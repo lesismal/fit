@@ -183,6 +183,10 @@ server-sent events 和长轮询这样缓慢涓流的响应，要等到达 64 KB�
 StreamUnknownLengthAtHeader bool
 ```
 
+为 `http.ClientConfig` 和 `http3.ClientConfig` 增加 `StreamUnknownLengthAtHeader` 的补丁，连同 HTTP/1、HTTP/2 和
+HTTP/3 的测试，在 fib 本地仓库的 `stream-unknown-length` 分支上（提交 `5fd41c1`，基于 `main`，未推送）。fib 的测试在
+race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，fit 的 `sse_test.go` 通过，其他测试也都通过。
+
 另一种也能让小的分块响应体保持整体的做法是一个等待时间 `StreamResponseBodyMaxWait time.Duration`：阈值的数据量到达、
 响应体结束、或自响应头起等待时间已过，三者先到者触发回调。
 

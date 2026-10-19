@@ -219,6 +219,12 @@ threshold as now:
 StreamUnknownLengthAtHeader bool
 ```
 
+A patch that adds `StreamUnknownLengthAtHeader` to `http.ClientConfig` and `http3.ClientConfig`,
+with tests over HTTP/1, HTTP/2 and HTTP/3, is on a local branch of the fib checkout,
+`stream-unknown-length` (commit `5fd41c1`, from `main`, not pushed). fib's tests pass under the race
+detector, and with the branch put in place of fib v1.3.0 and the setting turned on, fit's
+`sse_test.go` passes and the rest of its tests still do.
+
 An alternative that keeps small chunked bodies whole too would be a wait,
 `StreamResponseBodyMaxWait time.Duration`: the callback runs once the threshold has arrived, the
 body has ended, or the wait has passed since the header, whichever is first.
