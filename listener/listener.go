@@ -52,14 +52,19 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 
 	cfg := fib.DefaultConfig()
 	cfg.Name = "fit"
-	cfg.Bindings = make([]fib.Binding, len(g.Listeners))
+	bindings := make([]fib.Binding, len(g.Listeners))
 	for i, l := range g.Listeners {
-		cfg.Bindings[i] = fib.Binding{
+		bindings[i] = fib.Binding{
 			Addr:    l.Address,
 			Handler: fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: rt, name: l.Name}),
 		}
 	}
-	engine, err := fib.Bind(cfg, nil)
+	for _, l := range g.Listeners {
+		if err := checkFree(l.Address); err != nil {
+			return nil, fmt.Errorf("listener %q: %w", l.Name, err)
+		}
+	}
+	engine, err := fib.New(cfg, bindings...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +80,22 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	}
 	go func() { s.running <- engine.Run() }()
 	return s, nil
+}
+
+// checkFree fails when another socket already listens on address. fib
+// listens with SO_REUSEPORT, so that its loops share the accepts, and the
+// kernel would let a second process's listener share the address too,
+// splitting connections between two servers without a word. A plain bind,
+// which a reuseport listener refuses, tells. Port 0 picks a free port.
+func checkFree(address string) error {
+	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
+		return nil
+	}
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	return ln.Close()
 }
 
 // httpConfig is the fib HTTP config for a listener serving protocols.

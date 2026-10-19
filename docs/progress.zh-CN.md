@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-19 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I21 已完成 |
-| fib | `github.com/lesismal/fib v1.2.0`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 TLS；代理的 body 整体缓冲，也还没有超时（I16、I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
@@ -394,8 +394,11 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用模块代理上的 fib v1.2.0。本地 fib 仓库的 `main` 比这个 tag 多约 30 个提交。如果某个迭代
-  需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
+- **fib 版本。** fit 使用 fib v1.3.0，它是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
+  `fib.New(config, bindings...)` 以及 `AddBinding`、`RemoveBinding`、`ShutdownBinding`，`Connection.NotifyOutput`、
+  `Context.HoldBody` 和 `BodyWriter`。如果某个迭代需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
+- **SO_REUSEPORT。** fib v1.3.0 默认开启 `ReusePort` 监听，这会让另一个进程也能绑定同一地址。`listener` 先用普通
+  bind 检查每个地址，被占用时报错。
 - **图的生命周期与异步 handler。** `listener` 的分发器在 handler 返回时释放图。稍后才应答的 handler 要自己
   保证用到的东西可用：代理用 `Context.Retain` 持有请求，并依赖连接池在关闭前排空（决定 004）。
 - **测试环境。** 单元测试和 `go test` 微基准在本机运行。压测（`fitbench` 框架、wrk、h2load）在压测机上运行，

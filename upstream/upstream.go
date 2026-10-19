@@ -138,7 +138,7 @@ func (p *Pool) closeClient() {
 func StartEngine() (*fib.Engine, func(), error) {
 	cfg := fib.DefaultConfig()
 	cfg.Name = "fit-upstream"
-	engine, err := fib.NewEngine(cfg, nil)
+	engine, err := fib.New(cfg)
 	if err != nil {
 		return nil, nil, err
 	}

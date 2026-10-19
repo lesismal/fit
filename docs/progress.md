@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-19 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15 and I21 done |
-| fib | `github.com/lesismal/fib v1.2.0`, from the module proxy |
+| fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no TLS; proxied bodies are held whole, with no timeouts yet (I16, I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
@@ -481,9 +481,13 @@ Differences from the plan:
 
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.2.0 from the module proxy. The local fib checkout's `main` is
-  about 30 commits ahead of that tag. If an iteration needs something newer, tag a fib release
-  rather than committing a `replace` directive.
+- **fib version.** fit uses fib v1.3.0, tagged for I16 and I22 on fib's `main` of 2026-10-19: it
+  brings `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and `ShutdownBinding`,
+  `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`. If an iteration needs something
+  newer, tag a fib release rather than committing a `replace` directive.
+- **SO_REUSEPORT.** fib v1.3.0 listens with `ReusePort` on by default, which would let a second
+  process bind a listener's address too. `listener` checks each address with a plain bind first and
+  fails if it is taken.
 - **Graph lifetime and async handlers.** `listener`'s dispatcher releases the graph when the
   handler returns. A handler that answers later keeps alive what it uses itself: the proxy holds
   the request with `Context.Retain` and relies on its pool draining before it closes (decision 004).

@@ -20,7 +20,7 @@ import (
 // startEngine runs a fib engine with no listener, for the pool's client.
 func startEngine(t *testing.T) *fib.Engine {
 	t.Helper()
-	engine, err := fib.NewEngine(fib.DefaultConfig(), nil)
+	engine, err := fib.New(fib.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
