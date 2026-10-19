@@ -50,9 +50,9 @@
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
-**fib。** fit 依赖 `github.com/lesismal/fib`。两者同时修改时，分支上可以用 `replace` 指向本地 fib，
-但不要提交到 `main`。在 fib 中发现的缺口在 fib 里修（见 [风险](roadmap.zh-CN.md#风险与待定问题)），
-迭代要么等待，要么用说明记录的方式临时绕开。
+**fib。** fit 依赖已发布版本的 `github.com/lesismal/fib`。在 fib 中发现的缺口写进
+[fib-api-requests](fib-api-requests.zh-CN.md) 交给维护者，由维护者修改 fib 并发布；fit 随后升级到该版本（[开发规则](rules.zh-CN.md)
+第 15 条）。在此之前，迭代先做不依赖该缺口的部分，临时措施记录在 progress 中。
 
 ## 包结构
 
@@ -403,8 +403,8 @@ M0、M1 的其余部分符合规则：配置、模块注册表、运行时图、
 
 ### R03 不等待转发所需的 fib API
 
-- **做什么**：在 fib 中实现 [fib-api-requests](fib-api-requests.zh-CN.md) 中的 A1、A2、A3，A4–A7 按 fib 的安排进行；
-  发布 fib v1.4.0；fit 升级到该版本，行为不变。
+- **做什么**：维护者在 fib 中实现 [fib-api-requests](fib-api-requests.zh-CN.md) 中的 A1、A2、A3，A4–A7 按 fib 的安排
+  进行，并发布新的 fib 版本；fit 升级到该版本，行为不变。
 - **完成标准**：fit 在新的 fib 版本上构建并通过测试；fib-api-requests 中注明每个 API 是已提供、已调整还是被拒绝。
 - **涉及**：fib；fit 中的 `go.mod` 和文档。
 

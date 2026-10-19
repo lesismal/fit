@@ -58,10 +58,10 @@ on) in this file, and finish the current one.
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
 
-**fib.** fit depends on `github.com/lesismal/fib`. While both change together, a `replace`
-directive pointing at a local fib checkout is fine on a branch, but not in a commit on `main`. A gap
-found in fib is fixed in fib (see [risks](roadmap.md#risks-and-open-questions)), and the iteration
-waits for it or works around it with a note.
+**fib.** fit depends on `github.com/lesismal/fib`, at a released version. A gap found in fib goes
+into [fib-api-requests](fib-api-requests.md) for the maintainer, who changes fib and releases it;
+fit then moves to that version (rule 15 of the [development rules](rules.md)). Until then the
+iteration does what does not depend on the gap, and records any stopgap in the progress files.
 
 ## Package layout
 
@@ -440,8 +440,9 @@ The rest of M0 and M1 follows the rules: config, the module registry, the runtim
 
 ### R03 fib APIs for forwarding without waiting
 
-- **Do**: in fib, A1, A2 and A3 from [fib-api-requests](fib-api-requests.md), then A4–A7 as fib
-  schedules them; release fib v1.4.0; move fit to it with no change in behaviour.
+- **Do**: the maintainer adds A1, A2 and A3 from [fib-api-requests](fib-api-requests.md) to fib,
+  then A4–A7 as fib schedules them, and releases a new fib version; fit moves to it with no change
+  in behaviour.
 - **Done when**: fit builds and passes its tests on the new fib release, and fib-api-requests says
   of each API whether it was delivered, changed or declined.
 - **Touches**: fib; in fit, `go.mod` and the docs.
