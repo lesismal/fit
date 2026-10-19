@@ -67,10 +67,6 @@ func TestStuckClient(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close(); rt.Close() })
 
 	t.Run("http/1.1", func(t *testing.T) {
-		// fib v1.5.1 does not count a file SendFile queued by sendfile(2)
-		// in what the connection has unsent, so OnWritable never paces the
-		// transfer, and the stall timeout never cuts it off.
-		t.Skip("waits for A16 in fib-api-requests")
 		conn, err := net.Dial("tcp", s.Addrs()[2].Addr.String())
 		if err != nil {
 			t.Fatal(err)

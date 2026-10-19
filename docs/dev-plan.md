@@ -130,7 +130,7 @@ Status: `todo`, `doing` or `done`.
 | R03 | fib APIs for forwarding without waiting (in fib) | — | done |
 | R04 | Proxy downloads without waiting | R01, R03 | done |
 | R05 | Static files without blocking | R01, R03 | done |
-| R05b | Files sent by sendfile paced and bounded | R05, A16 | todo |
+| R05b | Files sent by sendfile paced and bounded | R05, A16 | done |
 | R06 | Connection and queue limits through fib | R02, R03 | done |
 | R07a | Hot path costs in fit | I23 | done |
 | R07b | Proxy allocations | I23 | done |

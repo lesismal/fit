@@ -26,7 +26,7 @@
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
 | A14 | 在没有连接的 Context 上 `Release` | 已完成，v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
-| A16 | `SendFile` 排队的文件计入连接未发送的输出 | P1 | 10、11 | R05 |
+| A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
 
 ## 证据
 
@@ -320,6 +320,8 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 **fit 如何使用。** 不需要改动：`upstream.TestDefaultMaxConns` 恢复为同时发出 256 个请求。
 
 ## A16：`SendFile` 排队的文件计入连接未发送的输出
+
+**状态。** 已在 fib v1.5.2 中部分完成（`6f66bcc`）：`SendFile` 排队的文件段计入 `NotifyOutput`、`WriteNoWait`、写截止时间和 `MaxPendingBytes` 看到的积压，所以静态 handler 的传输受节奏控制，停滞超时在普通 HTTP/1 上也能切断停止读取的客户端。未完成：`SendFile` 内部的停滞上限；fit 继续分段发送范围。
 
 **问题。** 在普通 HTTP/1 连接上，`Context.SendFile` 用 `Connection.SendFile` 把范围作为文件段排队，`pushLocked` 把它加入
 发送队列，但不计入 `pendingBytes`。所以控制响应节奏的机制都看不到它：`WriteNoWait` 不会报告超过上限，`OnWritable`

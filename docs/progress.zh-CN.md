@@ -10,8 +10,8 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R06、R07a、R07b 已完成；R05b 等待 fib 中的 A16，接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
-| fib | `github.com/lesismal/fib v1.5.1`，来自模块代理 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R06、R05b、R07a、R07b 已完成；接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler 和这些上限都已使用它们。R05b 等待 fib 中的 A16，接下来是 R07c。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们。接下来是 R07c。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -1097,10 +1097,20 @@ A11–A13。
   [A16](fib-api-requests.zh-CN.md#a16sendfile-排队的文件计入连接未发送的输出) 向 fib 提出；`TestStuckClient/http/1.1` 在
   R05b 升级到包含它的 fib 版本之前跳过。
 
+### R05b sendfile 发送的文件受节奏控制和上限约束 — 已完成
+
+- fib v1.5.2 把 `SendFile` 排队的文件计入连接的积压（A16，`6f66bcc`）。fit 升级到该版本，其他不变：静态 handler 的传输
+  在段与段之间、在停滞超时的写截止时间下等待 `OnWritable`，现在在普通 HTTP/1 上也会等待。
+- `TestStuckClient/http/1.1` 恢复运行：停止读取经 sendfile 发送的 64 MB 文件的客户端，在 1 s 停滞超时后被切断，与 h2c 和
+  h3 相同；`TestSlowReader` 在 HTTP/1.1 和 h2c 上仍能完整拿到 3 MB。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：fib 没有在 `SendFile` 内部增加停滞上限，所以范围仍然分段发送，普通 HTTP/1 上每段 256 KB，其他情况 64 KB。
+没有跑基准：基准框架的静态场景服务的是缓存中的文件，不走这条路径。
+
 ## 给后续迭代的说明
 
 - **fib 版本。** fit 使用 fib v1.5.1。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
-  v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
+  v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
   `fib.New(config, bindings...)` 以及 `AddBinding`、`RemoveBinding`、`ShutdownBinding`，`Connection.NotifyOutput`、
   `Context.HoldBody` 和 `BodyWriter`。如果某个迭代需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。

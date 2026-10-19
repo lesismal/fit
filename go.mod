@@ -2,4 +2,4 @@ module github.com/lesismal/fit
 
 go 1.27
 
-require github.com/lesismal/fib v1.5.1
+require github.com/lesismal/fib v1.5.2

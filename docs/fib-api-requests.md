@@ -27,7 +27,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
 | A14 | `Release` on a Context that has no connection | done, v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
-| A16 | A file queued by `SendFile` counted in a connection's unsent output | P1 | 10, 11 | R05 |
+| A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
 
 ## Evidence
 
@@ -419,6 +419,11 @@ burst within `MaxConnsPerHost` is not turned away.
 requests at once.
 
 ## A16: A file queued by `SendFile` counted in a connection's unsent output
+
+**Status.** Partly done in fib v1.5.2 (`6f66bcc`): a file segment queued by `SendFile` counts in the
+backlog that `NotifyOutput`, `WriteNoWait`, the write deadline and `MaxPendingBytes` see, so the
+static handler's transfer is paced and its stall timeout cuts off a client that stops reading, over
+plain HTTP/1 too. Not done: a stall bound inside `SendFile`; fit keeps sending ranges in pieces.
 
 **Problem.** On a plain HTTP/1 connection, `Context.SendFile` queues the range as a file segment
 with `Connection.SendFile`, which `pushLocked` adds to the send queue without counting it in
