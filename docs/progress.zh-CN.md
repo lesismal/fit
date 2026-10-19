@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09、I11–I22 已完成；剩 I10 和 I23 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09–I22 已完成；剩 I23 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c 和 TLS（HTTP/1.1 和 h2，按 SNI 选择证书）返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有 HTTP/3（I10）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I10，HTTP/3**，这是 I23 之前的最后一个；I23 以一致性测试和基准结束 M1（基准需要压测机，见说明）。
-I24、I32 也都可以开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I23，M1 一致性测试与基准**，它结束 M1。其中的基准需要压测机（见说明）；h2spec 和代理一致性测试可以
+在本机运行。I24、I32 也都可以开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I10。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I23。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -40,7 +40,7 @@ I24、I32 也都可以开始（除非已有别的会话在做）。I24、I32 也
 | `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
-| `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
+| `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
@@ -614,6 +614,28 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 与计划的不同：
 
 - 基准场景已经接入并检查过，但没有运行：压测机再次拒绝了本会话的 ssh 密钥，所以数据在 I23 时补上。
+
+### I10 HTTP/3 入口 — 已完成
+
+- 配置：协议新增 `h3`，需要 `tls`。它需要显式开启（与 nginx 一样）：不写协议的 TLS listener 服务 HTTP/1.1 和 h2。
+- `listener`：一个 listener 现在最多对应 engine 的两个 binding：一个 TCP 用于 HTTP/1.1、h2c 和 h2，一个 UDP 用于 h3，
+  端口与 TCP 得到的相同（所以端口为 0 的地址两者也是同一端口），由 `http3.NewHandlerWithConfig` 服务，TLS 配置经
+  `http3.ConfigureTLS`（TLS 1.3，ALPN `h3`），请求 body 超过 64KB 时像 TCP 一样流式传递。两者使用同一套证书。只有
+  `h3` 的 listener 只绑定 UDP。UDP 端口也像 TCP 一样先用普通 bind 检查。重载和退役会处理两个 binding；`Addr` 在
+  `UDPAddr` 中报告 UDP 地址。指纹现在包含协议，所以增加或去掉 `h3` 会重新绑定。
+- Alt-Svc：TCP 一侧的分发器在每个响应上注册 `OnHeader` 钩子，添加 `Alt-Svc: h3=":port"; ma=86400`（fib 的
+  `http3.AltSvc`）。钩子和值每个 listener 只创建一次，注册时不分配内存；没有 `h3` 的 listener 不注册。fib 交给钩子的
+  是 handler 传给 `WriteResponse` 的响应头的副本，所以 `respond` 和静态缓存共享的响应头不会被修改；有测试检查这一点。
+- 测试：`listener` 在 TCP 端口上通过 h3（fib 的 HTTP/3 客户端，`Proto` 为 HTTP/3.0）访问路由，在 HTTP/1.1 和 h2 响应
+  （包括 404）中看到指向它的 `Alt-Svc`；只有 h3 的 listener 不接受 TCP；没有 `h3` 时没有 `Alt-Svc`；去掉 `h3` 的重载会
+  释放 UDP 端口；一个带 `h3` 和一个不带的 listener 共享同一个 `respond` 时，只有前者带 `Alt-Svc`。`test/e2e` 以 h3 运行
+  `fit run`，通过 h2 访问 `/hello` 并看到 `Alt-Svc`，再在 Alt-Svc 指出的端口上通过 h3 访问，最后正常退出。
+  `go vet ./...`（包括 Windows）和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 在同一地址上被替换的 listener，在旧的排空期间会在旁边再绑定一个 UDP socket；这段时间内数据报由内核按哈希分到两个
+  socket，落在这个窗口里的 QUIC 连接可能中断，客户端会重连。TCP 连接不受这种影响。
 
 ## 给后续迭代的说明
 

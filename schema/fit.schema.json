@@ -50,12 +50,13 @@
           "type": "string"
         },
         "protocols": {
-          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN). http/1.1 alone when left out, or http/1.1 and h2 with tls.",
+          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc). http/1.1 alone when left out, or http/1.1 and h2 with tls.",
           "items": {
             "enum": [
               "http/1.1",
               "h2c",
-              "h2"
+              "h2",
+              "h3"
             ],
             "type": "string"
           },

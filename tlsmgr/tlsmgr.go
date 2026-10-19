@@ -57,7 +57,7 @@ func ServerConfig(c *config.TLS, protocols []string) (*tls.Config, string, error
 	default:
 		cfg.NextProtos = []string{"http/1.1"}
 	}
-	for _, p := range cfg.NextProtos {
+	for _, p := range protocols {
 		h.Write([]byte(p + "\x00"))
 	}
 	return cfg, hex.EncodeToString(h.Sum(nil)), nil

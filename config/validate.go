@@ -49,6 +49,8 @@ func (c *Config) Validate() Errors {
 				add(l.At.Field("protocols").Index(i), "%q is listed twice", p)
 			case p == ProtocolH2 && l.TLS == nil:
 				add(l.At.Field("protocols").Index(i), "h2 needs tls; h2c is HTTP/2 in the clear")
+			case p == ProtocolH3 && l.TLS == nil:
+				add(l.At.Field("protocols").Index(i), "h3 needs tls")
 			case p == ProtocolH2C && l.TLS != nil:
 				add(l.At.Field("protocols").Index(i), "h2c is HTTP/2 in the clear, which a listener with tls does not serve; use h2")
 			}

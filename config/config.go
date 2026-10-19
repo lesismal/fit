@@ -36,6 +36,7 @@ const (
 	ProtocolHTTP1 = "http/1.1"
 	ProtocolH2C   = "h2c"
 	ProtocolH2    = "h2"
+	ProtocolH3    = "h3"
 )
 
 // DefaultProtocols are what a listener that names none serves, and
@@ -49,7 +50,7 @@ var (
 type Listener struct {
 	Name      string   `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
 	Address   string   `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
-	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN). http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc). http/1.1 alone when left out, or http/1.1 and h2 with tls."`
 	TLS       *TLS     `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
 
 	At Value `json:"-" fit:"self"`

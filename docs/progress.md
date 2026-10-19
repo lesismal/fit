@@ -11,24 +11,24 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09, I11–I22 done; I10 and I23 left |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09–I22 done; I23 left |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c and TLS (HTTP/1.1 and h2, certificates chosen by SNI), writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME or certificate management beyond files (I28–I31); no HTTP/3 (I10); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I10, HTTP/3**, the last before I23, which closes M1 with conformance runs and
-benchmarks (the benchmarks need the benchmark host; see the notes). I24 and I32 are also ready to
-start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
+**Next iteration: I23, M1 conformance and benchmarks**, which closes M1. Its benchmarks need the
+benchmark host (see the notes); h2spec and the proxy conformance suite can run here. I24 and I32 are
+also ready to start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
 taken them.
 
 To continue, start a session with:
 
-> Implement iteration I10 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I23 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -45,7 +45,7 @@ To continue, start a session with:
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
-| `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
+| `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
@@ -781,6 +781,37 @@ Differences from the plan:
 
 - The benchmark scenario is wired and checked but not run: the benchmark host refused the session's
   ssh key again, so the numbers come with I23.
+
+### I10 HTTP/3 entry — done
+
+- Config: protocols gain `h3`, which needs `tls`. It is opt-in, as nginx has it: a TLS listener that
+  names no protocols serves HTTP/1.1 and h2.
+- `listener`: a listener's binding is now up to two of the engine's, one TCP for its HTTP/1.1, h2c
+  and h2, and one UDP for h3, on the port TCP got (so an address with port 0 gets the same port for
+  both), served by `http3.NewHandlerWithConfig` with the listener's TLS config through
+  `http3.ConfigureTLS` (TLS 1.3, ALPN `h3`) and request bodies streamed past 64KB as on TCP. The same
+  certificates serve both. An `h3`-only listener binds UDP alone. The UDP port is checked with a
+  plain bind first, as TCP's is. Reload and retire take both bindings; `Addr` reports the UDP address
+  in `UDPAddr`. The fingerprint now hashes the protocols, so adding or dropping `h3` rebinds.
+- Alt-Svc: the TCP side's dispatcher registers an `OnHeader` hook on every response that adds
+  `Alt-Svc: h3=":port"; ma=86400` (fib's `http3.AltSvc`). The hook and the value are made once per
+  listener, so registering it allocates nothing, and listeners without `h3` register none. fib hands
+  the hook a copy of a header a handler passed to `WriteResponse`, so the shared headers of `respond`
+  and of the static cache are left as they are; a test checks that.
+- Tests: `listener` serves a route over h3 (fib's HTTP/3 client, `Proto` HTTP/3.0) on the TCP port,
+  sees `Alt-Svc` naming it on HTTP/1.1 and h2 responses, 404s included; an h3-only listener takes no
+  TCP; no `Alt-Svc` without `h3`; a reload that drops `h3` lets the UDP port go; and a `respond`
+  shared by a listener with `h3` and one without gives `Alt-Svc` only to the first. `test/e2e` runs
+  `fit run` with h3, reaches `/hello` over h2 and finds `Alt-Svc`, reaches it over h3 on the port
+  Alt-Svc names, and shuts down cleanly. `go vet ./...` (also for Windows) and `go test -race ./...`
+  pass.
+
+Differences from the plan:
+
+- A listener replaced on the same address binds a second UDP socket beside the old one for the time
+  the old one drains; datagrams then split between the two by the kernel's hash, so a QUIC
+  connection caught in that window may break, and its client reconnects. TCP connections are not
+  affected that way.
 
 ## Notes for later iterations
 

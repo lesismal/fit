@@ -15,16 +15,20 @@ package listener
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	stdhttp "net/http"
 	"slices"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
+	"github.com/lesismal/fib/http3"
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
@@ -49,12 +53,18 @@ type Server struct {
 
 // binding is a listener the engine serves.
 type binding struct {
+	// index and udpIndex are the engine's bindings for the listener's TCP
+	// protocols and for HTTP/3, or -1 for one it does not have.
 	index     int
+	udpIndex  int
 	name      string
 	address   string
 	protocols []string
 	tlsKey    string
-	addr      net.Addr
+	// addr is where it listens: its TCP address, or for HTTP/3 alone its
+	// UDP one; udpAddr is HTTP/3's.
+	addr    net.Addr
+	udpAddr net.Addr
 }
 
 // same reports whether b serves the listener l as it is: the same name,
@@ -65,8 +75,10 @@ func (b *binding) same(l *runtime.Listener) bool {
 
 // Addr is where a listener listens.
 type Addr struct {
-	Name      string
-	Addr      net.Addr
+	Name string
+	Addr net.Addr
+	// UDPAddr is where HTTP/3 listens, for a listener that serves it.
+	UDPAddr   net.Addr
 	Protocols []string
 }
 
@@ -109,27 +121,91 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // bindings may be listening on the address, which fib's SO_REUSEPORT lets
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
-	if !shared {
-		if err := checkFree(l.Address); err != nil {
-			return nil, fmt.Errorf("listener %q: %w", l.Name, err)
+	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey}
+	fail := func(err error) (*binding, error) {
+		s.unbind(b)
+		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
+	}
+	h3 := slices.Contains(l.Protocols, config.ProtocolH3)
+	tcp := slices.ContainsFunc(l.Protocols, func(p string) bool { return p != config.ProtocolH3 })
+	udpAddress := l.Address
+	var tcpDispatcher *dispatcher
+	if tcp {
+		if !shared {
+			if err := checkFree(l.Address); err != nil {
+				return fail(err)
+			}
+		}
+		tcpDispatcher = &dispatcher{rt: s.rt, name: l.Name}
+		if h3 {
+			tcpDispatcher.announceH3()
+		}
+		var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), tcpDispatcher)
+		if l.TLS != nil {
+			// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
+			// or HTTP/1.1 as ALPN chose.
+			h = fibtls.NewServer(l.TLS, h)
+		}
+		var err error
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
+			return fail(err)
+		}
+		// HTTP/3 goes on the port TCP got, which is the one Alt-Svc names.
+		host, _, _ := net.SplitHostPort(l.Address)
+		udpAddress = net.JoinHostPort(host, strconv.Itoa(b.addr.(*net.TCPAddr).Port))
+	}
+	if h3 {
+		if !shared {
+			if err := checkFreeUDP(udpAddress); err != nil {
+				return fail(err)
+			}
+		}
+		h := http3.NewHandlerWithConfig(http3Config(l.TLS), &dispatcher{rt: s.rt, name: l.Name})
+		var err error
+		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h}); err != nil {
+			return fail(err)
+		}
+		if tcpDispatcher != nil {
+			tcpDispatcher.setAltSvc(http3.AltSvc(b.udpAddr.(*net.UDPAddr).Port))
 		}
 	}
-	var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: s.rt, name: l.Name})
-	if l.TLS != nil {
-		// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
-		// or HTTP/1.1 as ALPN chose.
-		h = fibtls.NewServer(l.TLS, h)
+	if b.addr == nil {
+		b.addr = b.udpAddr
 	}
-	i, err := s.engine.AddBinding(fib.Binding{Addr: l.Address, Handler: h})
+	return b, nil
+}
+
+// addBinding adds a binding to the engine and returns its index and the
+// address it got.
+func (s *Server) addBinding(fb fib.Binding) (int, net.Addr, error) {
+	i, err := s.engine.AddBinding(fb)
 	if err != nil {
-		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
+		return -1, nil, err
 	}
 	addrs, err := s.engine.BindingAddrs(i)
 	if err != nil || len(addrs) == 0 {
 		_ = s.engine.RemoveBinding(i)
-		return nil, fmt.Errorf("listener %q: no address bound: %v", l.Name, err)
+		return -1, nil, fmt.Errorf("no address bound: %v", err)
 	}
-	return &binding{index: i, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey, addr: addrs[0]}, nil
+	return i, addrs[0], nil
+}
+
+// unbind removes b's bindings at once.
+func (s *Server) unbind(b *binding) {
+	for _, i := range [...]int{b.index, b.udpIndex} {
+		if i >= 0 {
+			_ = s.engine.RemoveBinding(i)
+		}
+	}
+}
+
+// http3Config is the fib HTTP/3 config for a listener with tls.
+func http3Config(tlsConfig *tls.Config) http3.Config {
+	c := http3.DefaultConfig()
+	c.TLSConfig = http3.ConfigureTLS(tlsConfig)
+	c.StreamRequestBody = true
+	c.StreamRequestBodyThreshold = StreamThreshold
+	return c
 }
 
 // Reload makes g the runtime's current graph, taking over the caller's
@@ -181,7 +257,7 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 		}
 		if err != nil {
 			for _, b := range fresh {
-				_ = s.engine.RemoveBinding(b.index)
+				s.unbind(b)
 			}
 			s.bound = slices.DeleteFunc(s.bound, func(b *binding) bool { return slices.Contains(early, b) })
 			g.Release()
@@ -203,21 +279,26 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 func (s *Server) retire(bs []*binding, drain time.Duration) {
 	for _, b := range bs {
 		if drain <= 0 {
-			_ = s.engine.RemoveBinding(b.index)
+			s.unbind(b)
 			continue
 		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), drain)
-			defer cancel()
-			_ = s.engine.ShutdownBinding(ctx, b.index)
-		}()
+		for _, i := range [...]int{b.index, b.udpIndex} {
+			if i < 0 {
+				continue
+			}
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), drain)
+				defer cancel()
+				_ = s.engine.ShutdownBinding(ctx, i)
+			}()
+		}
 	}
 }
 
 func addrsOf(bs []*binding) []Addr {
 	addrs := make([]Addr, len(bs))
 	for i, b := range bs {
-		addrs[i] = Addr{Name: b.name, Addr: b.addr, Protocols: b.protocols}
+		addrs[i] = Addr{Name: b.name, Addr: b.addr, UDPAddr: b.udpAddr, Protocols: b.protocols}
 	}
 	return addrs
 }
@@ -236,6 +317,18 @@ func checkFree(address string) error {
 		return err
 	}
 	return ln.Close()
+}
+
+// checkFreeUDP is checkFree for HTTP/3's UDP port.
+func checkFreeUDP(address string) error {
+	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
+		return nil
+	}
+	pc, err := net.ListenPacket("udp", address)
+	if err != nil {
+		return err
+	}
+	return pc.Close()
 }
 
 // StreamThreshold is the body size past which a request body streams to its
@@ -299,7 +392,24 @@ func (s *Server) close() error {
 type dispatcher struct {
 	rt   *runtime.Runtime
 	name string
+	// altSvc, for a listener that also serves HTTP/3, is the Alt-Svc value
+	// announcing it, set once its port is known; addAltSvc is the hook that
+	// adds it, made once so that registering it allocates nothing.
+	altSvc    atomic.Pointer[[]string]
+	addAltSvc func(int, stdhttp.Header)
 }
+
+// announceH3 has d add an Alt-Svc field to every response, once setAltSvc
+// has said what.
+func (d *dispatcher) announceH3() {
+	d.addAltSvc = func(_ int, h stdhttp.Header) {
+		if v := d.altSvc.Load(); v != nil {
+			h["Alt-Svc"] = *v
+		}
+	}
+}
+
+func (d *dispatcher) setAltSvc(value string) { d.altSvc.Store(&[]string{value}) }
 
 var notFound = []byte("404 page not found\n")
 
@@ -310,6 +420,9 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	defer g.Release()
+	if d.addAltSvc != nil {
+		c.OnHeader(d.addAltSvc)
+	}
 	var route *runtime.Route
 	for _, l := range g.Listeners {
 		if l.Name == d.name {
