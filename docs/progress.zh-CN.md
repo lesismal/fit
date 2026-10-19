@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R04、R06、R07a、R07b 已完成；R05 等待 fib 中的 A14，接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R06、R07a、R07b 已完成；R05b 等待 fib 中的 A16，接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.5.1`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03、R04、R06 也已完成：fib v1.4.0 提供了这些 API，代理的下载和这些上限已经使用它们。R05 等待它的测试需要的 fib 修复 A14，接下来是 R07c。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler 和这些上限都已使用它们。R05b 等待 fib 中的 A16，接下来是 R07c。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -49,7 +49,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
 | `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制 |
-| `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
+| `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
@@ -60,7 +60,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
-| `internal/fibtest` | 在测试中不经网络运行 fib handler：`Serve`、`ServeRequest` |
+| `internal/fibtest` | 在测试中不经网络、像 fib 的服务器一样运行 fib handler，并等待之后才应答的 handler：`Serve`、`ServeRequest` |
 | `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
 | `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
 | `examples` | `hello.json`、`proxy.json` |
@@ -1062,6 +1062,40 @@ A11–A13。
   [A15](fib-api-requests.zh-CN.md#a15maxpendingperhost-不计入正在为其拨号的请求) 向 fib 提出，在 v1.5.1 中完成；测试恢复为
   同时发出 256 个请求。
 - 没有跑基准：基准框架的场景都不会触达这两个上限，而 `Pick` 少了一次原子加法和一次比较。
+
+### R05 静态文件不阻塞 — 已完成
+
+- `handler/static`：fib worker 上不再有任何文件操作。缓存在 `check_interval`（新参数，默认 1s）内保存一个请求路径解析出的
+  结果：文件及其索引文件和压缩副本、要列出或重定向的目录、或者没有可服务的内容；和以前一样也保存小文件的内容。能用这些
+  应答的请求在 worker 上应答，不做系统调用；条件请求和范围请求对内存中的字节运行 `ServeContent`，收集后整体写出。其他
+  请求（间隔内没见过的路径、要读取、打开或列出的文件）交给包内自己的文件池：`max(16, 4 × GOMAXPROCS)` 个 goroutine 和
+  4,096 的队列，所有静态 handler 共用。队列放不下的请求立即得到 503；池在 10 s 内没有应答的请求（还在排队，或磁盘挂住）
+  届时得到 503，后来的应答被丢弃（`queued.claim`）。路径查找结果最多保存 16,384 个，请求不存在路径的客户端无法让它超过这个数。
+- 大到不能缓存的文件经 fib 的 `SendFile` 发送：`ServeContent` 对一个只记录要复制的范围、而不实际复制的 writer 运行
+  （`rangeWriter`、`offsetFile`），`transfer` 把范围一段一段交给 `SendFile`。fib 逐段复制的情况下每段 64 KB，这样 fib 在一段
+  之内不会等待；普通 HTTP/1 上每段 256 KB，因为 sendfile 只是把它排队。段与段之间在写截止时间为停滞超时的情况下等待
+  `OnWritable`，与代理的下载相同。对这种文件请求多个范围时返回整个文件，因为 `ServeContent` 会经管道复制 multipart 响应体。
+  `stall.go` 及其等待式写入已去掉。
+- `internal/fibtest.ServeRequest` 改为像 fib 的服务器那样经 `fibhttp.Serve` 运行 handler，并最多等待 `fibtest.Timeout`，
+  让之后才应答的 handler 也能测试，fib v1.5.1 支持这样做（A14）。
+- 测试：`TestNoDiskOnHit`（`check_interval` 内已知的路径不经文件池即应答，四次请求只有一个池任务，间隔过后再查看磁盘；
+  不能缓存的大文件每次都有一个任务）；`TestSlowDisk`（池中唯一的 worker 卡住：需要磁盘的路径在池超时后得到 503，缓存中的
+  路径立即应答，队列满后立即 503）；`TestStuckClient` 在 h2c 和 h3 上改经 `SendFile`；`TestSlowReader`（以约 1.3 MB/s
+  经 HTTP/1.1 和 h2c 读取 3 MB，超过 1s 停滞超时，完整到达）；`TestConditional` 中从磁盘请求多个范围得到整个文件；
+  `TestChangedFile` 把间隔设为 0。`go vet ./...` 和 `go test -race ./...` 通过。
+- 压测主机上只跑 fit，R06 的构建与本构建各跑两轮，每秒千次请求：HTTP/1.1 静态文件 587 → 772（+31%），h2c 1,327 → 2,457
+  （+85%），常驻内存 31 MB 降到 26 MB。
+
+与计划的不同：
+
+- 没有用 fib 的 `FileCache`：它在调用者的 goroutine（也就是 fib worker）上读取未命中的文件，在没有 inotify 的地方每个请求都
+  stat，并通过 `ServeContent` 的等待式写入发送大文件；也没有 fit 的索引文件、try_files、目录列表、zstd 副本和 ETag。缓存
+  是 fit 自己的，每个文件操作都经过文件池。
+- 磁盘上的变化在 `check_interval` 内体现，而不是立即体现，与 nginx 的 `open_file_cache_valid` 相同。
+- 普通 HTTP/1 上经 sendfile 发送的文件既不受节奏控制，也不会被停滞超时切断：fib v1.5.1 不把排队的文件计入连接未发送的输出，
+  所以 `OnWritable` 总是报告有空间（R01 已记录过）。已作为
+  [A16](fib-api-requests.zh-CN.md#a16sendfile-排队的文件计入连接未发送的输出) 向 fib 提出；`TestStuckClient/http/1.1` 在
+  R05b 升级到包含它的 fib 版本之前跳过。
 
 ## 给后续迭代的说明
 

@@ -1,18 +1,25 @@
 // Package static is the static handler: it serves the files under a root
 // directory.
 //
-// Small files are kept in memory and leave without being read again while
-// they stay the same on disk: each request stats the file, one system call,
-// and reads it again when its size or modification time moved. A file larger
+// No file operation runs on a fib worker. What the handler learns of a
+// request path, the file it names, its index file or its compressed twins,
+// and the contents of small files, is kept in memory and trusted for
+// check_interval; a request it answers from what it knows costs no system
+// call. Anything else, a path not seen lately, a file to read, open or list,
+// goes to a pool of goroutines of the package's own for the disk, bounded in
+// size and queue, with a timeout, and is answered from there. A file larger
 // than max_file_bytes, or one that does not fit in what is left of
-// max_cache_bytes, is read from disk each time.
+// max_cache_bytes, is sent from disk each time, through fib's SendFile:
+// sendfile(2) on a plain HTTP/1 connection, and pieces read on fib's own
+// file pool elsewhere.
 //
 // Responses carry Content-Type (from the extension, or sniffed from the
 // first bytes as net/http does), Last-Modified, an ETag made of the
 // modification time and the size, as nginx makes it, and Accept-Ranges.
 // Conditional requests (If-None-Match, If-Modified-Since, If-Match,
 // If-Unmodified-Since) and range requests, If-Range included, are answered as
-// net/http.ServeContent answers them.
+// net/http.ServeContent answers them, but for a request for several ranges of
+// a file sent from disk, which is answered with the whole file.
 //
 // A request path is taken as a path under the root once strip_prefix is
 // removed from it. A path with a ".." segment, a NUL or a backslash is
@@ -24,7 +31,6 @@
 package static
 
 import (
-	"bytes"
 	"errors"
 	"io/fs"
 	"mime"
@@ -34,11 +40,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 )
 
@@ -65,11 +72,14 @@ type Static struct {
 	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 
+	CheckInterval config.Duration `json:"check_interval,omitempty" default:"\"1s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out."`
+
 	root          string
 	index         []string
 	precompressed []encoding
 	cache         cache
 	stall         time.Duration
+	pool          *filePool
 }
 
 // Provision checks the root and the index names.
@@ -115,11 +125,19 @@ func (s *Static) Provision(ctx *module.Context) error {
 		s.cache.maxBytes = DefaultMaxCacheBytes
 	}
 	s.cache.entries = make(map[string]*entry)
+	s.cache.lookups = make(map[string]*lookup)
+	s.cache.maxLookups = DefaultMaxLookups
+	s.cache.check = s.CheckInterval.Std()
+	if s.cache.check == 0 {
+		s.cache.check = time.Second
+	}
 	s.stall = ctx.WriteStallTimeout()
+	s.pool = defaultPool()
 	return nil
 }
 
-// ServeHTTP serves the file the request's path names.
+// ServeHTTP serves the file the request's path names: at once from what
+// the cache knows of it, or else from the file pool.
 func (s *Static) ServeHTTP(c *fibhttp.Context) {
 	r := c.Request
 	if r.Method != stdhttp.MethodGet && r.Method != stdhttp.MethodHead {
@@ -136,143 +154,208 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 		respondError(c, stdhttp.StatusBadRequest)
 		return
 	}
-	if s.TryFiles != nil {
-		s.tryFiles(c, name)
+	if s.serve(c, name, urlPath, nil) {
 		return
 	}
-	res := s.resolve(name)
-	switch {
-	case res.redirect:
-		redirectToDir(c, urlPath)
-	case res.status != 0:
-		respondError(c, res.status)
-	case res.listing:
-		s.list(c, urlPath, res.full)
-	default:
-		s.serveFile(c, res.name, res.full, res.info)
-	}
+	s.queue(c, name, urlPath)
 }
 
-// resolved is what a request path names under the root.
-type resolved struct {
-	// name and full are the file's slash-separated path under the root and
-	// its path on disk, and info what a stat of it said.
-	name, full string
-	info       fs.FileInfo
-	// redirect says the path is a directory asked for without its slash,
-	// listing that it is one to list, and status that there is nothing to
-	// serve, and why.
-	redirect, listing bool
-	status            int
-}
-
-// resolve finds what name, a request path within the root that safePath
-// passed, names: a file; a directory's index file or listing when name ends
-// in a slash; or a redirect for a directory without one.
-func (s *Static) resolve(name string) resolved {
-	dir := name == "" || strings.HasSuffix(name, "/")
-	name = strings.TrimPrefix(path.Clean("/"+name), "/")
-	full := filepath.Join(s.root, filepath.FromSlash(name))
-	info, err := os.Stat(full)
-	if err != nil {
-		s.cache.forget(full)
-		return resolved{status: statusOf(err)}
-	}
-	if info.IsDir() {
-		if !dir {
-			return resolved{redirect: true}
+// serve answers the request for name, whose URL path is urlPath, or try_files
+// for it. Without q, on a fib worker, it answers only from what the cache
+// knows and holds, and reports false, answering nothing, when it would have
+// to look at the disk. With q, on the file pool, it looks, and claims the
+// request from q before it answers.
+func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool {
+	if s.TryFiles == nil {
+		l := s.find(name, q != nil)
+		if l == nil {
+			return false
 		}
-		for _, index := range s.index {
-			indexFull := filepath.Join(full, index)
-			if info, err = os.Stat(indexFull); err == nil && info.Mode().IsRegular() {
-				return resolved{name: path.Join(name, index), full: indexFull, info: info}
+		switch {
+		case l.redirect:
+			if q.claim() {
+				redirectToDir(c, urlPath)
 			}
+		case l.status != 0:
+			if q.claim() {
+				respondError(c, l.status)
+			}
+		default:
+			return s.answer(c, l, urlPath, q)
 		}
-		if s.Browse {
-			return resolved{full: full, listing: true}
-		}
-		return resolved{status: stdhttp.StatusNotFound}
+		return true
 	}
-	if dir || !info.Mode().IsRegular() {
-		// A file asked for as a directory, or a device, a pipe or a socket.
-		return resolved{status: stdhttp.StatusNotFound}
-	}
-	return resolved{name: name, full: full, info: info}
-}
-
-// tryFiles serves the first of try_files that names something to serve.
-func (s *Static) tryFiles(c *fibhttp.Context, name string) {
 	requested := "/" + strings.TrimPrefix(name, "/")
 	for _, t := range s.TryFiles {
 		candidate := strings.ReplaceAll(t, "{path}", requested)
 		if !safePath(candidate) {
 			continue
 		}
-		res := s.resolve(candidate)
+		l := s.find(candidate, q != nil)
 		switch {
-		case res.redirect, res.status != 0:
+		case l == nil:
+			return false
+		case l.redirect, l.status != 0:
 			continue
-		case res.listing:
-			s.list(c, path.Clean(candidate)+"/", res.full)
-		default:
-			s.serveFile(c, res.name, res.full, res.info)
+		}
+		return s.answer(c, l, path.Clean(candidate)+"/", q)
+	}
+	if q.claim() {
+		respondError(c, stdhttp.StatusNotFound)
+	}
+	return true
+}
+
+// find returns what the cache knows of name, a request path within the
+// root, when it was learned within check_interval; or, with disk, what a look
+// at the disk finds, which the cache then keeps. Without disk it returns nil
+// for a name the cache does not know.
+func (s *Static) find(name string, disk bool) *lookup {
+	if l := s.cache.lookup(name); l != nil {
+		return l
+	}
+	if !disk {
+		return nil
+	}
+	l := s.resolve(name)
+	s.cache.keep(name, l)
+	return l
+}
+
+// answer serves the file or the listing l stands for, as serve does.
+func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queued) bool {
+	if l.listing {
+		if q == nil {
+			return false
+		}
+		s.list(c, listPath, l.full, q)
+		return true
+	}
+	v, full, info := s.variant(c.Request, l)
+	e := s.cache.current(full, info)
+	if e == nil && q != nil && info.Size() <= s.cache.maxFile {
+		e = s.cache.load(full, info, v)
+	}
+	switch {
+	case e != nil:
+		if q.claim() {
+			serveMemory(c, v.name, e)
+		}
+	case q == nil:
+		return false
+	default:
+		s.sendFromDisk(c, v, full, q)
+	}
+	return true
+}
+
+// queued is a request on its way through the file pool, which either the
+// pool's work or the pool's timeout answers, whichever claims it first.
+type queued struct {
+	state atomic.Int32
+	timer *time.Timer
+	// sending says SendFile took the request over, and gives it back.
+	sending bool
+}
+
+const (
+	queuedWaiting int32 = iota
+	queuedClaimed
+	queuedDone
+)
+
+// claim reports whether the pool's work may answer the request: true once
+// it has it, false when the timeout answered it first. A nil q is a request
+// answered on its worker, which nothing else answers.
+func (q *queued) claim() bool {
+	if q == nil {
+		return true
+	}
+	if q.state.CompareAndSwap(queuedWaiting, queuedClaimed) {
+		q.timer.Stop()
+		return true
+	}
+	return q.state.Load() == queuedClaimed
+}
+
+// queue serves the request on the file pool, or answers 503 when the pool's
+// queue is full, or its timeout passes before the pool's work has answered:
+// waiting to be taken up, or with the disk the work waits on hung.
+func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
+	c.Retain()
+	q := &queued{}
+	timeout := func() {
+		if q.state.CompareAndSwap(queuedWaiting, queuedDone) {
+			respondError(c, stdhttp.StatusServiceUnavailable)
+			c.Release()
+		}
+	}
+	q.timer = time.AfterFunc(s.pool.timeout, timeout)
+	// The pool's own ways out, which come after q.timer is set.
+	expire := func() {
+		q.timer.Stop()
+		timeout()
+	}
+	run := func() {
+		if c.Err() != nil {
+			// The client went while the request waited.
+			expire()
+			return
+		}
+		if !s.serve(c, name, urlPath, q) {
+			// Only a request served without the disk is left unanswered.
+			expire()
+			return
+		}
+		if q.state.Load() == queuedClaimed && !q.sending {
+			c.Release()
+		}
+	}
+	if !s.pool.submit(run, expire) {
+		expire()
+	}
+}
+
+// sendFromDisk serves a file the cache does not keep, as v describes it,
+// claiming the request from q once the file is open. A file that cannot be
+// opened gets 404. The body goes through SendFile, which neither waits for
+// the disk nor for the client; see send.go.
+func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, q *queued) {
+	f, err := os.Open(full)
+	if err != nil {
+		if q.claim() {
+			respondError(c, statusOf(err))
 		}
 		return
 	}
-	respondError(c, stdhttp.StatusNotFound)
-}
-
-// serveFile serves the regular file at full, whose slash-separated name
-// under the root is name, as info describes it, or the compressed twin of it
-// the client prefers.
-func (s *Static) serveFile(c *fibhttp.Context, name, full string, info fs.FileInfo) {
-	r := c.Request
-	v := variant{name: name, vary: len(s.precompressed) > 0}
-	if v.vary {
-		if enc, twinFull, twinInfo := s.twin(r, full); enc != nil {
-			v.encoding, full, info = enc.name, twinFull, twinInfo
-		}
-	}
-	e := s.cache.get(full, info, v)
-	if e == nil {
-		if !s.serveFromDisk(c, v, full) {
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		f.Close()
+		if q.claim() {
 			respondError(c, stdhttp.StatusNotFound)
 		}
 		return
 	}
-	if !hasConditions(r) {
-		// The header is shared by every response the file goes out in; fib
-		// does not change a header it is handed.
-		_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: e.header, Body: e.data})
+	if !q.claim() {
+		f.Close()
 		return
-	}
-	copyHeader(c.Header(), e.header)
-	stdhttp.ServeContent(s.writer(c), r, name, e.modTime, bytes.NewReader(e.data))
-}
-
-// serveFromDisk serves a file the cache does not keep, as v describes it. It
-// reports false when the file cannot be opened. On HTTP/1, ServeContent
-// hands the file to fib's Context.ReadFrom, which sends it by sendfile(2)
-// where the platform has it, without reading it into memory.
-func (s *Static) serveFromDisk(c *fibhttp.Context, v variant, full string) bool {
-	f, err := os.Open(full)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return false
 	}
 	h := c.Header()
 	copyHeader(h, fileHeader(v, info, nil))
-	if v.encoding != "" && c.Request.Header.Get("Range") == "" {
+	r := c.Request
+	if v.encoding != "" && r.Header.Get("Range") == "" {
 		// ServeContent leaves Content-Length out once Content-Encoding is
 		// set; a whole file knows its length.
 		h.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	}
-	stdhttp.ServeContent(s.writer(c), c.Request, v.name, info.ModTime(), f)
-	return true
+	if strings.Contains(r.Header.Get("Range"), ",") {
+		// Several ranges would go as a multipart body ServeContent copies
+		// through a pipe; the whole file goes instead, as RFC 9110 allows.
+		r.Header.Del("Range")
+	}
+	if send(c, f, v.name, info, s.stall) {
+		q.sending = true
+	}
 }
 
 // safePath reports whether name, a request path, is free of what could name a
@@ -388,83 +471,4 @@ func fileHeader(v variant, info fs.FileInfo, data []byte) stdhttp.Header {
 	h["Etag"] = []string{etag(info)}
 	h["Accept-Ranges"] = []string{"bytes"}
 	return h
-}
-
-// cache keeps the contents of small files, by path on disk.
-type cache struct {
-	maxFile  int64
-	maxBytes int64
-
-	mu      sync.RWMutex
-	entries map[string]*entry
-	bytes   int64
-}
-
-// entry is a file as last read.
-type entry struct {
-	data    []byte
-	header  stdhttp.Header
-	modTime time.Time
-	size    int64
-}
-
-// current reports whether e still stands for the file info describes.
-func (e *entry) current(info fs.FileInfo) bool {
-	return e.size == info.Size() && e.modTime.Equal(info.ModTime())
-}
-
-// get returns the cached file at full, which info describes, reading it when
-// the cache holds nothing current. It returns nil for a file it does not
-// keep, too large or past the cache's limit, or one it cannot read.
-func (c *cache) get(full string, info fs.FileInfo, v variant) *entry {
-	if info.Size() > c.maxFile {
-		return nil
-	}
-	c.mu.RLock()
-	e := c.entries[full]
-	c.mu.RUnlock()
-	if e != nil && e.current(info) {
-		return e
-	}
-	data, err := os.ReadFile(full)
-	if err != nil || int64(len(data)) != info.Size() {
-		// Unreadable, or changed while it was read: served from disk this
-		// time, and read again next time.
-		c.forget(full)
-		return nil
-	}
-	e = &entry{data: data, header: fileHeader(v, info, data), modTime: info.ModTime(), size: info.Size()}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	old := c.entries[full]
-	var freed int64
-	if old != nil {
-		freed = old.size
-	}
-	if c.bytes-freed+e.size > c.maxBytes {
-		if old != nil {
-			delete(c.entries, full)
-			c.bytes -= freed
-		}
-		return nil
-	}
-	c.entries[full] = e
-	c.bytes += e.size - freed
-	return e
-}
-
-// forget drops what the cache holds of the file at full.
-func (c *cache) forget(full string) {
-	c.mu.RLock()
-	_, ok := c.entries[full]
-	c.mu.RUnlock()
-	if !ok {
-		return
-	}
-	c.mu.Lock()
-	if e := c.entries[full]; e != nil {
-		c.bytes -= e.size
-		delete(c.entries, full)
-	}
-	c.mu.Unlock()
 }

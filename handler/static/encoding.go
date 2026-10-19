@@ -1,9 +1,7 @@
 package static
 
 import (
-	"io/fs"
 	stdhttp "net/http"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -21,34 +19,25 @@ var encodings = map[string]encoding{
 	"gzip": {"gzip", ".gz"},
 }
 
-// twin returns the compressed twin of the file at full that r's client
-// prefers among the handler's encodings, with its path and what a stat said
-// of it, or a nil encoding when the client takes none of them or no twin is
-// on disk. The client's q values rank them; among equals, the order
-// precompressed lists them.
-func (s *Static) twin(r *stdhttp.Request, full string) (*encoding, string, fs.FileInfo) {
+// preferred returns the index, among the handler's encodings, of the
+// compressed twin of l's file that r's client prefers of those on disk, or
+// -1 when the client takes none of them or none is on disk. The client's q
+// values rank them; among equals, the order precompressed lists them.
+func (s *Static) preferred(r *stdhttp.Request, l *lookup) int {
 	accept := r.Header["Accept-Encoding"]
-	if len(accept) == 0 {
-		return nil, "", nil
+	if len(accept) == 0 || len(l.twins) == 0 {
+		return -1
 	}
-	var best *encoding
-	var bestQ float64
-	var bestFull string
-	var bestInfo fs.FileInfo
+	best, bestQ := -1, 0.0
 	for i := range s.precompressed {
-		enc := &s.precompressed[i]
-		q := acceptQ(accept, enc.name)
-		if q <= 0 || q <= bestQ {
+		if l.twins[i].info == nil {
 			continue
 		}
-		twinFull := full + enc.suffix
-		info, err := os.Stat(twinFull)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
+		if q := acceptQ(accept, s.precompressed[i].name); q > 0 && q > bestQ {
+			best, bestQ = i, q
 		}
-		best, bestQ, bestFull, bestInfo = enc, q, twinFull, info
 	}
-	return best, bestFull, bestInfo
+	return best
 }
 
 // acceptQ is the q value the Accept-Encoding fields give coding: its own,

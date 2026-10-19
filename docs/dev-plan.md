@@ -129,7 +129,8 @@ Status: `todo`, `doing` or `done`.
 | R02 | Safe default limits | I13, I20 | done |
 | R03 | fib APIs for forwarding without waiting (in fib) | — | done |
 | R04 | Proxy downloads without waiting | R01, R03 | done |
-| R05 | Static files without blocking | R01, R03 | todo |
+| R05 | Static files without blocking | R01, R03 | done |
+| R05b | Files sent by sendfile paced and bounded | R05, A16 | todo |
 | R06 | Connection and queue limits through fib | R02, R03 | done |
 | R07a | Hot path costs in fit | I23 | done |
 | R07b | Proxy allocations | I23 | done |
@@ -469,6 +470,15 @@ The rest of M0 and M1 follows the rules: config, the module registry, the runtim
   slow and non-reading clients over HTTP/1.1, h2 and h3, and with a slow disk (a test hook on the
   pool); benchmarks before and after.
 - **Touches**: `handler/static`.
+
+### R05b Files sent by sendfile paced and bounded
+
+- **Do**: once fib counts a file queued by `SendFile` in a connection's unsent output (A16), move
+  to that fib release, and run `TestStuckClient/http/1.1`; if fib's `SendFile` bounds its own
+  waits, hand it whole ranges instead of pieces.
+- **Done when**: a client that stops reading a file sent by sendfile over plain HTTP/1 is cut off
+  after the stall timeout, and the skipped test runs.
+- **Touches**: `handler/static`, `go.mod`.
 
 ### R06 Connection and queue limits through fib
 

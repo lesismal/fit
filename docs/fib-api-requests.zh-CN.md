@@ -26,6 +26,7 @@
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
 | A14 | 在没有连接的 Context 上 `Release` | 已完成，v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
+| A16 | `SendFile` 排队的文件计入连接未发送的输出 | P1 | 10、11 | R05 |
 
 ## 证据
 
@@ -317,3 +318,24 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 是 `MaxConnsPerHost + MaxPendingPerHost`，而 `MaxConnsPerHost` 之内的突发请求不会被拒绝。
 
 **fit 如何使用。** 不需要改动：`upstream.TestDefaultMaxConns` 恢复为同时发出 256 个请求。
+
+## A16：`SendFile` 排队的文件计入连接未发送的输出
+
+**问题。** 在普通 HTTP/1 连接上，`Context.SendFile` 用 `Connection.SendFile` 把范围作为文件段排队，`pushLocked` 把它加入
+发送队列，但不计入 `pendingBytes`。所以控制响应节奏的机制都看不到它：`WriteNoWait` 不会报告超过上限，`OnWritable`
+（`Connection.NotifyOutput`）立即报告有空间，`outputwait.Unsent` 也不包括它。停止读取的客户端，只要不断开连接，就一直让它
+的文件排着队、文件描述符保持复制状态，没有写截止时间能切断它，因为没有任何东西在等待。`SendFile` 本身在任何协议上也
+不限制等待：在逐段复制的路径上，它无限期地等待 `OnWritable`。
+
+**证据。** R05 的静态 handler 经 `SendFile` 分段发送一个范围，普通 HTTP/1 上每段 256 KB（其他情况 64 KB），段与段之间在
+写截止时间为停滞超时的情况下等待 `OnWritable`。在 h2c 和 h3 上，停止读取 64 MB 文件的客户端在 1 s 停滞超时后被切断。在
+普通 HTTP/1 上，每段之后 `OnWritable` 都报告有空间：整个文件都排进队列，截止时间从未设置，客户端 2.5 s 后开始读取时拿到
+全部 64 MB。`handler/static/stall_test.go` 的 `TestStuckClient/http/1.1` 在此之前跳过。
+
+**请求。** 把排队文件段剩余的字节计入 `pendingBytes`（排队时加上，`sendfile` 发出时减去），让 `NotifyOutput`、
+`WriteNoWait` 以及全局的 `MaxPendingBytes` 预算像看待字节一样看待排给客户端的文件。更好的是在 `SendFile` 本身提供停滞
+上限（一个 `stall time.Duration` 参数，或在调用前设置的字段），让它能发送整个范围，并限制每次等待客户端的时间，fit 就
+不用自己分段。
+
+**fit 如何使用。** 有了第一项，fit 不需要改动：传输的等待在 HTTP/1 上同样生效，测试恢复运行。有了第二项，`send` 把整个
+范围交给 `SendFile`。

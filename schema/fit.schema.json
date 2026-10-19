@@ -580,6 +580,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "check_interval": {
+          "default": "1s",
+          "description": "How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
         "index": {
           "default": [
             "index.html"

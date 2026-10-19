@@ -27,6 +27,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
 | A14 | `Release` on a Context that has no connection | done, v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
+| A16 | A file queued by `SendFile` counted in a connection's unsent output | P1 | 10, 11 | R05 |
 
 ## Evidence
 
@@ -416,3 +417,31 @@ burst within `MaxConnsPerHost` is not turned away.
 
 **How fit uses it.** No change: `upstream.TestDefaultMaxConns` goes back to sending its 256
 requests at once.
+
+## A16: A file queued by `SendFile` counted in a connection's unsent output
+
+**Problem.** On a plain HTTP/1 connection, `Context.SendFile` queues the range as a file segment
+with `Connection.SendFile`, which `pushLocked` adds to the send queue without counting it in
+`pendingBytes`. So nothing that paces a response sees it: `WriteNoWait` does not report it as
+above the limit, `OnWritable` (`Connection.NotifyOutput`) reports room at once, and
+`outputwait.Unsent` leaves it out. A client that stops reading keeps its file queued, and its
+descriptor duplicated, for as long as it keeps the connection, with no write deadline cutting it
+off, since nothing waits. `SendFile` itself bounds no wait on any protocol either: where it copies
+pieces, it waits for `OnWritable` without a limit.
+
+**Evidence.** R05's static handler sends a range through `SendFile` in pieces of 256 KB on plain
+HTTP/1 (64 KB elsewhere), and between pieces waits on `OnWritable` under a write deadline of the
+stall timeout. Over h2c and h3, a client that stops reading a 64 MB file is cut off after the
+1 s stall timeout. Over plain HTTP/1, `OnWritable` reports room after every piece: the whole file
+is queued, the deadline never set, and the client, once it reads, gets all 64 MB after 2.5 s.
+`handler/static/stall_test.go`, `TestStuckClient/http/1.1`, is skipped until this lands.
+
+**Request.** Count a queued file segment's remaining bytes in `pendingBytes` (adding them when it
+is queued, taking them off as `sendfile` sends them), so that `NotifyOutput`, `WriteNoWait` and
+the server-wide `MaxPendingBytes` budget see a file queued for a client as they see bytes. And,
+better still, a stall bound in `SendFile` itself (a `stall time.Duration` argument or a field set
+before it), so that it can send a whole range with every wait for the client bounded, and fit
+need not split it.
+
+**How fit uses it.** With the first, nothing changes in fit: the transfer's waits work on HTTP/1
+too, and the test runs. With the second, `send` hands `SendFile` the whole range.

@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R04, R06, R07a and R07b are done; R05 waits for A14 in fib, and R07c is next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R06, R07a and R07b are done; R05b waits for A16 in fib, and R07c is next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.5.1`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -32,8 +32,8 @@ M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollb
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
-hot path work that needs nothing from fib, and R03, R04 and R06: fib v1.4.0 has the APIs, the proxy's
-downloads and the limits use them. R05 waits for A14, a fib fix its tests need, and R07c is next.
+hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
+static handler and the limits use them. R05b waits for A16 in fib, and R07c is next.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -60,7 +60,7 @@ To continue, start a session with:
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
-| `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
+| `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
@@ -71,7 +71,7 @@ To continue, start a session with:
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
-| `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
+| `internal/fibtest` | runs fib handlers in tests without a network, as fib's servers run them, waiting for one that answers later: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
 | `examples` | `hello.json`, `proxy.json` |
@@ -1408,6 +1408,56 @@ Differences from the plan:
   done in v1.5.1; the test sends its 256 at once again.
 - No benchmark: neither limit is reached in the harness's scenarios, and `Pick` lost an atomic
   add and a compare.
+
+### R05 Static files without blocking — done
+
+- `handler/static`: no file operation runs on a fib worker. The cache keeps what a request path
+  resolved to, a file with its index and its compressed twins, a directory to list or redirect,
+  or nothing to serve, for `check_interval` (a new parameter, 1s when left out), along with the
+  contents of small files as before. A request it can answer from that is answered on the worker
+  without a system call; a conditional or ranged one goes through `ServeContent` over the bytes in
+  memory, gathered and written whole. Anything else, a path not seen within the interval, a file
+  to read, open or list, goes to a file pool of the package's own: `max(16, 4 × GOMAXPROCS)`
+  goroutines and a queue of 4,096, shared by every static handler. A request the queue cannot
+  take gets 503 at once, and one the pool has not answered within 10 s, waiting or on a disk
+  that hangs, gets 503 then, its work's own answer dropped (`queued.claim`). The lookups are
+  bounded at 16,384 paths, so a client asking for paths that do not exist cannot grow them past
+  that.
+- A file too large to keep goes out through fib's `SendFile`: `ServeContent` runs against a writer
+  that takes the range it would copy (`rangeWriter`, `offsetFile`) instead of copying it, and
+  `transfer` hands `SendFile` the range a piece at a time. Each piece is 64 KB where fib copies, so
+  that fib never waits within one, and 256 KB on plain HTTP/1, where sendfile only queues it.
+  Between pieces it waits for `OnWritable` under a write deadline of the stall timeout, as the
+  proxy's downloads do. A request for several ranges of such a file gets the whole file, since
+  `ServeContent` would copy a multipart body through a pipe. `stall.go` and its writes that wait
+  are gone.
+- `internal/fibtest.ServeRequest` serves through `fibhttp.Serve`, as fib's servers do, and waits up
+  to `fibtest.Timeout` for a handler that answers later, which fib v1.5.1 allows (A14).
+- Tests: `TestNoDiskOnHit` (a known path within `check_interval` is answered without a pool job,
+  four requests to one job, and looked at again after it; a file too large to keep takes a job
+  each time); `TestSlowDisk` (a pool whose one worker is stuck: a path that needs the disk gets
+  503 after the pool's timeout, a cached one is answered at once, and past the full queue 503 at
+  once); `TestStuckClient` over h2c and h3 now through `SendFile`; `TestSlowReader` (3 MB read at
+  about 1.3 MB/s over HTTP/1.1 and h2c, past the 1s stall timeout, arrives whole);
+  `TestConditional`'s several ranges from disk get the whole file; `TestChangedFile` sets the
+  interval to 0. `go vet ./...` and `go test -race ./...` pass.
+- On the benchmark host, fit alone, R06's build against this one, two rounds each, thousands of
+  requests a second: static over HTTP/1.1 587 → 772 (+31%), over h2c 1,327 → 2,457 (+85%), with
+  26 MB resident against 31.
+
+Differences from the plan:
+
+- Not fib's `FileCache`: it reads a file it misses on the caller's goroutine, which would be a fib
+  worker, stats every request where it has no inotify, and sends large files through
+  `ServeContent`'s waiting writes; nor does it have fit's index files, try_files, listings,
+  zstd twins or ETags. The cache is fit's, and every file operation goes through the pool.
+- A change on disk shows within `check_interval`, not at once, as nginx's `open_file_cache_valid`
+  has it.
+- Over plain HTTP/1 a file sent by sendfile is neither paced nor cut off by the stall timeout:
+  fib v1.5.1 does not count a queued file in the connection's unsent output, so `OnWritable`
+  always reports room (as R01 noted). Asked of fib as
+  [A16](fib-api-requests.md#a16-a-file-queued-by-sendfile-counted-in-a-connections-unsent-output);
+  `TestStuckClient/http/1.1` is skipped until R05b moves to the fib release that has it.
 
 ## Notes for later iterations
 

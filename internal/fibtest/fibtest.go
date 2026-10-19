@@ -6,6 +6,8 @@ import (
 	"errors"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"sync"
+	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 )
@@ -14,17 +16,44 @@ import (
 // response, and only takes whole ones: a handler that writes piece by piece
 // has its response held by fib and handed over whole once it is done.
 type Recorder struct {
+	mu       sync.Mutex
 	Response fibhttp.Response
 	Written  bool
+	written  chan struct{}
 }
 
 // WriteResponse records the response.
 func (r *Recorder) WriteResponse(_ *stdhttp.Request, response fibhttp.Response) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.Written {
 		return errors.New("fibtest: response written twice")
 	}
 	r.Response, r.Written = response, true
+	close(r.signal())
 	return nil
+}
+
+// signal returns the channel closed once the response is written. r.mu is
+// held.
+func (r *Recorder) signal() chan struct{} {
+	if r.written == nil {
+		r.written = make(chan struct{})
+	}
+	return r.written
+}
+
+// Wait waits up to d for the response, and reports whether it came.
+func (r *Recorder) Wait(d time.Duration) bool {
+	r.mu.Lock()
+	ch := r.signal()
+	r.mu.Unlock()
+	select {
+	case <-ch:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 // WriteInterim refuses informational responses, which no test needs yet.
@@ -37,18 +66,23 @@ func (r *Recorder) Push(*stdhttp.Request, string, *stdhttp.PushOptions) error {
 	return errors.New("fibtest: push is not supported")
 }
 
+// Timeout is how long ServeRequest waits for a handler that answers after
+// it returns.
+var Timeout = 10 * time.Second
+
 // Serve runs h for a request with method and target, as httptest.NewRequest
 // makes one, and returns what it answered.
 func Serve(h fibhttp.Handler, method, target string) *Recorder {
 	return ServeRequest(h, httptest.NewRequest(method, target, nil))
 }
 
-// ServeRequest runs h for r and returns what it answered. A response written
-// through Write is finished when h returns, as the server finishes it.
+// ServeRequest runs h for r, as fib's servers run handlers, and returns what
+// it answered: a response written through Write is finished when h returns,
+// as the server finishes it, and one h retained the request for is waited
+// for, up to Timeout, as it is answered from elsewhere.
 func ServeRequest(h fibhttp.Handler, r *stdhttp.Request) *Recorder {
 	rec := &Recorder{}
-	c := fibhttp.NewStreamContext(nil, r, rec)
-	h.ServeHTTP(c)
-	_ = c.Finish()
+	fibhttp.Serve(h, fibhttp.NewStreamContext(nil, r, rec))
+	rec.Wait(Timeout)
 	return rec
 }

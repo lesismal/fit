@@ -223,9 +223,15 @@ func TestConditional(t *testing.T) {
 				t.Errorf("%s%s: 304 without the ETag", tt.name, extra)
 			}
 		}
+		// Several ranges: a multipart body from memory, and the whole file
+		// from disk.
 		multi := get(s, "GET", "/a.txt", map[string]string{"Range": "bytes=0-1,5-6"}).Response
-		if multi.StatusCode != 206 || !strings.HasPrefix(multi.Header.Get("Content-Type"), "multipart/byteranges") {
-			t.Errorf("multiple ranges%s: got %d %v", extra, multi.StatusCode, multi.Header)
+		if extra == "" {
+			if multi.StatusCode != 206 || !strings.HasPrefix(multi.Header.Get("Content-Type"), "multipart/byteranges") {
+				t.Errorf("multiple ranges: got %d %v", multi.StatusCode, multi.Header)
+			}
+		} else if multi.StatusCode != 200 || string(multi.Body) != "0123456789" {
+			t.Errorf("multiple ranges%s: got %d %q", extra, multi.StatusCode, multi.Body)
 		}
 	}
 }
@@ -233,6 +239,7 @@ func TestConditional(t *testing.T) {
 func TestChangedFile(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "one"})
 	s := mustLoad(t, root, "")
+	s.cache.check = 0 // every request looks at the disk
 	first := get(s, "GET", "/a.txt", nil).Response
 	if string(first.Body) != "one" {
 		t.Fatalf("got %q", first.Body)

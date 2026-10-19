@@ -15,8 +15,9 @@ import (
 )
 
 // list answers with an HTML listing of the directory at full, whose URL
-// path is urlPath. Names that start with a dot are left out.
-func (s *Static) list(c *fibhttp.Context, urlPath, full string) {
+// path is urlPath, once it has claimed the request from q. Names that start
+// with a dot are left out. It runs on the file pool.
+func (s *Static) list(c *fibhttp.Context, urlPath, full string, q *queued) {
 	// At most browse_max_entries are read, and one more to tell whether
 	// there are more; a directory of millions costs no more than that.
 	max := s.BrowseMax
@@ -25,13 +26,17 @@ func (s *Static) list(c *fibhttp.Context, urlPath, full string) {
 	}
 	dir, err := os.Open(full)
 	if err != nil {
-		respondError(c, statusOf(err))
+		if q.claim() {
+			respondError(c, statusOf(err))
+		}
 		return
 	}
 	entries, err := dir.ReadDir(max + 1)
 	dir.Close()
 	if err != nil && !errors.Is(err, io.EOF) {
-		respondError(c, statusOf(err))
+		if q.claim() {
+			respondError(c, statusOf(err))
+		}
 		return
 	}
 	more := len(entries) > max
@@ -78,6 +83,9 @@ func (s *Static) list(c *fibhttp.Context, urlPath, full string) {
 	b.WriteString("</table>\n")
 	if more {
 		b.WriteString("<p>Only the first " + strconv.Itoa(max) + " entries the directory gave are listed.</p>\n")
+	}
+	if !q.claim() {
+		return
 	}
 	_ = c.WriteResponse(fibhttp.Response{
 		StatusCode: stdhttp.StatusOK,
