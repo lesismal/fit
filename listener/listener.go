@@ -25,6 +25,7 @@ import (
 
 	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
+	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/observe"
@@ -52,12 +53,14 @@ type binding struct {
 	name      string
 	address   string
 	protocols []string
+	tlsKey    string
 	addr      net.Addr
 }
 
-// same reports whether b serves the listener l as it is.
+// same reports whether b serves the listener l as it is: the same name,
+// address, protocols and certificates.
 func (b *binding) same(l *runtime.Listener) bool {
-	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols)
+	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) && b.tlsKey == l.TLSKey
 }
 
 // Addr is where a listener listens.
@@ -111,7 +114,12 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 			return nil, fmt.Errorf("listener %q: %w", l.Name, err)
 		}
 	}
-	h := fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: s.rt, name: l.Name})
+	var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: s.rt, name: l.Name})
+	if l.TLS != nil {
+		// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
+		// or HTTP/1.1 as ALPN chose.
+		h = fibtls.NewServer(l.TLS, h)
+	}
 	i, err := s.engine.AddBinding(fib.Binding{Addr: l.Address, Handler: h})
 	if err != nil {
 		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
@@ -121,7 +129,7 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 		_ = s.engine.RemoveBinding(i)
 		return nil, fmt.Errorf("listener %q: no address bound: %v", l.Name, err)
 	}
-	return &binding{index: i, name: l.Name, address: l.Address, protocols: l.Protocols, addr: addrs[0]}, nil
+	return &binding{index: i, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey, addr: addrs[0]}, nil
 }
 
 // Reload makes g the runtime's current graph, taking over the caller's
@@ -243,11 +251,11 @@ func httpConfig(protocols []string) fibhttp.Config {
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
 	h1 := slices.Contains(protocols, config.ProtocolHTTP1)
-	h2c := slices.Contains(protocols, config.ProtocolH2C)
+	h2 := slices.Contains(protocols, config.ProtocolH2C) || slices.Contains(protocols, config.ProtocolH2)
 	switch {
-	case h1 && !h2c:
+	case h1 && !h2:
 		c.DisableHTTP2 = true
-	case h2c && !h1:
+	case h2 && !h1:
 		c.HTTP2Only = true
 	}
 	return c

@@ -44,10 +44,18 @@ func (c *Config) Validate() Errors {
 
 		seen := map[string]bool{}
 		for i, p := range l.Protocols {
-			if seen[p] {
+			switch {
+			case seen[p]:
 				add(l.At.Field("protocols").Index(i), "%q is listed twice", p)
+			case p == ProtocolH2 && l.TLS == nil:
+				add(l.At.Field("protocols").Index(i), "h2 needs tls; h2c is HTTP/2 in the clear")
+			case p == ProtocolH2C && l.TLS != nil:
+				add(l.At.Field("protocols").Index(i), "h2c is HTTP/2 in the clear, which a listener with tls does not serve; use h2")
 			}
 			seen[p] = true
+		}
+		if l.TLS != nil && len(l.TLS.Certificates) == 0 {
+			add(l.TLS.At.Field("certificates"), "at least one certificate is needed")
 		}
 	}
 

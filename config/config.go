@@ -35,16 +35,39 @@ type AccessLog struct {
 const (
 	ProtocolHTTP1 = "http/1.1"
 	ProtocolH2C   = "h2c"
+	ProtocolH2    = "h2"
 )
 
-// DefaultProtocols are what a listener that names none serves.
-var DefaultProtocols = []string{ProtocolHTTP1}
+// DefaultProtocols are what a listener that names none serves, and
+// DefaultTLSProtocols what one with TLS does.
+var (
+	DefaultProtocols    = []string{ProtocolHTTP1}
+	DefaultTLSProtocols = []string{ProtocolHTTP1, ProtocolH2}
+)
 
 // Listener is an address fit listens on.
 type Listener struct {
 	Name      string   `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
 	Address   string   `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
-	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c" doc:"The protocols served; http/1.1 alone when left out."`
+	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN). http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	TLS       *TLS     `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// TLS is a listener's TLS: the certificates it serves, chosen by the name the
+// client asks for (SNI). It allows TLS 1.2 and 1.3, and only AEAD cipher
+// suites with forward secrecy for 1.2.
+type TLS struct {
+	Certificates []Certificate `json:"certificates" fit:"required" doc:"The certificates served. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Certificate is a certificate and its key, from PEM files.
+type Certificate struct {
+	CertFile string `json:"cert_file" fit:"required" doc:"A PEM file with the certificate, followed by any intermediates."`
+	KeyFile  string `json:"key_file" fit:"required" doc:"A PEM file with the certificate's private key."`
 
 	At Value `json:"-" fit:"self"`
 }

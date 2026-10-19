@@ -11,23 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09, I11, I12, I14–I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS on listeners (I09); no HTTP/3 (I10); no precompressed files or fallbacks (I13); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c and TLS (HTTP/1.1 and h2, certificates chosen by SNI), writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ACME or certificate management beyond files (I28–I31); no HTTP/3 (I10); no precompressed files or fallbacks (I13); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I09, TLS entry from certificate files**, then I13 (static files II) and I10
-(HTTP/3); with those, I23 closes M1. I24 and I32 are also ready to start, unless another session has
+**Next iteration: I13, static files II**, being done next in this session; then I10 (HTTP/3);
+with those, I23 closes M1. I24 and I32 are also ready to start, unless another session has
 taken them.
 
 To continue, start a session with:
 
-> Implement iteration I09 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I10 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -47,8 +47,10 @@ To continue, start a session with:
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
+| `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
+| `internal/certtest` | self-signed certificates for tests |
 | `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
@@ -701,6 +703,41 @@ Differences from the plan:
 - The rest of upstream TLS (client certificates, skipping verification, cipher choices) is I54's.
 - A streamed upload with trailers costs a goroutine, the one exception to forwarding without one; a
   `BodyWriter` that takes the trailer with its close would remove it, and is worth asking fib for.
+
+### I09 TLS entry from certificate files — done
+
+- Config: a listener gains `tls: {"certificates": [{"cert_file", "key_file"}, ...]}`, and protocols
+  gain `h2`, HTTP/2 over TLS. A listener with TLS serves `http/1.1` and `h2` when it names no
+  protocols. `Validate` refuses `h2` without TLS, `h2c` with it, and TLS without certificates.
+- Package `tlsmgr` (static certificates only, as the plan says): `ServerConfig` loads the pairs and
+  returns a `tls.Config` with TLS 1.2 at least, the TLS 1.2 suites cut to ECDHE with AES-GCM or
+  ChaCha20-Poly1305 (TLS 1.3's are all fine and not configurable), and ALPN from the protocols
+  (`fibhttp.ConfigureTLS` for both, `h2` or `http/1.1` alone otherwise); and a fingerprint of the
+  certificates and the ALPN list. A certificate that cannot be loaded is a config error at its path.
+- `runtime.Compile` builds each TLS listener's config, so `fit validate` checks the files too.
+  `listener` wraps the HTTP handler in `fibtls.NewServer`; its HTTP config treats `h2` like `h2c`
+  for allowing HTTP/2. The certificates go in `Config.Certificates`, from which fib's handshake takes
+  the first that suits the client's hello, SNI first, wildcards included, and the first of all for a
+  name none has: fib runs such handshakes as state machines, with no goroutine, which a
+  `GetCertificate` would have given up. A listener's reload identity includes the fingerprint, so a
+  reload after the certificate files changed binds the listener anew, beside the old one, and new
+  connections get the new certificate.
+- Tests: `tlsmgr` checks the config for each protocol set, that fingerprints differ by protocols and
+  by certificate, and the errors for a missing file, a file with no PEM and a key that does not match
+  (with their paths); and the validation rules. `listener` serves two certificates by SNI (exact and
+  wildcard) over HTTP/1.1 and HTTP/2, gives an unknown name the first, refuses TLS 1.1, serves only
+  the protocols named, and picks up a new certificate on reload. `test/e2e` runs `fit run` with two
+  host names, each with its own certificate, over HTTP/1.1 and h2, one answered by `respond` and one
+  proxied, whose upstream sees `X-Forwarded-Proto: https`. `internal/certtest` writes self-signed
+  certificates for the tests. `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The certificates are chosen by fib's handshake from `Config.Certificates` rather than by a
+  `GetCertificate` of fit's own; the certificate manager (I28) will need `GetCertificate` for
+  certificates that change while the listener runs, and should keep the static ones on this path.
+- A listener whose certificate files change is only re-read on reload; watching the files is
+  I28's.
 
 ## Notes for later iterations
 

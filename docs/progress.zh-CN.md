@@ -10,21 +10,20 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14–I22 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09、I11、I12、I14–I22 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | listener 还没有 TLS（I09）；还没有 HTTP/3（I10）；还没有预压缩文件和回退（I13）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c 和 TLS（HTTP/1.1 和 h2，按 SNI 选择证书）返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有 HTTP/3（I10）；还没有预压缩文件和回退（I13）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I09，基于证书文件的 TLS 入口**，然后是 I13（静态文件 II）和 I10（HTTP/3）；完成这些后由 I23 结束
-M1。I24、I32 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I13，静态文件 II**，本会话接下来做；然后是 I10（HTTP/3）；完成这些后由 I23 结束 M1。I24、I32 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I09。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I10。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -43,8 +42,10 @@ M1。I24、I32 也都可以开始（除非已有别的会话在做）。
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
+| `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
+| `internal/certtest` | 为测试生成自签名证书 |
 | `internal/fibtest` | 在测试中不经网络运行 fib handler：`Serve`、`ServeRequest` |
 | `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
 | `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
@@ -556,6 +557,32 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 上游 TLS 的其余部分（客户端证书、跳过校验、密码套件选择）属于 I54。
 - 带 trailer 的流式上传需要一个 goroutine，这是“转发不占 goroutine”的唯一例外；如果 fib 的 `BodyWriter` 能在关闭时
   接收 trailer 就能去掉它，值得向 fib 提出。
+
+### I09 基于证书文件的 TLS 入口 — 已完成
+
+- 配置：listener 新增 `tls: {"certificates": [{"cert_file", "key_file"}, ...]}`，协议新增 `h2`（基于 TLS 的
+  HTTP/2）。带 TLS 的 listener 不写协议时服务 `http/1.1` 和 `h2`。`Validate` 拒绝没有 TLS 的 `h2`、带 TLS 的 `h2c`，
+  以及没有证书的 TLS。
+- `tlsmgr` 包（按计划只支持静态证书）：`ServerConfig` 加载证书对，返回一个 `tls.Config`：至少 TLS 1.2，TLS 1.2 的
+  密码套件只保留 ECDHE 搭配 AES-GCM 或 ChaCha20-Poly1305（TLS 1.3 的套件都可以，也不可配置），ALPN 按协议设置
+  （两者都有时用 `fibhttp.ConfigureTLS`，否则只有 `h2` 或 `http/1.1`）；以及证书和 ALPN 列表的指纹。无法加载的证书是
+  带路径的配置错误。
+- `runtime.Compile` 为每个 TLS listener 构建配置，所以 `fit validate` 也会检查证书文件。`listener` 用
+  `fibtls.NewServer` 包装 HTTP handler；它的 HTTP 配置在允许 HTTP/2 时把 `h2` 与 `h2c` 同等对待。证书放在
+  `Config.Certificates` 中，fib 的握手从中选出第一个适合客户端 hello 的证书——首先看 SNI，包括通配符——没有匹配的
+  名字时用第一个：fib 把这样的握手作为状态机运行，不占 goroutine，而用 `GetCertificate` 就会失去这一点。listener
+  的重载标识包含指纹，所以证书文件变化后的重载会在旧 listener 旁重新绑定，新连接得到新证书。
+- 测试：`tlsmgr` 检查每种协议组合的配置、指纹随协议和证书而变，以及文件不存在、文件没有 PEM、私钥不匹配时的错误
+  （带路径），还有校验规则。`listener` 通过 SNI（精确和通配符）在 HTTP/1.1 和 HTTP/2 下提供两个证书，未知名字得到
+  第一个，拒绝 TLS 1.1，只服务配置的协议，并在重载时换上新证书。`test/e2e` 用两个各有证书的主机名运行
+  `fit run`，覆盖 HTTP/1.1 和 h2，一个由 `respond` 应答，一个被代理，其上游看到 `X-Forwarded-Proto: https`。
+  `internal/certtest` 为测试生成自签名证书。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 证书由 fib 的握手从 `Config.Certificates` 中选择，而不是由 fit 自己的 `GetCertificate` 选择；证书管理器（I28）
+  对运行中会变化的证书需要 `GetCertificate`，静态证书应继续走这条路径。
+- 证书文件变化只在重载时重新读取；监视文件属于 I28。
 
 ## 给后续迭代的说明
 

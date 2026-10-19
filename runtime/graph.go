@@ -9,6 +9,7 @@
 package runtime
 
 import (
+	"crypto/tls"
 	"slices"
 	"sync/atomic"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/router"
+	"github.com/lesismal/fit/tlsmgr"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -52,6 +54,10 @@ type Listener struct {
 	Name      string
 	Address   string
 	Protocols []string
+	// TLS is the listener's TLS configuration, or nil for one in the
+	// clear, and TLSKey a fingerprint of its certificates and protocols.
+	TLS    *tls.Config
+	TLSKey string
 	// Routes are the listener's routes: highest priority first, and routes
 	// of equal priority in the order written.
 	Routes []*Route
@@ -118,6 +124,16 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols}
 		if len(l.Protocols) == 0 {
 			l.Protocols = config.DefaultProtocols
+			if lc.TLS != nil {
+				l.Protocols = config.DefaultTLSProtocols
+			}
+		}
+		if lc.TLS != nil {
+			var err error
+			if l.TLS, l.TLSKey, err = tlsmgr.ServerConfig(lc.TLS, l.Protocols); err != nil {
+				errs = append(errs, config.AsErrors(err)...)
+				continue
+			}
 		}
 		for i, rc := range c.Routes {
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
@@ -127,6 +143,10 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		slices.SortStableFunc(l.Routes, func(a, b *Route) int { return b.Priority - a.Priority })
 		l.Router = newRouter(l.Routes)
 		g.Listeners = append(g.Listeners, l)
+	}
+	if len(errs) > 0 {
+		cleanupModules(g)
+		return nil, errs
 	}
 	return g, nil
 }

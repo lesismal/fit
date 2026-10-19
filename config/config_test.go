@@ -90,7 +90,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "enum",
 			doc:  `{"listeners": [{"name": "a", "address": ":1", "protocols": ["http/1.1", "spdy"]}]}`,
-			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c"`},
+			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2"`},
 		},
 		{
 			name: "null for a list",

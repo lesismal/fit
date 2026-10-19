@@ -107,7 +107,7 @@ Status: `todo`, `doing` or `done`.
 | I07 | Benchmark harness: throughput | I06 | done |
 | I08 | Benchmark harness: idle connection memory and baselines | I07 | done |
 | **M1** | | | |
-| I09 | TLS entry from certificate files | I06 | todo |
+| I09 | TLS entry from certificate files | I06 | done |
 | I10 | HTTP/3 entry | I09 | todo |
 | I11 | Router v1: host and path | I06 | done |
 | I12 | Static files I | I11 | done |

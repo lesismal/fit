@@ -20,6 +20,24 @@
       },
       "type": "object"
     },
+    "config.Certificate": {
+      "additionalProperties": false,
+      "properties": {
+        "cert_file": {
+          "description": "A PEM file with the certificate, followed by any intermediates.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with the certificate's private key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cert_file",
+        "key_file"
+      ],
+      "type": "object"
+    },
     "config.Listener": {
       "additionalProperties": false,
       "properties": {
@@ -32,15 +50,20 @@
           "type": "string"
         },
         "protocols": {
-          "description": "The protocols served; http/1.1 alone when left out.",
+          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN). http/1.1 alone when left out, or http/1.1 and h2 with tls.",
           "items": {
             "enum": [
               "http/1.1",
-              "h2c"
+              "h2c",
+              "h2"
             ],
             "type": "string"
           },
           "type": "array"
+        },
+        "tls": {
+          "$ref": "#/$defs/config.TLS",
+          "description": "Serve TLS, with these certificates."
         }
       },
       "required": [
@@ -105,6 +128,22 @@
       },
       "required": [
         "handler"
+      ],
+      "type": "object"
+    },
+    "config.TLS": {
+      "additionalProperties": false,
+      "properties": {
+        "certificates": {
+          "description": "The certificates served. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none.",
+          "items": {
+            "$ref": "#/$defs/config.Certificate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "certificates"
       ],
       "type": "object"
     },
