@@ -35,6 +35,24 @@ ask for it, how it keeps a web page from using it, and what the history keeps.
   numbered with the versions `runtime.Runtime.Swap` gives their graphs. They are not written to
   disk; a restart starts from the file.
 
+Update, I25 (2026-10-19):
+
+- **A path into the config is a JSON pointer** (RFC 6901) after `/config`, as in
+  `/config/upstreams/0/addresses`, written with `~1` for a `/` in a key. `PUT` sets the value there
+  (replacing it, adding a member, or appending to an array at `-`), `PATCH` merges the body into
+  it as a JSON merge patch (RFC 7396), which can change a few fields of a listener without
+  restating it, and `DELETE` removes it. Every change applies a whole new config, checked as any
+  other, so one that leaves the config invalid is refused with its errors.
+- **An edited config is written out again**, two spaces to a level, its members in their order and
+  its numbers as written. Only a config sent whole (`POST /load`, `PUT /config`) is kept byte for
+  byte.
+- **The ETag is a hash of the config as written** (the first 96 bits of its SHA-256), not its
+  version: versions start again at 1 when fit restarts, and a rollback gives an old config a new
+  version. `If-Match` is checked, and the change made from the running config, under the lock
+  that orders applies, so concurrent writers lose nothing; one whose ETag is stale gets 412.
+- **`POST /rollback/{n}`** applies version `n`'s config again as a new version, while `n` is in
+  the history.
+
 ## Consequences
 
 - A config loaded through the API lasts until the next SIGHUP, which applies the file again, or a

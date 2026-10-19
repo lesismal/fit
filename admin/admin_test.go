@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -118,7 +119,7 @@ func TestLoadAndReadBack(t *testing.T) {
 		t.Fatalf("GET /config: %d %v %q", resp.StatusCode, resp.Header, body)
 	}
 	resp, body := f.load(t, doc("v2"))
-	if resp.StatusCode != 200 || resp.Header.Get(VersionHeader) != "2" || strings.TrimSpace(body) != `{"version":2}` {
+	if resp.StatusCode != 200 || resp.Header.Get(VersionHeader) != "2" || strings.TrimSpace(body) != `{"version":2,"etag":`+strconv.Quote(resp.Header.Get("ETag"))+`}` {
 		t.Fatalf("POST /load: %d %v %s", resp.StatusCode, resp.Header, body)
 	}
 	if got := f.served(t); got != "v2" {
@@ -158,7 +159,7 @@ func TestLoadRefused(t *testing.T) {
 		{"not bound", "application/json", `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}, {"name": "b", "address": "` + taken.Addr().String() + `"}]}`, 500,
 			`address already in use`},
 		{"not JSON", "text/plain", doc("v2"), 415, `application/json`},
-		{"too large", "application/json", strings.Repeat(" ", 1025) + doc("v2"), 413, `larger than max_config_bytes, 1024`},
+		{"too large", "application/json", strings.Repeat(" ", 1025) + doc("v2"), 413, `the body is larger than max_config_bytes, 1024`},
 	} {
 		req, _ := http.NewRequest("POST", f.api+"/load", strings.NewReader(tt.body))
 		req.Header.Set("Content-Type", tt.contentType)

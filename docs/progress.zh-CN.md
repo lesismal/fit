@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I32） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I25、I32） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（`GET /config`、`POST /load`、版本历史）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | Admin API 还没有局部修改、ETag 和回滚（I25）；除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -22,8 +22,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I25（Admin API：局部修改、ETag、回滚）和 I33（负载均衡 v2）。** M2 已完成 I24（Admin API 骨架与配置
-版本）和 I32（主动健康检查）。M2 之前的审查修复 R01、R02 已
+**下一步：I33（负载均衡 v2）。** M2 已完成 I24、I25（带配置版本、局部修改、ETag 和回滚的 Admin API）和 I32
+（主动健康检查）。M2 之前的审查修复 R01、R02 已
 完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -33,7 +33,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I25。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I33。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -42,7 +42,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | 包 | 内容 |
 | --- | --- |
 | `cmd/fit` | 命令行：`run`（收到 SIGHUP 或通过 Admin API 重载）、`validate`、`schema`、`version`、`help` |
-| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史；基于 net/http 的 Admin API：`GET /config`、`POST /load`、`GET /versions`、`GET /versions/{n}` |
+| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -820,6 +820,35 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 每个地址最多两个探测连接，而不是一个：在 race 检测下，一个放弃了大 body 的探测，其连接在 fib 客户端中最长要 750ms
   才关闭完，下一次探测因等待它而超时。fit 的其他部分不受此影响。
 - 后端退出或重新加入轮转时没有日志；I34 的指标会显示它。
+
+### I25 Admin API：局部修改、ETag、回滚 — 已完成
+
+- `GET /config/<pointer>` 返回运行中配置里 JSON pointer（RFC 6901）指向的值；`PUT` 把它设为请求体（替换成员或元素、
+  新增成员、在 `-` 处追加），`PATCH` 把请求体作为 JSON merge patch（RFC 7396，以 `application/merge-patch+json` 或
+  `application/json` 发送）合并进去，`DELETE` 删除它。单独的 `/config` 表示整个配置：`PUT /config` 像 `POST /load`
+  一样替换它，`DELETE /config` 被拒绝。不存在的成员或下标得到 404，不是 JSON（或有重复键）的请求体得到 400。
+- 每次修改都通过 `Configs.Update` 应用一个完整配置：它在给应用排序的那把锁下取运行中的配置、做修改并应用结果，所以
+  多个写入者的修改都基于前一个修改。让配置失效的修改连同错误一起被拒绝，什么都不变。
+- 每个版本都有 ETag，即配置原文 SHA-256 的前 96 位，在每个关于配置的应答中以 `ETag` 发送，并由 `GET /versions`
+  列出。带 `If-Match`（一个 ETag、一组 ETag 或 `*`）的修改只在运行中的配置仍是那一个时才做，否则返回 412；
+  `POST /load` 和回滚也支持它。`If-None-Match` 指向运行中的配置时，`GET /config` 返回 304。
+- `POST /rollback/{n}` 把版本 `n` 的配置作为新版本再次应用，来源为 `rollback`；已不在历史中的版本得到 404。
+- 修改后的配置由 fit 写出（`admin/jsonptr.go`：文档的树，成员保持顺序、数字保持原样，每层缩进两个空格）；整体发送的
+  配置按原样保存。
+- 测试（`admin/edit_test.go`）：pointer 及其转义；在文档中读取、设置、追加、删除和合并，以及成员不存在、下标越界或
+  有前导零、对标量取下级时的错误；顺序、数字和字符保持不变；读取一个值、`PUT`、`PATCH`、追加和删除路由，每次都立即
+  生效，以及写出的配置；验证失败（地址、模块、必填字段、未知字段）、不是 JSON 或指向不存在位置的修改被拒绝，什么都不变；
+  ETag、`If-None-Match`，以及用正确的、过期的、列表中的和 `*` 的 ETag 做 `If-Match`，过期的 ETag 对各种修改都被拒绝；
+  八个写入者读取、修改并带 `If-Match` 写回，遇到 412 就重试，旁边八个不带它追加，最终十六条路由都恰好出现一次，版本数
+  也对应；回滚到仍保存的版本、带 `If-Match` 回滚，以及回滚到已不在的版本。`go vet ./...`、`GOOS=windows go vet ./...`
+  和 `go test -race ./...` 通过。
+- 决策记录 [005](decisions/005-admin-api.zh-CN.md) 补充了这些格式：pointer、merge patch、ETag、回滚。
+
+与计划的不同：
+
+- `PATCH` 是在 pointer 处做 JSON merge patch，而不是替换那里的值（`PUT` 已经能做）；不接受 JSON Patch（RFC 6902）文档。
+- ETag 是配置的哈希，而不是版本号，因为重启后版本号会重新开始。
+- 修改后配置的排版是 fit 的，不是原来书写的样子。
 
 ## 给后续迭代的说明
 

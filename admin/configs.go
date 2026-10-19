@@ -8,7 +8,11 @@
 package admin
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,9 +23,14 @@ import (
 
 // Sources a config can come from.
 const (
-	SourceFile  = "file"
-	SourceAdmin = "admin"
+	SourceFile     = "file"
+	SourceAdmin    = "admin"
+	SourceRollback = "rollback"
 )
+
+// ErrChanged is what an update gets when the running config is no longer the
+// one its If-Match names; the API answers it with 412.
+var ErrChanged = errors.New("admin: the config has changed since the ETag given in If-Match")
 
 // Configs applies configs to a running server, one at a time and by one
 // path whatever their source: SIGHUP, the Admin API and, later, the file
@@ -47,8 +56,10 @@ type Version struct {
 	// Applied is when the config was applied, and Source where it came from.
 	Applied time.Time `json:"applied"`
 	Source  string    `json:"source"`
-	// Bytes is the size of the config as written.
-	Bytes int `json:"bytes"`
+	// Bytes is the size of the config as written, and ETag a strong entity
+	// tag of it, which If-Match compares.
+	Bytes int    `json:"bytes"`
+	ETag  string `json:"etag"`
 
 	data []byte
 }
@@ -59,6 +70,7 @@ func (v *Version) Data() []byte { return v.data }
 // Result is what applying a config did.
 type Result struct {
 	Version uint64
+	ETag    string
 	Source  string
 	// Added and Removed are the listeners bound and those taken away.
 	Added, Removed []listener.Addr
@@ -83,7 +95,9 @@ func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, f
 }
 
 func (cs *Configs) record(version uint64, data []byte, source string) {
-	cs.history = append(cs.history, &Version{Number: version, Applied: time.Now(), Source: source, Bytes: len(data), data: data})
+	sum := sha256.Sum256(data)
+	cs.history = append(cs.history, &Version{Number: version, Applied: time.Now(), Source: source, Bytes: len(data),
+		ETag: `"` + hex.EncodeToString(sum[:12]) + `"`, data: data})
 	if n := len(cs.history) - cs.keep; n > 0 {
 		clear(cs.history[:n])
 		cs.history = slices.Delete(cs.history, 0, n)
@@ -96,12 +110,30 @@ func (cs *Configs) record(version uint64, data []byte, source string) {
 // the error that said so. Apply keeps data, which the caller must not change
 // afterwards.
 func (cs *Configs) Apply(data []byte, source string) (Result, error) {
+	return cs.Update(source, "", func(*Version) ([]byte, error) { return data, nil })
+}
+
+// Update applies the config edit makes from the running one, as Apply does,
+// with no other config applied between the two: edits from many writers at
+// once each start from the one before, and none is lost. When ifMatch is
+// not empty, it is an If-Match field's value, and Update gives ErrChanged,
+// calling nothing, unless it names the running config's ETag or is "*". An
+// error from edit is returned as it is.
+func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byte, error)) (Result, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cur := cs.history[len(cs.history)-1]
+	if ifMatch != "" && !etagMatches(ifMatch, cur.ETag) {
+		return Result{}, ErrChanged
+	}
+	data, err := edit(cur)
+	if err != nil {
+		return Result{}, err
+	}
 	c, err := config.Load(data)
 	if err != nil {
 		return Result{}, err
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	g, err := runtime.Compile(c, cs.env)
 	if err != nil {
 		return Result{}, err
@@ -120,7 +152,31 @@ func (cs *Configs) Apply(data []byte, source string) (Result, error) {
 		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
 	}
 	cs.record(r.Version, data, source)
+	r.ETag = cs.history[len(cs.history)-1].ETag
 	return r, nil
+}
+
+// Rollback applies again the config applied as version n, as a new version.
+// It gives a *RequestError with status 404 when n is no longer kept.
+func (cs *Configs) Rollback(n uint64, ifMatch string) (Result, error) {
+	return cs.Update(SourceRollback, ifMatch, func(*Version) ([]byte, error) {
+		// Update holds the lock.
+		if v := cs.find(n); v != nil {
+			return v.data, nil
+		}
+		return nil, notFound("version %d is not kept", n)
+	})
+}
+
+// etagMatches reports whether an If-Match field's value names etag: "*",
+// or a list of entity tags one of which is etag, compared strongly.
+func etagMatches(field, etag string) bool {
+	for t := range strings.SplitSeq(field, ",") {
+		if t = strings.TrimSpace(t); t == "*" || t == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // Current returns the running config.
@@ -141,12 +197,18 @@ func (cs *Configs) Versions() []*Version {
 func (cs *Configs) Version(n uint64) (*Version, bool) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	v := cs.find(n)
+	return v, v != nil
+}
+
+// find returns version n, or nil. cs.mu must be held.
+func (cs *Configs) find(n uint64) *Version {
 	for _, v := range cs.history {
 		if v.Number == n {
-			return v, true
+			return v
 		}
 	}
-	return nil, false
+	return nil
 }
 
 func sameAccessLog(a, b *config.AccessLog) bool {

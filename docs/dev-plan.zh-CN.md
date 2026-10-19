@@ -124,7 +124,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | R07 | 热路径开销 | R03、I23 | todo |
 | **M2** | | | |
 | I24 | 配置版本与 Admin API 骨架 | I22 | done |
-| I25 | Admin API：局部修改、ETag、回滚 | I24 | todo |
+| I25 | Admin API：局部修改、ETag、回滚 | I24 | done |
 | I26 | 监听差量与旧图排空 | I24 | todo |
 | I27 | 文件 provider | I24 | todo |
 | I28 | 证书管理与存储；ACME 选型 | I09 | todo |

@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I32) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I32) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (`GET /config`, `POST /load`, a history of versions), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no patching, ETags or rollback in the Admin API (I25); no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -26,8 +26,8 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I25 (Admin API: patch, ETag, rollback) and I33 (load balancing v2).** M2 began with I24,
-the Admin API skeleton and config versions, and I32, active health checks.
+**Next: I33 (load balancing v2).** M2 has I24 and I25, the Admin API with config versions,
+patches, ETags and rollback, and I32, active health checks.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -41,7 +41,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I25 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I33 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -51,7 +51,7 @@ To continue, start a session with:
 | Package | Contents |
 | --- | --- |
 | `cmd/fit` | the CLI: `run` (with reload on SIGHUP and the Admin API), `validate`, `schema`, `version`, `help` |
-| `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied; the Admin API on net/http: `GET /config`, `POST /load`, `GET /versions`, `GET /versions/{n}` |
+| `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}` |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
@@ -1064,6 +1064,49 @@ Differences from the plan:
   of a probe that gave up on a large body took up to 750ms to finish closing in fib's client, and
   the next probe waited for it past its timeout. Nothing else in fit sees this.
 - Nothing is logged when a backend leaves or rejoins rotation; I34's metrics will show it.
+
+### I25 Admin API: patch, ETag, rollback — done
+
+- `GET /config/<pointer>` returns the value a JSON pointer (RFC 6901) names in the running config;
+  `PUT` sets it to the body (replacing a member or an element, adding a member, appending at `-`),
+  `PATCH` merges the body into it as a JSON merge patch (RFC 7396, sent as
+  `application/merge-patch+json` or `application/json`), and `DELETE` removes it. `/config` alone
+  is the whole config: `PUT /config` replaces it as `POST /load` does, and `DELETE /config` is
+  refused. A missing member or index gets 404, a body that is not JSON (or holds a key twice) 400.
+- Every change applies a whole config through `Configs.Update`, which takes the running config,
+  makes the change and applies the result under the lock that orders applies, so that changes from
+  many writers each start from the one before. A change that leaves the config invalid is refused
+  with its errors, and nothing changes.
+- Each version has an ETag, the first 96 bits of the SHA-256 of the config as written, sent as
+  `ETag` on every answer about a config and listed by `GET /versions`. A change with `If-Match`
+  (one ETag, a list of them, or `*`) is made only if the running config is still that one, and is
+  answered 412 otherwise; `POST /load` and rollbacks take it too. `GET /config` answers 304 to an
+  `If-None-Match` that names the running config.
+- `POST /rollback/{n}` applies version `n`'s config again, as a new version from the source
+  `rollback`; a version no longer in the history gets 404.
+- An edited config is written out by fit (`admin/jsonptr.go`: a tree of the document that keeps
+  members in order and numbers as written, two spaces to a level); a config sent whole is kept as
+  written.
+- Tests (`admin/edit_test.go`): pointers and their escapes; getting, putting, appending,
+  removing and merging in a document, and errors for missing members, indexes past the end or
+  with leading zeros, and scalars; order, numbers and characters kept; reading a value, `PUT`,
+  `PATCH`, appending and deleting a route, each served at once, and the config written out;
+  edits that fail validation (an address, a module, a required field, an unknown field), that are
+  not JSON or point nowhere, refused with nothing changed; ETags, `If-None-Match`, `If-Match` with
+  the right, a stale, a listed and `*` ETag, a stale one refused for every kind of change; eight
+  writers that read, change and write back with `If-Match`, retrying on 412, beside eight that
+  append without it, all sixteen routes in the config once and as many versions; rollbacks, to a
+  version still kept, with `If-Match`, and to one gone. `go vet ./...`, `GOOS=windows go vet ./...`
+  and `go test -race ./...` pass.
+- Decision note [005](decisions/005-admin-api.md) gains the formats: pointers, merge patch, the
+  ETag, rollback.
+
+Differences from the plan:
+
+- `PATCH` is a JSON merge patch at the pointer rather than a replacement of the value there, which
+  `PUT` already does; a JSON Patch (RFC 6902) document is not taken.
+- The ETag is a hash of the config, not its version, since versions start again on a restart.
+- An edited config's layout is fit's, not the one it was written in.
 
 ## Notes for later iterations
 
