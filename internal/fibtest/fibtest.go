@@ -30,7 +30,9 @@ func (r *Recorder) WriteResponse(_ *stdhttp.Request, response fibhttp.Response) 
 		return errors.New("fibtest: response written twice")
 	}
 	r.Response, r.Written = response, true
-	close(r.signal())
+	if r.written != nil {
+		close(r.written)
+	}
 	return nil
 }
 
@@ -46,12 +48,19 @@ func (r *Recorder) signal() chan struct{} {
 // Wait waits up to d for the response, and reports whether it came.
 func (r *Recorder) Wait(d time.Duration) bool {
 	r.mu.Lock()
+	if r.Written {
+		// Answered as the handler ran, as most are: nothing to wait on.
+		r.mu.Unlock()
+		return true
+	}
 	ch := r.signal()
 	r.mu.Unlock()
+	t := time.NewTimer(d)
+	defer t.Stop()
 	select {
 	case <-ch:
 		return true
-	case <-time.After(d):
+	case <-t.C:
 		return false
 	}
 }

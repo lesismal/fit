@@ -24,7 +24,6 @@ package proxy
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"net"
 	stdhttp "net/http"
@@ -33,6 +32,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
@@ -55,18 +55,35 @@ type Proxy struct {
 	trusted []netip.Prefix
 	stall   time.Duration
 	// graph is the config the proxy belongs to, held by each exchange until
-	// it is over; drains are the contexts its exchanges' contexts derive
-	// from, which Drain cancels. They are spread over several, so that
-	// exchanges starting at once do not all wait on one context's lock.
-	graph  module.Holder
-	drains [drainShards]drainCtx
+	// it is over; open are the exchanges under way, which Drain cuts off.
+	// They are spread over several sets, so that exchanges starting at once
+	// do not all wait on one lock.
+	graph module.Holder
+	open  [openShards]openSet
 }
 
-const drainShards = 32
+const openShards = 32
 
-type drainCtx struct {
-	ctx    context.Context
-	cancel context.CancelCauseFunc
+// openSet is a shard of a proxy's open exchanges.
+type openSet struct {
+	mu        sync.Mutex
+	exchanges map[*exchange]struct{}
+	_         [40]byte // a shard to a cache line
+}
+
+func (s *openSet) add(x *exchange) {
+	s.mu.Lock()
+	if s.exchanges == nil {
+		s.exchanges = make(map[*exchange]struct{})
+	}
+	s.exchanges[x] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *openSet) remove(x *exchange) {
+	s.mu.Lock()
+	delete(s.exchanges, x)
+	s.mu.Unlock()
 }
 
 // Drain cuts off the exchanges still open once the proxy's config has been
@@ -74,15 +91,17 @@ type drainCtx struct {
 // 503, and one under way is cut short as an upstream that broke off would
 // be, without counting against the backend.
 func (p *Proxy) Drain() {
-	for i := range p.drains {
-		p.drains[i].cancel(errDrained)
+	var open []*exchange
+	for i := range p.open {
+		s := &p.open[i]
+		s.mu.Lock()
+		for x := range s.exchanges {
+			open = append(open, x)
+		}
+		s.mu.Unlock()
 	}
-}
-
-// Cleanup lets go of the drain contexts.
-func (p *Proxy) Cleanup() {
-	for i := range p.drains {
-		p.drains[i].cancel(nil)
+	for _, x := range open {
+		x.cancel(errDrained)
 	}
 }
 
@@ -95,9 +114,6 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 	p.pool = pool
 	p.stall = ctx.WriteStallTimeout()
 	p.graph = ctx.Graph()
-	for i := range p.drains {
-		p.drains[i].ctx, p.drains[i].cancel = context.WithCancelCause(context.Background())
-	}
 	for i, s := range p.TrustedProxies {
 		prefix, err := parsePrefix(s)
 		if err != nil {

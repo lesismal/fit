@@ -3,7 +3,6 @@
 package proxy
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,10 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	fibhttp "github.com/lesismal/fib/http"
+
+	"github.com/lesismal/fit/upstream"
 )
 
 // upstreamConfig is a config whose upstream has the given extra fields.
@@ -323,14 +326,14 @@ func TestTrailers(t *testing.T) {
 
 func TestStatusOf(t *testing.T) {
 	x := &exchange{}
-	ctx, cancel := contextWithCause()
-	x.ctx = ctx
 	for _, tt := range []struct {
 		err  error
 		want int
 	}{
 		{errors.New("refused"), 502},
 		{os.ErrDeadlineExceeded, 504},
+		{fibhttp.ErrResponseHeaderTimeout, 504},
+		{upstream.ErrBusy, 503},
 		{&uploadError{errors.New("bad chunk")}, 400},
 		{&uploadError{os.ErrDeadlineExceeded}, 408},
 	} {
@@ -338,12 +341,8 @@ func TestStatusOf(t *testing.T) {
 			t.Errorf("%v: %d, want %d", tt.err, got, tt.want)
 		}
 	}
-	cancel(errHeaderTimeout)
+	x.cancel(errIdleTimeout)
 	if got := x.statusOf(errors.New("context canceled")); got != 504 {
-		t.Errorf("header timeout: %d", got)
+		t.Errorf("idle timeout: %d", got)
 	}
-}
-
-func contextWithCause() (context.Context, context.CancelCauseFunc) {
-	return context.WithCancelCause(context.Background())
 }

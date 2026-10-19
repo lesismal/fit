@@ -496,7 +496,7 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 // after the graph is released still has somewhere to go.
 func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route) {
 	r := c.Request
-	e := observe.Track(r)
+	e := observe.Track(c)
 	e.Start, e.Listener, e.BytesIn = time.Now(), d.name, r.ContentLength
 	if body := c.Body(); body != nil {
 		e.BytesIn = int64(len(body))

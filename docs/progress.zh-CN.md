@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R06、R05b、R07a、R07b 已完成；接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07c 已全部完成。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们。接下来是 R07c。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -1106,6 +1106,35 @@ A11–A13。
 
 与计划的不同：fib 没有在 `SendFile` 内部增加停滞上限，所以范围仍然分段发送，普通 HTTP/1 上每段 256 KB，其他情况 64 KB。
 没有跑基准：基准框架的静态场景服务的是缓存中的文件，不走这条路径。
+
+### R07c 依赖 fib 的热路径开销 — 已完成
+
+- 访问日志的条目放在 fib Context 的值槽中（A7）：`observe.Track(c)` 和 `EntryOf(c)` 接受 Context，不再为它复制请求。
+- 代理经 `Client.Start` 发送请求，用它的 `Call` 放弃请求：请求没有自己的 context（没有 `WithCancelCause`、没有
+  `WithContext` 复制，也没有让 fib 用 `context.AfterFunc` 监视的东西）。放弃的原因（客户端离开、空闲超时或排空）记录在
+  exchange 中（`cancel`、`causeErr`），一把小锁保证在取消先到达时也能正确保存 `Call`。排空时在每个代理的 32 个加锁集合中
+  找到进行中的 exchange，而不是取消一个父 context。
+- `response_header_timeout` 交给每个池客户端的 fib `ResponseHeaderTimeout`，与请求共用一个定时器，代理自己的定时器去掉了；
+  fib 的 `ErrResponseHeaderTimeout` 对应 504。
+- 整体到达的响应直接以 fib 客户端持有的字节（`BodyBytes`，A11）写给客户端，不再复制。A13 不需要 fit 改动。
+- `fibtest.Recorder.Wait` 对已经写出的响应不再创建定时器和 channel，`BenchmarkDispatch` 之前把它们也算进去了。
+- 测试：`TestStatusOf` 覆盖 `ErrResponseHeaderTimeout`、`ErrBusy` 和空闲超时的原因；`TestTrack` 覆盖值槽；排空、超时、
+  流式和访问日志测试不改动即通过。`go vet ./...` 和 `go test -race ./...` 通过。
+- 开发用 Mac 上的分配：`BenchmarkProxy` 每请求 77 → 65 次、11.1 → 10.0 KB（包括 net/http 后端）。使用相同 fibtest 的
+  `BenchmarkDispatch` 从 9 次变为 10 次，单线程 636 → 558 ns，8 核 406 → 396 ns：基准中每个请求的 Context 都是新的，fib 要在
+  上面创建值槽所在的钩子；服务器的 Context 会被回收复用并保留它们。
+- 压测主机上，R05b 的构建与本构建各跑两轮，每秒千次请求（HTTP/1.1 和 h2c）：不开访问日志时，代理 218.9 和 236.0 → 228.4
+  和 237.3（+4.3% 和 +0.5%），HTTP/1.1 p99 3.71 → 3.21 ms，固定响应 778 和 3,774 → 781 和 3,774；开访问日志时，代理 214.7
+  和 235.1 → 226.2 和 236.9（+5.4% 和 +0.8%），固定响应 787 和 2,683 → 788 和 2,691。
+
+与计划的不同：
+
+- `response_header_timeout` 现在从请求发完开始计时，与它的文档和 fib 客户端的计时一致；代理原来的定时器从请求开始计时，
+  包括建立连接和上传。
+- I23 的问题（代理在 HTTP/1.1 上只有 nginx 的 83%）：在这台主机上，fit 的代理经过 R07a–R07c 从 212k（I23 的构建）提高到
+  每秒 228k 请求，约为 I23 时 nginx 258k 的 88%。与 nginx 的重新对比属于 M2 的退出基准（I35）。
+- 打开访问日志时，h2c 固定响应仍比不开时少约 30%（269 万对 377 万），A13 已经去掉了响应头复制：剩下的是在 worker 上格式化
+  日志行和钩子本身的开销。这不是回归，也不属于 M1。
 
 ## 给后续迭代的说明
 

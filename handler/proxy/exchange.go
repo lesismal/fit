@@ -23,12 +23,11 @@ import (
 	"github.com/lesismal/fit/upstream"
 )
 
-// Why a proxied request was cut short, as the cause of its context.
+// Why a proxied request was cut short, as the cause exchange.cancel records.
 var (
-	errClientGone    = errors.New("proxy: the client went away")
-	errHeaderTimeout = errors.New("proxy: the upstream took too long to begin its response")
-	errIdleTimeout   = errors.New("proxy: the upstream went silent in the middle of its response")
-	errDrained       = errors.New("proxy: the config the request started on was swapped out the drain timeout ago")
+	errClientGone  = errors.New("proxy: the client went away")
+	errIdleTimeout = errors.New("proxy: the upstream went silent in the middle of its response")
+	errDrained     = errors.New("proxy: the config the request started on was swapped out the drain timeout ago")
 )
 
 // brokenTrailer is the Fit-Error trailer's value on an HTTP/2 response whose
@@ -67,28 +66,28 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	backend := p.pool.Pick(c.Request)
-	ctx, cancel := context.WithCancelCause(p.drains[rand.Uint32()%drainShards].ctx)
-	out := x.base.WithContext(ctx)
+	// The request goes without a context of its own: it is abandoned through
+	// its Call, which costs nothing, rather than a context fib would watch.
+	out := &x.base
 	// The backend is held until the exchange is over, body and all, so that
 	// least_conn counts a long download as busy for as long as it lasts;
 	// and the config, so that a download that outlasts a reload stays on
 	// the config it started on, until the drain timeout.
 	p.graph.Retain()
-	x.out, x.ctx, x.cancel, x.start, x.timeouts = out, ctx, cancel, time.Now(), p.pool.Timeouts()
+	x.out, x.start, x.timeouts = out, time.Now(), p.pool.Timeouts()
 	x.stall, x.pool, x.backend, x.setCookie, x.graph = p.stall, p.pool, backend, p.pool.SetCookie(c.Request, backend), p.graph
+	x.open = &p.open[rand.Uint32()%openShards]
+	x.open.add(x)
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
-	c.OnCancel(func(error) { cancel(errClientGone) })
-	if t := x.timeouts.ResponseHeader; t > 0 {
-		x.timer.Store(time.AfterFunc(t, func() { cancel(errHeaderTimeout) }))
-	}
+	c.OnCancel(func(error) { x.cancel(errClientGone) })
 
 	r := c.Request
 	announced := trailerNames(r)
 	switch {
 	case c.RequestBody() == nil && len(announced) == 0:
-		p.pool.Send(x.backend, out, x.onResponse)
+		x.send(out)
 		return
 	case c.RequestBody() == nil:
 		// Whole, with trailers, whose values are all here: they are set
@@ -101,7 +100,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_, _ = body.Write(c.Body())
 		_ = body.Close()
 		out.Body, out.ContentLength = body, -1
-		p.pool.Send(x.backend, out, x.onResponse)
+		x.send(out)
 		return
 	}
 	// A body still arriving goes up as it arrives, through a BodyWriter.
@@ -117,7 +116,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		}
 		out.ContentLength = -1
 	}
-	p.pool.Send(x.backend, out, x.onResponse)
+	x.send(out)
 	c.OnBody(func(data []byte, fin bool, err error) {
 		switch {
 		case err != nil:
@@ -191,8 +190,6 @@ type exchange struct {
 	url       url.URL
 	forwarded [4]string
 	out       *stdhttp.Request
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
 	start     time.Time
 	timeouts  upstream.Timeouts
 	// stall bounds each wait for the client to take what was written.
@@ -202,8 +199,17 @@ type exchange struct {
 	// setCookie is the sticky cookie the response sets, or "".
 	setCookie string
 	graph     module.Holder
-	// timer is the response header timeout's, then the idle timeout's.
+	// timer is the response idle timeout's.
 	timer atomic.Pointer[time.Timer]
+	// open is the proxy's shard of open exchanges this one is in, for a
+	// drain to find it.
+	open *openSet
+
+	// call abandons the upstream request, once Send has returned it, and
+	// cause is why it was abandoned, or nil; callMu orders the two.
+	callMu sync.Mutex
+	call   fibhttp.Call
+	cause  atomic.Pointer[error]
 
 	// mu orders what the upstream body's callbacks and OnWritable's do to
 	// the client's response, since a resumed body and OnWritable's function
@@ -224,18 +230,47 @@ func (x *exchange) release() {
 		if t := x.timer.Load(); t != nil {
 			t.Stop()
 		}
-		x.cancel(nil)
+		x.open.remove(x)
 		x.pool.Done(x.backend, x.failed)
 		x.c.Release()
 		x.graph.Release()
 	}
 }
 
+// send sends the request upstream, keeping its Call for cancel, and
+// abandons it at once if cancel came first.
+func (x *exchange) send(out *stdhttp.Request) {
+	x.callMu.Lock()
+	x.call = x.pool.Send(x.backend, out, x.onResponse)
+	x.callMu.Unlock()
+	if cause := x.cause.Load(); cause != nil {
+		x.call.Cancel(*cause)
+	}
+}
+
+// cancel abandons the upstream request for cause, the first cause given,
+// which statusOf and broken tell the outcome by.
+func (x *exchange) cancel(cause error) {
+	x.cause.CompareAndSwap(nil, &cause)
+	x.callMu.Lock()
+	call := x.call
+	x.callMu.Unlock()
+	call.Cancel(cause)
+}
+
+// causeErr is why the request was abandoned, or nil.
+func (x *exchange) causeErr() error {
+	if cause := x.cause.Load(); cause != nil {
+		return *cause
+	}
+	return nil
+}
+
 func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	if t := x.timer.Load(); t != nil {
 		t.Stop()
 	}
-	if e := observe.EntryOf(x.c.Request); e != nil {
+	if e := observe.EntryOf(x.c); e != nil {
 		e.Upstream, e.UpstreamDuration = x.backend.Address, time.Since(x.start)
 	}
 	if err != nil {
@@ -403,7 +438,7 @@ func (x *exchange) begin() {
 // fail answers a request whose upstream gave no response, unless the client
 // is gone.
 func (x *exchange) fail(err error) {
-	if errors.Is(context.Cause(x.ctx), errClientGone) {
+	if errors.Is(x.causeErr(), errClientGone) {
 		x.release()
 		return
 	}
@@ -417,10 +452,10 @@ func (x *exchange) fail(err error) {
 // statusOf is the status for a request that failed with err before its
 // response began.
 func (x *exchange) statusOf(err error) int {
-	cause := context.Cause(x.ctx)
+	cause := x.causeErr()
 	var upload *uploadError
 	switch {
-	case errors.Is(cause, errHeaderTimeout), errors.Is(cause, errIdleTimeout):
+	case errors.Is(cause, errIdleTimeout), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
 		return stdhttp.StatusGatewayTimeout
 	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy):
 		// Swapped out, or max_pending requests wait for a connection already.
@@ -447,7 +482,7 @@ func (x *exchange) statusOf(err error) int {
 // broken handles a response that failed after it began: the upstream broke
 // off, went silent, or the client went away.
 func (x *exchange) broken(err error) {
-	if errors.Is(context.Cause(x.ctx), errClientGone) {
+	if errors.Is(x.causeErr(), errClientGone) {
 		x.release()
 		return
 	}
@@ -456,7 +491,7 @@ func (x *exchange) broken(err error) {
 		return
 	}
 	// Cut off by a drain, the backend did nothing wrong.
-	x.failed = !errors.Is(context.Cause(x.ctx), errDrained)
+	x.failed = !errors.Is(x.causeErr(), errDrained)
 	switch {
 	case x.resp.ContentLength >= 0:
 		// Short of its length: fib closes an HTTP/1 connection and resets
@@ -473,20 +508,15 @@ func (x *exchange) broken(err error) {
 	x.release()
 }
 
-// readBody reads a response body that arrived whole: into a buffer of its
-// length when it has one, as it does unless it came chunked, so that it is
-// read in one allocation. fib holds the body already; reading it without a
-// copy is A11 in fib-api-requests.
+// readBody returns a response body that arrived whole: the bytes fib's
+// client holds, with no copy, or, for a body that is not fib's own buffer,
+// what reading it gives.
 func readBody(resp *fibhttp.ClientResponse) ([]byte, error) {
+	if body, ok := resp.BodyBytes(); ok {
+		return body, nil
+	}
 	if resp.Body == nil || resp.Body == stdhttp.NoBody {
 		return nil, nil
-	}
-	if n := resp.ContentLength; n >= 0 && n <= 1<<20 {
-		buf := make([]byte, n)
-		if _, err := io.ReadFull(resp.Body, buf); err != nil {
-			return nil, err
-		}
-		return buf, nil
 	}
 	return io.ReadAll(resp.Body)
 }

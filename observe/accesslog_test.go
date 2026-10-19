@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	fibhttp "github.com/lesismal/fib/http"
+
 	"github.com/lesismal/fit/config"
 )
 
@@ -326,24 +328,14 @@ func TestShards(t *testing.T) {
 }
 
 func TestTrack(t *testing.T) {
-	type key struct{}
-	r := httptest.NewRequest("GET", "/", nil)
-	r = r.WithContext(context.WithValue(r.Context(), key{}, "kept"))
-	if EntryOf(r) != nil {
+	c := fibhttp.NewStreamContext(nil, httptest.NewRequest("GET", "/", nil), nil)
+	if EntryOf(c) != nil {
 		t.Fatal("an entry before Track")
 	}
-	before := r
-	e := Track(r)
-	if r != before || EntryOf(r) != e {
+	before := c.Request
+	e := Track(c)
+	if c.Request != before || EntryOf(c) != e {
 		t.Fatal("the entry is not the request's")
-	}
-	if r.Context().Value(key{}) != "kept" {
-		t.Fatal("the context's other values are lost")
-	}
-	ctx, cancel := context.WithCancel(r.Context())
-	cancel()
-	if ctx.Err() == nil || EntryOf(r.WithContext(ctx)) != e {
-		t.Fatal("a context derived from the request's")
 	}
 }
 

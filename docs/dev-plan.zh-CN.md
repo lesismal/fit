@@ -124,7 +124,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | R06 | 通过 fib 实现连接和排队上限 | R02、R03 | done |
 | R07a | fit 自身的热路径开销 | I23 | done |
 | R07b | 代理的内存分配 | I23 | done |
-| R07c | 依赖 fib 的热路径开销 | R03、R07a、R07b | todo |
+| R07c | 依赖 fib 的热路径开销 | R03、R07a、R07b | done |
 | **M2** | | | |
 | I24 | 配置版本与 Admin API 骨架 | I22 | done |
 | I25 | Admin API：局部修改、ETag、回滚 | I24 | done |

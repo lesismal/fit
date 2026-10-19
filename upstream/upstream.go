@@ -151,6 +151,9 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	// Past max_pending waiting for a connection to an address, fib's client
 	// refuses a request at once with ErrBusy.
 	cc.MaxPendingPerHost = maxPending
+	// The client bounds the wait for the response's header, from the
+	// request's end, with the request's one timer.
+	cc.ResponseHeaderTimeout = p.timeouts.ResponseHeader
 	cc.MaxIdleConnsPerHost = DefaultMaxIdleConns
 	if c.MaxIdleConns != nil {
 		cc.MaxIdleConnsPerHost = *c.MaxIdleConns
@@ -179,8 +182,8 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 }
 
 // Timeouts are how long a proxy waits for parts of an upstream's response.
-// The pool does not enforce them; the proxy does, since it is the one that
-// knows when a response has begun and a body has gone quiet.
+// The pool's client bounds the wait for the header; the proxy bounds the
+// silences in a body, since it is the one that knows when one has begun.
 type Timeouts struct {
 	ResponseHeader time.Duration
 	ResponseIdle   time.Duration
@@ -259,18 +262,18 @@ func (p *Pool) done() {
 }
 
 // Send sends req to b and calls callback exactly once with the response or
-// the reason there is none. It sets req.URL's scheme and host to b's address
-// and leaves the rest of the request, its Host field included, as it is. See
-// fib's Client.Do for how the body is sent and the callback run: the
-// callback must not block.
-func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
+// the reason there is none, and returns the Call that abandons it. It sets
+// req.URL's scheme and host to b's address and leaves the rest of the
+// request, its Host field included, as it is. See fib's Client.Start for how
+// the body is sent and the callback run: the callback must not block.
+func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) fibhttp.Call {
 	if p.client == nil {
 		callback(nil, ErrNoEngine)
-		return
+		return fibhttp.Call{}
 	}
 	req.URL.Scheme = p.scheme
 	req.URL.Host = b.Address
-	p.client.Do(req, callback)
+	return p.client.Start(req, callback)
 }
 
 // Do is Pick, Send and Done for a caller that is done with the response

@@ -29,7 +29,6 @@
 package observe
 
 import (
-	"context"
 	"fmt"
 	"hash/maphash"
 	"io"
@@ -41,6 +40,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
 )
@@ -260,33 +261,19 @@ type Entry struct {
 	BytesIn          int64
 }
 
-type entryKey struct{}
-
-// tracked is a request's context with its entry, in one allocation.
-type tracked struct {
-	context.Context
-	entry Entry
+// Track gives the request c serves a new entry, for EntryOf to find, and
+// returns it for the caller to fill in. The entry is what fit keeps in the
+// Context's value slot, which nothing else of fit's uses.
+func Track(c *fibhttp.Context) *Entry {
+	e := &Entry{}
+	c.SetValue(e)
+	return e
 }
 
-func (t *tracked) Value(key any) any {
-	if key == (entryKey{}) {
-		return &t.entry
-	}
-	return t.Context.Value(key)
-}
-
-// Track gives r a new entry, for EntryOf to find, and returns it for the
-// caller to fill in. It replaces r's context in place, so that r stays the
-// same request.
-func Track(r *stdhttp.Request) *Entry {
-	t := &tracked{Context: r.Context()}
-	*r = *r.WithContext(t)
-	return &t.entry
-}
-
-// EntryOf returns r's entry, or nil when the request is not logged.
-func EntryOf(r *stdhttp.Request) *Entry {
-	e, _ := r.Context().Value(entryKey{}).(*Entry)
+// EntryOf returns the entry of the request c serves, or nil when the request
+// is not logged.
+func EntryOf(c *fibhttp.Context) *Entry {
+	e, _ := c.Value().(*Entry)
 	return e
 }
 

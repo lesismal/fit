@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R06, R05b, R07a and R07b are done; R07c is next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07c are all done. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -33,7 +33,8 @@ draining and shared pools, I27, the file provider, I32, active health checks, an
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
-static handler and the limits use them, sendfile included since R05b. R07c is next.
+static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
+costs to fib. The M1 review fixes are done.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -1471,6 +1472,47 @@ Differences from the plan:
 Differences from the plan: fib did not add a stall bound inside `SendFile`, so ranges still go a
 piece at a time, 256 KB over plain HTTP/1 and 64 KB elsewhere. No benchmark: the harness's static
 scenario serves a cached file, which does not take this path.
+
+### R07c Hot path costs through fib — done
+
+- The access log's entry is the request's in fib's Context value slot (A7): `observe.Track(c)` and
+  `EntryOf(c)` take the Context, and no request is copied for it.
+- The proxy sends through `Client.Start` and abandons a request with its `Call`: the request has no
+  context of its own (no `WithCancelCause`, no `WithContext` copy, nothing for fib to watch with
+  `context.AfterFunc`). Why it was abandoned, the client gone, the idle timeout or a drain, is
+  recorded in the exchange (`cancel`, `causeErr`), and a small lock orders keeping the `Call`
+  against a cancel that comes first. A drain finds the exchanges under way in 32 locked sets
+  per proxy instead of cancelling a parent context.
+- `response_header_timeout` is fib's `ResponseHeaderTimeout` on each pool's client, which shares
+  the request's one timer, and the proxy's own timer for it is gone; fib's
+  `ErrResponseHeaderTimeout` is 504.
+- A response that arrived whole goes to the client as the bytes fib's client holds
+  (`BodyBytes`, A11), without a copy. A13 needed nothing of fit's.
+- `fibtest.Recorder.Wait` makes no timer or channel for a response already written, which
+  `BenchmarkDispatch` was counting.
+- Tests: `TestStatusOf` covers `ErrResponseHeaderTimeout`, `ErrBusy` and the idle timeout's cause;
+  `TestTrack` the slot; the drain, timeout, streaming and access log tests pass unchanged.
+  `go vet ./...` and `go test -race ./...` pass.
+- Allocations on the development Mac: `BenchmarkProxy` 77 → 65 a request, 11.1 → 10.0 KB, net/http
+  backend included. `BenchmarkDispatch`, with the same fibtest, 9 → 10 allocations and 636 →
+  558 ns single-threaded, 406 → 396 ns at 8: each benchmark request has a fresh Context, on which
+  fib makes the hooks the value slot lives in; a server's Contexts are recycled and keep them.
+- On the benchmark host, R05b's build against this one, two rounds each, thousands of requests a
+  second (HTTP/1.1 and h2c): without an access log, proxy 218.9 and 236.0 → 228.4 and 237.3
+  (+4.3% and +0.5%), p99 over HTTP/1.1 3.71 → 3.21 ms, fixed 778 and 3,774 → 781 and 3,774; with
+  the access log, proxy 214.7 and 235.1 → 226.2 and 236.9 (+5.4% and +0.8%), fixed 787 and 2,683
+  → 788 and 2,691.
+
+Differences from the plan:
+
+- `response_header_timeout` now counts from the end of the request, as its doc says and as fib's
+  client measures it; the proxy's timer counted from the start, connect and upload included.
+- I23's question, the proxy's 83% of nginx over HTTP/1.1: on this host fit's proxy went from
+  212k (I23's build) to 228k requests a second through R07a–R07c, about 88% of nginx's 258k at
+  I23. A new comparison with nginx belongs to M2's exit benchmarks (I35).
+- With the access log on, fixed h2c still serves about 30% less than without (2.69M against
+  3.77M), where A13 removed the header copy: what is left is the line itself, formatted on the
+  worker, and the hooks. It is not a regression, and not M1's.
 
 ## Notes for later iterations
 
