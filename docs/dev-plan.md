@@ -42,6 +42,7 @@ on) in this file, and finish the current one.
 - its **Done when** items hold;
 - `go vet ./...` and `go test -race ./...` pass, and new code has tests;
 - nothing on the request path blocks a fib worker (see principle 1);
+- the change follows every rule in [the development rules](rules.md);
 - its status in the index is set to `done`, in both the English and the Chinese file, in the same
   commit;
 - [progress](progress.md) and its Chinese twin record what was built, how it was checked, where it
