@@ -81,7 +81,7 @@ func TestLeaveAndRejoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(startEngine(t), c)
+	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
 	seen := func(n int) map[string]int {
 		got := map[string]int{}

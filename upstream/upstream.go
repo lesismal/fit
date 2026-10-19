@@ -16,8 +16,11 @@ package upstream
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	stdhttp "net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +53,7 @@ var ErrNoEngine = errors.New("upstream: the pool has no engine to dial through")
 type Pool struct {
 	name      string
 	client    *fibhttp.Client // nil without an engine
+	scheme    string          // http, or https for h2
 	addresses []string
 	backends  []*Backend
 	balancer  Balancer
@@ -69,9 +73,10 @@ type Pool struct {
 // New returns a pool for the upstream c, which config.Config.Validate has
 // passed, dialing through engine, which must be running. A nil engine makes a
 // pool that fails every request with ErrNoEngine, for a config that is only
-// checked. Close the pool before stopping the engine.
-func New(engine *fib.Engine, c *config.Upstream) *Pool {
-	p := &Pool{name: c.Name, addresses: c.Addresses, timeouts: Timeouts{
+// checked. Close the pool before stopping the engine. Its error, about the
+// TLS settings, carries the path and position of the field.
+func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
+	p := &Pool{scheme: "http", name: c.Name, addresses: c.Addresses, timeouts: Timeouts{
 		ResponseHeader: orDefault(c.ResponseHeaderTimeout.Std(), DefaultResponseHeaderTimeout),
 		ResponseIdle:   orDefault(c.ResponseIdleTimeout.Std(), DefaultResponseIdleTimeout),
 	}}
@@ -88,8 +93,23 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 		p.maxFails = *c.MaxFails
 	}
 	p.failTimeout = orDefault(c.FailTimeout.Std(), DefaultFailTimeout)
+	var tlsConfig *tls.Config
+	if c.Protocol == "h2" {
+		p.scheme = "https"
+		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: c.TLSServerName}
+		if c.TLSCAFile != "" {
+			pem, err := os.ReadFile(c.TLSCAFile)
+			if err != nil {
+				return nil, c.At.Field("tls_ca_file").Errorf("%v", err)
+			}
+			tlsConfig.RootCAs = x509.NewCertPool()
+			if !tlsConfig.RootCAs.AppendCertsFromPEM(pem) {
+				return nil, c.At.Field("tls_ca_file").Errorf("%s holds no PEM certificate", c.TLSCAFile)
+			}
+		}
+	}
 	if engine == nil {
-		return p
+		return p, nil
 	}
 	cc := fibhttp.DefaultClientConfig()
 	// A request is bounded by the caller's context; the proxy's timeouts
@@ -112,8 +132,15 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 	if cc.DialTimeout == 0 {
 		cc.DialTimeout = DefaultConnectTimeout
 	}
+	// h2c speaks HTTP/2 to http:// addresses with prior knowledge; h2 offers
+	// h2 and http/1.1 through ALPN, which the client does when its TLS
+	// config names no protocols. HTTP/2 multiplexes requests over each
+	// connection, up to the streams the server allows at once, and max_conns
+	// bounds the connections.
+	cc.UnencryptedHTTP2 = c.Protocol == "h2c"
+	cc.TLSConfig = tlsConfig
 	p.client = fibhttp.NewClient(engine, cc)
-	return p
+	return p, nil
 }
 
 // Timeouts are how long a proxy waits for parts of an upstream's response.
@@ -183,7 +210,7 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 		callback(nil, ErrNoEngine)
 		return
 	}
-	req.URL.Scheme = "http"
+	req.URL.Scheme = p.scheme
 	req.URL.Host = b.Address
 	p.client.Do(req, callback)
 }

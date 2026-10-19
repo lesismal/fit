@@ -218,6 +218,16 @@ func TestValidate(t *testing.T) {
 				`3:73: upstreams[1].load_balancing: round_robin takes no weights; use weighted_round_robin or least_conn`,
 			},
 		},
+		{
+			name: "upstream tls without h2",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "upstreams": [
+  {"name": "u", "addresses": ["a:1"], "tls_server_name": "x", "tls_ca_file": "ca.pem"}
+]}`,
+			want: []string{
+				`2:58: upstreams[0].tls_server_name: tls_server_name needs protocol h2`,
+				`2:78: upstreams[0].tls_ca_file: tls_ca_file needs protocol h2`,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

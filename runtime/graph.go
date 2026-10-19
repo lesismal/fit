@@ -83,13 +83,23 @@ type Route struct {
 func Compile(c *config.Config, env Env) (*Graph, error) {
 	g := &Graph{AccessLog: env.AccessLog, upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
 	g.refs.Store(1)
+	var errs config.Errors
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
-		g.upstreams[u.Name] = upstream.New(env.Engine, u)
+		p, err := upstream.New(env.Engine, u)
+		if err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+			continue
+		}
+		g.upstreams[u.Name] = p
+	}
+	if len(errs) > 0 {
+		// The routes that name a broken upstream would only add to these.
+		cleanupModules(g)
+		return nil, errs
 	}
 	menv := &module.Env{Upstreams: g.upstreams}
 
-	var errs config.Errors
 	routes := make([]*Route, len(c.Routes))
 	for i, rc := range c.Routes {
 		r, err := g.compileRoute(rc, menv)

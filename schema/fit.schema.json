@@ -161,6 +161,15 @@
           "description": "A name unique among the upstreams, by which handlers refer to this one.",
           "type": "string"
         },
+        "protocol": {
+          "description": "How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out.",
+          "enum": [
+            "http/1.1",
+            "h2c",
+            "h2"
+          ],
+          "type": "string"
+        },
         "response_header_timeout": {
           "description": "How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
@@ -169,6 +178,14 @@
         "response_idle_timeout": {
           "description": "How long the upstream may go silent in the middle of a response body; 60s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls_ca_file": {
+          "description": "With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots.",
+          "type": "string"
+        },
+        "tls_server_name": {
+          "description": "With h2: the name the servers' certificates are checked against, and sent in SNI; each address's host when left out.",
           "type": "string"
         },
         "weights": {

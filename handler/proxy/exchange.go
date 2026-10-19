@@ -6,8 +6,12 @@ import (
 	"errors"
 	"io"
 	stdhttp "net/http"
+	"net/textproto"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -70,43 +74,31 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	}
 
 	r := c.Request
-	if c.RequestBody() == nil && len(r.Trailer) == 0 {
+	announced := trailerNames(r)
+	switch {
+	case c.RequestBody() == nil && len(announced) == 0:
 		p.pool.Send(x.backend, out, x.onResponse)
 		return
+	case c.RequestBody() == nil:
+		// Whole, with trailers, whose values are all here: they are set
+		// before the request goes, and only a body sent chunked carries them.
+		out.Trailer = make(stdhttp.Header, len(announced))
+		for _, name := range announced {
+			out.Trailer[name] = r.Trailer[name]
+		}
+		body := fibhttp.NewBodyWriter(0)
+		_, _ = body.Write(c.Body())
+		_ = body.Close()
+		out.Body, out.ContentLength = body, -1
+		p.pool.Send(x.backend, out, x.onResponse)
+		return
+	case len(announced) > 0:
+		p.forwardWithTrailers(c, x, out, announced)
+		return
 	}
-	// A body still arriving, or one that came with trailers, which only a
-	// body sent chunked carries: it goes through a BodyWriter.
+	// A body still arriving goes up as it arrives, through a BodyWriter.
 	body := fibhttp.NewBodyWriter(0)
 	out.Body, out.ContentLength = body, r.ContentLength
-	if len(r.Trailer) > 0 {
-		// The names now, for the header; the values once the body is done.
-		out.Trailer = make(stdhttp.Header, len(r.Trailer))
-		for name := range r.Trailer {
-			out.Trailer[name] = nil
-		}
-		out.ContentLength = -1
-	}
-	endBody := func() {
-		// A trailer goes only with a chunked body, which is what a body of
-		// unknown length is sent as; on HTTP/2 its names may first be known
-		// here, once it has arrived.
-		if len(r.Trailer) > 0 && out.ContentLength < 0 {
-			if out.Trailer == nil {
-				out.Trailer = make(stdhttp.Header, len(r.Trailer))
-			}
-			for name, values := range r.Trailer {
-				out.Trailer[name] = values
-			}
-		}
-		_ = body.Close()
-	}
-	if c.RequestBody() == nil {
-		// Whole, but with trailers.
-		_, _ = body.Write(c.Body())
-		p.pool.Send(x.backend, out, x.onResponse)
-		endBody()
-		return
-	}
 	p.pool.Send(x.backend, out, x.onResponse)
 	c.OnBody(func(data []byte, fin bool, err error) {
 		switch {
@@ -120,7 +112,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 			}
 		}
 		if fin {
-			endBody()
+			_ = body.Close()
 			return
 		}
 		// Held first, so that a drain that comes before OnDrain returns is
@@ -130,6 +122,138 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 			c.HoldBody(false)
 		}
 	})
+}
+
+// forwardWithTrailers forwards a body still arriving that announced
+// trailers, whose values are known only once it has ended. fib's client reads
+// a request's Trailer when it sends the header, which may be after the body
+// has ended, so the values cannot be written into it from OnBody without
+// racing that read. Instead the body is a trailerPipe, which fib's client
+// reads on a goroutine of its own that it starts once the header has gone,
+// and the pipe fills the values in on that goroutine just before it reports
+// the end. That costs the upload a goroutine, which only uploads with
+// trailers, rare as they are, pay.
+func (p *Proxy) forwardWithTrailers(c *fibhttp.Context, x *exchange, out *stdhttp.Request, announced []string) {
+	out.Trailer = make(stdhttp.Header, len(announced))
+	for _, name := range announced {
+		out.Trailer[name] = nil
+	}
+	pipe := &trailerPipe{c: c, out: out, in: c.Request}
+	pipe.cond = sync.NewCond(&pipe.mu)
+	out.Body, out.ContentLength = pipe, -1
+	p.pool.Send(x.backend, out, x.onResponse)
+	c.OnBody(pipe.push)
+}
+
+// trailerPipeLimit is how much of a body a trailerPipe holds before it holds
+// the client's body back.
+const trailerPipeLimit = 256 << 10
+
+// trailerPipe carries a body with trailers from OnBody to the upstream
+// client's reading goroutine; see forwardWithTrailers.
+type trailerPipe struct {
+	c   *fibhttp.Context
+	out *stdhttp.Request // the upstream request, whose Trailer Read fills in
+	in  *stdhttp.Request // the client's, whose Trailer has the values at the end
+
+	mu     sync.Mutex
+	cond   *sync.Cond
+	buf    []byte
+	held   bool
+	ended  bool
+	err    error
+	closed bool
+}
+
+// push takes a piece of the body, as OnBody delivers it, and holds the
+// client's body while the pipe is full.
+func (p *trailerPipe) push(data []byte, fin bool, err error) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.buf = append(p.buf, data...)
+	p.ended = p.ended || fin
+	if err != nil {
+		p.err = &uploadError{err}
+	}
+	hold := !p.held && len(p.buf) >= trailerPipeLimit && !fin
+	p.held = p.held || hold
+	p.cond.Signal()
+	p.mu.Unlock()
+	if hold {
+		p.c.HoldBody(true)
+	}
+}
+
+// Read waits for the body, as a body fib's client reads on its own goroutine
+// may.
+func (p *trailerPipe) Read(b []byte) (int, error) {
+	p.mu.Lock()
+	for len(p.buf) == 0 && !p.ended && p.err == nil && !p.closed {
+		p.cond.Wait()
+	}
+	switch {
+	case p.closed:
+		p.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	case len(p.buf) > 0:
+		n := copy(b, p.buf)
+		p.buf = p.buf[:copy(p.buf, p.buf[n:])]
+		release := p.held && len(p.buf) < trailerPipeLimit/2
+		p.held = p.held && !release
+		p.mu.Unlock()
+		if release {
+			p.c.HoldBody(false)
+		}
+		return n, nil
+	case p.err != nil:
+		err := p.err
+		p.mu.Unlock()
+		return 0, err
+	}
+	p.mu.Unlock()
+	// The end: the client's trailer is complete, and the upstream client
+	// reads the request's once this Read has returned.
+	for name, values := range p.in.Trailer {
+		p.out.Trailer[name] = values
+	}
+	return 0, io.EOF
+}
+
+// Close ends the pipe, as fib's client does once the request is over.
+func (p *trailerPipe) Close() error {
+	p.mu.Lock()
+	p.closed = true
+	release := p.held
+	p.held = false
+	p.cond.Broadcast()
+	p.mu.Unlock()
+	if release {
+		p.c.HoldBody(false)
+	}
+	return nil
+}
+
+// trailerNames returns the trailer fields r announced: the names in its
+// Trailer map, which HTTP/1 fills from the Trailer header, and those in the
+// Trailer header itself, which is all HTTP/2 has of them before the body
+// ends.
+func trailerNames(r *stdhttp.Request) []string {
+	var names []string
+	for name := range r.Trailer {
+		names = append(names, name)
+	}
+	for _, value := range r.Header["Trailer"] {
+		for name := range strings.SplitSeq(value, ",") {
+			name = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name))
+			if name != "" && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 // exchange is one proxied request, seen from the upstream's callbacks, which

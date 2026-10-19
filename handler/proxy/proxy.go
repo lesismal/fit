@@ -100,8 +100,8 @@ func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
 	delete(header, "Content-Length")
 	delete(header, "Expect")
 	if _, ok := header["User-Agent"]; !ok {
-		// Request.Write would add Go's own.
-		header["User-Agent"] = []string{""}
+		// Present and empty: no client adds its own, and none is sent.
+		header["User-Agent"] = []string{}
 	}
 	p.setForwarded(c, header)
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	stdhttp "net/http"
-	"net/http/httptest"
 	"runtime"
 	"runtime/metrics"
 	"strconv"
@@ -109,101 +108,107 @@ func (w *heapWatch) rise() int64 {
 }
 
 func TestStreamDownload(t *testing.T) {
-	size := int64(streamSize)
-	backend := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if r.URL.Query().Get("length") == "1" {
-			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	eachProto(t, func(t *testing.T, proto string) {
+		size := int64(streamSize)
+		backend := serveBackend(t, proto, stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			if r.URL.Query().Get("length") == "1" {
+				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			}
+			// Without a length, net/http sends it chunked.
+			_, _ = io.Copy(w, &patternReader{n: size})
+		}))
+		base := startFit(t, config1(`{"upstream": "app"}`), backend)
+		for _, tt := range []struct {
+			h2c    bool
+			length bool
+		}{{false, true}, {false, false}, {true, true}, {true, false}} {
+			name := fmt.Sprintf("h2c=%v length=%v", tt.h2c, tt.length)
+			target := base + "/big"
+			if tt.length {
+				target += "?length=1"
+			}
+			watch := watchHeap()
+			start := time.Now()
+			resp, err := slowClient(tt.h2c).Do(mustGet(t, target))
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			// A client slower than the upstream: it pauses after every 4MB.
+			n, err := checkPattern(resp.Body, 4<<20, 20*time.Millisecond)
+			resp.Body.Close()
+			rise := watch.rise()
+			if err != nil || n != size {
+				t.Fatalf("%s: read %d of %d bytes: %v", name, n, size, err)
+			}
+			if tt.length && resp.ContentLength != size {
+				t.Errorf("%s: Content-Length %d", name, resp.ContentLength)
+			}
+			if !tt.length && !tt.h2c && (len(resp.TransferEncoding) == 0 || resp.TransferEncoding[0] != "chunked") {
+				t.Errorf("%s: Transfer-Encoding %v", name, resp.TransferEncoding)
+			}
+			t.Logf("%s: %d MB in %v, heap rose %.1f MB", name, size>>20, time.Since(start).Round(time.Millisecond), float64(rise)/(1<<20))
+			if rise > maxHeapRise {
+				t.Errorf("%s: the heap rose %d MB moving %d MB", name, rise>>20, size>>20)
+			}
 		}
-		// Without a length, net/http sends it chunked.
-		_, _ = io.Copy(w, &patternReader{n: size})
-	}))
-	t.Cleanup(backend.Close)
-	base := startFit(t, config1(`{"upstream": "app"}`), backend.Listener.Addr().String())
-	for _, tt := range []struct {
-		h2c    bool
-		length bool
-	}{{false, true}, {false, false}, {true, true}, {true, false}} {
-		name := fmt.Sprintf("h2c=%v length=%v", tt.h2c, tt.length)
-		target := base + "/big"
-		if tt.length {
-			target += "?length=1"
-		}
-		watch := watchHeap()
-		start := time.Now()
-		resp, err := slowClient(tt.h2c).Do(mustGet(t, target))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		// A client slower than the upstream: it pauses after every 4MB.
-		n, err := checkPattern(resp.Body, 4<<20, 20*time.Millisecond)
-		resp.Body.Close()
-		rise := watch.rise()
-		if err != nil || n != size {
-			t.Fatalf("%s: read %d of %d bytes: %v", name, n, size, err)
-		}
-		if tt.length && resp.ContentLength != size {
-			t.Errorf("%s: Content-Length %d", name, resp.ContentLength)
-		}
-		if !tt.length && !tt.h2c && (len(resp.TransferEncoding) == 0 || resp.TransferEncoding[0] != "chunked") {
-			t.Errorf("%s: Transfer-Encoding %v", name, resp.TransferEncoding)
-		}
-		t.Logf("%s: %d MB in %v, heap rose %.1f MB", name, size>>20, time.Since(start).Round(time.Millisecond), float64(rise)/(1<<20))
-		if rise > maxHeapRise {
-			t.Errorf("%s: the heap rose %d MB moving %d MB", name, rise>>20, size>>20)
-		}
-	}
+	})
 }
 
 func TestStreamUpload(t *testing.T) {
-	size := int64(streamSize)
-	backend := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		// An upstream slower than the client: it pauses after every 4MB.
-		n, err := checkPattern(r.Body, 4<<20, 20*time.Millisecond)
-		if err != nil {
-			stdhttp.Error(w, err.Error(), stdhttp.StatusBadRequest)
-			return
+	eachProto(t, func(t *testing.T, proto string) {
+		size := int64(streamSize)
+		backend := serveBackend(t, proto, stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			// An upstream slower than the client: it pauses after every 4MB.
+			n, err := checkPattern(r.Body, 4<<20, 20*time.Millisecond)
+			if err != nil {
+				stdhttp.Error(w, err.Error(), stdhttp.StatusBadRequest)
+				return
+			}
+			_, _ = fmt.Fprintf(w, "%d %d %v", n, r.ContentLength, r.TransferEncoding)
+		}))
+		base := startFit(t, config1(`{"upstream": "app"}`), backend)
+		for _, tt := range []struct {
+			h2c    bool
+			length bool
+		}{{false, true}, {false, false}, {true, true}, {true, false}} {
+			name := fmt.Sprintf("h2c=%v length=%v", tt.h2c, tt.length)
+			var body io.Reader = &patternReader{n: size}
+			if !tt.length {
+				// Hiding the reader's type keeps net/http from finding a length.
+				body = io.MultiReader(body)
+			}
+			req, _ := stdhttp.NewRequest("PUT", base+"/upload", body)
+			if tt.length {
+				req.ContentLength = size
+			} else {
+				req.ContentLength = -1
+			}
+			watch := watchHeap()
+			start := time.Now()
+			resp, err := slowClient(tt.h2c).Do(req)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			rise := watch.rise()
+			want := fmt.Sprintf("%d %d [chunked]", size, -1)
+			if proto != "http/1.1" {
+				// HTTP/2 has no chunked framing.
+				want = fmt.Sprintf("%d %d []", size, -1)
+			}
+			if tt.length {
+				want = fmt.Sprintf("%d %d []", size, size)
+			}
+			if resp.StatusCode != 200 || string(got) != want {
+				t.Fatalf("%s: %d %q, want %q", name, resp.StatusCode, got, want)
+			}
+			t.Logf("%s: %d MB in %v, heap rose %.1f MB", name, size>>20, time.Since(start).Round(time.Millisecond), float64(rise)/(1<<20))
+			if rise > maxHeapRise {
+				t.Errorf("%s: the heap rose %d MB moving %d MB", name, rise>>20, size>>20)
+			}
 		}
-		_, _ = fmt.Fprintf(w, "%d %d %v", n, r.ContentLength, r.TransferEncoding)
-	}))
-	t.Cleanup(backend.Close)
-	base := startFit(t, config1(`{"upstream": "app"}`), backend.Listener.Addr().String())
-	for _, tt := range []struct {
-		h2c    bool
-		length bool
-	}{{false, true}, {false, false}, {true, true}, {true, false}} {
-		name := fmt.Sprintf("h2c=%v length=%v", tt.h2c, tt.length)
-		var body io.Reader = &patternReader{n: size}
-		if !tt.length {
-			// Hiding the reader's type keeps net/http from finding a length.
-			body = io.MultiReader(body)
-		}
-		req, _ := stdhttp.NewRequest("PUT", base+"/upload", body)
-		if tt.length {
-			req.ContentLength = size
-		} else {
-			req.ContentLength = -1
-		}
-		watch := watchHeap()
-		start := time.Now()
-		resp, err := slowClient(tt.h2c).Do(req)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		got, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		rise := watch.rise()
-		want := fmt.Sprintf("%d %d [chunked]", size, -1)
-		if tt.length {
-			want = fmt.Sprintf("%d %d []", size, size)
-		}
-		if resp.StatusCode != 200 || string(got) != want {
-			t.Fatalf("%s: %d %q, want %q", name, resp.StatusCode, got, want)
-		}
-		t.Logf("%s: %d MB in %v, heap rose %.1f MB", name, size>>20, time.Since(start).Round(time.Millisecond), float64(rise)/(1<<20))
-		if rise > maxHeapRise {
-			t.Errorf("%s: the heap rose %d MB moving %d MB", name, rise>>20, size>>20)
-		}
-	}
+	})
 }
 
 func mustGet(t *testing.T, target string) *stdhttp.Request {

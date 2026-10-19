@@ -5,6 +5,8 @@ import (
 	"net"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,7 +60,7 @@ func newPool(t *testing.T, doc string, backends ...*backend) *Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(startEngine(t), c)
+	p := mustNew(t, startEngine(t), c)
 	t.Cleanup(p.Close)
 	return p
 }
@@ -281,7 +283,7 @@ func TestConnectFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(startEngine(t), c)
+	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
 	select {
 	case got := <-goDo(t, p, "/"):
@@ -300,7 +302,7 @@ func TestConnectTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(startEngine(t), c)
+	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
 	start := time.Now()
 	select {
@@ -321,7 +323,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(startEngine(t), c)
+	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
 	if got := p.Addresses(); len(got) != 1 || got[0] != "127.0.0.1:1" {
 		t.Fatalf("addresses %v", got)
@@ -369,7 +371,7 @@ func TestNoEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(nil, c)
+	p := mustNew(t, nil, c)
 	defer p.Close()
 	if got := do(t, p, "/"); got.err != ErrNoEngine {
 		t.Fatalf("got %+v", got)
@@ -423,5 +425,36 @@ func TestPolicies(t *testing.T) {
 	close(release)
 	for _, ch := range held {
 		<-ch
+	}
+}
+
+func mustNew(t *testing.T, engine *fib.Engine, c *config.Upstream) *Pool {
+	t.Helper()
+	p, err := New(engine, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestTLSCAFileErrors(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty.pem")
+	if err := os.WriteFile(empty, []byte("not a certificate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		file, want string
+	}{
+		{filepath.Join(t.TempDir(), "missing.pem"), "no such file or directory"},
+		{empty, "holds no PEM certificate"},
+	} {
+		c, err := decode(t, `{"addresses": ["127.0.0.1:1"], "protocol": "h2", "tls_ca_file": "`+tt.file+`"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = New(nil, c)
+		if err == nil || !strings.Contains(err.Error(), "upstreams[0].tls_ca_file: ") || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: %v", tt.file, err)
+		}
 	}
 }

@@ -116,7 +116,7 @@ Status: `todo`, `doing` or `done`.
 | I15 | Reverse proxy I: forwarding and headers | I11, I14 | done |
 | I16 | Reverse proxy II: streaming and backpressure | I15 | done |
 | I17 | Reverse proxy III: timeouts, cancellation, errors | I16 | done |
-| I18 | HTTP/2 upstreams | I17 | todo |
+| I18 | HTTP/2 upstreams | I17 | done |
 | I19 | Load balancing v1 | I14 | done |
 | I20 | Passive health checks | I19 | done |
 | I21 | Access logs | I06 | done |

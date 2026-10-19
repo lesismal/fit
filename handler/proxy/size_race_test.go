@@ -6,5 +6,5 @@ package proxy
 // move less.
 const (
 	streamSize  = 64 << 20
-	maxHeapRise = 16 << 20
+	maxHeapRise = 32 << 20
 )

@@ -109,6 +109,14 @@ func (c *Config) Validate() Errors {
 		if len(u.Weights) > 0 && u.LoadBalancing == "round_robin" {
 			add(u.At.Field("load_balancing"), "round_robin takes no weights; use weighted_round_robin or least_conn")
 		}
+		if u.Protocol != "h2" {
+			if u.TLSServerName != "" {
+				add(u.At.Field("tls_server_name"), "tls_server_name needs protocol h2")
+			}
+			if u.TLSCAFile != "" {
+				add(u.At.Field("tls_ca_file"), "tls_ca_file needs protocol h2")
+			}
+		}
 		seen := map[string]bool{}
 		for i, addr := range u.Addresses {
 			at := u.At.Field("addresses").Index(i)

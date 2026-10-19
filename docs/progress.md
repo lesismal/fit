@@ -11,22 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I17, I19–I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS; no HTTP/2 upstreams (I18); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS on listeners (I09); no HTTP/3 (I10); no precompressed files or fallbacks (I13); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I18, HTTP/2 upstreams**, being done next in this session. I09, I13, I24 and I32
-are also ready to start, unless another session has taken them.
+**Next iteration: I09, TLS entry from certificate files**, then I13 (static files II) and I10
+(HTTP/3); with those, I23 closes M1. I24 and I32 are also ready to start, unless another session has
+taken them.
 
 To continue, start a session with:
 
-> Implement iteration I18 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I09 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -44,7 +45,7 @@ To continue, start a session with:
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
-| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
+| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
@@ -663,6 +664,43 @@ Differences from the plan:
 - No retry: the request that finds an address failing still fails. Retrying it on another address
   is I43's.
 - Transitions are not logged yet; metrics (I34) will report them.
+
+### I18 HTTP/2 upstreams — done
+
+- `config.Upstream` gains `protocol`: `http/1.1` (the default), `h2c` (HTTP/2 in the clear with
+  prior knowledge) or `h2` (TLS, offering h2 and http/1.1 through ALPN, so a server that does not
+  choose h2 is still reached), with `tls_server_name` and `tls_ca_file` for `h2`. `Validate` refuses
+  the TLS fields without `h2`; `upstream.New` now returns an error, for a CA file that cannot be read
+  or holds no certificate, which `Compile` reports with its position (and stops there, rather than
+  also reporting every route that names the upstream).
+- The pool sets fib's `UnencryptedHTTP2` for h2c, and a `tls.Config` (TLS 1.2 at least, the CA file
+  in place of the system roots when given) for h2, whose requests go to `https://`. fib's client
+  multiplexes requests over each HTTP/2 connection up to the server's `SETTINGS_MAX_CONCURRENT_STREAMS`
+  and opens another past it, within `max_conns`.
+- Proxy fixes the h2 tests found: an absent `User-Agent` is now sent as a present, empty field, which
+  both fib's HTTP/1 and HTTP/2 clients take as "send none" (`[""]` made the HTTP/2 client send an
+  empty one). A request's announced trailers are read from its `Trailer` header too, since an
+  HTTP/2 client's arrive only with the end of the body, and Go's servers keep only announced
+  trailers. And a race the HTTP/2 tests showed: fib's client reads a request's `Trailer` when it
+  sends the header, which may be after the body has ended, so a whole body's trailers are now set
+  before the request goes, and a streamed upload with trailers goes through a `trailerPipe` that
+  fib's client reads on its own goroutine, filling the values in just before the end.
+- Tests: the proxy tests of I15–I17 run as subtests against an HTTP/1.1, an h2c and an h2 (TLS)
+  backend each — forwarding (which checks the upstream saw HTTP/2), hop-by-hop request fields,
+  forwarded fields, `host_header`, 64 concurrent requests, HEAD, passive health, 256MB streamed each
+  way with the heap bounded, the header and idle timeouts, an upstream that breaks mid-body (now an
+  `http.ErrAbortHandler` panic, which closes an HTTP/1 connection and resets an HTTP/2 stream), client
+  aborts, and trailers both ways. `config` and `upstream` test the TLS settings' errors. The stream
+  tests' heap bound went from 16MB to 32MB: the heap is the test's HTTP/2 client's and backends' too.
+  Two runs of the proxy package under `-race` pass; `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- There is no per-connection stream limit of fit's own: fib's client honours the server's, and
+  `max_conns` bounds the connections. fib v1.3.0 has no setting to lower it.
+- The rest of upstream TLS (client certificates, skipping verification, cipher choices) is I54's.
+- A streamed upload with trailers costs a goroutine, the one exception to forwarding without one; a
+  `BodyWriter` that takes the trailer with its close would remove it, and is worth asking fib for.
 
 ## Notes for later iterations
 

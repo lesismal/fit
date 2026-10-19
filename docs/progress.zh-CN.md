@@ -10,20 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14–I17、I19–I22 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14–I22 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS；还没有 HTTP/2 上游（I18）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | listener 还没有 TLS（I09）；还没有 HTTP/3（I10）；还没有预压缩文件和回退（I13）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I18，HTTP/2 上游**，本会话接下来做。I09、I13、I24、I32 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I09，基于证书文件的 TLS 入口**，然后是 I13（静态文件 II）和 I10（HTTP/3）；完成这些后由 I23 结束
+M1。I24、I32 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I18。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I09。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -40,7 +41,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
-| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
+| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
@@ -526,6 +527,35 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 - 没有重试：遇到失败地址的那个请求仍然失败。在其他地址上重试是 I43 的内容。
 - 状态变化还没有记录日志；指标（I34）会报告它们。
+
+### I18 HTTP/2 上游 — 已完成
+
+- `config.Upstream` 新增 `protocol`：`http/1.1`（默认）、`h2c`（明文 HTTP/2，prior knowledge）或 `h2`（TLS，通过
+  ALPN 提供 h2 和 http/1.1，不选 h2 的服务器也能访问），`h2` 配合 `tls_server_name` 和 `tls_ca_file`。`Validate`
+  拒绝没有 `h2` 时的 TLS 字段；`upstream.New` 现在会返回错误（CA 文件无法读取或不含证书），`Compile` 带位置报告该
+  错误（并就此停止，而不是再报告每个引用该上游的路由）。
+- 连接池对 h2c 设置 fib 的 `UnencryptedHTTP2`，对 h2 设置 `tls.Config`（至少 TLS 1.2，给了 CA 文件时用它代替系统
+  根证书），请求发往 `https://`。fib 的客户端在每个 HTTP/2 连接上复用请求，直到服务器的
+  `SETTINGS_MAX_CONCURRENT_STREAMS`，超过后再开新连接，受 `max_conns` 限制。
+- h2 测试发现并修复的代理问题：缺少 `User-Agent` 时现在发送一个存在但为空的字段，fib 的 HTTP/1 和 HTTP/2 客户端
+  都将其理解为“不发送”（`[""]` 会让 HTTP/2 客户端发送一个空值）。请求声明的 trailer 也从它的 `Trailer` 头读取，
+  因为 HTTP/2 客户端的 trailer 随 body 结束才到达，而 Go 的服务器只保留声明过的 trailer。还有 HTTP/2 测试暴露的
+  一个竞争：fib 的客户端在发送请求头时读取请求的 `Trailer`，这可能晚于 body 结束，所以整体 body 的 trailer 现在在
+  请求发出前就设置好；带 trailer 的流式上传则通过 `trailerPipe`，由 fib 客户端在它自己的 goroutine 上读取，在结束
+  前一刻填入 trailer 的值。
+- 测试：I15–I17 的代理测试以子测试的形式分别针对 HTTP/1.1、h2c 和 h2（TLS）后端运行——转发（检查上游看到的是
+  HTTP/2）、请求逐跳头、转发头、`host_header`、64 个并发请求、HEAD、被动健康检查、双向各 256MB 流式传输且堆有
+  上限、响应头和空闲超时、上游在 body 中途断开（现在用 `http.ErrAbortHandler` panic，它会关闭 HTTP/1 连接、重置
+  HTTP/2 流）、客户端中止、双向 trailer。`config` 和 `upstream` 测试 TLS 设置的错误。流式测试的堆上限从 16MB 提高到
+  32MB：堆中也包含测试自己的 HTTP/2 客户端和后端。代理包在 `-race` 下运行两次均通过；`go vet ./...` 和
+  `go test -race ./...` 通过。
+
+与计划的不同：
+
+- fit 没有自己的每连接流数限制：fib 的客户端遵守服务器的限制，`max_conns` 限制连接数。fib v1.3.0 没有降低它的设置。
+- 上游 TLS 的其余部分（客户端证书、跳过校验、密码套件选择）属于 I54。
+- 带 trailer 的流式上传需要一个 goroutine，这是“转发不占 goroutine”的唯一例外；如果 fib 的 `BodyWriter` 能在关闭时
+  接收 trailer 就能去掉它，值得向 fib 提出。
 
 ## 给后续迭代的说明
 

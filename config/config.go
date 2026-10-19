@@ -83,6 +83,10 @@ type Upstream struct {
 	IdleTimeout    Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
 	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
 
+	Protocol      string `json:"protocol,omitempty" enum:"http/1.1,h2c,h2" doc:"How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out."`
+	TLSServerName string `json:"tls_server_name,omitempty" doc:"With h2: the name the servers' certificates are checked against, and sent in SNI; each address's host when left out."`
+	TLSCAFile     string `json:"tls_ca_file,omitempty" doc:"With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots."`
+
 	MaxFails    *int     `json:"max_fails,omitempty" min:"0" doc:"How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation."`
 	FailTimeout Duration `json:"fail_timeout,omitempty" doc:"The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out."`
 
