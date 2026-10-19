@@ -147,7 +147,7 @@ Status: `todo`, `doing` or `done`.
 | I31 | On-demand TLS | I30 | todo |
 | I32 | Active health checks | I20 | done |
 | I33 | Load balancing v2 | I19 | done |
-| I34 | Prometheus metrics | I23 | todo |
+| I34 | Prometheus metrics | I23 | done |
 | I35 | M2 exit tests | I25, I26, I27, I31, I32, I33, I34 | todo |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |

@@ -11,9 +11,9 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I28, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I28, I32–I34) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME: certificates come from files only (I29–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -27,10 +27,10 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I34 (Prometheus metrics), then I29 (ACME HTTP-01 and renewal).**
+**Next: I29 (ACME HTTP-01 and renewal), then I30 and I31.**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I32, active health checks, and I33, load
-balancing v2.
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I32, active health checks, I33, load
+balancing v2, and I34, Prometheus metrics.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I34 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I29 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -56,7 +56,7 @@ To continue, start a session with:
 | Package | Contents |
 | --- | --- |
 | `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file), `validate`, `schema`, `version`, `help` |
-| `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}` |
+| `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}`, `GET /metrics`, which `WriteMetrics` writes |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
@@ -67,7 +67,7 @@ To continue, start a session with:
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
-| `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry |
+| `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
@@ -1605,6 +1605,78 @@ Differences from the plan:
 - Formatting lines off the worker would move the cost, not remove it: the server's cores are
   already all busy in this benchmark.
 
+### I34 Prometheus metrics — done
+
+- The Admin API serves `GET /metrics` in Prometheus's text format (0.0.4), written by fit
+  (`observe.TextWriter`), no client library. Requests are counted only when the config has
+  `metrics` (`"metrics": {}`, which needs `admin`, and which a reload may turn on or off): `fit run`
+  makes an `observe.Metrics` when the config has `admin`, and a graph takes counters from it when
+  its config has `metrics`. The rest of `/metrics` is always served.
+- Requests, per listener and route: `fit_http_requests_total{listener,route,code}`, by the class
+  of the status (`2xx` and so on), and `fit_http_request_duration_seconds{listener,route}`, a
+  histogram from when the handler is called to when the response is handed to the connection, with
+  buckets from 5ms to 10s. A route without a name is counted as `#` and its place in the config
+  (`#1`), and requests no route takes under `route=""`. Each listener's routes get their counters
+  when the graph is compiled (`runtime.Listener.Requests`, by `Route.Index`), so a request finds
+  them by index, and counts them in the dispatcher's `OnFinish`, the one the access log already
+  registers when it is on. Counters are shared between graphs and kept while a graph has them: a
+  route that a reload keeps goes on counting, and one no graph has is no longer scraped.
+- Counting is atomic adds alone, spread over eight shards of 128 or 192 bytes. A shard is picked
+  by the address of the request's Context, which fib keeps in pools that favour the core that gave
+  it back: picked at random, every core touches every shard, and on 4 cores a request costs 37ns
+  rather than 6ns. With 14 cores on one route, 15ns.
+- Upstreams: `fit_upstream_requests_in_flight{upstream}`;
+  `fit_upstream_response_duration_seconds{upstream}`, a histogram of the time to a response's
+  header, or to a failure, recorded by the proxy; per backend,
+  `fit_upstream_backend_requests_total{upstream,backend,result}` (success or failure, as
+  `Pool.Done` is told), `fit_upstream_backend_requests_in_flight` and `fit_upstream_backend_up`.
+  A pool a reload replaces starts its counts afresh.
+- The listeners' engine: `fit_connections_open`, `fit_connections_refused_total`,
+  `fit_pending_bytes`, `fit_reads_paused_total{reason}`, from `listener.Server.Stats`. Config:
+  `fit_config_reloads_total{result}`, the configs applied after the first and those that failed
+  (`Configs.Reloads`), `fit_config_version`, `fit_config_last_applied_timestamp_seconds`.
+  Certificates: `fit_tls_certificate_not_after_seconds{listener,name,serial}`, from the
+  certificates of each listener's `tlsmgr.Static`. `fit_access_log_dropped_total`, and
+  `go_goroutines` and two of the Go runtime's memory figures, from `runtime/metrics`.
+- Tests: `observe` checks the histogram's bounds (inclusive), sums and counts, the status classes,
+  counts from eight goroutines at once, the registry's lifetime, the text format with escaping,
+  and the shards' sizes. `runtime`: two graphs share a listener's counters, a graph that fails to
+  compile after a listener took its counters gives them back, and none are left once every graph
+  is released. `admin`: a scrape after requests through two listeners (one with TLS) and an
+  upstream with a backend that answers and one that refuses, a reload and a failed one: every
+  count, the duration histograms, the backends' results, the certificate's expiry, the reloads and
+  the version are as expected, and the output is checked line by line (each family's HELP and TYPE
+  once, before its samples; no sample twice); a route renamed by a reload is no longer scraped;
+  without metrics, no request metrics are written. `test/e2e`: `fit run` with the Admin API
+  counts requests across a reload, and `/metrics` shows them. `go vet ./...`,
+  `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- Cost per request: `listener.BenchmarkDispatch`, on 14 cores without a network: 333ns a request
+  with neither the access log nor metrics, 350ns with the log, 438ns with metrics alone, 360ns with
+  both. Metrics alone pay for the first `OnFinish` hook, which takes a writer from fib's pool and
+  more (the test harness gives each request a new Context); with the log on, they add about 10ns
+  and no allocation. A17 in [fib-api-requests](fib-api-requests.md) asks fib for a cheaper
+  `OnFinish`.
+- Benchmarks on the benchmark host, fitbench, fit alone, two rounds alternating, before (R07d) and
+  after, both with the Admin API on. Without `metrics`, every scenario is within 1.5%: fixed
+  777k → 779k requests a second over HTTP/1.1 and 3.79M → 3.84M over h2c, static 772k → 775k and
+  2.46M → 2.45M, proxy 229k → 227k and 237k → 238k. With `metrics`, fixed h2c 3.29M (−13%) and
+  static h2c 2.25M (−9%), proxy over HTTP/1.1 −1.9%, the rest unchanged; HTTP/1.1 is held at
+  about 775k by the load generator, so it does not show the cost. `perf` on fixed h2c (3.86M
+  without, 3.28M with): of the 0.32µs more a request, about 110ns is fib's `OnFinish` path, 60ns
+  the two clock reads, 30–45ns the closure's allocation and collection, and 15ns fit's counting.
+  [A18](fib-api-requests.md#a18-a-responses-status-and-when-its-request-arrived-without-a-hook)
+  asks fib for a response's status and its request's arrival time, so that a request answered
+  before its handler returns is counted with one clock read and no hook.
+
+Differences from the plan:
+
+- No metrics per service: fit has no service layer yet (traffic splitting comes in M3); routes and
+  upstreams have theirs.
+- Status codes are counted by class, so that a request finds its counter by index; exact codes
+  would need a map, or a counter for each of 500 codes per route.
+- A first version counted requests whenever the Admin API was on; the benchmark showed what that
+  costs, and counting became a setting of its own, off by default: on the benchmark host it costs the
+  fastest paths 8% to 13% (fixed h2c −13%, static h2c −9%), and A18 asks fib for what would make it cheaper.
 ## Notes for later iterations
 
 - **fib version.** fit uses fib v1.5.2. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and

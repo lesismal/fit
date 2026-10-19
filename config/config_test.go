@@ -268,6 +268,11 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:73: admin.address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`},
 		},
 		{
+			name: "metrics without admin",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "metrics": {}}`,
+			want: []string{`1:63: metrics: the Admin API serves metrics: set admin too`},
+		},
+		{
 			name: "admin limits",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"history": -1}}`,
 			want: []string{`1:73: admin.history: -1 is less than the minimum 0`},
@@ -357,5 +362,19 @@ func TestMarshalRoundTrip(t *testing.T) {
 	}
 	if _, err := Load(out); err != nil {
 		t.Fatalf("reloading: %v", err)
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	c, err := Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": {}, "metrics": {}}`))
+	if err != nil || c.Metrics == nil {
+		t.Fatalf("metrics: %v, %+v", err, c)
+	}
+	if c, err := Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": {}}`)); err != nil || c.Metrics != nil {
+		t.Fatalf("no metrics: %v, %+v", err, c)
+	}
+	_, err = Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": {}, "metrics": {"per_host": true}}`))
+	if err == nil || !strings.Contains(err.Error(), "1:77: metrics.per_host: unknown field") {
+		t.Errorf("an unknown field: %v", err)
 	}
 }

@@ -78,6 +78,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	defer stopEngine()
 	env := fitruntime.Env{Engine: engine}
+	if c.Admin != nil {
+		// Where requests are counted, by the configs that have metrics,
+		// for the Admin API's /metrics: a reload may turn it on or off.
+		env.Metrics = observe.NewMetrics()
+	}
 	if c.AccessLog != nil {
 		if env.AccessLog, err = observe.NewAccessLog(c.AccessLog); err != nil {
 			fmt.Fprintf(stderr, "fit run: access log: %v\n", err)

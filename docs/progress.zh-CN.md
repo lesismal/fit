@@ -10,9 +10,9 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-20 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32–I34） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 ACME：证书只能来自文件（I29–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -23,9 +23,9 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I34（Prometheus 指标），然后是 I29（ACME HTTP-01 与续期）。** M2 已完成 I24、I25（带配置版本、局部
-修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I32（主动健康检查）和 I33（负载
-均衡 v2）。M2 之前的审查修复 R01、R02 已
+**下一步：I29（ACME HTTP-01 与续期），然后是 I30 和 I31。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I32（主动健康检查）、I33（负载
+均衡 v2）和 I34（Prometheus 指标）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I34。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I29。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -44,7 +44,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | 包 | 内容 |
 | --- | --- |
 | `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载）、`validate`、`schema`、`version`、`help` |
-| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}` |
+| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出） |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -55,7 +55,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
-| `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目 |
+| `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
@@ -1200,6 +1200,54 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   [A17](fib-api-requests.zh-CN.md#a17降低每个请求上-onfinish-和-setvalue-的开销) 向 fib 提出。
 - 把日志行的格式化移出 worker 只会转移开销，不会消除：在这个基准里服务端的核已经全部占满。
 
+### I34 Prometheus 指标 — 已完成
+
+- Admin API 在 `GET /metrics` 以 Prometheus 文本格式（0.0.4）提供指标，由 fit 自己写出（`observe.TextWriter`），不用
+  客户端库。只有配置中有 `metrics`（`"metrics": {}`，需要同时有 `admin`，可在重载时开关）时才统计请求：配置中有 `admin`
+  时 `fit run` 创建 `observe.Metrics`，配置有 `metrics` 的图从中取得计数器。`/metrics` 的其余部分始终提供。
+- 按 listener 和路由统计请求：`fit_http_requests_total{listener,route,code}`，按状态码类别（`2xx` 等）计数；
+  `fit_http_request_duration_seconds{listener,route}`，从调用 handler 到响应交给连接的耗时直方图，桶从 5ms 到 10s。
+  没有名字的路由记为 `#` 加它在配置中的位置（`#1`），没有路由接受的请求记在 `route=""` 下。编译图时每个 listener 的
+  路由取得各自的计数器（`runtime.Listener.Requests`，按 `Route.Index` 索引），请求按下标找到它们，在 dispatcher 的
+  `OnFinish` 中计数——开启访问日志时本来就会注册这个回调。计数器在图之间共享，只要有图在用就保留：重载保留的路由继续
+  累计，没有图再用的路由不再输出。
+- 计数只用原子加法，分散在 8 个 128 或 192 字节的分片上。分片按请求 Context 的地址选择，fib 把 Context 放在偏向归还它
+  的那个核的池中：若随机选择，每个核都会碰到每个分片，4 核时每个请求的开销是 37ns 而不是 6ns。14 个核同时计同一路由时
+  为 15ns。
+- 上游：`fit_upstream_requests_in_flight{upstream}`；`fit_upstream_response_duration_seconds{upstream}`，由代理记录的
+  得到响应头（或失败）所用时间的直方图；每个后端的 `fit_upstream_backend_requests_total{upstream,backend,result}`
+  （success 或 failure，以 `Pool.Done` 得到的结果为准）、`fit_upstream_backend_requests_in_flight` 和
+  `fit_upstream_backend_up`。重载替换掉的连接池从零开始计数。
+- listener 的 engine：`fit_connections_open`、`fit_connections_refused_total`、`fit_pending_bytes`、
+  `fit_reads_paused_total{reason}`，来自 `listener.Server.Stats`。配置：`fit_config_reloads_total{result}`，即首个配置之后
+  应用的配置数及其中失败的数量（`Configs.Reloads`），`fit_config_version`，`fit_config_last_applied_timestamp_seconds`。
+  证书：`fit_tls_certificate_not_after_seconds{listener,name,serial}`，来自每个 listener 的 `tlsmgr.Static` 中的证书。
+  还有 `fit_access_log_dropped_total`，以及来自 `runtime/metrics` 的 `go_goroutines` 和两项 Go 运行时内存数据。
+- 测试：`observe` 检查直方图的边界（包含上界）、总和与计数、状态码类别、8 个 goroutine 同时计数、注册表的生命周期、
+  带转义的文本格式，以及分片的大小。`runtime`：两个图共享一个 listener 的计数器；某个 listener 取得计数器之后编译失败
+  的图会把它们还回去；所有图释放后不再剩下计数器。`admin`：经过两个 listener（一个带 TLS）和一个上游（一个后端正常
+  应答、一个拒绝连接）发出请求，做一次成功重载和一次失败重载后抓取：各项计数、耗时直方图、后端结果、证书到期时间、
+  重载次数和版本都符合预期，并逐行检查输出（每个指标族的 HELP 和 TYPE 只出现一次且在样本之前；没有重复样本）；
+  被重载改名的路由不再输出；没有 Metrics 时不输出请求指标。`test/e2e`：带 Admin API 的 `fit run` 在重载前后统计请求，
+  `/metrics` 中能看到。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- 每个请求的开销：`listener.BenchmarkDispatch`，14 核、不经网络：既无访问日志也无指标时每请求 333ns，只开日志 350ns，
+  只开指标 438ns，两者都开 360ns。只开指标时要为第一个 `OnFinish` 回调付费，它要从 fib 的池中取一个 writer 等（测试
+  工具为每个请求新建 Context）；开着日志时，指标只多约 10ns，不多分配内存。[fib-api-requests](fib-api-requests.zh-CN.md)
+  中的 A17 请 fib 降低 `OnFinish` 的开销。
+- 压测主机上的基准：fitbench，只测 fit，改动前（R07d）和改动后交替各跑两轮，都开启 Admin API。不开 `metrics` 时所有场景
+  相差都在 1.5% 以内：固定响应 HTTP/1.1 每秒 777k → 779k、h2c 3.79M → 3.84M，静态文件 772k → 775k 和 2.46M → 2.45M，
+  代理 229k → 227k 和 237k → 238k。开启 `metrics` 时 h2c 固定响应 3.29M（−13%），h2c 静态文件 2.25M（−9%），HTTP/1.1
+  代理 −1.9%，其余不变；HTTP/1.1 受压测工具限制在约 775k，看不出开销。h2c 固定响应上的 `perf`（不开 3.86M，开启 3.28M）：
+  每个请求多出的 0.32µs 中，约 110ns 是 fib 的 `OnFinish` 路径，60ns 是两次时钟读取，30–45ns 是闭包的分配与回收，15ns
+  是 fit 的计数。[A18](fib-api-requests.zh-CN.md#a18不经回调取得响应的状态和请求到达的时间) 请 fib 提供响应的状态和请求
+  到达的时间，使在 handler 返回前就已应答的请求只需读一次时钟、不需回调即可计数。
+
+与计划的差异：
+
+- 没有按 service 的指标：fit 还没有 service 这一层（流量拆分在 M3）；路由和上游有各自的指标。
+- 状态码按类别计数，这样请求能按下标找到计数器；精确状态码需要一个 map，或者每个路由为 500 个状态码各准备一个计数器。
+- 最初的版本只要开启 Admin API 就统计请求；基准显示了它的开销，于是统计请求改为单独的设置项，默认关闭：在压测主机上它让最快的路径慢 8% 到 13%（h2c 固定响应 −13%，h2c 静态文件 −9%），A18 请 fib 提供能降低这一开销的
+  功能。
 ## 给后续迭代的说明
 
 - **fib 版本。** fit 使用 fib v1.5.1。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），

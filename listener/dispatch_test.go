@@ -31,16 +31,41 @@ const dispatchDoc = `{
   ]
 }`
 
-// BenchmarkDispatch serves a request through a listener's dispatcher, access
-// log included, without a network: what fit adds to every request.
+// BenchmarkDispatch serves a request through a listener's dispatcher, with
+// and without the access log and metrics, without a network: what fit adds
+// to every request.
 func BenchmarkDispatch(b *testing.B) {
-	c, err := config.Load([]byte(dispatchDoc))
+	for _, bb := range []struct {
+		name         string
+		log, metrics bool
+	}{
+		{"bare", false, false},
+		{"log", true, false},
+		{"metrics", false, true},
+		{"log+metrics", true, true},
+	} {
+		b.Run(bb.name, func(b *testing.B) { benchmarkDispatch(b, bb.log, bb.metrics) })
+	}
+}
+
+func benchmarkDispatch(b *testing.B, withLog, withMetrics bool) {
+	doc := dispatchDoc
+	if withMetrics {
+		doc = strings.Replace(doc, "{", `{"admin": {}, "metrics": {},`, 1)
+	}
+	c, err := config.Load([]byte(doc))
 	if err != nil {
 		b.Fatal(err)
 	}
-	log := observe.NewAccessLogTo(io.Discard, time.Second, 64<<20)
-	defer log.Close()
-	g, err := runtime.Compile(c, runtime.Env{AccessLog: log})
+	var env runtime.Env
+	if withLog {
+		env.AccessLog = observe.NewAccessLogTo(io.Discard, time.Second, 64<<20)
+		defer env.AccessLog.Close()
+	}
+	if withMetrics {
+		env.Metrics = observe.NewMetrics()
+	}
+	g, err := runtime.Compile(c, env)
 	if err != nil {
 		b.Fatal(err)
 	}

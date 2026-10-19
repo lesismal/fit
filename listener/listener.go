@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
@@ -504,11 +505,18 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		c.OnHeader(d.addAltSvc)
 	}
 	var route *runtime.Route
+	var metrics *observe.RequestMetrics
 	if l := d.listener(g); l != nil {
 		route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
+		metrics = l.RequestMetrics(route)
 	}
 	if log := g.AccessLog; log != nil {
-		d.logRequest(c, log, route)
+		d.logRequest(c, log, route, metrics)
+	} else if metrics != nil {
+		start := time.Now()
+		c.OnFinish(func(status int, _ stdhttp.Header, _ int64) {
+			metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(start))
+		})
 	}
 	if route == nil {
 		_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
@@ -518,9 +526,10 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 }
 
 // logRequest has the access log write a line for c's request once its
-// response is finished. The log outlives the graph, so a response finished
-// after the graph is released still has somewhere to go.
-func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route) {
+// response is finished, and metrics, if not nil, count it. The log and the
+// metrics outlive the graph, so a response finished after the graph is
+// released still has somewhere to go.
+func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route, metrics *observe.RequestMetrics) {
 	r := c.Request
 	e := observe.Track(c)
 	e.Start, e.Listener, e.BytesIn = time.Now(), d.name, r.ContentLength
@@ -532,5 +541,10 @@ func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, rout
 	if route != nil {
 		e.Route = route.Name
 	}
-	c.OnFinish(func(status int, _ stdhttp.Header, size int64) { log.Log(e, r, status, size) })
+	c.OnFinish(func(status int, _ stdhttp.Header, size int64) {
+		log.Log(e, r, status, size)
+		if metrics != nil {
+			metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(e.Start))
+		}
+	})
 }

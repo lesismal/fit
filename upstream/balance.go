@@ -27,8 +27,11 @@ type Backend struct {
 	Address string
 	Weight  int
 	// active counts the requests to the backend that are not over, body
-	// included: from Pool.Pick to Pool.Done.
-	active atomic.Int64
+	// included: from Pool.Pick to Pool.Done; requests and failures count
+	// those that are, and those of them the backend failed.
+	active   atomic.Int64
+	requests atomic.Uint64
+	failures atomic.Uint64
 	// current is smooth weighted round robin's running weight, for weights
 	// too many to precompute, guarded by the balancer's lock.
 	current int
@@ -54,6 +57,10 @@ type Backend struct {
 
 // Active returns how many requests to b are under way.
 func (b *Backend) Active() int64 { return b.active.Load() }
+
+// Requests returns how many requests to b are over, and how many of them b
+// failed, as Pool.Done was told.
+func (b *Backend) Requests() (done, failed uint64) { return b.requests.Load(), b.failures.Load() }
 
 // Down reports whether b is out of rotation, for having failed too many
 // requests or its probes.

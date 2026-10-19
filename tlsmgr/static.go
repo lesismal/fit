@@ -71,6 +71,9 @@ func appendOnce(list []int, i int) []int {
 	return append(list, i)
 }
 
+// Certificates returns s's certificates, which the caller must not change.
+func (s *Static) Certificates() []*tls.Certificate { return s.certs }
+
 // errNoCertificates is what a Static with no certificates answers.
 var errNoCertificates = errors.New("tlsmgr: no certificates")
 

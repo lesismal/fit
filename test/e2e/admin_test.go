@@ -8,13 +8,15 @@ import (
 	stdhttp "net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func adminConfig(body string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"handler": {"module": "respond", "params": {"body": "` + body + `"}}}],
-  "admin": {"address": "127.0.0.1:0", "history": 3}
+  "admin": {"address": "127.0.0.1:0", "history": 3},
+  "metrics": {}
 }`
 }
 
@@ -128,6 +130,33 @@ func TestAdminLoad(t *testing.T) {
 	}
 	if got := get(t, web); got != "v1" {
 		t.Fatalf("after SIGHUP: %q", got)
+	}
+
+	// fit run counts requests, and the Admin API serves the counts with
+	// the reloads: four requests to web answered 200, two reloads that
+	// applied and one that failed.
+	// A request is counted once its response has gone, which may be just
+	// after the client has it.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		metrics := get(t, api+"/metrics")
+		var missing []string
+		for _, want := range []string{
+			`fit_http_requests_total{listener="web",route="#0",code="2xx"} 4`,
+			`fit_config_reloads_total{result="success"} 2`,
+			`fit_config_reloads_total{result="failure"} 1`,
+			"fit_config_version 3",
+			"# TYPE fit_http_request_duration_seconds histogram",
+		} {
+			if !strings.Contains(metrics, want+"\n") {
+				missing = append(missing, want)
+			}
+		}
+		if len(missing) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET /metrics has no %q:\n%s", missing, metrics)
+		}
 	}
 
 	code, out := f.stop(t)

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fit/config"
@@ -47,6 +48,10 @@ type Configs struct {
 
 	mu      sync.Mutex // held for a whole Apply, so that applies follow one another
 	history []*Version // oldest first; the last is the running config
+
+	// reloads and failures count the configs Update tried to apply, from
+	// loading on, and those that failed.
+	reloads, failures atomic.Uint64
 }
 
 // Version is a config that was applied.
@@ -130,9 +135,28 @@ func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byt
 	if err != nil {
 		return Result{}, err
 	}
+	cs.reloads.Add(1)
+	r, c, err := cs.apply(data, source)
+	if err != nil {
+		cs.failures.Add(1)
+		return Result{}, err
+	}
+	cs.record(r.Version, data, source)
+	r.ETag = cs.history[len(cs.history)-1].ETag
+	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
+		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
+	}
+	if !sameAdmin(cs.first.Admin, c.Admin) {
+		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
+	}
+	return r, nil
+}
+
+// apply loads, compiles and applies data. cs.mu must be held.
+func (cs *Configs) apply(data []byte, source string) (Result, *config.Config, error) {
 	c, err := config.Load(data)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	env := cs.env
 	env.Previous = cs.rt.Current()
@@ -141,25 +165,21 @@ func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byt
 		env.Previous.Release()
 	}
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	added, removed, err := cs.server.Reload(g)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	// The runtime holds g now, and only Apply swaps graphs while fit runs,
 	// so g is still current.
-	r := Result{Version: g.Version, Source: source, Added: added, Removed: removed}
-	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
-		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
-	}
-	if !sameAdmin(cs.first.Admin, c.Admin) {
-		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
-	}
-	cs.record(r.Version, data, source)
-	r.ETag = cs.history[len(cs.history)-1].ETag
-	return r, nil
+	return Result{Version: g.Version, Source: source, Added: added, Removed: removed}, c, nil
 }
+
+// Reloads returns how many configs were tried, from loading on, since fit
+// started, and how many of them failed; the config fit started with is not
+// counted.
+func (cs *Configs) Reloads() (tried, failed uint64) { return cs.reloads.Load(), cs.failures.Load() }
 
 // Rollback applies again the config applied as version n, as a new version.
 // It gives a *RequestError with status 404 when n is no longer kept.

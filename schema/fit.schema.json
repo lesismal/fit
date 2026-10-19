@@ -233,6 +233,11 @@
       },
       "type": "object"
     },
+    "config.Metrics": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
     "config.Route": {
       "additionalProperties": false,
       "properties": {
@@ -669,7 +674,7 @@
     },
     "admin": {
       "$ref": "#/$defs/config.Admin",
-      "description": "The Admin API, through which the running config is read and replaced; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."
+      "description": "The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."
     },
     "limits": {
       "$ref": "#/$defs/config.Limits",
@@ -681,6 +686,10 @@
         "$ref": "#/$defs/config.Listener"
       },
       "type": "array"
+    },
+    "metrics": {
+      "$ref": "#/$defs/config.Metrics",
+      "description": "Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."
     },
     "routes": {
       "description": "How requests are matched, and what handles them.",

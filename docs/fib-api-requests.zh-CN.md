@@ -28,6 +28,7 @@
 | A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
 | A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
 | A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已提出 | 12 | R07d |
+| A18 | 不经回调取得响应的状态和请求到达的时间 | 已提出 | 12 | I34 |
 
 ## 证据
 
@@ -366,3 +367,28 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 - 不在 `c.mu` 之后的值槽：例如一个原子指针，不加锁地设置和读取，因为这个槽只在 handler 运行前设置一次，之后读取。
 
 **fit 如何使用。** fit 不需要改动：`observe.Track` 和 dispatcher 的 `OnFinish` 开销降低。
+
+## A18：不经回调取得响应的状态和请求到达的时间
+
+**状态。** 已提出，随 I34（2026-10-20）。
+
+**问题。** fit 的请求指标（I34）需要每个请求的响应状态和耗时。fib 只把状态交给 `OnFinish` 回调，所以 fit 对每个请求都
+注册一个回调，用闭包保存 dispatcher 在请求到来时读到的时间，并在回调中再读一次时钟。对于在返回前就已经应答的 handler
+（`respond` 和 `static` 都是），回调、闭包和其中一次时钟读取所提供的信息，fit 本可以在 handler 返回之后直接读到。
+
+**证据。** 在压测主机上测 fit 的 h2c 固定响应（h2load，64 个连接、32 个流；fit 用 7 个核），I34 的构建，开启 Admin API：
+不开 `metrics` 时每秒 3.86M 请求，开启时 3.28M，每个请求多 0.32 µs CPU。`perf` 显示其中约 110 ns 在 fib 的回调路径上
+（`addHook`、`responseHooks.before` 和 `finished`、`writeResponse`、`recycle`，以及 writer 在 `sync.Pool` 上的进出，A17
+已有描述），约 60 ns 在两次时钟读取，约 30 到 45 ns 在分配闭包和回收它，约 15 ns 在 fit 的计数。fitbench 两轮：h2c 固定
+响应 3.79M → 3.29M（−13%），h2c 静态文件 2.46M → 2.25M（−9%）；HTTP/1.1（受压测工具限制在约 775k）和代理（约 230k）
+没有变化。
+
+**请求。**
+
+- `Context.Status() int`：到目前为止已发送或已开始发送的响应的状态；尚无响应时为 0。配合 `Retained`，dispatcher 可以
+  在 handler 返回后判断响应已经确定，在那时计数，只为稍后才应答的 handler 保留 `OnFinish`。
+- `Context.Received() time.Time`，或一个单调的纳秒计数：读到请求头的时间，取自 fib 为读取轮次或超时本来就会读的时钟，
+  粗一些也可以，这样计算耗时只需读一次时钟而不是两次。
+
+**fit 如何使用。** dispatcher 在请求到来时用 `Received` 代替读时钟，在 handler 返回后，若 `Status` 表明响应已发送且没有
+`Retained`，就只读一次时钟、不注册回调地计数；代理的响应仍用回调，由 A17 降低其开销。

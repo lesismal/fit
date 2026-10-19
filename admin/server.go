@@ -108,6 +108,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	mux.HandleFunc("POST /rollback/{n}", s.rollback)
 	mux.HandleFunc("GET /versions", s.versions)
 	mux.HandleFunc("GET /versions/{n}", s.version)
+	mux.HandleFunc("GET /metrics", s.metrics)
 	s.srv = &http.Server{
 		Handler:           s.guard(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
