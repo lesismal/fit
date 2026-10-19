@@ -18,12 +18,13 @@
 
 ## 如何进行一次迭代
 
-**选一个。** 在 [索引](#索引) 中取第一个状态为 `todo`、且依赖全部为 `done` 的迭代。彼此没有依赖的迭代
+**选一个。** [开发进度](progress.zh-CN.md) 说明了当前进展和下一个迭代。否则在 [索引](#索引) 中取第一个状态为
+`todo`、且依赖全部为 `done` 的迭代。彼此没有依赖的迭代
 可以在不同分支上并行进行。
 
 **只读需要的内容。** 一次会话从以下内容开始：
 
-1. 本文件的 [索引](#索引) 和该迭代自己的小节；
+1. [开发进度](progress.zh-CN.md)、本文件的 [索引](#索引) 和该迭代自己的小节；
 2. 路线图中的 [设计原则](roadmap.zh-CN.md#设计原则)；
 3. 该迭代 **涉及** 中列出的包，以及 **参考** 中列出的 fib 文档或包。
 
@@ -38,12 +39,14 @@
 - `go vet ./...` 和 `go test -race ./...` 通过，新代码有测试；
 - 请求路径上没有任何操作阻塞 fib 的 worker（见原则 1）；
 - 在同一个 commit 中把索引里的状态改为 `done`，中英文两个文件都要改；
+- 在 [开发进度](progress.zh-CN.md) 及其英文版中记录做了什么、如何验证、与计划的差异，以及下一个迭代；
 - 迭代中做出的决定（库的选择、格式等）以简短说明记录在 `docs/decisions/NNN-title.md`。
 
 **会话提示词。** 可以用下面的话开始一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 IXX。先读索引、该迭代的小节和 docs/roadmap.zh-CN.md 中的设计原则，
-> 然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在两个 dev-plan 文件中把它标记为 done。
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 IXX。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
+> 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
 **fib。** fit 依赖 `github.com/lesismal/fib`。两者同时修改时，分支上可以用 `replace` 指向本地 fib，
 但不要提交到 `main`。在 fib 中发现的缺口在 fib 里修（见 [风险](roadmap.zh-CN.md#风险与待定问题)），
@@ -56,8 +59,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | 包 | 内容 |
 | --- | --- |
 | `cmd/fit` | 命令行：`run`、`validate`、`adapt`、`build`、`version` |
-| `config` | 原生配置类型、严格的 JSON 加载、JSON Schema |
+| `config` | 原生配置类型、严格的 JSON 加载 |
+| `schema` | 由配置类型和已注册模块生成的 JSON Schema |
 | `module` | 模块注册表和核心接口 |
+| `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | 把配置编译成不可变的图、原子替换、图的引用计数 |
 | `listener` | 基于 fib binding 的监听、协议入口、监听差量 |
 | `router` | 路由器和匹配器 |
@@ -73,6 +78,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `adapter/...` | 配置适配器：友好格式、nginx |
 | `bench` | 基准测试框架，nginx、Caddy、Traefik 和 fit 的配置，测试结果 |
 | `test/e2e` | 端到端测试和一致性测试 |
+| `internal/fibtest` | 在测试中不经网络运行 fib handler |
+| `examples` | 示例配置 |
 
 ## 索引
 
@@ -81,11 +88,11 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
 | **M0** | | | |
-| I01 | 仓库骨架与 CI | — | todo |
-| I02 | 配置类型 v0 与严格加载 | I01 | todo |
-| I03 | JSON Schema 与 `fit validate` | I02 | todo |
-| I04 | 模块注册表与核心接口 | I02 | todo |
-| I05 | 运行时图与原子替换 | I04 | todo |
+| I01 | 仓库骨架与 CI | — | done |
+| I02 | 配置类型 v0 与严格加载 | I01 | done |
+| I03 | JSON Schema 与 `fit validate` | I02 | done |
+| I04 | 模块注册表与核心接口 | I02 | done |
+| I05 | 运行时图与原子替换 | I04 | done |
 | I06 | HTTP 入口与 `fit run` | I05 | todo |
 | I07 | 基准框架：吞吐 | I06 | todo |
 | I08 | 基准框架：空闲连接内存与基线 | I07 | todo |
@@ -186,7 +193,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ### I03 JSON Schema 与 `fit validate`
 
-- **做什么**：原生配置的 JSON Schema，发布在 `config/schema` 下；一个保证 schema 与 Go 类型同步的测试；
+- **做什么**：原生配置的 JSON Schema，发布在 `schema` 下；一个保证 schema 与 Go 类型同步的测试；
   `fit validate -c file`，出错时以非零码退出并给出可读的错误。
 - **完成标准**：类型中新增字段而 schema 未加（或反之）时，同步测试失败。
 - **涉及**：`config`、`cmd/fit`。
@@ -374,7 +381,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 - **做什么**：`GetCertificate` 背后的证书管理接口（静态证书迁移到它下面）；带锁的存储接口及文件系统实现；
   一份在 CertMagic、lego 和自研 ACME 客户端之间做出选择的决定说明。
-- **完成标准**：静态证书通过证书管理工作；存在 `docs/decisions/001-acme.md`。
+- **完成标准**：静态证书通过证书管理工作；`docs/decisions` 中有 ACME 选型的决定说明。
 - **涉及**：`tlsmgr`、`docs/decisions`。
 
 ### I29 ACME HTTP-01 与续期

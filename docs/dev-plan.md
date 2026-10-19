@@ -20,13 +20,14 @@ of room.
 
 ## How to work an iteration
 
-**Pick one.** Take the first iteration in the [index](#index) whose status is `todo` and whose
+**Pick one.** [Progress](progress.md) says where the work stands and which iteration is next.
+Otherwise, take the first iteration in the [index](#index) whose status is `todo` and whose
 dependencies are all `done`. Iterations with no dependency between them may run in parallel, in
 separate branches.
 
 **Read only what it needs.** A session starts from:
 
-1. this file's [index](#index) and the iteration's own section;
+1. [progress](progress.md), this file's [index](#index) and the iteration's own section;
 2. the [design principles](roadmap.md#design-principles) in the roadmap;
 3. the packages the iteration lists under **Touches**, and the fib docs or packages under **Read**.
 
@@ -43,14 +44,17 @@ on) in this file, and finish the current one.
 - nothing on the request path blocks a fib worker (see principle 1);
 - its status in the index is set to `done`, in both the English and the Chinese file, in the same
   commit;
+- [progress](progress.md) and its Chinese twin record what was built, how it was checked, where it
+  differs from the plan, and which iteration is next;
 - any decision it made (a library choice, a format) is recorded as a short note in
   `docs/decisions/NNN-title.md`.
 
 **Session prompt.** A session can be started with:
 
-> Implement iteration IXX from docs/dev-plan.md. Read the index, that iteration's section and the
-> design principles in docs/roadmap.md, then only the packages it lists. Keep the change within
-> the iteration's scope, add tests, and mark it done in both dev-plan files when finished.
+> Implement iteration IXX from docs/dev-plan.md. Read docs/progress.md, the index and that
+> iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
+> the packages it lists. Keep the change within the iteration's scope, add tests, and when done
+> mark it done in both dev-plan files and record it in both progress files.
 
 **fib.** fit depends on `github.com/lesismal/fib`. While both change together, a `replace`
 directive pointing at a local fib checkout is fine on a branch, but not in a commit on `main`. A gap
@@ -65,8 +69,10 @@ should touch as few of these as it can.
 | Package | Contents |
 | --- | --- |
 | `cmd/fit` | the CLI: `run`, `validate`, `adapt`, `build`, `version` |
-| `config` | native config types, strict JSON loading, the JSON Schema |
+| `config` | native config types, strict JSON loading |
+| `schema` | the JSON Schema, generated from the config types and the registered modules |
 | `module` | the module registry and the core interfaces |
+| `modules/standard` | imports every module fit ships with |
 | `runtime` | compiling config into an immutable graph, atomic swaps, graph reference counts |
 | `listener` | listeners on fib bindings, protocol entry points, listener diffing |
 | `router` | routers and matchers |
@@ -82,6 +88,8 @@ should touch as few of these as it can.
 | `adapter/...` | config adapters: friendly format, nginx |
 | `bench` | the benchmark harness, configs for nginx, Caddy, Traefik and fit, results |
 | `test/e2e` | end-to-end and conformance suites |
+| `internal/fibtest` | running fib handlers in tests without a network |
+| `examples` | example configs |
 
 ## Index
 
@@ -90,11 +98,11 @@ Status: `todo`, `doing` or `done`.
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
 | **M0** | | | |
-| I01 | Repository skeleton and CI | — | todo |
-| I02 | Config types v0 and strict loading | I01 | todo |
-| I03 | JSON Schema and `fit validate` | I02 | todo |
-| I04 | Module registry and core interfaces | I02 | todo |
-| I05 | Runtime graph and atomic swap | I04 | todo |
+| I01 | Repository skeleton and CI | — | done |
+| I02 | Config types v0 and strict loading | I01 | done |
+| I03 | JSON Schema and `fit validate` | I02 | done |
+| I04 | Module registry and core interfaces | I02 | done |
+| I05 | Runtime graph and atomic swap | I04 | done |
 | I06 | HTTP entry points and `fit run` | I05 | todo |
 | I07 | Benchmark harness: throughput | I06 | todo |
 | I08 | Benchmark harness: idle connection memory and baselines | I07 | todo |
@@ -196,7 +204,7 @@ Status: `todo`, `doing` or `done`.
 
 ### I03 JSON Schema and `fit validate`
 
-- **Do**: a JSON Schema for the native config, published under `config/schema`; a test that keeps
+- **Do**: a JSON Schema for the native config, published under `schema`; a test that keeps
   the schema and the Go types in sync; `fit validate -c file` that exits non-zero with readable
   errors.
 - **Done when**: the sync test fails if a field is added to the types but not the schema, and the
@@ -408,7 +416,8 @@ Status: `todo`, `doing` or `done`.
 - **Do**: a certificate manager interface behind `GetCertificate` (static files move under it); a
   storage interface with a file system implementation and locks; a decision note choosing CertMagic,
   lego or our own ACME client.
-- **Done when**: static certificates work through the manager; `docs/decisions/001-acme.md` exists.
+- **Done when**: static certificates work through the manager; the ACME decision note exists in
+  `docs/decisions`.
 - **Touches**: `tlsmgr`, `docs/decisions`.
 
 ### I29 ACME HTTP-01 and renewal

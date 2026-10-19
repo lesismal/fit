@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (gofmt / vet / staticcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: make fmt-check
+      # Built against the latest x/tools, which keeps up with the compiler's
+      # export data format sooner than the x/tools staticcheck pins.
+      - name: Install staticcheck
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/staticcheck" && cd "$RUNNER_TEMP/staticcheck"
+          go mod init staticcheck-build
+          go get honnef.co/go/tools/cmd/staticcheck@latest golang.org/x/tools@latest
+          go install honnef.co/go/tools/cmd/staticcheck
+      # fib's engine is split per OS, so vet and staticcheck run once per target.
+      - name: go vet
+        run: |
+          for goos in linux darwin windows; do
+            echo "::group::GOOS=$goos"
+            GOOS=$goos go vet ./...
+            echo "::endgroup::"
+          done
+      - name: staticcheck
+        run: |
+          for goos in linux darwin windows; do
+            echo "::group::GOOS=$goos"
+            GOOS=$goos "$(go env GOPATH)/bin/staticcheck" ./...
+            echo "::endgroup::"
+          done
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go test -race
+        run: go test -race ./...
+
+  fuzz:
+    name: Fuzz (short)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: FuzzLoad
+        run: go test ./config -run '^$' -fuzz FuzzLoad -fuzztime 30s

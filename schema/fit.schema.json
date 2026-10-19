@@ -1,0 +1,193 @@
+{
+  "$defs": {
+    "config.Listener": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\".",
+          "type": "string"
+        },
+        "name": {
+          "description": "A name unique among the listeners, by which routes refer to this one.",
+          "type": "string"
+        },
+        "protocols": {
+          "description": "The protocols served; http/1.1 alone when left out.",
+          "items": {
+            "enum": [
+              "http/1.1",
+              "h2c"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "address"
+      ],
+      "type": "object"
+    },
+    "config.Match": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "description": "Host names, exact or with a leading \"*.\" wildcard.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "Paths, exact or ending in \"*\" to match a prefix.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "config.Route": {
+      "additionalProperties": false,
+      "properties": {
+        "handler": {
+          "$ref": "#/$defs/http.handlers",
+          "description": "What answers the request."
+        },
+        "listeners": {
+          "description": "The names of the listeners the route serves; every listener when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "match": {
+          "$ref": "#/$defs/config.Match",
+          "description": "What a request must match; every request when left out."
+        },
+        "middleware": {
+          "description": "Middleware a request passes through, in order, before the handler.",
+          "items": {
+            "$ref": "#/$defs/http.middleware"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "A name unique among the routes, for logs and metrics.",
+          "type": "string"
+        },
+        "priority": {
+          "description": "Routes with a higher priority are tried first; equal ones in the order written.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "handler"
+      ],
+      "type": "object"
+    },
+    "http.handlers": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "respond"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.respond"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [
+            "respond"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
+    "http.handlers.respond": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "The response body.",
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Response headers. Content-Type defaults to text/plain; charset=utf-8 when there is a body.",
+          "type": "object"
+        },
+        "status": {
+          "description": "The status code; 200 when left out.",
+          "maximum": 599,
+          "minimum": 100,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "http.middleware": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "description": "The module's name within its namespace.",
+          "enum": [],
+          "type": "string"
+        },
+        "params": {
+          "description": "The module's params."
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/lesismal/fit/schema/fit.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "listeners": {
+      "description": "The addresses fit listens on, and the protocols each one serves.",
+      "items": {
+        "$ref": "#/$defs/config.Listener"
+      },
+      "type": "array"
+    },
+    "routes": {
+      "description": "How requests are matched, and what handles them.",
+      "items": {
+        "$ref": "#/$defs/config.Route"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "listeners"
+  ],
+  "title": "fit config",
+  "type": "object"
+}
