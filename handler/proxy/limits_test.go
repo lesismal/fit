@@ -19,9 +19,7 @@ func limitsConfig(limits, fields string) string {
 }
 
 // TestMaxPending reaches max_pending: with the one connection busy and two
-// requests waiting for it, the next is answered 503 at once. The first is
-// sent alone, since a request waiting for a connection being opened counts
-// as waiting too.
+// requests waiting for it, the next is answered 503 at once.
 func TestMaxPending(t *testing.T) {
 	release := make(chan struct{})
 	backend := serveBackend(t, "http/1.1", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -31,10 +29,7 @@ func TestMaxPending(t *testing.T) {
 	defer close(release)
 	base := startFit(t, limitsConfig("", `, "max_conns": 1, "max_pending": 2`), backend)
 	held := make(chan int, 3)
-	for i := range 3 {
-		if i == 1 {
-			time.Sleep(300 * time.Millisecond) // the connection is open, and busy
-		}
+	for range 3 {
 		go func() {
 			c := client(false)
 			c.Timeout = 10 * time.Second

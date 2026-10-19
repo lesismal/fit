@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-19 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R04、R06、R07a、R07b 已完成；R05 等待 fib 中的 A14，接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
-| fib | `github.com/lesismal/fib v1.4.0`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.5.1`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
@@ -1057,16 +1057,16 @@ A11–A13。
 与计划的不同：
 
 - `max_pending` 按地址计算，而不是按上游：fib 的上限是按主机的。它的文档已说明。
-- fib 的上限也计入正在为其拨号的、等待连接的请求，所以冷启动时超过 `max_pending` 的突发请求，在 `max_conns` 允许的连接
-  还在建立时就被拒绝：`TestDefaultMaxConns` 的突发中 256 个只建立了 179 个。已作为
-  [A15](fib-api-requests.zh-CN.md#a15maxpendingperhost-不计入正在为其拨号的请求) 向 fib 提出；在此之前，测试按
-  `max_pending` 分批建立连接，`max_pending` 的文档也说明等待正在建立的连接的请求会被计入。
+- fib v1.4.0 的上限也计入正在为其拨号的、等待连接的请求，所以冷启动时超过 `max_pending` 的突发请求，在 `max_conns`
+  允许的连接还在建立时就被拒绝：`TestDefaultMaxConns` 的突发中 256 个只建立了 179 个。已作为
+  [A15](fib-api-requests.zh-CN.md#a15maxpendingperhost-不计入正在为其拨号的请求) 向 fib 提出，在 v1.5.1 中完成；测试恢复为
+  同时发出 256 个请求。
 - 没有跑基准：基准框架的场景都不会触达这两个上限，而 `Pick` 少了一次原子加法和一次比较。
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.4.0，它带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分；见
-  [fib-api-requests](fib-api-requests.zh-CN.md)）。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
+- **fib 版本。** fit 使用 fib v1.5.1。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
+  v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
   `fib.New(config, bindings...)` 以及 `AddBinding`、`RemoveBinding`、`ShutdownBinding`，`Connection.NotifyOutput`、
   `Context.HoldBody` 和 `BodyWriter`。如果某个迭代需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。

@@ -22,10 +22,10 @@
 | A9 | 拒绝不是 token 的请求头字段名 | 已完成，v1.4.0 | 13 | — |
 | A10 | 长度未知的客户端响应从响应头起就以流方式交付 | 已完成，v1.3.1 | 5 | — |
 | A11 | 不复制即取得整体到达的客户端响应体 | 已完成，v1.4.0 | 12 | R07c |
-| A12 | 减少每个客户端请求的定时器和 context | 部分完成，v1.4.0 | 12 | R07c |
+| A12 | 减少每个客户端请求的定时器和 context | 已完成，v1.5.0 | 12 | R07c |
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
-| A14 | 在没有连接的 Context 上 `Release` | P1 | 13 | R05 |
-| A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | P1 | 11 | R06 |
+| A14 | 在没有连接的 Context 上 `Release` | 已完成，v1.5.1 | 13 | R05 |
+| A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
 
 ## 证据
 
@@ -238,7 +238,7 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 
 ## A12：减少每个客户端请求的定时器和 context
 
-**状态。** 已在 fib v1.4.0 中部分完成（`b580ea7`、`f4afaa6`、`c58eb4b`）：连接的截止时间定时器和客户端的空闲定时器改为重置而不是新建；`ClientConfig.ResponseHeaderTimeout` 超时时以 `ErrResponseHeaderTimeout`（与 `os.ErrDeadlineExceeded` 匹配）失败，与 `Timeout` 共用请求的同一个定时器。它是配置项而不是按请求设置，这对 fit 正合适，因为每个上游池有自己的客户端。未完成：可取消的请求 context 上的 `context.AfterFunc`，这需要 `Do` 返回一个取消句柄。fib 记录的问题：复用的连接已关闭而重新排队的请求，其响应头超时不会重新计时。
+**状态。** 已在 fib v1.5.0 中完成（`b580ea7`、`f4afaa6`、`c58eb4b`、`783e89c`、`2f68795`）：连接的截止时间定时器和客户端的空闲定时器改为重置而不是新建；`ClientConfig.ResponseHeaderTimeout` 超时时以 `ErrResponseHeaderTimeout`（与 `os.ErrDeadlineExceeded` 匹配）失败，与 `Timeout` 共用请求的同一个定时器，为重试重新排队的请求会重新计时。它是配置项而不是按请求设置，这对 fit 正合适，因为每个上游池有自己的客户端。`Client.Start(req, cb) Call` 和 `Call.Cancel(err)` 无需可取消的 context 即可取消请求：每个请求 45 次分配，而用可取消 context 的 `Do` 是 48 次。
 
 **问题。** 每个经 `Client.Do` 的请求都会创建若干本可复用或省去的定时器和 context；代理还要为响应头超时再加一个自己的
 定时器，因为客户端没有这个设置。
@@ -281,6 +281,8 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 
 ## A14：在没有连接的 Context 上 `Release`
 
+**状态。** 已在 fib v1.5.1 中完成（`c9dd792`），按请求实现：`c.Conn` 为 nil 时最后一次 `Release` 跳过 flush，`NewStreamContext` 的文档说明允许 nil 连接。
+
 **问题。** `fibhttp.NewStreamContext(nil, req, stream)` 为 fib 之外服务的流创建一个没有 `fib.Connection` 的 Context；
 fit 的 `internal/fibtest` 用它在测试中不经网络运行 handler。`fibhttp.Serve` 在它上面运行 handler，在 handler 自己的
 goroutine 上应答没有问题。但 retain 请求、之后从另一个 goroutine 应答的 handler，在最后一次 `Release` 时会 panic：
@@ -298,6 +300,8 @@ nil 连接。
 不用改动就能覆盖它的异步路径。
 
 ## A15：`MaxPendingPerHost` 不计入正在为其拨号的请求
+
+**状态。** 已在 fib v1.5.1 中完成（`f627cd4`）：等待的请求数减去正在进行的拨号和 `MaxConnsPerHost` 剩余空间所覆盖的请求后达到上限时，才拒绝请求。对可能是 HTTP/2 的主机，剩余空间按它会变成的拨号数计算。拨号挂住时的上限是 `MaxConnsPerHost + MaxPendingPerHost`。没有设置 `MaxConnsPerHost` 时这个上限不再生效；fit 总会设置它。
 
 **问题。** `ClientConfig.MaxPendingPerHost` 计算主机队列中的所有请求，包括那些在等待 `MaxConnsPerHost` 允许、客户端
 正在为它们拨号的连接的请求。于是一批发往没有空闲连接的主机的新请求，在允许的连接还在建立时，超过

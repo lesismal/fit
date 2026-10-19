@@ -384,7 +384,7 @@
         },
         "max_pending": {
           "default": 1024,
-          "description": "How many requests may wait for a connection to one address, while one is being opened or once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0.",
+          "description": "How many requests may wait for a connection to one address once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },

@@ -11,9 +11,8 @@ import (
 // TestDefaultMaxConns reaches the default of 256 connections to an address
 // and max_pending past it: with every request held by the backend, 256
 // connections open, the next max_pending requests wait, and the one after
-// them is refused at once. The 256 go in waves of max_pending, each once
-// the last has its connections, since fib v1.4.0 counts a request waiting
-// for a connection being opened as waiting too (A15 in fib-api-requests).
+// them is refused at once. The 256 go at once: a request waiting for the
+// connection being opened for it does not count against max_pending.
 func TestDefaultMaxConns(t *testing.T) {
 	release := make(chan struct{})
 	b := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -29,17 +28,15 @@ func TestDefaultMaxConns(t *testing.T) {
 	}()
 	p := newPool(t, `{"addresses": [%s], "max_pending": 8}`, b)
 	var results []<-chan result
+	for range DefaultMaxConns {
+		results = append(results, goDo(t, p, "/"))
+	}
 	deadline := time.Now().Add(10 * time.Second)
-	for len(results) < DefaultMaxConns {
-		for range 8 {
-			results = append(results, goDo(t, p, "/"))
+	for b.open.Load() < DefaultMaxConns {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connections open, want %d", b.open.Load(), DefaultMaxConns)
 		}
-		for b.open.Load() < int64(len(results)) {
-			if time.Now().After(deadline) {
-				t.Fatalf("%d connections open, want %d", b.open.Load(), len(results))
-			}
-			time.Sleep(time.Millisecond)
-		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	time.Sleep(100 * time.Millisecond) // every request is on its connection
 	for range 8 {

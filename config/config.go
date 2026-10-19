@@ -202,7 +202,7 @@ type Upstream struct {
 	HashKey        string        `json:"hash_key,omitempty" doc:"With header_hash, the header, and with cookie_hash, the cookie, whose value requests are hashed by."`
 	StickyCookie   *StickyCookie `json:"sticky_cookie,omitempty" doc:"Keep each client on one address with a cookie: a request whose cookie names an address that is up goes there, and any other gets the cookie for the address it went to. No cookie when left out."`
 	MaxConns       int           `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. 256 when left out or 0."`
-	MaxPending     int           `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection to one address, while one is being opened or once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
+	MaxPending     int           `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection to one address once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
 	MaxIdleConns   *int          `json:"max_idle_conns,omitempty" min:"0" default:"32" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
 	IdleTimeout    Duration      `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
 	ConnectTimeout Duration      `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`

@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-19 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R04, R06, R07a and R07b are done; R05 waits for A14 in fib, and R07c is next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
-| fib | `github.com/lesismal/fib v1.4.0`, from the module proxy |
+| fib | `github.com/lesismal/fib v1.5.1`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
@@ -1401,19 +1401,19 @@ Differences from the plan:
 Differences from the plan:
 
 - `max_pending` is per address, not per upstream: fib's cap is per host. Its doc says so.
-- fib's cap also counts the requests waiting for a connection that is being dialed for them, so a
-  cold burst past `max_pending` is refused while the connections `max_conns` allows are still
+- fib v1.4.0's cap also counted the requests waiting for a connection being dialed for them, so a
+  cold burst past `max_pending` was refused while the connections `max_conns` allows were still
   opening: 179 of 256 opened in `TestDefaultMaxConns`'s burst. Asked of fib as
-  [A15](fib-api-requests.md#a15-maxpendingperhost-not-to-count-requests-whose-connection-is-being-dialed);
-  until then the test opens its connections in waves of `max_pending`, and the doc of
-  `max_pending` says a request waiting for a connection being opened counts.
+  [A15](fib-api-requests.md#a15-maxpendingperhost-not-to-count-requests-whose-connection-is-being-dialed),
+  done in v1.5.1; the test sends its 256 at once again.
 - No benchmark: neither limit is reached in the harness's scenarios, and `Pick` lost an atomic
   add and a compare.
 
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.4.0, which brings the APIs of R03 (A1–A7, A9, A11, A13, and
-  parts of A8 and A12; see [fib-api-requests](fib-api-requests.md)). v1.3.0, tagged for I16 and I22 on fib's `main` of
+- **fib version.** fit uses fib v1.5.1. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
+  parts of A8 and A12), v1.5.0 the rest of A12 (`Client.Start`), and v1.5.1 A14 and A15; see
+  [fib-api-requests](fib-api-requests.md). v1.3.0, tagged for I16 and I22 on fib's `main` of
   2026-10-19, brought `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and
   `ShutdownBinding`, `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`; v1.3.1 adds
   `ClientConfig.StreamUnknownLengthAtHeader` (A10) and nothing else. If an iteration needs something

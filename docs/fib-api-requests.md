@@ -23,10 +23,10 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A9 | Refuse a header field name that is not a token | done, v1.4.0 | 13 | — |
 | A10 | Stream a client response of unknown length from its header | done, v1.3.1 | 5 | — |
 | A11 | The body of a client response that arrived whole, without a copy | done, v1.4.0 | 12 | R07c |
-| A12 | Fewer timers and contexts per client request | partly, v1.4.0 | 12 | R07c |
+| A12 | Fewer timers and contexts per client request | done, v1.5.0 | 12 | R07c |
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
-| A14 | `Release` on a Context that has no connection | P1 | 13 | R05 |
-| A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | P1 | 11 | R06 |
+| A14 | `Release` on a Context that has no connection | done, v1.5.1 | 13 | R05 |
+| A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
 
 ## Evidence
 
@@ -306,13 +306,13 @@ streams. Or `Response.Body` taking the bytes `NewBufferedBody` was given, under 
 
 ## A12: Fewer timers and contexts per client request
 
-**Status.** Partly done in fib v1.4.0 (`b580ea7`, `f4afaa6`, `c58eb4b`): the connection's deadline
-timer and the client's idle timer are reset rather than made anew;
+**Status.** Done in fib v1.5.0 (`b580ea7`, `f4afaa6`, `c58eb4b`, `783e89c`, `2f68795`): the
+connection's deadline timer and the client's idle timer are reset rather than made anew;
 `ClientConfig.ResponseHeaderTimeout`, failing with `ErrResponseHeaderTimeout` (which matches
-`os.ErrDeadlineExceeded`), shares the request's one timer with `Timeout`. It is a config setting,
-not per request, which suits fit, with a client per upstream pool. Not done: the `context.AfterFunc`
-on a cancellable request context, which needs a cancel handle from `Do`. Noted by fib: a request
-requeued after its reused connection closed does not restart its header timeout.
+`os.ErrDeadlineExceeded`), shares the request's one timer with `Timeout`, and a request requeued for
+a retry restarts it. It is a config setting, not per request, which suits fit, with a client per
+upstream pool. `Client.Start(req, cb) Call` and `Call.Cancel(err)` cancel a request without a
+cancellable context: 45 allocations a request against `Do`'s 48 with one.
 
 **Problem.** Each request through `Client.Do` makes several timers and contexts that could be
 reused or left out, and the proxy adds one of its own for its response header timeout, which the
@@ -364,6 +364,9 @@ flag beside `whole` set by those two, and test it in `WriteResponse` instead of 
 
 ## A14: `Release` on a Context that has no connection
 
+**Status.** Done in fib v1.5.1 (`c9dd792`), as asked: the last `Release` skips the flush when
+`c.Conn` is nil, and `NewStreamContext`'s doc allows a nil connection.
+
 **Problem.** `fibhttp.NewStreamContext(nil, req, stream)` makes a Context for a stream served
 outside fib, with no `fib.Connection`; fit's `internal/fibtest` uses one to run handlers in tests
 without a network. `fibhttp.Serve` runs a handler on it, and a handler that answers from the
@@ -385,6 +388,12 @@ retained response to be written, so the static handler's tests run unchanged aga
 asynchronous paths.
 
 ## A15: `MaxPendingPerHost` not to count requests whose connection is being dialed
+
+**Status.** Done in fib v1.5.1 (`f627cd4`): a request is refused when the requests waiting, less
+those covered by dials under way and by the room `MaxConnsPerHost` leaves, reach the limit. For a
+host that may be HTTP/2, the room counts as the dials it would become. The bound while dials hang is
+`MaxConnsPerHost + MaxPendingPerHost`. Without `MaxConnsPerHost` the cap no longer applies; fit
+always sets one.
 
 **Problem.** `ClientConfig.MaxPendingPerHost` counts every request in a host's queue, those
 waiting for a connection that `MaxConnsPerHost` lets the client dial, and is dialing for them,
