@@ -11,23 +11,22 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16, I17, I21 and I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I17, I19, I21 and I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS; one address per request without health or load balancing beyond round robin (I19, I20); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS; no health checks, so a failing address stays in rotation (I20); no HTTP/2 upstreams (I18); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I19, load balancing v1**, being done next in this session; then I18 (HTTP/2
-upstreams) and I20 (passive health checks). I09, I13 and I24 are also ready to start, unless another
-session has taken them.
+**Next iteration: I20, passive health checks**, which I19 unblocked, or I18, HTTP/2 upstreams.
+I09, I13 and I24 are also ready to start, unless another session has taken them.
 
 To continue, start a session with:
 
-> Implement iteration I18 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I20 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -45,7 +44,7 @@ To continue, start a session with:
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
-| `upstream` | `Pool`, which sends requests to an upstream over HTTP/1.1 through fib's asynchronous client and drains before it closes; `StartEngine` for the engine pools dial through |
+| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
@@ -599,6 +598,40 @@ Differences from the plan:
 - The timeouts live on the upstream rather than the route; I43 adds per-route ones.
 - An HTTP/2 response of no declared length whose upstream fails mid-body ends with a trailer rather
   than a stream reset, which fib v1.3.0 does not let a handler ask for.
+
+### I19 Load balancing v1 — done
+
+- Config: `config.Upstream` gains `weights`, one per address (1 to 1000), and `load_balancing`:
+  `round_robin`, `weighted_round_robin` or `least_conn`. Left out, it is `round_robin`, or
+  `weighted_round_robin` when weights are given. `Validate` refuses a weight count that does not
+  match the addresses, and weights with `round_robin`.
+- `upstream.Balancer` is the selection interface, `Pick() *Backend`; a `Backend` is an address, its
+  weight and its count of requests under way. Round robin is an atomic counter. Weighted round robin
+  is nginx's smooth algorithm under a mutex: weights 5, 1, 1 give `a a b a c a a`. Least connections
+  scans every backend for the fewest requests under way for its weight (compared by
+  cross-multiplying, without dividing), from a starting point that moves with each pick, so that
+  idle backends share the load; it reads the counts without a lock.
+- `Pool.Pick` picks and counts the request under way, `Pool.Send` sends it to that backend, and
+  `Pool.Done` ends it; `Pool.Do` is the three for callers that are done when the callback returns.
+  The proxy picks at the start of an exchange and calls `Done` when it is over, body and all, so a
+  long download counts as busy for as long as it lasts. The pool's draining (I15) now counts from
+  `Pick` to `Done` too, so a pool waits for streamed bodies before it closes. The access log's
+  `upstream` field is the picked backend's address.
+- Tests: round robin gives `abcabc` and exactly 1,000 picks each of 3,000; weighted round robin gives
+  nginx's sequence and exact shares (5,000/1,000/1,000 of 7,000; 3,000/2,000 of 5,000); least
+  connections shares idle backends evenly, skips busy ones until the others catch up, and keeps
+  requests under way in proportion to weights 2:1; 8 goroutines pick concurrently under `-race` for
+  each policy; `AllocsPerRun` finds no allocation in any `Pick`. Through a pool, weights 3:1 send 30
+  and 10 of 40 requests, and with `least_conn` an address holding a slow request gets none of the
+  next 20. `config` tests the new checks. `BenchmarkPick`, 14 goroutines (Apple M3 Max): 52 ns round
+  robin, 107 ns weighted, 67 ns least connections, no allocations. `go vet ./...` and
+  `go test -race ./...` pass.
+
+Differences from the plan:
+
+- Weights are a list beside `addresses`, as Caddy has them, rather than objects in place of the
+  address strings, which keeps `addresses` as simple as I14 made it.
+- Weighted least connections came for free, so `least_conn` takes weights too, as nginx's does.
 
 ## Notes for later iterations
 

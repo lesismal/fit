@@ -9,8 +9,9 @@
 // idle too long. Nothing waits on the network on the caller's goroutine: a
 // response, or the reason there is none, arrives in a callback.
 //
-// The pool spreads requests over its addresses in turn. Load balancing
-// (I19) and health checks (I20) replace that with a selection of their own.
+// The pool spreads requests over its addresses by its upstream's load
+// balancing policy: round robin, smooth weighted round robin, or least
+// connections; see Balancer.
 package upstream
 
 import (
@@ -47,11 +48,12 @@ type Pool struct {
 	name      string
 	client    *fibhttp.Client // nil without an engine
 	addresses []string
+	backends  []*Backend
+	balancer  Balancer
 	timeouts  Timeouts
-	next      atomic.Uint32
 
-	// inFlight counts requests whose callback has not returned, and closing
-	// says Close was called: the client is closed once both hold.
+	// inFlight counts requests picked and not yet done, and closing says
+	// Close was called: the client is closed once there are none.
 	inFlight  atomic.Int64
 	closing   atomic.Bool
 	closeOnce sync.Once
@@ -66,6 +68,14 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 		ResponseHeader: orDefault(c.ResponseHeaderTimeout.Std(), DefaultResponseHeaderTimeout),
 		ResponseIdle:   orDefault(c.ResponseIdleTimeout.Std(), DefaultResponseIdleTimeout),
 	}}
+	for i, addr := range c.Addresses {
+		weight := 1
+		if i < len(c.Weights) {
+			weight = c.Weights[i]
+		}
+		p.backends = append(p.backends, &Backend{Address: addr, Weight: weight})
+	}
+	p.balancer = NewBalancer(c.LoadBalancing, p.backends)
 	if engine == nil {
 		return p
 	}
@@ -119,30 +129,52 @@ func (p *Pool) Name() string { return p.name }
 // them.
 func (p *Pool) Addresses() []string { return p.addresses }
 
-// Do sends req to one of the upstream's addresses, taken in turn, and calls
-// callback exactly once with the response or the reason there is none. It
-// sets req.URL's scheme and host to the address and leaves the rest of the
-// request, its Host field included, as it is. See fib's Client.Do for how the
-// body is sent and the callback run: the callback must not block. A pool
-// that Close was called on still takes requests until those in flight are
-// done, so that a request that started on it can still use it.
-func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
+// Backends returns the upstream's backends, in the order of its addresses.
+// The caller must not change them.
+func (p *Pool) Backends() []*Backend { return p.backends }
+
+// Pick chooses the backend for a request by the upstream's policy and counts
+// the request as under way on it until Done. A pool that Close was called on
+// still serves requests until those under way are done, so that a request
+// that started on it can still use it.
+func (p *Pool) Pick() *Backend {
+	b := p.balancer.Pick()
+	b.active.Add(1)
+	p.inFlight.Add(1)
+	return b
+}
+
+// Done ends the request Pick counted on b, once its response, body and all,
+// is over or has failed. It must be called exactly once a Pick.
+func (p *Pool) Done(b *Backend) {
+	b.active.Add(-1)
+	if p.inFlight.Add(-1) == 0 && p.closing.Load() {
+		p.closeClient()
+	}
+}
+
+// Send sends req to b and calls callback exactly once with the response or
+// the reason there is none. It sets req.URL's scheme and host to b's address
+// and leaves the rest of the request, its Host field included, as it is. See
+// fib's Client.Do for how the body is sent and the callback run: the
+// callback must not block.
+func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
 	if p.client == nil {
 		callback(nil, ErrNoEngine)
 		return
 	}
-	addr := p.addresses[0]
-	if n := len(p.addresses); n > 1 {
-		addr = p.addresses[int((p.next.Add(1)-1)%uint32(n))]
-	}
 	req.URL.Scheme = "http"
-	req.URL.Host = addr
-	p.inFlight.Add(1)
-	p.client.Do(req, func(resp *fibhttp.ClientResponse, err error) {
+	req.URL.Host = b.Address
+	p.client.Do(req, callback)
+}
+
+// Do is Pick, Send and Done for a caller that is done with the response
+// when its callback returns, as one that reads a body that arrived whole is.
+func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
+	b := p.Pick()
+	p.Send(b, req, func(resp *fibhttp.ClientResponse, err error) {
 		callback(resp, err)
-		if p.inFlight.Add(-1) == 0 && p.closing.Load() {
-			p.closeClient()
-		}
+		p.Done(b)
 	})
 }
 

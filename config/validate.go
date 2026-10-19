@@ -103,6 +103,12 @@ func (c *Config) Validate() Errors {
 		if len(u.Addresses) == 0 {
 			add(u.At.Field("addresses"), "an upstream needs at least one address")
 		}
+		if len(u.Weights) > 0 && len(u.Weights) != len(u.Addresses) {
+			add(u.At.Field("weights"), "%d weights for %d addresses; give one weight for each address", len(u.Weights), len(u.Addresses))
+		}
+		if len(u.Weights) > 0 && u.LoadBalancing == "round_robin" {
+			add(u.At.Field("load_balancing"), "round_robin takes no weights; use weighted_round_robin or least_conn")
+		}
 		seen := map[string]bool{}
 		for i, addr := range u.Addresses {
 			at := u.At.Field("addresses").Index(i)

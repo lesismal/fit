@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I17、I21、I22 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14–I17、I19、I21、I22 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS；除轮询外还没有负载均衡和健康检查（I19、I20）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | 还没有 TLS；还没有健康检查，失败的地址仍在轮转中（I20）；还没有 HTTP/2 上游（I18）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I19，负载均衡 v1**，本会话接下来做；然后是 I18（HTTP/2 上游）和 I20（被动健康检查）。I09、I13、
-I24 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I20，被动健康检查**（I19 完成后可以开始），或 I18，HTTP/2 上游。I09、I13、I24 也都可以开始（除非
+已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I18。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I20。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -41,7 +41,7 @@ I24 也都可以开始（除非已有别的会话在做）。
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
-| `upstream` | `Pool`：通过 fib 的异步客户端以 HTTP/1.1 向上游发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
+| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
@@ -479,6 +479,31 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 超时配置在上游上而不是路由上；I43 会加上按路由的超时。
 - 上游在 body 中途失败时，没有声明长度的 HTTP/2 响应以 trailer 结束而不是重置流，因为 fib v1.3.0 不允许 handler
   请求重置流。
+
+### I19 负载均衡 v1 — 已完成
+
+- 配置：`config.Upstream` 新增 `weights`（每个地址一个，1 到 1000）和 `load_balancing`：`round_robin`、
+  `weighted_round_robin` 或 `least_conn`。省略时为 `round_robin`，给了权重则为 `weighted_round_robin`。`Validate`
+  拒绝权重个数与地址个数不符，以及 `round_robin` 带权重。
+- `upstream.Balancer` 是选择接口 `Pick() *Backend`；`Backend` 是地址、权重和在途请求数。轮询是一个原子计数器。
+  加权轮询是 nginx 的平滑算法，加互斥锁：权重 5、1、1 得到 `a a b a c a a`。最少连接扫描所有后端，找按权重计算
+  在途请求最少的（交叉相乘比较，不做除法），起点随每次选择移动，让空闲后端分担负载；读取计数不加锁。
+- `Pool.Pick` 选择并把请求计为在途，`Pool.Send` 发往该后端，`Pool.Done` 结束；`Pool.Do` 是三者合一，供回调返回
+  即结束的调用者使用。代理在一次交换开始时选择，结束时（包括 body）调用 `Done`，所以长时间的下载在整个过程中
+  都算作繁忙。连接池的排空（I15）现在也从 `Pick` 计到 `Done`，所以连接池关闭前会等待流式 body。访问日志的
+  `upstream` 字段是所选后端的地址。
+- 测试：轮询得到 `abcabc`，3000 次选择每个恰好 1000 次；加权轮询得到 nginx 的序列和精确比例（7000 次中
+  5000/1000/1000；5000 次中 3000/2000）；最少连接在空闲后端间均分，跳过繁忙的直到其他追上，并让在途请求数按权重
+  2:1 分布；每种策略在 `-race` 下由 8 个 goroutine 并发选择；`AllocsPerRun` 确认 `Pick` 没有分配。通过连接池时，
+  权重 3:1 让 40 个请求分为 30 和 10，`least_conn` 下持有慢请求的地址在接下来 20 个请求中一个也不分到。`config`
+  测试新增的检查。`BenchmarkPick`（14 个 goroutine，Apple M3 Max）：轮询 52 ns，加权 107 ns，最少连接 67 ns，
+  零分配。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 权重是 `addresses` 旁边的一个列表（与 Caddy 一样），而不是用对象替换地址字符串，这样 `addresses` 保持 I14 时
+  的简单形式。
+- 加权最少连接顺带实现了，所以 `least_conn` 也接受权重，与 nginx 一样。
 
 ## 给后续迭代的说明
 

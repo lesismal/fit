@@ -207,6 +207,17 @@ func TestValidate(t *testing.T) {
 				`4:73: upstreams[2].addresses[5]: "a:70000" has no valid port`,
 			},
 		},
+		{
+			name: "upstream weights",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "upstreams": [
+  {"name": "u", "addresses": ["a:1", "b:1"], "weights": [1]},
+  {"name": "v", "addresses": ["a:1"], "weights": [2], "load_balancing": "round_robin"}
+]}`,
+			want: []string{
+				`2:57: upstreams[0].weights: 1 weights for 2 addresses; give one weight for each address`,
+				`3:73: upstreams[1].load_balancing: round_robin takes no weights; use weighted_round_robin or least_conn`,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

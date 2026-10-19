@@ -57,7 +57,10 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	out := p.outgoing(c)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	out = out.WithContext(ctx)
-	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts()}
+	// The backend is held until the exchange is over, body and all, so that
+	// least_conn counts a long download as busy for as long as it lasts.
+	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
+		pool: p.pool, backend: p.pool.Pick()}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -68,7 +71,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 
 	r := c.Request
 	if c.RequestBody() == nil && len(r.Trailer) == 0 {
-		p.pool.Do(out, x.onResponse)
+		p.pool.Send(x.backend, out, x.onResponse)
 		return
 	}
 	// A body still arriving, or one that came with trailers, which only a
@@ -100,11 +103,11 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	if c.RequestBody() == nil {
 		// Whole, but with trailers.
 		_, _ = body.Write(c.Body())
-		p.pool.Do(out, x.onResponse)
+		p.pool.Send(x.backend, out, x.onResponse)
 		endBody()
 		return
 	}
-	p.pool.Do(out, x.onResponse)
+	p.pool.Send(x.backend, out, x.onResponse)
 	c.OnBody(func(data []byte, fin bool, err error) {
 		switch {
 		case err != nil:
@@ -138,6 +141,8 @@ type exchange struct {
 	cancel   context.CancelCauseFunc
 	start    time.Time
 	timeouts upstream.Timeouts
+	pool     *upstream.Pool
+	backend  *upstream.Backend
 	// timer is the response header timeout's, then the idle timeout's.
 	timer atomic.Pointer[time.Timer]
 
@@ -154,6 +159,7 @@ func (x *exchange) release() {
 			t.Stop()
 		}
 		x.cancel(nil)
+		x.pool.Done(x.backend)
 		x.c.Release()
 	}
 }
@@ -163,8 +169,7 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		t.Stop()
 	}
 	if e := observe.EntryOf(x.c.Request); e != nil {
-		// Pool.Do set the address before sending.
-		e.Upstream, e.UpstreamDuration = x.out.URL.Host, time.Since(x.start)
+		e.Upstream, e.UpstreamDuration = x.backend.Address, time.Since(x.start)
 	}
 	if err != nil {
 		x.fail(err)

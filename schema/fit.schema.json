@@ -128,6 +128,15 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "load_balancing": {
+          "description": "How requests are spread over the addresses: in turn, in turn by weight (smoothly, as nginx does), or to the address with the fewest requests under way for its weight. round_robin when left out, or weighted_round_robin when weights are given.",
+          "enum": [
+            "round_robin",
+            "weighted_round_robin",
+            "least_conn"
+          ],
+          "type": "string"
+        },
         "max_conns": {
           "description": "The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out.",
           "minimum": 0,
@@ -151,6 +160,15 @@
           "description": "How long the upstream may go silent in the middle of a response body; 60s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "weights": {
+          "description": "Each address's weight, in the order of addresses: its share of requests under weighted_round_robin, and how many requests it takes to be as busy as an address of weight 1 under least_conn. 1 each when left out.",
+          "items": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": "array"
         }
       },
       "required": [

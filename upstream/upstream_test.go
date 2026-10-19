@@ -378,3 +378,50 @@ func TestNoEngine(t *testing.T) {
 		t.Fatalf("name %q, addresses %v", p.Name(), p.Addresses())
 	}
 }
+
+func TestPolicies(t *testing.T) {
+	a, b := newBackend(t, hello("a")), newBackend(t, hello("b"))
+	p := newPool(t, `{"addresses": [%s], "weights": [3, 1]}`, a, b)
+	counts := map[string]int{}
+	for range 40 {
+		got := do(t, p, "/")
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		counts[got.body[:1]]++
+	}
+	if counts["a"] != 30 || counts["b"] != 10 {
+		t.Fatalf("weights 3 and 1 over 40 requests: %v", counts)
+	}
+	for _, bk := range p.Backends() {
+		if bk.Active() != 0 {
+			t.Fatalf("%s still has %d under way", bk.Address, bk.Active())
+		}
+	}
+
+	// least_conn sends new requests away from an address that holds some.
+	release := make(chan struct{})
+	slow := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		<-release
+		_, _ = io.WriteString(w, "s")
+	})
+	fast := newBackend(t, hello("f"))
+	p = newPool(t, `{"addresses": [%s], "load_balancing": "least_conn"}`, slow, fast)
+	held := []<-chan result{goDo(t, p, "/"), goDo(t, p, "/")} // one to each, both idle
+	deadline := time.Now().Add(5 * time.Second)
+	for p.Backends()[0].Active() != 1 || p.Backends()[1].Active() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("under way: %d and %d", p.Backends()[0].Active(), p.Backends()[1].Active())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for range 20 {
+		if got := do(t, p, "/"); got.err != nil || got.body[:1] != "f" {
+			t.Fatalf("with the slow address busy: %+v", got)
+		}
+	}
+	close(release)
+	for _, ch := range held {
+		<-ch
+	}
+}
