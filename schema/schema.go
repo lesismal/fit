@@ -51,6 +51,10 @@ var (
 	moduleRefType = reflect.TypeFor[config.ModuleRef]()
 )
 
+// durationPattern is what time.ParseDuration takes, without a sign, since a
+// config's durations may not be negative.
+const durationPattern = `^\+?(0|(([0-9]+(\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$`
+
 func ref(name string) object { return object{"$ref": "#/$defs/" + name} }
 
 // typeSchema returns the schema of a value of type t; f is the struct field
@@ -59,6 +63,8 @@ func (g *generator) typeSchema(t reflect.Type, f *config.Field) object {
 	switch {
 	case t == valueType:
 		return object{}
+	case t == config.DurationType:
+		return object{"type": "string", "pattern": durationPattern}
 	case t == moduleRefType:
 		if f == nil || f.Module == "" {
 			panic(fmt.Sprintf("schema: a ModuleRef needs a module tag naming its namespace (%v)", f))

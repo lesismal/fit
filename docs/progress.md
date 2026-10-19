@@ -11,23 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11 and I12 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12 and I14 done |
 | fib | `github.com/lesismal/fib v1.2.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS, no proxying yet; no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS, no proxying yet (the upstream pool is built, the proxy handler is I15); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I14, upstream pool v1**, then I15 (which needs I11 and I14). I09, I13, I21
-and I22 are also ready to start, unless another session has taken them; any of them can run in
-parallel with I14.
+**Next iteration: I15, reverse proxy I**, which I11 and I14 unblocked. I09, I13, I19, I21 and
+I22 are also ready to start, unless another session has taken them; any of them can run in
+parallel with I15.
 
 To continue, start a session with:
 
-> Implement iteration I14 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I15 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -37,13 +37,14 @@ To continue, start a session with:
 | Package | Contents |
 | --- | --- |
 | `cmd/fit` | the CLI: `run`, `validate`, `schema`, `version`, `help` |
-| `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; semantic checks |
+| `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner` |
 | `handler/respond` | the `respond` handler |
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile` from config to an immutable `Graph` with a router per listener; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; graceful shutdown |
+| `upstream` | `Config` for an upstream (addresses, connection limits, timeouts) and `Pool`, which sends requests over HTTP/1.1 through fib's asynchronous client |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
@@ -353,6 +354,48 @@ Differences from the plan:
 - Any `..` segment is refused with 400, even one that would stay inside the root, as nginx
   refuses a path that climbs above the root; symbolic links are followed wherever they lead, as
   nginx and Caddy do by default.
+
+### I14 Upstream pool v1 (HTTP/1.1) — done
+
+- `config.Duration`: a length of time written as a string `time.ParseDuration` takes (`"10s"`,
+  `"1m30s"`), never negative. The decoder and the schema know it as they know `Value`; the schema
+  gives it a pattern, which a test checks against the decoder.
+- Package `upstream`: `Config` has `addresses` (required, `host:port` each), `max_conns` (per
+  address, no limit by default), `max_idle_conns` (per address, 32 by default, 0 keeps none),
+  `idle_timeout` (60s) and `connect_timeout` (10s). `Config.Check` refuses an empty list, a URL
+  (with a hint), a missing host or port, a port out of range and a repeated address, each with its
+  path and position.
+- `New(engine, config)` makes a `Pool` around a `fibhttp.Client` on a running engine, with the
+  limits mapped onto `MaxConnsPerHost`, `MaxIdleConnsPerHost`, `IdleConnTimeout` and
+  `DialTimeout`, and no overall `Timeout` (I17). fib's client already pools per `host:port`: it
+  reuses keep-alive connections, queues requests past the cap, keeps some idle and closes them on
+  a timer, so the pool adds the config, the defaults and the choice of address. `Pool.Do` takes the
+  addresses in turn (an atomic counter, no lock), sets the request URL's scheme and host, leaves
+  its `Host` alone, and hands it to the client, whose callback gets the response or the error.
+  `Close` closes the idle connections and fails the waiting requests.
+- Tests, against `httptest` backends that count their connections: 20 requests in turn over one
+  connection; `max_idle_conns: 0` opens one per request; with `max_conns: 2` and two requests held
+  by the backend, six more wait, no third connection opens, and all eight finish with at most two
+  connections and two requests in flight; `idle_timeout: "100ms"` closes the idle connection and
+  the next request opens a new one; `Close` closes the idle connection and refuses requests; two
+  addresses take five of ten requests each over one connection each; a refused connect and a
+  connect to TEST-NET-1 with `connect_timeout: "200ms"` fail promptly; and every config error with
+  its message and position. `config` and `schema` test `Duration`. Ten runs of the package under
+  `-race` pass; `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The upstream config is not in the config file yet: `upstream.Config` is a type the decoder
+  takes, ready for I15 to place, either as a top-level `upstreams` list named by routes (as
+  nginx's `upstream` blocks and Traefik's services are) or inline in the proxy's params (as
+  Caddy's are). The schema is unchanged until then.
+- `New` takes the engine to dial through. Where it comes from is I15's to settle: the listener
+  creates the engine after the graph is compiled, so either the graph's pools are made once the
+  engine exists, or a client engine of its own serves them. Sharing the server's engine keeps a
+  proxied request on the event loops it arrived on, as nginx does.
+- The pool spreads requests over several addresses in turn already, since one address per
+  upstream would make `addresses` a list of one; I19 replaces that with its selection interface.
+  `module.Upstream` and `module.Service` stay provisional until then.
 
 ## Notes for later iterations
 

@@ -132,6 +132,10 @@ func (d *decoder) decode(n *node, path string, rv reflect.Value, f *Field) {
 		rv.Set(reflect.ValueOf(Value{n: n, path: path}))
 		return
 	}
+	if t == DurationType {
+		d.decodeDuration(n, path, rv)
+		return
+	}
 	if t.Kind() == reflect.Pointer {
 		if n.kind == kindNull {
 			rv.SetZero()
