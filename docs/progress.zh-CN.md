@@ -10,16 +10,17 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09、I11、I12、I14–I22 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09、I11–I22 已完成；剩 I10 和 I23 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c 和 TLS（HTTP/1.1 和 h2，按 SNI 选择证书）返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有 HTTP/3（I10）；还没有预压缩文件和回退（I13）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有 HTTP/3（I10）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I13，静态文件 II**，本会话接下来做；然后是 I10（HTTP/3）；完成这些后由 I23 结束 M1。I24、I32 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I10，HTTP/3**，这是 I23 之前的最后一个；I23 以一致性测试和基准结束 M1（基准需要压测机，见说明）。
+I24、I32 也都可以开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
@@ -36,7 +37,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
 | `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded` |
-| `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求 |
+| `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
@@ -583,6 +584,36 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 证书由 fib 的握手从 `Config.Certificates` 中选择，而不是由 fit 自己的 `GetCertificate` 选择；证书管理器（I28）
   对运行中会变化的证书需要 `GetCertificate`，静态证书应继续走这条路径。
 - 证书文件变化只在重载时重新读取；监视文件属于 I28。
+
+### I13 静态文件 II — 已完成
+
+- `static` 新增 `precompressed`（`br`、`zstd`、`gzip` 任选；默认不用）、`try_files` 和 `browse`（默认关闭）。
+- 预压缩副本：对要服务的文件，在所列编码中查找 `name.br`、`name.zst` 和 `name.gz`，按客户端 `Accept-Encoding` 的
+  q 值排序（支持通配符和 `q=0` 拒绝，相同时按配置顺序），服务磁盘上最合适的副本，带 `Content-Encoding`、原文件的
+  `Content-Type`，以及副本自己的 `ETag` 和 `Last-Modified`，所以条件请求和 Range 都针对该表示。设置了
+  `precompressed` 时，所有文件响应都带 `Vary: Accept-Encoding`。副本像文件一样按自己的路径缓存；太大无法缓存的
+  副本从磁盘读取并带 `Content-Length`。每尝试一种编码多一次 stat，与 nginx 的 `gzip_static` 多一次 open 相当。
+- `try_files` 接受带 `{path}`（请求路径）的路径，与 nginx 相同；以 `/` 结尾的表示目录，用其索引文件服务（有
+  `browse` 时列出）。第一个能解析的被服务，否则 404；在 `try_files` 下，请求目录时不带斜杠不会被重定向。
+  `["{path}", "{path}/", "/index.html"]` 可服务单页应用。每个候选路径都经过与请求路径相同的穿越检查。
+- `browse` 列出没有索引文件的目录：一个 HTML 表格，目录在前，各组按名字排序，省略点文件，带大小和修改时间；名字
+  做 HTML 转义，href 做路径转义，所以 `?`、`#`、`&`、`<` 仍然是名字的一部分。
+- Sendfile：缓存放不下的文件经 `net/http.ServeContent` 交给 fib 的 `Context.ReadFrom`，在 HTTP/1 上通过 sendfile(2)
+  发送（整个文件或一个范围），不读入内存（I12 起就是如此，现在写进了文档和代码注释）。HTTP/2 则需要分帧发送。
+- 解析现在是独立的一步（`resolve`），普通请求和 `try_files` 共用；缓存和响应头接收一个 `variant`（决定类型的名字、
+  编码、是否加 Vary）。
+- 基准：fit 现在服务压测框架的 `static`（开启 `precompressed`；没有副本的 1KiB `small.html` 会让客户端接受的每种
+  编码多一次 stat）和 `proxy` 场景，与 nginx、Caddy 一样；`bench/configs/fit/fit.json` 中的上游保留 4096 个空闲
+  连接，与其他服务器一致。配置能通过校验，本地 `fit run` 在 HTTP/1.1 和 h2c 下返回该场景的 body。压测本身在 I23
+  于压测机上运行。
+- 测试：编码协商（偏好、q 值、相同时的顺序、`*`、拒绝、缺少副本、没有 `Accept-Encoding`）、副本的不同 ETag 和
+  304、副本的 Range、从磁盘读取的副本、不设 `precompressed` 时副本是普通文件；`acceptQ`；单页应用的 `try_files`
+  （文件、带与不带斜杠的目录、客户端路由、没有索引的目录、穿越）、全部找不到、配合 `browse`；目录列表（转义、顺序、
+  点文件、上级链接、无 `browse` 时 404）；新参数的错误。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 基准场景已经接入并检查过，但没有运行：压测机再次拒绝了本会话的 ssh 密钥，所以数据在 I23 时补上。
 
 ## 给后续迭代的说明
 

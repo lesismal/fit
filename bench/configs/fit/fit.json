@@ -3,11 +3,24 @@
     {"name": "h1", "address": ":8080", "protocols": ["http/1.1"]},
     {"name": "h2c", "address": ":8081", "protocols": ["h2c"]}
   ],
+  "upstreams": [
+    {"name": "backend", "addresses": ["{{BACKEND}}"], "max_idle_conns": 4096}
+  ],
   "routes": [
     {
       "name": "fixed",
       "match": {"path": ["/fixed"]},
       "handler": {"module": "respond", "params": {"body": "hello, world", "headers": {"Content-Type": "text/plain"}}}
+    },
+    {
+      "name": "static",
+      "match": {"path": ["/static/*"]},
+      "handler": {"module": "static", "params": {"root": "/srv/www", "precompressed": ["br", "zstd", "gzip"]}}
+    },
+    {
+      "name": "proxy",
+      "match": {"path": ["/proxy"]},
+      "handler": {"module": "proxy", "params": {"upstream": "backend"}}
     }
   ]
 }

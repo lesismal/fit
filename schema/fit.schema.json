@@ -364,6 +364,10 @@
     "http.handlers.static": {
       "additionalProperties": false,
       "properties": {
+        "browse": {
+          "description": "List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out.",
+          "type": "boolean"
+        },
         "index": {
           "description": "The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for [].",
           "items": {
@@ -381,6 +385,18 @@
           "minimum": 0,
           "type": "integer"
         },
+        "precompressed": {
+          "description": "Encodings whose compressed twins, name.br, name.zst and name.gz, are served in place of a file to a client that accepts them: the one it prefers by Accept-Encoding, and among equals the first listed. None when left out.",
+          "items": {
+            "enum": [
+              "br",
+              "zstd",
+              "gzip"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
         "root": {
           "description": "The directory files are served from.",
           "type": "string"
@@ -388,6 +404,13 @@
         "strip_prefix": {
           "description": "A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404.",
           "type": "string"
+        },
+        "try_files": {
+          "description": "Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

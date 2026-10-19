@@ -111,7 +111,7 @@ Status: `todo`, `doing` or `done`.
 | I10 | HTTP/3 entry | I09 | todo |
 | I11 | Router v1: host and path | I06 | done |
 | I12 | Static files I | I11 | done |
-| I13 | Static files II | I12 | todo |
+| I13 | Static files II | I12 | done |
 | I14 | Upstream pool v1 (HTTP/1.1) | I05 | done |
 | I15 | Reverse proxy I: forwarding and headers | I11, I14 | done |
 | I16 | Reverse proxy II: streaming and backpressure | I15 | done |

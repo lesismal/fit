@@ -11,18 +11,19 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09, I11, I12, I14–I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09, I11–I22 done; I10 and I23 left |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c and TLS (HTTP/1.1 and h2, certificates chosen by SNI), writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME or certificate management beyond files (I28–I31); no HTTP/3 (I10); no precompressed files or fallbacks (I13); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no ACME or certificate management beyond files (I28–I31); no HTTP/3 (I10); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I13, static files II**, being done next in this session; then I10 (HTTP/3);
-with those, I23 closes M1. I24 and I32 are also ready to start, unless another session has
+**Next iteration: I10, HTTP/3**, the last before I23, which closes M1 with conformance runs and
+benchmarks (the benchmarks need the benchmark host; see the notes). I24 and I32 are also ready to
+start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
 taken them.
 
 To continue, start a session with:
@@ -41,7 +42,7 @@ To continue, start a session with:
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list |
-| `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests |
+| `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
@@ -738,6 +739,48 @@ Differences from the plan:
   certificates that change while the listener runs, and should keep the static ones on this path.
 - A listener whose certificate files change is only re-read on reload; watching the files is
   I28's.
+
+### I13 Static files II — done
+
+- `static` gains `precompressed` (any of `br`, `zstd`, `gzip`; none by default), `try_files` and
+  `browse` (off by default).
+- Precompressed twins: for a file the handler would serve, it looks for `name.br`, `name.zst` and
+  `name.gz`, in that order of preference among the encodings listed, ranked by the client's
+  `Accept-Encoding` q values (wildcards and `q=0` refusals honoured, ties to the order listed), and
+  serves the best twin on disk with `Content-Encoding`, the original's `Content-Type`, and its own
+  `ETag` and `Last-Modified`, so conditions and ranges apply to that representation. With
+  `precompressed` set, every file response carries `Vary: Accept-Encoding`. Twins are cached like
+  files, by their own path; a twin too large to keep comes from disk with its `Content-Length`. It
+  costs a stat per encoding tried, as nginx's `gzip_static` costs an open.
+- `try_files` takes paths with `{path}` for the request's path, as nginx's does; one ending in `/`
+  is a directory, served by its index file (or listed, with `browse`). The first that resolves is
+  served, else 404; a directory asked for without its slash is not redirected under `try_files`.
+  `["{path}", "{path}/", "/index.html"]` serves a single-page app. Each candidate passes the same
+  traversal check as a request path.
+- `browse` lists a directory with no index file: an HTML table, directories first, each group by
+  name, dotfiles left out, with size and modification time; names are HTML-escaped and hrefs
+  path-escaped, so `?`, `#`, `&` and `<` stay names.
+- Sendfile: a file too large for the cache goes through `net/http.ServeContent` to fib's
+  `Context.ReadFrom`, which on HTTP/1 sends it, whole or a range, by sendfile(2) without reading it
+  into memory (since I12; now documented and in the code's comments). HTTP/2 frames it instead.
+- Resolution is now its own step (`resolve`), shared by plain requests and `try_files`, and the
+  cache and headers take a `variant` (the name the type comes from, the encoding, whether to vary).
+- Benchmarks: fit now serves the harness's `static` (with `precompressed` on, which a 1KiB
+  `small.html` with no twins exercises as a stat per encoding the client accepts) and `proxy`
+  scenarios, as nginx and Caddy do; `bench/configs/fit/fit.json` has the upstream with 4,096 idle
+  connections, as the others keep. The config validates, and a local `fit run` of it serves the
+  scenario's body over HTTP/1.1 and h2c. The harness run itself is for I23, on the benchmark host.
+- Tests: encoding negotiation (preference, q values, ties, `*`, refusals, a missing twin, no
+  `Accept-Encoding`), distinct ETags and a 304 for a twin, a range of a twin, a twin from disk, twins
+  as plain files without `precompressed`; `acceptQ`; `try_files` for a single-page app (a file, a
+  directory with and without its slash, a client route, a directory without an index, traversal),
+  with nothing found, and with `browse`; listings (escaping, order, dotfiles, the parent link, 404
+  without `browse`); the new params' errors. `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The benchmark scenario is wired and checked but not run: the benchmark host refused the session's
+  ssh key again, so the numbers come with I23.
 
 ## Notes for later iterations
 

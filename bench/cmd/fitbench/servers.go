@@ -70,9 +70,10 @@ var servers = []server{
 	},
 	{
 		name: "fit",
-		// static comes with I12, proxy with I15, TLS with I09 and WebSocket
-		// with I47: add them here, and to configs/fit/fit.json, as they land.
-		scenarios: []string{"fixed"},
+		// TLS idle connections need the harness's certificate in fit's config,
+		// and WebSocket comes with I47: add them here, and to
+		// configs/fit/fit.json, as they land.
+		scenarios: []string{"fixed", "static", "proxy"},
 		idle:      []string{"http1"},
 		mounts:    [][2]string{{"fit/fit.json", "/etc/fit/fit.json"}, {"www", "/srv/www"}},
 		cmd:       []string{"/usr/local/bin/fit", "run", "-c", "/etc/fit/fit.json"},

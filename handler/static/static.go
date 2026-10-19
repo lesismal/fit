@@ -59,10 +59,14 @@ type Static struct {
 	StripPrefix   string   `json:"strip_prefix,omitempty" doc:"A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404."`
 	MaxFileBytes  int64    `json:"max_file_bytes,omitempty" min:"0" doc:"The largest file kept in memory, in bytes; 1 MiB when left out."`
 	MaxCacheBytes int64    `json:"max_cache_bytes,omitempty" min:"0" doc:"How many bytes of files are kept in memory at most; 64 MiB when left out."`
+	Precompressed []string `json:"precompressed,omitempty" enum:"br,zstd,gzip" doc:"Encodings whose compressed twins, name.br, name.zst and name.gz, are served in place of a file to a client that accepts them: the one it prefers by Accept-Encoding, and among equals the first listed. None when left out."`
+	TryFiles      []string `json:"try_files,omitempty" doc:"Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then."`
+	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
 
-	root  string
-	index []string
-	cache cache
+	root          string
+	index         []string
+	precompressed []encoding
+	cache         cache
 }
 
 // Provision checks the root and the index names.
@@ -86,6 +90,14 @@ func (s *Static) Provision(ctx *module.Context) error {
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)
+		}
+	}
+	for _, name := range s.Precompressed {
+		s.precompressed = append(s.precompressed, encodings[name])
+	}
+	for i, t := range s.TryFiles {
+		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
 		}
 	}
 	if s.StripPrefix != "" && !strings.HasPrefix(s.StripPrefix, "/") {
@@ -120,46 +132,106 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 		respondError(c, stdhttp.StatusBadRequest)
 		return
 	}
+	if s.TryFiles != nil {
+		s.tryFiles(c, name)
+		return
+	}
+	res := s.resolve(name)
+	switch {
+	case res.redirect:
+		redirectToDir(c, urlPath)
+	case res.status != 0:
+		respondError(c, res.status)
+	case res.listing:
+		s.list(c, urlPath, res.full)
+	default:
+		s.serveFile(c, res.name, res.full, res.info)
+	}
+}
+
+// resolved is what a request path names under the root.
+type resolved struct {
+	// name and full are the file's slash-separated path under the root and
+	// its path on disk, and info what a stat of it said.
+	name, full string
+	info       fs.FileInfo
+	// redirect says the path is a directory asked for without its slash,
+	// listing that it is one to list, and status that there is nothing to
+	// serve, and why.
+	redirect, listing bool
+	status            int
+}
+
+// resolve finds what name, a request path within the root that safePath
+// passed, names: a file; a directory's index file or listing when name ends
+// in a slash; or a redirect for a directory without one.
+func (s *Static) resolve(name string) resolved {
 	dir := name == "" || strings.HasSuffix(name, "/")
 	name = strings.TrimPrefix(path.Clean("/"+name), "/")
 	full := filepath.Join(s.root, filepath.FromSlash(name))
 	info, err := os.Stat(full)
 	if err != nil {
 		s.cache.forget(full)
-		respondError(c, statusOf(err))
-		return
+		return resolved{status: statusOf(err)}
 	}
 	if info.IsDir() {
 		if !dir {
-			redirectToDir(c, urlPath)
-			return
+			return resolved{redirect: true}
 		}
 		for _, index := range s.index {
 			indexFull := filepath.Join(full, index)
 			if info, err = os.Stat(indexFull); err == nil && info.Mode().IsRegular() {
-				s.serveFile(c, path.Join(name, index), indexFull, info)
-				return
+				return resolved{name: path.Join(name, index), full: indexFull, info: info}
 			}
 		}
-		respondError(c, stdhttp.StatusNotFound)
-		return
+		if s.Browse {
+			return resolved{full: full, listing: true}
+		}
+		return resolved{status: stdhttp.StatusNotFound}
 	}
 	if dir || !info.Mode().IsRegular() {
 		// A file asked for as a directory, or a device, a pipe or a socket.
-		respondError(c, stdhttp.StatusNotFound)
+		return resolved{status: stdhttp.StatusNotFound}
+	}
+	return resolved{name: name, full: full, info: info}
+}
+
+// tryFiles serves the first of try_files that names something to serve.
+func (s *Static) tryFiles(c *fibhttp.Context, name string) {
+	requested := "/" + strings.TrimPrefix(name, "/")
+	for _, t := range s.TryFiles {
+		candidate := strings.ReplaceAll(t, "{path}", requested)
+		if !safePath(candidate) {
+			continue
+		}
+		res := s.resolve(candidate)
+		switch {
+		case res.redirect, res.status != 0:
+			continue
+		case res.listing:
+			s.list(c, path.Clean(candidate)+"/", res.full)
+		default:
+			s.serveFile(c, res.name, res.full, res.info)
+		}
 		return
 	}
-	s.serveFile(c, name, full, info)
+	respondError(c, stdhttp.StatusNotFound)
 }
 
 // serveFile serves the regular file at full, whose slash-separated name
-// under the root is name, as info describes it.
+// under the root is name, as info describes it, or the compressed twin of it
+// the client prefers.
 func (s *Static) serveFile(c *fibhttp.Context, name, full string, info fs.FileInfo) {
 	r := c.Request
-	e := s.cache.get(full, info)
+	v := variant{name: name, vary: len(s.precompressed) > 0}
+	if v.vary {
+		if enc, twinFull, twinInfo := s.twin(r, full); enc != nil {
+			v.encoding, full, info = enc.name, twinFull, twinInfo
+		}
+	}
+	e := s.cache.get(full, info, v)
 	if e == nil {
-		served := s.serveFromDisk(c, name, full)
-		if !served {
+		if !s.serveFromDisk(c, v, full) {
 			respondError(c, stdhttp.StatusNotFound)
 		}
 		return
@@ -174,9 +246,11 @@ func (s *Static) serveFile(c *fibhttp.Context, name, full string, info fs.FileIn
 	stdhttp.ServeContent(c, r, name, e.modTime, bytes.NewReader(e.data))
 }
 
-// serveFromDisk serves a file the cache does not keep. It reports false when
-// the file cannot be opened.
-func (s *Static) serveFromDisk(c *fibhttp.Context, name, full string) bool {
+// serveFromDisk serves a file the cache does not keep, as v describes it. It
+// reports false when the file cannot be opened. On HTTP/1, ServeContent
+// hands the file to fib's Context.ReadFrom, which sends it by sendfile(2)
+// where the platform has it, without reading it into memory.
+func (s *Static) serveFromDisk(c *fibhttp.Context, v variant, full string) bool {
 	f, err := os.Open(full)
 	if err != nil {
 		return false
@@ -187,12 +261,13 @@ func (s *Static) serveFromDisk(c *fibhttp.Context, name, full string) bool {
 		return false
 	}
 	h := c.Header()
-	copyHeader(h, fileHeader(name, info, nil))
-	if h.Get("Content-Type") == "" {
-		// ServeContent sniffs the first bytes for a name with no known type.
-		delete(h, "Content-Type")
+	copyHeader(h, fileHeader(v, info, nil))
+	if v.encoding != "" && c.Request.Header.Get("Range") == "" {
+		// ServeContent leaves Content-Length out once Content-Encoding is
+		// set; a whole file knows its length.
+		h.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	}
-	stdhttp.ServeContent(c, c.Request, name, info.ModTime(), f)
+	stdhttp.ServeContent(c, c.Request, v.name, info.ModTime(), f)
 	return true
 }
 
@@ -275,14 +350,32 @@ func etag(info fs.FileInfo) string {
 	return `"` + strconv.FormatInt(info.ModTime().UnixNano(), 16) + "-" + strconv.FormatInt(info.Size(), 16) + `"`
 }
 
+// variant is how a file goes out: as the file name names, or as its twin
+// compressed with encoding, and with Vary when the handler serves twins.
+type variant struct {
+	name     string
+	encoding string
+	vary     bool
+}
+
 // fileHeader is what a response carrying the file says of it. data is its
 // contents, to sniff its type from when its extension says none, or nil when
-// they are not at hand, which leaves Content-Type out.
-func fileHeader(name string, info fs.FileInfo, data []byte) stdhttp.Header {
-	h := make(stdhttp.Header, 4)
-	contentType := mime.TypeByExtension(filepath.Ext(name))
-	if contentType == "" && data != nil {
+// they are not at hand, which leaves Content-Type out. A twin has its
+// original's type, from the original's name.
+func fileHeader(v variant, info fs.FileInfo, data []byte) stdhttp.Header {
+	h := make(stdhttp.Header, 6)
+	contentType := mime.TypeByExtension(filepath.Ext(v.name))
+	if contentType == "" && data != nil && v.encoding == "" {
 		contentType = stdhttp.DetectContentType(data)
+	}
+	if contentType == "" && v.encoding != "" {
+		contentType = "application/octet-stream"
+	}
+	if v.encoding != "" {
+		h["Content-Encoding"] = []string{v.encoding}
+	}
+	if v.vary {
+		h["Vary"] = []string{"Accept-Encoding"}
 	}
 	if contentType != "" {
 		h["Content-Type"] = []string{contentType}
@@ -319,7 +412,7 @@ func (e *entry) current(info fs.FileInfo) bool {
 // get returns the cached file at full, which info describes, reading it when
 // the cache holds nothing current. It returns nil for a file it does not
 // keep, too large or past the cache's limit, or one it cannot read.
-func (c *cache) get(full string, info fs.FileInfo) *entry {
+func (c *cache) get(full string, info fs.FileInfo, v variant) *entry {
 	if info.Size() > c.maxFile {
 		return nil
 	}
@@ -336,7 +429,7 @@ func (c *cache) get(full string, info fs.FileInfo) *entry {
 		c.forget(full)
 		return nil
 	}
-	e = &entry{data: data, header: fileHeader(full, info, data), modTime: info.ModTime(), size: info.Size()}
+	e = &entry{data: data, header: fileHeader(v, info, data), modTime: info.ModTime(), size: info.Size()}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	old := c.entries[full]
