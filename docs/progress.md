@@ -11,22 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15 and I21 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16 and I21 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS; proxied bodies are held whole, with no timeouts yet (I16, I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS; no proxy timeouts or cancellation yet (I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I16, reverse proxy II (streaming and backpressure)**, which I15 unblocked. I09,
-I13, I19 and I22 are also ready to start, unless another session has taken them.
+**Next iteration: I22, reload on SIGHUP**, being done next in this session; then I17, reverse
+proxy III (timeouts, cancellation, errors), which I16 unblocked. I09, I13 and I19 are also ready
+to start, unless another session has taken them.
 
 To continue, start a session with:
 
-> Implement iteration I16 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I17 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -478,6 +479,50 @@ Differences from the plan:
 - One log for every listener; per-listener or per-route logs, sampling and other formats can come
   when someone needs them. Under heavy contention the one lock shows (416 ns a line at 14
   goroutines); per-worker buffers are the fix if I23's numbers call for it.
+
+### I16 Reverse proxy II: streaming and backpressure — done
+
+- fit moved to fib v1.3.0 first (its own commit), which has what forwarding without waiting needs:
+  `Context.HoldBody`, `BodyWriter` with `OnDrain`, and a client that sends a pushed body as the
+  connection has room. fib's reference proxy, `fib-examples/gateway`, was the model.
+- Listeners set `StreamRequestBody` with a threshold of 64KB (`listener.StreamThreshold`), and
+  upstream pools `StreamResponseBody` with the same (`upstream.StreamThreshold`): smaller bodies
+  still arrive whole and take I15's path, a single `WriteResponse`.
+- Upload: a request whose body streams (`c.RequestBody() != nil`) goes upstream with a
+  `fibhttp.BodyWriter` as its body and the client's `ContentLength` (-1 for chunked). The body comes
+  through `c.OnBody`; each piece is written to the `BodyWriter`, which copies it and returns; past
+  its limit (256KB) the callback holds the body with `c.HoldBody(true)`, which stops reading the
+  client once 256KB wait there, and `OnDrain` resumes it when the upstream has taken the backlog.
+  Nothing waits. `Content-Length` and `Expect` are no longer copied into the upstream request's
+  header: the length is the request's own, and fib answers `100 Continue` itself.
+- Download: a response whose body streams is taken with `resp.OnBody`; the first piece sends the
+  status and header (with the upstream's `Content-Length` when it had one, so the client gets
+  chunked only when the upstream sent it so), each piece is written with `c.Write` and flushed, and
+  the last one finishes the response. The callback runs on the upstream engine's worker; when the
+  client is slower, `Write` waits once 64KB are queued for it (HTTP/1) or the stream window is spent
+  (HTTP/2), and while it waits the upstream connection is not read, so the upstream is slowed by
+  TCP or by its own stream window. This is fib's intended pacing ("what holds the connection back
+  is fn itself"), and it waits on the upstream engine's pool, never the listeners'. An upstream that
+  fails mid-body closes an HTTP/1 client connection, so the truncation shows; one that fails before
+  the first piece gets 502. A client that goes away mid-body ends the upstream response.
+- Tests (`handler/proxy/stream_test.go`): 256MB down and 256MB up, each over HTTP/1.1 and h2c, with
+  a `Content-Length` and chunked, through a real listener: downloads to a client that pauses 20ms
+  after every 4MB, uploads to an upstream that does the same. Every byte is checked against a
+  pattern with a prime period, so a lost, repeated or moved byte shows; lengths and framing are
+  checked. The live heap (`/gc/heap/live:bytes`, sampled every 10ms) rose at most 10MB in any case,
+  against a bound of 16MB; at 1GB it rose the same, so memory does not grow with the body. Under
+  `-race` the tests move 64MB. `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The plan's `HoldReads` link is `HoldBody` and `BodyWriter.OnDrain` for the upload, which hold the
+  client's reads through fib, and fib's own pacing of `Context.Write` for the download, which holds
+  the upstream's. fit never calls `HoldReads` itself.
+- The download direction waits in `Context.Write` on a worker of the upstream engine. fib v1.3.0
+  offers no write on a `Context` that reports a full queue instead of waiting; if I23's numbers
+  show many slow clients tying up the upstream engine's pool, that is the API to ask fib for.
+- An HTTP/2 client whose upstream fails mid-body gets its stream finished rather than reset; I17
+  handles failures properly.
 
 ## Notes for later iterations
 

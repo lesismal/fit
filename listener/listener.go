@@ -98,9 +98,18 @@ func checkFree(address string) error {
 	return ln.Close()
 }
 
+// StreamThreshold is the body size past which a request body streams to its
+// handler rather than being read whole first.
+const StreamThreshold = 64 << 10
+
 // httpConfig is the fib HTTP config for a listener serving protocols.
 func httpConfig(protocols []string) fibhttp.Config {
 	c := fibhttp.DefaultConfig()
+	// A body past the threshold reaches its handler as it arrives, so that
+	// the proxy can pass an upload on without holding it whole; smaller ones
+	// arrive whole, as most do.
+	c.StreamRequestBody = true
+	c.StreamRequestBodyThreshold = StreamThreshold
 	h1 := slices.Contains(protocols, config.ProtocolHTTP1)
 	h2c := slices.Contains(protocols, config.ProtocolH2C)
 	switch {

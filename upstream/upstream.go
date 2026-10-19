@@ -31,6 +31,9 @@ const (
 	DefaultMaxIdleConns   = 32
 	DefaultIdleTimeout    = 60 * time.Second
 	DefaultConnectTimeout = 10 * time.Second
+	// StreamThreshold is the response body size past which a body streams
+	// to the callback rather than arriving whole.
+	StreamThreshold = 64 << 10
 )
 
 // ErrNoEngine is what a request through a pool made without an engine gets.
@@ -64,6 +67,10 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 	// A request is bounded by the caller's context; the proxy's timeouts
 	// come with I17.
 	cc.Timeout = 0
+	// A body past the threshold is handed over as it arrives, paced by its
+	// reader, rather than buffered whole; smaller ones arrive whole.
+	cc.StreamResponseBody = true
+	cc.StreamResponseBodyThreshold = StreamThreshold
 	cc.MaxConnsPerHost = c.MaxConns
 	cc.MaxIdleConnsPerHost = DefaultMaxIdleConns
 	if c.MaxIdleConns != nil {

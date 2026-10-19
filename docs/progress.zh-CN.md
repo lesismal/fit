@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I21 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I21 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS；代理的 body 整体缓冲，也还没有超时（I16、I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | 还没有 TLS；代理还没有超时和取消（I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I16，反向代理 II（流式与背压）**，I15 完成后它可以开始了。I09、I13、I19、I22 也都可以开始（除非
-已有别的会话在做）。
+**下一个迭代：I22，SIGHUP 重载**，本会话接下来做；然后是 I17，反向代理 III（超时、取消、错误），I16 完成后它
+可以开始了。I09、I13、I19 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I16。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I17。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -391,6 +391,38 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   SIGHUP 是否为日志轮转重新打开文件。
 - 所有 listener 共用一个日志；按 listener 或路由分开的日志、采样和其他格式，等有需要时再加。高并发竞争下单锁的
   开销可见（14 个 goroutine 时每行 416 ns）；如果 I23 的数据需要，改成每 worker 一个缓冲区。
+
+### I16 反向代理 II：流式转发与背压 — 已完成
+
+- fit 先升级到了 fib v1.3.0（单独一个提交），其中有无等待转发所需的一切：`Context.HoldBody`、带 `OnDrain` 的
+  `BodyWriter`，以及在连接有空间时发送推送式 body 的客户端。以 fib 的参考代理 `fib-examples/gateway` 为蓝本。
+- listener 设置 `StreamRequestBody`，阈值 64KB（`listener.StreamThreshold`）；上游连接池设置
+  `StreamResponseBody`，阈值相同（`upstream.StreamThreshold`）：更小的 body 仍然整体到达，走 I15 的路径，一次
+  `WriteResponse`。
+- 上传：body 以流方式到达的请求（`c.RequestBody() != nil`）以 `fibhttp.BodyWriter` 作为 body、带上客户端的
+  `ContentLength`（分块时为 -1）发往上游。body 通过 `c.OnBody` 到来；每一段写入 `BodyWriter`，它复制后立即返回；
+  超过其上限（256KB）时回调用 `c.HoldBody(true)` 挂起 body——那里积压 256KB 后就停止读取客户端——`OnDrain` 在
+  上游取走积压后恢复。没有任何等待。上游请求头中不再复制 `Content-Length` 和 `Expect`：长度用请求自己的，
+  `100 Continue` 由 fib 自己应答。
+- 下载：body 以流方式到达的响应用 `resp.OnBody` 接收；第一段时发出状态码和头（上游有 `Content-Length` 时带上，
+  这样只有上游本身分块时客户端才收到分块），每段用 `c.Write` 写出并 flush，最后一段结束响应。回调运行在上游
+  engine 的 worker 上；客户端更慢时，`Write` 在排队达到 64KB（HTTP/1）或流窗口用尽（HTTP/2）时等待，等待期间
+  不读上游连接，于是上游被 TCP 或它自己的流窗口减速。这是 fib 设计的节流方式（“what holds the connection back
+  is fn itself”），等待发生在上游 engine 的池上，而不是 listener 的。上游在 body 中途失败时关闭 HTTP/1 客户端
+  连接，让截断可见；在第一段之前失败则返回 502。客户端在 body 中途离开会结束上游响应。
+- 测试（`handler/proxy/stream_test.go`）：通过真实 listener，在 HTTP/1.1 和 h2c 下，带 `Content-Length` 和
+  分块两种方式，各下载 256MB、上传 256MB：下载的客户端每 4MB 暂停 20ms，上传的上游同样如此。每个字节都对照
+  一个周期为素数的模式检查，丢失、重复或错位都能发现；长度和分帧也被检查。存活堆（`/gc/heap/live:bytes`，
+  每 10ms 采样）在任何情况下最多上涨 10MB，上限为 16MB；传 1GB 时涨幅相同，说明内存不随 body 增长。在 `-race`
+  下测试传 64MB。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 计划中的 `HoldReads` 联动，在上传方向是 `HoldBody` 和 `BodyWriter.OnDrain`（通过 fib 挂起客户端的读），在
+  下载方向是 fib 对 `Context.Write` 的节流（挂起上游的读）。fit 自己从不调用 `HoldReads`。
+- 下载方向在上游 engine 的 worker 上于 `Context.Write` 中等待。fib v1.3.0 没有在队列满时返回而不是等待的
+  `Context` 写接口；如果 I23 的数据显示大量慢客户端占住了上游 engine 的池，就该向 fib 要这个接口。
+- 上游在 body 中途失败时，HTTP/2 客户端的流会被正常结束而不是被重置；I17 会正确处理失败。
 
 ## 给后续迭代的说明
 

@@ -114,7 +114,7 @@ Status: `todo`, `doing` or `done`.
 | I13 | Static files II | I12 | todo |
 | I14 | Upstream pool v1 (HTTP/1.1) | I05 | done |
 | I15 | Reverse proxy I: forwarding and headers | I11, I14 | done |
-| I16 | Reverse proxy II: streaming and backpressure | I15 | todo |
+| I16 | Reverse proxy II: streaming and backpressure | I15 | done |
 | I17 | Reverse proxy III: timeouts, cancellation, errors | I16 | todo |
 | I18 | HTTP/2 upstreams | I17 | todo |
 | I19 | Load balancing v1 | I14 | todo |
