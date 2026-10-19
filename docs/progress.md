@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R04, R07a and R07b are done; R05, R06 and R07c, which use fib v1.4.0, are next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R04, R06, R07a and R07b are done; R05 waits for A14 in fib, and R07c is next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.4.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -32,8 +32,8 @@ M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollb
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
-hot path work that needs nothing from fib, and R03 and R04: fib v1.4.0 has the APIs, the proxy's downloads
-use them, and R05, R06 and R07c are next.
+hot path work that needs nothing from fib, and R03, R04 and R06: fib v1.4.0 has the APIs, the proxy's
+downloads and the limits use them. R05 waits for A14, a fib fix its tests need, and R07c is next.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -1381,6 +1381,34 @@ Differences from the plan:
   on it, which the new test shows.
 - No benchmark host run: the harness's proxy scenario answers with a small body that arrives
   whole, which goes out in one `WriteResponse`, a path R04 leaves alone.
+
+### R06 Connection and queue limits through fib — done
+
+- `limits.max_conns` (100,000 when left out) is fib's `Config.MaxConns` on the listeners' engine: a
+  connection past it is closed as it is accepted, and counted in `Stats().ConnsRefused`. Like
+  `max_pending_bytes`, it is the engine's, set at start; a reload does not change it.
+- An upstream's `max_pending` is fib's `ClientConfig.MaxPendingPerHost`, and `upstream.ErrBusy` is
+  fib's `ErrTooManyPending`, which the proxy answers with 503 and which counts against no
+  backend. R02's count of requests in flight, and its guess of 100 streams per HTTP/2 connection,
+  are gone: `Pool.Pick` always picks.
+- The benchmark config sets `max_conns` to 1,000,000 for the 100k idle connection runs;
+  `examples/proxy.json` shows the default.
+- Tests: `listener` `TestConnLimit` (`max_conns` 3 across two listeners: a fourth connection is
+  closed unanswered and counted, and one opened after another closes is served); `upstream`
+  `TestDefaultMaxConns` and `handler/proxy` `TestMaxPending` reach fib's cap. `go vet ./...` and
+  `go test -race ./...` pass.
+
+Differences from the plan:
+
+- `max_pending` is per address, not per upstream: fib's cap is per host. Its doc says so.
+- fib's cap also counts the requests waiting for a connection that is being dialed for them, so a
+  cold burst past `max_pending` is refused while the connections `max_conns` allows are still
+  opening: 179 of 256 opened in `TestDefaultMaxConns`'s burst. Asked of fib as
+  [A15](fib-api-requests.md#a15-maxpendingperhost-not-to-count-requests-whose-connection-is-being-dialed);
+  until then the test opens its connections in waves of `max_pending`, and the doc of
+  `max_pending` says a request waiting for a connection being opened counts.
+- No benchmark: neither limit is reached in the harness's scenarios, and `Pick` lost an atomic
+  add and a compare.
 
 ## Notes for later iterations
 

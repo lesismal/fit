@@ -67,11 +67,6 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	backend := p.pool.Pick(c.Request)
-	if backend == nil {
-		// max_pending requests wait for a connection already.
-		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", unavailable)
-		return
-	}
 	ctx, cancel := context.WithCancelCause(p.drains[rand.Uint32()%drainShards].ctx)
 	out := x.base.WithContext(ctx)
 	// The backend is held until the exchange is over, body and all, so that
@@ -183,10 +178,7 @@ func trailerNames(r *stdhttp.Request) []string {
 	return names
 }
 
-var (
-	badRequest  = []byte("400 Bad Request\n")
-	unavailable = []byte("503 Service Unavailable\n")
-)
+var badRequest = []byte("400 Bad Request\n")
 
 // exchange is one proxied request, seen from the upstream's callbacks, which
 // come one at a time.
@@ -430,7 +422,8 @@ func (x *exchange) statusOf(err error) int {
 	switch {
 	case errors.Is(cause, errHeaderTimeout), errors.Is(cause, errIdleTimeout):
 		return stdhttp.StatusGatewayTimeout
-	case errors.Is(cause, errDrained):
+	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy):
+		// Swapped out, or max_pending requests wait for a connection already.
 		return stdhttp.StatusServiceUnavailable
 	case errors.As(err, &upload):
 		switch {

@@ -25,6 +25,7 @@
 | A12 | 减少每个客户端请求的定时器和 context | 部分完成，v1.4.0 | 12 | R07c |
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
 | A14 | 在没有连接的 Context 上 `Release` | P1 | 13 | R05 |
+| A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | P1 | 11 | R06 |
 
 ## 证据
 
@@ -295,3 +296,20 @@ nil 连接。
 
 **fit 如何使用。** `fibtest.ServeRequest` 改为经 `fibhttp.Serve` 运行，并等待被 retain 的响应写出，这样静态 handler 的测试
 不用改动就能覆盖它的异步路径。
+
+## A15：`MaxPendingPerHost` 不计入正在为其拨号的请求
+
+**问题。** `ClientConfig.MaxPendingPerHost` 计算主机队列中的所有请求，包括那些在等待 `MaxConnsPerHost` 允许、客户端
+正在为它们拨号的连接的请求。于是一批发往没有空闲连接的主机的新请求，在允许的连接还在建立时，超过
+`MaxPendingPerHost` 的部分就被拒绝。fit 的 `max_pending` 本意同 nginx 的 `queue`：`max_conns` 都忙之后等待的请求。
+R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这样测试的。
+
+**证据。** 在 fib v1.4.0 上，一个 `max_conns` 为 256（默认值）、`max_pending` 为 8 的上游，同时发出 256 个请求到一个
+会挂住请求的后端：只建立了 179 个连接，其余请求立即得到 `ErrTooManyPending`，而 R02 的计数能让 256 个连接都建立。
+`max_conns` 为 1、`max_pending` 为 2 时，同时向一个冷主机发出三个请求：第一个请求的连接还在拨号时，第三个就被拒绝了。
+
+**请求。** 计数时不包括正在进行的拨号所对应的请求：当 `pendingLocked(h) - h.dialing >= limit` 时才拒绝（对 HTTP/1
+而言每次拨号对应一个请求；对可能是 HTTP/2 的主机，在它应答之前一次拨号代表所有请求）。队列仍有上限：对拨号挂住的主机
+是 `MaxConnsPerHost + MaxPendingPerHost`，而 `MaxConnsPerHost` 之内的突发请求不会被拒绝。
+
+**fit 如何使用。** 不需要改动：`upstream.TestDefaultMaxConns` 恢复为同时发出 256 个请求。

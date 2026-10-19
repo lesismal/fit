@@ -42,6 +42,10 @@ type Graph struct {
 	// connections; see config.Limits. The listeners' engine takes it when it
 	// starts.
 	MaxPendingBytes int64
+	// MaxConns bounds the client connections open across the listeners;
+	// see config.Limits. The engine takes it when it starts, as it does
+	// MaxPendingBytes.
+	MaxConns int
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -113,7 +117,7 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, MaxPendingBytes: c.Limits.PendingBytes(),
+	g := &Graph{AccessLog: env.AccessLog, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
 	g.refs.Store(1)
 	var errs config.Errors

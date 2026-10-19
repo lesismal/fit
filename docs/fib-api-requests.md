@@ -26,6 +26,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A12 | Fewer timers and contexts per client request | partly, v1.4.0 | 12 | R07c |
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
 | A14 | `Release` on a Context that has no connection | P1 | 13 | R05 |
+| A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | P1 | 11 | R06 |
 
 ## Evidence
 
@@ -382,3 +383,27 @@ itself), and say in `NewStreamContext`'s doc that a nil connection is allowed.
 **How fit uses it.** `fibtest.ServeRequest` serves through `fibhttp.Serve` and waits for a
 retained response to be written, so the static handler's tests run unchanged against its
 asynchronous paths.
+
+## A15: `MaxPendingPerHost` not to count requests whose connection is being dialed
+
+**Problem.** `ClientConfig.MaxPendingPerHost` counts every request in a host's queue, those
+waiting for a connection that `MaxConnsPerHost` lets the client dial, and is dialing for them,
+included. So a burst of new requests to a host with no idle connections is refused past
+`MaxPendingPerHost` while the connections it is allowed are still opening. fit's `max_pending` is
+meant as nginx's `queue`: the requests waiting once `max_conns` are busy. R02 counted it that way,
+in fit, and `upstream.TestDefaultMaxConns` tested it.
+
+**Evidence.** With fib v1.4.0, an upstream with `max_conns` 256 (the default) and `max_pending`
+8, and 256 requests at once to a backend that holds them: 179 connections open and the rest of
+the requests get `ErrTooManyPending` at once, while R02's count let all 256 open. With
+`max_conns` 1 and `max_pending` 2, three requests at once to a cold host: the third is refused
+while the first's connection is dialing.
+
+**Request.** Leave out of the count the requests the dials under way are for: refuse when
+`pendingLocked(h) - h.dialing >= limit` (for HTTP/1, where each dial carries one request; for a
+host that may be HTTP/2, the one dial a time stands for all of them until it has answered). The
+queue stays bounded, at `MaxConnsPerHost + MaxPendingPerHost` for a host whose dials hang, and a
+burst within `MaxConnsPerHost` is not turned away.
+
+**How fit uses it.** No change: `upstream.TestDefaultMaxConns` goes back to sending its 256
+requests at once.

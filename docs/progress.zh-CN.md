@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R04、R07a、R07b 已完成；接下来是使用 fib v1.4.0 的 R05、R06 和 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R04、R06、R07a、R07b 已完成；R05 等待 fib 中的 A14，接下来是 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.4.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03、R04 也已完成：fib v1.4.0 提供了这些 API，代理的下载已经使用它们，接下来是 R05、R06 和 R07c。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03、R04、R06 也已完成：fib v1.4.0 提供了这些 API，代理的下载和这些上限已经使用它们。R05 等待它的测试需要的 fib 修复 A14，接下来是 R07c。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -1041,6 +1041,27 @@ A11–A13。
   连接，nginx 也是如此，所以在 `max_conns` 下（`TestStuckClientsPastMaxConns`）是停滞超时为其他请求腾出连接。上游是 h2c
   时，一个流可以单独暂停，不依赖停滞超时，新测试证明了这一点。
 - 没有在压测主机上跑：基准框架的代理场景返回整体到达的小响应体，用一次 `WriteResponse` 写出，R04 不改动这条路径。
+
+### R06 通过 fib 实现连接和队列上限 — 已完成
+
+- `limits.max_conns`（默认 100,000）就是 listener 引擎的 fib `Config.MaxConns`：超过它的连接在被接受时立即关闭，计入
+  `Stats().ConnsRefused`。与 `max_pending_bytes` 一样，它属于引擎，在启动时设置，重载不会改变它。
+- 上游的 `max_pending` 就是 fib 的 `ClientConfig.MaxPendingPerHost`，`upstream.ErrBusy` 就是 fib 的 `ErrTooManyPending`，
+  代理以 503 应答，且不计为后端的失败。R02 对进行中请求的计数，以及每个 HTTP/2 连接 100 个流的估计，都去掉了：
+  `Pool.Pick` 总是会选出后端。
+- 基准配置把 `max_conns` 设为 1,000,000，用于 10 万空闲连接的测试；`examples/proxy.json` 写出默认值。
+- 测试：`listener` 的 `TestConnLimit`（两个 listener 共 `max_conns` 3：第四个连接不被应答即关闭并计数，另一个关闭后新开
+  的连接能得到服务）；`upstream` 的 `TestDefaultMaxConns` 和 `handler/proxy` 的 `TestMaxPending` 触达 fib 的上限。
+  `go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- `max_pending` 按地址计算，而不是按上游：fib 的上限是按主机的。它的文档已说明。
+- fib 的上限也计入正在为其拨号的、等待连接的请求，所以冷启动时超过 `max_pending` 的突发请求，在 `max_conns` 允许的连接
+  还在建立时就被拒绝：`TestDefaultMaxConns` 的突发中 256 个只建立了 179 个。已作为
+  [A15](fib-api-requests.zh-CN.md#a15maxpendingperhost-不计入正在为其拨号的请求) 向 fib 提出；在此之前，测试按
+  `max_pending` 分批建立连接，`max_pending` 的文档也说明等待正在建立的连接的请求会被计入。
+- 没有跑基准：基准框架的场景都不会触达这两个上限，而 `Pick` 少了一次原子加法和一次比较。
 
 ## 给后续迭代的说明
 

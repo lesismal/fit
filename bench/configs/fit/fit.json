@@ -1,4 +1,5 @@
 {
+  "limits": {"max_conns": 1000000},
   "listeners": [
     {"name": "h1", "address": ":8080", "protocols": ["http/1.1"]},
     {"name": "h2c", "address": ":8081", "protocols": ["h2c"]},

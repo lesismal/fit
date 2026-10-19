@@ -124,3 +124,62 @@ func TestPendingBytesBudget(t *testing.T) {
 		t.Fatalf("the hog got %d bytes", n)
 	}
 }
+
+// TestConnLimit reaches max_conns: with three connections open across two
+// listeners, a fourth is closed as soon as it is accepted, and counted; once
+// one of the three closes, a new one is served.
+func TestConnLimit(t *testing.T) {
+	_, s := start(t, `{"listeners": [{"name": "a", "address": "127.0.0.1:0"}, {"name": "b", "address": "127.0.0.1:0"}],
+  "limits": {"max_conns": 3},
+  "routes": [{"listeners": ["a", "b"], "handler": {"module": "respond", "params": {"body": "ok"}}}]}`)
+	addrs := []string{s.Addrs()[0].Addr.String(), s.Addrs()[1].Addr.String()}
+	// get sends a request on conn and reports whether it was answered.
+	get := func(conn net.Conn) bool {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+			return false
+		}
+		buf := make([]byte, 512)
+		n, _ := conn.Read(buf)
+		return strings.HasPrefix(string(buf[:n]), "HTTP/1.1 200")
+	}
+	var open []net.Conn
+	for i := range 3 {
+		conn, err := net.Dial("tcp", addrs[i%2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if !get(conn) {
+			t.Fatalf("connection %d was not served", i)
+		}
+		open = append(open, conn)
+	}
+	extra, err := net.Dial("tcp", addrs[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extra.Close()
+	if get(extra) {
+		t.Fatal("a fourth connection was served past max_conns 3")
+	}
+	if st := s.Stats(); st.ConnsRefused == 0 || st.OpenConns != 3 {
+		t.Fatalf("stats: %d open, %d refused", st.OpenConns, st.ConnsRefused)
+	}
+	open[0].Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.Stats().OpenConns > 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connections still counted open", s.Stats().OpenConns)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	again, err := net.Dial("tcp", addrs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if !get(again) {
+		t.Fatal("a connection after one closed was not served")
+	}
+}

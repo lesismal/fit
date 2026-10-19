@@ -76,12 +76,14 @@ const (
 	DefaultMaxPendingBytes   = 256 << 20
 	DefaultMaxHeaderBytes    = 1 << 20
 	DefaultMaxBodyBytes      = 16 << 20
+	DefaultMaxConns          = 100000
 )
 
 // Limits bound what clients can make fit hold for them.
 type Limits struct {
 	MaxPendingBytes int64 `json:"max_pending_bytes,omitempty" min:"0" default:"268435456" doc:"How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. 256 MiB when left out or 0."`
 	MaxHeaderBytes  int   `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
+	MaxConns        int   `json:"max_conns,omitempty" min:"0" default:"100000" doc:"The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0."`
 	MaxBodyBytes    int64 `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
 
 	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" default:"\"30s\"" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
@@ -96,6 +98,9 @@ func (l Limits) HeaderBytes() int {
 	return int(orDefault(int64(l.MaxHeaderBytes), DefaultMaxHeaderBytes))
 }
 func (l Limits) BodyBytes() int64 { return orDefault(l.MaxBodyBytes, DefaultMaxBodyBytes) }
+
+// Conns returns the connection limit, its default when left out.
+func (l Limits) Conns() int { return int(orDefault(int64(l.MaxConns), DefaultMaxConns)) }
 
 func orDefault(v, def int64) int64 {
 	if v <= 0 {
@@ -197,7 +202,7 @@ type Upstream struct {
 	HashKey        string        `json:"hash_key,omitempty" doc:"With header_hash, the header, and with cookie_hash, the cookie, whose value requests are hashed by."`
 	StickyCookie   *StickyCookie `json:"sticky_cookie,omitempty" doc:"Keep each client on one address with a cookie: a request whose cookie names an address that is up goes there, and any other gets the cookie for the address it went to. No cookie when left out."`
 	MaxConns       int           `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. 256 when left out or 0."`
-	MaxPending     int           `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection, across the addresses, once max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
+	MaxPending     int           `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection to one address, while one is being opened or once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
 	MaxIdleConns   *int          `json:"max_idle_conns,omitempty" min:"0" default:"32" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
 	IdleTimeout    Duration      `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
 	ConnectTimeout Duration      `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`

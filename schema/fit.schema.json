@@ -151,6 +151,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_conns": {
+          "default": 100000,
+          "description": "The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_header_bytes": {
           "default": 1048576,
           "description": "The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0.",
@@ -378,7 +384,7 @@
         },
         "max_pending": {
           "default": 1024,
-          "description": "How many requests may wait for a connection, across the addresses, once max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0.",
+          "description": "How many requests may wait for a connection to one address, while one is being opened or once its max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },

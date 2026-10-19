@@ -43,11 +43,6 @@ const (
 	DefaultMaxConns              = 256
 	DefaultMaxPending            = 1024
 	DefaultResponseTimeout       = time.Hour
-	// h2StreamsPerConn is how many requests an HTTP/2 connection is taken to
-	// carry at once when counting the requests waiting for a connection: the
-	// 100 RFC 9113 asks a server to allow at least. fib's client honours
-	// what the server says; R06 moves the count into fib.
-	h2StreamsPerConn = 100
 	// StreamThreshold is the response body size past which a body streams
 	// to the callback rather than arriving whole.
 	StreamThreshold = 64 << 10
@@ -57,8 +52,9 @@ const (
 var ErrNoEngine = errors.New("upstream: the pool has no engine to dial through")
 
 // ErrBusy is what a request gets when max_pending requests already wait for
-// a connection; the proxy answers it with 503.
-var ErrBusy = errors.New("upstream: too many requests waiting for a connection")
+// a connection to its address: fib's client refuses it at once. The proxy
+// answers it with 503, and it counts against no backend's health.
+var ErrBusy = fibhttp.ErrTooManyPending
 
 // Pool sends requests to an upstream's addresses, over connections it keeps.
 // It is safe for concurrent use.
@@ -75,11 +71,6 @@ type Pool struct {
 	// for failTimeout.
 	maxFails    int
 	failTimeout time.Duration
-	// maxInFlight is how many requests may be under way at once: what the
-	// connections carry, max_conns of them to each address, and max_pending
-	// waiting for one. Past it Pick refuses.
-	maxInFlight int64
-
 	// prober runs the active health check, or is nil without one.
 	prober *prober
 
@@ -128,11 +119,6 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	if maxPending <= 0 {
 		maxPending = DefaultMaxPending
 	}
-	perConn := 1
-	if c.Protocol == "h2" || c.Protocol == "h2c" {
-		perConn = h2StreamsPerConn
-	}
-	p.maxInFlight = int64(maxConns*len(c.Addresses)*perConn + maxPending)
 	var tlsConfig *tls.Config
 	if c.Protocol == "h2" {
 		p.scheme = "https"
@@ -162,6 +148,9 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	// one that trickles, as server-sent events do, is passed on as it comes.
 	cc.StreamUnknownLengthAtHeader = true
 	cc.MaxConnsPerHost = maxConns
+	// Past max_pending waiting for a connection to an address, fib's client
+	// refuses a request at once with ErrBusy.
+	cc.MaxPendingPerHost = maxPending
 	cc.MaxIdleConnsPerHost = DefaultMaxIdleConns
 	if c.MaxIdleConns != nil {
 		cc.MaxIdleConnsPerHost = *c.MaxIdleConns
@@ -220,16 +209,11 @@ func (p *Pool) Backends() []*Backend { return p.backends }
 
 // Pick chooses the backend for r by the upstream's sticky cookie and policy,
 // and counts the request as under way on it until Done. r may be nil, for a
-// request with nothing to go by. It returns nil, counting
-// nothing, when the connections are all busy and max_pending requests wait
-// for one already. A pool that Close was called on still serves requests
-// until those under way are done, so that a request that started on it can
-// still use it.
+// request with nothing to go by. A pool that Close was called on still
+// serves requests until those under way are done, so that a request that
+// started on it can still use it.
 func (p *Pool) Pick(r *stdhttp.Request) *Backend {
-	if p.inFlight.Add(1) > p.maxInFlight {
-		p.done()
-		return nil
-	}
+	p.inFlight.Add(1)
 	var b *Backend
 	if p.sticky != nil {
 		b = p.sticky.pick(r)
@@ -291,16 +275,13 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 
 // Do is Pick, Send and Done for a caller that is done with the response
 // when its callback returns, as one that reads a body that arrived whole is.
-// An error counts as a failure of the backend.
+// An error counts as a failure of the backend, but for ErrBusy and a
+// cancelled request.
 func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
 	b := p.Pick(req)
-	if b == nil {
-		callback(nil, ErrBusy)
-		return
-	}
 	p.Send(b, req, func(resp *fibhttp.ClientResponse, err error) {
 		callback(resp, err)
-		p.Done(b, err != nil && !errors.Is(err, context.Canceled))
+		p.Done(b, err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrBusy))
 	})
 }
 

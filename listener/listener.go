@@ -100,6 +100,9 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	// that stops reading loses its response after the write stall timeout,
 	// so it cannot hold the budget for long.
 	cfg.MaxPendingBytes = g.MaxPendingBytes
+	// Connections past max_conns are closed as they are accepted, and
+	// counted in Stats.ConnsRefused.
+	cfg.MaxConns = g.MaxConns
 	engine, err := fib.New(cfg)
 	if err != nil {
 		return nil, err
@@ -117,9 +120,9 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	return s, nil
 }
 
-// Stats returns the listeners' engine's counters: connections, bytes
-// queued for clients, and the pauses the write watermark and
-// max_pending_bytes caused.
+// Stats returns the listeners' engine's counters: connections, those
+// max_conns refused, bytes queued for clients, and the pauses the write
+// watermark and max_pending_bytes caused.
 func (s *Server) Stats() fib.Stats { return s.engine.Stats() }
 
 // SetDrainTimeout sets how long a listener a reload removed may take to
