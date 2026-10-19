@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I26, I32, I33) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -26,9 +26,9 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I26 (listener diffing and graph draining) and I27 (file provider).** M2 has I24 and I25,
-the Admin API with config versions, patches, ETags and rollback, I32, active health checks, and
-I33, load balancing v2.
+**Next: I27 (file provider).** M2 has I24 and I25, the Admin API with config versions, patches,
+ETags and rollback, I26, graph draining and shared pools, I32, active health checks, and I33,
+load balancing v2.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -42,7 +42,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I26 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I27 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -59,7 +59,7 @@ To continue, start a session with:
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list |
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
-| `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
+| `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
@@ -1154,6 +1154,54 @@ Differences from the plan:
 - Consistent hashing is by a ring, as nginx's, rather than rendezvous hashing: lookups take a
   binary search however many addresses there are.
 
+### I26 Listener diffing and graph draining — done
+
+- Listener diffing was I22's: unchanged listeners kept, new ones added with `AddBinding` before the
+  swap, removed ones drained with `ShutdownBinding`. I26 adds what keeps long requests on the graph
+  they began on, and what ends them.
+- A handler that serves a request past its return holds its graph for it: `module.Env` carries the
+  graph, `module.Context.Graph()` gives a `module.Holder`, and the proxy takes a hold when an
+  exchange starts and gives it back in `exchange.release`. The graph, its modules and its pools stay
+  until the last exchange on it is over.
+- `Runtime.SetDrainTimeout` (30s by default; `listener.Server.SetDrainTimeout`, so `fit run`'s
+  `-shutdown-timeout`, sets it too): `Swap` starts a timer on the graph it swaps out, stopped when
+  the graph is cleaned up; when it fires, the modules that implement `module.Drainer` end what they
+  have. The proxy derives each exchange's context from one of 32 drain contexts, picked at random so
+  that exchanges starting at once do not share one lock, and `Drain` cancels them all: a response
+  not yet begun gets 503, one under way is cut short, and neither counts against the backend.
+- Pools are shared between graphs: `runtime.Env.Previous` names the graph being replaced, and an
+  upstream whose config (as JSON) and CA file contents are unchanged takes over its pool with
+  `Pool.Acquire`; `Pool.Close` gives a hold back and the last one closes it. Connections and active
+  health (I32) carry over a reload; an upstream that changes gets a pool of its own. `admin.Configs`
+  passes the running graph.
+- Tests: `runtime` drains a graph a request still holds after the timeout and not before, cleans
+  it up once the request lets go, never drains one whose requests ended first or with a negative
+  timeout; shares the pool of an unchanged upstream and its CA file, not of a changed one or one
+  whose CA file changed. `upstream`: a pool held twice. `handler/proxy`: a download that outlasts a
+  reload keeps streaming through the shared pool until the drain timeout and is then cut off, while
+  one begun after it goes on, and the backend stays in rotation; a request waiting for its response
+  when drained gets 503. `test/e2e/churn_test.go` swaps the config 2,000 times through the Admin
+  API, paced over six seconds, while eight clients send short requests (HTTP/1.1 and h2c, kept and
+  new connections, a fixed response and the proxy) and four download second-long streams; the
+  swaps change the fixed response each time, the upstream every 50 and add or remove a listener
+  every 100: in each of three runs, about 337,000 short requests and 32 downloads, none failed.
+  `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- Benchmarks before and after, on the benchmark host, fit alone, the proxy scenario: 216k and 214k
+  requests a second over HTTP/1.1, 228k and 229k over h2c, within 1%. Only one round counts: in the
+  second, another benchmark had started on the host (a WebSocket server at four cores), and both
+  binaries fell by 8% to 33%; the rerun was stopped so as not to disturb it. To be measured again
+  when the host is free.
+
+Differences from the plan:
+
+- The churn test's long connections are streamed downloads through the proxy, not WebSockets,
+  which come with I47.
+- Drained requests are those of handlers that answer after returning, the proxy's; a request whose
+  handler is still running (a static file being sent) holds its graph through the dispatcher and
+  ends as it would.
+- Each proxied exchange registers its context with one of the proxy's drain contexts, one lock
+  more a request; shared over 32 contexts, the benchmark does not show it.
+
 ## Notes for later iterations
 
 - **fib version.** fit uses fib v1.3.0, tagged for I16 and I22 on fib's `main` of 2026-10-19: it
@@ -1164,8 +1212,12 @@ Differences from the plan:
   process bind a listener's address too. `listener` checks each address with a plain bind first and
   fails if it is taken.
 - **Graph lifetime and async handlers.** `listener`'s dispatcher releases the graph when the
-  handler returns. A handler that answers later keeps alive what it uses itself: the proxy holds
-  the request with `Context.Retain` and relies on its pool draining before it closes (decision 004).
+  handler returns. A handler that answers later holds the graph itself with
+  `module.Context.Graph()` until it is done, and implements `module.Drainer` to end what it has when
+  the graph is drained, as the proxy does (decision 004).
+- **Proxied bodies of no length.** fib's client hands the proxy a response body of no declared
+  length only once 64 KB of it have arrived (`StreamResponseBodyThreshold`), so a slow trickle,
+  as server-sent events are, reaches the client late. Found in I26's tests; not changed there.
 - **Test hosts.** Unit tests and `go test` micro-benchmarks run locally. Load tests (the
   `fitbench` harness, wrk, h2load) run on the benchmark host, reached with `ssh -p 10013
   127.0.0.1`.

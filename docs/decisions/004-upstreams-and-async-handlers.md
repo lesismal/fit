@@ -38,6 +38,14 @@ one engine could serve both. The upstream engine stays separate anyway: since I1
 download waits in `Context.Write` for a slow client on the upstream engine's worker, and a separate
 engine keeps those waits off the listeners' pool.
 
+Update, I26 (2026-10-19): a handler that answers later now holds the graph itself, through
+`module.Context.Graph()`, for as long as it serves the request: the proxy takes a hold when an
+exchange starts and gives it back when the exchange is over, so a download that outlasts a reload
+stays on the graph it began on. A graph swapped out is drained after the runtime's drain timeout:
+its modules that implement `module.Drainer` end what they still have, as the proxy does by
+cancelling its exchanges' contexts. Pools are shared: a graph takes over the previous graph's pool
+for an upstream whose config and CA file are unchanged, and each pool counts the graphs holding it.
+
 ## Consequences
 
 - A handler that answers later must keep alive what it uses after returning, as the proxy does with

@@ -9,9 +9,15 @@
 package runtime
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
+	"encoding/json"
+	"os"
 	"slices"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	fib "github.com/lesismal/fib"
 
@@ -40,6 +46,14 @@ type Graph struct {
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
 	upstreams map[string]*upstream.Pool
+	// upstreamKeys say, by name, what each pool was made from, so that the
+	// next graph can take over the pools of the upstreams it leaves as they
+	// are.
+	upstreamKeys map[string]string
+
+	mu         sync.Mutex
+	cleaned    bool        // the modules are cleaned up
+	drainTimer *time.Timer // set once the graph is swapped out
 }
 
 // Env is what compiling a config needs from the process it runs in.
@@ -51,6 +65,10 @@ type Env struct {
 	// AccessLog is the log made from the config's access_log, which the
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
+	// Previous is the graph being replaced, or nil. The new graph shares
+	// its pools for the upstreams whose config, and CA file, are the same,
+	// so that their connections and their backends' health carry over.
+	Previous *Graph
 }
 
 // Listener is a listener and the routes it serves.
@@ -96,11 +114,22 @@ type Route struct {
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
 	g := &Graph{AccessLog: env.AccessLog, MaxPendingBytes: c.Limits.PendingBytes(),
-		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
+		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
 	g.refs.Store(1)
 	var errs config.Errors
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
+		key, keyed := upstreamKey(u)
+		if keyed {
+			g.upstreamKeys[u.Name] = key
+			if prev := env.Previous; prev != nil && prev.upstreamKeys[u.Name] == key {
+				if p := prev.upstreams[u.Name]; p != nil {
+					p.Acquire()
+					g.upstreams[u.Name] = p
+					continue
+				}
+			}
+		}
 		p, err := upstream.New(env.Engine, u)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
@@ -113,7 +142,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		cleanupModules(g)
 		return nil, errs
 	}
-	menv := &module.Env{Upstreams: g.upstreams, WriteStall: c.Limits.WriteStall()}
+	menv := &module.Env{Upstreams: g.upstreams, WriteStall: c.Limits.WriteStall(), Graph: g}
 
 	routes := make([]*Route, len(c.Routes))
 	for i, rc := range c.Routes {
@@ -214,11 +243,67 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 // and then closes the upstream pools the modules used. A pool closes once
 // the requests still in flight on it are done.
 func cleanupModules(g *Graph) {
+	g.mu.Lock()
+	g.cleaned = true
+	if g.drainTimer != nil {
+		g.drainTimer.Stop()
+	}
+	g.mu.Unlock()
 	for i := len(g.modules) - 1; i >= 0; i-- {
 		module.Cleanup(g.modules[i])
 	}
 	for _, p := range g.upstreams {
 		p.Close()
+	}
+}
+
+// upstreamKey is what decides whether two graphs can share an upstream's
+// pool: its config, and the contents of its CA file, which a reload is
+// expected to read again. It reports false when the CA file cannot be read,
+// for upstream.New to report.
+func upstreamKey(u *config.Upstream) (string, bool) {
+	data, err := json.Marshal(u)
+	if err != nil {
+		return "", false
+	}
+	key := string(data)
+	if u.TLSCAFile != "" {
+		pem, err := os.ReadFile(u.TLSCAFile)
+		if err != nil {
+			return "", false
+		}
+		sum := sha256.Sum256(pem)
+		key += "\x00" + hex.EncodeToString(sum[:])
+	}
+	return key, true
+}
+
+// retire starts g's drain timer, now that it is swapped out: if requests
+// still use it after drain, its modules are told to end them. A graph whose
+// last request is done first is cleaned up and never drained.
+func (g *Graph) retire(drain time.Duration) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cleaned || drain < 0 {
+		return
+	}
+	g.drainTimer = time.AfterFunc(drain, g.drain)
+}
+
+// drain asks g's modules to end what they have under way.
+func (g *Graph) drain() {
+	g.mu.Lock()
+	cleaned := g.cleaned
+	g.mu.Unlock()
+	if cleaned {
+		return
+	}
+	// The drained requests release g as they end, which may clean it up
+	// meanwhile; Drain may run beside Cleanup.
+	for _, m := range g.modules {
+		if d, ok := m.(module.Drainer); ok {
+			d.Drain()
+		}
 	}
 }
 

@@ -24,6 +24,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	stdhttp "net/http"
@@ -53,6 +54,36 @@ type Proxy struct {
 	pool    *upstream.Pool
 	trusted []netip.Prefix
 	stall   time.Duration
+	// graph is the config the proxy belongs to, held by each exchange until
+	// it is over; drains are the contexts its exchanges' contexts derive
+	// from, which Drain cancels. They are spread over several, so that
+	// exchanges starting at once do not all wait on one context's lock.
+	graph  module.Holder
+	drains [drainShards]drainCtx
+}
+
+const drainShards = 32
+
+type drainCtx struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
+// Drain cuts off the exchanges still open once the proxy's config has been
+// swapped out for the drain timeout: one whose response has not begun gets
+// 503, and one under way is cut short as an upstream that broke off would
+// be, without counting against the backend.
+func (p *Proxy) Drain() {
+	for i := range p.drains {
+		p.drains[i].cancel(errDrained)
+	}
+}
+
+// Cleanup lets go of the drain contexts.
+func (p *Proxy) Cleanup() {
+	for i := range p.drains {
+		p.drains[i].cancel(nil)
+	}
 }
 
 // Provision finds the upstream and parses the trusted proxies.
@@ -63,6 +94,10 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 	}
 	p.pool = pool
 	p.stall = ctx.WriteStallTimeout()
+	p.graph = ctx.Graph()
+	for i := range p.drains {
+		p.drains[i].ctx, p.drains[i].cancel = context.WithCancelCause(context.Background())
+	}
 	for i, s := range p.TrustedProxies {
 		prefix, err := parsePrefix(s)
 		if err != nil {

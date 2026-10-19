@@ -463,3 +463,24 @@ func TestTLSCAFileErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestAcquire: a pool held twice stays open until both holds are given
+// back.
+func TestAcquire(t *testing.T) {
+	b := newBackend(t, hello("a"))
+	c, err := decode(t, `{"addresses": ["`+b.addr+`"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := mustNew(t, startEngine(t), c)
+	p.Acquire()
+	p.Close()
+	if r := do(t, p, "/"); r.err != nil || r.body[:1] != "a" {
+		t.Fatalf("after one Close of two holds: %+v", r)
+	}
+	p.Close()
+	if r := do(t, p, "/"); r.err == nil {
+		t.Fatal("served after the last hold was given back")
+	}
+	p.Close() // more than held: nothing more happens
+}

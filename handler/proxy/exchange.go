@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	stdhttp "net/http"
 	"net/textproto"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/upstream"
 )
@@ -26,6 +28,7 @@ var (
 	errClientGone    = errors.New("proxy: the client went away")
 	errHeaderTimeout = errors.New("proxy: the upstream took too long to begin its response")
 	errIdleTimeout   = errors.New("proxy: the upstream went silent in the middle of its response")
+	errDrained       = errors.New("proxy: the config the request started on was swapped out the drain timeout ago")
 )
 
 // brokenTrailer is the Fit-Error trailer's value on an HTTP/2 response whose
@@ -69,12 +72,15 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("503 Service Unavailable\n"))
 		return
 	}
-	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx, cancel := context.WithCancelCause(p.drains[rand.Uint32()%drainShards].ctx)
 	out = out.WithContext(ctx)
 	// The backend is held until the exchange is over, body and all, so that
-	// least_conn counts a long download as busy for as long as it lasts.
+	// least_conn counts a long download as busy for as long as it lasts;
+	// and the config, so that a download that outlasts a reload stays on
+	// the config it started on, until the drain timeout.
+	p.graph.Retain()
 	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
-		stall: p.stall, pool: p.pool, backend: backend, setCookie: p.pool.SetCookie(c.Request, backend)}
+		stall: p.stall, pool: p.pool, backend: backend, setCookie: p.pool.SetCookie(c.Request, backend), graph: p.graph}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -281,6 +287,7 @@ type exchange struct {
 	backend *upstream.Backend
 	// setCookie is the sticky cookie the response sets, or "".
 	setCookie string
+	graph     module.Holder
 	// timer is the response header timeout's, then the idle timeout's.
 	timer atomic.Pointer[time.Timer]
 
@@ -302,6 +309,7 @@ func (x *exchange) release() {
 		x.cancel(nil)
 		x.pool.Done(x.backend, x.failed)
 		x.c.Release()
+		x.graph.Release()
 	}
 }
 
@@ -458,6 +466,8 @@ func (x *exchange) statusOf(err error) int {
 	switch {
 	case errors.Is(cause, errHeaderTimeout), errors.Is(cause, errIdleTimeout):
 		return stdhttp.StatusGatewayTimeout
+	case errors.Is(cause, errDrained):
+		return stdhttp.StatusServiceUnavailable
 	case errors.As(err, &upload):
 		switch {
 		case errors.Is(err, fibhttp.ErrBodyTooLarge):
@@ -488,7 +498,8 @@ func (x *exchange) broken(err error) {
 		x.fail(err)
 		return
 	}
-	x.failed = true
+	// Cut off by a drain, the backend did nothing wrong.
+	x.failed = !errors.Is(context.Cause(x.ctx), errDrained)
 	switch {
 	case x.resp.ContentLength >= 0:
 		// Short of its length: fib closes an HTTP/1 connection and resets

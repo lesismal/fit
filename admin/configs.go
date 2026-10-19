@@ -134,7 +134,12 @@ func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byt
 	if err != nil {
 		return Result{}, err
 	}
-	g, err := runtime.Compile(c, cs.env)
+	env := cs.env
+	env.Previous = cs.rt.Current()
+	g, err := runtime.Compile(c, env)
+	if env.Previous != nil {
+		env.Previous.Release()
+	}
 	if err != nil {
 		return Result{}, err
 	}

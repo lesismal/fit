@@ -123,11 +123,13 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 func (s *Server) Stats() fib.Stats { return s.engine.Stats() }
 
 // SetDrainTimeout sets how long a listener a reload removed may take to
-// finish the requests it has before its connections are closed.
+// finish the requests it has before its connections are closed, and, in the
+// runtime, how long requests may keep using a graph once it is swapped out.
 func (s *Server) SetDrainTimeout(d time.Duration) {
 	s.mu.Lock()
 	s.drain = d
 	s.mu.Unlock()
+	s.rt.SetDrainTimeout(d)
 }
 
 // bind has the engine serve l. shared says another of the server's own

@@ -88,6 +88,9 @@ type Pool struct {
 	inFlight  atomic.Int64
 	closing   atomic.Bool
 	closeOnce sync.Once
+	// users counts the graphs that use the pool: New's caller, and one more
+	// for each Acquire. Close gives one back.
+	users atomic.Int64
 }
 
 // New returns a pool for the upstream c, which config.Config.Validate has
@@ -100,6 +103,7 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 		ResponseHeader: orDefault(c.ResponseHeaderTimeout.Std(), DefaultResponseHeaderTimeout),
 		ResponseIdle:   orDefault(c.ResponseIdleTimeout.Std(), DefaultResponseIdleTimeout),
 	}}
+	p.users.Store(1)
 	for i, addr := range c.Addresses {
 		weight := 1
 		if i < len(c.Weights) {
@@ -297,11 +301,21 @@ func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, e
 	})
 }
 
-// Close closes the pool once the requests in flight are done, as a graph's
-// cleanup does when the last request using the graph has returned: a request
-// whose response arrives later can still finish. The idle connections are
-// closed then, and later requests fail. Probes stop at once.
+// Acquire takes another hold on p, for a graph that shares it with the one
+// that made it, as a reload does with an upstream it leaves unchanged: its
+// connections, and its backends' health, carry over. Each hold is given
+// back with Close.
+func (p *Pool) Acquire() { p.users.Add(1) }
+
+// Close gives back a hold on the pool, as a graph's cleanup does, and the
+// last one closes it once the requests in flight are done: a request whose
+// response arrives later can still finish. The idle connections are closed
+// then, and later requests fail. Probes stop at once. Closing more often
+// than the pool is held does nothing more.
 func (p *Pool) Close() {
+	if p.users.Add(-1) > 0 {
+		return // another graph still uses it
+	}
 	if p.prober != nil {
 		p.prober.stop()
 	}

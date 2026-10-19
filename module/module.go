@@ -85,6 +85,24 @@ type Cleaner interface {
 	Cleanup()
 }
 
+// Drainer is implemented by a module that serves requests past its
+// handler's return, as the proxy does. Drain is called when the config the
+// module belongs to was swapped out the drain timeout ago and requests still
+// use it: the module ends what it has under way, as soon as it can. Drain
+// may run beside Cleanup, and at most once.
+type Drainer interface {
+	Drain()
+}
+
+// Holder is a hold on the config a module belongs to: a module whose
+// requests outlive its handler's return takes one for each with Retain, and
+// gives it back with Release when the request is over, so that the config
+// is cleaned up, and drained, only once they are.
+type Holder interface {
+	Retain()
+	Release()
+}
+
 // Context is what Provision is given.
 type Context struct {
 	// Params are the module's params as written, for errors to point into.
@@ -100,7 +118,24 @@ type Env struct {
 	// WriteStall bounds each wait of a response for its client to take what
 	// it was sent; see config.Limits.WriteStallTimeout. Zero is the default.
 	WriteStall time.Duration
+	// Graph is the config the module belongs to, or nil, as in tests.
+	Graph Holder
 }
+
+// Graph returns the hold a module takes on its config for a request that
+// outlives its handler's return, or one that does nothing when there is
+// no config, as in tests.
+func (c *Context) Graph() Holder {
+	if c.env == nil || c.env.Graph == nil {
+		return noHolder{}
+	}
+	return c.env.Graph
+}
+
+type noHolder struct{}
+
+func (noHolder) Retain()  {}
+func (noHolder) Release() {}
 
 // WriteStallTimeout returns how long a response may wait, each time, for
 // its client to take what it was sent; a handler that writes a response
