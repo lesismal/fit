@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01, R02 and R07a are done, R03–R06 and R07c wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01, R02, R07a and R07b are done, R03–R06 and R07c wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.3.1`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -19,7 +19,8 @@ this file says what was done, and where the work differs from the plan.
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
-host; see I08.
+host; see I08. R07b measured M0's fit on the Linux host: within 1.3% (HTTP/1.1) and 4.2% (h2c) of
+today's fixed throughput.
 
 **M1 is done.** I23's conformance runs and benchmarks are in the
 [M1 report](../bench/results/m1-report-2026-10-19.md): h2spec passes everywhere, and on a Linux host
@@ -30,8 +31,8 @@ nginx's throughput over HTTP/1.1.
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
-R01 and R02, the review fixes that came before M2, are done, and so is R07a, the part of the hot
-path work that needs nothing from fib; R03, fib's part, is fib's to schedule, and R04–R06 and R07c
+R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
+hot path work that needs nothing from fib; R03, fib's part, is fib's to schedule, and R04–R06 and R07c
 follow it.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
@@ -1289,6 +1290,42 @@ Differences from the plan:
   `OnFinish` hook is registered, which cannot change it: asked of fib as
   [A13](fib-api-requests.md#a13-no-header-copy-for-a-response-that-only-onfinish-hooks). The
   request copy that `r.WithContext` makes waits for A7. Both are R07c's.
+
+### R07b Proxy allocations — done
+
+- `handler/proxy`: the exchange is allocated first and holds what the outgoing request is built
+  from: the request itself (`base`, of which `out` is the copy `WithContext` makes), its URL and the
+  four forwarding fields' values, whose header slices point into it. `clientAddr` returns the
+  client's address as a string too, a part of `RemoteAddr` for an IPv4 address (netip parses only
+  the canonical form, so it is that already) and formatted only for IPv6, once instead of twice;
+  `forwardedElement` builds the element in one sized `strings.Builder`. A response that arrived
+  whole is read into a buffer of its length with `io.ReadFull`, rather than through a
+  `bytes.Buffer` that grew past it; the 400 and 503 bodies are package variables.
+- `BenchmarkProxy` (`handler/proxy/bench_test.go`): small GETs through the proxy to an HTTP/1.1
+  backend over keep-alive connections, from a raw client that allocates little. The test helpers
+  `startFit` and `serveBackend` take a `testing.TB` for it. `TestForwardedElement` checks
+  `clientAddr` on IPv4, mapped, IPv6 and zoned addresses and that an IPv4 one allocates nothing.
+  `go vet ./...` and `go test -race ./...` pass.
+- On the development Mac: 95 → 81 allocations and 13.0 → 11.3 KB per proxied request, net/http
+  backend included; what fit's own code allocates is now the exchange, the header map, the
+  `OnCancel`, timer and `onResponse` closures and the response header timer, the context and its
+  copy of the request, the Forwarded element and the body read. The rest is fib's client, the
+  backend and the client: a memory profile is the evidence for
+  [A11](fib-api-requests.md#a11-the-body-of-a-client-response-that-arrived-whole-without-a-copy)
+  and [A12](fib-api-requests.md#a12-fewer-timers-and-contexts-per-client-request), four timers a
+  request among them.
+- On the benchmark host, R07a's build against this one, two rounds each alternating, thousands of
+  requests a second: proxy over HTTP/1.1 211.7 → 219.0 (+3.4%), p99 3.91 → 3.51 ms, over h2c
+  228.4 → 229.6; with the access log, 204.5 → 211.8 (+3.6%) and 226.3 → 228.1.
+- The M0 question from I23, settled on the benchmark host: fit at `f96aa03` (M0, fib v1.2.0) and
+  this build, with M0's config, two rounds each: fixed 792 and 3,929 → 782 and 3,764 over
+  HTTP/1.1 and h2c (−1.3% and −4.2%), with 19 → 28 MB resident. So fit's fall from 1.25 times
+  nginx's fixed throughput to 0.96 between the M0 baseline and I23 is the change of machine
+  (Docker Desktop on an M3 Max to the Linux host), not fit; the few percent that are fit's go to
+  R07c.
+
+Differences from the plan: none beyond what goes to fib. The proxy's response header timer stays
+until fib's client has a setting for it (A12).
 
 ## Notes for later iterations
 

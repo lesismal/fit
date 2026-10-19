@@ -10,14 +10,15 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02、R07a 已完成，R03–R06 和 R07c 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02、R07a、R07b 已完成，R03–R06 和 R07c 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.3.1`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
-Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
+Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 主机上测了 M0 的 fit：固定响应吞吐与现在相差不到
+1.3%（HTTP/1.1）和 4.2%（h2c）。
 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
@@ -25,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a 也已完成；R03 是 fib 的工作，由 fib 安排，R04–R06 和 R07c 在它之后。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03 是 fib 的工作，由 fib 安排，R04–R06 和 R07c 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -978,6 +979,31 @@ A11–A13。
   3 次是 fib 因为注册了 `OnFinish` 钩子而复制响应头，但这种钩子不能修改响应头：已作为
   [A13](fib-api-requests.zh-CN.md#a13只有-onfinish-钩子的响应不复制响应头) 向 fib 提出。`r.WithContext` 复制请求要等
   A7。两者都归 R07c。
+
+### R07b 代理的内存分配 — 已完成
+
+- `handler/proxy`：先分配 exchange，由它持有构造发往上游请求所需的东西：请求本身（`base`，`out` 是 `WithContext` 从它
+  复制出的副本）、它的 URL 和四个转发字段的值，请求头中的切片指向这些值。`clientAddr` 同时返回客户端地址的字符串：
+  IPv4 地址直接取 `RemoteAddr` 的一部分（netip 只接受规范形式，所以它已经是规范的），只有 IPv6 才格式化，且只做一次而不是
+  两次；`forwardedElement` 用一个预先定好大小的 `strings.Builder` 构造。整体到达的响应用 `io.ReadFull` 读进与其长度相同的
+  缓冲，而不是经过会超额增长的 `bytes.Buffer`；400 和 503 的响应体改为包级变量。
+- `BenchmarkProxy`（`handler/proxy/bench_test.go`）：用一个几乎不分配的原始客户端，经 keep-alive 连接把小的 GET 请求经
+  代理发到 HTTP/1.1 后端。为此测试辅助函数 `startFit` 和 `serveBackend` 改为接受 `testing.TB`。`TestForwardedElement` 检查
+  `clientAddr` 对 IPv4、映射地址、IPv6 和带 zone 的地址的结果，以及 IPv4 地址不分配。`go vet ./...` 和
+  `go test -race ./...` 通过。
+- 开发用 Mac 上：每个代理请求的分配从 95 次、13.0 KB 降到 81 次、11.3 KB（包括 net/http 后端）；fit 自身代码现在分配的是
+  exchange、请求头 map、`OnCancel`、定时器和 `onResponse` 的闭包及响应头定时器、context 和它的请求副本、Forwarded 元素和
+  响应体读取。其余来自 fib 的客户端、后端和压测客户端：内存 profile 是
+  [A11](fib-api-requests.zh-CN.md#a11不复制即取得整体到达的客户端响应体) 和
+  [A12](fib-api-requests.zh-CN.md#a12减少每个客户端请求的定时器和-context) 的证据，其中包括每个请求四个定时器。
+- 压测主机上，R07a 的构建与本构建交替各跑两轮，每秒千次请求：HTTP/1.1 代理 211.7 → 219.0（+3.4%），p99 3.91 → 3.51 ms，
+  h2c 代理 228.4 → 229.6；打开访问日志时 204.5 → 211.8（+3.6%）和 226.3 → 228.1。
+- I23 留下的 M0 问题在压测主机上有了结论：`f96aa03`（M0，fib v1.2.0）的 fit 与本构建，用 M0 的配置各跑两轮：固定响应在
+  HTTP/1.1 和 h2c 上 792 和 3,929 → 782 和 3,764（−1.3% 和 −4.2%），常驻内存 19 → 28 MB。所以从 M0 基线到 I23，fit 的
+  固定响应吞吐从 nginx 的 1.25 倍降到 0.96 倍，是换了机器（M3 Max 上的 Docker Desktop 换成 Linux 主机）造成的，不是 fit；
+  属于 fit 的那几个百分点交给 R07c。
+
+与计划的不同：除了交给 fib 的部分外没有。代理的响应头定时器保留到 fib 的客户端提供相应设置为止（A12）。
 
 ## 给后续迭代的说明
 

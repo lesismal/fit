@@ -1,13 +1,13 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"math/rand/v2"
 	stdhttp "net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -61,26 +61,26 @@ func (e *uploadError) Unwrap() error { return e.err }
 // its connection is closed on HTTP/1, and on HTTP/2 its stream is reset, or,
 // for a body of no declared length, ended with a Fit-Error trailer.
 func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
-	out := p.outgoing(c)
-	if out == nil {
-		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", []byte("400 Bad Request\n"))
+	x := &exchange{c: c}
+	if !p.outgoing(c, x) {
+		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
 		return
 	}
 	backend := p.pool.Pick(c.Request)
 	if backend == nil {
 		// max_pending requests wait for a connection already.
-		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("503 Service Unavailable\n"))
+		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", unavailable)
 		return
 	}
 	ctx, cancel := context.WithCancelCause(p.drains[rand.Uint32()%drainShards].ctx)
-	out = out.WithContext(ctx)
+	out := x.base.WithContext(ctx)
 	// The backend is held until the exchange is over, body and all, so that
 	// least_conn counts a long download as busy for as long as it lasts;
 	// and the config, so that a download that outlasts a reload stays on
 	// the config it started on, until the drain timeout.
 	p.graph.Retain()
-	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
-		stall: p.stall, pool: p.pool, backend: backend, setCookie: p.pool.SetCookie(c.Request, backend), graph: p.graph}
+	x.out, x.ctx, x.cancel, x.start, x.timeouts = out, ctx, cancel, time.Now(), p.pool.Timeouts()
+	x.stall, x.pool, x.backend, x.setCookie, x.graph = p.stall, p.pool, backend, p.pool.SetCookie(c.Request, backend), p.graph
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -272,15 +272,26 @@ func trailerNames(r *stdhttp.Request) []string {
 	return names
 }
 
+var (
+	badRequest  = []byte("400 Bad Request\n")
+	unavailable = []byte("503 Service Unavailable\n")
+)
+
 // exchange is one proxied request, seen from the upstream's callbacks, which
 // come one at a time.
 type exchange struct {
-	c        *fibhttp.Context
-	out      *stdhttp.Request
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	start    time.Time
-	timeouts upstream.Timeouts
+	c *fibhttp.Context
+	// base is the request outgoing made, which out is with ctx; url and
+	// forwarded are its URL and its forwarding fields' values, kept here so
+	// that the exchange is one allocation rather than several.
+	base      stdhttp.Request
+	url       url.URL
+	forwarded [4]string
+	out       *stdhttp.Request
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
+	start     time.Time
+	timeouts  upstream.Timeouts
 	// stall bounds each wait for the client to take what was written.
 	stall   time.Duration
 	pool    *upstream.Pool
@@ -516,16 +527,20 @@ func (x *exchange) broken(err error) {
 	x.release()
 }
 
-// readBody reads a response body that arrived whole.
+// readBody reads a response body that arrived whole: into a buffer of its
+// length when it has one, as it does unless it came chunked, so that it is
+// read in one allocation. fib holds the body already; reading it without a
+// copy is A11 in fib-api-requests.
 func readBody(resp *fibhttp.ClientResponse) ([]byte, error) {
-	if resp.Body == nil {
+	if resp.Body == nil || resp.Body == stdhttp.NoBody {
 		return nil, nil
 	}
-	n := resp.ContentLength
-	if n < 0 || n > 1<<20 {
-		n = 512
+	if n := resp.ContentLength; n >= 0 && n <= 1<<20 {
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(resp.Body, buf); err != nil {
+			return nil, err
+		}
+		return buf, nil
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, n))
-	_, err := io.Copy(buf, resp.Body)
-	return buf.Bytes(), err
+	return io.ReadAll(resp.Body)
 }

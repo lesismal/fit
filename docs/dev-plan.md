@@ -132,7 +132,7 @@ Status: `todo`, `doing` or `done`.
 | R05 | Static files without blocking | R01, R03 | todo |
 | R06 | Connection and queue limits through fib | R02, R03 | todo |
 | R07a | Hot path costs in fit | I23 | done |
-| R07b | Proxy allocations | I23 | todo |
+| R07b | Proxy allocations | I23 | done |
 | R07c | Hot path costs through fib | R03, R07a, R07b | todo |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |

@@ -27,7 +27,7 @@ func eachProto(t *testing.T, fn func(t *testing.T, proto string)) {
 var backendFields sync.Map
 
 // serveBackend starts a test server speaking proto and returns its address.
-func serveBackend(t *testing.T, proto string, h stdhttp.Handler) string {
+func serveBackend(t testing.TB, proto string, h stdhttp.Handler) string {
 	t.Helper()
 	s := httptest.NewUnstartedServer(h)
 	fields := ""

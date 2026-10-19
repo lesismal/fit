@@ -125,16 +125,18 @@ func parsePrefix(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
-// outgoing is the request sent upstream for the one c serves, or nil for one
-// with a header field whose name is not a token, as "X-A : 1" makes it: RFC
-// 9112 asks a server to refuse whitespace before the colon, which fib v1.3.1
-// lets through, and an upstream could read such a field differently.
-func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
+// outgoing fills in x.base, the request sent upstream for the one c serves,
+// and reports false for one with a header field whose name is not a token,
+// as "X-A : 1" makes it: RFC 9112 asks a server to refuse whitespace before
+// the colon, which fib v1.3.1 lets through, and an upstream could read such a
+// field differently. The request, its URL and its forwarding fields' values
+// live in x, so that they cost no allocations of their own.
+func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
 	header := make(stdhttp.Header, len(r.Header)+4)
 	for key, values := range r.Header {
 		if !validToken(key) {
-			return nil
+			return false
 		}
 		header[key] = values
 	}
@@ -147,15 +149,16 @@ func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
 		// Present and empty: no client adds its own, and none is sent.
 		header["User-Agent"] = []string{}
 	}
-	p.setForwarded(c, header)
+	p.setForwarded(c, header, &x.forwarded)
 
 	host := r.Host
 	if p.HostHeader != "" {
 		host = p.HostHeader
 	}
-	out := &stdhttp.Request{
+	x.url = url.URL{Path: r.URL.Path, RawPath: r.URL.RawPath, RawQuery: r.URL.RawQuery}
+	x.base = stdhttp.Request{
 		Method:     r.Method,
-		URL:        &url.URL{Path: r.URL.Path, RawPath: r.URL.RawPath, RawQuery: r.URL.RawQuery},
+		URL:        &x.url,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
@@ -163,46 +166,48 @@ func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
 		Host:       host,
 	}
 	if body := c.Body(); len(body) > 0 {
-		out.Body = io.NopCloser(bytes.NewReader(body))
-		out.ContentLength = int64(len(body))
-		out.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+		x.base.Body = io.NopCloser(bytes.NewReader(body))
+		x.base.ContentLength = int64(len(body))
+		x.base.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	}
-	return out
+	return true
 }
 
-// setForwarded sets the fields that tell the upstream about the client.
-func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header) {
+// setForwarded sets the fields that tell the upstream about the client. The
+// fields' values go in values, which the caller keeps for as long as the
+// header.
+func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, values *[4]string) {
 	r := c.Request
-	clientIP, _ := clientAddr(r.RemoteAddr)
+	clientIP, ip := clientAddr(r.RemoteAddr)
 	trusted := p.isTrusted(clientIP)
 	proto := "http"
 	if r.TLS != nil {
 		proto = "https"
 	}
-	ip := ""
-	if clientIP.IsValid() {
-		ip = clientIP.String()
+	field := func(i int, v string) []string {
+		values[i] = v
+		return values[i : i+1 : i+1]
 	}
 
 	if prior := header["X-Forwarded-For"]; trusted && len(prior) > 0 && ip != "" {
-		header["X-Forwarded-For"] = []string{strings.Join(prior, ", ") + ", " + ip}
+		header["X-Forwarded-For"] = field(0, strings.Join(prior, ", ")+", "+ip)
 	} else if ip != "" {
-		header["X-Forwarded-For"] = []string{ip}
+		header["X-Forwarded-For"] = field(0, ip)
 	} else if !trusted {
 		delete(header, "X-Forwarded-For")
 	}
 	if !trusted || len(header["X-Forwarded-Proto"]) == 0 {
-		header["X-Forwarded-Proto"] = []string{proto}
+		header["X-Forwarded-Proto"] = field(1, proto)
 	}
 	if !trusted || len(header["X-Forwarded-Host"]) == 0 {
-		header["X-Forwarded-Host"] = []string{r.Host}
+		header["X-Forwarded-Host"] = field(2, r.Host)
 	}
 
-	element := forwardedElement(clientIP, r.Host, proto)
+	element := forwardedElement(clientIP, ip, r.Host, proto)
 	if prior := header["Forwarded"]; trusted && len(prior) > 0 {
-		header["Forwarded"] = []string{strings.Join(prior, ", ") + ", " + element}
+		header["Forwarded"] = field(3, strings.Join(prior, ", ")+", "+element)
 	} else {
-		header["Forwarded"] = []string{element}
+		header["Forwarded"] = field(3, element)
 	}
 }
 
@@ -218,50 +223,59 @@ func (p *Proxy) isTrusted(ip netip.Addr) bool {
 	return false
 }
 
-// clientAddr is the IP address of a request's RemoteAddr, as "ip:port".
-func clientAddr(remote string) (netip.Addr, bool) {
+// clientAddr is the IP address of a request's RemoteAddr, as "ip:port", and
+// that address as a string, or "" when it is not one. An IPv4 address is
+// written in its canonical form already, since netip parses no other, so its
+// string is a part of RemoteAddr's, without an allocation.
+func clientAddr(remote string) (netip.Addr, string) {
 	host, _, err := net.SplitHostPort(remote)
 	if err != nil {
 		host = remote
 	}
 	ip, err := netip.ParseAddr(host)
 	if err != nil {
-		return netip.Addr{}, false
+		return netip.Addr{}, ""
 	}
-	return ip.Unmap().WithZone(""), true
+	if ip.Is4() {
+		return ip, host
+	}
+	ip = ip.Unmap().WithZone("")
+	return ip, ip.String()
 }
 
-// forwardedElement is a Forwarded element (RFC 7239) for the client.
-func forwardedElement(ip netip.Addr, host, proto string) string {
+// forwardedElement is a Forwarded element (RFC 7239) for the client at ip,
+// written as s.
+func forwardedElement(ip netip.Addr, s, host, proto string) string {
 	var b strings.Builder
+	b.Grow(len(`for="[]";host="";proto=https`) + len(s) + len(host))
 	b.WriteString("for=")
 	switch {
 	case !ip.IsValid():
 		b.WriteString("unknown")
 	case ip.Is6():
-		b.WriteString(`"[` + ip.String() + `]"`)
+		b.WriteString(`"[`)
+		b.WriteString(s)
+		b.WriteString(`]"`)
 	default:
-		b.WriteString(ip.String())
+		b.WriteString(s)
 	}
 	if host != "" {
 		b.WriteString(";host=")
-		b.WriteString(forwardedValue(host))
+		writeForwardedValue(&b, host)
 	}
 	b.WriteString(";proto=")
 	b.WriteString(proto)
 	return b.String()
 }
 
-// forwardedValue is v as a Forwarded parameter value: a token as it is,
-// anything else quoted.
-func forwardedValue(v string) string {
-	for i := range len(v) {
-		ch := v[i]
-		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", ch) >= 0) {
-			return strconv.Quote(v)
-		}
+// writeForwardedValue writes v as a Forwarded parameter value: a token as it
+// is, anything else quoted.
+func writeForwardedValue(b *strings.Builder, v string) {
+	if validToken(v) {
+		b.WriteString(v)
+		return
 	}
-	return v
+	b.WriteString(strconv.Quote(v))
 }
 
 // validToken reports whether s is an HTTP token, as a field name must be.

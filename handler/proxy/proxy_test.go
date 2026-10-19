@@ -44,13 +44,13 @@ func echoBackend(t *testing.T, proto string) string {
 // startFit serves doc, with %s standing for the upstream's address list, on
 // a listener of its own, with upstream connections dialed through an engine
 // of their own, as fit run does. It returns the listener's base URL.
-func startFit(t *testing.T, doc string, addrs ...string) string {
+func startFit(t testing.TB, doc string, addrs ...string) string {
 	t.Helper()
 	return startFitLog(t, doc, nil, addrs...)
 }
 
 // startFitLog is startFit with an access log.
-func startFitLog(t *testing.T, doc string, log *observe.AccessLog, addrs ...string) string {
+func startFitLog(t testing.TB, doc string, log *observe.AccessLog, addrs ...string) string {
 	t.Helper()
 	quoted := make([]string, len(addrs))
 	for i, a := range addrs {
@@ -363,12 +363,24 @@ func TestForwardedElement(t *testing.T) {
 		if tt.ip != "" {
 			ip = netip.MustParseAddr(tt.ip)
 		}
-		if got := forwardedElement(ip, tt.host, tt.proto); got != tt.want {
+		if got := forwardedElement(ip, ipString(ip), tt.host, tt.proto); got != tt.want {
 			t.Errorf("%s %s: %s, want %s", tt.ip, tt.host, got, tt.want)
 		}
 	}
-	if ip, ok := clientAddr("[::ffff:192.0.2.1]:80"); !ok || ip.String() != "192.0.2.1" {
-		t.Errorf("a mapped address: %v %v", ip, ok)
+	for remote, want := range map[string]string{
+		"192.0.2.1:80":          "192.0.2.1",
+		"[::ffff:192.0.2.1]:80": "192.0.2.1",
+		"[2001:DB8::1]:80":      "2001:db8::1",
+		"[fe80::1%eth0]:80":     "fe80::1",
+		"10.0.0.7":              "10.0.0.7",
+		"not an address:80":     "",
+	} {
+		if ip, s := clientAddr(remote); s != want || s != "" && ip.String() != want {
+			t.Errorf("%s: %v %q, want %q", remote, ip, s, want)
+		}
+	}
+	if n := testing.AllocsPerRun(100, func() { clientAddr("192.0.2.1:80") }); n != 0 {
+		t.Errorf("an IPv4 address takes %v allocations", n)
 	}
 }
 
@@ -516,4 +528,11 @@ func TestPassiveHealth(t *testing.T) {
 			t.Fatalf("statuses: %v", codes)
 		}
 	})
+}
+
+func ipString(ip netip.Addr) string {
+	if !ip.IsValid() {
+		return ""
+	}
+	return ip.String()
 }
