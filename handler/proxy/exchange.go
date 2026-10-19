@@ -108,13 +108,20 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		out.Body, out.ContentLength = body, -1
 		p.pool.Send(x.backend, out, x.onResponse)
 		return
-	case len(announced) > 0:
-		p.forwardWithTrailers(c, x, out, announced)
-		return
 	}
 	// A body still arriving goes up as it arrives, through a BodyWriter.
+	// One that announced trailers is sent chunked, with their names in its
+	// Trailer before it goes and their values, known only once it has
+	// ended, handed over as it closes.
 	body := fibhttp.NewBodyWriter(0)
 	out.Body, out.ContentLength = body, r.ContentLength
+	if len(announced) > 0 {
+		out.Trailer = make(stdhttp.Header, len(announced))
+		for _, name := range announced {
+			out.Trailer[name] = nil
+		}
+		out.ContentLength = -1
+	}
 	p.pool.Send(x.backend, out, x.onResponse)
 	c.OnBody(func(data []byte, fin bool, err error) {
 		switch {
@@ -128,7 +135,11 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 			}
 		}
 		if fin {
-			_ = body.Close()
+			if len(announced) > 0 {
+				_ = body.CloseWithTrailer(announcedTrailer(r, announced))
+			} else {
+				_ = body.Close()
+			}
 			return
 		}
 		// Held first, so that a drain that comes before OnDrain returns is
@@ -140,116 +151,16 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	})
 }
 
-// forwardWithTrailers forwards a body still arriving that announced
-// trailers, whose values are known only once it has ended. fib's client reads
-// a request's Trailer when it sends the header, which may be after the body
-// has ended, so the values cannot be written into it from OnBody without
-// racing that read. Instead the body is a trailerPipe, which fib's client
-// reads on a goroutine of its own that it starts once the header has gone,
-// and the pipe fills the values in on that goroutine just before it reports
-// the end. That costs the upload a goroutine, which only uploads with
-// trailers, rare as they are, pay.
-func (p *Proxy) forwardWithTrailers(c *fibhttp.Context, x *exchange, out *stdhttp.Request, announced []string) {
-	out.Trailer = make(stdhttp.Header, len(announced))
+// announcedTrailer is the trailer r's body ended with, of the fields it
+// announced.
+func announcedTrailer(r *stdhttp.Request, announced []string) stdhttp.Header {
+	trailer := make(stdhttp.Header, len(announced))
 	for _, name := range announced {
-		out.Trailer[name] = nil
-	}
-	pipe := &trailerPipe{c: c, out: out, in: c.Request}
-	pipe.cond = sync.NewCond(&pipe.mu)
-	out.Body, out.ContentLength = pipe, -1
-	p.pool.Send(x.backend, out, x.onResponse)
-	c.OnBody(pipe.push)
-}
-
-// trailerPipeLimit is how much of a body a trailerPipe holds before it holds
-// the client's body back.
-const trailerPipeLimit = 256 << 10
-
-// trailerPipe carries a body with trailers from OnBody to the upstream
-// client's reading goroutine; see forwardWithTrailers.
-type trailerPipe struct {
-	c   *fibhttp.Context
-	out *stdhttp.Request // the upstream request, whose Trailer Read fills in
-	in  *stdhttp.Request // the client's, whose Trailer has the values at the end
-
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    []byte
-	held   bool
-	ended  bool
-	err    error
-	closed bool
-}
-
-// push takes a piece of the body, as OnBody delivers it, and holds the
-// client's body while the pipe is full.
-func (p *trailerPipe) push(data []byte, fin bool, err error) {
-	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
-		return
-	}
-	p.buf = append(p.buf, data...)
-	p.ended = p.ended || fin
-	if err != nil {
-		p.err = &uploadError{err}
-	}
-	hold := !p.held && len(p.buf) >= trailerPipeLimit && !fin
-	p.held = p.held || hold
-	p.cond.Signal()
-	p.mu.Unlock()
-	if hold {
-		p.c.HoldBody(true)
-	}
-}
-
-// Read waits for the body, as a body fib's client reads on its own goroutine
-// may.
-func (p *trailerPipe) Read(b []byte) (int, error) {
-	p.mu.Lock()
-	for len(p.buf) == 0 && !p.ended && p.err == nil && !p.closed {
-		p.cond.Wait()
-	}
-	switch {
-	case p.closed:
-		p.mu.Unlock()
-		return 0, io.ErrClosedPipe
-	case len(p.buf) > 0:
-		n := copy(b, p.buf)
-		p.buf = p.buf[:copy(p.buf, p.buf[n:])]
-		release := p.held && len(p.buf) < trailerPipeLimit/2
-		p.held = p.held && !release
-		p.mu.Unlock()
-		if release {
-			p.c.HoldBody(false)
+		if values, ok := r.Trailer[name]; ok {
+			trailer[name] = values
 		}
-		return n, nil
-	case p.err != nil:
-		err := p.err
-		p.mu.Unlock()
-		return 0, err
 	}
-	p.mu.Unlock()
-	// The end: the client's trailer is complete, and the upstream client
-	// reads the request's once this Read has returned.
-	for name, values := range p.in.Trailer {
-		p.out.Trailer[name] = values
-	}
-	return 0, io.EOF
-}
-
-// Close ends the pipe, as fib's client does once the request is over.
-func (p *trailerPipe) Close() error {
-	p.mu.Lock()
-	p.closed = true
-	release := p.held
-	p.held = false
-	p.cond.Broadcast()
-	p.mu.Unlock()
-	if release {
-		p.c.HoldBody(false)
-	}
-	return nil
+	return trailer
 }
 
 // trailerNames returns the trailer fields r announced: the names in its
@@ -302,6 +213,10 @@ type exchange struct {
 	// timer is the response header timeout's, then the idle timeout's.
 	timer atomic.Pointer[time.Timer]
 
+	// mu orders what the upstream body's callbacks and OnWritable's do to
+	// the client's response, since a resumed body and OnWritable's function
+	// run on goroutines of fib's.
+	mu      sync.Mutex
 	resp    *fibhttp.ClientResponse
 	started bool
 	// failed says the upstream failed the request, which counts against the
@@ -357,15 +272,23 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 }
 
 // onBody streams the response body to the client. It runs on the worker that
-// reads the upstream connection, on the upstream engine. A client slower than
-// the upstream makes Write wait once 64KB are queued for it (HTTP/1), or the
-// stream's window is spent (HTTP/2), and while it waits the upstream
-// connection is not read: the upstream is held back by TCP or by its own
-// stream window, and neither side's body piles up here. Each wait is bounded
-// by the write stall timeout (see write): a client that stops reading loses
-// its response, the upstream response is given up, and the worker goes back
-// to the upstream connection's other streams.
+// reads the upstream connection, or on fib's side pool once a held body
+// resumes, and never waits: each piece goes out with WriteNoWait, and once
+// more than the response's limit is queued for the client, the upstream body
+// is held with HoldBody until OnWritable says the client has taken half of
+// it. While it is held, the upstream connection is read no further on
+// HTTP/1, and on HTTP/2 and HTTP/3 this stream alone gets no more window, so
+// a slow client holds back its own download and nothing else, and neither
+// side's body piles up here.
+//
+// Each wait for the client is bounded by the write stall timeout: the write
+// deadline is set when the body is held and lifted when the client catches
+// up, so a client that stops reading loses its response (fib closes its
+// HTTP/1 connection or resets its HTTP/2 or HTTP/3 stream, and OnWritable's
+// function hears of it), and the upstream response is given up.
 func (x *exchange) onBody(data []byte, fin bool, err error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	if x.done.Load() {
 		return
 	}
@@ -380,12 +303,18 @@ func (x *exchange) onBody(data []byte, fin bool, err error) {
 		x.begin()
 	}
 	if len(data) > 0 {
-		if werr := x.write(data, !fin); werr != nil {
-			// The client is gone, or stopped reading for the stall timeout;
-			// giving the response up stops the upstream's callbacks.
-			x.resp.Close()
-			x.release()
+		above, werr := x.c.WriteNoWait(data)
+		if werr == nil && !fin {
+			// Held back while the response is short; out at once, as a
+			// stream of events needs.
+			werr = x.c.FlushError()
+		}
+		if werr != nil {
+			x.giveUp()
 			return
+		}
+		if above && !fin {
+			x.hold()
 		}
 	}
 	if fin {
@@ -393,37 +322,61 @@ func (x *exchange) onBody(data []byte, fin bool, err error) {
 		for name, values := range x.resp.Trailer() {
 			h[stdhttp.TrailerPrefix+name] = values
 		}
-		// What Finish sends, the last of the body and the trailers, is
-		// bounded too; the deadline goes with the response.
+		// What Finish queues, the last of the body and the trailers, is
+		// bounded by the stall timeout too; the deadline goes with the
+		// response.
 		_ = x.c.SetWriteDeadline(time.Now().Add(x.stall))
 		_ = x.c.Finish()
 		x.release()
 	}
 }
 
-// write writes data to the client, and flushes it unless more is coming at
-// once, under a deadline of the stall timeout from now, which it lifts again
-// once the write is done. The deadline bounds only the time the write waits
-// for the client: a response with nothing to send, as one whose upstream
-// pauses between pieces, is not cut off for it, as nginx's send_timeout does
-// not cut one off. Once a deadline has passed, fib has closed the HTTP/1
-// connection or reset the HTTP/2 or HTTP/3 stream, and the write fails.
-func (x *exchange) write(data []byte, flush bool) error {
+// hold holds the upstream body until the client has room for more, for at
+// most the stall timeout. x.mu is held.
+func (x *exchange) hold() {
+	x.resp.HoldBody(true)
 	if err := x.c.SetWriteDeadline(time.Now().Add(x.stall)); err != nil && !errors.Is(err, stdhttp.ErrNotSupported) {
-		return err
+		x.giveUp()
+		return
 	}
-	if _, err := x.c.Write(data); err != nil {
-		return err
+	if !x.c.OnWritable(x.onWritable) {
+		// Room already, or nothing more will be written.
+		x.resume()
 	}
-	if flush {
-		if err := x.c.FlushError(); err != nil {
-			return err
-		}
+}
+
+// onWritable resumes the upstream body once the client has room, or gives
+// the response up when the client went first or the stall timeout passed.
+// It runs on a goroutine of fib's.
+func (x *exchange) onWritable(err error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.done.Load() {
+		return
 	}
+	if err != nil {
+		x.giveUp()
+		return
+	}
+	x.resume()
+}
+
+// resume lifts the deadline hold set and lets the upstream body go on. x.mu
+// is held.
+func (x *exchange) resume() {
 	if err := x.c.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, stdhttp.ErrNotSupported) {
-		return err
+		x.giveUp()
+		return
 	}
-	return nil
+	x.resp.HoldBody(false)
+}
+
+// giveUp ends an exchange whose client is gone, or stopped reading for the
+// stall timeout: the upstream response is closed, which stops its
+// callbacks. x.mu is held.
+func (x *exchange) giveUp() {
+	x.resp.Close()
+	x.release()
 }
 
 // addCookie adds the sticky cookie, if the response sets one, to h, after

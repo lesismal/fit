@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R03, R07a and R07b are done; R04–R06 and R07c, which use fib v1.4.0, are next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R04, R07a and R07b are done; R05, R06 and R07c, which use fib v1.4.0, are next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.4.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -32,8 +32,8 @@ M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollb
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
-hot path work that needs nothing from fib, and R03: fib v1.4.0 has the APIs, and R04–R06 and R07c
-can use them.
+hot path work that needs nothing from fib, and R03 and R04: fib v1.4.0 has the APIs, the proxy's downloads
+use them, and R05, R06 and R07c are next.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -59,7 +59,7 @@ To continue, start a session with:
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
-| `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list |
+| `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
@@ -1344,6 +1344,43 @@ until fib's client has a setting for it (A12).
   timeout.
 
 Differences from the plan: none. fib's own session did the work in fib, as rule 15 asks.
+
+### R04 Proxy downloads without waiting — done
+
+- `handler/proxy`: the download path never waits. Each piece of the upstream body goes to the
+  client with `Context.WriteNoWait`, flushed unless it is the last; once it reports more than the
+  response's limit (64 KB) queued for the client, the upstream body is held with
+  `ClientResponse.HoldBody(true)` and `Context.OnWritable` resumes it once half has gone. While it
+  is held, an HTTP/1 upstream connection is read no further, and an HTTP/2 or HTTP/3 one gives
+  this stream alone no more window, so a client that reads slowly holds back its own download
+  and nothing else. `write_stall_timeout` still bounds each wait: the write deadline is set when
+  the body is held and lifted when it resumes, and `OnWritable`'s function, told of the deadline
+  passing or the client going, gives the response up. A mutex in the exchange orders the body's
+  callbacks, which run on the upstream worker or fib's side pool once resumed, with
+  `OnWritable`'s.
+- An upload with trailers is an ordinary pushed body: a `BodyWriter`, sent chunked with the
+  announced names in its `Trailer`, ended with `CloseWithTrailer` and the values the client's body
+  ended with. `trailerPipe`, and the goroutine fib's client spent reading it, are gone.
+- Tests: `TestStuckClientWithoutStallTimeout`, with the stall timeout at an hour, a client over
+  HTTP/1.1, h2c or h3 that stops reading a 200 MB download from an h2c upstream with
+  `max_conns: 1`: ten other requests are served within a second, fit's heap grows by less than
+  32 MB, and the stuck client gets the whole body once it reads. On the R03 code, the others time
+  out after 10 s. `TestStuckClientOnSharedConnection` now expects the others at once and waits
+  out the stall timeout from when the client got stuck, not after the others. R01's other stall
+  tests, the 256 MB streaming tests, the trailer tests and the SSE test pass unchanged.
+  `BenchmarkProxyDownload` streams 64 MB through the proxy: on the development Mac, median of
+  four, 1,915 → 2,260 MB/s over HTTP/1.1 and 1,275 → 1,290 MB/s over h2c. `go vet ./...` and
+  `go test -race ./...` pass.
+
+Differences from the plan:
+
+- R01's tests do not all pass with the stall timeout at an hour, and cannot: with an HTTP/1.1
+  upstream, a stuck download keeps the upstream connection it is read from, as it does in nginx,
+  so under `max_conns` (`TestStuckClientsPastMaxConns`) it is the stall timeout that frees the
+  connections for others. With an h2c upstream, where a stream can be held alone, nothing relies
+  on it, which the new test shows.
+- No benchmark host run: the harness's proxy scenario answers with a small body that arrives
+  whole, which goes out in one `WriteResponse`, a path R04 leaves alone.
 
 ## Notes for later iterations
 

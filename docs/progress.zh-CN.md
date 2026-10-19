@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R03、R07a、R07b 已完成；接下来是使用 fib v1.4.0 的 R04–R06 和 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R04、R07a、R07b 已完成；接下来是使用 fib v1.4.0 的 R05、R06 和 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.4.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03 也已完成：fib v1.4.0 提供了这些 API，R04–R06 和 R07c 可以使用它们。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03、R04 也已完成：fib v1.4.0 提供了这些 API，代理的下载已经使用它们，接下来是 R05、R06 和 R07c。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -48,7 +48,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
-| `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded` |
+| `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制 |
 | `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
@@ -1017,6 +1017,30 @@ A11–A13。
   需要 `Do` 返回取消句柄。fib 记录的问题：复用的连接已关闭而重新排队的请求，其响应头超时不会重新计时。
 
 与计划的不同：没有。按规则 15，fib 中的工作由 fib 自己的会话完成。
+
+### R04 代理下载不再等待 — 已完成
+
+- `handler/proxy`：下载路径不再等待。上游响应体的每一段用 `Context.WriteNoWait` 写给客户端，除最后一段外都刷新；一旦它
+  报告排队给客户端的数据超过响应的上限（64 KB），就用 `ClientResponse.HoldBody(true)` 暂停上游响应体，`Context.OnWritable`
+  在排队数据降到一半时恢复。暂停期间，HTTP/1 上游连接不再读取，HTTP/2 或 HTTP/3 上游只是不再给这个流窗口，所以读得慢的
+  客户端只拖住自己的下载，不影响别的。`write_stall_timeout` 仍然限制每次等待：暂停时设置写截止时间，恢复时取消；截止时间
+  到了或客户端离开时，`OnWritable` 的函数会得知，并放弃这个响应。exchange 中的一把互斥锁让响应体的回调（在上游 worker
+  上，恢复后在 fib 的 side pool 上运行）与 `OnWritable` 的回调依次执行。
+- 带 trailer 的上传改为普通的推送式请求体：一个 `BodyWriter`，以分块方式发送，`Trailer` 中预先写好声明的名字，结束时用
+  `CloseWithTrailer` 交出客户端请求体结束时带来的值。`trailerPipe` 以及 fib 客户端为读取它而占用的 goroutine 都去掉了。
+- 测试：`TestStuckClientWithoutStallTimeout`，停滞超时设为一小时，经 HTTP/1.1、h2c 或 h3 的客户端从 `max_conns: 1` 的
+  h2c 上游下载 200 MB 时停止读取：另外十个请求都在一秒内得到服务，fit 的堆增长不到 32 MB，卡住的客户端恢复读取后拿到完整
+  响应体。在 R03 的代码上，另外的请求会在 10 s 后超时。`TestStuckClientOnSharedConnection` 现在期望其他请求立即完成，并从
+  客户端卡住时起等过停滞超时，而不是在其他请求之后再等。R01 的其他停滞测试、256 MB 流式测试、trailer 测试和 SSE 测试
+  不改动即通过。`BenchmarkProxyDownload` 经代理流式传输 64 MB：开发用 Mac 上四次取中位数，HTTP/1.1 1,915 → 2,260 MB/s，
+  h2c 1,275 → 1,290 MB/s。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- R01 的测试在停滞超时设为一小时时并不都能通过，也不可能都通过：上游是 HTTP/1.1 时，卡住的下载会占住它读取的那条上游
+  连接，nginx 也是如此，所以在 `max_conns` 下（`TestStuckClientsPastMaxConns`）是停滞超时为其他请求腾出连接。上游是 h2c
+  时，一个流可以单独暂停，不依赖停滞超时，新测试证明了这一点。
+- 没有在压测主机上跑：基准框架的代理场景返回整体到达的小响应体，用一次 `WriteResponse` 写出，R04 不改动这条路径。
 
 ## 给后续迭代的说明
 

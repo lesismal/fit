@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -58,6 +59,12 @@ func stallBackend(t *testing.T, proto string) string {
 // their addresses and the certificate the HTTP/3 one serves.
 func stallFit(t *testing.T, addr, fields string) (tcpAddr, h3Addr string, cert *certtest.Cert) {
 	t.Helper()
+	return stallFitWith(t, addr, fields, stallTimeout)
+}
+
+// stallFitWith is stallFit with a write stall timeout of stall.
+func stallFitWith(t *testing.T, addr, fields string, stall time.Duration) (tcpAddr, h3Addr string, cert *certtest.Cert) {
+	t.Helper()
 	cert, err := certtest.Write(t.TempDir(), "fit.example", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +77,7 @@ func stallFit(t *testing.T, addr, fields string) (tcpAddr, h3Addr string, cert *
   "limits": {"write_stall_timeout": %q},
   "upstreams": [{"name": "app", "addresses": [%%s]%s}],
   "routes": [{"handler": {"module": "proxy", "params": {"upstream": "app"}}}]
-}`, cert.CertFile, cert.KeyFile, stallTimeout.String(), fields)
+}`, cert.CertFile, cert.KeyFile, stall.String(), fields)
 	doc = withBackendFields(doc, addr)
 	c, err := config.Load([]byte(strings.Replace(doc, "%s", `"`+addr+`"`, 1)))
 	if err != nil {
@@ -290,14 +297,48 @@ func TestStuckClientOnSharedConnection(t *testing.T) {
 	for _, proto := range []string{"http/1.1", "h2c", "h3"} {
 		t.Run(proto, func(t *testing.T) {
 			tcpAddr, h3Addr, cert := stallFit(t, stallBackend(t, "h2c"), `, "max_conns": 1`)
+			began := time.Now()
 			stuck := []stuckClient{startStuck(t, proto, tcpAddr, h3Addr, cert)}
 			time.Sleep(300 * time.Millisecond) // the download is under way, and stuck
+			// The stuck download holds back its own stream, not the
+			// connection: the others go at once.
 			slowest := others(t, tcpAddr, 10)
-			if slowest > stallTimeout+2*time.Second {
+			if slowest > time.Second {
 				t.Errorf("the slowest of the others took %v", slowest)
 			}
-			time.Sleep(stallTimeout / 2) // past the stuck client's stall timeout
+			time.Sleep(time.Until(began.Add(stallTimeout + time.Second))) // past the stuck client's stall timeout
 			checkStuck(t, stuck)
+		})
+	}
+}
+
+// TestStuckClientWithoutStallTimeout checks that nothing relies on the stall
+// timeout to keep a stuck download to itself: with it at an hour, a client
+// that stops reading a download from an h2c upstream with max_conns 1 holds
+// back its own stream and nothing else, and what fit holds for it stays
+// bounded, rather than the 200MB download piling up for the client.
+func TestStuckClientWithoutStallTimeout(t *testing.T) {
+	for _, proto := range []string{"http/1.1", "h2c", "h3"} {
+		t.Run(proto, func(t *testing.T) {
+			tcpAddr, h3Addr, cert := stallFitWith(t, stallBackend(t, "h2c"), `, "max_conns": 1`, time.Hour)
+			goruntime.GC()
+			var before goruntime.MemStats
+			goruntime.ReadMemStats(&before)
+			stuck := startStuck(t, proto, tcpAddr, h3Addr, cert)
+			time.Sleep(time.Second) // the download is under way, and stuck
+			if slowest := others(t, tcpAddr, 10); slowest > time.Second {
+				t.Errorf("the slowest of the others took %v", slowest)
+			}
+			goruntime.GC()
+			var during goruntime.MemStats
+			goruntime.ReadMemStats(&during)
+			if grew := int64(during.HeapInuse) - int64(before.HeapInuse); grew > 32<<20 {
+				t.Errorf("the heap grew by %d MB with the download stuck", grew>>20)
+			}
+			// Not cut off: once the client reads, the rest comes.
+			if n, cut := stuck.done(t); cut || n < stuckSize {
+				t.Errorf("the stuck client read %d bytes, cut %v", n, cut)
+			}
 		})
 	}
 }

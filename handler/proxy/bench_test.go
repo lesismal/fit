@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // BenchmarkProxy sends small GETs through the proxy to an HTTP/1.1 backend,
@@ -73,4 +74,43 @@ func readResponse(r *bufio.Reader) error {
 	}
 	_, err := r.Discard(n)
 	return err
+}
+
+// BenchmarkProxyDownload streams a 64MB body through the proxy from an
+// HTTP/1.1 backend, over HTTP/1.1 and h2c, as fast as the client reads:
+// the download path, which writes each piece as it arrives.
+func BenchmarkProxyDownload(b *testing.B) {
+	const size = 64 << 20
+	chunk := make([]byte, 256<<10)
+	backend := serveBackend(b, "http/1.1", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(size))
+		for sent := 0; sent < size; sent += len(chunk) {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	base := startFit(b, config1(`{"upstream": "app"}`), backend)
+	for _, h2c := range []bool{false, true} {
+		name := "http/1.1"
+		if h2c {
+			name = "h2c"
+		}
+		b.Run(name, func(b *testing.B) {
+			c := client(h2c)
+			c.Timeout = time.Minute
+			b.SetBytes(size)
+			for b.Loop() {
+				resp, err := c.Get(base + "/big")
+				if err != nil {
+					b.Fatal(err)
+				}
+				n, err := io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if err != nil || n != size {
+					b.Fatalf("%d bytes: %v", n, err)
+				}
+			}
+		})
+	}
 }
