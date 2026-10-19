@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09–I22 已完成；剩 I23 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09–I22 已完成；I23 进行中（一致性部分已完成，基准等待压测机） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
@@ -19,12 +19,13 @@
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I23，M1 一致性测试与基准**，它结束 M1。其中的基准需要压测机（见说明）；h2spec 和代理一致性测试可以
-在本机运行。I24、I32 也都可以开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
+**下一步：完成 I23** 的基准部分，在压测机上运行：压测框架的 static 和 proxy 场景，以及 10k 和 100k 空闲连接的内存，
+结果提交到 `bench/results/` 并与基线比较。压测机拒绝了本会话的 ssh 登录（开发机上还没有密钥）。I24、I32 也都可以
+开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I23。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 完成 docs/dev-plan.zh-CN.md 中的迭代 I23：一致性部分已完成（见 docs/progress.zh-CN.md），在压测机上运行基准。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -636,6 +637,21 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 - 在同一地址上被替换的 listener，在旧的排空期间会在旁边再绑定一个 UDP socket；这段时间内数据报由内核按哈希分到两个
   socket，落在这个窗口里的 QUIC 连接可能中断，客户端会重连。TCP 连接不受这种影响。
+
+### I23 M1 一致性测试与基准 — 进行中
+
+已完成（见[报告](../bench/results/m1-conformance-2026-10-19.md)）：
+
+- h2spec 2.0.0 针对 h2c 和 TLS h2 入口运行，分别由 `respond` 应答和经过代理：四次运行均为 145/145。
+- `test/e2e/conformance_test.go`：通过 `fit` 二进制、逐字节构造请求的代理一致性测试：同时带两种长度的请求走私、
+  冲突的 `Content-Length`、冒号前的空白、缺少和重复的 `Host`、错误的分块大小、字段中的 NUL、超过上限的头、obs-fold、
+  `Expect: 100-continue`、HTTP/1.0 客户端、管线化、绝对形式的请求目标、上游返回的 304、204 和 1xx、不说 HTTP 的上游，
+  以及任一方的 `Connection: close`。
+- 发现：fib v1.3.0 把 `X-A : one` 当作名为 `X-A ` 的字段放行，而 RFC 9112 要求返回 400。代理现在拒绝字段名不是
+  token 的请求（在复制请求头的循环中检查），这样它不会到达上游。fib 中的修复在 fib 的 `fix-field-name-whitespace`
+  分支上，已提交、未推送，留给下一个 fib 版本。
+
+剩余：在压测机上运行压测框架的 static 和 proxy 场景，以及 10k 和 100k 空闲连接内存，并与基线比较。
 
 ## 给后续迭代的说明
 

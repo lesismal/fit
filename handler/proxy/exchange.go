@@ -59,6 +59,10 @@ func (e *uploadError) Unwrap() error { return e.err }
 // for a body of no declared length, ended with a Fit-Error trailer.
 func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	out := p.outgoing(c)
+	if out == nil {
+		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", []byte("400 Bad Request\n"))
+		return
+	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	out = out.WithContext(ctx)
 	// The backend is held until the exchange is over, body and all, so that

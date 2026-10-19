@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09–I22 done; I23 left |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09–I22 done; I23 under way (conformance done, benchmarks waiting for the benchmark host) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
@@ -21,14 +21,15 @@ response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and basel
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I23, M1 conformance and benchmarks**, which closes M1. Its benchmarks need the
-benchmark host (see the notes); h2spec and the proxy conformance suite can run here. I24 and I32 are
-also ready to start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
+**Next: finish I23** with its benchmarks, which run on the benchmark host: the harness's static and
+proxy scenarios, and idle memory at 10k and 100k connections, committed under `bench/results/` and
+compared with the baselines. The host refused this session's ssh login (no key on the development
+Mac yet). I24 and I32 are also ready to start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
 taken them.
 
 To continue, start a session with:
 
-> Implement iteration I23 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Finish iteration I23 from docs/dev-plan.md: its conformance part is done (see docs/progress.md); run the benchmarks on the benchmark host. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -812,6 +813,26 @@ Differences from the plan:
   the old one drains; datagrams then split between the two by the kernel's hash, so a QUIC
   connection caught in that window may break, and its client reconnects. TCP connections are not
   affected that way.
+
+### I23 M1 conformance and benchmarks — under way
+
+Done so far (see [the report](../bench/results/m1-conformance-2026-10-19.md)):
+
+- h2spec 2.0.0 against the h2c and TLS h2 entries, answering with `respond` and through the proxy:
+  145 of 145 in each of the four runs.
+- `test/e2e/conformance_test.go`, a proxy conformance suite through the `fit` binary with requests
+  written byte by byte: request smuggling with both lengths, conflicting `Content-Length`s,
+  whitespace before a colon, missing and doubled `Host`, a bad chunk size, a NUL in a field, a header
+  past the limit, obs-fold, `Expect: 100-continue`, an HTTP/1.0 client, pipelining, an
+  absolute-form target, 304, 204 and 1xx from the upstream, an upstream that does not speak HTTP,
+  and `Connection: close` from either side.
+- Found: fib v1.3.0 let `X-A : one` through as a field named `X-A `, where RFC 9112 asks for 400.
+  The proxy now refuses a request with a field name that is not a token (checked in the loop that
+  copies the header), so it never reaches an upstream. The fix in fib is on fib's branch
+  `fix-field-name-whitespace`, committed and not pushed, for the next fib release.
+
+Left: the harness's static and proxy scenarios and idle memory at 10k and 100k, on the benchmark
+host, and the comparison with the baselines.
 
 ## Notes for later iterations
 

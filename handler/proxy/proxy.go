@@ -87,11 +87,17 @@ func parsePrefix(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
-// outgoing is the request sent upstream for the one c serves.
+// outgoing is the request sent upstream for the one c serves, or nil for one
+// with a header field whose name is not a token, as "X-A : 1" makes it: RFC
+// 9112 asks a server to refuse whitespace before the colon, which fib v1.3.0
+// lets through, and an upstream could read such a field differently.
 func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
 	r := c.Request
 	header := make(stdhttp.Header, len(r.Header)+4)
 	for key, values := range r.Header {
+		if !validToken(key) {
+			return nil
+		}
 		header[key] = values
 	}
 	removeHopByHop(header)
@@ -218,6 +224,21 @@ func forwardedValue(v string) string {
 		}
 	}
 	return v
+}
+
+// validToken reports whether s is an HTTP token, as a field name must be.
+func validToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0 {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // hopByHop are the fields that concern one connection only, RFC 9110
