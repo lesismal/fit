@@ -97,8 +97,14 @@ func (h *harness) measureIdle(ctx context.Context, s server, kind string, r *Idl
 			u, mode = fmt.Sprintf(k.url, h.serverHost), k.mode
 		}
 	}
+	// One loopback address has some 64k ports to connect from; every 40k
+	// connections take another, which host networking reaches on loopback.
+	sources := 1
+	if h.serverHost == "127.0.0.1" {
+		sources = (h.idleConns + 39999) / 40000
+	}
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", loadgenName, "/fitbench/idleconn",
-		"-mode", mode, "-url", u, "-n", strconv.Itoa(h.idleConns), "-hold", "5m")
+		"-mode", mode, "-url", u, "-n", strconv.Itoa(h.idleConns), "-hold", "5m", "-sources", strconv.Itoa(sources))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		r.Error = err.Error()

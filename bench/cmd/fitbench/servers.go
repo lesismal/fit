@@ -70,12 +70,11 @@ var servers = []server{
 	},
 	{
 		name: "fit",
-		// TLS idle connections need the harness's certificate in fit's config,
-		// and WebSocket comes with I47: add them here, and to
-		// configs/fit/fit.json, as they land.
+		// WebSocket comes with I47: add it here, and to configs/fit/fit.json,
+		// when it lands.
 		scenarios: []string{"fixed", "static", "proxy"},
-		idle:      []string{"http1"},
-		mounts:    [][2]string{{"fit/fit.json", "/etc/fit/fit.json"}, {"www", "/srv/www"}},
+		idle:      []string{"http1", "tls"},
+		mounts:    [][2]string{{"fit/fit.json", "/etc/fit/fit.json"}, {"www", "/srv/www"}, {"certs", "/certs"}},
 		cmd:       []string{"/usr/local/bin/fit", "run", "-c", "/etc/fit/fit.json"},
 		version:   []string{"/usr/local/bin/fit", "version"},
 		ready:     "/fixed",

@@ -1,7 +1,9 @@
 {
   "listeners": [
     {"name": "h1", "address": ":8080", "protocols": ["http/1.1"]},
-    {"name": "h2c", "address": ":8081", "protocols": ["h2c"]}
+    {"name": "h2c", "address": ":8081", "protocols": ["h2c"]},
+    {"name": "tls", "address": ":8443", "protocols": ["http/1.1"],
+      "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}}
   ],
   "upstreams": [
     {"name": "backend", "addresses": ["{{BACKEND}}"], "max_idle_conns": 4096}

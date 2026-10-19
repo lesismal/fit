@@ -133,6 +133,8 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 	out := flags.String("out", "", "where to write the results; bench/results/run-<time>.json when empty")
+	rootDir := flags.String("root", "", "the fit repository; the module go finds when empty")
+	binDir := flags.String("bin", "", "a directory with fit and idleconn already built for the host, for a host without Go; they are built when empty")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -160,9 +162,11 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
-	root, err := moduleRoot()
-	if err != nil {
-		return err
+	root := *rootDir
+	if root == "" {
+		if root, err = moduleRoot(); err != nil {
+			return err
+		}
 	}
 	h.bench = filepath.Join(root, "bench")
 	h.work = filepath.Join(h.bench, ".work")
@@ -225,7 +229,11 @@ func run(ctx context.Context, args []string) error {
 		},
 	}
 
-	if err := h.buildTools(ctx, root, arch); err != nil {
+	if *binDir != "" {
+		if err := h.copyTools(*binDir); err != nil {
+			return err
+		}
+	} else if err := h.buildTools(ctx, root, arch); err != nil {
 		return err
 	}
 	if err := h.renderConfigs(map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr, "{{WORKERS}}": strconv.Itoa(serverThreads)}); err != nil {
@@ -413,6 +421,25 @@ func (h *harness) buildTools(ctx context.Context, root, arch string) error {
 		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("building %s: %v\n%s", name, err, out)
+		}
+	}
+	return nil
+}
+
+// copyTools takes fit and idleconn from dir, built elsewhere for this host,
+// for a host without Go.
+func (h *harness) copyTools(dir string) error {
+	step("taking fit and idleconn from " + dir)
+	if err := os.MkdirAll(h.work, 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{"fit", "idleconn"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(h.work, name), data, 0o755); err != nil {
+			return err
 		}
 	}
 	return nil

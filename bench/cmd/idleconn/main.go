@@ -42,6 +42,7 @@ func main() {
 	concurrency := flag.Int("concurrency", 64, "how many connections to open at once")
 	hold := flag.Duration("hold", 5*time.Minute, "the longest the connections are held")
 	serveWS := flag.String("serve-ws", "", "serve as a WebSocket backend on this address instead")
+	sources := flag.Int("sources", 1, "how many loopback addresses, 127.0.0.1 up, to open the connections from, for more than one address's ports allow; only for a loopback target")
 	flag.Parse()
 
 	if *serveWS != "" {
@@ -59,7 +60,7 @@ func main() {
 	}
 
 	start := time.Now()
-	conns, err := openAll(*mode, u, *n, *concurrency)
+	conns, err := openAll(*mode, u, *n, *concurrency, *sources)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "idleconn: %d of %d connections opened: %v\n", len(conns), *n, err)
 		os.Exit(1)
@@ -82,14 +83,14 @@ func main() {
 		if _, err := c.Read(make([]byte, 1)); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 			closed++
 		}
-		_ = c.Close()
+		abort(c)
 	}
 	fmt.Printf("DONE %d closed by the server\n", closed)
 }
 
 // openAll opens n connections, concurrency at a time, and stops at the
 // first that fails.
-func openAll(mode string, u *url.URL, n, concurrency int) ([]net.Conn, error) {
+func openAll(mode string, u *url.URL, n, concurrency, sources int) ([]net.Conn, error) {
 	conns := make([]net.Conn, n)
 	var next atomic.Int64
 	var mu sync.Mutex
@@ -105,7 +106,7 @@ func openAll(mode string, u *url.URL, n, concurrency int) ([]net.Conn, error) {
 				if stop {
 					return
 				}
-				c, err := open(mode, u)
+				c, err := open(mode, u, sourceAddr(i, sources))
 				mu.Lock()
 				if err != nil && firstErr == nil {
 					firstErr = err
@@ -125,19 +126,53 @@ func openAll(mode string, u *url.URL, n, concurrency int) ([]net.Conn, error) {
 	return opened, firstErr
 }
 
-// open opens one connection and makes its request.
-func open(mode string, u *url.URL) (net.Conn, error) {
+// abort closes c with a reset rather than a FIN, so that this side keeps no
+// TIME_WAIT for it: a run of 100k connections would otherwise hold the ports
+// of the next run for a minute.
+func abort(c net.Conn) {
+	if tc, ok := c.(*tls.Conn); ok {
+		c = tc.NetConn()
+	}
+	if tc, ok := c.(*net.TCPConn); ok {
+		_ = tc.SetLinger(0)
+	}
+	_ = c.Close()
+}
+
+// sourceAddr is the local address the i-th connection is opened from: one
+// of sources loopback addresses in turn, as 127.0.0.1, 127.0.0.2 and on,
+// each with its own ports, or nil for the system's choice when there is one.
+// Linux answers on the whole of 127.0.0.0/8.
+func sourceAddr(i, sources int) *net.TCPAddr {
+	if sources <= 1 {
+		return nil
+	}
+	k := i%sources + 1
+	return &net.TCPAddr{IP: net.IPv4(127, byte(k>>16), byte(k>>8), byte(k))}
+}
+
+// open opens one connection, from local when it is not nil, and makes its
+// request.
+func open(mode string, u *url.URL, local *net.TCPAddr) (net.Conn, error) {
 	host := u.Host
 	if u.Port() == "" {
 		host = net.JoinHostPort(u.Hostname(), map[bool]string{false: "80", true: "443"}[mode == "tls"])
 	}
 	var c net.Conn
 	var err error
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if local != nil {
+		dialer.LocalAddr = local
+		// The port is picked when connecting rather than when binding, so
+		// that it need only be free for this destination, and ports still in
+		// TIME_WAIT from an earlier run can be taken again.
+		dialer.Control = bindAddressNoPort
+	}
 	if mode == "tls" {
-		c, err = tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", host,
+		c, err = tls.DialWithDialer(dialer, "tcp", host,
 			&tls.Config{InsecureSkipVerify: true, NextProtos: []string{"http/1.1"}, ServerName: u.Hostname()})
 	} else {
-		c, err = net.DialTimeout("tcp", host, 10*time.Second)
+		c, err = dialer.Dial("tcp", host)
 	}
 	if err != nil {
 		return nil, err
