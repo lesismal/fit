@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12 已完成 |
 | fib | `github.com/lesismal/fib v1.2.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS、静态文件和代理；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 TLS 和代理；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I12，静态文件 I**，I11 完成后它可以开始了。I09、I14、I21、I22 也都可以开始（除非已有
-别的会话在做），其中任何一个都可以与 I12 并行。
+**下一个迭代：I14，上游连接池 v1**，然后是 I15（依赖 I11 和 I14）。I09、I13、I21、I22 也都可以开始（除非
+已有别的会话在做），其中任何一个都可以与 I14 并行。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I12。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I14。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -36,12 +36,13 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner` |
 | `handler/respond` | `respond` handler |
+| `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | 把配置 `Compile` 成不可变的 `Graph`，每个 listener 一个路由器；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；优雅退出 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
-| `internal/fibtest` | 在测试中不经网络运行 fib handler |
+| `internal/fibtest` | 在测试中不经网络运行 fib handler：`Serve`、`ServeRequest` |
 | `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
 | `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
 | `examples` | `hello.json` |
@@ -265,6 +266,40 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   的匹配内置在路由器里，而不是由 `module.Matcher` 模块组成；`module.Matcher` 留到 I36 加入需要整个请求的
   匹配器时再用。
 
+### I12 静态文件 I — 已完成
+
+- `handler/static` 包，模块名 `static`，参数有 `root`（必填）、`index`（默认 `["index.html"]`，`[]` 表示
+  不用）、`strip_prefix`、`max_file_bytes`（默认 1 MiB）和 `max_cache_bytes`（默认 64 MiB）。已在
+  `modules/standard` 中注册，schema 已重新生成。
+- 请求处理：只接受 GET 和 HEAD，其他返回 405 并带 `Allow`；去掉 `strip_prefix`（路径没有该前缀时返回 404）；
+  含 `..` 段、NUL 或反斜杠的路径返回 400；其余路径清理后拼到根目录下并 stat。请求目录但没有结尾斜杠时
+  301 重定向到带斜杠的路径（保留查询串）；有斜杠时返回第一个是普通文件的索引文件，否则 404。带结尾斜杠
+  请求文件、或目标不是普通文件，返回 404；stat 因权限被拒返回 403。
+- 不超过 `max_file_bytes` 的文件在 `max_cache_bytes` 允许时缓存在内存中，响应头只构建一次（`Content-Type`
+  按扩展名或内容嗅探、`Last-Modified`、`ETag`、`Accept-Ranges`），所有响应共享。没有条件和 Range 的请求
+  直接用 `WriteResponse` 发出该响应头和缓存的字节；有条件或 Range 的请求交给 `net/http.ServeContent`，它
+  处理 `If-None-Match`、`If-Modified-Since`、`If-Match`、`If-Unmodified-Since`、`Range`（包括 multipart）和
+  `If-Range`。更大的文件，或缓存放不下的文件，通过 `ServeContent` 从磁盘读取。只要文件大小和修改时间不变，
+  缓存副本就有效；文件被删除后从缓存中移除。
+- `internal/fibtest.ServeRequest` 用测试构造的请求运行 handler，并像服务器一样在 handler 返回时结束通过
+  `Write` 写出的响应。
+- 测试：`handler/static` 覆盖 MIME 类型（按扩展名和嗅探）、HEAD、空文件、转义的文件名、按顺序尝试的索引
+  文件、带或不带查询串的重定向、404、带 `Allow` 的 405；穿越尝试 `/../`、`/a/../../`、`%2e%2e`、`..%2f`、
+  `..%5c`、`%00` 和 `/..` 都返回 400，且不会返回根目录外的文件，而 `..dots` 这样的文件名正常返回；上面
+  所有条件请求和 Range 情况，分别从内存和磁盘服务；文件修改后返回新内容和新 `ETag`，删除后返回 404 并从
+  缓存移除；缓存上限；`strip_prefix`；`"index": []`；403；以及参数错误。`test/e2e` 用构建出的二进制通过
+  HTTP/1.1 和 h2c 服务一个小文件和一个 1 MiB 文件，覆盖 HEAD、304、Range、索引、重定向和原始 `..` 路径。
+  `BenchmarkServeCached`：缓存的 1 KiB 文件每请求约 1.8 µs、672 B、8 次分配（含测试上下文，Apple M3 Max）。
+  `go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- handler 没有使用 fib 的 `http.FileCache`：它在 v1.2.0 中不发送 `ETag`，并且自己应答请求，因此不知道索引
+  文件，也会自己写 404；见[决定 003](decisions/003-static-file-cache.zh-CN.md)。handler 每个请求 stat 一次
+  文件，与 nginx 默认行为相同，而 `FileCache` 在 Linux 上不需要。
+- 任何 `..` 段都返回 400，即使它不会离开根目录，与 nginx 拒绝越过根目录的路径一致；符号链接无论指向哪里都会
+  跟随，与 nginx 和 Caddy 的默认行为一致。
+
 ## 给后续迭代的说明
 
 - **fib 版本。** fit 使用模块代理上的 fib v1.2.0。本地 fib 仓库的 `main` 比这个 tag 多约 30 个提交。如果某个迭代
@@ -276,7 +311,8 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   29 MB），这体现在打开任何连接之前的内存里，而不是每连接的开销里。
 - **staticcheck。** 用较旧 Go 构建的 staticcheck 读不了 Go 1.27 的导出数据。按 CI 的方式（基于最新的
   `golang.org/x/tools`）构建，再传给 make：`make check STATICCHECK=/path/to/staticcheck`。
-- **测试 handler。** `internal/fibtest.Serve` 通过 `fibhttp.NewStreamContext` 和一个记录用的 stream 运行 fib
-  handler，不经过网络。
+- **测试 handler。** `internal/fibtest.Serve` 和 `ServeRequest` 通过 `fibhttp.NewStreamContext` 和一个记录用的
+  stream 运行 fib handler，不经过网络。带 content type 的 `Context.Respond` 会忽略 `c.Header()`；需要其他响应头
+  字段时用 `WriteResponse`。
 - **错误位置。** 错误测试比较带 行:列 的完整消息。期望的列号应该从文档计算，而不是手数。
 - **许可证。** 仓库还没有 LICENSE 文件（fib 是 MIT），由维护者决定。

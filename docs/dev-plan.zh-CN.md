@@ -100,7 +100,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I09 | 从证书文件加载的 TLS 入口 | I06 | todo |
 | I10 | HTTP/3 入口 | I09 | todo |
 | I11 | 路由 v1：host 与 path | I06 | done |
-| I12 | 静态文件 I | I11 | todo |
+| I12 | 静态文件 I | I11 | done |
 | I13 | 静态文件 II | I12 | todo |
 | I14 | 上游连接池 v1（HTTP/1.1） | I05 | todo |
 | I15 | 反向代理 I：转发与头处理 | I11、I14 | todo |

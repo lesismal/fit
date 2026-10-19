@@ -106,13 +106,30 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "static"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.static"
+              }
+            }
+          }
         }
       ],
       "properties": {
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
-            "respond"
+            "respond",
+            "static"
           ],
           "type": "string"
         },
@@ -146,6 +163,40 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "http.handlers.static": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "description": "The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for [].",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_cache_bytes": {
+          "description": "How many bytes of files are kept in memory at most; 64 MiB when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_file_bytes": {
+          "description": "The largest file kept in memory, in bytes; 1 MiB when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "root": {
+          "description": "The directory files are served from.",
+          "type": "string"
+        },
+        "strip_prefix": {
+          "description": "A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root"
+      ],
       "type": "object"
     },
     "http.middleware": {

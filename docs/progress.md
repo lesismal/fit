@@ -11,22 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11 and I12 done |
 | fib | `github.com/lesismal/fib v1.2.0`, from the module proxy |
-| What works | `fit run` serves fixed responses over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS, no static files, no proxying yet; no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no TLS, no proxying yet; no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I12, static files I**, which I11 unblocked. I09, I14, I21 and I22 are also
-ready to start, unless another session has taken them; any of them can run in parallel with I12.
+**Next iteration: I14, upstream pool v1**, then I15 (which needs I11 and I14). I09, I13, I21
+and I22 are also ready to start, unless another session has taken them; any of them can run in
+parallel with I14.
 
 To continue, start a session with:
 
-> Implement iteration I12 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I14 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -39,12 +40,13 @@ To continue, start a session with:
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner` |
 | `handler/respond` | the `respond` handler |
+| `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile` from config to an immutable `Graph` with a router per listener; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; graceful shutdown |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
-| `internal/fibtest` | runs fib handlers in tests without a network |
+| `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
 | `examples` | `hello.json` |
@@ -310,6 +312,48 @@ Differences from the plan:
   importing `runtime`. Host and path matching is built into the router rather than made of
   `module.Matcher` modules, which stay unused until I36 adds the matchers that need a request.
 
+### I12 Static files I — done
+
+- Package `handler/static`, module `static`, with params `root` (required), `index` (default
+  `["index.html"]`, `[]` for none), `strip_prefix`, `max_file_bytes` (default 1 MiB) and
+  `max_cache_bytes` (default 64 MiB). Registered in `modules/standard`; the schema is regenerated.
+- A request: GET and HEAD only, else 405 with `Allow`; `strip_prefix` removed (404 when the path
+  lacks it); a path with a `..` segment, a NUL or a backslash gets 400; the rest is cleaned and
+  joined to the root, and stat'ed. A directory asked for without a trailing slash is redirected
+  (301, query kept) to the path with one; with one, the first index file that is a regular file is
+  served, else 404. A file asked for with a trailing slash, or anything not a regular file, is 404;
+  a stat refused for permissions is 403.
+- Files up to `max_file_bytes` are kept in memory while `max_cache_bytes` allows, with a header
+  built once (`Content-Type` from the extension or sniffed, `Last-Modified`, `ETag`,
+  `Accept-Ranges`) and shared by every response. A request without conditions or a range leaves
+  through `WriteResponse` with that header and the cached bytes; one with them goes through
+  `net/http.ServeContent`, which answers `If-None-Match`, `If-Modified-Since`, `If-Match`,
+  `If-Unmodified-Since`, `Range` (multipart too) and `If-Range`. A larger file, or one past the
+  cache's room, is served from disk through `ServeContent`. The cached copy stands while the
+  file's size and modification time do; a file that is gone is dropped from the cache.
+- `internal/fibtest.ServeRequest` runs a handler for a request built by the test, and finishes a
+  response written through `Write` when the handler returns, as the server does.
+- Tests: `handler/static` covers MIME types (by extension and sniffed), HEAD, empty files, escaped
+  names, index files in order, redirects with and without a query, 404s, 405 with `Allow`; the
+  traversal attempts `/../`, `/a/../../`, `%2e%2e`, `..%2f`, `..%5c`, `%00` and `/..` all get 400
+  and never the file outside, while a name like `..dots` is served; every conditional and range
+  case above, from memory and from disk; a changed file served anew with a new `ETag`, a removed one
+  404 and dropped; the cache's limits; `strip_prefix`; `"index": []`; 403; and the params' errors.
+  `test/e2e` serves a small and a 1 MiB file from the built binary over HTTP/1.1 and h2c, with
+  HEAD, 304, ranges, an index, a redirect and a raw `..` path. `BenchmarkServeCached`: about
+  1.8 µs, 672 B and 8 allocations a request for a cached 1 KiB file, the test context included
+  (Apple M3 Max). `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The handler does not use fib's `http.FileCache`, which in v1.2.0 sends no `ETag` and answers
+  the request itself, so knows nothing of index files and writes its own 404; see
+  [decision 003](decisions/003-static-file-cache.md). The handler stats the file on each
+  request, as nginx does by default, where `FileCache` on Linux would not.
+- Any `..` segment is refused with 400, even one that would stay inside the root, as nginx
+  refuses a path that climbs above the root; symbolic links are followed wherever they lead, as
+  nginx and Caddy do by default.
+
 ## Notes for later iterations
 
 - **fib version.** fit uses fib v1.2.0 from the module proxy. The local fib checkout's `main` is
@@ -325,8 +369,9 @@ Differences from the plan:
 - **staticcheck.** A staticcheck built with an older Go cannot read Go 1.27 export data. Build it
   as CI does (against the latest `golang.org/x/tools`) and pass it to make:
   `make check STATICCHECK=/path/to/staticcheck`.
-- **Testing handlers.** `internal/fibtest.Serve` runs a fib handler through
-  `fibhttp.NewStreamContext` with a recording stream, with no network.
+- **Testing handlers.** `internal/fibtest.Serve` and `ServeRequest` run a fib handler through
+  `fibhttp.NewStreamContext` with a recording stream, with no network. `Context.Respond` with a
+  content type ignores `c.Header()`; a response with other fields goes through `WriteResponse`.
 - **Error positions.** Error tests compare whole messages with line:column. Work out expected
   columns from the document rather than counting by hand.
 - **License.** The repository has no LICENSE file yet (fib is MIT); that is the maintainer's call.

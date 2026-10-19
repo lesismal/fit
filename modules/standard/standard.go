@@ -4,4 +4,5 @@ package standard
 
 import (
 	_ "github.com/lesismal/fit/handler/respond"
+	_ "github.com/lesismal/fit/handler/static"
 )

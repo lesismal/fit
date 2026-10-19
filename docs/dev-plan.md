@@ -110,7 +110,7 @@ Status: `todo`, `doing` or `done`.
 | I09 | TLS entry from certificate files | I06 | todo |
 | I10 | HTTP/3 entry | I09 | todo |
 | I11 | Router v1: host and path | I06 | done |
-| I12 | Static files I | I11 | todo |
+| I12 | Static files I | I11 | done |
 | I13 | Static files II | I12 | todo |
 | I14 | Upstream pool v1 (HTTP/1.1) | I05 | todo |
 | I15 | Reverse proxy I: forwarding and headers | I11, I14 | todo |

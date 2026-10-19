@@ -40,7 +40,15 @@ func (r *Recorder) Push(*stdhttp.Request, string, *stdhttp.PushOptions) error {
 // Serve runs h for a request with method and target, as httptest.NewRequest
 // makes one, and returns what it answered.
 func Serve(h fibhttp.Handler, method, target string) *Recorder {
+	return ServeRequest(h, httptest.NewRequest(method, target, nil))
+}
+
+// ServeRequest runs h for r and returns what it answered. A response written
+// through Write is finished when h returns, as the server finishes it.
+func ServeRequest(h fibhttp.Handler, r *stdhttp.Request) *Recorder {
 	rec := &Recorder{}
-	h.ServeHTTP(fibhttp.NewStreamContext(nil, httptest.NewRequest(method, target, nil), rec))
+	c := fibhttp.NewStreamContext(nil, r, rec)
+	h.ServeHTTP(c)
+	_ = c.Finish()
 	return rec
 }
