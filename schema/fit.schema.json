@@ -38,6 +38,17 @@
       ],
       "type": "object"
     },
+    "config.Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "write_stall_timeout": {
+          "description": "How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.Listener": {
       "additionalProperties": false,
       "properties": {
@@ -444,6 +455,10 @@
     "access_log": {
       "$ref": "#/$defs/config.AccessLog",
       "description": "Where a line is written for each request, as JSON; no access log when left out."
+    },
+    "limits": {
+      "$ref": "#/$defs/config.Limits",
+      "description": "Limits that apply to every listener."
     },
     "listeners": {
       "description": "The addresses fit listens on, and the protocols each one serves.",

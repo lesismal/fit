@@ -41,3 +41,24 @@ func TestDuration(t *testing.T) {
 		t.Fatalf("errors:\n%v\nwant:\n%s", err, want)
 	}
 }
+
+func TestLimits(t *testing.T) {
+	c, err := Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Limits.WriteStall(); got != 30*time.Second {
+		t.Fatalf("default write stall timeout %v", got)
+	}
+	c, err = Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "limits": {"write_stall_timeout": "5s"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Limits.WriteStall(); got != 5*time.Second {
+		t.Fatalf("write stall timeout %v", got)
+	}
+	_, err = Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "limits": {"write_stall_timeout": "soon"}}`))
+	if err == nil || !strings.Contains(err.Error(), `limits.write_stall_timeout: "soon" is not a duration`) {
+		t.Fatalf("error %v", err)
+	}
+}

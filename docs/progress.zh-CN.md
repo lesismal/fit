@@ -22,8 +22,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一个迭代：R01，慢客户端的等待有上限**，然后是 R02，安全的默认上限：下面的审查把两者都放在 M2 之前，即在 I24、
-I32 之前。
+**下一个迭代：R02，安全的默认上限**，下面的审查把它放在 M2 之前，即在 I24、I32 之前。R01 已完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -32,7 +31,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 R01。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 R02。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -678,6 +677,36 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   `keepalive_timeout` 关闭了 100k 空闲连接中的约 45k，所以应比较它 10k 时的数字。
 - 与 M0 基线（M3 Max 上的 Docker Desktop）相比，fit 的 fixed HTTP/1.1 吞吐从 nginx 的 1.25 倍变为 0.96 倍，空闲
   HTTP/1.1 内存从 0.9 KiB 变为 1.5 KiB。两台机器不同；R07 会在这台主机上测量两个提交，确定是不是 fit 的变化。
+
+### R01 慢客户端的等待有上限 — 已完成
+
+- 配置：新的顶层 `limits` 对象中的 `limits.write_stall_timeout`（默认 30s），`Limits.WriteStall()` 给出默认值。
+  `runtime.Compile` 通过 `module.Env` 把它交给模块；`module.Context.WriteStallTimeout()` 在 provision 时读取。
+- 代理的下载路径通过 `exchange.write` 写出每一段：`SetWriteDeadline(now + stall)`、`Write`、`FlushError`，然后解除
+  截止时间。不再读取的客户端会在截止时间过后写入失败（fib 关闭其 HTTP/1 连接或重置其 HTTP/2、HTTP/3 流），上游响应
+  用 `ClientResponse.Close` 放弃，worker 回到上游连接上。`Finish` 也带截止时间。
+- 静态 handler 把 Context 包装为 `stallWriter` 交给 `ServeContent`：每次 `Write` 使用同样的“设置再解除”截止时间；
+  `ReadFrom` 在明文 HTTP/1 连接上仍走 fib 的 `ReadFrom`（sendfile，不等待），在 TLS、HTTP/2、HTTP/3 上则通过有上限的
+  `Write` 复制——这些情况下 fib 原本会通过会等待的写来复制。不支持截止时间的 Context（`http.ErrNotSupported`）就不带
+  截止时间写入。
+- 测试（`handler/proxy/stall_test.go`），stall 超时 1s，客户端覆盖 HTTP/1.1、h2c 和 h3：审查中的两种情况——一个客户端
+  不再读取来自 `max_conns: 1` 的 h2c 上游的 200MB 下载，以及八个这样的客户端对 `max_conns: 4` 的 HTTP/1.1 上游；两种
+  情况下另外十个请求都得到服务（分别在 stall 后 1s 和 2s 内），每个卡住的客户端的响应都被截断。去掉截止时间运行一次，
+  其他请求会在 10s 后超时，与审查测到的一致。慢慢读取的客户端，以及暂停两倍 stall 时长的上游，都能拿到完整响应。
+  `handler/static`：不再读取 64MB 文件的客户端在 h2c 和 h3 上响应被截断（去掉截止时间则拿到全部）。`config` 测试新
+  上限。`go vet ./...` 和 `go test -race ./...` 通过；流式测试仍然通过。
+
+与计划的不同：
+
+- `write_stall_timeout` 放在顶层 `limits` 对象中，而不是每个 listener 上：用它限制写入的 handler 被一个路由服务的所有
+  listener 共享，而 R02 也把 listener 的其他上限放在 `limits` 中。
+- 截止时间在每次写之前设置、之后解除，而不是至多每秒刷新一次：即使没有等待，fib 也会在截止时间过后重置 HTTP/2 或
+  HTTP/3 流，所以一直保留的截止时间会截断上游暂停的响应，比如 server-sent events。与 nginx 的 `send_timeout` 一样，只
+  计算写入等待客户端的时间。
+- 没有设置 listener 的 `WriteTimeout`，也没有设置 fib HTTP/3 的：它们限制的是整个响应，会截断长时间的下载。
+- 明文 HTTP/1 连接上通过 sendfile 发送的文件没有截止时间：没有 worker 等待它，客户端没取走的数据在内核中。R05（异步
+  文件发送）会给它加上。
+- 没有做前后对比的基准：压测框架的场景走的是 R01 没有改动的路径（一次写出的小代理响应、没有条件的缓存文件）。
 
 ## 给后续迭代的说明
 

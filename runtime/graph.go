@@ -104,7 +104,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		cleanupModules(g)
 		return nil, errs
 	}
-	menv := &module.Env{Upstreams: g.upstreams}
+	menv := &module.Env{Upstreams: g.upstreams, WriteStall: c.Limits.WriteStall()}
 
 	routes := make([]*Route, len(c.Routes))
 	for i, rc := range c.Routes {

@@ -10,6 +10,7 @@ package config
 import (
 	"os"
 	"reflect"
+	"time"
 )
 
 // Config is a whole fit config.
@@ -18,6 +19,25 @@ type Config struct {
 	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
+	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
+}
+
+// DefaultWriteStallTimeout is Limits.WriteStallTimeout's default.
+const DefaultWriteStallTimeout = Duration(30 * time.Second)
+
+// Limits bound what clients can make fit hold for them.
+type Limits struct {
+	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// WriteStall returns the write stall timeout, its default when left out.
+func (l Limits) WriteStall() time.Duration {
+	if l.WriteStallTimeout == 0 {
+		return DefaultWriteStallTimeout.Std()
+	}
+	return l.WriteStallTimeout.Std()
 }
 
 // AccessLog says where access log lines go. Lines are buffered and written

@@ -26,8 +26,8 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next iteration: R01, bounded waits on slow clients**, then R02, safe default limits: the review
-below puts both before M2, so before I24 and I32.
+**Next iteration: R02, safe default limits**, which the review below puts before M2, so before I24
+and I32. R01 is done.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -39,7 +39,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration R01 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration R02 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -869,6 +869,48 @@ Differences from the plan:
 - Against the M0 baseline (Docker Desktop on an M3 Max), fit's fixed HTTP/1.1 throughput went from
   1.25 times nginx's to 0.96, and its idle HTTP/1.1 memory from 0.9 to 1.5 KiB. The machines differ;
   measuring both commits on this host, for R07, settles whether fit moved.
+
+### R01 Bounded waits on slow clients — done
+
+- Config: `limits.write_stall_timeout` (30s when left out), in a new top-level `limits` object, with
+  `Limits.WriteStall()` for the default. `runtime.Compile` hands it to modules through `module.Env`;
+  `module.Context.WriteStallTimeout()` reads it at provision time.
+- The proxy's download path writes each piece through `exchange.write`: `SetWriteDeadline(now +
+  stall)`, `Write`, `FlushError`, then the deadline lifted. A client that stops reading fails the
+  write once the deadline passes (fib closes its HTTP/1 connection or resets its HTTP/2 or HTTP/3
+  stream), the upstream response is given up with `ClientResponse.Close`, and the worker goes back to
+  the upstream connection. `Finish` gets a deadline too.
+- The static handler hands `ServeContent` a `stallWriter` over the Context: each `Write` under the
+  same set-and-lift deadline; `ReadFrom` keeps fib's `ReadFrom` (sendfile, which does not wait) on a
+  plain HTTP/1 connection, and copies through the bounded `Write` over TLS, HTTP/2 and HTTP/3,
+  where fib would copy through writes that wait. A Context that takes no deadline
+  (`http.ErrNotSupported`) is written to without one.
+- Tests (`handler/proxy/stall_test.go`), with a stall timeout of 1s and clients over HTTP/1.1, h2c
+  and h3: the review's two cases, one client that stops reading a 200MB download from an h2c
+  upstream with `max_conns: 1`, and eight such clients against an HTTP/1.1 upstream with
+  `max_conns: 4`; in both, ten other requests are all served (within 1s and 2s of the stall
+  respectively) and every stuck client's response is cut short. Run once without the deadlines, the
+  other requests time out after 10s, as the review measured. A client that reads slowly and an
+  upstream that pauses for twice the stall timeout keep their response. `handler/static`: a client
+  that stops reading a 64MB file over h2c and over h3 has its response cut short (and keeps all of
+  it without the deadline). `config` tests the new limit. `go vet ./...` and `go test -race ./...`
+  pass; the streaming tests still pass.
+
+Differences from the plan:
+
+- `write_stall_timeout` is in a top-level `limits` object rather than on each listener: the handlers
+  that bound their writes by it are shared by every listener a route serves, and R02 puts the
+  listeners' other limits in `limits` too.
+- The deadline is set before each write and lifted after it, rather than refreshed at most once a
+  second: fib resets an HTTP/2 or HTTP/3 stream when its deadline passes even if nothing waits, so a
+  deadline left in place would cut off a response whose upstream pauses, as a server-sent events
+  stream does. As with nginx's `send_timeout`, only the time a write waits for the client counts.
+- Neither the listener's `WriteTimeout` nor fib's HTTP/3 one is set: they bound a whole response,
+  which would cut off long downloads.
+- A file sent by sendfile on a plain HTTP/1 connection gets no deadline: no worker waits for it,
+  and the kernel holds what the client has not taken. R05 (asynchronous file sending) gives it one.
+- No benchmark before and after: the harness's scenarios take the paths R01 leaves alone (a small
+  proxied body answered in one write, a cached file without conditions).
 
 ## Notes for later iterations
 

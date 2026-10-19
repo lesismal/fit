@@ -125,7 +125,7 @@ Status: `todo`, `doing` or `done`.
 | I22 | Reload on SIGHUP | I05, I06 | done |
 | I23 | M1 conformance and benchmarks | I13, I18, I20, I21, I22 | done |
 | **M1 review fixes** | | | |
-| R01 | Bounded waits on slow clients | I13, I17 | todo |
+| R01 | Bounded waits on slow clients | I13, I17 | done |
 | R02 | Safe default limits | I13, I20 | todo |
 | R03 | fib APIs for forwarding without waiting (in fib) | — | todo |
 | R04 | Proxy downloads without waiting | R01, R03 | todo |

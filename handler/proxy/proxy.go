@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -51,6 +52,7 @@ type Proxy struct {
 
 	pool    *upstream.Pool
 	trusted []netip.Prefix
+	stall   time.Duration
 }
 
 // Provision finds the upstream and parses the trusted proxies.
@@ -60,6 +62,7 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 		return ctx.Errorf("upstream", "there is no upstream named %q", p.Upstream)
 	}
 	p.pool = pool
+	p.stall = ctx.WriteStallTimeout()
 	for i, s := range p.TrustedProxies {
 		prefix, err := parsePrefix(s)
 		if err != nil {

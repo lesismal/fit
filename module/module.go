@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -96,6 +97,19 @@ type Context struct {
 type Env struct {
 	// Upstreams are the config's upstream pools, by name.
 	Upstreams map[string]*upstream.Pool
+	// WriteStall bounds each wait of a response for its client to take what
+	// it was sent; see config.Limits.WriteStallTimeout. Zero is the default.
+	WriteStall time.Duration
+}
+
+// WriteStallTimeout returns how long a response may wait, each time, for
+// its client to take what it was sent; a handler that writes a response
+// piece by piece bounds each write by it.
+func (c *Context) WriteStallTimeout() time.Duration {
+	if c.env == nil || c.env.WriteStall <= 0 {
+		return config.DefaultWriteStallTimeout.Std()
+	}
+	return c.env.WriteStall
 }
 
 // Upstream returns the pool of the upstream named name in the module's

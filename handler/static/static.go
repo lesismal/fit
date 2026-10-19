@@ -67,6 +67,7 @@ type Static struct {
 	index         []string
 	precompressed []encoding
 	cache         cache
+	stall         time.Duration
 }
 
 // Provision checks the root and the index names.
@@ -112,6 +113,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 		s.cache.maxBytes = DefaultMaxCacheBytes
 	}
 	s.cache.entries = make(map[string]*entry)
+	s.stall = ctx.WriteStallTimeout()
 	return nil
 }
 
@@ -243,7 +245,7 @@ func (s *Static) serveFile(c *fibhttp.Context, name, full string, info fs.FileIn
 		return
 	}
 	copyHeader(c.Header(), e.header)
-	stdhttp.ServeContent(c, r, name, e.modTime, bytes.NewReader(e.data))
+	stdhttp.ServeContent(s.writer(c), r, name, e.modTime, bytes.NewReader(e.data))
 }
 
 // serveFromDisk serves a file the cache does not keep, as v describes it. It
@@ -267,7 +269,7 @@ func (s *Static) serveFromDisk(c *fibhttp.Context, v variant, full string) bool 
 		// set; a whole file knows its length.
 		h.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	}
-	stdhttp.ServeContent(c, c.Request, v.name, info.ModTime(), f)
+	stdhttp.ServeContent(s.writer(c), c.Request, v.name, info.ModTime(), f)
 	return true
 }
 

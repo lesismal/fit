@@ -68,7 +68,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	// The backend is held until the exchange is over, body and all, so that
 	// least_conn counts a long download as busy for as long as it lasts.
 	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
-		pool: p.pool, backend: p.pool.Pick()}
+		stall: p.stall, pool: p.pool, backend: p.pool.Pick()}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -269,8 +269,10 @@ type exchange struct {
 	cancel   context.CancelCauseFunc
 	start    time.Time
 	timeouts upstream.Timeouts
-	pool     *upstream.Pool
-	backend  *upstream.Backend
+	// stall bounds each wait for the client to take what was written.
+	stall   time.Duration
+	pool    *upstream.Pool
+	backend *upstream.Backend
 	// timer is the response header timeout's, then the idle timeout's.
 	timer atomic.Pointer[time.Timer]
 
@@ -331,7 +333,10 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 // the upstream makes Write wait once 64KB are queued for it (HTTP/1), or the
 // stream's window is spent (HTTP/2), and while it waits the upstream
 // connection is not read: the upstream is held back by TCP or by its own
-// stream window, and neither side's body piles up here.
+// stream window, and neither side's body piles up here. Each wait is bounded
+// by the write stall timeout (see write): a client that stops reading loses
+// its response, the upstream response is given up, and the worker goes back
+// to the upstream connection's other streams.
 func (x *exchange) onBody(data []byte, fin bool, err error) {
 	if x.done.Load() {
 		return
@@ -347,15 +352,12 @@ func (x *exchange) onBody(data []byte, fin bool, err error) {
 		x.begin()
 	}
 	if len(data) > 0 {
-		if _, werr := x.c.Write(data); werr != nil {
-			// The client is gone; giving the response up stops the
-			// upstream's callbacks.
+		if werr := x.write(data, !fin); werr != nil {
+			// The client is gone, or stopped reading for the stall timeout;
+			// giving the response up stops the upstream's callbacks.
 			x.resp.Close()
 			x.release()
 			return
-		}
-		if !fin {
-			x.c.Flush()
 		}
 	}
 	if fin {
@@ -363,9 +365,37 @@ func (x *exchange) onBody(data []byte, fin bool, err error) {
 		for name, values := range x.resp.Trailer() {
 			h[stdhttp.TrailerPrefix+name] = values
 		}
+		// What Finish sends, the last of the body and the trailers, is
+		// bounded too; the deadline goes with the response.
+		_ = x.c.SetWriteDeadline(time.Now().Add(x.stall))
 		_ = x.c.Finish()
 		x.release()
 	}
+}
+
+// write writes data to the client, and flushes it unless more is coming at
+// once, under a deadline of the stall timeout from now, which it lifts again
+// once the write is done. The deadline bounds only the time the write waits
+// for the client: a response with nothing to send, as one whose upstream
+// pauses between pieces, is not cut off for it, as nginx's send_timeout does
+// not cut one off. Once a deadline has passed, fib has closed the HTTP/1
+// connection or reset the HTTP/2 or HTTP/3 stream, and the write fails.
+func (x *exchange) write(data []byte, flush bool) error {
+	if err := x.c.SetWriteDeadline(time.Now().Add(x.stall)); err != nil && !errors.Is(err, stdhttp.ErrNotSupported) {
+		return err
+	}
+	if _, err := x.c.Write(data); err != nil {
+		return err
+	}
+	if flush {
+		if err := x.c.FlushError(); err != nil {
+			return err
+		}
+	}
+	if err := x.c.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, stdhttp.ErrNotSupported) {
+		return err
+	}
+	return nil
 }
 
 // begin sends the response's status and header to the client.
