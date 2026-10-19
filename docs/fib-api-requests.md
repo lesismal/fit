@@ -29,6 +29,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
 | A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | asked | 12 | R07d |
+| A18 | A response's status, and when its request arrived, without a hook | asked | 12 | I34 |
 
 ## Evidence
 
@@ -483,3 +484,36 @@ without the log to 3.3% with it. Together about a sixth of the log's cost, on a 
 
 **How fit uses it.** Nothing changes in fit: `observe.Track` and the dispatcher's `OnFinish` cost
 less.
+
+## A18: A response's status, and when its request arrived, without a hook
+
+**Status.** Asked, with I34 (2026-10-20).
+
+**Problem.** fit's request metrics (I34) need, for each request, the status it was answered with
+and how long it took. fib gives the status only to an `OnFinish` hook, so fit registers one on
+every request, with a closure that holds the time the dispatcher read when the request came in,
+and reads the clock again in the hook. For a handler that has answered by the time it returns, as
+`respond` and `static` have, the hook, the closure and one of the clock reads stand for nothing
+fit could not read after the handler returns.
+
+**Evidence.** On the benchmark host, fit's fixed response over h2c (h2load, 64 connections, 32
+streams; fit on 7 cores), at I34's build, with the Admin API on: 3.86M requests a second without
+`metrics`, 3.28M with it, 0.32 µs more CPU a request. `perf` puts about 110 ns of it in fib's hook
+path (`addHook`, `responseHooks.before` and `finished`, `writeResponse`, `recycle`, and the
+`sync.Pool` traffic for the writer, as A17 describes), about 60 ns in the two clock reads, about 30
+to 45 ns in allocating the closure and collecting it, and about 15 ns in fit's counting. fitbench,
+two rounds: fixed h2c 3.79M → 3.29M (−13%), static h2c 2.46M → 2.25M (−9%); HTTP/1.1, held by
+the load generator at about 775k, and the proxy, at about 230k, do not move.
+
+**Request.**
+
+- `Context.Status() int`: the status of the response sent, or begun, so far; 0 before any. With
+  `Retained`, a dispatcher can tell after the handler returns that the response is settled, and
+  count it then, keeping `OnFinish` for handlers that answer later.
+- `Context.Received() time.Time`, or a monotonic nanosecond count: when the request's head was
+  read, from a clock fib reads anyway for the read round or its deadlines, however coarse, so that
+  a duration takes one clock read rather than two.
+
+**How fit uses it.** The dispatcher reads `Received` instead of the clock when a request comes in,
+and after the handler returns counts a response that `Status` says is sent and is not `Retained`,
+with one clock read and no hook; the proxy's responses keep the hook, which A17 makes cheaper.

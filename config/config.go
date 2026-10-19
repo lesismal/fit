@@ -21,8 +21,14 @@ type Config struct {
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
-	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
+	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
+	Metrics   *Metrics   `json:"metrics,omitempty" doc:"Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."`
 	ACME      *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
+}
+
+// Metrics turns on the counting of requests. It has no settings yet.
+type Metrics struct {
+	At Value `json:"-" fit:"self"`
 }
 
 // The defaults of ACME.

@@ -20,6 +20,7 @@ import (
 	"github.com/lesismal/fit/config"
 	_ "github.com/lesismal/fit/handler/respond"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 )
 
@@ -39,15 +40,21 @@ type fixture struct {
 }
 
 // start runs doc with the Admin API a, whose address is replaced by a free
-// loopback port when it has none.
+// loopback port when it has none, counting requests as fit run does.
 func start(t *testing.T, doc string, a *config.Admin) *fixture {
+	t.Helper()
+	return startEnv(t, doc, a, runtime.Env{Metrics: observe.NewMetrics()})
+}
+
+// startEnv is start with env for compiling configs.
+func startEnv(t *testing.T, doc string, a *config.Admin, env runtime.Env) *fixture {
 	t.Helper()
 	data := []byte(doc)
 	c, err := config.Load(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := runtime.Compile(c, runtime.Env{})
+	g, err := runtime.Compile(c, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +67,7 @@ func start(t *testing.T, doc string, a *config.Admin) *fixture {
 	if a.Address == "" {
 		a.Address = "127.0.0.1:0"
 	}
-	f := &fixture{configs: NewConfigs(rt, s, runtime.Env{}, c, data, SourceFile, a.HistoryLen()), server: s,
+	f := &fixture{configs: NewConfigs(rt, s, env, c, data, SourceFile, a.HistoryLen()), server: s,
 		client: &http.Client{Timeout: 10 * time.Second}}
 	if f.admin, err = Start(a, f.configs, nil); err != nil {
 		t.Fatal(err)

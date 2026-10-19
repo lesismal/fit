@@ -149,6 +149,13 @@ func TestCerts(t *testing.T) {
 			t.Errorf("%q: %v, %v", tt.sni, got, err)
 		}
 	}
+	// What the metrics list: the files', and those obtained for its names.
+	if got := both.Certificates(); len(got) != 2 || got[0] != file || got[1] != managed {
+		t.Errorf("Certificates: %v", got)
+	}
+	if got := NewCerts(nil, a, []string{"pending.example"}).Certificates(); len(got) != 0 {
+		t.Errorf("Certificates with none obtained: %v", got)
+	}
 }
 
 func TestManage(t *testing.T) {

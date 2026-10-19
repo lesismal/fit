@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -270,8 +271,10 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	if t := x.timer.Load(); t != nil {
 		t.Stop()
 	}
+	took := time.Since(x.start)
+	x.pool.ObserveResponse(uintptr(unsafe.Pointer(x.c)), took)
 	if e := observe.EntryOf(x.c); e != nil {
-		e.Upstream, e.UpstreamDuration = x.backend.Address, time.Since(x.start)
+		e.Upstream, e.UpstreamDuration = x.backend.Address, took
 	}
 	if err != nil {
 		x.fail(err)

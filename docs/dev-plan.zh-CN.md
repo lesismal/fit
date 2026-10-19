@@ -137,7 +137,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I31 | 按需 TLS | I30 | todo |
 | I32 | 主动健康检查 | I20 | done |
 | I33 | 负载均衡 v2 | I19 | done |
-| I34 | Prometheus 指标 | I23 | todo |
+| I34 | Prometheus 指标 | I23 | done |
 | I35 | M2 退出测试 | I25、I26、I27、I31、I32、I33、I34 | todo |
 | **M3** | | | |
 | I36 | 匹配器 v2 与优先级 | I11 | todo |

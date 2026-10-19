@@ -35,6 +35,23 @@ func NewCerts(static *Static, a *ACME, names []string) *Certs {
 // Static returns the certificates from files, or nil.
 func (c *Certs) Static() *Static { return c.static }
 
+// Certificates returns the certificates c serves: those from files, then
+// those obtained so far for its names, in no order.
+func (c *Certs) Certificates() []*tls.Certificate {
+	var certs []*tls.Certificate
+	if c.static != nil {
+		certs = append(certs, c.static.Certificates()...)
+	}
+	if c.acme != nil {
+		for name, cert := range *c.acme.certs.Load() {
+			if c.names[name] {
+				certs = append(certs, cert)
+			}
+		}
+	}
+	return certs
+}
+
 func (c *Certs) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	if c.acme != nil {
 		name := normalizeName(hello.ServerName)

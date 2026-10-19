@@ -29,6 +29,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/observe"
 )
 
 // The defaults config.Upstream's fields stand for when left out.
@@ -76,8 +77,11 @@ type Pool struct {
 
 	// inFlight counts requests picked and not yet done, and closing says
 	// Close was called: the client is closed once there are none.
-	inFlight  atomic.Int64
-	closing   atomic.Bool
+	inFlight atomic.Int64
+	closing  atomic.Bool
+	// responses times the responses' headers, or their failures, from the
+	// requests' start.
+	responses observe.Histogram
 	closeOnce sync.Once
 	// users counts the graphs that use the pool: New's caller, and one more
 	// for each Acquire. Close gives one back.
@@ -245,13 +249,26 @@ func (p *Pool) SetCookie(r *stdhttp.Request, b *Backend) string {
 // up on, or whose body the client failed to send, is no failure of b's.
 func (p *Pool) Done(b *Backend, failed bool) {
 	if failed {
+		b.failures.Add(1)
 		b.failed(p.maxFails, p.failTimeout)
 	} else {
 		b.succeeded()
 	}
+	b.requests.Add(1)
 	b.active.Add(-1)
 	p.done()
 }
+
+// ObserveResponse counts the time d a request took to get its response's
+// header, or to fail without one; hint is observe.Histogram.Observe's.
+func (p *Pool) ObserveResponse(hint uintptr, d time.Duration) { p.responses.Observe(hint, d) }
+
+// ResponseTimes returns the times ObserveResponse counted.
+func (p *Pool) ResponseTimes() observe.HistogramSnapshot { return p.responses.Snapshot() }
+
+// InFlight returns how many requests the pool has picked a backend for and
+// are not done.
+func (p *Pool) InFlight() int64 { return p.inFlight.Load() }
 
 // done takes a request off the count, and closes a pool that Close was
 // called on once the count is down to none.

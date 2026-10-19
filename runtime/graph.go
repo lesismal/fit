@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +39,9 @@ type Graph struct {
 	Listeners []*Listener
 	// AccessLog is where a line goes for each request, or nil.
 	AccessLog *observe.AccessLog
+	// Metrics is where the listeners' requests are counted, or nil when
+	// the config does not count them.
+	Metrics *observe.Metrics
 	// MaxPendingBytes bounds the output waiting across the listeners'
 	// connections; see config.Limits. The listeners' engine takes it when it
 	// starts.
@@ -71,6 +76,9 @@ type Env struct {
 	// makes pools that fail every request, for a config that is only
 	// checked, as fit validate does.
 	Engine *fib.Engine
+	// Metrics is where requests are counted when the config has metrics,
+	// which the caller owns; nil counts none.
+	Metrics *observe.Metrics
 	// AccessLog is the log made from the config's access_log, which the
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
@@ -101,11 +109,30 @@ type Listener struct {
 	Routes []*Route
 	// Router picks the route for a request, by package router's rules.
 	Router *router.Router[*Route]
+	// Requests count the requests each route answers on the listener, by
+	// Route.Index, and Unmatched those no route takes; nil without
+	// Graph.Metrics.
+	Requests  []*observe.RequestMetrics
+	Unmatched *observe.RequestMetrics
+}
+
+// RequestMetrics returns where a request route answered on l is counted,
+// or nil; route is nil for a request no route takes.
+func (l *Listener) RequestMetrics(route *Route) *observe.RequestMetrics {
+	if route == nil {
+		return l.Unmatched
+	}
+	if l.Requests == nil {
+		return nil
+	}
+	return l.Requests[route.Index]
 }
 
 // Route is a compiled route.
 type Route struct {
-	Name     string
+	Name string
+	// Index is the route's place in the config's routes.
+	Index    int
 	Priority int
 	// Hosts and Paths are what the route matches, as written; empty matches
 	// everything. Listener.Router gives them meaning.
@@ -127,6 +154,9 @@ type Route struct {
 func Compile(c *config.Config, env Env) (*Graph, error) {
 	g := &Graph{AccessLog: env.AccessLog, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
+	if c.Metrics != nil {
+		g.Metrics = env.Metrics
+	}
 	g.refs.Store(1)
 	var errs config.Errors
 	for i := range c.Upstreams {
@@ -163,6 +193,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			errs = append(errs, config.AsErrors(err)...)
 			continue
 		}
+		r.Index = i
 		routes[i] = r
 	}
 	if len(errs) > 0 {
@@ -208,6 +239,13 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
 				l.Routes = append(l.Routes, routes[i])
 			}
+		}
+		if m := g.Metrics; m != nil {
+			l.Requests = make([]*observe.RequestMetrics, len(routes))
+			for _, r := range l.Routes {
+				l.Requests[r.Index] = m.Requests(l.Name, metricsName(r))
+			}
+			l.Unmatched = m.Requests(l.Name, "")
 		}
 		slices.SortStableFunc(l.Routes, func(a, b *Route) int { return b.Priority - a.Priority })
 		l.Router = newRouter(l.Routes)
@@ -285,6 +323,27 @@ func cleanupModules(g *Graph) {
 	for _, p := range g.upstreams {
 		p.Close()
 	}
+	if m := g.Metrics; m != nil {
+		for _, l := range g.Listeners {
+			for _, r := range l.Requests {
+				if r != nil {
+					m.Release(r)
+				}
+			}
+			if l.Unmatched != nil {
+				m.Release(l.Unmatched)
+			}
+		}
+	}
+}
+
+// metricsName is the name r's requests are counted under: its own, or, for
+// a route without one, "#" and its place in the config's routes.
+func metricsName(r *Route) string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return "#" + strconv.Itoa(r.Index)
 }
 
 // upstreamKey is what decides whether two graphs can share an upstream's
@@ -335,6 +394,16 @@ func (g *Graph) drain() {
 			d.Drain()
 		}
 	}
+}
+
+// Upstreams returns the graph's upstream pools, by name.
+func (g *Graph) Upstreams() []*upstream.Pool {
+	pools := make([]*upstream.Pool, 0, len(g.upstreams))
+	for _, p := range g.upstreams {
+		pools = append(pools, p)
+	}
+	slices.SortFunc(pools, func(a, b *upstream.Pool) int { return strings.Compare(a.Name(), b.Name()) })
+	return pools
 }
 
 // Upstream returns the pool of the upstream named name.
