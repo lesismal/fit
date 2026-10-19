@@ -1,6 +1,7 @@
 package static
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -170,5 +171,25 @@ func TestFeatureErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%s: %v", tt.params, err)
 		}
+	}
+}
+
+func TestBrowseMaxEntries(t *testing.T) {
+	files := map[string]string{}
+	for i := range 20 {
+		files[fmt.Sprintf("d/f%02d.txt", i)] = "x"
+	}
+	root := tree(t, files)
+	s := mustLoad(t, root, `, "browse": true, "browse_max_entries": 5`)
+	got := get(s, "GET", "/d/", nil).Response
+	body := string(got.Body)
+	if got.StatusCode != 200 || strings.Count(body, "<tr><td><a href=\"./f") != 5 ||
+		!strings.Contains(body, "Only the first 5 entries") {
+		t.Fatalf("%d:\n%s", got.StatusCode, body)
+	}
+	s = mustLoad(t, root, `, "browse": true`)
+	body = string(get(s, "GET", "/d/", nil).Response.Body)
+	if strings.Count(body, "<tr><td><a href=\"./f") != 20 || strings.Contains(body, "Only the first") {
+		t.Fatalf("with the default:\n%s", body)
 	}
 }

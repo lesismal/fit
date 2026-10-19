@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -17,6 +18,8 @@ import (
 //	fit:"required"     the member must be present
 //	fit:"self"         on a Value field tagged json:"-": the struct's own
 //	                   object, for later checks to report positions in it
+//	default:"60"       the value, as JSON, a field left out stands for, which
+//	                   the schema shows; the code applies it
 //	enum:"a,b,c"       a string, or each string of a slice, must be one of
 //	                   these
 //	min:"n" max:"n"    a number must lie within these bounds
@@ -38,6 +41,9 @@ type Field struct {
 	Min, Max *float64
 	Doc      string
 	Module   string
+	// Default is the value a field left out stands for, as JSON, from its
+	// default tag; the schema shows it. Empty for a field without one.
+	Default string
 }
 
 var fieldCache sync.Map // reflect.Type → []Field
@@ -55,7 +61,10 @@ func Fields(t reflect.Type) []Field {
 		if !sf.IsExported() {
 			continue
 		}
-		f := Field{Index: i, Type: sf.Type, Doc: sf.Tag.Get("doc"), Module: sf.Tag.Get("module")}
+		f := Field{Index: i, Type: sf.Type, Doc: sf.Tag.Get("doc"), Module: sf.Tag.Get("module"), Default: sf.Tag.Get("default")}
+		if f.Default != "" && !json.Valid([]byte(f.Default)) {
+			panic(fmt.Sprintf("config: %s.%s: default tag %q is not JSON", t, sf.Name, f.Default))
+		}
 		name, _, _ := strings.Cut(sf.Tag.Get("json"), ",")
 		for opt := range strings.SplitSeq(sf.Tag.Get("fit"), ",") {
 			switch opt {

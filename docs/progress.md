@@ -26,8 +26,9 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next iteration: R02, safe default limits**, which the review below puts before M2, so before I24
-and I32. R01 is done.
+**Next: M2, with I24 (config versions and the Admin API skeleton) and I32 (active health checks).**
+R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
+and R04–R07 follow it.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -39,7 +40,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration R02 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I24 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -911,6 +912,56 @@ Differences from the plan:
   and the kernel holds what the client has not taken. R05 (asynchronous file sending) gives it one.
 - No benchmark before and after: the harness's scenarios take the paths R01 leaves alone (a small
   proxied body answered in one write, a cached file without conditions).
+
+### R02 Safe default limits — done
+
+- Upstreams: `max_conns` defaults to 256 per address (it had no limit); `max_pending` (1024) bounds
+  the requests waiting for a connection, and one past it gets 503 at once; `response_timeout` (1h)
+  bounds a whole response, through fib's client `Timeout`, so it gives 504 before the response
+  begins and cuts it short after. Until fib counts waiting requests (R06), the pool counts requests
+  under way from `Pick` to `Done` against `max_conns × addresses × streams + max_pending`, with one
+  stream per HTTP/1.1 connection and 100, RFC 9113's floor, per HTTP/2 one; `Pick` returns nil past
+  it, `Pool.Do` reports `upstream.ErrBusy`.
+- `limits` gains `max_pending_bytes` (256 MiB), set on the listeners' engine as fib's
+  `MaxPendingBytes`; and `max_header_bytes` (1 MiB) and `max_body_bytes` (16 MiB), set on every
+  listener's HTTP/1, HTTP/2 and HTTP/3 config. `max_body_bytes` bounds streamed bodies too
+  (`MaxStreamedBodyBytes`): since I16 every body past 64 KB streams, and fib's `MaxBodyBytes` alone
+  left those unbounded. A reload that changes the header or body limit rebinds the listener; the
+  engine's budget takes a restart. `listener.Server.Stats` returns the engine's counters.
+- `static` gains `browse_max_entries` (10000): a listing reads at most that many entries, sorts
+  those, and says when the directory has more, instead of reading it whole.
+- Every default is in the schema: a `default` struct tag, checked as JSON when the type is first
+  read, which the schema emits as JSON Schema's `default`; 23 fields carry one (the upstream's and
+  the access log's fields, `limits`, `respond`'s status, `static`'s). Defaults that depend on other
+  fields (a listener's protocols, `load_balancing`) stay in the descriptions. `examples/proxy.json`
+  writes the limits and the upstream's settings out at their defaults.
+- Tests that reach each limit: 256 connections open to one address and, past `max_pending`, a
+  request refused at once (`upstream`); 503 past `max_pending` through the proxy, `response_timeout`
+  before and during a response over HTTP/1.1 and h2c, and a streamed upload past `max_body_bytes`
+  refused with 413 for a declared length and ended for a chunked one (`handler/proxy`); a header past
+  `max_header_bytes` gets 431, and bodies past `max_body_bytes` 413 whole and streamed, over HTTP/1.1
+  and h2c (`listener`); `max_pending_bytes` spent by a client that reads nothing, which fib's counters
+  show as pending bytes past the budget and reads paused for it, until the client reads
+  (`listener`); a listing cut at `browse_max_entries` (`handler/static`); and the schema's defaults
+  (`schema`). The proxy tests' shared config raises `max_body_bytes` for the 256 MB streaming tests.
+  `go vet ./...` and `go test -race ./...` pass.
+- Benchmarks before and after, on the benchmark host, fit alone, two rounds each: static 577k and
+  1.33M requests a second over HTTP/1.1 and h2c, proxy 215k and 228k, the same within 0.5% before
+  and after. The harness's fit config now sets `max_conns: 4096` for its backend, as the others
+  keep 4096 connections: the h2c proxy scenario has 2,048 requests in flight, past the new default.
+
+Differences from the plan:
+
+- The limits test found nothing in fit or fib but a test helper of I14's, `newBackend`, whose
+  connection hook blocked once more than 64 connections had closed, stalling the backend: any test
+  with a burst of more than about 96 connections hung. Its send no longer blocks.
+- `max_pending_bytes` is fib's budget, which fib checks once a read round is done, so a request
+  that arrives in one read is still served while the budget is spent; it holds back reading on, as
+  the test shows through fib's counters. fib warns that a few peers that do not read can hold it.
+  A peer that streams is cut off by R01's stall timeout; one whose responses were queued whole is
+  not, and R06's connection limits are what bound how many such peers there can be.
+- An explicit 0 for `max_conns`, `max_pending` or a `limits` field means its default, since the
+  config cannot tell 0 from left out for these fields; no limit can be turned off.
 
 ## Notes for later iterations
 

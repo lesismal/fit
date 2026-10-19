@@ -86,9 +86,13 @@ func startFitLog(t *testing.T, doc string, log *observe.AccessLog, addrs ...stri
 	return "http://" + s.Addrs()[0].Addr.String()
 }
 
+// config1 is a config with one listener, one upstream and a proxy route
+// with proxyParams. Its body limit is raised past the streaming tests'
+// uploads, as a deployment that takes large uploads raises it.
 func config1(proxyParams string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
+  "limits": {"max_body_bytes": 4294967296},
   "upstreams": [{"name": "app", "addresses": [%s]}],
   "routes": [{"handler": {"module": "proxy", "params": ` + proxyParams + `}}]
 }`

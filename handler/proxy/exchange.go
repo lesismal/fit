@@ -63,12 +63,18 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", []byte("400 Bad Request\n"))
 		return
 	}
+	backend := p.pool.Pick()
+	if backend == nil {
+		// max_pending requests wait for a connection already.
+		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("503 Service Unavailable\n"))
+		return
+	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	out = out.WithContext(ctx)
 	// The backend is held until the exchange is over, body and all, so that
 	// least_conn counts a long download as busy for as long as it lasts.
 	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
-		stall: p.stall, pool: p.pool, backend: p.pool.Pick()}
+		stall: p.stall, pool: p.pool, backend: backend}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()

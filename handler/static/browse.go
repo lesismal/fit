@@ -1,7 +1,9 @@
 package static
 
 import (
+	"errors"
 	"html"
+	"io"
 	stdhttp "net/http"
 	"net/url"
 	"os"
@@ -15,10 +17,26 @@ import (
 // list answers with an HTML listing of the directory at full, whose URL
 // path is urlPath. Names that start with a dot are left out.
 func (s *Static) list(c *fibhttp.Context, urlPath, full string) {
-	entries, err := os.ReadDir(full)
+	// At most browse_max_entries are read, and one more to tell whether
+	// there are more; a directory of millions costs no more than that.
+	max := s.BrowseMax
+	if max <= 0 {
+		max = DefaultBrowseMax
+	}
+	dir, err := os.Open(full)
 	if err != nil {
 		respondError(c, statusOf(err))
 		return
+	}
+	entries, err := dir.ReadDir(max + 1)
+	dir.Close()
+	if err != nil && !errors.Is(err, io.EOF) {
+		respondError(c, statusOf(err))
+		return
+	}
+	more := len(entries) > max
+	if more {
+		entries = entries[:max]
 	}
 	entries = slices.DeleteFunc(entries, func(e os.DirEntry) bool { return strings.HasPrefix(e.Name(), ".") })
 	// Directories first, each group by name.
@@ -58,6 +76,9 @@ func (s *Static) list(c *fibhttp.Context, urlPath, full string) {
 			size + "</td><td>" + modified + "</td></tr>\n")
 	}
 	b.WriteString("</table>\n")
+	if more {
+		b.WriteString("<p>Only the first " + strconv.Itoa(max) + " entries the directory gave are listed.</p>\n")
+	}
 	_ = c.WriteResponse(fibhttp.Response{
 		StatusCode: stdhttp.StatusOK,
 		Header:     stdhttp.Header{"Content-Type": {"text/html; charset=utf-8"}, "Cache-Control": {"no-cache"}},

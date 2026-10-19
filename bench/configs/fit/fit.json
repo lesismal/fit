@@ -6,7 +6,7 @@
       "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}}
   ],
   "upstreams": [
-    {"name": "backend", "addresses": ["{{BACKEND}}"], "max_idle_conns": 4096}
+    {"name": "backend", "addresses": ["{{BACKEND}}"], "max_conns": 4096, "max_idle_conns": 4096}
   ],
   "routes": [
     {

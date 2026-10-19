@@ -92,7 +92,12 @@ func newBackend(t *testing.T, h stdhttp.HandlerFunc) *backend {
 			}
 		case stdhttp.StateClosed, stdhttp.StateHijacked:
 			b.open.Add(-1)
-			b.closed <- struct{}{}
+			// Never blocks: a hook that waited would stall the server's
+			// connections once more closed than the channel holds.
+			select {
+			case b.closed <- struct{}{}:
+			default:
+			}
 		}
 	}
 	b.Start()

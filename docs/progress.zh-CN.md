@@ -22,7 +22,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一个迭代：R02，安全的默认上限**，下面的审查把它放在 M2 之前，即在 I24、I32 之前。R01 已完成。
+**下一步：M2，先做 I24（配置版本与 Admin API 骨架）和 I32（主动健康检查）。** M2 之前的审查修复 R01、R02 已
+完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -31,7 +32,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 R02。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I24。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -707,6 +708,43 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 明文 HTTP/1 连接上通过 sendfile 发送的文件没有截止时间：没有 worker 等待它，客户端没取走的数据在内核中。R05（异步
   文件发送）会给它加上。
 - 没有做前后对比的基准：压测框架的场景走的是 R01 没有改动的路径（一次写出的小代理响应、没有条件的缓存文件）。
+
+### R02 安全的默认上限 — 已完成
+
+- 上游：`max_conns` 默认每个地址 256（原来不限）；`max_pending`（1024）限制等待连接的请求数，超过时立即返回 503；
+  `response_timeout`（1h）通过 fib 客户端的 `Timeout` 限制整个响应，所以响应开始前超时返回 504，开始后则被截断。在
+  fib 能统计等待请求之前（R06），连接池按 `max_conns × 地址数 × 流数 + max_pending` 统计从 `Pick` 到 `Done` 的在途请求，
+  HTTP/1.1 连接按 1 个流，HTTP/2 连接按 100 个（RFC 9113 的下限）；超过时 `Pick` 返回 nil，`Pool.Do` 报告
+  `upstream.ErrBusy`。
+- `limits` 新增 `max_pending_bytes`（256 MiB），设置为 listener engine 的 fib `MaxPendingBytes`；以及
+  `max_header_bytes`（1 MiB）和 `max_body_bytes`（16 MiB），设置到每个 listener 的 HTTP/1、HTTP/2、HTTP/3 配置中。
+  `max_body_bytes` 也限制流式 body（`MaxStreamedBodyBytes`）：自 I16 起超过 64 KB 的 body 都以流方式到达，仅靠 fib 的
+  `MaxBodyBytes` 它们是不受限的。修改了头或 body 上限的重载会重新绑定 listener；engine 的预算需要重启才生效。
+  `listener.Server.Stats` 返回 engine 的计数器。
+- `static` 新增 `browse_max_entries`（10000）：目录列表最多读取这么多条目并排序，目录还有更多时会注明，而不是整个读取。
+- 所有默认值都在 schema 中：新增 `default` 结构体标签（类型首次读取时检查是否为 JSON），schema 输出为 JSON Schema 的
+  `default`；共 23 个字段带有默认值（上游和访问日志的字段、`limits`、`respond` 的状态码、`static` 的参数）。依赖其他字段
+  的默认值（listener 的协议、`load_balancing`）仍只写在描述中。`examples/proxy.json` 把上限和上游设置按默认值写出。
+- 达到每个上限的测试：对一个地址打开 256 个连接，超过 `max_pending` 的请求立即被拒绝（`upstream`）；经过代理超过
+  `max_pending` 返回 503，`response_timeout` 在响应前和响应中触发（HTTP/1.1 和 h2c），以及超过 `max_body_bytes` 的流式
+  上传：声明长度的返回 413，分块的被中止（`handler/proxy`）；超过 `max_header_bytes` 的头返回 431，超过 `max_body_bytes`
+  的整体和流式 body 返回 413（HTTP/1.1 和 h2c，`listener`）；一个不读取的客户端耗尽 `max_pending_bytes`，fib 的计数器
+  显示待发字节超过预算并因此暂停读取，直到客户端开始读取（`listener`）；目录列表在 `browse_max_entries` 处截断
+  （`handler/static`）；以及 schema 中的默认值（`schema`）。代理测试共用的配置为 256 MB 流式测试调高了 `max_body_bytes`。
+  `go vet ./...` 和 `go test -race ./...` 通过。
+- 前后对比基准（压测机，只跑 fit，各两轮）：static 在 HTTP/1.1 和 h2c 上每秒 577k 和 1.33M 请求，proxy 215k 和 228k，
+  前后差异在 0.5% 以内。压测框架的 fit 配置现在为后端设置 `max_conns: 4096`（其他服务器保持 4096 个连接）：h2c 代理
+  场景有 2048 个在途请求，超过了新的默认值。
+
+与计划的不同：
+
+- 上限测试没有在 fit 或 fib 中发现问题，只发现 I14 的测试辅助函数 `newBackend` 的连接钩子在关闭超过 64 个连接后会阻塞，
+  卡住后端：任何突发超过约 96 个连接的测试都会挂起。现在它的发送不再阻塞。
+- `max_pending_bytes` 是 fib 的预算，fib 在一轮读取结束后检查它，所以预算耗尽时一次读完的请求仍会被服务；它阻止的是后续
+  的读取，测试通过 fib 的计数器展示了这一点。fib 提醒少数不读取的对端可能占住预算。流式发送的对端会被 R01 的 stall 超时
+  切断；整体排队响应的对端不会，能有多少这样的对端由 R06 的连接上限来限制。
+- `max_conns`、`max_pending` 或 `limits` 字段显式写 0 等同默认值，因为配置无法区分这些字段的 0 和未写；没有上限可以被
+  关闭。
 
 ## 给后续迭代的说明
 

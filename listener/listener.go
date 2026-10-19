@@ -15,7 +15,6 @@ package listener
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -61,6 +60,10 @@ type binding struct {
 	address   string
 	protocols []string
 	tlsKey    string
+	// maxHeaderBytes and maxBodyBytes are the limits its handlers were made
+	// with; a reload that changes them binds it anew.
+	maxHeaderBytes int
+	maxBodyBytes   int64
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -70,7 +73,8 @@ type binding struct {
 // same reports whether b serves the listener l as it is: the same name,
 // address, protocols and certificates.
 func (b *binding) same(l *runtime.Listener) bool {
-	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) && b.tlsKey == l.TLSKey
+	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) && b.tlsKey == l.TLSKey &&
+		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes
 }
 
 // Addr is where a listener listens.
@@ -92,6 +96,10 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 
 	cfg := fib.DefaultConfig()
 	cfg.Name = "fit"
+	// What waits for clients, across every connection, is bounded; a client
+	// that stops reading loses its response after the write stall timeout,
+	// so it cannot hold the budget for long.
+	cfg.MaxPendingBytes = g.MaxPendingBytes
 	engine, err := fib.New(cfg)
 	if err != nil {
 		return nil, err
@@ -109,6 +117,11 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	return s, nil
 }
 
+// Stats returns the listeners' engine's counters: connections, bytes
+// queued for clients, and the pauses the write watermark and
+// max_pending_bytes caused.
+func (s *Server) Stats() fib.Stats { return s.engine.Stats() }
+
 // SetDrainTimeout sets how long a listener a reload removed may take to
 // finish the requests it has before its connections are closed.
 func (s *Server) SetDrainTimeout(d time.Duration) {
@@ -121,7 +134,8 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // bindings may be listening on the address, which fib's SO_REUSEPORT lets
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
-	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey}
+	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey,
+		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes}
 	fail := func(err error) (*binding, error) {
 		s.unbind(b)
 		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
@@ -140,7 +154,7 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 		if h3 {
 			tcpDispatcher.announceH3()
 		}
-		var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), tcpDispatcher)
+		var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l), tcpDispatcher)
 		if l.TLS != nil {
 			// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
 			// or HTTP/1.1 as ALPN chose.
@@ -160,7 +174,7 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 				return fail(err)
 			}
 		}
-		h := http3.NewHandlerWithConfig(http3Config(l.TLS), &dispatcher{rt: s.rt, name: l.Name})
+		h := http3.NewHandlerWithConfig(http3Config(l), &dispatcher{rt: s.rt, name: l.Name})
 		var err error
 		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h}); err != nil {
 			return fail(err)
@@ -200,11 +214,14 @@ func (s *Server) unbind(b *binding) {
 }
 
 // http3Config is the fib HTTP/3 config for a listener with tls.
-func http3Config(tlsConfig *tls.Config) http3.Config {
+func http3Config(l *runtime.Listener) http3.Config {
 	c := http3.DefaultConfig()
-	c.TLSConfig = http3.ConfigureTLS(tlsConfig)
+	c.TLSConfig = http3.ConfigureTLS(l.TLS)
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
+	c.MaxHeaderBytes = l.MaxHeaderBytes
+	c.MaxBodyBytes = l.MaxBodyBytes
+	c.MaxStreamedBodyBytes = l.MaxBodyBytes
 	return c
 }
 
@@ -335,9 +352,16 @@ func checkFreeUDP(address string) error {
 // handler rather than being read whole first.
 const StreamThreshold = 64 << 10
 
-// httpConfig is the fib HTTP config for a listener serving protocols.
-func httpConfig(protocols []string) fibhttp.Config {
+// httpConfig is the fib HTTP config for a listener's TCP protocols.
+func httpConfig(l *runtime.Listener) fibhttp.Config {
+	protocols := l.Protocols
 	c := fibhttp.DefaultConfig()
+	// A body that streams is bounded as one read whole is: past the
+	// threshold every body streams, and MaxBodyBytes alone would leave those
+	// unbounded.
+	c.MaxHeaderBytes = l.MaxHeaderBytes
+	c.MaxBodyBytes = l.MaxBodyBytes
+	c.MaxStreamedBodyBytes = l.MaxBodyBytes
 	// A body past the threshold reaches its handler as it arrives, so that
 	// the proxy can pass an upload on without holding it whole; smaller ones
 	// arrive whole, as most do.

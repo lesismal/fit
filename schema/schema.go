@@ -139,6 +139,11 @@ func (g *generator) structSchema(t reflect.Type) object {
 				s["description"] = f.Doc
 			}
 		}
+		if f.Default != "" {
+			var v any
+			_ = json.Unmarshal([]byte(f.Default), &v) // checked by config.Fields
+			s["default"] = v
+		}
 		props[f.Name] = s
 		if f.Required {
 			required = append(required, f.Name)

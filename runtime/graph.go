@@ -32,6 +32,10 @@ type Graph struct {
 	Listeners []*Listener
 	// AccessLog is where a line goes for each request, or nil.
 	AccessLog *observe.AccessLog
+	// MaxPendingBytes bounds the output waiting across the listeners'
+	// connections; see config.Limits. The listeners' engine takes it when it
+	// starts.
+	MaxPendingBytes int64
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -58,6 +62,10 @@ type Listener struct {
 	// clear, and TLSKey a fingerprint of its certificates and protocols.
 	TLS    *tls.Config
 	TLSKey string
+	// MaxHeaderBytes and MaxBodyBytes bound the requests it takes; see
+	// config.Limits.
+	MaxHeaderBytes int
+	MaxBodyBytes   int64
 	// Routes are the listener's routes: highest priority first, and routes
 	// of equal priority in the order written.
 	Routes []*Route
@@ -87,7 +95,8 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
+	g := &Graph{AccessLog: env.AccessLog, MaxPendingBytes: c.Limits.PendingBytes(),
+		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
 	g.refs.Store(1)
 	var errs config.Errors
 	for i := range c.Upstreams {
@@ -121,7 +130,8 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	}
 
 	for _, lc := range c.Listeners {
-		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols}
+		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols,
+			MaxHeaderBytes: c.Limits.HeaderBytes(), MaxBodyBytes: c.Limits.BodyBytes()}
 		if len(l.Protocols) == 0 {
 			l.Protocols = config.DefaultProtocols
 			if lc.TLS != nil {

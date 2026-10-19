@@ -296,6 +296,7 @@ func TestStuckClientOnSharedConnection(t *testing.T) {
 			if slowest > stallTimeout+2*time.Second {
 				t.Errorf("the slowest of the others took %v", slowest)
 			}
+			time.Sleep(stallTimeout / 2) // past the stuck client's stall timeout
 			checkStuck(t, stuck)
 		})
 	}
@@ -319,6 +320,10 @@ func TestStuckClientsPastMaxConns(t *testing.T) {
 			if slowest > 3*stallTimeout+2*time.Second {
 				t.Errorf("the slowest of the others took %v", slowest)
 			}
+			// The four that waited began their downloads only when the first
+			// four were let go; give them their own stall timeout before
+			// they read, or a client released early reads it all.
+			time.Sleep(stallTimeout + 500*time.Millisecond)
 			checkStuck(t, stuck)
 		})
 	}

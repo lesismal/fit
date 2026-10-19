@@ -22,14 +22,38 @@ type Config struct {
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
 }
 
-// DefaultWriteStallTimeout is Limits.WriteStallTimeout's default.
-const DefaultWriteStallTimeout = Duration(30 * time.Second)
+// The defaults of Limits.
+const (
+	DefaultWriteStallTimeout = Duration(30 * time.Second)
+	DefaultMaxPendingBytes   = 256 << 20
+	DefaultMaxHeaderBytes    = 1 << 20
+	DefaultMaxBodyBytes      = 16 << 20
+)
 
 // Limits bound what clients can make fit hold for them.
 type Limits struct {
-	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
+	MaxPendingBytes int64 `json:"max_pending_bytes,omitempty" min:"0" default:"268435456" doc:"How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. 256 MiB when left out or 0."`
+	MaxHeaderBytes  int   `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
+	MaxBodyBytes    int64 `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
+
+	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" default:"\"30s\"" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// PendingBytes, HeaderBytes and BodyBytes return the limits, their defaults
+// when left out.
+func (l Limits) PendingBytes() int64 { return orDefault(l.MaxPendingBytes, DefaultMaxPendingBytes) }
+func (l Limits) HeaderBytes() int {
+	return int(orDefault(int64(l.MaxHeaderBytes), DefaultMaxHeaderBytes))
+}
+func (l Limits) BodyBytes() int64 { return orDefault(l.MaxBodyBytes, DefaultMaxBodyBytes) }
+
+func orDefault(v, def int64) int64 {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // WriteStall returns the write stall timeout, its default when left out.
@@ -44,9 +68,9 @@ func (l Limits) WriteStall() time.Duration {
 // by a goroutine of their own, so that a slow disk never holds up a request:
 // lines past the buffer's limit are dropped and counted.
 type AccessLog struct {
-	Output        string   `json:"output,omitempty" doc:"\"stdout\", \"stderr\", or the path of a file lines are appended to; \"stdout\" when left out."`
-	FlushInterval Duration `json:"flush_interval,omitempty" doc:"How long a line may wait in the buffer before it is written; 1s when left out."`
-	BufferBytes   int      `json:"buffer_bytes,omitempty" min:"0" doc:"How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out."`
+	Output        string   `json:"output,omitempty" default:"\"stdout\"" doc:"\"stdout\", \"stderr\", or the path of a file lines are appended to; \"stdout\" when left out."`
+	FlushInterval Duration `json:"flush_interval,omitempty" default:"\"1s\"" doc:"How long a line may wait in the buffer before it is written; 1s when left out."`
+	BufferBytes   int      `json:"buffer_bytes,omitempty" min:"0" default:"4194304" doc:"How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -122,20 +146,22 @@ type Upstream struct {
 	Addresses      []string `json:"addresses" fit:"required" doc:"The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\"."`
 	Weights        []int    `json:"weights,omitempty" min:"1" max:"1000" doc:"Each address's weight, in the order of addresses: its share of requests under weighted_round_robin, and how many requests it takes to be as busy as an address of weight 1 under least_conn. 1 each when left out."`
 	LoadBalancing  string   `json:"load_balancing,omitempty" enum:"round_robin,weighted_round_robin,least_conn" doc:"How requests are spread over the addresses: in turn, in turn by weight (smoothly, as nginx does), or to the address with the fewest requests under way for its weight. round_robin when left out, or weighted_round_robin when weights are given."`
-	MaxConns       int      `json:"max_conns,omitempty" min:"0" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out."`
-	MaxIdleConns   *int     `json:"max_idle_conns,omitempty" min:"0" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
-	IdleTimeout    Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
-	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
+	MaxConns       int      `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. 256 when left out or 0."`
+	MaxPending     int      `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection, across the addresses, once max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
+	MaxIdleConns   *int     `json:"max_idle_conns,omitempty" min:"0" default:"32" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
+	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
+	ConnectTimeout Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
 
-	Protocol      string `json:"protocol,omitempty" enum:"http/1.1,h2c,h2" doc:"How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out."`
+	Protocol      string `json:"protocol,omitempty" enum:"http/1.1,h2c,h2" default:"\"http/1.1\"" doc:"How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out."`
 	TLSServerName string `json:"tls_server_name,omitempty" doc:"With h2: the name the servers' certificates are checked against, and sent in SNI; each address's host when left out."`
 	TLSCAFile     string `json:"tls_ca_file,omitempty" doc:"With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots."`
 
-	MaxFails    *int     `json:"max_fails,omitempty" min:"0" doc:"How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation."`
-	FailTimeout Duration `json:"fail_timeout,omitempty" doc:"The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out."`
+	MaxFails    *int     `json:"max_fails,omitempty" min:"0" default:"1" doc:"How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation."`
+	FailTimeout Duration `json:"fail_timeout,omitempty" default:"\"10s\"" doc:"The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out."`
 
-	ResponseHeaderTimeout Duration `json:"response_header_timeout,omitempty" doc:"How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504."`
-	ResponseIdleTimeout   Duration `json:"response_idle_timeout,omitempty" doc:"How long the upstream may go silent in the middle of a response body; 60s when left out."`
+	ResponseHeaderTimeout Duration `json:"response_header_timeout,omitempty" default:"\"60s\"" doc:"How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504."`
+	ResponseIdleTimeout   Duration `json:"response_idle_timeout,omitempty" default:"\"60s\"" doc:"How long the upstream may go silent in the middle of a response body; 60s when left out."`
+	ResponseTimeout       Duration `json:"response_timeout,omitempty" default:"\"1h\"" doc:"How long a whole response may take, from sending the request to the end of its body; 1h when left out. A request past it before its response began gets 504, and one past it later is cut short."`
 
 	At Value `json:"-" fit:"self"`
 }

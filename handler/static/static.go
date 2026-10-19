@@ -46,22 +46,24 @@ func init() {
 	module.Register(module.Info{ID: module.Handlers + ".static", New: func() any { return new(Static) }})
 }
 
-// The defaults for the cache limits.
+// The defaults for the cache and listing limits.
 const (
 	DefaultMaxFileBytes  = 1 << 20
 	DefaultMaxCacheBytes = 64 << 20
+	DefaultBrowseMax     = 10000
 )
 
 // Static serves files under a root directory.
 type Static struct {
 	Root          string   `json:"root" fit:"required" doc:"The directory files are served from."`
-	Index         []string `json:"index,omitempty" doc:"The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for []."`
+	Index         []string `json:"index,omitempty" default:"[\"index.html\"]" doc:"The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for []."`
 	StripPrefix   string   `json:"strip_prefix,omitempty" doc:"A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404."`
-	MaxFileBytes  int64    `json:"max_file_bytes,omitempty" min:"0" doc:"The largest file kept in memory, in bytes; 1 MiB when left out."`
-	MaxCacheBytes int64    `json:"max_cache_bytes,omitempty" min:"0" doc:"How many bytes of files are kept in memory at most; 64 MiB when left out."`
+	MaxFileBytes  int64    `json:"max_file_bytes,omitempty" min:"0" default:"1048576" doc:"The largest file kept in memory, in bytes; 1 MiB when left out."`
+	MaxCacheBytes int64    `json:"max_cache_bytes,omitempty" min:"0" default:"67108864" doc:"How many bytes of files are kept in memory at most; 64 MiB when left out."`
 	Precompressed []string `json:"precompressed,omitempty" enum:"br,zstd,gzip" doc:"Encodings whose compressed twins, name.br, name.zst and name.gz, are served in place of a file to a client that accepts them: the one it prefers by Accept-Encoding, and among equals the first listed. None when left out."`
 	TryFiles      []string `json:"try_files,omitempty" doc:"Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then."`
 	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
+	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 
 	root          string
 	index         []string

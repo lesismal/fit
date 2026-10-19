@@ -2,8 +2,27 @@
   "listeners": [
     {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
   ],
+  "limits": {
+    "max_pending_bytes": 268435456,
+    "max_header_bytes": 1048576,
+    "max_body_bytes": 16777216,
+    "write_stall_timeout": "30s"
+  },
   "upstreams": [
-    {"name": "app", "addresses": ["127.0.0.1:9000", "127.0.0.1:9001"], "max_conns": 256, "idle_timeout": "60s"}
+    {
+      "name": "app",
+      "addresses": ["127.0.0.1:9000", "127.0.0.1:9001"],
+      "max_conns": 256,
+      "max_pending": 1024,
+      "max_idle_conns": 32,
+      "idle_timeout": "60s",
+      "connect_timeout": "10s",
+      "response_header_timeout": "60s",
+      "response_idle_timeout": "60s",
+      "response_timeout": "1h",
+      "max_fails": 1,
+      "fail_timeout": "10s"
+    }
   ],
   "routes": [
     {

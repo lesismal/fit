@@ -19,7 +19,7 @@ func init() {
 
 // Respond answers with a fixed status, headers and body.
 type Respond struct {
-	Status  int               `json:"status,omitempty" min:"100" max:"599" doc:"The status code; 200 when left out."`
+	Status  int               `json:"status,omitempty" min:"100" max:"599" default:"200" doc:"The status code; 200 when left out."`
 	Headers map[string]string `json:"headers,omitempty" doc:"Response headers. Content-Type defaults to text/plain; charset=utf-8 when there is a body."`
 	Body    string            `json:"body,omitempty" doc:"The response body."`
 
