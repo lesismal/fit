@@ -11,9 +11,9 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16 and I21 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16, I21 and I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no TLS; no proxy timeouts or cancellation yet (I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -21,9 +21,9 @@ response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and basel
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I22, reload on SIGHUP**, being done next in this session; then I17, reverse
-proxy III (timeouts, cancellation, errors), which I16 unblocked. I09, I13 and I19 are also ready
-to start, unless another session has taken them.
+**Next iteration: I17, reverse proxy III (timeouts, cancellation, errors)**, which I16 unblocked.
+I09, I13 and I19 are also ready to start, unless another session has taken them; I24 (config
+versions and the Admin API skeleton) is unblocked by I22.
 
 To continue, start a session with:
 
@@ -36,7 +36,7 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run`, `validate`, `schema`, `version`, `help` |
+| `cmd/fit` | the CLI: `run` (with reload on SIGHUP), `validate`, `schema`, `version`, `help` |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
@@ -44,7 +44,7 @@ To continue, start a session with:
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
-| `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; graceful shutdown |
+| `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which sends requests to an upstream over HTTP/1.1 through fib's asynchronous client and drains before it closes; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
@@ -523,6 +523,43 @@ Differences from the plan:
   show many slow clients tying up the upstream engine's pool, that is the API to ask fib for.
 - An HTTP/2 client whose upstream fails mid-body gets its stream finished rather than reset; I17
   handles failures properly.
+
+### I22 Reload on SIGHUP — done
+
+- `listener.Server` now makes its engine with no bindings and adds each listener with
+  `Engine.AddBinding`. `Server.Reload(g)` moves it to a new graph: a listener whose name, address and
+  protocols are all unchanged keeps its binding, its port and its connections; the others are bound
+  before the swap; then `Runtime.Swap(g)`; then the listeners `g` lacks, or that changed, are drained
+  with `Engine.ShutdownBinding` in the background, for at most the drain timeout (`fit run`'s
+  `-shutdown-timeout`). If a listener cannot be bound, the bindings made for `g` are removed, `g` is
+  released, and the running graph stays. A listener replaced on the same address (new protocols, a
+  new name) is bound beside the old one, which fib's SO_REUSEPORT allows, so there is no moment with
+  nothing listening; where that fails, the old one stops listening first, its connections left to
+  finish. `Addrs` reports the current listeners.
+- `fit run` turns SIGHUP into a reload: it loads and compiles the file with the same upstream
+  engine and access log, calls `Reload`, prints `fit: reloading`, a line per listener removed and
+  added, and `fit: reloaded <file> (config version N)`. A config that fails to load, compile or bind
+  prints `fit: reload failed; the running config stays` and its errors to stderr. Signals that arrive
+  during a reload fold into one more. A changed `access_log` is reported as taking effect on
+  restart.
+- Tests: `listener` reloads with a listener kept (same port, and a keep-alive connection open across
+  the reload sees the new routes), one changed (protocols), one added and one removed (it stops
+  taking connections), and checks the graph version; a reload with an address already taken fails,
+  unbinds the listener it had bound, and leaves the old graph serving; a listener on a fixed port
+  changes its protocols in place. `test/e2e` runs eight clients against `fit run` — keep-alive and a
+  new connection per request, HTTP/1.1 and h2c — through a reload that changes the route and adds a
+  listener, and a reload of a broken config, which leaves the running one serving and prints its
+  error: about 36,000 requests, none failed, in each of five runs. `go vet ./...` and
+  `go test -race ./...` pass.
+
+Differences from the plan:
+
+- Listeners are kept by name, address and protocols together, not by address alone, so that two
+  listeners on port 0 stay apart and a listener whose protocols change is served with the new ones.
+- The access log is not reopened or replaced on reload; a changed `access_log` waits for a restart.
+  Reopening the file for log rotation (nginx does it on USR1) is left for when someone needs it.
+- Upstream pools are made anew for each graph, so a reload drops the idle upstream connections of
+  the old one once it drains. I26 can carry pools over.
 
 ## Notes for later iterations
 

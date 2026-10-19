@@ -6,6 +6,11 @@
 // graph that is current when it arrives and keeps it until its handler
 // returns, so a graph swapped in later serves only the requests that start
 // after the swap.
+//
+// Reload moves the server to a new graph: a listener whose name, address and
+// protocols are unchanged keeps its binding and its connections; the others
+// are bound before the graph is swapped in, and those the new graph lacks are
+// drained after, finishing the requests they have.
 package listener
 
 import (
@@ -15,6 +20,7 @@ import (
 	"net"
 	stdhttp "net/http"
 	"slices"
+	"sync"
 	"time"
 
 	fib "github.com/lesismal/fib"
@@ -25,11 +31,33 @@ import (
 	"github.com/lesismal/fit/runtime"
 )
 
+// DefaultDrainTimeout is how long a listener a reload removed may take to
+// finish the requests it has, unless SetDrainTimeout says otherwise.
+const DefaultDrainTimeout = 30 * time.Second
+
 // Server serves the listeners of a Runtime's graph.
 type Server struct {
+	rt      *runtime.Runtime
 	engine  *fib.Engine
-	addrs   []Addr
 	running chan error
+
+	mu    sync.Mutex // orders reloads
+	bound []*binding // the current graph's listeners, in its order
+	drain time.Duration
+}
+
+// binding is a listener the engine serves.
+type binding struct {
+	index     int
+	name      string
+	address   string
+	protocols []string
+	addr      net.Addr
+}
+
+// same reports whether b serves the listener l as it is.
+func (b *binding) same(l *runtime.Listener) bool {
+	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols)
 }
 
 // Addr is where a listener listens.
@@ -40,9 +68,6 @@ type Addr struct {
 }
 
 // Start binds every listener of rt's current graph and starts serving them.
-// The listeners are fixed from then on: a graph swapped in later changes the
-// routes of the listeners it shares with this one by name, and a listener it
-// lacks answers 404.
 func Start(rt *runtime.Runtime) (*Server, error) {
 	g := rt.Current()
 	if g == nil {
@@ -52,34 +77,141 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 
 	cfg := fib.DefaultConfig()
 	cfg.Name = "fit"
-	bindings := make([]fib.Binding, len(g.Listeners))
-	for i, l := range g.Listeners {
-		bindings[i] = fib.Binding{
-			Addr:    l.Address,
-			Handler: fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: rt, name: l.Name}),
-		}
+	engine, err := fib.New(cfg)
+	if err != nil {
+		return nil, err
 	}
+	s := &Server{rt: rt, engine: engine, running: make(chan error, 1), drain: DefaultDrainTimeout}
 	for _, l := range g.Listeners {
+		b, err := s.bind(l, false)
+		if err != nil {
+			_ = engine.Close()
+			return nil, err
+		}
+		s.bound = append(s.bound, b)
+	}
+	go func() { s.running <- engine.Run() }()
+	return s, nil
+}
+
+// SetDrainTimeout sets how long a listener a reload removed may take to
+// finish the requests it has before its connections are closed.
+func (s *Server) SetDrainTimeout(d time.Duration) {
+	s.mu.Lock()
+	s.drain = d
+	s.mu.Unlock()
+}
+
+// bind has the engine serve l. shared says another of the server's own
+// bindings may be listening on the address, which fib's SO_REUSEPORT lets
+// the two share while one replaces the other.
+func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
+	if !shared {
 		if err := checkFree(l.Address); err != nil {
 			return nil, fmt.Errorf("listener %q: %w", l.Name, err)
 		}
 	}
-	engine, err := fib.New(cfg, bindings...)
+	h := fibhttp.NewHandlerWithConfig(httpConfig(l.Protocols), &dispatcher{rt: s.rt, name: l.Name})
+	i, err := s.engine.AddBinding(fib.Binding{Addr: l.Address, Handler: h})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
 	}
+	addrs, err := s.engine.BindingAddrs(i)
+	if err != nil || len(addrs) == 0 {
+		_ = s.engine.RemoveBinding(i)
+		return nil, fmt.Errorf("listener %q: no address bound: %v", l.Name, err)
+	}
+	return &binding{index: i, name: l.Name, address: l.Address, protocols: l.Protocols, addr: addrs[0]}, nil
+}
 
-	s := &Server{engine: engine, running: make(chan error, 1)}
+// Reload makes g the runtime's current graph, taking over the caller's
+// reference to it, and moves the listeners to g's: those g has unchanged are
+// kept, the new and changed ones bound first, and those g has no more drained
+// once g is current. If a listener cannot be bound, nothing changes: the
+// bindings made for g are removed, g is released, and the error returned. It
+// returns the listeners it bound and those it removed.
+func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var kept, fresh, gone, early []*binding
+	next := make([]*binding, len(g.Listeners))
 	for i, l := range g.Listeners {
-		addrs, err := engine.BindingAddrs(i)
-		if err != nil || len(addrs) == 0 {
-			_ = engine.Close()
-			return nil, fmt.Errorf("listener %q: no address bound: %v", l.Name, err)
+		for _, b := range s.bound {
+			if b.same(l) {
+				next[i] = b
+				kept = append(kept, b)
+				break
+			}
 		}
-		s.addrs = append(s.addrs, Addr{Name: l.Name, Addr: addrs[0], Protocols: l.Protocols})
 	}
-	go func() { s.running <- engine.Run() }()
-	return s, nil
+	for _, b := range s.bound {
+		if !slices.Contains(kept, b) {
+			gone = append(gone, b)
+		}
+	}
+	for i, l := range g.Listeners {
+		if next[i] != nil {
+			continue
+		}
+		shared := slices.ContainsFunc(gone, func(b *binding) bool { return b.address == l.Address })
+		b, err := s.bind(l, shared)
+		if err != nil && shared {
+			// A system without SO_REUSEPORT: the old listener stops listening
+			// first. Its connections stay open and finish what they have, but
+			// it cannot be put back if the reload fails after this.
+			var old []*binding
+			gone = slices.DeleteFunc(gone, func(b *binding) bool {
+				if b.address == l.Address {
+					old = append(old, b)
+					return true
+				}
+				return false
+			})
+			s.retire(old, 0)
+			early = append(early, old...)
+			b, err = s.bind(l, false)
+		}
+		if err != nil {
+			for _, b := range fresh {
+				_ = s.engine.RemoveBinding(b.index)
+			}
+			s.bound = slices.DeleteFunc(s.bound, func(b *binding) bool { return slices.Contains(early, b) })
+			g.Release()
+			return nil, nil, err
+		}
+		next[i] = b
+		fresh = append(fresh, b)
+	}
+	s.rt.Swap(g)
+	s.bound = next
+	s.retire(gone, s.drain)
+	return addrsOf(fresh), addrsOf(gone), nil
+}
+
+// retire stops the listeners bs taking connections and lets the ones they
+// have finish, for at most drain, in the background. With no drain, the
+// listeners stop at once and their connections are left open, to end as
+// they would.
+func (s *Server) retire(bs []*binding, drain time.Duration) {
+	for _, b := range bs {
+		if drain <= 0 {
+			_ = s.engine.RemoveBinding(b.index)
+			continue
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), drain)
+			defer cancel()
+			_ = s.engine.ShutdownBinding(ctx, b.index)
+		}()
+	}
+}
+
+func addrsOf(bs []*binding) []Addr {
+	addrs := make([]Addr, len(bs))
+	for i, b := range bs {
+		addrs[i] = Addr{Name: b.name, Addr: b.addr, Protocols: b.protocols}
+	}
+	return addrs
 }
 
 // checkFree fails when another socket already listens on address. fib
@@ -121,9 +253,14 @@ func httpConfig(protocols []string) fibhttp.Config {
 	return c
 }
 
-// Addrs returns where each listener listens, in the graph's order: with the
-// port the kernel chose for an address whose port is 0.
-func (s *Server) Addrs() []Addr { return s.addrs }
+// Addrs returns where each listener of the current graph listens, in the
+// graph's order: with the port the kernel chose for an address whose port is
+// 0.
+func (s *Server) Addrs() []Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return addrsOf(s.bound)
+}
 
 // Shutdown stops taking connections and waits for the ones open to finish:
 // idle connections are closed at once, and busy ones once the response in

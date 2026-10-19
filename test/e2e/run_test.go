@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -42,9 +43,29 @@ func TestMain(m *testing.M) {
 
 // fit is a running fit process.
 type fit struct {
-	cmd   *exec.Cmd
-	lines chan string // its stdout, line by line; closed when it ends
-	done  chan error  // its exit, once
+	cmd    *exec.Cmd
+	lines  chan string // its stdout, line by line; closed when it ends
+	done   chan error  // its exit, once
+	stderr *lockedBuffer
+	config string // the config file's path
+}
+
+// lockedBuffer keeps what a process writes, for a test to read meanwhile.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 var listening = regexp.MustCompile(`^fit: listener "([^"]+)" on (\S+) `)
@@ -58,7 +79,8 @@ func startFit(t *testing.T, doc string) (*fit, map[string]string) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(fitBin, "run", "-c", cfg)
-	cmd.Stderr = os.Stderr
+	stderr := new(lockedBuffer)
+	cmd.Stderr = io.MultiWriter(os.Stderr, stderr)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +88,7 @@ func startFit(t *testing.T, doc string) (*fit, map[string]string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	f := &fit{cmd: cmd, lines: make(chan string, 16), done: make(chan error, 1)}
+	f := &fit{cmd: cmd, lines: make(chan string, 16), done: make(chan error, 1), stderr: stderr, config: cfg}
 	go func() {
 		s := bufio.NewScanner(stdout)
 		for s.Scan() {

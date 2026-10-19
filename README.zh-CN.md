@@ -28,4 +28,7 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
+`fit run` 收到 SIGHUP 时重新加载配置文件，未变化的 listener 保持不动，新配置有错时继续使用正在运行的配置；收到
+SIGINT 或 SIGTERM 时优雅退出。
+
 `make check` 会运行 gofmt、go vet、staticcheck，以及开启 race 检测的测试。

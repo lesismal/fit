@@ -29,4 +29,7 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
+`fit run` reloads its config file on SIGHUP, keeping the listeners that did not change and the
+running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.
+
 `make check` runs gofmt, go vet, staticcheck and the tests with the race detector.

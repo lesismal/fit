@@ -33,6 +33,11 @@ returns.
   proxy holds the request itself with `Context.Retain` until it has written the response, and keeps
   nothing else of the graph.
 
+Update, I22 (2026-10-19): fit moved to fib v1.3.0, whose engines take bindings while they run, so
+one engine could serve both. The upstream engine stays separate anyway: since I16 a proxied
+download waits in `Context.Write` for a slow client on the upstream engine's worker, and a separate
+engine keeps those waits off the listeners' pool.
+
 ## Consequences
 
 - A handler that answers later must keep alive what it uses after returning, as the proxy does with

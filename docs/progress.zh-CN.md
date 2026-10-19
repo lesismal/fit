@@ -10,17 +10,17 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I21 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I21、I22 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 TLS；代理还没有超时和取消（I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I22，SIGHUP 重载**，本会话接下来做；然后是 I17，反向代理 III（超时、取消、错误），I16 完成后它
-可以开始了。I09、I13、I19 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I17，反向代理 III（超时、取消、错误）**，I16 完成后它可以开始了。I09、I13、I19 也都可以开始（除非
+已有别的会话在做）；I22 完成后 I24（配置版本与 Admin API 骨架）也可以开始了。
 
 可以用下面的话开始下一次会话：
 
@@ -32,7 +32,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`run`、`validate`、`schema`、`version`、`help` |
+| `cmd/fit` | 命令行：`run`（收到 SIGHUP 时重载）、`validate`、`schema`、`version`、`help` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -40,7 +40,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 | `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
-| `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；优雅退出 |
+| `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：通过 fib 的异步客户端以 HTTP/1.1 向上游发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
@@ -423,6 +423,34 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 下载方向在上游 engine 的 worker 上于 `Context.Write` 中等待。fib v1.3.0 没有在队列满时返回而不是等待的
   `Context` 写接口；如果 I23 的数据显示大量慢客户端占住了上游 engine 的池，就该向 fib 要这个接口。
 - 上游在 body 中途失败时，HTTP/2 客户端的流会被正常结束而不是被重置；I17 会正确处理失败。
+
+### I22 SIGHUP 重载 — 已完成
+
+- `listener.Server` 现在创建不带 binding 的 engine，再用 `Engine.AddBinding` 添加每个 listener。`Server.Reload(g)`
+  把它切换到新图：名字、地址和协议都没变的 listener 保留它的 binding、端口和连接；其余的在替换之前绑定；然后
+  `Runtime.Swap(g)`；然后 `g` 中没有的或有变化的 listener 在后台用 `Engine.ShutdownBinding` 排空，最长为排空超时
+  （`fit run` 的 `-shutdown-timeout`）。如果某个 listener 无法绑定，为 `g` 建立的 binding 会被移除，`g` 被释放，
+  正在运行的图保持不变。在同一地址上被替换的 listener（新协议或新名字）与旧的并排绑定——fib 的 SO_REUSEPORT
+  允许这样做——所以不会出现没有监听的时刻；如果失败，旧的先停止监听，它的连接继续完成。`Addrs` 返回当前的
+  listener。
+- `fit run` 把 SIGHUP 变成一次重载：用同一个上游 engine 和访问日志加载并编译文件，调用 `Reload`，输出
+  `fit: reloading`、每个被移除和新增的 listener 各一行，以及 `fit: reloaded <file> (config version N)`。加载、
+  编译或绑定失败的配置在 stderr 输出 `fit: reload failed; the running config stays` 及其错误。重载期间到达的信号
+  合并为下一次重载。`access_log` 有变化时会提示需要重启才生效。
+- 测试：`listener` 的重载中，一个 listener 保持不变（端口相同，跨越重载的 keep-alive 连接能看到新路由），一个
+  有变化（协议），一个新增，一个被移除（不再接受连接），并检查图的版本；地址已被占用的重载会失败，解除它已绑定
+  的 listener，旧图继续服务；固定端口上的 listener 原地更换协议。`test/e2e` 用八个客户端——keep-alive 和每请求
+  新连接、HTTP/1.1 和 h2c——访问 `fit run`，期间经历一次修改路由并新增 listener 的重载，以及一次配置有错的重载
+  （正在运行的配置继续服务并输出错误）：五次运行每次约 36000 个请求，没有失败。`go vet ./...` 和
+  `go test -race ./...` 通过。
+
+与计划的不同：
+
+- listener 按名字、地址和协议一起判断是否保留，而不是只看地址，这样两个端口为 0 的 listener 不会混淆，协议
+  有变化的 listener 会按新协议服务。
+- 重载时不会重新打开或替换访问日志；`access_log` 的变化要等重启。为日志轮转重新打开文件（nginx 用 USR1）等有
+  需要时再做。
+- 每个图都会新建上游连接池，所以重载后旧图排空时会丢掉它的空闲上游连接。I26 可以把连接池带过去。
 
 ## 给后续迭代的说明
 

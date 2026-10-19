@@ -98,7 +98,7 @@ func TestRun(t *testing.T) {
 	cancel()
 	var out, errOut bytes.Buffer
 	stopped := false
-	code := serve(ctx, func() { stopped = true }, []string{"-c", cfg}, &out, &errOut)
+	code := serve(ctx, func() { stopped = true }, nil, []string{"-c", cfg}, &out, &errOut)
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], `fit: listener "web" on 127.0.0.1:`) ||
 		!strings.HasSuffix(lines[0], "(http/1.1, h2c)") || lines[1] != "fit: shutting down" || lines[2] != "fit: stopped" || !stopped {
