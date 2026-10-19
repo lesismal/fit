@@ -19,6 +19,7 @@
 | A6 | 在 `BodyWriter` 关闭前设置 trailer | P2 | 1、4 | R04 |
 | A7 | `Context` 上的单请求值槽 | P2 | 12 | R07 |
 | A8 | 文档修正 | P2 | — | — |
+| A9 | 拒绝不是 token 的请求头字段名 | P1 | 13 | — |
 
 ## 证据
 
@@ -134,3 +135,22 @@ context 值。
   成立，但对会等待的 `OnBody` 回调不成立，因为回调运行在连接的读取者上。建议写明。
 - `Config.WriteTimeout` 默认为 0，所以流式 `Write` 遇到不再读取的客户端时会永远等待。建议增加按单次等待计的上限
   （`WriteStallTimeout`），默认非零，与针对整个响应的 `WriteTimeout` 分开，因为长时间下载无法使用后者。
+
+## A9：拒绝不是 token 的请求头字段名
+
+**问题。** fib v1.3.0 的 HTTP/1 服务器把 `X-A : one` 当作名为 `X-A `（带空格）的字段接受，而 RFC 9112 第 5.1 节要求
+服务器以 400 拒绝字段名和冒号之间的空白：下游服务器可能把它读成另一个字段，这是一种走私手段。快速解析器
+（`simpleField`）会拒绝这样的名字，并把请求头交给 net/http 的 `ReadRequest`，后者原样保留；net/http 自己的服务器在读取
+后会检查字段名，fib 的不会。冒号前的制表符已经会被拒绝。`Host : x` 之所以被拒绝，只是因为请求因此没有 `Host`。
+
+**证据。** I23 的代理一致性测试（`test/e2e/conformance_test.go`），以及手写给 fib handler 的请求：`X-A : one` 到达时是
+`[X-A ]=[one]`。
+
+**建议的修改。** 在 HTTP/1 服务器中，当 `parseRequestHead` 回退到 net/http 的读取器之后，像 net/http 的服务器一样，以
+`ErrMalformed`（即 400）拒绝字段名不是 token 的请求；快速路径本来就只接受 token。`parseRequestHead` 本身可以继续与
+`ReadRequest` 保持一致，如其测试所要求的。实现这一修改的补丁，连同针对其他字段冒号前的空格、制表符和名字中间空格的一致性
+测试用例，在 fib 本地仓库的 `fix-field-name-whitespace` 分支上（提交 `f02a0bc`，未推送），供维护者采用或重写。
+
+**fit 如何使用。** 不需要新的 API：这样的请求不会到达 handler。在此之前，fit 的代理以 400 拒绝字段名不是 token 的请求
+（I23，在复制请求头的循环中顺带检查），这样的字段不会到达上游；其他 handler 不转发请求头。fib 拒绝之后，这个检查作为纵深
+防御保留。

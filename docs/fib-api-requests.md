@@ -20,6 +20,7 @@ The fit iterations that depend on these are R03–R07 in the [development plan](
 | A6 | Trailers set on a `BodyWriter` before it closes | P2 | 1, 4 | R04 |
 | A7 | A per-request value slot on `Context` | P2 | 12 | R07 |
 | A8 | Documentation fixes | P2 | — | — |
+| A9 | Refuse a header field name that is not a token | P1 | 13 | — |
 
 ## Evidence
 
@@ -156,3 +157,29 @@ whole `http.Request` and allocates a context value on every request.
 - `Config.WriteTimeout` defaults to 0, so a streaming `Write` to a client that stops reading waits
   forever. Consider a per-wait bound (`WriteStallTimeout`) with a non-zero default, separate from the
   whole-response `WriteTimeout`, which long downloads cannot use.
+
+## A9: Refuse a header field name that is not a token
+
+**Problem.** fib v1.3.0's HTTP/1 server accepts `X-A : one` as a field named `X-A ` (with the
+space), where RFC 9112 section 5.1 asks a server to refuse whitespace between a field name and its
+colon with 400: a server downstream may read it as another field, which is a way to smuggle one.
+The fast parser (`simpleField`) refuses such a name and hands the head to net/http's
+`ReadRequest`, which keeps it as sent; net/http's own server checks names after reading, and fib's
+does not. A tab before the colon is refused already. `Host : x` was refused only because the
+request then has no `Host`.
+
+**Evidence.** I23's proxy conformance suite (`test/e2e/conformance_test.go`), and a request written
+by hand to a fib handler: `X-A : one` reaches it as `[X-A ]=[one]`.
+
+**Suggested change.** In the HTTP/1 server, after `parseRequestHead` falls back to net/http's
+reader, refuse with `ErrMalformed` (so 400) a request whose header has a name that is not a token,
+as net/http's server does; the fast path takes only tokens. `parseRequestHead` itself can keep
+matching `ReadRequest`, as its tests ask. A patch that does this, with conformance cases for a
+space before another field's colon, a tab, and a space inside a name, is on a local branch of the
+fib checkout, `fix-field-name-whitespace` (commit `f02a0bc`, not pushed), for the maintainer to take
+or redo.
+
+**How fit uses it.** It needs nothing new: the request never reaches a handler. Until then fit's
+proxy refuses with 400 a request with a field name that is not a token (I23, in the loop that
+copies the header anyway), so such a field never reaches an upstream; other handlers do not pass
+headers on. The check stays as defence in depth once fib refuses them.

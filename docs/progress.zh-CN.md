@@ -655,8 +655,9 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   obs-fold、`Expect: 100-continue`、HTTP/1.0 客户端、管线化、绝对形式的请求目标、上游返回的 304、204 和 1xx、不说
   HTTP 的上游，以及任一方的 `Connection: close`）。
 - 发现并修复：fib v1.3.0 把 `X-A : one` 当作名为 `X-A ` 的字段放行，而 RFC 9112 要求返回 400。代理拒绝字段名不是
-  token 的请求，这样它不会到达上游。fib 中的修复在 fib 的 `fix-field-name-whitespace` 分支上，已提交、未推送，留给
-  下一个 fib 版本（R03 的版本）。
+  token 的请求，这样它不会到达上游。fib 中的修复作为 A9 写进了
+  [fib-api-requests](fib-api-requests.zh-CN.md)，建议的补丁在 fib 本地分支 `fix-field-name-whitespace` 上，未推送；在此之前
+  代理的检查是临时措施。
 - 基准（在压测机上：Ryzen 7 7800X3D，Ubuntu 24.04，host 网络）：`fitbench` 以默认参数运行 nginx 1.31.4、Caddy
   2.10.2、Traefik 3.5.0 和 fit，空闲连接 10k 和 100k；结果是 `bench/results/m1-2026-10-19-linux.json` 和
   `m1-2026-10-19-linux-idle100k.json`。fit 在 HTTP/1.1 和 h2c 上每秒千请求数：fixed 783 和 3811（nginx 812 和 643）；
