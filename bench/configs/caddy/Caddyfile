@@ -1,0 +1,52 @@
+# Caddy for the fit benchmark harness. fitbench fills in the addresses of the
+# proxy and WebSocket backends.
+#
+# Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
+# with the same routes on both, /ws proxying WebSockets. Port 8443 is
+# HTTP/1.1 over TLS, for idle TLS connections. Caddy logs no requests unless
+# asked to.
+{
+	admin off
+	auto_https off
+	servers :8080 {
+		protocols h1
+	}
+	servers :8081 {
+		protocols h1 h2c
+	}
+	servers :8443 {
+		protocols h1
+	}
+}
+
+http://:8080, http://:8081 {
+	handle /fixed {
+		header Content-Type text/plain
+		respond "hello, world" 200
+	}
+	handle /static/* {
+		root * /srv/www
+		file_server
+	}
+	handle /proxy {
+		# Up to 4096 idle backend connections, as every proxy here keeps;
+		# Caddy's default of 32 makes it reopen them under load.
+		reverse_proxy {{BACKEND}} {
+			transport http {
+				keepalive_idle_conns 4096
+				keepalive_idle_conns_per_host 4096
+			}
+		}
+	}
+	handle /ws {
+		reverse_proxy {{WSBACKEND}}
+	}
+	handle {
+		respond 404
+	}
+}
+
+:8443 {
+	tls /certs/cert.pem /certs/key.pem
+	respond 404
+}

@@ -18,6 +18,7 @@ Usage:
 
 Commands:
 
+	run        serve a config file until SIGINT or SIGTERM
 	validate   check a config file without running it
 	schema     print the JSON Schema of the native config
 	version    print the versions of fit, fib and Go
@@ -36,6 +37,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "run":
+		return runRun(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
 	case "schema":

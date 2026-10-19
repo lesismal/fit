@@ -79,7 +79,7 @@
           "type": "string"
         },
         "priority": {
-          "description": "Routes with a higher priority are tried first; equal ones in the order written.",
+          "description": "Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one written first.",
           "type": "integer"
         }
       },

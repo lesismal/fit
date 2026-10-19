@@ -103,13 +103,13 @@ Status: `todo`, `doing` or `done`.
 | I03 | JSON Schema and `fit validate` | I02 | done |
 | I04 | Module registry and core interfaces | I02 | done |
 | I05 | Runtime graph and atomic swap | I04 | done |
-| I06 | HTTP entry points and `fit run` | I05 | todo |
-| I07 | Benchmark harness: throughput | I06 | todo |
-| I08 | Benchmark harness: idle connection memory and baselines | I07 | todo |
+| I06 | HTTP entry points and `fit run` | I05 | done |
+| I07 | Benchmark harness: throughput | I06 | done |
+| I08 | Benchmark harness: idle connection memory and baselines | I07 | done |
 | **M1** | | | |
 | I09 | TLS entry from certificate files | I06 | todo |
 | I10 | HTTP/3 entry | I09 | todo |
-| I11 | Router v1: host and path | I06 | todo |
+| I11 | Router v1: host and path | I06 | done |
 | I12 | Static files I | I11 | todo |
 | I13 | Static files II | I12 | todo |
 | I14 | Upstream pool v1 (HTTP/1.1) | I05 | todo |

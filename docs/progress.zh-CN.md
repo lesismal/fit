@@ -10,17 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：I01–I05 已完成；I06–I08 待做 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11 已完成 |
 | fib | `github.com/lesismal/fib v1.2.0`，来自模块代理 |
-| 可用的功能 | `fit validate` 加载配置、检查并 provision 其中的模块；`fit schema` 输出 JSON Schema；`fit version` |
-| 尚不可用 | fit 还不能处理流量：从 I06 开始 |
+| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 TLS、静态文件和代理；还没有方法、请求头等其他匹配器（I36） |
 
-**下一个迭代：I06，HTTP 入口与 `fit run`。** 它的依赖都已完成。之后的 I07、I08（基准框架）完成 M0。
-I06 完成后，I09、I11、I14、I21、I22 也可以开始。
+**M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
+基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
+Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
+
+**下一个迭代：I12，静态文件 I**，I11 完成后它可以开始了。I09、I14、I21、I22 也都可以开始（除非已有
+别的会话在做），其中任何一个都可以与 I12 并行。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I06。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I12。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -28,14 +32,18 @@ I06 完成后，I09、I11、I14、I21、I22 也可以开始。
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`validate`、`schema`、`version`、`help` |
+| `cmd/fit` | 命令行：`run`、`validate`、`schema`、`version`、`help` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner` |
 | `handler/respond` | `respond` handler |
 | `modules/standard` | 引入 fit 自带的所有模块 |
-| `runtime` | 把配置 `Compile` 成不可变的 `Graph`；带原子替换和图引用计数的 `Runtime` |
+| `runtime` | 把配置 `Compile` 成不可变的 `Graph`，每个 listener 一个路由器；带原子替换和图引用计数的 `Runtime` |
+| `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；优雅退出 |
+| `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/fibtest` | 在测试中不经网络运行 fib handler |
+| `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
+| `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
 | `examples` | `hello.json` |
 
 目前的配置形如：
@@ -126,10 +134,146 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 与计划的差异：没有实现路由匹配；`Route` 原样保存 host 和 path，供 I11 的路由器使用。
 
+### I06 HTTP 入口与 `fit run` — 已完成
+
+- `listener.Start` 把运行时当前图中的每个 listener 绑定为同一个 fib engine 的一个 binding，它们共用一个
+  事件循环、任务池和缓冲池。每个 binding 的 handler 是一个 `fibhttp.ServerHandler`，里面的分发器在每个
+  请求上取当前图，按名字找到自己的 listener，匹配路由并调用路由的 handler；handler 返回时释放图。没有
+  匹配的路由返回 404，没有图返回 503。
+- 协议映射到 fib 的 HTTP 配置：只有 `http/1.1` 时设置 `DisableHTTP2`（同时拒绝 `Upgrade: h2c`），只有
+  `h2c` 时设置 `HTTP2Only`，两者都有时同一端口同时支持 HTTP/1.1、预先知道的 h2c 和 `Upgrade: h2c`。
+- `Server.Shutdown` 就是 fib 的 `Engine.Shutdown`：listener 停止接受连接，空闲连接关闭，忙的连接在响应
+  写完后关闭（HTTP/2 发 GOAWAY）；然后关闭 engine。
+- `fit run -c file [-shutdown-timeout 30s]` 加载并编译配置，每个 listener 打印一行实际绑定的地址；收到
+  SIGINT 或 SIGTERM 时优雅退出，退出码为 0，超时则为 1。第二个信号直接结束进程。配置错误的打印方式
+  与 `fit validate` 相同，共用一个辅助函数。
+- 测试：`listener` 通过 HTTP/1.1 和 h2c 访问两条路由（host 与 path 匹配、404），单协议 listener 拒绝
+  另一种协议，替换图后使用新图，地址被占用时报错；退出测试用一个阻塞的 handler 挂住请求，验证
+  HTTP/1.1 和 h2c 下 `Shutdown` 都会等它、请求能正常完成、图中的模块恰好清理一次。`test/e2e` 编译
+  二进制、运行 `fit run`，通过 HTTP/1.1 和 h2c 拿到响应，在有空闲连接时发送 SIGTERM 并期望正常退出；
+  配置错误时退出码为 1 并打印错误。另外用 curl 手动验证了预先知道的 h2c、`Upgrade: h2c` 和 SIGTERM。
+
+与计划的差异：
+
+- 路由匹配曾是 `listener/match.go` 里一个线性的临时实现（精确和 `*.` 通配的 host，精确和前缀的 path，
+  按优先级取第一个匹配，不分配内存），让路由在 I11 之前就按配置的意思工作。I11 已用 `router` 包替换它。
+- listener 在服务器启动时就固定了。替换后的图会改变同名 listener 的路由；新图里没有的 listener 返回
+  404，新图里新增的 listener 不会被绑定。I26 负责 listener 的增量变更。
+- 请求只在 handler 返回之前持有图，而不是直到响应结束。这对 `respond` 足够；稍后才响应的 handler
+  （从 I15 的代理开始）需要持有图直到响应结束或被取消（`Context.OnFinish` 和 `OnCancel`，或
+  `Retain`）。
+- e2e 测试没有覆盖进行中的请求，因为目前自带的模块都无法挂住请求；这由进程内的 `listener` 测试覆盖。
+  e2e 测试不在 Windows 上编译，因为那里没有 SIGTERM。
+
+### I07 基准框架：吞吐 — 已完成
+
+- `bench/cmd/fitbench`，一个只用标准库和 `docker` 命令行的 Go 程序，见
+  [决定 002](decisions/002-benchmark-harness.zh-CN.md)。`go run ./bench/cmd/fitbench`（或 `make bench`）
+  为 Linux 编译 fit，构建压测客户端镜像（Ubuntu 上的 wrk、h2load 和 curl），用固定版本的官方镜像运行
+  各服务器（nginx 1.31.4、Caddy 2.10.2、Traefik 3.5.0；fit 跑在 `ubuntu:24.04` 上），写出
+  `bench/results/run-<时间>.json`。
+- `bench/configs` 里四个服务器的配置，在 8080（HTTP/1.1，wrk）和 8081（h2c，h2load）上提供同样的路由：
+  `fixed`、1 KiB 的 `static` 文件，以及代理到返回同样固定响应的 fit 后端的 `proxy`。
+- 每轮之前用 curl 核对状态码、协议和响应体；然后预热，再测量。每个结果记录每秒请求数、延迟（wrk 的
+  百分位通过 Lua `done` 钩子以 JSON 输出；h2load 给出均值、标准差和最大值）、按类型分的错误数、服务器的
+  CPU 核数和内存（取自其 cgroup）。报告记录 CPU 型号、内核、内存、版本、镜像摘要和参数。各容器绑定
+  到各自的 CPU；nginx 每个服务器 CPU 一个 worker。
+- 测试：wrk 和 h2load 的解析（用真实的输出格式）、cgroup 解析、CPU 划分和名字选择。框架本身端到端
+  跑过多次，有短时的也有完整时长的。
+
+与计划的差异：
+
+- 用 Go 程序而不是脚本，这样解析逻辑有测试，并且有 Docker 的地方都能跑。
+- Traefik 既不能返回固定响应也不能提供文件，只跑 `proxy`；fit 只跑 `fixed`，直到 I12（`static`）和
+  I15（`proxy`）把各自的场景加进 `servers.go` 和 `configs/fit/fit.json`。
+- 静态文件放在 Docker volume 里：Docker Desktop 的 bind mount 让 nginx 只有每秒 1.4 万请求，换成
+  volume 后是 35 万。
+- 每个代理都保持最多 4096 个空闲的后端连接。用默认值时，Caddy（32）和 Traefik（200）在 256 或 2048 个
+  在途请求下不断重开后端连接直到端口耗尽：Caddy 跌到每秒 1600 个请求并返回 502。
+- 目前只在 Docker Desktop（bridge 网络）上跑过，还没有在 Linux 主机上用 `-network host` 跑过，而
+  发布的数字应该走后者。
+
+### I08 基准框架：空闲连接内存与基线 — 已完成
+
+- `bench/cmd/idleconn` 每次 64 个并发地打开 N 个连接，每个发一个请求后保持住，直到标准输入关闭：
+  `http1`（请求 `/idle` 得到 404 后的长连接）、`tls`（同上，走 8443 上的 TLS）和 `ws`（由服务器代理
+  到后端的 WebSocket）。`idleconn -serve-ws` 就是这个后端。
+- `fitbench -idle http1,tls,ws` 对新启动的服务器测每种连接：打开连接前、以及连接空闲 `-idle-settle`
+  后各读一次服务器 cgroup 的匿名内存，差值除以连接数。TLS listener 用框架生成的一次性 ECDSA P-256
+  证书。
+- [`bench/results/baseline-2026-10-19-macos-docker.json`](../bench/results/baseline-2026-10-19-macos-docker.json)，
+  使用默认参数（每轮 30 秒、wrk 256 个连接、h2load 64×32 个流、1 万个空闲连接）。`bench/README.zh-CN.md`
+  说明如何复现。
+
+每秒请求数，以及每个空闲连接的匿名内存（每种 1 万个）：
+
+| | nginx | Caddy | Traefik | fit |
+| --- | ---: | ---: | ---: | ---: |
+| fixed，HTTP/1.1 | 811,923 | 249,350 | — | 1,018,822 |
+| fixed，h2c | 914,776 | 163,137 | — | 3,651,820 |
+| static，HTTP/1.1 | 724,292 | 155,336 | — | — |
+| static，h2c | 663,958 | 112,823 | — | — |
+| proxy，HTTP/1.1 | 170,101 | 97,915 | 142,490 | — |
+| proxy，h2c | 158,202 | 69,446 | 85,954 | — |
+| 空闲 HTTP/1.1 | 531 B | 21,733 B | 22,812 B | 956 B |
+| 空闲 TLS | 29,943 B | 51,561 B | 51,928 B | — |
+| 空闲 WebSocket（代理） | 22,281 B | 131,578 B | 130,963 B | — |
+
+在这台机器上，HTTP/1.1 的数字每次运行之间最多相差四分之一（nginx 的固定响应在两次完整运行中分别是
+111 万和 81 万，较慢的那次有几十个 wrk 超时）；h2c 和内存的数字只差几个百分点。nginx 在打开任何连接
+之前就有 176 MB 内存，是它预分配的连接表；Caddy 是 13 MB，Traefik 22 MB，fit 9 MB。
+
+与计划的差异：
+
+- 内存用的是 cgroup 的匿名内存而不是 RSS：它覆盖容器内所有进程，不会重复计算共享页，也不含页缓存。
+- 基线是在一台 Apple M3 Max 的 Docker Desktop 上测的（给 Docker 14 个 CPU，bridge 网络），这是本次
+  会话唯一可用的机器。服务器之间的比例有意义，绝对数字与 Linux 主机上的不同。应在专用的 Linux 主机上
+  重跑，并把那份结果作为要发布的基线提交。
+- 路线图提到的 WebSocket 和 HTTP/3 压测客户端不在 M0 内，见决定 002。
+
+### I11 路由 v1：host 与 path — 已完成
+
+- `router` 包：`New` 由一组路由（host、path、优先级和任意类型的值）构建 `Router[T]`，
+  `Match(host, path)` 返回服务该请求的路由的值，没有匹配时返回 false，listener 据此返回 404。host 可以是
+  精确的，也可以是 `*.` 通配（恰好一个标签），忽略大小写、端口、IPv6 的方括号和末尾的点；path 可以是精确的，
+  也可以是以 `*` 结尾的前缀；没有 host 或没有 path 的路由匹配所有 host 或 path。
+- 多个路由同时匹配时的规则：优先级最高的；其次 host 最具体的（精确，然后通配，然后没有 host）；其次 path
+  最具体的（精确，然后最长的前缀，然后没有 path）；最后是写在前面的。先看 host 再看 path，与 nginx 和
+  Caddy 一致：它们先按名字选出 server 或站点，再看 path。这条规则写在包文档和 `priority` 字段的说明里，
+  因此 schema 中也有。
+- 实现方式：一个按精确 host、一个按通配后缀（`.example.com`）索引节点的 map，再加一个给没有 host 的路由用的
+  节点。节点把精确 path 放在一个 map 里，把前缀按长度分别放在 map 里，从长到短尝试。一次查找最多查三个 host
+  节点，每个节点对精确 path 查一次 map，对每种不同的前缀长度查一次，一旦剩下的都不可能胜出就停止。含大写
+  字母的 host 在栈上的缓冲区里转成小写，再通过 `m[string(b)]` 查找，Go 对这种写法不分配内存。
+- `runtime.Compile` 为每个 listener 用它的路由构建一个路由器（`Listener.Router`）；`Listener.Routes`
+  和以前一样按优先级排序。`listener` 的分发器用请求的 `Host` 和 `URL.Path` 调用 `Router.Match`；
+  `listener/match.go` 及其测试已删除。
+- 测试：host 和 path 的表驱动测试，以及顺序和平局的表驱动测试（优先级压过具体程度；低优先级的路由仍能服务
+  高优先级路由不匹配的请求；精确 host 优先于通配，通配优先于没有 host；host 优先于 path；精确 path 优先于
+  较长前缀，较长前缀优先于较短前缀，较短前缀优先于没有 path；平局时取写在前面的路由；后写的、优先级更高的
+  路由会替换同一模式下先写的路由；一个路由的每个模式各自匹配）。`TestMatchAllocs` 用 `AllocsPerRun`
+  在 103 个路由的路由器上验证 `Match` 不分配内存，覆盖小写和大小写混合的 host、通配、IPv6 和未命中。
+  `BenchmarkMatch`：101 个路由时每次查找约 60 ns，0 次分配（Apple M3 Max）。`runtime` 的测试验证每个
+  listener 的路由器只在自己的路由中选择；`listener` 的服务测试加了一个写在最后的通配路由，它在 HTTP/1.1
+  和 h2c 下都胜过没有 host 的路由。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的差异：
+
+- 以前优先级相同时取写在前面的路由；现在按计划取最具体的路由。如果配置里较宽泛的路由写在前面且优先级相同，
+  现在会由较具体的路由胜出。
+- `Router` 对路由的值是泛型的，这样 `runtime` 可以构建它，而 `router` 不需要引用 `runtime`。host 和 path
+  的匹配内置在路由器里，而不是由 `module.Matcher` 模块组成；`module.Matcher` 留到 I36 加入需要整个请求的
+  匹配器时再用。
+
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用模块代理上的 fib v1.2.0。本地 fib 仓库的 `main` 比这个 tag 多约 30 个提交。如果 I06 需要
-  更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
+- **fib 版本。** fit 使用模块代理上的 fib v1.2.0。本地 fib 仓库的 `main` 比这个 tag 多约 30 个提交。如果某个迭代
+  需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
+- **图的生命周期与异步 handler。** `listener` 的分发器在 handler 返回时释放图。I15 是第一个稍后才响应的
+  handler，必须持有图直到响应结束或被取消。
+- **基准测试。** fit 新支持的场景或模块要加进 `bench/cmd/fitbench/servers.go` 和
+  `bench/configs/fit/fit.json`。nginx 会预分配连接表（`worker_connections 65536` 时每个 worker 约
+  29 MB），这体现在打开任何连接之前的内存里，而不是每连接的开销里。
 - **staticcheck。** 用较旧 Go 构建的 staticcheck 读不了 Go 1.27 的导出数据。按 CI 的方式（基于最新的
   `golang.org/x/tools`）构建，再传给 make：`make check STATICCHECK=/path/to/staticcheck`。
 - **测试 handler。** `internal/fibtest.Serve` 通过 `fibhttp.NewStreamContext` 和一个记录用的 stream 运行 fib

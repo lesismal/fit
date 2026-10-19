@@ -93,13 +93,13 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I03 | JSON Schema 与 `fit validate` | I02 | done |
 | I04 | 模块注册表与核心接口 | I02 | done |
 | I05 | 运行时图与原子替换 | I04 | done |
-| I06 | HTTP 入口与 `fit run` | I05 | todo |
-| I07 | 基准框架：吞吐 | I06 | todo |
-| I08 | 基准框架：空闲连接内存与基线 | I07 | todo |
+| I06 | HTTP 入口与 `fit run` | I05 | done |
+| I07 | 基准框架：吞吐 | I06 | done |
+| I08 | 基准框架：空闲连接内存与基线 | I07 | done |
 | **M1** | | | |
 | I09 | 从证书文件加载的 TLS 入口 | I06 | todo |
 | I10 | HTTP/3 入口 | I09 | todo |
-| I11 | 路由 v1：host 与 path | I06 | todo |
+| I11 | 路由 v1：host 与 path | I06 | done |
 | I12 | 静态文件 I | I11 | todo |
 | I13 | 静态文件 II | I12 | todo |
 | I14 | 上游连接池 v1（HTTP/1.1） | I05 | todo |

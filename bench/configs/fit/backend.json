@@ -1,0 +1,6 @@
+{
+  "listeners": [{"name": "backend", "address": ":9000"}],
+  "routes": [
+    {"handler": {"module": "respond", "params": {"body": "hello, world", "headers": {"Content-Type": "text/plain"}}}}
+  ]
+}

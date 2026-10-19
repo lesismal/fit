@@ -1,4 +1,4 @@
-.PHONY: all build test race vet lint fmt fmt-check schema fuzz check
+.PHONY: all build test race vet lint fmt fmt-check schema fuzz bench check
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -33,5 +33,10 @@ schema:
 
 fuzz:
 	$(GO) test ./config -run '^$$' -fuzz FuzzLoad -fuzztime 30s
+
+# Runs nginx, Caddy, Traefik and fit through the benchmark harness; needs
+# Docker. See bench/README.md.
+bench:
+	$(GO) run ./bench/cmd/fitbench
 
 check: fmt-check vet lint race

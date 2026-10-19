@@ -1,0 +1,24 @@
+# Traefik for the fit benchmark harness. Traefik only proxies: it has no
+# fixed response and serves no files, so it runs the proxy scenario alone.
+#
+# Port 8080 serves HTTP/1.1, and port 8081 h2c (HTTP/2 with prior
+# knowledge), which Traefik accepts on any cleartext entry point; 8080 also
+# proxies WebSockets at /ws. Port 8443 is TLS, for idle TLS connections.
+entryPoints:
+  h1:
+    address: ":8080"
+  h2c:
+    address: ":8081"
+  tls:
+    address: ":8443"
+    http:
+      tls: {}
+# Up to 4096 idle backend connections, as every proxy here keeps; Traefik's
+# default of 200 makes it reopen them under load.
+serversTransport:
+  maxIdleConnsPerHost: 4096
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+log:
+  level: ERROR

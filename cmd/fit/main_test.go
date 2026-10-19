@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -79,5 +80,39 @@ func TestSchema(t *testing.T) {
 	var s map[string]any
 	if code != 0 || json.Unmarshal([]byte(stdout), &s) != nil || s["title"] != "fit config" {
 		t.Fatalf("schema: %d %.200q", code, stdout)
+	}
+}
+
+func TestRun(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "fit.json")
+	doc := `{"listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
+"routes": [{"handler": {"module": "respond"}}]}`
+	if err := os.WriteFile(cfg, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A context already done: fit starts, then shuts down at once.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errOut bytes.Buffer
+	stopped := false
+	code := serve(ctx, func() { stopped = true }, []string{"-c", cfg}, &out, &errOut)
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], `fit: listener "web" on 127.0.0.1:`) ||
+		!strings.HasSuffix(lines[0], "(http/1.1, h2c)") || lines[1] != "fit: shutting down" || lines[2] != "fit: stopped" || !stopped {
+		t.Fatalf("run: %d %q %q", code, out.String(), errOut.String())
+	}
+
+	if code, _, stderr := runFit("run", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.HasPrefix(stderr, "fit run: open ") {
+		t.Fatalf("missing file: %d %q", code, stderr)
+	}
+	if err := os.WriteFile(cfg, []byte(`{"listeners": []}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runFit("run", "-c", cfg); code != 1 || stderr != cfg+": listeners: at least one listener is needed\n" {
+		t.Fatalf("bad config: %d %q", code, stderr)
+	}
+	if code, _, _ := runFit("run", "extra"); code != 2 {
+		t.Fatalf("extra argument: %d", code)
 	}
 }

@@ -33,22 +33,28 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err != nil {
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) {
-			fmt.Fprintf(stderr, "fit validate: %v\n", err)
-			return 1
-		}
-		for _, e := range config.AsErrors(err) {
-			sep := ":"
-			if e.Line == 0 {
-				sep = ": "
-			}
-			fmt.Fprintf(stderr, "%s%s%s\n", *file, sep, e)
-		}
+		printConfigError(stderr, "fit validate", *file, err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "%s: valid\n", *file)
 	return 0
+}
+
+// printConfigError prints why the config in file could not be loaded or
+// compiled: each error with its position, or why the file could not be read.
+func printConfigError(stderr io.Writer, cmd, file string, err error) {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
+		return
+	}
+	for _, e := range config.AsErrors(err) {
+		sep := ":"
+		if e.Line == 0 {
+			sep = ": "
+		}
+		fmt.Fprintf(stderr, "%s%s%s\n", file, sep, e)
+	}
 }
 
 func runSchema(args []string, stdout, stderr io.Writer) int {

@@ -139,6 +139,22 @@ func TestCompile(t *testing.T) {
 	if web.Routes[1] != api.Routes[2] {
 		t.Fatal("a route serving two listeners was compiled twice")
 	}
+	// Each listener's router picks among its own routes.
+	for _, tt := range []struct {
+		l          *Listener
+		host, path string
+		want       string
+	}{
+		{web, "a.com", "/v1/x", "high"},
+		{web, "b.com", "/v1/x", "low"},
+		{api, "a.com", "/v1/x", "high"}, // equal priority: the host is more specific
+		{api, "b.com", "/v1/x", "api-only"},
+		{api, "b.com", "/x", "low"},
+	} {
+		if r, ok := tt.l.Router.Match(tt.host, tt.path); !ok || r.Name != tt.want {
+			t.Errorf("%s: %s%s: got %v, want %s", tt.l.Name, tt.host, tt.path, r, tt.want)
+		}
+	}
 }
 
 func TestCompileErrors(t *testing.T) {

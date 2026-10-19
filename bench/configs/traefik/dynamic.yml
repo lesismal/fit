@@ -1,0 +1,26 @@
+# fitbench fills in the addresses of the proxy and WebSocket backends.
+http:
+  routers:
+    proxy:
+      rule: "Path(`/proxy`)"
+      entryPoints: [h1, h2c]
+      service: backend
+    ws:
+      rule: "Path(`/ws`)"
+      entryPoints: [h1]
+      service: wsbackend
+  services:
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://{{BACKEND}}"
+    wsbackend:
+      loadBalancer:
+        servers:
+          - url: "http://{{WSBACKEND}}"
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/cert.pem
+        keyFile: /certs/key.pem

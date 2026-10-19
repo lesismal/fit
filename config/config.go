@@ -41,7 +41,7 @@ type Listener struct {
 type Route struct {
 	Name       string      `json:"name,omitempty" doc:"A name unique among the routes, for logs and metrics."`
 	Listeners  []string    `json:"listeners,omitempty" doc:"The names of the listeners the route serves; every listener when left out."`
-	Priority   int         `json:"priority,omitempty" doc:"Routes with a higher priority are tried first; equal ones in the order written."`
+	Priority   int         `json:"priority,omitempty" doc:"Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one written first."`
 	Match      *Match      `json:"match,omitempty" doc:"What a request must match; every request when left out."`
 	Middleware []ModuleRef `json:"middleware,omitempty" module:"http.middleware" doc:"Middleware a request passes through, in order, before the handler."`
 	Handler    ModuleRef   `json:"handler" fit:"required" module:"http.handlers" doc:"What answers the request."`

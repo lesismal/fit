@@ -5,7 +5,8 @@
 fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均衡、TLS 终结、静态文件服务和 API 网关，
 定位与 nginx、Caddy、Traefik 相同。
 
-fit 处于早期开发阶段，还不能处理流量。目前它可以加载和检查配置；已完成的内容见 [开发进度](docs/progress.zh-CN.md)。
+fit 处于早期开发阶段。目前它可以按 JSON 配置通过 HTTP/1.1 和 h2c 返回固定响应；已完成的内容见
+[开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的对比测量方法见 [bench](bench/README.zh-CN.md)。
 
 ## 文档
 
@@ -24,6 +25,7 @@ make build
 
 ```bash
 ./bin/fit validate -c examples/hello.json
+./bin/fit run -c examples/hello.json
 ```
 
 `make check` 会运行 gofmt、go vet、staticcheck，以及开启 race 检测的测试。

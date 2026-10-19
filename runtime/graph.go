@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/router"
 )
 
 // Graph is a compiled config.
@@ -33,9 +34,11 @@ type Listener struct {
 	Name      string
 	Address   string
 	Protocols []string
-	// Routes are tried in order: highest priority first, and routes of equal
-	// priority in the order written.
+	// Routes are the listener's routes: highest priority first, and routes
+	// of equal priority in the order written.
 	Routes []*Route
+	// Router picks the route for a request, by package router's rules.
+	Router *router.Router[*Route]
 }
 
 // Route is a compiled route.
@@ -43,7 +46,7 @@ type Route struct {
 	Name     string
 	Priority int
 	// Hosts and Paths are what the route matches, as written; empty matches
-	// everything. Package router gives them meaning.
+	// everything. Listener.Router gives them meaning.
 	Hosts []string
 	Paths []string
 	// Handler is the route's handler with its middleware already wrapped
@@ -88,9 +91,19 @@ func Compile(c *config.Config) (*Graph, error) {
 			}
 		}
 		slices.SortStableFunc(l.Routes, func(a, b *Route) int { return b.Priority - a.Priority })
+		l.Router = newRouter(l.Routes)
 		g.Listeners = append(g.Listeners, l)
 	}
 	return g, nil
+}
+
+// newRouter builds the router for a listener's routes.
+func newRouter(routes []*Route) *router.Router[*Route] {
+	rs := make([]router.Route[*Route], len(routes))
+	for i, r := range routes {
+		rs[i] = router.Route[*Route]{Hosts: r.Hosts, Paths: r.Paths, Priority: r.Priority, Value: r}
+	}
+	return router.New(rs)
 }
 
 func (g *Graph) compileRoute(rc config.Route) (*Route, error) {

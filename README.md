@@ -5,8 +5,9 @@
 fit is a reverse proxy, load balancer, TLS terminator, static file server and API gateway built on
 [fib](https://github.com/lesismal/fib), in the same space as nginx, Caddy and Traefik.
 
-fit is in early development and does not serve traffic yet. Today it can load and check a config;
-see [progress](docs/progress.md) for what works.
+fit is in early development. Today it serves fixed responses over HTTP/1.1 and h2c from a JSON
+config; see [progress](docs/progress.md) for what works, and [bench](bench/README.md) for how it is
+measured against nginx, Caddy and Traefik.
 
 ## Docs
 
@@ -25,6 +26,7 @@ make build
 
 ```bash
 ./bin/fit validate -c examples/hello.json
+./bin/fit run -c examples/hello.json
 ```
 
 `make check` runs gofmt, go vet, staticcheck and the tests with the race detector.
