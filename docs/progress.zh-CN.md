@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-20 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07c 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32、I33） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 ACME：证书只能来自文件（I29–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -1170,6 +1170,35 @@ A11–A13。
 - 没有监视证书文件；重载（SIGHUP、对配置文件的 `-watch`、Admin API）会重新读取它们，并且不再重新绑定 listener。监视
   证书文件，或由续期循环来发现它们的变化，留给 I29–I30。
 - 存储位置还没有配置项：它随 `Storage` 的第一个使用者 I29 一起加入。
+
+### R07d 访问日志的开销 — 已完成
+
+R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压测主机上用 `perf` 分析（fit 用 7 个核，h2load 64 个连接、
+32 个流，日志写到 `/dev/null`）：fit 约 23% 的 CPU 在日志下面，每个请求 0.6 µs，分散在多处：逐字节转义 JSON 字符串，
+每行都让 `Header.Get` 对 "User-Agent" 和 "Referer" 做规范化，按浮点数格式化时长，每行完整格式化一遍日期时间，分片的
+锁，两次读时钟，以及 fib 里的 `SetValue` 和 `OnFinish`。
+
+- `appendString` 一次扫描八个字节（`plainLen`、`plainWord`），每段不需转义的字节一次追加。
+- User-Agent 和 Referer 用规范的键直接从请求头 map 读取（`headerValue`），不再重复规范化。
+- 时长由整数微秒格式化（`appendSeconds`），结果与 `AppendFloat` 保留六位小数相同，不再格式化浮点数。
+- 精确到秒的日期时间每秒格式化一次并共享（`AccessLog.appendTime`，一个指向上一秒文本的原子指针），每行只追加毫秒。
+- 分片数从每个 GOMAXPROCS 一个改为四个，最多 64 个：请求的分片由客户端决定而不是 worker，分片数和 worker 一样多时，
+  两个 worker 常常选到同一个分片。
+- 测试：`TestPlainLen` 对照查表检查每个位置上的每个字节；`TestAppendStringLong` 在长字符串的每个偏移放一个需转义的字符；
+  `TestAppendSeconds` 对照 `strconv`；`TestLogTime` 跨秒、跨时区对照 `appendTime`；`TestLogLine` 检查 `Log` 写出的就是
+  `appendLine` 格式化的内容。`go vet ./...` 和 `go test -race ./...` 通过。
+- 开发用的 Mac 上：`BenchmarkLog` 单线程 230 → 181 ns，前后都没有分配；`BenchmarkDispatch` 单线程 580 → 550 ns，8 线程
+  390 → 350 ns，前后都是 10 次分配。
+- 压测主机上，`ea59148` 和它加上本改动的干净构建，各跑两轮、每轮 20 s，开着访问日志的 h2c 固定响应：每秒 2.69M 和
+  2.69M → 2.86M 和 2.87M 请求（+6.6%），不开日志是 3.80M；日志的开销从 29% 降到 24.5%。基准框架交替跑两轮，HTTP/1.1
+  固定响应和代理没有变化（788k、226k 和 236k），限制它们的不是日志。
+
+与计划的差异：
+
+- 剩下的约每请求 0.45 µs，是在 worker 上格式化日志行本身，以及 fib 的部分：整体写出的响应注册 `OnFinish` 时要从 fib 的
+  全局池取一个 `responseWriter`，`SetValue` 要拿 Context 的锁，合计约 85 ns。这部分已作为
+  [A17](fib-api-requests.zh-CN.md#a17降低每个请求上-onfinish-和-setvalue-的开销) 向 fib 提出。
+- 把日志行的格式化移出 worker 只会转移开销，不会消除：在这个基准里服务端的核已经全部占满。
 
 ## 给后续迭代的说明
 

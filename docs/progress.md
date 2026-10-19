@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07c are all done. M2, dynamic config and TLS: under way (I24–I28, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I28, I32, I33) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME: certificates come from files only (I29–I31); no method, header or other matchers (I36) |
@@ -1564,6 +1564,46 @@ Differences from the plan:
   reads them again, and no longer rebinds the listener. A watch on them, or a renewal loop that
   picks them up, is left for I29–I30.
 - No config yet for the storage's location: it comes with I29, the first user of `Storage`.
+
+### R07d Access log cost — done
+
+R07c left fixed h2c about 30% slower with the access log on than off. `perf` on the benchmark host
+(fit on 7 cores, h2load with 64 connections and 32 streams, the log to `/dev/null`) put about 23%
+of fit's CPU under the log, 0.6 µs a request, spread thin: escaping JSON strings a byte at a time,
+`Header.Get` canonicalizing "User-Agent" and "Referer" on every line, durations formatted as
+floats, the date and time formatted in full on every line, the shards' locks, two clock reads, and,
+in fib, `SetValue` and `OnFinish`.
+
+- `appendString` scans eight bytes at a time (`plainLen`, `plainWord`) and appends each plain run
+  at once.
+- The user agent and referer are read from the header map by their canonical keys
+  (`headerValue`), without canonicalizing them again.
+- Durations are formatted from integer microseconds (`appendSeconds`), as `AppendFloat` with
+  six decimals would, without formatting a float.
+- The date and time to the second are formatted once a second and shared (`AccessLog.appendTime`,
+  an atomic pointer to the last second's text); a line adds its milliseconds.
+- Four shards for each of GOMAXPROCS, up to 64, where there was one: a request's shard is its
+  client's, and with as many shards as workers two workers picked the same one often.
+- Tests: `TestPlainLen` checks every byte at every position against the table; `TestAppendStringLong`
+  an escape at every offset of a long string; `TestAppendSeconds` against `strconv`;
+  `TestLogTime` against `appendTime` across seconds and zones; `TestLogLine` that `Log` writes
+  what `appendLine` formats. `go vet ./...` and `go test -race ./...` pass.
+- On the development Mac: `BenchmarkLog` 230 → 181 ns single-threaded, no allocations either way;
+  `BenchmarkDispatch` 580 → 550 ns single-threaded, 390 → 350 ns at 8, 10 allocations either way.
+- On the benchmark host, clean builds of `ea59148` and of it with this change, two rounds each
+  of 20 s, fixed h2c with the access log: 2.69M and 2.69M → 2.86M and 2.87M requests a second
+  (+6.6%), against 3.80M without the log; the log's cost goes from 29% to 24.5%. In the harness,
+  two rounds alternating, fixed HTTP/1.1 and the proxy did not move (788k, 226k and 236k), the log
+  not being what bounds them.
+
+Differences from the plan:
+
+- What is left, about 0.45 µs a request, is the line itself, formatted on the worker, and fib's
+  share: `OnFinish` takes a `responseWriter` from fib's global pool for a response written whole,
+  and `SetValue` takes the Context's lock, together about 85 ns. That is asked of fib as
+  [A17](fib-api-requests.md#a17-cheaper-onfinish-and-setvalue-on-every-request).
+- Formatting lines off the worker would move the cost, not remove it: the server's cores are
+  already all busy in this benchmark.
 
 ## Notes for later iterations
 

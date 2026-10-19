@@ -283,7 +283,7 @@ func TestShards(t *testing.T) {
 	l := NewAccessLogTo(&out, 5*time.Millisecond, 0)
 	var dropped atomic.Int64
 	l.warn = countDrops{&dropped}
-	if len(l.shards) != 8 {
+	if len(l.shards) != 32 {
 		t.Fatalf("%d shards for GOMAXPROCS 8", len(l.shards))
 	}
 	// Clients logging at once, as fast as they can: every line is written
@@ -349,5 +349,115 @@ func TestAppendTime(t *testing.T) {
 		if got, want := string(appendTime(nil, tm)), tm.UTC().Format("2006-01-02T15:04:05.000Z07:00"); got != want {
 			t.Errorf("%v: %s, want %s", tm, got, want)
 		}
+	}
+}
+
+func TestPlainLen(t *testing.T) {
+	// Every byte at every position of a run of plain ones, word-sized and
+	// not.
+	for _, n := range []int{8, 16, 21} {
+		for pos := range n {
+			for c := range 256 {
+				block := []byte(strings.Repeat("a", n))
+				block[pos] = byte(c)
+				want := n
+				if !plain[c] {
+					want = pos
+				}
+				if got := plainLen(string(block)); got != want {
+					t.Errorf("byte %#x at %d of %d: plainLen %d, want %d", c, pos, n, got, want)
+				}
+			}
+		}
+	}
+	// Bytes either side of a borrow.
+	for _, s := range []string{"\x00\x01\x20\x21\x22\x23\x5b\x5c", "\x21\x21\x21\x21\x21\x21\x21\x1f", "\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x80"} {
+		want := 0
+		for want < len(s) && plain[s[want]] {
+			want++
+		}
+		if got := plainLen(s); got != want {
+			t.Errorf("%q: plainLen %d, want %d", s, got, want)
+		}
+	}
+}
+
+func TestAppendStringLong(t *testing.T) {
+	// A byte that must be escaped at every offset of a long string, so that
+	// the word-at-a-time scan finds it wherever it is.
+	base := strings.Repeat("Mozilla/5.0 (X11; Linux x86_64) ", 3)
+	for i := range len(base) {
+		for _, c := range []string{`"`, `\`, "\n", "\x01", "é", "\xff"} {
+			s := base[:i] + c + base[i:]
+			var back string
+			if err := json.Unmarshal(appendString(nil, s), &back); err != nil {
+				t.Fatalf("%q: %v", s, err)
+			}
+			if want := strings.ToValidUTF8(s, "�"); back != want {
+				t.Fatalf("%q came back as %q", s, back)
+			}
+		}
+	}
+}
+
+func TestAppendSeconds(t *testing.T) {
+	for _, d := range []time.Duration{0, 1, 499, 501, 999, 1000, 412345, 1500 * time.Millisecond,
+		time.Second - 1, 59*time.Minute + 999999499, 1<<62 - 1, -1, -1500 * time.Microsecond} {
+		got := string(appendSeconds(nil, d))
+		want := strconv.FormatFloat(d.Seconds(), 'f', 6, 64)
+		if want == "-0.000000" {
+			want = "0.000000"
+		}
+		if d >= 1<<53 {
+			// Past what a float64 holds to the nanosecond: the float is off,
+			// not the integer.
+			want = strconv.FormatInt(int64((d+500)/1000)/1e6, 10) + "." + fmt.Sprintf("%06d", int64((d+500)/1000)%1e6)
+		}
+		if got != want {
+			t.Errorf("%d: %s, want %s", d, got, want)
+		}
+	}
+}
+
+func TestLogTime(t *testing.T) {
+	l := &AccessLog{}
+	base := time.Date(2026, 10, 19, 7, 39, 56, 0, time.UTC)
+	for _, tm := range []time.Time{
+		base, base.Add(123 * time.Millisecond), base.Add(999999999), base.Add(time.Second),
+		base.Add(time.Second + 5*time.Millisecond).In(time.FixedZone("x", 8*3600)),
+		time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), base,
+	} {
+		if got, want := string(l.appendTime(nil, tm)), string(appendTime(nil, tm)); got != want {
+			t.Errorf("%v: %s, want %s", tm, got, want)
+		}
+	}
+}
+
+func TestLogLine(t *testing.T) {
+	// What Log writes is what appendLine formats.
+	var out syncBuffer
+	l := NewAccessLogTo(&out, time.Hour, 0)
+	r := httptest.NewRequest("GET", "/x?y=1", nil)
+	r.Header.Set("User-Agent", "agent")
+	e := &Entry{Start: time.Now(), Listener: "web", Route: "r"}
+	l.Log(e, r, 200, 7)
+	l.Close()
+	line := out.String()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("%q: %v", line, err)
+	}
+	ts, _ := got["time"].(string)
+	want := string(appendLine(nil, e, r, 200, 7, time.Time{}))
+	_, wantRest, _ := strings.Cut(want, `","listener"`)
+	_, gotRest, _ := strings.Cut(line, `","listener"`)
+	// The durations differ; the rest of the line does not.
+	cut := func(s string) string {
+		i := strings.Index(s, `,"duration"`)
+		j := strings.Index(s, `,"user_agent"`)
+		return s[:i] + s[j:]
+	}
+	if len(ts) != len("2006-01-02T15:04:05.000Z") || cut(gotRest) != cut(wantRest) {
+		t.Errorf("Log wrote %q, appendLine %q", line, want)
 	}
 }

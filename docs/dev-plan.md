@@ -135,6 +135,7 @@ Status: `todo`, `doing` or `done`.
 | R07a | Hot path costs in fit | I23 | done |
 | R07b | Proxy allocations | I23 | done |
 | R07c | Hot path costs through fib | R03, R07a, R07b | done |
+| R07d | Access log cost | R07c | done |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
@@ -518,6 +519,16 @@ R07 split in three: what fit can do alone (R07a, R07b) and what needs fib (R07c)
 - **Done when**: as R07a; the proxy's allocations per request, before and after, are in the
   progress record.
 - **Touches**: `observe`, `listener`, `handler/proxy`, `upstream`.
+
+### R07d Access log cost
+
+- **Do**: R07c left fixed h2c about 30% slower with the access log on than off. Profile it on the
+  benchmark host and take out what fit pays for each line: header lookups that canonicalize a
+  key already canonical, durations formatted as floats, the date formatted on every line, a JSON
+  string scanned a byte at a time, and contention on the log's shards; what is fib's goes to
+  fib-api-requests.
+- **Done when**: as R07a, for the fixed response with the access log on, over HTTP/1.1 and h2c.
+- **Touches**: `observe`.
 
 ## M2, dynamic config and TLS
 

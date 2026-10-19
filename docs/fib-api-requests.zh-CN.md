@@ -27,6 +27,7 @@
 | A14 | 在没有连接的 Context 上 `Release` | 已完成，v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
 | A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
+| A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已提出 | 12 | R07d |
 
 ## 证据
 
@@ -341,3 +342,27 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 **fit 如何使用。** 有了第一项，fit 不需要改动：传输的等待在 HTTP/1 上同样生效，测试恢复运行。有了第二项，`send` 把整个
 范围交给 `SendFile`。
+
+## A17：降低每个请求上 `OnFinish` 和 `SetValue` 的开销
+
+**状态。** 已提出，在 R07d 之后（2026-10-20）。
+
+**问题。** fit 的访问日志对每个记录的请求调用 `SetValue` 和 `OnFinish`。两者在 fib 里的开销都比它们代表的工作大：
+
+- `OnFinish` 调用 `addHook`，后者调用 `Context.writer()`。对于整体写出的响应（`respond` 的响应就是），Context 还没有
+  `responseWriter`，于是这个钩子从全局 `writerPool` 取一个（`sync.Pool.Get`），`recycle` 再把它重置后放回。为了一个只装一个
+  函数的位置，每个请求都要在池里走一个来回。
+- `SetValue` 要拿 `c.mu`，连接的 goroutine 也拿这把锁，所以解锁时这把锁所在的缓存行常常在另一个核上。
+
+**证据。** 在压测主机上用 `perf` 测 fit 的 h2c 固定响应（h2load，64 个连接、32 个流；fit 用 7 个核），访问日志写到
+`/dev/null`，R07d 的构建：日志每个请求的 0.51 µs 开销中，约 54 ns 是 `addHook` 及其下的 `writerPool.Get`，约 31 ns 是
+`SetValue`，主要在 `Mutex.Unlock`；`Context.recycle` 占的 CPU 从不开日志时的 2.1% 升到开日志时的 3.3%。合起来约占日志开销
+的六分之一，而这条路径不开日志时每秒 3.78M 请求，开日志时 2.83M。
+
+**请求。** 以下任一项或两项：
+
+- Context 回收时保留它的 `responseWriter`（重置后），像保留 `cancelHooks` 一样，而不是还给 `writerPool`；或者把 `OnFinish`
+  钩子放在 Context 自己的存储里，注册时不需要 writer。
+- 不在 `c.mu` 之后的值槽：例如一个原子指针，不加锁地设置和读取，因为这个槽只在 handler 运行前设置一次，之后读取。
+
+**fit 如何使用。** fit 不需要改动：`observe.Track` 和 dispatcher 的 `OnFinish` 开销降低。

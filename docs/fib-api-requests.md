@@ -28,6 +28,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A14 | `Release` on a Context that has no connection | done, v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
 | A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
+| A17 | Cheaper `OnFinish` and `SetValue` on every request | asked | 12 | R07d |
 
 ## Evidence
 
@@ -450,3 +451,35 @@ need not split it.
 
 **How fit uses it.** With the first, nothing changes in fit: the transfer's waits work on HTTP/1
 too, and the test runs. With the second, `send` hands `SendFile` the whole range.
+
+## A17: Cheaper `OnFinish` and `SetValue` on every request
+
+**Status.** Asked, after R07d (2026-10-20).
+
+**Problem.** fit's access log calls `SetValue` and `OnFinish` on every request it logs. Each costs
+more in fib than the work it stands for:
+
+- `OnFinish` calls `addHook`, which calls `Context.writer()`. For a response written whole, as
+  `respond`'s is, the Context has no `responseWriter` yet, so the hook takes one from the global
+  `writerPool` (`sync.Pool.Get`), and `recycle` resets it and puts it back. That is a pool round
+  trip per request for a slot that holds one function.
+- `SetValue` takes `c.mu`, which the connection's goroutine also takes, so the unlock often finds
+  the lock's cache line on another core.
+
+**Evidence.** `perf` on the benchmark host, fit's fixed response over h2c (h2load, 64 connections,
+32 streams; fit on 7 cores) with the access log to `/dev/null`, at R07d's build: of the
+0.51 µs a request the log costs, about 54 ns is `addHook` and the `writerPool.Get` under it, and
+about 31 ns `SetValue`, mostly in `Mutex.Unlock`; `Context.recycle` goes from 2.1% of the CPU
+without the log to 3.3% with it. Together about a sixth of the log's cost, on a path that serves
+3.78M requests a second without the log and 2.83M with it.
+
+**Request.** Either or both:
+
+- Keep a Context's `responseWriter`, reset, when it is recycled, as its `cancelHooks` are kept,
+  instead of returning it to `writerPool`; or keep `OnFinish` hooks in storage of the Context's
+  own, so that registering one needs no writer.
+- A value slot that is not behind `c.mu`: say an atomic pointer, set and read without the lock,
+  since the slot is set once, before the handler runs, and read after.
+
+**How fit uses it.** Nothing changes in fit: `observe.Track` and the dispatcher's `OnFinish` cost
+less.

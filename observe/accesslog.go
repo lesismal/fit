@@ -18,11 +18,13 @@
 // disk or a blocked pipe never holds up a fib worker. When the buffer is full,
 // lines are dropped and counted rather than waited for.
 //
-// The buffer is split in shards, one for each of up to GOMAXPROCS, each with
-// its own lock, so that workers finishing responses at once seldom wait for
-// one another. buffer_bytes bounds what the writer has to write, with what
-// the shards hold, though each shard holds up to 64KB of its own past it. A shard hands a buffer
-// to the writer as soon as it holds 64KB. A request's line goes to the shard
+// The buffer is split in shards, shardsPerProc for each of GOMAXPROCS up to
+// 64, each with its own lock, so that workers finishing responses at once
+// seldom wait for one another: a request's shard is its client's, not its
+// worker's, and with no more shards than workers two of them pick the same
+// one often. buffer_bytes bounds what the writer has to write, with what the
+// shards hold, though each shard holds up to 64KB of its own past it. A shard
+// hands a buffer to the writer as soon as it holds 64KB. A request's line goes to the shard
 // of its client's address, so the lines of one connection keep their order;
 // lines of different clients may be written out of time order by up to the
 // flush interval, as the lines of nginx's workers are.
@@ -65,6 +67,9 @@ type AccessLog struct {
 
 	shards []shard
 	seed   maphash.Seed
+	// stamp is the time of the last line, to the second, formatted: lines
+	// logged within the same second share it.
+	stamp atomic.Pointer[stamp]
 	// queued counts the bytes handed to the writer and not yet written.
 	// With what each shard holds, it is bounded by maxBytes; a shard adds
 	// its bytes when it hands them over, once a buffer rather than once a
@@ -97,8 +102,12 @@ type shard struct {
 	_      [64]byte
 }
 
-// maxShards bounds the shards, whatever GOMAXPROCS is.
-const maxShards = 64
+// shardsPerProc is how many shards there are for each of GOMAXPROCS, and
+// maxShards bounds them, whatever GOMAXPROCS is.
+const (
+	shardsPerProc = 4
+	maxShards     = 64
+)
 
 // NewAccessLog opens the log c describes and starts its writer.
 func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
@@ -135,7 +144,7 @@ func (l *AccessLog) start() {
 	}
 	// A power of two, so that a shard is picked with a mask.
 	n := 1
-	for n*2 <= min(goruntime.GOMAXPROCS(0), maxShards) {
+	for n < min(shardsPerProc*goruntime.GOMAXPROCS(0), maxShards) {
 		n *= 2
 	}
 	l.shards = make([]shard, n)
@@ -283,7 +292,9 @@ func EntryOf(c *fibhttp.Context) *Entry {
 func (l *AccessLog) Log(e *Entry, r *stdhttp.Request, status int, size int64) {
 	end := time.Now()
 	var stack [512]byte
-	line := appendLine(stack[:0], e, r, status, size, end)
+	b := append(stack[:0], `{"time":"`...)
+	b = l.appendTime(b, end)
+	line := appendFields(b, e, r, status, size, end)
 
 	sh := &l.shards[0]
 	if len(l.shards) > 1 {
@@ -317,6 +328,12 @@ func (l *AccessLog) Log(e *Entry, r *stdhttp.Request, status int, size int64) {
 func appendLine(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, end time.Time) []byte {
 	b = append(b, `{"time":"`...)
 	b = appendTime(b, end)
+	return appendFields(b, e, r, status, size, end)
+}
+
+// appendFields appends what follows the time in a request's line, which b
+// ends with.
+func appendFields(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, end time.Time) []byte {
 	b = append(b, `","listener":`...)
 	b = appendString(b, e.Listener)
 	if e.Route != "" {
@@ -340,18 +357,73 @@ func appendLine(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, 
 	b = append(b, `,"bytes_out":`...)
 	b = strconv.AppendInt(b, size, 10)
 	b = append(b, `,"duration":`...)
-	b = strconv.AppendFloat(b, end.Sub(e.Start).Seconds(), 'f', 6, 64)
+	b = appendSeconds(b, end.Sub(e.Start))
 	if e.Upstream != "" {
 		b = append(b, `,"upstream":`...)
 		b = appendString(b, e.Upstream)
 		b = append(b, `,"upstream_duration":`...)
-		b = strconv.AppendFloat(b, e.UpstreamDuration.Seconds(), 'f', 6, 64)
+		b = appendSeconds(b, e.UpstreamDuration)
 	}
 	b = append(b, `,"user_agent":`...)
-	b = appendString(b, r.Header.Get("User-Agent"))
+	b = appendString(b, headerValue(r.Header, "User-Agent"))
 	b = append(b, `,"referer":`...)
-	b = appendString(b, r.Header.Get("Referer"))
+	b = appendString(b, headerValue(r.Header, "Referer"))
 	return append(b, "}\n"...)
+}
+
+// headerValue is h.Get(key) for a key already in canonical form, as the
+// keys of a parsed request's header are, without canonicalizing it again.
+func headerValue(h stdhttp.Header, key string) string {
+	if v := h[key]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// appendSeconds appends d in seconds with six decimals, as
+// strconv.AppendFloat(b, d.Seconds(), 'f', 6, 64) would, rounding to the
+// nearest microsecond, without formatting a float.
+func appendSeconds(b []byte, d time.Duration) []byte {
+	neg := d < 0
+	if neg {
+		d = -d
+	}
+	us := uint64((d + time.Microsecond/2) / time.Microsecond)
+	if neg && us > 0 {
+		b = append(b, '-')
+	}
+	b = strconv.AppendUint(b, us/1e6, 10)
+	frac := us % 1e6
+	return append(b, '.',
+		byte('0'+frac/100000), byte('0'+frac/10000%10), byte('0'+frac/1000%10),
+		byte('0'+frac/100%10), byte('0'+frac/10%10), byte('0'+frac%10))
+}
+
+// stamp is a second, and its time formatted up to its fraction:
+// "2006-01-02T15:04:05.".
+type stamp struct {
+	sec  int64
+	text [20]byte
+}
+
+// appendTime is appendTime(b, t) for a time near the last line's: the date
+// and time of day are formatted once a second, and only the milliseconds per
+// line.
+func (l *AccessLog) appendTime(b []byte, t time.Time) []byte {
+	sec := t.Unix()
+	s := l.stamp.Load()
+	if s == nil || s.sec != sec {
+		formatted := appendTime(nil, t)
+		if len(formatted) != len("2006-01-02T15:04:05.000Z") {
+			return append(b, formatted...)
+		}
+		s = &stamp{sec: sec}
+		copy(s.text[:], formatted)
+		l.stamp.Store(s)
+	}
+	ms := t.Nanosecond() / 1e6
+	b = append(b, s.text[:]...)
+	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
 }
 
 // clientIP is the host part of a RemoteAddr.
@@ -399,19 +471,55 @@ var plain = func() (t [256]bool) {
 	return t
 }()
 
+// The constants plainWord tests eight bytes at once with.
+const (
+	ones  = 0x0101010101010101
+	highs = 0x8080808080808080
+)
+
+// plainWord reports whether every byte of x, eight of them, is plain: none is
+// a control character, the quote, the backslash or past ASCII. It is what
+// eight lookups in plain would tell, a word at a time.
+func plainWord(x uint64) bool {
+	// A byte's high bit is set below where a byte of x is under 0x20, or is
+	// the quote or the backslash, unless x's own is; and x's own are set
+	// past ASCII.
+	below := x - 0x20*ones
+	quote := (x ^ '"'*ones) - ones
+	slash := (x ^ '\\'*ones) - ones
+	return ((below|quote|slash)&^x|x)&highs == 0
+}
+
+// plainLen returns how many of s's first bytes are plain, eight at a time
+// while it can.
+func plainLen(s string) int {
+	i := 0
+	for ; i+8 <= len(s); i += 8 {
+		w := s[i : i+8]
+		x := uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24 |
+			uint64(w[4])<<32 | uint64(w[5])<<40 | uint64(w[6])<<48 | uint64(w[7])<<56
+		if !plainWord(x) {
+			break
+		}
+	}
+	for i < len(s) && plain[s[i]] {
+		i++
+	}
+	return i
+}
+
 // appendString appends s as a JSON string. Bytes that are not valid UTF-8
 // become U+FFFD, so that every line is valid JSON whatever a client sent.
 func appendString(b []byte, s string) []byte {
 	b = append(b, '"')
-	start := 0
-	for i := 0; i < len(s); {
-		c := s[i]
-		if plain[c] {
-			i++
-			continue
+	for {
+		n := plainLen(s)
+		b = append(b, s[:n]...)
+		s = s[n:]
+		if len(s) == 0 {
+			return append(b, '"')
 		}
-		if c < utf8.RuneSelf {
-			b = append(b, s[start:i]...)
+		if c := s[0]; c < utf8.RuneSelf {
 			switch c {
 			case '"', '\\':
 				b = append(b, '\\', c)
@@ -424,20 +532,15 @@ func appendString(b []byte, s string) []byte {
 			default:
 				b = append(b, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xf])
 			}
-			i++
-			start = i
+			s = s[1:]
 			continue
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
+		r, size := utf8.DecodeRuneInString(s)
 		if r == utf8.RuneError && size == 1 {
-			b = append(b, s[start:i]...)
 			b = append(b, `�`...)
-			i++
-			start = i
-			continue
+		} else {
+			b = append(b, s[:size]...)
 		}
-		i += size
+		s = s[size:]
 	}
-	b = append(b, s[start:]...)
-	return append(b, '"')
 }
