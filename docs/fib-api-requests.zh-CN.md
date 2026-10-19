@@ -24,6 +24,7 @@
 | A11 | 不复制即取得整体到达的客户端响应体 | 已完成，v1.4.0 | 12 | R07c |
 | A12 | 减少每个客户端请求的定时器和 context | 部分完成，v1.4.0 | 12 | R07c |
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
+| A14 | 在没有连接的 Context 上 `Release` | P1 | 13 | R05 |
 
 ## 证据
 
@@ -276,3 +277,21 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 `WriteResponse` 检查它而不是 `hooked() != nil`。
 
 **fit 如何使用。** fit 不需要改动；记日志的响应不再为这次复制付出代价。
+
+## A14：在没有连接的 Context 上 `Release`
+
+**问题。** `fibhttp.NewStreamContext(nil, req, stream)` 为 fib 之外服务的流创建一个没有 `fib.Connection` 的 Context；
+fit 的 `internal/fibtest` 用它在测试中不经网络运行 handler。`fibhttp.Serve` 在它上面运行 handler，在 handler 自己的
+goroutine 上应答没有问题。但 retain 请求、之后从另一个 goroutine 应答的 handler，在最后一次 `Release` 时会 panic：
+这条路径上 `Context.giveBack` 在 `Finish` 之后调用 `c.Conn.Flush()`，而 `Conn` 是 nil。
+
+**证据。** 在 fib v1.4.0 上，一个 handler 调用 `c.Retain()`，然后在 goroutine 中调用 `c.WriteResponse(...)` 和
+`c.Release()`，经 `fibhttp.Serve` 在 `NewStreamContext(nil, ...)` 上运行：在 `(*Connection).Flush` 中空指针解引用，调用
+来自 `(*Context).giveBack`（`http/context.go:895`）。R05 把静态 handler 的文件操作移到一个从自己的 goroutine 应答的池上，
+所以静态 handler 的每个测试都会走这条路径。
+
+**请求。** `c.Conn` 为 nil 时跳过 flush（外部的流会自己发送交给它的内容），并在 `NewStreamContext` 的文档中说明允许
+nil 连接。
+
+**fit 如何使用。** `fibtest.ServeRequest` 改为经 `fibhttp.Serve` 运行，并等待被 retain 的响应写出，这样静态 handler 的测试
+不用改动就能覆盖它的异步路径。

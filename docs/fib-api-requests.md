@@ -25,6 +25,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A11 | The body of a client response that arrived whole, without a copy | done, v1.4.0 | 12 | R07c |
 | A12 | Fewer timers and contexts per client request | partly, v1.4.0 | 12 | R07c |
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
+| A14 | `Release` on a Context that has no connection | P1 | 13 | R05 |
 
 ## Evidence
 
@@ -359,3 +360,25 @@ it (written to `/dev/null`), and 783k and 752k over HTTP/1.1.
 flag beside `whole` set by those two, and test it in `WriteResponse` instead of `hooked() != nil`.
 
 **How fit uses it.** Nothing changes in fit; logged responses stop paying for the copy.
+
+## A14: `Release` on a Context that has no connection
+
+**Problem.** `fibhttp.NewStreamContext(nil, req, stream)` makes a Context for a stream served
+outside fib, with no `fib.Connection`; fit's `internal/fibtest` uses one to run handlers in tests
+without a network. `fibhttp.Serve` runs a handler on it, and a handler that answers from the
+handler's goroutine works. One that retains the request and answers later, from another
+goroutine, panics at its last `Release`. `Context.giveBack` calls `c.Conn.Flush()` after
+`Finish` on that path, and `Conn` is nil.
+
+**Evidence.** With fib v1.4.0, a handler that calls `c.Retain()`, then from a goroutine
+`c.WriteResponse(...)` and `c.Release()`, served through `fibhttp.Serve` on a
+`NewStreamContext(nil, ...)`: nil pointer dereference in `(*Connection).Flush`, from
+`(*Context).giveBack` (`http/context.go:895`). R05 moves the static handler's file work to a pool
+that answers from its own goroutines, so every static handler test takes that path.
+
+**Request.** Skip the flush when `c.Conn` is nil (an external stream sends what it is given
+itself), and say in `NewStreamContext`'s doc that a nil connection is allowed.
+
+**How fit uses it.** `fibtest.ServeRequest` serves through `fibhttp.Serve` and waits for a
+retained response to be written, so the static handler's tests run unchanged against its
+asynchronous paths.
