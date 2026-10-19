@@ -127,7 +127,7 @@ Status: `todo`, `doing` or `done`.
 | **M1 review fixes** | | | |
 | R01 | Bounded waits on slow clients | I13, I17 | done |
 | R02 | Safe default limits | I13, I20 | done |
-| R03 | fib APIs for forwarding without waiting (in fib) | — | todo |
+| R03 | fib APIs for forwarding without waiting (in fib) | — | done |
 | R04 | Proxy downloads without waiting | R01, R03 | todo |
 | R05 | Static files without blocking | R01, R03 | todo |
 | R06 | Connection and queue limits through fib | R02, R03 | todo |

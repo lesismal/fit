@@ -9,21 +9,21 @@
 
 ## 概览
 
-| ID | API | 优先级 | 解决的规则 | fit 迭代 |
+| ID | API | 状态 | 解决的规则 | fit 迭代 |
 | --- | --- | --- | --- | --- |
-| A1 | `ClientResponse.HoldBody(hold bool)` | P0 | 1、8 | R04 |
-| A2 | 从不等待的响应写入，以及可写通知 | P0 | 1、8、9 | R04、R05 |
-| A3 | 异步发送文件 | P1 | 1、4 | R05 |
-| A4 | 引擎连接数上限 | P1 | 11 | R06 |
-| A5 | 客户端等待连接的请求数上限 | P1 | 11 | R06 |
-| A6 | 在 `BodyWriter` 关闭前设置 trailer | P2 | 1、4 | R04 |
-| A7 | `Context` 上的单请求值槽 | P2 | 12 | R07c |
-| A8 | 文档修正 | P2 | — | — |
-| A9 | 拒绝不是 token 的请求头字段名 | P1 | 13 | — |
+| A1 | `ClientResponse.HoldBody(hold bool)` | 已完成，v1.4.0 | 1、8 | R04 |
+| A2 | 从不等待的响应写入，以及可写通知 | 已完成，v1.4.0 | 1、8、9 | R04、R05 |
+| A3 | 异步发送文件 | 已完成，v1.4.0 | 1、4 | R05 |
+| A4 | 引擎连接数上限 | 已完成，v1.4.0 | 11 | R06 |
+| A5 | 客户端等待连接的请求数上限 | 已完成，v1.4.0 | 11 | R06 |
+| A6 | 在 `BodyWriter` 关闭前设置 trailer | 已完成，v1.4.0 | 1、4 | R04 |
+| A7 | `Context` 上的单请求值槽 | 已完成，v1.4.0 | 12 | R07c |
+| A8 | 文档修正 | 部分完成，v1.4.0 | — | — |
+| A9 | 拒绝不是 token 的请求头字段名 | 已完成，v1.4.0 | 13 | — |
 | A10 | 长度未知的客户端响应从响应头起就以流方式交付 | 已完成，v1.3.1 | 5 | — |
-| A11 | 不复制即取得整体到达的客户端响应体 | P2 | 12 | R07c |
-| A12 | 减少每个客户端请求的定时器和 context | P2 | 12 | R07c |
-| A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | P1 | 12 | R07c |
+| A11 | 不复制即取得整体到达的客户端响应体 | 已完成，v1.4.0 | 12 | R07c |
+| A12 | 减少每个客户端请求的定时器和 context | 部分完成，v1.4.0 | 12 | R07c |
+| A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
 
 ## 证据
 
@@ -42,6 +42,8 @@ fit 代理的下载方向在 `ClientResponse.OnBody` 的回调里调用 `Context
 
 ## A1：`ClientResponse.HoldBody(hold bool)`
 
+**状态。** 已在 fib v1.4.0 中完成（`b520601`）：按请求提供 `ClientResponse.HoldBody(hold bool)`，支持 HTTP/1、HTTP/2 和 HTTP/3。恢复交付在 fib 的 side pool 上进行。暂停期间响应体的结束也会等待，但错误会立即交付；整体到达的响应在它唯一的一次调用之前暂停。
+
 **问题。** 客户端响应体只能靠 `OnBody` 回调阻塞来控速（"what holds the connection back is fn itself"）。在 HTTP/2 上，
 回调运行在读取共享连接的 worker 上，一个慢消费者会卡住这条连接上的所有 stream。
 
@@ -57,6 +59,8 @@ func (c *ClientResponse) HoldBody(hold bool)
 **fit 的用法。** 在 `onBody` 中，写入后若客户端队列超过上限：先 `resp.HoldBody(true)`，等 A2 的通知再恢复。
 
 ## A2：从不等待的响应写入，以及可写通知
+
+**状态。** 已在 fib v1.4.0 中完成（`24da9bb`）：按请求提供 `Context.WriteNoWait(p) (above bool, err error)` 和 `Context.OnWritable(fn func(error)) bool`，同一时间只有一个 fn。HTTP/1 用 `Connection.NotifyOutput`，HTTP/2 用流窗口，HTTP/3 通过新的 `http.ResponseNotifier` 接口；没有实现它的外部 stream 退回到 `Write`。响应开始流式发送之前 `OnWritable` 返回 false，因为小的写入会被暂存，不会超过水位。
 
 **问题。** 排队超过 64 KB（HTTP/1）或被流控挡住（HTTP/2、HTTP/3）时，`Context.Write` 会等待。没有办法不等待地写入，
 并在有空间时得到通知。`Connection.NotifyOutput` 只适用于 HTTP/1 连接，不适用于 HTTP/2、HTTP/3 的 stream。
@@ -91,6 +95,8 @@ if above {
 
 ## A3：异步发送文件
 
+**状态。** 已在 fib v1.4.0 中完成（`ecd62b0`），采用第一种方案：`Context.SendFile(f *os.File, offset, n int64, done func(error))`。普通 HTTP/1 上 16 KB 及以上用 `Connection.SendFile`；TLS、HTTP/2 和 HTTP/3 在 fib 的文件池（`sidepool.File()`，256 个 worker）上按 64 KB 读取，用 `WriteNoWait` 和 `OnWritable` 写出。`done` 在另一个 goroutine 上运行，在此之前响应保持 retain。未设置时它会补上 `Content-Length`；206 和 `Content-Range` 由 handler 自己设置。没有接入 `FileCache`。
+
 **问题。** fit 的静态文件 handler 用 `http.ServeContent` 发送文件：它在 worker 上读文件，再通过 `Context.Write` 或
 `ReadFrom`（sendfile）写出，两者都会等待客户端。磁盘读取和这些等待都会阻塞 worker。
 
@@ -104,6 +110,8 @@ if above {
 
 ## A4：引擎连接数上限
 
+**状态。** 已在 fib v1.4.0 中完成（`eb0fe89`）：`fib.Config.MaxConns int`，作用于整个引擎（不能按 binding 设置），0 表示不限制。超过上限接受的连接会在 `OnOpen` 之前立即关闭，计入 `Stats.ConnsRefused`；`Stats.OpenConns` 是当前连接数。UDP 对端和主动拨出的连接不计入。
+
 **问题。** `fib.Config` 没有限制打开的连接数。规则 11 要求有上限，并且有安全的默认值。
 
 **需求。** `Config.MaxConns int`（可选再加上每个 `Binding` 的上限）：超过时立即关闭新接受的连接（或暂停 accept），
@@ -111,12 +119,16 @@ if above {
 
 ## A5：客户端等待连接的请求数上限
 
+**状态。** 已在 fib v1.4.0 中完成（`7179521`）：按请求提供 `ClientConfig.MaxPendingPerHost int` 和 `ErrTooManyPending`，只在 `http` 中（`http3` 没有按主机的上限）。重试的请求不受它限制。
+
 **问题。** 达到 `MaxConnsPerHost` 后，请求排队等待连接，排队数量没有上限，只有各自的 context 限制等待时长。
 
 **需求。** `ClientConfig.MaxPendingPerHost int`：超出的请求立即失败，返回专门的错误（如 `ErrTooManyPending`），
 fit 把它映射为 503。
 
 ## A6：在 `BodyWriter` 关闭前设置 trailer
+
+**状态。** 已在 fib v1.4.0 中完成（`b51db73`），范围比请求的窄：`Close` 本来就会按 `Close` 时的样子发送 `req.Trailer`，所以在此之前设置的值会发出，前提是这些名字在 `Do` 之前已经在 `req.Trailer` 中。`BodyWriter.CloseWithTrailer(trailer http.Header) error` 让不持有请求的生产者也能交出这些值。HTTP/1 只在分块响应体上发送 trailer。
 
 **问题。** fib 的客户端在发送请求头时读取请求的 `Trailer`。如果 trailer 的值要等 body 结束才知道（带 trailer 的
 客户端上传），就无法使用 `BodyWriter`。fit 只好在客户端自己的 goroutine 上用阻塞的管道读取，每个这样的上传占用一个
@@ -127,6 +139,8 @@ goroutine。
 
 ## A7：`Context` 上的单请求值槽
 
+**状态。** 已在 fib v1.4.0 中完成（`21eeb62`、`dbb6ef2`）：`Context.SetValue(v any)` 和 `Context.Value() any`，Context 回收时清空。这个槽和 Context 的取消钩子放在一起，所以在新 Context 上第一次 `SetValue` 会分配它们（约 48 字节）；回收复用的 Context 会保留它们。
+
 **问题。** fit 用 `r.WithContext` 把访问日志条目挂到请求上，每个请求都要复制整个 `http.Request` 并分配一个
 context 值。
 
@@ -135,12 +149,16 @@ context 值。
 
 ## A8：文档修正
 
+**状态。** 已在 fib v1.4.0 中部分完成（`75e7005`）：`StreamResponseBody` 和 `OnBody` 的文档说明了会等待的 `OnBody` 函数会拖住连接上的其他流。没有增加 `WriteStallTimeout`：有了 `WriteNoWait`（A2），fit 的代理不再需要它。
+
 - `StreamResponseBody` 的文档说停滞的读者"never holds up the other streams on the connection"。这对读取 `Body` 的读者
   成立，但对会等待的 `OnBody` 回调不成立，因为回调运行在连接的读取者上。建议写明。
 - `Config.WriteTimeout` 默认为 0，所以流式 `Write` 遇到不再读取的客户端时会永远等待。建议增加按单次等待计的上限
   （`WriteStallTimeout`），默认非零，与针对整个响应的 `WriteTimeout` 分开，因为长时间下载无法使用后者。
 
 ## A9：拒绝不是 token 的请求头字段名
+
+**状态。** 已在 fib v1.4.0 中完成（`25064b3`），即 `f02a0bc` 的补丁变基到 `main` 上。
 
 **问题。** fib v1.3.0 的 HTTP/1 服务器把 `X-A : one` 当作名为 `X-A `（带空格）的字段接受，而 RFC 9112 第 5.1 节要求
 服务器以 400 拒绝字段名和冒号之间的空白：下游服务器可能把它读成另一个字段，这是一种走私手段。快速解析器
@@ -201,6 +219,8 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 
 ## A11：不复制即取得整体到达的客户端响应体
 
+**状态。** 已在 fib v1.4.0 中完成（`3661093`）：`ClientResponse.BodyBytes() ([]byte, bool)`，返回 `Body` 还未读取的部分，以流方式到达的响应返回 false；fib 不会复用这些字节。HTTP/3 也支持。
+
 **问题。** 整体到达的响应把响应体放在 `bufferedBody` 里，`Body` 从中读取。代理用 `Context.WriteResponse` 转发这样的
 响应体，而它的 `Body` 是 `[]byte`，所以代理要先把响应体读进自己的切片：每个小的代理响应都多一次分配和一次复制。`OnBody`
 交付的是同样的字节且不复制，但它们只在调用期间有效，而 `WriteResponse` 会一直读 `Body` 直到发出，在 HTTP/2 上这发生在
@@ -215,6 +235,8 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 **fit 如何使用。** `exchange.onResponse` 把这些字节直接交给 `WriteResponse`，不再读取。
 
 ## A12：减少每个客户端请求的定时器和 context
+
+**状态。** 已在 fib v1.4.0 中部分完成（`b580ea7`、`f4afaa6`、`c58eb4b`）：连接的截止时间定时器和客户端的空闲定时器改为重置而不是新建；`ClientConfig.ResponseHeaderTimeout` 超时时以 `ErrResponseHeaderTimeout`（与 `os.ErrDeadlineExceeded` 匹配）失败，与 `Timeout` 共用请求的同一个定时器。它是配置项而不是按请求设置，这对 fit 正合适，因为每个上游池有自己的客户端。未完成：可取消的请求 context 上的 `context.AfterFunc`，这需要 `Do` 返回一个取消句柄。fib 记录的问题：复用的连接已关闭而重新排队的请求，其响应头超时不会重新计时。
 
 **问题。** 每个经 `Client.Do` 的请求都会创建若干本可复用或省去的定时器和 context；代理还要为响应头超时再加一个自己的
 定时器，因为客户端没有这个设置。
@@ -238,6 +260,8 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 空闲超时仍是代理自己的定时器，随响应体到达而重置。
 
 ## A13：只有 `OnFinish` 钩子的响应不复制响应头
+
+**状态。** 已在 fib v1.4.0 中完成（`67bc31d`），按请求实现：只有 `OnHeader` 和 `OnResponse` 钩子才会让 `WriteResponse`、`Upgrade` 和 `Connect` 复制响应头。没有 API 变化。
 
 **问题。** 只要注册了任何钩子，`Context.WriteResponse` 就会复制响应头（`handler.go` 的 `WriteResponse`：
 `c.hooked() != nil`），因为钩子可能修改它。但 `OnFinish` 钩子不能修改：它拿到的响应头“must not be changed”。fit 的访问日志

@@ -11,8 +11,8 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01, R02, R07a and R07b are done, R03–R06 and R07c wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
-| fib | `github.com/lesismal/fib v1.3.1`, from the module proxy |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R03, R07a and R07b are done; R04–R06 and R07c, which use fib v1.4.0, are next. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| fib | `github.com/lesismal/fib v1.4.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
@@ -32,8 +32,8 @@ M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollb
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
-hot path work that needs nothing from fib; R03, fib's part, is fib's to schedule, and R04–R06 and R07c
-follow it.
+hot path work that needs nothing from fib, and R03: fib v1.4.0 has the APIs, and R04–R06 and R07c
+can use them.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -1327,9 +1327,28 @@ Differences from the plan:
 Differences from the plan: none beyond what goes to fib. The proxy's response header timer stays
 until fib's client has a setting for it (A12).
 
+### R03 fib APIs for forwarding without waiting — done
+
+- fib v1.4.0 (tag on `ecd62b0`) has A1–A7, A9, A11 and A13, and parts of A8 and A12. fit moves to
+  it with no change of its own: `go.mod` and `go.sum` only. `go vet ./...` and `go test -race ./...`
+  pass on it.
+- [fib-api-requests](fib-api-requests.md) and its twin give each request's status, its commits,
+  and how the API as built differs from what was asked. The differences that matter to the next
+  iterations: `fib.Config.MaxConns` is engine-wide, not per binding (R06); `MaxPendingPerHost` is
+  in `http` only (R06); `ResponseHeaderTimeout` is a client setting, which fits one client per
+  upstream pool (R07c); `OnWritable` reports false until a response streams (R04); `SendFile` is
+  not tied to `FileCache`, and leaves 206 and `Content-Range` to the handler (R05).
+- Not done in fib: `WriteStallTimeout` (A8), which `WriteNoWait` makes unneeded; the
+  `context.AfterFunc` per cancellable request (A12), which needs a cancel handle from `Do`. fib
+  noted that a request requeued after its reused connection closed does not restart its header
+  timeout.
+
+Differences from the plan: none. fib's own session did the work in fib, as rule 15 asks.
+
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.3.1. v1.3.0, tagged for I16 and I22 on fib's `main` of
+- **fib version.** fit uses fib v1.4.0, which brings the APIs of R03 (A1–A7, A9, A11, A13, and
+  parts of A8 and A12; see [fib-api-requests](fib-api-requests.md)). v1.3.0, tagged for I16 and I22 on fib's `main` of
   2026-10-19, brought `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and
   `ShutdownBinding`, `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`; v1.3.1 adds
   `ClientConfig.StreamUnknownLengthAtHeader` (A10) and nothing else. If an iteration needs something

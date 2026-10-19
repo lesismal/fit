@@ -10,21 +10,21 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 
 ## Summary
 
-| ID | API | Priority | Rules it unblocks | fit iterations |
+| ID | API | Status | Rules it unblocks | fit iterations |
 | --- | --- | --- | --- | --- |
-| A1 | `ClientResponse.HoldBody(hold bool)` | P0 | 1, 8 | R04 |
-| A2 | A response write that never waits, and a writable notification | P0 | 1, 8, 9 | R04, R05 |
-| A3 | Asynchronous file sending | P1 | 1, 4 | R05 |
-| A4 | Engine connection limit | P1 | 11 | R06 |
-| A5 | Client limit on requests waiting for a connection | P1 | 11 | R06 |
-| A6 | Trailers set on a `BodyWriter` before it closes | P2 | 1, 4 | R04 |
-| A7 | A per-request value slot on `Context` | P2 | 12 | R07c |
-| A8 | Documentation fixes | P2 | — | — |
-| A9 | Refuse a header field name that is not a token | P1 | 13 | — |
+| A1 | `ClientResponse.HoldBody(hold bool)` | done, v1.4.0 | 1, 8 | R04 |
+| A2 | A response write that never waits, and a writable notification | done, v1.4.0 | 1, 8, 9 | R04, R05 |
+| A3 | Asynchronous file sending | done, v1.4.0 | 1, 4 | R05 |
+| A4 | Engine connection limit | done, v1.4.0 | 11 | R06 |
+| A5 | Client limit on requests waiting for a connection | done, v1.4.0 | 11 | R06 |
+| A6 | Trailers set on a `BodyWriter` before it closes | done, v1.4.0 | 1, 4 | R04 |
+| A7 | A per-request value slot on `Context` | done, v1.4.0 | 12 | R07c |
+| A8 | Documentation fixes | partly, v1.4.0 | — | — |
+| A9 | Refuse a header field name that is not a token | done, v1.4.0 | 13 | — |
 | A10 | Stream a client response of unknown length from its header | done, v1.3.1 | 5 | — |
-| A11 | The body of a client response that arrived whole, without a copy | P2 | 12 | R07c |
-| A12 | Fewer timers and contexts per client request | P2 | 12 | R07c |
-| A13 | No header copy for a response that only `OnFinish` hooks | P1 | 12 | R07c |
+| A11 | The body of a client response that arrived whole, without a copy | done, v1.4.0 | 12 | R07c |
+| A12 | Fewer timers and contexts per client request | partly, v1.4.0 | 12 | R07c |
+| A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
 
 ## Evidence
 
@@ -44,6 +44,10 @@ Measured against fit at commit `511f64b`, with fib v1.3.0:
 goroutine stays in `Write`.
 
 ## A1: `ClientResponse.HoldBody(hold bool)`
+
+**Status.** Done in fib v1.4.0 (`b520601`): `ClientResponse.HoldBody(hold bool)` as asked, on
+HTTP/1, HTTP/2 and HTTP/3. Delivery resumes on fib's side pool. While held, the end of the body
+waits too, but an error is delivered at once; a whole response is held before its one call.
 
 **Problem.** A client response body can only be paced by its `OnBody` function blocking ("what holds
 the connection back is fn itself"). On HTTP/2 the function runs on the worker that reads the shared
@@ -66,6 +70,12 @@ func (c *ClientResponse) HoldBody(hold bool)
 `resp.HoldBody(true)`, then resume from the A2 notification.
 
 ## A2: A response write that never waits, and a writable notification
+
+**Status.** Done in fib v1.4.0 (`24da9bb`): `Context.WriteNoWait(p) (above bool, err error)` and
+`Context.OnWritable(fn func(error)) bool`, as asked, one fn at a time. HTTP/1 uses
+`Connection.NotifyOutput`, HTTP/2 its stream windows, and HTTP/3 a new `http.ResponseNotifier`
+interface; an external stream without it falls back to `Write`. `OnWritable` reports false before
+the response streams, since small writes are held back and never above the watermark.
 
 **Problem.** `Context.Write` waits when 64 KB are queued (HTTP/1) or held back by flow control
 (HTTP/2, HTTP/3). There is no way to write without waiting and learn when there is room again.
@@ -105,6 +115,13 @@ This is the same shape as the upload direction, which already uses `Context.Hold
 
 ## A3: Asynchronous file sending
 
+**Status.** Done in fib v1.4.0 (`ecd62b0`), as the first option: `Context.SendFile(f *os.File,
+offset, n int64, done func(error))`. Plain HTTP/1 sends 16 KB or more with `Connection.SendFile`;
+TLS, HTTP/2 and HTTP/3 read 64 KB pieces on a file pool of fib's (`sidepool.File()`, 256 workers)
+and write them with `WriteNoWait` and `OnWritable`. `done` runs on another goroutine, and the
+response is retained until then. It sets `Content-Length` when unset; the handler sets 206 and
+`Content-Range` itself. Not tied to `FileCache`.
+
 **Problem.** fit's static handler serves files with `http.ServeContent`, which reads the file on the
 worker and writes through `Context.Write` or `ReadFrom` (sendfile), both of which wait for the
 client. Disk reads and the waits both block the worker.
@@ -122,6 +139,11 @@ calls no blocking file operation on a worker.
 
 ## A4: Engine connection limit
 
+**Status.** Done in fib v1.4.0 (`eb0fe89`): `fib.Config.MaxConns int`, engine-wide (no per-binding
+setting), 0 for no cap. Connections accepted past it are closed at once, before `OnOpen`, and
+counted in `Stats.ConnsRefused`; `Stats.OpenConns` is the count. UDP peers and dialed connections
+are not counted.
+
 **Problem.** `fib.Config` has no limit on open connections. Rule 11 requires one, with a safe
 default.
 
@@ -130,6 +152,10 @@ closed at once (or accepting pauses), counted in a statistic. Zero keeps today's
 
 ## A5: Client limit on requests waiting for a connection
 
+**Status.** Done in fib v1.4.0 (`7179521`): `ClientConfig.MaxPendingPerHost int` and
+`ErrTooManyPending`, as asked, in `http` only (`http3` has no per-host cap). Retried requests bypass
+it.
+
 **Problem.** With `MaxConnsPerHost` reached, requests wait for a connection with no limit on how
 many wait; only their context bounds how long.
 
@@ -137,6 +163,11 @@ many wait; only their context bounds how long.
 distinct error (for example `ErrTooManyPending`), which fit maps to 503.
 
 ## A6: Trailers set on a `BodyWriter` before it closes
+
+**Status.** Done in fib v1.4.0 (`b51db73`), narrower than asked: `Close` already sends `req.Trailer`
+as it is at `Close`, so values set before it go out, provided the names were in `req.Trailer` before
+`Do`. `BodyWriter.CloseWithTrailer(trailer http.Header) error` hands the values over from a producer
+that does not hold the request. HTTP/1 sends a trailer only with a chunked body.
 
 **Problem.** fib's client reads a request's `Trailer` when it sends the header. A body whose trailer
 values are known only when it ends (a client upload with trailers) cannot use `BodyWriter`, so fit
@@ -147,6 +178,11 @@ request's `Trailer` after the body's EOF rather than with the header.
 
 ## A7: A per-request value slot on `Context`
 
+**Status.** Done in fib v1.4.0 (`21eeb62`, `dbb6ef2`): `Context.SetValue(v any)` and
+`Context.Value() any`, cleared when the Context is recycled. The slot lives with the Context's
+cancellation hooks, so the first `SetValue` on a fresh Context allocates them (about 48 bytes); a
+recycled one keeps them.
+
 **Problem.** fit attaches its access log entry to a request with `r.WithContext`, which copies the
 whole `http.Request` and allocates a context value on every request.
 
@@ -154,6 +190,10 @@ whole `http.Request` and allocates a context value on every request.
 `Context` is recycled), or a small keyed map with the same lifetime.
 
 ## A8: Documentation fixes
+
+**Status.** Partly done in fib v1.4.0 (`75e7005`): `StreamResponseBody` and `OnBody` now say that an
+`OnBody` function that waits holds up the connection's other streams. `WriteStallTimeout` was not
+added: with `WriteNoWait` (A2) fit's proxy no longer needs it.
 
 - `StreamResponseBody` says a stalled reader "never holds up the other streams on the connection".
   That holds for a reader of `Body`, but not for an `OnBody` function that waits, which runs on the
@@ -163,6 +203,8 @@ whole `http.Request` and allocates a context value on every request.
   whole-response `WriteTimeout`, which long downloads cannot use.
 
 ## A9: Refuse a header field name that is not a token
+
+**Status.** Done in fib v1.4.0 (`25064b3`), the patch of `f02a0bc` rebased onto `main`.
 
 **Problem.** fib v1.3.0's HTTP/1 server accepts `X-A : one` as a field named `X-A ` (with the
 space), where RFC 9112 section 5.1 asks a server to refuse whitespace between a field name and its
@@ -242,6 +284,9 @@ Until then there is no stopgap that keeps both: fit keeps the 64 KB threshold.
 
 ## A11: The body of a client response that arrived whole, without a copy
 
+**Status.** Done in fib v1.4.0 (`3661093`): `ClientResponse.BodyBytes() ([]byte, bool)`, what `Body`
+has yet to read, false for a streamed body; fib never reuses the bytes. HTTP/3 too.
+
 **Problem.** A response that arrived whole holds its body in a `bufferedBody`, which `Body` reads
 from. The proxy passes such a body on with `Context.WriteResponse`, whose `Body` is a `[]byte`, so
 it reads the body into a slice of its own first: an allocation and a copy of every small proxied
@@ -258,6 +303,14 @@ streams. Or `Response.Body` taking the bytes `NewBufferedBody` was given, under 
 **How fit uses it.** `exchange.onResponse` hands the bytes to `WriteResponse` without reading them.
 
 ## A12: Fewer timers and contexts per client request
+
+**Status.** Partly done in fib v1.4.0 (`b580ea7`, `f4afaa6`, `c58eb4b`): the connection's deadline
+timer and the client's idle timer are reset rather than made anew;
+`ClientConfig.ResponseHeaderTimeout`, failing with `ErrResponseHeaderTimeout` (which matches
+`os.ErrDeadlineExceeded`), shares the request's one timer with `Timeout`. It is a config setting,
+not per request, which suits fit, with a client per upstream pool. Not done: the `context.AfterFunc`
+on a cancellable request context, which needs a cancel handle from `Do`. Noted by fib: a request
+requeued after its reused connection closed does not restart its header timeout.
 
 **Problem.** Each request through `Client.Do` makes several timers and contexts that could be
 reused or left out, and the proxy adds one of its own for its response header timeout, which the
@@ -287,6 +340,9 @@ and the proxy drops its own timer for it; the idle timeout stays a timer of the 
 the body arrives.
 
 ## A13: No header copy for a response that only `OnFinish` hooks
+
+**Status.** Done in fib v1.4.0 (`67bc31d`), as asked: only `OnHeader` and `OnResponse` hooks make
+`WriteResponse`, `Upgrade` and `Connect` copy the header. No API change.
 
 **Problem.** `Context.WriteResponse` clones the response's header whenever any hook is registered
 (`handler.go`, `WriteResponse`: `c.hooked() != nil`), since a hook may change it. An `OnFinish`

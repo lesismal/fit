@@ -10,8 +10,8 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02、R07a、R07b 已完成，R03–R06 和 R07c 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
-| fib | `github.com/lesismal/fib v1.3.1`，来自模块代理 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R03、R07a、R07b 已完成；接下来是使用 fib v1.4.0 的 R04–R06 和 R07c。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| fib | `github.com/lesismal/fib v1.4.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03 是 fib 的工作，由 fib 安排，R04–R06 和 R07c 在它之后。
+完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03 也已完成：fib v1.4.0 提供了这些 API，R04–R06 和 R07c 可以使用它们。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -1005,9 +1005,23 @@ A11–A13。
 
 与计划的不同：除了交给 fib 的部分外没有。代理的响应头定时器保留到 fib 的客户端提供相应设置为止（A12）。
 
+### R03 转发不等待所需的 fib API — 已完成
+
+- fib v1.4.0（tag 在 `ecd62b0`）提供了 A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分。fit 升级到该版本，自身代码不变：
+  只改了 `go.mod` 和 `go.sum`。在它之上 `go vet ./...` 和 `go test -race ./...` 通过。
+- [fib-api-requests](fib-api-requests.zh-CN.md) 及其英文版写明了每个请求的状态、提交，以及实现的 API 与请求的差别。对后续
+  迭代重要的差别：`fib.Config.MaxConns` 作用于整个引擎，不能按 binding 设置（R06）；`MaxPendingPerHost` 只在 `http` 中
+  （R06）；`ResponseHeaderTimeout` 是客户端配置项，正适合每个上游池一个客户端（R07c）；响应开始流式发送之前 `OnWritable`
+  返回 false（R04）；`SendFile` 没有接入 `FileCache`，206 和 `Content-Range` 由 handler 设置（R05）。
+- fib 中没有做的：`WriteStallTimeout`（A8），有了 `WriteNoWait` 已不需要；每个可取消请求上的 `context.AfterFunc`（A12），
+  需要 `Do` 返回取消句柄。fib 记录的问题：复用的连接已关闭而重新排队的请求，其响应头超时不会重新计时。
+
+与计划的不同：没有。按规则 15，fib 中的工作由 fib 自己的会话完成。
+
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.3.1，它在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
+- **fib 版本。** fit 使用 fib v1.4.0，它带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分；见
+  [fib-api-requests](fib-api-requests.zh-CN.md)）。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
   `fib.New(config, bindings...)` 以及 `AddBinding`、`RemoveBinding`、`ShutdownBinding`，`Connection.NotifyOutput`、
   `Context.HoldBody` 和 `BodyWriter`。如果某个迭代需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
