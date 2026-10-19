@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01, R02 and R07a are done, R03–R06 and R07c wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.3.1`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
@@ -30,8 +30,9 @@ nginx's throughput over HTTP/1.1.
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
 balancing v2.
-R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
-and R04–R07 follow it.
+R01 and R02, the review fixes that came before M2, are done, and so is R07a, the part of the hot
+path work that needs nothing from fib; R03, fib's part, is fib's to schedule, and R04–R06 and R07c
+follow it.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -64,7 +65,7 @@ To continue, start a session with:
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
-| `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
+| `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry |
 | `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
@@ -1232,6 +1233,62 @@ Differences from the plan:
 
 - The watcher polls rather than taking file system events; see decision 006.
 - It is turned on by a flag of `fit run`, not by the config.
+
+### R07a Hot path costs in fit — done
+
+R07 is split in three ([dev-plan](dev-plan.md#r07a-hot-path-costs-in-fit)): R07a and R07b need
+nothing from fib, and R07c waits for A7 and A11–A13.
+
+- Access log (`observe`): the buffer is split into shards, a power of two up to GOMAXPROCS (at most
+  64), each with its own lock, padded apart. A line goes to the shard of its client's address
+  (`maphash` of `RemoteAddr`), so one connection's lines keep their order. A shard hands its
+  buffer to the writer through a bounded channel once it holds 64 KB, under its lock, and the
+  writer queues each shard's partial buffer the same way at each flush, so the channel holds every
+  shard's buffers in the order they were filled. `buffer_bytes` bounds what is queued for the
+  writer plus what the shards hold. A shard checks that against an atomic counter it updates once
+  per buffer handed over, not once per line, so each shard can hold up to 64 KB more than the
+  bound. Buffers written out are reused through a bounded free list. A line's timestamp is
+  formatted by hand rather than by `Time.AppendFormat`, and JSON string escaping checks a byte
+  table.
+- `observe.Track(r)` replaces `Attach`: the entry and the context that carries it are one
+  allocation (`tracked`, a `context.Context` whose `Value` answers for the entry).
+- `listener`: each dispatcher keeps where its listener was in the last graph it looked in (graph
+  version and index, behind an atomic pointer), so a request scans the graph's listeners only once
+  per graph.
+- `upstream`: smooth weighted round robin is worked out once per balancer as a schedule of
+  `total weight / gcd` entries (at most 65,536; past that it stays under the lock), and a pick takes
+  the next entry with one atomic add. A backend that is down is passed over by drawing another
+  entry, so its share goes to the others by weight; when all are down, health is ignored as before.
+- Tests: `observe` `TestShards` (16 clients logging at once at GOMAXPROCS 8; every line written or
+  counted as dropped, each client's in order, nothing left counted), `TestTrack`,
+  `TestAppendTime`; `listener` `TestDispatchFollowsReload` (the listener moving between positions
+  across reloads, and a graph where it has no route); `upstream` `TestWeightedRoundRobinDown`,
+  `TestWeightedRoundRobinSchedule` (gcd, and weights too many to precompute),
+  `TestWeightedRoundRobinConcurrent` (exact shares over 8 × 7000 picks). The new
+  `BenchmarkDispatch` serves a `respond` route through the dispatcher, with the access log on,
+  from each P as a client of its own; `BenchmarkLog` now does the same. `go vet ./...` and `go test
+  -race ./...` pass.
+- Micro-benchmarks on the development Mac (M3 Max), before and after, median of five, ns/op at
+  GOMAXPROCS 1, 8 and 16: `BenchmarkLog` 359, 335, 424 → 223, 49, 34; `BenchmarkDispatch` 1009,
+  750, 852 → 969, 485, 387, with 13 → 12 allocations; `BenchmarkPick/weighted_round_robin` 17.2,
+  116, 115 → 2.5, 45, 57, as plain round robin, where the shared counter is now the cost.
+- On the benchmark host, fit alone, two rounds of each build alternating, thousands of requests a
+  second (HTTP/1.1 and h2c): without an access log, fixed 781 and 3,768 → 780 and 3,770, proxy 212
+  and 228 → 212 and 229, all within 0.4%; with the access log to `/dev/null`, fixed 732 and 2,108
+  → 752 and 2,296 (+2.7% and +8.9%), proxy 207 and 226 → 208 and 228.
+
+Differences from the plan:
+
+- The dispatcher's listener lookup is a cache per graph version rather than an index built at
+  compile time: the dispatcher outlives graphs, and a graph's listeners keep their slice, so the
+  index is the position, found once.
+- The schedule is not rebuilt when health changes: drawing again past a backend that is down gives
+  the same shares by weight among those up, without a rebuild on the probe's goroutine.
+- The access log still costs fixed h2c about 40% of its throughput (3.77M without, 2.30M with).
+  Three of `BenchmarkDispatch`'s 12 allocations are fib cloning the response header because an
+  `OnFinish` hook is registered, which cannot change it: asked of fib as
+  [A13](fib-api-requests.md#a13-no-header-copy-for-a-response-that-only-onfinish-hooks). The
+  request copy that `r.WithContext` makes waits for A7. Both are R07c's.
 
 ## Notes for later iterations
 

@@ -3,6 +3,7 @@ package upstream
 import (
 	"math"
 	stdhttp "net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,8 +29,8 @@ type Backend struct {
 	// active counts the requests to the backend that are not over, body
 	// included: from Pool.Pick to Pool.Done.
 	active atomic.Int64
-	// current is smooth weighted round robin's running weight, guarded by
-	// the balancer's lock.
+	// current is smooth weighted round robin's running weight, for weights
+	// too many to precompute, guarded by the balancer's lock.
 	current int
 
 	// downUntil is when, in Unix nanoseconds, a backend out of rotation may
@@ -154,7 +155,7 @@ func NewBalancer(policy string, backends []*Backend, key string) Balancer {
 	}
 	switch policy {
 	case WeightedRoundRobin:
-		return &weightedRoundRobin{backends: backends}
+		return newWeightedRoundRobin(backends)
 	case LeastConn:
 		return &leastConn{backends: backends}
 	case Random:
@@ -195,12 +196,93 @@ func (r *roundRobin) Pick(*stdhttp.Request) *Backend {
 // highest, and takes the total back off it. A backend of weight w gets w
 // picks of every total, spread out rather than in a run: weights 5, 1 and 1
 // give a a b a c a a.
+//
+// The sequence repeats every total weight, so it is worked out once, when
+// the balancer is made, and a pick takes the next entry of it with one
+// atomic add and no lock. A backend that is down is passed over by taking
+// another entry, so that its share goes to the others in proportion to their
+// weights. Weights whose sequence would be longer than maxSchedule, after
+// dividing them by their greatest common divisor, are picked under a lock,
+// as nginx does.
 type weightedRoundRobin struct {
-	mu       sync.Mutex
 	backends []*Backend
+	schedule []*Backend
+	next     atomic.Uint64
+
+	mu sync.Mutex // guards the backends' running weights, without schedule
+}
+
+// maxSchedule bounds the precomputed sequence, at 512KB of pointers.
+const maxSchedule = 1 << 16
+
+func newWeightedRoundRobin(backends []*Backend) *weightedRoundRobin {
+	w := &weightedRoundRobin{backends: backends}
+	g, total := 0, 0
+	for _, b := range backends {
+		g = gcd(g, b.Weight)
+	}
+	if g == 0 {
+		return w
+	}
+	for _, b := range backends {
+		total += b.Weight / g
+	}
+	if total > maxSchedule {
+		return w
+	}
+	current := make([]int, len(backends))
+	w.schedule = make([]*Backend, total)
+	for i := range w.schedule {
+		best := -1
+		for j, b := range backends {
+			current[j] += b.Weight / g
+			if best < 0 || current[j] > current[best] {
+				best = j
+			}
+		}
+		current[best] -= total
+		w.schedule[i] = backends[best]
+	}
+	return w
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 func (w *weightedRoundRobin) Pick(*stdhttp.Request) *Backend {
+	if w.schedule == nil {
+		return w.pickLocked()
+	}
+	n := uint64(len(w.schedule))
+	var now int64
+	first := w.schedule[(w.next.Add(1)-1)%n]
+	if first.up(&now) {
+		return first
+	}
+	// Another entry, as many times as it takes: each is a fair draw of the
+	// sequence, so the backends up share the pick by weight. One that is up
+	// is found within n tries unless none is, which the scan settles first.
+	if !slices.ContainsFunc(w.backends, func(b *Backend) bool { return b.up(&now) }) {
+		return first
+	}
+	for range n {
+		if b := w.schedule[(w.next.Add(1)-1)%n]; b.up(&now) {
+			return b
+		}
+	}
+	for _, b := range w.backends {
+		if b.up(&now) {
+			return b
+		}
+	}
+	return first
+}
+
+func (w *weightedRoundRobin) pickLocked() *Backend {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var now int64

@@ -17,14 +17,25 @@
 // in a buffer; a goroutine of the log's own writes the buffer out, so a slow
 // disk or a blocked pipe never holds up a fib worker. When the buffer is full,
 // lines are dropped and counted rather than waited for.
+//
+// The buffer is split in shards, one for each of up to GOMAXPROCS, each with
+// its own lock, so that workers finishing responses at once seldom wait for
+// one another. buffer_bytes bounds what the writer has to write, with what
+// the shards hold, though each shard holds up to 64KB of its own past it. A shard hands a buffer
+// to the writer as soon as it holds 64KB. A request's line goes to the shard
+// of its client's address, so the lines of one connection keep their order;
+// lines of different clients may be written out of time order by up to the
+// flush interval, as the lines of nginx's workers are.
 package observe
 
 import (
 	"context"
 	"fmt"
+	"hash/maphash"
 	"io"
 	stdhttp "net/http"
 	"os"
+	goruntime "runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -38,8 +49,8 @@ import (
 const (
 	DefaultFlushInterval = time.Second
 	DefaultBufferBytes   = 4 << 20
-	// flushBytes is how full the buffer gets before it is written without
-	// waiting for the interval.
+	// flushBytes is how full a shard's buffer gets before it is written
+	// without waiting for the interval.
 	flushBytes = 64 << 10
 )
 
@@ -51,18 +62,42 @@ type AccessLog struct {
 	interval time.Duration
 	maxBytes int
 
-	mu      sync.Mutex
-	buf     []byte
-	spare   []byte
+	shards []shard
+	seed   maphash.Seed
+	// queued counts the bytes handed to the writer and not yet written.
+	// With what each shard holds, it is bounded by maxBytes; a shard adds
+	// its bytes when it hands them over, once a buffer rather than once a
+	// line, so that loggers on different shards share no counter.
+	queued atomic.Int64
+	// ready holds the shards' buffers for the writer, in the order each
+	// shard filled them: full ones, which hold flushBytes or more of queued
+	// each, so that no more than maxBytes/flushBytes are ever there, and at
+	// each flush one from each shard. Its capacity leaves room for them all.
+	// free holds buffers written out, to reuse.
+	ready chan []byte
+	free  chan []byte
+	// closing orders Close; closed is set once every shard is.
+	closing sync.Mutex
 	closed  bool
 	dropped atomic.Int64
 
-	kick chan struct{} // asks the writer to flush now
 	stop chan struct{}
 	done chan struct{}
 	// warn is where dropped lines are reported.
 	warn io.Writer
 }
+
+// shard is a part of the buffer, with a lock of its own. Shards are padded
+// apart, so that two shards' locks never share a cache line.
+type shard struct {
+	mu     sync.Mutex
+	buf    []byte
+	closed bool
+	_      [64]byte
+}
+
+// maxShards bounds the shards, whatever GOMAXPROCS is.
+const maxShards = 64
 
 // NewAccessLog opens the log c describes and starts its writer.
 func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
@@ -97,48 +132,93 @@ func (l *AccessLog) start() {
 	if l.maxBytes <= 0 {
 		l.maxBytes = DefaultBufferBytes
 	}
-	l.buf = make([]byte, 0, min(flushBytes*2, l.maxBytes))
-	l.kick = make(chan struct{}, 1)
+	// A power of two, so that a shard is picked with a mask.
+	n := 1
+	for n*2 <= min(goruntime.GOMAXPROCS(0), maxShards) {
+		n *= 2
+	}
+	l.shards = make([]shard, n)
+	l.seed = maphash.MakeSeed()
+	l.ready = make(chan []byte, l.maxBytes/flushBytes+1+n)
+	l.free = make(chan []byte, l.maxBytes/flushBytes+1)
 	l.stop = make(chan struct{})
 	l.done = make(chan struct{})
 	go l.run()
 }
 
-// run writes the buffer out every interval, or sooner when asked.
+// buffer returns a buffer to fill: one written out before, or a new one.
+func (l *AccessLog) buffer() []byte {
+	select {
+	case b := <-l.free:
+		return b
+	default:
+		return make([]byte, 0, flushBytes+4<<10)
+	}
+}
+
+// run writes the full buffers as they come, and every interval what the
+// shards hold.
 func (l *AccessLog) run() {
 	defer close(l.done)
 	t := time.NewTicker(l.interval)
 	defer t.Stop()
 	for {
 		select {
+		case b := <-l.ready:
+			l.write(b)
 		case <-t.C:
-		case <-l.kick:
+			l.flush()
 		case <-l.stop:
 			l.flush()
 			return
 		}
-		l.flush()
 	}
 }
 
-// flush writes what the buffer holds. Only the writer goroutine calls it, so
-// the spare buffer is its own while the lock is not held.
+// write writes a buffer out and keeps it to fill again.
+func (l *AccessLog) write(b []byte) {
+	_, _ = l.out.Write(b)
+	l.queued.Add(-int64(len(b)))
+	if cap(b) <= 2*flushBytes {
+		select {
+		case l.free <- b[:0]:
+		default:
+		}
+	}
+}
+
+// flush writes what the shards hold, and reports the lines dropped since
+// the last flush. Each shard's buffer goes to ready under its lock, as a full
+// one does, so that ready has every shard's buffers in the order they were
+// filled.
 func (l *AccessLog) flush() {
-	l.mu.Lock()
-	data := l.buf
-	l.buf, l.spare = l.spare[:0], nil
-	l.mu.Unlock()
-	if len(data) > 0 {
-		_, _ = l.out.Write(data)
+	for i := range l.shards {
+		sh := &l.shards[i]
+		sh.mu.Lock()
+		if len(sh.buf) > 0 {
+			select {
+			case l.ready <- sh.buf:
+				l.queued.Add(int64(len(sh.buf)))
+				sh.buf = nil
+			default:
+				// ready is full of what came first; the rest waits for the
+				// next flush.
+			}
+		}
+		sh.mu.Unlock()
+	}
+	for {
+		select {
+		case b := <-l.ready:
+			l.write(b)
+			continue
+		default:
+		}
+		break
 	}
 	if n := l.dropped.Swap(0); n > 0 {
 		fmt.Fprintf(l.warn, "fit: access log: %d lines dropped, the output was too slow\n", n)
 	}
-	l.mu.Lock()
-	if cap(data) <= l.maxBytes {
-		l.spare = data[:0]
-	}
-	l.mu.Unlock()
 }
 
 // Dropped returns how many lines have been dropped since it was last
@@ -148,13 +228,18 @@ func (l *AccessLog) Dropped() int64 { return l.dropped.Load() }
 // Close writes out what is buffered, stops the writer and closes the file
 // the log opened. Lines logged after Close are dropped.
 func (l *AccessLog) Close() error {
-	l.mu.Lock()
+	l.closing.Lock()
+	defer l.closing.Unlock()
 	if l.closed {
-		l.mu.Unlock()
 		return nil
 	}
 	l.closed = true
-	l.mu.Unlock()
+	for i := range l.shards {
+		sh := &l.shards[i]
+		sh.mu.Lock()
+		sh.closed = true
+		sh.mu.Unlock()
+	}
 	close(l.stop)
 	<-l.done
 	if l.file != nil {
@@ -177,10 +262,26 @@ type Entry struct {
 
 type entryKey struct{}
 
-// Attach makes e the entry of r, for EntryOf to find. It replaces r's
-// context in place, so that r stays the same request.
-func Attach(r *stdhttp.Request, e *Entry) {
-	*r = *r.WithContext(context.WithValue(r.Context(), entryKey{}, e))
+// tracked is a request's context with its entry, in one allocation.
+type tracked struct {
+	context.Context
+	entry Entry
+}
+
+func (t *tracked) Value(key any) any {
+	if key == (entryKey{}) {
+		return &t.entry
+	}
+	return t.Context.Value(key)
+}
+
+// Track gives r a new entry, for EntryOf to find, and returns it for the
+// caller to fill in. It replaces r's context in place, so that r stays the
+// same request.
+func Track(r *stdhttp.Request) *Entry {
+	t := &tracked{Context: r.Context()}
+	*r = *r.WithContext(t)
+	return &t.entry
 }
 
 // EntryOf returns r's entry, or nil when the request is not logged.
@@ -197,27 +298,38 @@ func (l *AccessLog) Log(e *Entry, r *stdhttp.Request, status int, size int64) {
 	var stack [512]byte
 	line := appendLine(stack[:0], e, r, status, size, end)
 
-	l.mu.Lock()
-	if l.closed || len(l.buf)+len(line) > l.maxBytes {
-		l.mu.Unlock()
+	sh := &l.shards[0]
+	if len(l.shards) > 1 {
+		sh = &l.shards[maphash.String(l.seed, r.RemoteAddr)&uint64(len(l.shards)-1)]
+	}
+	sh.mu.Lock()
+	if sh.closed || l.queued.Load()+int64(len(sh.buf)+len(line)) > int64(l.maxBytes) {
+		sh.mu.Unlock()
 		l.dropped.Add(1)
 		return
 	}
-	l.buf = append(l.buf, line...)
-	full := len(l.buf) >= flushBytes
-	l.mu.Unlock()
-	if full {
+	if sh.buf == nil {
+		sh.buf = l.buffer()
+	}
+	sh.buf = append(sh.buf, line...)
+	if len(sh.buf) >= flushBytes {
+		// Handed over under the lock, so that the writer cannot take what
+		// the shard holds next before it; ready has room for it, as queued
+		// says, and the select only keeps that from ever waiting.
 		select {
-		case l.kick <- struct{}{}:
+		case l.ready <- sh.buf:
+			l.queued.Add(int64(len(sh.buf)))
+			sh.buf = nil
 		default:
 		}
 	}
+	sh.mu.Unlock()
 }
 
 // appendLine appends the JSON line for a request to b.
 func appendLine(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, end time.Time) []byte {
 	b = append(b, `{"time":"`...)
-	b = end.UTC().AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")
+	b = appendTime(b, end)
 	b = append(b, `","listener":`...)
 	b = appendString(b, e.Listener)
 	if e.Route != "" {
@@ -272,7 +384,33 @@ func clientIP(remote string) string {
 	return remote
 }
 
+// appendTime appends t in UTC as "2006-01-02T15:04:05.000Z", as
+// Time.AppendFormat would, without parsing a layout.
+func appendTime(b []byte, t time.Time) []byte {
+	t = t.UTC()
+	year, month, day := t.Date()
+	hour, minute, sec := t.Clock()
+	if year < 0 || year > 9999 {
+		return t.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")
+	}
+	ms := t.Nanosecond() / 1e6
+	return append(b,
+		byte('0'+year/1000), byte('0'+year/100%10), byte('0'+year/10%10), byte('0'+year%10), '-',
+		byte('0'+int(month)/10), byte('0'+int(month)%10), '-', byte('0'+day/10), byte('0'+day%10), 'T',
+		byte('0'+hour/10), byte('0'+hour%10), ':', byte('0'+minute/10), byte('0'+minute%10), ':',
+		byte('0'+sec/10), byte('0'+sec%10), '.', byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
+}
+
 const hex = "0123456789abcdef"
+
+// plain says which bytes go into a JSON string as they are: printable ASCII
+// but the quote and the backslash.
+var plain = func() (t [256]bool) {
+	for c := 0x20; c < utf8.RuneSelf; c++ {
+		t[c] = c != '"' && c != '\\'
+	}
+	return t
+}()
 
 // appendString appends s as a JSON string. Bytes that are not valid UTF-8
 // become U+FFFD, so that every line is valid JSON whatever a client sent.
@@ -281,11 +419,11 @@ func appendString(b []byte, s string) []byte {
 	start := 0
 	for i := 0; i < len(s); {
 		c := s[i]
+		if plain[c] {
+			i++
+			continue
+		}
 		if c < utf8.RuneSelf {
-			if c >= 0x20 && c != '"' && c != '\\' {
-				i++
-				continue
-			}
 			b = append(b, s[start:i]...)
 			switch c {
 			case '"', '\\':

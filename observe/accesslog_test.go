@@ -2,12 +2,17 @@ package observe
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -232,20 +237,125 @@ func TestFileOutput(t *testing.T) {
 }
 
 func BenchmarkLog(b *testing.B) {
-	l := NewAccessLogTo(discard{}, time.Second, 0)
+	l := NewAccessLogTo(discard{}, time.Second, 64<<20)
+	// Lines come faster here than a writer that shares the CPUs with the
+	// loggers can take them: what is dropped is counted, not reported.
+	var dropped atomic.Int64
+	l.warn = countDrops{&dropped}
 	defer l.Close()
 	r := httptest.NewRequest("GET", "/api/items?page=2", nil)
 	r.Header.Set("User-Agent", "Mozilla/5.0 (benchmark)")
 	e := &Entry{Start: time.Now(), Listener: "web", Route: "api", Upstream: "10.0.0.1:8080"}
+	var clients atomic.Int32
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine a client of its own, as the connections of a
+		// server's workers are.
+		r := r.Clone(context.Background())
+		r.RemoteAddr = fmt.Sprintf("192.0.2.%d:4321", clients.Add(1))
 		for pb.Next() {
 			l.Log(e, r, 200, 512)
 		}
 	})
-	b.ReportMetric(float64(l.Dropped()), "dropped")
+	b.ReportMetric(float64(l.Dropped()+dropped.Load())/float64(b.N), "dropped/op")
+}
+
+// countDrops adds up the lines a log's warnings say it dropped.
+type countDrops struct{ n *atomic.Int64 }
+
+func (c countDrops) Write(p []byte) (int, error) {
+	var n int64
+	if _, err := fmt.Sscanf(string(p), "fit: access log: %d lines", &n); err == nil {
+		c.n.Add(n)
+	}
+	return len(p), nil
 }
 
 type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+func TestShards(t *testing.T) {
+	defer goruntime.GOMAXPROCS(goruntime.GOMAXPROCS(8))
+	var out syncBuffer
+	l := NewAccessLogTo(&out, 5*time.Millisecond, 0)
+	var dropped atomic.Int64
+	l.warn = countDrops{&dropped}
+	if len(l.shards) != 8 {
+		t.Fatalf("%d shards for GOMAXPROCS 8", len(l.shards))
+	}
+	// Clients logging at once, as fast as they can: every line is written
+	// or counted as dropped, and each client's are written in the order
+	// logged.
+	const clients, lines = 16, 2000
+	var wg sync.WaitGroup
+	for c := range clients {
+		wg.Go(func() {
+			r := httptest.NewRequest("GET", "/", nil)
+			r.RemoteAddr = fmt.Sprintf("192.0.2.%d:%d", c, 1000+c)
+			for i := range lines {
+				r.RequestURI = "/" + strconv.Itoa(i)
+				l.Log(&Entry{Start: time.Now(), Listener: "web"}, r, 200, 1)
+			}
+		})
+	}
+	wg.Wait()
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	last := map[string]int{}
+	n := 0
+	for line := range strings.Lines(out.String()) {
+		var got struct{ Client, URI string }
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
+		i, _ := strconv.Atoi(strings.TrimPrefix(got.URI, "/"))
+		if prev, ok := last[got.Client]; ok && i <= prev {
+			t.Fatalf("client %s: line %d after line %d", got.Client, i, prev)
+		}
+		last[got.Client] = i
+		n++
+	}
+	if int64(n)+dropped.Load() != clients*lines {
+		t.Fatalf("%d lines written and %d dropped of %d", n, dropped.Load(), clients*lines)
+	}
+	if l.queued.Load() != 0 {
+		t.Fatalf("%d bytes still counted as queued", l.queued.Load())
+	}
+}
+
+func TestTrack(t *testing.T) {
+	type key struct{}
+	r := httptest.NewRequest("GET", "/", nil)
+	r = r.WithContext(context.WithValue(r.Context(), key{}, "kept"))
+	if EntryOf(r) != nil {
+		t.Fatal("an entry before Track")
+	}
+	before := r
+	e := Track(r)
+	if r != before || EntryOf(r) != e {
+		t.Fatal("the entry is not the request's")
+	}
+	if r.Context().Value(key{}) != "kept" {
+		t.Fatal("the context's other values are lost")
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	cancel()
+	if ctx.Err() == nil || EntryOf(r.WithContext(ctx)) != e {
+		t.Fatal("a context derived from the request's")
+	}
+}
+
+func TestAppendTime(t *testing.T) {
+	for _, tm := range []time.Time{
+		time.Date(2026, 10, 19, 7, 39, 56, 123456789, time.UTC),
+		time.Date(1999, 1, 2, 3, 4, 5, 6e6, time.FixedZone("x", 8*3600)),
+		time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(1, 1, 1, 0, 0, 0, 999999999, time.UTC),
+	} {
+		if got, want := string(appendTime(nil, tm)), tm.UTC().Format("2006-01-02T15:04:05.000Z07:00"); got != want {
+			t.Errorf("%v: %s, want %s", tm, got, want)
+		}
+	}
+}

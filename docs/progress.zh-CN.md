@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02、R07a 已完成，R03–R06 和 R07c 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.3.1`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
@@ -25,7 +25,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
-完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
+完成，热路径工作中不需要 fib 的 R07a 也已完成；R03 是 fib 的工作，由 fib 安排，R04–R06 和 R07c 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -54,7 +54,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
-| `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
+| `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目 |
 | `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
@@ -935,6 +935,49 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 - 监视器采用轮询，而不是文件系统事件；见决策 006。
 - 它由 `fit run` 的参数开启，而不是在配置中。
+
+### R07a fit 自身的热路径开销 — 已完成
+
+R07 拆成三部分（[开发计划](dev-plan.zh-CN.md#r07a-fit-自身的热路径开销)）：R07a 和 R07b 不需要 fib，R07c 等待 A7 和
+A11–A13。
+
+- 访问日志（`observe`）：缓冲拆成若干分片，数量是不超过 GOMAXPROCS 的 2 的幂（最多 64），每个分片有自己的锁，彼此填充
+  隔开。一行日志按客户端地址（`RemoteAddr` 的 `maphash`）进入对应分片，所以同一连接的日志保持顺序。分片里满 64 KB 时，
+  在自己的锁下把缓冲经一个有界 channel 交给写出 goroutine；每次刷新时，写出 goroutine 也以同样方式把每个分片未满的缓冲
+  放进这个 channel，所以 channel 中每个分片的缓冲都按填充的顺序排列。`buffer_bytes` 限制的是等待写出的字节加上各分片持有
+  的字节。分片对照一个原子计数检查这个上限，计数在每次交出缓冲时更新一次，而不是每行一次，所以每个分片最多可以超出这个
+  上限 64 KB。写出后的缓冲经一个有界的空闲列表复用。日志行的时间戳改为手写格式化，不再用 `Time.AppendFormat`；JSON
+  字符串转义改为查字节表。
+- `observe.Track(r)` 取代 `Attach`：日志条目和携带它的 context 合并为一次分配（`tracked`，一个 `Value` 方法会返回该条目
+  的 `context.Context`）。
+- `listener`：每个分发器记住自己的 listener 在上次查找的图中的位置（图版本和下标，放在一个原子指针后面），所以每张图只有
+  第一次请求会扫描图中的 listener。
+- `upstream`：平滑加权轮询在创建负载均衡器时一次算出长度为 `总权重 / 最大公约数` 的调度序列（最多 65,536 项，超出时仍在锁
+  下计算），每次选择用一次原子加法取下一项。遇到已下线的后端就再取一项，所以它的份额按权重分给其他后端；全部下线时与
+  之前一样忽略健康状态。
+- 测试：`observe` 的 `TestShards`（GOMAXPROCS 为 8 时 16 个客户端同时写日志；每行要么写出要么计为丢弃，每个客户端的行
+  保持顺序，最后没有残留计数）、`TestTrack`、`TestAppendTime`；`listener` 的 `TestDispatchFollowsReload`（重载后 listener
+  在图中位置变化，以及一张图中它没有路由）；`upstream` 的 `TestWeightedRoundRobinDown`、`TestWeightedRoundRobinSchedule`
+  （最大公约数，以及多到无法预先计算的权重）、`TestWeightedRoundRobinConcurrent`（8 × 7000 次选择份额精确）。新增的
+  `BenchmarkDispatch` 打开访问日志，经分发器服务一个 `respond` 路由，每个 P 作为一个独立客户端；`BenchmarkLog` 也改为
+  这样。`go vet ./...` 和 `go test -race ./...` 通过。
+- 开发用 Mac（M3 Max）上的微基准，前后对比，五次取中位数，GOMAXPROCS 为 1、8、16 时的 ns/op：`BenchmarkLog` 359、
+  335、424 → 223、49、34；`BenchmarkDispatch` 1009、750、852 → 969、485、387，分配 13 → 12 次；
+  `BenchmarkPick/weighted_round_robin` 17.2、116、115 → 2.5、45、57，与普通轮询相同，现在的开销在共享计数器上。
+- 压测主机上只跑 fit，两个构建交替各跑两轮，每秒千次请求（HTTP/1.1 和 h2c）：不开访问日志时，固定响应 781 和 3,768 →
+  780 和 3,770，代理 212 和 228 → 212 和 229，差别都在 0.4% 以内；访问日志写到 `/dev/null` 时，固定响应 732 和 2,108 →
+  752 和 2,296（+2.7% 和 +8.9%），代理 207 和 226 → 208 和 228。
+
+与计划的不同：
+
+- 分发器查找 listener 用的是按图版本的缓存，而不是编译时建立的索引：分发器比图活得久，而图中的 listener 切片不变，所以
+  索引就是位置，找一次即可。
+- 健康状态变化时不重建调度序列：遇到下线的后端就再取一项，在线后端之间的份额同样按权重分配，也不需要在探测 goroutine
+  上重建。
+- 访问日志仍让固定响应在 h2c 上损失约 40% 的吞吐（不开时 377 万，开时 230 万）。`BenchmarkDispatch` 的 12 次分配中有
+  3 次是 fib 因为注册了 `OnFinish` 钩子而复制响应头，但这种钩子不能修改响应头：已作为
+  [A13](fib-api-requests.zh-CN.md#a13只有-onfinish-钩子的响应不复制响应头) 向 fib 提出。`r.WithContext` 复制请求要等
+  A7。两者都归 R07c。
 
 ## 给后续迭代的说明
 

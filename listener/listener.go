@@ -423,6 +423,31 @@ type dispatcher struct {
 	// adds it, made once so that registering it allocates nothing.
 	altSvc    atomic.Pointer[[]string]
 	addAltSvc func(int, stdhttp.Header)
+	// found is where the listener was in the last graph d looked it up in,
+	// so that the requests after it find it there at once, without
+	// scanning the graph's listeners.
+	found atomic.Pointer[listenerAt]
+}
+
+// listenerAt says a listener is the index'th of the graph of a version.
+type listenerAt struct {
+	version uint64
+	index   int
+}
+
+// listener returns d's listener in g, or nil when g has none of its name.
+// Only the first request on each graph scans g's listeners for it.
+func (d *dispatcher) listener(g *runtime.Graph) *runtime.Listener {
+	if at := d.found.Load(); at != nil && at.version == g.Version {
+		return g.Listeners[at.index]
+	}
+	for i, l := range g.Listeners {
+		if l.Name == d.name {
+			d.found.Store(&listenerAt{version: g.Version, index: i})
+			return l
+		}
+	}
+	return nil
 }
 
 // announceH3 has d add an Alt-Svc field to every response, once setAltSvc
@@ -450,11 +475,8 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		c.OnHeader(d.addAltSvc)
 	}
 	var route *runtime.Route
-	for _, l := range g.Listeners {
-		if l.Name == d.name {
-			route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
-			break
-		}
+	if l := d.listener(g); l != nil {
+		route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
 	}
 	if log := g.AccessLog; log != nil {
 		d.logRequest(c, log, route)
@@ -471,7 +493,8 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 // after the graph is released still has somewhere to go.
 func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route) {
 	r := c.Request
-	e := &observe.Entry{Start: time.Now(), Listener: d.name, BytesIn: r.ContentLength}
+	e := observe.Track(r)
+	e.Start, e.Listener, e.BytesIn = time.Now(), d.name, r.ContentLength
 	if body := c.Body(); body != nil {
 		e.BytesIn = int64(len(body))
 	} else if e.BytesIn < 0 {
@@ -480,6 +503,5 @@ func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, rout
 	if route != nil {
 		e.Route = route.Name
 	}
-	observe.Attach(r, e)
 	c.OnFinish(func(status int, _ stdhttp.Header, size int64) { log.Log(e, r, status, size) })
 }

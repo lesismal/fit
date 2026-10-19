@@ -131,7 +131,9 @@ Status: `todo`, `doing` or `done`.
 | R04 | Proxy downloads without waiting | R01, R03 | todo |
 | R05 | Static files without blocking | R01, R03 | todo |
 | R06 | Connection and queue limits through fib | R02, R03 | todo |
-| R07 | Hot path costs | R03, I23 | todo |
+| R07a | Hot path costs in fit | I23 | done |
+| R07b | Proxy allocations | I23 | todo |
+| R07c | Hot path costs through fib | R03, R07a, R07b | todo |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
@@ -391,7 +393,8 @@ Status: `todo`, `doing` or `done`.
 
 A review of M0 and M1 against the [development rules](rules.md) on 2026-10-19 found code that breaks
 them. These iterations fix it in three steps: R01 and R02 change fit alone and come before M2; R03
-is work in fib, specified in [APIs fit needs from fib](fib-api-requests.md); R04–R07 use those APIs.
+is work in fib, specified in [APIs fit needs from fib](fib-api-requests.md); R04–R06 and R07c use those
+APIs. R07a and R07b are the part of R07, the hot path, that needs nothing from fib.
 
 What the review found, and where each finding is fixed:
 
@@ -403,7 +406,7 @@ What the review found, and where each finding is fixed:
 | An upstream without `max_conns` has no connection limit; requests waiting for a connection are not limited in number; a response has no total timeout | 10, 11 | `upstream/upstream.go`, `config` | R02, R06 |
 | The engine limits neither total queued output nor connections | 11 | `listener/listener.go`, `Start` | R02, R06 |
 | An upload with trailers holds a goroutine blocked in a pipe read | 1, 4 | `handler/proxy/exchange.go`, `trailerPipe` | R04 |
-| A lock per access log line; a copy of the request and a context per request for the log entry; a scan of the graph's listeners per request; a lock per weighted round robin pick | 12 | `observe`, `listener`, `upstream/balance.go` | R07 |
+| A lock per access log line; a copy of the request and a context per request for the log entry; a scan of the graph's listeners per request; a lock per weighted round robin pick | 12 | `observe`, `listener`, `upstream/balance.go` | R07a, R07c |
 | No test that a client that stops reading leaves other requests alone; no slow-client tests for static files | 13 | tests | R01, R05 |
 
 The rest of M0 and M1 follows the rules: config, the module registry, the runtime graph, the router,
@@ -441,8 +444,8 @@ The rest of M0 and M1 follows the rules: config, the module registry, the runtim
 ### R03 fib APIs for forwarding without waiting
 
 - **Do**: the maintainer adds A1, A2 and A3 from [fib-api-requests](fib-api-requests.md) to fib,
-  then A4–A7 as fib schedules them, and releases a new fib version; fit moves to it with no change
-  in behaviour.
+  then A4–A7 and A11–A13 as fib schedules them, and releases a new fib version; fit moves to it
+  with no change in behaviour.
 - **Done when**: fit builds and passes its tests on the new fib release, and fib-api-requests says
   of each API whether it was delivered, changed or declined.
 - **Touches**: fib; in fit, `go.mod` and the docs.
@@ -474,16 +477,37 @@ The rest of M0 and M1 follows the rules: config, the module registry, the runtim
 - **Done when**: tests reach both limits, and R02's interim count is gone.
 - **Touches**: `listener`, `upstream`, `config`.
 
-### R07 Hot path costs
+### R07a Hot path costs in fit
 
-- **Do**, guided by I23's numbers: per-worker or sharded access log buffers; the log entry in the
-  Context's value slot (A7) instead of `r.WithContext`; each listener's routes found without scanning
-  the graph, through an index set at compile time; smooth weighted round robin without a lock, as a
-  precomputed schedule and an atomic index rebuilt when health changes; fewer allocations per
-  proxied request.
-- **Done when**: allocations and nanoseconds per request, before and after, are in the progress
-  record, and throughput does not regress.
-- **Touches**: `observe`, `listener`, `runtime`, `upstream`, `handler/proxy`.
+R07 split in three: what fit can do alone (R07a, R07b) and what needs fib (R07c).
+
+- **Do**, guided by I23's numbers: per-shard access log buffers, each with its own lock; the log
+  entry and its context in one allocation; each listener's routes found without scanning the graph;
+  smooth weighted round robin without a lock, as a precomputed schedule and an atomic index;
+  benchmarks of the dispatcher and the log from several cores.
+- **Done when**: nanoseconds and allocations per request, before and after, are in the progress
+  record, and throughput does not regress on the benchmark host.
+- **Touches**: `observe`, `listener`, `upstream`.
+
+### R07b Proxy allocations
+
+- **Do**: fewer allocations per proxied request in fit's own code: the outgoing request, its URL
+  and the forwarding fields' values in the exchange's allocation; the client's IPv4 address
+  without formatting it; a response that arrived whole read in one allocation; a benchmark of the
+  proxy with a raw client. What fib's client allocates goes to fib-api-requests.
+- **Done when**: as R07a, for the proxy scenario.
+- **Touches**: `handler/proxy`.
+
+### R07c Hot path costs through fib
+
+- **Do**: the log entry in the Context's value slot (A7) instead of `r.WithContext`; a response
+  that arrived whole written without a copy (A11); the client's per-request timers and contexts
+  (A12), with the proxy's response header timer handed to fib's client; no header copy for a
+  logged response (A13); then, on the benchmark host, the proxy's 83% of nginx over HTTP/1.1 and
+  its p99 tail, as I23 left them.
+- **Done when**: as R07a; the proxy's allocations per request, before and after, are in the
+  progress record.
+- **Touches**: `observe`, `listener`, `handler/proxy`, `upstream`.
 
 ## M2, dynamic config and TLS
 

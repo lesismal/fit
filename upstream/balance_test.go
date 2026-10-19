@@ -63,6 +63,82 @@ func TestWeightedRoundRobin(t *testing.T) {
 	}
 }
 
+func TestWeightedRoundRobinDown(t *testing.T) {
+	// a, of weight 5, down: its share goes to b and c by their weights.
+	bs := backends(5, 2, 1)
+	b := NewBalancer(WeightedRoundRobin, bs, "")
+	bs[0].setProbedDown(true)
+	if got := counts(b, 9000); got["a"] != 0 || got["b"] < 5700 || got["b"] > 6300 || got["c"] < 2700 || got["c"] > 3300 {
+		t.Fatalf("a down: %v", got)
+	}
+	// All down: health is ignored, and the weights hold again.
+	bs[1].setProbedDown(true)
+	bs[2].setProbedDown(true)
+	if got := counts(b, 8000); got["a"] != 5000 || got["b"] != 2000 || got["c"] != 1000 {
+		t.Fatalf("all down: %v", got)
+	}
+	bs[0].setProbedDown(false)
+	if got := counts(b, 800); got["a"] != 800 {
+		t.Fatalf("only a up: %v", got)
+	}
+}
+
+func TestWeightedRoundRobinSchedule(t *testing.T) {
+	// Weights with a common divisor make the sequence of their quotients.
+	w := NewBalancer(WeightedRoundRobin, backends(10, 2, 2), "").(*weightedRoundRobin)
+	if len(w.schedule) != 7 {
+		t.Fatalf("schedule of %d entries for 10, 2, 2", len(w.schedule))
+	}
+	// Too many weights to precompute: picked under the lock, still smooth
+	// and still by weight.
+	weights := make([]int, 100)
+	for i := range weights {
+		weights[i] = 997 - i%2
+	}
+	bs := backends(weights...)
+	w = NewBalancer(WeightedRoundRobin, bs, "").(*weightedRoundRobin)
+	if w.schedule != nil {
+		t.Fatalf("a schedule of %d entries", len(w.schedule))
+	}
+	total := 0
+	for _, x := range weights {
+		total += x
+	}
+	got := map[*Backend]int{}
+	for range total {
+		got[w.Pick(nil)]++
+	}
+	for i, x := range bs {
+		if got[x] != weights[i] {
+			t.Fatalf("backend %d of weight %d picked %d times", i, weights[i], got[x])
+		}
+	}
+}
+
+func TestWeightedRoundRobinConcurrent(t *testing.T) {
+	bs := backends(5, 1, 1)
+	b := NewBalancer(WeightedRoundRobin, bs, "")
+	var mu sync.Mutex
+	got := map[string]int{}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			mine := counts(b, 7000)
+			mu.Lock()
+			for k, v := range mine {
+				got[k] += v
+			}
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	// Every pick takes its own entry of the sequence, so the shares are
+	// exact over whole rounds whatever the interleaving.
+	if got["a"] != 40000 || got["b"] != 8000 || got["c"] != 8000 {
+		t.Fatalf("8 x 7000 picks: %v", got)
+	}
+}
+
 func TestLeastConn(t *testing.T) {
 	bs := backends(1, 1, 1)
 	b := NewBalancer(LeastConn, bs, "")

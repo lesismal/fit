@@ -5,7 +5,7 @@
 按 [开发规则](rules.zh-CN.md) 审查 M0、M1 时发现，有些地方只靠 fib v1.3.0 现有的 API，fit 无法遵守规则。本文列出 fit
 需要 fib 提供的 API、原因，以及 fit 打算怎么用。文中的名字和签名只是建议，最终形式由 fib 决定。
 
-依赖这些 API 的 fit 迭代是 [开发计划](dev-plan.zh-CN.md#m1-审查修复) 中的 R03–R07。
+依赖这些 API 的 fit 迭代是 [开发计划](dev-plan.zh-CN.md#m1-审查修复) 中的 R03–R06 和 R07c。
 
 ## 概览
 
@@ -17,10 +17,13 @@
 | A4 | 引擎连接数上限 | P1 | 11 | R06 |
 | A5 | 客户端等待连接的请求数上限 | P1 | 11 | R06 |
 | A6 | 在 `BodyWriter` 关闭前设置 trailer | P2 | 1、4 | R04 |
-| A7 | `Context` 上的单请求值槽 | P2 | 12 | R07 |
+| A7 | `Context` 上的单请求值槽 | P2 | 12 | R07c |
 | A8 | 文档修正 | P2 | — | — |
 | A9 | 拒绝不是 token 的请求头字段名 | P1 | 13 | — |
 | A10 | 长度未知的客户端响应从响应头起就以流方式交付 | 已完成，v1.3.1 | 5 | — |
+| A11 | 不复制即取得整体到达的客户端响应体 | P2 | 12 | R07c |
+| A12 | 减少每个客户端请求的定时器和 context | P2 | 12 | R07c |
+| A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | P1 | 12 | R07c |
 
 ## 证据
 
@@ -195,3 +198,57 @@ race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，
 **fit 如何使用。** `upstream.New` 在 `StreamResponseBody` 旁边设置它；代理的流式路径本来就会把每一段在到达时写出，并在
 后面没有紧接着的数据时刷新，所以事件会按上游发送的节奏到达客户端。届时 `sse_test.go` 改为运行而不是跳过。在此之前没有
 能两者兼顾的临时办法：fit 保持 64 KB 的阈值。
+
+## A11：不复制即取得整体到达的客户端响应体
+
+**问题。** 整体到达的响应把响应体放在 `bufferedBody` 里，`Body` 从中读取。代理用 `Context.WriteResponse` 转发这样的
+响应体，而它的 `Body` 是 `[]byte`，所以代理要先把响应体读进自己的切片：每个小的代理响应都多一次分配和一次复制。`OnBody`
+交付的是同样的字节且不复制，但它们只在调用期间有效，而 `WriteResponse` 会一直读 `Body` 直到发出，在 HTTP/2 上这发生在
+它返回之后。
+
+**证据。** `BenchmarkProxy`（`handler/proxy/bench_test.go`）：R07b 之后这次读取是一次与响应体等长的分配（`readBody`），
+约占 fit 每个代理请求 12 次分配中的 1 次。
+
+**请求。** `ClientResponse.BodyBytes() ([]byte, bool)`：返回整体到达的响应的响应体，只要响应还被引用就一直有效；对以流
+方式到达的响应返回 false。或者让 `Response.Body` 直接取用 `NewBufferedBody` 收到的字节，条件相同。
+
+**fit 如何使用。** `exchange.onResponse` 把这些字节直接交给 `WriteResponse`，不再读取。
+
+## A12：减少每个客户端请求的定时器和 context
+
+**问题。** 每个经 `Client.Do` 的请求都会创建若干本可复用或省去的定时器和 context；代理还要为响应头超时再加一个自己的
+定时器，因为客户端没有这个设置。
+
+**证据。** `BenchmarkProxy`（HTTP/1.1 上游、keep-alive、fib v1.3.1）的内存 profile，每个请求：四个 `time.AfterFunc`
+定时器，每个都是一个定时器加一个闭包：`Client.do` 为 `ClientConfig.Timeout` 创建的（`client.go:284`）；`Client.release`
+的空闲定时器，每次连接回到池中都新建一个（`client.go:716` 和 `774`），而不是重置；连接的读截止时间
+（`Connection.armDeadlineLocked`）；以及代理的 `response_header_timeout`。此外还有请求 context 上的 `context.AfterFunc`
+（`client.go:287`，连同 `propagateCancel` 共四次分配），以及客户端里的一个 `context.WithCancel`。整个交换（包括 net/http
+后端）每个请求 81 次分配。
+
+**请求。**
+
+- 空闲定时器随连接保存，连接空闲时 `Reset`、被取用时停止，而不是每次新建。
+- 连接的截止时间定时器在多次设置之间复用。
+- `ClientConfig.ResponseHeaderTimeout`（以及按请求设置的方式，因为 fit 的每个上游各有自己的值）：从请求发完到响应头到达
+  的时间；超时时请求以一个 fit 能与 `Timeout` 区分开的错误失败。
+- 如果几个超时能共用每个请求一个定时器（或每个 worker 一个时间轮），更好。
+
+**fit 如何使用。** `upstream.New` 用 `response_header_timeout` 设置 `ResponseHeaderTimeout`，代理去掉自己的这个定时器；
+空闲超时仍是代理自己的定时器，随响应体到达而重置。
+
+## A13：只有 `OnFinish` 钩子的响应不复制响应头
+
+**问题。** 只要注册了任何钩子，`Context.WriteResponse` 就会复制响应头（`handler.go` 的 `WriteResponse`：
+`c.hooked() != nil`），因为钩子可能修改它。但 `OnFinish` 钩子不能修改：它拿到的响应头“must not be changed”。fit 的访问日志
+在每个请求上都注册一个这样的钩子，所以打开日志后，每个整体写出的响应（`respond` 和代理的小响应都是）都要为一次没人需要的
+响应头复制付出代价。
+
+**证据。** `BenchmarkDispatch`（`listener/dispatch_test.go`，打开访问日志的 `respond` 路由）：`net/http.Header.Clone` 占每
+请求 12 次分配中的 3 次。压测主机上，fit 的固定响应在 h2c 上不开访问日志时每秒 378 万请求，开日志（写到 `/dev/null`）时
+228 万；HTTP/1.1 上分别是 78.3 万和 75.2 万。
+
+**请求。** 只有注册了 `OnHeader` 或 `OnResponse` 钩子时才复制响应头：在 `whole` 旁边加一个由这两者设置的标志，
+`WriteResponse` 检查它而不是 `hooked() != nil`。
+
+**fit 如何使用。** fit 不需要改动；记日志的响应不再为这次复制付出代价。

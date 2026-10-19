@@ -6,7 +6,7 @@ A review of M0 and M1 against the [development rules](rules.md) found places whe
 follow them with fib v1.3.0's API alone. This document lists what fit asks of fib, why, and how fit
 would use each API. The names and signatures are suggestions; fib decides the final shape.
 
-The fit iterations that depend on these are R03–R07 in the [development plan](dev-plan.md#m1-review-fixes).
+The fit iterations that depend on these are R03–R06 and R07c in the [development plan](dev-plan.md#m1-review-fixes).
 
 ## Summary
 
@@ -18,10 +18,13 @@ The fit iterations that depend on these are R03–R07 in the [development plan](
 | A4 | Engine connection limit | P1 | 11 | R06 |
 | A5 | Client limit on requests waiting for a connection | P1 | 11 | R06 |
 | A6 | Trailers set on a `BodyWriter` before it closes | P2 | 1, 4 | R04 |
-| A7 | A per-request value slot on `Context` | P2 | 12 | R07 |
+| A7 | A per-request value slot on `Context` | P2 | 12 | R07c |
 | A8 | Documentation fixes | P2 | — | — |
 | A9 | Refuse a header field name that is not a token | P1 | 13 | — |
 | A10 | Stream a client response of unknown length from its header | done, v1.3.1 | 5 | — |
+| A11 | The body of a client response that arrived whole, without a copy | P2 | 12 | R07c |
+| A12 | Fewer timers and contexts per client request | P2 | 12 | R07c |
+| A13 | No header copy for a response that only `OnFinish` hooks | P1 | 12 | R07c |
 
 ## Evidence
 
@@ -236,3 +239,67 @@ body has ended, or the wait has passed since the header, whichever is first.
 path already writes each piece as it arrives and flushes it unless more is coming at once, so
 events reach the client as the upstream sends them. `sse_test.go` is then run instead of skipped.
 Until then there is no stopgap that keeps both: fit keeps the 64 KB threshold.
+
+## A11: The body of a client response that arrived whole, without a copy
+
+**Problem.** A response that arrived whole holds its body in a `bufferedBody`, which `Body` reads
+from. The proxy passes such a body on with `Context.WriteResponse`, whose `Body` is a `[]byte`, so
+it reads the body into a slice of its own first: an allocation and a copy of every small proxied
+response. `OnBody` delivers the same bytes without a copy, but they are valid only during the call,
+and `WriteResponse` reads `Body` until it is sent, which over HTTP/2 is after it returns.
+
+**Evidence.** `BenchmarkProxy` (`handler/proxy/bench_test.go`): since R07b the read is one
+allocation of the body's length (`readBody`), about 1 of fit's 12 allocations per proxied request.
+
+**Request.** `ClientResponse.BodyBytes() ([]byte, bool)`: the body of a response that arrived
+whole, which stays valid for as long as the response is referenced, and false for one that
+streams. Or `Response.Body` taking the bytes `NewBufferedBody` was given, under the same terms.
+
+**How fit uses it.** `exchange.onResponse` hands the bytes to `WriteResponse` without reading them.
+
+## A12: Fewer timers and contexts per client request
+
+**Problem.** Each request through `Client.Do` makes several timers and contexts that could be
+reused or left out, and the proxy adds one of its own for its response header timeout, which the
+client has no setting for.
+
+**Evidence.** A memory profile of `BenchmarkProxy` (HTTP/1.1 upstream, keep-alive, fib v1.3.1),
+per request: four `time.AfterFunc` timers, each a timer and a closure: `Client.do`'s for
+`ClientConfig.Timeout` (`client.go:284`); `Client.release`'s idle timer, made anew each time a
+connection goes back to the pool (`client.go:716` and `774`) rather than reset; the connection's
+read deadline (`Connection.armDeadlineLocked`); and the proxy's `response_header_timeout`. Besides
+those, `context.AfterFunc` for the request's context (`client.go:287`, four allocations with
+`propagateCancel`), and a `context.WithCancel` in the client. The whole exchange, net/http backend
+included, makes 81 allocations a request.
+
+**Request.**
+
+- The idle timer kept with the connection and `Reset` when the connection goes idle, and stopped
+  when it is taken, rather than made each time.
+- The connection's deadline timer reused across deadlines.
+- `ClientConfig.ResponseHeaderTimeout` (and a per-request way to set it, as fit's upstreams each
+  have their own): the time from the request's end to its response's header, failing the request
+  with an error fit can tell apart from `Timeout`'s.
+- If the timeouts can share one timer per request (or a wheel per worker), so much the better.
+
+**How fit uses it.** `upstream.New` sets `ResponseHeaderTimeout` from `response_header_timeout`,
+and the proxy drops its own timer for it; the idle timeout stays a timer of the proxy's, reset as
+the body arrives.
+
+## A13: No header copy for a response that only `OnFinish` hooks
+
+**Problem.** `Context.WriteResponse` clones the response's header whenever any hook is registered
+(`handler.go`, `WriteResponse`: `c.hooked() != nil`), since a hook may change it. An `OnFinish`
+hook cannot: its header "must not be changed". fit's access log registers one on every request, so
+with the log on, every response written whole, as `respond` and the proxy's small responses are,
+pays for a copy of its header that nothing needs.
+
+**Evidence.** `BenchmarkDispatch` (`listener/dispatch_test.go`, a `respond` route with the access
+log on): `net/http.Header.Clone` is 3 of the 12 allocations per request. On the benchmark host,
+fit's fixed response over h2c serves 3.78M requests a second without the access log and 2.28M with
+it (written to `/dev/null`), and 783k and 752k over HTTP/1.1.
+
+**Request.** Clone the header only when an `OnHeader` or `OnResponse` hook is registered: keep a
+flag beside `whole` set by those two, and test it in `WriteResponse` instead of `hooked() != nil`.
+
+**How fit uses it.** Nothing changes in fit; logged responses stop paying for the copy.
