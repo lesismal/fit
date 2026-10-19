@@ -369,3 +369,6 @@ Traefik's:
    OpenTelemetry tracing.
 5. **M5, caching and extensions**: a two-tier response cache, WASM plugins, an nginx config
    converter.
+
+The [roadmap](roadmap.md) expands these milestones with scope, exit criteria and performance
+targets.

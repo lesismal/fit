@@ -307,3 +307,5 @@ fib 的并发模型与 nginx 相近，开发体验与 Caddy、Traefik 相近：
    TCP/UDP 四层代理与 SNI 分流。
 4. **M4 平台集成**：Docker 与 Kubernetes Gateway API provider、仪表盘、OpenTelemetry 追踪。
 5. **M5 缓存与扩展**：两级响应缓存、WASM 插件、nginx 配置转换器。
+
+[路线图](roadmap.zh-CN.md) 在这些里程碑的基础上展开了范围、退出标准和性能目标。
