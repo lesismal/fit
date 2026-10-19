@@ -9,11 +9,11 @@
 
 | | |
 | --- | --- |
-| 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07c 已全部完成。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
+| 最后更新 | 2026-10-20 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07c 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32、I33） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | 还没有 ACME：证书只能来自文件（I29–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,8 +23,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
-修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
+**下一步：I34（Prometheus 指标），然后是 I29（ACME HTTP-01 与续期）。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I32（主动健康检查）和 I33（负载
 均衡 v2）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I28。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I34。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -56,7 +56,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目 |
-| `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
+| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
@@ -1135,6 +1135,41 @@ A11–A13。
   每秒 228k 请求，约为 I23 时 nginx 258k 的 88%。与 nginx 的重新对比属于 M2 的退出基准（I35）。
 - 打开访问日志时，h2c 固定响应仍比不开时少约 30%（269 万对 377 万），A13 已经去掉了响应头复制：剩下的是在 worker 上格式化
   日志行和钩子本身的开销。这不是回归，也不属于 M1。
+
+### I28 证书管理与存储；ACME 选型 — 已完成
+
+- `tlsmgr.Manager` 是握手取得证书的接口：`GetCertificate(*tls.ClientHelloInfo)`。`tlsmgr.Static` 是来自文件的证书的
+  Manager（`LoadStatic`，错误仍指向出错证书的路径）：从每个证书所覆盖的名字（小写的 DNS 名、IP 地址），以及每个
+  `*.` 名字的父域名，索引到对应的证书，保持配置中的顺序。握手得到该名字下客户端支持的第一个证书，否则是该名字下的
+  第一个，名字没有对应证书或客户端未给出名字时是所有证书中的第一个，与 fib 从 `Config.Certificates` 中选择的结果一致；
+  只有一个证书的名字省去检查。在 100 个证书中查找耗时 26ns，不分配内存。
+- `tlsmgr.ServerConfig(protocols, get)` 构造 listener 的 `tls.Config`，只设 `GetCertificate`，不设 `Certificates`。
+  `runtime.Listener` 用 `Certificates tlsmgr.Manager` 取代原来的 `tls.Config` 和指纹；`listener` 为每个 binding 只构造一次
+  配置（HTTP/1、HTTP/2、HTTP/3 都是），其 `GetCertificate` 从原子指针读取 binding 的 Manager，`Reload` 在新图生效后把它
+  换成新图的。只改证书的重载保留 binding 及其连接，新的握手得到新证书。
+- `tlsmgr.Storage` 用来保存 ACME 的数据（I29）：`Load`、`Store`（要么全部写入，要么不写）、`Delete`、`List`，以及跨进程
+  的 `Lock`/`Unlock`；这些方法可能阻塞，带 context，只在管理器自己的 goroutine 上调用。`FileStorage` 把每个 key 存成根目录
+  下的一个文件（先写临时文件、sync、再改名；文件 0600、目录 0700；值最大 4 MiB；拒绝含空段、`.`、`..`、以斜杠开头或含
+  反斜杠的 key），每个锁是一个用 `O_EXCL` 创建的文件，持有者每 5s touch 一次，等待者在它 30s 未更新后删除它。
+- 决定说明 [007](decisions/007-acme-client.zh-CN.md)：证书由 fit 自己管理，协议用 `golang.org/x/crypto/acme`，ARI 由
+  fit 自己实现；不用 CertMagic、lego、`autocert`，暂不用 acmez。
+- 测试：`tlsmgr` 覆盖按精确名字、大小写与末尾点号、通配符（只匹配一级）、IP 地址、顺序和密钥类型（不支持 ECDSA 的客户端
+  得到 RSA 证书）选择，无名字或未知名字时得到第一个；各协议组合的配置；带路径的加载错误。`FileStorage`：存、替换、读、
+  按前缀列出（锁不在其中）、删除、非法 key、值的上限、已取消的 context；两个 storage 共用一个目录，八个持有者轮流取锁，
+  从未同时持有；保持新鲜的锁在超过过期时间后仍需等待，释放后被等待者取得；过期的锁被接管。`listener`：证书被改写后
+  重载，listener 和跨越重载的连接都保留，HTTP/1.1、h2、h3 的新连接得到新证书而不是旧证书。`go vet ./...`、
+  `GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- 基准：`listener.BenchmarkTLSHandshake`，新连接上不复用会话的完整 TLS 1.3 握手，改动前（`Config.Certificates`）和改动后
+  （`GetCertificate`）在 M3 Max 上交替跑五轮：平均每次握手 68.8µs 对 68.8µs，各轮分别在 70.2–67.4µs 和 70.8–67.6µs 之间。
+  fib 对带 `GetCertificate` 的握手仍用状态机，只有回调交给它的握手池。压测工具的场景不做握手，因此没有运行。
+
+与计划的差异：
+
+- 静态证书也走 `GetCertificate`，而没有像 I09 的说明建议的那样留在 `Config.Certificates`：基准显示没有代价，换来的是
+  证书变化时不必重新绑定 listener。
+- 没有监视证书文件；重载（SIGHUP、对配置文件的 `-watch`、Admin API）会重新读取它们，并且不再重新绑定 listener。监视
+  证书文件，或由续期循环来发现它们的变化，留给 I29–I30。
+- 存储位置还没有配置项：它随 `Storage` 的第一个使用者 I29 一起加入。
 
 ## 给后续迭代的说明
 

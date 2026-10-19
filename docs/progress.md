@@ -10,11 +10,11 @@ this file says what was done, and where the work differs from the plan.
 
 | | |
 | --- | --- |
-| Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07c are all done. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
+| Last updated | 2026-10-20 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07c are all done. M2, dynamic config and TLS: under way (I24–I28, I32, I33) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
+| What does not | no ACME: certificates come from files only (I29–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -27,9 +27,9 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I28 (certificate manager and storage; the ACME decision) and I34 (Prometheus metrics).**
+**Next: I34 (Prometheus metrics), then I29 (ACME HTTP-01 and renewal).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I32, active health checks, and I33, load
 balancing v2.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I28 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I34 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -68,7 +68,7 @@ To continue, start a session with:
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry |
-| `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
+| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
@@ -1513,6 +1513,57 @@ Differences from the plan:
 - With the access log on, fixed h2c still serves about 30% less than without (2.69M against
   3.77M), where A13 removed the header copy: what is left is the line itself, formatted on the
   worker, and the hooks. It is not a regression, and not M1's.
+
+### I28 Certificate manager and storage; ACME decision — done
+
+- `tlsmgr.Manager`, the interface a handshake's certificate comes from:
+  `GetCertificate(*tls.ClientHelloInfo)`. `tlsmgr.Static` is the Manager of certificates from
+  files (`LoadStatic`, errors at the certificate's path as before): an index from each name a
+  certificate is for (DNS names in lower case, IP addresses) and from the parent of each `*.` name
+  to the certificates for it, in the order given. A handshake gets the first for its name that the
+  client supports, or the first for its name, or the first of all when none is for it or it names
+  none, as fib picked from `Config.Certificates`; a name with one certificate skips the check. A
+  lookup among 100 certificates takes 26ns and allocates nothing.
+- `tlsmgr.ServerConfig(protocols, get)` builds a listener's `tls.Config` with `GetCertificate` and
+  no `Certificates`. `runtime.Listener` carries `Certificates tlsmgr.Manager` in place of the
+  `tls.Config` and fingerprint; `listener` builds the configuration once per binding, over HTTP/1,
+  HTTP/2 and HTTP/3, with a `GetCertificate` that reads the binding's Manager from an atomic
+  pointer, which `Reload` sets to the new graph's once it is current. A reload that changes only
+  certificates keeps the binding and its connections; new handshakes get the new certificates.
+- `tlsmgr.Storage`, for what ACME keeps (I29): `Load`, `Store` (whole or not at all), `Delete`,
+  `List`, and `Lock`/`Unlock` across processes; its methods may block and take a context, and are
+  for the manager's own goroutines. `FileStorage` keeps each key as a file under a root (written to
+  a temporary file, synced and renamed; 0600 files, 0700 directories; values up to 4 MiB; keys with
+  an empty, `.` or `..` part, a leading slash or a backslash refused), and each lock as a file made
+  with `O_EXCL`, which its holder touches every 5s and which a waiter removes once it is 30s old.
+- Decision note [007](decisions/007-acme-client.md): fit manages certificates itself, with
+  `golang.org/x/crypto/acme` for the protocol and ARI written in fit; not CertMagic, lego,
+  `autocert` or, for now, acmez.
+- Tests: `tlsmgr` picks by exact name, case and trailing dot, wildcard (one label only), IP
+  address, order, and key type (an RSA certificate for a client without ECDSA), and the first for
+  no name or an unknown one; the configuration per protocol set; load errors with their paths.
+  `FileStorage`: store, replace, load, list by prefix (locks not listed), delete, bad keys, the
+  value limit, a cancelled context; eight holders in two storages on one directory take a lock in
+  turn, never two at once; a lock kept fresh is waited for past the stale time and taken once given
+  back; a stale one is taken over. `listener`: a reload with a rewritten certificate keeps the
+  listener and a connection open across it, and new connections over HTTP/1.1, h2 and h3 get the new
+  certificate and not the old one. `go vet ./...`, `GOOS=windows go vet ./...` and
+  `go test -race ./...` pass.
+- Benchmark: `listener.BenchmarkTLSHandshake`, full TLS 1.3 handshakes on new connections without
+  resumption, before (`Config.Certificates`) and after (`GetCertificate`), five rounds alternating
+  on an M3 Max: 68.8µs and 68.8µs a handshake on average, with each round within 70.2–67.4µs and
+  70.8–67.6µs. fib keeps a handshake with `GetCertificate` a state machine, and only the callback
+  goes to its handshake pool. The harness's scenarios do not handshake, so it was not run.
+
+Differences from the plan:
+
+- Static certificates go through `GetCertificate` rather than staying in `Config.Certificates`, as
+  I09's notes suggested: the benchmark shows no cost, and in exchange a certificate changes without
+  binding the listener anew.
+- Certificate files are not watched; a reload (SIGHUP, `-watch` on the config file, the Admin API)
+  reads them again, and no longer rebinds the listener. A watch on them, or a renewal loop that
+  picks them up, is left for I29–I30.
+- No config yet for the storage's location: it comes with I29, the first user of `Storage`.
 
 ## Notes for later iterations
 

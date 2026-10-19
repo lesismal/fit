@@ -15,6 +15,7 @@ package listener
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -33,6 +34,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/tlsmgr"
 )
 
 // DefaultDrainTimeout is how long a listener a reload removed may take to
@@ -59,7 +61,10 @@ type binding struct {
 	name      string
 	address   string
 	protocols []string
-	tlsKey    string
+	// certs picks the certificates of its handshakes, for a listener with
+	// TLS: the Manager of the graph's listener, replaced when a reload keeps
+	// the binding, so that a change of certificates needs no new binding.
+	certs atomic.Pointer[certs]
 	// maxHeaderBytes and maxBodyBytes are the limits its handlers were made
 	// with; a reload that changes them binds it anew.
 	maxHeaderBytes int
@@ -70,11 +75,21 @@ type binding struct {
 	udpAddr net.Addr
 }
 
-// same reports whether b serves the listener l as it is: the same name,
-// address, protocols and certificates.
+// certs is a listener's tlsmgr.Manager, as a binding holds it.
+type certs struct{ tlsmgr.Manager }
+
+// same reports whether b can serve the listener l as it is: the same name,
+// address and protocols, and TLS or not as l has it. Its certificates may
+// differ: b takes on l's when it is kept.
 func (b *binding) same(l *runtime.Listener) bool {
-	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) && b.tlsKey == l.TLSKey &&
+	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) &&
+		(b.certs.Load() != nil) == (l.Certificates != nil) &&
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes
+}
+
+// getCertificate is the GetCertificate of b's TLS configuration.
+func (b *binding) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return b.certs.Load().GetCertificate(hello)
 }
 
 // Addr is where a listener listens.
@@ -139,8 +154,13 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // bindings may be listening on the address, which fib's SO_REUSEPORT lets
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
-	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols, tlsKey: l.TLSKey,
+	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
 		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes}
+	var tlsConfig *tls.Config
+	if l.Certificates != nil {
+		b.certs.Store(&certs{l.Certificates})
+		tlsConfig = tlsmgr.ServerConfig(l.Protocols, b.getCertificate)
+	}
 	fail := func(err error) (*binding, error) {
 		s.unbind(b)
 		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
@@ -160,10 +180,10 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 			tcpDispatcher.announceH3()
 		}
 		var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l), tcpDispatcher)
-		if l.TLS != nil {
+		if tlsConfig != nil {
 			// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
 			// or HTTP/1.1 as ALPN chose.
-			h = fibtls.NewServer(l.TLS, h)
+			h = fibtls.NewServer(tlsConfig, h)
 		}
 		var err error
 		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
@@ -179,7 +199,7 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 				return fail(err)
 			}
 		}
-		h := http3.NewHandlerWithConfig(http3Config(l), &dispatcher{rt: s.rt, name: l.Name})
+		h := http3.NewHandlerWithConfig(http3Config(l, tlsConfig), &dispatcher{rt: s.rt, name: l.Name})
 		var err error
 		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h}); err != nil {
 			return fail(err)
@@ -219,9 +239,9 @@ func (s *Server) unbind(b *binding) {
 }
 
 // http3Config is the fib HTTP/3 config for a listener with tls.
-func http3Config(l *runtime.Listener) http3.Config {
+func http3Config(l *runtime.Listener, tlsConfig *tls.Config) http3.Config {
 	c := http3.DefaultConfig()
-	c.TLSConfig = http3.ConfigureTLS(l.TLS)
+	c.TLSConfig = http3.ConfigureTLS(tlsConfig)
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
 	c.MaxHeaderBytes = l.MaxHeaderBytes
@@ -233,7 +253,8 @@ func http3Config(l *runtime.Listener) http3.Config {
 // Reload makes g the runtime's current graph, taking over the caller's
 // reference to it, and moves the listeners to g's: those g has unchanged are
 // kept, the new and changed ones bound first, and those g has no more drained
-// once g is current. If a listener cannot be bound, nothing changes: the
+// once g is current. A kept listener with TLS takes on g's certificates
+// once g is current, for the handshakes after. If a listener cannot be bound, nothing changes: the
 // bindings made for g are removed, g is released, and the error returned. It
 // returns the listeners it bound and those it removed.
 func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
@@ -289,6 +310,11 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 		fresh = append(fresh, b)
 	}
 	s.rt.Swap(g)
+	for i, l := range g.Listeners {
+		if l.Certificates != nil && !slices.Contains(fresh, next[i]) {
+			next[i].certs.Store(&certs{l.Certificates})
+		}
+	}
 	s.bound = next
 	s.retire(gone, s.drain)
 	return addrsOf(fresh), addrsOf(gone), nil

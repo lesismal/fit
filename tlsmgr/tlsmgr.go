@@ -1,18 +1,25 @@
-// Package tlsmgr builds the TLS configurations listeners serve. For now
-// they come from certificate files; certificate storage, ACME and OCSP come
-// with M2.
+// Package tlsmgr gives listeners their TLS: the configuration they serve,
+// and a Manager that picks each handshake's certificate. For now the
+// certificates come from files (Static); certificates obtained with ACME
+// come with I29, kept in a Storage.
 package tlsmgr
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"slices"
 
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
 )
+
+// A Manager gives a handshake its certificate. A listener's TLS
+// configuration asks it through tls.Config.GetCertificate, which fib calls on
+// its handshake pool, never on a worker; a Manager still answers from memory,
+// and leaves what may block (obtaining a certificate) to pools of its own.
+type Manager interface {
+	GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
+}
 
 // cipherSuites are the TLS 1.2 suites a listener allows: ECDHE for forward
 // secrecy and AEAD ciphers only, as Mozilla's intermediate profile has them.
@@ -26,27 +33,14 @@ var cipherSuites = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
-// ServerConfig loads c's certificates and returns the TLS configuration a
-// listener serving protocols uses, and a fingerprint of the certificates, by
-// which a reload tells whether they changed. Its errors carry the path and
-// position of the file that failed.
-//
-// The certificates are handed to fib's TLS as Config.Certificates, from which
-// a handshake takes the first that suits the client's hello, its server name
-// above all, without a goroutine: fib runs such handshakes as state machines.
-func ServerConfig(c *config.TLS, protocols []string) (*tls.Config, string, error) {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: cipherSuites}
-	h := sha256.New()
-	for i, cc := range c.Certificates {
-		cert, err := tls.LoadX509KeyPair(cc.CertFile, cc.KeyFile)
-		if err != nil {
-			return nil, "", c.At.Field("certificates").Index(i).Errorf("%v", err)
-		}
-		cfg.Certificates = append(cfg.Certificates, cert)
-		for _, der := range cert.Certificate {
-			h.Write(der)
-		}
-	}
+// ServerConfig returns the TLS configuration of a listener serving
+// protocols, whose certificates get picks. get is called for every full
+// handshake, so the listener may change what it answers, on a reload or when
+// a certificate is renewed, without the configuration changing: fib's TLS
+// copies a configuration when it first uses it, and sees no change made to it
+// after.
+func ServerConfig(protocols []string, get func(*tls.ClientHelloInfo) (*tls.Certificate, error)) *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: cipherSuites, GetCertificate: get}
 	h1 := slices.Contains(protocols, config.ProtocolHTTP1)
 	h2 := slices.Contains(protocols, config.ProtocolH2)
 	switch {
@@ -57,8 +51,5 @@ func ServerConfig(c *config.TLS, protocols []string) (*tls.Config, string, error
 	default:
 		cfg.NextProtos = []string{"http/1.1"}
 	}
-	for _, p := range protocols {
-		h.Write([]byte(p + "\x00"))
-	}
-	return cfg, hex.EncodeToString(h.Sum(nil)), nil
+	return cfg
 }

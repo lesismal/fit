@@ -10,7 +10,6 @@ package runtime
 
 import (
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -80,10 +79,9 @@ type Listener struct {
 	Name      string
 	Address   string
 	Protocols []string
-	// TLS is the listener's TLS configuration, or nil for one in the
-	// clear, and TLSKey a fingerprint of its certificates and protocols.
-	TLS    *tls.Config
-	TLSKey string
+	// Certificates picks the certificate of each TLS handshake, or is nil
+	// for a listener in the clear.
+	Certificates tlsmgr.Manager
 	// MaxHeaderBytes and MaxBodyBytes bound the requests it takes; see
 	// config.Limits.
 	MaxHeaderBytes int
@@ -172,11 +170,12 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			}
 		}
 		if lc.TLS != nil {
-			var err error
-			if l.TLS, l.TLSKey, err = tlsmgr.ServerConfig(lc.TLS, l.Protocols); err != nil {
+			certs, err := tlsmgr.LoadStatic(lc.TLS)
+			if err != nil {
 				errs = append(errs, config.AsErrors(err)...)
 				continue
 			}
+			l.Certificates = certs
 		}
 		for i, rc := range c.Routes {
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {

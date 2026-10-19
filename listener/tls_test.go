@@ -118,41 +118,59 @@ func TestTLSProtocols(t *testing.T) {
 
 func TestTLSReloadNewCertificate(t *testing.T) {
 	dir := t.TempDir()
-	a, err := certtest.Write(dir, "a.example")
+	a, err := certtest.Write(dir, "a.example", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	doc := func(c *certtest.Cert, body string) string {
+		return fmt.Sprintf(`{"listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2", "h3"],
+    "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
+  "routes": [{"handler": {"module": "respond", "params": {"body": %q}}}]}`, c.CertFile, c.KeyFile, body)
 	}
-	addr := probe.Addr().String()
-	probe.Close()
-	doc := func(c *certtest.Cert) string {
-		return fmt.Sprintf(`{"listeners": [{"name": "web", "address": %q, "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
-  "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`, addr, c.CertFile, c.KeyFile)
-	}
-	_, s := start(t, doc(a))
-	// The same files, rewritten with a new certificate: the listener is bound
-	// anew, and new connections get it.
-	a2, err := certtest.Write(dir, "a.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	added, _, err := s.Reload(compile(t, doc(a2)))
-	if err != nil || len(added) != 1 {
-		t.Fatalf("reload: %v, added %v", err, added)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		resp, err := tlsClient(addr, false, a2).Get("https://a.example/")
-		if err == nil {
-			resp.Body.Close()
-			break
+	_, s := start(t, doc(a, "v1"))
+	l := s.Addrs()[0]
+	addr := l.Addr.String()
+	// A connection open across the reload, on the old certificate.
+	kept := tlsClient(addr, false, a)
+	get := func(c *stdhttp.Client) (string, error) {
+		resp, err := c.Get("https://a.example/")
+		if err != nil {
+			return "", err
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the new certificate is not served: %v", err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		return string(body), err
+	}
+	if body, err := get(kept); err != nil || body != "v1" {
+		t.Fatalf("before: %q, %v", body, err)
+	}
+
+	// The same files, rewritten with a new certificate: the listener keeps
+	// its binding and its connections, and new handshakes get the new one.
+	a2, err := certtest.Write(dir, "a.example", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, removed, err := s.Reload(compile(t, doc(a2, "v2")))
+	if err != nil || len(added) != 0 || len(removed) != 0 {
+		t.Fatalf("reload: %v, added %v, removed %v", err, added, removed)
+	}
+	if body, err := get(kept); err != nil || body != "v2" {
+		t.Errorf("the connection open across the reload: %q, %v", body, err)
+	}
+	for _, h2 := range []bool{false, true} {
+		if body, err := get(tlsClient(addr, h2, a2)); err != nil || body != "v2" {
+			t.Errorf("h2=%v, new certificate: %q, %v", h2, body, err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		if _, err := get(tlsClient(addr, h2, a)); err == nil {
+			t.Errorf("h2=%v: the old certificate is still served", h2)
+		}
+	}
+	target := fmt.Sprintf("https://127.0.0.1:%d/", l.UDPAddr.(*net.UDPAddr).Port)
+	if _, body, err := h3Get(t, target, "a.example", a2); err != nil || body != "v2" {
+		t.Errorf("h3, new certificate: %q, %v", body, err)
+	}
+	if _, _, err := h3Get(t, target, "a.example", a); err == nil {
+		t.Error("h3: the old certificate is still served")
 	}
 }
