@@ -158,6 +158,9 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	// reader, rather than buffered whole; smaller ones arrive whole.
 	cc.StreamResponseBody = true
 	cc.StreamResponseBodyThreshold = StreamThreshold
+	// A body of no declared length is handed over from its header, so that
+	// one that trickles, as server-sent events do, is passed on as it comes.
+	cc.StreamUnknownLengthAtHeader = true
 	cc.MaxConnsPerHost = maxConns
 	cc.MaxIdleConnsPerHost = DefaultMaxIdleConns
 	if c.MaxIdleConns != nil {

@@ -73,17 +73,11 @@ func startReloadable(t *testing.T, doc string, drain time.Duration, addrs ...str
 	return &reloadable{base: "http://" + s.Addrs()[0].Addr.String(), rt: rt, server: s}, reload
 }
 
-// ticker is a backend that sends a 1KB line every 20ms until the client
-// goes, after 80 of them at once: a body of no length streams through the
-// proxy once 64KB of it have arrived.
+// ticker is a backend that sends a line every 20ms until the client goes.
 func ticker(t *testing.T) string {
-	pad := strings.Repeat("x", 1000)
 	return serveBackend(t, "http/1.1", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		for i := range 80 {
-			fmt.Fprintf(w, "%s %d\n", pad, i)
-		}
 		for i := 0; ; i++ {
-			if _, err := fmt.Fprintf(w, "%s tick %d\n", pad, i); err != nil {
+			if _, err := fmt.Fprintf(w, "tick %d\n", i); err != nil {
 				return
 			}
 			w.(stdhttp.Flusher).Flush()

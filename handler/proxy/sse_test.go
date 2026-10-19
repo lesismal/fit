@@ -12,7 +12,6 @@ import (
 // server-sent events do, reaches the client as it arrives, not once 64KB of
 // it have.
 func TestSSELatency(t *testing.T) {
-	t.Skip("waits for fib to stream a response of unknown length from its header: A10 in docs/fib-api-requests.md")
 	eachProto(t, func(t *testing.T, proto string) {
 		backend := serveBackend(t, proto, stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")

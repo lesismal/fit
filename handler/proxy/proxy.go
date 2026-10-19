@@ -127,7 +127,7 @@ func parsePrefix(s string) (netip.Prefix, error) {
 
 // outgoing is the request sent upstream for the one c serves, or nil for one
 // with a header field whose name is not a token, as "X-A : 1" makes it: RFC
-// 9112 asks a server to refuse whitespace before the colon, which fib v1.3.0
+// 9112 asks a server to refuse whitespace before the colon, which fib v1.3.1
 // lets through, and an upstream could read such a field differently.
 func (p *Proxy) outgoing(c *fibhttp.Context) *stdhttp.Request {
 	r := c.Request

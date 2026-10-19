@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-19 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
-| fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.3.1`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
@@ -938,7 +938,8 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.3.0，它是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
+- **fib 版本。** fit 使用 fib v1.3.1，它在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
+  v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了
   `fib.New(config, bindings...)` 以及 `AddBinding`、`RemoveBinding`、`ShutdownBinding`，`Connection.NotifyOutput`、
   `Context.HoldBody` 和 `BodyWriter`。如果某个迭代需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
 - **SO_REUSEPORT。** fib v1.3.0 默认开启 `ReusePort` 监听，这会让另一个进程也能绑定同一地址。`listener` 先用普通
@@ -946,10 +947,12 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - **图的生命周期与异步 handler。** `listener` 的分发器在 handler 返回时释放图。稍后才应答的 handler 用
   `module.Context.Graph()` 自己持有图直到结束，并实现 `module.Drainer`，在图被排空时结束仍在处理的请求，代理就是
   这样做的（决定 004）。
-- **没有长度的代理响应体。** fib 的客户端要等这种响应体到达 64 KB 后才交给代理（`StreamResponseBodyThreshold`），
-  所以像 server-sent events 这样缓慢涓流的响应会晚到客户端：在 `handler/proxy/sse_test.go` 中，无论上游是 HTTP/1.1、h2c
-  还是 h2，第一个事件都要约 610 ms 后、流结束时才到达。阈值设为 0 能解决，但会让每个小响应都失去一次写完的路径，所以
-  等待 fib 的 [A10](fib-api-requests.zh-CN.md#a10长度未知的客户端响应从响应头起就以流方式交付)。在此之前该测试跳过。
+- **没有长度的代理响应体。** 在 fib v1.3.1 之前，fib 的客户端要等这种响应体到达 64 KB 后才交给代理
+  （`StreamResponseBodyThreshold`），所以像 server-sent events 这样缓慢涓流的响应会晚到客户端：在
+  `handler/proxy/sse_test.go` 中，无论上游是 HTTP/1.1、h2c 还是 h2，第一个事件都要约 610 ms 后、流结束时才到达。fib v1.3.1
+  增加了 `StreamUnknownLengthAtHeader`（[A10](fib-api-requests.zh-CN.md#a10长度未知的客户端响应从响应头起就以流方式交付)），
+  `upstream.New` 打开了它：这种响应体从响应头起就交给代理，带长度的响应体仍和以前一样在 64 KB 以内整体接收。该测试在
+  各种上游协议上都运行并通过。没有做基准：压测框架的代理后端带 `Content-Length` 应答，走的路径和以前相同。
 - **测试环境。** 单元测试和 `go test` 微基准在本机运行。压测（`fitbench` 框架、wrk、h2load）在压测机上运行，
   用 `ssh -p 10013 127.0.0.1` 登录。
 - **基准测试。** fit 新支持的场景或模块要加进 `bench/cmd/fitbench/servers.go` 和

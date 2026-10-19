@@ -21,7 +21,7 @@ The fit iterations that depend on these are R03–R07 in the [development plan](
 | A7 | A per-request value slot on `Context` | P2 | 12 | R07 |
 | A8 | Documentation fixes | P2 | — | — |
 | A9 | Refuse a header field name that is not a token | P1 | 13 | — |
-| A10 | Stream a client response of unknown length from its header | P1 | 5 | — |
+| A10 | Stream a client response of unknown length from its header | done, v1.3.1 | 5 | — |
 
 ## Evidence
 
@@ -187,6 +187,9 @@ headers on. The check stays as defence in depth once fib refuses them.
 
 ## A10: Stream a client response of unknown length from its header
 
+**Status.** Done in fib v1.3.1 (`ClientConfig.StreamUnknownLengthAtHeader`, in `http` and
+`http3`); fit uses it from then on.
+
 **Problem.** `ClientConfig.StreamResponseBodyThreshold` does two jobs. For a body with a
 `Content-Length`, it decides whether the body arrives whole (up to the threshold) or streams. For a
 body of no declared length (chunked, ended by the server's close, or an HTTP/2 body that declares
@@ -221,7 +224,7 @@ StreamUnknownLengthAtHeader bool
 
 A patch that adds `StreamUnknownLengthAtHeader` to `http.ClientConfig` and `http3.ClientConfig`,
 with tests over HTTP/1, HTTP/2 and HTTP/3, is on a local branch of the fib checkout,
-`stream-unknown-length` (commit `5fd41c1`, from `main`, not pushed). fib's tests pass under the race
+`stream-unknown-length` (commit `5fd41c1`, from `main`), merged and released as v1.3.1. fib's tests pass under the race
 detector, and with the branch put in place of fib v1.3.0 and the setting turned on, fit's
 `sse_test.go` passes and the rest of its tests still do.
 

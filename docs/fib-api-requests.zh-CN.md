@@ -20,7 +20,7 @@
 | A7 | `Context` 上的单请求值槽 | P2 | 12 | R07 |
 | A8 | 文档修正 | P2 | — | — |
 | A9 | 拒绝不是 token 的请求头字段名 | P1 | 13 | — |
-| A10 | 长度未知的客户端响应从响应头起就以流方式交付 | P1 | 5 | — |
+| A10 | 长度未知的客户端响应从响应头起就以流方式交付 | 已完成，v1.3.1 | 5 | — |
 
 ## 证据
 
@@ -158,6 +158,8 @@ context 值。
 
 ## A10：长度未知的客户端响应从响应头起就以流方式交付
 
+**状态。** 已在 fib v1.3.1 中完成（`http` 和 `http3` 的 `ClientConfig.StreamUnknownLengthAtHeader`）；fit 从此使用它。
+
 **问题。** `ClientConfig.StreamResponseBodyThreshold` 同时做两件事。对带 `Content-Length` 的响应体，它决定响应体是整体
 到达（不超过阈值时）还是以流方式到达；对没有声明长度的响应体（分块、以服务器关闭连接结束，或没有声明长度的 HTTP/2
 响应体），它是回调运行前必须先到达的数据量。fit 把它设为 64 KB，让小响应整体到达、一次写给客户端；但这样一来，像
@@ -184,7 +186,7 @@ StreamUnknownLengthAtHeader bool
 ```
 
 为 `http.ClientConfig` 和 `http3.ClientConfig` 增加 `StreamUnknownLengthAtHeader` 的补丁，连同 HTTP/1、HTTP/2 和
-HTTP/3 的测试，在 fib 本地仓库的 `stream-unknown-length` 分支上（提交 `5fd41c1`，基于 `main`，未推送）。fib 的测试在
+HTTP/3 的测试，在 fib 本地仓库的 `stream-unknown-length` 分支上（提交 `5fd41c1`，基于 `main`），已合并并发布为 v1.3.1。fib 的测试在
 race 检测下通过；用该分支替换 fib v1.3.0 并打开这个设置后，fit 的 `sse_test.go` 通过，其他测试也都通过。
 
 另一种也能让小的分块响应体保持整体的做法是一个等待时间 `StreamResponseBodyMaxWait time.Duration`：阈值的数据量到达、

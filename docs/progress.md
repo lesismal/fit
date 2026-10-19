@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-19 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
-| fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
+| fib | `github.com/lesismal/fib v1.3.1`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
@@ -1235,9 +1235,10 @@ Differences from the plan:
 
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.3.0, tagged for I16 and I22 on fib's `main` of 2026-10-19: it
-  brings `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and `ShutdownBinding`,
-  `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`. If an iteration needs something
+- **fib version.** fit uses fib v1.3.1. v1.3.0, tagged for I16 and I22 on fib's `main` of
+  2026-10-19, brought `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and
+  `ShutdownBinding`, `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`; v1.3.1 adds
+  `ClientConfig.StreamUnknownLengthAtHeader` (A10) and nothing else. If an iteration needs something
   newer, tag a fib release rather than committing a `replace` directive.
 - **SO_REUSEPORT.** fib v1.3.0 listens with `ReusePort` on by default, which would let a second
   process bind a listener's address too. `listener` checks each address with a plain bind first and
@@ -1246,13 +1247,16 @@ Differences from the plan:
   handler returns. A handler that answers later holds the graph itself with
   `module.Context.Graph()` until it is done, and implements `module.Drainer` to end what it has when
   the graph is drained, as the proxy does (decision 004).
-- **Proxied bodies of no length.** fib's client hands the proxy a response body of no declared
-  length only once 64 KB of it have arrived (`StreamResponseBodyThreshold`), so a slow trickle,
-  as server-sent events are, reaches the client late: in `handler/proxy/sse_test.go` the first
-  event comes after about 610 ms, when the stream ends, over HTTP/1.1, h2c and h2 upstreams. A
-  threshold of 0 fixes it but takes every small response off its one-write path, so it waits for
-  fib: [A10](fib-api-requests.md#a10-stream-a-client-response-of-unknown-length-from-its-header).
-  The test is skipped until then.
+- **Proxied bodies of no length.** Until fib v1.3.1, fib's client handed the proxy a response body
+  of no declared length only once 64 KB of it had arrived (`StreamResponseBodyThreshold`), so a
+  slow trickle, as server-sent events are, reached the client late: in `handler/proxy/sse_test.go`
+  the first event came after about 610 ms, when the stream ended, over HTTP/1.1, h2c and h2
+  upstreams. fib v1.3.1 adds `StreamUnknownLengthAtHeader`
+  ([A10](fib-api-requests.md#a10-stream-a-client-response-of-unknown-length-from-its-header)),
+  which `upstream.New` turns on: such a body is handed over from its header, and bodies with a
+  length are kept whole up to 64 KB as before. The test runs and passes on every upstream protocol.
+  No benchmark: the harness's proxy backend answers with a `Content-Length`, which takes the same
+  path as before.
 - **Test hosts.** Unit tests and `go test` micro-benchmarks run locally. Load tests (the
   `fitbench` harness, wrk, h2load) run on the benchmark host, reached with `ssh -p 10013
   127.0.0.1`.
