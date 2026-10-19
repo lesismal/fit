@@ -79,7 +79,10 @@ type Upstream struct {
 	MaxConns       int      `json:"max_conns,omitempty" min:"0" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out."`
 	MaxIdleConns   *int     `json:"max_idle_conns,omitempty" min:"0" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
 	IdleTimeout    Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
-	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out."`
+	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
+
+	ResponseHeaderTimeout Duration `json:"response_header_timeout,omitempty" doc:"How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504."`
+	ResponseIdleTimeout   Duration `json:"response_idle_timeout,omitempty" doc:"How long the upstream may go silent in the middle of a response body; 60s when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

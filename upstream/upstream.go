@@ -28,9 +28,11 @@ import (
 
 // The defaults config.Upstream's fields stand for when left out.
 const (
-	DefaultMaxIdleConns   = 32
-	DefaultIdleTimeout    = 60 * time.Second
-	DefaultConnectTimeout = 10 * time.Second
+	DefaultMaxIdleConns          = 32
+	DefaultIdleTimeout           = 60 * time.Second
+	DefaultConnectTimeout        = 10 * time.Second
+	DefaultResponseHeaderTimeout = 60 * time.Second
+	DefaultResponseIdleTimeout   = 60 * time.Second
 	// StreamThreshold is the response body size past which a body streams
 	// to the callback rather than arriving whole.
 	StreamThreshold = 64 << 10
@@ -45,6 +47,7 @@ type Pool struct {
 	name      string
 	client    *fibhttp.Client // nil without an engine
 	addresses []string
+	timeouts  Timeouts
 	next      atomic.Uint32
 
 	// inFlight counts requests whose callback has not returned, and closing
@@ -59,7 +62,10 @@ type Pool struct {
 // pool that fails every request with ErrNoEngine, for a config that is only
 // checked. Close the pool before stopping the engine.
 func New(engine *fib.Engine, c *config.Upstream) *Pool {
-	p := &Pool{name: c.Name, addresses: c.Addresses}
+	p := &Pool{name: c.Name, addresses: c.Addresses, timeouts: Timeouts{
+		ResponseHeader: orDefault(c.ResponseHeaderTimeout.Std(), DefaultResponseHeaderTimeout),
+		ResponseIdle:   orDefault(c.ResponseIdleTimeout.Std(), DefaultResponseIdleTimeout),
+	}}
 	if engine == nil {
 		return p
 	}
@@ -87,6 +93,24 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 	p.client = fibhttp.NewClient(engine, cc)
 	return p
 }
+
+// Timeouts are how long a proxy waits for parts of an upstream's response.
+// The pool does not enforce them; the proxy does, since it is the one that
+// knows when a response has begun and a body has gone quiet.
+type Timeouts struct {
+	ResponseHeader time.Duration
+	ResponseIdle   time.Duration
+}
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d == 0 {
+		return def
+	}
+	return d
+}
+
+// Timeouts returns the upstream's response timeouts.
+func (p *Pool) Timeouts() Timeouts { return p.timeouts }
 
 // Name returns the upstream's name.
 func (p *Pool) Name() string { return p.name }

@@ -11,23 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16, I21 and I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15, I16, I17, I21 and I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS; no proxy timeouts or cancellation yet (I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS; one address per request without health or load balancing beyond round robin (I19, I20); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I17, reverse proxy III (timeouts, cancellation, errors)**, which I16 unblocked.
-I09, I13 and I19 are also ready to start, unless another session has taken them; I24 (config
-versions and the Admin API skeleton) is unblocked by I22.
+**Next iteration: I19, load balancing v1**, being done next in this session; then I18 (HTTP/2
+upstreams) and I20 (passive health checks). I09, I13 and I24 are also ready to start, unless another
+session has taken them.
 
 To continue, start a session with:
 
-> Implement iteration I17 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I18 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -560,6 +560,45 @@ Differences from the plan:
   Reopening the file for log rotation (nginx does it on USR1) is left for when someone needs it.
 - Upstream pools are made anew for each graph, so a reload drops the idle upstream connections of
   the old one once it drains. I26 can carry pools over.
+
+### I17 Reverse proxy III: timeouts, cancellation, errors — done
+
+- `config.Upstream` gains `response_header_timeout` and `response_idle_timeout` (60s each by
+  default); `connect_timeout` was there already. `upstream.Pool.Timeouts` hands the first two to the
+  proxy, which enforces them, since only it knows when a response begins and a body goes quiet.
+- The proxy's request handling moved to `handler/proxy/exchange.go`. Each upstream request carries a
+  context the proxy cancels with a cause: the client going away (`Context.OnCancel`), the header
+  timer (started at `Do`, stopped at the response), or the idle timer (started at a streamed
+  response, reset on each piece of body). Cancelling makes fib's client abandon the request and end
+  a body that is streaming.
+- Failures before the response begins: a header or idle timeout, a connect timeout
+  (`os.ErrDeadlineExceeded` from fib's dial) and a body held past `MaxBodyHold` give 504; a client
+  body that failed gives 400, 408 for its read timeout, 413 past `MaxStreamedBodyBytes`; anything
+  else 502. A client that went away gets nothing. After the response began: a body with a declared
+  length is finished short, which fib turns into a closed HTTP/1 connection or a reset HTTP/2
+  stream; a chunked one closes the HTTP/1 connection; on HTTP/2 a body of no declared length ends
+  with a `Fit-Error` trailer, as fib's gateway does, since fib has no way to reset such a stream.
+- Trailers: a response's trailers are forwarded, whole (in `Response.Trailer`) or streamed (the
+  `Trailer` announcement kept through the hop-by-hop filter, the values set with
+  `http.TrailerPrefix` before `Finish`). A request's trailers are forwarded too: a body with
+  trailers goes through the `BodyWriter`, chunked, even when it arrived whole, and the values are
+  copied into the upstream request's `Trailer` once the body ends — on HTTP/2 the names are first
+  known then.
+- Tests (`handler/proxy/failure_test.go`, not on Windows), over HTTP/1.1 and h2c: a connect to a
+  listener whose backlog is full times out to 504; a backend that never answers hits
+  `response_header_timeout` (504 after about 150ms); a backend that sends 200KB and goes quiet hits
+  `response_idle_timeout`, and the client can tell the body was cut short, with and without a
+  length; the same for a backend that drops the connection mid-body; a client that gives up before
+  the header, one that closes a download after 256KB, and one whose upload fails all have the
+  upstream request cancelled (the backend sees its request context end); trailers go both ways for
+  small and streamed bodies; `statusOf` maps each cause. Three runs of the package under `-race`
+  pass; `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The timeouts live on the upstream rather than the route; I43 adds per-route ones.
+- An HTTP/2 response of no declared length whose upstream fails mid-body ends with a trailer rather
+  than a stream reset, which fib v1.3.0 does not let a handler ask for.
 
 ## Notes for later iterations
 

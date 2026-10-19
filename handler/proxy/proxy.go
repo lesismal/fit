@@ -17,12 +17,9 @@
 // replaces all four with what it sees itself. No proxy is trusted by
 // default, so a client cannot pass itself off as another.
 //
-// A request whose upstream cannot be reached, or fails before its response
-// arrives, gets 502.
-//
 // Bodies up to 64KB travel whole; larger ones stream in both directions,
-// each side paced by the other (see ServeHTTP and exchange.onBody).
-// Timeouts and cancellation come with I17.
+// each side paced by the other, and trailers follow them both ways. How a
+// request fails is in exchange.go.
 package proxy
 
 import (
@@ -35,13 +32,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/module"
-	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -91,182 +85,6 @@ func parsePrefix(s string) (netip.Prefix, error) {
 	}
 	addr = addr.Unmap()
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
-}
-
-// ServeHTTP forwards the request and answers with the upstream's response,
-// later, from the upstream client's callbacks.
-//
-// A body that arrived with the request goes out as it is. One still arriving
-// is pushed upstream piece by piece from Context.OnBody through a
-// fibhttp.BodyWriter: when the upstream falls behind, the body is held with
-// Context.HoldBody, which stops reading the client, and resumed when the
-// writer has room, so nothing waits and memory stays bounded.
-func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
-	out := p.outgoing(c)
-	x := &exchange{c: c, out: out, start: time.Now()}
-	// The request, its body among it, stays the handler's until the
-	// response is written.
-	c.Retain()
-	if c.RequestBody() == nil {
-		p.pool.Do(out, x.onResponse)
-		return
-	}
-	body := fibhttp.NewBodyWriter(0)
-	out.Body, out.ContentLength = body, c.Request.ContentLength
-	p.pool.Do(out, x.onResponse)
-	c.OnBody(func(data []byte, fin bool, err error) {
-		switch {
-		case err != nil:
-			body.CloseWithError(err)
-			return
-		case len(data) > 0:
-			if _, werr := body.Write(data); werr != nil {
-				// The upstream request is over; the rest is not wanted.
-				return
-			}
-		}
-		if fin {
-			_ = body.Close()
-			return
-		}
-		// Held first, so that a drain that comes before OnDrain returns is
-		// not missed.
-		c.HoldBody(true)
-		if !body.OnDrain(func() { c.HoldBody(false) }) {
-			c.HoldBody(false)
-		}
-	})
-}
-
-// exchange is one proxied request, seen from the upstream's callbacks, which
-// come one at a time.
-type exchange struct {
-	c     *fibhttp.Context
-	out   *stdhttp.Request
-	start time.Time
-
-	resp    *fibhttp.ClientResponse
-	started bool
-	done    atomic.Bool
-}
-
-// release gives the client's request back, once.
-func (x *exchange) release() {
-	if x.done.CompareAndSwap(false, true) {
-		x.c.Release()
-	}
-}
-
-func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
-	if e := observe.EntryOf(x.c.Request); e != nil {
-		// Pool.Do set the address before sending.
-		e.Upstream, e.UpstreamDuration = x.out.URL.Host, time.Since(x.start)
-	}
-	if err != nil {
-		x.fail()
-		return
-	}
-	if resp.BodyComplete() {
-		// The whole of it is here: one write, as small responses go.
-		defer x.release()
-		body, err := readBody(resp)
-		if err != nil {
-			x.fail()
-			return
-		}
-		header := resp.Header
-		removeHopByHop(header)
-		_ = x.c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body})
-		return
-	}
-	x.resp = resp
-	resp.OnBody(x.onBody)
-}
-
-// onBody streams the response body to the client. It runs on the worker that
-// reads the upstream connection, on the upstream engine. A client slower than
-// the upstream makes Write wait once 64KB are queued for it (HTTP/1), or the
-// stream's window is spent (HTTP/2), and while it waits the upstream
-// connection is not read: the upstream is held back by TCP or by its own
-// stream window, and neither side's body piles up here.
-func (x *exchange) onBody(data []byte, fin bool, err error) {
-	if x.done.Load() {
-		return
-	}
-	if err != nil {
-		x.broken()
-		return
-	}
-	if !x.started {
-		x.begin()
-	}
-	if len(data) > 0 {
-		if _, werr := x.c.Write(data); werr != nil {
-			// The client is gone; giving the response up stops the
-			// upstream's callbacks.
-			x.resp.Close()
-			x.release()
-			return
-		}
-		if !fin {
-			x.c.Flush()
-		}
-	}
-	if fin {
-		_ = x.c.Finish()
-		x.release()
-	}
-}
-
-// begin sends the response's status and header to the client.
-func (x *exchange) begin() {
-	x.started = true
-	h := x.c.Header()
-	for key, values := range x.resp.Header {
-		h[key] = values
-	}
-	removeHopByHop(h)
-	delete(h, "Content-Length")
-	if x.resp.ContentLength >= 0 {
-		h["Content-Length"] = []string{strconv.FormatInt(x.resp.ContentLength, 10)}
-	}
-	x.c.WriteHeader(x.resp.StatusCode)
-}
-
-// fail answers 502 for a request whose upstream gave no response.
-func (x *exchange) fail() {
-	_ = x.c.Respond(stdhttp.StatusBadGateway, "text/plain; charset=utf-8", []byte("502 Bad Gateway\n"))
-	x.release()
-}
-
-// broken handles an upstream that failed after its response began.
-func (x *exchange) broken() {
-	if !x.started {
-		x.fail()
-		return
-	}
-	if x.c.Request.ProtoMajor == 1 {
-		// A body that stops short can only be told from a whole one by
-		// closing the connection.
-		_ = x.c.Conn.Close()
-	} else {
-		_ = x.c.Finish()
-	}
-	x.release()
-}
-
-// readBody reads a response body that arrived whole.
-func readBody(resp *fibhttp.ClientResponse) ([]byte, error) {
-	if resp.Body == nil {
-		return nil, nil
-	}
-	n := resp.ContentLength
-	if n < 0 || n > 1<<20 {
-		n = 512
-	}
-	buf := bytes.NewBuffer(make([]byte, 0, n))
-	_, err := io.Copy(buf, resp.Body)
-	return buf.Bytes(), err
 }
 
 // outgoing is the request sent upstream for the one c serves.

@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I21、I22 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I16、I17、I21、I22 已完成 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS；代理还没有超时和取消（I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 尚不可用 | 还没有 TLS；除轮询外还没有负载均衡和健康检查（I19、I20）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I17，反向代理 III（超时、取消、错误）**，I16 完成后它可以开始了。I09、I13、I19 也都可以开始（除非
-已有别的会话在做）；I22 完成后 I24（配置版本与 Admin API 骨架）也可以开始了。
+**下一个迭代：I19，负载均衡 v1**，本会话接下来做；然后是 I18（HTTP/2 上游）和 I20（被动健康检查）。I09、I13、
+I24 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I17。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I18。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -451,6 +451,34 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 重载时不会重新打开或替换访问日志；`access_log` 的变化要等重启。为日志轮转重新打开文件（nginx 用 USR1）等有
   需要时再做。
 - 每个图都会新建上游连接池，所以重载后旧图排空时会丢掉它的空闲上游连接。I26 可以把连接池带过去。
+
+### I17 反向代理 III：超时、取消、错误 — 已完成
+
+- `config.Upstream` 新增 `response_header_timeout` 和 `response_idle_timeout`（默认各 60s）；`connect_timeout`
+  已经有了。`upstream.Pool.Timeouts` 把前两个交给代理，由代理执行，因为只有代理知道响应何时开始、body 何时停顿。
+- 代理的请求处理移到了 `handler/proxy/exchange.go`。每个上游请求带一个代理会按原因取消的 context：客户端离开
+  （`Context.OnCancel`）、响应头计时器（在 `Do` 时启动，响应到达时停止）、空闲计时器（流式响应开始时启动，每收到
+  一段 body 重置）。取消会让 fib 的客户端放弃请求并结束正在流式传输的 body。
+- 响应开始之前的失败：响应头或空闲超时、连接超时（fib 拨号返回的 `os.ErrDeadlineExceeded`）、body 被挂起超过
+  `MaxBodyHold`，返回 504；客户端 body 出错返回 400，读超时返回 408，超过 `MaxStreamedBodyBytes` 返回 413；其他
+  返回 502。客户端已离开则不应答。响应开始之后：有声明长度的 body 不足长度就结束，fib 会把它变成关闭 HTTP/1 连接
+  或重置 HTTP/2 流；分块的 body 关闭 HTTP/1 连接；HTTP/2 上没有声明长度的 body 以 `Fit-Error` trailer 结束（与 fib
+  的 gateway 一样），因为 fib 无法重置这样的流。
+- Trailer：响应的 trailer 会被转发，无论整体（放在 `Response.Trailer`）还是流式（`Trailer` 声明在逐跳过滤中保留，
+  值在 `Finish` 之前用 `http.TrailerPrefix` 设置）。请求的 trailer 也会转发：带 trailer 的 body 即使整体到达，也
+  通过 `BodyWriter` 分块发送，body 结束时把值复制到上游请求的 `Trailer` 中——在 HTTP/2 上名字也是那时才知道。
+- 测试（`handler/proxy/failure_test.go`，不在 Windows 上运行），HTTP/1.1 和 h2c：连接到 backlog 已满的 listener
+  超时得到 504；从不应答的后端触发 `response_header_timeout`（约 150ms 后 504）；发送 200KB 后沉默的后端触发
+  `response_idle_timeout`，无论有无长度，客户端都能看出 body 被截断；后端在 body 中途断开连接也一样；在响应头之前
+  放弃的客户端、下载 256KB 后关闭的客户端、上传失败的客户端，都会让上游请求被取消（后端看到请求 context 结束）；
+  小 body 和流式 body 的 trailer 双向转发；`statusOf` 对每种原因的映射。该包在 `-race` 下运行三次均通过；
+  `go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 超时配置在上游上而不是路由上；I43 会加上按路由的超时。
+- 上游在 body 中途失败时，没有声明长度的 HTTP/2 响应以 trailer 结束而不是重置流，因为 fib v1.3.0 不允许 handler
+  请求重置流。
 
 ## 给后续迭代的说明
 

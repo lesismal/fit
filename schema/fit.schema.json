@@ -119,7 +119,7 @@
           "type": "array"
         },
         "connect_timeout": {
-          "description": "How long opening a connection may take; 10s when left out.",
+          "description": "How long opening a connection may take; 10s when left out. A request whose connect times out gets 504.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -140,6 +140,16 @@
         },
         "name": {
           "description": "A name unique among the upstreams, by which handlers refer to this one.",
+          "type": "string"
+        },
+        "response_header_timeout": {
+          "description": "How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "response_idle_timeout": {
+          "description": "How long the upstream may go silent in the middle of a response body; 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         }
       },
