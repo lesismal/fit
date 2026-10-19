@@ -266,6 +266,31 @@
       ],
       "type": "object"
     },
+    "config.StickyCookie": {
+      "additionalProperties": false,
+      "properties": {
+        "max_age": {
+          "description": "How long the client keeps the cookie, as its Max-Age; until the browser closes when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "name": {
+          "default": "fit_sticky",
+          "description": "The cookie's name; fit_sticky when left out.",
+          "type": "string"
+        },
+        "path": {
+          "default": "/",
+          "description": "The cookie's Path; / when left out.",
+          "type": "string"
+        },
+        "secure": {
+          "description": "Mark the cookie Secure, so that it is sent only over HTTPS. It is always HttpOnly and SameSite=Lax.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "config.TLS": {
       "additionalProperties": false,
       "properties": {
@@ -304,6 +329,10 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "hash_key": {
+          "description": "With header_hash, the header, and with cookie_hash, the cookie, whose value requests are hashed by.",
+          "type": "string"
+        },
         "health_check": {
           "$ref": "#/$defs/config.HealthCheck",
           "description": "Probe each address on a schedule, and take one that fails its probes out of rotation until it passes them again; no probes when left out. Probes and max_fails take an address out each on their own account."
@@ -315,11 +344,17 @@
           "type": "string"
         },
         "load_balancing": {
-          "description": "How requests are spread over the addresses: in turn, in turn by weight (smoothly, as nginx does), or to the address with the fewest requests under way for its weight. round_robin when left out, or weighted_round_robin when weights are given.",
+          "description": "How requests are spread over the addresses: round_robin, in turn; weighted_round_robin, in turn by weight (smoothly, as nginx does); least_conn, to the address with the fewest requests under way for its weight; random, at random by weight; p2c, to the less busy for its weight of two addresses chosen at random; ip_hash, uri_hash, header_hash and cookie_hash, by a consistent hash of the client's IP address, the request's path and query, the header hash_key names or the cookie it names, so that the same key goes to the same address while it is up, and adding or removing an address moves only the keys that went to it or will. A request without the header or cookie goes in turn. round_robin when left out, or weighted_round_robin when weights are given.",
           "enum": [
             "round_robin",
             "weighted_round_robin",
-            "least_conn"
+            "least_conn",
+            "random",
+            "p2c",
+            "ip_hash",
+            "uri_hash",
+            "header_hash",
+            "cookie_hash"
           ],
           "type": "string"
         },
@@ -378,6 +413,10 @@
           "description": "How long a whole response may take, from sending the request to the end of its body; 1h when left out. A request past it before its response began gets 504, and one past it later is cut short.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "sticky_cookie": {
+          "$ref": "#/$defs/config.StickyCookie",
+          "description": "Keep each client on one address with a cookie: a request whose cookie names an address that is up goes there, and any other gets the cookie for the address it went to. No cookie when left out."
         },
         "tls_ca_file": {
           "description": "With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots.",

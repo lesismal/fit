@@ -42,13 +42,13 @@ func TestHealthMaxFails(t *testing.T) {
 func TestPickSkipsDown(t *testing.T) {
 	for _, policy := range []string{RoundRobin, WeightedRoundRobin, LeastConn} {
 		bs := backends(1, 1, 1)
-		bal := NewBalancer(policy, bs)
+		bal := NewBalancer(policy, bs, "")
 		bs[1].failed(1, 100*time.Millisecond)
 		got := counts(bal, 300)
 		if got["b"] != 0 || got["a"] != 150 || got["c"] != 150 {
 			t.Errorf("%s with b down: %v", policy, got)
 		}
-		if n := testing.AllocsPerRun(100, func() { bal.Pick() }); n != 0 {
+		if n := testing.AllocsPerRun(100, func() { bal.Pick(nil) }); n != 0 {
 			t.Errorf("%s: %v allocations a pick with a backend down", policy, n)
 		}
 		// All down: health is ignored rather than failing everything.

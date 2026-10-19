@@ -69,6 +69,7 @@ type Pool struct {
 	addresses []string
 	backends  []*Backend
 	balancer  Balancer
+	sticky    *sticky // nil without a sticky cookie
 	timeouts  Timeouts
 	// maxFails failures within failTimeout take a backend out of rotation
 	// for failTimeout.
@@ -106,7 +107,10 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 		}
 		p.backends = append(p.backends, &Backend{Address: addr, Weight: weight})
 	}
-	p.balancer = NewBalancer(c.LoadBalancing, p.backends)
+	p.balancer = NewBalancer(c.LoadBalancing, p.backends, c.HashKey)
+	if c.StickyCookie != nil {
+		p.sticky = newSticky(c.StickyCookie, p.backends)
+	}
 	p.maxFails = DefaultMaxFails
 	if c.MaxFails != nil {
 		p.maxFails = *c.MaxFails
@@ -207,20 +211,37 @@ func (p *Pool) Addresses() []string { return p.addresses }
 // The caller must not change them.
 func (p *Pool) Backends() []*Backend { return p.backends }
 
-// Pick chooses the backend for a request by the upstream's policy and counts
-// the request as under way on it until Done. It returns nil, counting
+// Pick chooses the backend for r by the upstream's sticky cookie and policy,
+// and counts the request as under way on it until Done. r may be nil, for a
+// request with nothing to go by. It returns nil, counting
 // nothing, when the connections are all busy and max_pending requests wait
 // for one already. A pool that Close was called on still serves requests
 // until those under way are done, so that a request that started on it can
 // still use it.
-func (p *Pool) Pick() *Backend {
+func (p *Pool) Pick(r *stdhttp.Request) *Backend {
 	if p.inFlight.Add(1) > p.maxInFlight {
 		p.done()
 		return nil
 	}
-	b := p.balancer.Pick()
+	var b *Backend
+	if p.sticky != nil {
+		b = p.sticky.pick(r)
+	}
+	if b == nil {
+		b = p.balancer.Pick(r)
+	}
 	b.active.Add(1)
 	return b
+}
+
+// SetCookie returns the Set-Cookie field a response to r, which went to b,
+// carries: the sticky cookie naming b, unless r's names it already; or ""
+// without a sticky cookie.
+func (p *Pool) SetCookie(r *stdhttp.Request, b *Backend) string {
+	if p.sticky == nil || (r != nil && cookieValue(r.Header, p.sticky.name) == p.sticky.ids[b]) {
+		return ""
+	}
+	return p.sticky.setCookie[b]
 }
 
 // Done ends the request Pick counted on b, once its response, body and all,
@@ -265,7 +286,7 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 // when its callback returns, as one that reads a body that arrived whole is.
 // An error counts as a failure of the backend.
 func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
-	b := p.Pick()
+	b := p.Pick(req)
 	if b == nil {
 		callback(nil, ErrBusy)
 		return

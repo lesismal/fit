@@ -11,9 +11,9 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I32) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I32, I33) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -26,8 +26,9 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I33 (load balancing v2).** M2 has I24 and I25, the Admin API with config versions,
-patches, ETags and rollback, and I32, active health checks.
+**Next: I26 (listener diffing and graph draining) and I27 (file provider).** M2 has I24 and I25,
+the Admin API with config versions, patches, ETags and rollback, I32, active health checks, and
+I33, load balancing v2.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -41,7 +42,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I33 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I26 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -60,7 +61,7 @@ To continue, start a session with:
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
-| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
+| `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
@@ -1107,6 +1108,51 @@ Differences from the plan:
   `PUT` already does; a JSON Patch (RFC 6902) document is not taken.
 - The ETag is a hash of the config, not its version, since versions start again on a restart.
 - An edited config's layout is fit's, not the one it was written in.
+
+### I33 Load balancing v2 — done
+
+- `load_balancing` gains `random` (by weight), `p2c` (of two backends drawn at random, the one
+  with fewer requests under way for its weight), and `ip_hash`, `uri_hash`, `header_hash` and
+  `cookie_hash`, consistent hashing on the client's IP address (without its port), the path and
+  query, or the header or cookie `hash_key` names. A request without the header or cookie goes in
+  turn. `sticky_cookie` (`name`, `path`, `max_age`, `secure`; always `HttpOnly` and
+  `SameSite=Lax`) keeps a client on one address on top of any policy: a request whose cookie names
+  an address that is up goes there, and any other is answered with the cookie of the address it
+  went to, after the upstream's own `Set-Cookie` fields. The cookie's value is the first 64 bits of
+  the SHA-256 of the address, so it is the same in every fit with the same addresses and says
+  nothing more about them.
+- The hash ring has 160 points per unit of weight for each backend, placed by its address alone
+  (FNV-1a with MurmurHash3's finish), as nginx's `hash ... consistent` has; a key goes to the
+  first point at or after its hash, or, when that backend is down, to the next point whose backend
+  is up, so the keys of a backend that is down move and come back with it, and no others do.
+  Every policy passes over backends that are down, unless all are, as before.
+- `Balancer.Pick` and `Pool.Pick` take the request (nil when there is none, as for `Pool.Do`'s
+  callers); `Pool.SetCookie` says what the proxy adds to the response. Nothing on the request path
+  allocates: keys are read from the request in place, header names canonicalised and the
+  `Set-Cookie` fields made when the pool is.
+- Tests: distribution of `random` (even and by weight) and `p2c` (never the busiest of three,
+  level as requests stay, by weight, one backend up); hash distribution for each key, even and by
+  weight; the same key to the same backend; adding a fourth backend moves only keys to it, a
+  quarter of them; a backend down moves only its own keys, which come back with it; the port not
+  counting for `ip_hash`, the query counting for `uri_hash`; cookie parsing; requests without a key
+  going in turn; no allocation a pick for the new policies and the sticky cookie; down backends
+  passed over; sticky cookies (set without one, followed with one, replaced when its backend is
+  down or it names nothing, attributes) in `upstream`, and through the proxy, with the upstream's
+  own cookie kept, and `header_hash` keeping each user on one backend (`handler/proxy`); config
+  errors. `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- Benchmarks before and after, on the benchmark host, fit alone, the proxy scenario (round robin,
+  as the harness's config has it), two rounds each, alternating: over HTTP/1.1 215k and 216k
+  requests a second before, 215k and 213k after; over h2c 228k and 228k before, 228k and 227k after,
+  within 1%, about as far apart as two rounds of the same binary. `go test -bench BenchmarkPickNew`
+  (parallel, 14 threads, this Mac): 1.5 to 4 ns a pick for the new policies, cookie_hash the most,
+  none allocating.
+
+Differences from the plan:
+
+- Sticky sessions are a `sticky_cookie` beside `load_balancing` rather than a policy of their own,
+  so that a client without the cookie, or whose address is down, is placed by any policy.
+- Consistent hashing is by a ring, as nginx's, rather than rendezvous hashing: lookups take a
+  binary search however many addresses there are.
 
 ## Notes for later iterations
 

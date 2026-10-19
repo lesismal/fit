@@ -10,9 +10,9 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I25、I32） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I25、I32、I33） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -22,8 +22,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I33（负载均衡 v2）。** M2 已完成 I24、I25（带配置版本、局部修改、ETag 和回滚的 Admin API）和 I32
-（主动健康检查）。M2 之前的审查修复 R01、R02 已
+**下一步：I26（监听差量与旧图排空）和 I27（文件 provider）。** M2 已完成 I24、I25（带配置版本、局部修改、ETag 和
+回滚的 Admin API）、I32（主动健康检查）和 I33（负载均衡 v2）。M2 之前的审查修复 R01、R02 已
 完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -33,7 +33,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I33。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I26。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -51,7 +51,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
-| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
+| `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
@@ -849,6 +849,36 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - `PATCH` 是在 pointer 处做 JSON merge patch，而不是替换那里的值（`PUT` 已经能做）；不接受 JSON Patch（RFC 6902）文档。
 - ETag 是配置的哈希，而不是版本号，因为重启后版本号会重新开始。
 - 修改后配置的排版是 fit 的，不是原来书写的样子。
+
+### I33 负载均衡 v2 — 已完成
+
+- `load_balancing` 新增 `random`（按权重）、`p2c`（随机抽两个后端，取按权重计在途请求较少的那个），以及 `ip_hash`、
+  `uri_hash`、`header_hash` 和 `cookie_hash`：按客户端 IP 地址（不含端口）、路径和查询串、或 `hash_key` 指定的请求头
+  或 cookie 做一致性哈希。没有该请求头或 cookie 的请求按轮询分配。`sticky_cookie`（`name`、`path`、`max_age`、
+  `secure`；总是 `HttpOnly` 和 `SameSite=Lax`）在任何策略之上把客户端固定在一个地址：cookie 指向一个在线地址的请求
+  发往那里，其他请求的应答带上它所去地址的 cookie，排在上游自己的 `Set-Cookie` 之后。cookie 的值是地址 SHA-256 的前
+  64 位，因此在地址相同的每个 fit 中都一样，也不透露地址的其他信息。
+- 哈希环为每个后端每单位权重放 160 个点，只由地址决定位置（FNV-1a 加 MurmurHash3 的收尾），与 nginx 的
+  `hash ... consistent` 相同；一个键落到哈希值处或之后的第一个点，该后端下线时落到下一个后端在线的点，所以下线后端的键
+  会移走、随它恢复而回来，其他键都不动。所有策略都跳过下线的后端，除非全部下线，与以前一样。
+- `Balancer.Pick` 和 `Pool.Pick` 接收请求（没有请求时为 nil，如 `Pool.Do` 的调用者）；`Pool.SetCookie` 给出代理要加到
+  应答上的内容。请求路径上没有内存分配：键直接从请求中读取，请求头名称和 `Set-Cookie` 字段在创建连接池时就已准备好。
+- 测试：`random`（均匀和按权重）和 `p2c`（三个中最忙的从不被选、请求保持时各后端持平、按权重、只有一个在线）的分布；
+  每种键的哈希分布，均匀和按权重；相同的键去相同的后端；加入第四个后端只把键移给它，约四分之一；一个后端下线只移走它
+  自己的键，随它恢复而回来；`ip_hash` 不计端口，`uri_hash` 计入查询串；cookie 解析；没有键的请求按轮询；新策略和粘性
+  cookie 每次选择都不分配内存；跳过下线后端；`upstream` 中的粘性 cookie（没有时设置、有时遵从、其后端下线或指向不存在
+  时替换、属性），以及经过代理时保留上游自己的 cookie、`header_hash` 让每个用户固定在一个后端（`handler/proxy`）；配置
+  错误。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- 前后对比基准（压测机，只跑 fit，proxy 场景，按压测框架配置用轮询，各两轮，交替进行）：HTTP/1.1 之前每秒 215k 和
+  216k 请求，之后 215k 和 213k；h2c 之前 228k 和 228k，之后 228k 和 227k，差异在 1% 以内，与同一二进制两轮之间的差距
+  相当。`go test -bench BenchmarkPickNew`（并行，14 线程，本机 Mac）：新策略每次选择 1.5 到 4 ns，cookie_hash 最慢，
+  都不分配内存。
+
+与计划的不同：
+
+- 粘性会话是 `load_balancing` 旁边的 `sticky_cookie`，而不是一种单独的策略，这样没有 cookie 或其地址下线的客户端可以
+  由任何策略来分配。
+- 一致性哈希用哈希环（与 nginx 相同），而不是 rendezvous 哈希：无论有多少地址，查找都是一次二分查找。
 
 ## 给后续迭代的说明
 

@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"math"
+	stdhttp "net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,12 @@ const (
 	RoundRobin         = "round_robin"
 	WeightedRoundRobin = "weighted_round_robin"
 	LeastConn          = "least_conn"
+	Random             = "random"
+	P2C                = "p2c"
+	IPHash             = "ip_hash"
+	URIHash            = "uri_hash"
+	HeaderHash         = "header_hash"
+	CookieHash         = "cookie_hash"
 )
 
 // Backend is one of an upstream's addresses.
@@ -122,19 +129,21 @@ func (b *Backend) succeeded() {
 	b.mu.Unlock()
 }
 
-// Balancer picks the backend for the next request. Pick runs once a request
-// and must not allocate or block for long. It passes over the backends that
+// Balancer picks the backend for a request, which may be nil when there is
+// none to go by. Pick runs once a request and must not allocate or block for
+// long. It passes over the backends that
 // are down, unless all of them are: then health is ignored, since an
 // upstream that may still answer serves better than one that surely will
 // not, which is also why nginx ignores health for a single server.
 type Balancer interface {
-	Pick() *Backend
+	Pick(r *stdhttp.Request) *Backend
 }
 
 // NewBalancer returns the balancer policy names, over backends, which it
-// keeps. An empty policy is round robin, or weighted round robin when any
-// backend's weight is not 1.
-func NewBalancer(policy string, backends []*Backend) Balancer {
+// keeps; key is the header or cookie header_hash and cookie_hash hash by. An
+// empty policy is round robin, or weighted round robin when any backend's
+// weight is not 1.
+func NewBalancer(policy string, backends []*Backend, key string) Balancer {
 	if policy == "" {
 		policy = RoundRobin
 		for _, b := range backends {
@@ -148,6 +157,12 @@ func NewBalancer(policy string, backends []*Backend) Balancer {
 		return &weightedRoundRobin{backends: backends}
 	case LeastConn:
 		return &leastConn{backends: backends}
+	case Random:
+		return newRandom(backends)
+	case P2C:
+		return &p2c{backends: backends}
+	case IPHash, URIHash, HeaderHash, CookieHash:
+		return newHash(policy, key, backends)
 	default:
 		return &roundRobin{backends: backends}
 	}
@@ -159,7 +174,7 @@ type roundRobin struct {
 	next     atomic.Uint64
 }
 
-func (r *roundRobin) Pick() *Backend {
+func (r *roundRobin) Pick(*stdhttp.Request) *Backend {
 	n := uint64(len(r.backends))
 	first := r.next.Add(1) - 1
 	var now int64
@@ -185,7 +200,7 @@ type weightedRoundRobin struct {
 	backends []*Backend
 }
 
-func (w *weightedRoundRobin) Pick() *Backend {
+func (w *weightedRoundRobin) Pick(*stdhttp.Request) *Backend {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var now int64
@@ -227,7 +242,7 @@ type leastConn struct {
 	next     atomic.Uint64
 }
 
-func (l *leastConn) Pick() *Backend {
+func (l *leastConn) Pick(*stdhttp.Request) *Backend {
 	n := uint64(len(l.backends))
 	first := l.next.Add(1) - 1
 	var now int64

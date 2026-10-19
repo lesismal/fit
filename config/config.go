@@ -190,15 +190,17 @@ type Match struct {
 // Upstream is a set of servers requests can be proxied to, and how the
 // connections to them are kept.
 type Upstream struct {
-	Name           string   `json:"name" fit:"required" doc:"A name unique among the upstreams, by which handlers refer to this one."`
-	Addresses      []string `json:"addresses" fit:"required" doc:"The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\"."`
-	Weights        []int    `json:"weights,omitempty" min:"1" max:"1000" doc:"Each address's weight, in the order of addresses: its share of requests under weighted_round_robin, and how many requests it takes to be as busy as an address of weight 1 under least_conn. 1 each when left out."`
-	LoadBalancing  string   `json:"load_balancing,omitempty" enum:"round_robin,weighted_round_robin,least_conn" doc:"How requests are spread over the addresses: in turn, in turn by weight (smoothly, as nginx does), or to the address with the fewest requests under way for its weight. round_robin when left out, or weighted_round_robin when weights are given."`
-	MaxConns       int      `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. 256 when left out or 0."`
-	MaxPending     int      `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection, across the addresses, once max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
-	MaxIdleConns   *int     `json:"max_idle_conns,omitempty" min:"0" default:"32" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
-	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
-	ConnectTimeout Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
+	Name           string        `json:"name" fit:"required" doc:"A name unique among the upstreams, by which handlers refer to this one."`
+	Addresses      []string      `json:"addresses" fit:"required" doc:"The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\"."`
+	Weights        []int         `json:"weights,omitempty" min:"1" max:"1000" doc:"Each address's weight, in the order of addresses: its share of requests under weighted_round_robin, and how many requests it takes to be as busy as an address of weight 1 under least_conn. 1 each when left out."`
+	LoadBalancing  string        `json:"load_balancing,omitempty" enum:"round_robin,weighted_round_robin,least_conn,random,p2c,ip_hash,uri_hash,header_hash,cookie_hash" doc:"How requests are spread over the addresses: round_robin, in turn; weighted_round_robin, in turn by weight (smoothly, as nginx does); least_conn, to the address with the fewest requests under way for its weight; random, at random by weight; p2c, to the less busy for its weight of two addresses chosen at random; ip_hash, uri_hash, header_hash and cookie_hash, by a consistent hash of the client's IP address, the request's path and query, the header hash_key names or the cookie it names, so that the same key goes to the same address while it is up, and adding or removing an address moves only the keys that went to it or will. A request without the header or cookie goes in turn. round_robin when left out, or weighted_round_robin when weights are given."`
+	HashKey        string        `json:"hash_key,omitempty" doc:"With header_hash, the header, and with cookie_hash, the cookie, whose value requests are hashed by."`
+	StickyCookie   *StickyCookie `json:"sticky_cookie,omitempty" doc:"Keep each client on one address with a cookie: a request whose cookie names an address that is up goes there, and any other gets the cookie for the address it went to. No cookie when left out."`
+	MaxConns       int           `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. 256 when left out or 0."`
+	MaxPending     int           `json:"max_pending,omitempty" min:"0" default:"1024" doc:"How many requests may wait for a connection, across the addresses, once max_conns are busy; one past it is answered 503 at once. 1024 when left out or 0."`
+	MaxIdleConns   *int          `json:"max_idle_conns,omitempty" min:"0" default:"32" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
+	IdleTimeout    Duration      `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
+	ConnectTimeout Duration      `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
 
 	Protocol      string `json:"protocol,omitempty" enum:"http/1.1,h2c,h2" default:"\"http/1.1\"" doc:"How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out."`
 	TLSServerName string `json:"tls_server_name,omitempty" doc:"With h2: the name the servers' certificates are checked against, and sent in SNI; each address's host when left out."`
@@ -212,6 +214,21 @@ type Upstream struct {
 	ResponseTimeout       Duration `json:"response_timeout,omitempty" default:"\"1h\"" doc:"How long a whole response may take, from sending the request to the end of its body; 1h when left out. A request past it before its response began gets 504, and one past it later is cut short."`
 
 	HealthCheck *HealthCheck `json:"health_check,omitempty" doc:"Probe each address on a schedule, and take one that fails its probes out of rotation until it passes them again; no probes when left out. Probes and max_fails take an address out each on their own account."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// The default of StickyCookie.Name.
+const DefaultStickyCookieName = "fit_sticky"
+
+// StickyCookie is the cookie that keeps a client on one of an upstream's
+// addresses. Its value is a hash of the address, the same in every fit with
+// the same addresses.
+type StickyCookie struct {
+	Name   string   `json:"name,omitempty" default:"\"fit_sticky\"" doc:"The cookie's name; fit_sticky when left out."`
+	Path   string   `json:"path,omitempty" default:"\"/\"" doc:"The cookie's Path; / when left out."`
+	MaxAge Duration `json:"max_age,omitempty" doc:"How long the client keeps the cookie, as its Max-Age; until the browser closes when left out."`
+	Secure bool     `json:"secure,omitempty" doc:"Mark the cookie Secure, so that it is sent only over HTTPS. It is always HttpOnly and SameSite=Lax."`
 
 	At Value `json:"-" fit:"self"`
 }

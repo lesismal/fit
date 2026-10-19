@@ -63,7 +63,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", []byte("400 Bad Request\n"))
 		return
 	}
-	backend := p.pool.Pick()
+	backend := p.pool.Pick(c.Request)
 	if backend == nil {
 		// max_pending requests wait for a connection already.
 		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("503 Service Unavailable\n"))
@@ -74,7 +74,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	// The backend is held until the exchange is over, body and all, so that
 	// least_conn counts a long download as busy for as long as it lasts.
 	x := &exchange{c: c, out: out, ctx: ctx, cancel: cancel, start: time.Now(), timeouts: p.pool.Timeouts(),
-		stall: p.stall, pool: p.pool, backend: backend}
+		stall: p.stall, pool: p.pool, backend: backend, setCookie: p.pool.SetCookie(c.Request, backend)}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -279,6 +279,8 @@ type exchange struct {
 	stall   time.Duration
 	pool    *upstream.Pool
 	backend *upstream.Backend
+	// setCookie is the sticky cookie the response sets, or "".
+	setCookie string
 	// timer is the response header timeout's, then the idle timeout's.
 	timer atomic.Pointer[time.Timer]
 
@@ -323,6 +325,7 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		}
 		header := resp.Header
 		removeHopByHop(header)
+		x.addCookie(header)
 		_ = x.c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body, Trailer: resp.Trailer()})
 		x.release()
 		return
@@ -404,6 +407,15 @@ func (x *exchange) write(data []byte, flush bool) error {
 	return nil
 }
 
+// addCookie adds the sticky cookie, if the response sets one, to h, after
+// the upstream's own.
+func (x *exchange) addCookie(h stdhttp.Header) {
+	if x.setCookie != "" {
+		own := h["Set-Cookie"]
+		h["Set-Cookie"] = append(own[:len(own):len(own)], x.setCookie)
+	}
+}
+
 // begin sends the response's status and header to the client.
 func (x *exchange) begin() {
 	x.started = true
@@ -413,6 +425,7 @@ func (x *exchange) begin() {
 		h[key] = values
 	}
 	removeHopByHop(h)
+	x.addCookie(h)
 	if len(announced) > 0 {
 		h["Trailer"] = announced
 	}

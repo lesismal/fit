@@ -131,6 +131,22 @@ func (c *Config) Validate() Errors {
 		if len(u.Weights) > 0 && u.LoadBalancing == "round_robin" {
 			add(u.At.Field("load_balancing"), "round_robin takes no weights; use weighted_round_robin or least_conn")
 		}
+		switch keyed := u.LoadBalancing == "header_hash" || u.LoadBalancing == "cookie_hash"; {
+		case keyed && u.HashKey == "":
+			add(u.At.Field("hash_key"), "%s needs hash_key, the name of the %s to hash", u.LoadBalancing, strings.TrimSuffix(u.LoadBalancing, "_hash"))
+		case !keyed && u.HashKey != "":
+			add(u.At.Field("hash_key"), "hash_key is for header_hash and cookie_hash")
+		case keyed && !isToken(u.HashKey):
+			add(u.At.Field("hash_key"), "%q is not a valid %s name", u.HashKey, strings.TrimSuffix(u.LoadBalancing, "_hash"))
+		}
+		if s := u.StickyCookie; s != nil {
+			if s.Name != "" && !isToken(s.Name) {
+				add(s.At.Field("name"), "%q is not a valid cookie name", s.Name)
+			}
+			if s.Path != "" && (!strings.HasPrefix(s.Path, "/") || strings.ContainsAny(s.Path, ";\x00\r\n")) {
+				add(s.At.Field("path"), "%q is not a cookie path: it must start with '/' and hold no ';'", s.Path)
+			}
+		}
 		if u.Protocol != "h2" {
 			if u.TLSServerName != "" {
 				add(u.At.Field("tls_server_name"), "tls_server_name needs protocol h2")
@@ -177,6 +193,22 @@ func (c *Config) Validate() Errors {
 		}
 	}
 	return errs
+}
+
+// isToken reports whether s is an HTTP token (RFC 9110), as header field
+// and cookie names are.
+func isToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0 {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // isLoopback reports whether host is localhost or a loopback IP address.

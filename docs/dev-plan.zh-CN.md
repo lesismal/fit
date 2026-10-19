@@ -132,7 +132,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I30 | TLS-ALPN-01、OCSP stapling、默认 HTTPS | I29 | todo |
 | I31 | 按需 TLS | I30 | todo |
 | I32 | 主动健康检查 | I20 | done |
-| I33 | 负载均衡 v2 | I19 | todo |
+| I33 | 负载均衡 v2 | I19 | done |
 | I34 | Prometheus 指标 | I23 | todo |
 | I35 | M2 退出测试 | I25、I26、I27、I31、I32、I33、I34 | todo |
 | **M3** | | | |
