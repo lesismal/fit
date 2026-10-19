@@ -62,6 +62,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # Pebble, the ACME test server, for the tests that obtain certificates
+      # (see internal/pebbletest); its version is pebbletest.Version.
+      - name: Install Pebble
+        run: |
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.1
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.1
+          echo "FIT_PEBBLE_BIN=$(go env GOPATH)/bin" >> "$GITHUB_ENV"
       - name: go test -race
         run: go test -race ./...
 

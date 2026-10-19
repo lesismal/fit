@@ -1,5 +1,46 @@
 {
   "$defs": {
+    "config.ACME": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own.",
+          "type": "string"
+        },
+        "directory": {
+          "default": "https://acme-v02.api.letsencrypt.org/directory",
+          "description": "The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests.",
+          "type": "string"
+        },
+        "email": {
+          "description": "The address the CA may write to about the account's certificates; none when left out.",
+          "type": "string"
+        },
+        "max_concurrent": {
+          "default": 2,
+          "description": "How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request_timeout": {
+          "default": "30s",
+          "description": "How long each request to the CA may take. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "storage": {
+          "description": "The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10m",
+          "description": "How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.AccessLog": {
       "additionalProperties": false,
       "properties": {
@@ -300,17 +341,21 @@
     "config.TLS": {
       "additionalProperties": false,
       "properties": {
+        "acme": {
+          "description": "Host names to obtain certificates for with ACME, as the top-level acme says, through the HTTP-01 challenge: the CA must reach fit on port 80 at each name, where any listener of fit's in the clear answers it. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "certificates": {
-          "description": "The certificates served. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none.",
+          "description": "Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none.",
           "items": {
             "$ref": "#/$defs/config.Certificate"
           },
           "type": "array"
         }
       },
-      "required": [
-        "certificates"
-      ],
       "type": "object"
     },
     "config.Upstream": {
@@ -666,6 +711,10 @@
     "access_log": {
       "$ref": "#/$defs/config.AccessLog",
       "description": "Where a line is written for each request, as JSON; no access log when left out."
+    },
+    "acme": {
+      "$ref": "#/$defs/config.ACME",
+      "description": "How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."
     },
     "admin": {
       "$ref": "#/$defs/config.Admin",

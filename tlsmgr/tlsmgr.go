@@ -1,7 +1,6 @@
 // Package tlsmgr gives listeners their TLS: the configuration they serve,
-// and a Manager that picks each handshake's certificate. For now the
-// certificates come from files (Static); certificates obtained with ACME
-// come with I29, kept in a Storage.
+// and a Manager that picks each handshake's certificate, from files (Static)
+// or obtained with ACME and kept in a Storage (ACME), or both (Certs).
 package tlsmgr
 
 import (

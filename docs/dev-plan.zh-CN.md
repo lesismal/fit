@@ -132,7 +132,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I26 | 监听差量与旧图排空 | I24 | done |
 | I27 | 文件 provider | I24 | done |
 | I28 | 证书管理与存储；ACME 选型 | I09 | done |
-| I29 | ACME HTTP-01 与续期 | I28 | todo |
+| I29 | ACME HTTP-01 与续期 | I28 | done |
 | I30 | TLS-ALPN-01、OCSP stapling、默认 HTTPS | I29 | todo |
 | I31 | 按需 TLS | I30 | todo |
 | I32 | 主动健康检查 | I20 | done |

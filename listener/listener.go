@@ -22,6 +22,7 @@ import (
 	stdhttp "net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,6 +133,7 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 		s.bound = append(s.bound, b)
 	}
 	go func() { s.running <- engine.Run() }()
+	manageACME(g)
 	return s, nil
 }
 
@@ -317,7 +319,16 @@ func (s *Server) Reload(g *runtime.Graph) (added, removed []Addr, err error) {
 	}
 	s.bound = next
 	s.retire(gone, s.drain)
+	manageACME(g)
 	return addrsOf(fresh), addrsOf(gone), nil
+}
+
+// manageACME tells g's certificate manager, if it has one, the names to keep
+// certificates for, now that g is current.
+func manageACME(g *runtime.Graph) {
+	if g.ACME != nil {
+		g.ACME.Manage(g.ACMENames)
+	}
 }
 
 // retire stops the listeners bs taking connections and lets the ones they
@@ -500,6 +511,14 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	defer g.Release()
+	if g.ACME != nil && c.Request.TLS == nil && strings.HasPrefix(c.Request.URL.Path, tlsmgr.ACMEChallengePrefix) {
+		// The CA checks an HTTP-01 challenge in the clear; the answer is in
+		// memory. A token with no challenge under way goes to the routes.
+		if answer, ok := g.ACME.HTTPChallenge(c.Request.URL.Path[len(tlsmgr.ACMEChallengePrefix):]); ok {
+			_ = c.Respond(stdhttp.StatusOK, "text/plain", []byte(answer))
+			return
+		}
+	}
 	if d.addAltSvc != nil {
 		c.OnHeader(d.addAltSvc)
 	}

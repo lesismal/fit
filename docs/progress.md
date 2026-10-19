@@ -13,8 +13,8 @@ this file says what was done, and where the work differs from the plan.
 | Last updated | 2026-10-20 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I28, I32, I33) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME: certificates come from files only (I29–I31); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01, chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | ACME has HTTP-01 only: no TLS-ALPN-01, OCSP stapling, HTTPS by default (I30) or on-demand TLS (I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -68,10 +68,11 @@ To continue, start a session with:
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry |
-| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances |
+| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 and renews them on goroutines of its own; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
+| `internal/pebbletest` | runs Pebble, the ACME test server, and its DNS server for tests; skips them without the binaries |
 | `internal/fibtest` | runs fib handlers in tests without a network, as fib's servers run them, waiting for one that answers later: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
@@ -1604,6 +1605,63 @@ Differences from the plan:
   [A17](fib-api-requests.md#a17-cheaper-onfinish-and-setvalue-on-every-request).
 - Formatting lines off the worker would move the cost, not remove it: the server's cores are
   already all busy in this benchmark.
+
+### I29 ACME HTTP-01 and renewal — done
+
+- Config: a listener's `tls` takes `acme`, host names to obtain certificates for, besides or instead
+  of `certificates` (one or the other is needed); a name may not be a wildcard, an IP address or
+  listed twice. A top-level `acme` says where: `directory` (Let's Encrypt's when left out),
+  `email`, `ca_file` for a CA of one's own, `storage` (`$XDG_DATA_HOME/fit` or
+  `~/.local/share/fit`), `max_concurrent` (2), `timeout` for one certificate (10m) and
+  `request_timeout` for each request to the CA (30s). Like `access_log` and `admin`, the `acme`
+  settings are read at start, and a reload that changes them gets a warning; the names follow
+  every reload.
+- `tlsmgr.ACME`, the control plane's certificate manager, on `golang.org/x/crypto/acme` (decision
+  [007](decisions/007-acme-client.md)): a scheduler and `max_concurrent` workers of its own, which
+  may block on the CA and the storage, each obtaining under the `timeout`. `Manage(names)` sets the
+  names; `Certificate(name)` and `HTTPChallenge(token)` read memory only, an atomic map and a
+  `sync.Map`, for a handshake and a request. For each name a worker takes the storage's
+  certificate if it is not due for renewal, and otherwise takes the storage's lock for the name,
+  looks again, and orders one: account (its key made and kept on first use, under a lock of its
+  own), order, HTTP-01 answer, finalize with a new P-256 key, and the chain and key stored as one
+  PEM value, so that they change together.
+- Renewal once a third of the lifetime is left, less up to a fiftieth of it by the serial number,
+  so that certificates obtained together spread out, and instances sharing a storage agree on
+  when. A failure is tried again after a minute, doubling up to an hour, less up to a tenth at
+  random; it is logged on stderr with the wait.
+- `tlsmgr.Certs`, a listener's Manager when it lists names: a listed name's obtained certificate,
+  and the files' for every other name and for a listed name not obtained yet; with no files, the
+  first name's for a client that names none, and an error for a handshake with nothing to give.
+- `runtime`: `Env.ACME`, the manager `fit run` makes at start, whether or not the config lists
+  names, so a reload can add some; the graph carries it with the names of all its listeners, and
+  `listener` tells it the names once the graph is current, at start and on every reload. The
+  dispatcher answers `/.well-known/acme-challenge/<token>` from memory on a request in the clear
+  when a challenge for the token is under way; any other goes to the routes.
+- `internal/pebbletest` runs Pebble v2.10.1 and its DNS test server, which answers 127.0.0.1 for
+  every name, from `$FIT_PEBBLE_BIN` or `PATH`; tests without them are skipped. CI installs them.
+- Tests: `TestPebble` obtains a certificate from Pebble, answering the challenge from
+  `HTTPChallenge`, checks it chains to Pebble's root and that the account key is stored, renews it
+  (renewal set 3s after issue) and gets a new serial, and has a second manager on the same storage
+  serve the renewed certificate without obtaining one. `TestACMEFromPebble` (e2e) runs the fit
+  binary with a listener in the clear on Pebble's HTTP port and a TLS listener with only
+  `acme`: a client gets the page over a certificate that verifies against Pebble's root, and a
+  token with no challenge goes to the routes. Without Pebble: `TestSlowCA`, a CA that never answers,
+  five names and `max_concurrent` 2: each name is given up after the timeout and tried again, the CA
+  never sees more than two requests at once, a handshake and a challenge are answered meanwhile,
+  and `Close` returns at once; `TestCutCA`, a CA that closes every connection, is tried again later
+  and later; `TestStoredCertificate`, a stored certificate served without the CA; `TestManage`, a
+  name dropped is no longer served or tried; `TestCerts`, `TestRenewAt`, `TestBackoff`, `TestCAKey`;
+  the config's checks in `TestValidate`. `go vet ./...`, `GOOS=windows go vet ./...` and
+  `go test -race ./...` pass, with Pebble and without it; the ACME tests pass five times in a row.
+
+Differences from the plan:
+
+- ARI, the CA's suggested renewal window, which decision 007 says fit adds itself, is not here:
+  renewal is by lifetime. It goes with I30.
+- No benchmark: the data plane gains, on a request in the clear, a pointer check and a prefix
+  compare of the path, and handshakes for a listed name a map lookup through an atomic pointer.
+- The plan touched `tlsmgr` and `listener`; `config`, `schema`, `runtime`, `admin`, `cmd/fit` and CI
+  changed too, to configure, wire and test it.
 
 ## Notes for later iterations
 

@@ -156,6 +156,9 @@ func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byt
 	if !sameAdmin(cs.first.Admin, c.Admin) {
 		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
 	}
+	if !sameACME(cs.first.ACME, c.ACME) {
+		r.Warnings = append(r.Warnings, "acme changed; the change takes effect when fit restarts")
+	}
 	cs.record(r.Version, data, source)
 	r.ETag = cs.history[len(cs.history)-1].ETag
 	return r, nil
@@ -221,6 +224,14 @@ func sameAccessLog(a, b *config.AccessLog) bool {
 		return a == b
 	}
 	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
+}
+
+func sameACME(a, b *config.ACME) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Directory == b.Directory && a.Email == b.Email && a.CAFile == b.CAFile && a.Storage == b.Storage &&
+		a.MaxConcurrent == b.MaxConcurrent && a.Timeout == b.Timeout && a.RequestTimeout == b.RequestTimeout
 }
 
 func sameAdmin(a, b *config.Admin) bool {

@@ -18,6 +18,7 @@ import (
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/provider/file"
 	fitruntime "github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/tlsmgr"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -87,6 +88,15 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		// line written.
 		defer env.AccessLog.Close()
 	}
+	// The certificate manager is there whether or not the config lists
+	// names for it, so that a reload may add some; with none it only waits.
+	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, func(format string, args ...any) {
+		fmt.Fprintf(stderr, "fit: "+format+"\n", args...)
+	}); err != nil {
+		printConfigError(stderr, "fit run", *cfgFile, err)
+		return 1
+	}
+	defer env.ACME.Close()
 	g, err := fitruntime.Compile(c, env)
 	if err != nil {
 		printConfigError(stderr, "fit run", *cfgFile, err)

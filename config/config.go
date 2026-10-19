@@ -22,6 +22,66 @@ type Config struct {
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
 	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
+	ACME      *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
+}
+
+// The defaults of ACME.
+const (
+	DefaultACMEDirectory     = "https://acme-v02.api.letsencrypt.org/directory"
+	DefaultACMEMaxConcurrent = 2
+)
+
+// The defaults of ACME's durations.
+var (
+	DefaultACMETimeout        = Duration(10 * time.Minute)
+	DefaultACMERequestTimeout = Duration(30 * time.Second)
+)
+
+// ACME says where certificates are obtained, and where what is obtained is
+// kept. Certificates are renewed once a third of their lifetime is left,
+// give or take a little, so that instances sharing a storage do not all
+// renew at once; a failure is tried again later and later, up to an hour
+// apart.
+type ACME struct {
+	Directory      string   `json:"directory,omitempty" default:"\"https://acme-v02.api.letsencrypt.org/directory\"" doc:"The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests."`
+	Email          string   `json:"email,omitempty" doc:"The address the CA may write to about the account's certificates; none when left out."`
+	CAFile         string   `json:"ca_file,omitempty" doc:"A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own."`
+	Storage        string   `json:"storage,omitempty" doc:"The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out."`
+	MaxConcurrent  int      `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
+	Timeout        Duration `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
+	RequestTimeout Duration `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// DirectoryURL, Concurrency, OrderTimeout and HTTPTimeout return a's
+// settings, their defaults when a is nil or they are left out.
+func (a *ACME) DirectoryURL() string {
+	if a == nil || a.Directory == "" {
+		return DefaultACMEDirectory
+	}
+	return a.Directory
+}
+
+func (a *ACME) Concurrency() int {
+	if a == nil || a.MaxConcurrent <= 0 {
+		return DefaultACMEMaxConcurrent
+	}
+	return a.MaxConcurrent
+}
+
+func (a *ACME) OrderTimeout() time.Duration {
+	if a == nil || a.Timeout <= 0 {
+		return DefaultACMETimeout.Std()
+	}
+	return a.Timeout.Std()
+}
+
+func (a *ACME) HTTPTimeout() time.Duration {
+	if a == nil || a.RequestTimeout <= 0 {
+		return DefaultACMERequestTimeout.Std()
+	}
+	return a.RequestTimeout.Std()
 }
 
 // The defaults of Admin.
@@ -154,10 +214,11 @@ type Listener struct {
 }
 
 // TLS is a listener's TLS: the certificates it serves, chosen by the name the
-// client asks for (SNI). It allows TLS 1.2 and 1.3, and only AEAD cipher
-// suites with forward secrecy for 1.2.
+// client asks for (SNI), from files or obtained with ACME. It allows TLS 1.2
+// and 1.3, and only AEAD cipher suites with forward secrecy for 1.2.
 type TLS struct {
-	Certificates []Certificate `json:"certificates" fit:"required" doc:"The certificates served. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
+	Certificates []Certificate `json:"certificates,omitempty" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
+	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through the HTTP-01 challenge: the CA must reach fit on port 80 at each name, where any listener of fit's in the clear answers it. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
 
 	At Value `json:"-" fit:"self"`
 }

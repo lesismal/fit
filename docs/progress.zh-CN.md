@@ -12,8 +12,8 @@
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I28、I32、I33） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 ACME：证书只能来自文件（I29–I31）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 获取并续期，按 SNI 选择）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | ACME 只有 HTTP-01：还没有 TLS-ALPN-01、OCSP stapling、默认 HTTPS（I30）和按需 TLS（I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -56,10 +56,11 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目 |
-| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁 |
+| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 获取证书并续期；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
+| `internal/pebbletest` | 为测试运行 ACME 测试服务器 Pebble 及其 DNS 服务器；没有二进制文件时跳过测试 |
 | `internal/fibtest` | 在测试中不经网络、像 fib 的服务器一样运行 fib handler，并等待之后才应答的 handler：`Serve`、`ServeRequest` |
 | `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
 | `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
@@ -1199,6 +1200,44 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   全局池取一个 `responseWriter`，`SetValue` 要拿 Context 的锁，合计约 85 ns。这部分已作为
   [A17](fib-api-requests.zh-CN.md#a17降低每个请求上-onfinish-和-setvalue-的开销) 向 fib 提出。
 - 把日志行的格式化移出 worker 只会转移开销，不会消除：在这个基准里服务端的核已经全部占满。
+
+### I29 ACME HTTP-01 与续期 — 已完成
+
+- 配置：listener 的 `tls` 新增 `acme`，即要获取证书的主机名，可与 `certificates` 并存或取代它（两者至少要有一个）；名字不能
+  是通配符、IP 地址，也不能重复。顶层 `acme` 说明从哪里获取：`directory`（默认 Let's Encrypt）、`email`、自建 CA 用的
+  `ca_file`、`storage`（`$XDG_DATA_HOME/fit` 或 `~/.local/share/fit`）、`max_concurrent`（2）、获取一张证书的 `timeout`
+  （10m）以及每个发往 CA 的请求的 `request_timeout`（30s）。与 `access_log`、`admin` 一样，`acme` 的设置在启动时读取，重载
+  改动它们会得到警告；名字则跟随每次重载。
+- `tlsmgr.ACME`，控制面的证书管理器，基于 `golang.org/x/crypto/acme`（决策 [007](decisions/007-acme-client.zh-CN.md)）：
+  有自己的调度 goroutine 和 `max_concurrent` 个 worker，可以阻塞在 CA 和存储上，每次获取都受 `timeout` 限制。
+  `Manage(names)` 设置名字；`Certificate(name)` 和 `HTTPChallenge(token)` 只读内存（一个原子 map 和一个 `sync.Map`），供握手
+  和请求使用。对每个名字，worker 先取存储中尚未到续期时间的证书；否则拿到存储中该名字的锁，再看一次，然后申请：账户（首次
+  使用时生成并保存密钥，有自己的锁）、订单、HTTP-01 应答、用新的 P-256 密钥 finalize，证书链和密钥作为一个 PEM 值保存，
+  保证两者一起变化。
+- 剩下三分之一有效期时续期，再按序列号提前最多五十分之一有效期，让一起获取的证书错开，共享存储的实例对续期时间看法一致。
+  失败后一分钟重试，每次翻倍，最多一小时，再随机减去最多十分之一；失败及等待时间写到 stderr。
+- `tlsmgr.Certs`，列了名字的 listener 的 Manager：列出的名字给获取到的证书，其他名字以及还没获取到的列出的名字给文件中的
+  证书；没有文件时，不带名字的客户端得到第一个名字的证书，无证书可给的握手得到错误。
+- `runtime`：`Env.ACME` 是 `fit run` 启动时创建的管理器，不论配置是否列了名字都创建，以便重载时加入名字；图携带它和所有
+  listener 的名字，`listener` 在图成为当前图后（启动时和每次重载）把名字告诉它。dispatcher 在明文请求上、对应 token 的
+  challenge 进行中时，从内存应答 `/.well-known/acme-challenge/<token>`；其他请求交给路由。
+- `internal/pebbletest` 从 `$FIT_PEBBLE_BIN` 或 `PATH` 启动 Pebble v2.10.1 及其 DNS 测试服务器（对所有名字都答
+  127.0.0.1）；找不到时测试跳过。CI 会安装它们。
+- 测试：`TestPebble` 从 Pebble 获取证书（用 `HTTPChallenge` 应答 challenge），检查它链到 Pebble 的根、账户密钥已保存，
+  续期（续期时间设为签发后 3s）后序列号变化，并让同一存储上的第二个管理器直接使用续期后的证书而不再申请。
+  `TestACMEFromPebble`（e2e）运行 fit 二进制，明文 listener 在 Pebble 的 HTTP 端口上，TLS listener 只有 `acme`：客户端拿到
+  页面，证书能对 Pebble 的根验证通过；没有进行中 challenge 的 token 交给路由。不需要 Pebble 的：`TestSlowCA`，CA 永不应答、
+  五个名字、`max_concurrent` 为 2：每个名字超时后放弃并重试，CA 同时最多看到两个请求，期间握手和 challenge 照常应答，
+  `Close` 立即返回；`TestCutCA`，CA 关闭每个连接，重试间隔越来越长；`TestStoredCertificate`，存储中的证书无需 CA 即可使用；
+  `TestManage`，去掉的名字不再提供证书也不再重试；`TestCerts`、`TestRenewAt`、`TestBackoff`、`TestCAKey`；`TestValidate`
+  中的配置检查。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 在有无 Pebble 时都通过；ACME 测试
+  连续五次通过。
+
+与计划的差异：
+
+- 决策 007 说由 fit 自己实现的 ARI（CA 建议的续期窗口）这次没有做：续期按有效期计算。放到 I30。
+- 没有跑基准：数据面在明文请求上多了一次指针判断和一次路径前缀比较，列出名字的握手多了一次经原子指针的 map 查找。
+- 计划只涉及 `tlsmgr` 和 `listener`；为了配置、接线和测试，`config`、`schema`、`runtime`、`admin`、`cmd/fit` 和 CI 也有改动。
 
 ## 给后续迭代的说明
 

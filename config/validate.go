@@ -2,6 +2,7 @@ package config
 
 import (
 	"net"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -56,8 +57,24 @@ func (c *Config) Validate() Errors {
 			}
 			seen[p] = true
 		}
-		if l.TLS != nil && len(l.TLS.Certificates) == 0 {
-			add(l.TLS.At.Field("certificates"), "at least one certificate is needed")
+		if t := l.TLS; t != nil {
+			if len(t.Certificates) == 0 && len(t.ACME) == 0 {
+				add(t.At, "a certificate or a name for acme is needed")
+			}
+			names := map[string]bool{}
+			for i, name := range t.ACME {
+				switch msg := checkHost(name); {
+				case msg != "":
+					add(t.At.Field("acme").Index(i), "%s", msg)
+				case strings.HasPrefix(name, "*."):
+					add(t.At.Field("acme").Index(i), "%q is a wildcard, which the HTTP-01 challenge cannot obtain", name)
+				case net.ParseIP(strings.Trim(name, "[]")) != nil:
+					add(t.At.Field("acme").Index(i), "%q is an IP address; acme takes host names", name)
+				case names[strings.ToLower(name)]:
+					add(t.At.Field("acme").Index(i), "%q is listed twice", name)
+				}
+				names[strings.ToLower(name)] = true
+			}
 		}
 	}
 
@@ -110,6 +127,12 @@ func (c *Config) Validate() Errors {
 			add(a.At.Field("address"), "%s", msg)
 		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && a.TokenFile == "" {
 			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file", address)
+		}
+	}
+
+	if a := c.ACME; a != nil && a.Directory != "" {
+		if u, err := url.Parse(a.Directory); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
+			add(a.At.Field("directory"), "%q is not an http or https URL", a.Directory)
 		}
 	}
 

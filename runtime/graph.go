@@ -45,6 +45,12 @@ type Graph struct {
 	// see config.Limits. The engine takes it when it starts, as it does
 	// MaxPendingBytes.
 	MaxConns int
+	// ACME obtains the certificates of the names the listeners list in
+	// tls.acme, ACMENames, or is nil. It outlives the graph: once the graph
+	// is current, ACME is told to manage ACMENames, none or some, and it
+	// answers HTTP-01 challenges on the listeners in the clear.
+	ACME      *tlsmgr.ACME
+	ACMENames []string
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -68,6 +74,10 @@ type Env struct {
 	// AccessLog is the log made from the config's access_log, which the
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
+	// ACME is the certificate manager made from the config's acme, which
+	// the caller owns and closes, or nil; a config whose listeners list
+	// names in tls.acme needs one.
+	ACME *tlsmgr.ACME
 	// Previous is the graph being replaced, or nil. The new graph shares
 	// its pools for the upstreams whose config, and CA file, are the same,
 	// so that their connections and their backends' health carry over.
@@ -115,7 +125,7 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
+	g := &Graph{AccessLog: env.AccessLog, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
 	g.refs.Store(1)
 	var errs config.Errors
@@ -169,13 +179,30 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 				l.Protocols = config.DefaultTLSProtocols
 			}
 		}
-		if lc.TLS != nil {
-			certs, err := tlsmgr.LoadStatic(lc.TLS)
-			if err != nil {
-				errs = append(errs, config.AsErrors(err)...)
-				continue
+		if t := lc.TLS; t != nil {
+			var static *tlsmgr.Static
+			if len(t.Certificates) > 0 {
+				certs, err := tlsmgr.LoadStatic(t)
+				if err != nil {
+					errs = append(errs, config.AsErrors(err)...)
+					continue
+				}
+				static = certs
 			}
-			l.Certificates = certs
+			switch {
+			case len(t.ACME) == 0:
+				l.Certificates = static
+			case env.ACME == nil:
+				errs = append(errs, t.At.Field("acme").Errorf("there is no ACME certificate manager to obtain these names' certificates"))
+				continue
+			default:
+				l.Certificates = tlsmgr.NewCerts(static, env.ACME, t.ACME)
+				for _, name := range t.ACME {
+					if !slices.Contains(g.ACMENames, name) {
+						g.ACMENames = append(g.ACMENames, name)
+					}
+				}
+			}
 		}
 		for i, rc := range c.Routes {
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
