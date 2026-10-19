@@ -6,12 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/observe"
@@ -54,7 +56,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		return 2
 	}
 
-	c, err := config.LoadFile(*file)
+	data, err := os.ReadFile(*file)
+	var c *config.Config
+	if err == nil {
+		c, err = config.Load(data)
+	}
 	if err != nil {
 		printConfigError(stderr, "fit run", *file, err)
 		return 1
@@ -97,19 +103,41 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	for _, a := range s.Addrs() {
 		printListener(stdout, a)
 	}
+	var keep int
+	if c.Admin != nil {
+		keep = c.Admin.HistoryLen()
+	}
+	configs := admin.NewConfigs(rt, s, env, c, data, admin.SourceFile, keep)
+	var as *admin.Server
+	if c.Admin != nil {
+		as, err = admin.Start(c.Admin, configs, func(r admin.Result) {
+			printApplied(stdout, stderr, r)
+			fmt.Fprintf(stdout, "fit: loaded a config from the admin API (config version %d)\n", r.Version)
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fit run: %v\n", err)
+			_ = s.Close()
+			return 1
+		}
+		fmt.Fprintf(stdout, "fit: admin API on %s\n", as.Addr())
+	}
 
 	for running := true; running; {
 		select {
 		case <-ctx.Done():
 			running = false
 		case <-reload:
-			reloadConfig(*file, c, env, rt, s, stdout, stderr)
+			reloadConfig(*file, configs, stdout, stderr)
 		}
 	}
 	stopSignals()
 	fmt.Fprintln(stdout, "fit: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), *grace)
 	defer cancel()
+	if as != nil {
+		// First, so that no config is applied while the listeners shut down.
+		_ = as.Shutdown(sctx)
+	}
 	if err := s.Shutdown(sctx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			fmt.Fprintf(stderr, "fit run: shutdown took longer than %s; connections still open were closed\n", *grace)
@@ -126,46 +154,39 @@ func printListener(w io.Writer, a listener.Addr) {
 	fmt.Fprintf(w, "fit: listener %q on %s (%s)\n", a.Name, a.Addr, strings.Join(a.Protocols, ", "))
 }
 
-// reloadConfig loads and compiles file and moves the server to it. On any
-// failure the running config stays, and the error goes to stderr. first is
-// the config fit started with, whose access log stays until a restart.
-func reloadConfig(file string, first *config.Config, env fitruntime.Env, rt *fitruntime.Runtime, s *listener.Server, stdout, stderr io.Writer) {
+// reloadConfig loads file and applies it. On any failure the running config
+// stays, and the error goes to stderr.
+func reloadConfig(file string, configs *admin.Configs, stdout, stderr io.Writer) {
 	fmt.Fprintf(stdout, "fit: reloading %s\n", file)
-	c, err := config.LoadFile(file)
-	var g *fitruntime.Graph
+	data, err := os.ReadFile(file)
+	var r admin.Result
 	if err == nil {
-		g, err = fitruntime.Compile(c, env)
+		r, err = configs.Apply(data, admin.SourceFile)
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
-		printConfigError(stderr, "fit run", file, err)
+		var errs config.Errors
+		var pathErr *fs.PathError
+		if errors.As(err, &errs) || errors.As(err, &pathErr) {
+			fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
+			printConfigError(stderr, "fit run", file, err)
+		} else {
+			fmt.Fprintf(stderr, "fit: reload failed; the running config stays: %v\n", err)
+		}
 		return
 	}
-	added, removed, err := s.Reload(g)
-	if err != nil {
-		fmt.Fprintf(stderr, "fit: reload failed; the running config stays: %v\n", err)
-		return
-	}
-	for _, a := range removed {
-		fmt.Fprintf(stdout, "fit: listener %q on %s removed\n", a.Name, a.Addr)
-	}
-	for _, a := range added {
-		printListener(stdout, a)
-	}
-	if !sameAccessLog(first.AccessLog, c.AccessLog) {
-		fmt.Fprintln(stderr, "fit: access_log changed; the change takes effect when fit restarts")
-	}
-	version := uint64(0)
-	if cur := rt.Current(); cur != nil {
-		version = cur.Version
-		cur.Release()
-	}
-	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", file, version)
+	printApplied(stdout, stderr, r)
+	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", file, r.Version)
 }
 
-func sameAccessLog(a, b *config.AccessLog) bool {
-	if a == nil || b == nil {
-		return a == b
+// printApplied prints what applying a config changed.
+func printApplied(stdout, stderr io.Writer, r admin.Result) {
+	for _, a := range r.Removed {
+		fmt.Fprintf(stdout, "fit: listener %q on %s removed\n", a.Name, a.Addr)
 	}
-	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
+	for _, a := range r.Added {
+		printListener(stdout, a)
+	}
+	for _, w := range r.Warnings {
+		fmt.Fprintf(stderr, "fit: %s\n", w)
+	}
 }

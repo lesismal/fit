@@ -101,6 +101,18 @@ func (c *Config) Validate() Errors {
 		}
 	}
 
+	if a := c.Admin; a != nil {
+		if network, address := a.Network(); network == "unix" {
+			if address == "" {
+				add(a.At.Field("address"), "%q has no path after %q", a.Address, AdminUnixPrefix)
+			}
+		} else if _, msg := checkAddress(address); msg != "" {
+			add(a.At.Field("address"), "%s", msg)
+		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && a.TokenFile == "" {
+			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file", address)
+		}
+	}
+
 	upstreams := map[string]bool{}
 	for _, u := range c.Upstreams {
 		switch {
@@ -139,6 +151,15 @@ func (c *Config) Validate() Errors {
 		}
 	}
 	return errs
+}
+
+// isLoopback reports whether host is localhost or a loopback IP address.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // checkUpstreamAddress says what is wrong with addr as an upstream's

@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07 are planned |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (`GET /config`, `POST /load`, a history of versions), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no patching, ETags or rollback in the Admin API (I25); no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -26,7 +26,7 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: M2, with I24 (config versions and the Admin API skeleton) and I32 (active health checks).**
+**Next: I32 (active health checks).** M2 began with I24, the Admin API skeleton and config versions.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -40,7 +40,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I24 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I32 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -49,7 +49,8 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run` (with reload on SIGHUP), `validate`, `schema`, `version`, `help` |
+| `cmd/fit` | the CLI: `run` (with reload on SIGHUP and the Admin API), `validate`, `schema`, `version`, `help` |
+| `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied; the Admin API on net/http: `GET /config`, `POST /load`, `GET /versions`, `GET /versions/{n}` |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
@@ -963,6 +964,58 @@ Differences from the plan:
   not, and R06's connection limits are what bound how many such peers there can be.
 - An explicit 0 for `max_conns`, `max_pending` or a `limits` field means its default, since the
   config cannot tell 0 from left out for these fields; no limit can be turned off.
+
+### I24 Config versions and Admin API skeleton — done
+
+- `admin.Configs` is the one path a new config takes, from SIGHUP or the Admin API (and later the
+  file provider): `Apply(data, source)` loads, compiles and moves the server to it with
+  `listener.Server.Reload`, under one lock, so that applies follow one another; on any failure the
+  running config stays. It keeps the last `admin.history` configs (10) as they were written, with
+  the version `runtime.Runtime.Swap` gave each graph, when it was applied and where it came from.
+  `fit run`'s SIGHUP reload now goes through it; its output is unchanged.
+- The Admin API (`admin.Server`), on net/http and off unless the config has `admin`:
+  `GET /config` returns the running config as written, with its version in `Fit-Config-Version`;
+  `POST /load` applies its body and answers the new version, the listeners added and removed, and
+  warnings (changes to `access_log` or `admin`, which take a restart), or 400 with each config
+  error's path, line, column and message, or 500 when a listener cannot be bound; `GET /versions`
+  lists the configs kept and `GET /versions/{n}` returns one. `fit run` prints
+  `fit: admin API on <address>`, and a line for each config the API applies.
+- Config: a top-level `admin` with `address` (127.0.0.1:2019, or `unix/<path>` for a Unix socket,
+  made 0600; a socket left by a process that is gone is replaced, one in use is refused),
+  `token_file` (a bearer token every request must carry, compared in constant time), `history`,
+  `max_config_bytes` (4 MiB) and `max_conns` (16). The address must be loopback or a socket unless
+  `token_file` is set. Requests with `Origin` get 403, `POST /load` takes only `application/json`,
+  and on a TCP address without a token the `Host` field must name a loopback host, so that neither
+  a web page nor DNS rebinding reaches the API. Timeouts: 10s for the header, 60s for the body and
+  the response, 60s idle; 64 KiB of header.
+- Tests: `admin` loads a config and reads it back, and the listener serves it; refuses a config
+  that does not decode, compile or bind (400, 400, 500), one sent as `text/plain` (415) and one past
+  `max_config_bytes`, with a length (413 before reading) and chunked (413 at the limit), leaving
+  the running config and history alone; the token (missing, wrong, another scheme, right; an empty
+  token file); Origin and Host checks; history trimmed to `history`; eight concurrent loads, each
+  applied whole with a version of its own; a client that stops sending its config, cut off at the
+  read timeout while others are served, and one cut midway, which applies nothing; connections past
+  `max_conns` closed at once and served again once others go; the Unix socket, its mode, a stale
+  socket replaced and one in use refused; and the warnings. `config` tests the new checks;
+  `test/e2e/admin_test.go` runs fit with the API, loads a config that adds a listener, reads it
+  back and from `/versions/1`, is refused a broken one, and sees SIGHUP apply the file again as
+  version 3. `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- No benchmark: the data plane is unchanged; the API runs beside it on goroutines of its own.
+- Decision note [005](decisions/005-admin-api.md): net/http for the API, off by default, the token
+  in a file, configs kept as written.
+
+Differences from the plan:
+
+- The Admin API is off unless the config has `admin` (`"admin": {}` turns it on at its default
+  address), where Caddy's is on by default; see decision 005.
+- `runtime` is unchanged: `Runtime.Swap` already numbers graphs, and the history, being control
+  plane, lives in `admin` with the apply path.
+- `GET /versions` and `GET /versions/{n}`, not in the plan, show the history; `/versions` rather
+  than `/config/versions`, since I25 gives paths under `/config` to JSON pointers.
+- The history is in memory only; SIGHUP applies the file again over a config loaded through the
+  API, and a restart starts from the file.
+- A listener at port 0 is kept by a new config only if it is still written as port 0: listeners
+  are matched by the address as written, so the e2e test keeps `127.0.0.1:0` for the kept one.
 
 ## Notes for later iterations
 

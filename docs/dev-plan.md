@@ -133,7 +133,7 @@ Status: `todo`, `doing` or `done`.
 | R06 | Connection and queue limits through fib | R02, R03 | todo |
 | R07 | Hot path costs | R03, I23 | todo |
 | **M2** | | | |
-| I24 | Config versions and Admin API skeleton | I22 | todo |
+| I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | todo |
 | I26 | Listener diffing and graph draining | I24 | todo |
 | I27 | File provider | I24 | todo |

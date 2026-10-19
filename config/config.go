@@ -10,6 +10,7 @@ package config
 import (
 	"os"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -20,7 +21,54 @@ type Config struct {
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
+	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
 }
+
+// The defaults of Admin.
+const (
+	DefaultAdminAddress        = "127.0.0.1:2019"
+	DefaultAdminHistory        = 10
+	DefaultAdminMaxConfigBytes = 4 << 20
+	DefaultAdminMaxConns       = 16
+)
+
+// AdminUnixPrefix starts an Admin address that is a Unix socket's path.
+const AdminUnixPrefix = "unix/"
+
+// Admin is where the Admin API listens, and who may use it.
+type Admin struct {
+	Address        string `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	TokenFile      string `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
+	History        int    `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
+	MaxConfigBytes int64  `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
+	MaxConns       int    `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Addr returns the address, its default when left out.
+func (a *Admin) Addr() string {
+	if a.Address == "" {
+		return DefaultAdminAddress
+	}
+	return a.Address
+}
+
+// Network returns the network and address to listen on: "unix" and a path
+// for an address with AdminUnixPrefix, and "tcp" and the address otherwise.
+func (a *Admin) Network() (network, address string) {
+	addr := a.Addr()
+	if path, ok := strings.CutPrefix(addr, AdminUnixPrefix); ok {
+		return "unix", path
+	}
+	return "tcp", addr
+}
+
+// HistoryLen, ConfigBytes and Conns return the limits, their defaults when
+// left out.
+func (a *Admin) HistoryLen() int    { return int(orDefault(int64(a.History), DefaultAdminHistory)) }
+func (a *Admin) ConfigBytes() int64 { return orDefault(a.MaxConfigBytes, DefaultAdminMaxConfigBytes) }
+func (a *Admin) Conns() int         { return int(orDefault(int64(a.MaxConns), DefaultAdminMaxConns)) }
 
 // The defaults of Limits.
 const (

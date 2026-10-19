@@ -70,8 +70,12 @@ func (l *lockedBuffer) String() string {
 
 var listening = regexp.MustCompile(`^fit: listener "([^"]+)" on (\S+) `)
 
+// adminListening is the line fit prints once its Admin API listens.
+var adminListening = regexp.MustCompile(`^fit: admin API on (\S+)$`)
+
 // startFit runs fit on the config doc and waits until it listens. It
-// returns the address of each listener by name.
+// returns the address of each listener by name, and of the Admin API as
+// "admin".
 func startFit(t *testing.T, doc string) (*fit, map[string]string) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "fit.json")
@@ -111,11 +115,13 @@ func startFit(t *testing.T, doc string) (*fit, map[string]string) {
 			if !ok {
 				t.Fatalf("fit exited before listening: %v", <-f.done)
 			}
-			m := listening.FindStringSubmatch(line)
-			if m == nil {
+			if m := listening.FindStringSubmatch(line); m != nil {
+				addrs[m[1]] = m[2]
+			} else if m := adminListening.FindStringSubmatch(line); m != nil {
+				addrs["admin"] = m[1]
+			} else {
 				t.Fatalf("unexpected output: %q", line)
 			}
-			addrs[m[1]] = m[2]
 			if strings.Count(doc, `"address"`) == len(addrs) {
 				return f, addrs
 			}

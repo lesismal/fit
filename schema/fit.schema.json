@@ -23,6 +23,39 @@
       },
       "type": "object"
     },
+    "config.Admin": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:2019",
+          "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out.",
+          "type": "string"
+        },
+        "history": {
+          "default": 10,
+          "description": "How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_config_bytes": {
+          "default": 4194304,
+          "description": "The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_conns": {
+          "default": 16,
+          "description": "The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token_file": {
+          "description": "A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.Certificate": {
       "additionalProperties": false,
       "properties": {
@@ -510,6 +543,10 @@
     "access_log": {
       "$ref": "#/$defs/config.AccessLog",
       "description": "Where a line is written for each request, as JSON; no access log when left out."
+    },
+    "admin": {
+      "$ref": "#/$defs/config.Admin",
+      "description": "The Admin API, through which the running config is read and replaced; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."
     },
     "limits": {
       "$ref": "#/$defs/config.Limits",

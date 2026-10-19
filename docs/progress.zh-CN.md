@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07 已规划 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游，写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（`GET /config`、`POST /load`、版本历史）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | Admin API 还没有局部修改、ETag 和回滚（I25）；除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -22,7 +22,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：M2，先做 I24（配置版本与 Admin API 骨架）和 I32（主动健康检查）。** M2 之前的审查修复 R01、R02 已
+**下一步：I32（主动健康检查）。** M2 已从 I24（Admin API 骨架与配置版本）开始。M2 之前的审查修复 R01、R02 已
 完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -32,7 +32,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I24。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I32。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -40,7 +40,8 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`run`（收到 SIGHUP 时重载）、`validate`、`schema`、`version`、`help` |
+| `cmd/fit` | 命令行：`run`（收到 SIGHUP 或通过 Admin API 重载）、`validate`、`schema`、`version`、`help` |
+| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史；基于 net/http 的 Admin API：`GET /config`、`POST /load`、`GET /versions`、`GET /versions/{n}` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -746,6 +747,43 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   切断；整体排队响应的对端不会，能有多少这样的对端由 R06 的连接上限来限制。
 - `max_conns`、`max_pending` 或 `limits` 字段显式写 0 等同默认值，因为配置无法区分这些字段的 0 和未写；没有上限可以被
   关闭。
+
+### I24 配置版本与 Admin API 骨架 — 已完成
+
+- `admin.Configs` 是新配置的唯一路径，无论来自 SIGHUP 还是 Admin API（以后还有文件 provider）：
+  `Apply(data, source)` 加载、编译配置，并用 `listener.Server.Reload` 把服务器切换过去，全程持有一把锁，所以多次应用
+  依次进行；任何一步失败，运行中的配置保持不变。它按原样保存最近 `admin.history` 个配置（10 个），连同
+  `runtime.Runtime.Swap` 给每个图的版本号、应用时间和来源。`fit run` 的 SIGHUP 重载现在走这条路径，输出不变。
+- Admin API（`admin.Server`）基于 net/http，配置里没有 `admin` 时不开启：`GET /config` 按原样返回运行中的配置，版本号
+  在 `Fit-Config-Version` 中；`POST /load` 应用请求体，返回新版本号、新增和移除的 listener，以及警告（`access_log` 或
+  `admin` 的修改需要重启才生效）；配置有错时返回 400，带每个错误的路径、行、列和信息；listener 无法绑定时返回 500；
+  `GET /versions` 列出保存的配置，`GET /versions/{n}` 返回其中一个。`fit run` 打印 `fit: admin API on <地址>`，API
+  每应用一个配置也打印一行。
+- 配置：顶层的 `admin`，包括 `address`（127.0.0.1:2019，或 `unix/<路径>` 表示 Unix 套接字，权限 0600；已退出进程留下
+  的套接字会被替换，仍在使用的则拒绝）、`token_file`（每个请求都必须携带的 bearer 令牌，按常数时间比较）、`history`、
+  `max_config_bytes`（4 MiB）和 `max_conns`（16）。除非设置了 `token_file`，地址必须是回环地址或套接字。带 `Origin`
+  的请求得到 403，`POST /load` 只接受 `application/json`，在没有令牌的 TCP 地址上 `Host` 字段必须是回环主机名，所以
+  网页和 DNS 重绑定都无法到达 API。超时：头部 10s，请求体和响应 60s，空闲 60s；头部最多 64 KiB。
+- 测试：`admin` 加载配置并读回，listener 按新配置服务；拒绝无法解码、编译或绑定的配置（400、400、500），以
+  `text/plain` 发送的配置（415），以及超过 `max_config_bytes` 的配置，带长度的（读取前 413）和分块的（到达上限时 413），
+  运行中的配置和历史都不变；令牌（缺失、错误、其他方案、正确；空的令牌文件）；Origin 和 Host 检查；历史裁剪到
+  `history`；八个并发加载，每个都完整应用并得到自己的版本号；一个停止发送配置的客户端在读取超时时被切断，期间其他请求
+  照常服务，一个中途断开的客户端不应用任何东西；超过 `max_conns` 的连接立即关闭，其他连接离开后又能服务；Unix 套接字、
+  它的权限、替换残留的套接字和拒绝正在使用的套接字；以及警告。`config` 测试新的检查；`test/e2e/admin_test.go` 运行
+  带 API 的 fit，加载一个新增 listener 的配置，从 `/config` 和 `/versions/1` 读回，被拒绝一个错误的配置，并看到
+  SIGHUP 重新应用文件，成为版本 3。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- 没有做基准：数据面没有变化；API 在它旁边、在自己的 goroutine 上运行。
+- 决策记录 [005](decisions/005-admin-api.zh-CN.md)：API 用 net/http，默认关闭，令牌放在文件里，配置按原样保存。
+
+与计划的不同：
+
+- 配置里没有 `admin` 时 Admin API 不开启（`"admin": {}` 在默认地址开启它），而 Caddy 默认开启；见决策 005。
+- `runtime` 没有修改：`Runtime.Swap` 已经给图编号；历史属于控制面，与应用路径一起放在 `admin` 中。
+- 计划中没有的 `GET /versions` 和 `GET /versions/{n}` 用来查看历史；用 `/versions` 而不是 `/config/versions`，因为
+  I25 会把 `/config` 下的路径用作 JSON pointer。
+- 历史只在内存中；SIGHUP 会用文件覆盖通过 API 加载的配置，重启从文件开始。
+- 端口为 0 的 listener 只有在新配置中仍写作端口 0 时才会保留：listener 按书写的地址匹配，所以 e2e 测试中保留的那个
+  仍写 `127.0.0.1:0`。
 
 ## 给后续迭代的说明
 

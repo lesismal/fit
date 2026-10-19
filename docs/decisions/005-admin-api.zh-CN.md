@@ -1,0 +1,35 @@
+# 005：Admin API 用 net/http，默认关闭，配置按原样保存
+
+[English](005-admin-api.md) | [简体中文](005-admin-api.zh-CN.md)
+
+状态：已采纳，见 I24（2026-10-19）。
+
+## 背景
+
+I24 加入 Admin API，用来读取和替换运行中的配置，以及已应用配置的历史。需要确定：由什么来服务这个 API；配置没有
+要求时它是否开启；如何防止网页使用它；以及历史保存什么。
+
+## 决定
+
+- **Admin API 由 net/http 在它自己的 goroutine 上服务。** API 属于控制面：应用配置要读取证书文件、绑定
+  listener，这些都会阻塞，所以不能运行在 fib worker 上（规则 4）。net/http 属于标准库，核心的依赖不变；fib 只
+  会多出一个 API 反正要离开的 worker 池。它的资源都有上限：`admin.max_conns` 个连接（16；超过的连接在 accept
+  后立即关闭）、`max_config_bytes` 的请求体（4 MiB；超过则 413）、64 KiB 的头部，头部 10s、请求体和响应 60s、
+  空闲 60s 的超时。同一时间只应用一个配置。
+- **配置里没有 `admin` 就不开启。** `"admin": {}` 在 127.0.0.1:2019 开启它。Caddy 默认开启；对 fit 来说，那样
+  同一主机上的第二个进程就会启动失败，而且一个没人要求的 listener 出现在代理的配置里会让人意外。地址必须是回环
+  地址或 Unix 套接字（`unix/<路径>`，权限 0600），除非设置了 `token_file`，这样远程可达的 API 总是要求令牌。
+- **拒绝网页的请求。** 带 `Origin` 的请求得到 403，网页因此无法向 localhost 提交配置；`POST /load` 只接受
+  `application/json`，网页发送它需要一次预检，而 API 不应答预检；在没有令牌的 TCP 地址上，`Host` 字段必须是
+  回环主机名，通过 DNS 重绑定到达 127.0.0.1 的网页不满足这一点。
+- **令牌从文件读取**，即 `token_file`，从不写在配置里：`GET /config` 返回配置，令牌写在里面也会被返回。
+- **配置按原样保存**在内存中：`GET /config` 返回被应用的字节，来自文件或 API，而不是重新编码的结果。保留最近
+  `admin.history` 个配置（10 个），编号为 `runtime.Runtime.Swap` 给它们的图的版本号。它们不写入磁盘；重启从文件
+  开始。
+
+## 影响
+
+- 通过 API 加载的配置持续到下一次 SIGHUP（它会重新应用文件）或重启。把 API 加载的配置写回磁盘（像 Caddy 的
+  autosave 那样）可以随文件 provider（I27）一起做。
+- 对 `admin` 和 `access_log` 的修改在重启后生效；应用时会提示。
+- 历史中 API 配置最多占 `history × max_config_bytes`（默认 40 MiB），文件的配置按其大小计。

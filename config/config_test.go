@@ -228,11 +228,66 @@ func TestValidate(t *testing.T) {
 				`2:78: upstreams[0].tls_ca_file: tls_ca_file needs protocol h2`,
 			},
 		},
+		{
+			name: "admin on every interface without a token",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": ":2019"}}`,
+			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+		},
+		{
+			name: "admin on another host without a token",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "10.0.0.1:2019"}}`,
+			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+		},
+		{
+			name: "admin addresses",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "unix/"}}`,
+			want: []string{`1:73: admin.address: "unix/" has no path after "unix/"`},
+		},
+		{
+			name: "admin address without a port",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "localhost"}}`,
+			want: []string{`1:73: admin.address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`},
+		},
+		{
+			name: "admin limits",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"history": -1}}`,
+			want: []string{`1:73: admin.history: -1 is less than the minimum 0`},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			checkErrors(t, tt.doc, tt.want)
 		})
+	}
+}
+
+func TestAdmin(t *testing.T) {
+	for _, tt := range []struct {
+		admin            string
+		network, address string
+	}{
+		{`{}`, "tcp", DefaultAdminAddress},
+		{`{"address": "localhost:2019"}`, "tcp", "localhost:2019"},
+		{`{"address": "[::1]:0"}`, "tcp", "[::1]:0"},
+		{`{"address": "127.0.0.2:9"}`, "tcp", "127.0.0.2:9"},
+		{`{"address": ":2019", "token_file": "token"}`, "tcp", ":2019"},
+		{`{"address": "unix//run/fit/admin.sock"}`, "unix", "/run/fit/admin.sock"},
+	} {
+		c, err := Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": ` + tt.admin + `}`))
+		if err != nil {
+			t.Fatalf("%s: %v", tt.admin, err)
+		}
+		if network, address := c.Admin.Network(); network != tt.network || address != tt.address {
+			t.Errorf("%s: Network() = %s %s, want %s %s", tt.admin, network, address, tt.network, tt.address)
+		}
+	}
+	a := &Admin{}
+	if a.HistoryLen() != DefaultAdminHistory || a.ConfigBytes() != DefaultAdminMaxConfigBytes || a.Conns() != DefaultAdminMaxConns {
+		t.Errorf("defaults: %d %d %d", a.HistoryLen(), a.ConfigBytes(), a.Conns())
+	}
+	a = &Admin{History: 3, MaxConfigBytes: 100, MaxConns: 2}
+	if a.HistoryLen() != 3 || a.ConfigBytes() != 100 || a.Conns() != 2 {
+		t.Errorf("set: %d %d %d", a.HistoryLen(), a.ConfigBytes(), a.Conns())
 	}
 }
 
