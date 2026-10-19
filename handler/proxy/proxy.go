@@ -34,10 +34,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -96,8 +98,13 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
+	start := time.Now()
 	p.pool.Do(out, func(resp *fibhttp.ClientResponse, err error) {
 		defer c.Release()
+		if e := observe.EntryOf(c.Request); e != nil {
+			// Pool.Do set the address before sending.
+			e.Upstream, e.UpstreamDuration = out.URL.Host, time.Since(start)
+		}
 		if err != nil {
 			_ = c.Respond(stdhttp.StatusBadGateway, "text/plain; charset=utf-8", []byte("502 Bad Gateway\n"))
 			return

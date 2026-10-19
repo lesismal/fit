@@ -11,9 +11,9 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14 and I15 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14, I15 and I21 done |
 | fib | `github.com/lesismal/fib v1.2.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no TLS; proxied bodies are held whole, with no timeouts yet (I16, I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -21,9 +21,8 @@ response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and basel
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I16, reverse proxy II (streaming and backpressure)**, which I15 unblocked. I21
-is being done next in this session; I09, I13, I19 and I22 are also ready to start, unless another
-session has taken them.
+**Next iteration: I16, reverse proxy II (streaming and backpressure)**, which I15 unblocked. I09,
+I13, I19 and I22 are also ready to start, unless another session has taken them.
 
 To continue, start a session with:
 
@@ -46,6 +45,7 @@ To continue, start a session with:
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; graceful shutdown |
 | `upstream` | `Pool`, which sends requests to an upstream over HTTP/1.1 through fib's asynchronous client and drains before it closes; `StartEngine` for the engine pools dial through |
+| `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
@@ -439,6 +439,45 @@ Differences from the plan:
   kept, with trailers (I17).
 - The proxy holds the request with `Retain`, not the graph; decision 004 explains why the pool's
   draining is enough.
+
+### I21 Access logs — done
+
+- Config: a top-level `access_log` with `output` (`"stdout"`, the default, `"stderr"` or a file
+  appended to), `flush_interval` (1s) and `buffer_bytes` (4 MiB). `fit run` opens it, hands it to
+  the graph through `runtime.Env.AccessLog`, and closes it after the graph, which writes out what is
+  buffered. `fit validate` does not open it.
+- Package `observe`: `AccessLog.Log` formats one JSON line (time in UTC with milliseconds,
+  listener, route, client IP, proto, method, host, URI, status, bytes in and out, duration,
+  upstream and upstream duration, user agent, referer) into a stack buffer and appends it to the
+  log's buffer under a short lock; it allocates nothing. A goroutine of the log's own swaps the
+  buffer out and writes it every `flush_interval`, or as soon as 64 KB wait. When `buffer_bytes`
+  are waiting, because the output is slow or blocked, lines are dropped and counted, and the count
+  goes to stderr once the output catches up: a request never waits for the disk. Strings are
+  escaped by hand, invalid UTF-8 becoming U+FFFD, so every line is valid JSON.
+- `listener`'s dispatcher, when the graph has a log, makes an `observe.Entry` (start, listener,
+  route, bytes in), attaches it to the request's context with `observe.Attach`, and registers a
+  `Context.OnFinish` hook that logs the line with the status and size fib sends. The proxy fills in
+  the entry's upstream address and time before writing its response. 404s are logged too.
+- Tests: `observe` checks a line's fields and escaping, IPv6 and missing fields, JSON string
+  escaping against `encoding/json`, the flush interval, the flush when 64 KB wait, a blocked
+  output (10,000 lines logged within a second with the writer stuck, every line either written or
+  counted as dropped, the drops reported), `Close` flushing and dropping later lines, and file
+  output. `handler/proxy` logs proxied and unmatched requests through a real listener over HTTP/1.1
+  and h2c and checks every field; `test/e2e` runs `fit run` with a file log and finds the lines
+  after SIGTERM. `BenchmarkLog`: about 416 ns and no allocation a line with 14 goroutines logging
+  at once (Apple M3 Max). `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The plan's "a benchmark shows logging does not block workers" is shown by the blocked-output
+  test and `BenchmarkLog`. A load test with logging on and off was to run on the benchmark host,
+  which refused the session's ssh key; it can be run there with key-based login.
+- The log belongs to the process, not the graph, so that a response finished after a graph swap
+  still has a log to go to. I22 decides what a reload that changes `access_log` does, and whether
+  SIGHUP reopens the file for log rotation.
+- One log for every listener; per-listener or per-route logs, sampling and other formats can come
+  when someone needs them. Under heavy contention the one lock shows (416 ns a line at 14
+  goroutines); per-worker buffers are the fix if I23's numbers call for it.
 
 ## Notes for later iterations
 

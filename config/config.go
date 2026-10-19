@@ -17,6 +17,18 @@ type Config struct {
 	Listeners []Listener `json:"listeners" fit:"required" doc:"The addresses fit listens on, and the protocols each one serves."`
 	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
+	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
+}
+
+// AccessLog says where access log lines go. Lines are buffered and written
+// by a goroutine of their own, so that a slow disk never holds up a request:
+// lines past the buffer's limit are dropped and counted.
+type AccessLog struct {
+	Output        string   `json:"output,omitempty" doc:"\"stdout\", \"stderr\", or the path of a file lines are appended to; \"stdout\" when left out."`
+	FlushInterval Duration `json:"flush_interval,omitempty" doc:"How long a line may wait in the buffer before it is written; 1s when left out."`
+	BufferBytes   int      `json:"buffer_bytes,omitempty" min:"0" doc:"How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out."`
+
+	At Value `json:"-" fit:"self"`
 }
 
 // Protocols a listener can serve.

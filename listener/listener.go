@@ -15,11 +15,13 @@ import (
 	"net"
 	stdhttp "net/http"
 	"slices"
+	"time"
 
 	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 )
 
@@ -140,9 +142,30 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 			break
 		}
 	}
+	if log := g.AccessLog; log != nil {
+		d.logRequest(c, log, route)
+	}
 	if route == nil {
 		_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
 		return
 	}
 	route.Handler.ServeHTTP(c)
+}
+
+// logRequest has the access log write a line for c's request once its
+// response is finished. The log outlives the graph, so a response finished
+// after the graph is released still has somewhere to go.
+func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route) {
+	r := c.Request
+	e := &observe.Entry{Start: time.Now(), Listener: d.name, BytesIn: r.ContentLength}
+	if body := c.Body(); body != nil {
+		e.BytesIn = int64(len(body))
+	} else if e.BytesIn < 0 {
+		e.BytesIn = 0
+	}
+	if route != nil {
+		e.Route = route.Name
+	}
+	observe.Attach(r, e)
+	c.OnFinish(func(status int, _ stdhttp.Header, size int64) { log.Log(e, r, status, size) })
 }

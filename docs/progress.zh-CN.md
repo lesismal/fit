@@ -10,17 +10,17 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15、I21 已完成 |
 | fib | `github.com/lesismal/fib v1.2.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 TLS；代理的 body 整体缓冲，也还没有超时（I16、I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I16，反向代理 II（流式与背压）**，I15 完成后它可以开始了。本会话接下来做 I21；I09、I13、I19、
-I22 也都可以开始（除非已有别的会话在做）。
+**下一个迭代：I16，反向代理 II（流式与背压）**，I15 完成后它可以开始了。I09、I13、I19、I22 也都可以开始（除非
+已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
@@ -42,6 +42,7 @@ I22 也都可以开始（除非已有别的会话在做）。
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；优雅退出 |
 | `upstream` | `Pool`：通过 fib 的异步客户端以 HTTP/1.1 向上游发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
+| `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/fibtest` | 在测试中不经网络运行 fib handler：`Serve`、`ServeRequest` |
@@ -362,6 +363,34 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 计划中的“一个上游”是配置 `upstreams` 中的一个具名上游，它可以有多个地址并轮流使用（I14）。
 - `TE` 和其他逐跳头一样被去掉，包括 `TE: trailers`；gRPC（I49）需要保留它，并配合 trailer（I17）。
 - 代理用 `Retain` 持有的是请求而不是图；决定 004 说明了为什么连接池的排空就足够了。
+
+### I21 访问日志 — 已完成
+
+- 配置：顶层 `access_log`，包括 `output`（默认 `"stdout"`，也可以是 `"stderr"` 或追加写入的文件）、
+  `flush_interval`（1s）和 `buffer_bytes`（4 MiB）。`fit run` 打开它，通过 `runtime.Env.AccessLog` 交给图，
+  并在图之后关闭它，关闭时写出缓冲的内容。`fit validate` 不会打开它。
+- `observe` 包：`AccessLog.Log` 把一行 JSON（UTC 毫秒时间、listener、路由、客户端 IP、协议、方法、host、URI、
+  状态码、收发字节数、耗时、上游及上游耗时、user agent、referer）格式化到栈上的缓冲区，再在短暂持锁的情况下追加
+  到日志缓冲区；不分配内存。日志自己的 goroutine 每隔 `flush_interval`，或者积累到 64 KB 时，换出缓冲区并写出。
+  当输出慢或被阻塞、等待写出的数据达到 `buffer_bytes` 时，新行被丢弃并计数，输出恢复后把计数写到 stderr：请求
+  永远不等磁盘。字符串手工转义，无效的 UTF-8 变成 U+FFFD，保证每一行都是合法 JSON。
+- `listener` 的分发器在图有日志时创建一个 `observe.Entry`（开始时间、listener、路由、收到的字节数），用
+  `observe.Attach` 挂到请求的 context 上，并注册 `Context.OnFinish` 钩子，用 fib 发出的状态码和大小记录日志。代理在
+  写响应前填入上游地址和耗时。404 也会记录。
+- 测试：`observe` 检查一行的字段和转义、IPv6 和缺省字段、对照 `encoding/json` 的 JSON 字符串转义、按间隔刷新、
+  积累 64 KB 时刷新、输出被阻塞（写出卡住时一秒内记录 10000 行，每一行要么写出要么计入丢弃，丢弃被报告）、
+  `Close` 会刷新并丢弃之后的行，以及文件输出。`handler/proxy` 通过真实 listener 在 HTTP/1.1 和 h2c 下记录代理和
+  未匹配的请求并检查所有字段；`test/e2e` 用文件日志运行 `fit run`，在 SIGTERM 后找到这些行。`BenchmarkLog`：14
+  个 goroutine 同时记录时每行约 416 ns、零分配（Apple M3 Max）。`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 计划中的“基准显示日志不阻塞 worker”由输出阻塞测试和 `BenchmarkLog` 证明。开关日志的压测原本要在压测机上
+  进行，但压测机拒绝了本会话的 ssh 密钥；配置好密钥登录后可以在那里补跑。
+- 日志属于进程而不是图，这样图替换之后才结束的响应仍有日志可写。I22 决定修改了 `access_log` 的重载怎么处理，以及
+  SIGHUP 是否为日志轮转重新打开文件。
+- 所有 listener 共用一个日志；按 listener 或路由分开的日志、采样和其他格式，等有需要时再加。高并发竞争下单锁的
+  开销可见（14 个 goroutine 时每行 416 ns）；如果 I23 的数据需要，改成每 worker 一个缓冲区。
 
 ## 给后续迭代的说明
 

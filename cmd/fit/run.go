@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/observe"
 	fitruntime "github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/upstream"
 )
@@ -54,7 +55,17 @@ func serve(ctx context.Context, stopSignals func(), args []string, stdout, stder
 		return 1
 	}
 	defer stopEngine()
-	g, err := fitruntime.Compile(c, fitruntime.Env{Engine: engine})
+	env := fitruntime.Env{Engine: engine}
+	if c.AccessLog != nil {
+		if env.AccessLog, err = observe.NewAccessLog(c.AccessLog); err != nil {
+			fmt.Fprintf(stderr, "fit run: access log: %v\n", err)
+			return 1
+		}
+		// Closed after the graph, so that every response finished has its
+		// line written.
+		defer env.AccessLog.Close()
+	}
+	g, err := fitruntime.Compile(c, env)
 	if err != nil {
 		printConfigError(stderr, "fit run", *file, err)
 		return 1

@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/upstream"
 )
@@ -47,6 +49,12 @@ func echoBackend(t *testing.T) string {
 // of their own, as fit run does. It returns the listener's base URL.
 func startFit(t *testing.T, doc string, addrs ...string) string {
 	t.Helper()
+	return startFitLog(t, doc, nil, addrs...)
+}
+
+// startFitLog is startFit with an access log.
+func startFitLog(t *testing.T, doc string, log *observe.AccessLog, addrs ...string) string {
+	t.Helper()
 	quoted := make([]string, len(addrs))
 	for i, a := range addrs {
 		quoted[i] = `"` + a + `"`
@@ -59,7 +67,7 @@ func startFit(t *testing.T, doc string, addrs ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := runtime.Compile(c, runtime.Env{Engine: engine})
+	g, err := runtime.Compile(c, runtime.Env{Engine: engine, AccessLog: log})
 	if err != nil {
 		stop()
 		t.Fatal(err)
@@ -388,6 +396,82 @@ func TestHead(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != 200 || resp.ContentLength != 11 {
 			t.Errorf("h2c=%v: HEAD gave %d with Content-Length %d, want the upstream's 11", h2c, resp.StatusCode, resp.ContentLength)
+		}
+	}
+}
+
+// lockedBuffer collects access log lines.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func TestAccessLog(t *testing.T) {
+	var out lockedBuffer
+	log := observe.NewAccessLogTo(&out, time.Hour, 0)
+	backend := echoBackend(t)
+	base := startFitLog(t, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
+  "upstreams": [{"name": "app", "addresses": [%s]}],
+  "routes": [{"name": "api", "match": {"path": ["/api/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}}}]
+}`, log, backend)
+	for _, h2c := range []bool{false, true} {
+		req, _ := stdhttp.NewRequest("POST", base+"/api/x?q=1", strings.NewReader("hello"))
+		req.Header.Set("User-Agent", "logtest")
+		resp, err := client(h2c).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		resp, err = client(h2c).Get(base + "/nowhere")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out.mu.Lock()
+	lines := strings.Split(strings.TrimSuffix(out.b.String(), "\n"), "\n")
+	out.mu.Unlock()
+	if len(lines) != 4 {
+		t.Fatalf("%d lines: %q", len(lines), lines)
+	}
+	// A line is written as its response finishes, which may be after the
+	// client has the response: the lines' order is not the requests'.
+	protos := map[string]int{}
+	for i, line := range lines {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
+		protos[fmt.Sprint(got["proto"], " ", got["uri"])]++
+		if got["listener"] != "web" || got["client"] != "127.0.0.1" {
+			t.Errorf("line %d: %v", i, got)
+		}
+		if got["uri"] == "/api/x?q=1" {
+			if got["route"] != "api" || got["method"] != "POST" || got["status"] != 201.0 ||
+				got["bytes_in"] != 5.0 || got["bytes_out"].(float64) < 10 || got["upstream"] != backend ||
+				got["upstream_duration"].(float64) <= 0 || got["user_agent"] != "logtest" ||
+				got["duration"].(float64) < got["upstream_duration"].(float64) {
+				t.Errorf("proxied line %d: %v", i, got)
+			}
+		} else if got["status"] != 404.0 || got["uri"] != "/nowhere" || got["route"] != nil || got["upstream"] != nil {
+			t.Errorf("404 line %d: %v", i, got)
+		}
+	}
+	for _, k := range []string{"HTTP/1.1 /api/x?q=1", "HTTP/1.1 /nowhere", "HTTP/2.0 /api/x?q=1", "HTTP/2.0 /nowhere"} {
+		if protos[k] != 1 {
+			t.Errorf("lines by protocol and URI: %v", protos)
+			break
 		}
 	}
 }

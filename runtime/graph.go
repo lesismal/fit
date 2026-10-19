@@ -16,6 +16,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/router"
 	"github.com/lesismal/fit/upstream"
 )
@@ -27,6 +28,8 @@ type Graph struct {
 	Version uint64
 	// Listeners are the config's listeners, in the order written.
 	Listeners []*Listener
+	// AccessLog is where a line goes for each request, or nil.
+	AccessLog *observe.AccessLog
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -39,6 +42,9 @@ type Env struct {
 	// makes pools that fail every request, for a config that is only
 	// checked, as fit validate does.
 	Engine *fib.Engine
+	// AccessLog is the log made from the config's access_log, which the
+	// caller owns and closes, or nil.
+	AccessLog *observe.AccessLog
 }
 
 // Listener is a listener and the routes it serves.
@@ -75,7 +81,7 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
+	g := &Graph{AccessLog: env.AccessLog, upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
 	g.refs.Store(1)
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
