@@ -25,6 +25,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/upstream"
 )
 
 // Namespaces, and the interface a module in each must implement.
@@ -87,6 +88,24 @@ type Cleaner interface {
 type Context struct {
 	// Params are the module's params as written, for errors to point into.
 	Params config.Value
+
+	env *Env
+}
+
+// Env is what the config a module belongs to provides it with.
+type Env struct {
+	// Upstreams are the config's upstream pools, by name.
+	Upstreams map[string]*upstream.Pool
+}
+
+// Upstream returns the pool of the upstream named name in the module's
+// config. The pool lives as long as the module does.
+func (c *Context) Upstream(name string) (*upstream.Pool, bool) {
+	if c.env == nil {
+		return nil, false
+	}
+	p, ok := c.env.Upstreams[name]
+	return p, ok
 }
 
 // Errorf returns an error about the param named field, or about the params as
@@ -173,8 +192,9 @@ func Namespace(ns string) []Info {
 }
 
 // Load creates the module ref names in namespace ns, decodes its params and
-// provisions it. Its errors carry the path and position of what is wrong.
-func Load(ns string, ref config.ModuleRef) (any, error) {
+// provisions it with env, which may be nil. Its errors carry the path and
+// position of what is wrong.
+func Load(ns string, ref config.ModuleRef, env *Env) (any, error) {
 	info, ok := Lookup(ns + "." + ref.Module)
 	if !ok {
 		return nil, ref.At.Field("module").Errorf("there is no module %q in %s%s", ref.Module, ns, known(ns))
@@ -184,7 +204,7 @@ func Load(ns string, ref config.ModuleRef) (any, error) {
 		return nil, err
 	}
 	if p, ok := m.(Provisioner); ok {
-		if err := p.Provision(&Context{Params: ref.Params}); err != nil {
+		if err := p.Provision(&Context{Params: ref.Params, env: env}); err != nil {
 			if _, ok := err.(*config.Error); !ok {
 				if _, ok := err.(config.Errors); !ok {
 					err = ref.Params.Errorf("%v", err)

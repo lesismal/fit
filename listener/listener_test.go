@@ -61,7 +61,7 @@ func swap(t *testing.T, rt *runtime.Runtime, doc string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := runtime.Compile(c)
+	g, err := runtime.Compile(c, runtime.Env{})
 	if err != nil {
 		t.Fatal(err)
 	}

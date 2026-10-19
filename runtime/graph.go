@@ -12,9 +12,12 @@ import (
 	"slices"
 	"sync/atomic"
 
+	fib "github.com/lesismal/fib"
+
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/router"
+	"github.com/lesismal/fit/upstream"
 )
 
 // Graph is a compiled config.
@@ -25,8 +28,17 @@ type Graph struct {
 	// Listeners are the config's listeners, in the order written.
 	Listeners []*Listener
 
-	refs    atomic.Int64
-	modules []any // every provisioned module, in the order provisioned
+	refs      atomic.Int64
+	modules   []any // every provisioned module, in the order provisioned
+	upstreams map[string]*upstream.Pool
+}
+
+// Env is what compiling a config needs from the process it runs in.
+type Env struct {
+	// Engine is the running fib engine upstream pools dial through. Nil
+	// makes pools that fail every request, for a config that is only
+	// checked, as fit validate does.
+	Engine *fib.Engine
 }
 
 // Listener is a listener and the routes it serves.
@@ -55,20 +67,26 @@ type Route struct {
 }
 
 // Compile builds a Graph from c, which must already have passed
-// config.Load's checks. It loads and provisions every module the config
-// names, and reports every module that fails, not only the first. On
-// failure, the modules already provisioned are cleaned up.
+// config.Load's checks. It makes a pool for each upstream, dialing through
+// env's engine, then loads and provisions every module the config names, and
+// reports every module that fails, not only the first. On failure, the
+// modules already provisioned are cleaned up and the pools closed.
 //
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
-func Compile(c *config.Config) (*Graph, error) {
-	g := &Graph{}
+func Compile(c *config.Config, env Env) (*Graph, error) {
+	g := &Graph{upstreams: make(map[string]*upstream.Pool, len(c.Upstreams))}
 	g.refs.Store(1)
+	for i := range c.Upstreams {
+		u := &c.Upstreams[i]
+		g.upstreams[u.Name] = upstream.New(env.Engine, u)
+	}
+	menv := &module.Env{Upstreams: g.upstreams}
 
 	var errs config.Errors
 	routes := make([]*Route, len(c.Routes))
 	for i, rc := range c.Routes {
-		r, err := g.compileRoute(rc)
+		r, err := g.compileRoute(rc, menv)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 			continue
@@ -106,9 +124,9 @@ func newRouter(routes []*Route) *router.Router[*Route] {
 	return router.New(rs)
 }
 
-func (g *Graph) compileRoute(rc config.Route) (*Route, error) {
+func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	var errs config.Errors
-	m, err := module.Load(module.Handlers, rc.Handler)
+	m, err := module.Load(module.Handlers, rc.Handler, env)
 	var h module.Handler
 	if err != nil {
 		errs = append(errs, config.AsErrors(err)...)
@@ -121,7 +139,7 @@ func (g *Graph) compileRoute(rc config.Route) (*Route, error) {
 	}
 	mws := make([]module.Middleware, len(rc.Middleware))
 	for i, ref := range rc.Middleware {
-		m, err := module.Load(module.Middlewares, ref)
+		m, err := module.Load(module.Middlewares, ref, env)
 		if err != nil {
 			errs = append(errs, config.AsErrors(err)...)
 			continue
@@ -146,11 +164,22 @@ func (g *Graph) compileRoute(rc config.Route) (*Route, error) {
 }
 
 // cleanupModules cleans up g's modules in the reverse of the order they were
-// provisioned, so that a module is cleaned up before any it was built on.
+// provisioned, so that a module is cleaned up before any it was built on,
+// and then closes the upstream pools the modules used. A pool closes once
+// the requests still in flight on it are done.
 func cleanupModules(g *Graph) {
 	for i := len(g.modules) - 1; i >= 0; i-- {
 		module.Cleanup(g.modules[i])
 	}
+	for _, p := range g.upstreams {
+		p.Close()
+	}
+}
+
+// Upstream returns the pool of the upstream named name.
+func (g *Graph) Upstream(name string) (*upstream.Pool, bool) {
+	p, ok := g.upstreams[name]
+	return p, ok
 }
 
 // Retain takes another reference to g, which must already hold one that the

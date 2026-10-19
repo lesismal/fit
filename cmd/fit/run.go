@@ -15,6 +15,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	fitruntime "github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/upstream"
 )
 
 func runRun(args []string, stdout, stderr io.Writer) int {
@@ -40,10 +41,20 @@ func serve(ctx context.Context, stopSignals func(), args []string, stdout, stder
 	}
 
 	c, err := config.LoadFile(*file)
-	var g *fitruntime.Graph
-	if err == nil {
-		g, err = fitruntime.Compile(c)
+	if err != nil {
+		printConfigError(stderr, "fit run", *file, err)
+		return 1
 	}
+	// Upstream connections are dialed through an engine of their own, since
+	// the listeners' engine is made from the compiled graph. It stops after
+	// the graph is released, which closes the pools.
+	engine, stopEngine, err := upstream.StartEngine()
+	if err != nil {
+		fmt.Fprintf(stderr, "fit run: %v\n", err)
+		return 1
+	}
+	defer stopEngine()
+	g, err := fitruntime.Compile(c, fitruntime.Env{Engine: engine})
 	if err != nil {
 		printConfigError(stderr, "fit run", *file, err)
 		return 1

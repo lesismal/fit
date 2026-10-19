@@ -90,7 +90,50 @@ func (c *Config) Validate() Errors {
 			add(r.Handler.At.Field("module"), "the module name is empty")
 		}
 	}
+
+	upstreams := map[string]bool{}
+	for _, u := range c.Upstreams {
+		switch {
+		case !namePattern.MatchString(u.Name):
+			add(u.At.Field("name"), "%q is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit", u.Name)
+		case upstreams[u.Name]:
+			add(u.At.Field("name"), "another upstream is already named %q", u.Name)
+		}
+		upstreams[u.Name] = true
+		if len(u.Addresses) == 0 {
+			add(u.At.Field("addresses"), "an upstream needs at least one address")
+		}
+		seen := map[string]bool{}
+		for i, addr := range u.Addresses {
+			at := u.At.Field("addresses").Index(i)
+			if msg := checkUpstreamAddress(addr); msg != "" {
+				add(at, "%s", msg)
+			} else if seen[addr] {
+				add(at, "%q is listed twice", addr)
+			}
+			seen[addr] = true
+		}
+	}
 	return errs
+}
+
+// checkUpstreamAddress says what is wrong with addr as an upstream's
+// address, or returns "".
+func checkUpstreamAddress(addr string) string {
+	if strings.Contains(addr, "://") {
+		return addr + " is a URL; write the host and port alone, as in \"10.0.0.1:8080\""
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return strconv.Quote(addr) + " is not a host and port, as in \"10.0.0.1:8080\""
+	}
+	if host == "" {
+		return strconv.Quote(addr) + " has no host"
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return strconv.Quote(addr) + " has no valid port"
+	}
+	return ""
 }
 
 // checkAddress returns address's port, or why it is not a valid address.

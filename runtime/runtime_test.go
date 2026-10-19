@@ -81,7 +81,7 @@ func compile(t *testing.T, doc string) (*Graph, error) {
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	return Compile(c)
+	return Compile(c, Env{})
 }
 
 func mustCompile(t *testing.T, doc string) *Graph {

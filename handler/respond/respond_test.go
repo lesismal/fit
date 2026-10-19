@@ -22,7 +22,7 @@ func load(t *testing.T, params string) (*Respond, error) {
 	if err := v.Decode(&ref); err != nil {
 		t.Fatal(err)
 	}
-	m, err := module.Load(module.Handlers, ref)
+	m, err := module.Load(module.Handlers, ref, nil)
 	if err != nil {
 		return nil, err
 	}

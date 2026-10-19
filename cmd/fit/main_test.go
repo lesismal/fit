@@ -41,8 +41,10 @@ func TestVersion(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	if code, stdout, stderr := runFit("validate", "-c", "../../examples/hello.json"); code != 0 || stdout != "../../examples/hello.json: valid\n" {
-		t.Fatalf("example: %d %q %q", code, stdout, stderr)
+	for _, example := range []string{"../../examples/hello.json", "../../examples/proxy.json"} {
+		if code, stdout, stderr := runFit("validate", "-c", example); code != 0 || stdout != example+": valid\n" {
+			t.Fatalf("%s: %d %q %q", example, code, stdout, stderr)
+		}
 	}
 
 	dir := t.TempDir()

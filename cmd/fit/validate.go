@@ -28,7 +28,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	if err == nil {
 		// Compiling provisions every module, which checks their params too.
 		var g *fitruntime.Graph
-		if g, err = fitruntime.Compile(c); err == nil {
+		if g, err = fitruntime.Compile(c, fitruntime.Env{}); err == nil {
 			g.Release()
 		}
 	}

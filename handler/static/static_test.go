@@ -24,7 +24,7 @@ func load(t *testing.T, params string) (*Static, error) {
 	if err := v.Decode(&ref); err != nil {
 		t.Fatal(err)
 	}
-	m, err := module.Load(module.Handlers, ref)
+	m, err := module.Load(module.Handlers, ref, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func BenchmarkServeCached(b *testing.B) {
 	if err := v.Decode(&ref); err != nil {
 		b.Fatal(err)
 	}
-	m, err := module.Load(module.Handlers, ref)
+	m, err := module.Load(module.Handlers, ref, nil)
 	if err != nil {
 		b.Fatal(err)
 	}

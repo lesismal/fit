@@ -88,9 +88,66 @@
       ],
       "type": "object"
     },
+    "config.Upstream": {
+      "additionalProperties": false,
+      "properties": {
+        "addresses": {
+          "description": "The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\".",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "connect_timeout": {
+          "description": "How long opening a connection may take; 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "description": "How long an idle connection is kept before it is closed; 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_conns": {
+          "description": "The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_idle_conns": {
+          "description": "How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "A name unique among the upstreams, by which handlers refer to this one.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "addresses"
+      ],
+      "type": "object"
+    },
     "http.handlers": {
       "additionalProperties": false,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "proxy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.proxy"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -128,6 +185,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "proxy",
             "respond",
             "static"
           ],
@@ -139,6 +197,30 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "http.handlers.proxy": {
+      "additionalProperties": false,
+      "properties": {
+        "host_header": {
+          "description": "The Host header sent upstream; the client's when left out.",
+          "type": "string"
+        },
+        "trusted_proxies": {
+          "description": "The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "upstream": {
+          "description": "The name of the upstream requests go to.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upstream"
       ],
       "type": "object"
     },
@@ -232,6 +314,13 @@
       "description": "How requests are matched, and what handles them.",
       "items": {
         "$ref": "#/$defs/config.Route"
+      },
+      "type": "array"
+    },
+    "upstreams": {
+      "description": "The servers requests can be proxied to, by name.",
+      "items": {
+        "$ref": "#/$defs/config.Upstream"
       },
       "type": "array"
     }

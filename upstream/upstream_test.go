@@ -36,17 +36,14 @@ func startEngine(t *testing.T) *fib.Engine {
 	return engine
 }
 
-func decode(t *testing.T, doc string) (*Config, error) {
+// decode loads a config whose one upstream is doc, without its name.
+func decode(t *testing.T, doc string) (*config.Upstream, error) {
 	t.Helper()
-	v, err := config.ParseValue([]byte(doc), "upstream")
+	c, err := config.Load([]byte(`{"listeners": [{"name": "web", "address": ":0"}], "upstreams": [{"name": "u", ` + doc[1:] + `]}`))
 	if err != nil {
-		t.Fatal(err)
-	}
-	var c Config
-	if err := v.Decode(&c); err != nil {
 		return nil, err
 	}
-	return &c, c.Check()
+	return &c.Upstreams[0], nil
 }
 
 // newPool decodes doc, with %s standing for the backends' addresses, and
@@ -331,33 +328,53 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestConfigErrors(t *testing.T) {
-	tests := []struct {
-		doc  string
-		want string
-	}{
-		{`{}`, `1:1: upstream.addresses: missing required field`},
-		{`{"addresses": []}`, `1:15: upstream.addresses: an upstream needs at least one address`},
-		{`{"addresses": ["http://a:80"]}`, `1:16: upstream.addresses[0]: http://a:80 is a URL; write the host and port alone, as in "10.0.0.1:8080"`},
-		{`{"addresses": ["a"]}`, `1:16: upstream.addresses[0]: "a" is not a host and port, as in "10.0.0.1:8080"`},
-		{`{"addresses": [":80"]}`, `1:16: upstream.addresses[0]: ":80" has no host`},
-		{`{"addresses": ["a:0", "a:x", "a:70000"]}`, "1:16: upstream.addresses[0]: \"a:0\" has no valid port\n" +
-			"1:23: upstream.addresses[1]: \"a:x\" has no valid port\n" +
-			"1:30: upstream.addresses[2]: \"a:70000\" has no valid port"},
-		{`{"addresses": ["a:1", "a:1"]}`, `1:23: upstream.addresses[1]: "a:1" is listed twice`},
-		{`{"addresses": ["a:1"], "max_conns": -1}`, `1:37: upstream.max_conns: -1 is less than the minimum 0`},
-		{`{"addresses": ["a:1"], "idle_timeout": "soon"}`, `1:40: upstream.idle_timeout: "soon" is not a duration, such as "10s" or "1m30s"`},
-		{`{"addresses": ["a:1"], "connect_timeout": 5}`, `1:43: upstream.connect_timeout: expected a string, got a number`},
+func TestCloseDrains(t *testing.T) {
+	release := make(chan struct{})
+	arrived := make(chan struct{})
+	b := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.URL.Path == "/slow" {
+			close(arrived)
+			<-release
+		}
+		_, _ = io.WriteString(w, "ok")
+	})
+	p := newPool(t, `{"addresses": [%s]}`, b)
+	slow := goDo(t, p, "/slow")
+	<-arrived
+	p.Close()
+	// Requests still go while one is in flight: one that started on the
+	// pool's graph may yet need it.
+	if got := do(t, p, "/"); got.err != nil || got.status != 200 {
+		t.Fatalf("a request while draining: %+v", got)
 	}
-	for _, tt := range tests {
-		_, err := decode(t, tt.doc)
-		if err == nil || err.Error() != tt.want {
-			t.Errorf("%s:\n got %v\nwant %s", tt.doc, err, tt.want)
+	close(release)
+	if got := <-slow; got.err != nil || got.body != "ok" {
+		t.Fatalf("the request in flight at Close: %+v", got)
+	}
+	timeout := time.After(5 * time.Second)
+	for b.open.Load() > 0 {
+		select {
+		case <-b.closed:
+		case <-timeout:
+			t.Fatal("the connections stayed open after draining")
 		}
 	}
-	for _, ok := range []string{`{"addresses": ["[::1]:8080", "backend:80", "10.0.0.1:65535"], "max_idle_conns": 0}`} {
-		if _, err := decode(t, ok); err != nil {
-			t.Errorf("%s: %v", ok, err)
-		}
+	if got := do(t, p, "/"); got.err == nil {
+		t.Fatal("a drained pool sent a request")
+	}
+}
+
+func TestNoEngine(t *testing.T) {
+	c, err := decode(t, `{"addresses": ["127.0.0.1:1"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(nil, c)
+	defer p.Close()
+	if got := do(t, p, "/"); got.err != ErrNoEngine {
+		t.Fatalf("got %+v", got)
+	}
+	if p.Name() != "u" || len(p.Addresses()) != 1 {
+		t.Fatalf("name %q, addresses %v", p.Name(), p.Addresses())
 	}
 }

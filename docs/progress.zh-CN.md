@@ -10,21 +10,21 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I11、I12、I14、I15 已完成 |
 | fib | `github.com/lesismal/fib v1.2.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TLS 和代理（上游连接池已完成，代理 handler 在 I15）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1 和 h2c 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 TLS；代理的 body 整体缓冲，也还没有超时（I16、I17）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一个迭代：I15，反向代理 I**，I11 和 I14 完成后它可以开始了。I09、I13、I19、I21、I22 也都可以开始（除非
-已有别的会话在做），其中任何一个都可以与 I15 并行。
+**下一个迭代：I16，反向代理 II（流式与背压）**，I15 完成后它可以开始了。本会话接下来做 I21；I09、I13、I19、
+I22 也都可以开始（除非已有别的会话在做）。
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I15。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I16。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
 > 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
 > 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -34,19 +34,20 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 | --- | --- |
 | `cmd/fit` | 命令行：`run`、`validate`、`schema`、`version`、`help` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
-| `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner` |
+| `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
+| `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded` |
 | `handler/static` | `static` handler：根目录下的文件，小文件缓存，校验器，条件请求和 Range 请求 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
-| `runtime` | 把配置 `Compile` 成不可变的 `Graph`，每个 listener 一个路由器；带原子替换和图引用计数的 `Runtime` |
+| `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener；把每个请求分发到当前图的路由；优雅退出 |
-| `upstream` | 上游的 `Config`（地址、连接上限、超时）和 `Pool`，后者通过 fib 的异步客户端以 HTTP/1.1 发送请求 |
+| `upstream` | `Pool`：通过 fib 的异步客户端以 HTTP/1.1 向上游发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/fibtest` | 在测试中不经网络运行 fib handler：`Serve`、`ServeRequest` |
 | `test/e2e` | 编译 fit 二进制，经网络驱动 `fit run` |
 | `bench` | 基准框架：`cmd/fitbench`、`cmd/idleconn`、四个服务器的配置、结果 |
-| `examples` | `hello.json` |
+| `examples` | `hello.json`、`proxy.json` |
 
 目前的配置形如：
 
@@ -332,12 +333,44 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 连接池已经会在多个地址之间轮流分配请求，否则每个上游只有一个地址，`addresses` 就成了只有一项的列表；
   I19 会用它的选择接口替换这一做法。在那之前 `module.Upstream` 和 `module.Service` 仍是暂定接口。
 
+### I15 反向代理 I：转发与头处理 — 已完成
+
+- 配置：顶层 `upstreams` 列表，元素是 `config.Upstream`（`name` 加上 I14 的字段），由 `Config.Validate` 检查
+  （名字，以及原来 `upstream.Config.Check` 里的地址检查）。该类型从 `upstream` 移到了 `config`（`upstream` 依赖
+  `config`）。见[决定 004](decisions/004-upstreams-and-async-handlers.zh-CN.md)。
+- `runtime.Compile(c, Env)` 在提供模块之前通过 `Env.Engine` 为每个上游创建连接池，用 `module.Env` 传给模块
+  （`module.Load` 接受它；`Context.Upstream(name)` 查找），并在清理模块之后关闭它们。`fit run` 用
+  `upstream.StartEngine` 启动客户端 engine，图释放后停止；`fit validate` 不带 engine 编译，此时连接池让每个请求
+  失败。`Pool.Close` 现在会排空：在途请求的回调都执行完后才关闭客户端。
+- `handler/proxy` 包，模块名 `proxy`，参数有 `upstream`（必填）、`trusted_proxies`（IP 和 CIDR）和
+  `host_header`。它用客户端的方法、路径（保持收到时的转义）、查询串、头和 body（`c.Body()`，fib 默认整体读取）
+  构造上游请求，retain 请求，调用 `Pool.Do`，在回调里写回状态码、头和 body，然后 release。逐跳头（`Connection`
+  及其列出的头、`Keep-Alive`、`Proxy-Connection`、`Proxy-Authenticate`、`Proxy-Authorization`、`TE`、`Trailer`、
+  `Transfer-Encoding`、`Upgrade`）双向都去掉。除非设置了 `host_header`，否则把客户端的 `Host` 发给上游。客户端
+  没发 `User-Agent` 时不会凭空加一个。在 `trusted_proxies` 中的客户端，会把它自己追加到 `X-Forwarded-For` 和
+  `Forwarded`，并保留它的 `X-Forwarded-Proto` 和 `X-Forwarded-Host`；其他客户端这四个头都会被替换。`Forwarded`
+  中的 IPv6 地址和带端口的 host 会加引号。上游请求失败返回 502。
+- 测试通过真实的 listener 和客户端 engine 进行：方法、转义的路径和查询串、`Host`、重复的和自定义的头、8 KB 的
+  body 通过 HTTP/1.1 和 h2c 到达上游，状态码和头正确返回；请求中的逐跳头被去掉，用原始后端验证响应中的逐跳头
+  也被去掉；不可信和可信的转发头；`host_header`；连接被拒绝时返回 502；HEAD 保留上游的 `Content-Length`；两种
+  协议下 64 个并发请求；IPv4、IPv6 和 unknown 的 `Forwarded` 元素；配置错误。`config` 测试上游检查，`upstream`
+  测试排空和无 engine 的连接池，`cmd/fit` 校验 `examples/proxy.json`，`test/e2e` 通过构建出的二进制做代理。代理
+  测试在 `-race` 下运行五次均通过；`go vet ./...` 和 `go test -race ./...` 通过。
+
+与计划的不同：
+
+- 计划中的“一个上游”是配置 `upstreams` 中的一个具名上游，它可以有多个地址并轮流使用（I14）。
+- `TE` 和其他逐跳头一样被去掉，包括 `TE: trailers`；gRPC（I49）需要保留它，并配合 trailer（I17）。
+- 代理用 `Retain` 持有的是请求而不是图；决定 004 说明了为什么连接池的排空就足够了。
+
 ## 给后续迭代的说明
 
 - **fib 版本。** fit 使用模块代理上的 fib v1.2.0。本地 fib 仓库的 `main` 比这个 tag 多约 30 个提交。如果某个迭代
   需要更新的 fib，应该发布一个 fib 版本，而不是提交 `replace` 指令。
-- **图的生命周期与异步 handler。** `listener` 的分发器在 handler 返回时释放图。I15 是第一个稍后才响应的
-  handler，必须持有图直到响应结束或被取消。
+- **图的生命周期与异步 handler。** `listener` 的分发器在 handler 返回时释放图。稍后才应答的 handler 要自己
+  保证用到的东西可用：代理用 `Context.Retain` 持有请求，并依赖连接池在关闭前排空（决定 004）。
+- **测试环境。** 单元测试和 `go test` 微基准在本机运行。压测（`fitbench` 框架、wrk、h2load）在压测机上运行，
+  用 `ssh -p 10013 127.0.0.1` 登录。
 - **基准测试。** fit 新支持的场景或模块要加进 `bench/cmd/fitbench/servers.go` 和
   `bench/configs/fit/fit.json`。nginx 会预分配连接表（`worker_connections 65536` 时每个 worker 约
   29 MB），这体现在打开任何连接之前的内存里，而不是每连接的开销里。

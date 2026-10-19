@@ -11,23 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12 and I14 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14 and I15 done |
 | fib | `github.com/lesismal/fib v1.2.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS, no proxying yet (the upstream pool is built, the proxy handler is I15); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no TLS; proxied bodies are held whole, with no timeouts yet (I16, I17); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I15, reverse proxy I**, which I11 and I14 unblocked. I09, I13, I19, I21 and
-I22 are also ready to start, unless another session has taken them; any of them can run in
-parallel with I15.
+**Next iteration: I16, reverse proxy II (streaming and backpressure)**, which I15 unblocked. I21
+is being done next in this session; I09, I13, I19 and I22 are also ready to start, unless another
+session has taken them.
 
 To continue, start a session with:
 
-> Implement iteration I15 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I16 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -38,19 +38,20 @@ To continue, start a session with:
 | --- | --- |
 | `cmd/fit` | the CLI: `run`, `validate`, `schema`, `version`, `help` |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
-| `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner` |
+| `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
+| `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list |
 | `handler/static` | the `static` handler: files under a root, with a cache of small files, validators, conditional and range requests |
 | `modules/standard` | imports every module fit ships with |
-| `runtime` | `Compile` from config to an immutable `Graph` with a router per listener; `Runtime` with atomic swaps and graph reference counts |
+| `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine; dispatches each request to a route of the current graph; graceful shutdown |
-| `upstream` | `Config` for an upstream (addresses, connection limits, timeouts) and `Pool`, which sends requests over HTTP/1.1 through fib's asynchronous client |
+| `upstream` | `Pool`, which sends requests to an upstream over HTTP/1.1 through fib's asynchronous client and drains before it closes; `StartEngine` for the engine pools dial through |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/fibtest` | runs fib handlers in tests without a network: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
-| `examples` | `hello.json` |
+| `examples` | `hello.json`, `proxy.json` |
 
 A config today looks like this:
 
@@ -397,14 +398,59 @@ Differences from the plan:
   upstream would make `addresses` a list of one; I19 replaces that with its selection interface.
   `module.Upstream` and `module.Service` stay provisional until then.
 
+### I15 Reverse proxy I: forwarding and headers — done
+
+- Config: a top-level `upstreams` list of `config.Upstream` (`name` plus I14's fields), checked by
+  `Config.Validate` (names, and the address checks that were `upstream.Config.Check`). The type
+  moved from `upstream` to `config`, which `upstream` imports. See
+  [decision 004](decisions/004-upstreams-and-async-handlers.md).
+- `runtime.Compile(c, Env)` makes a pool per upstream through `Env.Engine` before provisioning the
+  modules, passes them in `module.Env` (`module.Load` takes it; `Context.Upstream(name)` finds
+  one), and closes them after cleaning up the modules. `fit run` starts a client engine with
+  `upstream.StartEngine` and stops it after the graph goes; `fit validate` compiles with no engine,
+  whose pools fail every request. `Pool.Close` now drains: it closes the client once the requests
+  in flight have had their callbacks.
+- Package `handler/proxy`, module `proxy`, params `upstream` (required), `trusted_proxies` (IPs and
+  CIDRs) and `host_header`. It builds the upstream request from the client's method, path (escaped
+  as received), query, headers and body (`c.Body()`, which fib reads whole by default), retains the
+  request, calls `Pool.Do`, and in the callback writes the status, headers and body back, then
+  releases. Hop-by-hop fields (`Connection` and what it names, `Keep-Alive`, `Proxy-Connection`,
+  `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`) are
+  dropped both ways. The client's `Host` goes upstream unless `host_header` is set. No
+  `User-Agent` is made up for a client that sent none. A client in `trusted_proxies` has itself
+  appended to `X-Forwarded-For` and `Forwarded` and its `X-Forwarded-Proto` and `X-Forwarded-Host`
+  kept; anyone else has all four replaced. `Forwarded` quotes IPv6 addresses and hosts with a port.
+  A failed upstream request gets 502.
+- Tests, through a real listener and client engine: method, an escaped path and query, the `Host`,
+  repeated and custom headers and an 8 KB body reach the upstream over HTTP/1.1 and h2c, and the
+  status and headers come back; hop-by-hop fields are dropped from a request and, with a raw
+  backend, from a response; untrusted and trusted forwarded fields; `host_header`; 502 for a
+  refused connect; HEAD keeps the upstream's `Content-Length`; 64 concurrent requests over both
+  protocols; `Forwarded` elements for IPv4, IPv6 and unknown; config errors. `config` tests the
+  upstream checks, `upstream` the draining and the engineless pool, `cmd/fit` validates
+  `examples/proxy.json`, and `test/e2e` proxies through the built binary. Five runs of the proxy
+  tests under `-race` pass; `go vet ./...` and `go test -race ./...` pass.
+
+Differences from the plan:
+
+- The plan's "one upstream" is a named upstream from the config's `upstreams`, which may have
+  several addresses taken in turn (I14).
+- `TE` is dropped like the other hop-by-hop fields, `TE: trailers` included; gRPC (I49) needs it
+  kept, with trailers (I17).
+- The proxy holds the request with `Retain`, not the graph; decision 004 explains why the pool's
+  draining is enough.
+
 ## Notes for later iterations
 
 - **fib version.** fit uses fib v1.2.0 from the module proxy. The local fib checkout's `main` is
   about 30 commits ahead of that tag. If an iteration needs something newer, tag a fib release
   rather than committing a `replace` directive.
 - **Graph lifetime and async handlers.** `listener`'s dispatcher releases the graph when the
-  handler returns. I15, the first handler to answer later, must hold the graph until the response
-  is finished or cancelled.
+  handler returns. A handler that answers later keeps alive what it uses itself: the proxy holds
+  the request with `Context.Retain` and relies on its pool draining before it closes (decision 004).
+- **Test hosts.** Unit tests and `go test` micro-benchmarks run locally. Load tests (the
+  `fitbench` harness, wrk, h2load) run on the benchmark host, reached with `ssh -p 10013
+  127.0.0.1`.
 - **Benchmarks.** A new scenario or module that fit can serve goes into
   `bench/cmd/fitbench/servers.go` and `bench/configs/fit/fit.json`. nginx preallocates its
   connection tables (about 29 MB per worker with `worker_connections 65536`), which shows in its

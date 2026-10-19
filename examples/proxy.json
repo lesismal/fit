@@ -1,0 +1,20 @@
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "upstreams": [
+    {"name": "app", "addresses": ["127.0.0.1:9000", "127.0.0.1:9001"], "max_conns": 256, "idle_timeout": "60s"}
+  ],
+  "routes": [
+    {
+      "name": "api",
+      "match": {"path": ["/api/*"]},
+      "handler": {"module": "proxy", "params": {"upstream": "app", "trusted_proxies": ["10.0.0.0/8"]}}
+    },
+    {
+      "name": "fallback",
+      "priority": -1,
+      "handler": {"module": "respond", "params": {"status": 404, "body": "not found\n"}}
+    }
+  ]
+}

@@ -187,6 +187,26 @@ func TestValidate(t *testing.T) {
 				`3:138: routes[1].handler.module: the module name is empty`,
 			},
 		},
+		{
+			name: "upstreams",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "upstreams": [
+  {"name": "u", "addresses": ["a:1", "a:1"]},
+  {"name": "u", "addresses": []},
+  {"name": "-x", "addresses": ["http://a:80", "a", ":80", "a:0", "a:x", "a:70000", "[::1]:8080"], "max_conns": 2, "idle_timeout": "1s"}
+]}`,
+			want: []string{
+				`2:38: upstreams[0].addresses[1]: "a:1" is listed twice`,
+				`3:12: upstreams[1].name: another upstream is already named "u"`,
+				`3:30: upstreams[1].addresses: an upstream needs at least one address`,
+				`4:12: upstreams[2].name: "-x" is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit`,
+				`4:32: upstreams[2].addresses[0]: http://a:80 is a URL; write the host and port alone, as in "10.0.0.1:8080"`,
+				`4:47: upstreams[2].addresses[1]: "a" is not a host and port, as in "10.0.0.1:8080"`,
+				`4:52: upstreams[2].addresses[2]: ":80" has no host`,
+				`4:59: upstreams[2].addresses[3]: "a:0" has no valid port`,
+				`4:66: upstreams[2].addresses[4]: "a:x" has no valid port`,
+				`4:73: upstreams[2].addresses[5]: "a:70000" has no valid port`,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

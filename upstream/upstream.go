@@ -14,10 +14,9 @@
 package upstream
 
 import (
-	"net"
+	"errors"
 	stdhttp "net/http"
-	"strconv"
-	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,80 +26,40 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// The defaults Config's fields stand for when left out.
+// The defaults config.Upstream's fields stand for when left out.
 const (
 	DefaultMaxIdleConns   = 32
 	DefaultIdleTimeout    = 60 * time.Second
 	DefaultConnectTimeout = 10 * time.Second
 )
 
-// Config is an upstream: the addresses requests to it go to, and how the
-// connections to them are kept.
-type Config struct {
-	Addresses      []string        `json:"addresses" fit:"required" doc:"The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\"."`
-	MaxConns       int             `json:"max_conns,omitempty" min:"0" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out."`
-	MaxIdleConns   *int            `json:"max_idle_conns,omitempty" min:"0" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
-	IdleTimeout    config.Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
-	ConnectTimeout config.Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out."`
-
-	At config.Value `json:"-" fit:"self"`
-}
-
-// Check reports what is wrong with c that its types do not catch, with the
-// path and position of each mistake.
-func (c *Config) Check() error {
-	var errs config.Errors
-	if len(c.Addresses) == 0 {
-		errs = append(errs, c.At.Field("addresses").Errorf("an upstream needs at least one address"))
-	}
-	seen := make(map[string]bool, len(c.Addresses))
-	for i, addr := range c.Addresses {
-		at := c.At.Field("addresses").Index(i)
-		if msg := checkAddress(addr); msg != "" {
-			errs = append(errs, at.Errorf("%s", msg))
-			continue
-		}
-		if seen[addr] {
-			errs = append(errs, at.Errorf("%q is listed twice", addr))
-		}
-		seen[addr] = true
-	}
-	if len(errs) > 0 {
-		return errs
-	}
-	return nil
-}
-
-// checkAddress says what is wrong with addr as an upstream's address, or
-// returns "".
-func checkAddress(addr string) string {
-	if strings.Contains(addr, "://") {
-		return addr + " is a URL; write the host and port alone, as in \"10.0.0.1:8080\""
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return strconv.Quote(addr) + " is not a host and port, as in \"10.0.0.1:8080\""
-	}
-	if host == "" {
-		return strconv.Quote(addr) + " has no host"
-	}
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-		return strconv.Quote(addr) + " has no valid port"
-	}
-	return ""
-}
+// ErrNoEngine is what a request through a pool made without an engine gets.
+var ErrNoEngine = errors.New("upstream: the pool has no engine to dial through")
 
 // Pool sends requests to an upstream's addresses, over connections it keeps.
 // It is safe for concurrent use.
 type Pool struct {
-	client    *fibhttp.Client
+	name      string
+	client    *fibhttp.Client // nil without an engine
 	addresses []string
 	next      atomic.Uint32
+
+	// inFlight counts requests whose callback has not returned, and closing
+	// says Close was called: the client is closed once both hold.
+	inFlight  atomic.Int64
+	closing   atomic.Bool
+	closeOnce sync.Once
 }
 
-// New returns a pool for the upstream c, which Check has passed, dialing
-// through engine, which must be running. Close the pool before the engine.
-func New(engine *fib.Engine, c *Config) *Pool {
+// New returns a pool for the upstream c, which config.Config.Validate has
+// passed, dialing through engine, which must be running. A nil engine makes a
+// pool that fails every request with ErrNoEngine, for a config that is only
+// checked. Close the pool before stopping the engine.
+func New(engine *fib.Engine, c *config.Upstream) *Pool {
+	p := &Pool{name: c.Name, addresses: c.Addresses}
+	if engine == nil {
+		return p
+	}
 	cc := fibhttp.DefaultClientConfig()
 	// A request is bounded by the caller's context; the proxy's timeouts
 	// come with I17.
@@ -118,8 +77,12 @@ func New(engine *fib.Engine, c *Config) *Pool {
 	if cc.DialTimeout == 0 {
 		cc.DialTimeout = DefaultConnectTimeout
 	}
-	return &Pool{client: fibhttp.NewClient(engine, cc), addresses: c.Addresses}
+	p.client = fibhttp.NewClient(engine, cc)
+	return p
 }
+
+// Name returns the upstream's name.
+func (p *Pool) Name() string { return p.name }
 
 // Addresses returns the upstream's addresses. The caller must not change
 // them.
@@ -129,18 +92,62 @@ func (p *Pool) Addresses() []string { return p.addresses }
 // callback exactly once with the response or the reason there is none. It
 // sets req.URL's scheme and host to the address and leaves the rest of the
 // request, its Host field included, as it is. See fib's Client.Do for how the
-// body is sent and the callback run: the callback must not block.
+// body is sent and the callback run: the callback must not block. A pool
+// that Close was called on still takes requests until those in flight are
+// done, so that a request that started on it can still use it.
 func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
+	if p.client == nil {
+		callback(nil, ErrNoEngine)
+		return
+	}
 	addr := p.addresses[0]
 	if n := len(p.addresses); n > 1 {
 		addr = p.addresses[int((p.next.Add(1)-1)%uint32(n))]
 	}
 	req.URL.Scheme = "http"
 	req.URL.Host = addr
-	p.client.Do(req, callback)
+	p.inFlight.Add(1)
+	p.client.Do(req, func(resp *fibhttp.ClientResponse, err error) {
+		callback(resp, err)
+		if p.inFlight.Add(-1) == 0 && p.closing.Load() {
+			p.closeClient()
+		}
+	})
 }
 
-// Close stops the pool taking requests and closes its idle connections.
-// Requests in flight finish as they would have; those still waiting for a
-// connection fail.
-func (p *Pool) Close() { p.client.Close() }
+// Close closes the pool once the requests in flight are done, as a graph's
+// cleanup does when the last request using the graph has returned: a request
+// whose response arrives later can still finish. The idle connections are
+// closed then, and later requests fail.
+func (p *Pool) Close() {
+	p.closing.Store(true)
+	if p.inFlight.Load() == 0 {
+		p.closeClient()
+	}
+}
+
+func (p *Pool) closeClient() {
+	if p.client != nil {
+		p.closeOnce.Do(p.client.Close)
+	}
+}
+
+// StartEngine starts a fib engine with no listener, for pools to dial
+// through, and returns it with the func that stops it. Stop it after closing
+// the pools.
+func StartEngine() (*fib.Engine, func(), error) {
+	cfg := fib.DefaultConfig()
+	cfg.Name = "fit-upstream"
+	engine, err := fib.NewEngine(cfg, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- engine.Run() }()
+	stop := func() {
+		engine.Stop()
+		<-done
+		_ = engine.Close()
+	}
+	return engine, stop, nil
+}

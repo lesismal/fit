@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Listeners []Listener `json:"listeners" fit:"required" doc:"The addresses fit listens on, and the protocols each one serves."`
 	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
+	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 }
 
 // Protocols a listener can serve.
@@ -54,6 +55,19 @@ type Route struct {
 type Match struct {
 	Host []string `json:"host,omitempty" doc:"Host names, exact or with a leading \"*.\" wildcard."`
 	Path []string `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Upstream is a set of servers requests can be proxied to, and how the
+// connections to them are kept.
+type Upstream struct {
+	Name           string   `json:"name" fit:"required" doc:"A name unique among the upstreams, by which handlers refer to this one."`
+	Addresses      []string `json:"addresses" fit:"required" doc:"The addresses of the upstream's servers, each a host and a port, as in \"10.0.0.1:8080\" or \"backend:80\"."`
+	MaxConns       int      `json:"max_conns,omitempty" min:"0" doc:"The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out."`
+	MaxIdleConns   *int     `json:"max_idle_conns,omitempty" min:"0" doc:"How many idle connections to one address are kept for later requests; 32 when left out, and 0 keeps none."`
+	IdleTimeout    Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
+	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

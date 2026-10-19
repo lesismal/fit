@@ -86,14 +86,14 @@ func loadRef(t *testing.T, doc string) config.ModuleRef {
 }
 
 func TestLoad(t *testing.T) {
-	m, err := Load("test.mods", loadRef(t, `{"module": "plain", "params": {"size": 3}}`))
+	m, err := Load("test.mods", loadRef(t, `{"module": "plain", "params": {"size": 3}}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m.(*plain).Size != 3 {
 		t.Fatalf("loaded %+v", m)
 	}
-	m, err = Load("test.mods", loadRef(t, `{"module": "checked"}`))
+	m, err = Load("test.mods", loadRef(t, `{"module": "checked"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +116,12 @@ func TestLoadErrors(t *testing.T) {
 		{`{"module": "checked", "params": {"name": "field-error"}}`, `1:42: handler.params.name: is reserved`},
 	}
 	for _, tt := range tests {
-		_, err := Load("test.mods", loadRef(t, tt.doc))
+		_, err := Load("test.mods", loadRef(t, tt.doc), nil)
 		if err == nil || err.Error() != tt.want {
 			t.Errorf("Load(%s) error = %v, want %s", tt.doc, err, tt.want)
 		}
 	}
-	if _, err := Load("test.empty", loadRef(t, `{"module": "x"}`)); err == nil || err.Error() != `1:12: handler.module: there is no module "x" in test.empty` {
+	if _, err := Load("test.empty", loadRef(t, `{"module": "x"}`), nil); err == nil || err.Error() != `1:12: handler.module: there is no module "x" in test.empty` {
 		t.Errorf("empty namespace: %v", err)
 	}
 }

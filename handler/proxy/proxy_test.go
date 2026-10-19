@@ -1,0 +1,393 @@
+package proxy
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	stdhttp "net/http"
+	"net/http/httptest"
+	"net/netip"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/upstream"
+)
+
+// echo is what the echo backend saw of a request.
+type echo struct {
+	Method     string
+	RequestURI string
+	Host       string
+	Header     stdhttp.Header
+	Body       string
+	Proto      string
+}
+
+func echoBackend(t *testing.T) string {
+	t.Helper()
+	s := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backend", "echo")
+		w.WriteHeader(stdhttp.StatusCreated)
+		_ = json.NewEncoder(w).Encode(echo{r.Method, r.RequestURI, r.Host, r.Header, string(body), r.Proto})
+	}))
+	t.Cleanup(s.Close)
+	return s.Listener.Addr().String()
+}
+
+// startFit serves doc, with %s standing for the upstream's address list, on
+// a listener of its own, with upstream connections dialed through an engine
+// of their own, as fit run does. It returns the listener's base URL.
+func startFit(t *testing.T, doc string, addrs ...string) string {
+	t.Helper()
+	quoted := make([]string, len(addrs))
+	for i, a := range addrs {
+		quoted[i] = `"` + a + `"`
+	}
+	c, err := config.Load([]byte(strings.Replace(doc, "%s", strings.Join(quoted, ", "), 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := runtime.Compile(c, runtime.Env{Engine: engine})
+	if err != nil {
+		stop()
+		t.Fatal(err)
+	}
+	rt := new(runtime.Runtime)
+	rt.Swap(g)
+	s, err := listener.Start(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.Close()
+		rt.Close()
+		stop()
+	})
+	return "http://" + s.Addrs()[0].Addr.String()
+}
+
+func config1(proxyParams string) string {
+	return `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
+  "upstreams": [{"name": "app", "addresses": [%s]}],
+  "routes": [{"handler": {"module": "proxy", "params": ` + proxyParams + `}}]
+}`
+}
+
+func client(h2c bool) *stdhttp.Client {
+	tr := &stdhttp.Transport{Protocols: new(stdhttp.Protocols)}
+	if h2c {
+		tr.Protocols.SetUnencryptedHTTP2(true)
+	} else {
+		tr.Protocols.SetHTTP1(true)
+	}
+	return &stdhttp.Client{Transport: tr, Timeout: 5 * time.Second}
+}
+
+func send(t *testing.T, c *stdhttp.Client, req *stdhttp.Request) (*stdhttp.Response, echo) {
+	t.Helper()
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var e echo
+	data, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(data, &e); err != nil {
+		t.Fatalf("%d %q: %v", resp.StatusCode, data, err)
+	}
+	return resp, e
+}
+
+func TestForwarding(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app"}`), echoBackend(t))
+	for _, h2c := range []bool{false, true} {
+		c := client(h2c)
+		body := strings.Repeat("payload ", 1000)
+		req, _ := stdhttp.NewRequest("PUT", base+"/a%2Fb/c?x=1&y=%20z", strings.NewReader(body))
+		req.Host = "app.example.com"
+		req.Header.Set("X-Custom", "kept")
+		req.Header.Add("X-Multi", "1")
+		req.Header.Add("X-Multi", "2")
+		resp, e := send(t, c, req)
+		if resp.StatusCode != 201 || resp.Header.Get("X-Backend") != "echo" || resp.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("h2c=%v: response %d %v", h2c, resp.StatusCode, resp.Header)
+		}
+		if e.Method != "PUT" || e.RequestURI != "/a%2Fb/c?x=1&y=%20z" || e.Host != "app.example.com" || e.Body != body ||
+			e.Proto != "HTTP/1.1" || e.Header.Get("X-Custom") != "kept" || strings.Join(e.Header["X-Multi"], ",") != "1,2" {
+			t.Fatalf("h2c=%v: upstream saw %+v", h2c, e)
+		}
+		if ua := e.Header.Get("User-Agent"); ua != "Go-http-client/1.1" && ua != "Go-http-client/2.0" {
+			t.Errorf("h2c=%v: User-Agent %q, want the client's", h2c, ua)
+		}
+	}
+	// No body, and no User-Agent: none is made up.
+	req, _ := stdhttp.NewRequest("GET", base+"/", nil)
+	req.Header.Set("User-Agent", "")
+	if _, e := send(t, client(false), req); e.Body != "" || e.Header.Get("Content-Length") != "" || e.Header["User-Agent"] != nil {
+		t.Fatalf("upstream saw %+v", e)
+	}
+}
+
+func TestHopByHopRequest(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app"}`), echoBackend(t))
+	req, _ := stdhttp.NewRequest("GET", base+"/", nil)
+	req.Header.Set("Connection", "X-Hop, keep-alive")
+	req.Header.Set("X-Hop", "1")
+	req.Header.Set("Keep-Alive", "timeout=5")
+	req.Header.Set("Proxy-Connection", "keep-alive")
+	req.Header.Set("Proxy-Authorization", "Basic eDp5")
+	req.Header.Set("Te", "trailers")
+	req.Header.Set("Upgrade", "foo")
+	req.Header.Set("X-End", "kept")
+	_, e := send(t, client(false), req)
+	for _, name := range []string{"X-Hop", "Keep-Alive", "Proxy-Connection", "Proxy-Authorization", "Te", "Upgrade"} {
+		if v, ok := e.Header[name]; ok {
+			t.Errorf("%s reached the upstream: %q", name, v)
+		}
+	}
+	if e.Header.Get("X-End") != "kept" {
+		t.Errorf("X-End lost: %v", e.Header)
+	}
+}
+
+func TestHopByHopResponse(t *testing.T) {
+	// A raw backend, so that its response carries exactly the fields written.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				for {
+					req, err := stdhttp.ReadRequest(br)
+					if err != nil {
+						return
+					}
+					_, _ = io.Copy(io.Discard, req.Body)
+					_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nConnection: X-Hop\r\nX-Hop: 1\r\nKeep-Alive: timeout=5\r\n"+
+						"Proxy-Authenticate: Basic\r\nTrailer: X-T\r\nUpgrade: foo\r\nX-End: kept\r\nContent-Length: 2\r\n\r\nok")
+				}
+			}()
+		}
+	}()
+	base := startFit(t, config1(`{"upstream": "app"}`), ln.Addr().String())
+	for _, h2c := range []bool{false, true} {
+		resp, err := client(h2c).Get(base + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || string(body) != "ok" || resp.Header.Get("X-End") != "kept" {
+			t.Fatalf("h2c=%v: %d %q %v", h2c, resp.StatusCode, body, resp.Header)
+		}
+		for _, name := range []string{"X-Hop", "Keep-Alive", "Proxy-Authenticate", "Trailer", "Upgrade"} {
+			if v, ok := resp.Header[name]; ok {
+				t.Errorf("h2c=%v: %s reached the client: %q", h2c, name, v)
+			}
+		}
+	}
+}
+
+func TestForwardedUntrusted(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app"}`), echoBackend(t))
+	req, _ := stdhttp.NewRequest("GET", base+"/", nil)
+	req.Host = "site.example"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	req.Header.Set("Forwarded", "for=203.0.113.9")
+	_, e := send(t, client(false), req)
+	want := map[string]string{
+		"X-Forwarded-For":   "127.0.0.1",
+		"X-Forwarded-Proto": "http",
+		"X-Forwarded-Host":  "site.example",
+		"Forwarded":         "for=127.0.0.1;host=site.example;proto=http",
+	}
+	for name, v := range want {
+		if got := strings.Join(e.Header[name], " | "); got != v {
+			t.Errorf("%s = %q, want %q", name, got, v)
+		}
+	}
+}
+
+func TestForwardedTrusted(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app", "trusted_proxies": ["10.0.0.0/8", "127.0.0.1"]}`), echoBackend(t))
+	req, _ := stdhttp.NewRequest("GET", base+"/", nil)
+	req.Host = "site.example"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "public.example")
+	req.Header.Set("Forwarded", `for=203.0.113.9;proto=https`)
+	_, e := send(t, client(false), req)
+	want := map[string]string{
+		"X-Forwarded-For":   "203.0.113.9, 127.0.0.1",
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "public.example",
+		"Forwarded":         "for=203.0.113.9;proto=https, for=127.0.0.1;host=site.example;proto=http",
+	}
+	for name, v := range want {
+		if got := strings.Join(e.Header[name], " | "); got != v {
+			t.Errorf("%s = %q, want %q", name, got, v)
+		}
+	}
+	// A trusted proxy that sends none of them gets them set.
+	req, _ = stdhttp.NewRequest("GET", base+"/", nil)
+	req.Host = "site.example"
+	_, e = send(t, client(false), req)
+	if e.Header.Get("X-Forwarded-For") != "127.0.0.1" || e.Header.Get("X-Forwarded-Proto") != "http" ||
+		e.Header.Get("X-Forwarded-Host") != "site.example" {
+		t.Errorf("upstream saw %v", e.Header)
+	}
+}
+
+func TestHostHeader(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app", "host_header": "internal.svc:8080"}`), echoBackend(t))
+	req, _ := stdhttp.NewRequest("GET", base+"/", nil)
+	req.Host = "site.example"
+	if _, e := send(t, client(false), req); e.Host != "internal.svc:8080" || e.Header.Get("X-Forwarded-Host") != "site.example" {
+		t.Fatalf("upstream saw host %q, %v", e.Host, e.Header)
+	}
+}
+
+func TestBadGateway(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	base := startFit(t, config1(`{"upstream": "app"}`), addr)
+	for _, h2c := range []bool{false, true} {
+		resp, err := client(h2c).Get(base + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 502 || string(body) != "502 Bad Gateway\n" {
+			t.Fatalf("h2c=%v: %d %q", h2c, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestManyRequests(t *testing.T) {
+	base := startFit(t, config1(`{"upstream": "app"}`), echoBackend(t))
+	errs := make(chan error, 64)
+	for i := range 64 {
+		go func() {
+			req, _ := stdhttp.NewRequest("POST", fmt.Sprintf("%s/n/%d", base, i), strings.NewReader(fmt.Sprint(i)))
+			resp, err := client(i%2 == 1).Do(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			var e echo
+			if err := json.NewDecoder(resp.Body).Decode(&e); err != nil {
+				errs <- err
+				return
+			}
+			if e.RequestURI != fmt.Sprintf("/n/%d", i) || e.Body != fmt.Sprint(i) {
+				errs <- fmt.Errorf("request %d: upstream saw %+v", i, e)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	for range 64 {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestForwardedElement(t *testing.T) {
+	tests := []struct {
+		ip    string
+		host  string
+		proto string
+		want  string
+	}{
+		{"192.0.2.1", "a.example", "http", "for=192.0.2.1;host=a.example;proto=http"},
+		{"2001:db8::1", "a.example:8443", "https", `for="[2001:db8::1]";host="a.example:8443";proto=https`},
+		{"", "", "http", "for=unknown;proto=http"},
+	}
+	for _, tt := range tests {
+		var ip netip.Addr
+		if tt.ip != "" {
+			ip = netip.MustParseAddr(tt.ip)
+		}
+		if got := forwardedElement(ip, tt.host, tt.proto); got != tt.want {
+			t.Errorf("%s %s: %s, want %s", tt.ip, tt.host, got, tt.want)
+		}
+	}
+	if ip, ok := clientAddr("[::ffff:192.0.2.1]:80"); !ok || ip.String() != "192.0.2.1" {
+		t.Errorf("a mapped address: %v %v", ip, ok)
+	}
+}
+
+func TestConfigErrors(t *testing.T) {
+	tests := []struct {
+		params string
+		want   string
+	}{
+		{`{"upstream": "nope"}`, `routes[0].handler.params.upstream: there is no upstream named "nope"`},
+		{`{"upstream": "app", "trusted_proxies": ["10.0.0.0/8", "nope"]}`, `routes[0].handler.params.trusted_proxies[1]: "nope" is not an IP address or a network, as in "10.0.0.1" or "10.0.0.0/8"`},
+		{`{"upstream": "app", "host_header": "a b"}`, `routes[0].handler.params.host_header: "a b" is not a host`},
+		{`{}`, `routes[0].handler.params.upstream: missing required field`},
+	}
+	for _, tt := range tests {
+		c, err := config.Load([]byte(strings.Replace(config1(tt.params), "%s", `"127.0.0.1:1"`, 1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = runtime.Compile(c, runtime.Env{})
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: %v, want %s", tt.params, err, tt.want)
+		}
+	}
+}
+
+func TestHead(t *testing.T) {
+	s := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		w.Header().Set("Content-Length", "11")
+		if r.Method != "HEAD" {
+			_, _ = io.WriteString(w, "hello world")
+		}
+	}))
+	t.Cleanup(s.Close)
+	base := startFit(t, config1(`{"upstream": "app"}`), s.Listener.Addr().String())
+	for _, h2c := range []bool{false, true} {
+		req, _ := stdhttp.NewRequest("HEAD", base+"/", nil)
+		resp, err := client(h2c).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 || resp.ContentLength != 11 {
+			t.Errorf("h2c=%v: HEAD gave %d with Content-Length %d, want the upstream's 11", h2c, resp.StatusCode, resp.ContentLength)
+		}
+	}
+}
