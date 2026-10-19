@@ -947,7 +947,9 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   `module.Context.Graph()` 自己持有图直到结束，并实现 `module.Drainer`，在图被排空时结束仍在处理的请求，代理就是
   这样做的（决定 004）。
 - **没有长度的代理响应体。** fib 的客户端要等这种响应体到达 64 KB 后才交给代理（`StreamResponseBodyThreshold`），
-  所以像 server-sent events 这样缓慢涓流的响应会晚到客户端。I26 的测试中发现，未在 I26 中修改。
+  所以像 server-sent events 这样缓慢涓流的响应会晚到客户端：在 `handler/proxy/sse_test.go` 中，无论上游是 HTTP/1.1、h2c
+  还是 h2，第一个事件都要约 610 ms 后、流结束时才到达。阈值设为 0 能解决，但会让每个小响应都失去一次写完的路径，所以
+  等待 fib 的 [A10](fib-api-requests.zh-CN.md#a10长度未知的客户端响应从响应头起就以流方式交付)。在此之前该测试跳过。
 - **测试环境。** 单元测试和 `go test` 微基准在本机运行。压测（`fitbench` 框架、wrk、h2load）在压测机上运行，
   用 `ssh -p 10013 127.0.0.1` 登录。
 - **基准测试。** fit 新支持的场景或模块要加进 `bench/cmd/fitbench/servers.go` 和

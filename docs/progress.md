@@ -1248,7 +1248,11 @@ Differences from the plan:
   the graph is drained, as the proxy does (decision 004).
 - **Proxied bodies of no length.** fib's client hands the proxy a response body of no declared
   length only once 64 KB of it have arrived (`StreamResponseBodyThreshold`), so a slow trickle,
-  as server-sent events are, reaches the client late. Found in I26's tests; not changed there.
+  as server-sent events are, reaches the client late: in `handler/proxy/sse_test.go` the first
+  event comes after about 610 ms, when the stream ends, over HTTP/1.1, h2c and h2 upstreams. A
+  threshold of 0 fixes it but takes every small response off its one-write path, so it waits for
+  fib: [A10](fib-api-requests.md#a10-stream-a-client-response-of-unknown-length-from-its-header).
+  The test is skipped until then.
 - **Test hosts.** Unit tests and `go test` micro-benchmarks run locally. Load tests (the
   `fitbench` harness, wrk, h2load) run on the benchmark host, reached with `ssh -p 10013
   127.0.0.1`.

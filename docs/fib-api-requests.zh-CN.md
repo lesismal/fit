@@ -20,6 +20,7 @@
 | A7 | `Context` 上的单请求值槽 | P2 | 12 | R07 |
 | A8 | 文档修正 | P2 | — | — |
 | A9 | 拒绝不是 token 的请求头字段名 | P1 | 13 | — |
+| A10 | 长度未知的客户端响应从响应头起就以流方式交付 | P1 | 5 | — |
 
 ## 证据
 
@@ -154,3 +155,37 @@ context 值。
 **fit 如何使用。** 不需要新的 API：这样的请求不会到达 handler。在此之前，fit 的代理以 400 拒绝字段名不是 token 的请求
 （I23，在复制请求头的循环中顺带检查），这样的字段不会到达上游；其他 handler 不转发请求头。fib 拒绝之后，这个检查作为纵深
 防御保留。
+
+## A10：长度未知的客户端响应从响应头起就以流方式交付
+
+**问题。** `ClientConfig.StreamResponseBodyThreshold` 同时做两件事。对带 `Content-Length` 的响应体，它决定响应体是整体
+到达（不超过阈值时）还是以流方式到达；对没有声明长度的响应体（分块、以服务器关闭连接结束，或没有声明长度的 HTTP/2
+响应体），它是回调运行前必须先到达的数据量。fit 把它设为 64 KB，让小响应整体到达、一次写给客户端；但这样一来，像
+server-sent events 和长轮询这样缓慢涓流的响应，要等到达 64 KB、流结束，或被 fit 的 `response_idle_timeout`（60s）切断时，
+才会到达 fit 的回调，进而到达客户端。阈值设为 0 能让这类响应立即以流方式交付，但同时也让每个带长度的响应体都以流方式
+交付，无论多小：回调运行时它们都还不完整，因此都要走流式路径，响应头一次写、响应体再写若干次，而不是一次写完。
+
+**证据。** `handler/proxy/sse_test.go`（在此之前跳过）：后端先发送 `data: 0`，再间隔 200 ms 发送两个事件，经 fit 的代理，
+上游分别为 HTTP/1.1、h2c 和 h2。在 fib v1.3.0、fit 阈值为 64 KB 时，第一个事件要 606–617 ms 后、流结束时才到达客户端；
+不结束的流在 60 s 内什么都显示不出来。阈值为 0 时它立即到达，但经 `upstream.Pool` 的 20 个带 `Content-Length` 的小响应中，
+回调运行时没有一个是完整的，而阈值为 64 KB 时 20 个都完整。
+
+**请求。** 一个设置：让长度未知的响应体在响应头到达时就运行回调（带上随响应头一起到达的那部分响应体），带长度的响应体
+仍按阈值处理：
+
+```go
+// StreamUnknownLengthAtHeader runs the callback of a response whose body
+// has no declared length as soon as its header has arrived, rather than
+// once StreamResponseBodyThreshold of the body has, so that a body that
+// trickles is passed on as it comes. Bodies with a Content-Length are kept
+// whole or streamed by StreamResponseBodyThreshold as before. It has no
+// effect without StreamResponseBody, and applies to HTTP/1 and HTTP/2.
+StreamUnknownLengthAtHeader bool
+```
+
+另一种也能让小的分块响应体保持整体的做法是一个等待时间 `StreamResponseBodyMaxWait time.Duration`：阈值的数据量到达、
+响应体结束、或自响应头起等待时间已过，三者先到者触发回调。
+
+**fit 如何使用。** `upstream.New` 在 `StreamResponseBody` 旁边设置它；代理的流式路径本来就会把每一段在到达时写出，并在
+后面没有紧接着的数据时刷新，所以事件会按上游发送的节奏到达客户端。届时 `sse_test.go` 改为运行而不是跳过。在此之前没有
+能两者兼顾的临时办法：fit 保持 64 KB 的阈值。

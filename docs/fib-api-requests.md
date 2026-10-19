@@ -21,6 +21,7 @@ The fit iterations that depend on these are R03–R07 in the [development plan](
 | A7 | A per-request value slot on `Context` | P2 | 12 | R07 |
 | A8 | Documentation fixes | P2 | — | — |
 | A9 | Refuse a header field name that is not a token | P1 | 13 | — |
+| A10 | Stream a client response of unknown length from its header | P1 | 5 | — |
 
 ## Evidence
 
@@ -183,3 +184,46 @@ or redo.
 proxy refuses with 400 a request with a field name that is not a token (I23, in the loop that
 copies the header anyway), so such a field never reaches an upstream; other handlers do not pass
 headers on. The check stays as defence in depth once fib refuses them.
+
+## A10: Stream a client response of unknown length from its header
+
+**Problem.** `ClientConfig.StreamResponseBodyThreshold` does two jobs. For a body with a
+`Content-Length`, it decides whether the body arrives whole (up to the threshold) or streams. For a
+body of no declared length (chunked, ended by the server's close, or an HTTP/2 body that declares
+none), it is how much of the body must arrive before the callback runs. fit sets it to 64 KB, so
+that small responses arrive whole and are written to the client in one go; but then a response
+that trickles, as server-sent events and long polls do, reaches fit's callback, and so the
+client, only once 64 KB of it have arrived, or the stream ends, or fit's
+`response_idle_timeout` (60s) cuts it off. A threshold of 0 streams those at once, but it also
+streams every body with a length, however small: none of them is complete when the callback runs,
+so each takes the streaming path, with a write for the header and more for the body, instead of one.
+
+**Evidence.** `handler/proxy/sse_test.go` (skipped until this lands): a backend that sends
+`data: 0`, then two more events 200 ms apart, through fit's proxy over HTTP/1.1, h2c and h2
+upstreams. With fib v1.3.0 and fit's threshold of 64 KB the first event reaches the client after
+606–617 ms, when the stream ends; a stream that does not end shows nothing for 60 s. With the
+threshold at 0 it arrives at once, but of 20 small responses with a `Content-Length` through
+`upstream.Pool`, none was complete when its callback ran, against all 20 at 64 KB.
+
+**Request.** A setting that runs the callback of a body of unknown length as soon as its header
+has arrived, with whatever of the body came with it, and leaves bodies with a length to the
+threshold as now:
+
+```go
+// StreamUnknownLengthAtHeader runs the callback of a response whose body
+// has no declared length as soon as its header has arrived, rather than
+// once StreamResponseBodyThreshold of the body has, so that a body that
+// trickles is passed on as it comes. Bodies with a Content-Length are kept
+// whole or streamed by StreamResponseBodyThreshold as before. It has no
+// effect without StreamResponseBody, and applies to HTTP/1 and HTTP/2.
+StreamUnknownLengthAtHeader bool
+```
+
+An alternative that keeps small chunked bodies whole too would be a wait,
+`StreamResponseBodyMaxWait time.Duration`: the callback runs once the threshold has arrived, the
+body has ended, or the wait has passed since the header, whichever is first.
+
+**How fit uses it.** `upstream.New` sets it beside `StreamResponseBody`; the proxy's streaming
+path already writes each piece as it arrives and flushes it unless more is coming at once, so
+events reach the client as the upstream sends them. `sse_test.go` is then run instead of skipped.
+Until then there is no stopgap that keeps both: fit keeps the 64 KB threshold.
