@@ -7,9 +7,10 @@ fit is a reverse proxy, load balancer, TLS terminator, static file server and AP
 [nginx, Caddy and Traefik compared](comparison.md) into milestones: what each one delivers, how we
 know it is done, and which part of fib it builds on.
 
-fit is at the planning stage: there is no code yet. The order of the milestones is firm; their
-contents will move as the work teaches us things. Dates are left out on purpose, because a
-milestone ends when its exit criteria are met, not when a calendar says so.
+fit is at the planning stage: there is no code yet. The [development plan](dev-plan.md) breaks
+these milestones into small iterations, each sized for one working session. The order of the
+milestones is firm; their contents will move as the work teaches us things. Dates are left out on
+purpose, because a milestone ends when its exit criteria are met, not when a calendar says so.
 
 - [Goals](#goals)
 - [Non-goals](#non-goals)
