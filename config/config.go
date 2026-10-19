@@ -83,6 +83,9 @@ type Upstream struct {
 	IdleTimeout    Duration `json:"idle_timeout,omitempty" doc:"How long an idle connection is kept before it is closed; 60s when left out."`
 	ConnectTimeout Duration `json:"connect_timeout,omitempty" doc:"How long opening a connection may take; 10s when left out. A request whose connect times out gets 504."`
 
+	MaxFails    *int     `json:"max_fails,omitempty" min:"0" doc:"How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation."`
+	FailTimeout Duration `json:"fail_timeout,omitempty" doc:"The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out."`
+
 	ResponseHeaderTimeout Duration `json:"response_header_timeout,omitempty" doc:"How long the upstream may take, once the request is sent, to begin its response; 60s when left out. A request past it gets 504."`
 	ResponseIdleTimeout   Duration `json:"response_idle_timeout,omitempty" doc:"How long the upstream may go silent in the middle of a response body; 60s when left out."`
 

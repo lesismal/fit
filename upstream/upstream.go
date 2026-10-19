@@ -15,6 +15,7 @@
 package upstream
 
 import (
+	"context"
 	"errors"
 	stdhttp "net/http"
 	"sync"
@@ -34,6 +35,8 @@ const (
 	DefaultConnectTimeout        = 10 * time.Second
 	DefaultResponseHeaderTimeout = 60 * time.Second
 	DefaultResponseIdleTimeout   = 60 * time.Second
+	DefaultMaxFails              = 1
+	DefaultFailTimeout           = 10 * time.Second
 	// StreamThreshold is the response body size past which a body streams
 	// to the callback rather than arriving whole.
 	StreamThreshold = 64 << 10
@@ -51,6 +54,10 @@ type Pool struct {
 	backends  []*Backend
 	balancer  Balancer
 	timeouts  Timeouts
+	// maxFails failures within failTimeout take a backend out of rotation
+	// for failTimeout.
+	maxFails    int
+	failTimeout time.Duration
 
 	// inFlight counts requests picked and not yet done, and closing says
 	// Close was called: the client is closed once there are none.
@@ -76,6 +83,11 @@ func New(engine *fib.Engine, c *config.Upstream) *Pool {
 		p.backends = append(p.backends, &Backend{Address: addr, Weight: weight})
 	}
 	p.balancer = NewBalancer(c.LoadBalancing, p.backends)
+	p.maxFails = DefaultMaxFails
+	if c.MaxFails != nil {
+		p.maxFails = *c.MaxFails
+	}
+	p.failTimeout = orDefault(c.FailTimeout.Std(), DefaultFailTimeout)
 	if engine == nil {
 		return p
 	}
@@ -145,8 +157,16 @@ func (p *Pool) Pick() *Backend {
 }
 
 // Done ends the request Pick counted on b, once its response, body and all,
-// is over or has failed. It must be called exactly once a Pick.
-func (p *Pool) Done(b *Backend) {
+// is over or has failed. It must be called exactly once a Pick. failed says
+// the upstream failed it — could not be reached, broke off, or timed out —
+// which counts towards taking b out of rotation; a request the client gave
+// up on, or whose body the client failed to send, is no failure of b's.
+func (p *Pool) Done(b *Backend, failed bool) {
+	if failed {
+		b.failed(p.maxFails, p.failTimeout)
+	} else {
+		b.succeeded()
+	}
 	b.active.Add(-1)
 	if p.inFlight.Add(-1) == 0 && p.closing.Load() {
 		p.closeClient()
@@ -170,11 +190,12 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 
 // Do is Pick, Send and Done for a caller that is done with the response
 // when its callback returns, as one that reads a body that arrived whole is.
+// An error counts as a failure of the backend.
 func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
 	b := p.Pick()
 	p.Send(b, req, func(resp *fibhttp.ClientResponse, err error) {
 		callback(resp, err)
-		p.Done(b)
+		p.Done(b, err != nil && !errors.Is(err, context.Canceled))
 	})
 }
 

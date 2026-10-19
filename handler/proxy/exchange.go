@@ -148,7 +148,10 @@ type exchange struct {
 
 	resp    *fibhttp.ClientResponse
 	started bool
-	done    atomic.Bool
+	// failed says the upstream failed the request, which counts against the
+	// backend's health.
+	failed bool
+	done   atomic.Bool
 }
 
 // release gives the client's request back, once, and lets go of the
@@ -159,7 +162,7 @@ func (x *exchange) release() {
 			t.Stop()
 		}
 		x.cancel(nil)
-		x.pool.Done(x.backend)
+		x.pool.Done(x.backend, x.failed)
 		x.c.Release()
 	}
 }
@@ -264,6 +267,8 @@ func (x *exchange) fail(err error) {
 		return
 	}
 	status := x.statusOf(err)
+	// 400, 408 and 413 are the client's body failing, not the upstream.
+	x.failed = status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout
 	_ = x.c.Respond(status, "text/plain; charset=utf-8", []byte(strconv.Itoa(status)+" "+stdhttp.StatusText(status)+"\n"))
 	x.release()
 }
@@ -306,6 +311,7 @@ func (x *exchange) broken(err error) {
 		x.fail(err)
 		return
 	}
+	x.failed = true
 	switch {
 	case x.resp.ContentLength >= 0:
 		// Short of its length: fib closes an HTTP/1 connection and resets

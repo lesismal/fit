@@ -123,6 +123,11 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "fail_timeout": {
+          "description": "The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
         "idle_timeout": {
           "description": "How long an idle connection is kept before it is closed; 60s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
@@ -139,6 +144,11 @@
         },
         "max_conns": {
           "description": "The most connections open, or being opened, to one address; a request past it waits for one to be free. No limit when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_fails": {
+          "description": "How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation.",
           "minimum": 0,
           "type": "integer"
         },

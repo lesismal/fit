@@ -3,6 +3,7 @@ package upstream
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Load balancing policies, as config.Upstream's load_balancing names them.
@@ -22,13 +23,80 @@ type Backend struct {
 	// current is smooth weighted round robin's running weight, guarded by
 	// the balancer's lock.
 	current int
+
+	// downUntil is when, in Unix nanoseconds, a backend that failed too
+	// often may take requests again, or 0 for one that is up. Picking reads
+	// only it, and the clock only when it is set.
+	downUntil atomic.Int64
+	// failing says fails may be above zero, so that a success need not take
+	// the lock to find it is not.
+	failing atomic.Bool
+	mu      sync.Mutex
+	fails   int
+	// windowEnd is when the failures counted so far stop counting.
+	windowEnd int64
 }
 
 // Active returns how many requests to b are under way.
 func (b *Backend) Active() int64 { return b.active.Load() }
 
+// Down reports whether b is out of rotation for having failed too often.
+func (b *Backend) Down() bool {
+	d := b.downUntil.Load()
+	return d != 0 && time.Now().UnixNano() < d
+}
+
+// up reports whether b may take a request. now is the time in Unix
+// nanoseconds, read the first time a pick needs it and kept in *now.
+func (b *Backend) up(now *int64) bool {
+	d := b.downUntil.Load()
+	if d == 0 {
+		return true
+	}
+	if *now == 0 {
+		*now = time.Now().UnixNano()
+	}
+	return *now >= d
+}
+
+// failed counts a failure of b. maxFails of them within window take b out
+// of rotation for window, as nginx's max_fails and fail_timeout do.
+func (b *Backend) failed(maxFails int, window time.Duration) {
+	if maxFails <= 0 {
+		return
+	}
+	now := time.Now().UnixNano()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if now >= b.windowEnd {
+		b.fails, b.windowEnd = 0, now+int64(window)
+	}
+	b.fails++
+	b.failing.Store(true)
+	if b.fails >= maxFails {
+		b.downUntil.Store(now + int64(window))
+		b.fails, b.windowEnd = 0, 0
+	}
+}
+
+// succeeded clears b's failures: one success is enough to put a backend
+// that has come back fully in rotation again.
+func (b *Backend) succeeded() {
+	if !b.failing.Load() && b.downUntil.Load() == 0 {
+		return
+	}
+	b.mu.Lock()
+	b.fails, b.windowEnd = 0, 0
+	b.failing.Store(false)
+	b.downUntil.Store(0)
+	b.mu.Unlock()
+}
+
 // Balancer picks the backend for the next request. Pick runs once a request
-// and must not allocate or block for long.
+// and must not allocate or block for long. It passes over the backends that
+// are down, unless all of them are: then health is ignored, since an
+// upstream that may still answer serves better than one that surely will
+// not, which is also why nginx ignores health for a single server.
 type Balancer interface {
 	Pick() *Backend
 }
@@ -63,7 +131,18 @@ type roundRobin struct {
 
 func (r *roundRobin) Pick() *Backend {
 	n := uint64(len(r.backends))
-	return r.backends[(r.next.Add(1)-1)%n]
+	first := r.next.Add(1) - 1
+	var now int64
+	for i := range n {
+		if b := r.backends[(first+i)%n]; b.up(&now) {
+			if i > 0 {
+				// Move the turn past the backends passed over.
+				r.next.Add(i)
+			}
+			return b
+		}
+	}
+	return r.backends[first%n]
 }
 
 // weightedRoundRobin is nginx's smooth weighted round robin: each pick adds
@@ -79,16 +158,31 @@ type weightedRoundRobin struct {
 func (w *weightedRoundRobin) Pick() *Backend {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	var now int64
+	if b := w.pick(&now, true); b != nil {
+		return b
+	}
+	return w.pick(&now, false)
+}
+
+// pick is one round of the algorithm, over the backends that are up or,
+// without healthy, over all of them. It returns nil when none is up.
+func (w *weightedRoundRobin) pick(now *int64, healthy bool) *Backend {
 	var best *Backend
 	total := 0
 	for _, b := range w.backends {
+		if healthy && !b.up(now) {
+			continue
+		}
 		b.current += b.Weight
 		total += b.Weight
 		if best == nil || b.current > best.current {
 			best = b
 		}
 	}
-	best.current -= total
+	if best != nil {
+		best.current -= total
+	}
 	return best
 }
 
@@ -104,15 +198,37 @@ type leastConn struct {
 }
 
 func (l *leastConn) Pick() *Backend {
+	n := uint64(len(l.backends))
+	first := l.next.Add(1) - 1
+	var now int64
+	// The scan starts at the next backend in turn that is up, the turn moved
+	// past those passed over, so that ties spread over the backends up
+	// rather than going to whichever follows one that is down.
+	for i := range n {
+		if l.backends[(first+i)%n].up(&now) {
+			if i > 0 {
+				l.next.Add(i)
+			}
+			return l.pick(int((first+i)%n), &now, true)
+		}
+	}
+	return l.pick(int(first%n), &now, false)
+}
+
+// pick scans from start for the least busy backend that is up or, without
+// healthy, of all of them. It returns nil when none is up.
+func (l *leastConn) pick(start int, now *int64, healthy bool) *Backend {
 	n := len(l.backends)
-	start := int((l.next.Add(1) - 1) % uint64(n))
-	best := l.backends[start]
-	bestActive := best.active.Load()
-	for i := 1; i < n; i++ {
+	var best *Backend
+	var bestActive int64
+	for i := range n {
 		b := l.backends[(start+i)%n]
+		if healthy && !b.up(now) {
+			continue
+		}
 		active := b.active.Load()
 		// active/weight < bestActive/bestWeight, without dividing.
-		if active*int64(best.Weight) < bestActive*int64(b.Weight) {
+		if best == nil || active*int64(best.Weight) < bestActive*int64(b.Weight) {
 			best, bestActive = b, active
 		}
 	}

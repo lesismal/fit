@@ -11,22 +11,22 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I17, I19, I21 and I22 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I11, I12, I14–I17, I19–I22 done |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1 and h2c, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no TLS; no health checks, so a failing address stays in rotation (I20); no HTTP/2 upstreams (I18); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What does not | no TLS; no HTTP/2 upstreams (I18); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next iteration: I20, passive health checks**, which I19 unblocked, or I18, HTTP/2 upstreams.
-I09, I13 and I24 are also ready to start, unless another session has taken them.
+**Next iteration: I18, HTTP/2 upstreams**, being done next in this session. I09, I13, I24 and I32
+are also ready to start, unless another session has taken them.
 
 To continue, start a session with:
 
-> Implement iteration I20 from docs/dev-plan.md. Read docs/progress.md, the index and that
+> Implement iteration I18 from docs/dev-plan.md. Read docs/progress.md, the index and that
 > iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
 > the packages it lists. Keep the change within the iteration's scope, add tests, and when done
 > mark it done in both dev-plan files and record it in both progress files.
@@ -632,6 +632,37 @@ Differences from the plan:
 - Weights are a list beside `addresses`, as Caddy has them, rather than objects in place of the
   address strings, which keeps `addresses` as simple as I14 made it.
 - Weighted least connections came for free, so `least_conn` takes weights too, as nginx's does.
+
+### I20 Passive health checks — done
+
+- `config.Upstream` gains `max_fails` (1 by default, 0 for none) and `fail_timeout` (10s), as
+  nginx's: `max_fails` failures of an address within `fail_timeout` take it out of rotation for
+  `fail_timeout`; after that it takes requests again, and one success clears its record.
+- A `Backend` keeps its state beside its counters: `downUntil` (atomic, Unix nanoseconds, 0 when up)
+  and, under a mutex only failures and the first success after them take, the failures in the
+  current window. A pick reads `downUntil` and only reads the clock when it is set, so picking costs
+  nothing more while everything is healthy. Every policy passes over backends that are down; round
+  robin and least connections move their turn past them, so the load spreads evenly over the rest.
+  If every backend is down, health is ignored rather than failing every request, since an address
+  that may answer is better than none (nginx ignores health for a single server for the same reason).
+- `Pool.Done(b, failed)` reports how the request ended. The proxy counts a failure when the
+  upstream could not be reached, broke off, or timed out (502 and 504, and a response cut short);
+  not when the client went away or failed to send its body (400, 408, 413). HTTP statuses are not
+  failures. `Pool.Do` counts an error other than cancellation.
+- Tests: two failures within the window take a backend down, a success brings it back, failures in
+  different windows do not add up, `max_fails: 0` never takes it down; every policy skips a down
+  backend and shares its load evenly, without allocating, ignores health when all are down, and
+  takes the backends back after the window. Through a pool, an address whose port starts refusing
+  costs one failed request and then gets none; the port listening again, the address rejoins after
+  `fail_timeout` and takes half the requests. Through the proxy, an upstream with a refused address
+  answers 1 of 20 requests with 502 and the rest from the live one. `go vet ./...` and
+  `go test -race ./...` pass.
+
+Differences from the plan:
+
+- No retry: the request that finds an address failing still fails. Retrying it on another address
+  is I43's.
+- Transitions are not logged yet; metrics (I34) will report them.
 
 ## Notes for later iterations
 

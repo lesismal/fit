@@ -475,3 +475,26 @@ func TestAccessLog(t *testing.T) {
 		}
 	}
 }
+
+func TestPassiveHealth(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := ln.Addr().String()
+	ln.Close()
+	base := startFit(t, config1(`{"upstream": "app"}`), echoBackend(t), refused)
+	codes := map[int]int{}
+	for range 20 {
+		resp, err := client(false).Get(base + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		codes[resp.StatusCode]++
+	}
+	// The first request to the refused address fails, and takes it out.
+	if codes[502] != 1 || codes[201] != 19 {
+		t.Fatalf("statuses: %v", codes)
+	}
+}
