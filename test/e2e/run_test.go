@@ -73,16 +73,16 @@ var listening = regexp.MustCompile(`^fit: listener "([^"]+)" on (\S+) `)
 // adminListening is the line fit prints once its Admin API listens.
 var adminListening = regexp.MustCompile(`^fit: admin API on (\S+)$`)
 
-// startFit runs fit on the config doc and waits until it listens. It
-// returns the address of each listener by name, and of the Admin API as
-// "admin".
-func startFit(t *testing.T, doc string) (*fit, map[string]string) {
+// startFit runs fit on the config doc, with args after its own, and waits
+// until it listens. It returns the address of each listener by name, and of
+// the Admin API as "admin".
+func startFit(t *testing.T, doc string, args ...string) (*fit, map[string]string) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "fit.json")
 	if err := os.WriteFile(cfg, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(fitBin, "run", "-c", cfg)
+	cmd := exec.Command(fitBin, append([]string{"run", "-c", cfg}, args...)...)
 	stderr := new(lockedBuffer)
 	cmd.Stderr = io.MultiWriter(os.Stderr, stderr)
 	stdout, err := cmd.StdoutPipe()
@@ -119,6 +119,8 @@ func startFit(t *testing.T, doc string) (*fit, map[string]string) {
 				addrs[m[1]] = m[2]
 			} else if m := adminListening.FindStringSubmatch(line); m != nil {
 				addrs["admin"] = m[1]
+			} else if strings.HasPrefix(line, "fit: watching ") {
+				continue
 			} else {
 				t.Fatalf("unexpected output: %q", line)
 			}

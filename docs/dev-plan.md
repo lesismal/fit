@@ -136,7 +136,7 @@ Status: `todo`, `doing` or `done`.
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
 | I26 | Listener diffing and graph draining | I24 | done |
-| I27 | File provider | I24 | todo |
+| I27 | File provider | I24 | done |
 | I28 | Certificate manager and storage; ACME decision | I09 | todo |
 | I29 | ACME HTTP-01 and renewal | I28 | todo |
 | I30 | TLS-ALPN-01, OCSP stapling, HTTPS by default | I29 | todo |

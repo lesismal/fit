@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/observe"
+	"github.com/lesismal/fit/provider/file"
 	fitruntime "github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/upstream"
 )
@@ -46,8 +46,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	file := flags.String("c", "fit.json", "the config file to run")
-	grace := flags.Duration("shutdown-timeout", 30*time.Second, "how long shutdown waits for requests in flight before closing their connections")
+	cfgFile := flags.String("c", "fit.json", "the config file to run")
+	grace := flags.Duration("shutdown-timeout", 30*time.Second, "how long shutdown waits for requests in flight before closing their connections, and how long requests may keep using a config after a reload")
+	watch := flags.Bool("watch", false, "apply the config file again each time it changes, as SIGHUP does")
+	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "with -watch, how often the file is looked at")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -56,13 +58,13 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		return 2
 	}
 
-	data, err := os.ReadFile(*file)
+	data, err := os.ReadFile(*cfgFile)
 	var c *config.Config
 	if err == nil {
 		c, err = config.Load(data)
 	}
 	if err != nil {
-		printConfigError(stderr, "fit run", *file, err)
+		printConfigError(stderr, "fit run", *cfgFile, err)
 		return 1
 	}
 	// Upstream connections are dialed through an engine of their own, so
@@ -87,7 +89,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	g, err := fitruntime.Compile(c, env)
 	if err != nil {
-		printConfigError(stderr, "fit run", *file, err)
+		printConfigError(stderr, "fit run", *cfgFile, err)
 		return 1
 	}
 	rt := new(fitruntime.Runtime)
@@ -122,15 +124,40 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		fmt.Fprintf(stdout, "fit: admin API on %s\n", as.Addr())
 	}
 
+	var watcher *file.Watcher
+	stopWatch := func() {}
+	if *watch {
+		watcher = file.New(*cfgFile, data, file.Options{Interval: *watchInterval}, func(data []byte) error {
+			fmt.Fprintf(stdout, "fit: %s changed; reloading\n", *cfgFile)
+			applyFile(*cfgFile, data, configs, stdout, stderr)
+			return nil // applyFile reported it
+		}, func(err error) {
+			fmt.Fprintf(stderr, "fit: watching %s: %v\n", *cfgFile, err)
+		})
+		wctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			watcher.Run(wctx)
+		}()
+		stopWatch = func() {
+			cancel()
+			<-done
+		}
+		fmt.Fprintf(stdout, "fit: watching %s\n", *cfgFile)
+	}
+
 	for running := true; running; {
 		select {
 		case <-ctx.Done():
 			running = false
 		case <-reload:
-			reloadConfig(*file, configs, stdout, stderr)
+			reloadConfig(*cfgFile, configs, watcher, stdout, stderr)
 		}
 	}
 	stopSignals()
+	// No config is applied while the server shuts down.
+	stopWatch()
 	fmt.Fprintln(stdout, "fit: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), *grace)
 	defer cancel()
@@ -154,28 +181,39 @@ func printListener(w io.Writer, a listener.Addr) {
 	fmt.Fprintf(w, "fit: listener %q on %s (%s)\n", a.Name, a.Addr, strings.Join(a.Protocols, ", "))
 }
 
-// reloadConfig loads file and applies it. On any failure the running config
-// stays, and the error goes to stderr.
-func reloadConfig(file string, configs *admin.Configs, stdout, stderr io.Writer) {
-	fmt.Fprintf(stdout, "fit: reloading %s\n", file)
-	data, err := os.ReadFile(file)
-	var r admin.Result
-	if err == nil {
-		r, err = configs.Apply(data, admin.SourceFile)
+// reloadConfig loads the config file at path and applies it. On any failure
+// the running config stays, and the error goes to stderr. A watcher of the
+// file, when there is one, is told, so that it does not apply the same again.
+func reloadConfig(path string, configs *admin.Configs, watcher *file.Watcher, stdout, stderr io.Writer) {
+	fmt.Fprintf(stdout, "fit: reloading %s\n", path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
+		printConfigError(stderr, "fit run", path, err)
+		return
 	}
+	if watcher != nil {
+		watcher.Applied(data)
+	}
+	applyFile(path, data, configs, stdout, stderr)
+}
+
+// applyFile applies data, read from the file at path, and says what
+// happened.
+func applyFile(path string, data []byte, configs *admin.Configs, stdout, stderr io.Writer) {
+	r, err := configs.Apply(data, admin.SourceFile)
 	if err != nil {
 		var errs config.Errors
-		var pathErr *fs.PathError
-		if errors.As(err, &errs) || errors.As(err, &pathErr) {
+		if errors.As(err, &errs) {
 			fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
-			printConfigError(stderr, "fit run", file, err)
+			printConfigError(stderr, "fit run", path, err)
 		} else {
 			fmt.Fprintf(stderr, "fit: reload failed; the running config stays: %v\n", err)
 		}
 		return
 	}
 	printApplied(stdout, stderr, r)
-	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", file, r.Version)
+	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", path, r.Version)
 }
 
 // printApplied prints what applying a config changed.

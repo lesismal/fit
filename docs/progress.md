@@ -11,9 +11,9 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I25, I26, I32, I33) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24–I27, I32, I33) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -26,9 +26,10 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I27 (file provider).** M2 has I24 and I25, the Admin API with config versions, patches,
-ETags and rollback, I26, graph draining and shared pools, I32, active health checks, and I33,
-load balancing v2.
+**Next: I28 (certificate manager and storage; the ACME decision) and I34 (Prometheus metrics).**
+M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
+draining and shared pools, I27, the file provider, I32, active health checks, and I33, load
+balancing v2.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -42,7 +43,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I27 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I28 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -51,7 +52,7 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run` (with reload on SIGHUP and the Admin API), `validate`, `schema`, `version`, `help` |
+| `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file), `validate`, `schema`, `version`, `help` |
 | `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}` |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
@@ -62,6 +63,7 @@ To continue, start a session with:
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
+| `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
@@ -1201,6 +1203,35 @@ Differences from the plan:
   ends as it would.
 - Each proxied exchange registers its context with one of the proxy's drain contexts, one lock
   more a request; shared over 32 contexts, the benchmark does not show it.
+
+### I27 File provider — done
+
+- `provider/file.Watcher` looks at the config file's size and modification time every interval
+  (1s), on a goroutine of its own; once they have stayed the same for the debounce time (500ms)
+  after a change, it reads the file (at most 64 MiB) and, if its SHA-256 differs from what was
+  applied last, applies it. An editor's several writes make one reload, a touch none, and a file
+  renamed into place is seen as one written in place. A config that fails, a file that is gone or
+  too large, is reported once, and the watcher goes on: the next edit is tried, a file that comes
+  back is applied. `Applied` records contents applied another way.
+- `fit run -watch` (and `-watch-interval`) starts it, printing `fit: watching <file>`; a change
+  prints `fit: <file> changed; reloading` and is applied through `admin.Configs.Apply`, as SIGHUP
+  is, with the same output; a SIGHUP tells the watcher what it applied. The watcher stops before
+  shutdown begins, so that no config is applied meanwhile.
+- Tests (`provider/file`): an edit applied, one renamed into place applied, a touch not; four writes
+  in a row applied once, as the last; a broken edit reported once, then a fix applied; a file
+  removed reported once and applied when it is back; a file past the limit refused; contents
+  applied by SIGHUP not applied again. `test/e2e/watch_test.go` runs `fit run -watch`, edits the
+  file and sees the new route served, a broken edit reported on stderr with the running config
+  kept, and a fix applied. `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...`
+  pass.
+- Decision note [006](decisions/006-file-provider-polls.md): polling rather than file system
+  events.
+- No benchmark: nothing on the data plane changed.
+
+Differences from the plan:
+
+- The watcher polls rather than taking file system events; see decision 006.
+- It is turned on by a flag of `fit run`, not by the config.
 
 ## Notes for later iterations
 

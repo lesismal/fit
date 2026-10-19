@@ -10,9 +10,9 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I25、I26、I32、I33） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24–I27、I32、I33） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -22,8 +22,9 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I27（文件 provider）。** M2 已完成 I24、I25（带配置版本、局部修改、ETag 和回滚的 Admin API）、I26（旧图
-排空与连接池共享）、I32（主动健康检查）和 I33（负载均衡 v2）。M2 之前的审查修复 R01、R02 已
+**下一步：I28（证书管理器与存储；ACME 决策）和 I34（Prometheus 指标）。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I32（主动健康检查）和 I33（负载
+均衡 v2）。M2 之前的审查修复 R01、R02 已
 完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -33,7 +34,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I27。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I28。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -41,7 +42,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`run`（收到 SIGHUP 或通过 Admin API 重载）、`validate`、`schema`、`version`、`help` |
+| `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载）、`validate`、`schema`、`version`、`help` |
 | `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}` |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
@@ -52,6 +53,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
+| `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
@@ -912,6 +914,27 @@ I09 和 I10 会加入 `h2` 和 `h3`。
   图，按原来的方式结束。
 - 每次代理转发都要把自己的 context 注册到代理的一个排空 context 上，每请求多一次加锁；分散在 32 个 context 上，
   基准测试中看不出影响。
+
+### I27 文件 provider — 已完成
+
+- `provider/file.Watcher` 在独立的 goroutine 上每隔一个间隔（1s）查看配置文件的大小和修改时间；变化之后保持不变达到
+  防抖时间（500ms）时读取文件（最多 64 MiB），若其 SHA-256 与上次应用的不同就应用它。编辑器的多次写入只触发一次重载，
+  touch 不触发，通过重命名替换的文件和原地写入的一样能被发现。失败的配置、不存在或过大的文件只报告一次，监视继续：下一次
+  编辑会重新尝试，文件恢复后会被应用。`Applied` 记录通过其他方式应用的内容。
+- `fit run -watch`（以及 `-watch-interval`）启动它，打印 `fit: watching <文件>`；文件变化时打印
+  `fit: <文件> changed; reloading`，并像 SIGHUP 一样通过 `admin.Configs.Apply` 应用，输出相同；SIGHUP 会告诉监视器它
+  应用了什么。关闭开始前先停止监视，这样关闭期间不会应用配置。
+- 测试（`provider/file`）：一次编辑被应用，重命名替换的被应用，touch 不被应用；连续四次写入只应用一次，即最后一次；错误
+  的编辑只报告一次，之后的修正被应用；文件被删除时报告一次，恢复后被应用；超过上限的文件被拒绝；SIGHUP 已应用的内容
+  不再应用。`test/e2e/watch_test.go` 运行 `fit run -watch`，编辑文件后看到新路由生效，错误的编辑在 stderr 中报告且运行中的
+  配置保持不变，修正后被应用。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- 决策记录 [006](decisions/006-file-provider-polls.zh-CN.md)：采用轮询而不是文件系统事件。
+- 没有做基准：数据面没有变化。
+
+与计划的不同：
+
+- 监视器采用轮询，而不是文件系统事件；见决策 006。
+- 它由 `fit run` 的参数开启，而不是在配置中。
 
 ## 给后续迭代的说明
 
