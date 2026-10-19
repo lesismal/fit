@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 const validConfig = `{
@@ -229,6 +230,24 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "health checks",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "upstreams": [
+  {"name": "u", "addresses": ["a:1"], "health_check": {"type": "tcp", "path": "/h", "host": "h", "expect_status": [200]}},
+  {"name": "v", "addresses": ["a:1"], "health_check": {"path": "h", "host": "*.h", "timeout": "6s", "jitter": "5s"}},
+  {"name": "w", "addresses": ["a:1"], "health_check": {"interval": "100ms"}}
+]}`,
+			want: []string{
+				`2:79: upstreams[0].health_check.path: path is for http health checks; a tcp one only opens a connection`,
+				`2:93: upstreams[0].health_check.host: host is for http health checks; a tcp one only opens a connection`,
+				`2:115: upstreams[0].health_check.expect_status: expect_status is for http health checks; a tcp one only opens a connection`,
+				`3:64: upstreams[1].health_check.path: "h" does not start with '/'`,
+				`3:77: upstreams[1].health_check.host: "*.h" is not a host name or IP address`,
+				`3:95: upstreams[1].health_check.timeout: the timeout, 6s, is longer than the interval, 5s`,
+				`3:111: upstreams[1].health_check.jitter: the jitter, 5s, is not less than the interval, 5s`,
+				`4:55: upstreams[2].health_check.timeout: the timeout, 2s, is longer than the interval, 100ms`,
+			},
+		},
+		{
 			name: "admin on every interface without a token",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": ":2019"}}`,
 			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
@@ -288,6 +307,17 @@ func TestAdmin(t *testing.T) {
 	a = &Admin{History: 3, MaxConfigBytes: 100, MaxConns: 2}
 	if a.HistoryLen() != 3 || a.ConfigBytes() != 100 || a.Conns() != 2 {
 		t.Errorf("set: %d %d %d", a.HistoryLen(), a.ConfigBytes(), a.Conns())
+	}
+}
+
+func TestHealthCheckDefaults(t *testing.T) {
+	h := &HealthCheck{}
+	if h.Every() != 5*time.Second || h.Wait() != 2*time.Second || h.Spread() != 500*time.Millisecond || h.FailsNeeded() != 2 || h.PassesNeeded() != 2 {
+		t.Errorf("defaults: %v %v %v %d %d", h.Every(), h.Wait(), h.Spread(), h.FailsNeeded(), h.PassesNeeded())
+	}
+	h = &HealthCheck{Interval: Duration(time.Second), Timeout: Duration(time.Second), Jitter: Duration(time.Millisecond), Fails: 1, Passes: 3}
+	if h.Every() != time.Second || h.Wait() != time.Second || h.Spread() != time.Millisecond || h.FailsNeeded() != 1 || h.PassesNeeded() != 3 {
+		t.Errorf("set: %v %v %v %d %d", h.Every(), h.Wait(), h.Spread(), h.FailsNeeded(), h.PassesNeeded())
 	}
 }
 

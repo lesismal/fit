@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,9 +25,10 @@ type Backend struct {
 	// the balancer's lock.
 	current int
 
-	// downUntil is when, in Unix nanoseconds, a backend that failed too
-	// often may take requests again, or 0 for one that is up. Picking reads
-	// only it, and the clock only when it is set.
+	// downUntil is when, in Unix nanoseconds, a backend out of rotation may
+	// take requests again: math.MaxInt64 while its probes say it is down,
+	// and otherwise passiveUntil; 0 for one that is up. Picking reads only
+	// it, and the clock only when it is set.
 	downUntil atomic.Int64
 	// failing says fails may be above zero, so that a success need not take
 	// the lock to find it is not.
@@ -35,12 +37,18 @@ type Backend struct {
 	fails   int
 	// windowEnd is when the failures counted so far stop counting.
 	windowEnd int64
+	// passiveUntil is when a backend that failed too many requests may take
+	// requests again, or 0, and probedDown says its active health check
+	// took it out of rotation.
+	passiveUntil int64
+	probedDown   atomic.Bool // written under mu
 }
 
 // Active returns how many requests to b are under way.
 func (b *Backend) Active() int64 { return b.active.Load() }
 
-// Down reports whether b is out of rotation for having failed too often.
+// Down reports whether b is out of rotation, for having failed too many
+// requests or its probes.
 func (b *Backend) Down() bool {
 	d := b.downUntil.Load()
 	return d != 0 && time.Now().UnixNano() < d
@@ -74,21 +82,43 @@ func (b *Backend) failed(maxFails int, window time.Duration) {
 	b.fails++
 	b.failing.Store(true)
 	if b.fails >= maxFails {
-		b.downUntil.Store(now + int64(window))
+		b.passiveUntil = now + int64(window)
 		b.fails, b.windowEnd = 0, 0
+		b.storeDown()
 	}
 }
 
+// storeDown sets downUntil from the passive and the active state. b.mu must
+// be held.
+func (b *Backend) storeDown() {
+	if b.probedDown.Load() {
+		b.downUntil.Store(math.MaxInt64)
+	} else {
+		b.downUntil.Store(b.passiveUntil)
+	}
+}
+
+// ProbedDown reports whether b's active health check has taken it out of
+// rotation.
+func (b *Backend) ProbedDown() bool { return b.probedDown.Load() }
+
+func (b *Backend) setProbedDown(down bool) {
+	b.mu.Lock()
+	b.probedDown.Store(down)
+	b.storeDown()
+	b.mu.Unlock()
+}
+
 // succeeded clears b's failures: one success is enough to put a backend
-// that has come back fully in rotation again.
+// that has come back fully in rotation again, unless its probes keep it out.
 func (b *Backend) succeeded() {
 	if !b.failing.Load() && b.downUntil.Load() == 0 {
 		return
 	}
 	b.mu.Lock()
-	b.fails, b.windowEnd = 0, 0
+	b.fails, b.windowEnd, b.passiveUntil = 0, 0, 0
 	b.failing.Store(false)
-	b.downUntil.Store(0)
+	b.storeDown()
 	b.mu.Unlock()
 }
 

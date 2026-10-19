@@ -211,7 +211,66 @@ type Upstream struct {
 	ResponseIdleTimeout   Duration `json:"response_idle_timeout,omitempty" default:"\"60s\"" doc:"How long the upstream may go silent in the middle of a response body; 60s when left out."`
 	ResponseTimeout       Duration `json:"response_timeout,omitempty" default:"\"1h\"" doc:"How long a whole response may take, from sending the request to the end of its body; 1h when left out. A request past it before its response began gets 504, and one past it later is cut short."`
 
+	HealthCheck *HealthCheck `json:"health_check,omitempty" doc:"Probe each address on a schedule, and take one that fails its probes out of rotation until it passes them again; no probes when left out. Probes and max_fails take an address out each on their own account."`
+
 	At Value `json:"-" fit:"self"`
+}
+
+// Health check types.
+const (
+	HealthHTTP = "http"
+	HealthTCP  = "tcp"
+)
+
+// The defaults of HealthCheck.
+const (
+	DefaultHealthInterval  = Duration(5 * time.Second)
+	DefaultHealthTimeout   = Duration(2 * time.Second)
+	DefaultHealthThreshold = 2
+)
+
+// HealthCheck is an upstream's active health check: a probe sent to each of
+// its addresses every interval.
+type HealthCheck struct {
+	Type         string   `json:"type,omitempty" enum:"http,tcp" default:"\"http\"" doc:"http sends a GET request, over the upstream's protocol, and passes on an expected status; tcp passes once a connection opens. http when left out."`
+	Path         string   `json:"path,omitempty" default:"\"/\"" doc:"With http: the path, and query, the probe asks for; / when left out."`
+	Host         string   `json:"host,omitempty" doc:"With http: the Host field the probe sends; the address's host when left out."`
+	Port         int      `json:"port,omitempty" min:"1" max:"65535" doc:"The port probes go to, in place of each address's own."`
+	ExpectStatus []int    `json:"expect_status,omitempty" min:"100" max:"599" doc:"With http: the statuses that pass; any from 200 to 399 when left out."`
+	Interval     Duration `json:"interval,omitempty" default:"\"5s\"" doc:"How long from the start of one probe of an address to the start of the next; 5s when left out."`
+	Timeout      Duration `json:"timeout,omitempty" default:"\"2s\"" doc:"How long a probe may take, connecting included, before it fails; 2s when left out. No longer than interval."`
+	Jitter       Duration `json:"jitter,omitempty" doc:"Up to how much longer than interval each wait between probes may be, chosen at random each time, so that probes from many upstreams spread out; a tenth of interval when left out. Less than interval."`
+	Fails        int      `json:"fails,omitempty" min:"0" default:"2" doc:"How many probes in a row must fail to take an address out of rotation; 2 when left out or 0."`
+	Passes       int      `json:"passes,omitempty" min:"0" default:"2" doc:"How many probes in a row must pass to put an address that was out back in; 2 when left out or 0."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Every, Wait, Spread, FailsNeeded and PassesNeeded return the settings,
+// their defaults when left out.
+func (h *HealthCheck) Every() time.Duration {
+	if h.Interval == 0 {
+		return DefaultHealthInterval.Std()
+	}
+	return h.Interval.Std()
+}
+func (h *HealthCheck) Wait() time.Duration {
+	if h.Timeout == 0 {
+		return DefaultHealthTimeout.Std()
+	}
+	return h.Timeout.Std()
+}
+func (h *HealthCheck) Spread() time.Duration {
+	if h.Jitter == 0 {
+		return h.Every() / 10
+	}
+	return h.Jitter.Std()
+}
+func (h *HealthCheck) FailsNeeded() int {
+	return int(orDefault(int64(h.Fails), DefaultHealthThreshold))
+}
+func (h *HealthCheck) PassesNeeded() int {
+	return int(orDefault(int64(h.Passes), DefaultHealthThreshold))
 }
 
 // ModuleRef names a module and holds its params, which the module decodes

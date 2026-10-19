@@ -139,6 +139,32 @@ func (c *Config) Validate() Errors {
 				add(u.At.Field("tls_ca_file"), "tls_ca_file needs protocol h2")
 			}
 		}
+		if h := u.HealthCheck; h != nil {
+			if h.Type == HealthTCP {
+				for _, f := range []struct {
+					name string
+					set  bool
+				}{{"path", h.Path != ""}, {"host", h.Host != ""}, {"expect_status", len(h.ExpectStatus) > 0}} {
+					if f.set {
+						add(h.At.Field(f.name), "%s is for http health checks; a tcp one only opens a connection", f.name)
+					}
+				}
+			}
+			if h.Path != "" && !strings.HasPrefix(h.Path, "/") {
+				add(h.At.Field("path"), "%q does not start with '/'", h.Path)
+			}
+			if h.Host != "" {
+				if msg := checkHost(h.Host); msg != "" || strings.HasPrefix(h.Host, "*.") {
+					add(h.At.Field("host"), "%q is not a host name or IP address", h.Host)
+				}
+			}
+			if h.Wait() > h.Every() {
+				add(h.At.Field("timeout"), "the timeout, %s, is longer than the interval, %s", h.Wait(), h.Every())
+			}
+			if h.Spread() >= h.Every() {
+				add(h.At.Field("jitter"), "the jitter, %s, is not less than the interval, %s", h.Spread(), h.Every())
+			}
+		}
 		seen := map[string]bool{}
 		for i, addr := range u.Addresses {
 			at := u.At.Field("addresses").Index(i)

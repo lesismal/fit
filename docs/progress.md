@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01 and R02 are done, R03–R07 wait for fib. M2, dynamic config and TLS: under way (I24, I32) |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (`GET /config`, `POST /load`, a history of versions), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no patching, ETags or rollback in the Admin API (I25); no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP or through the Admin API (`GET /config`, `POST /load`, a history of versions), and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no patching, ETags or rollback in the Admin API (I25); no ACME or certificate management beyond files (I28–I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -26,7 +26,8 @@ host; see I08.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I32 (active health checks).** M2 began with I24, the Admin API skeleton and config versions.
+**Next: I25 (Admin API: patch, ETag, rollback) and I33 (load balancing v2).** M2 began with I24,
+the Admin API skeleton and config versions, and I32, active health checks.
 R01 and R02, the review fixes that came before M2, are done; R03, fib's part, is fib's to schedule,
 and R04–R07 follow it.
 
@@ -40,7 +41,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I32 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I25 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -59,7 +60,7 @@ To continue, start a session with:
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream; `Runtime` with atomic swaps and graph reference counts |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
-| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; `StartEngine` for the engine pools dial through |
+| `upstream` | `Pool`, which picks a backend by the upstream's policy (round robin, smooth weighted round robin, least connections) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `observe` | the access log: one JSON line per request, buffered and written by a goroutine of its own, dropping lines rather than blocking |
 | `tlsmgr` | the TLS configuration of a listener: certificates from files, TLS 1.2+, AEAD suites, ALPN from its protocols |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
@@ -1016,6 +1017,53 @@ Differences from the plan:
   API, and a restart starts from the file.
 - A listener at port 0 is kept by a new config only if it is still written as port 0: listeners
   are matched by the address as written, so the e2e test keeps `127.0.0.1:0` for the kept one.
+
+### I32 Active health checks — done
+
+- Config: an upstream's `health_check`, with `type` (`http`, the default, or `tcp`), `path` (`/`),
+  `host`, `port`, `expect_status` (200–399 when left out), `interval` (5s), `timeout` (2s, no
+  longer than the interval), `jitter` (a tenth of the interval, less than it), and `fails` and
+  `passes` (2 each): the probes in a row that take an address out of rotation and put it back.
+  `path`, `host` and `expect_status` on a `tcp` check are refused.
+- `upstream`'s prober, made by `upstream.New` for a pool with an engine and stopped by `Pool.Close`
+  (so `fit validate` probes nothing): each backend's probes follow one another, each started by a
+  `time.AfterFunc` timer and finished in fib's callback, the next scheduled `interval` after the
+  last began plus a random jitter, the first within a jitter of the start. No goroutine waits for
+  a probe and none runs on a listener's worker. An http probe is a GET through a `fibhttp.Client` of
+  the pool's own protocol and TLS settings but its own connections (two per address, none kept
+  idle), so that it sees whether the backend takes new connections and never waits behind the
+  pool's requests; its callback runs once the header has arrived (`StreamResponseBody`, threshold
+  0) and the body is given up with `ClientResponse.Close`. A tcp probe is `Engine.DialWithHandler`,
+  closed as soon as it opens.
+- Results go to the backend's `downUntil`, the one field `Pick` reads, which is now
+  `math.MaxInt64` while probes have the backend down, and otherwise what passive health set:
+  probes and `max_fails` take a backend out each on their own account, and a request's success
+  does not put back one its probes took out. `Pick` is unchanged; when every backend is down, health
+  is still ignored. `Backend.ProbedDown` reports the probes' verdict.
+- Tests (`upstream/probe_test.go`): a backend whose health endpoint turns to 503 leaves rotation
+  and rejoins it within the configured window (two probes' intervals and jitter and the second's
+  timeout, doubled for a loaded host), and requests through the pool avoid it meanwhile; a single
+  failure under `fails: 2` keeps it; tcp probes against a port that closes and opens again; slow
+  upstreams (answering after the timeout, or taking the connection and never answering) and a cut
+  connection (a header broken off) are taken out, and a 1 GiB body is not waited for; `expect_status`,
+  `host` and `port`; probes over h2c and h2 with a CA file; probes stop when the pool closes; probe
+  connections are not kept; probes and passive health together. `config` tests the new checks and
+  defaults. `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- `examples/proxy.json` has a health check and the Admin API.
+- No harness benchmark: requests take the same path as before (`Pick` reads the same field), and a
+  config without `health_check`, as the harness's, starts no probes. `go test -bench BenchmarkPick`
+  (parallel, 14 threads, this Mac) before and after: round robin 54 and 57 ns, weighted round robin
+  106 and 107, least connections 66 and 66, within the benchmark's run-to-run spread.
+
+Differences from the plan:
+
+- A reload makes new pools (as since I22), so health starts again with every backend up after a
+  reload or an Admin API load, and a backend that was down rejoins until `fails` probes fail
+  again. I26, which can share pools between graphs whose upstream did not change, would keep it.
+- Each address may have two probe connections, not one: under the race detector, the connection
+  of a probe that gave up on a large body took up to 750ms to finish closing in fib's client, and
+  the next probe waited for it past its timeout. Nothing else in fit sees this.
+- Nothing is logged when a backend leaves or rejoins rotation; I34's metrics will show it.
 
 ## Notes for later iterations
 

@@ -79,6 +79,9 @@ type Pool struct {
 	// waiting for one. Past it Pick refuses.
 	maxInFlight int64
 
+	// prober runs the active health check, or is nil without one.
+	prober *prober
+
 	// inFlight counts requests picked and not yet done, and closing says
 	// Close was called: the client is closed once there are none.
 	inFlight  atomic.Int64
@@ -168,6 +171,10 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	cc.UnencryptedHTTP2 = c.Protocol == "h2c"
 	cc.TLSConfig = tlsConfig
 	p.client = fibhttp.NewClient(engine, cc)
+	if c.HealthCheck != nil {
+		p.prober = newProber(engine, c, p.scheme, tlsConfig, p.backends)
+		p.prober.start()
+	}
 	return p, nil
 }
 
@@ -272,8 +279,11 @@ func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, e
 // Close closes the pool once the requests in flight are done, as a graph's
 // cleanup does when the last request using the graph has returned: a request
 // whose response arrives later can still finish. The idle connections are
-// closed then, and later requests fail.
+// closed then, and later requests fail. Probes stop at once.
 func (p *Pool) Close() {
+	if p.prober != nil {
+		p.prober.stop()
+	}
 	p.closing.Store(true)
 	if p.inFlight.Load() == 0 {
 		p.closeClient()

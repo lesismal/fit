@@ -74,6 +74,74 @@
       ],
       "type": "object"
     },
+    "config.HealthCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "expect_status": {
+          "description": "With http: the statuses that pass; any from 200 to 399 when left out.",
+          "items": {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "fails": {
+          "default": 2,
+          "description": "How many probes in a row must fail to take an address out of rotation; 2 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "description": "With http: the Host field the probe sends; the address's host when left out.",
+          "type": "string"
+        },
+        "interval": {
+          "default": "5s",
+          "description": "How long from the start of one probe of an address to the start of the next; 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "jitter": {
+          "description": "Up to how much longer than interval each wait between probes may be, chosen at random each time, so that probes from many upstreams spread out; a tenth of interval when left out. Less than interval.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "passes": {
+          "default": 2,
+          "description": "How many probes in a row must pass to put an address that was out back in; 2 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "default": "/",
+          "description": "With http: the path, and query, the probe asks for; / when left out.",
+          "type": "string"
+        },
+        "port": {
+          "description": "The port probes go to, in place of each address's own.",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "2s",
+          "description": "How long a probe may take, connecting included, before it fails; 2s when left out. No longer than interval.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "type": {
+          "default": "http",
+          "description": "http sends a GET request, over the upstream's protocol, and passes on an expected status; tcp passes once a connection opens. http when left out.",
+          "enum": [
+            "http",
+            "tcp"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.Limits": {
       "additionalProperties": false,
       "properties": {
@@ -235,6 +303,10 @@
           "description": "The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "health_check": {
+          "$ref": "#/$defs/config.HealthCheck",
+          "description": "Probe each address on a schedule, and take one that fails its probes out of rotation until it passes them again; no probes when left out. Probes and max_fails take an address out each on their own account."
         },
         "idle_timeout": {
           "default": "60s",

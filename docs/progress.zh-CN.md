@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01、R02 已完成，R03–R07 等待 fib。M2 动态配置与 TLS：进行中（I24、I32） |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游，写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（`GET /config`、`POST /load`、版本历史）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | Admin API 还没有局部修改、ETag 和回滚（I25）；除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查），写 JSON 访问日志，收到 SIGHUP 或通过 Admin API（`GET /config`、`POST /load`、版本历史）重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | Admin API 还没有局部修改、ETag 和回滚（I25）；除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -22,7 +22,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I32（主动健康检查）。** M2 已从 I24（Admin API 骨架与配置版本）开始。M2 之前的审查修复 R01、R02 已
+**下一步：I25（Admin API：局部修改、ETag、回滚）和 I33（负载均衡 v2）。** M2 已完成 I24（Admin API 骨架与配置
+版本）和 I32（主动健康检查）。M2 之前的审查修复 R01、R02 已
 完成；R03 是 fib 的工作，由 fib 安排，R04–R07 在它之后。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -32,7 +33,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I32。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I25。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -50,7 +51,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池；带原子替换和图引用计数的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
-| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；`StartEngine` 启动连接池拨号用的 engine |
+| `upstream` | `Pool`：按上游的策略（轮询、平滑加权轮询、最少连接）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲后由单独的 goroutine 写出，宁可丢行也不阻塞 |
 | `tlsmgr` | listener 的 TLS 配置：证书文件、TLS 1.2+、AEAD 密码套件、按协议设置 ALPN |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
@@ -784,6 +785,41 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 历史只在内存中；SIGHUP 会用文件覆盖通过 API 加载的配置，重启从文件开始。
 - 端口为 0 的 listener 只有在新配置中仍写作端口 0 时才会保留：listener 按书写的地址匹配，所以 e2e 测试中保留的那个
   仍写 `127.0.0.1:0`。
+
+### I32 主动健康检查 — 已完成
+
+- 配置：上游的 `health_check`，包括 `type`（默认 `http`，或 `tcp`）、`path`（`/`）、`host`、`port`、
+  `expect_status`（未写时为 200–399）、`interval`（5s）、`timeout`（2s，不超过 interval）、`jitter`（interval 的十分之一，
+  小于 interval），以及 `fails` 和 `passes`（各 2）：连续多少次探测失败使地址退出轮转、连续多少次成功使它回来。`tcp`
+  检查上写 `path`、`host` 或 `expect_status` 会被拒绝。
+- `upstream` 的探测器由 `upstream.New` 为有 engine 的连接池创建，由 `Pool.Close` 停止（所以 `fit validate` 不探测）：
+  每个后端的探测依次进行，每次由 `time.AfterFunc` 定时器发起、在 fib 的回调中结束，下一次安排在上一次开始后
+  `interval` 加一个随机抖动，第一次在启动后一个抖动之内。没有 goroutine 等待探测，也没有探测运行在 listener 的
+  worker 上。http 探测是一个 GET，经由一个 `fibhttp.Client` 发出，协议和 TLS 设置与连接池相同，但连接是它自己的（每个
+  地址两个，不保留空闲连接），这样探测能看出后端是否还接受新连接，也不会排在连接池的请求后面；回调在响应头到达时就
+  运行（`StreamResponseBody`，阈值 0），body 用 `ClientResponse.Close` 放弃。tcp 探测是 `Engine.DialWithHandler`，连上
+  后立即关闭。
+- 结果写入后端的 `downUntil`，即 `Pick` 唯一读取的字段：探测判定后端下线时为 `math.MaxInt64`，否则为被动健康检查设置
+  的值。探测和 `max_fails` 各自独立地让后端退出轮转，请求成功不会让被探测判定下线的后端回来。`Pick` 没有变化；所有
+  后端都下线时仍忽略健康状态。`Backend.ProbedDown` 报告探测的判定。
+- 测试（`upstream/probe_test.go`）：一个健康接口变为 503 的后端在配置的时间窗口内（两次探测的间隔和抖动加上第二次的
+  超时，为负载高的主机放宽一倍）退出并重新加入轮转，期间经连接池的请求都避开它；`fails: 2` 下单次失败不会让它退出；
+  对一个关闭又重新打开的端口做 tcp 探测；慢上游（超时后才应答，或接受连接后从不应答）和中途断开的连接（响应头被截断）
+  会被移出，1 GiB 的 body 不会被等待；`expect_status`、`host` 和 `port`；经 h2c 和带 CA 文件的 h2 探测；连接池关闭后
+  探测停止；探测连接不被保留；探测与被动健康检查同时生效。`config` 测试新的检查和默认值。`go vet ./...`、
+  `GOOS=windows go vet ./...` 和 `go test -race ./...` 通过。
+- `examples/proxy.json` 加入了健康检查和 Admin API。
+- 没有跑压测框架：请求走的路径与之前相同（`Pick` 读取同一个字段），没有 `health_check` 的配置（压测框架的配置就是
+  这样）不会启动探测。`go test -bench BenchmarkPick`（并行，14 线程，本机 Mac）前后对比：轮询 54 和 57 ns，加权轮询
+  106 和 107，最少连接 66 和 66，在该基准两次运行之间的波动范围内。
+
+与计划的不同：
+
+- 重载会创建新的连接池（I22 起如此），所以每次重载或经 Admin API 加载后，健康状态从所有后端在线重新开始，原先下线的
+  后端会先回到轮转，直到再失败 `fails` 次探测。I26 可以在上游未变的图之间共享连接池，届时状态得以保留。
+- 每个地址最多两个探测连接，而不是一个：在 race 检测下，一个放弃了大 body 的探测，其连接在 fib 客户端中最长要 750ms
+  才关闭完，下一次探测因等待它而超时。fit 的其他部分不受此影响。
+- 后端退出或重新加入轮转时没有日志；I34 的指标会显示它。
 
 ## 给后续迭代的说明
 
