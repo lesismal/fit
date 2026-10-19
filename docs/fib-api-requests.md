@@ -1,0 +1,158 @@
+# APIs fit needs from fib
+
+[English](fib-api-requests.md) | [简体中文](fib-api-requests.zh-CN.md)
+
+A review of M0 and M1 against the [development rules](rules.md) found places where fit cannot
+follow them with fib v1.3.0's API alone. This document lists what fit asks of fib, why, and how fit
+would use each API. The names and signatures are suggestions; fib decides the final shape.
+
+The fit iterations that depend on these are R03–R07 in the [development plan](dev-plan.md#m1-review-fixes).
+
+## Summary
+
+| ID | API | Priority | Rules it unblocks | fit iterations |
+| --- | --- | --- | --- | --- |
+| A1 | `ClientResponse.HoldBody(hold bool)` | P0 | 1, 8 | R04 |
+| A2 | A response write that never waits, and a writable notification | P0 | 1, 8, 9 | R04, R05 |
+| A3 | Asynchronous file sending | P1 | 1, 4 | R05 |
+| A4 | Engine connection limit | P1 | 11 | R06 |
+| A5 | Client limit on requests waiting for a connection | P1 | 11 | R06 |
+| A6 | Trailers set on a `BodyWriter` before it closes | P2 | 1, 4 | R04 |
+| A7 | A per-request value slot on `Context` | P2 | 12 | R07 |
+| A8 | Documentation fixes | P2 | — | — |
+
+## Evidence
+
+The download direction of fit's proxy calls `Context.Write` from `ClientResponse.OnBody`'s function
+(`handler/proxy/exchange.go`, `exchange.onBody`). For HTTP/1 and HTTP/2 upstreams that function runs
+on the worker that reads the upstream connection, and `Write` waits once 64 KB are queued for the
+client. fit leaves `Config.WriteTimeout` at its default of 0, so the wait has no limit.
+Measured against fit at commit `511f64b`, with fib v1.3.0:
+
+| Setup | One or more clients ask for a 200 MB download and never read | Other requests to the same upstream |
+| --- | --- | --- |
+| h2c upstream, `max_conns: 1` | 1 client | time out (5 s), still after 7 s; served again only once the stuck client disconnects |
+| HTTP/1.1 upstream, `max_conns: 4` | 8 clients | time out (5 s), still after 7 s; served again only once they disconnect |
+| HTTP/1.1 upstream, no `max_conns` | 512 clients | served (fib's adaptive pool adds workers), at the cost of a blocked goroutine and an upstream connection per stuck client, without limit |
+
+`response_idle_timeout` (2 s in these runs) does not help: it cancels the upstream request, but the
+goroutine stays in `Write`.
+
+## A1: `ClientResponse.HoldBody(hold bool)`
+
+**Problem.** A client response body can only be paced by its `OnBody` function blocking ("what holds
+the connection back is fn itself"). On HTTP/2 the function runs on the worker that reads the shared
+connection, so one slow consumer stalls every stream on it.
+
+**Request.** The mirror of `Context.HoldBody` for client responses:
+
+```go
+// HoldBody pauses, with hold set, the delivery of the body to OnBody's
+// function, and resumes it without. While held, what arrives waits in the
+// client's buffer: HTTP/1 stops reading the connection once
+// StreamResponseBodyBuffer waits; HTTP/2 and HTTP/3 stop returning window for
+// this stream only, so other streams on the connection go on. Resuming
+// delivers on the engine's handler pool, never on the caller's goroutine, so
+// HoldBody may be called from inside the function and from anywhere else.
+func (c *ClientResponse) HoldBody(hold bool)
+```
+
+**fit's use.** In `onBody`, after a write that leaves the client's queue above its limit:
+`resp.HoldBody(true)`, then resume from the A2 notification.
+
+## A2: A response write that never waits, and a writable notification
+
+**Problem.** `Context.Write` waits when 64 KB are queued (HTTP/1) or held back by flow control
+(HTTP/2, HTTP/3). There is no way to write without waiting and learn when there is room again.
+`Connection.NotifyOutput` covers an HTTP/1 connection only, and not HTTP/2 or HTTP/3 streams.
+
+**Request.**
+
+```go
+// WriteNoWait adds p to the response body as Write does, but never waits: it
+// takes all of p, and reports above when more than the response's limit
+// (64 KB) is now queued or held back by flow control. A caller that gets
+// above stops writing until OnWritable's function runs.
+func (c *Context) WriteNoWait(p []byte) (above bool, err error)
+
+// OnWritable arranges for fn to run, once, on another goroutine, when the
+// response's queued output falls to half its limit, or with an error when the
+// connection or stream ends or the write deadline passes. It reports false,
+// and never runs fn, when the output is already at or below half.
+func (c *Context) OnWritable(fn func(error)) bool
+```
+
+**fit's use.** Together with A1:
+
+```go
+above, err := c.WriteNoWait(data)
+if err != nil { /* client gone: resp.Close(), release */ }
+if above {
+    resp.HoldBody(true)
+    if !c.OnWritable(func(err error) { if err == nil { resp.HoldBody(false) } else { /* abort */ } }) {
+        resp.HoldBody(false)
+    }
+}
+```
+
+This is the same shape as the upload direction, which already uses `Context.HoldBody` and
+`BodyWriter.OnDrain`. WebSocket, gRPC and tunnel forwarding (M3) need the same pair.
+
+## A3: Asynchronous file sending
+
+**Problem.** fit's static handler serves files with `http.ServeContent`, which reads the file on the
+worker and writes through `Context.Write` or `ReadFrom` (sendfile), both of which wait for the
+client. Disk reads and the waits both block the worker.
+
+**Request.** One of:
+
+- `Context.SendFile(f *os.File, offset, n int64, done func(error))`, which sends a range of a file
+  without waiting: sendfile paced by A2's notification on HTTP/1, and chunks read on a bounded file
+  I/O pool and sent with A2 on HTTP/2 and HTTP/3; or
+- an `http.FileCache` method that serves a cached file, or a range of it, through A2, with misses
+  read on a bounded pool.
+
+**fit's use.** The static handler serves from `FileCache` and sends large files with this API; it
+calls no blocking file operation on a worker.
+
+## A4: Engine connection limit
+
+**Problem.** `fib.Config` has no limit on open connections. Rule 11 requires one, with a safe
+default.
+
+**Request.** `Config.MaxConns int` (and optionally per `Binding`): past it, accepted connections are
+closed at once (or accepting pauses), counted in a statistic. Zero keeps today's behaviour.
+
+## A5: Client limit on requests waiting for a connection
+
+**Problem.** With `MaxConnsPerHost` reached, requests wait for a connection with no limit on how
+many wait; only their context bounds how long.
+
+**Request.** `ClientConfig.MaxPendingPerHost int`: a request beyond it fails at once with a
+distinct error (for example `ErrTooManyPending`), which fit maps to 503.
+
+## A6: Trailers set on a `BodyWriter` before it closes
+
+**Problem.** fib's client reads a request's `Trailer` when it sends the header. A body whose trailer
+values are known only when it ends (a client upload with trailers) cannot use `BodyWriter`, so fit
+uses a blocking pipe read on the client's own goroutine, one goroutine per such upload.
+
+**Request.** `BodyWriter.CloseWithTrailer(trailer http.Header) error`, or the client reading the
+request's `Trailer` after the body's EOF rather than with the header.
+
+## A7: A per-request value slot on `Context`
+
+**Problem.** fit attaches its access log entry to a request with `r.WithContext`, which copies the
+whole `http.Request` and allocates a context value on every request.
+
+**Request.** `Context.SetValue(v any)` and `Context.Value() any` (one slot, cleared when the
+`Context` is recycled), or a small keyed map with the same lifetime.
+
+## A8: Documentation fixes
+
+- `StreamResponseBody` says a stalled reader "never holds up the other streams on the connection".
+  That holds for a reader of `Body`, but not for an `OnBody` function that waits, which runs on the
+  connection's reader. Say so.
+- `Config.WriteTimeout` defaults to 0, so a streaming `Write` to a client that stops reading waits
+  forever. Consider a per-wait bound (`WriteStallTimeout`) with a non-zero default, separate from the
+  whole-response `WriteTimeout`, which long downloads cannot use.

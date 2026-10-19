@@ -12,6 +12,7 @@ of room.
 - [Index](#index)
 - [M0, foundations](#m0-foundations)
 - [M1, the proxy core](#m1-the-proxy-core)
+- [M1 review fixes](#m1-review-fixes)
 - [M2, dynamic config and TLS](#m2-dynamic-config-and-tls)
 - [M3, gateway features](#m3-gateway-features)
 - [M4, platform integration](#m4-platform-integration)
@@ -123,6 +124,14 @@ Status: `todo`, `doing` or `done`.
 | I21 | Access logs | I06 | done |
 | I22 | Reload on SIGHUP | I05, I06 | done |
 | I23 | M1 conformance and benchmarks | I13, I18, I20, I21, I22 | doing |
+| **M1 review fixes** | | | |
+| R01 | Bounded waits on slow clients | I13, I17 | todo |
+| R02 | Safe default limits | I13, I20 | todo |
+| R03 | fib APIs for forwarding without waiting (in fib) | — | todo |
+| R04 | Proxy downloads without waiting | R01, R03 | todo |
+| R05 | Static files without blocking | R01, R03 | todo |
+| R06 | Connection and queue limits through fib | R02, R03 | todo |
+| R07 | Hot path costs | R03, I23 | todo |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | todo |
 | I25 | Admin API: patch, ETag, rollback | I24 | todo |
@@ -377,6 +386,103 @@ Status: `todo`, `doing` or `done`.
 - **Done when**: results are committed under `bench/results/` and compared with the baselines in a
   short report.
 - **Touches**: `test/e2e`, `bench`.
+
+## M1 review fixes
+
+A review of M0 and M1 against the [development rules](rules.md) on 2026-10-19 found code that breaks
+them. These iterations fix it in three steps: R01 and R02 change fit alone and come before M2; R03
+is work in fib, specified in [APIs fit needs from fib](fib-api-requests.md); R04–R07 use those APIs.
+
+What the review found, and where each finding is fixed:
+
+| Finding | Rules | Where | Fixed in |
+| --- | --- | --- | --- |
+| A proxied download waits in `Context.Write` on the worker that reads the upstream connection, with no time limit. One client that stops reading stalls every request sharing its h2c upstream connection, and a few exhaust `max_conns`; both were reproduced | 1, 8, 10 | `handler/proxy/exchange.go`, `onBody` | R01 bounds it, R04 fixes it |
+| Static files are stat'ed, read and opened on the worker, and sent through writes that wait without a time limit; a directory listing reads the whole directory | 1, 4, 10, 11 | `handler/static` | R01 and R02 bound it, R05 fixes it |
+| Listeners set no `WriteTimeout` or stall timeout | 10 | `listener/listener.go`, `httpConfig` and `http3Config` | R01 |
+| An upstream without `max_conns` has no connection limit; requests waiting for a connection are not limited in number; a response has no total timeout | 10, 11 | `upstream/upstream.go`, `config` | R02, R06 |
+| The engine limits neither total queued output nor connections | 11 | `listener/listener.go`, `Start` | R02, R06 |
+| An upload with trailers holds a goroutine blocked in a pipe read | 1, 4 | `handler/proxy/exchange.go`, `trailerPipe` | R04 |
+| A lock per access log line; a copy of the request and a context per request for the log entry; a scan of the graph's listeners per request; a lock per weighted round robin pick | 12 | `observe`, `listener`, `upstream/balance.go` | R07 |
+| No test that a client that stops reading leaves other requests alone; no slow-client tests for static files | 13 | tests | R01, R05 |
+
+The rest of M0 and M1 follows the rules: config, the module registry, the runtime graph, the router,
+`respond`, the proxy's upload direction and the access log's writer.
+
+### R01 Bounded waits on slow clients
+
+- **Do**: a listener setting, `write_stall_timeout` (30s when left out), that bounds each wait for a
+  client to take output. The proxy's download path and the static handler call
+  `Context.SetWriteDeadline(now + stall)` before writing, refreshed at most once a second to spare
+  system calls, so a client that stops reading loses its response (its HTTP/1 connection closed, its
+  HTTP/2 or HTTP/3 stream reset) and the goroutine waiting on it is let go; the proxy then abandons
+  the upstream response. Regression tests that reproduce the review: a non-reading client on a
+  shared h2c upstream connection, and non-reading clients against `max_conns`, over HTTP/1.1, h2c
+  and h3.
+- **Done when**: in those tests other requests are served while the stuck clients are there, and
+  the stuck ones end within the stall timeout; the streaming tests still pass.
+- **Touches**: `config`, `schema`, `listener`, `handler/proxy`, `handler/static`, `test/e2e`.
+- **Read**: fib `Context.SetWriteDeadline`, `Config.WriteTimeout`; the evidence in
+  [fib-api-requests](fib-api-requests.md#evidence).
+
+### R02 Safe default limits
+
+- **Do**: a default for every limit the review found open, each settable in the config:
+  `max_conns` per upstream address (256 when left out); `max_pending` per upstream, the requests
+  waiting for a connection (1024 when left out; past it, 503 at once, counted by fit until R06);
+  `response_timeout` per upstream, the total time a response may take (1h when left out); a
+  top-level `limits` object with the engine's `max_pending_bytes` (256MB) and the listeners'
+  `max_header_bytes` and `max_body_bytes` (fib's 1MB and 16MB, now visible); and
+  `browse_max_entries` for directory listings (10000). Every default is in the schema.
+- **Done when**: each limit has a test that reaches it; the schema and the examples show the
+  defaults.
+- **Touches**: `config`, `schema`, `upstream`, `handler/proxy`, `handler/static`, `listener`.
+
+### R03 fib APIs for forwarding without waiting
+
+- **Do**: in fib, A1, A2 and A3 from [fib-api-requests](fib-api-requests.md), then A4–A7 as fib
+  schedules them; release fib v1.4.0; move fit to it with no change in behaviour.
+- **Done when**: fit builds and passes its tests on the new fib release, and fib-api-requests says
+  of each API whether it was delivered, changed or declined.
+- **Touches**: fib; in fit, `go.mod` and the docs.
+
+### R04 Proxy downloads without waiting
+
+- **Do**: rewrite the download path with `WriteNoWait`, `OnWritable` and `ClientResponse.HoldBody`,
+  as the upload path already uses `HoldBody` and `OnDrain`; replace `trailerPipe` with trailers on
+  `BodyWriter` (A6) once fib has them.
+- **Done when**: no proxy code calls a write that waits; R01's tests pass with the stall timeout
+  raised to an hour, so nothing relies on it; a slow client holds back only its own upstream stream;
+  memory stays bounded in the 256MB streaming tests.
+- **Touches**: `handler/proxy`.
+
+### R05 Static files without blocking
+
+- **Do**: serve from fib's `http.FileCache`, with no stat per request; open, stat, read and list the
+  files it misses on a bounded file I/O pool of fit's own, with a timeout; send large files with A3.
+  Range and conditional requests keep working.
+- **Done when**: no static code calls a file operation or a waiting write on a worker; tests with
+  slow and non-reading clients over HTTP/1.1, h2 and h3, and with a slow disk (a test hook on the
+  pool); benchmarks before and after.
+- **Touches**: `handler/static`.
+
+### R06 Connection and queue limits through fib
+
+- **Do**: the engine's connection limit (A4), as `limits.max_conns`; the client's pending limit (A5)
+  in place of R02's count in fit.
+- **Done when**: tests reach both limits, and R02's interim count is gone.
+- **Touches**: `listener`, `upstream`, `config`.
+
+### R07 Hot path costs
+
+- **Do**, guided by I23's numbers: per-worker or sharded access log buffers; the log entry in the
+  Context's value slot (A7) instead of `r.WithContext`; each listener's routes found without scanning
+  the graph, through an index set at compile time; smooth weighted round robin without a lock, as a
+  precomputed schedule and an atomic index rebuilt when health changes; fewer allocations per
+  proxied request.
+- **Done when**: allocations and nanoseconds per request, before and after, are in the progress
+  record, and throughput does not regress.
+- **Touches**: `observe`, `listener`, `runtime`, `upstream`, `handler/proxy`.
 
 ## M2, dynamic config and TLS
 

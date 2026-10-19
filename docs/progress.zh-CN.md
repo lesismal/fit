@@ -23,6 +23,11 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 结果提交到 `bench/results/` 并与基线比较。压测机拒绝了本会话的 ssh 登录（开发机上还没有密钥）。I24、I32 也都可以
 开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
 
+**按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
+worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
+默认值。修复见 [开发计划](dev-plan.zh-CN.md#m1-审查修复) 中的 R01–R07；fit 需要 fib 提供的 API 见
+[fib-api-requests](fib-api-requests.zh-CN.md)。**R01、R02 只改 fit，应在 M2 之前完成**，即在 I24、I32 之前。
+
 可以用下面的话开始下一次会话：
 
 > 完成 docs/dev-plan.zh-CN.md 中的迭代 I23：一致性部分已完成（见 docs/progress.zh-CN.md），在压测机上运行基准。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的

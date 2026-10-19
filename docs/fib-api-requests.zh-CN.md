@@ -1,0 +1,136 @@
+# fit 需要 fib 提供的 API
+
+[English](fib-api-requests.md) | [简体中文](fib-api-requests.zh-CN.md)
+
+按 [开发规则](rules.zh-CN.md) 审查 M0、M1 时发现，有些地方只靠 fib v1.3.0 现有的 API，fit 无法遵守规则。本文列出 fit
+需要 fib 提供的 API、原因，以及 fit 打算怎么用。文中的名字和签名只是建议，最终形式由 fib 决定。
+
+依赖这些 API 的 fit 迭代是 [开发计划](dev-plan.zh-CN.md#m1-审查修复) 中的 R03–R07。
+
+## 概览
+
+| ID | API | 优先级 | 解决的规则 | fit 迭代 |
+| --- | --- | --- | --- | --- |
+| A1 | `ClientResponse.HoldBody(hold bool)` | P0 | 1、8 | R04 |
+| A2 | 从不等待的响应写入，以及可写通知 | P0 | 1、8、9 | R04、R05 |
+| A3 | 异步发送文件 | P1 | 1、4 | R05 |
+| A4 | 引擎连接数上限 | P1 | 11 | R06 |
+| A5 | 客户端等待连接的请求数上限 | P1 | 11 | R06 |
+| A6 | 在 `BodyWriter` 关闭前设置 trailer | P2 | 1、4 | R04 |
+| A7 | `Context` 上的单请求值槽 | P2 | 12 | R07 |
+| A8 | 文档修正 | P2 | — | — |
+
+## 证据
+
+fit 代理的下载方向在 `ClientResponse.OnBody` 的回调里调用 `Context.Write`（`handler/proxy/exchange.go` 的
+`exchange.onBody`）。对 HTTP/1 和 HTTP/2 上游，这个回调运行在读取上游连接的 worker 上；客户端排队超过 64 KB 后，
+`Write` 就会等待。fit 没有设置 `Config.WriteTimeout`，其默认值为 0，所以这个等待没有时间上限。
+在 fit `511f64b`、fib v1.3.0 上的实测结果：
+
+| 场景 | 请求 200 MB 下载但从不读取的客户端 | 发往同一上游的其他请求 |
+| --- | --- | --- |
+| h2c 上游，`max_conns: 1` | 1 个 | 超时（5 秒），7 秒后仍然超时；只有卡住的客户端断开后才恢复 |
+| HTTP/1.1 上游，`max_conns: 4` | 8 个 | 超时（5 秒），7 秒后仍然超时；只有它们断开后才恢复 |
+| HTTP/1.1 上游，不设 `max_conns` | 512 个 | 能正常处理（fib 的自适应池会增加 worker），代价是每个卡住的客户端占用一个阻塞的 goroutine 和一条上游连接，没有上限 |
+
+`response_idle_timeout`（这些测试里设为 2 秒）不起作用：它取消了上游请求，但 goroutine 仍停在 `Write` 里。
+
+## A1：`ClientResponse.HoldBody(hold bool)`
+
+**问题。** 客户端响应体只能靠 `OnBody` 回调阻塞来控速（"what holds the connection back is fn itself"）。在 HTTP/2 上，
+回调运行在读取共享连接的 worker 上，一个慢消费者会卡住这条连接上的所有 stream。
+
+**需求。** 与 `Context.HoldBody` 对称的客户端响应版本：
+
+```go
+// HoldBody 在 hold 为 true 时暂停向 OnBody 回调交付 body，为 false 时恢复。暂停期间到达的数据留在客户端缓冲中：
+// HTTP/1 在 StreamResponseBodyBuffer 满后停止读取连接；HTTP/2 和 HTTP/3 只停止归还这个 stream 的窗口，同一连接上的
+// 其他 stream 照常进行。恢复时在引擎的 handler 池上交付，绝不在调用者的 goroutine 上，所以回调内外都可以调用。
+func (c *ClientResponse) HoldBody(hold bool)
+```
+
+**fit 的用法。** 在 `onBody` 中，写入后若客户端队列超过上限：先 `resp.HoldBody(true)`，等 A2 的通知再恢复。
+
+## A2：从不等待的响应写入，以及可写通知
+
+**问题。** 排队超过 64 KB（HTTP/1）或被流控挡住（HTTP/2、HTTP/3）时，`Context.Write` 会等待。没有办法不等待地写入，
+并在有空间时得到通知。`Connection.NotifyOutput` 只适用于 HTTP/1 连接，不适用于 HTTP/2、HTTP/3 的 stream。
+
+**需求。**
+
+```go
+// WriteNoWait 像 Write 一样把 p 加入响应体，但从不等待：它接收全部 p，并在当前排队或被流控挡住的数据超过响应上限
+// （64 KB）时返回 above=true。收到 above 的调用者应停止写入，直到 OnWritable 的回调运行。
+func (c *Context) WriteNoWait(p []byte) (above bool, err error)
+
+// OnWritable 安排 fn 在另一个 goroutine 上运行一次：当响应排队的输出降到上限的一半时；或者连接、stream 结束，或写截止
+// 时间已过时，带上错误运行。如果输出已经不超过一半，它返回 false，fn 不会运行。
+func (c *Context) OnWritable(fn func(error)) bool
+```
+
+**fit 的用法。** 与 A1 配合：
+
+```go
+above, err := c.WriteNoWait(data)
+if err != nil { /* 客户端已断开：resp.Close()，释放 */ }
+if above {
+    resp.HoldBody(true)
+    if !c.OnWritable(func(err error) { if err == nil { resp.HoldBody(false) } else { /* 中止 */ } }) {
+        resp.HoldBody(false)
+    }
+}
+```
+
+这与上传方向的写法一致：上传方向已经在用 `Context.HoldBody` 和 `BodyWriter.OnDrain`。M3 的 WebSocket、gRPC 和隧道
+转发也需要同样的一对 API。
+
+## A3：异步发送文件
+
+**问题。** fit 的静态文件 handler 用 `http.ServeContent` 发送文件：它在 worker 上读文件，再通过 `Context.Write` 或
+`ReadFrom`（sendfile）写出，两者都会等待客户端。磁盘读取和这些等待都会阻塞 worker。
+
+**需求。** 二选一：
+
+- `Context.SendFile(f *os.File, offset, n int64, done func(error))`：不等待地发送文件的一段。HTTP/1 上用 sendfile，
+  由 A2 的通知控速；HTTP/2、HTTP/3 上在有界的文件 I/O 池中分块读取，再用 A2 发送；或者
+- `http.FileCache` 提供一个方法，通过 A2 发送已缓存的文件或其中一段，未命中时在有界池中读取。
+
+**fit 的用法。** 静态 handler 从 `FileCache` 提供文件，大文件用这个 API 发送，不在 worker 上调用任何阻塞的文件操作。
+
+## A4：引擎连接数上限
+
+**问题。** `fib.Config` 没有限制打开的连接数。规则 11 要求有上限，并且有安全的默认值。
+
+**需求。** `Config.MaxConns int`（可选再加上每个 `Binding` 的上限）：超过时立即关闭新接受的连接（或暂停 accept），
+并计入统计。为 0 时保持现在的行为。
+
+## A5：客户端等待连接的请求数上限
+
+**问题。** 达到 `MaxConnsPerHost` 后，请求排队等待连接，排队数量没有上限，只有各自的 context 限制等待时长。
+
+**需求。** `ClientConfig.MaxPendingPerHost int`：超出的请求立即失败，返回专门的错误（如 `ErrTooManyPending`），
+fit 把它映射为 503。
+
+## A6：在 `BodyWriter` 关闭前设置 trailer
+
+**问题。** fib 的客户端在发送请求头时读取请求的 `Trailer`。如果 trailer 的值要等 body 结束才知道（带 trailer 的
+客户端上传），就无法使用 `BodyWriter`。fit 只好在客户端自己的 goroutine 上用阻塞的管道读取，每个这样的上传占用一个
+goroutine。
+
+**需求。** `BodyWriter.CloseWithTrailer(trailer http.Header) error`，或者客户端在 body 读到 EOF 之后再读取请求的
+`Trailer`，而不是在发送请求头时读取。
+
+## A7：`Context` 上的单请求值槽
+
+**问题。** fit 用 `r.WithContext` 把访问日志条目挂到请求上，每个请求都要复制整个 `http.Request` 并分配一个
+context 值。
+
+**需求。** `Context.SetValue(v any)` 和 `Context.Value() any`（一个槽，`Context` 回收时清空），或者一个生命周期相同
+的小型键值表。
+
+## A8：文档修正
+
+- `StreamResponseBody` 的文档说停滞的读者"never holds up the other streams on the connection"。这对读取 `Body` 的读者
+  成立，但对会等待的 `OnBody` 回调不成立，因为回调运行在连接的读取者上。建议写明。
+- `Config.WriteTimeout` 默认为 0，所以流式 `Write` 遇到不再读取的客户端时会永远等待。建议增加按单次等待计的上限
+  （`WriteStallTimeout`），默认非零，与针对整个响应的 `WriteTimeout` 分开，因为长时间下载无法使用后者。

@@ -10,6 +10,7 @@
 - [索引](#索引)
 - [M0 基础](#m0-基础)
 - [M1 反向代理核心](#m1-反向代理核心)
+- [M1 审查修复](#m1-审查修复)
 - [M2 动态配置与 TLS](#m2-动态配置与-tls)
 - [M3 网关能力](#m3-网关能力)
 - [M4 平台集成](#m4-平台集成)
@@ -113,6 +114,14 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I21 | 访问日志 | I06 | done |
 | I22 | SIGHUP 重载 | I05、I06 | done |
 | I23 | M1 一致性测试与基准 | I13、I18、I20、I21、I22 | doing |
+| **M1 审查修复** | | | |
+| R01 | 慢客户端的等待有上限 | I13、I17 | todo |
+| R02 | 安全的默认上限 | I13、I20 | todo |
+| R03 | 不等待转发所需的 fib API（在 fib 中） | — | todo |
+| R04 | 代理下载不等待 | R01、R03 | todo |
+| R05 | 静态文件不阻塞 | R01、R03 | todo |
+| R06 | 通过 fib 实现连接和排队上限 | R02、R03 | todo |
+| R07 | 热路径开销 | R03、I23 | todo |
 | **M2** | | | |
 | I24 | 配置版本与 Admin API 骨架 | I22 | todo |
 | I25 | Admin API：局部修改、ETag、回滚 | I24 | todo |
@@ -348,6 +357,86 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
   1 万、10 万连接下的空闲内存；修复发现的问题，或拆成新的迭代。
 - **完成标准**：结果提交到 `bench/results/`，并有一份与基线对比的简短报告。
 - **涉及**：`test/e2e`、`bench`。
+
+## M1 审查修复
+
+2026-10-19 按 [开发规则](rules.zh-CN.md) 审查 M0、M1 时，发现了违反规则的代码。下面的迭代分三步修复：R01、R02 只改
+fit，在 M2 之前完成；R03 是 fib 中的工作，需求见 [fit 需要 fib 提供的 API](fib-api-requests.zh-CN.md)；R04–R07 使用
+这些 API。
+
+审查发现的问题，以及各自在哪个迭代修复：
+
+| 问题 | 规则 | 位置 | 修复迭代 |
+| --- | --- | --- | --- |
+| 代理下载在读取上游连接的 worker 上于 `Context.Write` 中等待，且没有时间上限。一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求，几个就能耗尽 `max_conns`；两者都已复现 | 1、8、10 | `handler/proxy/exchange.go`，`onBody` | R01 加上限，R04 根治 |
+| 静态文件在 worker 上 stat、读取、打开文件，并通过没有时间上限的等待式写入发送；目录列表一次读取整个目录 | 1、4、10、11 | `handler/static` | R01、R02 加上限，R05 根治 |
+| listener 没有设置 `WriteTimeout` 或停滞超时 | 10 | `listener/listener.go`，`httpConfig` 和 `http3Config` | R01 |
+| 不写 `max_conns` 的上游没有连接上限；等待连接的请求数量没有上限；响应没有总超时 | 10、11 | `upstream/upstream.go`、`config` | R02、R06 |
+| 引擎既不限制排队输出总量，也不限制连接数 | 11 | `listener/listener.go`，`Start` | R02、R06 |
+| 带 trailer 的上传占用一个阻塞在管道读取上的 goroutine | 1、4 | `handler/proxy/exchange.go`，`trailerPipe` | R04 |
+| 每行访问日志一次加锁；每个请求为日志条目复制一次请求并创建 context；每个请求扫描一遍图中的 listener；加权轮询每次选择都加锁 | 12 | `observe`、`listener`、`upstream/balance.go` | R07 |
+| 没有测试验证不读取的客户端不影响其他请求；静态文件没有慢客户端测试 | 13 | 测试 | R01、R05 |
+
+M0、M1 的其余部分符合规则：配置、模块注册表、运行时图、路由器、`respond`、代理的上传方向，以及访问日志的写出。
+
+### R01 慢客户端的等待有上限
+
+- **做什么**：新增 listener 设置 `write_stall_timeout`（默认 30 秒），限制每次等待客户端取走输出的时长。代理的下载路径
+  和静态 handler 在写入前调用 `Context.SetWriteDeadline(now + stall)`（最多每秒刷新一次，以节省系统调用）。这样，不读取
+  的客户端会失去它的响应（HTTP/1 连接被关闭，HTTP/2、HTTP/3 stream 被重置），等待它的 goroutine 被放开，代理随后放弃
+  上游响应。加入复现审查结论的回归测试：共享 h2c 上游连接上的不读取客户端，以及针对 `max_conns` 的多个不读取客户端，
+  分别在 HTTP/1.1、h2c、h3 上测试。
+- **完成标准**：在这些测试中，卡住的客户端存在时其他请求照常得到处理，卡住的请求在停滞超时内结束；流式测试仍然通过。
+- **涉及**：`config`、`schema`、`listener`、`handler/proxy`、`handler/static`、`test/e2e`。
+- **参考**：fib `Context.SetWriteDeadline`、`Config.WriteTimeout`；[fib-api-requests](fib-api-requests.zh-CN.md#证据)
+  中的证据。
+
+### R02 安全的默认上限
+
+- **做什么**：为审查发现的每个缺失上限设置默认值，并且都可以在配置中修改：每个上游地址的 `max_conns`（默认 256）；
+  每个上游的 `max_pending`，即等待连接的请求数（默认 1024；超过时立即返回 503，R06 之前由 fit 自己计数）；每个上游的
+  `response_timeout`，即响应的总时长上限（默认 1 小时）；顶层 `limits` 对象，包括引擎的 `max_pending_bytes`（256MB）
+  和 listener 的 `max_header_bytes`、`max_body_bytes`（即 fib 的 1MB 和 16MB，现在显式可见）；目录列表的
+  `browse_max_entries`（10000）。所有默认值都写进 schema。
+- **完成标准**：每个上限都有一个触达它的测试；schema 和示例展示这些默认值。
+- **涉及**：`config`、`schema`、`upstream`、`handler/proxy`、`handler/static`、`listener`。
+
+### R03 不等待转发所需的 fib API
+
+- **做什么**：在 fib 中实现 [fib-api-requests](fib-api-requests.zh-CN.md) 中的 A1、A2、A3，A4–A7 按 fib 的安排进行；
+  发布 fib v1.4.0；fit 升级到该版本，行为不变。
+- **完成标准**：fit 在新的 fib 版本上构建并通过测试；fib-api-requests 中注明每个 API 是已提供、已调整还是被拒绝。
+- **涉及**：fib；fit 中的 `go.mod` 和文档。
+
+### R04 代理下载不等待
+
+- **做什么**：用 `WriteNoWait`、`OnWritable` 和 `ClientResponse.HoldBody` 重写下载路径，与上传路径已在使用的
+  `HoldBody`、`OnDrain` 对称；fib 提供 `BodyWriter` 的 trailer（A6）后，用它替换 `trailerPipe`。
+- **完成标准**：代理代码中没有任何会等待的写入；把停滞超时调到一小时后 R01 的测试仍然通过，说明不再依赖它；慢客户端只
+  拖慢它自己的上游 stream；256MB 流式测试中内存保持有界。
+- **涉及**：`handler/proxy`。
+
+### R05 静态文件不阻塞
+
+- **做什么**：基于 fib 的 `http.FileCache` 提供文件，不再每个请求 stat 一次；缓存未命中时的 open、stat、读取和目录列表
+  放到 fit 自己的有界文件 I/O 池中执行，并设超时；大文件用 A3 发送。Range 和条件请求保持可用。
+- **完成标准**：静态代码不在 worker 上调用任何文件操作或会等待的写入；有慢客户端和不读取客户端的测试，覆盖 HTTP/1.1、
+  h2、h3，以及慢磁盘（通过池的测试钩子）；有改动前后的基准对比。
+- **涉及**：`handler/static`。
+
+### R06 通过 fib 实现连接和排队上限
+
+- **做什么**：引擎的连接数上限（A4），对应配置 `limits.max_conns`；用客户端的排队上限（A5）替换 R02 中 fit 自己的计数。
+- **完成标准**：测试能触达这两个上限；R02 的临时计数代码已删除。
+- **涉及**：`listener`、`upstream`、`config`。
+
+### R07 热路径开销
+
+- **做什么**（以 I23 的数据为依据）：访问日志改用按 worker 或分片的缓冲；日志条目放进 Context 的值槽（A7），不再用
+  `r.WithContext`；在编译时建立索引，每个 listener 找自己的路由时不必扫描整张图；平滑加权轮询改为无锁实现，即预先计算
+  的调度序列加原子下标，健康状态变化时重建；减少每个代理请求的内存分配。
+- **完成标准**：改动前后每请求的分配次数和耗时记录在开发进度中，吞吐没有下降。
+- **涉及**：`observe`、`listener`、`runtime`、`upstream`、`handler/proxy`。
 
 ## M2 动态配置与 TLS
 

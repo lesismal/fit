@@ -27,6 +27,14 @@ compared with the baselines. The host refused this session's ssh login (no key o
 Mac yet). I24 and I32 are also ready to start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
 taken them.
 
+**Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
+[development rules](rules.md). The proxy's download path and the static handler wait on fib workers
+without a time limit (reproduced: one client that stops reading stalls every request sharing its
+h2c upstream connection), and several limits have no safe default. The fixes are iterations
+R01–R07 in the [development plan](dev-plan.md#m1-review-fixes); what fit needs from fib is in
+[fib-api-requests](fib-api-requests.md). **R01 and R02 change fit alone and come before M2**, so
+before I24 and I32.
+
 To continue, start a session with:
 
 > Finish iteration I23 from docs/dev-plan.md: its conformance part is done (see docs/progress.md); run the benchmarks on the benchmark host. Read docs/progress.md, the index and that
