@@ -123,7 +123,7 @@ Status: `todo`, `doing` or `done`.
 | I20 | Passive health checks | I19 | done |
 | I21 | Access logs | I06 | done |
 | I22 | Reload on SIGHUP | I05, I06 | done |
-| I23 | M1 conformance and benchmarks | I13, I18, I20, I21, I22 | doing |
+| I23 | M1 conformance and benchmarks | I13, I18, I20, I21, I22 | done |
 | **M1 review fixes** | | | |
 | R01 | Bounded waits on slow clients | I13, I17 | todo |
 | R02 | Safe default limits | I13, I20 | todo |

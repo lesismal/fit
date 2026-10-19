@@ -11,21 +11,23 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-19 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: I09–I22 done; I23 under way (conformance done, benchmarks waiting for the benchmark host) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07 are planned |
 | fib | `github.com/lesismal/fib v1.3.0`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no precompressed files, fallbacks or directory listings (I13); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ACME or certificate management beyond files (I28–I31); no active health checks (I32); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
 Caddy and Traefik are checked in, but they were measured on Docker Desktop on a Mac, not on a Linux
 host; see I08.
 
-**Next: finish I23** with its benchmarks, which run on the benchmark host: the harness's static and
-proxy scenarios, and idle memory at 10k and 100k connections, committed under `bench/results/` and
-compared with the baselines. The host refused this session's ssh login (no key on the development
-Mac yet). I24 and I32 are also ready to start, unless another session has taken them. I24 and I32 are also ready to start, unless another session has
-taken them.
+**M1 is done.** I23's conformance runs and benchmarks are in the
+[M1 report](../bench/results/m1-report-2026-10-19.md): h2spec passes everywhere, and on a Linux host
+fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
+nginx's throughput over HTTP/1.1.
+
+**Next iteration: R01, bounded waits on slow clients**, then R02, safe default limits: the review
+below puts both before M2, so before I24 and I32.
 
 **Review against the rules (2026-10-19).** M0 and M1 were reviewed against the
 [development rules](rules.md). The proxy's download path and the static handler wait on fib workers
@@ -37,10 +39,10 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Finish iteration I23 from docs/dev-plan.md: its conformance part is done (see docs/progress.md); run the benchmarks on the benchmark host. Read docs/progress.md, the index and that
-> iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md; then only
-> the packages it lists. Keep the change within the iteration's scope, add tests, and when done
-> mark it done in both dev-plan files and record it in both progress files.
+> Implement iteration R01 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
+> then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
+> done mark it done in both dev-plan files and record it in both progress files.
 
 ## Code as built
 
@@ -822,25 +824,51 @@ Differences from the plan:
   connection caught in that window may break, and its client reconnects. TCP connections are not
   affected that way.
 
-### I23 M1 conformance and benchmarks — under way
+### I23 M1 conformance and benchmarks — done
 
-Done so far (see [the report](../bench/results/m1-conformance-2026-10-19.md)):
+The [M1 report](../bench/results/m1-report-2026-10-19.md) has the details.
 
-- h2spec 2.0.0 against the h2c and TLS h2 entries, answering with `respond` and through the proxy:
-  145 of 145 in each of the four runs.
-- `test/e2e/conformance_test.go`, a proxy conformance suite through the `fit` binary with requests
-  written byte by byte: request smuggling with both lengths, conflicting `Content-Length`s,
+- Conformance (on the development Mac): h2spec 2.0.0 against the h2c and TLS h2 entries, answering
+  with `respond` and through the proxy, 145 of 145 in each of the four runs; and
+  `test/e2e/conformance_test.go`, a proxy conformance suite through the `fit` binary with requests
+  written byte by byte (request smuggling with both lengths, conflicting `Content-Length`s,
   whitespace before a colon, missing and doubled `Host`, a bad chunk size, a NUL in a field, a header
-  past the limit, obs-fold, `Expect: 100-continue`, an HTTP/1.0 client, pipelining, an
-  absolute-form target, 304, 204 and 1xx from the upstream, an upstream that does not speak HTTP,
-  and `Connection: close` from either side.
-- Found: fib v1.3.0 let `X-A : one` through as a field named `X-A `, where RFC 9112 asks for 400.
-  The proxy now refuses a request with a field name that is not a token (checked in the loop that
-  copies the header), so it never reaches an upstream. The fix in fib is on fib's branch
-  `fix-field-name-whitespace`, committed and not pushed, for the next fib release.
+  past the limit, obs-fold, `Expect: 100-continue`, an HTTP/1.0 client, pipelining, an absolute-form
+  target, 304, 204 and 1xx from the upstream, an upstream that does not speak HTTP, and
+  `Connection: close` from either side).
+- Found and fixed: fib v1.3.0 let `X-A : one` through as a field named `X-A `, where RFC 9112 asks
+  for 400. The proxy refuses a request with a field name that is not a token, so it never reaches an
+  upstream. The fix in fib is on fib's branch `fix-field-name-whitespace`, committed and not pushed,
+  for the next fib release (R03's).
+- Benchmarks (on the benchmark host: Ryzen 7 7800X3D, Ubuntu 24.04, host networking): `fitbench`
+  with its defaults for nginx 1.31.4, Caddy 2.10.2, Traefik 3.5.0 and fit, with idle connections at
+  10k and 100k; the results are `bench/results/m1-2026-10-19-linux.json` and
+  `m1-2026-10-19-linux-idle100k.json`. fit, in thousands of requests a second over HTTP/1.1 and h2c:
+  fixed 783 and 3,811 (nginx 812 and 643); static 580 and 1,328 (nginx 440 and 373, Caddy 164 and
+  125); proxy 215 and 230 (nginx 258 and 249, Caddy 129 and 94, Traefik 152 and 113). Memory per
+  idle connection: HTTP/1.1 1.5 KiB at 10k and 1.1 at 100k (nginx 0.5, Caddy and Traefik 20 to 22);
+  TLS 9.1 and 7.4 KiB (nginx 29, Caddy and Traefik 43 to 46). p99 below Caddy's and Traefik's in
+  every scenario, above nginx's over HTTP/1.1. Every target of the roadmap for M1 holds.
+- To run there, the harness gained `-root` and `-bin` (prebuilt binaries for a host without Go);
+  `idleconn` opens connections from several loopback addresses (`-sources`, one per 40k), binds them
+  with `IP_BIND_ADDRESS_NO_PORT`, and closes them with a reset, so 100k fit in the ports and leave no
+  TIME_WAIT for the next run; fit serves the harness's TLS idle connections.
+- `go vet ./...` and `go test -race ./...` pass.
 
-Left: the harness's static and proxy scenarios and idle memory at 10k and 100k, on the benchmark
-host, and the comparison with the baselines.
+Differences from the plan:
+
+- No fix was split into a new iteration: the review that came in meanwhile planned R01–R07, and the
+  report's leads go to them. The proxy's 83% of nginx over HTTP/1.1, with 6.1 cores to nginx's 4.7,
+  and fit's HTTP/1.1 p99 tail are R07's to look into, with the download path's waits, which R04
+  removes.
+- WebSocket idle memory at 100k could not be measured for any server: the proxy's connections to the
+  one WebSocket backend address run out of ports at 64,504. The harness needs several backend
+  addresses for it by I47, when fit proxies WebSockets. nginx closed about 45k of its 100k idle
+  connections by its 75s `keepalive_timeout` while the rest were opening, so its 10k figures are the
+  ones to compare.
+- Against the M0 baseline (Docker Desktop on an M3 Max), fit's fixed HTTP/1.1 throughput went from
+  1.25 times nginx's to 0.96, and its idle HTTP/1.1 memory from 0.9 to 1.5 KiB. The machines differ;
+  measuring both commits on this host, for R07, settles whether fit moved.
 
 ## Notes for later iterations
 

@@ -10,18 +10,20 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-19 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：I09–I22 已完成；I23 进行中（一致性部分已完成，基准等待压测机） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07 已规划 |
 | fib | `github.com/lesismal/fib v1.3.0`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有预压缩文件、回退和目录列表（I13）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，按 SNI 选择证书）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游，写 JSON 访问日志，收到 SIGHUP 时重载配置，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 除证书文件外还没有 ACME 和证书管理（I28–I31）；还没有主动健康检查（I32）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。
 
-**下一步：完成 I23** 的基准部分，在压测机上运行：压测框架的 static 和 proxy 场景，以及 10k 和 100k 空闲连接的内存，
-结果提交到 `bench/results/` 并与基线比较。压测机拒绝了本会话的 ssh 登录（开发机上还没有密钥）。I24、I32 也都可以
-开始（除非已有别的会话在做）。I24、I32 也都可以开始（除非已有别的会话在做）。
+**M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
+在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
+
+**下一个迭代：R01，慢客户端的等待有上限**，然后是 R02，安全的默认上限：下面的审查把两者都放在 M2 之前，即在 I24、
+I32 之前。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
 worker 上无时间上限地等待（已复现：一个不读取的客户端会卡住共享同一 h2c 上游连接的所有请求），还有若干上限没有安全的
@@ -30,9 +32,9 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 完成 docs/dev-plan.zh-CN.md 中的迭代 I23：一致性部分已完成（见 docs/progress.zh-CN.md），在压测机上运行基准。先读 docs/progress.zh-CN.md、docs/dev-plan.zh-CN.md 的索引和该迭代的
-> 小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上测试，完成后在
-> 两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 R01。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
+> 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
 ## 已有的代码
 
@@ -643,20 +645,39 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - 在同一地址上被替换的 listener，在旧的排空期间会在旁边再绑定一个 UDP socket；这段时间内数据报由内核按哈希分到两个
   socket，落在这个窗口里的 QUIC 连接可能中断，客户端会重连。TCP 连接不受这种影响。
 
-### I23 M1 一致性测试与基准 — 进行中
+### I23 M1 一致性测试与基准 — 已完成
 
-已完成（见[报告](../bench/results/m1-conformance-2026-10-19.md)）：
+详见 [M1 报告](../bench/results/m1-report-2026-10-19.md)。
 
-- h2spec 2.0.0 针对 h2c 和 TLS h2 入口运行，分别由 `respond` 应答和经过代理：四次运行均为 145/145。
-- `test/e2e/conformance_test.go`：通过 `fit` 二进制、逐字节构造请求的代理一致性测试：同时带两种长度的请求走私、
-  冲突的 `Content-Length`、冒号前的空白、缺少和重复的 `Host`、错误的分块大小、字段中的 NUL、超过上限的头、obs-fold、
-  `Expect: 100-continue`、HTTP/1.0 客户端、管线化、绝对形式的请求目标、上游返回的 304、204 和 1xx、不说 HTTP 的上游，
-  以及任一方的 `Connection: close`。
-- 发现：fib v1.3.0 把 `X-A : one` 当作名为 `X-A ` 的字段放行，而 RFC 9112 要求返回 400。代理现在拒绝字段名不是
-  token 的请求（在复制请求头的循环中检查），这样它不会到达上游。fib 中的修复在 fib 的 `fix-field-name-whitespace`
-  分支上，已提交、未推送，留给下一个 fib 版本。
+- 一致性（在开发机上）：h2spec 2.0.0 针对 h2c 和 TLS h2 入口，分别由 `respond` 应答和经过代理，四次运行均为
+  145/145；以及 `test/e2e/conformance_test.go`：通过 `fit` 二进制、逐字节构造请求的代理一致性测试（同时带两种长度的
+  请求走私、冲突的 `Content-Length`、冒号前的空白、缺少和重复的 `Host`、错误的分块大小、字段中的 NUL、超过上限的头、
+  obs-fold、`Expect: 100-continue`、HTTP/1.0 客户端、管线化、绝对形式的请求目标、上游返回的 304、204 和 1xx、不说
+  HTTP 的上游，以及任一方的 `Connection: close`）。
+- 发现并修复：fib v1.3.0 把 `X-A : one` 当作名为 `X-A ` 的字段放行，而 RFC 9112 要求返回 400。代理拒绝字段名不是
+  token 的请求，这样它不会到达上游。fib 中的修复在 fib 的 `fix-field-name-whitespace` 分支上，已提交、未推送，留给
+  下一个 fib 版本（R03 的版本）。
+- 基准（在压测机上：Ryzen 7 7800X3D，Ubuntu 24.04，host 网络）：`fitbench` 以默认参数运行 nginx 1.31.4、Caddy
+  2.10.2、Traefik 3.5.0 和 fit，空闲连接 10k 和 100k；结果是 `bench/results/m1-2026-10-19-linux.json` 和
+  `m1-2026-10-19-linux-idle100k.json`。fit 在 HTTP/1.1 和 h2c 上每秒千请求数：fixed 783 和 3811（nginx 812 和 643）；
+  static 580 和 1328（nginx 440 和 373，Caddy 164 和 125）；proxy 215 和 230（nginx 258 和 249，Caddy 129 和 94，
+  Traefik 152 和 113）。每个空闲连接的内存：HTTP/1.1 在 10k 时 1.5 KiB、100k 时 1.1 KiB（nginx 0.5，Caddy 和 Traefik
+  20 到 22）；TLS 9.1 和 7.4 KiB（nginx 29，Caddy 和 Traefik 43 到 46）。p99 在所有场景都低于 Caddy 和 Traefik，在
+  HTTP/1.1 上高于 nginx。路线图中 M1 的所有目标都满足。
+- 为在压测机上运行，压测框架新增 `-root` 和 `-bin`（为没有 Go 的主机使用预先构建的二进制）；`idleconn` 从多个回环
+  地址发起连接（`-sources`，每 40k 一个），用 `IP_BIND_ADDRESS_NO_PORT` 绑定，并以 RST 关闭，这样 100k 连接的端口够用，
+  也不给下一次运行留下 TIME_WAIT；fit 现在也服务压测框架的 TLS 空闲连接。
+- `go vet ./...` 和 `go test -race ./...` 通过。
 
-剩余：在压测机上运行压测框架的 static 和 proxy 场景，以及 10k 和 100k 空闲连接内存，并与基线比较。
+与计划的不同：
+
+- 没有把修复拆成新迭代：期间到来的审查规划了 R01–R07，报告中的线索交给它们。代理在 HTTP/1.1 上是 nginx 的 83%
+  （fit 用 6.1 个核，nginx 用 4.7 个），以及 fit 在 HTTP/1.1 上的 p99 长尾，由 R07 研究；下载路径的等待由 R04 去掉。
+- 100k 时的 WebSocket 空闲内存对所有服务器都无法测量：代理到唯一一个 WebSocket 后端地址的连接在 64504 个时用尽端口。
+  压测框架需要在 I47（fit 代理 WebSocket）之前支持多个后端地址。nginx 在其余连接还在建立时，按 75s 的
+  `keepalive_timeout` 关闭了 100k 空闲连接中的约 45k，所以应比较它 10k 时的数字。
+- 与 M0 基线（M3 Max 上的 Docker Desktop）相比，fit 的 fixed HTTP/1.1 吞吐从 nginx 的 1.25 倍变为 0.96 倍，空闲
+  HTTP/1.1 内存从 0.9 KiB 变为 1.5 KiB。两台机器不同；R07 会在这台主机上测量两个提交，确定是不是 fit 的变化。
 
 ## 给后续迭代的说明
 
