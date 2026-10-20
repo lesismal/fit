@@ -153,6 +153,7 @@ Status: `todo`, `doing` or `done`.
 | I34 | Prometheus metrics | I23 | done |
 | I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | done |
 | I35b | Certificate files watched | I27, I28, I34 | done |
+| I35c | On-demand names dropped when idle | I31, I35b | done |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |
 | I37 | Expression matcher | I36 | todo |
@@ -670,6 +671,17 @@ Left by I09 to I28 and by I28 to I29–I30, and done by none of them; found when
 - **Done when**: a renewed pair is served without a reload by hand, and a certificate written
   before its key is reported and changes nothing, in an end-to-end test.
 - **Touches**: `tlsmgr`, `runtime`, `admin`, `cmd/fit`.
+
+### I35c On-demand names dropped when idle
+
+Left by I31, which keeps every name taken on demand until a restart; found when M2 was reviewed.
+
+- **Do**: drop a name taken on demand that no handshake has asked for in `acme.on_demand`'s
+  `idle_timeout`, with a safe default, so that `max_names` is not used up for good; its
+  certificate stays in the storage, and the certificate expiry metric stops listing it.
+- **Done when**: time-driven tests show an idle name dropped, no longer served, listed or
+  counted, and taken on again from the storage, while a name asked for meanwhile is kept.
+- **Touches**: `config`, `tlsmgr`.
 
 ## M3, gateway features
 

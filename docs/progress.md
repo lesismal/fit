@@ -34,7 +34,8 @@ M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is 
 HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
-balancing v2, I34, Prometheus metrics, I35, its exit tests, and I35b, certificate files watched.
+balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
+I35c, on-demand names dropped when idle.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -1831,7 +1832,7 @@ Differences from the plan:
 - Rate limits are on taking names on, which a certificate loaded from the storage counts towards
   too; a stored certificate still needs the ask URL's yes, as the name may no longer be allowed.
 - Names taken on are kept and renewed until a restart; none is dropped for going unused, and
-  `max_names` bounds them meanwhile.
+  `max_names` bounds them meanwhile. I35c drops them once idle.
 - The certificate expiry metric lists the names a listener lists, not those taken on demand.
 
 ### I30b HTTPS by default — done
@@ -1909,7 +1910,13 @@ Differences from the plan:
 
 - A new order does not name the certificate it replaces (ARI's `replaces`): x/crypto's
   `AuthorizeOrder` has no way to send it. A CA uses it to exempt renewals from rate limits, so a
-  renewal ARI asks for is ordered as any other.
+  renewal ARI asks for is ordered as any other. Looked at again on 2026-10-20, after M2: neither
+  x/crypto v0.58.0, the latest release, nor its master of 2026-10-16 (`0ae6809`) can send it.
+  `AuthorizeOrder` takes `OrderOption`s, but the interface is sealed and offers only `notBefore`,
+  `notAfter` and `profile`, and the client has no exported way to post a signed request of one's
+  own. Sending it would mean signing ACME's requests in fit, or another ACME library (acmez and
+  lego send it), against decision 007; left until x/crypto has it. Pebble v2.10.1 takes
+  `replaces`, so the test is ready to write then.
 
 ### I35 M2 exit tests — done
 
@@ -2030,6 +2037,35 @@ Differences from the plan:
 
 - The access log gained 2%, not the sixth of its cost A17 estimated: what is left is the line.
 - `Received` is not in fib; see A18.
+
+### I35c On-demand names dropped when idle — done
+
+- `acme.on_demand` gains `idle_timeout` (a week when left out): a name taken on demand that no
+  handshake has asked for that long is dropped. It no longer counts against `max_names`, its
+  certificate is no longer served nor listed in the certificate expiry metric, and its OCSP
+  response is given back; the certificate stays in the storage, so the next handshake that asks
+  for the name takes it on again from there, with the ask URL's yes and counted against the rate,
+  without a new order while it is good. Like the rest of `acme`, it is read at start.
+- A handshake records that it used a name in an `atomic.Int64` of the name's, which it reads
+  without a lock (a `sync.Map` that changes only when a name is taken on or dropped), and writes at
+  most once a second, so that handshakes for one name do not all write to it. ACME's scheduler,
+  which already wakes for the next name due, wakes for the next name to go idle too, and drops it
+  under ACME's lock; a name being worked on waits for its run to end. A name a reload lists is no
+  longer on demand, and is not dropped.
+- Tests: `TestOnDemandIdle`, on a clock of the test's: two names taken on from the storage, with
+  a CA that is not there, fill `max_names`; one is asked for again at 40 minutes, with an hour's
+  `idle_timeout`; at 59 minutes neither is dropped, at 61 the other is, and it is no longer
+  served, listed or counted, and there is room for another; asked for again it is taken on from
+  the storage with a second ask; the first is dropped an hour after its last handshake.
+  `TestOnDemandIdleTimer`: on the real clock, with 100ms, the scheduler wakes for it by itself.
+  `go vet` and staticcheck for linux, darwin and windows, and `go test -race ./...` pass, with
+  Pebble.
+- No benchmark: a handshake for a name taken on demand gains a `sync.Map` load and, at most once
+  a second, a store; nothing on a request's path changes.
+
+Differences from the plan:
+
+- None.
 
 ## Notes for later iterations
 

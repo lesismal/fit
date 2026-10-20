@@ -73,24 +73,27 @@ const (
 var (
 	DefaultOnDemandInterval = Duration(time.Minute)
 	DefaultOnDemandTimeout  = Duration(10 * time.Second)
+	DefaultOnDemandIdle     = Duration(7 * 24 * time.Hour)
 )
 
 // OnDemand is how certificates are obtained during handshakes, for names no
 // listener lists: only for names the ask URL allows, at most Rate every
-// Interval, and MaxNames in all. A handshake for such a name waits for its
+// Interval, and MaxNames in all, each dropped once no handshake has asked for
+// it for IdleTimeout. A handshake for such a name waits for its
 // certificate, on fib's handshake pool and not on a worker, for at most
 // Timeout; one that gives up leaves it being obtained for the next.
 type OnDemand struct {
-	Ask      string   `json:"ask" fit:"required" doc:"A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute."`
-	Rate     int      `json:"rate,omitempty" min:"0" default:"10" doc:"How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0."`
-	Interval Duration `json:"interval,omitempty" default:"\"1m\"" doc:"The interval rate counts over. 1m when left out."`
-	MaxNames int      `json:"max_names,omitempty" min:"0" default:"1000" doc:"How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0."`
-	Timeout  Duration `json:"timeout,omitempty" default:"\"10s\"" doc:"How long a handshake waits for its name's certificate, as long as fib's handshake timeout by default. 10s when left out."`
+	Ask         string   `json:"ask" fit:"required" doc:"A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute."`
+	Rate        int      `json:"rate,omitempty" min:"0" default:"10" doc:"How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0."`
+	Interval    Duration `json:"interval,omitempty" default:"\"1m\"" doc:"The interval rate counts over. 1m when left out."`
+	MaxNames    int      `json:"max_names,omitempty" min:"0" default:"1000" doc:"How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0."`
+	Timeout     Duration `json:"timeout,omitempty" default:"\"10s\"" doc:"How long a handshake waits for its name's certificate, as long as fib's handshake timeout by default. 10s when left out."`
+	IdleTimeout Duration `json:"idle_timeout,omitempty" default:"\"168h\"" doc:"How long a name taken on demand is kept, and renewed, with no handshake asking for it; then it is dropped and no longer counts against max_names, and its certificate stays in the storage for the next handshake that asks for it, which the ask URL must allow again. 168h, a week, when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// Limit, Every, Names and Wait return o's settings, their defaults when
+// Limit, Every, Names, Wait and Idle return o's settings, their defaults when
 // left out.
 func (o *OnDemand) Limit() int {
 	if o.Rate <= 0 {
@@ -118,6 +121,13 @@ func (o *OnDemand) Wait() time.Duration {
 		return DefaultOnDemandTimeout.Std()
 	}
 	return o.Timeout.Std()
+}
+
+func (o *OnDemand) Idle() time.Duration {
+	if o.IdleTimeout <= 0 {
+		return DefaultOnDemandIdle.Std()
+	}
+	return o.IdleTimeout.Std()
 }
 
 // The challenges ACME answers.
