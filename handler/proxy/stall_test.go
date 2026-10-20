@@ -10,6 +10,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,11 +130,24 @@ func newStuckHTTP1(t *testing.T, addr string) stuckClient {
 	return &stuckHTTP1{conn}
 }
 
+// stuckIdle is how long done waits for more of the body before giving up.
+// It bounds the wait for each piece, not for the whole body: under the race
+// detector on a CI runner's few CPUs, the rest of a 200MB download takes
+// longer than any fixed time a fast machine needs.
+const stuckIdle = 5 * time.Second
+
 func (s *stuckHTTP1) done(t *testing.T) (int64, bool) {
-	_ = s.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, err := io.Copy(io.Discard, s.conn)
-	// Closed by fit: EOF (nil here) or a reset, with the body short.
-	return n, (err == nil || !errors.Is(err, net.ErrClosed) && !isTimeout(err)) && n < stuckSize
+	var n int64
+	buf := make([]byte, 256<<10)
+	for {
+		_ = s.conn.SetReadDeadline(time.Now().Add(stuckIdle))
+		m, err := s.conn.Read(buf)
+		n += int64(m)
+		if err != nil {
+			// Closed by fit: EOF or a reset, with the body short.
+			return n, (err == io.EOF || !errors.Is(err, net.ErrClosed) && !isTimeout(err)) && n < stuckSize
+		}
+	}
 }
 
 func isTimeout(err error) bool {
@@ -157,22 +171,35 @@ func newStuckH2C(t *testing.T, addr string) stuckClient {
 }
 
 func (s *stuckH2C) done(t *testing.T) (int64, bool) {
-	type result struct {
-		n   int64
-		err error
-	}
-	ch := make(chan result, 1)
+	var read atomic.Int64
+	ch := make(chan error, 1)
 	go func() {
-		n, err := io.Copy(io.Discard, s.resp.Body)
-		ch <- result{n, err}
+		_, err := io.Copy(countWriter{&read}, s.resp.Body)
+		ch <- err
 	}()
-	select {
-	case r := <-ch:
-		return r.n, r.err != nil && r.n < stuckSize
-	case <-time.After(5 * time.Second):
-		s.resp.Body.Close()
-		return 0, false
+	for last := int64(-1); ; {
+		select {
+		case err := <-ch:
+			n := read.Load()
+			return n, err != nil && n < stuckSize
+		case <-time.After(stuckIdle):
+		}
+		if n := read.Load(); n == last {
+			s.resp.Body.Close()
+			<-ch
+			return n, false
+		} else {
+			last = n
+		}
 	}
+}
+
+// countWriter counts what is written to it, and keeps none of it.
+type countWriter struct{ n *atomic.Int64 }
+
+func (w countWriter) Write(p []byte) (int, error) {
+	w.n.Add(int64(len(p)))
+	return len(p), nil
 }
 
 // stuckH3 asks over HTTP/3 with fib's client and holds its body callback
@@ -237,10 +264,20 @@ func newStuckH3(t *testing.T, addr string, cert *certtest.Cert) stuckClient {
 
 func (s *stuckH3) done(t *testing.T) (int64, bool) {
 	close(s.release)
-	select {
-	case <-s.ended:
-	case <-time.After(5 * time.Second):
-		return 0, false
+	for last := int64(-1); ; {
+		select {
+		case <-s.ended:
+		case <-time.After(stuckIdle):
+			s.mu.Lock()
+			n := s.n
+			s.mu.Unlock()
+			if n == last {
+				return n, false
+			}
+			last = n
+			continue
+		}
+		break
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

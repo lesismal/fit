@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务仍然失败，先根据其日志查明原因。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）和 I35（退出测试）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -1419,17 +1419,19 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   用三个 CPU（与 runner 相同）运行测试，复现了一个原因：fit 的代理读取请求声明的 trailer 名字，与 fib 的 HTTP/2 服务端在
   请求体结束时设置请求的 `Trailer` 之间的数据竞争。这是 fib 的问题：作为
   [A19](fib-api-requests.zh-CN.md#a19流式请求的-trailer-在交出请求体结尾的地方设置) 提出，已修复并发布于 fib v1.5.3，
-  fit 已升级；三个 CPU 下 `TestTrailers` 连续通过五次，而 v1.5.2 五次中失败一次。这两个任务在 v1.5.3 上仍然失败，原因
-  在 CI 日志中，本地三个和四个 CPU 的运行都没有出现；查看日志需要登录 GitHub。
+  fit 已升级；三个 CPU 下 `TestTrailers` 连续通过五次，而 v1.5.2 五次中失败一次。这两个任务在 v1.5.3 上仍然失败。查看其日志需要登录
+  GitHub，所以 CI 现在还会把每个失败包的测试输出写成注解（`internal/testsummary`），任何人都能读取。由此找到原因：
+  `TestStuckClientWithoutStallTimeout` 在客户端恢复读取后只给它 5 秒读完 200MB 下载的剩余部分，而在竞态检测器下、runner
+  的 CPU 上读不完（Linux 上是 h3；macOS 上是 h2c 和 h3；本地用 `-cpu 2` 可复现）。现在卡住的客户端只在连续 5 秒没有新数据
+  到达时才放弃。fit 本身没有问题。
 
 与计划的差异：
 
 - CI 中的证书测试针对 Pebble；Let's Encrypt 测试环境需要公网域名和 80、443 端口，按 I30 完成标准的允许，写成文档手动运行。
-- CI 的其他测试任务尚未变绿；查明原因是 M2 之后的第一件事。
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.5.3。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
+- **fib 版本。** fit 使用 fib `main` 的 `8c637e0`（`v1.5.4-0.20261020043140-8c637e0f9b68`），在 v1.5.3 之后，增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了
   A19：流式请求的 `Trailer` 在交出请求体结尾的地方设置，CI 的竞态检测曾在代理的 `TestTrailers/h2c` 中发现它；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了

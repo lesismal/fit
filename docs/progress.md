@@ -28,7 +28,7 @@ fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik
 nginx's throughput over HTTP/1.1.
 
 **M2 is done.** Its three exit tests pass in CI, in a job of their own (I35); CI's full race test
-jobs still fail, and finding why, from their logs, comes first. **Next: M3, from I36 (matchers v2).**
+jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below). **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, and I35, its exit tests.
@@ -1928,19 +1928,22 @@ Differences from the plan:
   HTTP/2 server setting the request's `Trailer` as the body ended. It was fib's: asked as
   [A19](fib-api-requests.md#a19-a-streamed-requests-trailer-set-where-its-end-is-handed-over), fixed
   and released in fib v1.5.3, which fit now uses; `TestTrailers` passes five times in a row with
-  three CPUs, where v1.5.2 failed one in five. The jobs still fail on v1.5.3, for a reason the CI
-  logs hold and the local runs with three and four CPUs do not show; the logs need a GitHub
-  sign-in.
+  three CPUs, where v1.5.2 failed one in five. The jobs still failed on v1.5.3. Their logs need a
+  GitHub sign-in, so CI now writes each failed package's test output to an annotation as well
+  (`internal/testsummary`), which anyone can read. That showed the cause:
+  `TestStuckClientWithoutStallTimeout` gave the client 5s to read the rest of its 200MB download
+  once it read again, which under the race detector on a runner's CPUs it did not finish (h3 on
+  Linux; h2c and h3 on macOS; reproduced locally with `-cpu 2`). The stuck clients now give up only
+  when 5s pass with nothing new arriving. fit itself was not at fault.
 
 Differences from the plan:
 
 - The certificate test is against Pebble in CI; Let's Encrypt staging needs a public name and
   ports 80 and 443, and is documented to be run by hand, as I30's done-when allows.
-- CI's other test jobs are not green yet; finding why is the first thing after M2.
 
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.5.3. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
+- **fib version.** fit uses fib's `main` at `8c637e0` (`v1.5.4-0.20261020043140-8c637e0f9b68`), after v1.5.3, which adds connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
   parts of A8 and A12), v1.5.0 the rest of A12 (`Client.Start`), v1.5.1 A14 and A15, v1.5.2 the
   first part of A16, and v1.5.3 A19, a streamed request's `Trailer` set where its end is handed
   over, which CI's race detector had caught in the proxy's `TestTrailers/h2c`; see [fib-api-requests](fib-api-requests.md). v1.3.0, tagged for I16 and I22 on fib's `main` of
