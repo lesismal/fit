@@ -36,6 +36,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
 | A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
 | A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
+| A24 | A task queue that costs nothing until it is used | made, not yet released | 13 | — |
 
 ## Evidence
 
@@ -683,3 +684,42 @@ collected) fail without the change and pass with it.
 **How fit uses it.** Nothing changes in fit's code. `handler/proxy` under the race detector now
 peaks at 1.8GB rather than 5.3GB and runs in 104s rather than 142s, and 16 copies of
 `TestStreamedBodyLimit` at once, 400 times each, all pass, each under 510MB.
+
+## A24: A task queue that costs nothing until it is used
+
+**Status.** Made in fib as `a6d78cd` on its branch `ring-lazy-seq`, on top of `7f632cb`; not yet
+on fib's `main` nor released, since `main`'s CI failed on macOS at `7f632cb`. fit moves to the
+release that carries it.
+
+**Problem.** `taskpool.newTaskRing` stored every cell's `seq` with an atomic when it made the
+ring: 100,000 cells for a pool at the default sizing on a machine of ten cores or more, 40,000 on
+four. Under the race detector each address an atomic touches costs a sync object of a few hundred
+bytes in the detector's own memory, which the Go heap does not count, so each engine's pool cost
+tens of megabytes before it ran a task. Outside the detector the stores touched every page of the
+queue.
+
+**Evidence.** After A23, `handler/proxy` under `go test -race` still peaked at 1.27GB resident
+(1.42GB peak footprint) on a 14-core Mac, and at 1.25GB footprint with GOMAXPROCS=4, though the
+Go heap of a test such as `TestHostHeader` never passed 18MB, nearly all of it the rings. One fit
+started with no traffic had a footprint of 179MB, 155MB of it the region `vmmap` names
+`Sanitizer`, against 9MB of Go heap; without the race detector the same test peaked at 25MB.
+`runtime.AddCleanup` probes on twelve fits started, used over HTTP/1.1, h2c and h2 and stopped,
+found every closed engine collected and the heap in use flat at 3MB, so nothing was leaking.
+
+**Change.** A cell keeps its `seq` less its index, so that a zeroed cell is already free for its
+first position and a new ring writes none of its cells. fib's `TestTaskRingStartsUntouched`
+checks a new ring's cells are zero and that a ring of four keeps its order and limit over 1000
+laps; fib's tests pass with and without the race detector, vet passes for Linux, macOS, Windows
+and FreeBSD and staticcheck for the first three. A push and a pop cost the same as before (5.0
+against 5.3ns, and 142 against 142ns with four CPUs), and a ring of 100,000 is made in 82µs
+rather than 263µs.
+
+**How fit uses it.** Nothing changes in fit's code. With it, one idle fit under the race detector
+has a footprint of 67MB rather than 179MB, and `handler/proxy` peaks at 540–720MB rather than
+1.27–1.42GB (runs differ by about 100MB), and at 518MB rather than 1.25GB with GOMAXPROCS=4, in
+the same time. What is left is what the heaviest tests hold on purpose: in
+`TestStuckClientsPastMaxConns` and `TestStuckClientWithoutStallTimeout` eight downloads that are
+not read fill their flow-control windows in the test's own h2c client and in fib's HTTP/3
+streams, and the stream tests move 64MB each way, with the race detector's shadow of that memory
+on top. Closing the idle connections of the test helper `client`'s transports at the end of each
+test was tried, and changed nothing beyond the noise: fit's listener cuts them when it closes.

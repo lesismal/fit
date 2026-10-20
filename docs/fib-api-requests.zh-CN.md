@@ -34,6 +34,7 @@
 | A21 | 事件循环每次休眠只调用一次 `epoll_ctl`，而不是两次 | 已提出 | 12 | R07f |
 | A22 | 客户端连接的空闲计时不必每个请求重置定时器 | 已提出 | 12 | R07f |
 | A23 | `Engine.Close` 切断的连接也运行 `OnClose` | 已完成，v1.5.6 | 11、13 | — |
+| A24 | 用到之前不占资源的任务队列 | 已实现，尚未发布 | 13 | — |
 
 ## 证据
 
@@ -508,3 +509,29 @@ fib 的 `TestCloseRunsOnClose`（`Close` 时一个空闲连接和一个 handler 
 
 **fit 如何使用。** fit 的代码不需要改动。`handler/proxy` 在竞态检测下的峰值从 5.3GB 降到 1.8GB，运行时间从 142 秒降到
 104 秒；同时运行 16 份 `TestStreamedBodyLimit`、每份 400 次，全部通过，每份都在 510MB 以内。
+
+## A24：用到之前不占资源的任务队列
+
+**状态。** 已在 fib 的 `ring-lazy-seq` 分支上实现为 `a6d78cd`，基于 `7f632cb`；由于 `main` 在 `7f632cb` 上的 CI 在 macOS
+上失败，它尚未进入 fib 的 `main`，也未发布。fit 将升级到包含它的版本。
+
+**问题。** `taskpool.newTaskRing` 建立环时，用原子操作写入每个单元的 `seq`：在十核及以上的机器上，默认规格的池有 100,000 个
+单元，四核时有 40,000 个。在竞态检测下，原子操作触及的每个地址都会在检测器自己的内存中占用一个几百字节的同步对象，Go 堆并不
+统计这部分内存，因此每个引擎的池在运行第一个任务之前就占用几十 MB。不开竞态检测时，这些写入也会触及队列的每一页。
+
+**证据。** A23 之后，`handler/proxy` 在 `go test -race` 下的常驻内存峰值在 14 核 Mac 上仍为 1.27GB（峰值占用 1.42GB），
+GOMAXPROCS=4 时峰值占用为 1.25GB，而 `TestHostHeader` 这类测试的 Go 堆从未超过 18MB，几乎都是这些环。启动一个没有流量的 fit，
+占用为 179MB，其中 155MB 是 `vmmap` 称为 `Sanitizer` 的区域，Go 堆只有 9MB；不开竞态检测时同一测试峰值为 25MB。在十二个
+经 HTTP/1.1、h2c 和 h2 使用后停止的 fit 上用 `runtime.AddCleanup` 探测，所有关闭的引擎都被回收，使用中的堆一直是 3MB，
+所以并没有泄漏。
+
+**修改。** 单元保存的 `seq` 减去了自己的下标，于是清零的单元本身就对它的第一个位置空闲，新建的环不写任何单元。fib 的
+`TestTaskRingStartsUntouched` 检查新环的单元都是零，并检查一个四单元的环在 1000 圈中保持顺序和上限；fib 的测试在开与不开竞态
+检测时都通过，vet 在 Linux、macOS、Windows 和 FreeBSD 上通过，staticcheck 在前三者上通过。一次入队和出队的开销与之前相同
+（5.0 对 5.3ns，四个 CPU 时 142 对 142ns），建立 100,000 单元的环从 263µs 降到 82µs。
+
+**fit 如何使用。** fit 的代码不需要改动。有了它，竞态检测下一个空闲 fit 的占用从 179MB 降到 67MB，`handler/proxy` 的峰值从
+1.27–1.42GB 降到 540–720MB（各次运行相差约 100MB），GOMAXPROCS=4 时从 1.25GB 降到 518MB，用时不变。剩下的是最重的测试
+有意持有的内存：在 `TestStuckClientsPastMaxConns` 和 `TestStuckClientWithoutStallTimeout` 中，八个不读取的下载填满了测试
+自己的 h2c 客户端和 fib 的 HTTP/3 流的流量控制窗口；流测试每个方向传输 64MB；再加上竞态检测器为这些内存保留的影子内存。
+曾尝试在每个测试结束时关闭测试辅助函数 `client` 的 transport 的空闲连接，结果在噪声范围内没有变化：fit 的监听器关闭时会切断它们。
