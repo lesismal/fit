@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-20 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
-| fib | `github.com/lesismal/fib v1.5.5`, from the module proxy |
+| fib | `github.com/lesismal/fib v1.5.6`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
 
@@ -34,7 +34,9 @@ M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is 
 HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
-balancing v2, I34, Prometheus metrics, I35, its exit tests, and I35b, certificate files watched.
+balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
+I35c, on-demand names dropped when idle. R07f profiled the proxy's CPU per request: what is left
+to gain is fib's, asked as A20–A22.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -1831,7 +1833,7 @@ Differences from the plan:
 - Rate limits are on taking names on, which a certificate loaded from the storage counts towards
   too; a stored certificate still needs the ask URL's yes, as the name may no longer be allowed.
 - Names taken on are kept and renewed until a restart; none is dropped for going unused, and
-  `max_names` bounds them meanwhile.
+  `max_names` bounds them meanwhile. I35c drops them once idle.
 - The certificate expiry metric lists the names a listener lists, not those taken on demand.
 
 ### I30b HTTPS by default — done
@@ -1909,7 +1911,13 @@ Differences from the plan:
 
 - A new order does not name the certificate it replaces (ARI's `replaces`): x/crypto's
   `AuthorizeOrder` has no way to send it. A CA uses it to exempt renewals from rate limits, so a
-  renewal ARI asks for is ordered as any other.
+  renewal ARI asks for is ordered as any other. Looked at again on 2026-10-20, after M2: neither
+  x/crypto v0.58.0, the latest release, nor its master of 2026-10-16 (`0ae6809`) can send it.
+  `AuthorizeOrder` takes `OrderOption`s, but the interface is sealed and offers only `notBefore`,
+  `notAfter` and `profile`, and the client has no exported way to post a signed request of one's
+  own. Sending it would mean signing ACME's requests in fit, or another ACME library (acmez and
+  lego send it), against decision 007; left until x/crypto has it. Pebble v2.10.1 takes
+  `replaces`, so the test is ready to write then.
 
 ### I35 M2 exit tests — done
 
@@ -2034,9 +2042,87 @@ Differences from the plan:
 - The access log gained 2%, not the sixth of its cost A17 estimated: what is left is the line.
 - `Received` is not in fib; see A18.
 
+### I35c On-demand names dropped when idle — done
+
+- `acme.on_demand` gains `idle_timeout` (a week when left out): a name taken on demand that no
+  handshake has asked for that long is dropped. It no longer counts against `max_names`, its
+  certificate is no longer served nor listed in the certificate expiry metric, and its OCSP
+  response is given back; the certificate stays in the storage, so the next handshake that asks
+  for the name takes it on again from there, with the ask URL's yes and counted against the rate,
+  without a new order while it is good. Like the rest of `acme`, it is read at start.
+- A handshake records that it used a name in an `atomic.Int64` of the name's, which it reads
+  without a lock (a `sync.Map` that changes only when a name is taken on or dropped), and writes at
+  most once a second, so that handshakes for one name do not all write to it. ACME's scheduler,
+  which already wakes for the next name due, wakes for the next name to go idle too, and drops it
+  under ACME's lock; a name being worked on waits for its run to end. A name a reload lists is no
+  longer on demand, and is not dropped.
+- Tests: `TestOnDemandIdle`, on a clock of the test's: two names taken on from the storage, with
+  a CA that is not there, fill `max_names`; one is asked for again at 40 minutes, with an hour's
+  `idle_timeout`; at 59 minutes neither is dropped, at 61 the other is, and it is no longer
+  served, listed or counted, and there is room for another; asked for again it is taken on from
+  the storage with a second ask; the first is dropped an hour after its last handshake.
+  `TestOnDemandIdleTimer`: on the real clock, with 100ms, the scheduler wakes for it by itself.
+  `go vet` and staticcheck for linux, darwin and windows, and `go test -race ./...` pass, with
+  Pebble.
+- No benchmark: a handshake for a name taken on demand gains a `sync.Map` load and, at most once
+  a second, a store; nothing on a request's path changes.
+
+Differences from the plan:
+
+- None.
+
+### R07f The proxy's CPU per request, profiled (A20–A22) — done
+
+The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times its CPU per request.
+
+- Profiled on the benchmark host with `perf`, fit at 2b37a8e (fib v1.5.4) and nginx 1.31.4 each
+  on 7 CPUs, proxying to a fit backend on 2, under wrk (7 threads, 256 connections) over HTTP/1.1:
+  fit 226.8k requests a second at 29.7 µs of CPU each, nginx 265.3k at 20.7 µs. The kernel takes
+  about the same for both (fit 15.2 µs, nginx 17.0 µs; 5.9 and 6.3 system calls a request); the
+  difference is user time, 14.5 µs against 3.6. Of fit's, fib's code and what it calls take
+  10.3 µs, the GC's background marking 1.3 µs, the rest of the runtime 1.2 µs, and fit's own code
+  1.8 µs.
+- fib's: its client writes each upstream request with net/http's `Request.Write` (1.49 µs) and
+  reads each response head with `net/http.ReadResponse` over a new 4 KiB `bufio.Reader`
+  (2.23 µs), together an eighth of the CPU and over half of the allocations; its event loops arm
+  and disarm their relay epoll instance each time they park (0.48 `epoll_ctl` a request, which
+  nginx does not make); and the client resets a connection's idle timer on every request
+  (0.23 µs). Asked as [A20](fib-api-requests.md#a20-client-requests-written-and-response-heads-read-without-nethttp),
+  [A21](fib-api-requests.md#a21-one-epoll_ctl-per-park-of-an-event-loop-not-two) and
+  [A22](fib-api-requests.md#a22-a-client-connections-idle-clock-without-a-timer-reset-per-request);
+  A20 is in fib v1.5.6 (below); A21 and A22 are still asked.
+- fit's: the proxy skips hop-by-hop fields, `Content-Length` and `Expect` as it copies the
+  request's header, rather than deleting each name after, and `removeHopByHop` (also used on
+  responses) looks at each field once; `validToken` reads a table. `BenchmarkOutgoing`, new, which
+  builds the upstream request: 227 → 214 ns for a load generator's request, 684 → 541 ns for a
+  browser's with nine fields, allocations unchanged (3 and 6). On the benchmark host, fit alone,
+  proxy, three rounds each, alternating: HTTP/1.1 227.7k → 227.0k (−0.3%), h2c 234.8k → 234.9k,
+  within the noise, as 0.05 µs of 29.7 is.
+- `go vet` and staticcheck for linux, darwin and windows, and the proxy's tests under the race
+  detector, pass.
+
+- A20 was then made in fib, by this session with the maintainer's leave, released as v1.5.6
+  (`0a9339f`, CI run 214 green), and fit moved to it. On the benchmark host, fit at 3f25679 on
+  v1.5.5 against the same fit on A20, three rounds each, alternating: the proxy over HTTP/1.1
+  226.6k → 245.8k requests a second (+8.4%, about 93% of nginx's 265k), at 26.0 µs of CPU a
+  request instead of 29.7; over h2c 235.5k → 238.1k (+1.1%). fit's race suite, with Pebble, and
+  `go vet` and staticcheck for linux, darwin and windows pass on v1.5.6.
+
+Differences from the plan:
+
+- What fit could take out is small: most of its 1.8 µs is building the `net/http` header map and
+  `Request` that fib's `Client.Do` takes, which A20 leaves as they are. The rest of the proxy's
+  gap to nginx waits on A21 and A22.
+
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.5.5, v1.5.4 with two fixes its CI found on Windows and macOS: a queued file's descriptor closed when a connection closes mid-send, and the HTTP/1 idle deadline lifted before an HTTP/2 connection is built. v1.5.4 brings A16's stall bound (`SendFileStall`), A17 and the first part of A18 (`Context.Status`), made by fit's session in fib with the maintainer's leave (R07e); before it, fib's `main` at `8c637e0`, after v1.5.3, added connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
+- **fib version.** fit uses fib v1.5.6, which brings A20, the HTTP/1 client writing request heads
+  and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
+  queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
+  lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`
+  cuts (A23: without it an idle HTTP/2 connection's idle timer kept each closed engine in memory,
+  `handler/proxy` peaked at 5.3GB under the race detector, and the swapping stalled an h2c upload
+  past its timeout on macOS). v1.5.4 brought A16's stall bound (`SendFileStall`), A17 and the first part of A18 (`Context.Status`), made by fit's session in fib with the maintainer's leave (R07e); before it, fib's `main` at `8c637e0`, after v1.5.3, added connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
   parts of A8 and A12), v1.5.0 the rest of A12 (`Client.Start`), v1.5.1 A14 and A15, v1.5.2 the
   first part of A16, and v1.5.3 A19, a streamed request's `Trailer` set where its end is handed
   over, which CI's race detector had caught in the proxy's `TestTrailers/h2c`; see [fib-api-requests](fib-api-requests.md). v1.3.0, tagged for I16 and I22 on fib's `main` of

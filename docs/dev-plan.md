@@ -137,6 +137,7 @@ Status: `todo`, `doing` or `done`.
 | R07c | Hot path costs through fib | R03, R07a, R07b | done |
 | R07d | Access log cost | R07c | done |
 | R07e | Hooks and files through fib (A16–A18) | R05b, R07d, I34 | done |
+| R07f | The proxy's CPU per request, profiled (A20–A22) | R07e, I35 | done |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
@@ -153,6 +154,7 @@ Status: `todo`, `doing` or `done`.
 | I34 | Prometheus metrics | I23 | done |
 | I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | done |
 | I35b | Certificate files watched | I27, I28, I34 | done |
+| I35c | On-demand names dropped when idle | I31, I35b | done |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |
 | I37 | Expression matcher | I36 | todo |
@@ -547,6 +549,18 @@ Done in fib by fit's own session, with the maintainer's leave, after the M2 repo
 - **Touches**: fib's `http`; fit's `module`, `runtime`, `listener`, `handler/respond`,
   `handler/static`.
 
+### R07f The proxy's CPU per request, profiled (A20–A22)
+
+The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times nginx's CPU per
+request.
+
+- **Do**: profile the proxy against nginx on the benchmark host; take out what is fit's, and write
+  up what is fib's in fib-api-requests with the evidence.
+- **Done when**: the CPU per request is split between the kernel, fib, fit and the runtime; fit's
+  part is measured before and after with a micro-benchmark and the harness; fib's requests are
+  written.
+- **Touches**: `handler/proxy`; `docs/fib-api-requests`.
+
 ## M2, dynamic config and TLS
 
 ### I24 Config versions and Admin API skeleton
@@ -670,6 +684,17 @@ Left by I09 to I28 and by I28 to I29–I30, and done by none of them; found when
 - **Done when**: a renewed pair is served without a reload by hand, and a certificate written
   before its key is reported and changes nothing, in an end-to-end test.
 - **Touches**: `tlsmgr`, `runtime`, `admin`, `cmd/fit`.
+
+### I35c On-demand names dropped when idle
+
+Left by I31, which keeps every name taken on demand until a restart; found when M2 was reviewed.
+
+- **Do**: drop a name taken on demand that no handshake has asked for in `acme.on_demand`'s
+  `idle_timeout`, with a safe default, so that `max_names` is not used up for good; its
+  certificate stays in the storage, and the certificate expiry metric stops listing it.
+- **Done when**: time-driven tests show an idle name dropped, no longer served, listed or
+  counted, and taken on again from the storage, while a name asked for meanwhile is kept.
+- **Touches**: `config`, `tlsmgr`.
 
 ## M3, gateway features
 

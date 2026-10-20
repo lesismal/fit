@@ -32,6 +32,10 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | done, v1.5.4 | 12 | R07d, R07e |
 | A18 | A response's status, and when its request arrived, without a hook | partly, v1.5.4 | 12 | I34, R07e |
 | A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
+| A20 | Client requests written and response heads read without net/http | done, v1.5.6 | 12 | R07f |
+| A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
+| A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
+| A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
 
 ## Evidence
 
@@ -556,3 +560,126 @@ where the body's end is handed to the handler, on the goroutine taking it: by `R
 body and trailer arrive, fail under the race detector without the change and pass with it.
 
 **How fit uses it.** Nothing changes in fit: the proxy's `trailerNames` stops racing.
+
+## A20: Client requests written and response heads read without net/http
+
+**Status.** Done in fib v1.5.6 (`0a9339f`), by fit's session with the maintainer's leave; fit uses
+it. The client writes request heads and reads response heads itself, and decodes a whole
+chunked body without a trailer, producing net/http's output exactly, which tables and fuzzing
+against net/http check; anything outside the common shape still goes through net/http. Writing
+fit's proxied request: 1 allocation and 300 ns, against 8 and 645 ns; reading a plain response
+head: 5 and 400 ns, against 13 and 1.1 µs. On the benchmark host, fit's proxy (3f25679) over
+HTTP/1.1 went from 226.6k to 245.8k requests a second (+8.4%, three rounds each), at 26.0 µs of
+CPU a request instead of 29.7; over h2c 235.5k to 238.1k. fib's race suite and fit's, against the
+branch, pass.
+
+**Problem.** fib's client frames every HTTP/1 request with `net/http`'s `Request.Write`
+(`marshalRequest`, `marshalStreamedHead`) and reads every response head with
+`net/http.ReadResponse` over a new `bufio.Reader` (`responseParser.parseHead`, and
+`completeChunked` again for a chunked body). Both do much more than a proxy's request needs:
+`Request.Write` sorts the header's keys, formats with `fmt.Fprintf` and grows a `bytes.Buffer`;
+`ReadResponse` allocates a 4 KiB reader for a head of 100 bytes, a `textproto.Reader`, a `Header`
+map and a string per field, and a `Response`. fib's server side does neither: it parses request
+heads and writes response heads itself (`parseSimpleRequestHead`, `appendResponseHead`,
+`appendHeaderLines`).
+
+**Evidence.** `perf` on the benchmark host (R07f), fit's proxy over HTTP/1.1 at 2b37a8e on fib
+v1.5.4: wrk, 256 connections, fit on 7 CPUs, its backend another fit on 2. fit serves 226.8k
+requests a second at 29.7 µs of CPU each; nginx, the same way, 265.3k at 20.7 µs. The kernel's share
+is about the same (fit 15.2 µs, nginx 17.0 µs, with 5.9 and 6.3 system calls a request); the
+difference is user time, 14.5 µs against 3.6. Of fit's, fib's code and what it calls take 10.3
+µs and fit's own 1.8 µs. `parseHead` is 2.23 µs a request (7.5% of all CPU), 1.38 µs of it in
+`ReadResponse`, and `marshalRequest` 1.49 µs (5.0%), 1.43 µs of it in `Request.write`; between them
+they make over half of the request's allocations (0.9 and 0.24 µs of the 2.1 µs in `mallocgc` and
+GC assists), which the GC's background marking, another 1.3 µs, follows. Alone, on the development
+Mac: `ReadResponse` as `parseHead` calls it, for a head of four lines, takes 1.0 µs, 5,015 bytes and
+13 allocations; `Request.Write` for the request fit's proxy sends, 0.63 µs, 704 bytes and 8
+allocations.
+
+**Request.**
+
+- Write an HTTP/1 request head with fib's own appender, into a buffer from `bufferpool`: request
+  line, `Host`, the header's fields in map order (net/http sorts them, which no peer needs),
+  framing; the checks `Request.Write` makes on names and values kept, as `appendHeaderLines` makes
+  them for responses.
+- Parse a response head with fib's own parser, as the server parses requests: status line, fields
+  into a `Header` whose keys are canonical (one string for the whole head, sliced, as
+  `parseSimpleRequestHead` does, or interned common names), `Content-Length`, `Transfer-Encoding`
+  and `Connection` read as it goes; no `bufio.Reader`. `ClientResponse` keeps its shape.
+- Chunked bodies decoded without a second `ReadResponse`.
+
+Together about 3.7 µs a request, an eighth of the proxy's CPU, and most of what puts its user time
+above nginx's; fib's HTTP/1 client and every caller of `Client.Do` gain, not only fit.
+
+**How fit uses it.** Nothing changes in fit; the proxy's requests cost less.
+
+## A21: One `epoll_ctl` per park of an event loop, not two
+
+**Status.** Asked (R07f).
+
+**Problem.** An event loop with nothing to do parks in Go's netpoller through a relay epoll
+instance (`epollWaiter.wait`): it polls once, arms the relay with `EPOLL_CTL_MOD` (`EPOLLIN`),
+parks, and disarms it with another `EPOLL_CTL_MOD` once woken. Under a proxy's load the loops park
+often, so these add system calls nginx does not make.
+
+**Evidence.** The run of A20, with `perf stat` on fit's process: 0.48 `epoll_ctl` and 1.25
+`epoll_pwait` a request (nginx: no `epoll_ctl`, 1.36 `epoll_wait`). `epollWaiter.wait` is 1.25
+µs a request with its kernel time, `arm` 0.31 µs, and the polls that find nothing, in
+`pollEvents`, 0.82 µs.
+
+**Request.** Register the relay's interest with `EPOLLIN | EPOLLONESHOT`: an event disarms it, so
+only arming takes a call, and the disarm after waking goes. If the look after arming that the
+comment in `wait` explains is still needed, it stays. Or another way to park that costs one call.
+
+**How fit uses it.** Nothing changes in fit.
+
+## A22: A client connection's idle clock without a timer reset per request
+
+**Status.** Asked (R07f).
+
+**Problem.** Each time a request's response ends and its connection goes back to the pool,
+`Client.idleLocked` reads the clock and calls `Timer.Reset` on the connection's idle timer, which
+takes the timer's lock and moves it in the runtime's timer heap, and taking the connection stops
+it again; with keep-alive that is every request.
+
+**Evidence.** The run of A20: `idleLocked` is 0.23 µs a request, mostly `Timer.Reset`.
+
+**Request.** Keep the idle deadline as a time on the connection, written when it goes idle, and
+have one timer per client (or per host) sweep idle connections every `IdleConnTimeout` / 4 or so,
+closing those past their deadline; or reset the timer only when the deadline moves by more than a
+fraction of the timeout. A connection closes up to that fraction late, which `IdleConnTimeout`
+allows.
+
+**How fit uses it.** Nothing changes in fit.
+
+## A23: `OnClose` for the connections `Engine.Close` cuts
+
+**Status.** Done in fib v1.5.6 (`6fb6479`); fit uses it from then on.
+
+**Problem.** `Engine.Close` on the epoll, kqueue and IOCP backends cut every connection at once
+without running its `OnClose`, which the portable backend's `Close` did run. What a protocol lets
+go of in `OnClose` stayed held: an HTTP/2 connection's idle timer, set for `IdleTimeout` (two
+minutes by default) once its last stream ended, kept the connection, and through it the closed
+engine, its task pool and the 20000-slot queues of its stream pool, until it fired. Every fit a
+test starts and closes, after one h2c request, stayed in memory for two minutes.
+
+**Evidence.** fit's CI failed on macOS in `handler/proxy` `TestStreamedBodyLimit`, h2c case
+`{150000 false 200}`: the client timed out awaiting headers. Under load the same hang came back
+locally in every GOMAXPROCS=2 copy of the test run 16 at a time; the goroutine dump showed the
+client waiting for flow control with its first 65535 bytes sent, and fit's connection reader still
+building the engine's stream pool in `newH2ServerConn`, before it had sent its SETTINGS. The
+machine was swapping: one test process had grown to 4.2GB. Each start and close of fit with one
+h2c request kept about 1MB (56MB under the race detector); with fib's HTTP timer sites tagged,
+every timer still pending was the idle timer of a connection `OnClose` never reached. The whole
+`handler/proxy` package under the race detector peaked at 5.3GB, which on a 7GB runner running
+several packages at once is swapping, and stalls of seconds.
+
+**Change.** `Close` records the connections it cuts, and runs their `OnClose` once no round
+runs, before the task pools go, as their last round would have. fib's
+`TestCloseRunsOnClose` (an idle connection and one whose handler is running at `Close`) and
+`TestCloseLetsGoOfAnIdleHTTP2Connection` (a closed engine with an idle HTTP/2 connection is
+collected) fail without the change and pass with it.
+
+**How fit uses it.** Nothing changes in fit's code. `handler/proxy` under the race detector now
+peaks at 1.8GB rather than 5.3GB and runs in 104s rather than 142s, and 16 copies of
+`TestStreamedBodyLimit` at once, 400 times each, all pass, each under 510MB.

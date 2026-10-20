@@ -298,3 +298,96 @@ func TestOnDemandNames(t *testing.T) {
 		t.Errorf("without on_demand: %v", err)
 	}
 }
+
+// TestOnDemandIdle takes two names on from certificates in the storage, with
+// a CA that is not there, and has a handshake ask for one of them again
+// before idle_timeout: the other is dropped once it is idle that long, its
+// certificate no longer served or listed, and no longer counted against
+// max_names; the next handshake for it takes it on again from the storage,
+// asking the ask URL again.
+func TestOnDemandIdle(t *testing.T) {
+	ask := newAsker(t, "idle.fit.test", "busy.fit.test", "third.fit.test")
+	var l logs
+	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", OnDemand: &config.OnDemand{Ask: ask.srv.URL,
+		MaxNames: 2, IdleTimeout: config.Duration(time.Hour), Timeout: config.Duration(5 * time.Second)}}, &l)
+	for _, name := range []string{"idle.fit.test", "busy.fit.test"} {
+		storeIssued(t, a, name)
+	}
+	var now atomic.Pointer[time.Time]
+	start := time.Now()
+	now.Store(&start)
+	a.now = func() time.Time { return *now.Load() }
+	at := func(d time.Duration) {
+		t := start.Add(d)
+		now.Store(&t)
+		a.poke()
+	}
+	a.start()
+	certs := NewCerts(nil, a, nil, true)
+	for _, name := range []string{"idle.fit.test", "busy.fit.test"} {
+		if _, err := certs.GetCertificate(hello(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err := certs.GetCertificate(hello("third.fit.test")); !errors.Is(err, ErrOnDemandTooMany) {
+		t.Fatalf("past max_names: %v", err)
+	}
+	counted := func() int {
+		a.onDemand.mu.Lock()
+		defer a.onDemand.mu.Unlock()
+		return a.onDemand.names
+	}
+
+	at(40 * time.Minute)
+	if _, err := certs.GetCertificate(hello("busy.fit.test")); err != nil {
+		t.Fatal(err)
+	}
+	at(59 * time.Minute)
+	if l.count("dropped") != 0 || a.Certificate("idle.fit.test") == nil {
+		t.Fatal("a name was dropped before its idle_timeout")
+	}
+	at(61 * time.Minute)
+	eventually(t, 5*time.Second, "idle.fit.test dropped", func() bool { return l.count("idle.fit.test: on demand: no handshake") == 1 })
+	if a.Certificate("idle.fit.test") != nil || a.Certificate("busy.fit.test") == nil {
+		t.Error("the idle name is still served, or the busy one is not")
+	}
+	if got := certs.Certificates(); len(got) != 1 || got[0].Leaf.VerifyHostname("busy.fit.test") != nil {
+		t.Errorf("Certificates lists %d, want busy.fit.test's alone", len(got))
+	}
+	if n := counted(); n != 1 {
+		t.Errorf("%d names counted, want 1", n)
+	}
+	if err := a.onDemand.room(a.now(), false); err != nil {
+		t.Errorf("no room after a name was dropped: %v", err)
+	}
+
+	// Asked for again, it is taken on from the storage, with the ask URL's
+	// yes.
+	if c, err := certs.GetCertificate(hello("idle.fit.test")); err != nil || c.Leaf.VerifyHostname("idle.fit.test") != nil {
+		t.Fatalf("taken on again: %v", err)
+	}
+	if n := ask.count("idle.fit.test"); n != 2 {
+		t.Errorf("asked %d times, want 2", n)
+	}
+	// busy.fit.test was last asked for at 40 minutes.
+	at(101 * time.Minute)
+	eventually(t, 5*time.Second, "busy.fit.test dropped", func() bool { return l.count("busy.fit.test: on demand: no handshake") == 1 })
+	if n := counted(); n != 1 {
+		t.Errorf("%d names counted, want 1", n)
+	}
+}
+
+// TestOnDemandIdleTimer checks that the scheduler wakes for an idle name by
+// itself, on the real clock.
+func TestOnDemandIdleTimer(t *testing.T) {
+	ask := newAsker(t, "idle.fit.test")
+	var l logs
+	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", OnDemand: &config.OnDemand{Ask: ask.srv.URL,
+		IdleTimeout: config.Duration(100 * time.Millisecond)}}, &l)
+	storeIssued(t, a, "idle.fit.test")
+	a.start()
+	if _, err := a.OnDemand("idle.fit.test"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 5*time.Second, "idle.fit.test dropped", func() bool { return a.Certificate("idle.fit.test") == nil })
+}

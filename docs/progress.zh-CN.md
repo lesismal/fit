@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
-| fib | `github.com/lesismal/fib v1.5.5`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.5.6`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
 
@@ -25,7 +25,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
-均衡 v2）、I34（Prometheus 指标）、I35（退出测试）和 I35b（监视证书文件）。M2 之前的审查修复 R01、R02 已
+均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -1347,7 +1347,7 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 与计划的差异：
 
 - 速率限制针对加入名字，从存储加载证书也计入；存储中已有证书仍需 ask URL 同意，因为名字可能已不再被允许。
-- 按需加入的名字在重启前一直保留并续期，不因长期不用而丢弃，期间由 `max_names` 限制总数。
+- 按需加入的名字在重启前一直保留并续期，不因长期不用而丢弃，期间由 `max_names` 限制总数。I35c 起闲置后丢弃。
 - 证书到期指标只列出 listener 列出的名字，不含按需加入的名字。
 
 ### I30b 默认 HTTPS — 已完成
@@ -1402,7 +1402,10 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 与计划的差异：
 
 - 新订单不注明它替换的证书（ARI 的 `replaces`）：x/crypto 的 `AuthorizeOrder` 无法发送它。CA 用它让续期不受速率限制，
-  所以 ARI 要求的续期和其他订单一样提交。
+  所以 ARI 要求的续期和其他订单一样提交。2026-10-20（M2 之后）再次检查：最新发布的 x/crypto v0.58.0 和 2026-10-16 的
+  master（`0ae6809`）都不能发送它。`AuthorizeOrder` 接受 `OrderOption`，但该接口是封闭的，只提供 `notBefore`、
+  `notAfter` 和 `profile`，客户端也没有导出发送自定义签名请求的方法。要发送它，就得在 fit 中自己签名 ACME 请求，或换用
+  别的 ACME 库（acmez 和 lego 支持），违背决定 007；留待 x/crypto 支持。Pebble v2.10.1 接受 `replaces`，届时即可写测试。
 
 ### I35 M2 退出测试 — 已完成
 
@@ -1490,9 +1493,61 @@ M2 报告之后，维护者同意由 fit 的会话自己完成 A16–A18 在 fib
 - 访问日志只提高了 2%，不是 A17 估计的其开销的六分之一：剩下的是格式化日志行本身。
 - `Received` 没有加入 fib；见 A18。
 
+### I35c 丢弃闲置的按需名字 — 已完成
+
+- `acme.on_demand` 新增 `idle_timeout`（默认一周）：按需加入的名字在这段时间内没有任何握手请求时被丢弃。它不再计入
+  `max_names`，证书不再提供、也不再列入证书到期指标，OCSP 响应被归还；证书留在存储中，所以下一个请求该名字的握手会从
+  存储重新加入它：需要 ask URL 同意并计入速率，证书仍有效时不会重新下单。和 `acme` 的其他设置一样，只在启动时读取。
+- 握手把使用记录在该名字的 `atomic.Int64` 中，无锁读取（放在一个 `sync.Map` 里，只在加入或丢弃名字时变化），每秒最多
+  写一次，避免同一名字的握手都去写它。ACME 的调度器原本就为下一个到期的名字醒来，现在也为下一个将要闲置的名字醒来，并在
+  ACME 的锁下丢弃它；正在处理的名字等这次运行结束。重载后列出的名字不再算按需加入，不会被丢弃。
+- 测试：`TestOnDemandIdle` 使用测试自己的时钟：在 CA 不存在的情况下，从存储加入两个名字，占满 `max_names`；
+  `idle_timeout` 为一小时，其中一个在第 40 分钟再次被请求；第 59 分钟两者都未丢弃，第 61 分钟另一个被丢弃，不再提供、
+  列出或计数，并且有了加入新名字的余地；再次请求时从存储重新加入，ask URL 被问第二次；前一个在最后一次握手一小时后被丢弃。
+  `TestOnDemandIdleTimer`：使用真实时钟、100ms，调度器自己醒来丢弃它。linux、darwin 和 windows 的 `go vet` 与
+  staticcheck，以及 `go test -race ./...`（含 Pebble）通过。
+- 没有基准：按需名字的握手多了一次 `sync.Map` 读取，每秒最多一次写入；请求路径没有变化。
+
+与计划的差异：
+
+- 无。
+
+### R07f 剖析代理每个请求的 CPU（A20–A22） — 已完成
+
+M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求的 CPU 是 nginx 的 1.5 倍。
+
+- 在基准机上用 `perf` 剖析：fit（2b37a8e，fib v1.5.4）和 nginx 1.31.4 各用 7 个 CPU，代理到用 2 个 CPU 的 fit 后端，
+  wrk（7 个线程、256 个连接）走 HTTP/1.1：fit 每秒 226.8k 个请求，每个 29.7 µs CPU；nginx 265.3k，20.7 µs。两者的
+  内核时间差不多（fit 15.2 µs，nginx 17.0 µs；每个请求 5.9 和 6.3 次系统调用）；差别在用户态：14.5 µs 对 3.6 µs。fit 的
+  用户态时间中，fib 的代码及其调用的部分占 10.3 µs，GC 后台标记 1.3 µs，运行时其余部分 1.2 µs，fit 自己的代码 1.8 µs。
+- 属于 fib 的：客户端用 net/http 的 `Request.Write` 写每个上游请求（1.49 µs），在新建的 4 KiB `bufio.Reader` 上用
+  `net/http.ReadResponse` 读每个响应头（2.23 µs），合计占 CPU 的八分之一、分配的一半以上；事件循环每次休眠都要布防和撤防
+  中继 epoll 实例（每个请求 0.48 次 `epoll_ctl`，nginx 没有）；客户端每个请求都重置连接的空闲定时器（0.23 µs）。已作为
+  [A20](fib-api-requests.zh-CN.md#a20不经-nethttp-写客户端请求读响应头)、
+  [A21](fib-api-requests.zh-CN.md#a21事件循环每次休眠只调用一次-epoll_ctl而不是两次) 和
+  [A22](fib-api-requests.zh-CN.md#a22客户端连接的空闲计时不必每个请求重置定时器) 提出。A20 已在 fib v1.5.6 中
+  实现（见下文）；A21 和 A22 仍待实现。
+- 属于 fit 的：代理在复制请求头时就跳过逐跳字段、`Content-Length` 和 `Expect`，而不是复制后逐个删除；`removeHopByHop`
+  （响应也用）对每个字段只看一次；`validToken` 查表。新增的 `BenchmarkOutgoing`（构造上游请求）：压测工具的请求
+  227 → 214 ns，带九个字段的浏览器请求 684 → 541 ns，分配次数不变（3 和 6）。在基准机上单独测 fit 的 proxy，前后交替各三轮：
+  HTTP/1.1 227.7k → 227.0k（−0.3%），h2c 234.8k → 234.9k，都在噪声范围内，因为这只是 29.7 µs 中的 0.05 µs。
+- linux、darwin 和 windows 的 `go vet` 与 staticcheck，以及代理测试在竞态检测下通过。
+
+- 之后 A20 由本会话经维护者同意在 fib 中实现，发布为 v1.5.6（`0a9339f`，CI 第 214 次运行通过），fit 已升级。在基准机上，
+  fit 3f25679 分别用 v1.5.5 和 A20，前后交替各三轮：代理在 HTTP/1.1 上从每秒 226.6k 提高到 245.8k（+8.4%，约为 nginx 265k 的
+  93%），每个请求的 CPU 从 29.7 µs 降到 26.0 µs；h2c 上从 235.5k 到 238.1k（+1.1%）。在 v1.5.6 上，fit 的竞态测试（含 Pebble）
+  以及 linux、darwin 和 windows 的 `go vet` 与 staticcheck 都通过。
+
+与计划的差异：
+
+- fit 能去掉的很少：它的 1.8 µs 大部分用于构造 fib 的 `Client.Do` 所需的 `net/http` 头部 map 和 `Request`，A20 不改变
+  这些。代理与 nginx 余下的差距要等 A21 和 A22。
+
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.5.5，即 v1.5.4 加上其 CI 在 Windows 和 macOS 上发现的两处修复：连接在发送中途关闭时关闭排队文件的描述符，以及建立 HTTP/2 连接前撤掉 HTTP/1 的 idle 截止时间。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
+- **fib 版本。** fit 使用 fib v1.5.6，带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
+  fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
+  运行 `OnClose`（A23：没有它，空闲 HTTP/2 连接的 idle 定时器会把每个已关闭的引擎留在内存中，`handler/proxy` 在竞态检测下峰值达 5.3GB，交换导致 macOS 上一次 h2c 上传超时）。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了
   A19：流式请求的 `Trailer` 在交出请求体结尾的地方设置，CI 的竞态检测曾在代理的 `TestTrailers/h2c` 中发现它；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了

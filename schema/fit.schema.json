@@ -333,6 +333,12 @@
           "description": "A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute.",
           "type": "string"
         },
+        "idle_timeout": {
+          "default": "168h",
+          "description": "How long a name taken on demand is kept, and renewed, with no handshake asking for it; then it is dropped and no longer counts against max_names, and its certificate stays in the storage for the next handshake that asks for it, which the ask URL must allow again. 168h, a week, when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
         "interval": {
           "default": "1m",
           "description": "The interval rate counts over. 1m when left out.",
