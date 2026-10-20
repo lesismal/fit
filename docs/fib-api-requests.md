@@ -30,7 +30,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | asked | 12 | R07d |
 | A18 | A response's status, and when its request arrived, without a hook | asked | 12 | I34 |
-| A19 | A streamed request's `Trailer` set where its end is handed over | fixed on a branch | 13 | I35 |
+| A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
 
 ## Evidence
 
@@ -521,8 +521,7 @@ with one clock read and no hook; the proxy's responses keep the hook, which A17 
 
 ## A19: A streamed request's Trailer set where its end is handed over
 
-**Status.** Fixed on fib's branch `trailer-on-consumer` (commit `a06c587`, from `main` at
-`67db021`), not merged.
+**Status.** Done in fib v1.5.3 (`aa7c1b0`); fit uses it from then on.
 
 **Problem.** `BodyStream.finish` set the request's `Trailer` on the goroutine that took the body's
 end off the connection. On HTTP/2 and HTTP/3 that is the connection's reader, not the handler's

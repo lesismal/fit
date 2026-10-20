@@ -29,7 +29,7 @@
 | A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
 | A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已提出 | 12 | R07d |
 | A18 | 不经回调取得响应的状态和请求到达的时间 | 已提出 | 12 | I34 |
-| A19 | 流式请求的 `Trailer` 在交出请求体结尾的地方设置 | 已在分支上修复 | 13 | I35 |
+| A19 | 流式请求的 `Trailer` 在交出请求体结尾的地方设置 | 已完成，v1.5.3 | 13 | I35 |
 
 ## 证据
 
@@ -396,7 +396,7 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 ## A19：流式请求的 Trailer 在交出请求体结尾的地方设置
 
-**状态。** 已在 fib 的分支 `trailer-on-consumer` 上修复（提交 `a06c587`，基于 `main` 的 `67db021`），尚未合并。
+**状态。** 已在 fib v1.5.3 中完成（`aa7c1b0`）；fit 从此使用它。
 
 **问题。** `BodyStream.finish` 在从连接上读到请求体结尾的 goroutine 上设置请求的 `Trailer`。在 HTTP/2 和 HTTP/3 上，
 那是连接的读取者，而不是 handler 的 goroutine，所以读取请求自带 `Trailer` 的 handler（net/http 允许在读请求体之前这样做）
