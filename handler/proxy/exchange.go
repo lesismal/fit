@@ -227,15 +227,25 @@ type exchange struct {
 // release gives the client's request back, once, and lets go of the
 // upstream's.
 func (x *exchange) release() {
-	if x.done.CompareAndSwap(false, true) {
-		if t := x.timer.Load(); t != nil {
-			t.Stop()
-		}
-		x.open.remove(x)
-		x.pool.Done(x.backend, x.failed)
+	if x.settle() {
 		x.c.Release()
 		x.graph.Release()
 	}
+}
+
+// settle lets go of the upstream's request and tells the pool how the
+// backend did, once, and reports whether it did so; release, or fail
+// before it answers, gives the client's request back after it.
+func (x *exchange) settle() bool {
+	if !x.done.CompareAndSwap(false, true) {
+		return false
+	}
+	if t := x.timer.Load(); t != nil {
+		t.Stop()
+	}
+	x.open.remove(x)
+	x.pool.Done(x.backend, x.failed)
+	return true
 }
 
 // send sends the request upstream, keeping its Call for cancel, and
@@ -448,8 +458,15 @@ func (x *exchange) fail(err error) {
 	status := x.statusOf(err)
 	// 400, 408 and 413 are the client's body failing, not the upstream.
 	x.failed = status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout
+	// The pool hears of the failure before the client does, so that the
+	// request the client sends next is not given a backend this one has
+	// just taken out of rotation.
+	settled := x.settle()
 	_ = x.c.Respond(status, "text/plain; charset=utf-8", []byte(strconv.Itoa(status)+" "+stdhttp.StatusText(status)+"\n"))
-	x.release()
+	if settled {
+		x.c.Release()
+		x.graph.Release()
+	}
 }
 
 // statusOf is the status for a request that failed with err before its

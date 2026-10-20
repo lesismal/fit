@@ -1943,7 +1943,10 @@ Differences from the plan:
   and the watcher took its first look at the file's size and modification time when it started, so
   an edit made in between, the same size as before, showed no change from then on and was never
   applied. The watcher now starts as if the file had just changed, and its contents decide
-  (`TestEditBeforeWatching`).
+  (`TestEditBeforeWatching`). Later, on 5608205, `TestPassiveHealth/h2c` saw two 502s from the
+  address that refuses connections where one takes it out: the proxy answered a failed request
+  before telling the pool, so on a slow runner the client's next requests could reach the address
+  before it was out. The pool now hears of the failure first.
 
 Differences from the plan:
 
