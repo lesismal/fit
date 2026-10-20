@@ -26,8 +26,9 @@ type event struct {
 	Output  string
 }
 
-// maxMessage keeps an annotation under GitHub's limit for one message; the
-// end of a failure's output is the part kept, as it holds the cause.
+// maxMessage keeps an annotation under GitHub's limit for one message. Of a
+// longer failure's output the start and the end are kept: the end holds a
+// test's cause, the start a timeout's panic and the goroutines it names first.
 const maxMessage = 60000
 
 func main() {
@@ -43,6 +44,7 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 	type key struct{ pkg, test string }
 	output := map[key]*strings.Builder{}
 	failed := map[key]bool{}
+	ended := map[key]bool{}
 	var order []key
 
 	sc := bufio.NewScanner(in)
@@ -78,6 +80,9 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 			b.WriteString(e.Output)
 		case "fail":
 			failed[k] = true
+			ended[k] = true
+		case "pass", "skip":
+			ended[k] = true
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -85,6 +90,15 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 	}
 	if !annotate {
 		return nil
+	}
+
+	// A package that timed out or crashed ends its tests without a word:
+	// test2json gives the running ones the panic's output, but no fail
+	// action. They failed with the package.
+	for _, k := range order {
+		if k.test != "" && !ended[k] && failed[key{k.pkg, ""}] {
+			failed[k] = true
+		}
 	}
 
 	// A test that failed because a subtest did has nothing of its own to
@@ -114,7 +128,8 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 		}
 		s := msg.String()
 		if len(s) > maxMessage {
-			s = "...\n" + s[len(s)-maxMessage:]
+			head := maxMessage / 3
+			s = s[:head] + "\n...\n" + s[len(s)-(maxMessage-head):]
 		}
 		fmt.Fprintf(w, "::error title=go test %s::%s\n", pkg, escape(s))
 	}
