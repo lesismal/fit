@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-20 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I31、I32–I34） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I31、I30b、I32–I34） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有默认 HTTPS（I30b）和 ARI（I30c）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 ARI（I30c）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,8 +23,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I30b（默认 HTTPS）和 I30c（ARI），然后是 I35（M2 退出测试）。** M2 已完成 I24、I25（带配置版本、局部
-修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
+**下一步：I30c（ARI），然后是 I35（M2 退出测试）。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）和 I34（Prometheus 指标）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I30b。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I30c。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -1349,6 +1349,38 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 - 速率限制针对加入名字，从存储加载证书也计入；存储中已有证书仍需 ask URL 同意，因为名字可能已不再被允许。
 - 按需加入的名字在重启前一直保留并续期，不因长期不用而丢弃，期间由 `max_names` 限制总数。
 - 证书到期指标只列出 listener 列出的名字，不含按需加入的名字。
+
+### I30b 默认 HTTPS — 已完成
+
+- `listeners` 可以不写。默认 HTTPS 开启时，没写 listener 的配置由一个 `https` listener（`:443`，HTTP/1.1 和 h2）提供服务，
+  证书经 ACME 为其路由匹配的域名申请；另有一个 `http` listener（`:80`），应答 ACME 的 HTTP-01 验证，把其他所有请求以 308
+  跳转到 `https://<host>[:port]<target>`，使客户端重复其方法和请求体。路由可以指定这两个 listener 中的任何一个；`http`
+  不服务路由。写了 `tls` 但内容为空的 TLS listener，为它服务的路由的域名申请证书。写全了的 listener 按原样提供服务，所以
+  现有配置不变。
+- 名字：至少两段的域名；跳过通配符、IP 地址和只有私有网络才能解析的名字（`localhost`、`.localhost`、`.local`、
+  `.internal`、`.home.arpa`、`.invalid`）。
+- `auto_https`：`disable`（不生成 listener，空的 `tls` 被拒绝）、`disable_redirects`（没有 `http` listener：证书经
+  TLS-ALPN-01 获取）、`http_port`（80）和 `https_port`（443）。逻辑在 `config.Config.Effective` 中，`Validate` 和
+  `runtime.Compile` 都用它：没有 listener 又没有可申请证书的名字的配置被拒绝，指定不存在的 listener 的路由、两个端口相同
+  也被拒绝。`runtime.Listener` 增加 `RedirectHTTPS`，即 dispatcher 跳转到的端口；访问日志和指标把它记为没有路由接受的请求。
+- Let's Encrypt 测试环境：`test/e2e` 的 `TestLetsEncryptStaging` 用只写了域名的配置针对测试环境 CA 运行 fit，检查提供的是
+  它签发的证书。需要在一台该域名从互联网解析到、并能监听 80 和 443 端口的主机上手动运行：
+  `FIT_LE_STAGING_NAME=<name> go test ./test/e2e -run TestLetsEncryptStaging -v -timeout 10m`
+  （`FIT_LE_STAGING_EMAIL` 设置账户邮箱）；否则跳过。
+- 测试：`config` 的 `TestAutoHTTPSName` 和 `TestEffective`（按 listener 的名字、其他 listener 上的路由、配置不被修改、
+  端口、不跳转）以及 `TestValidate` 中的检查；`listener` 的 `TestAutoHTTPSRedirect`：没写 listener 的配置得到两个 listener，
+  明文请求以 308 跳转，保留主机、端口和目标，覆盖 GET 和 POST、IPv6 主机、没有验证进行中的验证路径；`test/e2e` 的
+  `TestAutoHTTPSFromPebble`：fit 程序用只写了 `auto.fit.test`（以及 Pebble 的地址和端口）的配置，经 `http` listener 上的
+  HTTP-01 取得证书，通过 HTTPS 提供页面，并跳转 HTTP；`fit validate` 接受这样的配置。`go vet ./...`、
+  `GOOS=windows go vet ./...` 和 `go test -race ./...` 通过（含 Pebble）。
+- 没有基准：dispatcher 只是多读一个已有 listener 的字段。
+
+与计划的差异：
+
+- 写全了的 listener 不加跳转：默认 HTTPS 补上配置没写的部分，不改变配置写了的内容。为写出的 listener 跳转随 I38 的跳转功能
+  提供。
+- `https` listener 提供 HTTP/1.1 和 h2，不含 h3，与写出的 TLS listener 的默认值相同。
+- Let's Encrypt 测试环境的测试尚未运行：它需要公网域名和 80、443 端口，压测主机都没有。
 
 ## 给后续迭代的说明
 

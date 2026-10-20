@@ -144,7 +144,7 @@ Status: `todo`, `doing` or `done`.
 | I28 | Certificate manager and storage; ACME decision | I09 | done |
 | I29 | ACME HTTP-01 and renewal | I28 | done |
 | I30 | TLS-ALPN-01, OCSP stapling | I29 | done |
-| I30b | HTTPS by default | I30 | todo |
+| I30b | HTTPS by default | I30 | done |
 | I30c | ACME Renewal Information (ARI) | I29 | todo |
 | I31 | On-demand TLS | I30 | done |
 | I32 | Active health checks | I20 | done |

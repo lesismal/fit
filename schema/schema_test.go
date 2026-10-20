@@ -52,7 +52,8 @@ func TestSchemaShape(t *testing.T) {
 	if err := json.Unmarshal(out, &s); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Required) != 1 || s.Required[0] != "listeners" {
+	// listeners may be left out, for HTTPS by default to make them.
+	if len(s.Required) != 0 {
 		t.Fatalf("root required = %v", s.Required)
 	}
 	listener := s.Defs["config.Listener"]

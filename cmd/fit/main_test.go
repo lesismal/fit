@@ -55,7 +55,7 @@ func TestValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, stderr := runFit("validate", "-c", bad)
-	if want := bad + ": listeners: at least one listener is needed\n"; code != 1 || stderr != want {
+	if want := bad + ": listeners: at least one listener is needed, or a route that matches a host name for HTTPS by default\n"; code != 1 || stderr != want {
 		t.Fatalf("bad config: %d %q, want %q", code, stderr, want)
 	}
 
@@ -79,6 +79,16 @@ func TestValidate(t *testing.T) {
 	}
 	if code, stdout, stderr := runFit("validate", "-c", acme); code != 0 || stdout != acme+": valid\n" {
 		t.Fatalf("acme: %d %q %q", code, stdout, stderr)
+	}
+
+	// A config that writes no listeners, but a host name, is valid: HTTPS
+	// by default makes its listeners.
+	auto := filepath.Join(dir, "auto.json")
+	if err := os.WriteFile(auto, []byte(`{"routes": [{"match": {"host": ["a.example"]}, "handler": {"module": "respond"}}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, stderr := runFit("validate", "-c", auto); code != 0 || stdout != auto+": valid\n" {
+		t.Fatalf("auto: %d %q %q", code, stdout, stderr)
 	}
 
 	if code, _, stderr := runFit("validate", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.Contains(stderr, "missing.json") {
@@ -123,7 +133,7 @@ func TestRun(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(`{"listeners": []}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, stderr := runFit("run", "-c", cfg); code != 1 || stderr != cfg+": listeners: at least one listener is needed\n" {
+	if code, _, stderr := runFit("run", "-c", cfg); code != 1 || stderr != cfg+": listeners: at least one listener is needed, or a route that matches a host name for HTTPS by default\n" {
 		t.Fatalf("bad config: %d %q", code, stderr)
 	}
 	if code, _, _ := runFit("run", "extra"); code != 2 {

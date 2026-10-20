@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I31, I32–I34) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I31, I30b, I32–I34) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no HTTPS by default (I30b) or ARI (I30c); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ARI (I30c); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -27,9 +27,9 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I30b (HTTPS by default) and I30c (ARI), then I35 (M2's exit tests).**
+**Next: I30c (ARI), then I35 (M2's exit tests).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I31, on-demand TLS, I32, active health checks, I33, load
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, and I34, Prometheus metrics.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I30b from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I30c from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -1828,6 +1828,50 @@ Differences from the plan:
 - Names taken on are kept and renewed until a restart; none is dropped for going unused, and
   `max_names` bounds them meanwhile.
 - The certificate expiry metric lists the names a listener lists, not those taken on demand.
+
+### I30b HTTPS by default — done
+
+- `listeners` may be left out. A config that writes none is served, while HTTPS by default is on,
+  on an `https` listener (`:443`, HTTP/1.1 and h2) with certificates obtained with ACME for the
+  host names its routes match, and an `http` listener (`:80`) that answers ACME's HTTP-01
+  challenges and redirects every other request to `https://<host>[:port]<target>` with 308, so
+  that a client repeats its method and body. Routes may name either listener; the `http` one
+  serves none. A TLS listener written with an empty `tls` gets certificates for the host names of
+  the routes it serves. Listeners written out are served as written, so existing configs do not
+  change.
+- Names: a host name of two labels or more; wildcards, IP addresses and names only a private
+  network resolves (`localhost`, `.localhost`, `.local`, `.internal`, `.home.arpa`, `.invalid`)
+  are skipped.
+- `auto_https`: `disable` (no listeners made, an empty `tls` refused), `disable_redirects` (no
+  `http` listener: certificates come through TLS-ALPN-01), `http_port` (80) and `https_port`
+  (443). The logic is `config.Config.Effective`, which `Validate` and `runtime.Compile` both use:
+  a config with no listeners and no name to obtain a certificate for is refused, as is a route
+  naming a listener that does not exist, and the two ports being one. `runtime.Listener`
+  gains `RedirectHTTPS`, the port the dispatcher redirects to; it is counted by the access log and
+  metrics as a request no route took.
+- Let's Encrypt staging: `test/e2e` `TestLetsEncryptStaging` runs fit with a config naming only a
+  host, against the staging CA, and checks that a certificate from it is served. It is run by hand
+  on a host the name resolves to from the internet and that can listen on ports 80 and 443:
+  `FIT_LE_STAGING_NAME=<name> go test ./test/e2e -run TestLetsEncryptStaging -v -timeout 10m`
+  (`FIT_LE_STAGING_EMAIL` sets the account's address); it is skipped otherwise.
+- Tests: `config` `TestAutoHTTPSName` and `TestEffective` (names per listener, routes on other
+  listeners, the config left unchanged, ports, no redirects) and the checks in `TestValidate`;
+  `listener` `TestAutoHTTPSRedirect`: a config with no listeners gets both, and requests in the
+  clear are redirected with 308, host, port and target kept, for GET and POST, an IPv6 host, and a
+  challenge path with no challenge; `test/e2e` `TestAutoHTTPSFromPebble`: the fit binary with a
+  config naming only `auto.fit.test` (and Pebble's address and ports) obtains its certificate
+  through HTTP-01 on the `http` listener, serves the page over HTTPS, and redirects HTTP; `fit
+  validate` takes such a config. `go vet ./...`, `GOOS=windows go vet ./...` and
+  `go test -race ./...` pass, with Pebble.
+- No benchmark: the dispatcher reads one more field of the listener it already has.
+
+Differences from the plan:
+
+- Listeners written out get no redirect: HTTPS by default fills in what a config leaves out, and
+  does not change what it says. A redirect for a written listener comes with I38's redirects.
+- The `https` listener serves HTTP/1.1 and h2, not h3, as a written TLS listener does by default.
+- The Let's Encrypt staging test has not been run: it needs a public name and ports 80 and 443,
+  which the benchmark host does not have.
 
 ## Notes for later iterations
 

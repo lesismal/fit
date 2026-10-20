@@ -109,6 +109,11 @@ type Listener struct {
 	// config.Limits.
 	MaxHeaderBytes int
 	MaxBodyBytes   int64
+	// RedirectHTTPS, when not 0, is the HTTPS port every request this
+	// listener in the clear takes is redirected to, but for ACME's HTTP-01
+	// challenges; it serves no routes. HTTPS by default makes such a
+	// listener.
+	RedirectHTTPS int
 	// Routes are the listener's routes: highest priority first, and routes
 	// of equal priority in the order written.
 	Routes []*Route
@@ -206,8 +211,10 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		return nil, errs
 	}
 
-	for _, lc := range c.Listeners {
-		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols,
+	// The listeners written, or those HTTPS by default makes.
+	listeners, redirect := c.Effective()
+	for _, lc := range listeners {
+		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols, RedirectHTTPS: redirect[lc.Name],
 			MaxHeaderBytes: c.Limits.HeaderBytes(), MaxBodyBytes: c.Limits.BodyBytes()}
 		if len(l.Protocols) == 0 {
 			l.Protocols = config.DefaultProtocols
@@ -245,6 +252,9 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			}
 		}
 		for i, rc := range c.Routes {
+			if l.RedirectHTTPS != 0 {
+				break // it serves no routes
+			}
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
 				l.Routes = append(l.Routes, routes[i])
 			}

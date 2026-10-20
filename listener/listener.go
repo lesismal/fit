@@ -525,7 +525,9 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	}
 	var route *runtime.Route
 	var metrics *observe.RequestMetrics
+	redirect := 0
 	if l := d.listener(g); l != nil {
+		redirect = l.RedirectHTTPS
 		route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
 		metrics = l.RequestMetrics(route)
 	}
@@ -538,10 +540,41 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		})
 	}
 	if route == nil {
+		if redirect != 0 {
+			redirectHTTPS(c, redirect)
+			return
+		}
 		_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
 		return
 	}
 	route.Handler.ServeHTTP(c)
+}
+
+// redirectHTTPS answers c's request with a permanent redirect to the same
+// host and target over HTTPS, on port: 308, so that a client repeats its
+// method and body there.
+func redirectHTTPS(c *fibhttp.Context, port int) {
+	host := c.Request.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", []byte("400 no host to redirect to\n"))
+		return
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]" // an IPv6 address, from host and port
+	}
+	target := c.Request.RequestURI
+	if target == "" || target[0] != '/' {
+		target = c.Request.URL.RequestURI()
+	}
+	location := "https://" + host
+	if port != 443 {
+		location += ":" + strconv.Itoa(port)
+	}
+	_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusPermanentRedirect,
+		Header: stdhttp.Header{"Location": {location + target}}})
 }
 
 // logRequest has the access log write a line for c's request once its

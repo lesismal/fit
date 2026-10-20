@@ -67,7 +67,6 @@ func TestLoadErrors(t *testing.T) {
 			doc:  `{"Listeners": []}`,
 			want: []string{
 				`1:2: Listeners: unknown field (did you mean "listeners"?)`,
-				`1:1: listeners: missing required field`,
 			},
 		},
 		{
@@ -150,7 +149,32 @@ func TestValidate(t *testing.T) {
 		{
 			name: "no listeners",
 			doc:  `{"listeners": []}`,
+			want: []string{`listeners: at least one listener is needed, or a route that matches a host name for HTTPS by default`},
+		},
+		{
+			name: "no listeners, and no host names for HTTPS by default",
+			doc:  `{"routes": [{"match": {"host": ["localhost", "*.a.example", "10.0.0.1", "intranet"]}, "handler": {"module": "respond"}}]}`,
+			want: []string{`listeners: at least one listener is needed, or a route that matches a host name for HTTPS by default`},
+		},
+		{
+			name: "no listeners, HTTPS by default off",
+			doc:  `{"auto_https": {"disable": true}, "routes": [{"match": {"host": ["a.example"]}, "handler": {"module": "respond"}}]}`,
 			want: []string{`listeners: at least one listener is needed`},
+		},
+		{
+			name: "HTTPS by default on one port",
+			doc:  `{"auto_https": {"http_port": 8443, "https_port": 8443}, "routes": [{"match": {"host": ["a.example"]}, "handler": {"module": "respond"}}]}`,
+			want: []string{`1:30: auto_https.http_port: the HTTP port is the HTTPS port, 8443`},
+		},
+		{
+			name: "empty tls without host names",
+			doc:  `{"listeners": [{"name": "web", "address": ":443", "tls": {}}], "routes": [{"match": {"host": ["localhost"]}, "handler": {"module": "respond"}}]}`,
+			want: []string{`1:58: listeners[0].tls: a certificate, a name for acme or on_demand is needed, or a route on this listener that matches a host name for HTTPS by default`},
+		},
+		{
+			name: "a route on a listener HTTPS by default does not make",
+			doc:  `{"routes": [{"listeners": ["web"], "match": {"host": ["a.example"]}, "handler": {"module": "respond"}}]}`,
+			want: []string{`1:28: routes[0].listeners[0]: there is no listener named "web"`},
 		},
 		{
 			name: "listener names and addresses",

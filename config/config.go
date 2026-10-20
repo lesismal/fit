@@ -16,12 +16,13 @@ import (
 
 // Config is a whole fit config.
 type Config struct {
-	Listeners []Listener `json:"listeners" fit:"required" doc:"The addresses fit listens on, and the protocols each one serves."`
+	Listeners []Listener `json:"listeners,omitempty" doc:"The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https."`
 	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
 	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
+	AutoHTTPS *AutoHTTPS `json:"auto_https,omitempty" doc:"HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."`
 	Metrics   *Metrics   `json:"metrics,omitempty" doc:"Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."`
 	ACME      *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
 }

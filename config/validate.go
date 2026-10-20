@@ -21,10 +21,24 @@ func (c *Config) Validate() Errors {
 		errs = append(errs, v.Errorf(format, args...))
 	}
 
-	if len(c.Listeners) == 0 {
+	auto := c.AutoHTTPS
+	switch {
+	case len(c.Listeners) > 0:
+	case !auto.on():
 		errs = append(errs, &Error{Path: "listeners", Msg: "at least one listener is needed"})
+	case len(c.autoNames("")) == 0:
+		errs = append(errs, &Error{Path: "listeners", Msg: "at least one listener is needed, or a route that matches a host name for HTTPS by default"})
+	case auto.redirects() && auto.HTTP() == auto.HTTPS():
+		add(auto.At.Field("http_port"), "the HTTP port is the HTTPS port, %d", auto.HTTP())
 	}
 	listeners := map[string]bool{}
+	if len(c.Listeners) == 0 {
+		// The ones HTTPS by default makes, which routes may name.
+		effective, _ := c.Effective()
+		for _, l := range effective {
+			listeners[l.Name] = true
+		}
+	}
 	addresses := map[string]string{}
 	for _, l := range c.Listeners {
 		switch {
@@ -59,8 +73,12 @@ func (c *Config) Validate() Errors {
 			seen[p] = true
 		}
 		if t := l.TLS; t != nil {
-			if len(t.Certificates) == 0 && len(t.ACME) == 0 && !t.OnDemand {
+			switch {
+			case !emptyTLS(t):
+			case !auto.on():
 				add(t.At, "a certificate, a name for acme or on_demand is needed")
+			case len(c.autoNames(l.Name)) == 0:
+				add(t.At, "a certificate, a name for acme or on_demand is needed, or a route on this listener that matches a host name for HTTPS by default")
 			}
 			if t.OnDemand && (c.ACME == nil || c.ACME.OnDemand == nil) {
 				add(t.At.Field("on_demand"), "on_demand needs acme.on_demand, which says whom to ask whether a name may have a certificate")

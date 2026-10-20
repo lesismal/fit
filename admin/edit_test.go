@@ -180,7 +180,7 @@ func TestEditsRefused(t *testing.T) {
 		{"PATCH", "/config/listeners/0", "application/merge-patch+json", `{"address": "bogus"}`, 400,
 			`{"path":"listeners[0].address","line":5,"column":18,"message":"\"bogus\" is not a host and port, as in \":8080\" or \"127.0.0.1:8080\""}`},
 		{"PUT", "/config/routes/0/handler/module", "application/json", `"nope"`, 400, `there is no module \"nope\"`},
-		{"DELETE", "/config/listeners", "", "", 400, `"path":"listeners","line":1,"column":1,"message":"missing required field"`},
+		{"DELETE", "/config/listeners", "", "", 400, `"path":"listeners","message":"at least one listener is needed, or a route that matches a host name for HTTPS by default"`},
 		{"PUT", "/config/routes/0/bogus", "application/json", `1`, 400, `"path":"routes[0].bogus","line":16,"column":7,"message":"unknown field"`},
 		{"PUT", "/config/routes/0", "application/json", `{`, 400, `the body is not JSON`},
 		{"PUT", "/config/nope/x", "application/json", `1`, 404, `there is no member \"nope\"`},

@@ -116,6 +116,34 @@
       },
       "type": "object"
     },
+    "config.AutoHTTPS": {
+      "additionalProperties": false,
+      "properties": {
+        "disable": {
+          "description": "Turn HTTPS by default off: no listeners are made for a config that writes none, and an empty tls gets no certificates.",
+          "type": "boolean"
+        },
+        "disable_redirects": {
+          "description": "Make no listener in the clear to redirect to HTTPS. ACME's HTTP-01 challenge is then answered by none, and certificates come through TLS-ALPN-01.",
+          "type": "boolean"
+        },
+        "http_port": {
+          "default": 80,
+          "description": "The port of the listener in the clear that redirects to HTTPS. 80 when left out or 0.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "https_port": {
+          "default": 443,
+          "description": "The port of the HTTPS listener, and the one redirects name when it is not 443. 443 when left out or 0.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "config.Certificate": {
       "additionalProperties": false,
       "properties": {
@@ -785,12 +813,16 @@
       "$ref": "#/$defs/config.Admin",
       "description": "The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."
     },
+    "auto_https": {
+      "$ref": "#/$defs/config.AutoHTTPS",
+      "description": "HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."
+    },
     "limits": {
       "$ref": "#/$defs/config.Limits",
       "description": "Limits that apply to every listener."
     },
     "listeners": {
-      "description": "The addresses fit listens on, and the protocols each one serves.",
+      "description": "The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https.",
       "items": {
         "$ref": "#/$defs/config.Listener"
       },
@@ -815,9 +847,6 @@
       "type": "array"
     }
   },
-  "required": [
-    "listeners"
-  ],
   "title": "fit config",
   "type": "object"
 }

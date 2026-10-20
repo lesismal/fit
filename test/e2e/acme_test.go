@@ -10,6 +10,7 @@ import (
 	"net"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +127,76 @@ func TestOnDemandFromPebble(t *testing.T) {
 	if err == nil {
 		conn.Close()
 		t.Error("a handshake for a refused name succeeded")
+	}
+}
+
+// TestAutoHTTPSFromPebble runs fit with a config that names only a host,
+// and Pebble's address and ports: HTTPS by default serves it over HTTPS with
+// a certificate from Pebble, obtained through HTTP-01 on the listener in
+// the clear it makes, which redirects every other request to HTTPS.
+func TestAutoHTTPSFromPebble(t *testing.T) {
+	httpPort, httpsPort := pebbletest.FreePort(t), pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: httpPort, TLSPort: httpsPort})
+	_, addrs := startFit(t, fmt.Sprintf(`{
+  "acme": {"directory": %q, "ca_file": %q, "storage": %q},
+  "auto_https": {"http_port": %d, "https_port": %d},
+  "routes": [{"match": {"host": ["auto.fit.test"]}, "handler": {"module": "respond", "params": {"body": "by default"}}}]
+}`, p.Directory, p.CAFile, t.TempDir(), httpPort, httpsPort))
+	if body := getObtained(t, p, addrs["https"], "auto.fit.test"); body != "by default" {
+		t.Errorf("%q", body)
+	}
+	c := &stdhttp.Client{Timeout: 5 * time.Second, CheckRedirect: func(*stdhttp.Request, []*stdhttp.Request) error {
+		return stdhttp.ErrUseLastResponse
+	}}
+	req, _ := stdhttp.NewRequest("GET", "http://"+addrs["http"]+"/page", nil)
+	req.Host = "auto.fit.test"
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if want := fmt.Sprintf("https://auto.fit.test:%d/page", httpsPort); resp.StatusCode != stdhttp.StatusPermanentRedirect ||
+		resp.Header.Get("Location") != want {
+		t.Errorf("http: %d %q, want %q", resp.StatusCode, resp.Header.Get("Location"), want)
+	}
+}
+
+// TestLetsEncryptStaging obtains a certificate from Let's Encrypt's staging
+// CA, with a config that names only a host. It is run by hand, on a host
+// that the name resolves to from the internet, and that can listen on ports
+// 80 and 443 (as root, or with CAP_NET_BIND_SERVICE):
+//
+//	FIT_LE_STAGING_NAME=test.example.com go test ./test/e2e -run TestLetsEncryptStaging -v -timeout 10m
+//
+// FIT_LE_STAGING_EMAIL, if set, is the account's address. Staging
+// certificates chain to roots no system trusts, so the test checks the
+// issuer's name instead of the chain.
+func TestLetsEncryptStaging(t *testing.T) {
+	name := os.Getenv("FIT_LE_STAGING_NAME")
+	if name == "" {
+		t.Skip("FIT_LE_STAGING_NAME is not set; see the test's comment")
+	}
+	_, addrs := startFit(t, fmt.Sprintf(`{
+  "acme": {"directory": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": %q, "storage": %q},
+  "routes": [{"match": {"host": [%q]}, "handler": {"module": "respond", "params": {"body": "staging"}}}]
+}`, os.Getenv("FIT_LE_STAGING_EMAIL"), t.TempDir(), name))
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		conn, err := tls.Dial("tcp", addrs["https"], &tls.Config{ServerName: name, InsecureSkipVerify: true})
+		if err == nil {
+			leaf := conn.ConnectionState().PeerCertificates[0]
+			conn.Close()
+			if err := leaf.VerifyHostname(name); err == nil {
+				if !strings.Contains(leaf.Issuer.String(), "STAGING") {
+					t.Errorf("issued by %s, not Let's Encrypt's staging CA", leaf.Issuer)
+				}
+				t.Logf("certificate for %v from %s, valid until %s", leaf.DNSNames, leaf.Issuer, leaf.NotAfter)
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no certificate within 5 minutes: %v", err)
+		}
+		time.Sleep(2 * time.Second)
 	}
 }

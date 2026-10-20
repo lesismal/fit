@@ -108,6 +108,12 @@ func startFit(t *testing.T, doc string, args ...string) (*fit, map[string]string
 	})
 
 	addrs := map[string]string{}
+	// A listener for each address written, the Admin API's included; a
+	// config that writes no listeners gets HTTPS by default's two.
+	want := strings.Count(doc, `"address"`)
+	if !strings.Contains(doc, `"listeners"`) {
+		want += 2
+	}
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
@@ -124,7 +130,7 @@ func startFit(t *testing.T, doc string, args ...string) (*fit, map[string]string
 			} else {
 				t.Fatalf("unexpected output: %q", line)
 			}
-			if strings.Count(doc, `"address"`) == len(addrs) {
+			if want == len(addrs) {
 				return f, addrs
 			}
 		case <-deadline:
