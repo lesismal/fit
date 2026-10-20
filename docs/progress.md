@@ -35,7 +35,8 @@ HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
-I35c, on-demand names dropped when idle.
+I35c, on-demand names dropped when idle. R07f profiled the proxy's CPU per request: what is left
+to gain is fib's, asked as A20–A22.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -2066,6 +2067,42 @@ Differences from the plan:
 Differences from the plan:
 
 - None.
+
+### R07f The proxy's CPU per request, profiled (A20–A22) — done
+
+The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times its CPU per request.
+
+- Profiled on the benchmark host with `perf`, fit at 2b37a8e (fib v1.5.4) and nginx 1.31.4 each
+  on 7 CPUs, proxying to a fit backend on 2, under wrk (7 threads, 256 connections) over HTTP/1.1:
+  fit 226.8k requests a second at 29.7 µs of CPU each, nginx 265.3k at 20.7 µs. The kernel takes
+  about the same for both (fit 15.2 µs, nginx 17.0 µs; 5.9 and 6.3 system calls a request); the
+  difference is user time, 14.5 µs against 3.6. Of fit's, fib's code and what it calls take
+  10.3 µs, the GC's background marking 1.3 µs, the rest of the runtime 1.2 µs, and fit's own code
+  1.8 µs.
+- fib's: its client writes each upstream request with net/http's `Request.Write` (1.49 µs) and
+  reads each response head with `net/http.ReadResponse` over a new 4 KiB `bufio.Reader`
+  (2.23 µs), together an eighth of the CPU and over half of the allocations; its event loops arm
+  and disarm their relay epoll instance each time they park (0.48 `epoll_ctl` a request, which
+  nginx does not make); and the client resets a connection's idle timer on every request
+  (0.23 µs). Asked as [A20](fib-api-requests.md#a20-client-requests-written-and-response-heads-read-without-nethttp),
+  [A21](fib-api-requests.md#a21-one-epoll_ctl-per-park-of-an-event-loop-not-two) and
+  [A22](fib-api-requests.md#a22-a-client-connections-idle-clock-without-a-timer-reset-per-request);
+  to be made in fib once its CI passes on v1.5.4's fixes.
+- fit's: the proxy skips hop-by-hop fields, `Content-Length` and `Expect` as it copies the
+  request's header, rather than deleting each name after, and `removeHopByHop` (also used on
+  responses) looks at each field once; `validToken` reads a table. `BenchmarkOutgoing`, new, which
+  builds the upstream request: 227 → 214 ns for a load generator's request, 684 → 541 ns for a
+  browser's with nine fields, allocations unchanged (3 and 6). On the benchmark host, fit alone,
+  proxy, three rounds each, alternating: HTTP/1.1 227.7k → 227.0k (−0.3%), h2c 234.8k → 234.9k,
+  within the noise, as 0.05 µs of 29.7 is.
+- `go vet` and staticcheck for linux, darwin and windows, and the proxy's tests under the race
+  detector, pass.
+
+Differences from the plan:
+
+- What fit could take out is small: most of its 1.8 µs is building the `net/http` header map and
+  `Request` that fib's `Client.Do` takes, which A20 leaves as they are. The proxy's gap to nginx
+  waits on A20–A22.
 
 ## Notes for later iterations
 

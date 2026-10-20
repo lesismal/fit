@@ -25,7 +25,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
-均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。M2 之前的审查修复 R01、R02 已
+均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -1511,6 +1511,32 @@ M2 报告之后，维护者同意由 fit 的会话自己完成 A16–A18 在 fib
 与计划的差异：
 
 - 无。
+
+### R07f 剖析代理每个请求的 CPU（A20–A22） — 已完成
+
+M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求的 CPU 是 nginx 的 1.5 倍。
+
+- 在基准机上用 `perf` 剖析：fit（2b37a8e，fib v1.5.4）和 nginx 1.31.4 各用 7 个 CPU，代理到用 2 个 CPU 的 fit 后端，
+  wrk（7 个线程、256 个连接）走 HTTP/1.1：fit 每秒 226.8k 个请求，每个 29.7 µs CPU；nginx 265.3k，20.7 µs。两者的
+  内核时间差不多（fit 15.2 µs，nginx 17.0 µs；每个请求 5.9 和 6.3 次系统调用）；差别在用户态：14.5 µs 对 3.6 µs。fit 的
+  用户态时间中，fib 的代码及其调用的部分占 10.3 µs，GC 后台标记 1.3 µs，运行时其余部分 1.2 µs，fit 自己的代码 1.8 µs。
+- 属于 fib 的：客户端用 net/http 的 `Request.Write` 写每个上游请求（1.49 µs），在新建的 4 KiB `bufio.Reader` 上用
+  `net/http.ReadResponse` 读每个响应头（2.23 µs），合计占 CPU 的八分之一、分配的一半以上；事件循环每次休眠都要布防和撤防
+  中继 epoll 实例（每个请求 0.48 次 `epoll_ctl`，nginx 没有）；客户端每个请求都重置连接的空闲定时器（0.23 µs）。已作为
+  [A20](fib-api-requests.zh-CN.md#a20不经-nethttp-写客户端请求读响应头)、
+  [A21](fib-api-requests.zh-CN.md#a21事件循环每次休眠只调用一次-epoll_ctl而不是两次) 和
+  [A22](fib-api-requests.zh-CN.md#a22客户端连接的空闲计时不必每个请求重置定时器) 提出；待 fib 的 CI 在 v1.5.4 的修复上
+  通过后在 fib 中实现。
+- 属于 fit 的：代理在复制请求头时就跳过逐跳字段、`Content-Length` 和 `Expect`，而不是复制后逐个删除；`removeHopByHop`
+  （响应也用）对每个字段只看一次；`validToken` 查表。新增的 `BenchmarkOutgoing`（构造上游请求）：压测工具的请求
+  227 → 214 ns，带九个字段的浏览器请求 684 → 541 ns，分配次数不变（3 和 6）。在基准机上单独测 fit 的 proxy，前后交替各三轮：
+  HTTP/1.1 227.7k → 227.0k（−0.3%），h2c 234.8k → 234.9k，都在噪声范围内，因为这只是 29.7 µs 中的 0.05 µs。
+- linux、darwin 和 windows 的 `go vet` 与 staticcheck，以及代理测试在竞态检测下通过。
+
+与计划的差异：
+
+- fit 能去掉的很少：它的 1.8 µs 大部分用于构造 fib 的 `Client.Do` 所需的 `net/http` 头部 map 和 `Request`，A20 不改变
+  这些。代理与 nginx 的差距要等 A20–A22。
 
 ## 给后续迭代的说明
 

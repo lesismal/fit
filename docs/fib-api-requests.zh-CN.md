@@ -30,6 +30,9 @@
 | A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已完成，v1.5.4 | 12 | R07d、R07e |
 | A18 | 不经回调取得响应的状态和请求到达的时间 | 部分完成，v1.5.4 | 12 | I34、R07e |
 | A19 | 流式请求的 `Trailer` 在交出请求体结尾的地方设置 | 已完成，v1.5.3 | 13 | I35 |
+| A20 | 不经 net/http 写客户端请求、读响应头 | 已提出 | 12 | R07f |
+| A21 | 事件循环每次休眠只调用一次 `epoll_ctl`，而不是两次 | 已提出 | 12 | R07f |
+| A22 | 客户端连接的空闲计时不必每个请求重置定时器 | 已提出 | 12 | R07f |
 
 ## 证据
 
@@ -411,3 +414,69 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 HTTP/3 上的测试（handler 在请求体和 trailer 到达时读取 `Trailer`）没有这个修改时在竞态检测下失败，有修改时通过。
 
 **fit 如何使用。** fit 不需要改动：代理的 `trailerNames` 不再竞争。
+
+## A20：不经 net/http 写客户端请求、读响应头
+
+**状态。** 已提出（R07f）。
+
+**问题。** fib 的客户端用 `net/http` 的 `Request.Write` 组装每个 HTTP/1 请求（`marshalRequest`、`marshalStreamedHead`），
+并在新建的 `bufio.Reader` 上用 `net/http.ReadResponse` 读每个响应头（`responseParser.parseHead`；分块响应体在
+`completeChunked` 中再读一次）。两者做的远多于代理请求所需：`Request.Write` 对头部的键排序、用 `fmt.Fprintf` 格式化、
+扩容 `bytes.Buffer`；`ReadResponse` 为 100 字节的响应头分配 4 KiB 的 reader，还有一个 `textproto.Reader`、一个 `Header`
+map、每个字段一个字符串，以及一个 `Response`。fib 的服务端两者都不用：它自己解析请求头、自己写响应头
+（`parseSimpleRequestHead`、`appendResponseHead`、`appendHeaderLines`）。
+
+**证据。** 在基准主机上用 `perf` 测量（R07f）：fit 在 2b37a8e、fib v1.5.4 上通过 HTTP/1.1 代理，wrk 256 个连接，fit 用
+7 个 CPU，其后端是另一个 fit，用 2 个 CPU。fit 每秒处理 226.8k 个请求，每个请求 29.7 µs CPU；同样条件下 nginx 为 265.3k、
+20.7 µs。内核部分差不多（fit 15.2 µs，nginx 17.0 µs；每个请求分别 5.9 和 6.3 次系统调用）；差别在用户态：14.5 µs 对 3.6 µs。
+fit 的用户态时间中，fib 的代码及其调用的部分占 10.3 µs，fit 自己的代码占 1.8 µs。`parseHead` 每个请求 2.23 µs（全部 CPU 的
+7.5%），其中 1.38 µs 在 `ReadResponse`；`marshalRequest` 1.49 µs（5.0%），其中 1.43 µs 在 `Request.write`；两者合计产生
+请求一半以上的分配（`mallocgc` 和 GC 协助的 2.1 µs 中占 0.9 和 0.24 µs），随之而来的是 GC 后台标记的另外 1.3 µs。在开发用的
+Mac 上单独测量：按 `parseHead` 的方式对四行的响应头调用 `ReadResponse`，1.0 µs、5,015 字节、13 次分配；对 fit 代理发出的
+请求调用 `Request.Write`，0.63 µs、704 字节、8 次分配。
+
+**请求。**
+
+- 用 fib 自己的写入函数把 HTTP/1 请求头写进 `bufferpool` 的缓冲区：请求行、`Host`、按 map 顺序写头部字段（net/http 会排序，
+  对端并不需要）、长度或分块；保留 `Request.Write` 对名字和值的检查，像 `appendHeaderLines` 对响应那样。
+- 用 fib 自己的解析器解析响应头，像服务端解析请求那样：状态行；字段放入键为规范形式的 `Header`（整个响应头一个字符串、
+  切片引用，如 `parseSimpleRequestHead`，或复用常见名字）；边解析边读出 `Content-Length`、`Transfer-Encoding` 和
+  `Connection`；不用 `bufio.Reader`。`ClientResponse` 的形式不变。
+- 分块响应体的解码不再调用第二次 `ReadResponse`。
+
+合计每个请求约 3.7 µs，占代理 CPU 的八分之一，也是其用户态时间高于 nginx 的主要原因；受益的是 fib 的 HTTP/1 客户端和所有
+`Client.Do` 的调用者，不只是 fit。
+
+**fit 如何使用。** fit 不需要改动；代理的请求开销变小。
+
+## A21：事件循环每次休眠只调用一次 `epoll_ctl`，而不是两次
+
+**状态。** 已提出（R07f）。
+
+**问题。** 无事可做的事件循环通过一个中继 epoll 实例在 Go 的 netpoller 中休眠（`epollWaiter.wait`）：先轮询一次，用
+`EPOLL_CTL_MOD`（`EPOLLIN`）布防中继，休眠，被唤醒后再用一次 `EPOLL_CTL_MOD` 撤防。代理负载下事件循环经常休眠，
+这就多出了 nginx 没有的系统调用。
+
+**证据。** A20 的那次测量中，对 fit 进程运行 `perf stat`：每个请求 0.48 次 `epoll_ctl`、1.25 次 `epoll_pwait`（nginx 没有
+`epoll_ctl`，1.36 次 `epoll_wait`）。`epollWaiter.wait` 连同内核时间每个请求 1.25 µs，其中 `arm` 0.31 µs，`pollEvents` 中
+什么也没取到的轮询 0.82 µs。
+
+**请求。** 以 `EPOLLIN | EPOLLONESHOT` 注册中继：事件发生后自动撤防，只有布防需要一次调用，唤醒后的撤防可以去掉。
+如果 `wait` 注释中解释的布防后再查看一次仍然需要，就保留它。或者换一种只需一次调用的休眠方式。
+
+**fit 如何使用。** fit 不需要改动。
+
+## A22：客户端连接的空闲计时不必每个请求重置定时器
+
+**状态。** 已提出（R07f）。
+
+**问题。** 每当一个请求的响应结束、连接回到连接池，`Client.idleLocked` 都会读一次时钟，并对连接的空闲定时器调用
+`Timer.Reset`，这会获取定时器的锁、在运行时的定时器堆中移动它；连接被取用时又把它停掉。保持连接时，每个请求都如此。
+
+**证据。** A20 的那次测量中，`idleLocked` 每个请求 0.23 µs，主要是 `Timer.Reset`。
+
+**请求。** 把空闲截止时间作为一个时间值记在连接上，连接空闲时写入；每个客户端（或每个主机）用一个定时器，大约每
+`IdleConnTimeout` / 4 扫描一次空闲连接，关闭超时的；或者只在截止时间移动超过超时的一定比例时才重置定时器。连接最多晚关闭
+这个比例的时间，`IdleConnTimeout` 允许这样。
+
+**fit 如何使用。** fit 不需要改动。

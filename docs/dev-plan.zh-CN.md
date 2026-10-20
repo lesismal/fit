@@ -127,6 +127,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | R07c | 依赖 fib 的热路径开销 | R03、R07a、R07b | done |
 | R07d | 访问日志的开销 | R07c | done |
 | R07e | 借助 fib 降低钩子和文件发送的开销（A16–A18） | R05b、R07d、I34 | done |
+| R07f | 剖析代理每个请求的 CPU（A20–A22） | R07e、I35 | done |
 | **M2** | | | |
 | I24 | 配置版本与 Admin API 骨架 | I22 | done |
 | I25 | Admin API：局部修改、ETag、回滚 | I24 | done |
@@ -490,6 +491,14 @@ R07 拆成三部分：fit 自己能做的（R07a、R07b）和需要 fib 的（R0
 - **完成标准**：在基准机上对比开启访问日志、开启指标时 h2c 上 fixed 和 static 的前后数据；整段发送时
   `TestStuckClient` 在所有协议上通过。
 - **涉及**：fib 的 `http`；fit 的 `module`、`runtime`、`listener`、`handler/respond`、`handler/static`。
+
+### R07f 剖析代理每个请求的 CPU（A20–A22）
+
+M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求的 CPU 是 nginx 的 1.5 倍。
+
+- **做什么**：在基准机上对比 nginx 剖析代理；去掉属于 fit 的开销，属于 fib 的连同证据写进 fib-api-requests。
+- **完成标准**：每个请求的 CPU 按内核、fib、fit 和运行时分开；fit 的部分用微基准和压测工具做前后对比；fib 的请求写好。
+- **涉及**：`handler/proxy`；`docs/fib-api-requests`。
 
 ## M2 动态配置与 TLS
 

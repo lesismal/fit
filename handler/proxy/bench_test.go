@@ -6,10 +6,13 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	fibhttp "github.com/lesismal/fib/http"
 )
 
 // BenchmarkProxy sends small GETs through the proxy to an HTTP/1.1 backend,
@@ -109,6 +112,46 @@ func BenchmarkProxyDownload(b *testing.B) {
 				resp.Body.Close()
 				if err != nil || n != size {
 					b.Fatalf("%d bytes: %v", n, err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkOutgoing builds the request sent upstream for a load generator's
+// request and for a browser's, the part of the proxy's work that is fit's
+// own rather than fib's.
+func BenchmarkOutgoing(b *testing.B) {
+	p := &Proxy{}
+	for _, tt := range []struct {
+		name   string
+		header map[string]string
+	}{
+		{"wrk", map[string]string{}},
+		{"browser", map[string]string{
+			"User-Agent":      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36",
+			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+			"Accept-Encoding": "gzip, deflate, br, zstd",
+			"Accept-Language": "en-US,en;q=0.9",
+			"Cache-Control":   "max-age=0",
+			"Connection":      "keep-alive",
+			"Cookie":          "session=0123456789abcdef; theme=dark",
+			"Referer":         "https://example.com/",
+			"Sec-Fetch-Mode":  "navigate",
+		}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			r := httptest.NewRequest(stdhttp.MethodGet, "http://example.com/proxy?q=1", nil)
+			r.RemoteAddr = "192.0.2.10:54321"
+			for k, v := range tt.header {
+				r.Header.Set(k, v)
+			}
+			c := fibhttp.NewStreamContext(nil, r, nil)
+			x := &exchange{}
+			b.ReportAllocs()
+			for b.Loop() {
+				if !p.outgoing(c, x) {
+					b.Fatal("refused")
 				}
 			}
 		})

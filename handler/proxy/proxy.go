@@ -154,13 +154,14 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		if !validToken(key) {
 			return false
 		}
+		// The body's length is the request's own, and the client answers
+		// 100 Continue itself, when the body is asked for.
+		if isHopByHop(key) || key == "Content-Length" || key == "Expect" {
+			continue
+		}
 		header[key] = values
 	}
-	removeHopByHop(header)
-	// The body's length is the request's own, and the client answers 100
-	// Continue itself, when the body is asked for.
-	delete(header, "Content-Length")
-	delete(header, "Expect")
+	removeConnectionNamed(header, r.Header["Connection"])
 	if _, ok := header["User-Agent"]; !ok {
 		// Present and empty: no client adds its own, and none is sent.
 		header["User-Agent"] = []string{}
@@ -294,40 +295,59 @@ func writeForwardedValue(b *strings.Builder, v string) {
 	b.WriteString(strconv.Quote(v))
 }
 
+// tokenChars are the bytes an HTTP token may hold.
+var tokenChars = func() (t [256]bool) {
+	for c := range 256 {
+		t[c] = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", byte(c)) >= 0
+	}
+	return t
+}()
+
 // validToken reports whether s is an HTTP token, as a field name must be.
 func validToken(s string) bool {
 	if s == "" {
 		return false
 	}
 	for i := range len(s) {
-		c := s[i]
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0 {
-			continue
+		if !tokenChars[s[i]] {
+			return false
 		}
-		return false
 	}
 	return true
 }
 
-// hopByHop are the fields that concern one connection only, RFC 9110
-// section 7.6.1, with Keep-Alive and Proxy-Connection, which older clients
-// send.
-var hopByHop = []string{
-	"Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization",
-	"Te", "Trailer", "Transfer-Encoding", "Upgrade",
+// isHopByHop reports whether name, canonical, is a field that concerns one
+// connection only, RFC 9110 section 7.6.1, or Keep-Alive or
+// Proxy-Connection, which older clients send.
+func isHopByHop(name string) bool {
+	switch name {
+	case "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization",
+		"Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		return true
+	}
+	return false
 }
 
 // removeHopByHop deletes the hop-by-hop fields from h, and the fields its
-// Connection field names.
+// Connection field names. It looks at each field once rather than deleting
+// each hop-by-hop name, as few headers have any.
 func removeHopByHop(h stdhttp.Header) {
-	for _, value := range h["Connection"] {
+	removeConnectionNamed(h, h["Connection"])
+	for name := range h {
+		if isHopByHop(name) {
+			delete(h, name)
+		}
+	}
+}
+
+// removeConnectionNamed deletes from h the fields that connection, a
+// Connection field's values, names.
+func removeConnectionNamed(h stdhttp.Header, connection []string) {
+	for _, value := range connection {
 		for name := range strings.SplitSeq(value, ",") {
 			if name = textproto.TrimString(name); name != "" {
 				delete(h, textproto.CanonicalMIMEHeaderKey(name))
 			}
 		}
-	}
-	for _, name := range hopByHop {
-		delete(h, name)
 	}
 }

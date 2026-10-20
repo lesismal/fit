@@ -137,6 +137,7 @@ Status: `todo`, `doing` or `done`.
 | R07c | Hot path costs through fib | R03, R07a, R07b | done |
 | R07d | Access log cost | R07c | done |
 | R07e | Hooks and files through fib (A16–A18) | R05b, R07d, I34 | done |
+| R07f | The proxy's CPU per request, profiled (A20–A22) | R07e, I35 | done |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
@@ -547,6 +548,18 @@ Done in fib by fit's own session, with the maintainer's leave, after the M2 repo
   on the benchmark host; `TestStuckClient` passes over every protocol with whole ranges.
 - **Touches**: fib's `http`; fit's `module`, `runtime`, `listener`, `handler/respond`,
   `handler/static`.
+
+### R07f The proxy's CPU per request, profiled (A20–A22)
+
+The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times nginx's CPU per
+request.
+
+- **Do**: profile the proxy against nginx on the benchmark host; take out what is fit's, and write
+  up what is fib's in fib-api-requests with the evidence.
+- **Done when**: the CPU per request is split between the kernel, fib, fit and the runtime; fit's
+  part is measured before and after with a micro-benchmark and the harness; fib's requests are
+  written.
+- **Touches**: `handler/proxy`; `docs/fib-api-requests`.
 
 ## M2, dynamic config and TLS
 
