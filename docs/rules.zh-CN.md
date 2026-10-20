@@ -50,8 +50,8 @@
 15. **fib 暂时做不到的，加到 fib 里，不在 fit 里绕过。** 把 fib 需要新增或优化的点写进
     [docs/fib-api-requests.zh-CN.md](fib-api-requests.zh-CN.md) 及其英文版：问题、证据、建议的 API、fit 的用法。之后
     fit 的开发会话可以自己在 fib 仓库里实现，并遵守 fib 自己的标准：测试、竞态检测、fib 支持的每个系统上的 vet 和
-    staticcheck、它的大小和分配检查，热路径上的改动还要用基准对比前后。改动推送到 fib 的 `main` 并打 tag 发布，在需求
-    的状态里记下版本；fit 再升级到该版本继续，不在 fit 中提交 `replace` 指令或本地 `go.work`。依赖它的 fit 改动，要等
+    staticcheck、它的大小和分配检查，热路径上的改动还要用基准对比前后。改动推送到 fib 的 `main`，在需求的状态里记下
+    版本；fit 再升级到该版本继续（规则 19），不在 fit 中提交 `replace` 指令或本地 `go.work`。依赖它的 fit 改动，要等
     fib 在该提交上的 CI 通过后再推送。等待期间可以先做不依赖它的部分；fit 中的临时措施也必须遵守其他所有规则，并在
     progress 中记录，注明将来由哪项 fib 需求替换。
 
@@ -60,3 +60,9 @@
 16. **压测只考虑 Linux。** 不在 Windows、macOS 或其他 Unix 系统上压测 fit。
 17. **压测机可用时，压测一律在压测机上进行。** 本机只做普通测试：单元测试、竞态检测、vet 等。
 18. **只有压测机不可用时**，才可以在本机压测。
+
+## 九、fib 版本
+
+19. **开发过程中，fit 依赖 fib 优先使用提交哈希版本号，不依赖 tag。** 升级到 fib 的某个改动时用
+    `go get github.com/lesismal/fib@<提交哈希>`，`go.mod` 中记下该提交的伪版本号；fib 不必为此打 tag 发布。只有所需的
+    fib 版本已经有 tag 时才用 tag。

@@ -5,7 +5,8 @@ it: nothing blocks a fib worker, bodies are streamed with `OnBody` and fib's asy
 every buffer, queue and resource is bounded, every data plane feature is tested against slow peers,
 large bodies and cut connections, and what fib cannot do yet is written up in
 [docs/fib-api-requests.md](docs/fib-api-requests.md) and added to fib (the sibling repository
-`../fib`), by fit's sessions too, then released as a tag that fit moves to; it is never worked
+`../fib`), by fit's sessions too, then pushed to fib's `main`, and fit moves to that commit by
+its hash (rule 19), with no tag needed; it is never worked
 around in fit in breach of the rules.
 
 For iteration work, also read [docs/progress.md](docs/progress.md) and the iteration's section in
