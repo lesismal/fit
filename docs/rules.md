@@ -67,3 +67,11 @@ Every change to fit follows these rules. They are what the
     fib's CI must pass on the commit before fit pushes what depends on it. Meanwhile, work that does
     not depend on it may go ahead; a stopgap in fit must still follow every other rule, and is
     recorded in the progress files with the fib request that will replace it.
+
+## 8. Load testing
+
+16. **Load tests cover Linux only.** fit is not load tested on Windows, macOS or other Unix
+    systems.
+17. **While the benchmark host is available, load tests run there and nowhere else.** The local
+    machine runs only ordinary tests: unit tests, the race detector, vet and the like.
+18. **Only when the benchmark host is unavailable** may a load test run on the local machine.
