@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
-| fib | `github.com/lesismal/fib v1.5.4`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.5.6`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
 
@@ -1525,22 +1525,29 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
   中继 epoll 实例（每个请求 0.48 次 `epoll_ctl`，nginx 没有）；客户端每个请求都重置连接的空闲定时器（0.23 µs）。已作为
   [A20](fib-api-requests.zh-CN.md#a20不经-nethttp-写客户端请求读响应头)、
   [A21](fib-api-requests.zh-CN.md#a21事件循环每次休眠只调用一次-epoll_ctl而不是两次) 和
-  [A22](fib-api-requests.zh-CN.md#a22客户端连接的空闲计时不必每个请求重置定时器) 提出；待 fib 的 CI 在 v1.5.4 的修复上
-  通过后在 fib 中实现。
+  [A22](fib-api-requests.zh-CN.md#a22客户端连接的空闲计时不必每个请求重置定时器) 提出。A20 已在 fib v1.5.6 中
+  实现（见下文）；A21 和 A22 仍待实现。
 - 属于 fit 的：代理在复制请求头时就跳过逐跳字段、`Content-Length` 和 `Expect`，而不是复制后逐个删除；`removeHopByHop`
   （响应也用）对每个字段只看一次；`validToken` 查表。新增的 `BenchmarkOutgoing`（构造上游请求）：压测工具的请求
   227 → 214 ns，带九个字段的浏览器请求 684 → 541 ns，分配次数不变（3 和 6）。在基准机上单独测 fit 的 proxy，前后交替各三轮：
   HTTP/1.1 227.7k → 227.0k（−0.3%），h2c 234.8k → 234.9k，都在噪声范围内，因为这只是 29.7 µs 中的 0.05 µs。
 - linux、darwin 和 windows 的 `go vet` 与 staticcheck，以及代理测试在竞态检测下通过。
 
+- 之后 A20 由本会话经维护者同意在 fib 中实现，发布为 v1.5.6（`0a9339f`，CI 第 214 次运行通过），fit 已升级。在基准机上，
+  fit 3f25679 分别用 v1.5.5 和 A20，前后交替各三轮：代理在 HTTP/1.1 上从每秒 226.6k 提高到 245.8k（+8.4%，约为 nginx 265k 的
+  93%），每个请求的 CPU 从 29.7 µs 降到 26.0 µs；h2c 上从 235.5k 到 238.1k（+1.1%）。在 v1.5.6 上，fit 的竞态测试（含 Pebble）
+  以及 linux、darwin 和 windows 的 `go vet` 与 staticcheck 都通过。
+
 与计划的差异：
 
 - fit 能去掉的很少：它的 1.8 µs 大部分用于构造 fib 的 `Client.Do` 所需的 `net/http` 头部 map 和 `Request`，A20 不改变
-  这些。代理与 nginx 的差距要等 A20–A22。
+  这些。代理与 nginx 余下的差距要等 A21 和 A22。
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.5.4，带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
+- **fib 版本。** fit 使用 fib v1.5.6，带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
+  fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
+  运行 `OnClose`。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了
   A19：流式请求的 `Trailer` 在交出请求体结尾的地方设置，CI 的竞态检测曾在代理的 `TestTrailers/h2c` 中发现它；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了

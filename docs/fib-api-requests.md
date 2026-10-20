@@ -32,7 +32,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | done, v1.5.4 | 12 | R07d, R07e |
 | A18 | A response's status, and when its request arrived, without a hook | partly, v1.5.4 | 12 | I34, R07e |
 | A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
-| A20 | Client requests written and response heads read without net/http | made, not yet released | 12 | R07f |
+| A20 | Client requests written and response heads read without net/http | done, v1.5.6 | 12 | R07f |
 | A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
 | A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
 
@@ -562,8 +562,8 @@ body and trailer arrive, fail under the race detector without the change and pas
 
 ## A20: Client requests written and response heads read without net/http
 
-**Status.** Made in fib on the branch `a20-client-codec` (`ef16235`, on v1.5.5), not yet pushed or
-released. The client writes request heads and reads response heads itself, and decodes a whole
+**Status.** Done in fib v1.5.6 (`0a9339f`), by fit's session with the maintainer's leave; fit uses
+it. The client writes request heads and reads response heads itself, and decodes a whole
 chunked body without a trailer, producing net/http's output exactly, which tables and fuzzing
 against net/http check; anything outside the common shape still goes through net/http. Writing
 fit's proxied request: 1 allocation and 300 ns, against 8 and 645 ns; reading a plain response
