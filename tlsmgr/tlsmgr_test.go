@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -171,6 +172,20 @@ func TestLoadStatic(t *testing.T) {
 			t.Errorf("%q: %v, %v", name, got, err)
 		}
 	}
+	// What a FileWatcher compares the files with.
+	files := s.Files()
+	for _, p := range []string{a.CertFile, a.KeyFile, ip.CertFile, ip.KeyFile} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if files[p] != sha256.Sum256(data) {
+			t.Errorf("%s: sum %x", p, files[p])
+		}
+	}
+	if len(files) != 4 {
+		t.Errorf("Files: %d, want 4", len(files))
+	}
 }
 
 func TestLoadStaticErrors(t *testing.T) {
@@ -187,12 +202,18 @@ func TestLoadStaticErrors(t *testing.T) {
 	if err := os.WriteFile(garbage, []byte("not pem"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	large := filepath.Join(dir, "large.pem")
+	if err := os.WriteFile(large, make([]byte, MaxCertFileBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct {
 		cert, key, want string
 	}{
 		{filepath.Join(dir, "missing.crt"), a.KeyFile, "no such file or directory"},
 		{garbage, a.KeyFile, "failed to find any PEM data"},
 		{a.CertFile, b.KeyFile, "private key does not match public key"},
+		{large, a.KeyFile, "larger than 1048576 bytes"},
+		{a.CertFile, large, "larger than 1048576 bytes"},
 	} {
 		l, err := load(t, `{"name": "web", "address": ":443", "tls": {"certificates": [{"cert_file": "`+tt.cert+`", "key_file": "`+tt.key+`"}]}}`)
 		if err != nil {

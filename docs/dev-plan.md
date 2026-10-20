@@ -151,6 +151,7 @@ Status: `todo`, `doing` or `done`.
 | I33 | Load balancing v2 | I19 | done |
 | I34 | Prometheus metrics | I23 | done |
 | I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | done |
+| I35b | Certificate files watched | I27, I28, I34 | done |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |
 | I37 | Expression matcher | I36 | todo |
@@ -643,6 +644,18 @@ are the rest of it.
   criteria, together in `test/e2e`, run in CI.
 - **Done when**: all three pass in CI.
 - **Touches**: `test/e2e`.
+
+### I35b Certificate files watched
+
+Left by I09 to I28 and by I28 to I29–I30, and done by none of them; found when M2 was reviewed.
+
+- **Do**: apply the running config again when the certificate or key files it loaded change, as a
+  renewal tool outside fit changes them, polling as the file provider does; a pair that does not
+  load leaves the running certificates. List the certificates taken on demand in the certificate
+  expiry metric too.
+- **Done when**: a renewed pair is served without a reload by hand, and a certificate written
+  before its key is reported and changes nothing, in an end-to-end test.
+- **Touches**: `tlsmgr`, `runtime`, `admin`, `cmd/fit`.
 
 ## M3, gateway features
 

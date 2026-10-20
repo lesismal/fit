@@ -1,8 +1,12 @@
 package tlsmgr
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/lesismal/fit/config"
@@ -11,7 +15,7 @@ import (
 // Static is a Manager of certificates loaded from files, indexed by the
 // names they are for, so that a handshake finds its certificate without
 // looking at the others. It does not change once loaded; a reload loads
-// another.
+// another, as a FileWatcher has done when the files change.
 type Static struct {
 	certs []*tls.Certificate
 	// exact holds, for each name a certificate is for (a host name in lower
@@ -23,14 +27,29 @@ type Static struct {
 	// response, by index: nil for one with none to keep.
 	ocsp    *OCSP
 	staples []*Staple
+	// files holds the SHA-256 of each certificate and key file loaded, by
+	// path, so that a watcher can tell when one changes; nil for a Static
+	// not loaded from files.
+	files map[string][sha256.Size]byte
 }
+
+// MaxCertFileBytes is the largest certificate or key file LoadStatic reads.
+const MaxCertFileBytes = 1 << 20
 
 // LoadStatic loads c's certificates. Its errors carry the path and position
 // of the certificate that failed.
 func LoadStatic(c *config.TLS) (*Static, error) {
-	s := &Static{exact: map[string][]int{}, wildcard: map[string][]int{}}
+	s := &Static{exact: map[string][]int{}, wildcard: map[string][]int{}, files: map[string][sha256.Size]byte{}}
 	for i, cc := range c.Certificates {
-		cert, err := tls.LoadX509KeyPair(cc.CertFile, cc.KeyFile)
+		certPEM, err := s.read(cc.CertFile)
+		var keyPEM []byte
+		if err == nil {
+			keyPEM, err = s.read(cc.KeyFile)
+		}
+		var cert tls.Certificate
+		if err == nil {
+			cert, err = tls.X509KeyPair(certPEM, keyPEM)
+		}
 		if err != nil {
 			return nil, c.At.Field("certificates").Index(i).Errorf("%v", err)
 		}
@@ -38,6 +57,36 @@ func LoadStatic(c *config.TLS) (*Static, error) {
 	}
 	return s, nil
 }
+
+// read reads the file at path, up to MaxCertFileBytes, and keeps its sum.
+func (s *Static) read(path string) ([]byte, error) {
+	data, err := readFile(path)
+	if err == nil {
+		s.files[path] = sha256.Sum256(data)
+	}
+	return data, err
+}
+
+// readFile reads the file at path, refusing one past MaxCertFileBytes.
+func readFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxCertFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxCertFileBytes {
+		return nil, fmt.Errorf("%s: larger than %d bytes", path, MaxCertFileBytes)
+	}
+	return data, nil
+}
+
+// Files returns the SHA-256 of each file s was loaded from, by path, which
+// the caller must not change; nil for a Static made by NewStatic.
+func (s *Static) Files() map[string][sha256.Size]byte { return s.files }
 
 // NewStatic returns a Static of certs, which must have their Leaf set.
 func NewStatic(certs ...*tls.Certificate) *Static {

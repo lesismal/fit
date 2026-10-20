@@ -56,6 +56,10 @@ type Graph struct {
 	// answers HTTP-01 challenges on the listeners in the clear.
 	ACME      *tlsmgr.ACME
 	ACMENames []string
+	// CertFiles holds the SHA-256 of each certificate and key file the
+	// listeners loaded, by path, for a tlsmgr.FileWatcher; nil when they
+	// loaded none.
+	CertFiles map[string][sha256.Size]byte
 
 	refs      atomic.Int64
 	modules   []any // every provisioned module, in the order provisioned
@@ -231,6 +235,18 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 					continue
 				}
 				static = certs
+				for p, sum := range certs.Files() {
+					if g.CertFiles == nil {
+						g.CertFiles = map[string][sha256.Size]byte{}
+					}
+					if prev, ok := g.CertFiles[p]; ok && prev != sum {
+						// Changed while the config was compiled, so that two
+						// listeners loaded it differently: a sum no file has
+						// has the watcher load it again.
+						sum = [sha256.Size]byte{}
+					}
+					g.CertFiles[p] = sum
+				}
 				if env.OCSP != nil {
 					static.Staple(env.OCSP)
 				}

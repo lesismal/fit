@@ -64,7 +64,9 @@ func (c *Certs) Release() {
 func (c *Certs) Static() *Static { return c.static }
 
 // Certificates returns the certificates c serves: those from files, then
-// those obtained so far for its names, in no order.
+// those obtained so far for its names, in no order. With on-demand TLS, a
+// handshake gets any certificate ACME has for a name the files do not
+// cover, so those are listed too.
 func (c *Certs) Certificates() []*tls.Certificate {
 	var certs []*tls.Certificate
 	if c.static != nil {
@@ -72,7 +74,7 @@ func (c *Certs) Certificates() []*tls.Certificate {
 	}
 	if c.acme != nil {
 		for name, cert := range *c.acme.certs.Load() {
-			if c.names[name] {
+			if c.names[name] || c.onDemand && (c.static == nil || !c.static.Has(name)) {
 				certs = append(certs, cert)
 			}
 		}

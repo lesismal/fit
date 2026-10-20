@@ -27,6 +27,9 @@ const (
 	SourceFile     = "file"
 	SourceAdmin    = "admin"
 	SourceRollback = "rollback"
+	// SourceCertificates is the running config applied again because the
+	// certificate files it loaded changed.
+	SourceCertificates = "certificates"
 )
 
 // ErrChanged is what an update gets when the running config is no longer the
@@ -34,8 +37,8 @@ const (
 var ErrChanged = errors.New("admin: the config has changed since the ETag given in If-Match")
 
 // Configs applies configs to a running server, one at a time and by one
-// path whatever their source: SIGHUP, the Admin API and, later, the file
-// provider. It keeps the configs it applied, numbered by the versions the
+// path whatever their source: SIGHUP, the Admin API, the file provider and
+// the watcher of certificate files. It keeps the configs it applied, numbered by the versions the
 // runtime gave their graphs.
 type Configs struct {
 	rt     *runtime.Runtime
@@ -183,6 +186,12 @@ func (cs *Configs) apply(data []byte, source string) (Result, *config.Config, er
 // started, and how many of them failed; the config fit started with is not
 // counted.
 func (cs *Configs) Reloads() (tried, failed uint64) { return cs.reloads.Load(), cs.failures.Load() }
+
+// Reapply applies the running config again, as a new version, so that what
+// it loads from files, its certificates, is loaded again.
+func (cs *Configs) Reapply(source string) (Result, error) {
+	return cs.Update(source, "", func(cur *Version) ([]byte, error) { return cur.data, nil })
+}
 
 // Rollback applies again the config applied as version n, as a new version.
 // It gives a *RequestError with status 404 when n is no longer kept.

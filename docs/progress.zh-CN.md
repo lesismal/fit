@@ -12,7 +12,7 @@
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
 | fib | `github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68`（fib `main` 的 `8c637e0`，v1.5.3 之后），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -25,7 +25,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
-均衡 v2）、I34（Prometheus 指标）和 I35（退出测试）。M2 之前的审查修复 R01、R02 已
+均衡 v2）、I34（Prometheus 指标）、I35（退出测试）和 I35b（监视证书文件）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
 **按规则审查（2026-10-19）。** 已按 [开发规则](rules.zh-CN.md) 审查 M0、M1。代理的下载路径和静态 handler 会在 fib
@@ -1431,6 +1431,30 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 
 - CI 中的证书测试针对 Pebble；Let's Encrypt 测试环境需要公网域名和 80、443 端口，按 I30 完成标准的允许，写成文档手动运行。
 - 计划中的 I35 不含基准；R07c 的记录留到 M2 结束时做的 nginx 对比，就是 I35 之后在 59083f3 上跑的 [M2 报告](../bench/results/m2-report-2026-10-20.md)。压测工具只测空闲连接时，汇总表原来不列服务器名，现已修正。
+
+### I35b 监视证书文件 — 已完成
+
+- 运行中的配置所加载的证书或私钥文件变化时，`fit run` 重新应用该配置（`-watch-certs`，默认开启；`-watch-interval`
+  现在同时设置两个监视器的轮询间隔）。`tlsmgr.FileWatcher` 在独立的 goroutine 上轮询每个文件的大小和修改时间，与
+  配置文件监视器相同（决定 006）；它们保持不变 500ms 后读取文件，把 SHA-256 与运行中的配置加载时的结果比较，后者
+  由 `LoadStatic` 记录（`Static.Files`，汇总在 `Graph.CertFiles`）。有差异时通过 `admin.Configs.Reapply` 重新应用
+  运行中的配置，走与所有重载相同的路径，作为来源为 `certificates` 的新版本；监听保留，只有证书改变。因此加载失败的
+  证书对（先写了证书、还没写私钥）像任何失败的重载一样失败，只报告一次，正在使用的证书不变；同样的文件在再次变化前
+  不会重试。读不到的文件（比如正在被替换）只报告一次。
+- 通过其他方式（SIGHUP、Admin API、`-watch`）应用的配置也会和它的文件比较一次，因为文件可能在它读取之后变化；两个
+  监听对同一文件加载到不同内容（中途被改）时，会重新加载。
+- 证书和私钥文件最多读取 1 MiB（`MaxCertFileBytes`），原来 `tls.LoadX509KeyPair` 会整个读入。
+- 证书到期指标列出按需获取的证书：开启按需 TLS 的监听会为其文件未覆盖的任何域名提供 ACME 持有的证书，现在也列出它们。
+- 测试：`tlsmgr.TestFileWatcher`（分两步写入的续期只应用一次，touch 或改了又改回不应用，失败的证书对只报告一次、
+  变化后重试，文件消失只报告一次）、`TestFileWatcherNewConfig`、`TestLoadStatic` 中的文件摘要、
+  `TestLoadStaticErrors` 中超过上限的文件、`TestCerts` 中的按需证书，以及 `e2e.TestCertificateFilesWatched`：给
+  运行中的 fit 换上新证书，与私钥不匹配时报告错误并继续使用旧证书，再换上私钥后，握手得到新证书。
+
+与计划的差异：
+
+- 没有基准：数据面没有变化；监视器在独立的 goroutine 上每秒 stat 几个文件。
+- 重新应用整个配置，而不是原地替换某个监听的证书：重载保留监听以及上游连接池和健康状态（I26），代价是一次编译，
+  换来续期也有每次重载都有的检查、回滚和指标。
 
 ## 给后续迭代的说明
 

@@ -119,7 +119,7 @@ func (cs *Configs) WriteMetrics(b []byte) []byte {
 
 	cur := cs.Current()
 	tried, failed := cs.Reloads()
-	w.Family("fit_config_reloads_total", "counter", "Configs applied after the first, by SIGHUP, the file watcher or the Admin API, by result.")
+	w.Family("fit_config_reloads_total", "counter", "Configs applied after the first, by SIGHUP, the file watcher, the Admin API or a change of certificate files, by result.")
 	w.Sample("fit_config_reloads_total", float64(tried-failed), "result", "success")
 	w.Sample("fit_config_reloads_total", float64(failed), "result", "failure")
 	w.Family("fit_config_version", "gauge", "The version of the running config.")

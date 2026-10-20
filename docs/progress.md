@@ -13,7 +13,7 @@ this file says what was done, and where the work differs from the plan.
 | Last updated | 2026-10-20 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
 | fib | `github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68` (fib's `main` at `8c637e0`, after v1.5.3), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -34,7 +34,7 @@ M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is 
 HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
-balancing v2, I34, Prometheus metrics, and I35, its exit tests.
+balancing v2, I34, Prometheus metrics, I35, its exit tests, and I35b, certificate files watched.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -1952,6 +1952,42 @@ Differences from the plan:
 - The plan's I35 has no benchmarks; the comparison with nginx that R07c's notes left for M2's end
   is the [M2 report](../bench/results/m2-report-2026-10-20.md), run after I35 at 59083f3. The
   harness's summary now names the servers of a run of idle connections alone, which it left out.
+
+### I35b Certificate files watched — done
+
+- `fit run` applies the running config again when a certificate or key file it loaded changes
+  (`-watch-certs`, on by default; `-watch-interval` now sets how often both watchers look). A
+  `tlsmgr.FileWatcher` polls each file's size and modification time on a goroutine of its own, as
+  the config file's watcher does (decision 006), and once they have stayed as they are for 500ms
+  reads the files and compares their SHA-256 with what the running config loaded, which
+  `LoadStatic` now keeps (`Static.Files`, gathered in `Graph.CertFiles`). A difference applies the
+  running config again through `admin.Configs.Reapply`, the same path as every reload, as a new
+  version with the source `certificates`; the listeners are kept and only their certificates
+  change. So a pair that does not load, a certificate written before its key, fails as any bad
+  reload does, is reported once, and leaves the running certificates; the same files are not tried
+  again until they change. A file that cannot be read, as while it is replaced, is reported once.
+- A config applied another way (SIGHUP, the Admin API, `-watch`) is compared with its files once
+  too, since they may have changed after it read them; two listeners that loaded one file
+  differently, changed between them, have it loaded again.
+- Certificate and key files are read up to 1 MiB (`MaxCertFileBytes`), where
+  `tls.LoadX509KeyPair` read them whole.
+- The certificate expiry metric lists the certificates obtained on demand: a listener with
+  on-demand TLS serves any certificate ACME has for a name its files do not cover, and lists those.
+- Tests: `tlsmgr.TestFileWatcher` (a renewal written in two steps applies once, a touch or a change
+  undone none, a failing pair is reported once and tried again when it changes, a file gone is
+  reported once), `TestFileWatcherNewConfig`, the file sums in `TestLoadStatic`, files past the
+  limit in `TestLoadStaticErrors`, on-demand listing in `TestCerts`, and
+  `e2e.TestCertificateFilesWatched`: the fit binary is given a new certificate, which does not
+  match the key and is reported while the old one is served, then the key, after which handshakes
+  get the new certificate.
+
+Differences from the plan:
+
+- No benchmark: nothing on the data plane changes; the watcher stats a few files a second on a
+  goroutine of its own.
+- Applying the whole config again rather than swapping a listener's certificates in place: a
+  reload keeps the listeners, and the upstreams' pools and health (I26), so it costs a compile, and
+  it gives a renewal the checks, the rollback and the metrics every reload has.
 
 ## Notes for later iterations
 

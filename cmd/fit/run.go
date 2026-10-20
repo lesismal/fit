@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -50,7 +51,8 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	cfgFile := flags.String("c", "fit.json", "the config file to run")
 	grace := flags.Duration("shutdown-timeout", 30*time.Second, "how long shutdown waits for requests in flight before closing their connections, and how long requests may keep using a config after a reload")
 	watch := flags.Bool("watch", false, "apply the config file again each time it changes, as SIGHUP does")
-	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "with -watch, how often the file is looked at")
+	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "how often a watched file is looked at: the config file, with -watch, and certificate files, with -watch-certs")
+	watchCerts := flags.Bool("watch-certs", true, "apply the running config again each time the certificate or key files it loaded change")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -166,6 +168,39 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		fmt.Fprintf(stdout, "fit: watching %s\n", *cfgFile)
 	}
 
+	stopCertWatch := func() {}
+	if *watchCerts {
+		cw := tlsmgr.NewFileWatcher(tlsmgr.WatchOptions{Interval: *watchInterval}, func() (uint64, map[string][sha256.Size]byte) {
+			g := rt.Current()
+			if g == nil {
+				return 0, nil
+			}
+			defer g.Release()
+			return g.Version, g.CertFiles
+		}, func() error {
+			fmt.Fprintln(stdout, "fit: certificate files changed; reloading")
+			r, err := configs.Reapply(admin.SourceCertificates)
+			if err != nil {
+				return err
+			}
+			printApplied(stdout, stderr, r)
+			fmt.Fprintf(stdout, "fit: reloaded certificate files (config version %d)\n", r.Version)
+			return nil
+		}, func(err error) {
+			fmt.Fprintf(stderr, "fit: certificate files: %v; the running certificates stay\n", err)
+		})
+		cctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			cw.Run(cctx)
+		}()
+		stopCertWatch = func() {
+			cancel()
+			<-done
+		}
+	}
+
 	for running := true; running; {
 		select {
 		case <-ctx.Done():
@@ -177,6 +212,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	stopSignals()
 	// No config is applied while the server shuts down.
 	stopWatch()
+	stopCertWatch()
 	fmt.Fprintln(stdout, "fit: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), *grace)
 	defer cancel()

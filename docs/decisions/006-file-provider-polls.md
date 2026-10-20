@@ -29,3 +29,5 @@ from time to time.
 - A change takes up to the interval and the debounce to apply, about 1.5s at the defaults.
 - A file whose size and modification time stay the same after an edit within the file system's
   timestamp resolution is not seen until it changes again; SIGHUP still applies it.
+- I35b watches the certificate and key files the running config loaded the same way, on by
+  default (`-watch-certs`), and applies the running config again when their contents change.

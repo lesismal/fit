@@ -156,6 +156,16 @@ func TestCerts(t *testing.T) {
 	if got := NewCerts(nil, a, []string{"pending.example"}, false).Certificates(); len(got) != 0 {
 		t.Errorf("Certificates with none obtained: %v", got)
 	}
+	// On demand, a handshake gets any certificate obtained for a name the
+	// files do not cover, so the metrics list those too.
+	demand := keyCert(t, false, "demand.example")
+	a.certs.Store(&map[string]*tls.Certificate{"managed.example": managed, "demand.example": demand})
+	if got := NewCerts(nil, a, nil, true).Certificates(); len(got) != 2 {
+		t.Errorf("Certificates on demand: %v", got)
+	}
+	if got := NewCerts(static, a, nil, true).Certificates(); len(got) != 2 || got[0] != file || got[1] != demand {
+		t.Errorf("Certificates on demand beside files for managed.example: %v", got)
+	}
 }
 
 func TestManage(t *testing.T) {
