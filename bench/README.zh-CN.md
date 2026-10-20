@@ -32,9 +32,10 @@ go run ./bench/cmd/fitbench
 | `-nginx-image`、`-caddy-image`、`-traefik-image`、`-base-image` | 固定的版本 | |
 | `-out` | `bench/results/run-<时间>.json` | |
 
-在 macOS 或 Windows 上，工具跑在 Docker Desktop 的虚拟机里，走 bridge 网络。这样的数字适合在同一台
-机器上比较各服务器，不适合发布：虚拟机、bridge 网络和共享的 CPU 都有开销，而 Linux 主机配合
-`-network host` 没有这些开销。
+fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[规则 16](../docs/rules.zh-CN.md#八压测)）。
+工具在 macOS 或 Windows 的 Docker Desktop 下（虚拟机里，走 bridge 网络）仍能启动，但这样跑出的结果不采用：
+虚拟机、bridge 网络和共享的 CPU 都有 Linux 主机没有的开销。M0 用这种方式测得的基线只作为记录保留；
+以 M1 起在 Linux 上的结果为准。
 
 ## 各进程跑在哪里
 

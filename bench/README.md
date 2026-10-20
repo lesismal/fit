@@ -35,10 +35,11 @@ common ones are:
 | `-nginx-image`, `-caddy-image`, `-traefik-image`, `-base-image` | pinned versions | |
 | `-out` | `bench/results/run-<time>.json` | |
 
-On macOS or Windows the harness runs in Docker Desktop's VM on a bridge network. The numbers are
-useful for comparing the servers with each other on that machine, not for publishing: the VM, the
-bridge and the shared CPUs all cost something that a Linux host with `-network host` does not
-pay.
+fit's results come only from the benchmark host, a Linux machine with `-network host`
+([rule 16](../docs/rules.md#8-load-testing)). The harness can still start under Docker Desktop on
+macOS or Windows, in its VM on a bridge network, but those runs are not used: the VM, the bridge
+and the shared CPUs all cost something a Linux host does not pay. The M0 baseline measured that
+way is kept for the record only; the Linux results from M1 on are the reference.
 
 ## What runs where
 

@@ -70,11 +70,15 @@ Every change to fit follows these rules. They are what the
 
 ## 8. Load testing
 
-16. **Load tests cover Linux only.** fit is not load tested on Windows, macOS or other Unix
-    systems.
+16. **Load tests cover Linux only, and the benchmark host's Linux is the reference.** Every load
+    test and benchmark result fit goes by comes from the benchmark host. fit is not load tested,
+    nor benchmarked, on Windows, macOS or other Unix systems, nor in Docker on Windows or macOS
+    (Docker Desktop's VM and bridge network), and results from those are not used.
 17. **While the benchmark host is available, load tests run there and nowhere else.** The local
     machine runs only ordinary tests: unit tests, the race detector, vet and the like.
-18. **Only when the benchmark host is unavailable** may a load test run on the local machine.
+18. **Only when the benchmark host is unavailable** may a load test run elsewhere, and then only
+    on another Linux machine, with the machine recorded beside its results; otherwise it waits
+    for the host.
 
 ## 9. The fib version
 

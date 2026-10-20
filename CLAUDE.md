@@ -12,7 +12,8 @@ slow peers, large bodies and cut connections, and what fib cannot do yet is writ
 `../fib`), by fit's sessions too, then pushed to fib's `main`, and fit moves to that commit by
 its hash (rule 19), with no tag needed; it is never worked around in fit in breach of the rules.
 
-**Load tests (rules 16-18) never run on this machine.** Benchmarks (`go test -bench`), A/B
+**Load tests (rules 16-18) never run on this machine.** The benchmark host's Linux is the only
+reference: no load tests or benchmarks on Windows, macOS, or Docker on Windows or macOS. Benchmarks (`go test -bench`), A/B
 comparisons, perf profiles, and stress or flake reproduction (high `-count`, `-cpu`, GOMAXPROCS
 limits, parallel packages under load) run on the benchmark host,
 `ssh -S ~/.ssh/fitbench.sock -p 10013 root@127.0.0.1` (Linux, no Go: cross-build with
