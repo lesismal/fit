@@ -56,10 +56,14 @@ Every change to fit follows these rules. They are what the
 
 ## 7. When fib falls short
 
-15. **What fib cannot do yet is asked of fib, not worked around in fit.** Write down what fib should
+15. **What fib cannot do yet is added to fib, not worked around in fit.** Write down what fib should
     add or improve in [docs/fib-api-requests.md](fib-api-requests.md) and its Chinese twin: the
-    problem, the evidence, the suggested API and how fit would use it, and hand it to the
-    maintainer, who makes the change in the fib repository and releases it. fit then moves to that
-    fib version and carries on. Meanwhile, work that does not depend on it may go ahead; a stopgap
-    in fit must still follow every other rule, and is recorded in the progress files with the fib
-    request that will replace it. fit's sessions do not change fib themselves.
+    problem, the evidence, the suggested API and how fit would use it. fit's sessions may then make
+    the change in the fib repository themselves, by fib's own standards: tests, the race detector,
+    vet and staticcheck for every OS fib builds for, its size and allocation checks, and a
+    benchmark before and after for a change on the hot path. The change is pushed to fib's `main`
+    and released as a tag, and the request's status records the version; fit then moves to that
+    version, never to a `replace` directive or a local `go.work` committed in fit, and carries on.
+    fib's CI must pass on the commit before fit pushes what depends on it. Meanwhile, work that does
+    not depend on it may go ahead; a stopgap in fit must still follow every other rule, and is
+    recorded in the progress files with the fib request that will replace it.

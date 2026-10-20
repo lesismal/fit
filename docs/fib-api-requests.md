@@ -4,7 +4,8 @@
 
 A review of M0 and M1 against the [development rules](rules.md) found places where fit cannot
 follow them with fib v1.3.0's API alone. This document lists what fit asks of fib, why, and how fit
-would use each API. The names and signatures are suggestions; fib decides the final shape.
+would use each API. The names and signatures are suggestions; fib decides the final shape. Since
+R07e, fit's sessions may make the change in fib themselves ([rule 15](rules.md#7-when-fib-falls-short)).
 
 The fit iterations that depend on these are R03–R06 and R07c in the [development plan](dev-plan.md#m1-review-fixes).
 

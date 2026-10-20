@@ -3,7 +3,7 @@
 [English](fib-api-requests.md) | [简体中文](fib-api-requests.zh-CN.md)
 
 按 [开发规则](rules.zh-CN.md) 审查 M0、M1 时发现，有些地方只靠 fib v1.3.0 现有的 API，fit 无法遵守规则。本文列出 fit
-需要 fib 提供的 API、原因，以及 fit 打算怎么用。文中的名字和签名只是建议，最终形式由 fib 决定。
+需要 fib 提供的 API、原因，以及 fit 打算怎么用。文中的名字和签名只是建议，最终形式由 fib 决定。自 R07e 起，fit 的开发会话可以自己在 fib 中实现（[规则 15](rules.zh-CN.md#七fib-满足不了时)）。
 
 依赖这些 API 的 fit 迭代是 [开发计划](dev-plan.zh-CN.md#m1-审查修复) 中的 R03–R06 和 R07c。
 

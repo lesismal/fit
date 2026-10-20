@@ -47,7 +47,10 @@
 
 ## 七、fib 满足不了时
 
-15. **fib 暂时做不到的，向 fib 提需求，不在 fit 里绕过。** 把 fib 需要新增或优化的点写进
-    [docs/fib-api-requests.zh-CN.md](fib-api-requests.zh-CN.md) 及其英文版：问题、证据、建议的 API、fit 的用法，交给
-    维护者。维护者在 fib 仓库完成并发布新版本后，fit 升级到该 fib 版本再继续。等待期间可以先做不依赖它的部分；fit 中
-    的临时措施也必须遵守其他所有规则，并在 progress 中记录，注明将来由哪项 fib 需求替换。fit 的开发会话不自己修改 fib。
+15. **fib 暂时做不到的，加到 fib 里，不在 fit 里绕过。** 把 fib 需要新增或优化的点写进
+    [docs/fib-api-requests.zh-CN.md](fib-api-requests.zh-CN.md) 及其英文版：问题、证据、建议的 API、fit 的用法。之后
+    fit 的开发会话可以自己在 fib 仓库里实现，并遵守 fib 自己的标准：测试、竞态检测、fib 支持的每个系统上的 vet 和
+    staticcheck、它的大小和分配检查，热路径上的改动还要用基准对比前后。改动推送到 fib 的 `main` 并打 tag 发布，在需求
+    的状态里记下版本；fit 再升级到该版本继续，不在 fit 中提交 `replace` 指令或本地 `go.work`。依赖它的 fit 改动，要等
+    fib 在该提交上的 CI 通过后再推送。等待期间可以先做不依赖它的部分；fit 中的临时措施也必须遵守其他所有规则，并在
+    progress 中记录，注明将来由哪项 fib 需求替换。
