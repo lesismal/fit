@@ -87,6 +87,10 @@ type Env struct {
 	// the names listeners list in tls.acme, for a config that is only
 	// checked, as fit validate does.
 	ACME *tlsmgr.ACME
+	// OCSP keeps the OCSP responses of the certificates from files, which
+	// their handshakes get stapled; the caller owns and closes it. Nil
+	// staples none.
+	OCSP *tlsmgr.OCSP
 	// Previous is the graph being replaced, or nil. The new graph shares
 	// its pools for the upstreams whose config, and CA file, are the same,
 	// so that their connections and their backends' health carry over.
@@ -220,6 +224,9 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 					continue
 				}
 				static = certs
+				if env.OCSP != nil {
+					static.Staple(env.OCSP)
+				}
 			}
 			switch {
 			case len(t.ACME) == 0:
@@ -324,6 +331,11 @@ func cleanupModules(g *Graph) {
 	}
 	for _, p := range g.upstreams {
 		p.Close()
+	}
+	for _, l := range g.Listeners {
+		if r, ok := l.Certificates.(interface{ Release() }); ok {
+			r.Release()
+		}
 	}
 	if m := g.Metrics; m != nil {
 		for _, l := range g.Listeners {

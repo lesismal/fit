@@ -20,6 +20,10 @@ type Manager interface {
 	GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
+// ACMEALPN is the protocol a CA asks for through ALPN when it checks a
+// TLS-ALPN-01 challenge.
+const ACMEALPN = "acme-tls/1"
+
 // cipherSuites are the TLS 1.2 suites a listener allows: ECDHE for forward
 // secrecy and AEAD ciphers only, as Mozilla's intermediate profile has them.
 // TLS 1.3's suites are not configurable, and all of them qualify.
@@ -50,5 +54,8 @@ func ServerConfig(protocols []string, get func(*tls.ClientHelloInfo) (*tls.Certi
 	default:
 		cfg.NextProtos = []string{"http/1.1"}
 	}
+	// Last, so that only a client that offers it alone, as a CA checking a
+	// TLS-ALPN-01 challenge does, gets it.
+	cfg.NextProtos = append(cfg.NextProtos, ACMEALPN)
 	return cfg
 }

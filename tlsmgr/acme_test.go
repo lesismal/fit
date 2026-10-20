@@ -390,3 +390,123 @@ func TestPebble(t *testing.T) {
 		t.Errorf("the second instance obtained %d certificates", n)
 	}
 }
+
+// serveHTTP01 answers a's HTTP-01 challenges on 127.0.0.1:port, counting
+// them, until the test ends.
+func serveHTTP01(t *testing.T, a *ACME, port int) *atomic.Int32 {
+	t.Helper()
+	var answered atomic.Int32
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		answer, ok := a.HTTPChallenge(strings.TrimPrefix(r.URL.Path, ACMEChallengePrefix))
+		if !ok || !strings.HasPrefix(r.URL.Path, ACMEChallengePrefix) {
+			http.NotFound(w, r)
+			return
+		}
+		answered.Add(1)
+		_, _ = w.Write([]byte(answer))
+	})}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return &answered
+}
+
+// serveTLSALPN01 has a TLS server on 127.0.0.1:port take handshakes with
+// certs, as a listener does, counting those that negotiate ACMEALPN.
+func serveTLSALPN01(t *testing.T, certs *Certs, port int) *atomic.Int32 {
+	t.Helper()
+	var answered atomic.Int32
+	ln, err := tls.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port), ServerConfig([]string{"http/1.1", "h2"}, certs.GetCertificate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				tc := c.(*tls.Conn)
+				_ = tc.SetDeadline(time.Now().Add(5 * time.Second))
+				if tc.Handshake() == nil && tc.ConnectionState().NegotiatedProtocol == ACMEALPN {
+					answered.Add(1)
+				}
+			}()
+		}
+	}()
+	return &answered
+}
+
+// TestPebbleTLSALPN obtains a certificate from Pebble through TLS-ALPN-01
+// alone, answered by a TLS server whose configuration is a listener's.
+func TestPebbleTLSALPN(t *testing.T) {
+	tlsPort := pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: pebbletest.FreePort(t), TLSPort: tlsPort})
+	var l logs
+	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"tls-alpn-01"}}, &l)
+	answered := serveTLSALPN01(t, NewCerts(nil, a, []string{"alpn.fit.test"}), tlsPort)
+	a.start()
+	a.Manage([]string{"alpn.fit.test"})
+	t.Cleanup(func() { l.mu.Lock(); t.Log(strings.Join(l.lines, "\n")); l.mu.Unlock() })
+	eventually(t, 30*time.Second, "a certificate from pebble", func() bool { return a.Certificate("alpn.fit.test") != nil })
+	if answered.Load() == 0 {
+		t.Error("no tls-alpn-01 challenge was answered")
+	}
+	if a.ALPNChallenge("alpn.fit.test") != nil {
+		t.Error("the challenge's certificate is kept once the challenge is over")
+	}
+}
+
+// TestChallengeFallback has a CA check a challenge nobody answers first: the
+// attempt after the failure starts with the next, which is answered.
+func TestChallengeFallback(t *testing.T) {
+	httpPort := pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: httpPort})
+	var l logs
+	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"tls-alpn-01", "http-01"}}, &l)
+	answered := serveHTTP01(t, a, httpPort)
+	a.start()
+	a.Manage([]string{"fallback.fit.test"})
+	t.Cleanup(func() { l.mu.Lock(); t.Log(strings.Join(l.lines, "\n")); l.mu.Unlock() })
+	eventually(t, 30*time.Second, "a certificate from pebble", func() bool { return a.Certificate("fallback.fit.test") != nil })
+	if l.count("trying again") == 0 || answered.Load() == 0 {
+		t.Errorf("failures %d, http-01 answered %d: the first attempt should fail and the next use http-01", l.count("trying again"), answered.Load())
+	}
+}
+
+func TestCertsALPN(t *testing.T) {
+	var l logs
+	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
+	certs := NewCerts(nil, a, []string{"a.fit.test"})
+	alpn := func(name string) *tls.ClientHelloInfo {
+		h := hello(name)
+		h.SupportedProtos = []string{ACMEALPN}
+		return h
+	}
+	if _, err := certs.GetCertificate(alpn("a.fit.test")); err == nil {
+		t.Error("a certificate with no challenge under way")
+	}
+	challenge := keyCert(t, false, "a.fit.test")
+	a.alpnCerts.Store("a.fit.test", challenge)
+	other := keyCert(t, false, "b.fit.test")
+	a.alpnCerts.Store("b.fit.test", other)
+	if got, err := certs.GetCertificate(alpn("A.fit.test.")); err != nil || got != challenge {
+		t.Errorf("the challenge's certificate: %v, %v", got, err)
+	}
+	if _, err := certs.GetCertificate(alpn("b.fit.test")); err == nil {
+		t.Error("the challenge of a name the listener does not list was answered")
+	}
+	// A client that offers other protocols too is no CA checking a
+	// challenge.
+	h := hello("a.fit.test")
+	h.SupportedProtos = []string{"h2", ACMEALPN}
+	if got, _ := certs.GetCertificate(h); got == challenge {
+		t.Error("a client offering h2 got the challenge's certificate")
+	}
+}

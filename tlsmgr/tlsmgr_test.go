@@ -36,10 +36,10 @@ func TestServerConfig(t *testing.T) {
 		protocols []string
 		alpn      []string
 	}{
-		{[]string{"http/1.1", "h2"}, []string{"h2", "http/1.1"}},
-		{[]string{"h2"}, []string{"h2"}},
-		{[]string{"http/1.1"}, []string{"http/1.1"}},
-		{[]string{"http/1.1", "h2", "h3"}, []string{"h2", "http/1.1"}},
+		{[]string{"http/1.1", "h2"}, []string{"h2", "http/1.1", ACMEALPN}},
+		{[]string{"h2"}, []string{"h2", ACMEALPN}},
+		{[]string{"http/1.1"}, []string{"http/1.1", ACMEALPN}},
+		{[]string{"http/1.1", "h2", "h3"}, []string{"h2", "http/1.1", ACMEALPN}},
 	} {
 		cfg := ServerConfig(tt.protocols, get)
 		if !slices.Equal(cfg.NextProtos, tt.alpn) || cfg.MinVersion != tls.VersionTLS12 || cfg.GetCertificate == nil ||

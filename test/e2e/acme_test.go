@@ -32,40 +32,66 @@ func TestACMEFromPebble(t *testing.T) {
   "routes": [{"handler": {"module": "respond", "params": {"body": "hello"}}}]
 }`, p.Directory, p.CAFile, t.TempDir(), port))
 
+	if body := getObtained(t, p, addrs["https"], "www.fit.test"); body != "hello" {
+		t.Errorf("%q", body)
+	}
+
+	resp, err := stdhttp.Get(fmt.Sprintf("http://127.0.0.1:%d/.well-known/acme-challenge/none", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "hello") {
+		t.Errorf("a token with no challenge: %d %q", resp.StatusCode, body)
+	}
+}
+
+// getObtained fetches https://name/ from addr, trusting Pebble's roots, until
+// fit has the certificate, and returns the body; the handshake fails until
+// then.
+func getObtained(t *testing.T, p *pebbletest.Pebble, addr, name string) string {
+	t.Helper()
 	tr := &stdhttp.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: p.Roots(t)},
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			var d net.Dialer
-			return d.DialContext(ctx, network, addrs["https"])
+			return d.DialContext(ctx, network, addr)
 		},
 	}
 	c := &stdhttp.Client{Transport: tr, Timeout: 5 * time.Second}
-	var resp *stdhttp.Response
-	var err error
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		// Until fit has the certificate, the handshake fails.
-		if resp, err = c.Get("https://www.fit.test/"); err == nil {
-			break
+		resp, err := c.Get("https://" + name + "/")
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err := resp.TLS.PeerCertificates[0].VerifyHostname(name); err != nil {
+				t.Errorf("certificate for %v", resp.TLS.PeerCertificates[0].DNSNames)
+			}
+			return string(body)
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("no certificate within 30s: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if string(body) != "hello" || resp.TLS.PeerCertificates[0].VerifyHostname("www.fit.test") != nil {
-		t.Errorf("%q, certificate for %v", body, resp.TLS.PeerCertificates[0].DNSNames)
-	}
+}
 
-	resp, err = stdhttp.Get(fmt.Sprintf("http://127.0.0.1:%d/.well-known/acme-challenge/none", port))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "hello") {
-		t.Errorf("a token with no challenge: %d %q", resp.StatusCode, body)
+// TestACMETLSALPNFromPebble runs fit with only a TLS listener, on the port
+// Pebble checks TLS-ALPN-01 challenges on, so that fib's TLS answers the
+// challenge, and no listener in the clear.
+func TestACMETLSALPNFromPebble(t *testing.T) {
+	port := pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: pebbletest.FreePort(t), TLSPort: port})
+	_, addrs := startFit(t, fmt.Sprintf(`{
+  "acme": {"directory": %q, "ca_file": %q, "storage": %q, "timeout": "20s", "challenges": ["tls-alpn-01"]},
+  "listeners": [
+    {"name": "https", "address": "127.0.0.1:%d", "tls": {"acme": ["alpn.fit.test"]}}
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "over alpn"}}}]
+}`, p.Directory, p.CAFile, t.TempDir(), port))
+	if body := getObtained(t, p, addrs["https"], "alpn.fit.test"); body != "over alpn" {
+		t.Errorf("%q", body)
 	}
 }

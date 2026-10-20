@@ -143,12 +143,14 @@ Status: `todo`, `doing` or `done`.
 | I27 | File provider | I24 | done |
 | I28 | Certificate manager and storage; ACME decision | I09 | done |
 | I29 | ACME HTTP-01 and renewal | I28 | done |
-| I30 | TLS-ALPN-01, OCSP stapling, HTTPS by default | I29 | todo |
+| I30 | TLS-ALPN-01, OCSP stapling | I29 | done |
+| I30b | HTTPS by default | I30 | todo |
+| I30c | ACME Renewal Information (ARI) | I29 | todo |
 | I31 | On-demand TLS | I30 | todo |
 | I32 | Active health checks | I20 | done |
 | I33 | Load balancing v2 | I19 | done |
 | I34 | Prometheus metrics | I23 | done |
-| I35 | M2 exit tests | I25, I26, I27, I31, I32, I33, I34 | todo |
+| I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | todo |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |
 | I37 | Expression matcher | I36 | todo |
@@ -580,13 +582,31 @@ R07 split in three: what fit can do alone (R07a, R07b) and what needs fib (R07c)
 - **Done when**: tests against Pebble (the ACME test server) issue and renew certificates.
 - **Touches**: `tlsmgr`, `listener`.
 
-### I30 TLS-ALPN-01, OCSP stapling, HTTPS by default
+### I30 TLS-ALPN-01, OCSP stapling
 
-- **Do**: the TLS-ALPN-01 challenge; OCSP stapling with refresh; every host name in the config gets
-  a managed certificate and an HTTP→HTTPS redirect unless turned off.
+- **Do**: the TLS-ALPN-01 challenge, and a choice of challenges; OCSP stapling with refresh, for
+  certificates from files and obtained ones.
+- **Done when**: tests obtain a certificate from Pebble through TLS-ALPN-01 alone, answered by fib's
+  TLS; responses are stapled over TLS 1.3 and 1.2, refreshed, and dropped once they expire.
+- **Touches**: `tlsmgr`, `runtime`.
+
+I30 was split in three, to keep each part within the size an iteration aims for: I30b and I30c
+are the rest of it.
+
+### I30b HTTPS by default
+
+- **Do**: every host name in the config gets a managed certificate and an HTTP→HTTPS redirect
+  unless turned off.
 - **Done when**: a config with only a host name serves HTTPS against Pebble; a test against Let's
   Encrypt staging is documented and can be run by hand.
-- **Touches**: `tlsmgr`, `runtime`.
+- **Touches**: `config`, `runtime`, `listener`.
+
+### I30c ACME Renewal Information (ARI)
+
+- **Do**: renew when the CA's suggested window (RFC 9773) says, checked again as its Retry-After
+  says, and by lifetime when the CA has none; decision 007 leaves ARI to fit.
+- **Done when**: tests against Pebble and a CA that suggests a window in the past renew in it.
+- **Touches**: `tlsmgr`.
 
 ### I31 On-demand TLS
 

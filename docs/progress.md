@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I29, I32–I34) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I30, I32–I34) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01, chosen by SNI) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | ACME has HTTP-01 only: no TLS-ALPN-01, OCSP stapling, HTTPS by default (I30) or on-demand TLS (I31); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, chosen by SNI, with OCSP responses stapled) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no HTTPS by default (I30b), ARI (I30c) or on-demand TLS (I31); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -27,9 +27,9 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I30 (TLS-ALPN-01, OCSP stapling, HTTPS by default), then I31 (on-demand TLS).**
+**Next: I31 (on-demand TLS), then I30b (HTTPS by default) and I30c (ARI).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I32, active health checks, I33, load
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I32, active health checks, I33, load
 balancing v2, and I34, Prometheus metrics.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I30 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I31 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -68,7 +68,7 @@ To continue, start a session with:
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
-| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 and renews them on goroutines of its own; `Certs`, a listener's Manager of files and names obtained with ACME |
+| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
@@ -1738,6 +1738,56 @@ Differences from the plan:
   compare of the path, and handshakes for a listed name a map lookup through an atomic pointer.
 - The plan touched `tlsmgr` and `listener`; `config`, `schema`, `runtime`, `admin`, `cmd/fit` and CI
   changed too, to configure, wire and test it.
+
+### I30 TLS-ALPN-01, OCSP stapling — done
+
+- TLS-ALPN-01 (RFC 8737): every TLS listener offers `acme-tls/1` last in ALPN, so only a client that
+  offers it alone, as a CA checking the challenge does, gets it; `tlsmgr.Certs` gives such a hello
+  the challenge's certificate (made with `TLSALPN01ChallengeCert`) while a challenge for a name the
+  listener lists is under way, and nothing otherwise. `ACME.ALPNChallenge` reads a `sync.Map`.
+  fib's TLS needed nothing new: its server picks ALPN in the server's order and gives
+  `GetCertificate` the client's protocols, and a connection that negotiates neither h2 nor
+  http/1.1 is read as HTTP/1, which the CA closes after the handshake.
+- `acme.challenges` (`["http-01", "tls-alpn-01"]` when left out) says which challenges are
+  answered, in order; the attempt after n failures in a row starts with the nth, so that a type the
+  CA cannot reach does not fail every attempt.
+- OCSP stapling: `tlsmgr.OCSP`, made by `fit run` and closed after the graph, keeps a response for
+  every certificate that names a responder and has its issuer in its chain, from files
+  (`Static.Staple`, at compile; `Release` at the graph's cleanup) or obtained (`ACME.UseOCSP`). It
+  fetches on goroutines of its own, two at once, each within 10s and 64 KiB, with
+  `golang.org/x/crypto/ocsp`, checks the response against the issuer, and staples a good one to a
+  copy of the certificate, which handshakes read through an atomic pointer. It fetches again
+  halfway through a response's validity (hourly without a next update), after a failure a minute
+  later doubling up to an hour, and never staples a response past its next update. Certificates
+  are kept by their chain with a count of users, so the graphs a reload makes share one response.
+  A revoked certificate is not stapled and is reported; one obtained with ACME is renewed at once,
+  and the storage's copy of it is not taken again.
+- `internal/certtest` gains a CA that issues certificates naming an OCSP responder, and
+  `internal/pebbletest` a settable TLS-ALPN-01 port.
+- Tests: `TestPebbleTLSALPN` obtains a certificate from Pebble through TLS-ALPN-01 alone, answered by
+  a TLS server with a listener's configuration, and the challenge's certificate is gone after;
+  `TestChallengeFallback` lists `tls-alpn-01` first with nobody answering it: the first attempt
+  fails and the next is answered over HTTP-01; `TestCertsALPN`: the challenge's certificate only
+  for a listed name and a hello offering `acme-tls/1` alone. `test/e2e` `TestACMETLSALPNFromPebble`
+  runs the fit binary with only a TLS listener on Pebble's TLS-ALPN-01 port: fib's TLS answers the
+  challenge and the client gets the page. OCSP, against a responder the tests control: a response
+  stapled to a copy; refreshed halfway through a validity of two seconds; kept while the responder
+  is down and dropped once expired, then stapled again; a revoked certificate unstapled and
+  reported; one chain added twice shares a staple and one fetch, dropped after its last release; a
+  responder that holds every request sees at most two at once, and `Close` returns at once;
+  `Static` serves the stapled copy and releases it. `listener` `TestOCSPStapled`: clients of TLS 1.3
+  and 1.2 get the response stapled by fib's TLS. `go vet ./...`, `GOOS=windows go vet ./...` and
+  `go test -race ./...` pass, with Pebble.
+- Benchmark: `listener.BenchmarkTLSHandshake`, four rounds alternating before and after: medians
+  70.9µs and 70.2µs a handshake, within the noise of a laptop. The request path is unchanged.
+
+Differences from the plan:
+
+- Split: HTTPS by default goes to I30b, and ARI, which I29 had left for I30, to I30c, to keep the
+  iteration near the size the plan aims for.
+- Let's Encrypt has stopped OCSP, so its certificates get no staple; the stapling is for other CAs
+  and for certificates from files.
+- No setting turns stapling off: a certificate that names no responder costs nothing.
 
 ## Notes for later iterations
 

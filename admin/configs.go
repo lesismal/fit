@@ -251,7 +251,8 @@ func sameACME(a, b *config.ACME) bool {
 		return a == b
 	}
 	return a.Directory == b.Directory && a.Email == b.Email && a.CAFile == b.CAFile && a.Storage == b.Storage &&
-		a.MaxConcurrent == b.MaxConcurrent && a.Timeout == b.Timeout && a.RequestTimeout == b.RequestTimeout
+		a.MaxConcurrent == b.MaxConcurrent && a.Timeout == b.Timeout && a.RequestTimeout == b.RequestTimeout &&
+		slices.Equal(a.ChallengeTypes(), b.ChallengeTypes())
 }
 
 func sameAdmin(a, b *config.Admin) bool {

@@ -36,8 +36,9 @@ type Pebble struct {
 	// the certificate it serves it with.
 	Directory string
 	CAFile    string
-	// HTTPPort is the port it checks HTTP-01 challenges on.
-	HTTPPort int
+	// HTTPPort and TLSPort are the ports it checks HTTP-01 and TLS-ALPN-01
+	// challenges on.
+	HTTPPort, TLSPort int
 
 	mgmt   string
 	client *http.Client
@@ -45,8 +46,10 @@ type Pebble struct {
 
 // Options are what a test sets of Pebble.
 type Options struct {
-	// HTTPPort is the port Pebble checks HTTP-01 challenges on, at 127.0.0.1.
-	HTTPPort int
+	// HTTPPort is the port Pebble checks HTTP-01 challenges on, at 127.0.0.1,
+	// and TLSPort the one it checks TLS-ALPN-01 challenges on; a free port
+	// when zero.
+	HTTPPort, TLSPort int
 	// Validity is how long the certificates it issues are valid; 90 days
 	// when zero.
 	Validity time.Duration
@@ -97,6 +100,9 @@ func Start(t testing.TB, o Options) *Pebble {
 	if validity == 0 {
 		validity = 90 * 24 * 3600
 	}
+	if o.TLSPort == 0 {
+		o.TLSPort = FreePort(t)
+	}
 	listen, mgmt := fmt.Sprintf("127.0.0.1:%d", FreePort(t)), fmt.Sprintf("127.0.0.1:%d", FreePort(t))
 	cfg := map[string]any{"pebble": map[string]any{
 		"listenAddress":           listen,
@@ -104,7 +110,7 @@ func Start(t testing.TB, o Options) *Pebble {
 		"certificate":             cert.CertFile,
 		"privateKey":              cert.KeyFile,
 		"httpPort":                o.HTTPPort,
-		"tlsPort":                 FreePort(t),
+		"tlsPort":                 o.TLSPort,
 		"ocspResponderURL":        "",
 		"retryAfter":              map[string]int{"authz": 1, "order": 1},
 		"keyAlgorithm":            "ecdsa",
@@ -119,7 +125,7 @@ func Start(t testing.TB, o Options) *Pebble {
 	// the tests are about fit, not about its retries of a bad nonce.
 	run(t, pebble, []string{"PEBBLE_VA_NOSLEEP=1", "PEBBLE_WFE_NONCEREJECT=0"}, "-config", cfgFile, "-dnsserver", dns)
 
-	p := &Pebble{Directory: "https://" + listen + "/dir", CAFile: cert.CertFile, HTTPPort: o.HTTPPort, mgmt: "https://" + mgmt,
+	p := &Pebble{Directory: "https://" + listen + "/dir", CAFile: cert.CertFile, HTTPPort: o.HTTPPort, TLSPort: o.TLSPort, mgmt: "https://" + mgmt,
 		client: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: certtest.Pool(cert)}}}}
 	deadline := time.Now().Add(10 * time.Second)
 	for {

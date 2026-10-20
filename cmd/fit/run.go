@@ -93,15 +93,19 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		// line written.
 		defer env.AccessLog.Close()
 	}
+	logf := func(format string, args ...any) { fmt.Fprintf(stderr, "fit: "+format+"\n", args...) }
+	// OCSP responses are stapled to every certificate that names a
+	// responder, from files or obtained.
+	env.OCSP = tlsmgr.NewOCSP(logf)
+	defer env.OCSP.Close()
 	// The certificate manager is there whether or not the config lists
 	// names for it, so that a reload may add some; with none it only waits.
-	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, func(format string, args ...any) {
-		fmt.Fprintf(stderr, "fit: "+format+"\n", args...)
-	}); err != nil {
+	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, logf); err != nil {
 		printConfigError(stderr, "fit run", *cfgFile, err)
 		return 1
 	}
 	defer env.ACME.Close()
+	env.ACME.UseOCSP(env.OCSP)
 	g, err := fitruntime.Compile(c, env)
 	if err != nil {
 		printConfigError(stderr, "fit run", *cfgFile, err)

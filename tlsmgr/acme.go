@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"math/big"
 	mathrand "math/rand/v2"
 	"net/http"
 	"net/url"
@@ -40,12 +41,13 @@ const (
 )
 
 // ACME obtains certificates for the names it manages from an ACME CA,
-// through the HTTP-01 challenge, keeps them in a Storage, and renews them
+// through the HTTP-01 or the TLS-ALPN-01 challenge, keeps them in a Storage, and renews them
 // once a third of their lifetime is left. It is the control plane's: its
 // work runs on goroutines of its own, a scheduler and MaxConcurrent workers,
 // which may block on the CA and the storage, each with a timeout. A
-// handshake asks it for a certificate (Certificate) and a request for a
-// challenge's answer (HTTPChallenge), and both read memory only.
+// handshake asks it for a certificate (Certificate) or a TLS-ALPN-01
+// challenge's (ALPNChallenge), and a request for an HTTP-01 challenge's
+// answer (HTTPChallenge), and all of them read memory only.
 //
 // A certificate in the storage is used as it is until it is due for
 // renewal, so that a restart, or another instance sharing the storage, does
@@ -60,6 +62,10 @@ type ACME struct {
 	timeout   time.Duration
 	workers   int
 	logf      func(format string, args ...any)
+	// challenges are the challenge types answered, in order; an attempt
+	// after n failures in a row starts with the nth, so that a type the CA
+	// cannot check does not fail every attempt.
+	challenges []string
 
 	// now, renewAt, retryBase and retryMax are what tests change.
 	now                 func() time.Time
@@ -69,9 +75,15 @@ type ACME struct {
 	// certs holds the certificate of each name that has one, replaced
 	// whole on every change, so that a handshake reads it without a lock.
 	certs atomic.Pointer[map[string]*tls.Certificate]
+	// ocsp, once UseOCSP sets it, keeps the certificates' OCSP responses,
+	// and staples holds, the same way as certs, each one's Staple.
+	ocsp    atomic.Pointer[OCSP]
+	staples atomic.Pointer[map[string]*Staple]
 	// tokens holds the key authorization of each HTTP-01 challenge under
-	// way, by its token.
-	tokens sync.Map
+	// way, by its token, and alpnCerts the certificate of each TLS-ALPN-01
+	// challenge under way, by its name.
+	tokens    sync.Map
+	alpnCerts sync.Map
 
 	mu     sync.Mutex
 	names  map[string]*managed
@@ -92,6 +104,9 @@ type managed struct {
 	due      time.Time
 	failures int
 	running  bool
+	// revoked is the serial number of a certificate the OCSP responder
+	// said is revoked, which the next run does not take from the storage.
+	revoked *big.Int
 }
 
 // NewACME returns an ACME that obtains certificates as c says, or with the
@@ -147,6 +162,7 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 		names:     map[string]*managed{},
 		wake:      make(chan struct{}, 1),
 	}
+	a.challenges = c.ChallengeTypes()
 	if c != nil {
 		a.email = c.Email
 	}
@@ -243,14 +259,50 @@ func (a *ACME) Manage(names []string) {
 			}
 		}
 		a.certs.Store(&kept)
+		if sts := a.staples.Load(); sts != nil {
+			keptStaples := make(map[string]*Staple, len(*sts))
+			for n, st := range *sts {
+				if want[n] {
+					keptStaples[n] = st
+				} else {
+					a.ocsp.Load().Release(st)
+				}
+			}
+			a.staples.Store(&keptStaples)
+		}
 	}
 	a.mu.Unlock()
 	a.poke()
 }
 
-// Certificate returns the certificate a has for name, or nil.
+// Certificate returns the certificate a has for name, with its OCSP
+// response stapled if it has one, or nil.
 func (a *ACME) Certificate(name string) *tls.Certificate {
+	if sts := a.staples.Load(); sts != nil {
+		if st := (*sts)[name]; st != nil {
+			return st.Certificate()
+		}
+	}
 	return (*a.certs.Load())[name]
+}
+
+// UseOCSP has o keep the OCSP responses of the certificates a obtains from
+// now on, and has a renew a certificate o hears is revoked. It is called
+// once, before Manage.
+func (a *ACME) UseOCSP(o *OCSP) {
+	a.staples.Store(&map[string]*Staple{})
+	a.ocsp.Store(o)
+}
+
+// renewRevoked has name's certificate, with serial number serial, replaced
+// at once, by one other than it.
+func (a *ACME) renewRevoked(name string, serial *big.Int) {
+	a.mu.Lock()
+	if m := a.names[name]; m != nil {
+		m.revoked, m.due, m.failures = serial, a.now(), 0
+	}
+	a.mu.Unlock()
+	a.poke()
 }
 
 // HTTPChallenge returns the answer to the HTTP-01 challenge of token, if one
@@ -261,6 +313,16 @@ func (a *ACME) HTTPChallenge(token string) (string, bool) {
 		return "", false
 	}
 	return v.(string), true
+}
+
+// ALPNChallenge returns the certificate that answers the TLS-ALPN-01
+// challenge of name, if one is under way.
+func (a *ACME) ALPNChallenge(name string) *tls.Certificate {
+	v, ok := a.alpnCerts.Load(normalizeName(name))
+	if !ok {
+		return nil
+	}
+	return v.(*tls.Certificate)
 }
 
 // Close stops a: the work under way is cancelled, and Close returns once
@@ -348,13 +410,16 @@ func (a *ACME) work() {
 // is due for renewal, or, after a failure, later and later.
 func (a *ACME) run(m *managed) {
 	ctx, cancel := context.WithTimeout(a.ctx, a.timeout)
-	cert, err := a.ensure(ctx, m.name)
+	a.mu.Lock()
+	revoked := m.revoked
+	a.mu.Unlock()
+	cert, err := a.ensure(ctx, m.name, m.failures, revoked)
 	cancel()
 	a.mu.Lock()
 	m.running = false
 	if a.names[m.name] == m {
 		if err == nil {
-			m.failures = 0
+			m.failures, m.revoked = 0, nil
 			m.due = a.renewAt(cert.Leaf)
 			certs := *a.certs.Load()
 			if certs[m.name] != cert {
@@ -364,6 +429,7 @@ func (a *ACME) run(m *managed) {
 				}
 				next[m.name] = cert
 				a.certs.Store(&next)
+				a.staple(m.name, cert)
 			}
 		} else if a.ctx.Err() == nil {
 			m.failures++
@@ -374,6 +440,28 @@ func (a *ACME) run(m *managed) {
 	}
 	a.mu.Unlock()
 	a.poke()
+}
+
+// staple has a's OCSP, if it has one, keep name's new certificate's
+// response, in place of its last one's. a.mu is held.
+func (a *ACME) staple(name string, cert *tls.Certificate) {
+	o := a.ocsp.Load()
+	if o == nil {
+		return
+	}
+	sts := *a.staples.Load()
+	next := make(map[string]*Staple, len(sts)+1)
+	for n, st := range sts {
+		next[n] = st
+	}
+	serial := cert.Leaf.SerialNumber
+	if st := o.Add(cert, func() { a.renewRevoked(name, serial) }); st != nil {
+		next[name] = st
+	} else {
+		delete(next, name)
+	}
+	a.staples.Store(&next)
+	o.Release(sts[name])
 }
 
 // backoff is how long to wait after the nth failure in a row: retryBase
@@ -410,9 +498,14 @@ func (a *ACME) certKey(name string) string { return "certificates/" + a.caKey + 
 func (a *ACME) accountKey() string         { return "acme/" + a.caKey + "/account.pem" }
 
 // ensure returns a certificate for name that is not due for renewal: the
-// one in the storage, or a new one, which it stores.
-func (a *ACME) ensure(ctx context.Context, name string) (*tls.Certificate, error) {
-	if cert := a.load(ctx, name); a.usable(cert) {
+// one in the storage, or a new one, which it stores. attempt counts the
+// failures before it, which pick the challenge tried first; revoked, if not
+// nil, is the serial number of a certificate not to take from the storage.
+func (a *ACME) ensure(ctx context.Context, name string, attempt int, revoked *big.Int) (*tls.Certificate, error) {
+	usable := func(cert *tls.Certificate) bool {
+		return a.usable(cert) && (revoked == nil || cert.Leaf.SerialNumber.Cmp(revoked) != 0)
+	}
+	if cert := a.load(ctx, name); usable(cert) {
 		return cert, nil
 	}
 	lock := "issue/" + a.caKey + "/" + name
@@ -421,10 +514,10 @@ func (a *ACME) ensure(ctx context.Context, name string) (*tls.Certificate, error
 	}
 	defer a.unlock(lock)
 	// Another instance may have renewed it while this one waited.
-	if cert := a.load(ctx, name); a.usable(cert) {
+	if cert := a.load(ctx, name); usable(cert) {
 		return cert, nil
 	}
-	cert, data, err := a.obtain(ctx, name)
+	cert, data, err := a.obtain(ctx, name, attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -535,9 +628,9 @@ func (a *ACME) accountSigner(ctx context.Context) (crypto.Signer, error) {
 	return key, nil
 }
 
-// obtain orders a certificate for name, answers its HTTP-01 challenges, and
-// returns it, with its chain and key as PEM to store.
-func (a *ACME) obtain(ctx context.Context, name string) (*tls.Certificate, []byte, error) {
+// obtain orders a certificate for name, answers its challenges, and returns
+// it, with its chain and key as PEM to store.
+func (a *ACME) obtain(ctx context.Context, name string, attempt int) (*tls.Certificate, []byte, error) {
 	client, err := a.account(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -547,7 +640,7 @@ func (a *ACME) obtain(ctx context.Context, name string) (*tls.Certificate, []byt
 		return nil, nil, fmt.Errorf("ordering: %w", err)
 	}
 	for _, u := range order.AuthzURLs {
-		if err := a.authorize(ctx, client, u); err != nil {
+		if err := a.authorize(ctx, client, u, attempt); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -589,9 +682,10 @@ func (a *ACME) obtain(ctx context.Context, name string) (*tls.Certificate, []byt
 	return &cert, data, nil
 }
 
-// authorize answers the HTTP-01 challenge of the authorization at u, unless
-// it is valid already, and waits for the CA to check it.
-func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string) error {
+// authorize answers a challenge of the authorization at u, unless it is
+// valid already, and waits for the CA to check it: the first of a's types,
+// starting at the attempt'th, that the CA offers.
+func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string, attempt int) error {
 	authz, err := client.GetAuthorization(ctx, u)
 	if err != nil {
 		return fmt.Errorf("authorization: %w", err)
@@ -600,21 +694,38 @@ func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string) err
 		return nil
 	}
 	var chal *acme.Challenge
-	for _, c := range authz.Challenges {
-		if c.Type == "http-01" {
-			chal = c
+	for i := range a.challenges {
+		typ := a.challenges[(attempt+i)%len(a.challenges)]
+		for _, c := range authz.Challenges {
+			if c.Type == typ {
+				chal = c
+				break
+			}
+		}
+		if chal != nil {
 			break
 		}
 	}
 	if chal == nil {
-		return fmt.Errorf("the CA offers no http-01 challenge for %s", authz.Identifier.Value)
+		return fmt.Errorf("the CA offers none of the challenges %s for %s", strings.Join(a.challenges, ", "), authz.Identifier.Value)
 	}
-	answer, err := client.HTTP01ChallengeResponse(chal.Token)
-	if err != nil {
-		return err
+	switch chal.Type {
+	case config.ChallengeHTTP01:
+		answer, err := client.HTTP01ChallengeResponse(chal.Token)
+		if err != nil {
+			return err
+		}
+		a.tokens.Store(chal.Token, answer)
+		defer a.tokens.Delete(chal.Token)
+	case config.ChallengeTLSALPN01:
+		name := normalizeName(authz.Identifier.Value)
+		cert, err := client.TLSALPN01ChallengeCert(chal.Token, name)
+		if err != nil {
+			return err
+		}
+		a.alpnCerts.Store(name, &cert)
+		defer a.alpnCerts.Delete(name)
 	}
-	a.tokens.Store(chal.Token, answer)
-	defer a.tokens.Delete(chal.Token)
 	if _, err := client.Accept(ctx, chal); err != nil {
 		return fmt.Errorf("accepting the challenge: %w", err)
 	}

@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-20 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I29、I32–I34） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I30、I32–I34） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 获取并续期，按 SNI 选择）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | ACME 只有 HTTP-01：还没有 TLS-ALPN-01、OCSP stapling、默认 HTTPS（I30）和按需 TLS（I31）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，按 SNI 选择，并 staple OCSP 响应）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有默认 HTTPS（I30b）、ARI（I30c）和按需 TLS（I31）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,8 +23,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I30（TLS-ALPN-01、OCSP stapling、默认 HTTPS），然后是 I31（按需 TLS）。** M2 已完成 I24、I25（带配置版本、局部
-修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I32（主动健康检查）、I33（负载
+**下一步：I31（按需 TLS），然后是 I30b（默认 HTTPS）和 I30c（ARI）。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I32（主动健康检查）、I33（负载
 均衡 v2）和 I34（Prometheus 指标）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I30。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I31。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -56,7 +56,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
-| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 获取证书并续期；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
+| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
@@ -1289,6 +1289,40 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 - 决策 007 说由 fit 自己实现的 ARI（CA 建议的续期窗口）这次没有做：续期按有效期计算。放到 I30。
 - 没有跑基准：数据面在明文请求上多了一次指针判断和一次路径前缀比较，列出名字的握手多了一次经原子指针的 map 查找。
 - 计划只涉及 `tlsmgr` 和 `listener`；为了配置、接线和测试，`config`、`schema`、`runtime`、`admin`、`cmd/fit` 和 CI 也有改动。
+
+### I30 TLS-ALPN-01、OCSP stapling — 已完成
+
+- TLS-ALPN-01（RFC 8737）：每个 TLS listener 在 ALPN 列表最后提供 `acme-tls/1`，所以只有单独提供它的客户端（检查验证的
+  CA 正是这样）才会协商到它；`tlsmgr.Certs` 在该 listener 列出的名字有验证进行中时，给这样的 hello 验证用的证书（由
+  `TLSALPN01ChallengeCert` 生成），否则什么都不给。`ACME.ALPNChallenge` 读一个 `sync.Map`。fib 的 TLS 不需要新功能：它的
+  服务端按服务端顺序选择 ALPN，把客户端的协议列表交给 `GetCertificate`，既不是 h2 也不是 http/1.1 的连接按 HTTP/1 读取，
+  CA 在握手后就关闭它。
+- `acme.challenges`（不写时为 `["http-01", "tls-alpn-01"]`）指定应答哪些验证及顺序；连续失败 n 次后的尝试从第 n 个开始，
+  这样 CA 访问不到的验证方式不会让每次尝试都失败。
+- OCSP stapling：`tlsmgr.OCSP` 由 `fit run` 创建，在图之后关闭，为每个指明了响应者、且证书链中有签发者的证书保存响应，
+  包括文件中的证书（编译时 `Static.Staple`，图清理时 `Release`）和申请到的证书（`ACME.UseOCSP`）。它在自己的 goroutine 上
+  获取响应，同时最多两个，每次限 10s 和 64 KiB，用 `golang.org/x/crypto/ocsp` 对照签发者检查响应，把有效的响应 staple 到
+  证书的副本上，握手通过原子指针读取。响应有效期过半时重新获取（没有下次更新时间时每小时一次），失败后一分钟再试，
+  加倍直到一小时，并且绝不在响应的下次更新时间之后继续使用它。证书按证书链保存并计数使用者，所以重载生成的图共享同一
+  响应。被吊销的证书不 staple 并报告；经 ACME 申请的证书立即续期，且不再从存储中取回这一张。
+- `internal/certtest` 增加一个 CA，签发指明 OCSP 响应者的证书；`internal/pebbletest` 可以设置 TLS-ALPN-01 的端口。
+- 测试：`TestPebbleTLSALPN` 只通过 TLS-ALPN-01 从 Pebble 取得证书，由使用 listener 配置的 TLS 服务端应答，之后验证用的
+  证书被删除；`TestChallengeFallback` 把没人应答的 `tls-alpn-01` 排在第一：第一次尝试失败，下一次经 HTTP-01 应答成功；
+  `TestCertsALPN`：只对列出的名字、且只单独提供 `acme-tls/1` 的 hello 给验证证书。`test/e2e` 的
+  `TestACMETLSALPNFromPebble` 让 fit 程序只用一个 TLS listener 监听 Pebble 的 TLS-ALPN-01 端口：fib 的 TLS 应答验证，
+  客户端拿到页面。OCSP 针对测试控制的响应者：响应 staple 在副本上；有效期两秒时在过半时刷新；响应者宕机时保留仍有效的
+  响应，过期后丢弃，恢复后再次 staple；被吊销的证书不 staple 并报告；同一证书链加入两次共享一个 staple、只获取一次，最后
+  一次释放后删除；响应者扣住所有请求时同时最多两个请求，`Close` 立即返回；`Static` 提供 staple 后的副本并能释放。
+  `listener` 的 `TestOCSPStapled`：TLS 1.3 和 1.2 的客户端都拿到 fib 的 TLS staple 的响应。`go vet ./...`、
+  `GOOS=windows go vet ./...` 和 `go test -race ./...` 通过（含 Pebble）。
+- 基准：`listener.BenchmarkTLSHandshake`，改动前后交替四轮：中位数每次握手 70.9µs 和 70.2µs，在笔记本的噪声范围内。
+  请求路径没有变化。
+
+与计划的差异：
+
+- 拆分：默认 HTTPS 移到 I30b，I29 留给 I30 的 ARI 移到 I30c，使这次迭代接近计划的目标规模。
+- Let's Encrypt 已停止 OCSP，它的证书不会有 staple；stapling 用于其他 CA 和文件中的证书。
+- 没有关闭 stapling 的设置：不指明响应者的证书没有任何开销。
 
 ## 给后续迭代的说明
 

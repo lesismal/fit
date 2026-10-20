@@ -268,6 +268,16 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:73: admin.address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`},
 		},
 		{
+			name: "acme challenges",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"challenges": ["http-01", "dns-01"]}}`,
+			want: []string{`1:87: acme.challenges[1]: "dns-01" is not one of "http-01", "tls-alpn-01"`},
+		},
+		{
+			name: "acme challenges twice",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"challenges": ["http-01", "tls-alpn-01", "http-01"]}}`,
+			want: []string{`1:102: acme.challenges[2]: "http-01" is listed twice`},
+		},
+		{
 			name: "metrics without admin",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "metrics": {}}`,
 			want: []string{`1:63: metrics: the Admin API serves metrics: set admin too`},

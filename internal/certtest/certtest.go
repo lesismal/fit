@@ -80,3 +80,97 @@ func Pool(certs ...*Cert) *x509.CertPool {
 	}
 	return p
 }
+
+// CA is a certificate authority for tests, which issues certificates that
+// chain to it.
+type CA struct {
+	Cert *x509.Certificate
+	Key  *ecdsa.PrivateKey
+}
+
+// NewCA makes a CA named name.
+func NewCA(name string) (*CA, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: name},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	return &CA{Cert: cert, Key: key}, nil
+}
+
+// Issue writes a certificate for names that ca signs, followed by ca's own,
+// and its key, as PEM files in dir. ocspServer, if not empty, is the OCSP
+// responder the certificate names.
+func (ca *CA) Issue(dir, ocspServer string, names ...string) (*Cert, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+	if err != nil {
+		return nil, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: names[0]},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	if ocspServer != "" {
+		tmpl.OCSPServer = []string{ocspServer}
+	}
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else {
+			tmpl.DNSNames = append(tmpl.DNSNames, n)
+		}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.Key)
+	if err != nil {
+		return nil, err
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+	c := &Cert{CertFile: filepath.Join(dir, names[0]+".crt"), KeyFile: filepath.Join(dir, names[0]+".key"), Leaf: leaf}
+	chain := append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Cert.Raw})...)
+	if err := os.WriteFile(c.CertFile, chain, 0o644); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(c.KeyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// Pool returns a pool that trusts ca.
+func (ca *CA) Pool() *x509.CertPool {
+	p := x509.NewCertPool()
+	p.AddCert(ca.Cert)
+	return p
+}

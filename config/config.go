@@ -56,8 +56,26 @@ type ACME struct {
 	MaxConcurrent  int      `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
 	Timeout        Duration `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
 	RequestTimeout Duration `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
+	Challenges     []string `json:"challenges,omitempty" enum:"http-01,tls-alpn-01" default:"[\"http-01\",\"tls-alpn-01\"]" doc:"The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// The challenges ACME answers.
+const (
+	ChallengeHTTP01    = "http-01"
+	ChallengeTLSALPN01 = "tls-alpn-01"
+)
+
+// DefaultACMEChallenges are the challenges answered when acme names none.
+var DefaultACMEChallenges = []string{ChallengeHTTP01, ChallengeTLSALPN01}
+
+// ChallengeTypes returns the challenges a answers, in order.
+func (a *ACME) ChallengeTypes() []string {
+	if a == nil || len(a.Challenges) == 0 {
+		return DefaultACMEChallenges
+	}
+	return a.Challenges
 }
 
 // DirectoryURL, Concurrency, OrderTimeout and HTTPTimeout return a's
@@ -224,7 +242,7 @@ type Listener struct {
 // and 1.3, and only AEAD cipher suites with forward secrecy for 1.2.
 type TLS struct {
 	Certificates []Certificate `json:"certificates,omitempty" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
-	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through the HTTP-01 challenge: the CA must reach fit on port 80 at each name, where any listener of fit's in the clear answers it. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
+	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
 
 	At Value `json:"-" fit:"self"`
 }

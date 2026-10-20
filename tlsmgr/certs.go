@@ -15,6 +15,16 @@ type Certs struct {
 	first  string // the first name listed, for a client that names none
 }
 
+// errNoChallenge is what a handshake for ACMEALPN gets with no TLS-ALPN-01
+// challenge under way for its name.
+var errNoChallenge = errors.New("tlsmgr: no tls-alpn-01 challenge under way for this name")
+
+// isACMETLS reports whether hello offers ACMEALPN alone, as a CA checking a
+// TLS-ALPN-01 challenge does (RFC 8737).
+func isACMETLS(hello *tls.ClientHelloInfo) bool {
+	return len(hello.SupportedProtos) == 1 && hello.SupportedProtos[0] == ACMEALPN
+}
+
 // errNoCertificate is what a handshake gets when there is no certificate to
 // give it: a listed name ACME has none for yet, and no files.
 var errNoCertificate = errors.New("tlsmgr: no certificate yet for this name")
@@ -30,6 +40,13 @@ func NewCerts(static *Static, a *ACME, names []string) *Certs {
 		}
 	}
 	return c
+}
+
+// Release gives back what Staple took for the certificates from files.
+func (c *Certs) Release() {
+	if c.static != nil {
+		c.static.Release()
+	}
 }
 
 // Static returns the certificates from files, or nil.
@@ -53,6 +70,14 @@ func (c *Certs) Certificates() []*tls.Certificate {
 }
 
 func (c *Certs) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if c.acme != nil && isACMETLS(hello) {
+		// A CA checking a TLS-ALPN-01 challenge, which gets the challenge's
+		// certificate or nothing.
+		if cert := c.acme.ALPNChallenge(hello.ServerName); cert != nil && c.names[normalizeName(hello.ServerName)] {
+			return cert, nil
+		}
+		return nil, errNoChallenge
+	}
 	if c.acme != nil {
 		name := normalizeName(hello.ServerName)
 		if name == "" && c.static == nil {

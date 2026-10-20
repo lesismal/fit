@@ -133,12 +133,14 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I27 | 文件 provider | I24 | done |
 | I28 | 证书管理与存储；ACME 选型 | I09 | done |
 | I29 | ACME HTTP-01 与续期 | I28 | done |
-| I30 | TLS-ALPN-01、OCSP stapling、默认 HTTPS | I29 | todo |
+| I30 | TLS-ALPN-01、OCSP stapling | I29 | done |
+| I30b | 默认 HTTPS | I30 | todo |
+| I30c | ACME 续期信息（ARI） | I29 | todo |
 | I31 | 按需 TLS | I30 | todo |
 | I32 | 主动健康检查 | I20 | done |
 | I33 | 负载均衡 v2 | I19 | done |
 | I34 | Prometheus 指标 | I23 | done |
-| I35 | M2 退出测试 | I25、I26、I27、I31、I32、I33、I34 | todo |
+| I35 | M2 退出测试 | I25、I26、I27、I30b、I31、I32、I33、I34 | todo |
 | **M3** | | | |
 | I36 | 匹配器 v2 与优先级 | I11 | todo |
 | I37 | 表达式匹配器 | I36 | todo |
@@ -518,12 +520,27 @@ R07 拆成三部分：fit 自己能做的（R07a、R07b）和需要 fib 的（R0
 - **完成标准**：针对 Pebble（ACME 测试服务器）的测试能签发和续期证书。
 - **涉及**：`tlsmgr`、`listener`。
 
-### I30 TLS-ALPN-01、OCSP stapling、默认 HTTPS
+### I30 TLS-ALPN-01、OCSP stapling
 
-- **做什么**：TLS-ALPN-01 验证；OCSP stapling 及刷新；配置中的每个域名默认获得托管证书和 HTTP→HTTPS 跳转，
-  可关闭。
-- **完成标准**：只写了域名的配置能在 Pebble 下提供 HTTPS；针对 Let's Encrypt 测试环境的测试有文档，可手动运行。
+- **做什么**：TLS-ALPN-01 验证，以及可选择的验证方式；OCSP stapling 及刷新，对文件中的证书和申请到的证书都适用。
+- **完成标准**：测试只通过 TLS-ALPN-01 从 Pebble 取得证书，由 fib 的 TLS 应答；OCSP 响应在 TLS 1.3 和 1.2 下都被
+  staple，会刷新，过期后不再使用。
 - **涉及**：`tlsmgr`、`runtime`。
+
+为使每部分都在一次迭代的目标规模之内，I30 拆成三部分：其余部分是 I30b 和 I30c。
+
+### I30b 默认 HTTPS
+
+- **做什么**：配置中的每个域名默认获得托管证书和 HTTP→HTTPS 跳转，可关闭。
+- **完成标准**：只写了域名的配置能在 Pebble 下提供 HTTPS；针对 Let's Encrypt 测试环境的测试有文档，可手动运行。
+- **涉及**：`config`、`runtime`、`listener`。
+
+### I30c ACME 续期信息（ARI）
+
+- **做什么**：按 CA 建议的续期时间窗（RFC 9773）续期，按其 Retry-After 再次查询；CA 没有时按有效期续期；决定 007
+  把 ARI 留给 fit 自己实现。
+- **完成标准**：针对 Pebble 和一个建议时间窗已过的 CA 的测试都在时间窗内续期。
+- **涉及**：`tlsmgr`。
 
 ### I31 按需 TLS
 

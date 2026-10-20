@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -130,9 +131,16 @@ func (c *Config) Validate() Errors {
 		}
 	}
 
-	if a := c.ACME; a != nil && a.Directory != "" {
-		if u, err := url.Parse(a.Directory); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
-			add(a.At.Field("directory"), "%q is not an http or https URL", a.Directory)
+	if a := c.ACME; a != nil {
+		if a.Directory != "" {
+			if u, err := url.Parse(a.Directory); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
+				add(a.At.Field("directory"), "%q is not an http or https URL", a.Directory)
+			}
+		}
+		for i, ch := range a.Challenges {
+			if slices.Index(a.Challenges, ch) < i {
+				add(a.At.Field("challenges").Index(i), "%q is listed twice", ch)
+			}
 		}
 	}
 	if m := c.Metrics; m != nil && c.Admin == nil {

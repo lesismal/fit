@@ -19,6 +19,10 @@ type Static struct {
 	// wildcard holds the same for the parent of each "*." name.
 	exact    map[string][]int
 	wildcard map[string][]int
+	// ocsp and staples, set by Staple, keep each certificate's OCSP
+	// response, by index: nil for one with none to keep.
+	ocsp    *OCSP
+	staples []*Staple
 }
 
 // LoadStatic loads c's certificates. Its errors carry the path and position
@@ -71,6 +75,37 @@ func appendOnce(list []int, i int) []int {
 	return append(list, i)
 }
 
+// cert returns the ith certificate, with its OCSP response stapled if it
+// has one.
+func (s *Static) cert(i int) *tls.Certificate {
+	if s.staples != nil {
+		if st := s.staples[i]; st != nil {
+			return st.Certificate()
+		}
+	}
+	return s.certs[i]
+}
+
+// Staple has o keep the OCSP responses of s's certificates, which s's
+// handshakes then get, until Release. It is called once, before s serves.
+func (s *Static) Staple(o *OCSP) {
+	s.ocsp = o
+	s.staples = make([]*Staple, len(s.certs))
+	for i, c := range s.certs {
+		s.staples[i] = o.Add(c, nil)
+	}
+}
+
+// Release gives back what Staple took.
+func (s *Static) Release() {
+	if s.ocsp == nil {
+		return
+	}
+	for _, st := range s.staples {
+		s.ocsp.Release(st)
+	}
+}
+
 // Certificates returns s's certificates, which the caller must not change.
 func (s *Static) Certificates() []*tls.Certificate { return s.certs }
 
@@ -86,7 +121,7 @@ func (s *Static) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 		return nil, errNoCertificates
 	}
 	if len(s.certs) == 1 || hello.ServerName == "" {
-		return s.certs[0], nil
+		return s.cert(0), nil
 	}
 	name := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
 	exact := s.exact[name]
@@ -100,9 +135,9 @@ func (s *Static) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	// supports, so there is nothing to check.
 	switch {
 	case len(exact) == 1 && len(wild) == 0:
-		return s.certs[exact[0]], nil
+		return s.cert(exact[0]), nil
 	case len(exact) == 0 && len(wild) == 1:
-		return s.certs[wild[0]], nil
+		return s.cert(wild[0]), nil
 	}
 	// The two lists are each in the order given; walk them as one.
 	first := -1
@@ -117,11 +152,11 @@ func (s *Static) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 			first = i
 		}
 		if hello.SupportsCertificate(s.certs[i]) == nil {
-			return s.certs[i], nil
+			return s.cert(i), nil
 		}
 	}
 	if first >= 0 {
-		return s.certs[first], nil
+		return s.cert(first), nil
 	}
-	return s.certs[0], nil
+	return s.cert(0), nil
 }

@@ -7,6 +7,21 @@
           "description": "A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own.",
           "type": "string"
         },
+        "challenges": {
+          "default": [
+            "http-01",
+            "tls-alpn-01"
+          ],
+          "description": "The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out.",
+          "items": {
+            "enum": [
+              "http-01",
+              "tls-alpn-01"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
         "directory": {
           "default": "https://acme-v02.api.letsencrypt.org/directory",
           "description": "The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests.",
@@ -347,7 +362,7 @@
       "additionalProperties": false,
       "properties": {
         "acme": {
-          "description": "Host names to obtain certificates for with ACME, as the top-level acme says, through the HTTP-01 challenge: the CA must reach fit on port 80 at each name, where any listener of fit's in the clear answers it. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files.",
+          "description": "Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files.",
           "items": {
             "type": "string"
           },
