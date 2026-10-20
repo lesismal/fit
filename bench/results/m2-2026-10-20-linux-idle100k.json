@@ -1,0 +1,58 @@
+{
+  "started": "2026-10-20T06:54:25.103401942Z",
+  "finished": "2026-10-20T06:58:20.858136624Z",
+  "host": {
+    "architecture": "x86_64",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "kernel": "Linux 7.0.0-38-generic",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "os": "linux"
+  },
+  "params": {
+    "duration": "30s",
+    "warmup": "5s",
+    "connections": 256,
+    "h2_connections": 64,
+    "h2_streams": 32,
+    "idle_connections": 100000,
+    "idle_settle": "5s",
+    "network": "host",
+    "server_cpus": "0-6",
+    "client_cpus": "7-13",
+    "backend_cpus": "14-15"
+  },
+  "versions": {
+    "docker": "29.1.3",
+    "h2load": "h2load nghttp2/1.59.0",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {},
+  "results": null,
+  "idle": [
+    {
+      "server": "fit",
+      "kind": "http1",
+      "connections": 100000,
+      "anon_before": 10559488,
+      "anon_after": 120688640,
+      "memory_before": 12509184,
+      "memory_after": 530337792,
+      "bytes_per_conn": 1101.29152,
+      "closed_by_server": 0
+    },
+    {
+      "server": "fit",
+      "kind": "tls",
+      "connections": 100000,
+      "anon_before": 10420224,
+      "anon_after": 802631680,
+      "memory_before": 12779520,
+      "memory_after": 1211551744,
+      "bytes_per_conn": 7922.11456,
+      "closed_by_server": 0
+    }
+  ]
+}

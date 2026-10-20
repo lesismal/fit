@@ -780,6 +780,13 @@ func printSummary(results []Result, idle []IdleResult) {
 		}
 		rows[key][r.Server] = cell
 	}
+	// A run of idle connections alone has no throughput results to name
+	// the servers.
+	for _, r := range idle {
+		if !slices.Contains(names, r.Server) {
+			names = append(names, r.Server)
+		}
+	}
 	fmt.Printf("\n%-18s", "req/s")
 	for _, n := range names {
 		fmt.Printf("%14s", n)

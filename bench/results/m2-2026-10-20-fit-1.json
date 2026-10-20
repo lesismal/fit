@@ -1,0 +1,152 @@
+{
+  "started": "2026-10-20T06:58:20.944056115Z",
+  "finished": "2026-10-20T07:01:54.147251535Z",
+  "host": {
+    "architecture": "x86_64",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "kernel": "Linux 7.0.0-38-generic",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "os": "linux"
+  },
+  "params": {
+    "duration": "30s",
+    "warmup": "5s",
+    "connections": 256,
+    "h2_connections": 64,
+    "h2_streams": 32,
+    "idle_connections": 10000,
+    "idle_settle": "5s",
+    "network": "host",
+    "server_cpus": "0-6",
+    "client_cpus": "7-13",
+    "backend_cpus": "14-15"
+  },
+  "versions": {
+    "docker": "29.1.3",
+    "fit": "fit v0.0.0-20261020055604-59083f3a1688; fib v1.5.4-0.20261020043140-8c637e0f9b68; go1.27.0 linux/amd64",
+    "h2load": "h2load nghttp2/1.59.0",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {
+    "fit": "ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
+  },
+  "results": [
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 770836.6266617262,
+      "requests": 23162193,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.164,
+        "p90": 0.395,
+        "p99": 2.732,
+        "p99.9": 3.928,
+        "mean": 0.28889,
+        "stdev": 0.44625,
+        "max": 16.465
+      },
+      "cpu_cores": 6.426544511652207,
+      "memory_bytes": 25518080,
+      "anon_bytes": 22749184
+    },
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 3814171.63,
+      "requests": 114425149,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.481,
+        "stdev": 0.384,
+        "max": 12.43
+      },
+      "cpu_cores": 6.984647368048395,
+      "memory_bytes": 49532928,
+      "anon_bytes": 47218688
+    },
+    {
+      "server": "fit",
+      "scenario": "static",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 776690.9169756526,
+      "requests": 23322530,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.158,
+        "p90": 0.332,
+        "p99": 0.999,
+        "p99.9": 3.168,
+        "mean": 0.21932,
+        "stdev": 0.22708,
+        "max": 10.251
+      },
+      "cpu_cores": 6.9032870006056894,
+      "memory_bytes": 34803712,
+      "anon_bytes": 32436224
+    },
+    {
+      "server": "fit",
+      "scenario": "static",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 2445512.23,
+      "requests": 73365367,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.768,
+        "stdev": 0.588,
+        "max": 17.1
+      },
+      "cpu_cores": 6.985866776649475,
+      "memory_bytes": 62709760,
+      "anon_bytes": 59662336
+    },
+    {
+      "server": "fit",
+      "scenario": "proxy",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 227585.67869044616,
+      "requests": 6834415,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 1.053,
+        "p90": 1.784,
+        "p99": 3.083,
+        "p99.9": 5.167,
+        "mean": 1.12776,
+        "stdev": 0.57209,
+        "max": 9.012
+      },
+      "cpu_cores": 6.073946015844104,
+      "memory_bytes": 46342144,
+      "anon_bytes": 42876928
+    },
+    {
+      "server": "fit",
+      "scenario": "proxy",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 237027.97,
+      "requests": 7110839,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 8.64,
+        "stdev": 2.15,
+        "max": 46.38
+      },
+      "cpu_cores": 6.626278154414473,
+      "memory_bytes": 77320192,
+      "anon_bytes": 74440704
+    }
+  ]
+}

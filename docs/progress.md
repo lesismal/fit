@@ -28,7 +28,10 @@ fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik
 nginx's throughput over HTTP/1.1.
 
 **M2 is done.** Its three exit tests pass in CI, in a job of their own (I35); CI's full race test
-jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below). **Next: M3, from I36 (matchers v2).**
+jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
+Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
+M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
+HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, and I35, its exit tests.
@@ -1511,7 +1514,8 @@ Differences from the plan:
   client measures it; the proxy's timer counted from the start, connect and upload included.
 - I23's question, the proxy's 83% of nginx over HTTP/1.1: on this host fit's proxy went from
   212k (I23's build) to 228k requests a second through R07a–R07c, about 88% of nginx's 258k at
-  I23. A new comparison with nginx belongs to M2's exit benchmarks (I35).
+  I23. The [M2 report](../bench/results/m2-report-2026-10-20.md) compares them again in one run:
+  226k against nginx's 264k, 86%, with half as much CPU again per request.
 - With the access log on, fixed h2c still serves about 30% less than without (2.69M against
   3.77M), where A13 removed the header copy: what is left is the line itself, formatted on the
   worker, and the hooks. It is not a regression, and not M1's.
@@ -1945,6 +1949,9 @@ Differences from the plan:
 
 - The certificate test is against Pebble in CI; Let's Encrypt staging needs a public name and
   ports 80 and 443, and is documented to be run by hand, as I30's done-when allows.
+- The plan's I35 has no benchmarks; the comparison with nginx that R07c's notes left for M2's end
+  is the [M2 report](../bench/results/m2-report-2026-10-20.md), run after I35 at 59083f3. The
+  harness's summary now names the servers of a run of idle connections alone, which it left out.
 
 ## Notes for later iterations
 
