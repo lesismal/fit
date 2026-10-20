@@ -40,10 +40,20 @@ const (
 // takes them, and answers "ok" for anything else.
 func stallBackend(t *testing.T, proto string) string {
 	t.Helper()
+	return stallBackendWith(t, proto, nil)
+}
+
+// stallBackendWith is stallBackend that calls ended, when not nil, as each
+// download for /big ends: when fit has let go of it, or it is all sent.
+func stallBackendWith(t *testing.T, proto string, ended func()) string {
+	t.Helper()
 	return serveBackend(t, proto, stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if r.URL.Path != "/big" {
 			_, _ = io.WriteString(w, "ok")
 			return
+		}
+		if ended != nil {
+			defer ended()
 		}
 		w.Header().Set("Content-Length", fmt.Sprint(stuckSize))
 		chunk := make([]byte, 64<<10)
@@ -289,6 +299,19 @@ func (s *stuckH3) done(t *testing.T) (int64, bool) {
 func others(t *testing.T, addr string, n int) time.Duration {
 	t.Helper()
 	var slowest time.Duration
+	for _, s := range othersTimed(t, addr, n) {
+		slowest = max(slowest, s.end.Sub(s.start))
+	}
+	return slowest
+}
+
+// span is when a request began and when its response was all read.
+type span struct{ start, end time.Time }
+
+// othersTimed is others, reporting when each request began and ended.
+func othersTimed(t *testing.T, addr string, n int) []span {
+	t.Helper()
+	var spans []span
 	for i := range n {
 		c := client(false)
 		c.Timeout = 10 * time.Second
@@ -302,9 +325,16 @@ func others(t *testing.T, addr string, n int) time.Duration {
 		if resp.StatusCode != 200 || string(body) != "ok" {
 			t.Fatalf("request %d of the others: %d %q", i, resp.StatusCode, body)
 		}
-		slowest = max(slowest, time.Since(start))
+		spans = append(spans, span{start, time.Now()})
 	}
-	return slowest
+	return spans
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 func startStuck(t *testing.T, proto, tcpAddr, h3Addr string, cert *certtest.Cert) stuckClient {
@@ -386,17 +416,36 @@ func TestStuckClientWithoutStallTimeout(t *testing.T) {
 func TestStuckClientsPastMaxConns(t *testing.T) {
 	for _, proto := range []string{"http/1.1", "h2c", "h3"} {
 		t.Run(proto, func(t *testing.T) {
-			tcpAddr, h3Addr, cert := stallFit(t, stallBackend(t, "http/1.1"), `, "max_conns": 4`)
+			const n = 8
+			ended := make(chan time.Time, n)
+			backend := stallBackendWith(t, "http/1.1", func() { ended <- time.Now() })
+			tcpAddr, h3Addr, cert := stallFit(t, backend, `, "max_conns": 4`)
 			var stuck []stuckClient
-			for range 8 {
+			for range n {
 				stuck = append(stuck, startStuck(t, proto, tcpAddr, h3Addr, cert))
 			}
 			time.Sleep(300 * time.Millisecond)
-			// Four stuck downloads hold the connections and four wait for them;
-			// each pair is let go one stall timeout after it stalls.
-			slowest := others(t, tcpAddr, 10)
-			if slowest > 3*stallTimeout+2*time.Second {
-				t.Errorf("the slowest of the others took %v", slowest)
+			// Four stuck downloads hold the connections and four wait for
+			// them; each four is let go one stall timeout after it stalls,
+			// which is after its socket buffers fill. The others wait for
+			// that and nothing more: none ends more than a second after the
+			// later of its start and the last stuck download let go. How
+			// long the buffers take to fill under the race detector on a
+			// loaded runner is no business of the test's.
+			spans := othersTimed(t, tcpAddr, 10)
+			var last time.Time
+			for i := range n {
+				select {
+				case at := <-ended:
+					last = at
+				case <-time.After(10 * stallTimeout):
+					t.Fatalf("%d of the %d stuck downloads were let go", i, n)
+				}
+			}
+			for i, s := range spans {
+				if late := s.end.Sub(maxTime(s.start, last)); late > time.Second {
+					t.Errorf("request %d of the others took %v, ending %v after the stuck downloads were let go", i, s.end.Sub(s.start), late)
+				}
 			}
 			// The four that waited began their downloads only when the first
 			// four were let go; give them their own stall timeout before
