@@ -62,6 +62,9 @@ type ACME struct {
 	timeout   time.Duration
 	workers   int
 	logf      func(format string, args ...any)
+	// onDemand, when the config has acme.on_demand, takes on names during
+	// handshakes; see OnDemand.
+	onDemand *onDemand
 	// challenges are the challenge types answered, in order; an attempt
 	// after n failures in a row starts with the nth, so that a type the CA
 	// cannot check does not fail every attempt.
@@ -107,6 +110,9 @@ type managed struct {
 	// revoked is the serial number of a certificate the OCSP responder
 	// said is revoked, which the next run does not take from the storage.
 	revoked *big.Int
+	// onDemand says a handshake took the name on, not the config; Manage
+	// leaves it, and it is dropped if its first certificate fails.
+	onDemand bool
 }
 
 // NewACME returns an ACME that obtains certificates as c says, or with the
@@ -163,6 +169,9 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 		wake:      make(chan struct{}, 1),
 	}
 	a.challenges = c.ChallengeTypes()
+	if c != nil && c.OnDemand != nil {
+		a.onDemand = newOnDemand(c.OnDemand)
+	}
 	if c != nil {
 		a.email = c.Email
 	}
@@ -239,8 +248,15 @@ func (a *ACME) Manage(names []string) {
 		want[normalizeName(n)] = true
 	}
 	changed := false
-	for n := range a.names {
-		if !want[n] {
+	for n, m := range a.names {
+		switch {
+		case want[n] && m.onDemand:
+			// Listed now: the config's, and no longer counted on demand.
+			m.onDemand = false
+			a.onDemand.drop()
+		case m.onDemand:
+			want[n] = true
+		case !want[n]:
 			delete(a.names, n)
 			changed = true
 		}
@@ -431,6 +447,13 @@ func (a *ACME) run(m *managed) {
 				a.certs.Store(&next)
 				a.staple(m.name, cert)
 			}
+		} else if m.onDemand && (*a.certs.Load())[m.name] == nil {
+			// A name taken on during a handshake whose first certificate
+			// fails is dropped, rather than tried again for ever; the
+			// next handshake for it may take it on again.
+			delete(a.names, m.name)
+			a.onDemand.drop()
+			a.logf("acme: %s: %v; dropped", m.name, err)
 		} else if a.ctx.Err() == nil {
 			m.failures++
 			wait := a.backoff(m.failures)
@@ -438,6 +461,9 @@ func (a *ACME) run(m *managed) {
 			a.logf("acme: %s: %v; trying again in %s", m.name, err, wait.Round(time.Second))
 		}
 	}
+	// A handshake waiting for the name hears of it, whether or not the name
+	// is still on demand.
+	a.onDemand.finish(m.name, a.Certificate(m.name), err)
 	a.mu.Unlock()
 	a.poke()
 }

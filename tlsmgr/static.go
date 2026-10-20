@@ -109,6 +109,17 @@ func (s *Static) Release() {
 // Certificates returns s's certificates, which the caller must not change.
 func (s *Static) Certificates() []*tls.Certificate { return s.certs }
 
+// Has reports whether s has a certificate for name, exactly or by a
+// wildcard.
+func (s *Static) Has(name string) bool {
+	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	if len(s.exact[name]) > 0 {
+		return true
+	}
+	_, parent, ok := strings.Cut(name, ".")
+	return ok && len(s.wildcard[parent]) > 0
+}
+
 // errNoCertificates is what a Static with no certificates answers.
 var errNoCertificates = errors.New("tlsmgr: no certificates")
 

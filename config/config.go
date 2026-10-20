@@ -49,16 +49,74 @@ var (
 // renew at once; a failure is tried again later and later, up to an hour
 // apart.
 type ACME struct {
-	Directory      string   `json:"directory,omitempty" default:"\"https://acme-v02.api.letsencrypt.org/directory\"" doc:"The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests."`
-	Email          string   `json:"email,omitempty" doc:"The address the CA may write to about the account's certificates; none when left out."`
-	CAFile         string   `json:"ca_file,omitempty" doc:"A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own."`
-	Storage        string   `json:"storage,omitempty" doc:"The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out."`
-	MaxConcurrent  int      `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
-	Timeout        Duration `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
-	RequestTimeout Duration `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
-	Challenges     []string `json:"challenges,omitempty" enum:"http-01,tls-alpn-01" default:"[\"http-01\",\"tls-alpn-01\"]" doc:"The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out."`
+	Directory      string    `json:"directory,omitempty" default:"\"https://acme-v02.api.letsencrypt.org/directory\"" doc:"The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests."`
+	Email          string    `json:"email,omitempty" doc:"The address the CA may write to about the account's certificates; none when left out."`
+	CAFile         string    `json:"ca_file,omitempty" doc:"A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own."`
+	Storage        string    `json:"storage,omitempty" doc:"The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out."`
+	MaxConcurrent  int       `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
+	Timeout        Duration  `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
+	RequestTimeout Duration  `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
+	OnDemand       *OnDemand `json:"on_demand,omitempty" doc:"How certificates are obtained during handshakes, for listeners whose tls sets on_demand: whom to ask whether a name may have one, and how fast and how many."`
+	Challenges     []string  `json:"challenges,omitempty" enum:"http-01,tls-alpn-01" default:"[\"http-01\",\"tls-alpn-01\"]" doc:"The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// The defaults of OnDemand.
+const (
+	DefaultOnDemandRate     = 10
+	DefaultOnDemandMaxNames = 1000
+)
+
+// The defaults of OnDemand's durations.
+var (
+	DefaultOnDemandInterval = Duration(time.Minute)
+	DefaultOnDemandTimeout  = Duration(10 * time.Second)
+)
+
+// OnDemand is how certificates are obtained during handshakes, for names no
+// listener lists: only for names the ask URL allows, at most Rate every
+// Interval, and MaxNames in all. A handshake for such a name waits for its
+// certificate, on fib's handshake pool and not on a worker, for at most
+// Timeout; one that gives up leaves it being obtained for the next.
+type OnDemand struct {
+	Ask      string   `json:"ask" fit:"required" doc:"A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute."`
+	Rate     int      `json:"rate,omitempty" min:"0" default:"10" doc:"How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0."`
+	Interval Duration `json:"interval,omitempty" default:"\"1m\"" doc:"The interval rate counts over. 1m when left out."`
+	MaxNames int      `json:"max_names,omitempty" min:"0" default:"1000" doc:"How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0."`
+	Timeout  Duration `json:"timeout,omitempty" default:"\"10s\"" doc:"How long a handshake waits for its name's certificate, as long as fib's handshake timeout by default. 10s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Limit, Every, Names and Wait return o's settings, their defaults when
+// left out.
+func (o *OnDemand) Limit() int {
+	if o.Rate <= 0 {
+		return DefaultOnDemandRate
+	}
+	return o.Rate
+}
+
+func (o *OnDemand) Every() time.Duration {
+	if o.Interval <= 0 {
+		return DefaultOnDemandInterval.Std()
+	}
+	return o.Interval.Std()
+}
+
+func (o *OnDemand) Names() int {
+	if o.MaxNames <= 0 {
+		return DefaultOnDemandMaxNames
+	}
+	return o.MaxNames
+}
+
+func (o *OnDemand) Wait() time.Duration {
+	if o.Timeout <= 0 {
+		return DefaultOnDemandTimeout.Std()
+	}
+	return o.Timeout.Std()
 }
 
 // The challenges ACME answers.
@@ -243,6 +301,7 @@ type Listener struct {
 type TLS struct {
 	Certificates []Certificate `json:"certificates,omitempty" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
 	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
+	OnDemand     bool          `json:"on_demand,omitempty" doc:"Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it."`
 
 	At Value `json:"-" fit:"self"`
 }

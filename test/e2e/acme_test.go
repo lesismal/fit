@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -93,5 +94,37 @@ func TestACMETLSALPNFromPebble(t *testing.T) {
 }`, p.Directory, p.CAFile, t.TempDir(), port))
 	if body := getObtained(t, p, addrs["https"], "alpn.fit.test"); body != "over alpn" {
 		t.Errorf("%q", body)
+	}
+}
+
+// TestOnDemandFromPebble runs fit with a listener that obtains certificates
+// during handshakes, as an ask URL allows: a client asking for an allowed
+// name gets the page over a certificate obtained then, and one asking for a
+// refused name fails its handshake.
+func TestOnDemandFromPebble(t *testing.T) {
+	port := pebbletest.FreePort(t)
+	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
+	ask := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.URL.Query().Get("domain") != "yes.fit.test" {
+			stdhttp.Error(w, "no", stdhttp.StatusForbidden)
+		}
+	}))
+	defer ask.Close()
+	_, addrs := startFit(t, fmt.Sprintf(`{
+  "acme": {"directory": %q, "ca_file": %q, "storage": %q, "challenges": ["http-01"],
+    "on_demand": {"ask": %q, "timeout": "20s"}},
+  "listeners": [
+    {"name": "http", "address": "127.0.0.1:%d"},
+    {"name": "https", "address": "127.0.0.1:0", "tls": {"on_demand": true}}
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "on demand"}}}]
+}`, p.Directory, p.CAFile, t.TempDir(), ask.URL, port))
+	if body := getObtained(t, p, addrs["https"], "yes.fit.test"); body != "on demand" {
+		t.Errorf("%q", body)
+	}
+	conn, err := tls.Dial("tcp", addrs["https"], &tls.Config{RootCAs: p.Roots(t), ServerName: "no.fit.test"})
+	if err == nil {
+		conn.Close()
+		t.Error("a handshake for a refused name succeeded")
 	}
 }

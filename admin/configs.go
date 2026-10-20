@@ -252,7 +252,14 @@ func sameACME(a, b *config.ACME) bool {
 	}
 	return a.Directory == b.Directory && a.Email == b.Email && a.CAFile == b.CAFile && a.Storage == b.Storage &&
 		a.MaxConcurrent == b.MaxConcurrent && a.Timeout == b.Timeout && a.RequestTimeout == b.RequestTimeout &&
-		slices.Equal(a.ChallengeTypes(), b.ChallengeTypes())
+		slices.Equal(a.ChallengeTypes(), b.ChallengeTypes()) && sameOnDemand(a.OnDemand, b.OnDemand)
+}
+
+func sameOnDemand(a, b *config.OnDemand) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Ask == b.Ask && a.Limit() == b.Limit() && a.Every() == b.Every() && a.Names() == b.Names() && a.Wait() == b.Wait()
 }
 
 func sameAdmin(a, b *config.Admin) bool {

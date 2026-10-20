@@ -37,6 +37,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "on_demand": {
+          "$ref": "#/$defs/config.OnDemand",
+          "description": "How certificates are obtained during handshakes, for listeners whose tls sets on_demand: whom to ask whether a name may have one, and how fast and how many."
+        },
         "request_timeout": {
           "default": "30s",
           "description": "How long each request to the CA may take. 30s when left out.",
@@ -294,6 +298,43 @@
       "properties": {},
       "type": "object"
     },
+    "config.OnDemand": {
+      "additionalProperties": false,
+      "properties": {
+        "ask": {
+          "description": "A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute.",
+          "type": "string"
+        },
+        "interval": {
+          "default": "1m",
+          "description": "The interval rate counts over. 1m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_names": {
+          "default": 1000,
+          "description": "How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rate": {
+          "default": 10,
+          "description": "How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long a handshake waits for its name's certificate, as long as fib's handshake timeout by default. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ask"
+      ],
+      "type": "object"
+    },
     "config.Route": {
       "additionalProperties": false,
       "properties": {
@@ -374,6 +415,10 @@
             "$ref": "#/$defs/config.Certificate"
           },
           "type": "array"
+        },
+        "on_demand": {
+          "description": "Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it.",
+          "type": "boolean"
         }
       },
       "type": "object"

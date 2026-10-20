@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I30, I32–I34) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I31, I32–I34) |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, chosen by SNI, with OCSP responses stapled) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no HTTPS by default (I30b), ARI (I30c) or on-demand TLS (I31); no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no HTTPS by default (I30b) or ARI (I30c); no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -27,9 +27,9 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I31 (on-demand TLS), then I30b (HTTPS by default) and I30c (ARI).**
+**Next: I30b (HTTPS by default) and I30c (ARI), then I35 (M2's exit tests).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I32, active health checks, I33, load
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, and I34, Prometheus metrics.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I31 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I30b from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -68,7 +68,7 @@ To continue, start a session with:
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
-| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; `Certs`, a listener's Manager of files and names obtained with ACME |
+| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
@@ -1788,6 +1788,46 @@ Differences from the plan:
 - Let's Encrypt has stopped OCSP, so its certificates get no staple; the stapling is for other CAs
   and for certificates from files.
 - No setting turns stapling off: a certificate that names no responder costs nothing.
+
+### I31 On-demand TLS — done
+
+- Config: a listener's `tls` takes `on_demand: true`, alone or with `certificates` and `acme`, and
+  needs a top-level `acme.on_demand`: `ask`, a URL asked with `domain=<name>` whether a name may
+  have a certificate (any answer but 2xx refuses it), `rate` per `interval` (10 a minute),
+  `max_names` (1000) and `timeout`, how long a handshake waits (10s, fib's handshake timeout).
+  Like the rest of `acme`, it is read at start; a reload that changes it gets a warning.
+- `tlsmgr.Certs` serves a listed name as before, and a name the files have a certificate for
+  (`Static.Has`, exact or wildcard) from them; any other name a client asks for goes to
+  `ACME.OnDemand`, which `GetCertificate` calls on fib's handshake pool, never on a worker. It
+  refuses names that are no host name (an IP address, one label, a wildcard, a bad label) without
+  asking; serves a certificate it has from memory; otherwise checks the rate and `max_names`,
+  asks the ask URL, counts the name against both, and hands it to the ACME workers as a managed
+  name, which loads it from the storage or obtains it as I29 does, and renews it after. Handshakes
+  for the same name wait for one certificate; each waits at most `timeout`, and the certificate
+  goes on being obtained for the next. A refusal is remembered for a minute (10,000 names at
+  most); an ask URL that does not answer refuses without being remembered. A name whose first
+  certificate fails is dropped and no longer counted; a reload keeps the names taken on.
+- Tests: four handshakes at once for an allowed name get one certificate from Pebble, with one ask
+  and one order, and it is then served from memory, also after a reload that lists no names; a
+  refused name is asked about once a minute; an ask URL that does not answer refuses each time; with
+  a rate of one an hour, the second name is refused without asking, and allowed an hour later; past
+  `max_names` a name is refused; against a CA that cuts connections the waiting handshake hears the
+  failure, the name is dropped and no longer counted; bad names are refused without asking; a name
+  the files have is served from them, as is a hello with no name; without `acme.on_demand` nothing
+  is obtained. `test/e2e` `TestOnDemandFromPebble`: the fit binary obtains a certificate during the
+  handshake of an allowed name and serves the page, and fails the handshake of a refused one. The
+  config's checks in `TestValidate`. `go vet ./...`, `GOOS=windows go vet ./...` and
+  `go test -race ./...` pass, with Pebble.
+- No benchmark: listeners without `on_demand` take the same path as before, and a request's path is
+  unchanged.
+
+Differences from the plan:
+
+- Rate limits are on taking names on, which a certificate loaded from the storage counts towards
+  too; a stored certificate still needs the ask URL's yes, as the name may no longer be allowed.
+- Names taken on are kept and renewed until a restart; none is dropped for going unused, and
+  `max_names` bounds them meanwhile.
+- The certificate expiry metric lists the names a listener lists, not those taken on demand.
 
 ## Notes for later iterations
 

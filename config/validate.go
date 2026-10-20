@@ -59,8 +59,11 @@ func (c *Config) Validate() Errors {
 			seen[p] = true
 		}
 		if t := l.TLS; t != nil {
-			if len(t.Certificates) == 0 && len(t.ACME) == 0 {
-				add(t.At, "a certificate or a name for acme is needed")
+			if len(t.Certificates) == 0 && len(t.ACME) == 0 && !t.OnDemand {
+				add(t.At, "a certificate, a name for acme or on_demand is needed")
+			}
+			if t.OnDemand && (c.ACME == nil || c.ACME.OnDemand == nil) {
+				add(t.At.Field("on_demand"), "on_demand needs acme.on_demand, which says whom to ask whether a name may have a certificate")
 			}
 			names := map[string]bool{}
 			for i, name := range t.ACME {
@@ -135,6 +138,11 @@ func (c *Config) Validate() Errors {
 		if a.Directory != "" {
 			if u, err := url.Parse(a.Directory); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
 				add(a.At.Field("directory"), "%q is not an http or https URL", a.Directory)
+			}
+		}
+		if o := a.OnDemand; o != nil {
+			if u, err := url.Parse(o.Ask); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
+				add(o.At.Field("ask"), "%q is not an http or https URL", o.Ask)
 			}
 		}
 		for i, ch := range a.Challenges {

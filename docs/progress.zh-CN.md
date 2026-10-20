@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-20 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I30、I32–I34） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：进行中（I24–I31、I32–I34） |
 | fib | `github.com/lesismal/fib v1.5.2`，来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，按 SNI 选择，并 staple OCSP 响应）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有默认 HTTPS（I30b）、ARI（I30c）和按需 TLS（I31）；还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有默认 HTTPS（I30b）和 ARI（I30c）；还没有方法、请求头等其他匹配器（I36） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,8 +23,8 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**下一步：I31（按需 TLS），然后是 I30b（默认 HTTPS）和 I30c（ARI）。** M2 已完成 I24、I25（带配置版本、局部
-修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I32（主动健康检查）、I33（负载
+**下一步：I30b（默认 HTTPS）和 I30c（ARI），然后是 I35（M2 退出测试）。** M2 已完成 I24、I25（带配置版本、局部
+修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）和 I34（Prometheus 指标）。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
 
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I31。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I30b。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -56,7 +56,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
-| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
+| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
@@ -1323,6 +1323,32 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 - 拆分：默认 HTTPS 移到 I30b，I29 留给 I30 的 ARI 移到 I30c，使这次迭代接近计划的目标规模。
 - Let's Encrypt 已停止 OCSP，它的证书不会有 staple；stapling 用于其他 CA 和文件中的证书。
 - 没有关闭 stapling 的设置：不指明响应者的证书没有任何开销。
+
+### I31 按需 TLS — 已完成
+
+- 配置：listener 的 `tls` 可以设置 `on_demand: true`，可以单独使用，也可以与 `certificates`、`acme` 同时使用，并需要顶层
+  的 `acme.on_demand`：`ask` 是询问某个名字能否获得证书的 URL，带 `domain=<name>` 参数（2xx 以外的回答都表示拒绝）；
+  `rate` 和 `interval`（每分钟 10 个）；`max_names`（1000）；`timeout` 是握手最多等待多久（10s，即 fib 的握手超时）。
+  和 `acme` 的其余部分一样在启动时读取；修改它的重载会得到警告。
+- `tlsmgr.Certs` 对列出的名字照旧处理，文件中有证书的名字（`Static.Has`，精确或通配符匹配）用文件中的证书；客户端请求的
+  其他名字交给 `ACME.OnDemand`，由 `GetCertificate` 在 fib 的握手池上调用，绝不在 worker 上。它不经询问就拒绝不是主机名
+  的名字（IP 地址、只有一段、通配符、不合法的段）；内存中已有证书就直接返回；否则先检查速率和 `max_names`，再询问 ask URL，
+  把名字计入两者，交给 ACME 的 worker 作为受管名字处理：像 I29 那样从存储加载或申请，之后续期。同一名字的多个握手等待同一张
+  证书；每个最多等待 `timeout`，超时后证书仍继续申请，留给下一次握手。拒绝会被记住一分钟（最多 10,000 个名字）；ask URL
+  不应答时拒绝但不记住。第一张证书申请失败的名字会被丢弃，不再计数；重载保留按需加入的名字。
+- 测试：对一个允许的名字同时发起四个握手，从 Pebble 得到同一张证书，只询问一次、只下一个订单，之后从内存提供，在不列名字
+  的重载后也是如此；被拒绝的名字每分钟只询问一次；不应答的 ask URL 每次都拒绝；速率为每小时一个时，第二个名字不经询问就被
+  拒绝，一小时后被允许；超过 `max_names` 的名字被拒绝；CA 切断连接时，等待中的握手得知失败，名字被丢弃且不再计数；不合法的
+  名字不经询问就被拒绝；文件中有的名字用文件中的证书，没有名字的 hello 也是；没有 `acme.on_demand` 时什么都不申请。
+  `test/e2e` 的 `TestOnDemandFromPebble`：fit 程序在允许的名字的握手中申请证书并提供页面，被拒绝的名字握手失败。配置检查在
+  `TestValidate` 中。`go vet ./...`、`GOOS=windows go vet ./...` 和 `go test -race ./...` 通过（含 Pebble）。
+- 没有基准：没有 `on_demand` 的 listener 走原来的路径，请求的路径没有变化。
+
+与计划的差异：
+
+- 速率限制针对加入名字，从存储加载证书也计入；存储中已有证书仍需 ask URL 同意，因为名字可能已不再被允许。
+- 按需加入的名字在重启前一直保留并续期，不因长期不用而丢弃，期间由 `max_names` 限制总数。
+- 证书到期指标只列出 listener 列出的名字，不含按需加入的名字。
 
 ## 给后续迭代的说明
 

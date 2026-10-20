@@ -10,9 +10,12 @@ import (
 // for a listed name until ACME has one.
 type Certs struct {
 	static *Static // nil when the listener has no files
-	acme   *ACME   // nil when it lists no names
+	acme   *ACME   // nil when it lists no names and has no on-demand TLS
 	names  map[string]bool
 	first  string // the first name listed, for a client that names none
+	// onDemand has a obtain a certificate during the handshake for a name
+	// neither listed nor in the files.
+	onDemand bool
 }
 
 // errNoChallenge is what a handshake for ACMEALPN gets with no TLS-ALPN-01
@@ -30,14 +33,22 @@ func isACMETLS(hello *tls.ClientHelloInfo) bool {
 var errNoCertificate = errors.New("tlsmgr: no certificate yet for this name")
 
 // NewCerts returns the Manager of a listener with the certificates from files
-// static, which may be nil, and names, which a obtains certificates for.
-func NewCerts(static *Static, a *ACME, names []string) *Certs {
-	c := &Certs{static: static}
-	if a != nil && len(names) > 0 {
-		c.acme, c.names, c.first = a, make(map[string]bool, len(names)), normalizeName(names[0])
+// static, which may be nil, and names, which a obtains certificates for, and,
+// with onDemand, any other name a client asks for that a allows (see
+// ACME.OnDemand).
+func NewCerts(static *Static, a *ACME, names []string, onDemand bool) *Certs {
+	c := &Certs{static: static, names: map[string]bool{}}
+	if a == nil {
+		return c
+	}
+	if len(names) > 0 {
+		c.acme, c.first = a, normalizeName(names[0])
 		for _, n := range names {
 			c.names[normalizeName(n)] = true
 		}
+	}
+	if onDemand {
+		c.acme, c.onDemand = a, true
 	}
 	return c
 }
@@ -73,7 +84,7 @@ func (c *Certs) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 	if c.acme != nil && isACMETLS(hello) {
 		// A CA checking a TLS-ALPN-01 challenge, which gets the challenge's
 		// certificate or nothing.
-		if cert := c.acme.ALPNChallenge(hello.ServerName); cert != nil && c.names[normalizeName(hello.ServerName)] {
+		if cert := c.acme.ALPNChallenge(hello.ServerName); cert != nil && (c.names[normalizeName(hello.ServerName)] || c.onDemand) {
 			return cert, nil
 		}
 		return nil, errNoChallenge
@@ -88,6 +99,11 @@ func (c *Certs) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 				return cert, nil
 			}
 		}
+	}
+	if c.onDemand && hello.ServerName != "" && (c.static == nil || !c.static.Has(hello.ServerName)) {
+		// Blocks, on fib's handshake pool, for at most on_demand's
+		// timeout.
+		return c.acme.OnDemand(hello.ServerName)
 	}
 	if c.static != nil {
 		return c.static.GetCertificate(hello)

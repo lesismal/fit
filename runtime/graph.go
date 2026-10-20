@@ -229,14 +229,14 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 				}
 			}
 			switch {
-			case len(t.ACME) == 0:
+			case len(t.ACME) == 0 && !t.OnDemand:
 				l.Certificates = static
 			case env.ACME == nil:
 				// A config only checked, as fit validate does: the names'
 				// certificates are not obtained, and only the files' served.
-				l.Certificates = tlsmgr.NewCerts(static, nil, nil)
+				l.Certificates = tlsmgr.NewCerts(static, nil, nil, false)
 			default:
-				l.Certificates = tlsmgr.NewCerts(static, env.ACME, t.ACME)
+				l.Certificates = tlsmgr.NewCerts(static, env.ACME, t.ACME, t.OnDemand)
 				for _, name := range t.ACME {
 					if !slices.Contains(g.ACMENames, name) {
 						g.ACMENames = append(g.ACMENames, name)

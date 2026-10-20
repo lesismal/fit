@@ -125,9 +125,9 @@ func TestCerts(t *testing.T) {
 	a := &ACME{}
 	a.certs.Store(&map[string]*tls.Certificate{"managed.example": managed})
 
-	both := NewCerts(static, a, []string{"Managed.Example", "pending.example"})
-	acmeOnly := NewCerts(nil, a, []string{"managed.example", "pending.example"})
-	pendingFirst := NewCerts(nil, a, []string{"pending.example", "managed.example"})
+	both := NewCerts(static, a, []string{"Managed.Example", "pending.example"}, false)
+	acmeOnly := NewCerts(nil, a, []string{"managed.example", "pending.example"}, false)
+	pendingFirst := NewCerts(nil, a, []string{"pending.example", "managed.example"}, false)
 	for _, tt := range []struct {
 		c    *Certs
 		sni  string
@@ -153,7 +153,7 @@ func TestCerts(t *testing.T) {
 	if got := both.Certificates(); len(got) != 2 || got[0] != file || got[1] != managed {
 		t.Errorf("Certificates: %v", got)
 	}
-	if got := NewCerts(nil, a, []string{"pending.example"}).Certificates(); len(got) != 0 {
+	if got := NewCerts(nil, a, []string{"pending.example"}, false).Certificates(); len(got) != 0 {
 		t.Errorf("Certificates with none obtained: %v", got)
 	}
 }
@@ -251,7 +251,7 @@ func TestSlowCA(t *testing.T) {
 		}
 	}
 	start := time.Now()
-	if c, err := NewCerts(nil, a, names).GetCertificate(hello("a.example")); c != nil || err == nil {
+	if c, err := NewCerts(nil, a, names, false).GetCertificate(hello("a.example")); c != nil || err == nil {
 		t.Error("a certificate for a name never obtained")
 	}
 	if _, ok := a.HTTPChallenge("token"); ok {
@@ -450,7 +450,7 @@ func TestPebbleTLSALPN(t *testing.T) {
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: pebbletest.FreePort(t), TLSPort: tlsPort})
 	var l logs
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"tls-alpn-01"}}, &l)
-	answered := serveTLSALPN01(t, NewCerts(nil, a, []string{"alpn.fit.test"}), tlsPort)
+	answered := serveTLSALPN01(t, NewCerts(nil, a, []string{"alpn.fit.test"}, false), tlsPort)
 	a.start()
 	a.Manage([]string{"alpn.fit.test"})
 	t.Cleanup(func() { l.mu.Lock(); t.Log(strings.Join(l.lines, "\n")); l.mu.Unlock() })
@@ -483,7 +483,7 @@ func TestChallengeFallback(t *testing.T) {
 func TestCertsALPN(t *testing.T) {
 	var l logs
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
-	certs := NewCerts(nil, a, []string{"a.fit.test"})
+	certs := NewCerts(nil, a, []string{"a.fit.test"}, false)
 	alpn := func(name string) *tls.ClientHelloInfo {
 		h := hello(name)
 		h.SupportedProtos = []string{ACMEALPN}

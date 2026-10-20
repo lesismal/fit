@@ -211,8 +211,8 @@ func TestValidate(t *testing.T) {
 	}{
 		{`{"name": "web", "address": ":80", "protocols": ["h2"]}`, "h2 needs tls"},
 		{`{"name": "web", "address": ":443", "protocols": ["h2c"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}}`, "use h2"},
-		{`{"name": "web", "address": ":443", "tls": {"certificates": []}}`, "listeners[0].tls: a certificate or a name for acme is needed"},
-		{`{"name": "web", "address": ":443", "tls": {}}`, "listeners[0].tls: a certificate or a name for acme is needed"},
+		{`{"name": "web", "address": ":443", "tls": {"certificates": []}}`, "listeners[0].tls: a certificate, a name for acme or on_demand is needed"},
+		{`{"name": "web", "address": ":443", "tls": {}}`, "listeners[0].tls: a certificate, a name for acme or on_demand is needed"},
 		{`{"name": "web", "address": ":443", "tls": {"acme": ["*.example.com"]}}`, "acme[0]: \"*.example.com\" is a wildcard"},
 		{`{"name": "web", "address": ":443", "tls": {"acme": ["192.0.2.1"]}}`, "acme[0]: \"192.0.2.1\" is an IP address"},
 		{`{"name": "web", "address": ":443", "tls": {"acme": ["a.example", "A.EXAMPLE"]}}`, "acme[1]: \"A.EXAMPLE\" is listed twice"},

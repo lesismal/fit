@@ -146,7 +146,7 @@ Status: `todo`, `doing` or `done`.
 | I30 | TLS-ALPN-01, OCSP stapling | I29 | done |
 | I30b | HTTPS by default | I30 | todo |
 | I30c | ACME Renewal Information (ARI) | I29 | todo |
-| I31 | On-demand TLS | I30 | todo |
+| I31 | On-demand TLS | I30 | done |
 | I32 | Active health checks | I20 | done |
 | I33 | Load balancing v2 | I19 | done |
 | I34 | Prometheus metrics | I23 | done |

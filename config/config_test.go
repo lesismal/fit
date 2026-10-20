@@ -278,6 +278,16 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:102: acme.challenges[2]: "http-01" is listed twice`},
 		},
 		{
+			name: "on_demand without acme.on_demand",
+			doc:  `{"listeners": [{"name": "web", "address": ":443", "tls": {"on_demand": true}}]}`,
+			want: []string{`1:72: listeners[0].tls.on_demand: on_demand needs acme.on_demand, which says whom to ask whether a name may have a certificate`},
+		},
+		{
+			name: "on_demand's ask",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"on_demand": {"ask": "ftp://x"}}}`,
+			want: []string{`1:82: acme.on_demand.ask: "ftp://x" is not an http or https URL`},
+		},
+		{
 			name: "metrics without admin",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "metrics": {}}`,
 			want: []string{`1:63: metrics: the Admin API serves metrics: set admin too`},
