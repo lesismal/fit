@@ -30,6 +30,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | asked | 12 | R07d |
 | A18 | A response's status, and when its request arrived, without a hook | asked | 12 | I34 |
+| A19 | A streamed request's `Trailer` set where its end is handed over | fixed on a branch | 13 | I35 |
 
 ## Evidence
 
@@ -517,3 +518,27 @@ the load generator at about 775k, and the proxy, at about 230k, do not move.
 **How fit uses it.** The dispatcher reads `Received` instead of the clock when a request comes in,
 and after the handler returns counts a response that `Status` says is sent and is not `Retained`,
 with one clock read and no hook; the proxy's responses keep the hook, which A17 makes cheaper.
+
+## A19: A streamed request's Trailer set where its end is handed over
+
+**Status.** Fixed on fib's branch `trailer-on-consumer` (commit `a06c587`, from `main` at
+`67db021`), not merged.
+
+**Problem.** `BodyStream.finish` set the request's `Trailer` on the goroutine that took the body's
+end off the connection. On HTTP/2 and HTTP/3 that is the connection's reader, not the handler's
+goroutine, so a handler that reads the `Trailer` its request came with, as net/http lets it before
+it reads the body, races with the body ending. fit's proxy reads the trailer names its client
+announced as it starts, to declare them upstream.
+
+**Evidence.** CI has failed since the M1 review; with three CPUs, as a CI runner has,
+`handler/proxy` `TestTrailers/h2c` fails under the race detector: `trailerNames` reads
+`Request.Trailer` while `BodyStream.finish`, called from `h2ServerConn.handleTrailers`, writes it.
+Five runs in a row fail one in five with fib v1.5.2, and none with the branch.
+
+**Change.** The trailer is kept in the `BodyStream` and becomes the request's `Trailer` only
+where the body's end is handed to the handler, on the goroutine taking it: by `Read` as it returns
+`io.EOF`, and before `OnBody`'s function is called with `fin`. Until then the request keeps the
+`Trailer` it came with. Tests over HTTP/2 and HTTP/3, a handler reading its `Trailer` while the
+body and trailer arrive, fail under the race detector without the change and pass with it.
+
+**How fit uses it.** Nothing changes in fit: the proxy's `trailerNames` stops racing.

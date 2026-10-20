@@ -29,6 +29,7 @@
 | A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
 | A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已提出 | 12 | R07d |
 | A18 | 不经回调取得响应的状态和请求到达的时间 | 已提出 | 12 | I34 |
+| A19 | 流式请求的 `Trailer` 在交出请求体结尾的地方设置 | 已在分支上修复 | 13 | I35 |
 
 ## 证据
 
@@ -392,3 +393,21 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 **fit 如何使用。** dispatcher 在请求到来时用 `Received` 代替读时钟，在 handler 返回后，若 `Status` 表明响应已发送且没有
 `Retained`，就只读一次时钟、不注册回调地计数；代理的响应仍用回调，由 A17 降低其开销。
+
+## A19：流式请求的 Trailer 在交出请求体结尾的地方设置
+
+**状态。** 已在 fib 的分支 `trailer-on-consumer` 上修复（提交 `a06c587`，基于 `main` 的 `67db021`），尚未合并。
+
+**问题。** `BodyStream.finish` 在从连接上读到请求体结尾的 goroutine 上设置请求的 `Trailer`。在 HTTP/2 和 HTTP/3 上，
+那是连接的读取者，而不是 handler 的 goroutine，所以读取请求自带 `Trailer` 的 handler（net/http 允许在读请求体之前这样做）
+会与请求体结束发生竞争。fit 的代理在开始时读取客户端声明的 trailer 名字，以便向上游声明。
+
+**证据。** 自 M1 审查以来 CI 一直失败；在三个 CPU（与 CI 的 runner 相同）下，`handler/proxy` 的 `TestTrailers/h2c` 在竞态
+检测下失败：`trailerNames` 读取 `Request.Trailer`，同时由 `h2ServerConn.handleTrailers` 调用的 `BodyStream.finish` 写它。
+用 fib v1.5.2 连续运行五次有一次失败，用这个分支没有失败。
+
+**修改。** trailer 保存在 `BodyStream` 中，只在把请求体结尾交给 handler 的地方、在取走它的 goroutine 上，成为请求的
+`Trailer`：`Read` 返回 `io.EOF` 时，以及以 `fin` 调用 `OnBody` 的函数之前。在此之前请求保留它自带的 `Trailer`。HTTP/2 和
+HTTP/3 上的测试（handler 在请求体和 trailer 到达时读取 `Trailer`）没有这个修改时在竞态检测下失败，有修改时通过。
+
+**fit 如何使用。** fit 不需要改动：代理的 `trailerNames` 不再竞争。

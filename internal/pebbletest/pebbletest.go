@@ -3,7 +3,8 @@
 // certificates.
 //
 // The binaries are found in $FIT_PEBBLE_BIN, or on PATH; a test without them
-// is skipped. Install them with:
+// is skipped, or fails when $FIT_PEBBLE_REQUIRED is set, as in CI's M2 exit
+// tests. Install them with:
 //
 //	go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.1
 //	go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.1
@@ -78,6 +79,9 @@ func binary(t testing.TB, name string) string {
 	}
 	p, err := exec.LookPath(name)
 	if err != nil {
+		if os.Getenv("FIT_PEBBLE_REQUIRED") != "" {
+			t.Fatalf("%s not found in $FIT_PEBBLE_BIN or on PATH, and $FIT_PEBBLE_REQUIRED is set", name)
+		}
 		t.Skipf("%s not found in $FIT_PEBBLE_BIN or on PATH; see package pebbletest", name)
 	}
 	return p

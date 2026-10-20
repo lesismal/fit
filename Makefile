@@ -1,4 +1,4 @@
-.PHONY: all build test race vet lint fmt fmt-check schema fuzz bench check
+.PHONY: all build test race vet lint fmt fmt-check schema fuzz bench check m2-exit
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -30,6 +30,15 @@ fmt-check:
 # or a standard module.
 schema:
 	$(GO) test ./schema -run TestSchemaUpToDate -update
+
+# M2's exit criteria (docs/roadmap.md): a churn of config swaps under traffic,
+# a config with only a host name served over HTTPS with a certificate from
+# Pebble, and an upstream that stops answering probes leaving rotation and
+# coming back. The certificate test needs Pebble; see internal/pebbletest.
+M2_EXIT = TestChurn|TestAutoHTTPSFromPebble|TestHealthCheckRotation
+
+m2-exit:
+	$(GO) test -race -count=1 -v -run '^($(M2_EXIT))$$' ./test/e2e
 
 fuzz:
 	$(GO) test ./config -run '^$$' -fuzz FuzzLoad -fuzztime 30s

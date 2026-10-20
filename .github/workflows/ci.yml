@@ -72,6 +72,26 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
+  # M2's exit criteria, run on their own so that they show as a check of
+  # their own; go test -race ./... above runs them too. With Pebble set
+  # to be required, a missing binary fails the job rather than skipping it.
+  m2-exit:
+    name: M2 exit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install Pebble
+        run: |
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.1
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.1
+          echo "FIT_PEBBLE_BIN=$(go env GOPATH)/bin" >> "$GITHUB_ENV"
+          echo "FIT_PEBBLE_REQUIRED=1" >> "$GITHUB_ENV"
+      - name: make m2-exit
+        run: make m2-exit
+
   fuzz:
     name: Fuzz (short)
     runs-on: ubuntu-latest
