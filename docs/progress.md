@@ -2117,7 +2117,9 @@ Differences from the plan:
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
   lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`
-  cuts. v1.5.4 brought A16's stall bound (`SendFileStall`), A17 and the first part of A18 (`Context.Status`), made by fit's session in fib with the maintainer's leave (R07e); before it, fib's `main` at `8c637e0`, after v1.5.3, added connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
+  cuts (A23: without it an idle HTTP/2 connection's idle timer kept each closed engine in memory,
+  `handler/proxy` peaked at 5.3GB under the race detector, and the swapping stalled an h2c upload
+  past its timeout on macOS). v1.5.4 brought A16's stall bound (`SendFileStall`), A17 and the first part of A18 (`Context.Status`), made by fit's session in fib with the maintainer's leave (R07e); before it, fib's `main` at `8c637e0`, after v1.5.3, added connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
   parts of A8 and A12), v1.5.0 the rest of A12 (`Client.Start`), v1.5.1 A14 and A15, v1.5.2 the
   first part of A16, and v1.5.3 A19, a streamed request's `Trailer` set where its end is handed
   over, which CI's race detector had caught in the proxy's `TestTrailers/h2c`; see [fib-api-requests](fib-api-requests.md). v1.3.0, tagged for I16 and I22 on fib's `main` of

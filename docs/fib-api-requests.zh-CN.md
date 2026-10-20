@@ -33,6 +33,7 @@
 | A20 | 不经 net/http 写客户端请求、读响应头 | 已完成，v1.5.6 | 12 | R07f |
 | A21 | 事件循环每次休眠只调用一次 `epoll_ctl`，而不是两次 | 已提出 | 12 | R07f |
 | A22 | 客户端连接的空闲计时不必每个请求重置定时器 | 已提出 | 12 | R07f |
+| A23 | `Engine.Close` 切断的连接也运行 `OnClose` | 已完成，v1.5.6 | 11、13 | — |
 
 ## 证据
 
@@ -484,3 +485,26 @@ Mac 上单独测量：按 `parseHead` 的方式对四行的响应头调用 `Read
 这个比例的时间，`IdleConnTimeout` 允许这样。
 
 **fit 如何使用。** fit 不需要改动。
+
+## A23：`Engine.Close` 切断的连接也运行 `OnClose`
+
+**状态。** 已在 fib v1.5.6 中完成（`6fb6479`）；fit 从此使用它。
+
+**问题。** 在 epoll、kqueue 和 IOCP 后端上，`Engine.Close` 一次切断所有连接，却不运行它们的 `OnClose`，而可移植后端的
+`Close` 会运行。协议在 `OnClose` 里放开的东西因此一直被持有：HTTP/2 连接在最后一个流结束后设置的 idle 定时器（`IdleTimeout`，
+默认两分钟）持有连接，并经由它持有已关闭的引擎、它的任务池以及它的流池那些 20000 槽的队列，直到定时器触发。测试中每启动并
+关闭一次 fit（只要有过一个 h2c 请求），它就在内存中多留两分钟。
+
+**证据。** fit 的 CI 在 macOS 上的 `handler/proxy` `TestStreamedBodyLimit` 失败，h2c 用例 `{150000 false 200}`：客户端
+等待响应头超时。在负载下同时运行 16 份该测试时，本地每个 GOMAXPROCS=2 的副本都重现了同样的挂起；goroutine 转储显示客户端
+已发出最初的 65535 字节、正在等待流量控制，而 fit 的连接读取者仍在 `newH2ServerConn` 中建立引擎的流池，尚未发出 SETTINGS。
+当时机器正在使用交换空间：一个测试进程已增长到 4.2GB。每次带一个 h2c 请求启动并关闭 fit 会留下约 1MB（竞态检测下 56MB）；
+给 fib 的 HTTP 定时器各个位置打上标记后，所有仍未触发的定时器都是 `OnClose` 从未到达的连接的 idle 定时器。整个 `handler/proxy`
+包在竞态检测下峰值达 5.3GB，在同时运行多个包的 7GB runner 上，这意味着交换和数秒的停顿。
+
+**修改。** `Close` 记下它切断的连接，在没有轮次运行后、任务池释放之前运行它们的 `OnClose`，如同它们最后一轮本会做的那样。
+fib 的 `TestCloseRunsOnClose`（`Close` 时一个空闲连接和一个 handler 正在运行的连接）和
+`TestCloseLetsGoOfAnIdleHTTP2Connection`（带空闲 HTTP/2 连接关闭的引擎能被回收）没有这个修改时失败，有修改时通过。
+
+**fit 如何使用。** fit 的代码不需要改动。`handler/proxy` 在竞态检测下的峰值从 5.3GB 降到 1.8GB，运行时间从 142 秒降到
+104 秒；同时运行 16 份 `TestStreamedBodyLimit`、每份 400 次，全部通过，每份都在 510MB 以内。

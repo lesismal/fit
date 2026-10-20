@@ -35,6 +35,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A20 | Client requests written and response heads read without net/http | done, v1.5.6 | 12 | R07f |
 | A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
 | A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
+| A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
 
 ## Evidence
 
@@ -650,3 +651,35 @@ fraction of the timeout. A connection closes up to that fraction late, which `Id
 allows.
 
 **How fit uses it.** Nothing changes in fit.
+
+## A23: `OnClose` for the connections `Engine.Close` cuts
+
+**Status.** Done in fib v1.5.6 (`6fb6479`); fit uses it from then on.
+
+**Problem.** `Engine.Close` on the epoll, kqueue and IOCP backends cut every connection at once
+without running its `OnClose`, which the portable backend's `Close` did run. What a protocol lets
+go of in `OnClose` stayed held: an HTTP/2 connection's idle timer, set for `IdleTimeout` (two
+minutes by default) once its last stream ended, kept the connection, and through it the closed
+engine, its task pool and the 20000-slot queues of its stream pool, until it fired. Every fit a
+test starts and closes, after one h2c request, stayed in memory for two minutes.
+
+**Evidence.** fit's CI failed on macOS in `handler/proxy` `TestStreamedBodyLimit`, h2c case
+`{150000 false 200}`: the client timed out awaiting headers. Under load the same hang came back
+locally in every GOMAXPROCS=2 copy of the test run 16 at a time; the goroutine dump showed the
+client waiting for flow control with its first 65535 bytes sent, and fit's connection reader still
+building the engine's stream pool in `newH2ServerConn`, before it had sent its SETTINGS. The
+machine was swapping: one test process had grown to 4.2GB. Each start and close of fit with one
+h2c request kept about 1MB (56MB under the race detector); with fib's HTTP timer sites tagged,
+every timer still pending was the idle timer of a connection `OnClose` never reached. The whole
+`handler/proxy` package under the race detector peaked at 5.3GB, which on a 7GB runner running
+several packages at once is swapping, and stalls of seconds.
+
+**Change.** `Close` records the connections it cuts, and runs their `OnClose` once no round
+runs, before the task pools go, as their last round would have. fib's
+`TestCloseRunsOnClose` (an idle connection and one whose handler is running at `Close`) and
+`TestCloseLetsGoOfAnIdleHTTP2Connection` (a closed engine with an idle HTTP/2 connection is
+collected) fail without the change and pass with it.
+
+**How fit uses it.** Nothing changes in fit's code. `handler/proxy` under the race detector now
+peaks at 1.8GB rather than 5.3GB and runs in 104s rather than 142s, and 16 copies of
+`TestStreamedBodyLimit` at once, 400 times each, all pass, each under 510MB.
