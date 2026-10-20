@@ -1423,7 +1423,9 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   GitHub，所以 CI 现在还会把每个失败包的测试输出写成注解（`internal/testsummary`），任何人都能读取。由此找到原因：
   `TestStuckClientWithoutStallTimeout` 在客户端恢复读取后只给它 5 秒读完 200MB 下载的剩余部分，而在竞态检测器下、runner
   的 CPU 上读不完（Linux 上是 h3；macOS 上是 h2c 和 h3；本地用 `-cpu 2` 可复现）。现在卡住的客户端只在连续 5 秒没有新数据
-  到达时才放弃。fit 本身没有问题。
+  到达时才放弃。下一次运行显示了第二个原因，是 fit 自己的 bug：Linux 上的 `TestWatch` 漏掉了第一次修改。
+  `fit run` 先启动监听器再启动 watcher，而 watcher 在启动时才第一次查看文件的大小和修改时间，所以在两者之间、大小不变的
+  修改从此看不出变化，永远不会被应用。现在 watcher 启动时视文件为刚刚改变，由内容决定是否应用（`TestEditBeforeWatching`）。
 
 与计划的差异：
 

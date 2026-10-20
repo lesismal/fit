@@ -119,6 +119,20 @@ func TestApplyOnChange(t *testing.T) {
 	}
 }
 
+// TestEditBeforeWatching: an edit made after the running config was read
+// and before the watcher started, as fit run's listeners are up before its
+// watcher, is applied, though the file shows no change once watched.
+func TestEditBeforeWatching(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fit.json")
+	write(t, path, "v2") // the same size as "v1", and not touched again
+	r := &recorder{}
+	w := New(path, []byte("v1"), fast, r.apply, r.report)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+	r.waitFor(t, "the edit", func(a []string, _ []error) bool { return len(a) == 1 && a[0] == "v2" })
+}
+
 // TestDebounce: a file written several times in a row is applied once, as
 // it ends up.
 func TestDebounce(t *testing.T) {

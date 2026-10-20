@@ -82,9 +82,15 @@ func New(path string, current []byte, opts Options, apply func([]byte) error, re
 	if report == nil {
 		report = func(error) {}
 	}
-	w := &Watcher{path: path, opts: opts, apply: apply, report: report, last: sha256.Sum256(current)}
-	w.seen = w.look()
-	return w
+	// seen starts empty rather than as the file looks now: the file may
+	// have changed since current was read from it, and a stamp taken now
+	// would hide that change for good, as a same-sized edit within the file
+	// system's timestamp granularity, or before this look, leaves nothing
+	// newer to see. So the watcher starts as if the file had just changed,
+	// and the contents decide, which for an unchanged file costs one read
+	// and no apply.
+	return &Watcher{path: path, opts: opts, apply: apply, report: report, last: sha256.Sum256(current),
+		since: time.Now(), dirty: true}
 }
 
 // Run watches until ctx ends.

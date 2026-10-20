@@ -1934,7 +1934,12 @@ Differences from the plan:
   `TestStuckClientWithoutStallTimeout` gave the client 5s to read the rest of its 200MB download
   once it read again, which under the race detector on a runner's CPUs it did not finish (h3 on
   Linux; h2c and h3 on macOS; reproduced locally with `-cpu 2`). The stuck clients now give up only
-  when 5s pass with nothing new arriving. fit itself was not at fault.
+  when 5s pass with nothing new arriving. The next run showed a second cause, a bug of fit's:
+  `TestWatch` on Linux missed its first edit. `fit run` starts its listeners before its watcher,
+  and the watcher took its first look at the file's size and modification time when it started, so
+  an edit made in between, the same size as before, showed no change from then on and was never
+  applied. The watcher now starts as if the file had just changed, and its contents decide
+  (`TestEditBeforeWatching`).
 
 Differences from the plan:
 
