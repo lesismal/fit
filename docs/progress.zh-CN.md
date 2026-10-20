@@ -1269,7 +1269,9 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   证书；没有文件时，不带名字的客户端得到第一个名字的证书，无证书可给的握手得到错误。
 - `runtime`：`Env.ACME` 是 `fit run` 启动时创建的管理器，不论配置是否列了名字都创建，以便重载时加入名字；图携带它和所有
   listener 的名字，`listener` 在图成为当前图后（启动时和每次重载）把名字告诉它。dispatcher 在明文请求上、对应 token 的
-  challenge 进行中时，从内存应答 `/.well-known/acme-challenge/<token>`；其他请求交给路由。
+  challenge 进行中时，从内存应答 `/.well-known/acme-challenge/<token>`；其他请求交给路由。没有管理器时编译（`fit validate`
+  就是这样），listener 列出的名字不去申请，只提供它文件中的证书（合并后修复：此前 `fit validate` 会拒绝所有列了名字的配置，
+  现在 `cmd/fit` 的 validate 测试覆盖了这一点）。
 - `internal/pebbletest` 从 `$FIT_PEBBLE_BIN` 或 `PATH` 启动 Pebble v2.10.1 及其 DNS 测试服务器（对所有名字都答
   127.0.0.1）；找不到时测试跳过。CI 会安装它们。
 - 测试：`TestPebble` 从 Pebble 获取证书（用 `HTTPChallenge` 应答 challenge），检查它链到 Pebble 的根、账户密钥已保存，

@@ -1709,7 +1709,10 @@ Differences from the plan:
   names, so a reload can add some; the graph carries it with the names of all its listeners, and
   `listener` tells it the names once the graph is current, at start and on every reload. The
   dispatcher answers `/.well-known/acme-challenge/<token>` from memory on a request in the clear
-  when a challenge for the token is under way; any other goes to the routes.
+  when a challenge for the token is under way; any other goes to the routes. Compiled without a
+  manager, as `fit validate` does, a listener's listed names are not obtained and only its files'
+  certificates are served (fixed after the merge: `fit validate` had refused every config that
+  lists names, which `cmd/fit`'s validate test now covers).
 - `internal/pebbletest` runs Pebble v2.10.1 and its DNS test server, which answers 127.0.0.1 for
   every name, from `$FIT_PEBBLE_BIN` or `PATH`; tests without them are skipped. CI installs them.
 - Tests: `TestPebble` obtains a certificate from Pebble, answering the challenge from

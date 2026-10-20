@@ -83,8 +83,9 @@ type Env struct {
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
 	// ACME is the certificate manager made from the config's acme, which
-	// the caller owns and closes, or nil; a config whose listeners list
-	// names in tls.acme needs one.
+	// the caller owns and closes, or nil. Nil obtains no certificates for
+	// the names listeners list in tls.acme, for a config that is only
+	// checked, as fit validate does.
 	ACME *tlsmgr.ACME
 	// Previous is the graph being replaced, or nil. The new graph shares
 	// its pools for the upstreams whose config, and CA file, are the same,
@@ -224,8 +225,9 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			case len(t.ACME) == 0:
 				l.Certificates = static
 			case env.ACME == nil:
-				errs = append(errs, t.At.Field("acme").Errorf("there is no ACME certificate manager to obtain these names' certificates"))
-				continue
+				// A config only checked, as fit validate does: the names'
+				// certificates are not obtained, and only the files' served.
+				l.Certificates = tlsmgr.NewCerts(static, nil, nil)
 			default:
 				l.Certificates = tlsmgr.NewCerts(static, env.ACME, t.ACME)
 				for _, name := range t.ACME {

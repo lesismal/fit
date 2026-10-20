@@ -69,6 +69,18 @@ func TestValidate(t *testing.T) {
 		t.Fatalf("bad module params: %d %q, want %q", code, stderr, want)
 	}
 
+	// A config whose certificates come from ACME is valid without obtaining
+	// them.
+	acme := filepath.Join(dir, "acme.json")
+	doc = `{"listeners": [{"name": "web", "address": ":0", "tls": {"acme": ["example.com"]}}],
+"routes": [{"handler": {"module": "respond"}}]}`
+	if err := os.WriteFile(acme, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, stderr := runFit("validate", "-c", acme); code != 0 || stdout != acme+": valid\n" {
+		t.Fatalf("acme: %d %q %q", code, stdout, stderr)
+	}
+
 	if code, _, stderr := runFit("validate", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.Contains(stderr, "missing.json") {
 		t.Fatalf("missing file: %d %q", code, stderr)
 	}
