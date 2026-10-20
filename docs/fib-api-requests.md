@@ -33,10 +33,10 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A18 | A response's status, and when its request arrived, without a hook | partly, v1.5.4 | 12 | I34, R07e |
 | A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
 | A20 | Client requests written and response heads read without net/http | done, v1.5.6 | 12 | R07f |
-| A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
-| A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
+| A21 | One `epoll_ctl` per park of an event loop, not two | not done: `EPOLLONESHOT` cannot save the call | 12 | R07f |
+| A22 | A client connection's idle clock without a timer reset per request | done, `7f632cb` (main after v1.5.6) | 12 | R07f |
 | A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
-| A24 | A task queue that costs nothing until it is used | made, not yet released | 13 | — |
+| A24 | A new taskpool ring that writes none of its cells | done, `a6d78cd` (main after v1.5.6) | 11 | — |
 
 ## Evidence
 
@@ -685,11 +685,10 @@ collected) fail without the change and pass with it.
 peaks at 1.8GB rather than 5.3GB and runs in 104s rather than 142s, and 16 copies of
 `TestStreamedBodyLimit` at once, 400 times each, all pass, each under 510MB.
 
-## A24: A task queue that costs nothing until it is used
+## A24: A new taskpool ring that writes none of its cells
 
-**Status.** Made in fib as `a6d78cd` on its branch `ring-lazy-seq`, on top of `7f632cb`; not yet
-on fib's `main` nor released, since `main`'s CI failed on macOS at `7f632cb`. fit moves to the
-release that carries it.
+**Status.** Done on fib's `main` as `a6d78cd`, after v1.5.6, whose CI passed on every job; fit uses
+it by commit (`v1.5.7-0.20261020131351-a6d78cd9d925`, rule 19).
 
 **Problem.** `taskpool.newTaskRing` stored every cell's `seq` with an atomic when it made the
 ring: 100,000 cells for a pool at the default sizing on a machine of ten cores or more, 40,000 on

@@ -61,9 +61,9 @@ Every change to fit follows these rules. They are what the
     problem, the evidence, the suggested API and how fit would use it. fit's sessions may then make
     the change in the fib repository themselves, by fib's own standards: tests, the race detector,
     vet and staticcheck for every OS fib builds for, its size and allocation checks, and a
-    benchmark before and after for a change on the hot path. The change is pushed to fib's `main`
-    and released as a tag, and the request's status records the version; fit then moves to that
-    version, never to a `replace` directive or a local `go.work` committed in fit, and carries on.
+    benchmark before and after for a change on the hot path. The change is pushed to fib's `main`,
+    and the request's status records the version; fit then moves to that version (rule 19), never
+    to a `replace` directive or a local `go.work` committed in fit, and carries on.
     fib's CI must pass on the commit before fit pushes what depends on it. Meanwhile, work that does
     not depend on it may go ahead; a stopgap in fit must still follow every other rule, and is
     recorded in the progress files with the fib request that will replace it.
@@ -75,3 +75,10 @@ Every change to fit follows these rules. They are what the
 17. **While the benchmark host is available, load tests run there and nowhere else.** The local
     machine runs only ordinary tests: unit tests, the race detector, vet and the like.
 18. **Only when the benchmark host is unavailable** may a load test run on the local machine.
+
+## 9. The fib version
+
+19. **During development fit depends on fib by commit hash, not by tag.** Moving to a fib change
+    means `go get github.com/lesismal/fib@<commit hash>`, which puts the commit's pseudo-version in
+    `go.mod`; fib need not tag a release for it. A tag is used only when the fib version wanted
+    already has one.

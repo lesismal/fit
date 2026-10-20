@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-20 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
-| fib | `github.com/lesismal/fib v1.5.6`, from the module proxy |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261020131351-a6d78cd9d925` (fib's `main` at `a6d78cd`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
 
@@ -1951,7 +1951,10 @@ Differences from the plan:
   and the watcher took its first look at the file's size and modification time when it started, so
   an edit made in between, the same size as before, showed no change from then on and was never
   applied. The watcher now starts as if the file had just changed, and its contents decide
-  (`TestEditBeforeWatching`).
+  (`TestEditBeforeWatching`). Later, on 5608205, `TestPassiveHealth/h2c` saw two 502s from the
+  address that refuses connections where one takes it out: the proxy answered a failed request
+  before telling the pool, so on a slow runner the client's next requests could reach the address
+  before it was out. The pool now hears of the failure first.
 
 Differences from the plan:
 
@@ -2113,7 +2116,7 @@ Differences from the plan:
 
 ## Notes for later iterations
 
-- **fib version.** fit uses fib v1.5.6, which brings A20, the HTTP/1 client writing request heads
+- **fib version.** fit uses fib's `main` at `a6d78cd` (`v1.5.7-0.20261020131351-a6d78cd9d925`), after v1.5.6: A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
   lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`

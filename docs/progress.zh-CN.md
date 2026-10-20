@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
-| fib | `github.com/lesismal/fib v1.5.6`，来自模块代理 |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261020131351-a6d78cd9d925`（fib `main` 的 `a6d78cd`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
 
@@ -1428,7 +1428,7 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
   的 CPU 上读不完（Linux 上是 h3；macOS 上是 h2c 和 h3；本地用 `-cpu 2` 可复现）。现在卡住的客户端只在连续 5 秒没有新数据
   到达时才放弃。下一次运行显示了第二个原因，是 fit 自己的 bug：Linux 上的 `TestWatch` 漏掉了第一次修改。
   `fit run` 先启动监听器再启动 watcher，而 watcher 在启动时才第一次查看文件的大小和修改时间，所以在两者之间、大小不变的
-  修改从此看不出变化，永远不会被应用。现在 watcher 启动时视文件为刚刚改变，由内容决定是否应用（`TestEditBeforeWatching`）。
+  修改从此看不出变化，永远不会被应用。现在 watcher 启动时视文件为刚刚改变，由内容决定是否应用（`TestEditBeforeWatching`）。之后在 5608205 上，`TestPassiveHealth/h2c` 从拒绝连接的地址收到两个 502，而一次失败就应把它移出轮转：代理先应答失败的请求，再通知连接池，所以在较慢的机器上，客户端接下来的请求可能在它被移出之前又被分到这个地址。现在先通知连接池。
 
 与计划的差异：
 
@@ -1545,7 +1545,7 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib v1.5.6，带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
+- **fib 版本。** fit 使用 fib `main` 的 `a6d78cd`（`v1.5.7-0.20261020131351-a6d78cd9d925`），在 v1.5.6 之后：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
   fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
   运行 `OnClose`（A23：没有它，空闲 HTTP/2 连接的 idle 定时器会把每个已关闭的引擎留在内存中，`handler/proxy` 在竞态检测下峰值达 5.3GB，交换导致 macOS 上一次 h2c 上传超时）。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了
