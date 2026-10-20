@@ -616,7 +616,17 @@ above nginx's; fib's HTTP/1 client and every caller of `Client.Do` gain, not onl
 
 ## A21: One `epoll_ctl` per park of an event loop, not two
 
-**Status.** Asked (R07f).
+**Status.** Not done: the change asked for cannot save the call. `EPOLLONESHOT` disarms an item only
+when `epoll_wait` on the relay delivers it, and nothing calls `epoll_wait` on the relay: Go's
+runtime watches it from its own edge-triggered epoll, which learns only that it is ready. On the
+benchmark host (Linux 7.0), a relay holding an instance with `EPOLLIN | EPOLLONESHOT`, watched as the
+runtime watches it, reported the instance ready to the runtime's epoll for every new event, three
+in a row and again after an `epoll_wait` on the relay that found the instance drained. A one-shot
+relay would stay armed while the loop runs, and the runtime's poller would look at a busy loop's
+instance, which is what the relay is there to stop (4.3% of the CPU in fib's own measurement, in
+`poller_epoll.go`). Leaving the relay armed after a wake-up until the loop next finds work is the
+other way to save calls; fib's notes measured a variant of it at 1.6% less at 20k and 50k
+connections, so it would need fib's WebSocket benchmarks too, not only fit's proxy. Left as it is.
 
 **Problem.** An event loop with nothing to do parks in Go's netpoller through a relay epoll
 instance (`epollWaiter.wait`): it polls once, arms the relay with `EPOLL_CTL_MOD` (`EPOLLIN`),
@@ -636,7 +646,16 @@ comment in `wait` explains is still needed, it stays. Or another way to park tha
 
 ## A22: A client connection's idle clock without a timer reset per request
 
-**Status.** Asked (R07f).
+**Status.** Done in fib's `main` at `7f632cb`, after v1.5.6; fit uses it from `a6d78cd` on, by
+commit (rule 19). The connection's clock is `idleUntil` alone, and its timer is set only when none
+is pending; one that fires finds the connection taken, idle until later (and is set again for what
+is left), or idle long enough. A connection still closes `IdleConnTimeout` after it last went idle.
+On the benchmark host, fit's proxy over HTTP/1.1 (ca450dd on v1.5.6, against the same with the
+change): 24.85 and 24.86 µs of CPU a request against 24.64 and 24.80, about 0.13 µs less;
+throughput within noise, 245.8k → 246.1k over HTTP/1.1 and 240.2k → 238.8k over h2c (three rounds
+each). fib's CI on `7f632cb` (run 215) failed on two macOS tests in packages the change does not
+touch (`TestRemoveUDPBindingClosesPeers/pollers-no-reuseport`, http3's `TestStreamTimeoutMidBody`);
+both pass 20 times in a row alone.
 
 **Problem.** Each time a request's response ends and its connection goes back to the pool,
 `Client.idleLocked` reads the clock and calls `Timer.Reset` on the connection's idle timer, which
