@@ -2,5 +2,7 @@ github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68 h1:O7FvDTUPu+BAJlQ2
 github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 github.com/lesismal/fib v1.5.4 h1:5pvGUo0qTkJ1dEMrWlxz/IfPlQpqtDxPokMMcRItizM=
 github.com/lesismal/fib v1.5.4/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/lesismal/fib v1.5.5 h1:mO8rpAat57QZfiLsE6kvCMSCSHbAuQycHTcv1o5b6kY=
+github.com/lesismal/fib v1.5.5/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
