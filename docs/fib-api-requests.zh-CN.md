@@ -26,9 +26,9 @@
 | A13 | 只有 `OnFinish` 钩子的响应不复制响应头 | 已完成，v1.4.0 | 12 | R07c |
 | A14 | 在没有连接的 Context 上 `Release` | 已完成，v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` 不计入正在为其拨号的请求 | 已完成，v1.5.1 | 11 | R06 |
-| A16 | `SendFile` 排队的文件计入连接未发送的输出 | 部分完成，v1.5.2 | 10、11 | R05 |
-| A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已提出 | 12 | R07d |
-| A18 | 不经回调取得响应的状态和请求到达的时间 | 已提出 | 12 | I34 |
+| A16 | `SendFile` 排队的文件计入连接未发送的输出 | 已完成，v1.5.4 | 10、11 | R05、R07e |
+| A17 | 降低每个请求上 `OnFinish` 和 `SetValue` 的开销 | 已完成，v1.5.4 | 12 | R07d、R07e |
+| A18 | 不经回调取得响应的状态和请求到达的时间 | 部分完成，v1.5.4 | 12 | I34、R07e |
 | A19 | 流式请求的 `Trailer` 在交出请求体结尾的地方设置 | 已完成，v1.5.3 | 13 | I35 |
 
 ## 证据
@@ -324,7 +324,7 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 ## A16：`SendFile` 排队的文件计入连接未发送的输出
 
-**状态。** 已在 fib v1.5.2 中部分完成（`6f66bcc`）：`SendFile` 排队的文件段计入 `NotifyOutput`、`WriteNoWait`、写截止时间和 `MaxPendingBytes` 看到的积压，所以静态 handler 的传输受节奏控制，停滞超时在普通 HTTP/1 上也能切断停止读取的客户端。未完成：`SendFile` 内部的停滞上限；fit 继续分段发送范围。
+**状态。** 已在 fib v1.5.2 中部分完成（`6f66bcc`）：`SendFile` 排队的文件段计入 `NotifyOutput`、`WriteNoWait`、写截止时间和 `MaxPendingBytes` 看到的积压，所以静态 handler 的传输受节奏控制，停滞超时在普通 HTTP/1 上也能切断停止读取的客户端。停滞上限在 fib v1.5.4（`fe60763`）中完成，经维护者同意由 fit 的会话实现：`Context.SendFileStall(f, offset, n, stall, done)` 分段发送（排队给 sendfile 或读出后写入），段与段之间在 `stall` 的写截止时间下等待空间；`SendFile` 即不设上限的它。fit 的静态 handler 把整段范围交给它（R07e）。
 
 **问题。** 在普通 HTTP/1 连接上，`Context.SendFile` 用 `Connection.SendFile` 把范围作为文件段排队，`pushLocked` 把它加入
 发送队列，但不计入 `pendingBytes`。所以控制响应节奏的机制都看不到它：`WriteNoWait` 不会报告超过上限，`OnWritable`
@@ -347,7 +347,7 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 ## A17：降低每个请求上 `OnFinish` 和 `SetValue` 的开销
 
-**状态。** 已提出，在 R07d 之后（2026-10-20）。
+**状态。** 已在 fib v1.5.4 中完成（`b39373d`），经维护者同意由 fit 的会话实现，两项都按第一种方案：回收的 Context 为下一个请求保留清空后的 response writer；`SetValue` 和 `Value` 不加锁（在请求交给其他 goroutine 之前设置，之后读取）。基准机上，开启访问日志时 h2c 的 fixed 和 static 提高 2.2% 和 2.1%（R07e）；`SetValue`、`OnFinish` 和 `Respond` 的单线程微基准从 105.6 ns 降到 94.2 ns。
 
 **问题。** fit 的访问日志对每个记录的请求调用 `SetValue` 和 `OnFinish`。两者在 fib 里的开销都比它们代表的工作大：
 
@@ -371,7 +371,7 @@ R02 在 fit 中就是这样计数的，`upstream.TestDefaultMaxConns` 也是这�
 
 ## A18：不经回调取得响应的状态和请求到达的时间
 
-**状态。** 已提出，随 I34（2026-10-20）。
+**状态。** 已在 fib v1.5.4 中部分完成（`b39373d`）：`Context.Status()`，配合 `Retained` 使用。未完成：`Received`。fib 只在超时需要时才为请求读时钟，为每个请求或每轮读取读一次时钟会让所有服务器付出代价，只为省下 fit 的两次读时钟中的一次；fit 继续自己读时钟。`Status` 只有在没有其他 goroutine 应答时才能安全读取，所以 fit 只对声明在返回前应答的 handler（`module.Inline`：`respond`，以及分发器的 404 和跳转）不注册回调地计数；开启指标时 h2c 的 fixed 提高 8.5%（R07e）。
 
 **问题。** fit 的请求指标（I34）需要每个请求的响应状态和耗时。fib 只把状态交给 `OnFinish` 回调，所以 fit 对每个请求都
 注册一个回调，用闭包保存 dispatcher 在请求到来时读到的时间，并在回调中再读一次时钟。对于在返回前就已经应答的 handler

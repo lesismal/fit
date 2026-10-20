@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-20 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07d 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
-| fib | `github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68`（fib `main` 的 `8c637e0`，v1.5.3 之后），来自模块代理 |
+| fib | `github.com/lesismal/fib v1.5.4`，来自模块代理 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
 
@@ -1456,9 +1456,43 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 - 重新应用整个配置，而不是原地替换某个监听的证书：重载保留监听以及上游连接池和健康状态（I26），代价是一次编译，
   换来续期也有每次重载都有的检查、回滚和指标。
 
+### R07e 借助 fib 降低钩子和文件发送的开销（A16–A18） — 已完成
+
+M2 报告之后，维护者同意由 fit 的会话自己完成 A16–A18 在 fib 中的部分，并推送、打 tag：fib v1.5.4
+（`fe60763`、`b39373d`）。
+
+- fib 中：回收的 Context 保留清空后的 response writer，不再为每个需要它的请求（例如访问日志的 `OnFinish`）
+  去 `writerPool` 取放（A17）。`SetValue` 和 `Value` 不加锁：`Context.cancel` 改为原子指针，值在请求交给其他
+  goroutine 之前设置。`Context.Status()` 返回已发送或已开始的响应的状态码（A18）。`SendFileStall` 为段与段之间
+  等待客户端的每一次设上限（A16）。`Context` 保持 160 字节，`closing` 和 `lingers` 合用一个字节给状态码腾出
+  空间：第一版多占了 16 字节，被 fib 自己的测试发现，HTTP/2 和 HTTP/3 的 stream 超出了各自的分配尺寸档。fib
+  完整的竞态测试通过；`TestClientStreamTimeoutMidBody` 在整套测试的负载下失败过一次，单独连续跑 30 次都通过，
+  它所在的客户端路径不受这次修改影响。
+- fit 中：`module.Inline`（`respond` 实现了它）让没有中间件的路由成为 `Route.Inline`；开启指标、关闭访问日志时，
+  分发器在 handler 返回后用 `Context.Status()` 为这类请求以及自己的 404 和跳转计数，不注册 `OnFinish` 回调。
+  `Status` 只在这里读取：其他 handler 的响应可能同时在别的 goroutine 上写出。静态 handler 把整段范围交给
+  `SendFileStall`，原来自己分段发送的 `transfer` 已删除；`TestStuckClient` 在所有协议上通过。
+- 基准机上，fit 修改前（59083f3，fib 8c637e0）与修改后（fib v1.5.4）单独运行，各两轮交替（每秒请求数，均值）：
+
+| 场景 | 协议 | 原配置 | 访问日志 | 指标 |
+| --- | --- | --- | --- | --- |
+| fixed | h2c | 3,798k → 3,769k（−0.8%） | 2,863k → 2,926k（+2.2%） | 3,294k → 3,575k（+8.5%） |
+| static | h2c | 2,439k → 2,435k（−0.2%） | 2,054k → 2,098k（+2.1%） | 2,257k → 2,284k（+1.2%） |
+| proxy | h2c | 238k → 234k（−1.4%） | 236k → 235k（−0.6%） | 237k → 235k（−0.9%） |
+
+  HTTP/1.1 上所有数字都在 0.6% 以内。原配置下 h2c 的 fixed 和 proxy 再跑三轮，为 −0.6% 和 −1.3%。二分：
+  fit 5608205 分别配 fib 8c637e0、fe60763（A16，这些路径用不到）和 b39373d，A16 单独为 +0.7% 和 −0.5%，
+  即两次构建之间的噪声；从 A16 到 A17–A18 为 −1.3% 和 −0.4%。没有钩子的 h2c fixed 响应不取 writer，只多一次
+  状态码赋值。按构建间的波动范围看待，不做改动。
+
+与计划的差异：
+
+- 访问日志只提高了 2%，不是 A17 估计的其开销的六分之一：剩下的是格式化日志行本身。
+- `Received` 没有加入 fib；见 A18。
+
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib `main` 的 `8c637e0`（`v1.5.4-0.20261020043140-8c637e0f9b68`），在 v1.5.3 之后，增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
+- **fib 版本。** fit 使用 fib v1.5.4，带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了
   A19：流式请求的 `Trailer` 在交出请求体结尾的地方设置，CI 的竞态检测曾在代理的 `TestTrailers/h2c` 中发现它；见 [fib-api-requests](fib-api-requests.zh-CN.md)。v1.3.1 在 v1.3.0 之上只增加了 `ClientConfig.StreamUnknownLengthAtHeader`（A10）。
   v1.3.0 是为 I16 和 I22 在 2026-10-19 的 fib `main` 上打的 tag：带来了

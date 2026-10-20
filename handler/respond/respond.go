@@ -58,6 +58,9 @@ func (r *Respond) Provision(ctx *module.Context) error {
 	return nil
 }
 
+// Inline says that ServeHTTP answers before it returns; see module.Inline.
+func (r *Respond) Inline() {}
+
 // ServeHTTP answers with the response.
 func (r *Respond) ServeHTTP(c *fibhttp.Context) {
 	_ = c.WriteResponse(r.response) // fails only when the client is gone

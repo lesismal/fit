@@ -531,23 +531,38 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
 		metrics = l.RequestMetrics(route)
 	}
+	// inline is the metrics of a request answered before its handler
+	// returns, which are counted then rather than by a hook.
+	var inline *observe.RequestMetrics
+	var start time.Time
 	if log := g.AccessLog; log != nil {
 		d.logRequest(c, log, route, metrics)
 	} else if metrics != nil {
-		start := time.Now()
-		c.OnFinish(func(status int, _ stdhttp.Header, _ int64) {
-			metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(start))
-		})
-	}
-	if route == nil {
-		if redirect != 0 {
-			redirectHTTPS(c, redirect)
-			return
+		start = time.Now()
+		if route == nil || route.Inline {
+			inline = metrics
+		} else {
+			c.OnFinish(func(status int, _ stdhttp.Header, _ int64) {
+				metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(start))
+			})
 		}
-		_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
-		return
 	}
-	route.Handler.ServeHTTP(c)
+	switch {
+	case route != nil:
+		route.Handler.ServeHTTP(c)
+	case redirect != 0:
+		redirectHTTPS(c, redirect)
+	default:
+		_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
+	}
+	// Status is read only for an inline answer: another handler's may be
+	// written meanwhile on another goroutine. It is 0 when the client went
+	// first, which a hook would not have counted either.
+	if inline != nil {
+		if status := c.Status(); status != 0 {
+			inline.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(start))
+		}
+	}
 }
 
 // redirectHTTPS answers c's request with a permanent redirect to the same

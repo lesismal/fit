@@ -155,6 +155,9 @@ type Route struct {
 	// Handler is the route's handler with its middleware already wrapped
 	// around it.
 	Handler module.Handler
+	// Inline says that Handler answers every request before it returns:
+	// a module.Inline handler with no middleware around it.
+	Inline bool
 }
 
 // Compile builds a Graph from c, which must already have passed
@@ -331,10 +334,12 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
+	_, inline := h.(module.Inline)
+	inline = inline && len(mws) == 0
 	for i := len(mws) - 1; i >= 0; i-- {
 		h = mws[i].Wrap(h)
 	}
-	r := &Route{Name: rc.Name, Priority: rc.Priority, Handler: h}
+	r := &Route{Name: rc.Name, Priority: rc.Priority, Handler: h, Inline: inline}
 	if rc.Match != nil {
 		r.Hosts, r.Paths = rc.Match.Host, rc.Match.Path
 	}

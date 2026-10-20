@@ -136,6 +136,7 @@ Status: `todo`, `doing` or `done`.
 | R07b | Proxy allocations | I23 | done |
 | R07c | Hot path costs through fib | R03, R07a, R07b | done |
 | R07d | Access log cost | R07c | done |
+| R07e | Hooks and files through fib (A16–A18) | R05b, R07d, I34 | done |
 | **M2** | | | |
 | I24 | Config versions and Admin API skeleton | I22 | done |
 | I25 | Admin API: patch, ETag, rollback | I24 | done |
@@ -532,6 +533,19 @@ R07 split in three: what fit can do alone (R07a, R07b) and what needs fib (R07c)
   fib-api-requests.
 - **Done when**: as R07a, for the fixed response with the access log on, over HTTP/1.1 and h2c.
 - **Touches**: `observe`.
+
+### R07e Hooks and files through fib (A16–A18)
+
+Done in fib by fit's own session, with the maintainer's leave, after the M2 report.
+
+- **Do**: in fib, a Context that keeps its response writer for the next request and a value slot
+  without a lock (A17); `Context.Status` (A18); `SendFileStall` (A16). In fit, count the requests
+  of a handler that answers before it returns without an OnFinish hook, and send a file's range
+  whole through `SendFileStall`; then move to the fib release.
+- **Done when**: fixed and static over h2c, with the access log and with metrics, before and after,
+  on the benchmark host; `TestStuckClient` passes over every protocol with whole ranges.
+- **Touches**: fib's `http`; fit's `module`, `runtime`, `listener`, `handler/respond`,
+  `handler/static`.
 
 ## M2, dynamic config and TLS
 

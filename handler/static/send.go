@@ -13,8 +13,9 @@ import (
 
 // send answers the request with the file f, which info describes, as
 // ServeContent would: status, validators, conditions and a range. The body
-// goes through fib's SendFile, a piece at a time (see transfer), so that
-// nothing waits for the disk or for the client. It reports whether SendFile
+// goes through fib's SendFileStall, so that nothing waits for the disk or
+// for the client, and a client that takes nothing of it for stall loses
+// it, while one that reads slowly keeps it. It reports whether SendFile
 // took the response over, closing f and releasing the request when it is
 // done; otherwise f is closed, and the response complete. It runs on the
 // file pool, with the request retained.
@@ -29,13 +30,10 @@ func send(c *fibhttp.Context, f *os.File, name string, info fs.FileInfo, stall t
 		}
 		return false
 	}
-	t := &transfer{c: c, f: f, offset: w.offset, left: w.n, piece: transferPiece, stall: stall}
-	r := c.Request
-	if r.ProtoMajor == 1 && r.TLS == nil {
-		// sendfile(2): a piece is queued, not read, so it may be larger.
-		t.piece = sendfilePiece
-	}
-	t.next()
+	c.SendFileStall(f, w.offset, w.n, stall, func(error) {
+		f.Close()
+		c.Release()
+	})
 	return true
 }
 
@@ -105,85 +103,4 @@ func (o *offsetFile) Seek(offset int64, whence int) (int64, error) {
 		o.offset = n
 	}
 	return n, err
-}
-
-// The pieces a transfer hands SendFile. A piece copied through writes is
-// fib's own read size, so that SendFile never waits within one; one sent by
-// sendfile(2) is only queued, and may be larger.
-const (
-	transferPiece = 64 << 10
-	sendfilePiece = 256 << 10
-)
-
-// transfer sends a range of a file through SendFile, a piece at a time,
-// and waits between pieces, without a goroutine, for the client to take the
-// last: once more than the response's limit is queued, it goes on from
-// OnWritable, under a write deadline of the stall timeout, as the proxy's
-// downloads do. So a client that stops reading loses its response after
-// the stall timeout, and one that reads slowly keeps it. SendFile alone
-// would wait for the client without a bound; one piece at a time keeps
-// every wait the transfer's own, until fib's SendFile can bound them (A16 in
-// fib-api-requests).
-type transfer struct {
-	c            *fibhttp.Context
-	f            *os.File
-	offset, left int64
-	piece        int64
-	stall        time.Duration
-	n            int64 // the piece under way
-}
-
-func (t *transfer) next() {
-	t.n = min(t.left, t.piece)
-	t.c.SendFile(t.f, t.offset, t.n, t.sent)
-}
-
-// sent runs, on a goroutine of fib's, once SendFile has handed a piece to
-// the connection.
-func (t *transfer) sent(err error) {
-	if err != nil {
-		t.end()
-		return
-	}
-	t.offset += t.n
-	t.left -= t.n
-	if t.left == 0 {
-		t.end()
-		return
-	}
-	if setDeadline(t.c, time.Now().Add(t.stall)) != nil {
-		t.end()
-		return
-	}
-	if t.c.OnWritable(t.writable) {
-		return
-	}
-	// Room already.
-	t.writable(nil)
-}
-
-// writable goes on once the client has room, or ends the response when it
-// went, or stopped reading for the stall timeout.
-func (t *transfer) writable(err error) {
-	if err != nil || setDeadline(t.c, time.Time{}) != nil {
-		t.end()
-		return
-	}
-	t.next()
-}
-
-// end lets the file and the request go.
-func (t *transfer) end() {
-	t.f.Close()
-	t.c.Release()
-}
-
-// setDeadline sets c's write deadline, which a Context serving a stream
-// outside fib may not take; the transfer then goes on without one.
-func setDeadline(c *fibhttp.Context, d time.Time) error {
-	err := c.SetWriteDeadline(d)
-	if errors.Is(err, stdhttp.ErrNotSupported) {
-		return nil
-	}
-	return err
 }

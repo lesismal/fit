@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-20 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
-| fib | `github.com/lesismal/fib v1.5.4-0.20261020043140-8c637e0f9b68` (fib's `main` at `8c637e0`, after v1.5.3), from the module proxy |
+| fib | `github.com/lesismal/fib v1.5.4`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
 
@@ -1989,9 +1989,51 @@ Differences from the plan:
   reload keeps the listeners, and the upstreams' pools and health (I26), so it costs a compile, and
   it gives a renewal the checks, the rollback and the metrics every reload has.
 
+### R07e Hooks and files through fib (A16–A18) — done
+
+After the M2 report, the maintainer let fit's session make the fib side of A16–A18 itself, and
+push and tag it: fib v1.5.4 (`fe60763`, `b39373d`).
+
+- In fib: a recycled Context keeps its response writer, cleared, rather than going to
+  `writerPool` for each request that needs one, as an access log's `OnFinish` does (A17).
+  `SetValue` and `Value` take no lock: `Context.cancel` is an atomic pointer, and the value is set
+  before the request goes to another goroutine. `Context.Status()` is the status of the response
+  sent or begun (A18). `SendFileStall` bounds every wait for the client between pieces (A16).
+  `Context` stays at 160 bytes, `closing` and `lingers` sharing a byte to make room for the
+  status: a first version took 16 bytes more and fib's own tests caught it, with HTTP/2 and
+  HTTP/3 streams past their allocation size classes. fib's full race suite passes;
+  `TestClientStreamTimeoutMidBody` failed once under the whole suite's load and passes alone 30
+  times in a row, on a client path the change does not touch.
+- In fit: `module.Inline`, which `respond` implements, makes a route without middleware
+  `Route.Inline`; with metrics on and the access log off, the dispatcher counts such a request,
+  and its own 404 and redirects, from `Context.Status()` once the handler returns, without an
+  `OnFinish` hook. `Status` is read only there: another handler's response may be written on
+  another goroutine meanwhile. The static handler hands `SendFileStall` the whole range, and its
+  `transfer`, which sent pieces itself, is gone; `TestStuckClient` passes over every protocol.
+- On the benchmark host, fit before (59083f3, fib 8c637e0) and after (fib v1.5.4), alone, two
+  rounds each, alternating (requests a second, mean):
+
+| Scenario | Protocol | as configured | access log | metrics |
+| --- | --- | --- | --- | --- |
+| fixed | h2c | 3,798k → 3,769k (−0.8%) | 2,863k → 2,926k (+2.2%) | 3,294k → 3,575k (+8.5%) |
+| static | h2c | 2,439k → 2,435k (−0.2%) | 2,054k → 2,098k (+2.1%) | 2,257k → 2,284k (+1.2%) |
+| proxy | h2c | 238k → 234k (−1.4%) | 236k → 235k (−0.6%) | 237k → 235k (−0.9%) |
+
+  Over HTTP/1.1, every figure is within 0.6%. Three more rounds of fixed and proxy over h2c as
+  configured gave −0.6% and −1.3%. A bisection, fit at 5608205 on fib 8c637e0, on fe60763 (A16,
+  which these paths do not use) and on b39373d, gave +0.7% and −0.5% for A16 alone, which
+  measures the noise between builds, and −1.3% and −0.4% from A16 to A17–A18; a fixed response
+  over h2c with nothing hooked takes no writer, and pays only the status's store. Left as it is,
+  within what a build moves.
+
+Differences from the plan:
+
+- The access log gained 2%, not the sixth of its cost A17 estimated: what is left is the line.
+- `Received` is not in fib; see A18.
+
 ## Notes for later iterations
 
-- **fib version.** fit uses fib's `main` at `8c637e0` (`v1.5.4-0.20261020043140-8c637e0f9b68`), after v1.5.3, which adds connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
+- **fib version.** fit uses fib v1.5.4, which brings A16's stall bound (`SendFileStall`), A17 and the first part of A18 (`Context.Status`), made by fit's session in fib with the maintainer's leave (R07e); before it, fib's `main` at `8c637e0`, after v1.5.3, added connection debugging state and tests. v1.4.0 brought the APIs of R03 (A1–A7, A9, A11, A13, and
   parts of A8 and A12), v1.5.0 the rest of A12 (`Client.Start`), v1.5.1 A14 and A15, v1.5.2 the
   first part of A16, and v1.5.3 A19, a streamed request's `Trailer` set where its end is handed
   over, which CI's race detector had caught in the proxy's `TestTrailers/h2c`; see [fib-api-requests](fib-api-requests.md). v1.3.0, tagged for I16 and I22 on fib's `main` of

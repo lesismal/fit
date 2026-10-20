@@ -126,6 +126,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | R07b | 代理的内存分配 | I23 | done |
 | R07c | 依赖 fib 的热路径开销 | R03、R07a、R07b | done |
 | R07d | 访问日志的开销 | R07c | done |
+| R07e | 借助 fib 降低钩子和文件发送的开销（A16–A18） | R05b、R07d、I34 | done |
 | **M2** | | | |
 | I24 | 配置版本与 Admin API 骨架 | I22 | done |
 | I25 | Admin API：局部修改、ETag、回滚 | I24 | done |
@@ -477,6 +478,17 @@ R07 拆成三部分：fit 自己能做的（R07a、R07b）和需要 fib 的（R0
   日志分片上的锁争用；属于 fib 的写进 fib-api-requests。
 - **完成标准**：同 R07a，针对开着访问日志的固定响应，HTTP/1.1 和 h2c。
 - **涉及**：`observe`。
+
+### R07e 借助 fib 降低钩子和文件发送的开销（A16–A18）
+
+在 M2 报告之后，经维护者同意，由 fit 的会话直接在 fib 中完成。
+
+- **做什么**：fib 中，Context 为下一个请求保留 response writer，值槽不加锁（A17）；`Context.Status`（A18）；
+  `SendFileStall`（A16）。fit 中，对在返回前应答的 handler 不注册 OnFinish 钩子即可计数；文件的范围整段交给
+  `SendFileStall` 发送；然后切换到 fib 新版本。
+- **完成标准**：在基准机上对比开启访问日志、开启指标时 h2c 上 fixed 和 static 的前后数据；整段发送时
+  `TestStuckClient` 在所有协议上通过。
+- **涉及**：fib 的 `http`；fit 的 `module`、`runtime`、`listener`、`handler/respond`、`handler/static`。
 
 ## M2 动态配置与 TLS
 

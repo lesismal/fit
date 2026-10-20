@@ -27,9 +27,9 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A13 | No header copy for a response that only `OnFinish` hooks | done, v1.4.0 | 12 | R07c |
 | A14 | `Release` on a Context that has no connection | done, v1.5.1 | 13 | R05 |
 | A15 | `MaxPendingPerHost` not to count requests whose connection is being dialed | done, v1.5.1 | 11 | R06 |
-| A16 | A file queued by `SendFile` counted in a connection's unsent output | partly, v1.5.2 | 10, 11 | R05 |
-| A17 | Cheaper `OnFinish` and `SetValue` on every request | asked | 12 | R07d |
-| A18 | A response's status, and when its request arrived, without a hook | asked | 12 | I34 |
+| A16 | A file queued by `SendFile` counted in a connection's unsent output | done, v1.5.4 | 10, 11 | R05, R07e |
+| A17 | Cheaper `OnFinish` and `SetValue` on every request | done, v1.5.4 | 12 | R07d, R07e |
+| A18 | A response's status, and when its request arrived, without a hook | partly, v1.5.4 | 12 | I34, R07e |
 | A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
 
 ## Evidence
@@ -426,7 +426,10 @@ requests at once.
 **Status.** Partly done in fib v1.5.2 (`6f66bcc`): a file segment queued by `SendFile` counts in the
 backlog that `NotifyOutput`, `WriteNoWait`, the write deadline and `MaxPendingBytes` see, so the
 static handler's transfer is paced and its stall timeout cuts off a client that stops reading, over
-plain HTTP/1 too. Not done: a stall bound inside `SendFile`; fit keeps sending ranges in pieces.
+plain HTTP/1 too. The stall bound came in fib v1.5.4 (`fe60763`), done by fit's session with the
+maintainer's leave: `Context.SendFileStall(f, offset, n, stall, done)` sends a range a piece at a
+time, queued for sendfile or read, and waits for room between pieces under a write deadline of
+`stall`; `SendFile` is it without a bound. fit's static handler hands it whole ranges (R07e).
 
 **Problem.** On a plain HTTP/1 connection, `Context.SendFile` queues the range as a file segment
 with `Connection.SendFile`, which `pushLocked` adds to the send queue without counting it in
@@ -456,7 +459,12 @@ too, and the test runs. With the second, `send` hands `SendFile` the whole range
 
 ## A17: Cheaper `OnFinish` and `SetValue` on every request
 
-**Status.** Asked, after R07d (2026-10-20).
+**Status.** Done in fib v1.5.4 (`b39373d`), by fit's session with the maintainer's leave, as the
+first option of each: a recycled Context keeps its response writer, cleared, for its next request,
+and `SetValue` and `Value` take no lock (the value is set before the request goes to another
+goroutine and read after). On the benchmark host, fixed and static over h2c with the access log on
+gained 2.2% and 2.1% (R07e); a single-threaded micro-benchmark of `SetValue`, `OnFinish` and
+`Respond` went from 105.6 to 94.2 ns.
 
 **Problem.** fit's access log calls `SetValue` and `OnFinish` on every request it logs. Each costs
 more in fib than the work it stands for:
@@ -488,7 +496,13 @@ less.
 
 ## A18: A response's status, and when its request arrived, without a hook
 
-**Status.** Asked, with I34 (2026-10-20).
+**Status.** Partly done in fib v1.5.4 (`b39373d`): `Context.Status()`, with `Retained`. Not done:
+`Received`. fib reads no clock for a request unless a timeout needs it, so a read for every
+request, or every read round, would cost every server for one of fit's two reads; fit keeps
+reading the clock itself. Status alone is read safely only where nothing else answers, so fit counts
+without a hook only a handler that declares it answers before returning (`module.Inline`:
+`respond`, and the dispatcher's 404 and redirects); fixed over h2c with metrics on gained 8.5%
+(R07e).
 
 **Problem.** fit's request metrics (I34) need, for each request, the status it was answered with
 and how long it took. fib gives the status only to an `OnFinish` hook, so fit registers one on

@@ -320,3 +320,21 @@ func TestConcurrentSwaps(t *testing.T) {
 		t.Fatal("the readers served nothing")
 	}
 }
+
+// TestRouteInline checks that a route is inline, its responses counted when
+// its handler returns, only when its handler says it answers before then.
+func TestRouteInline(t *testing.T) {
+	g := mustCompile(t, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+  "routes": [
+    {"name": "fixed", "match": {"path": ["/fixed"]}, "handler": {"module": "respond", "params": {"body": "ok"}}},
+    {"name": "held", "handler": {"module": "test_holder"}}
+  ]
+}`)
+	want := map[string]bool{"fixed": true, "held": false}
+	for _, r := range g.Listeners[0].Routes {
+		if r.Inline != want[r.Name] {
+			t.Errorf("route %s: Inline %v", r.Name, r.Inline)
+		}
+	}
+}

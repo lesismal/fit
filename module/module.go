@@ -94,6 +94,14 @@ type Drainer interface {
 	Drain()
 }
 
+// Inline is implemented by a handler that answers every request before its
+// ServeHTTP returns, and never retains one, as respond does. What serves it
+// can then count its responses once it returns, from Context.Status,
+// without an OnFinish hook on each.
+type Inline interface {
+	Inline()
+}
+
 // Holder is a hold on the config a module belongs to: a module whose
 // requests outlive its handler's return takes one for each with Retain, and
 // gives it back with Release when the request is over, so that the config
