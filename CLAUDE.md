@@ -21,6 +21,11 @@ limits, parallel packages under load) run on the benchmark host,
 ordinary tests: `go test -race ./...`, vet, staticcheck. A brief for another session that
 involves any of this says so explicitly. A user-level hook refuses such commands locally.
 
+**Verification is sized to the change (rules 20-23):** `make test-changed` while working, the
+full `go test -race ./...` once before a push; benchmarks only for the hot path, with
+`bench/ab.sh` (started in the background, read with `-report` before the push) and
+`bench/microbench.sh`; the full harness only at a milestone's end.
+
 For iteration work, also read [docs/progress.md](docs/progress.md) and the iteration's section in
 [docs/dev-plan.md](docs/dev-plan.md); when an iteration is done, update both dev-plan files and
 both progress files.

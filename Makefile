@@ -1,4 +1,4 @@
-.PHONY: all build test race vet lint fmt fmt-check schema fuzz bench check m2-exit
+.PHONY: all build test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -13,6 +13,13 @@ test:
 
 race:
 	$(GO) test -race ./...
+
+# The race detector on the packages changed since BASE (origin/main) and those
+# that depend on them (docs/rules.md rule 20): the check while working; `race`
+# runs once before a push.
+BASE ?= origin/main
+test-changed:
+	scripts/test-changed.sh $(BASE)
 
 vet:
 	$(GO) vet ./...
@@ -44,7 +51,9 @@ fuzz:
 	$(GO) test ./config -run '^$$' -fuzz FuzzLoad -fuzztime 30s
 
 # Runs nginx, Caddy, Traefik and fit through the benchmark harness; needs
-# Docker. See bench/README.md.
+# Docker, on Linux: on the benchmark host (docs/rules.md rules 16-18). For a
+# change, bench/ab.sh and bench/microbench.sh instead (rule 21). See
+# bench/README.md.
 bench:
 	$(GO) run ./bench/cmd/fitbench
 

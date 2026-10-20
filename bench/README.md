@@ -41,6 +41,23 @@ macOS or Windows, in its VM on a bridge network, but those runs are not used: th
 and the shared CPUs all cost something a Linux host does not pay. The M0 baseline measured that
 way is kept for the record only; the Linux results from M1 on are the reference.
 
+## Comparing two builds
+
+Most changes need far less than the full harness ([rules 20-23](../docs/rules.md#10-verification-sized-to-the-change)).
+Both scripts below build here for linux/amd64 and run on the benchmark host through its ssh
+master.
+
+- `bench/ab.sh [options] A B` compares two git refs of fit (or `work`, the working tree): fit
+  alone, only the scenarios and protocols given (`-scenarios`, `-protocols`), 10s runs after a 2s
+  warm-up, 3 rounds alternating A and B, with `-extra` merged into fit's config (an access log,
+  metrics). It starts on the host and returns an id; `bench/ab.sh -report ID` fetches what has
+  finished and summarizes requests a second and CPU per request, marking a change only past 1%
+  (`AB_NOISE`) and the spread of the rounds; `-wait ID` waits for the end. One scenario over one
+  protocol takes about a minute and a half, the default set about eight.
+- `bench/microbench.sh [-C repo] -pkg PKG -bench REGEX A B` runs a package's micro-benchmarks
+  for two refs, alternating, 10 times each, on the host, and compares them with benchstat here;
+  `-C ../fib` does it for fib. About a minute.
+
 ## What runs where
 
 Every process runs in a container pinned to CPUs of its own, with `nofile` raised to 1048576:

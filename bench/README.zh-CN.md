@@ -37,6 +37,19 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 虚拟机、bridge 网络和共享的 CPU 都有 Linux 主机没有的开销。M0 用这种方式测得的基线只作为记录保留；
 以 M1 起在 Linux 上的结果为准。
 
+## 对比两个版本
+
+大多数改动用不到完整的基准框架（[规则 20–23](../docs/rules.zh-CN.md#十按改动大小验证)）。下面两个脚本都在本机
+交叉编译 linux/amd64，通过 ssh master 在压测机上运行。
+
+- `bench/ab.sh [选项] A B` 对比 fit 的两个 git ref（或 `work`，即工作区）：只跑 fit，只跑给定的场景和协议
+  （`-scenarios`、`-protocols`），预热 2 秒后每次跑 10 秒，A、B 交替 3 轮；`-extra` 合并进 fit 的配置（访问日志、
+  指标等）。它在压测机上启动后返回一个 id；`bench/ab.sh -report ID` 取回已完成的结果，汇总每秒请求数和每请求
+  CPU，变化超过 1%（`AB_NOISE`）且超出各轮波动才标出；`-wait ID` 等到结束。一个场景一个协议约一分半，默认组合约
+  八分钟。
+- `bench/microbench.sh [-C 仓库] -pkg 包 -bench 正则 A B` 在压测机上对两个 ref 交替各跑 10 次某个包的微基准，
+  本机用 benchstat 对比；`-C ../fib` 用于 fib。约一分钟。
+
 ## 各进程跑在哪里
 
 每个进程都在自己的容器里，绑定到各自的 CPU，`nofile` 调到 1048576：
