@@ -32,7 +32,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A17 | Cheaper `OnFinish` and `SetValue` on every request | done, v1.5.4 | 12 | R07d, R07e |
 | A18 | A response's status, and when its request arrived, without a hook | partly, v1.5.4 | 12 | I34, R07e |
 | A19 | A streamed request's `Trailer` set where its end is handed over | done, v1.5.3 | 13 | I35 |
-| A20 | Client requests written and response heads read without net/http | asked | 12 | R07f |
+| A20 | Client requests written and response heads read without net/http | made, not yet released | 12 | R07f |
 | A21 | One `epoll_ctl` per park of an event loop, not two | asked | 12 | R07f |
 | A22 | A client connection's idle clock without a timer reset per request | asked | 12 | R07f |
 
@@ -562,7 +562,15 @@ body and trailer arrive, fail under the race detector without the change and pas
 
 ## A20: Client requests written and response heads read without net/http
 
-**Status.** Asked (R07f).
+**Status.** Made in fib on the branch `a20-client-codec` (`ef16235`, on v1.5.5), not yet pushed or
+released. The client writes request heads and reads response heads itself, and decodes a whole
+chunked body without a trailer, producing net/http's output exactly, which tables and fuzzing
+against net/http check; anything outside the common shape still goes through net/http. Writing
+fit's proxied request: 1 allocation and 300 ns, against 8 and 645 ns; reading a plain response
+head: 5 and 400 ns, against 13 and 1.1 µs. On the benchmark host, fit's proxy (3f25679) over
+HTTP/1.1 went from 226.6k to 245.8k requests a second (+8.4%, three rounds each), at 26.0 µs of
+CPU a request instead of 29.7; over h2c 235.5k to 238.1k. fib's race suite and fit's, against the
+branch, pass.
 
 **Problem.** fib's client frames every HTTP/1 request with `net/http`'s `Request.Write`
 (`marshalRequest`, `marshalStreamedHead`) and reads every response head with
