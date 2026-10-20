@@ -2147,9 +2147,13 @@ Differences from the plan:
   length are kept whole up to 64 KB as before. The test runs and passes on every upstream protocol.
   No benchmark: the harness's proxy backend answers with a `Content-Length`, which takes the same
   path as before.
-- **Test hosts.** Unit tests and `go test` micro-benchmarks run locally. Load tests (the
-  `fitbench` harness, wrk, h2load) run on the benchmark host, reached with `ssh -p 10013
-  127.0.0.1`.
+- **Test hosts.** Only ordinary tests run locally: unit tests, the race detector, vet,
+  staticcheck. Every load test runs on the benchmark host (rules 16-18), reached with
+  `ssh -S ~/.ssh/fitbench.sock -p 10013 root@127.0.0.1`: the `fitbench` harness, wrk, h2load,
+  `go test` micro-benchmarks, perf, and stress or flake reproduction (high `-count`, `-cpu`).
+  The host has no Go: cross-build with `GOOS=linux GOARCH=amd64` (`go build`, `go test -c`) and
+  run the binaries there. Micro-benchmarks recorded above as run on the development Mac predate
+  this.
 - **Benchmarks.** A new scenario or module that fit can serve goes into
   `bench/cmd/fitbench/servers.go` and `bench/configs/fit/fit.json`. nginx preallocates its
   connection tables (about 29 MB per worker with `worker_connections 65536`), which shows in its

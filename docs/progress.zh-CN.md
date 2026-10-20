@@ -1564,8 +1564,10 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
   增加了 `StreamUnknownLengthAtHeader`（[A10](fib-api-requests.zh-CN.md#a10长度未知的客户端响应从响应头起就以流方式交付)），
   `upstream.New` 打开了它：这种响应体从响应头起就交给代理，带长度的响应体仍和以前一样在 64 KB 以内整体接收。该测试在
   各种上游协议上都运行并通过。没有做基准：压测框架的代理后端带 `Content-Length` 应答，走的路径和以前相同。
-- **测试环境。** 单元测试和 `go test` 微基准在本机运行。压测（`fitbench` 框架、wrk、h2load）在压测机上运行，
-  用 `ssh -p 10013 127.0.0.1` 登录。
+- **测试环境。** 本机只运行普通测试：单元测试、竞态检测、vet、staticcheck。所有压测都在基准机上运行（规则 16–18），
+  用 `ssh -S ~/.ssh/fitbench.sock -p 10013 root@127.0.0.1` 登录：`fitbench` 框架、wrk、h2load、`go test` 微基准、
+  perf，以及压力或偶发失败的复现（高 `-count`、`-cpu`）。基准机上没有 Go：用 `GOOS=linux GOARCH=amd64` 交叉编译
+  （`go build`、`go test -c`）后在那里运行。上文记录的在开发用 Mac 上跑的微基准早于这条规定。
 - **基准测试。** fit 新支持的场景或模块要加进 `bench/cmd/fitbench/servers.go` 和
   `bench/configs/fit/fit.json`。nginx 会预分配连接表（`worker_connections 65536` 时每个 worker 约
   29 MB），这体现在打开任何连接之前的内存里，而不是每连接的开销里。
