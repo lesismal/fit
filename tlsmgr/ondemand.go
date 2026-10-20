@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fit/config"
@@ -28,9 +29,13 @@ var (
 
 // refusedFor is how long a name the ask URL refused is refused without
 // asking again, and maxRefused how many such names are remembered.
+// usedEvery is how often a handshake records that it used a name taken on:
+// no more than once a second for each, so that handshakes for one name do not
+// all write to it.
 const (
 	refusedFor = time.Minute
 	maxRefused = 10000
+	usedEvery  = time.Second
 )
 
 // onDemand is what ACME keeps to take on names during handshakes.
@@ -41,6 +46,12 @@ type onDemand struct {
 	every    time.Duration
 	maxNames int
 	wait     time.Duration
+	idle     time.Duration
+
+	// used holds, for each name kept on demand, a *atomic.Int64 of when a
+	// handshake last asked for it, in Unix nanoseconds; handshakes read it
+	// without a lock, and the scheduler drops a name idle long ago.
+	used sync.Map
 
 	mu sync.Mutex
 	// taken are when the last names were taken on, at most limit of them,
@@ -72,6 +83,7 @@ func newOnDemand(c *config.OnDemand) *onDemand {
 		every:    c.Every(),
 		maxNames: c.Names(),
 		wait:     c.Wait(),
+		idle:     c.Idle(),
 		refused:  map[string]time.Time{},
 		waits:    map[string]*onDemandWait{},
 	}
@@ -82,7 +94,8 @@ func newOnDemand(c *config.OnDemand) *onDemand {
 // reached. It may block, for the ask and for the certificate, up to
 // on_demand's timeout; a handshake calls it from fib's handshake pool, never
 // from a worker. Handshakes for the same name wait for one certificate, and
-// one that gives up leaves it being obtained.
+// one that gives up leaves it being obtained. A name no handshake asks for
+// for on_demand's idle_timeout is dropped (see dropIdle).
 func (a *ACME) OnDemand(name string) (*tls.Certificate, error) {
 	od := a.onDemand
 	if od == nil {
@@ -92,10 +105,11 @@ func (a *ACME) OnDemand(name string) (*tls.Certificate, error) {
 	if !onDemandName(name) {
 		return nil, errOnDemandBadName
 	}
+	now := a.now()
 	if c := a.Certificate(name); c != nil {
+		od.touch(name, now)
 		return c, nil
 	}
-	now := a.now()
 	od.mu.Lock()
 	if w := od.waits[name]; w != nil {
 		od.mu.Unlock()
@@ -119,10 +133,15 @@ func (a *ACME) OnDemand(name string) (*tls.Certificate, error) {
 	a.mu.Lock()
 	if a.names[name] == nil {
 		a.names[name] = &managed{name: name, due: a.now(), onDemand: true}
+		used := &atomic.Int64{}
+		used.Store(a.now().UnixNano())
+		od.used.Store(name, used)
 	} else {
 		// Listed meanwhile, or taken on by a reload: not counted on
 		// demand, and worked on as it is.
-		od.drop()
+		od.mu.Lock()
+		od.names--
+		od.mu.Unlock()
 	}
 	a.mu.Unlock()
 	a.poke()
@@ -230,14 +249,38 @@ func (od *onDemand) finish(name string, cert *tls.Certificate, err error) {
 	}
 }
 
-// drop counts a name taken on as no longer kept on demand. od may be nil.
-func (od *onDemand) drop() {
+// drop counts name, taken on, as no longer kept on demand. od may be nil.
+func (od *onDemand) drop(name string) {
 	if od == nil {
 		return
 	}
+	od.used.Delete(name)
 	od.mu.Lock()
 	od.names--
 	od.mu.Unlock()
+}
+
+// touch records that a handshake asked for name at now, if name is kept on
+// demand.
+func (od *onDemand) touch(name string, now time.Time) {
+	v, ok := od.used.Load(name)
+	if !ok {
+		return
+	}
+	used, t := v.(*atomic.Int64), now.UnixNano()
+	if t-used.Load() >= int64(usedEvery) {
+		used.Store(t)
+	}
+}
+
+// idleUntil returns when name, kept on demand, is dropped if no handshake
+// asks for it before then, or false if it is not kept on demand.
+func (od *onDemand) idleUntil(name string) (time.Time, bool) {
+	v, ok := od.used.Load(name)
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.Unix(0, v.(*atomic.Int64).Load()).Add(od.idle), true
 }
 
 // onDemandName reports whether name is one a certificate may be obtained

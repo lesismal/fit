@@ -264,7 +264,7 @@ func (a *ACME) Manage(names []string) {
 		case want[n] && m.onDemand:
 			// Listed now: the config's, and no longer counted on demand.
 			m.onDemand = false
-			a.onDemand.drop()
+			a.onDemand.drop(n)
 		case m.onDemand:
 			want[n] = true
 		case !want[n]:
@@ -278,28 +278,68 @@ func (a *ACME) Manage(names []string) {
 		}
 	}
 	if changed {
-		certs := *a.certs.Load()
-		kept := make(map[string]*tls.Certificate, len(certs))
-		for n, c := range certs {
-			if want[n] {
-				kept[n] = c
-			}
-		}
-		a.certs.Store(&kept)
-		if sts := a.staples.Load(); sts != nil {
-			keptStaples := make(map[string]*Staple, len(*sts))
-			for n, st := range *sts {
-				if want[n] {
-					keptStaples[n] = st
-				} else {
-					a.ocsp.Load().Release(st)
-				}
-			}
-			a.staples.Store(&keptStaples)
-		}
+		a.pruneCerts()
 	}
 	a.mu.Unlock()
 	a.poke()
+}
+
+// pruneCerts stops serving the certificates of names a no longer manages,
+// and gives back their OCSP responses. a.mu is held.
+func (a *ACME) pruneCerts() {
+	certs := *a.certs.Load()
+	kept := make(map[string]*tls.Certificate, len(certs))
+	for n, c := range certs {
+		if a.names[n] != nil {
+			kept[n] = c
+		}
+	}
+	a.certs.Store(&kept)
+	if sts := a.staples.Load(); sts != nil {
+		keptStaples := make(map[string]*Staple, len(*sts))
+		for n, st := range *sts {
+			if a.names[n] != nil {
+				keptStaples[n] = st
+			} else {
+				a.ocsp.Load().Release(st)
+			}
+		}
+		a.staples.Store(&keptStaples)
+	}
+}
+
+// dropIdle drops the names taken on demand that no handshake has asked for
+// in on_demand's idle_timeout, as of now, and returns when the next of the
+// others will be, or zero if none will. A name being worked on waits for its
+// run to end. A name dropped no longer counts against max_names, and its
+// certificate is no longer served but stays in the storage, for the next
+// handshake that asks for it to take it on again. a.mu is held.
+func (a *ACME) dropIdle(now time.Time) time.Time {
+	var next time.Time
+	dropped := false
+	for n, m := range a.names {
+		if !m.onDemand || m.running {
+			continue
+		}
+		until, ok := a.onDemand.idleUntil(n)
+		if !ok {
+			continue
+		}
+		if until.After(now) {
+			if next.IsZero() || until.Before(next) {
+				next = until
+			}
+			continue
+		}
+		delete(a.names, n)
+		a.onDemand.drop(n)
+		dropped = true
+		a.logf("acme: %s: on demand: no handshake for %s; dropped", n, a.onDemand.idle)
+	}
+	if dropped {
+		a.pruneCerts()
+	}
+	return next
 }
 
 // Certificate returns the certificate a has for name, with its OCSP
@@ -384,6 +424,9 @@ func (a *ACME) schedule() {
 		a.mu.Lock()
 		now := a.now()
 		var next time.Time
+		if a.onDemand != nil {
+			next = a.dropIdle(now)
+		}
 		for _, m := range a.names {
 			if m.running {
 				continue
@@ -476,7 +519,7 @@ func (a *ACME) run(m *managed) {
 			// fails is dropped, rather than tried again for ever; the
 			// next handshake for it may take it on again.
 			delete(a.names, m.name)
-			a.onDemand.drop()
+			a.onDemand.drop(m.name)
 			a.logf("acme: %s: %v; dropped", m.name, err)
 		} else if a.ctx.Err() == nil {
 			m.failures++
