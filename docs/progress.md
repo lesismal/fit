@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I34, with I30b and I30c); I35, its exit tests, is left |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
 | fib | `github.com/lesismal/fib v1.5.3`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
@@ -27,10 +27,11 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I35 (M2's exit tests), which ends M2.**
+**M2 is done.** Its three exit tests pass in CI, in a job of their own (I35); CI's full race test
+jobs still fail, and finding why, from their logs, comes first. **Next: M3, from I36 (matchers v2).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
-balancing v2, and I34, Prometheus metrics.
+balancing v2, I34, Prometheus metrics, and I35, its exit tests.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
 static handler and the limits use them, sendfile included since R05b, and R07c took the hot path's
@@ -46,7 +47,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I35 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I36 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -1905,6 +1906,37 @@ Differences from the plan:
 - A new order does not name the certificate it replaces (ARI's `replaces`): x/crypto's
   `AuthorizeOrder` has no way to send it. A CA uses it to exempt renewals from rate limits, so a
   renewal ARI asks for is ordered as any other.
+
+### I35 M2 exit tests — done
+
+- M2's three exit criteria (roadmap) are three tests in `test/e2e`, which run the fit binary:
+  `TestChurn` (I26: 2,000 config swaps through the Admin API under traffic, no request failed),
+  `TestAutoHTTPSFromPebble` (I30b: a config naming only a host name is served over HTTPS with a
+  certificate from Pebble, and HTTP redirects to it), and `TestHealthCheckRotation`, new: two
+  backends behind an upstream with an HTTP health check (200ms interval, 100ms timeout, two fails,
+  two passes); one backend's probe path stops answering while its other requests are served, so
+  only the health check can take it out. It leaves rotation within the window (fails × interval +
+  timeout + an interval of slack, 700ms; measured 380–540ms), gets no request while out, and is back
+  within its window (passes × interval + an interval, 600ms; measured 350–380ms); no request fails.
+- `make m2-exit` runs the three, and CI gains an "M2 exit tests" job that runs them with Pebble
+  required: `pebbletest` fails rather than skips when `$FIT_PEBBLE_REQUIRED` is set. The job passed
+  in CI on `929ec73` (run 15), with the lint and fuzz jobs. The Let's Encrypt staging check is
+  `TestLetsEncryptStaging` (I30b), run by hand.
+- CI's full `go test -race ./...` jobs, on Linux and macOS, have failed on every push since the M1
+  review (`d4b9c5b`), unnoticed. Run with three CPUs, as a runner has, the suite reproduced one
+  cause: a data race between fit's proxy reading a request's announced trailer names and fib's
+  HTTP/2 server setting the request's `Trailer` as the body ended. It was fib's: asked as
+  [A19](fib-api-requests.md#a19-a-streamed-requests-trailer-set-where-its-end-is-handed-over), fixed
+  and released in fib v1.5.3, which fit now uses; `TestTrailers` passes five times in a row with
+  three CPUs, where v1.5.2 failed one in five. The jobs still fail on v1.5.3, for a reason the CI
+  logs hold and the local runs with three and four CPUs do not show; the logs need a GitHub
+  sign-in.
+
+Differences from the plan:
+
+- The certificate test is against Pebble in CI; Let's Encrypt staging needs a public name and
+  ports 80 and 443, and is documented to be run by hand, as I30's done-when allows.
+- CI's other test jobs are not green yet; finding why is the first thing after M2.
 
 ## Notes for later iterations
 

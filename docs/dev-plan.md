@@ -150,7 +150,7 @@ Status: `todo`, `doing` or `done`.
 | I32 | Active health checks | I20 | done |
 | I33 | Load balancing v2 | I19 | done |
 | I34 | Prometheus metrics | I23 | done |
-| I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | doing |
+| I35 | M2 exit tests | I25, I26, I27, I30b, I31, I32, I33, I34 | done |
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | todo |
 | I37 | Expression matcher | I36 | todo |
