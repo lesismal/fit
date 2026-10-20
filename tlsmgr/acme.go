@@ -70,10 +70,13 @@ type ACME struct {
 	// cannot check does not fail every attempt.
 	challenges []string
 
-	// now, renewAt, retryBase and retryMax are what tests change.
+	// now, renewAt, retryBase, retryMax, ariMin and ariMax are what tests
+	// change; ariMin and ariMax bound the wait before asking the CA about a
+	// certificate again.
 	now                 func() time.Time
 	renewAt             func(leaf *x509.Certificate) time.Time
 	retryBase, retryMax time.Duration
+	ariMin, ariMax      time.Duration
 
 	// certs holds the certificate of each name that has one, replaced
 	// whole on every change, so that a handshake reads it without a lock.
@@ -88,10 +91,13 @@ type ACME struct {
 	tokens    sync.Map
 	alpnCerts sync.Map
 
-	mu     sync.Mutex
-	names  map[string]*managed
-	client *acme.Client // once the account is registered
-	closed bool
+	mu    sync.Mutex
+	names map[string]*managed
+	// ariURL is the CA's ARI endpoint, once ariKnown, from its directory.
+	ariURL   string
+	ariKnown bool
+	client   *acme.Client // once the account is registered
+	closed   bool
 
 	jobs   chan *managed
 	wake   chan struct{}
@@ -113,6 +119,9 @@ type managed struct {
 	// onDemand says a handshake took the name on, not the config; Manage
 	// leaves it, and it is dropped if its first certificate fails.
 	onDemand bool
+	// ari is what the CA's renewal information says of the certificate,
+	// or nil before ACME has asked.
+	ari *ariState
 }
 
 // NewACME returns an ACME that obtains certificates as c says, or with the
@@ -165,6 +174,8 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 		now:       time.Now,
 		retryBase: defaultRetryBase,
 		retryMax:  defaultRetryMax,
+		ariMin:    ariCheckMin,
+		ariMax:    ariCheckMax,
 		names:     map[string]*managed{},
 		wake:      make(chan struct{}, 1),
 	}
@@ -427,9 +438,12 @@ func (a *ACME) work() {
 func (a *ACME) run(m *managed) {
 	ctx, cancel := context.WithTimeout(a.ctx, a.timeout)
 	a.mu.Lock()
-	revoked := m.revoked
+	revoked, ari := m.revoked, m.ari
 	a.mu.Unlock()
-	cert, err := a.ensure(ctx, m.name, m.failures, revoked)
+	cert, err := a.ensure(ctx, m.name, m.failures, revoked, ari)
+	if err == nil {
+		a.checkARI(ctx, m, cert.Leaf)
+	}
 	cancel()
 	a.mu.Lock()
 	m.running = false
@@ -437,6 +451,16 @@ func (a *ACME) run(m *managed) {
 		if err == nil {
 			m.failures, m.revoked = 0, nil
 			m.due = a.renewAt(cert.Leaf)
+			if s := m.ari; s != nil && s.serial.Cmp(cert.Leaf.SerialNumber) == 0 {
+				// Earlier when the CA's window says so, and when it is time
+				// to ask again.
+				if !s.renewAt.IsZero() && s.renewAt.Before(m.due) {
+					m.due = s.renewAt
+				}
+				if s.checkAt.Before(m.due) {
+					m.due = s.checkAt
+				}
+			}
 			certs := *a.certs.Load()
 			if certs[m.name] != cert {
 				next := make(map[string]*tls.Certificate, len(certs)+1)
@@ -526,10 +550,12 @@ func (a *ACME) accountKey() string         { return "acme/" + a.caKey + "/accoun
 // ensure returns a certificate for name that is not due for renewal: the
 // one in the storage, or a new one, which it stores. attempt counts the
 // failures before it, which pick the challenge tried first; revoked, if not
-// nil, is the serial number of a certificate not to take from the storage.
-func (a *ACME) ensure(ctx context.Context, name string, attempt int, revoked *big.Int) (*tls.Certificate, error) {
+// nil, is the serial number of a certificate not to take from the storage,
+// and ari, if not nil, what the CA's renewal information says.
+func (a *ACME) ensure(ctx context.Context, name string, attempt int, revoked *big.Int, ari *ariState) (*tls.Certificate, error) {
 	usable := func(cert *tls.Certificate) bool {
-		return a.usable(cert) && (revoked == nil || cert.Leaf.SerialNumber.Cmp(revoked) != 0)
+		return a.usable(cert) && (revoked == nil || cert.Leaf.SerialNumber.Cmp(revoked) != 0) &&
+			!ari.due(cert.Leaf.SerialNumber, a.now())
 	}
 	if cert := a.load(ctx, name); usable(cert) {
 		return cert, nil

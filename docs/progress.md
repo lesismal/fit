@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I31, I30b, I32–I34) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: under way (I24–I34, with I30b and I30c); I35, its exit tests, is left |
 | fib | `github.com/lesismal/fib v1.5.2`, from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ARI (I30c); no method, header or other matchers (I36) |
+| What does not | no method, header or other matchers (I36) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -27,9 +27,9 @@ today's fixed throughput.
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
-**Next: I30c (ARI), then I35 (M2's exit tests).**
+**Next: I35 (M2's exit tests), which ends M2.**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
-draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I31, on-demand TLS, I32, active health checks, I33, load
+draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, and I34, Prometheus metrics.
 R01 and R02, the review fixes that came before M2, are done, and so are R07a and R07b, the part of the
 hot path work that needs nothing from fib, and R03–R06: fib has the APIs, and the proxy's downloads, the
@@ -46,7 +46,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I30c from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I35 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -1872,6 +1872,39 @@ Differences from the plan:
 - The `https` listener serves HTTP/1.1 and h2, not h3, as a written TLS listener does by default.
 - The Let's Encrypt staging test has not been run: it needs a public name and ports 80 and 443,
   which the benchmark host does not have.
+
+### I30c ACME Renewal Information (ARI) — done
+
+- `tlsmgr.ACME` asks the CA, after each run that leaves a name with a certificate, what ARI
+  (RFC 9773) suggests for it: the `renewalInfo` URL from the CA's directory, read once (x/crypto's
+  `acme.Directory` does not carry it), and the certificate's identifier, its authority key
+  identifier and its serial number's DER in base64url. A window that has begun makes the
+  certificate due at once; one to come, at a time picked at random in it. The certificate is due
+  at the earliest of that, its lifetime's renewal time, and when to ask again: the CA's
+  Retry-After, in seconds or as a date, kept between a minute and a day, six hours when it says
+  nothing. What ARI says counts for the certificate it was asked about only, so a certificate
+  another instance renewed meanwhile is taken from the storage as it is.
+- A CA without ARI, or one that does not answer, leaves renewal to the lifetime, and is asked again
+  after six hours; a failure is logged, and nothing else changes.
+- Requests to the CA's ARI run on the ACME workers, with their timeouts and a 64 KiB bound on
+  answers.
+- `internal/pebbletest` gains `SetRenewalInfo`, which has Pebble suggest a window for a
+  certificate.
+- Tests: `TestCertID` (RFC 9773's example, a serial without its top bit, no key identifier),
+  `TestRetryAfter`; against a CA of the test's: a stored certificate far from due, whose window has
+  begun, is renewed at once while it is still served, and the CA is asked by its identifier; a
+  window to come renews nothing, is picked within it, and the CA is asked again as Retry-After
+  says. Against Pebble: the window it suggests for a certificate it issued is used, within the
+  certificate's lifetime, and once Pebble moves the window into the past the certificate is
+  renewed. The `tlsmgr` tests pass three times in a row under the race detector, with Pebble.
+  `go vet ./...`, `GOOS=windows go vet ./...` and `go test -race ./...` pass.
+- No benchmark: nothing on the data plane changed.
+
+Differences from the plan:
+
+- A new order does not name the certificate it replaces (ARI's `replaces`): x/crypto's
+  `AuthorizeOrder` has no way to send it. A CA uses it to exempt renewals from rate limits, so a
+  renewal ARI asks for is ordered as any other.
 
 ## Notes for later iterations
 

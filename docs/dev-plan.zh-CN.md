@@ -135,7 +135,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I29 | ACME HTTP-01 与续期 | I28 | done |
 | I30 | TLS-ALPN-01、OCSP stapling | I29 | done |
 | I30b | 默认 HTTPS | I30 | done |
-| I30c | ACME 续期信息（ARI） | I29 | todo |
+| I30c | ACME 续期信息（ARI） | I29 | done |
 | I31 | 按需 TLS | I30 | done |
 | I32 | 主动健康检查 | I20 | done |
 | I33 | 负载均衡 v2 | I19 | done |

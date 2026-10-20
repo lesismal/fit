@@ -10,6 +10,7 @@
 package pebbletest
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -160,6 +161,23 @@ func run(t testing.TB, name string, env []string, args ...string) {
 		cancel()
 		_ = cmd.Wait()
 	})
+}
+
+// SetRenewalInfo has Pebble suggest, for the certificate in certPEM, that it
+// be renewed between start and end (ACME Renewal Information).
+func (p *Pebble) SetRenewalInfo(t testing.TB, certPEM []byte, start, end time.Time) {
+	t.Helper()
+	window, _ := json.Marshal(map[string]any{"suggestedWindow": map[string]time.Time{"start": start, "end": end}})
+	body, _ := json.Marshal(map[string]string{"Certificate": string(certPEM), "ARIResponse": string(window)})
+	resp, err := p.client.Post(p.mgmt+"/set-renewal-info/", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		t.Fatalf("set-renewal-info: %s %s", resp.Status, msg)
+	}
 }
 
 // Roots returns the roots the certificates Pebble issues chain to.
