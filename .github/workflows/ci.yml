@@ -70,7 +70,14 @@ jobs:
           go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.1
           echo "FIT_PEBBLE_BIN=$(go env GOPATH)/bin" >> "$GITHUB_ENV"
       - name: go test -race
-        run: go test -race ./...
+        shell: bash
+        run: go test -race -json ./... | tee test.json | go run ./internal/testsummary
+      # A job's log needs a GitHub sign-in to read; its annotations do not.
+      # So each failed package's output goes to an annotation as well.
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: go run ./internal/testsummary -annotate < test.json
 
   # M2's exit criteria, run on their own so that they show as a check of
   # their own; go test -race ./... above runs them too. With Pebble set
