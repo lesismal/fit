@@ -248,7 +248,10 @@ func TestIfMatch(t *testing.T) {
 // others or are told to read again; and writers without If-Match lose
 // nothing either, since each change is made to the config before it.
 func TestConcurrentWriters(t *testing.T) {
-	f := start(t, doc("v0"), &config.Admin{History: 100})
+	// Its 16 clients are max_conns' default: a connection a client has let
+	// go keeps its slot until the server sees it close, so one dialed
+	// meanwhile would be cut off, which TestConnectionLimit tests, not this.
+	f := start(t, doc("v0"), &config.Admin{History: 100, MaxConns: 64})
 	const n = 8
 	var wg sync.WaitGroup
 	var conflicts atomic.Int64
