@@ -855,8 +855,8 @@ The [M1 report](../bench/results/m1-report-2026-10-19.md) has the details.
 - Found and fixed: fib v1.3.0 let `X-A : one` through as a field named `X-A `, where RFC 9112 asks
   for 400. The proxy refuses a request with a field name that is not a token, so it never reaches an
   upstream. The fix in fib is asked for as A9 in
-  [fib-api-requests](fib-api-requests.md), with a proposed patch on a local fib branch,
-  `fix-field-name-whitespace`, not pushed; the proxy's check is the stopgap until then.
+  [fib-api-requests](fib-api-requests.md), and fib v1.4.0 refuses such a request with 400 (`25064b3`);
+  the proxy's check stays as defence in depth, in the loop that copies the header anyway.
 - Benchmarks (on the benchmark host: Ryzen 7 7800X3D, Ubuntu 24.04, host networking): `fitbench`
   with its defaults for nginx 1.31.4, Caddy 2.10.2, Traefik 3.5.0 and fit, with idle connections at
   10k and 100k; the results are `bench/results/m1-2026-10-19-linux.json` and

@@ -144,8 +144,8 @@ func parsePrefix(s string) (netip.Prefix, error) {
 // outgoing fills in x.base, the request sent upstream for the one c serves,
 // and reports false for one with a header field whose name is not a token,
 // as "X-A : 1" makes it: RFC 9112 asks a server to refuse whitespace before
-// the colon, which fib v1.3.1 lets through, and an upstream could read such a
-// field differently. The request, its URL and its forwarding fields' values
+// the colon, and an upstream could read such a field differently. fib refuses
+// it with 400 since v1.4.0; this stays as defence in depth. The request, its URL and its forwarding fields' values
 // live in x, so that they cost no allocations of their own.
 func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
