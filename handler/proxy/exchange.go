@@ -26,9 +26,10 @@ import (
 
 // Why a proxied request was cut short, as the cause exchange.cancel records.
 var (
-	errClientGone  = errors.New("proxy: the client went away")
-	errIdleTimeout = errors.New("proxy: the upstream went silent in the middle of its response")
-	errDrained     = errors.New("proxy: the config the request started on was swapped out the drain timeout ago")
+	errClientGone   = errors.New("proxy: the client went away")
+	errIdleTimeout  = errors.New("proxy: the upstream went silent in the middle of its response")
+	errDrained      = errors.New("proxy: the config the request started on was swapped out the drain timeout ago")
+	errRouteTimeout = errors.New("proxy: the request took longer than the route's timeout")
 )
 
 // brokenTrailer is the Fit-Error trailer's value on an HTTP/2 response whose
@@ -79,6 +80,12 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	x.stall, x.pool, x.backend, x.setCookie, x.graph = p.stall, p.pool, backend, p.pool.SetCookie(c.Request, backend), p.graph
 	x.open = &p.open[rand.Uint32()%openShards]
 	x.open.add(x)
+	if x.policy = p.retry; x.policy != nil {
+		x.policy.budget.deposit()
+	}
+	if p.timeout > 0 {
+		x.deadline = time.AfterFunc(p.timeout, func() { x.cancel(errRouteTimeout) })
+	}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
@@ -200,6 +207,12 @@ type exchange struct {
 	// setCookie is the sticky cookie the response sets, or "".
 	setCookie string
 	graph     module.Holder
+	// policy is the proxy's retries, or nil, and attempt how many times the
+	// request has been sent again.
+	policy  *retryPolicy
+	attempt int
+	// deadline is the route's timeout's, or nil.
+	deadline *time.Timer
 	// timer is the response idle timeout's.
 	timer atomic.Pointer[time.Timer]
 	// open is the proxy's shard of open exchanges this one is in, for a
@@ -243,6 +256,9 @@ func (x *exchange) settle() bool {
 	if t := x.timer.Load(); t != nil {
 		t.Stop()
 	}
+	if x.deadline != nil {
+		x.deadline.Stop()
+	}
 	x.open.remove(x)
 	x.pool.Done(x.backend, x.failed)
 	return true
@@ -285,6 +301,9 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	x.pool.ObserveResponse(uintptr(unsafe.Pointer(x.c)), took)
 	if e := observe.EntryOf(x.c); e != nil {
 		e.Upstream, e.UpstreamDuration = x.backend.Address, took
+	}
+	if x.policy != nil && x.retry(resp, err) {
+		return
 	}
 	if err != nil {
 		x.fail(err)
@@ -456,8 +475,10 @@ func (x *exchange) fail(err error) {
 		return
 	}
 	status := x.statusOf(err)
-	// 400, 408 and 413 are the client's body failing, not the upstream.
-	x.failed = status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout
+	// 400, 408 and 413 are the client's body failing, not the upstream, and
+	// the route's timeout is the route's.
+	x.failed = (status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout) &&
+		!errors.Is(x.causeErr(), errRouteTimeout)
 	// The pool hears of the failure before the client does, so that the
 	// request the client sends next is not given a backend this one has
 	// just taken out of rotation.
@@ -475,7 +496,7 @@ func (x *exchange) statusOf(err error) int {
 	cause := x.causeErr()
 	var upload *uploadError
 	switch {
-	case errors.Is(cause, errIdleTimeout), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
+	case errors.Is(cause, errIdleTimeout), errors.Is(cause, errRouteTimeout), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
 		return stdhttp.StatusGatewayTimeout
 	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy), errors.Is(err, upstream.ErrClosed):
 		// Swapped out, max_pending requests wait for a connection already,
@@ -511,8 +532,9 @@ func (x *exchange) broken(err error) {
 		x.fail(err)
 		return
 	}
-	// Cut off by a drain, the backend did nothing wrong.
-	x.failed = !errors.Is(x.causeErr(), errDrained)
+	// Cut off by a drain or the route's timeout, the backend did nothing
+	// wrong.
+	x.failed = !errors.Is(x.causeErr(), errDrained) && !errors.Is(x.causeErr(), errRouteTimeout)
 	switch {
 	case x.resp.ContentLength >= 0:
 		// Short of its length: fib closes an HTTP/1 connection and resets

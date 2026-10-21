@@ -37,6 +37,7 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/upstream"
 )
@@ -47,11 +48,15 @@ func init() {
 
 // Proxy forwards requests to an upstream.
 type Proxy struct {
-	Upstream       string   `json:"upstream" fit:"required" doc:"The name of the upstream requests go to."`
-	TrustedProxies []string `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out."`
-	HostHeader     string   `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
+	Upstream       string          `json:"upstream" fit:"required" doc:"The name of the upstream requests go to."`
+	TrustedProxies []string        `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out."`
+	HostHeader     string          `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
+	Retry          *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
+	Timeout        config.Duration `json:"timeout,omitempty" doc:"The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out."`
 
 	pool    *upstream.Pool
+	retry   *retryPolicy
+	timeout time.Duration
 	trusted []netip.Prefix
 	stall   time.Duration
 	// graph is the config the proxy belongs to, held by each exchange until
@@ -124,6 +129,15 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 	if strings.ContainsAny(p.HostHeader, " \t\r\n\x00/") {
 		return ctx.Errorf("host_header", "%q is not a host", p.HostHeader)
 	}
+	if r := p.Retry; r != nil {
+		for i, status := range r.Statuses {
+			if status < 500 || status > 599 {
+				return ctx.Params.Field("retry").Field("statuses").Index(i).Errorf("%d is not a 5xx status", status)
+			}
+		}
+		p.retry = newRetryPolicy(r)
+	}
+	p.timeout = p.Timeout.Std()
 	return nil
 }
 

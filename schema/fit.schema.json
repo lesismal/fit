@@ -792,6 +792,15 @@
           "description": "The Host header sent upstream; the client's when left out.",
           "type": "string"
         },
+        "retry": {
+          "$ref": "#/$defs/proxy.Retry",
+          "description": "Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."
+        },
+        "timeout": {
+          "description": "The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
         "trusted_proxies": {
           "description": "The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out.",
           "items": {
@@ -1384,6 +1393,39 @@
           "description": "Prefixes to take off the path: the first that the path starts with, at a segment boundary, is removed, and what is left starts with '/'. \"/api\" makes \"/api/users\" \"/users\" and \"/api\" \"/\", and leaves \"/apix\" alone.",
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "proxy.Retry": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "default": 2,
+          "description": "How many times a request may be sent again after the first; 2 when left out.",
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "budget_min_per_second": {
+          "default": 10,
+          "description": "Retries allowed each second beyond budget_ratio, so that a proxy taking few requests may still retry; 10 when left out.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "budget_ratio": {
+          "default": 0.2,
+          "description": "Retries may add at most this share of the requests the proxy takes, so that retries cannot multiply the load on an upstream already failing; 0.2 when left out.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "statuses": {
+          "description": "Statuses of the upstream's, 5xx ones, that have a request of an idempotent method sent again, as 502, 503 and 504; none when left out, so that only requests that got no response are.",
+          "items": {
+            "type": "integer"
           },
           "type": "array"
         }

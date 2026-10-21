@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I42） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I43） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283`（fib `main` 的 `cfb4f09`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有重试和按路由的超时（I43）、熔断（I44）及 M3 的其余部分 |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有熔断（I44）、流量拆分（I45）及 M3 的其余部分 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I42 已完成；下一步是 I43（重试与按路由的超时）。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I43 已完成；下一步是 I44（熔断）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I43。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I44。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -1778,6 +1778,31 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 - 没有使用 JWT 库：标准库能验证所有算法，解析很小，因此没有新依赖。claims 保存在访问日志的条目里——fit 唯一的按请求存储
   ——而不是单独的存储。
+
+### I43 重试与按路由超时 — 已完成
+
+- 代理的 `retry` 把请求再发一次，发往上游策略选出的下一个后端，第一次之后最多 `attempts`（默认 2）次：连接未能建立的请求
+  （拨号错误，或该后端已有 `max_pending` 个请求在等待），无论方法，因为它从未发出；以及 GET、HEAD、OPTIONS、TRACE、PUT
+  和 DELETE（RFC 9110 的幂等方法）在响应开始之前失败的，或响应状态码在 `statuses` 中的（只能是 5xx；默认没有），此时放弃
+  其响应体。请求体流式发送的（超过 64 KB、仍在到达或带 trailer）永不重发，因为请求体已经发走；整体到达的从其字节重发。
+  重试受预算限制，与 Finagle 和 Linkerd 相同：每个请求增加 `budget_ratio`（0.2）次重试，每秒增加
+  `budget_min_per_second`（10）次，最多保存十秒的量，初始为一秒的量，因此重试最多给已在失败的上游增加约五分之一的负载。
+  失败的尝试照旧计为其后端的失败；因状态码重试的不计。
+- 代理的 `timeout` 限制一个请求从代理接收到响应结束的时间，包括重试：响应开始之前超过的回应 504，正在进行的响应像上游中断
+  那样被截断。不计为后端的失败。默认没有；上游自己的超时照旧有效。
+- 测试（`handler/proxy/retry_test.go`）：`TestRetryConnectFailure`（一个拒绝连接的后端和一个正常的：每个 GET 和 POST
+  都由正常的后端回应，各一次）、`TestRetryNotResentOnceSent`（读完请求后关闭连接的后端：POST 到达一次，PUT 在 4 次
+  尝试中各到达一次，fib 的客户端自己重发时为两次）、`TestRetryStatuses`（一个回应 503、一个回应 200 的后端：GET 都得到
+  200；POST 得到 503 且不重试）、`TestRetryBudget`（50 个 GET 发往回应 503 的后端，`budget_ratio` 为 0.2 且没有每秒
+  额度：最多 10 次重试）、`TestRouteTimeout`（慢上游得到 504；下载被截断）和 `TestRetryParams`。完整的竞态测试在
+  基准机上通过。
+- 基准机上的 `bench/ab.sh`，代理场景，3 轮各 10s，main 对比本改动（未设置 retry 或 timeout）：HTTP/1.1 每秒 246k → 245k
+  请求（−0.6%），h2c 240k → 240k（−0.1%），都在噪声范围内。
+
+与计划的差异：
+
+- 重试属于代理，而不是 `middleware/retry`：重发需要代理的请求、后端和池。状态码重试只用于幂等请求，预算由一个代理（一个
+  路由）的请求共享，而不是由上游共享。
 
 ## 给后续迭代的说明
 
