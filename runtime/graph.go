@@ -58,8 +58,8 @@ type Graph struct {
 	ACME      *tlsmgr.ACME
 	ACMENames []string
 	// CertFiles holds the SHA-256 of each certificate, key and CA file the
-	// listeners loaded, by path, for a tlsmgr.FileWatcher; nil when they
-	// loaded none.
+	// listeners and upstreams loaded, by path, for a tlsmgr.FileWatcher; nil
+	// when they loaded none.
 	CertFiles map[string][sha256.Size]byte
 
 	refs      atomic.Int64
@@ -198,9 +198,10 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	var errs config.Errors
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
-		key, keyed := upstreamKey(u)
+		key, files, keyed := upstreamKey(u)
 		if keyed {
 			g.upstreamKeys[u.Name] = key
+			g.watchFiles(files)
 			if prev := env.Previous; prev != nil && prev.upstreamKeys[u.Name] == key {
 				if p := prev.upstreams[u.Name]; p != nil {
 					p.Acquire()
@@ -492,24 +493,32 @@ func metricsName(r *Route) string {
 }
 
 // upstreamKey is what decides whether two graphs can share an upstream's
-// pool: its config, and the contents of its CA file, which a reload is
-// expected to read again. It reports false when the CA file cannot be read,
-// for upstream.New to report.
-func upstreamKey(u *config.Upstream) (string, bool) {
+// pool: its config, and the contents of its TLS files, CA, certificate and
+// key, which a reload is expected to read again. files are those files'
+// sums, by path, for the watcher. It reports false when a file cannot be
+// read, for upstream.New to report.
+func upstreamKey(u *config.Upstream) (key string, files map[string][sha256.Size]byte, ok bool) {
 	data, err := json.Marshal(u)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
-	key := string(data)
-	if u.TLSCAFile != "" {
-		pem, err := os.ReadFile(u.TLSCAFile)
+	key = string(data)
+	for _, path := range [...]string{u.TLSCAFile, u.TLSCertFile, u.TLSKeyFile} {
+		if path == "" {
+			continue
+		}
+		pem, err := os.ReadFile(path)
 		if err != nil {
-			return "", false
+			return "", nil, false
 		}
 		sum := sha256.Sum256(pem)
+		if files == nil {
+			files = map[string][sha256.Size]byte{}
+		}
+		files[path] = sum
 		key += "\x00" + hex.EncodeToString(sum[:])
 	}
-	return key, true
+	return key, files, true
 }
 
 // watchFiles adds files, sums by path, to those g.CertFiles has watched.

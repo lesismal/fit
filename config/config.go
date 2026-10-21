@@ -529,7 +529,9 @@ type Upstream struct {
 
 	Protocol      string `json:"protocol,omitempty" enum:"http/1.1,h2c,h2" default:"\"http/1.1\"" doc:"How requests reach the upstream: http/1.1 in the clear, h2c (HTTP/2 in the clear, which the servers must expect), or h2 (TLS, with HTTP/2 when the server chooses it through ALPN and HTTP/1.1 otherwise). http/1.1 when left out."`
 	TLSServerName string `json:"tls_server_name,omitempty" doc:"With h2: the name the servers' certificates are checked against, and sent in SNI; each address's host when left out."`
-	TLSCAFile     string `json:"tls_ca_file,omitempty" doc:"With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots."`
+	TLSCAFile     string `json:"tls_ca_file,omitempty" doc:"With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots. It is watched, as a listener's certificate files are: a change loads the config again."`
+	TLSCertFile   string `json:"tls_cert_file,omitempty" doc:"With h2: a PEM file of the client certificate, and the chain after it, that fit presents to servers that ask for one (mutual TLS); needs tls_key_file. It is watched, as tls_ca_file is: a change loads the config again."`
+	TLSKeyFile    string `json:"tls_key_file,omitempty" doc:"With h2: the PEM file of tls_cert_file's private key."`
 
 	MaxFails    *int     `json:"max_fails,omitempty" min:"0" default:"1" doc:"How many failed requests to an address within fail_timeout take it out of rotation for fail_timeout, as nginx's max_fails does: a connect that failed, an upstream that broke off or timed out. 1 when left out; 0 keeps every address in rotation."`
 	FailTimeout Duration `json:"fail_timeout,omitempty" default:"\"10s\"" doc:"The window max_fails are counted in, and how long an address that reached them stays out; 10s when left out."`

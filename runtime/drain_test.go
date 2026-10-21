@@ -143,7 +143,40 @@ func TestSharedPools(t *testing.T) {
 	if b5, _ := g5.Upstream("b"); b5 == b4 {
 		t.Fatal("a changed CA file kept the old pool")
 	}
-	for _, g := range []*Graph{g2, g3, g4, g5} {
+	if _, ok := g5.CertFiles[ca]; !ok {
+		t.Fatal("the CA file is not watched")
+	}
+
+	// A client certificate and its key: watched too, and new ones make a
+	// new pool.
+	client, err := certtest.Write(t.TempDir(), "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withCert := withCA + `, "tls_cert_file": "` + client.CertFile + `", "tls_key_file": "` + client.KeyFile + `"`
+	g6 := compileAfter(t, upstreamDoc(withCert), g5)
+	if _, ok := g6.CertFiles[client.KeyFile]; !ok {
+		t.Fatal("the key file is not watched")
+	}
+	other, err := certtest.Write(t.TempDir(), "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for from, to := range map[string]string{other.CertFile: client.CertFile, other.KeyFile: client.KeyFile} {
+		data, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g7 := compileAfter(t, upstreamDoc(withCert), g6)
+	b6, _ := g6.Upstream("b")
+	if b7, _ := g7.Upstream("b"); b7 == b6 {
+		t.Fatal("a changed client certificate kept the old pool")
+	}
+	for _, g := range []*Graph{g2, g3, g4, g5, g6, g7} {
 		g.Release()
 	}
 }

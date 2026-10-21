@@ -146,6 +146,15 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 				return nil, c.At.Field("tls_ca_file").Errorf("%s holds no PEM certificate", c.TLSCAFile)
 			}
 		}
+		if c.TLSCertFile != "" {
+			// Presented to a server that asks for a client certificate, by
+			// the proxy's requests and the health checks' probes alike.
+			cert, err := tls.LoadX509KeyPair(c.TLSCertFile, c.TLSKeyFile)
+			if err != nil {
+				return nil, c.At.Field("tls_cert_file").Errorf("%v", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
 	}
 	if engine == nil {
 		return p, nil

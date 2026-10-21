@@ -175,7 +175,7 @@ Status: `todo`, `doing` or `done`.
 | I52 | SNI routing and PROXY protocol | I50 | done |
 | I53 | One port, many protocols; SOCKS and CONNECT | I52 | done |
 | I53b | The CONNECT forward proxy | I53 | done |
-| I54 | Upstream TLS | I18 | todo |
+| I54 | Upstream TLS | I18 | done |
 | I55 | M3 exit tests | I37–I54 | todo |
 | **M4** | | | |
 | I56 | Provider framework and effective config | I27 | todo |

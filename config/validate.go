@@ -386,6 +386,15 @@ func (c *Config) Validate() Errors {
 			if u.TLSCAFile != "" {
 				add(u.At.Field("tls_ca_file"), "tls_ca_file needs protocol h2")
 			}
+			if u.TLSCertFile != "" {
+				add(u.At.Field("tls_cert_file"), "tls_cert_file needs protocol h2")
+			}
+		}
+		switch {
+		case u.TLSCertFile != "" && u.TLSKeyFile == "":
+			add(u.At.Field("tls_cert_file"), "tls_cert_file needs tls_key_file")
+		case u.TLSKeyFile != "" && u.TLSCertFile == "":
+			add(u.At.Field("tls_key_file"), "tls_key_file needs tls_cert_file")
 		}
 		if h := u.HealthCheck; h != nil {
 			if h.Type == HealthTCP {

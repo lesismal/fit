@@ -789,7 +789,15 @@
           "description": "Keep each client on one address with a cookie: a request whose cookie names an address that is up goes there, and any other gets the cookie for the address it went to. No cookie when left out."
         },
         "tls_ca_file": {
-          "description": "With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots.",
+          "description": "With h2: a PEM file of the certificates the servers' are checked against, in place of the system's roots. It is watched, as a listener's certificate files are: a change loads the config again.",
+          "type": "string"
+        },
+        "tls_cert_file": {
+          "description": "With h2: a PEM file of the client certificate, and the chain after it, that fit presents to servers that ask for one (mutual TLS); needs tls_key_file. It is watched, as tls_ca_file is: a change loads the config again.",
+          "type": "string"
+        },
+        "tls_key_file": {
+          "description": "With h2: the PEM file of tls_cert_file's private key.",
           "type": "string"
         },
         "tls_server_name": {

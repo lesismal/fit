@@ -264,11 +264,17 @@ func TestValidate(t *testing.T) {
 		{
 			name: "upstream tls without h2",
 			doc: `{"listeners": [{"name": "web", "address": ":80"}], "upstreams": [
-  {"name": "u", "addresses": ["a:1"], "tls_server_name": "x", "tls_ca_file": "ca.pem"}
+  {"name": "u", "addresses": ["a:1"], "tls_server_name": "x", "tls_ca_file": "ca.pem"},
+  {"name": "v", "addresses": ["a:1"], "tls_cert_file": "c.pem", "tls_key_file": "k.pem"},
+  {"name": "w", "addresses": ["a:1"], "protocol": "h2", "tls_cert_file": "c.pem"},
+  {"name": "x", "addresses": ["a:1"], "protocol": "h2", "tls_key_file": "k.pem"}
 ]}`,
 			want: []string{
 				`2:58: upstreams[0].tls_server_name: tls_server_name needs protocol h2`,
 				`2:78: upstreams[0].tls_ca_file: tls_ca_file needs protocol h2`,
+				`3:56: upstreams[1].tls_cert_file: tls_cert_file needs protocol h2`,
+				`4:74: upstreams[2].tls_cert_file: tls_cert_file needs tls_key_file`,
+				`5:73: upstreams[3].tls_key_file: tls_key_file needs tls_cert_file`,
 			},
 		},
 		{
