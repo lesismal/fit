@@ -119,9 +119,10 @@ connection to the backend, since every server here proxies them.
 
 ## Results
 
-[`results`](results) holds the runs that are checked in: `baseline-*.json` are the baselines M0
-set for nginx, Caddy and Traefik, which later milestones compare fit against. To reproduce one,
-run the harness with the `params` recorded in it, on comparable hardware:
+[`results`](results) holds the runs that are checked in. `baseline-2026-10-19-macos-docker.json` is
+M0's baseline for nginx, Caddy and Traefik, measured on Docker Desktop and kept for the record only
+(above); the reference is the Linux runs from M1 on, `m1-*` and `m2-*` with their reports. To
+reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
 go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,fit -out bench/results/baseline-$(date +%Y%m%d).json

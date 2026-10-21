@@ -101,8 +101,9 @@ worker），不含页缓存；相当于 RSS 去掉文件映射的部分。WebSoc
 
 ## 结果
 
-[`results`](results) 存放提交进仓库的结果：`baseline-*.json` 是 M0 为 nginx、Caddy 和 Traefik
-建立的基线，后续里程碑拿 fit 与之比较。要复现某个结果，在相近的硬件上用其中记录的 `params` 运行：
+[`results`](results) 存放提交进仓库的结果。`baseline-2026-10-19-macos-docker.json` 是 M0 为 nginx、Caddy 和
+Traefik 测得的基线，在 Docker Desktop 上测得，只作为记录保留（见上文）；以 M1 起在 Linux 上的结果为准，即 `m1-*`、
+`m2-*` 及其报告。要复现某个结果，在压测机上用其中记录的 `params` 运行：
 
 ```bash
 go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,fit -out bench/results/baseline-$(date +%Y%m%d).json

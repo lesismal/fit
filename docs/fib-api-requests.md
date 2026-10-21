@@ -20,7 +20,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A5 | Client limit on requests waiting for a connection | done, v1.4.0 | 11 | R06 |
 | A6 | Trailers set on a `BodyWriter` before it closes | done, v1.4.0 | 1, 4 | R04 |
 | A7 | A per-request value slot on `Context` | done, v1.4.0 | 12 | R07c |
-| A8 | Documentation fixes | partly, v1.4.0 | — | — |
+| A8 | Documentation fixes | done, v1.4.0 (the rest not needed) | — | — |
 | A9 | Refuse a header field name that is not a token | done, v1.4.0 | 13 | — |
 | A10 | Stream a client response of unknown length from its header | done, v1.3.1 | 5 | — |
 | A11 | The body of a client response that arrived whole, without a copy | done, v1.4.0 | 12 | R07c |
@@ -203,9 +203,11 @@ whole `http.Request` and allocates a context value on every request.
 
 ## A8: Documentation fixes
 
-**Status.** Partly done in fib v1.4.0 (`75e7005`): `StreamResponseBody` and `OnBody` now say that an
+**Status.** Done in fib v1.4.0 (`75e7005`): `StreamResponseBody` and `OnBody` now say that an
 `OnBody` function that waits holds up the connection's other streams. `WriteStallTimeout` was not
-added: with `WriteNoWait` (A2) fit's proxy no longer needs it.
+added and is not needed: with `WriteNoWait` (A2) fit's proxy no longer waits on a client, and
+`SendFileStall` (A16) bounds the static handler's waits. Checked again on 2026-10-21: nothing is left
+to ask.
 
 - `StreamResponseBody` says a stalled reader "never holds up the other streams on the connection".
   That holds for a reader of `Body`, but not for an `OnBody` function that waits, which runs on the

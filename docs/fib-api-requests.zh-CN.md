@@ -18,7 +18,7 @@
 | A5 | 客户端等待连接的请求数上限 | 已完成，v1.4.0 | 11 | R06 |
 | A6 | 在 `BodyWriter` 关闭前设置 trailer | 已完成，v1.4.0 | 1、4 | R04 |
 | A7 | `Context` 上的单请求值槽 | 已完成，v1.4.0 | 12 | R07c |
-| A8 | 文档修正 | 部分完成，v1.4.0 | — | — |
+| A8 | 文档修正 | 已完成，v1.4.0（其余不再需要） | — | — |
 | A9 | 拒绝不是 token 的请求头字段名 | 已完成，v1.4.0 | 13 | — |
 | A10 | 长度未知的客户端响应从响应头起就以流方式交付 | 已完成，v1.3.1 | 5 | — |
 | A11 | 不复制即取得整体到达的客户端响应体 | 已完成，v1.4.0 | 12 | R07c |
@@ -160,7 +160,7 @@ context 值。
 
 ## A8：文档修正
 
-**状态。** 已在 fib v1.4.0 中部分完成（`75e7005`）：`StreamResponseBody` 和 `OnBody` 的文档说明了会等待的 `OnBody` 函数会拖住连接上的其他流。没有增加 `WriteStallTimeout`：有了 `WriteNoWait`（A2），fit 的代理不再需要它。
+**状态。** 已在 fib v1.4.0 中完成（`75e7005`）：`StreamResponseBody` 和 `OnBody` 的文档说明了会等待的 `OnBody` 函数会拖住连接上的其他流。没有增加 `WriteStallTimeout`，也不再需要：有了 `WriteNoWait`（A2），fit 的代理不再等待客户端，静态文件处理的等待由 `SendFileStall`（A16）限定。2026-10-21 复查：没有剩下要提的。
 
 - `StreamResponseBody` 的文档说停滞的读者"never holds up the other streams on the connection"。这对读取 `Body` 的读者
   成立，但对会等待的 `OnBody` 回调不成立，因为回调运行在连接的读取者上。建议写明。
