@@ -955,6 +955,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "circuit_breaker"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.circuit_breaker"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "client_cert"
               }
             }
@@ -1086,6 +1102,7 @@
           "enum": [
             "basic_auth",
             "body_limit",
+            "circuit_breaker",
             "client_cert",
             "concurrency_limit",
             "forward_auth",
@@ -1147,6 +1164,62 @@
       "required": [
         "max_bytes"
       ],
+      "type": "object"
+    },
+    "http.middleware.circuit_breaker": {
+      "additionalProperties": false,
+      "properties": {
+        "error_ratio": {
+          "default": 0.5,
+          "description": "The share of failures in the window that opens it; 0.5 when left out.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "half_open_requests": {
+          "default": 5,
+          "description": "How many requests it lets through, half-open, that must all fare well for it to close; 5 when left out. Others are answered 503 meanwhile.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_requests": {
+          "default": 20,
+          "description": "How many requests the window must have counted before it can open; 20 when left out.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open_duration": {
+          "default": "30s",
+          "description": "How long it stays open before letting requests through to try; 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "slow_ratio": {
+          "default": 0.5,
+          "description": "With slow_threshold, the share of slow responses in the window that opens it; 0.5 when left out.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "slow_threshold": {
+          "description": "A response that takes longer than this to begin counts as slow; none is when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "statuses": {
+          "description": "The statuses that count as failures; 500 to 599 when left out.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "window": {
+          "default": "10s",
+          "description": "How far back requests are counted, in ten steps; 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "http.middleware.client_cert": {

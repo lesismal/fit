@@ -154,7 +154,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I41 | ForwardAuth | I40 | done |
 | I42 | JWT 与 JWKS | I40 | done |
 | I43 | 重试与按路由超时 | I17 | done |
-| I44 | 熔断 | I43 | todo |
+| I44 | 熔断 | I43 | done |
 | I45 | 流量拆分：加权、镜像、故障转移 | I19 | todo |
 | I46 | 压缩 | I36 | todo |
 | I47 | WebSocket 代理 | I17 | todo |

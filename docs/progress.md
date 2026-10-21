@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I43) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I44) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no circuit breakers (I44), traffic splitting (I45) or the rest of M3 |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no traffic splitting (I45), compression (I46), WebSocket proxying (I47) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I43 are done; next, I44 (circuit breakers).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I44 are done; next, I45 (traffic splitting: weights, mirroring, failover).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I44 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I45 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -70,6 +70,7 @@ To continue, start a session with:
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
 | `middleware/auth` | `jwt` (JWS verified with the standard library, keys from PEM files, a secret or a JWK set fetched by the control plane, verified tokens kept); `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
+| `middleware/breaker` | `circuit_breaker`: closed, open and half-open on a route's error and slow-response ratios |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -2488,6 +2489,37 @@ Differences from the plan:
 - Retries are the proxy's, not a `middleware/retry`: sending again needs the proxy's request, its
   backend and its pool. Statuses are retried for idempotent requests only, and the budget is shared
   by the requests of one proxy (one route), not of the upstream.
+
+### I44 Circuit breakers — done
+
+- `middleware/breaker`'s `circuit_breaker` is a breaker on a route's requests, with three states.
+  Closed, it lets them through and counts, over the last `window` (10s, in ten steps), the
+  responses that are failures (5xx, or a status of `statuses`) and those slower than
+  `slow_threshold` to begin (from the request to its header; none by default); once at least
+  `min_requests` (20) were counted and the failures reach `error_ratio` (0.5), or the slow ones
+  `slow_ratio` (0.5), it opens. Open, it answers every request 503 at once, with `Retry-After`
+  saying when it will try again, for `open_duration` (30s). Then half-open, it lets
+  `half_open_requests` (5) through, answering the rest 503: if they all fare well it closes, with
+  an empty window, and if one fails or is slow it opens again. A request whose client goes before
+  its answer counts for nothing, and a half-open one gives its place back.
+- Outcomes are heard in an `OnHeader` hook, whichever way the handler answers, and the client
+  leaving in `OnCancel`; the state and the window are behind one lock, taken twice a request.
+  `State` reports the state.
+- Tests, on a test clock: `TestBreakerTransitions` (closed under the ratio and under
+  `min_requests`; open past it, 503 with `Retry-After` 30 and then 10; half-open after
+  `open_duration`; a failed probe opens it again; probes that fare well close it, with a fresh
+  window), `TestBreakerHalfOpenLimit` (only `half_open_requests` at once; a cancelled probe's place
+  given back), `TestBreakerWindow` (failures that left the window do not count),
+  `TestBreakerSlowAndStatuses` and `TestBreakerParams`. The full race suite passes on the benchmark
+  host; `go vet` and staticcheck for linux, darwin and windows pass.
+- Benchmark on the benchmark host (`BenchmarkBreaker`, an inline handler through fibtest, 3 runs):
+  75.6 ns bare, 444 ns behind a closed breaker, 9 allocations more (the outcome, its two hooks,
+  fib's hook lists).
+
+Differences from the plan:
+
+- The breaker is a route's, as a middleware, not an upstream's: routes that share an upstream each
+  have their own. Latency counts towards it as a share of slow responses rather than an average.
 
 ## Notes for later iterations
 
