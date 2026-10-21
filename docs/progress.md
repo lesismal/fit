@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I38) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I39) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114` (fib's `main` at `8e04da9`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no rate, concurrency or body size limits per route (I39) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, and limits a route's request rate (by client IP, header or route), its requests under way, and the declared size of its bodies; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no Basic auth or client mTLS (I40); a route's body limit does not reach bodies of no declared length (fib A25) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I38 are done; next, I39 (rate, concurrency and size limits).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I39 are done; next, I40 (Basic auth and client mTLS).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I39 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I40 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -68,6 +68,7 @@ To continue, start a session with:
 | `handler/respond` | the `respond` handler |
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
+| `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -2247,6 +2248,60 @@ Differences from the plan:
 Differences from the plan:
 
 - `redirect` is in `middleware/rewrite` with `rewrite`. Header values take no placeholders yet.
+
+### I39 Rate, concurrency and size limits — done
+
+- `middleware/limit` has three middleware. `rate_limit`: a token bucket per key, `rate` tokens a
+  second up to `burst` (the rate, rounded up, by default), one per request, and 429 (or `status`)
+  with `Retry-After` in whole seconds when there is none. `key` is `ip` (the default), `route` (one
+  bucket for the route) or `header:Name` (by ip when the header is missing); with
+  `trusted_proxies`, the client is the last address in X-Forwarded-For that is not a trusted
+  proxy, or the first when all are, as nginx's `real_ip_recursive` does, and a list that does not
+  parse is not believed past there. `concurrency_limit`: at most `max` requests under way at once,
+  one past it answered 429 (or `status`) at once rather than kept waiting. `body_limit`: a body
+  whose `Content-Length` is past `max_bytes` is answered 413 before the handler sees it.
+- The buckets are in 64 shards with a lock each, keyed by `netip.Addr` (no allocation) or the
+  header's value, values over 128 bytes by a seeded 64-bit hash, so what a key costs is bounded.
+  Tokens are counted in nanotokens, integers, so that refills add up exactly. `max_keys` (100000
+  by default) bounds the keys: a new key in a full shard evicts one of up to eight it looks at,
+  the first whose bucket is full by now, which forgets nothing, or else the first of them.
+- A request under `concurrency_limit` ends one of three ways, and each gives its place back once:
+  the handler returns without retaining it; its response is sent (`OnFinish`, set before the
+  handler runs, since the proxy may answer before it returns); or its client goes. fib's `OnCancel`
+  keeps one callback, so the handler's (the proxy's, on every request) replaced the middleware's,
+  which `TestConcurrencyClientGone` caught: the place stayed taken. Asked as
+  [A26](fib-api-requests.md#a26-more-than-one-oncancel-callback-on-a-context); until then the
+  middleware waits on the request's `Context()` with `context.AfterFunc`, asked for only once
+  the handler has returned with the request retained (one asked for of a request already over is
+  cancelled already), and stopped when the response is sent.
+- `body_limit` cannot see a body of no declared length, which goes to the handler's `OnBody`:
+  that is bounded by the listener's limits alone until fib has a per-request limit, asked as
+  [A25](fib-api-requests.md#a25-a-per-request-limit-on-a-request-body-streamed-or-not).
+- Tests: `TestRateBucket` (burst, refusal with `Retry-After`, refill by half and whole tokens, and
+  no further than the burst, on a test clock), `TestRateSlow` (0.01 a second, `Retry-After: 100`,
+  another status), `TestRateKeys` (by ip, IPv4 mapped into IPv6 as IPv4, by route, by header with
+  long values hashed, behind trusted proxies), `TestClientIP` (11 X-Forwarded-For cases),
+  `TestRateMemoryBounded` (100000 keys with `max_keys` 640 keep at most 640),
+  `TestEvictPrefersFull`, `TestRateAllocs` (a request counted by ip, also through
+  X-Forwarded-For, allocates nothing), `TestConcurrency` (inline requests, two held and answered
+  elsewhere, a third refused and one let in once one is answered), `TestConcurrencyClientGone`
+  (over the network, three rounds of a request that hangs taking the one place and giving it back
+  when its client hangs up), `TestBody`, and the params' errors. `go vet ./...` and the race
+  tests of middleware, modules and schema pass on the benchmark host; `go vet` and staticcheck
+  for linux, darwin and windows pass.
+- Benchmarks on the benchmark host (`bench/microbench.sh`, 16 threads in parallel):
+  `BenchmarkRate` 16.0 ns a request over 1000 keys, 31.8 ns over a million keys kept to 100000
+  (evicting), 126.6 ns with one key for all threads (`key: route`, one shard's lock), no
+  allocations; `BenchmarkConcurrency`, an inline handler through fibtest, 315 ns bare against
+  506 ns behind the limit, 5 allocations more (the slot, its hook and fib's hook list).
+
+Differences from the plan:
+
+- fib's `middleware/limiter` counts fixed or sliding windows and keeps every key until a sweep;
+  fit's is a token bucket with a bound on its keys, keyed as fit's configs need, so it does not
+  use fib's.
+- `body_limit` covers declared lengths only, until A25; `concurrency_limit` uses the request's
+  context until A26.
 
 ## Notes for later iterations
 

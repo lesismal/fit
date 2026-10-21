@@ -35,6 +35,8 @@
 | A22 | 客户端连接的空闲计时不必每个请求重置定时器 | 已完成，`7f632cb`（v1.5.6 之后的 main） | 12 | R07f |
 | A23 | `Engine.Close` 切断的连接也运行 `OnClose` | 已完成，v1.5.6 | 11、13 | — |
 | A24 | taskpool 新建的环不写任何单元 | 已完成，`a6d78cd`（v1.5.6 之后的 main） | 11 | — |
+| A25 | 按请求限制请求体大小，流式的也包括在内 | 待办 | 7、11 | I39 |
+| A26 | 一个 Context 上可以有多个 `OnCancel` 回调 | 待办 | 1、12 | I39 |
 
 ## 证据
 
@@ -549,3 +551,34 @@ GOMAXPROCS=4 时峰值占用为 1.25GB，而 `TestHostHeader` 这类测试的 Go
 有意持有的内存：在 `TestStuckClientsPastMaxConns` 和 `TestStuckClientWithoutStallTimeout` 中，八个不读取的下载填满了测试
 自己的 h2c 客户端和 fib 的 HTTP/3 流的流量控制窗口；流测试每个方向传输 64MB；再加上竞态检测器为这些内存保留的影子内存。
 曾尝试在每个测试结束时关闭测试辅助函数 `client` 的 transport 的空闲连接，结果在噪声范围内没有变化：fit 的监听器关闭时会切断它们。
+
+## A25：按请求限制请求体大小，流式的也包括在内
+
+**状态。** 待办。
+
+**问题。** fit 的 `body_limit` 中间件把一个路由的请求体限制在低于监听器 `max_body_bytes` 的大小。它可以拒绝
+`Content-Length` 声明过大的请求体，但无法拒绝没有声明长度的请求体（HTTP/1.1 的 chunked，或没有该字段的 HTTP/2 和
+HTTP/3）：这些字节送到处理器的 `OnBody` 回调，中间件看不到，而一个 `Context` 只有一个回调。这样的请求体只受监听器的
+`MaxBodyBytes` 和 `MaxStreamedBodyBytes` 限制，所以本应只接收 1MB 的路由会接收整个监听器允许的大小。
+
+**建议的 API。** `Context.LimitBody(n int64)`，在取请求体之前调用：超过 `n` 字节时，fib 以错误结束请求体，处理器的
+`OnBody` 能看到（与超过 `MaxStreamedBodyBytes` 时一样），在响应尚未开始时自行回应 413；`Content-Length` 超过 `n` 时立即
+拒绝。`n` 与连接的限制取较小者。
+
+**fit 如何使用。** `body_limit` 调用 `c.LimitBody(max_bytes)`，不再自己检查 `Content-Length`。
+
+## A26：一个 Context 上可以有多个 `OnCancel` 回调
+
+**状态。** 待办。
+
+**问题。** `Context.OnCancel` 只保存一个回调：第二个会替换第一个。必须知道客户端离开的中间件（例如 fit 的
+`concurrency_limit` 要归还请求的名额）会在处理器注册自己的回调时失去它的回调，而 fit 的代理对每个请求都会注册。fit 的
+测试 `TestConcurrencyClientGone` 就是这样失败的：客户端挂断后名额仍被占用。
+
+**fit 中的权宜做法。** 中间件用 `context.AfterFunc` 等待 `Context.Context()`，只在处理器返回且请求被保留时才获取它，
+响应发出后停止。在 fit 的微基准中，这条路径对每个被保留的请求多花一个 context 及其取消机制；被取消的请求还多一个 goroutine。
+
+**建议的 API。** `OnCancel` 保留所有注册的回调，按注册的逆序运行，与响应钩子相同；只有一个回调时开销与现在一样（一个字段，
+第二个回调才用切片）。
+
+**fit 如何使用。** `concurrency_limit` 在处理器运行之前与 `OnFinish` 一起注册 `OnCancel`，不再获取请求的 context。

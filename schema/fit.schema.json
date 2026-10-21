@@ -867,6 +867,38 @@
           "if": {
             "properties": {
               "module": {
+                "const": "body_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.body_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "concurrency_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.concurrency_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "headers"
               }
             }
@@ -875,6 +907,22 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/http.middleware.headers"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "rate_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.rate_limit"
               }
             }
           }
@@ -916,7 +964,10 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "body_limit",
+            "concurrency_limit",
             "headers",
+            "rate_limit",
             "redirect",
             "rewrite"
           ],
@@ -928,6 +979,39 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "http.middleware.body_limit": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bytes": {
+          "description": "The most bytes a request's body may have.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_bytes"
+      ],
+      "type": "object"
+    },
+    "http.middleware.concurrency_limit": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "description": "The most requests under way at once.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "default": 429,
+          "description": "The status of a request refused; 429 when left out, or 503 as nginx's limit_conn answers.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max"
       ],
       "type": "object"
     },
@@ -943,6 +1027,47 @@
           "description": "Changes to the response's fields, made just before it is sent, whichever handler wrote it."
         }
       },
+      "type": "object"
+    },
+    "http.middleware.rate_limit": {
+      "additionalProperties": false,
+      "properties": {
+        "burst": {
+          "description": "How many requests a key may make at once, after it has been idle: the bucket's size. The rate, rounded up, when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "default": "ip",
+          "description": "What requests are counted by: ip, the client's address; route, every request of the route together; or header:Name, a header's value, with a request without it counted by ip. ip when left out.",
+          "type": "string"
+        },
+        "max_keys": {
+          "default": 100000,
+          "description": "The most keys kept at once, which bounds the memory the buckets take: under 100 bytes each, and up to 128 more for a header; 100000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rate": {
+          "description": "How many requests a second each key may make, on average; at least 0.001.",
+          "type": "number"
+        },
+        "status": {
+          "default": 429,
+          "description": "The status of a request refused; 429 when left out.",
+          "type": "integer"
+        },
+        "trusted_proxies": {
+          "description": "The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of fit: for a request that comes from one, the client's address is the last in X-Forwarded-For that is not one of them. None when left out, and the client is the connection's peer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rate"
+      ],
       "type": "object"
     },
     "http.middleware.redirect": {

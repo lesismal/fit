@@ -37,6 +37,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A22 | A client connection's idle clock without a timer reset per request | done, `7f632cb` (main after v1.5.6) | 12 | R07f |
 | A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
 | A24 | A new taskpool ring that writes none of its cells | done, `a6d78cd` (main after v1.5.6) | 11 | — |
+| A25 | A per-request limit on a request body, streamed or not | open | 7, 11 | I39 |
+| A26 | More than one `OnCancel` callback on a Context | open | 1, 12 | I39 |
 
 ## Evidence
 
@@ -750,3 +752,44 @@ not read fill their flow-control windows in the test's own h2c client and in fib
 streams, and the stream tests move 64MB each way, with the race detector's shadow of that memory
 on top. Closing the idle connections of the test helper `client`'s transports at the end of each
 test was tried, and changed nothing beyond the noise: fit's listener cuts them when it closes.
+
+## A25: A per-request limit on a request body, streamed or not
+
+**Status.** Open.
+
+**Problem.** fit's `body_limit` middleware bounds a route's request bodies below the listener's
+`max_body_bytes`. It can refuse a body whose `Content-Length` declares too much, but not one of no
+declared length (chunked on HTTP/1.1, or HTTP/2 and HTTP/3 without the field): the bytes reach the
+handler's `OnBody` callback, which the middleware does not see, and a `Context` holds one. Such a
+body is bounded only by the listener's `MaxBodyBytes` and `MaxStreamedBodyBytes`, so a route that
+should take 1MB takes what the whole listener allows.
+
+**Suggested API.** `Context.LimitBody(n int64)`, callable before the body is taken: past `n` bytes
+fib ends the body with an error the handler's `OnBody` sees (as it does past
+`MaxStreamedBodyBytes`), and answers 413 itself when no response has begun; a `Content-Length`
+past `n` is refused at once. The lower of `n` and the connection's limits applies.
+
+**How fit would use it.** `body_limit` calls `c.LimitBody(max_bytes)` and drops its own
+`Content-Length` check.
+
+## A26: More than one `OnCancel` callback on a Context
+
+**Status.** Open.
+
+**Problem.** `Context.OnCancel` keeps one callback: a second replaces the first. A middleware that
+must hear of a client leaving, as fit's `concurrency_limit` must to give a request's place back,
+loses its callback when the handler registers its own, as fit's proxy does for every request.
+fit's test `TestConcurrencyClientGone` failed that way: the place stayed taken after the client
+hung up.
+
+**Stopgap in fit.** The middleware waits on `Context.Context()` with `context.AfterFunc`, asked for
+only once the handler has returned with the request retained, and stopped when the response is
+sent. On fit's micro-benchmark that path costs a context and its cancel machinery per retained
+request; a cancelled one costs a goroutine too.
+
+**Suggested API.** `OnCancel` keeps every callback registered, and runs them in the reverse of the
+order they were registered, as the response hooks do; one callback stays as cheap as today (a
+field, with a slice only for a second).
+
+**How fit would use it.** `concurrency_limit` registers `OnCancel` beside `OnFinish` before the
+handler runs, and no longer asks for the request's context.
