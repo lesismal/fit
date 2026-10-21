@@ -143,8 +143,12 @@ func TestConcurrencyClientGone(t *testing.T) {
 		return res.StatusCode
 	}
 
-	for round := range 3 {
-		// A request that hangs takes the one place.
+	// hang sends a request that hangs, and reports whether it took the place
+	// rather than being refused. The /ok requests that check on it take the
+	// place too, for as long as each is served, and one sent on a connection
+	// kept alive may well be served before /hang, which comes on a new one;
+	// /hang is then refused, rightly, and sent again.
+	hang := func() (net.Conn, bool) {
 		conn, err := net.Dial("tcp", addr)
 		if err != nil {
 			t.Fatal(err)
@@ -153,12 +157,34 @@ func TestConcurrencyClientGone(t *testing.T) {
 			t.Fatal(err)
 		}
 		deadline := time.Now().Add(5 * time.Second)
-		for get("/ok") != 429 {
-			if time.Now().After(deadline) {
-				t.Fatalf("round %d: the hanging request never took the place", round)
+		for time.Now().Before(deadline) {
+			if get("/ok") == 429 {
+				return conn, true
 			}
-			time.Sleep(5 * time.Millisecond)
+			// Whatever /hang was answered with comes back meanwhile.
+			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+			if n, _ := conn.Read(make([]byte, 64)); n > 0 {
+				conn.Close()
+				return nil, false
+			}
 		}
+		t.Fatal("the hanging request was neither kept nor refused")
+		return nil, false
+	}
+
+	for round := range 3 {
+		// A request that hangs takes the one place.
+		var conn net.Conn
+		for tries := 0; ; tries++ {
+			var kept bool
+			if conn, kept = hang(); kept {
+				break
+			}
+			if tries == 10 {
+				t.Fatalf("round %d: the hanging request was refused every time", round)
+			}
+		}
+		deadline := time.Now().Add(5 * time.Second)
 		// Its client goes: the place is free again.
 		conn.Close()
 		for get("/ok") != 200 {

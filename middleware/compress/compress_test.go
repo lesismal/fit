@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
-	fibhttp "github.com/lesismal/fib/http"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
+	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibtest"
