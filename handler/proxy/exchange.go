@@ -477,8 +477,9 @@ func (x *exchange) statusOf(err error) int {
 	switch {
 	case errors.Is(cause, errIdleTimeout), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
 		return stdhttp.StatusGatewayTimeout
-	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy):
-		// Swapped out, or max_pending requests wait for a connection already.
+	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy), errors.Is(err, upstream.ErrClosed):
+		// Swapped out, max_pending requests wait for a connection already,
+		// or the upstream's pool is closed.
 		return stdhttp.StatusServiceUnavailable
 	case errors.As(err, &upload):
 		switch {
