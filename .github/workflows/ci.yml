@@ -99,6 +99,18 @@ jobs:
       - name: make m2-exit
         run: make m2-exit
 
+  # M3's exit criteria, a check of their own as M2's are.
+  m3-exit:
+    name: M3 exit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: make m3-exit
+        run: make m3-exit
+
   fuzz:
     name: Fuzz (short)
     runs-on: ubuntu-latest

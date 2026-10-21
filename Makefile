@@ -1,4 +1,4 @@
-.PHONY: all build test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit
+.PHONY: all build test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit m3-exit
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -46,6 +46,16 @@ M2_EXIT = TestChurn|TestAutoHTTPSFromPebble|TestHealthCheckRotation
 
 m2-exit:
 	$(GO) test -race -count=1 -v -run '^($(M2_EXIT))$$' ./test/e2e
+
+# M3's exit criteria (docs/roadmap.md): no middleware or handler blocks a
+# worker, and each has a benchmark (test/workers); WebSocket, gRPC (unary and
+# streaming) and TCP/UDP proxying, with backpressure under slow peers; and
+# one port serving HTTP/1.1, HTTP/2, TLS passed through by SNI and SOCKS.
+M3_EXIT = TestEveryModuleCovered|TestNoModuleBlocks|TestWebSocketEcho|TestWebSocketBackpressure|TestWebSocketExtendedConnect|TestGRPCUnary|TestGRPCServerStreaming|TestGRPCClientStreaming|TestGRPCBidiStreaming|TestGRPCBackpressure|TestTCPEcho|TestTCPSlowClient|TestTCPSlowUpstream|TestUDPEcho|TestSNIRouting|TestSOCKS|TestSniffClear|TestOnePortManyProtocols
+M3_EXIT_PKGS = ./test/workers ./handler/proxy ./l4 ./test/e2e
+
+m3-exit:
+	$(GO) test -race -count=1 -v -run '^($(M3_EXIT))$$' $(M3_EXIT_PKGS)
 
 fuzz:
 	$(GO) test ./config -run '^$$' -fuzz FuzzLoad -fuzztime 30s

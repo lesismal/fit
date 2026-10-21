@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I54) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M3's exit tests (I55) |
+| What does not | M4, platform integration: providers, Kubernetes, the dashboard, OpenTelemetry (I56–I66) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,13 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I54 are done; next, I55 (M3's exit tests).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is done.** Its exit tests are `make m3-exit` and a CI job of their own (I55): no middleware or
+handler waits on a worker (`test/workers`), each has a benchmark, WebSocket, gRPC and TCP/UDP
+proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1, HTTP/2, TLS passed
+through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
+fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
+h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **Next, M4: I56 (provider framework
+and effective config).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +58,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I55 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I56 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -2921,6 +2927,39 @@ Differences from the plan:
 
 - No setting skips the verification of upstreams' certificates, and the cipher suites are Go's for
   TLS 1.2 and up, as I18 noted they might be; tcp services' upstreams still take no TLS of fit's.
+
+### I55 M3 exit tests — done
+
+- M3's three exit criteria (roadmap), as `make m3-exit` and a CI job of their own, "M3 exit tests":
+  - **No middleware puts a blocking call on a worker, and each has a benchmark.** The new package
+    `test/workers` serves every middleware and handler fit registers, each with something slow
+    behind it: the handler it wraps answers 600 ms later from a timer, `forward_auth`'s auth
+    service and `proxy`'s upstream take 600 ms, `basic_auth` checks a bcrypt hash on its pool.
+    `TestNoModuleBlocks` checks that ServeHTTP returns within 200 ms and that the answer still
+    comes only once the slow part has given it (but for those that answer themselves: `redirect`,
+    `respond`, and `static` once its file is cached). `TestEveryModuleCovered` fails for a module
+    registered without a case, so a new middleware cannot skip the check; `forward_proxy` is left
+    to fib's `TestConnectProxyDoesNotWait`, since a CONNECT needs a connection to switch.
+    `BenchmarkModule` is each module's benchmark, with nothing slow behind it. Each middleware's
+    own package tests are its conformance tests.
+  - **WebSocket, gRPC (unary and streaming) and TCP/UDP proxying, with backpressure under slow
+    peers**: the WebSocket tests (echo, extended CONNECT from h2, a client that reads nothing while
+    the upstream floods), the gRPC tests (unary, server, client and bidirectional streaming, over h2c
+    and h2 upstreams), and TCP and UDP's (echo, slow client, slow upstream). gRPC had no slow-peer
+    test: `TestGRPCBackpressure`, new, has a client that reads nothing hold back a 32 MB server
+    stream (the upstream sent fewer than half its messages in a second) and an upstream that reads
+    nothing hold back a 32 MB client stream, then every message arrive.
+  - **One port serving HTTP/1.1, HTTP/2, TLS passed through by SNI and SOCKS**: I53's
+    `TestOnePortManyProtocols`, with `TestSNIRouting`, `TestSOCKS` and `TestSniffClear`.
+- They pass under the race detector on the benchmark host, run from a checkout of their own at
+  `1486c28`; CI runs them once fit is pushed.
+- The milestone's benchmarks, the full harness with every server (rule 21): the
+  [M3 report](../bench/results/m3-report-2026-10-22.md).
+
+Differences from the plan:
+
+- The check that no middleware blocks is a test of how soon each returns, not a hook in fib: a
+  wait on the worker shows as a ServeHTTP that lasts as long as what it waits on.
 
 ## Notes for later iterations
 

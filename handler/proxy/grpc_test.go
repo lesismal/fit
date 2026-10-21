@@ -10,6 +10,7 @@ import (
 	stdhttp "net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,10 @@ type grpcService struct {
 	// context; entered says one has.
 	hang    chan struct{}
 	entered chan struct{}
+	// sent counts the messages Count has sent, and gate is what a Sum whose
+	// first message is "wait" waits on before it reads the rest.
+	sent atomic.Int64
+	gate chan struct{}
 }
 
 var grpcDesc = grpc.ServiceDesc{
@@ -55,7 +60,7 @@ var grpcDesc = grpc.ServiceDesc{
 		{StreamName: "Count", ServerStreams: true, Handler: func(srv any, s grpc.ServerStream) error {
 			return srv.(*grpcService).count(s)
 		}},
-		{StreamName: "Sum", ClientStreams: true, Handler: func(_ any, s grpc.ServerStream) error {
+		{StreamName: "Sum", ClientStreams: true, Handler: func(srv any, s grpc.ServerStream) error {
 			total, n := 0, 0
 			for {
 				in := new(msg)
@@ -63,6 +68,9 @@ var grpcDesc = grpc.ServiceDesc{
 					return s.SendMsg(&msg{Msg: "sum", N: total*1000 + n})
 				} else if err != nil {
 					return err
+				}
+				if n == 0 && in.Msg == "wait" {
+					<-srv.(*grpcService).gate
 				}
 				total += in.N
 				n++
@@ -117,6 +125,7 @@ func (g *grpcService) count(s grpc.ServerStream) error {
 		if err := s.SendMsg(&msg{Msg: in.Msg, N: i}); err != nil {
 			return err
 		}
+		g.sent.Add(1)
 	}
 	return nil
 }
@@ -148,7 +157,8 @@ func runEngine(t *testing.T, bindings ...fib.Binding) (engine *fib.Engine, stop 
 // that stops it, ending its connections.
 func grpcUpstream(t *testing.T, proto string) (string, *grpcService, func()) {
 	t.Helper()
-	svc := &grpcService{deadline: make(chan time.Duration, 1), hang: make(chan struct{}), entered: make(chan struct{}, 1)}
+	svc := &grpcService{deadline: make(chan time.Duration, 1), hang: make(chan struct{}), entered: make(chan struct{}, 1),
+		gate: make(chan struct{})}
 	server := grpc.NewServer()
 	server.RegisterService(&grpcDesc, svc)
 	var handler fib.Handler = server
@@ -173,10 +183,12 @@ func grpcUpstream(t *testing.T, proto string) (string, *grpcService, func()) {
 	addr := addrs[0].String()
 	backendFields.Store(addr, fields)
 	t.Cleanup(func() {
-		select {
-		case <-svc.hang:
-		default:
-			close(svc.hang)
+		for _, ch := range []chan struct{}{svc.hang, svc.gate} {
+			select {
+			case <-ch:
+			default:
+				close(ch)
+			}
 		}
 	})
 	return addr, svc, stop
@@ -324,6 +336,72 @@ func TestGRPCBidiStreaming(t *testing.T) {
 		_ = s.CloseSend()
 		if err := s.RecvMsg(new(msg)); err != io.EOF {
 			t.Fatalf("after the last message: %v, want EOF", err)
+		}
+	})
+}
+
+// TestGRPCBackpressure has each side of a stream outpace the other: a
+// client that reads nothing holds back the upstream's stream to it, and an
+// upstream that reads nothing holds back the client's. fit holds neither
+// stream whole, and every message arrives once the slow side reads.
+func TestGRPCBackpressure(t *testing.T) {
+	eachGRPCProto(t, func(t *testing.T, proto string) {
+		addr, svc, _ := grpcUpstream(t, proto)
+		cc := grpcClient(t, startFit(t, config1(`{"upstream": "app"}`), addr))
+		ctx := grpcContext(t)
+		const n = 1000
+		pad := strings.Repeat("p", 32<<10)
+
+		down, err := cc.NewStream(ctx, &grpcDesc.Streams[0], "/test.Echo/Count")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := down.SendMsg(&msg{Msg: pad, N: n}); err != nil {
+			t.Fatal(err)
+		}
+		_ = down.CloseSend()
+		time.Sleep(time.Second)
+		if sent := svc.sent.Load(); sent >= n/2 {
+			t.Errorf("the upstream sent %d of %d messages to a client that read none", sent, n)
+		}
+		for i := range n {
+			in := new(msg)
+			if err := down.RecvMsg(in); err != nil || in.N != i {
+				t.Fatalf("message %d: %d, %v", i, in.N, err)
+			}
+		}
+
+		up, err := cc.NewStream(ctx, &grpcDesc.Streams[1], "/test.Echo/Sum")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sent atomic.Int64
+		done := make(chan error, 1)
+		go func() {
+			if err := up.SendMsg(&msg{Msg: "wait"}); err != nil {
+				done <- err
+				return
+			}
+			for range n {
+				if err := up.SendMsg(&msg{Msg: pad, N: 1}); err != nil {
+					done <- err
+					return
+				}
+				sent.Add(1)
+			}
+			done <- up.CloseSend()
+		}()
+		time.Sleep(time.Second)
+		if k := sent.Load(); k >= n/2 {
+			t.Errorf("the client sent %d of %d messages to an upstream that read none", k, n)
+		}
+		close(svc.gate)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		out := new(msg)
+		if err := up.RecvMsg(out); err != nil || out.N != n*1000+n+1 {
+			t.Fatalf("sum: %+v, %v", out.N, err)
 		}
 	})
 }

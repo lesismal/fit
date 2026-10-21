@@ -166,7 +166,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I53 | 一个端口多种协议；SOCKS 与 CONNECT | I52 | done |
 | I53b | CONNECT 正向代理 | I53 | done |
 | I54 | 上游 TLS | I18 | done |
-| I55 | M3 退出测试 | I37–I54 | todo |
+| I55 | M3 退出测试 | I37–I54 | done |
 | **M4** | | | |
 | I56 | Provider 框架与生效配置 | I27 | todo |
 | I57 | Docker provider | I56 | todo |
