@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I48) |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392` (fib's `main` at `929924e`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no gRPC proxying (I49), TCP/UDP proxying (I50) or the rest of M3 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I49) |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392` (fib's `main` at `929924e`, after v1.5.6; by commit, not tag, rule 19), from the module proxy; I49 needs A32, on fib's branch `feat/a32-stream-at-header` and not yet on its `main`, so `go.mod` moves once they are |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no TCP/UDP proxying (I50) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I48 are done; next, I49 (gRPC proxying).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I49 are done; next, I50 (TCP proxying).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I49 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I50 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -66,7 +66,7 @@ To continue, start a session with:
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
-| `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
+| `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down; WebSockets joined to their upstream's tunnel; gRPC calls with `TE: trailers`, `grpc-timeout` as a deadline and gRPC statuses on failure |
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
 | `middleware/auth` | `jwt` (JWS verified with the standard library, keys from PEM files, a secret or a JWK set fetched by the control plane, verified tokens kept); `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
@@ -2657,6 +2657,53 @@ Differences from the plan:
 Differences from the plan:
 
 - None in substance; the stopgap above waits for A31.
+
+### I49 gRPC proxying — done
+
+- A gRPC call, an HTTP/2 or HTTP/3 POST of `application/grpc` or a subtype of it, is proxied as any
+  request is, its messages streaming both ways as they come and the upstream's trailers, with
+  `grpc-status` and `grpc-message`, following its response; it needs an h2 or h2c upstream. What
+  the proxy adds: `TE: trailers` goes upstream; `grpc-timeout` bounds the call at the proxy as the
+  route's `timeout` does, the shorter of the two winning, and the upstream is told the one chosen
+  (a route's timeout becomes the call's `grpc-timeout` when it is the shorter or the call set
+  none); and a call the proxy cannot complete is answered as gRPC answers, not with an HTTP status
+  its client would not read: before the response began, a trailers-only response (status 200 with
+  `grpc-status` and `grpc-message`): `UNAVAILABLE` for no upstream, a refused or failed connect, a
+  drain or `max_pending`; `DEADLINE_EXCEEDED` for a timeout; `RESOURCE_EXHAUSTED` for a body too
+  large; and on a response cut short, those trailers in place of the `Fit-Error` one. Neither
+  timeout counts against the backend.
+- A gRPC client may wait for the answer to its first small message before it sends the next, so
+  the listener hands a gRPC call's body to the proxy from its header rather than once 64 KB of it
+  has arrived: [A32](fib-api-requests.md#a32-a-request-body-streamed-from-its-header-picked-per-request),
+  `Config.StreamRequestBodyAtHeader` in fib's `http` and `http3`, made by this session on fib's
+  branch `feat/a32-stream-at-header`, with fib's HTTP/2 client sending `te: trailers`, which it
+  used to drop.
+- Tests (`handler/proxy/grpc_test.go`), through fit to a gRPC server of fib's over h2c and h2 (TLS),
+  with fib's gRPC client and its JSON codec: `TestGRPCUnary` (an echo, 200 KB, the upstream's
+  status and trailer passed on, a deadline of about 5s seen upstream), `TestGRPCServerStreaming`
+  (2,000 messages back), `TestGRPCClientStreaming` (500 messages of 1 KB up, one answer),
+  `TestGRPCBidiStreaming` (50 messages, each answered before the next goes, 300 KB ones among
+  them), `TestGRPCNoUpstream` (`UNAVAILABLE`), `TestGRPCUpstreamGone` (a server stream whose
+  upstream stops after two messages ends `UNAVAILABLE` after them), `TestGRPCTimeouts` (a call's
+  `grpc-timeout` of 300ms and a route's of 2s each answered `DEADLINE_EXCEEDED` by fit while the
+  upstream hangs, the route's carried upstream as the call's deadline, and the backend still in
+  rotation after) and `TestGRPCHelpers`. Without A32 `TestGRPCBidiStreaming` stalls on its first
+  answer. The race tests of `handler/proxy`, `listener` and the packages that depend on them pass
+  on the benchmark host, as do fib's `http`, `http3` and `grpc` with A32; `go vet` and staticcheck
+  pass for linux, darwin and windows (and freebsd for fib).
+- No `bench/ab.sh` comparison yet: it builds against the fib of `go.mod`, which has no A32 until
+  fib's branch reaches `main`; it is to run before this is pushed. fib's micro-benchmarks on the
+  benchmark host (`bench/microbench.sh`, 10 runs each), `main` against the branch: the server's
+  `ServerKeepAlive` and `ServerKeepAlivePOST` unchanged within the noise, the bare parser's
+  `ParserKeepAliveGET` +5.9% and `ParserContentLength` +4.5%, though neither reaches the new code;
+  `main` with only the new `Config` field added costs those two +2.5% and +1.8%, and the rest is
+  code layout.
+
+Differences from the plan:
+
+- It needed A32 of fib, which this session made. The listener's read body timeout (fib's 5 minutes)
+  still bounds a call whose client streams, and the upstream's `response_idle_timeout` (60s) a
+  call silent that long: a longer stream needs them raised.
 
 ## Notes for later iterations
 

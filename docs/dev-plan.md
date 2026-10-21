@@ -169,7 +169,7 @@ Status: `todo`, `doing` or `done`.
 | I46 | Compression | I36 | done |
 | I47 | WebSocket proxying | I17 | done |
 | I48 | WebSocket over HTTP/2 and HTTP/3 entries | I47, I10 | done |
-| I49 | gRPC proxying | I18 | todo |
+| I49 | gRPC proxying | I18 | done |
 | I50 | TCP proxying | I05 | todo |
 | I51 | UDP proxying | I50 | todo |
 | I52 | SNI routing and PROXY protocol | I50 | todo |

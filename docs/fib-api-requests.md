@@ -44,6 +44,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A29 | A client request whose 101 hands over its connection as a tunnel | done, `929924e` (with A28) | 1, 9 | I47 |
 | A30 | Extended CONNECT from the HTTP/3 client | done, `929924e` (with A28) | 13 | I48 tests |
 | A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
+| A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | made on fib's branch `feat/a32-stream-at-header` (`98cc39c`), not yet on `main` | 1, 5, 9 | I49 |
 
 ## Evidence
 
@@ -927,3 +928,29 @@ with an error once the tunnel ends, and report true.
 
 **How fit would use it.** The relay registers it in place of the goroutine, which goes.
 
+## A32: A request body streamed from its header, picked per request
+
+**Status.** Made by fit's session on fib's branch `feat/a32-stream-at-header` (`98cc39c`); not yet
+pushed to `main`.
+
+**Problem.** fit streams a request body to its handler only past 64 KB (`StreamRequestBodyThreshold`),
+so that ordinary bodies arrive whole and can be retried and mirrored. A gRPC call's body has no
+length and comes in small messages, and a client of a bidirectional or client-streaming call may
+wait for an answer to its first message before it sends the next: the proxy's handler then never
+runs. fib's HTTP/2 client also dropped every `TE` field, and gRPC servers expect `te: trailers`.
+
+**Evidence.** I49's `TestGRPCBidiStreaming`, with the hook below taken out of fit's listener, stalls
+until its 10 s deadline on its first answer, over h2c and h2 upstreams alike.
+
+**As built.** `Config.StreamRequestBodyAtHeader func(*http.Request) bool` in package `http` (HTTP/1
+and HTTP/2) and in package `http3`: with `StreamRequestBody`, it is called once for each request
+with a body still to come, and a request it picks runs its handler at once, its body streaming
+through `OnBody` whatever the threshold. HTTP/3 cannot tell at the header whether a body follows
+that declares no length, so a picked request there streams even if its body is empty. A nil
+function costs a nil check, and only for requests with a body. The HTTP/2 client sends
+`te: trailers` when the request's `TE` lists `trailers`, the one value HTTP/2 allows, and drops any
+other. fib's `TestStreamRequestBodyAtHeaderH2`, `TestStreamRequestBodyAtHeaderH1`,
+`TestH2ClientSendsTETrailers` and http3's `TestStreamRequestBodyAtHeader`.
+
+**How fit uses it.** The listener picks gRPC calls (HTTP/2 or HTTP/3 POSTs of `application/grpc` or
+a subtype of it), and the proxy sends them upstream with `TE: trailers`.

@@ -42,6 +42,7 @@
 | A29 | 客户端请求收到 101 时把连接移交为 tunnel | 已完成，`929924e`（与 A28 一起） | 1、9 | I47 |
 | A30 | HTTP/3 客户端发送 extended CONNECT | 已完成，`929924e`（与 A28 一起） | 13 | I48 的测试 |
 | A31 | HTTP/2、HTTP/3 tunnel 的未发送输出排空时的回调 | 待实现 | 1、8、9 | I48 |
+| A32 | 按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers` | 已在 fib 的分支 `feat/a32-stream-at-header`（`98cc39c`）实现，尚未进入 `main` | 1、5、9 | I49 |
 
 ## 证据
 
@@ -686,3 +687,23 @@ limit 时，在不超过一半时运行 fn 一次，tunnel 结束时带错误运
 
 **fit 如何使用。** 中继用它代替那个 goroutine。
 
+## A32：按请求选择从请求头起流式交给处理器的请求体
+
+**状态。** 由 fit 的会话在 fib 的分支 `feat/a32-stream-at-header`（`98cc39c`）实现；尚未推送到 `main`。
+
+**问题。** fit 只在请求体超过 64 KB（`StreamRequestBodyThreshold`）时才把它流式交给处理器，好让普通请求体完整到达、可以
+重试和镜像。gRPC 调用的请求体没有长度，由一个个小消息组成，双向流或客户端流调用的客户端可能要等第一条消息的应答才发下一条：
+于是代理的处理器永远不会运行。fib 的 HTTP/2 客户端还会去掉所有 `TE` 字段，而 gRPC 服务器期望收到 `te: trailers`。
+
+**证据。** 把 fit 监听器里下面的钩子去掉后，I49 的 `TestGRPCBidiStreaming` 在第一个应答上一直卡到 10 秒期限，h2c 和
+h2 上游都是如此。
+
+**实现。** 包 `http`（HTTP/1 和 HTTP/2）和包 `http3` 的 `Config.StreamRequestBodyAtHeader func(*http.Request) bool`：与
+`StreamRequestBody` 一起使用时，对每个还有请求体待到达的请求调用一次，被它选中的请求立即运行处理器，请求体不论阈值都经
+`OnBody` 流式到达。HTTP/3 在请求头处无法判断没有声明长度的请求是否还有请求体，所以在那里被选中的请求即使请求体为空也按流式
+处理。函数为 nil 时只多一次 nil 判断，且只针对有请求体的请求。HTTP/2 客户端在请求的 `TE` 列出 `trailers` 时发送
+`te: trailers`（HTTP/2 允许的唯一值），其他值都去掉。fib 的 `TestStreamRequestBodyAtHeaderH2`、
+`TestStreamRequestBodyAtHeaderH1`、`TestH2ClientSendsTETrailers` 以及 http3 的 `TestStreamRequestBodyAtHeader`。
+
+**fit 如何使用。** 监听器选中 gRPC 调用（`application/grpc` 或其子类型的 HTTP/2 或 HTTP/3 POST），代理带 `TE: trailers`
+把它们发往上游。

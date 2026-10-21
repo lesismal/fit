@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I48） |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392`（fib `main` 的 `929924e`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 gRPC 代理（I49）、TCP/UDP 代理（I50）及 M3 的其余部分 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I49） |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392`（fib `main` 的 `929924e`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理；I49 需要 A32，它在 fib 的分支 `feat/a32-stream-at-header` 上，尚未进入其 `main`，进入后再更新 `go.mod` |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 TCP/UDP 代理（I50）及 M3 的其余部分 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I48 已完成；下一步是 I49（gRPC 代理）。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I49 已完成；下一步是 I50（TCP 代理）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I49。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I50。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -48,7 +48,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
-| `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制 |
+| `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制；WebSocket 与上游的 tunnel 对接；gRPC 调用带 `TE: trailers`，把 `grpc-timeout` 作为期限，失败时回应 gRPC 状态 |
 | `middleware/rewrite` | `rewrite` 中间件（去前缀、正则、加前缀）和 `redirect` |
 | `middleware/limit` | `rate_limit`（按客户端 IP、头部或路由的令牌桶，键数有上限）、`concurrency_limit`、`body_limit` |
 | `middleware/auth` | `jwt`（用标准库验证 JWS，密钥来自 PEM 文件、密钥文件或由控制面获取的 JWK 集合，保存已验证的令牌）；`forward_auth`（经 fib 异步客户端向认证服务发送子请求）；`basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
@@ -1922,6 +1922,38 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 与计划的差异：
 
 - 实质上没有；上面的临时方案等待 A31。
+
+### I49 gRPC 代理 — 已完成
+
+- gRPC 调用（`application/grpc` 或其子类型的 HTTP/2 或 HTTP/3 POST）像其他请求一样被代理：消息到达即双向流式转发，上游的
+  trailer（带 `grpc-status` 和 `grpc-message`）跟在响应之后；它需要 h2 或 h2c 上游。代理额外做的：向上游发送
+  `TE: trailers`；`grpc-timeout` 像路由的 `timeout` 一样在代理处限制调用，取两者中较短的，并把选中的告诉上游（路由的
+  timeout 较短或调用没有设置时，它成为调用的 `grpc-timeout`）；代理无法完成的调用按 gRPC 的方式应答，而不是客户端读不懂的
+  HTTP 状态：响应开始前，用 trailers-only 响应（状态 200，带 `grpc-status` 和 `grpc-message`）：没有上游、连接被拒或失败、
+  drain 或 `max_pending` 时为 `UNAVAILABLE`，超时为 `DEADLINE_EXCEEDED`，请求体过大为 `RESOURCE_EXHAUSTED`；响应中途被切断时，
+  用这些 trailer 代替 `Fit-Error`。两种超时都不计入后端的失败。
+- gRPC 客户端可能要等第一条小消息的应答才发下一条，所以监听器在请求头到达时就把 gRPC 调用的请求体交给代理，而不是等它到达
+  64 KB：[A32](fib-api-requests.zh-CN.md#a32按请求选择从请求头起流式交给处理器的请求体)，fib `http` 和 `http3` 的
+  `Config.StreamRequestBodyAtHeader`，由本会话在 fib 的分支 `feat/a32-stream-at-header` 实现，同时 fib 的 HTTP/2 客户端
+  发送原先会被去掉的 `te: trailers`。
+- 测试（`handler/proxy/grpc_test.go`），经 fit 到 fib 的 gRPC 服务器，h2c 和 h2（TLS）上游，使用 fib 的 gRPC 客户端和 JSON
+  编解码：`TestGRPCUnary`（回显、200 KB、上游的状态和 trailer 被传回、上游看到约 5 秒的期限）、`TestGRPCServerStreaming`
+  （回传 2,000 条消息）、`TestGRPCClientStreaming`（上传 500 条 1 KB 消息，一个应答）、`TestGRPCBidiStreaming`（50 条消息，
+  每条在下一条发出前得到应答，其中有 300 KB 的）、`TestGRPCNoUpstream`（`UNAVAILABLE`）、`TestGRPCUpstreamGone`（上游在两条
+  消息后停止的服务端流，在这两条之后以 `UNAVAILABLE` 结束）、`TestGRPCTimeouts`（上游挂起时，调用 300ms 的 `grpc-timeout` 和
+  路由 2s 的 timeout 各自由 fit 回应 `DEADLINE_EXCEEDED`，路由的 timeout 作为调用的期限传给上游，之后后端仍在轮转中）和
+  `TestGRPCHelpers`。没有 A32 时 `TestGRPCBidiStreaming` 卡在第一个应答上。`handler/proxy`、`listener` 及依赖它们的包的竞态
+  测试在基准机上通过，带 A32 的 fib `http`、`http3`、`grpc` 也通过；`go vet` 和 staticcheck 在 linux、darwin、windows（fib
+  还有 freebsd）上通过。
+- 还没有 `bench/ab.sh` 对比：它按 `go.mod` 中的 fib 构建，在 fib 的分支进入 `main` 之前那里没有 A32；它要在推送之前运行。
+  fib 的微基准（基准机上的 `bench/microbench.sh`，各 10 次），`main` 对比分支：服务器的 `ServerKeepAlive` 和
+  `ServerKeepAlivePOST` 在噪声内不变，单独解析器的 `ParserKeepAliveGET` +5.9%、`ParserContentLength` +4.5%，尽管两者都不走新
+  代码；只在 `main` 上加入新的 `Config` 字段就让这两项 +2.5% 和 +1.8%，其余是代码布局。
+
+与计划的差异：
+
+- 需要 fib 的 A32，由本会话实现。监听器的请求体读取超时（fib 的 5 分钟）仍限制客户端流式发送的调用，上游的
+  `response_idle_timeout`（60 秒）限制静默这么久的调用：更长的流需要调大它们。
 
 ## 给后续迭代的说明
 

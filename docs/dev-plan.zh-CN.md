@@ -159,7 +159,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I46 | 压缩 | I36 | done |
 | I47 | WebSocket 代理 | I17 | done |
 | I48 | HTTP/2、HTTP/3 入口上的 WebSocket | I47、I10 | done |
-| I49 | gRPC 代理 | I18 | todo |
+| I49 | gRPC 代理 | I18 | done |
 | I50 | TCP 代理 | I05 | todo |
 | I51 | UDP 代理 | I50 | todo |
 | I52 | SNI 分流与 PROXY protocol | I50 | todo |

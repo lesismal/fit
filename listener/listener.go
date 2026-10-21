@@ -266,6 +266,7 @@ func http3Config(l *runtime.Listener, tlsConfig *tls.Config) http3.Config {
 	c.TLSConfig = http3.ConfigureTLS(tlsConfig)
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
+	c.StreamRequestBodyAtHeader = streamsAtHeader
 	c.MaxHeaderBytes = l.MaxHeaderBytes
 	c.MaxBodyBytes = l.MaxBodyBytes
 	c.MaxStreamedBodyBytes = l.MaxBodyBytes
@@ -414,6 +415,24 @@ func checkFreeUDP(address string) error {
 // handler rather than being read whole first.
 const StreamThreshold = 64 << 10
 
+// streamsAtHeader picks the requests whose bodies reach their handlers from
+// their headers, before StreamThreshold of them has arrived: gRPC calls,
+// HTTP/2 or HTTP/3 POSTs of application/grpc or a subtype of it, whose
+// clients may wait for an answer to a first small message before sending
+// more. The proxy knows gRPC calls the same way.
+func streamsAtHeader(r *stdhttp.Request) bool {
+	if r.ProtoMajor < 2 || r.Method != stdhttp.MethodPost {
+		return false
+	}
+	ct := r.Header["Content-Type"]
+	const prefix = "application/grpc"
+	if len(ct) != 1 || len(ct[0]) < len(prefix) || !strings.EqualFold(ct[0][:len(prefix)], prefix) {
+		return false
+	}
+	rest := ct[0][len(prefix):]
+	return rest == "" || rest[0] == '+' || rest[0] == ';'
+}
+
 // httpConfig is the fib HTTP config for a listener's TCP protocols.
 func httpConfig(l *runtime.Listener) fibhttp.Config {
 	protocols := l.Protocols
@@ -429,6 +448,7 @@ func httpConfig(l *runtime.Listener) fibhttp.Config {
 	// arrive whole, as most do.
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
+	c.StreamRequestBodyAtHeader = streamsAtHeader
 	h1 := slices.Contains(protocols, config.ProtocolHTTP1)
 	h2 := slices.Contains(protocols, config.ProtocolH2C) || slices.Contains(protocols, config.ProtocolH2)
 	switch {

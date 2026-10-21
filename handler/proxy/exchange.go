@@ -75,6 +75,12 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
 		return
 	}
+	timeout, why := p.timeout, errRouteTimeout
+	if isGRPC(c.Request) {
+		x.grpc = true
+		x.base.Header["Te"] = teTrailers
+		timeout, why = x.callTimeout(p.timeout)
+	}
 	pool := p.pool
 	if p.split != nil || p.failover != nil {
 		pool = p.pickPool()
@@ -98,8 +104,8 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	if x.policy = p.retry; x.policy != nil {
 		x.policy.budget.deposit()
 	}
-	if p.timeout > 0 {
-		x.deadline = time.AfterFunc(p.timeout, func() { x.cancel(errRouteTimeout) })
+	if timeout > 0 {
+		x.deadline = time.AfterFunc(timeout, func() { x.cancel(why) })
 	}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
@@ -226,8 +232,12 @@ type exchange struct {
 	// request has been sent again.
 	policy  *retryPolicy
 	attempt int
-	// deadline is the route's timeout's, or nil.
+	// deadline is the route's timeout's, or the call's grpc-timeout's, or
+	// nil.
 	deadline *time.Timer
+	// grpc says the request is a gRPC call, which is answered as gRPC
+	// answers when it fails (grpc.go).
+	grpc bool
 	// timer is the response idle timeout's.
 	timer atomic.Pointer[time.Timer]
 	// open is the proxy's shard of open exchanges this one is in, for a
@@ -298,6 +308,13 @@ func (x *exchange) cancel(cause error) {
 	call := x.call
 	x.callMu.Unlock()
 	call.Cancel(cause)
+}
+
+// timedOut reports whether the request was cut short by the route's timeout
+// or the call's grpc-timeout, which are no failure of the backend's.
+func (x *exchange) timedOut() bool {
+	cause := x.causeErr()
+	return errors.Is(cause, errRouteTimeout) || errors.Is(cause, errCallDeadline)
 }
 
 // causeErr is why the request was abandoned, or nil.
@@ -492,13 +509,16 @@ func (x *exchange) fail(err error) {
 	status := x.statusOf(err)
 	// 400, 408 and 413 are the client's body failing, not the upstream, and
 	// the route's timeout is the route's.
-	x.failed = (status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout) &&
-		!errors.Is(x.causeErr(), errRouteTimeout)
+	x.failed = (status == stdhttp.StatusBadGateway || status == stdhttp.StatusGatewayTimeout) && !x.timedOut()
 	// The pool hears of the failure before the client does, so that the
 	// request the client sends next is not given a backend this one has
 	// just taken out of rotation.
 	settled := x.settle()
-	_ = x.c.Respond(status, "text/plain; charset=utf-8", []byte(strconv.Itoa(status)+" "+stdhttp.StatusText(status)+"\n"))
+	if x.grpc {
+		x.grpcFail(status)
+	} else {
+		_ = x.c.Respond(status, "text/plain; charset=utf-8", []byte(strconv.Itoa(status)+" "+stdhttp.StatusText(status)+"\n"))
+	}
 	if settled {
 		x.c.Release()
 		x.graph.Release()
@@ -511,7 +531,7 @@ func (x *exchange) statusOf(err error) int {
 	cause := x.causeErr()
 	var upload *uploadError
 	switch {
-	case errors.Is(cause, errIdleTimeout), errors.Is(cause, errRouteTimeout), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
+	case errors.Is(cause, errIdleTimeout), x.timedOut(), errors.Is(err, fibhttp.ErrResponseHeaderTimeout):
 		return stdhttp.StatusGatewayTimeout
 	case errors.Is(cause, errDrained), errors.Is(err, upstream.ErrBusy), errors.Is(err, upstream.ErrClosed):
 		// Swapped out, max_pending requests wait for a connection already,
@@ -549,11 +569,14 @@ func (x *exchange) broken(err error) {
 	}
 	// Cut off by a drain or the route's timeout, the backend did nothing
 	// wrong.
-	x.failed = !errors.Is(x.causeErr(), errDrained) && !errors.Is(x.causeErr(), errRouteTimeout)
+	x.failed = !errors.Is(x.causeErr(), errDrained) && !x.timedOut()
 	switch {
 	case x.resp.ContentLength >= 0:
 		// Short of its length: fib closes an HTTP/1 connection and resets
 		// an HTTP/2 stream for it.
+		_ = x.c.Finish()
+	case x.grpc:
+		x.grpcBroken()
 		_ = x.c.Finish()
 	case x.c.Request.ProtoMajor == 1:
 		// A chunked body without its last chunk; closing the connection is
