@@ -628,7 +628,14 @@ relay would stay armed while the loop runs, and the runtime's poller would look 
 instance, which is what the relay is there to stop (4.3% of the CPU in fib's own measurement, in
 `poller_epoll.go`). Leaving the relay armed after a wake-up until the loop next finds work is the
 other way to save calls; fib's notes measured a variant of it at 1.6% less at 20k and 50k
-connections, so it would need fib's WebSocket benchmarks too, not only fit's proxy. Left as it is.
+connections, so it would need fib's WebSocket benchmarks too, not only fit's proxy. Tried on
+2026-10-21: the relay left armed after a wake-up and disarmed only when the look before parking
+finds events, so that a loop that parks again with nothing to do makes neither call. On the
+benchmark host, fit at cbdca26 against the same fit on that fib, three rounds each, alternating:
+the proxy over HTTP/1.1 248k → 246k requests a second (−0.8%), over h2c 240k → 240k (−0.1%), at
+the same CPU a request (23.15 µs → 23.12 over HTTP/1.1); fixed over HTTP/1.1 +0.9% and h2c −0.3%;
+all within the noise. The calls it saves do not show in fit's throughput, so it was not kept, and
+fib's WebSocket benchmarks were not needed. Left as it is.
 
 **Problem.** An event loop with nothing to do parks in Go's netpoller through a relay epoll
 instance (`epollWaiter.wait`): it polls once, arms the relay with `EPOLL_CTL_MOD` (`EPOLLIN`),
