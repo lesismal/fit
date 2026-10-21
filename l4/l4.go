@@ -2,6 +2,15 @@
 // an address of its service's upstream, and what either side sends is
 // passed to the other as it comes, untouched.
 //
+// A udp listener's sessions go the same way. fib makes each address that
+// sends the listener a datagram a connection of its own; its session dials
+// a UDP socket of its own to an upstream address, and each datagram either
+// side sends is sent on as one datagram. UDP has no backpressure: what
+// cannot be sent is dropped, as the network would drop it, and so are the
+// datagrams past Watermark that arrive before the upstream's socket is
+// open. A session ends only by its idle timeout, a drain, or an upstream
+// that refuses it, after which the client's next datagram starts another.
+//
 // Nothing waits. The upstream's connection is dialed through fib's engine,
 // asynchronously, while the client's reads are held; each side's data is
 // sent on from the callback that received it; and a side's reads are held
@@ -16,10 +25,12 @@
 package l4
 
 import (
+	"errors"
 	"math/rand/v2"
 	stdhttp "net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	fib "github.com/lesismal/fib"
@@ -37,12 +48,14 @@ const maxAttempts = 3
 
 const shards = 16
 
-// Service proxies the connections of its tcp listeners to its upstream.
+// Service proxies the connections of its tcp listeners, and the sessions of
+// its udp listeners, to its upstream.
 type Service struct {
 	name     string
 	pool     *upstream.Pool
 	engine   *fib.Engine
 	idle     time.Duration
+	udpIdle  time.Duration
 	maxConns int64
 	attempts int
 	conns    atomic.Int64
@@ -53,20 +66,21 @@ type Service struct {
 // engine, the engine pool dials through. A nil engine makes a service that
 // closes every connection, for a config that is only checked.
 func NewService(c *config.Service, pool *upstream.Pool, engine *fib.Engine) *Service {
-	return &Service{name: c.Name, pool: pool, engine: engine, idle: c.Idle(), maxConns: int64(c.Conns()),
+	return &Service{name: c.Name, pool: pool, engine: engine, idle: c.Idle(), udpIdle: c.UDPIdle(), maxConns: int64(c.Conns()),
 		attempts: min(maxAttempts, len(pool.Backends()))}
 }
 
 // Name returns the service's name.
 func (s *Service) Name() string { return s.name }
 
-// Conns returns how many connections the service proxies now.
+// Conns returns how many connections and udp sessions the service proxies
+// now.
 func (s *Service) Conns() int64 { return s.conns.Load() }
 
 // Open proxies c, a connection one of the service's listeners has just
-// accepted, from its OnOpen; Clients serves its callbacks from then on.
-// release is called once, when the connection is over, as it is at once for
-// one past max_conns, which is closed.
+// accepted, or a udp listener's new session, from its OnOpen; Clients serves
+// its callbacks from then on. release is called once, when the connection is
+// over, as it is at once for one past max_conns, which is closed.
 func (s *Service) Open(c *fib.Connection, release func()) {
 	if s.engine == nil || s.conns.Add(1) > s.maxConns {
 		s.conns.Add(-1)
@@ -74,16 +88,24 @@ func (s *Service) Open(c *fib.Connection, release func()) {
 		release()
 		return
 	}
-	r := &relay{s: s, client: c, release: release, pick: stdhttp.Request{RemoteAddr: c.RemoteAddr().String()}}
+	r := &relay{s: s, client: c, release: release, udp: c.IsUDP(), idle: s.idle,
+		pick: stdhttp.Request{RemoteAddr: c.RemoteAddr().String()}}
 	r.toUp.resume = func(error) { r.toUp.lift() }
 	r.toClient.resume = func(error) { r.toClient.lift() }
 	r.last.Store(time.Now().UnixNano())
-	// Nothing is read from the client until there is somewhere to send it.
-	c.HoldReads(true)
-	c.SetWriteBackpressure(false)
+	if r.udp {
+		// The session's idle timeout is the relay's, not the engine's.
+		r.idle = s.udpIdle
+		c.SetUDPIdleTimeout(-1)
+	} else {
+		// Nothing is read from the client until there is somewhere to send
+		// it.
+		c.HoldReads(true)
+		c.SetWriteBackpressure(false)
+	}
 	c.SetAttachment(r)
 	s.add(r)
-	r.timer = time.AfterFunc(s.idle, r.checkIdle)
+	r.timer = time.AfterFunc(r.idle, r.checkIdle)
 	r.dial()
 }
 
@@ -127,11 +149,14 @@ func (s *Service) remove(r *relay) {
 	r.set.mu.Unlock()
 }
 
-// relay is a client's connection and the upstream's it is joined to.
+// relay is a client's connection, or udp session, and the upstream's it is
+// joined to.
 type relay struct {
 	s       *Service
 	client  *fib.Connection
 	release func()
+	udp     bool
+	idle    time.Duration
 	// pick is what the upstream's balancer picks an address by: the
 	// client's address, for ip_hash.
 	pick    stdhttp.Request
@@ -142,10 +167,11 @@ type relay struct {
 	// up is the upstream's connection, once it is open.
 	up atomic.Pointer[fib.Connection]
 	// mu orders the dial's outcome with the client's data and close: what
-	// the client sent before the upstream opened waits in pending, and
-	// clientGone says the client closed first.
+	// the client sent before the upstream opened waits in pending, or for
+	// UDP in datagrams, and clientGone says the client closed first.
 	mu         sync.Mutex
 	pending    []byte
+	datagrams  [][]byte
 	clientGone bool
 
 	toUp, toClient direction
@@ -180,7 +206,8 @@ func (d *direction) lift() {
 // while to has more than the watermark unsent.
 func (r *relay) pass(d *direction, from, to *fib.Connection, data []byte) {
 	r.last.Store(time.Now().UnixNano())
-	if to.Send(data) != nil || d.held.Load() {
+	// A datagram that cannot be sent is dropped.
+	if to.Send(data) != nil || r.udp || d.held.Load() {
 		return
 	}
 	d.mu.Lock()
@@ -199,7 +226,11 @@ func (r *relay) dial() {
 	s := r.s
 	r.attempt++
 	r.backend = s.pool.Pick(&r.pick)
-	if err := s.engine.DialWithHandler("tcp", r.backend.Address, s.pool.ConnectTimeout(), (*upSide)(r), r.dialed); err != nil {
+	network := "tcp"
+	if r.udp {
+		network = "udp"
+	}
+	if err := s.engine.DialWithHandler(network, r.backend.Address, s.pool.ConnectTimeout(), (*upSide)(r), r.dialed); err != nil {
 		r.dialed(nil, err)
 	}
 }
@@ -216,7 +247,9 @@ func (r *relay) dialed(up *fib.Connection, err error) {
 			_ = up.Close()
 			return
 		}
-		r.client.HoldReads(false)
+		if !r.udp {
+			r.client.HoldReads(false)
+		}
 		return
 	}
 	if !gone && r.attempt < r.s.attempts {
@@ -237,7 +270,14 @@ func (r *relay) fromClient(data []byte) {
 	if up == nil {
 		r.mu.Lock()
 		if up = r.up.Load(); up == nil {
-			r.pending = append(r.pending, data...)
+			switch {
+			case !r.udp:
+				r.pending = append(r.pending, data...)
+			case len(r.pending)+len(data) <= Watermark:
+				// Each is a slice of what pending has gathered.
+				r.pending = append(r.pending, data...)
+				r.datagrams = append(r.datagrams, r.pending[len(r.pending)-len(data):])
+			}
 			r.mu.Unlock()
 			return
 		}
@@ -253,7 +293,11 @@ func (r *relay) clientClosed() {
 	up := r.up.Load()
 	r.mu.Unlock()
 	if up != nil {
-		up.CloseAfterSend()
+		if r.udp {
+			_ = up.Close()
+		} else {
+			up.CloseAfterSend()
+		}
 	}
 	r.sideEnded()
 }
@@ -270,11 +314,11 @@ func (r *relay) abandon() {
 // looks again when it last carried something otherwise.
 func (r *relay) checkIdle() {
 	since := time.Since(time.Unix(0, r.last.Load()))
-	if since >= r.s.idle {
+	if since >= r.idle {
 		r.abandon()
 		return
 	}
-	r.timer.Reset(r.s.idle - since)
+	r.timer.Reset(r.idle - since)
 }
 
 // sideEnded counts a side's end; once both are over, the relay lets go of
@@ -301,7 +345,13 @@ func (h *upSide) OnOpen(up *fib.Connection) {
 	r := (*relay)(h)
 	up.SetWriteBackpressure(false)
 	r.mu.Lock()
-	if len(r.pending) > 0 {
+	switch {
+	case r.udp:
+		for _, d := range r.datagrams {
+			_ = up.Send(d)
+		}
+		r.datagrams, r.pending = nil, nil
+	case len(r.pending) > 0:
 		_ = up.Send(r.pending)
 		r.pending = nil
 	}
@@ -316,10 +366,20 @@ func (h *upSide) OnData(up *fib.Connection, data []byte) {
 
 func (h *upSide) OnPriorityData(*fib.Connection, []byte) {}
 
-// OnClose ends the client's side once what the upstream sent has gone.
-func (h *upSide) OnClose(*fib.Connection, error) {
+// OnClose ends the client's side once what the upstream sent has gone. A
+// UDP socket closes when the upstream refuses its datagrams, which counts
+// against the backend, and ends the session: the client's next datagram
+// starts another.
+func (h *upSide) OnClose(_ *fib.Connection, err error) {
 	r := (*relay)(h)
-	r.client.CloseAfterSend()
+	if r.udp {
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			r.failed = true
+		}
+		_ = r.client.Close()
+	} else {
+		r.client.CloseAfterSend()
+	}
 	r.sideEnded()
 }
 

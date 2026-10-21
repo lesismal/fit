@@ -19,7 +19,7 @@ type Config struct {
 	Listeners []Listener `json:"listeners,omitempty" doc:"The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https."`
 	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
-	Services  []Service  `json:"services,omitempty" doc:"Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte."`
+	Services  []Service  `json:"services,omitempty" doc:"Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one."`
 	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
 	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
@@ -282,27 +282,38 @@ type AccessLog struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// Service proxies the connections of tcp listeners to an upstream.
+// Service proxies the connections of tcp listeners, and the sessions of udp
+// listeners, to an upstream.
 type Service struct {
 	Name        string   `json:"name" fit:"required" doc:"A name unique among the services."`
-	Listeners   []string `json:"listeners" fit:"required" doc:"The names of the tcp listeners whose connections the service takes; each tcp listener is one service's."`
+	Listeners   []string `json:"listeners" fit:"required" doc:"The names of the tcp and udp listeners whose connections the service takes; each is one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client."`
 	Upstream    string   `json:"upstream" fit:"required" doc:"The name of the upstream connections go to: one of its addresses, picked by its load_balancing (ip_hash by the client's address; header, cookie and URI hashes, which a connection has none of, in turn), out of rotation for its max_fails and health checks as for HTTP, dialed within its connect_timeout. A connect that fails is tried on the next address picked, up to three addresses. Its protocol and HTTP settings are not used."`
-	IdleTimeout Duration `json:"idle_timeout,omitempty" default:"\"10m\"" doc:"How long a connection may carry nothing either way before both sides are closed; 10m when left out."`
-	MaxConns    int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections the service proxies at once; one past it is closed as soon as it is accepted. 10000 when left out or 0."`
+	IdleTimeout Duration `json:"idle_timeout,omitempty" doc:"How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out."`
+	MaxConns    int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
 
 // The defaults Service's fields stand for when left out.
 const (
-	DefaultServiceIdleTimeout = Duration(10 * time.Minute)
-	DefaultServiceMaxConns    = 10000
+	DefaultServiceIdleTimeout    = Duration(10 * time.Minute)
+	DefaultServiceUDPIdleTimeout = Duration(time.Minute)
+	DefaultServiceMaxConns       = 10000
 )
 
-// Idle returns the service's idle timeout, or its default.
+// Idle returns the service's idle timeout for a connection, or its default.
 func (s *Service) Idle() time.Duration {
 	if s.IdleTimeout <= 0 {
 		return DefaultServiceIdleTimeout.Std()
+	}
+	return s.IdleTimeout.Std()
+}
+
+// UDPIdle returns the service's idle timeout for a udp session, or its
+// default.
+func (s *Service) UDPIdle() time.Duration {
+	if s.IdleTimeout <= 0 {
+		return DefaultServiceUDPIdleTimeout.Std()
 	}
 	return s.IdleTimeout.Std()
 }
@@ -319,6 +330,9 @@ const (
 	// ProtocolTCP is raw TCP, which a service proxies to its upstream as
 	// it is; a listener that serves it serves nothing else.
 	ProtocolTCP = "tcp"
+	// ProtocolUDP is UDP, whose datagrams a service proxies to its upstream
+	// as they are; a listener that serves it serves nothing else.
+	ProtocolUDP = "udp"
 )
 
 // DefaultProtocols are what a listener that names none serves, and
@@ -332,10 +346,31 @@ var (
 type Listener struct {
 	Name      string   `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
 	Address   string   `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
-	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream; or udp alone, whose datagrams it proxies. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
 	TLS       *TLS     `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// networks are the transports the listener takes its address in: "tcp",
+// "udp" or both.
+func (l *Listener) networks() []string {
+	var tcp, udp bool
+	for _, p := range l.Protocols {
+		switch p {
+		case ProtocolUDP, ProtocolH3:
+			udp = true
+		default:
+			tcp = true
+		}
+	}
+	switch {
+	case udp && tcp:
+		return []string{"tcp", "udp"}
+	case udp:
+		return []string{"udp"}
+	}
+	return []string{"tcp"}
 }
 
 // TLS is a listener's TLS: the certificates it serves, chosen by the name the

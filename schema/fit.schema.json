@@ -321,14 +321,15 @@
           "type": "string"
         },
         "protocols": {
-          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream. http/1.1 alone when left out, or http/1.1 and h2 with tls.",
+          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream; or udp alone, whose datagrams it proxies. http/1.1 alone when left out, or http/1.1 and h2 with tls.",
           "items": {
             "enum": [
               "http/1.1",
               "h2c",
               "h2",
               "h3",
-              "tcp"
+              "tcp",
+              "udp"
             ],
             "type": "string"
           },
@@ -501,13 +502,12 @@
       "additionalProperties": false,
       "properties": {
         "idle_timeout": {
-          "default": "10m",
-          "description": "How long a connection may carry nothing either way before both sides are closed; 10m when left out.",
+          "description": "How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
         "listeners": {
-          "description": "The names of the tcp listeners whose connections the service takes; each tcp listener is one service's.",
+          "description": "The names of the tcp and udp listeners whose connections the service takes; each is one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client.",
           "items": {
             "type": "string"
           },
@@ -515,7 +515,7 @@
         },
         "max_conns": {
           "default": 10000,
-          "description": "The most connections the service proxies at once; one past it is closed as soon as it is accepted. 10000 when left out or 0.",
+          "description": "The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -1708,7 +1708,7 @@
       "type": "array"
     },
     "services": {
-      "description": "Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte.",
+      "description": "Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one.",
       "items": {
         "$ref": "#/$defs/config.Service"
       },

@@ -90,7 +90,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "enum",
 			doc:  `{"listeners": [{"name": "a", "address": ":1", "protocols": ["http/1.1", "spdy"]}]}`,
-			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3", "tcp"`},
+			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3", "tcp", "udp"`},
 		},
 		{
 			name: "null for a list",
@@ -287,16 +287,36 @@ func TestValidate(t *testing.T) {
   {"name": "x", "listeners": [], "upstream": "db"}
 ]}`,
 			want: []string{
-				`3:67: listeners[1].protocols[1]: a tcp listener serves raw TCP alone: list tcp without HTTP's protocols`,
+				`3:67: listeners[1].protocols[1]: a tcp listener serves TCP alone: list tcp without other protocols`,
 				`5:71: listeners[3].tls: a tcp listener proxies its connections as they are, TLS and all: it takes no tls`,
 				`8:27: routes[0].listeners[0]: "raw" is a tcp listener, which a service serves, not routes`,
-				`10:39: services[0].listeners[1]: "web" is not a tcp listener: a service takes the connections of listeners whose protocols are ["tcp"]`,
+				`10:39: services[0].listeners[1]: "web" is not a tcp or udp listener: a service takes the connections of listeners whose protocols are ["tcp"] or ["udp"]`,
 				`10:46: services[0].listeners[2]: there is no listener named "nope"`,
 				`11:12: services[1].name: another service is already named "pg"`,
 				`11:32: services[1].listeners[0]: listener "raw" is already service "pg"'s`,
 				`11:52: services[1].upstream: there is no upstream named "none"`,
-				`12:30: services[2].listeners: a service needs at least one tcp listener`,
+				`12:30: services[2].listeners: a service needs at least one tcp or udp listener`,
 				`4:55: listeners[2].protocols: no service takes this tcp listener's connections: list it in a service's listeners`,
+			},
+		},
+		{
+			name: "udp listeners",
+			doc: `{"listeners": [
+  {"name": "dns", "address": ":53", "protocols": ["udp"]},
+  {"name": "dnstcp", "address": ":53", "protocols": ["tcp"]},
+  {"name": "dns2", "address": ":53", "protocols": ["udp"]},
+  {"name": "mixed", "address": ":54", "protocols": ["udp", "tcp"]},
+  {"name": "secure", "address": ":55", "protocols": ["udp"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}},
+  {"name": "web", "address": ":443", "protocols": ["h3"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}},
+  {"name": "quic", "address": ":443", "protocols": ["udp"]}
+], "upstreams": [{"name": "ns", "addresses": ["a:53"]}],
+"services": [{"name": "dns", "listeners": ["dns", "dnstcp", "dns2", "mixed", "secure", "quic"], "upstream": "ns"}]}`,
+			want: []string{
+				`4:31: listeners[2].address: listener "dns" already listens on :53`,
+				`5:53: listeners[3].protocols[0]: a udp listener serves UDP alone: list udp without other protocols`,
+				`5:60: listeners[3].protocols[1]: a tcp listener serves TCP alone: list tcp without other protocols`,
+				`6:69: listeners[4].tls: a udp listener proxies its datagrams as they are: it takes no tls`,
+				`8:31: listeners[6].address: listener "web" already listens on :443`,
 			},
 		},
 		{

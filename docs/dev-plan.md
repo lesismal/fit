@@ -171,7 +171,7 @@ Status: `todo`, `doing` or `done`.
 | I48 | WebSocket over HTTP/2 and HTTP/3 entries | I47, I10 | done |
 | I49 | gRPC proxying | I18 | done |
 | I50 | TCP proxying | I05 | done |
-| I51 | UDP proxying | I50 | todo |
+| I51 | UDP proxying | I50 | done |
 | I52 | SNI routing and PROXY protocol | I50 | todo |
 | I53 | One port, many protocols; SOCKS and CONNECT | I52 | todo |
 | I54 | Upstream TLS | I18 | todo |

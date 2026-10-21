@@ -195,11 +195,26 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 				return fail(err)
 			}
 		}
-		h := &tcpListener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
+		h := &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
 		var err error
 		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
 			return fail(err)
 		}
+		return b, nil
+	}
+	if slices.Equal(l.Protocols, []string{config.ProtocolUDP}) {
+		// UDP, whose sessions the listener's service proxies.
+		if !shared {
+			if err := checkFreeUDP(l.Address); err != nil {
+				return fail(err)
+			}
+		}
+		h := &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
+		var err error
+		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: l.Address, Handler: h}); err != nil {
+			return fail(err)
+		}
+		b.addr = b.udpAddr
 		return b, nil
 	}
 	h3 := slices.Contains(l.Protocols, config.ProtocolH3)
@@ -509,15 +524,15 @@ func (s *Server) close() error {
 	return err
 }
 
-// tcpListener hands a tcp listener's connections to the service the
-// current graph has for it. A connection keeps the graph it started on until
-// it ends.
-type tcpListener struct {
+// l4Listener hands a tcp listener's connections, or a udp listener's
+// sessions, to the service the current graph has for it. A connection keeps
+// the graph it started on until it ends.
+type l4Listener struct {
 	l4.Clients
 	dispatcher dispatcher
 }
 
-func (t *tcpListener) OnOpen(c *fib.Connection) {
+func (t *l4Listener) OnOpen(c *fib.Connection) {
 	g := t.dispatcher.rt.Current()
 	if g == nil {
 		_ = c.Close()

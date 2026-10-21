@@ -54,11 +54,20 @@ func (c *Config) Validate() Errors {
 
 		if port, msg := checkAddress(l.Address); msg != "" {
 			add(l.At.Field("address"), "%s", msg)
-		} else if other, ok := addresses[l.Address]; ok {
-			add(l.At.Field("address"), "listener %q already listens on %s", other, l.Address)
-		} else if port != 0 {
-			// Port 0 picks a free port, so two of them do not clash.
-			addresses[l.Address] = l.Name
+		} else {
+			// A TCP port and a UDP one of the same number do not clash, so
+			// a tcp listener and a udp one, or HTTP and HTTP/3, may share
+			// an address.
+			for _, network := range l.networks() {
+				key := network + " " + l.Address
+				if other, ok := addresses[key]; ok {
+					add(l.At.Field("address"), "listener %q already listens on %s", other, l.Address)
+					break
+				} else if port != 0 {
+					// Port 0 picks a free port, so two of them do not clash.
+					addresses[key] = l.Name
+				}
+			}
 		}
 
 		seen := map[string]bool{}
@@ -72,10 +81,12 @@ func (c *Config) Validate() Errors {
 				add(l.At.Field("protocols").Index(i), "h3 needs tls")
 			case p == ProtocolH2C && l.TLS != nil:
 				add(l.At.Field("protocols").Index(i), "h2c is HTTP/2 in the clear, which a listener with tls does not serve; use h2")
-			case p == ProtocolTCP && len(l.Protocols) > 1:
-				add(l.At.Field("protocols").Index(i), "a tcp listener serves raw TCP alone: list tcp without HTTP's protocols")
+			case (p == ProtocolTCP || p == ProtocolUDP) && len(l.Protocols) > 1:
+				add(l.At.Field("protocols").Index(i), "a %s listener serves %s alone: list %s without other protocols", p, strings.ToUpper(p), p)
 			case p == ProtocolTCP && l.TLS != nil:
 				add(l.At.Field("tls"), "a tcp listener proxies its connections as they are, TLS and all: it takes no tls")
+			case p == ProtocolUDP && l.TLS != nil:
+				add(l.At.Field("tls"), "a udp listener proxies its datagrams as they are: it takes no tls")
 			}
 			seen[p] = true
 		}
@@ -115,10 +126,13 @@ func (c *Config) Validate() Errors {
 		}
 	}
 
-	tcp := map[string]bool{}
+	// l4 holds the tcp and udp listeners, which services serve.
+	l4 := map[string]string{}
 	for _, l := range c.Listeners {
-		if slices.Contains(l.Protocols, ProtocolTCP) {
-			tcp[l.Name] = true
+		for _, p := range [...]string{ProtocolTCP, ProtocolUDP} {
+			if slices.Contains(l.Protocols, p) {
+				l4[l.Name] = p
+			}
 		}
 	}
 	routes := map[string]bool{}
@@ -135,8 +149,8 @@ func (c *Config) Validate() Errors {
 		for i, name := range r.Listeners {
 			if !listeners[name] {
 				add(r.At.Field("listeners").Index(i), "there is no listener named %q", name)
-			} else if tcp[name] {
-				add(r.At.Field("listeners").Index(i), "%q is a tcp listener, which a service serves, not routes", name)
+			} else if p := l4[name]; p != "" {
+				add(r.At.Field("listeners").Index(i), "%q is a %s listener, which a service serves, not routes", name, p)
 			}
 		}
 		if r.Match != nil {
@@ -241,14 +255,14 @@ func (c *Config) Validate() Errors {
 		}
 		services[sv.Name] = true
 		if len(sv.Listeners) == 0 {
-			add(sv.At.Field("listeners"), "a service needs at least one tcp listener")
+			add(sv.At.Field("listeners"), "a service needs at least one tcp or udp listener")
 		}
 		for i, name := range sv.Listeners {
 			switch other, taken := servedBy[name]; {
 			case !listeners[name]:
 				add(sv.At.Field("listeners").Index(i), "there is no listener named %q", name)
-			case !tcp[name]:
-				add(sv.At.Field("listeners").Index(i), "%q is not a tcp listener: a service takes the connections of listeners whose protocols are [\"tcp\"]", name)
+			case l4[name] == "":
+				add(sv.At.Field("listeners").Index(i), "%q is not a tcp or udp listener: a service takes the connections of listeners whose protocols are [\"tcp\"] or [\"udp\"]", name)
 			case taken:
 				add(sv.At.Field("listeners").Index(i), "listener %q is already service %q's", name, other)
 			}
@@ -259,8 +273,8 @@ func (c *Config) Validate() Errors {
 		}
 	}
 	for _, l := range c.Listeners {
-		if _, ok := servedBy[l.Name]; tcp[l.Name] && !ok {
-			add(l.At.Field("protocols"), "no service takes this tcp listener's connections: list it in a service's listeners")
+		if _, ok := servedBy[l.Name]; l4[l.Name] != "" && !ok {
+			add(l.At.Field("protocols"), "no service takes this %s listener's connections: list it in a service's listeners", l4[l.Name])
 		}
 	}
 

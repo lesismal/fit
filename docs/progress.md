@@ -10,11 +10,11 @@ this file says what was done, and where the work differs from the plan.
 
 | | |
 | --- | --- |
-| Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I50) |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021144757-9ab22e8dfa1e` (fib's `main` at `9ab22e8`, after v1.5.6; by commit, not tag, rule 19), from the module proxy; with A32 and A33 since I49 and I50 |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte (services); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no UDP proxying (I51) or the rest of M3 |
+| Last updated | 2026-10-22 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I51) |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021162400-11de9eba7af5` (`11de9eb` on fib's branch `udp-peer-idle`, which is fib's `main` at `9ab22e8` with A34; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 since I51 |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client (services); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no SNI routing or PROXY protocol (I52), or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I50 are done; next, I51 (UDP proxying).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I51 are done; next, I52 (SNI routing and PROXY protocol).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I51 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I52 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -2749,9 +2749,46 @@ Differences from the plan:
   has no request to route by; I52's SNI routing will add a match to them. A service has no access
   log or metrics yet.
 
+### I51 UDP proxying — done
+
+- A listener whose `protocols` are `["udp"]` takes datagrams, and the service that lists it proxies
+  them to its upstream: a service's `listeners` may now name tcp and udp listeners alike, so one
+  service can serve DNS on both, and a tcp and a udp listener may share an address (the config
+  checks addresses per transport, so HTTP and HTTP/3 count too). A session is a client's address:
+  fib makes each address that sends the listener a datagram a connection of its own, and its
+  session dials a UDP socket of its own to an upstream address picked as for TCP (`ip_hash` by the
+  client's address), so the upstream sees one address per client. Each datagram either way is sent
+  on as one datagram, whatever its size; those that arrive before the session's socket is open
+  wait, up to 64 KB, and the rest are dropped, as is a datagram that cannot be sent: UDP has no
+  backpressure. A session ends after `idle_timeout` with nothing either way (1 minute by default
+  for UDP, 10 for TCP), on a drain, or when its upstream refuses it (the ICMP refusal closes its
+  socket, which counts against the backend); the client's next datagram starts another. `max_conns`
+  counts sessions with connections, and a session past it is closed as it opens.
+- The engine's own sweep of silent UDP peers is one timeout for the whole engine, which HTTP/3 also
+  relies on, so a session opts out of it and keeps its own timer, as a TCP relay does:
+  [A34](fib-api-requests.md#a34-a-udp-peers-own-idle-timeout-or-none),
+  `Connection.SetUDPIdleTimeout`, made in fib by this session on the branch `udp-peer-idle`
+  (`11de9eb`), which fit depends on by its hash until it is merged into fib's `main`.
+- Tests (`l4/udp_test.go`, `config`): `TestUDPEcho` (datagrams of 1, 1,400 and 60,000 bytes each
+  come back whole; 200 clients at once, 10 round trips each, each one session and one address at
+  the upstream), `TestUDPSessionsExpire` (an idle session ends after 300 ms while a busy one keeps
+  its socket, and the idle client's next datagram comes from a new one), `TestUDPMaxConns`,
+  `TestUDPRefused` (a refused upstream ends the session; with a refused and a live address, the
+  client is answered by the live one) and `TestUDPReload` (a session keeps its service until the
+  drain timeout, and then goes to the new one); and the config's checks. They pass under the race
+  detector on the benchmark host, the UDP tests 10 times over; fib's `TestUDPPeerIdleTimeout` too.
+- No benchmark: UDP is a new path, and HTTP's takes one more comparison per listener binding.
+
+Differences from the plan:
+
+- It needed A34 of fib, which this session made on a branch of fib, not yet on its `main`.
+  fib's own `TestUDPSendBatch`, `TestUDPSendBatchSegments` and `TestUDPBurstFromManyPeers` fail in
+  the benchmark host's Docker container on fib's `main` as on the branch; they are not this
+  change's, and fib's CI is where they are judged.
+
 ## Notes for later iterations
 
-- **fib version.** fit uses fib's `main` at `9ab22e8` (`v1.5.7-0.20261021144757-9ab22e8dfa1e`), which is `929924e` with A32 (`0bd2447`, a request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client) and A33 (`9ab22e8`, a peer's end seen while reads are held is not lost). `929924e` is `fc7ec5e` with A28-A30 (a retained request upgraded after its handler returned, `Client.StartUpgrade`, extended CONNECT from the HTTP/3 client). `fc7ec5e` is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
+- **fib version.** fit uses `11de9eb` on fib's branch `udp-peer-idle` (`v1.5.7-0.20261021162400-11de9eba7af5`), which is fib's `main` at `9ab22e8` with A34 (a UDP peer's own idle timeout); it moves to fib's `main` once that is merged there. `9ab22e8` is `929924e` with A32 (`0bd2447`, a request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client) and A33 (`9ab22e8`, a peer's end seen while reads are held is not lost). `929924e` is `fc7ec5e` with A28-A30 (a retained request upgraded after its handler returned, `Client.StartUpgrade`, extended CONNECT from the HTTP/3 client). `fc7ec5e` is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
   lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`

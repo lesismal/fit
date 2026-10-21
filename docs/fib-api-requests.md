@@ -46,6 +46,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
 | A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | done, `0bd2447` | 1, 5, 9 | I49 |
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
+| A34 | A UDP peer's own idle timeout, or none | made, `11de9eb` on fib's branch `udp-peer-idle`; to `main` with the user's word | 10, 11 | I51 |
 
 ## Evidence
 
@@ -975,3 +976,24 @@ the round that next reads is handed both. fib's `TestHoldReadsFromOpenThenHangup
 **How fit uses it.** `l4` holds a client's reads from `OnOpen` until its upstream has opened, and
 holds either side's for the other's backlog.
 
+## A34: A UDP peer's own idle timeout, or none
+
+**Status.** Made by fit's session: `11de9eb` on fib's branch `udp-peer-idle`, which fit depends on
+by its hash until it is merged into fib's `main` with the user's word.
+
+**Problem.** fib closes a UDP listener's peer that has been silent for `Config.UDPIdleTimeout`, one
+value for the whole engine (60 s by default), which also bounds the peers of HTTP/3, whose QUIC
+idle timeout must stay below it. A udp service's session has the service's own `idle_timeout`, which
+may be longer, and fit's listeners share one engine across reloads, so the engine's value cannot
+follow the config.
+
+**Evidence.** I51's `TestUDPSessionsExpire` and an `idle_timeout` above a minute: without a way out
+of the engine's sweep, a session would end at 60 s whatever the service says.
+
+**As built.** `Connection.SetUDPIdleTimeout(d)` on a UDP listener's peer: `d > 0` replaces the
+engine's timeout for that peer (looked at as often as the engine's sweep runs), zero goes back to
+the engine's, and a negative value keeps the peer until it is closed. It costs an atomic load per
+peer per sweep. fib's `TestUDPPeerIdleTimeout`.
+
+**How fit uses it.** `l4` sets -1 on each udp session's client side and closes the session with its
+own timer, as it does a TCP relay.
