@@ -2,11 +2,9 @@ github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
 github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
-github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283 h1:l/+dO6KMqMKnSGaEPcqefqQIUiP/BF905vzb5GWn3yA=
-github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
-github.com/lesismal/fib v1.5.7-0.20261021111325-fc7ec5e327d4 h1:XvfVz4XCny0of/7F9i7GdWZ8tkRsZl8+/Uqx2H395fk=
-github.com/lesismal/fib v1.5.7-0.20261021111325-fc7ec5e327d4/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
-github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392 h1:iD6Z4zb+DY968BeEQYeNS4Gbgb7EIpnwlwKluZq2kt8=
-github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/lesismal/fib v1.5.7-0.20261021144757-9ab22e8dfa1e h1:wOpDrZuRwOjSyl+t9Vvc9rLqsG2bY5H3xeZmjczzaAk=
+github.com/lesismal/fib v1.5.7-0.20261021144757-9ab22e8dfa1e/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
+github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=

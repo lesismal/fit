@@ -11,7 +11,7 @@
 | --- | --- |
 | 最后更新 | 2026-10-21 |
 | 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I50） |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392`（fib `main` 的 `929924e`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理；I49 和 I50 需要 A32 和 A33，它们在 fib 的分支 `feat/a32-stream-at-header` 上，尚未进入其 `main`，进入后再更新 `go.mod` |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021144757-9ab22e8dfa1e`（fib `main` 的 `9ab22e8`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理；自 I49 和 I50 起带 A32 和 A33 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游（services）；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 还没有 UDP 代理（I51）及 M3 的其余部分 |
 
@@ -1935,7 +1935,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   用这些 trailer 代替 `Fit-Error`。两种超时都不计入后端的失败。
 - gRPC 客户端可能要等第一条小消息的应答才发下一条，所以监听器在请求头到达时就把 gRPC 调用的请求体交给代理，而不是等它到达
   64 KB：[A32](fib-api-requests.zh-CN.md#a32按请求选择从请求头起流式交给处理器的请求体)，fib `http` 和 `http3` 的
-  `Config.StreamRequestBodyAtHeader`，由本会话在 fib 的分支 `feat/a32-stream-at-header` 实现，同时 fib 的 HTTP/2 客户端
+  `Config.StreamRequestBodyAtHeader`，由本会话实现并推送到 fib 的 `main`（`0bd2447`），同时 fib 的 HTTP/2 客户端
   发送原先会被去掉的 `te: trailers`。
 - 测试（`handler/proxy/grpc_test.go`），经 fit 到 fib 的 gRPC 服务器，h2c 和 h2（TLS）上游，使用 fib 的 gRPC 客户端和 JSON
   编解码：`TestGRPCUnary`（回显、200 KB、上游的状态和 trailer 被传回、上游看到约 5 秒的期限）、`TestGRPCServerStreaming`
@@ -1946,8 +1946,8 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   `TestGRPCHelpers`。没有 A32 时 `TestGRPCBidiStreaming` 卡在第一个应答上。`handler/proxy`、`listener` 及依赖它们的包的竞态
   测试在基准机上通过，带 A32 的 fib `http`、`http3`、`grpc` 也通过；`go vet` 和 staticcheck 在 linux、darwin、windows（fib
   还有 freebsd）上通过。
-- 还没有 `bench/ab.sh` 对比：它按 `go.mod` 中的 fib 构建，在 fib 的分支进入 `main` 之前那里没有 A32；它要在推送之前运行。
-  fib 的微基准（基准机上的 `bench/microbench.sh`，各 10 次），`main` 对比分支：服务器的 `ServerKeepAlive` 和
+- 基准机上的 `bench/ab.sh`，代理场景，3 轮各 10 秒，`fa1886a` 对比本改动（fib 为 `9ab22e8`）：HTTP/1.1 每秒 245k → 244k 请求
+  （−0.3%），h2c 238k → 237k（−0.5%），都在噪声内。fib 的微基准（基准机上的 `bench/microbench.sh`，各 10 次），`main` 对比分支：服务器的 `ServerKeepAlive` 和
   `ServerKeepAlivePOST` 在噪声内不变，单独解析器的 `ParserKeepAliveGET` +5.9%、`ParserContentLength` +4.5%，尽管两者都不走新
   代码；只在 `main` 上加入新的 `Config` 字段就让这两项 +2.5% 和 +1.8%，其余是代码布局。
 
@@ -1985,7 +1985,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 ## 给后续迭代的说明
 
-- **fib 版本。** fit 使用 fib `main` 的 `929924e`（`v1.5.7-0.20261021130553-929924e17392`），即 `fc7ec5e` 加上 A28-A30（处理器返回后 Upgrade 被保留的请求、`Client.StartUpgrade`、HTTP/3 客户端的 extended CONNECT）。`fc7ec5e` 即 `cfb4f09` 加上 A27（`Context.OnBodyFilter`）。`cfb4f09` 即 `8e04da9` 加上 A25（`Context.LimitBody`）、A26（保留每个 `OnCancel` 回调）和一处 QUIC 修复。`8e04da9` 即 `06992a5` 加上两处测试修复（HTTP/2 保留 body 的测试等 handler 返回后再释放；SOCKS UDP 测试等所有数据报到齐后再放行拨号）。`06992a5` 即 `b101811` 加上一处修复，让内核分配的 UDP 端口在 bind 时不带 SO_REUSEADDR 和 SO_REUSEPORT，改在 bind 之后设置，因为 Linux 可能把已被占用的端口再分给另一个服务器（在 fib 的测试里，客户端的 QUIC 握手连到了别的测试的服务器，并正确地拒绝了它的证书）。`b101811` 即 `a6d78cd` 加上 fib 偶发失败测试的修复，以及由此发现的一个 taskpool bug 的修复（一个分片能用光共享额度，MaxWorkers 为 16 时同时跑了 17 个阻塞任务）。`a6d78cd` 在 v1.5.6 之后带来：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
+- **fib 版本。** fit 使用 fib `main` 的 `9ab22e8`（`v1.5.7-0.20261021144757-9ab22e8dfa1e`），即 `929924e` 加上 A32（`0bd2447`，按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers`）和 A33（`9ab22e8`，读取被暂停时看到的对端结束不再丢失）。`929924e` 即 `fc7ec5e` 加上 A28-A30（处理器返回后 Upgrade 被保留的请求、`Client.StartUpgrade`、HTTP/3 客户端的 extended CONNECT）。`fc7ec5e` 即 `cfb4f09` 加上 A27（`Context.OnBodyFilter`）。`cfb4f09` 即 `8e04da9` 加上 A25（`Context.LimitBody`）、A26（保留每个 `OnCancel` 回调）和一处 QUIC 修复。`8e04da9` 即 `06992a5` 加上两处测试修复（HTTP/2 保留 body 的测试等 handler 返回后再释放；SOCKS UDP 测试等所有数据报到齐后再放行拨号）。`06992a5` 即 `b101811` 加上一处修复，让内核分配的 UDP 端口在 bind 时不带 SO_REUSEADDR 和 SO_REUSEPORT，改在 bind 之后设置，因为 Linux 可能把已被占用的端口再分给另一个服务器（在 fib 的测试里，客户端的 QUIC 握手连到了别的测试的服务器，并正确地拒绝了它的证书）。`b101811` 即 `a6d78cd` 加上 fib 偶发失败测试的修复，以及由此发现的一个 taskpool bug 的修复（一个分片能用光共享额度，MaxWorkers 为 16 时同时跑了 17 个阻塞任务）。`a6d78cd` 在 v1.5.6 之后带来：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
   fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
   运行 `OnClose`（A23：没有它，空闲 HTTP/2 连接的 idle 定时器会把每个已关闭的引擎留在内存中，`handler/proxy` 在竞态检测下峰值达 5.3GB，交换导致 macOS 上一次 h2c 上传超时）。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了

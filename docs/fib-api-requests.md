@@ -44,8 +44,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A29 | A client request whose 101 hands over its connection as a tunnel | done, `929924e` (with A28) | 1, 9 | I47 |
 | A30 | Extended CONNECT from the HTTP/3 client | done, `929924e` (with A28) | 13 | I48 tests |
 | A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
-| A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | made on fib's branch `feat/a32-stream-at-header` (`98cc39c`), not yet on `main` | 1, 5, 9 | I49 |
-| A33 | A peer's end seen while reads are held is not lost | made on fib's branch `feat/a32-stream-at-header` (`1e9d14a`), not yet on `main` | 8, 9 | I50 |
+| A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | done, `0bd2447` | 1, 5, 9 | I49 |
+| A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
 
 ## Evidence
 
@@ -931,8 +931,7 @@ with an error once the tunnel ends, and report true.
 
 ## A32: A request body streamed from its header, picked per request
 
-**Status.** Made by fit's session on fib's branch `feat/a32-stream-at-header` (`98cc39c`); not yet
-pushed to `main`.
+**Status.** Done (`0bd2447` on fib's `main`), made by fit's session.
 
 **Problem.** fit streams a request body to its handler only past 64 KB (`StreamRequestBodyThreshold`),
 so that ordinary bodies arrive whole and can be retried and mirrored. A gRPC call's body has no
@@ -958,8 +957,7 @@ a subtype of it), and the proxy sends them upstream with `TE: trailers`.
 
 ## A33: A peer's end seen while reads are held is not lost
 
-**Status.** Fixed by fit's session on fib's branch `feat/a32-stream-at-header` (`1e9d14a`); not yet
-pushed to `main`.
+**Status.** Done (`9ab22e8` on fib's `main`), fixed by fit's session.
 
 **Problem.** A connection whose reads are held when its peer sends and then ends its side never
 hears the end: the round that saw the end stalled the read and dropped the end, whose edge-triggered
