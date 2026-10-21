@@ -4,5 +4,9 @@ github.com/lesismal/fib v1.5.7-0.20261020131351-a6d78cd9d925 h1:7cGpk/VdNmFvFYrU
 github.com/lesismal/fib v1.5.7-0.20261020131351-a6d78cd9d925/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 github.com/lesismal/fib v1.5.7-0.20261021010413-b101811dd7f0 h1:RDn+dubo7dRehcZJVnffmYgkDbz9aDn6+++6+trj8Bg=
 github.com/lesismal/fib v1.5.7-0.20261021010413-b101811dd7f0/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/lesismal/fib v1.5.7-0.20261021011949-06992a524c75 h1:TS4p3WYpsgx5e1uxkO/qPjaI1CMyfhENx0TN+/xL5TA=
+github.com/lesismal/fib v1.5.7-0.20261021011949-06992a524c75/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114 h1:vBQaXZtEolUnEOHoHwOEjKb5RZRQ4xcbOLwsqSvIFO8=
+github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
