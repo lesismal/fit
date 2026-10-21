@@ -24,6 +24,7 @@ import (
 	_ "github.com/lesismal/fit/middleware/limit"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/upstream"
 )
 
 func init() {
@@ -87,7 +88,12 @@ func compile(t *testing.T, cfg string) *runtime.Graph {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := runtime.Compile(c, runtime.Env{})
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	g, err := runtime.Compile(c, runtime.Env{Engine: engine})
 	if err != nil {
 		t.Fatal(err)
 	}

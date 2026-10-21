@@ -161,7 +161,7 @@ Status: `todo`, `doing` or `done`.
 | I38 | Rewrites, redirects and headers | I36 | done |
 | I39 | Rate, concurrency and size limits | I36 | done |
 | I40 | Basic auth and client mTLS | I36 | done |
-| I41 | ForwardAuth | I40 | todo |
+| I41 | ForwardAuth | I40 | done |
 | I42 | JWT and JWKS | I40 | todo |
 | I43 | Retries and per-route timeouts | I17 | todo |
 | I44 | Circuit breakers | I43 | todo |

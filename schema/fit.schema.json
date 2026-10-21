@@ -978,6 +978,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "forward_auth"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.forward_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "headers"
               }
             }
@@ -1047,6 +1063,7 @@
             "body_limit",
             "client_cert",
             "concurrency_limit",
+            "forward_auth",
             "headers",
             "rate_limit",
             "redirect",
@@ -1136,6 +1153,44 @@
       },
       "required": [
         "max"
+      ],
+      "type": "object"
+    },
+    "http.middleware.forward_auth": {
+      "additionalProperties": false,
+      "properties": {
+        "copy_headers": {
+          "description": "Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent are removed, so that it cannot pass them off as the auth service's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "request_headers": {
+          "description": "The request's fields sent to the auth service; all but the hop-by-hop ones and those of the body when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long to wait for the auth service's answer, after which the request is answered 504 Gateway Timeout; 10s when left out. A service that cannot be reached is answered 502 Bad Gateway.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "The name of the upstream the auth service is.",
+          "type": "string"
+        },
+        "uri": {
+          "default": "/",
+          "description": "The path, and query, of the request sent to the auth service; / when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upstream"
       ],
       "type": "object"
     },

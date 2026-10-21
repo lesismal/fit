@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I40) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I41) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no ForwardAuth (I41), JWT (I42), retries (I43) or the rest of M3 |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), or asks an auth service (ForwardAuth); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no JWT (I42), retries (I43) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I40 are done; next, I41 (ForwardAuth).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I41 are done; next, I42 (JWT and JWKS).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I41 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I42 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -69,7 +69,7 @@ To continue, start a session with:
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
-| `middleware/auth` | `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
+| `middleware/auth` | `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -2371,6 +2371,39 @@ Differences from the plan:
   fit already depends on (decision 007), so there is no new dependency to note.
 - Basic auth's users are written in the config; a file of users, as htpasswd keeps, is left for
   later.
+
+### I41 ForwardAuth — done
+
+- `middleware/auth`'s `forward_auth` sends a GET to an auth service, an upstream of the config's
+  (`upstream`, with its balancing, health and limits), at `uri` (`/` by default), with the request's
+  fields (all but the hop-by-hop ones and the body's, or only `request_headers`) and
+  `X-Forwarded-Method`, `-Proto`, `-Host`, `-Uri` and `-For`, which replace any the client sent. A
+  2xx answer lets the request through, with the fields `copy_headers` names copied from the answer
+  and any the client sent of those names removed; any other answer is the client's, its status,
+  fields and a body that arrived whole (up to the pool's 64 KiB threshold; a larger one is given up
+  and the answer goes without). A service that cannot be reached is answered 502, one past
+  `timeout` (10s by default) 504, and a check the config's drain cuts off 503.
+- The subrequest goes through fib's asynchronous client (`Pool.Pick`, `Send`, `Done`); the request
+  waits retained, holding its config, and the rest of the chain runs in the client's callback, so a
+  waiting request holds no worker (rule 1). `OnCancel` abandons the subrequest when the client goes,
+  a timer when the timeout passes, and `Drain` the ones still waiting once the config is drained.
+  A timeout counts against the auth service's backend, as the proxy counts one.
+- Tests: `TestForwardAuth` (allowed, with the fields the service saw and the copied user; a client's
+  forged copy field removed; a redirect to a login page passed on with its fields and body; a
+  denial with a 200 KiB body passed on without it; a service past the timeout),
+  `TestForwardAuthUnreachable`, `TestForwardAuthClientGone` (the service sees its request
+  abandoned), `TestForwardAuthSlowService` (128 requests at once wait half a second each on the
+  service, more than the server has workers, while another route answers each of ten requests
+  within 250 ms; all 128 are let in, together), and `TestForwardAuthParams`. The race tests of
+  `middleware/auth`, `schema` and `cmd/fit` pass on the benchmark host; `go vet` and staticcheck for
+  linux, darwin and windows pass.
+- No benchmark: routes without the middleware run as before.
+
+Differences from the plan:
+
+- The auth service is an upstream of the config, not an address of the middleware's own, so it
+  has the pools' limits, health checks and load balancing. The client's own `X-Forwarded-*` are not
+  believed, there being no trusted proxies for this middleware yet.
 
 ## Notes for later iterations
 
