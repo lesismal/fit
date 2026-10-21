@@ -46,8 +46,8 @@
 | A33 | 读取被暂停时看到的对端结束不再丢失 | 已完成，`9ab22e8` | 8、9 | I50 |
 | A34 | UDP 对端自己的空闲超时，或不超时 | 已完成，`11de9eb` | 10、11 | I51 |
 | A35 | 按 PROXY 头替换连接的对端地址 | 已完成，`530d222` | 13 | I52 |
-| A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9`（分支 `feat/a36-a37-forward-proxy`） | 10 | I53、I53b |
-| A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9`（分支 `feat/a36-a37-forward-proxy`） | 1 | I53b |
+| A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9` | 10 | I53、I53b |
+| A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9` | 1 | I53b |
 
 ## 证据
 
@@ -763,7 +763,7 @@ UDP 连接以及无效或带 zone 的地址不受影响。fib 的 `TestSetRemote
 
 ## A36：SOCKS 与 CONNECT 中继的空闲超时
 
-**状态。** 已完成（fib 分支 `feat/a36-a37-forward-proxy` 的 `4f1c3e9`，待合入 `main`），由 fit 的会话实现。
+**状态。** 已完成（fib `main` 的 `4f1c3e9`），由 fit 的会话实现。
 
 **问题。** 中继中的 SOCKS CONNECT 和 `ConnectProxy` 隧道，只要两端都不关连接，即使什么都不传也一直保持：规则 10 要求每个对外交互都有
 空闲超时，fit 自己的 tcp 中继也有。
@@ -779,7 +779,7 @@ fib 的 `TestRelayIdleTimeout` 与 `TestConnectProxyIdleTimeout`。
 
 ## A37：`ConnectProxy` 在拨号回调里应答
 
-**状态。** 已完成（fib 分支 `feat/a36-a37-forward-proxy` 的 `4f1c3e9`，待合入 `main`），由 fit 的会话实现。
+**状态。** 已完成（fib `main` 的 `4f1c3e9`），由 fit 的会话实现。
 
 **问题。** `ConnectProxy.ServeHTTP` 在服务请求的 goroutine 上用 channel 等拨号结果，而那正是 fib 的 worker：违反规则 1。应答慢的目标
 最多会占住一个 worker 直到拨号超时，足够多时整个引擎的请求都会停住。

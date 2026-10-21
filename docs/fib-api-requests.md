@@ -48,8 +48,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
 | A34 | A UDP peer's own idle timeout, or none | done, `11de9eb` | 10, 11 | I51 |
 | A35 | A connection's peer address replaced, as a PROXY header gives it | done, `530d222` | 13 | I52 |
-| A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` (branch `feat/a36-a37-forward-proxy`) | 10 | I53, I53b |
-| A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` (branch `feat/a36-a37-forward-proxy`) | 1 | I53b |
+| A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` | 10 | I53, I53b |
+| A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 
 ## Evidence
 
@@ -1023,8 +1023,7 @@ header it sends on name the client.
 
 ## A36: An idle timeout for SOCKS and CONNECT relays
 
-**Status.** Done (`4f1c3e9` on fib's branch `feat/a36-a37-forward-proxy`, for `main`), made by fit's
-session.
+**Status.** Done (`4f1c3e9` on fib's `main`), made by fit's session.
 
 **Problem.** A relayed SOCKS CONNECT and a `ConnectProxy` tunnel stayed open as long as both peers
 kept their connections, with nothing passing: rule 10 asks for an idle timeout on every exchange
@@ -1044,8 +1043,7 @@ at it, from the reply (or the tunnel's open) until a side closes. fib's `TestRel
 
 ## A37: `ConnectProxy` answers from its dial's callback
 
-**Status.** Done (`4f1c3e9` on fib's branch `feat/a36-a37-forward-proxy`, for `main`), made by fit's
-session.
+**Status.** Done (`4f1c3e9` on fib's `main`), made by fit's session.
 
 **Problem.** `ConnectProxy.ServeHTTP` waited on a channel for its dial, on the goroutine serving
 the request, which is a fib worker: rule 1. A destination slow to answer held a worker for up to
