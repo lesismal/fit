@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I41) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I42) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), or asks an auth service (ForwardAuth); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no JWT (I42), retries (I43) or the rest of M3 |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no retries or per-route timeouts (I43), circuit breakers (I44) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I41 are done; next, I42 (JWT and JWKS).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I42 are done; next, I43 (retries and per-route timeouts).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I42 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I43 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -69,7 +69,7 @@ To continue, start a session with:
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
-| `middleware/auth` | `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
+| `middleware/auth` | `jwt` (JWS verified with the standard library, keys from PEM files, a secret or a JWK set fetched by the control plane, verified tokens kept); `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -2404,6 +2404,54 @@ Differences from the plan:
 - The auth service is an upstream of the config, not an address of the middleware's own, so it
   has the pools' limits, health checks and load balancing. The client's own `X-Forwarded-*` are not
   believed, there being no trusted proxies for this middleware yet.
+
+### I42 JWT and JWKS — done
+
+- `middleware/auth`'s `jwt` lets a request through only with a JSON Web Token (a compact JWS)
+  whose signature verifies and whose claims hold: `exp` is required and in the future, `nbf`, if
+  there, in the past, both within `leeway`; `iss` is `issuer` and `aud` (a string or a list) names
+  one of `audience`, when they are set. RS256/384/512, PS256/384/512, ES256/384/512, EdDSA (Ed25519)
+  and HS256/384/512 are verified with the standard library; `algorithms` narrows them. `none` never
+  passes, nor a header with `crit`, nor an algorithm that does not fit the key: HMAC needs the
+  config's own secret, so a public key cannot be taken for one, and an ECDSA algorithm needs its
+  curve. The token is after `Bearer` in Authorization, or (`token_from`) in another field, a cookie
+  or the query; a request without one is answered 401 with `WWW-Authenticate: Bearer realm="fit"`,
+  one with a bad one adds `error="invalid_token"`.
+- Keys: `public_key_files` (PEM public keys or certificates), `hmac_secret_file` (32 bytes at
+  least), and `jwks_url`, a JWK set that a goroutine of the control plane fetches (net/http, 10s,
+  1 MiB at most) when the config is loaded, every `jwks_refresh` (1h by default), and when a token
+  names a `kid` the set lacks, at most every 10 seconds. Such a token's request, and one that comes
+  before the first fetch is done, waits retained for the fetch under way or the next (at most 1024
+  wait; past that they are refused), and is verified again when it is done. A fetch that fails
+  keeps the keys there were. Keys for encryption, HMAC keys, RSA keys under 2048 bits and EC
+  points off their curve are left out of a set. `Cleanup` cancels the goroutine without waiting.
+- The claims go to later middleware: `auth.ClaimsOf`, kept in `observe.Entry.Claims`; `sub` is who
+  the request was authenticated as (`UserOf`, the access log's `user`), unless an earlier middleware
+  said so. `claims_headers` sets request fields to claims (strings as they are, the rest as JSON,
+  control characters replaced), and removes those fields as the client sent them, let in or not.
+- Verifying an RSA, ECDSA or Ed25519 signature takes tens of microseconds of a worker's CPU, and a
+  token is sent again and again for its life, so tokens that passed are kept by their SHA-256 in 16
+  shards of at most 1024, a full shard forgetting one at random; a kept token holds only for the
+  keys it was verified with, so a key a JWK set drops stops verifying at once, and its `exp` and
+  `nbf` are checked on every use.
+- Tests: `TestJWTAlgorithms` (all 13 algorithms; a P-256 key for ES384, another RSA key, none, the
+  RSA public key used as an HMAC secret; `algorithms`), `TestJWTClaims` (exp and nbf within and past
+  the leeway, exp missing or a string, a fractional exp, issuer, audiences, a tampered payload,
+  malformed tokens, crit, a token past 16 KiB, the clock moving past exp), `TestJWTTokenFrom`,
+  `TestJWTClaimsHeaders`, `TestJWTParams`, `TestParseJWKS`, `TestJWTCache`, `TestJWKSRotation` (a
+  request before the first fetch waits for it; a new kid has the set fetched and waits; a dropped
+  key no longer verifies; 20 unknown kids at once fetch it at most every minRefetch) and
+  `TestJWKSRefresh` (fetched every 50ms; a set that fails to parse keeps the keys). The full race
+  suite passes on the benchmark host; `go vet` and staticcheck for linux, darwin and windows pass.
+- Benchmark on the benchmark host (`BenchmarkJWT`, a request through `jwt` and fibtest, 3 runs):
+  verified anew, HS256 3.2 µs, RS256 25.7 µs, EdDSA 39.8 µs, ES256 54.5 µs; kept, 0.47–0.65 µs and 5
+  allocations.
+
+Differences from the plan:
+
+- No JWT library: the standard library verifies every algorithm, and the parsing is small, so
+  there is no new dependency. Claims are kept in the access log's entry, the one per-request store
+  fit has, rather than in a store of their own.
 
 ## Notes for later iterations
 

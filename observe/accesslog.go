@@ -271,6 +271,9 @@ type Entry struct {
 	// User is who the request was authenticated as, by Basic auth or a
 	// client certificate's subject; empty when it was not.
 	User string
+	// Claims are those of the JSON Web Token the request was let in with,
+	// for later middleware; the access log does not write them.
+	Claims map[string]any
 }
 
 // Track gives the request c serves a new entry, for EntryOf to find, and

@@ -1010,6 +1010,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "jwt"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.jwt"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "rate_limit"
               }
             }
@@ -1065,6 +1081,7 @@
             "concurrency_limit",
             "forward_auth",
             "headers",
+            "jwt",
             "rate_limit",
             "redirect",
             "rewrite"
@@ -1204,6 +1221,83 @@
         "response": {
           "$ref": "#/$defs/headers.Ops",
           "description": "Changes to the response's fields, made just before it is sent, whichever handler wrote it."
+        }
+      },
+      "type": "object"
+    },
+    "http.middleware.jwt": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithms": {
+          "description": "The algorithms tokens may be signed with; any that fits the keys when left out. none never is.",
+          "items": {
+            "enum": [
+              "RS256",
+              "RS384",
+              "RS512",
+              "PS256",
+              "PS384",
+              "PS512",
+              "ES256",
+              "ES384",
+              "ES512",
+              "EdDSA",
+              "HS256",
+              "HS384",
+              "HS512"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "audience": {
+          "description": "Audiences of which a token's aud must name one; any when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "claims_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim.",
+          "type": "object"
+        },
+        "hmac_secret_file": {
+          "description": "A file whose contents are the secret of tokens signed with HS256, HS384 or HS512; at least 32 bytes.",
+          "type": "string"
+        },
+        "issuer": {
+          "description": "The iss a token must have; any when left out.",
+          "type": "string"
+        },
+        "jwks_refresh": {
+          "default": "1h",
+          "description": "How often the JWK set is fetched again; 1h when left out. A token naming a kid the set does not have has it fetched sooner, at most every 10s.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "jwks_url": {
+          "description": "The URL of a JWK set (RFC 7517) whose signing keys tokens are verified with.",
+          "type": "string"
+        },
+        "leeway": {
+          "description": "How far exp and nbf may be off, for clocks that differ; none when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "public_key_files": {
+          "description": "PEM files of public keys or certificates (RSA, ECDSA or Ed25519) tokens are verified with.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token_from": {
+          "default": "header",
+          "description": "Where the token is: header, after Bearer in the Authorization field; header:Name, the whole of that field; cookie:name; or query:name. header when left out.",
+          "type": "string"
         }
       },
       "type": "object"

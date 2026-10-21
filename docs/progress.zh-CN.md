@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I41） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I42） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283`（fib `main` 的 `cfb4f09`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），或询问认证服务（ForwardAuth）；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 JWT（I42）、重试（I43）及 M3 的其余部分 |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有重试和按路由的超时（I43）、熔断（I44）及 M3 的其余部分 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I41 已完成；下一步是 I42（JWT 与 JWKS）。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I42 已完成；下一步是 I43（重试与按路由的超时）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I42。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I43。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -51,7 +51,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制 |
 | `middleware/rewrite` | `rewrite` 中间件（去前缀、正则、加前缀）和 `redirect` |
 | `middleware/limit` | `rate_limit`（按客户端 IP、头部或路由的令牌桶，键数有上限）、`concurrency_limit`、`body_limit` |
-| `middleware/auth` | `forward_auth`（经 fib 异步客户端向认证服务发送子请求）；`basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
+| `middleware/auth` | `jwt`（用标准库验证 JWS，密钥来自 PEM 文件、密钥文件或由控制面获取的 JWK 集合，保存已验证的令牌）；`forward_auth`（经 fib 异步客户端向认证服务发送子请求）；`basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
 | `middleware/headers` | `headers` 中间件：删除、设置和添加请求与响应的字段 |
 | `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
@@ -1744,6 +1744,40 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 - 认证服务是配置中的 upstream，而不是中间件自己的地址，因此有池的限制、健康检查和负载均衡。客户端自己的
   `X-Forwarded-*` 不被采信，因为这个中间件暂时没有可信代理列表。
+
+### I42 JWT 与 JWKS — 已完成
+
+- `middleware/auth` 的 `jwt` 只放行带有 JSON Web Token（紧凑格式的 JWS）且签名验证通过、claims 成立的请求：`exp` 必须
+  存在且在未来，`nbf`（如有）在过去，两者都允许 `leeway` 的偏差；设置了 `issuer` 和 `audience` 时，`iss` 须等于
+  `issuer`，`aud`（字符串或列表）须包含 `audience` 之一。RS256/384/512、PS256/384/512、ES256/384/512、EdDSA（Ed25519）
+  和 HS256/384/512 用标准库验证；`algorithms` 可以收窄。`none` 永不通过，带 `crit` 的头部和与密钥不符的算法也不通过：
+  HMAC 需要配置自己的密钥，因此公钥不能被当作 HMAC 密钥，ECDSA 算法需要对应的曲线。令牌在 Authorization 的 `Bearer`
+  之后，或（`token_from`）在另一个字段、cookie 或查询参数中；没有令牌的请求回应 401 并带
+  `WWW-Authenticate: Bearer realm="fit"`，令牌无效的再加上 `error="invalid_token"`。
+- 密钥：`public_key_files`（PEM 公钥或证书）、`hmac_secret_file`（至少 32 字节），以及 `jwks_url`：一个 JWK 集合，由
+  控制面的 goroutine 获取（net/http，10s，最多 1 MiB）——加载配置时、每隔 `jwks_refresh`（默认 1h）、以及令牌的 `kid`
+  不在集合中时（最多每 10 秒一次）。这样的请求、以及在首次获取完成之前到来的请求，以保留状态等待正在进行的或下一次获取
+  （最多 1024 个等待，超出的被拒绝），完成后重新验证。获取失败时保留原有的密钥。用于加密的密钥、HMAC 密钥、小于 2048 位
+  的 RSA 密钥和不在曲线上的 EC 点被排除。`Cleanup` 取消 goroutine，不等待。
+- claims 提供给后续中间件：`auth.ClaimsOf`，保存在 `observe.Entry.Claims`；除非之前的中间件已经设定，`sub` 是请求被
+  认证的身份（`UserOf`，访问日志的 `user`）。`claims_headers` 把请求字段设为 claims（字符串原样，其他为 JSON，控制字符
+  被替换），并删除客户端发来的这些字段，无论是否放行。
+- 验证 RSA、ECDSA 或 Ed25519 签名要占用 worker 几十微秒的 CPU，而一个令牌在有效期内会反复发送，因此通过的令牌按其
+  SHA-256 保存在 16 个分片中，每片最多 1024 个，满了随机忘掉一个；保存的令牌只对验证它时的那组密钥有效，因此 JWK 集合
+  删除的密钥立即失效，且每次使用都检查 `exp` 和 `nbf`。
+- 测试：`TestJWTAlgorithms`（全部 13 种算法；P-256 密钥用于 ES384、另一个 RSA 密钥、none、把 RSA 公钥当作 HMAC 密钥；
+  `algorithms`）、`TestJWTClaims`（exp 和 nbf 在偏差内外、缺少 exp 或为字符串、小数的 exp、issuer、audience、被篡改的
+  载荷、格式错误的令牌、crit、超过 16 KiB 的令牌、时钟越过 exp）、`TestJWTTokenFrom`、`TestJWTClaimsHeaders`、
+  `TestJWTParams`、`TestParseJWKS`、`TestJWTCache`、`TestJWKSRotation`（首次获取前的请求等待它；新的 kid 触发获取并等待；
+  被删除的密钥不再通过；同时 20 个未知 kid 最多每 minRefetch 获取一次）和 `TestJWKSRefresh`（每 50ms 获取；解析失败的
+  集合保留原有密钥）。完整的竞态测试在基准机上通过；linux、darwin 和 windows 的 `go vet` 与 staticcheck 通过。
+- 基准机上的基准（`BenchmarkJWT`，经 fibtest 通过 `jwt` 的一个请求，3 次）：重新验证时 HS256 3.2 µs、RS256 25.7 µs、
+  EdDSA 39.8 µs、ES256 54.5 µs；已保存的 0.47–0.65 µs，5 次分配。
+
+与计划的差异：
+
+- 没有使用 JWT 库：标准库能验证所有算法，解析很小，因此没有新依赖。claims 保存在访问日志的条目里——fit 唯一的按请求存储
+  ——而不是单独的存储。
 
 ## 给后续迭代的说明
 
