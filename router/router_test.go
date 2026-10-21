@@ -2,6 +2,8 @@ package router
 
 import (
 	"fmt"
+	stdhttp "net/http"
+	"net/url"
 	"testing"
 )
 
@@ -28,12 +30,17 @@ func route(name string, priority int, hosts, paths []string) Route[string] {
 
 func list(s ...string) []string { return s }
 
+// req is a GET request for host and path, the way fib makes one.
+func req(host, path string) *stdhttp.Request {
+	return &stdhttp.Request{Method: "GET", Host: host, URL: &url.URL{Path: path}, Header: stdhttp.Header{}, RemoteAddr: "192.0.2.1:1234"}
+}
+
 // check matches each of cases against r: want "" means no route.
 func check(t *testing.T, r *Router[string], cases [][3]string) {
 	t.Helper()
 	for _, c := range cases {
 		host, path, want := c[0], c[1], c[2]
-		got, ok := r.Match(host, path)
+		got, ok := r.Match(req(host, path))
 		if ok != (want != "") || got != want {
 			t.Errorf("Match(%q, %q) = %q, %v; want %q", host, path, got, ok, want)
 		}
@@ -234,7 +241,8 @@ func TestMatchAllocs(t *testing.T) {
 		{"h42.example.net", "/p42/x"},
 		{"[::1]:8080", "/nothing"},
 	} {
-		if n := testing.AllocsPerRun(100, func() { r.Match(c[0], c[1]) }); n != 0 {
+		rq := req(c[0], c[1])
+		if n := testing.AllocsPerRun(100, func() { r.Match(rq) }); n != 0 {
 			t.Errorf("Match(%q, %q) allocates %v times", c[0], c[1], n)
 		}
 	}
@@ -251,8 +259,9 @@ func BenchmarkMatch(b *testing.B) {
 	}
 	routes = append(routes, Route[int]{Hosts: list("*.example.com"), Paths: list("/*"), Value: -1})
 	r := New(routes)
+	rq := req("H50.example.com:8080", "/api/v50/users/1")
 	b.ReportAllocs()
 	for b.Loop() {
-		r.Match("H50.example.com:8080", "/api/v50/users/1")
+		r.Match(rq)
 	}
 }

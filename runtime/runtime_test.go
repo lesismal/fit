@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"cmp"
 	"fmt"
+	stdhttp "net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -151,8 +154,44 @@ func TestCompile(t *testing.T) {
 		{api, "b.com", "/v1/x", "api-only"},
 		{api, "b.com", "/x", "low"},
 	} {
-		if r, ok := tt.l.Router.Match(tt.host, tt.path); !ok || r.Name != tt.want {
+		if r, ok := tt.l.Router.Match(&stdhttp.Request{Host: tt.host, URL: &url.URL{Path: tt.path}}); !ok || r.Name != tt.want {
 			t.Errorf("%s: %s%s: got %v, want %s", tt.l.Name, tt.host, tt.path, r, tt.want)
+		}
+	}
+}
+
+func TestCompileMatchers(t *testing.T) {
+	g := mustCompile(t, `{
+  "listeners": [{"name": "web", "address": ":0"}],
+  "routes": [
+    {"name": "any", "handler": {"module": "respond"}},
+    {"name": "get", "match": {"path": ["/a"], "method": ["GET", "HEAD"]}, "handler": {"module": "respond"}},
+    {"name": "beta", "match": {"path": ["/a"], "method": ["GET"], "header": {"x-beta": ["1"]}}, "handler": {"module": "respond"}},
+    {"name": "query", "match": {"path_regexp": ["^/users/[0-9]+$"], "query": {"debug": []}}, "handler": {"module": "respond"}},
+    {"name": "lan", "priority": 1, "match": {"remote_ip": ["10.0.0.0/8"]}, "handler": {"module": "respond"}}
+  ]
+}`)
+	defer g.Release()
+	l := g.Listeners[0]
+	for _, tt := range []struct {
+		method, target, remote, beta, want string
+	}{
+		{"GET", "/a", "192.0.2.1:1", "", "get"},
+		{"HEAD", "/a", "192.0.2.1:1", "", "get"},
+		{"POST", "/a", "192.0.2.1:1", "", "any"},
+		{"GET", "/a", "192.0.2.1:1", "1", "beta"},
+		{"GET", "/users/7?debug", "192.0.2.1:1", "", "query"},
+		{"GET", "/users/7", "192.0.2.1:1", "", "any"},
+		{"GET", "/a", "10.1.1.1:1", "1", "lan"},
+		{"GET", "//www.example.com/a", "10.1.1.1:1", "", "lan"},
+	} {
+		u, _ := url.Parse(tt.target)
+		r := &stdhttp.Request{Method: tt.method, Host: cmp.Or(u.Host, "x"), URL: u, Header: stdhttp.Header{}, RemoteAddr: tt.remote}
+		if tt.beta != "" {
+			r.Header.Set("X-Beta", tt.beta)
+		}
+		if got, ok := l.Router.Match(r); !ok || got.Name != tt.want {
+			t.Errorf("%s %s from %s, beta %q: got %v, want %s", tt.method, tt.target, tt.remote, tt.beta, got, tt.want)
 		}
 	}
 }

@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：下一步 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114`（fib `main` 的 `8e04da9`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host 和 path 匹配，先看优先级再看具体程度；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有方法、请求头等其他匹配器（I36） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，依次看优先级、具体程度和设置的匹配器个数；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有表达式匹配器（I37），也没有重写、跳转和头部中间件（I38） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**下一步：M3，从 I36（匹配器 v2）开始。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36 已完成；下一步是 I37（表达式匹配器）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I36。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I37。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -57,7 +57,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
-| `router` | `Router[T]`：按 host 和 path 选出路由，先看优先级再看具体程度，不分配内存 |
+| `router` | `Router[T]`：先用 map 按 host 和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`），依次看优先级、具体程度和匹配器个数，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
 | `internal/pebbletest` | 为测试运行 ACME 测试服务器 Pebble 及其 DNS 服务器；没有二进制文件时跳过测试 |
@@ -1547,6 +1547,40 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
 - fit 能去掉的很少：它的 1.8 µs 大部分用于构造 fib 的 `Client.Do` 所需的 `net/http` 头部 map 和 `Request`，A20 不改变
   这些。代理与 nginx 余下的差距中，A22 之后已在 fib 中实现，A21 无法实现，已关闭，
   因为 `EPOLLONESHOT` 省不掉这次调用。
+
+### I36 匹配器 v2 与优先级 — 已完成
+
+- 路由的 `match` 除 `host` 和 `path` 外新增：`method`（按原样比较）、`header`（名字到值：请求须有每个头部，且其某个字段
+  的值是列出的值之一；未列出值时任意值都可以）、`query`（键到值，规则同上，解码后比较）、`remote_ip`（连接对端须落在的 IP
+  地址和 CIDR 前缀；映射到 IPv6 的 IPv4 地址按 IPv4 算，不读 X-Forwarded-For）和 `path_regexp`（Go 正则表达式，不写 `^` 和
+  `$` 时不锚定）。设置的每个字段都须匹配；同一字段内任一项匹配即可。`config.Validate` 逐项检查：方法和头部名须是 token，
+  查询键不能为空，地址和前缀能解析，正则表达式能编译。
+- `router` 包：`Matcher`（`Match(*http.Request) bool`），以及构造它的 `Methods`、`Headers`、`Query`、`RemoteIP` 和
+  `PathRegexp`。`Route.Matchers` 须全部匹配。`Router.Match` 现在接收请求本身，而不是它的 host 和 path。`runtime` 在编译
+  配置时构造路由的匹配器，便宜的在前（`Route.Matchers`）；`listener` 的分发器传入 `c.Request`。
+- 路由的顺序（见包文档和 `priority` 字段的说明）：优先级最高的；然后 host 最具体的；然后 path 最具体的；**然后设置的匹配器
+  最多的**（每个字段算一个：`method`、`header`、`query`、`remote_ip`、`path_regexp`）；最后是先写的。所以在优先级相同、
+  host 和 path 相同时，带头部匹配器的 `GET /api` 胜过 `GET /api`，后者又胜过 `/api`；匹配器不匹配的路由让给下一个。
+- 实现：host 和 path 仍然用 map 查找，但每个节点现在为每个 path 和前缀保存其下的所有路由，按优劣排序，并在第一个没有匹配器
+  的路由之后截断（它之后的路由不可能被选中）。查找依次尝试精确 host、通配符、无 host，每个里面依次尝试精确 path 和由长到短的
+  前缀；只有当一个列表的第一个路由能胜过已找到的路由时，才运行这个列表的匹配器，因此在同一 host 上已有更好的路由匹配后，
+  优先级更低或更不具体的路由的匹配器不会运行。匹配不分配内存：查询串原地扫描、边解码边比较，远端地址用 `netip` 解析；
+  `PathRegexp` 只在 Go 的 `regexp` 分配时分配。
+- 测试：每个匹配器的表驱动测试（`TestMatchers`：方法；头部存在与带值；用 `%` 和 `+` 转义的查询以及无效转义；远端 IPv4、
+  IPv6、映射和带 zone 的地址；正则表达式）、它们的错误，以及顺序（`TestMatcherOrder`：落到下一个路由、匹配器多的胜过少的、
+  具体程度胜过匹配器、优先级胜过两者、精确 path 回退到前缀再回退到更不具体的 host、平局时取先写的、不应运行的匹配器）；
+  `TestMatchersAllocs` 检查在 53 个路由上带方法、头部、查询和远端 IP 匹配器的 `Match` 不分配内存；`config` 的
+  `TestValidate` 加入新错误及其位置；`runtime` 的 `TestCompileMatchers` 编译一个包含所有匹配器的配置并检查其路由器。
+- 检查：在基准机上用 `golang:1.27-bookworm` 镜像运行 `go vet ./...` 和受影响包（router、config、runtime、listener、
+  schema、admin、cmd/fit、handler/...、module、observe、tlsmgr、upstream、test/e2e）的 `go test -race`，均通过；linux、darwin 和 windows 的 `go vet` 与 staticcheck 通过。
+- 在基准机上用 `bench/microbench.sh` 比较 main 和本改动，各 10 轮交替：`router` 的 `BenchmarkMatch`（101 个路由，
+  无匹配器）92.4 ns → 56.5 ns（−39%：条目改为按指针传递而不是复制，并且先尝试精确 host），`listener` 的
+  `BenchmarkDispatch/bare` 111.0 ns → 109.5 ns（−1.4%），分配次数不变（0 和 4）。
+
+与计划的差异：
+
+- 匹配器是路由 `match` 的字段，内置在路由器里，而不是 `module.Matcher` 模块；`module.Matcher` 保留给以后可能需要它的模块。
+  `remote_ip` 是连接的对端；从可信代理的头部取客户端地址可以在 I39 中加入，它的限流需要这个地址。
 
 ## 给后续迭代的说明
 

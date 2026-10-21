@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114` (fib's `main` at `8e04da9`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no method, header or other matchers (I36) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, by priority, then specificity, then how many matchers they set; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no expression matcher (I37), nor rewrites, redirects or header middleware (I38) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **Next: M3, from I36 (matchers v2).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36 is done; next, I37 (the expression matcher).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I36 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I37 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -75,7 +75,7 @@ To continue, start a session with:
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
-| `router` | `Router[T]`: picks a route by host and path, by priority and then specificity, without allocating |
+| `router` | `Router[T]`: picks a route by host and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`), by priority, specificity and how many matchers it has, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
 | `internal/pebbletest` | runs Pebble, the ACME test server, and its DNS server for tests; skips them without the binaries |
@@ -2120,6 +2120,61 @@ Differences from the plan:
   `Request` that fib's `Client.Do` takes, which A20 leaves as they are. Of the rest of the proxy's gap
   to nginx, A22 has since been made in fib, and A21 is closed as not doable, since `EPOLLONESHOT`
   cannot save the call.
+
+### I36 Matchers v2 and priorities — done
+
+- A route's `match` takes, besides `host` and `path`: `method` (compared as written), `header`
+  (names to values: the request must have each header, with one of the values listed as the value
+  of one of its fields, or with any value when none are listed), `query` (keys to values, alike,
+  compared once unescaped), `remote_ip` (IP addresses and CIDR prefixes the connection's peer must
+  be in; an IPv4 address mapped into IPv6 counts as IPv4, X-Forwarded-For is not read) and
+  `path_regexp` (Go regular expressions, unanchored unless written with `^` and `$`). Every field
+  set must match; within a field, any one entry may. `config.Validate` checks each: methods and
+  header names are tokens, query keys are not empty, addresses and prefixes parse, regular
+  expressions compile.
+- Package `router`: `Matcher` (`Match(*http.Request) bool`), and `Methods`, `Headers`, `Query`,
+  `RemoteIP` and `PathRegexp` to build one. `Route.Matchers` must all match. `Router.Match` now
+  takes the request rather than its host and path. `runtime` builds a route's matchers when it
+  compiles the config, cheapest first (`Route.Matchers`), and `listener`'s dispatcher passes
+  `c.Request`.
+- The order of routes, in the package doc and the `priority` field's description: the highest
+  priority; then the most specific host; then the most specific path; **then the route with the
+  most matchers set** (one per field: `method`, `header`, `query`, `remote_ip`, `path_regexp`);
+  then the one written first. So, at equal priority and on the same host and path,
+  `GET /api` with a header matcher beats `GET /api`, which beats `/api`; a route whose matchers do
+  not match gives way to the next.
+- How it is built: hosts and paths are looked up in maps as before, but a node now keeps, for each
+  path and prefix, every route under it, best first, cut after the first one with no matchers
+  (none after it can be picked). A lookup tries the exact host, then the wildcard, then no host,
+  and in each the exact path, then the prefixes longest first; a list's matchers run only when its
+  first route would beat what has been found, so a lower priority or less specific route's
+  matchers do not run once a better route matched on the same host. Matching does not allocate:
+  the query is scanned in place and compared while it is unescaped, the remote address parsed with
+  `netip`; `PathRegexp` allocates only when Go's `regexp` does.
+- Tests: table tests for each matcher (`TestMatchers`: methods, headers present and with values,
+  queries escaped with `%` and `+` and invalid escapes, remote IPv4, IPv6, mapped and zoned
+  addresses, regular expressions), their errors, and the order (`TestMatcherOrder`: falling
+  through to the next route, more matchers beating fewer, specificity beating matchers, priority
+  beating both, an exact path falling back to a prefix and then to a less specific host, ties to
+  the route written first, and matchers that must not run); `TestMatchersAllocs` checks that
+  `Match` with method, header, query and remote IP matchers allocates nothing over 53 routes;
+  `config`'s `TestValidate` has the new errors with their positions; `runtime`'s
+  `TestCompileMatchers` compiles a config with every matcher and checks its router.
+- Checks: `go vet ./...` and `go test -race` on the packages the change reaches (router, config,
+  runtime, listener, schema, admin, cmd/fit, handler/..., module, observe, tlsmgr, upstream,
+  test/e2e), run on the benchmark host in the `golang:1.27-bookworm` image, pass; `go vet` and
+  staticcheck for linux, darwin and windows pass.
+- Benchmarks on the benchmark host, `bench/microbench.sh`, 10 alternating runs, main against this
+  change: `router`'s `BenchmarkMatch` (101 routes, no matchers) 92.4 ns → 56.5 ns (−39%: entries
+  are now passed by pointer rather than copied, and the exact host is tried first), `listener`'s
+  `BenchmarkDispatch/bare` 111.0 ns → 109.5 ns (−1.4%), allocations unchanged (0 and 4).
+
+Differences from the plan:
+
+- The matchers are fields of a route's `match`, built into the router, rather than
+  `module.Matcher` modules; `module.Matcher` stays for modules that may want one later.
+  `remote_ip` is the connection's peer; a client address taken from trusted proxies' headers can
+  come with I39, which needs one for its limits.
 
 ## Notes for later iterations
 

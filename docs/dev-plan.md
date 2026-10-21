@@ -156,7 +156,7 @@ Status: `todo`, `doing` or `done`.
 | I35b | Certificate files watched | I27, I28, I34 | done |
 | I35c | On-demand names dropped when idle | I31, I35b | done |
 | **M3** | | | |
-| I36 | Matchers v2 and priorities | I11 | todo |
+| I36 | Matchers v2 and priorities | I11 | done |
 | I37 | Expression matcher | I36 | todo |
 | I38 | Rewrites, redirects and headers | I36 | todo |
 | I39 | Rate, concurrency and size limits | I36 | todo |

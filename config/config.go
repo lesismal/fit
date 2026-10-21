@@ -330,7 +330,7 @@ type Certificate struct {
 type Route struct {
 	Name       string      `json:"name,omitempty" doc:"A name unique among the routes, for logs and metrics."`
 	Listeners  []string    `json:"listeners,omitempty" doc:"The names of the listeners the route serves; every listener when left out."`
-	Priority   int         `json:"priority,omitempty" doc:"Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one written first."`
+	Priority   int         `json:"priority,omitempty" doc:"Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp), then the one written first."`
 	Match      *Match      `json:"match,omitempty" doc:"What a request must match; every request when left out."`
 	Middleware []ModuleRef `json:"middleware,omitempty" module:"http.middleware" doc:"Middleware a request passes through, in order, before the handler."`
 	Handler    ModuleRef   `json:"handler" fit:"required" module:"http.handlers" doc:"What answers the request."`
@@ -341,8 +341,13 @@ type Route struct {
 // Match is what a request must match for a route to take it. Each field
 // that is set must match; within a field, any one entry may.
 type Match struct {
-	Host []string `json:"host,omitempty" doc:"Host names, exact or with a leading \"*.\" wildcard."`
-	Path []string `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix."`
+	Host       []string            `json:"host,omitempty" doc:"Host names, exact or with a leading \"*.\" wildcard."`
+	Path       []string            `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix."`
+	PathRegexp []string            `json:"path_regexp,omitempty" doc:"Regular expressions in Go's syntax, matched against the path anywhere in it unless anchored with ^ and $."`
+	Method     []string            `json:"method,omitempty" doc:"Methods, as in \"GET\"; compared as written, since methods are case-sensitive."`
+	Header     map[string][]string `json:"header,omitempty" doc:"Headers the request must have, each with one of the values listed as the value of one of its fields, or with any value when none are listed. Names ignore case; values do not."`
+	Query      map[string][]string `json:"query,omitempty" doc:"Query parameters the request must have, each with one of the values listed, or with any value when none are listed; compared once unescaped."`
+	RemoteIP   []string            `json:"remote_ip,omitempty" doc:"IP addresses and CIDR prefixes, as in \"10.0.0.0/8\", the client's address must be in: the address of the connection, not of X-Forwarded-For."`
 
 	At Value `json:"-" fit:"self"`
 }

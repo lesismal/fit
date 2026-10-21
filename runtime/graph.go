@@ -152,6 +152,8 @@ type Route struct {
 	// everything. Listener.Router gives them meaning.
 	Hosts []string
 	Paths []string
+	// Matchers are the route's other matchers, built from its config.
+	Matchers []router.Matcher
 	// Handler is the route's handler with its middleware already wrapped
 	// around it.
 	Handler module.Handler
@@ -300,7 +302,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 func newRouter(routes []*Route) *router.Router[*Route] {
 	rs := make([]router.Route[*Route], len(routes))
 	for i, r := range routes {
-		rs[i] = router.Route[*Route]{Hosts: r.Hosts, Paths: r.Paths, Priority: r.Priority, Value: r}
+		rs[i] = router.Route[*Route]{Hosts: r.Hosts, Paths: r.Paths, Matchers: r.Matchers, Priority: r.Priority, Value: r}
 	}
 	return router.New(rs)
 }
@@ -342,8 +344,42 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	r := &Route{Name: rc.Name, Priority: rc.Priority, Handler: h, Inline: inline}
 	if rc.Match != nil {
 		r.Hosts, r.Paths = rc.Match.Host, rc.Match.Path
+		var err error
+		if r.Matchers, err = matchers(rc.Match); err != nil {
+			return nil, rc.Match.At.Errorf("%v", err)
+		}
 	}
 	return r, nil
+}
+
+// matchers builds the matchers m asks for besides hosts and paths, in the
+// order cheapest first; config.Validate has checked them.
+func matchers(m *config.Match) ([]router.Matcher, error) {
+	var ms []router.Matcher
+	if len(m.Method) > 0 {
+		ms = append(ms, router.Methods(m.Method...))
+	}
+	if len(m.RemoteIP) > 0 {
+		ip, err := router.RemoteIP(m.RemoteIP...)
+		if err != nil {
+			return nil, err
+		}
+		ms = append(ms, ip)
+	}
+	if len(m.Header) > 0 {
+		ms = append(ms, router.Headers(m.Header))
+	}
+	if len(m.Query) > 0 {
+		ms = append(ms, router.Query(m.Query))
+	}
+	if len(m.PathRegexp) > 0 {
+		re, err := router.PathRegexp(m.PathRegexp...)
+		if err != nil {
+			return nil, err
+		}
+		ms = append(ms, re)
+	}
+	return ms, nil
 }
 
 // cleanupModules cleans up g's modules in the reverse of the order they were

@@ -304,6 +304,16 @@
     "config.Match": {
       "additionalProperties": false,
       "properties": {
+        "header": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Headers the request must have, each with one of the values listed as the value of one of its fields, or with any value when none are listed. Names ignore case; values do not.",
+          "type": "object"
+        },
         "host": {
           "description": "Host names, exact or with a leading \"*.\" wildcard.",
           "items": {
@@ -311,8 +321,39 @@
           },
           "type": "array"
         },
+        "method": {
+          "description": "Methods, as in \"GET\"; compared as written, since methods are case-sensitive.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "path": {
           "description": "Paths, exact or ending in \"*\" to match a prefix.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path_regexp": {
+          "description": "Regular expressions in Go's syntax, matched against the path anywhere in it unless anchored with ^ and $.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Query parameters the request must have, each with one of the values listed, or with any value when none are listed; compared once unescaped.",
+          "type": "object"
+        },
+        "remote_ip": {
+          "description": "IP addresses and CIDR prefixes, as in \"10.0.0.0/8\", the client's address must be in: the address of the connection, not of X-Forwarded-For.",
           "items": {
             "type": "string"
           },
@@ -399,7 +440,7 @@
           "type": "string"
         },
         "priority": {
-          "description": "Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one written first.",
+          "description": "Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp), then the one written first.",
           "type": "integer"
         }
       },

@@ -528,7 +528,7 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	redirect := 0
 	if l := d.listener(g); l != nil {
 		redirect = l.RedirectHTTPS
-		route, _ = l.Router.Match(c.Request.Host, c.Request.URL.Path)
+		route, _ = l.Router.Match(c.Request)
 		metrics = l.RequestMetrics(route)
 	}
 	// inline is the metrics of a request answered before its handler

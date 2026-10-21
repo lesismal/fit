@@ -1,12 +1,15 @@
 package config
 
 import (
+	"maps"
 	"net"
 	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/lesismal/fit/router"
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
@@ -127,6 +130,31 @@ func (c *Config) Validate() Errors {
 					add(r.Match.At.Field("path").Index(i), "%q does not start with '/'", p)
 				} else if strings.Contains(strings.TrimSuffix(p, "*"), "*") {
 					add(r.Match.At.Field("path").Index(i), "%q has a '*' other than at its end", p)
+				}
+			}
+			for i, e := range r.Match.PathRegexp {
+				if _, err := router.PathRegexp(e); err != nil {
+					add(r.Match.At.Field("path_regexp").Index(i), "%v", err)
+				}
+			}
+			for i, m := range r.Match.Method {
+				if !isToken(m) {
+					add(r.Match.At.Field("method").Index(i), "%q is not a valid method", m)
+				}
+			}
+			for _, name := range slices.Sorted(maps.Keys(r.Match.Header)) {
+				if !isToken(name) {
+					add(r.Match.At.Field("header").Field(name), "%q is not a valid header name", name)
+				}
+			}
+			for _, key := range slices.Sorted(maps.Keys(r.Match.Query)) {
+				if key == "" {
+					add(r.Match.At.Field("query").Field(key), "the query parameter's name is empty")
+				}
+			}
+			for i, s := range r.Match.RemoteIP {
+				if _, err := router.ParsePrefix(s); err != nil {
+					add(r.Match.At.Field("remote_ip").Index(i), "%v", err)
 				}
 			}
 		}
@@ -255,8 +283,8 @@ func (c *Config) Validate() Errors {
 	return errs
 }
 
-// isToken reports whether s is an HTTP token (RFC 9110), as header field
-// and cookie names are.
+// isToken reports whether s is an HTTP token (RFC 9110), as methods,
+// header field and cookie names are.
 func isToken(s string) bool {
 	if s == "" {
 		return false
