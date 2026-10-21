@@ -125,6 +125,30 @@ func do(t *testing.T, p *Pool, target string) result {
 	return <-goDo(t, p, target)
 }
 
+// releaser returns a channel for handlers to wait on and the func that
+// closes it, which may be called more than once. A test defers the func, so
+// that one that fails while handlers wait does not leave httptest's Close,
+// in the cleanup, waiting for them for good.
+func releaser() (<-chan struct{}, func()) {
+	ch := make(chan struct{})
+	var once sync.Once
+	return ch, func() { once.Do(func() { close(ch) }) }
+}
+
+// settle waits until b has n requests under way. A request's callback runs
+// before Pool.Do calls Done, so do can return while the request still counts
+// on its backend.
+func settle(t *testing.T, b *Backend, n int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for b.Active() != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s has %d requests under way, want %d", b.Address, b.Active(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // goDo sends a request through p and returns where its result will arrive.
 func goDo(t *testing.T, p *Pool, target string) <-chan result {
 	t.Helper()
@@ -174,9 +198,9 @@ func TestNoIdle(t *testing.T) {
 
 func TestMaxConns(t *testing.T) {
 	var inFlight, maxInFlight atomic.Int64
-	release := make(chan struct{})
-	var arrived sync.WaitGroup
-	arrived.Add(2)
+	release, unblock := releaser()
+	defer unblock()
+	arrived := make(chan struct{}, 2)
 	b := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		n := inFlight.Add(1)
 		defer inFlight.Add(-1)
@@ -187,7 +211,7 @@ func TestMaxConns(t *testing.T) {
 			}
 		}
 		if r.URL.Path == "/first" {
-			arrived.Done()
+			arrived <- struct{}{}
 		}
 		<-release
 		_, _ = io.WriteString(w, "ok")
@@ -197,7 +221,17 @@ func TestMaxConns(t *testing.T) {
 	for range 2 {
 		results = append(results, goDo(t, p, "/first"))
 	}
-	arrived.Wait()
+	for range 2 {
+		select {
+		case <-arrived:
+		case got := <-results[0]:
+			t.Fatalf("a first request ended before it was let go: %+v", got)
+		case got := <-results[1]:
+			t.Fatalf("a first request ended before it was let go: %+v", got)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the two first requests did not reach the backend")
+		}
+	}
 	for range 6 {
 		results = append(results, goDo(t, p, "/later"))
 	}
@@ -206,7 +240,7 @@ func TestMaxConns(t *testing.T) {
 	if n := b.opened.Load(); n != 2 {
 		t.Fatalf("with max_conns 2, %d connections opened", n)
 	}
-	close(release)
+	unblock()
 	for i, ch := range results {
 		if got := <-ch; got.err != nil || got.status != 200 || got.body != "ok" {
 			t.Fatalf("request %d: %+v", i, got)
@@ -336,7 +370,8 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestCloseDrains(t *testing.T) {
-	release := make(chan struct{})
+	release, unblock := releaser()
+	defer unblock()
 	arrived := make(chan struct{})
 	b := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if r.URL.Path == "/slow" {
@@ -354,7 +389,7 @@ func TestCloseDrains(t *testing.T) {
 	if got := do(t, p, "/"); got.err != nil || got.status != 200 {
 		t.Fatalf("a request while draining: %+v", got)
 	}
-	close(release)
+	unblock()
 	if got := <-slow; got.err != nil || got.body != "ok" {
 		t.Fatalf("the request in flight at Close: %+v", got)
 	}
@@ -401,13 +436,12 @@ func TestPolicies(t *testing.T) {
 		t.Fatalf("weights 3 and 1 over 40 requests: %v", counts)
 	}
 	for _, bk := range p.Backends() {
-		if bk.Active() != 0 {
-			t.Fatalf("%s still has %d under way", bk.Address, bk.Active())
-		}
+		settle(t, bk, 0)
 	}
 
 	// least_conn sends new requests away from an address that holds some.
-	release := make(chan struct{})
+	release, unblock := releaser()
+	defer unblock()
 	slow := newBackend(t, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		<-release
 		_, _ = io.WriteString(w, "s")
@@ -423,11 +457,14 @@ func TestPolicies(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	for range 20 {
+		// The last request to the fast address may count on it still,
+		// which would tie the two.
+		settle(t, p.Backends()[1], 0)
 		if got := do(t, p, "/"); got.err != nil || got.body[:1] != "f" {
 			t.Fatalf("with the slow address busy: %+v", got)
 		}
 	}
-	close(release)
+	unblock()
 	for _, ch := range held {
 		<-ch
 	}

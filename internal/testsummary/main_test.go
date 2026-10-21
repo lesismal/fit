@@ -56,3 +56,41 @@ func TestAnnotateKeepsTheEnd(t *testing.T) {
 		t.Fatalf("got %d bytes ending %q", len(s), s[len(s)-10:])
 	}
 }
+
+// A timeout's panic goes to the tests still running, which never get a fail
+// action of their own; the annotation must still hold it.
+func TestAnnotateTimeout(t *testing.T) {
+	in := `{"Action":"run","Package":"p","Test":"TestA"}
+{"Action":"output","Package":"p","Test":"TestA","Output":"=== RUN   TestA\n"}
+{"Action":"run","Package":"p","Test":"TestA/sub"}
+{"Action":"output","Package":"p","Test":"TestA/sub","Output":"=== RUN   TestA/sub\n"}
+{"Action":"output","Package":"p","Test":"TestA/sub","Output":"panic: test timed out after 2s\n"}
+{"Action":"output","Package":"p","Test":"TestA/sub","Output":"goroutine 7 [sleep]:\n"}
+{"Action":"output","Package":"p","Test":"TestB","Output":"--- PASS: TestB\n"}
+{"Action":"pass","Package":"p","Test":"TestB"}
+{"Action":"output","Package":"p","Output":"FAIL\tp\t2.0s\n"}
+{"Action":"fail","Package":"p"}
+`
+	var out strings.Builder
+	if err := run(strings.NewReader(in), &out, true); err != nil {
+		t.Fatal(err)
+	}
+	want := "::error title=go test p::=== RUN   TestA/sub%0Apanic: test timed out after 2s%0Agoroutine 7 [sleep]:%0AFAIL\tp\t2.0s%0A\n"
+	if out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+}
+
+func TestAnnotateKeepsTheStart(t *testing.T) {
+	long := "panic: test timed out" + strings.Repeat("x", 2*maxMessage)
+	in := `{"Action":"output","Package":"p","Output":"` + long + `"}
+{"Action":"fail","Package":"p"}
+`
+	var out strings.Builder
+	if err := run(strings.NewReader(in), &out, true); err != nil {
+		t.Fatal(err)
+	}
+	if s := out.String(); !strings.HasPrefix(s, "::error title=go test p::panic: test timed out") {
+		t.Fatalf("got %q", s[:60])
+	}
+}
