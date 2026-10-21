@@ -27,7 +27,9 @@ package l4
 import (
 	"errors"
 	"math/rand/v2"
+	"net"
 	stdhttp "net/http"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -58,16 +60,25 @@ type Service struct {
 	udpIdle  time.Duration
 	maxConns int64
 	attempts int
-	conns    atomic.Int64
-	open     [shards]relaySet
+	// proxy is the PROXY protocol version sent to the upstream first, or 0.
+	proxy int
+	conns atomic.Int64
+	open  [shards]relaySet
 }
 
 // NewService returns the service c, whose upstream is pool, dialing through
 // engine, the engine pool dials through. A nil engine makes a service that
 // closes every connection, for a config that is only checked.
 func NewService(c *config.Service, pool *upstream.Pool, engine *fib.Engine) *Service {
-	return &Service{name: c.Name, pool: pool, engine: engine, idle: c.Idle(), udpIdle: c.UDPIdle(), maxConns: int64(c.Conns()),
+	s := &Service{name: c.Name, pool: pool, engine: engine, idle: c.Idle(), udpIdle: c.UDPIdle(), maxConns: int64(c.Conns()),
 		attempts: min(maxAttempts, len(pool.Backends()))}
+	switch c.ProxyProtocol {
+	case config.ProxyProtocolV1:
+		s.proxy = 1
+	case config.ProxyProtocolV2:
+		s.proxy = 2
+	}
+	return s
 }
 
 // Name returns the service's name.
@@ -77,19 +88,24 @@ func (s *Service) Name() string { return s.name }
 // now.
 func (s *Service) Conns() int64 { return s.conns.Load() }
 
-// Open proxies c, a connection one of the service's listeners has just
-// accepted, or a udp listener's new session, from its OnOpen; Clients serves
-// its callbacks from then on. release is called once, when the connection is
-// over, as it is at once for one past max_conns, which is closed.
-func (s *Service) Open(c *fib.Connection, release func()) {
+// start proxies c, a connection one of the service's listeners has accepted,
+// or a udp listener's new session, for Entry.Open; Clients serves its
+// callbacks from then on. initial is what the client sent before, and dst
+// where its PROXY header said it connected to, if it sent one. release is
+// called once, when the connection is over, as it is at once for one past
+// max_conns, which is closed.
+func (s *Service) start(c *fib.Connection, release func(), initial []byte, dst netip.AddrPort) {
 	if s.engine == nil || s.conns.Add(1) > s.maxConns {
 		s.conns.Add(-1)
 		_ = c.Close()
 		release()
 		return
 	}
-	r := &relay{s: s, client: c, release: release, udp: c.IsUDP(), idle: s.idle,
+	r := &relay{s: s, client: c, release: release, udp: c.IsUDP(), idle: s.idle, dst: dst,
 		pick: stdhttp.Request{RemoteAddr: c.RemoteAddr().String()}}
+	if len(initial) > 0 {
+		r.pending = append([]byte(nil), initial...)
+	}
 	r.toUp.resume = func(error) { r.toUp.lift() }
 	r.toClient.resume = func(error) { r.toClient.lift() }
 	r.last.Store(time.Now().UnixNano())
@@ -157,6 +173,8 @@ type relay struct {
 	release func()
 	udp     bool
 	idle    time.Duration
+	// dst is where the client's PROXY header said it connected to.
+	dst netip.AddrPort
 	// pick is what the upstream's balancer picks an address by: the
 	// client's address, for ip_hash.
 	pick    stdhttp.Request
@@ -344,6 +362,15 @@ type upSide relay
 func (h *upSide) OnOpen(up *fib.Connection) {
 	r := (*relay)(h)
 	up.SetWriteBackpressure(false)
+	if v := r.s.proxy; v != 0 {
+		dst := r.dst
+		if !dst.IsValid() {
+			if a, ok := r.client.LocalAddr().(*net.TCPAddr); ok {
+				dst = a.AddrPort()
+			}
+		}
+		_ = up.Send(appendProxy(nil, v, r.client.RemoteAddrPort(), dst))
+	}
 	r.mu.Lock()
 	switch {
 	case r.udp:
@@ -383,21 +410,27 @@ func (h *upSide) OnClose(_ *fib.Connection, err error) {
 	r.sideEnded()
 }
 
-// Clients serves the callbacks of a tcp listener's connections once
-// Service.Open has taken them; a listener's handler embeds it beside the
-// OnOpen that finds the service.
+// Clients serves the callbacks of a tcp or udp listener's connections once
+// Entry.Open has taken them; a listener's handler embeds it beside the
+// OnOpen that finds the entry.
 type Clients struct{}
 
 func (Clients) OnData(c *fib.Connection, data []byte) {
-	if r, ok := c.Attachment().(*relay); ok {
-		r.fromClient(data)
+	switch a := c.Attachment().(type) {
+	case *relay:
+		a.fromClient(data)
+	case *opening:
+		a.data(c, data)
 	}
 }
 
 func (Clients) OnPriorityData(*fib.Connection, []byte) {}
 
 func (Clients) OnClose(c *fib.Connection, _ error) {
-	if r, ok := c.Attachment().(*relay); ok {
-		r.clientClosed()
+	switch a := c.Attachment().(type) {
+	case *relay:
+		a.clientClosed()
+	case *opening:
+		a.release()
 	}
 }

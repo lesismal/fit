@@ -47,6 +47,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | done, `0bd2447` | 1, 5, 9 | I49 |
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
 | A34 | A UDP peer's own idle timeout, or none | made, `11de9eb` on fib's branch `udp-peer-idle`; to `main` with the user's word | 10, 11 | I51 |
+| A35 | A connection's peer address replaced, as a PROXY header gives it | made, `530d222` on fib's branch `udp-peer-idle`; to `main` with the user's word | 13 | I52 |
 
 ## Evidence
 
@@ -997,3 +998,25 @@ peer per sweep. fib's `TestUDPPeerIdleTimeout`.
 
 **How fit uses it.** `l4` sets -1 on each udp session's client side and closes the session with its
 own timer, as it does a TCP relay.
+
+## A35: A connection's peer address replaced, as a PROXY header gives it
+
+**Status.** Made by fit's session: `530d222` on fib's branch `udp-peer-idle`, after A34, which fit
+depends on by its hash until it is merged into fib's `main`.
+
+**Problem.** A listener behind a load balancer that sends the PROXY protocol learns the client's
+address from the header, but fib's HTTP handler takes a request's `RemoteAddr` from the
+connection's peer, which is the load balancer, and nothing could change it.
+
+**Evidence.** I52's `TestProxyProtocolHTTP`: the upstream's `X-Forwarded-For` must name the client
+of the header, which only the connection's own address can carry into the request.
+
+**As built.** `Connection.SetRemoteAddrPort(ap)`: from then on `RemoteAddrPort` reports `ap` and
+`RemoteAddr` a `*net.TCPAddr` of it, in place of the socket's; it is called by the handler that
+reads the header, before the connection reaches the one that serves it. It reuses the packed peer
+address a connection already keeps and a flag bit, so a connection is no larger; UDP connections
+and invalid or zoned addresses are left alone. fib's `TestSetRemoteAddrPort`.
+
+**How fit uses it.** `l4.AcceptProxy` wraps the HTTP (and TLS) handler of a listener with
+`proxy_protocol`, and `l4` sets it on a tcp listener's connection, so `ip_hash` and the PROXY
+header it sends on name the client.

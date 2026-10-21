@@ -293,7 +293,7 @@ func TestValidate(t *testing.T) {
 				`10:39: services[0].listeners[1]: "web" is not a tcp or udp listener: a service takes the connections of listeners whose protocols are ["tcp"] or ["udp"]`,
 				`10:46: services[0].listeners[2]: there is no listener named "nope"`,
 				`11:12: services[1].name: another service is already named "pg"`,
-				`11:32: services[1].listeners[0]: listener "raw" is already service "pg"'s`,
+				`11:32: services[1].listeners[0]: listener "raw" is already service "pg"'s: services that share a tcp listener take the connections of their server_names, and only one of them may have none`,
 				`11:52: services[1].upstream: there is no upstream named "none"`,
 				`12:30: services[2].listeners: a service needs at least one tcp or udp listener`,
 				`4:55: listeners[2].protocols: no service takes this tcp listener's connections: list it in a service's listeners`,
@@ -317,6 +317,33 @@ func TestValidate(t *testing.T) {
 				`5:60: listeners[3].protocols[1]: a tcp listener serves TCP alone: list tcp without other protocols`,
 				`6:69: listeners[4].tls: a udp listener proxies its datagrams as they are: it takes no tls`,
 				`8:31: listeners[6].address: listener "web" already listens on :443`,
+			},
+		},
+		{
+			name: "server names and the PROXY protocol",
+			doc: `{"listeners": [
+  {"name": "tls", "address": ":443", "protocols": ["tcp"], "proxy_protocol": {"trusted": ["10.0.0.0/8", "nope"]}},
+  {"name": "dns", "address": ":53", "protocols": ["udp"], "proxy_protocol": {"trusted": []}},
+  {"name": "web", "address": ":80", "proxy_protocol": {"trusted": ["127.0.0.1"]}}
+], "upstreams": [{"name": "a", "addresses": ["a:1"]}],
+"services": [
+  {"name": "s1", "listeners": ["tls"], "upstream": "a", "server_names": ["a.example.com", "*.b.example.com"]},
+  {"name": "s2", "listeners": ["tls"], "upstream": "a", "server_names": ["A.example.com", "1.2.3.4", "x..y", "c.example.com", "c.example.com"]},
+  {"name": "s3", "listeners": ["tls"], "upstream": "a"},
+  {"name": "s4", "listeners": ["tls"], "upstream": "a", "proxy_protocol": "v1"},
+  {"name": "s5", "listeners": ["dns"], "upstream": "a", "server_names": ["d.example.com"], "proxy_protocol": "v2"}
+]}`,
+			want: []string{
+				`2:105: listeners[0].proxy_protocol.trusted[1]: "nope" is not an IP address or CIDR range`,
+				`3:77: listeners[1].proxy_protocol: a PROXY protocol header comes at the start of a TCP connection; this listener takes UDP alone`,
+				`3:89: listeners[1].proxy_protocol.trusted: at least one address is needed`,
+				`8:74: services[1].server_names[0]: "A.example.com" is already service "s1"'s on listener "tls"`,
+				`8:91: services[1].server_names[1]: "1.2.3.4" is an IP address; a ClientHello names host names`,
+				`8:102: services[1].server_names[2]: "x..y" is not a valid host name`,
+				`8:127: services[1].server_names[4]: "c.example.com" is listed twice`,
+				`10:32: services[3].listeners[0]: listener "tls" is already service "s3"'s: services that share a tcp listener take the connections of their server_names, and only one of them may have none`,
+				`11:73: services[4].server_names: server_names pick a service by the TLS ClientHello of a tcp connection; a service with a udp listener takes none`,
+				`11:110: services[4].proxy_protocol: the PROXY protocol is sent on tcp connections; a service with a udp listener sends none`,
 			},
 		},
 		{

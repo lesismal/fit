@@ -77,6 +77,9 @@ type binding struct {
 	// with; a reload that changes them binds it anew.
 	maxHeaderBytes int
 	maxBodyBytes   int64
+	// proxyTrusted are the addresses its HTTP takes PROXY headers from; a
+	// reload that changes them binds it anew.
+	proxyTrusted l4.Trusted
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -93,6 +96,7 @@ func (b *binding) same(l *runtime.Listener) bool {
 	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) &&
 		(b.certs.Load() != nil) == (l.Certificates != nil) &&
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
+		slices.Equal(b.proxyTrusted, l.ProxyTrusted) &&
 		b.clientAuth == clientAuthSum(l)
 }
 
@@ -174,7 +178,7 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
-		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l)}
+		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted}
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
@@ -236,6 +240,10 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 			// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
 			// or HTTP/1.1 as ALPN chose.
 			h = fibtls.NewServer(tlsConfig, h)
+		}
+		if len(l.ProxyTrusted) > 0 {
+			// The PROXY header comes first, before TLS.
+			h = l4.AcceptProxy(l.ProxyTrusted, h)
 		}
 		var err error
 		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
@@ -539,12 +547,12 @@ func (t *l4Listener) OnOpen(c *fib.Connection) {
 		return
 	}
 	l := t.dispatcher.listener(g)
-	if l == nil || l.Service == nil {
+	if l == nil || l.L4 == nil {
 		g.Release()
 		_ = c.Close()
 		return
 	}
-	l.Service.Open(c, g.Release)
+	l.L4.Open(c, g.Release)
 }
 
 // dispatcher serves one listener's requests from whatever graph is current.

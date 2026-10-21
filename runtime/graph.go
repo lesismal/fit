@@ -133,9 +133,12 @@ type Listener struct {
 	Requests  []*observe.RequestMetrics
 	Unmatched *observe.RequestMetrics
 
-	// Service is what a tcp listener's connections are proxied by, or nil
+	// L4 is what a tcp or udp listener's connections are proxied by, or nil
 	// for a listener of HTTP.
-	Service *l4.Service
+	L4 *l4.Entry
+	// ProxyTrusted, for a listener of HTTP, are the addresses it takes PROXY
+	// protocol headers from; none when it is empty.
+	ProxyTrusted l4.Trusted
 }
 
 // RequestMetrics returns where a request route answered on l is counted,
@@ -228,14 +231,27 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		return nil, errs
 	}
 
-	services := map[string]*l4.Service{}
+	trusted := map[string]l4.Trusted{}
+	for _, lc := range c.Listeners {
+		if pp := lc.ProxyProtocol; pp != nil {
+			for _, s := range pp.Trusted {
+				// Checked by Validate.
+				p, _ := router.ParsePrefix(s)
+				trusted[lc.Name] = append(trusted[lc.Name], p)
+			}
+		}
+	}
+	entries := map[string]*l4.Entry{}
 	for i := range c.Services {
 		sc := &c.Services[i]
 		svc := l4.NewService(sc, g.upstreams[sc.Upstream], env.Engine)
 		// A drain closes its connections, as it does the proxy's.
 		g.modules = append(g.modules, svc)
 		for _, name := range sc.Listeners {
-			services[name] = svc
+			if entries[name] == nil {
+				entries[name] = l4.NewEntry(trusted[name])
+			}
+			entries[name].Add(svc, sc.ServerNames)
 		}
 	}
 
@@ -289,16 +305,19 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 				}
 			}
 		}
-		l.Service = services[lc.Name]
+		l.L4 = entries[lc.Name]
+		if l.L4 == nil {
+			l.ProxyTrusted = trusted[lc.Name]
+		}
 		for i, rc := range c.Routes {
-			if l.RedirectHTTPS != 0 || l.Service != nil {
+			if l.RedirectHTTPS != 0 || l.L4 != nil {
 				break // it serves no routes
 			}
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
 				l.Routes = append(l.Routes, routes[i])
 			}
 		}
-		if m := g.Metrics; m != nil && l.Service == nil {
+		if m := g.Metrics; m != nil && l.L4 == nil {
 			l.Requests = make([]*observe.RequestMetrics, len(routes))
 			for _, r := range l.Routes {
 				l.Requests[r.Index] = m.Requests(l.Name, metricsName(r))

@@ -45,6 +45,7 @@
 | A32 | 按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers` | 已完成，`0bd2447` | 1、5、9 | I49 |
 | A33 | 读取被暂停时看到的对端结束不再丢失 | 已完成，`9ab22e8` | 8、9 | I50 |
 | A34 | UDP 对端自己的空闲超时，或不超时 | 已实现，fib 分支 `udp-peer-idle` 的 `11de9eb`；经用户同意后合入 `main` | 10、11 | I51 |
+| A35 | 按 PROXY 头替换连接的对端地址 | 已实现，fib 分支 `udp-peer-idle` 的 `530d222`；经用户同意后合入 `main` | 13 | I52 |
 
 ## 证据
 
@@ -741,3 +742,19 @@ HTTP/3 的对端，QUIC 的空闲超时必须低于它。udp 服务的会话有�
 零恢复为引擎的，负值让对端一直保留到被关闭。每次清扫每个对端多一次原子读取。fib 的 `TestUDPPeerIdleTimeout`。
 
 **fit 如何使用。** `l4` 对每个 udp 会话的客户端一侧设置 -1，并像 TCP 中继那样用自己的定时器关闭会话。
+
+## A35：按 PROXY 头替换连接的对端地址
+
+**状态。** 由 fit 的会话实现：fib 分支 `udp-peer-idle` 的 `530d222`（在 A34 之后）；在合入 fib 的 `main` 之前，fit 按这个哈希依赖它。
+
+**问题。** 位于发送 PROXY protocol 的负载均衡器之后的监听器，从头部得知客户端地址，但 fib 的 HTTP 处理器从连接的对端取请求的
+`RemoteAddr`，即负载均衡器的地址，且无法修改。
+
+**证据。** I52 的 `TestProxyProtocolHTTP`：上游的 `X-Forwarded-For` 必须是头部中的客户端，而只有连接自己的地址能把它带进请求。
+
+**实现。** `Connection.SetRemoteAddrPort(ap)`：此后 `RemoteAddrPort` 返回 `ap`，`RemoteAddr` 返回它的 `*net.TCPAddr`，取代
+socket 的地址；由读取头部的处理器在把连接交给真正服务它的处理器之前调用。它复用连接已有的压缩对端地址和一个标志位，连接不变大；
+UDP 连接以及无效或带 zone 的地址不受影响。fib 的 `TestSetRemoteAddrPort`。
+
+**fit 如何使用。** `l4.AcceptProxy` 包装配置了 `proxy_protocol` 的监听器的 HTTP（及 TLS）处理器；`l4` 对 tcp 监听器的连接设置它，
+使 `ip_hash` 和它向上游发送的 PROXY 头都指向客户端。

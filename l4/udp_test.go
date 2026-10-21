@@ -124,7 +124,7 @@ func exchange(c *net.UDPConn, data []byte, wait time.Duration) ([]byte, error) {
 func (f *fit) conns() int64 {
 	g := f.rt.Current()
 	defer g.Release()
-	return g.Listeners[0].Service.Conns()
+	return g.Listeners[0].L4.Conns()
 }
 
 // waitConns waits for the service to proxy want sessions.

@@ -285,14 +285,22 @@ type AccessLog struct {
 // Service proxies the connections of tcp listeners, and the sessions of udp
 // listeners, to an upstream.
 type Service struct {
-	Name        string   `json:"name" fit:"required" doc:"A name unique among the services."`
-	Listeners   []string `json:"listeners" fit:"required" doc:"The names of the tcp and udp listeners whose connections the service takes; each is one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client."`
-	Upstream    string   `json:"upstream" fit:"required" doc:"The name of the upstream connections go to: one of its addresses, picked by its load_balancing (ip_hash by the client's address; header, cookie and URI hashes, which a connection has none of, in turn), out of rotation for its max_fails and health checks as for HTTP, dialed within its connect_timeout. A connect that fails is tried on the next address picked, up to three addresses. Its protocol and HTTP settings are not used."`
-	IdleTimeout Duration `json:"idle_timeout,omitempty" doc:"How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out."`
-	MaxConns    int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0."`
+	Name          string   `json:"name" fit:"required" doc:"A name unique among the services."`
+	Listeners     []string `json:"listeners" fit:"required" doc:"The names of the tcp and udp listeners whose connections the service takes; each is one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client."`
+	Upstream      string   `json:"upstream" fit:"required" doc:"The name of the upstream connections go to: one of its addresses, picked by its load_balancing (ip_hash by the client's address; header, cookie and URI hashes, which a connection has none of, in turn), out of rotation for its max_fails and health checks as for HTTP, dialed within its connect_timeout. A connect that fails is tried on the next address picked, up to three addresses. Its protocol and HTTP settings are not used."`
+	IdleTimeout   Duration `json:"idle_timeout,omitempty" doc:"How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out."`
+	MaxConns      int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0."`
+	ServerNames   []string `json:"server_names,omitempty" doc:"The server names (SNI) of the TLS connections the service takes from its tcp listeners, which it proxies as they are, without terminating their TLS; \"*.example.com\" takes the names one label below example.com. A tcp listener may then be listed by several services: a connection goes to the one whose names hold the name its ClientHello asks for, or else to the listener's service without server_names, if it has one, as one that is not TLS or asks for no name does; otherwise it is closed. The ClientHello must come within 10s."`
+	ProxyProtocol string   `json:"proxy_protocol,omitempty" enum:"v1,v2" doc:"Send each upstream connection a PROXY protocol header of this version (v1, text, or v2, binary) first, naming the client's address and the one it connected to. For tcp listeners."`
 
 	At Value `json:"-" fit:"self"`
 }
+
+// The PROXY protocol versions a service can send.
+const (
+	ProxyProtocolV1 = "v1"
+	ProxyProtocolV2 = "v2"
+)
 
 // The defaults Service's fields stand for when left out.
 const (
@@ -344,10 +352,18 @@ var (
 
 // Listener is an address fit listens on.
 type Listener struct {
-	Name      string   `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
-	Address   string   `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
-	Protocols []string `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream; or udp alone, whose datagrams it proxies. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
-	TLS       *TLS     `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
+	Name          string         `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
+	Address       string         `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
+	Protocols     []string       `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream; or udp alone, whose datagrams it proxies. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	TLS           *TLS           `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
+	ProxyProtocol *ProxyProtocol `json:"proxy_protocol,omitempty" doc:"Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// ProxyProtocol is what a listener takes PROXY protocol headers from.
+type ProxyProtocol struct {
+	Trusted []string `json:"trusted" fit:"required" doc:"The addresses and CIDR ranges of the proxies that send the header, as \"10.0.0.0/8\": a connection from one of them must begin with a header, within 10s, or it is closed, and one from elsewhere is served as it is, with no header."`
 
 	At Value `json:"-" fit:"self"`
 }

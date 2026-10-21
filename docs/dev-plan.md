@@ -172,7 +172,7 @@ Status: `todo`, `doing` or `done`.
 | I49 | gRPC proxying | I18 | done |
 | I50 | TCP proxying | I05 | done |
 | I51 | UDP proxying | I50 | done |
-| I52 | SNI routing and PROXY protocol | I50 | todo |
+| I52 | SNI routing and PROXY protocol | I50 | done |
 | I53 | One port, many protocols; SOCKS and CONNECT | I52 | todo |
 | I54 | Upstream TLS | I18 | todo |
 | I55 | M3 exit tests | I37–I54 | todo |

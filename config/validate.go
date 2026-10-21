@@ -90,6 +90,19 @@ func (c *Config) Validate() Errors {
 			}
 			seen[p] = true
 		}
+		if pp := l.ProxyProtocol; pp != nil {
+			if nets := l.networks(); len(nets) == 1 && nets[0] == "udp" {
+				add(pp.At, "a PROXY protocol header comes at the start of a TCP connection; this listener takes UDP alone")
+			}
+			if len(pp.Trusted) == 0 {
+				add(pp.At.Field("trusted"), "at least one address is needed")
+			}
+			for i, t := range pp.Trusted {
+				if _, err := router.ParsePrefix(t); err != nil {
+					add(pp.At.Field("trusted").Index(i), "%q is not an IP address or CIDR range", t)
+				}
+			}
+		}
 		if t := l.TLS; t != nil {
 			switch {
 			case !emptyTLS(t):
@@ -246,6 +259,10 @@ func (c *Config) Validate() Errors {
 	}
 	services := map[string]bool{}
 	servedBy := map[string]string{}
+	// fallback is a tcp listener's service without server_names, and
+	// byName the service of each listener and server name.
+	fallback := map[string]string{}
+	byName := map[[2]string]string{}
 	for _, sv := range c.Services {
 		switch {
 		case !namePattern.MatchString(sv.Name):
@@ -257,16 +274,50 @@ func (c *Config) Validate() Errors {
 		if len(sv.Listeners) == 0 {
 			add(sv.At.Field("listeners"), "a service needs at least one tcp or udp listener")
 		}
+		udp := false
 		for i, name := range sv.Listeners {
 			switch other, taken := servedBy[name]; {
 			case !listeners[name]:
 				add(sv.At.Field("listeners").Index(i), "there is no listener named %q", name)
 			case l4[name] == "":
 				add(sv.At.Field("listeners").Index(i), "%q is not a tcp or udp listener: a service takes the connections of listeners whose protocols are [\"tcp\"] or [\"udp\"]", name)
-			case taken:
+			case l4[name] == ProtocolUDP && taken:
 				add(sv.At.Field("listeners").Index(i), "listener %q is already service %q's", name, other)
+			case l4[name] == ProtocolUDP:
+				udp = true
+			case len(sv.ServerNames) == 0 && fallback[name] != "":
+				add(sv.At.Field("listeners").Index(i), "listener %q is already service %q's: services that share a tcp listener take the connections of their server_names, and only one of them may have none", name, fallback[name])
+			case len(sv.ServerNames) == 0:
+				fallback[name] = sv.Name
+			default:
+				for j, sn := range sv.ServerNames {
+					key := [2]string{name, strings.ToLower(sn)}
+					if other, ok := byName[key]; ok && other != sv.Name {
+						add(sv.At.Field("server_names").Index(j), "%q is already service %q's on listener %q", sn, other, name)
+					}
+					byName[key] = sv.Name
+				}
 			}
 			servedBy[name] = sv.Name
+		}
+		seen := map[string]bool{}
+		for i, sn := range sv.ServerNames {
+			at := sv.At.Field("server_names").Index(i)
+			switch msg := checkHost(sn); {
+			case msg != "":
+				add(at, "%s", msg)
+			case net.ParseIP(sn) != nil:
+				add(at, "%q is an IP address; a ClientHello names host names", sn)
+			case seen[strings.ToLower(sn)]:
+				add(at, "%q is listed twice", sn)
+			}
+			seen[strings.ToLower(sn)] = true
+		}
+		if udp && len(sv.ServerNames) > 0 {
+			add(sv.At.Field("server_names"), "server_names pick a service by the TLS ClientHello of a tcp connection; a service with a udp listener takes none")
+		}
+		if udp && sv.ProxyProtocol != "" {
+			add(sv.At.Field("proxy_protocol"), "the PROXY protocol is sent on tcp connections; a service with a udp listener sends none")
 		}
 		if !upstreams[sv.Upstream] {
 			add(sv.At.Field("upstream"), "there is no upstream named %q", sv.Upstream)

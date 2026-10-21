@@ -57,7 +57,7 @@ func TestSchemaShape(t *testing.T) {
 		t.Fatalf("root required = %v", s.Required)
 	}
 	listener := s.Defs["config.Listener"]
-	if _, ok := listener.Properties["At"]; ok || len(listener.Properties) != 4 {
+	if _, ok := listener.Properties["At"]; ok || len(listener.Properties) != 5 {
 		t.Fatalf("listener properties = %v", listener.Properties)
 	}
 	if string(listener.Properties["protocols"]) == "" {
