@@ -326,8 +326,7 @@ func (p *Pool) Acquire() { p.users.Add(1) }
 // before then still finishes, its response and body arriving later. Requests
 // sent after it fail at once with ErrClosed, even while others are still in
 // flight, and the idle connections are closed once those are done. Probes
-// stop at once. Closing more often
-// than the pool is held does nothing more.
+// stop at once. Closing more often than the pool is held does nothing more.
 func (p *Pool) Close() {
 	if p.users.Add(-1) > 0 {
 		return // another graph still uses it
