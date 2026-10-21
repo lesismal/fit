@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I37) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114` (fib's `main` at `8e04da9`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, by priority, then specificity, then how many matchers they set; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no expression matcher (I37), nor rewrites, redirects or header middleware (I38) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no rewrites, redirects or header middleware (I38) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36 is done; next, I37 (the expression matcher).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36 and I37 are done; next, I38 (rewrites, redirects and headers).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I37 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I38 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -75,7 +75,7 @@ To continue, start a session with:
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
-| `router` | `Router[T]`: picks a route by host and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`), by priority, specificity and how many matchers it has, without allocating |
+| `router` | `Router[T]`: picks a route by host and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
 | `internal/pebbletest` | runs Pebble, the ACME test server, and its DNS server for tests; skips them without the binaries |
@@ -2176,6 +2176,38 @@ Differences from the plan:
   `remote_ip` is the connection's peer; a client address taken from trusted proxies' headers can
   come with I39, which needs one for its limits.
 
+### I37 Expression matcher — done
+
+- A route's `match` takes `expr`, an expression that combines matchers with `&&`, `||`, `!` and
+  parentheses, `&&` binding tighter than `||` as in Go:
+  `Host("a.example", "*.b.example") && (PathPrefix("/api/") || Method("POST"))`. Its matchers are
+  `Host` (exact or `*.` wildcard, ignoring case, a port and a trailing dot), `Path`, `PathPrefix`,
+  `PathRegexp`, `Method`, `Header(name, value...)`, `Query(key, value...)` and `RemoteIP`, with
+  string arguments quoted as in Go (`"..."` or `` `...` ``). It is ANDed with the route's other
+  fields and counts as one matcher in the order of routes; its hosts and paths do not make the
+  route more specific, so a route that has only an `expr` is tried as a route with no hosts or
+  paths, and is placed with `priority`, which the field's description says.
+- `router.ParseExpr` parses it into an `Expr`, a `Matcher` that `String` prints back in a canonical
+  form, with only the parentheses its structure needs. It is a recursive descent parser over a
+  small scanner; errors give the byte they are at (`at byte 22: there is no matcher Nope`), which
+  `config.Validate` reports at the `expr` field. An expression is at most 64 KiB and nests at most
+  100 deep, so a config cannot make the parser recurse without end; a long chain of `&&` is not
+  deep. `runtime` compiles it with the route, after the route's other matchers.
+- Tests: `TestParseExpr` (precedence, grouping, canonical printing, quoting), `TestParseExprErrors`
+  (27 malformed expressions, each with its message and position, the length and depth limits, and
+  a chain of 1,001 matchers), `TestExprMatch` (an expression using every operator and most
+  matchers, on ten requests), `TestExprAllocs` (evaluation allocates nothing), and
+  `FuzzParseExpr`: the parser never panics, and what it parses prints back to an expression that
+  parses to the same. Fuzzed for 2 minutes on the benchmark host, 4.5 million inputs, no failure.
+  `config`'s and `runtime`'s tests have an `expr` too. The race tests of router, config, runtime,
+  listener, schema, cmd/fit and test/e2e pass on the host.
+
+Differences from the plan:
+
+- None in substance. The expression does not feed the router's host and path maps: an expression's
+  hosts and paths are checked by evaluating it, after the maps found the route's candidates by its
+  `host` and `path` fields, which may be set beside `expr` for that.
+
 ## Notes for later iterations
 
 - **fib version.** fit uses fib's `main` at `8e04da9` (`v1.5.7-0.20261021033319-8e04da9ea114`): `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
@@ -2216,7 +2248,10 @@ Differences from the plan:
   `go test` micro-benchmarks, perf, and stress or flake reproduction (high `-count`, `-cpu`).
   The host has no Go: cross-build with `GOOS=linux GOARCH=amd64` (`go build`, `go test -c`) and
   run the binaries there. Micro-benchmarks recorded above as run on the development Mac predate
-  this.
+  this. The race detector cannot be cross-built from a Mac; since I36 the race tests have run on
+  the host in Docker instead: a copy of the tree with `go mod vendor` is synced to the host and
+  `go test -race` runs in the `golang:1.27-bookworm` image with `GOFLAGS=-mod=vendor`, keeping
+  the build cache in a volume.
 - **Benchmarks.** A new scenario or module that fit can serve goes into
   `bench/cmd/fitbench/servers.go` and `bench/configs/fit/fit.json`. nginx preallocates its
   connection tables (about 29 MB per worker with `worker_connections 65536`), which shows in its

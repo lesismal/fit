@@ -157,6 +157,11 @@ func (c *Config) Validate() Errors {
 					add(r.Match.At.Field("remote_ip").Index(i), "%v", err)
 				}
 			}
+			if r.Match.Expr != "" {
+				if _, err := router.ParseExpr(r.Match.Expr); err != nil {
+					add(r.Match.At.Field("expr"), "%v", err)
+				}
+			}
 		}
 		for _, m := range r.Middleware {
 			if m.Module == "" {

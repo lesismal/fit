@@ -379,6 +379,13 @@ func matchers(m *config.Match) ([]router.Matcher, error) {
 		}
 		ms = append(ms, re)
 	}
+	if m.Expr != "" {
+		e, err := router.ParseExpr(m.Expr)
+		if err != nil {
+			return nil, err
+		}
+		ms = append(ms, e)
+	}
 	return ms, nil
 }
 

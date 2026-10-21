@@ -168,7 +168,8 @@ func TestCompileMatchers(t *testing.T) {
     {"name": "get", "match": {"path": ["/a"], "method": ["GET", "HEAD"]}, "handler": {"module": "respond"}},
     {"name": "beta", "match": {"path": ["/a"], "method": ["GET"], "header": {"x-beta": ["1"]}}, "handler": {"module": "respond"}},
     {"name": "query", "match": {"path_regexp": ["^/users/[0-9]+$"], "query": {"debug": []}}, "handler": {"module": "respond"}},
-    {"name": "lan", "priority": 1, "match": {"remote_ip": ["10.0.0.0/8"]}, "handler": {"module": "respond"}}
+    {"name": "lan", "priority": 1, "match": {"remote_ip": ["10.0.0.0/8"]}, "handler": {"module": "respond"}},
+    {"name": "expr", "priority": 2, "match": {"expr": "Host(\"*.example.com\") && !Method(\"GET\")"}, "handler": {"module": "respond"}}
   ]
 }`)
 	defer g.Release()
@@ -183,6 +184,7 @@ func TestCompileMatchers(t *testing.T) {
 		{"GET", "/users/7?debug", "192.0.2.1:1", "", "query"},
 		{"GET", "/users/7", "192.0.2.1:1", "", "any"},
 		{"GET", "/a", "10.1.1.1:1", "1", "lan"},
+		{"POST", "//www.example.com/a", "10.1.1.1:1", "", "expr"},
 		{"GET", "//www.example.com/a", "10.1.1.1:1", "", "lan"},
 	} {
 		u, _ := url.Parse(tt.target)

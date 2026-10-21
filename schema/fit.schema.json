@@ -304,6 +304,10 @@
     "config.Match": {
       "additionalProperties": false,
       "properties": {
+        "expr": {
+          "description": "An expression the request must match, combining matchers with &&, ||, ! and parentheses, as in Host(\"a.example\") && (PathPrefix(\"/api/\") || Method(\"POST\")). Its matchers are Host, Path, PathPrefix, PathRegexp, Method, Header(name, value...), Query(key, value...) and RemoteIP, whose arguments are strings quoted as in Go. It counts as one matcher in the order of routes, and its hosts and paths do not make a route more specific: give it a priority.",
+          "type": "string"
+        },
         "header": {
           "additionalProperties": {
             "items": {
@@ -440,7 +444,7 @@
           "type": "string"
         },
         "priority": {
-          "description": "Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp), then the one written first.",
+          "description": "Routes with a higher priority are picked first; among equal ones, the most specific host, then path, then the one with the most other matchers set (method, header, query, remote_ip, path_regexp, expr), then the one written first.",
           "type": "integer"
         }
       },

@@ -8,7 +8,8 @@
 // are exact, as in "/hello", or end in "*" to match a prefix, as in "/api/*".
 // Hosts ignore case; paths do not. Matchers test anything else: the method,
 // headers, the query, the client's address, a regular expression on the path
-// (see Methods, Headers, Query, RemoteIP and PathRegexp).
+// (see Methods, Headers, Query, RemoteIP and PathRegexp), or an expression
+// combining them (see ParseExpr).
 //
 // When several routes match, the one that serves the request is, in order:
 //

@@ -216,7 +216,8 @@ func TestValidate(t *testing.T) {
 			name: "route matchers",
 			doc: `{"listeners": [{"name": "web", "address": ":80"}], "routes": [
   {"match": {"method": ["GET", "BAD METHOD", ""], "header": {"X-Ok": [], "Bad Name": ["v"]}, "query": {"": ["1"], "ok": []}}, "handler": {"module": "respond"}},
-  {"match": {"remote_ip": ["10.0.0.0/8", "10.0.0.0/33", "a.example", "::1"], "path_regexp": ["^/ok$", "("]}, "handler": {"module": "respond"}}
+  {"match": {"remote_ip": ["10.0.0.0/8", "10.0.0.0/33", "a.example", "::1"], "path_regexp": ["^/ok$", "("]}, "handler": {"module": "respond"}},
+  {"match": {"expr": "Host(\"a.example\") && Nope(\"x\")"}, "handler": {"module": "respond"}}
 ]}`,
 			want: []string{
 				`2:32: routes[0].match.method[1]: "BAD METHOD" is not a valid method`,
@@ -226,6 +227,7 @@ func TestValidate(t *testing.T) {
 				"3:103: routes[1].match.path_regexp[1]: \"(\" is not a valid regular expression: error parsing regexp: missing closing ): `(`",
 				`3:42: routes[1].match.remote_ip[1]: "10.0.0.0/33" is not an IP address or a CIDR prefix`,
 				`3:57: routes[1].match.remote_ip[2]: "a.example" is not an IP address or a CIDR prefix`,
+				`4:22: routes[2].match.expr: at byte 22: there is no matcher Nope`,
 			},
 		},
 		{
