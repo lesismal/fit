@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I44) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I45) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no traffic splitting (I45), compression (I46), WebSocket proxying (I47) or the rest of M3 |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no compression (I46), WebSocket proxying (I47) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I44 are done; next, I45 (traffic splitting: weights, mirroring, failover).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I45 are done; next, I46 (compression).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I45 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I46 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -2520,6 +2520,37 @@ Differences from the plan:
 
 - The breaker is a route's, as a middleware, not an upstream's: routes that share an upstream each
   have their own. Latency counts towards it as a share of slow responses rather than an average.
+
+### I45 Traffic splitting: weights, mirroring, failover — done
+
+- The proxy takes `upstreams`, in place of `upstream`: upstreams with a `weight` each (1 to 1000),
+  over which requests are spread at random by weight, as a canary release does; each upstream
+  then picks the backend by its own policy, and a request's retries stay in its upstream.
+- `failover` names an upstream that takes the requests when none of the chosen upstream's backends
+  is in rotation (taken out for failing, `max_fails`, or by its health checks) and one of its own
+  is; `upstream.Pool.Available` tells. Until then the chosen upstream is used as before.
+- `mirror` sends a copy of a share (`percent`, all by default) of the requests whose bodies arrived
+  whole (64 KB at most) to another upstream, with the same method, path, fields and body, and drops
+  its answers. The copy is made before the request goes on, with a header, URL and body of its own,
+  since it may outlive the request, and goes through the mirror's pool asynchronously, so the
+  request never waits for it. At most 256 copies are under way at once for a proxy; past that,
+  requests are not copied, so a slow or dead mirror costs that much and no more.
+- Tests: `TestSplitWeights` (800 requests at 3:1 land within five deviations of 600 and 200),
+  `TestSplitFailover` (a refused upstream with `max_fails` 1: its first request 502, the rest to the
+  failover), `TestMirror` (the copy has the method, path, query, fields and body), `TestMirrorDoesNotSlow`
+  (400 requests at once beside a mirror that takes a second to answer are all answered within
+  0.9s, and it gets between 1 and 256 copies), `TestMirrorPercent` (25%: about 100 of 400) and
+  `TestSplitParams`. The race tests of `handler/proxy`, `upstream`, `config`, `runtime`, `admin`,
+  `schema`, `cmd/fit` and `test/e2e` pass on the benchmark host.
+- `bench/ab.sh` on the benchmark host, the proxy scenario, 3 rounds of 10s, main against this
+  change (one upstream, no mirror or failover): HTTP/1.1 246k → 246k requests a second (−0.0%),
+  h2c 240k → 240k (+0.0%).
+
+Differences from the plan:
+
+- The split is the proxy's, which picks the upstream per request, rather than package `upstream`'s;
+  `upstream` gained only `Pool.Available`. Streamed request bodies are not mirrored, since copying
+  them would mean buffering them.
 
 ## Notes for later iterations
 

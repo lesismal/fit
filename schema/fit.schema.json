@@ -788,9 +788,17 @@
     "http.handlers.proxy": {
       "additionalProperties": false,
       "properties": {
+        "failover": {
+          "description": "An upstream that takes the requests when none of the chosen upstream's backends is in rotation, for failing or for its health checks, and one of its own is.",
+          "type": "string"
+        },
         "host_header": {
           "description": "The Host header sent upstream; the client's when left out.",
           "type": "string"
+        },
+        "mirror": {
+          "$ref": "#/$defs/proxy.Mirror",
+          "description": "Send a copy of a share of the requests whose bodies arrive whole (64KB at most) to another upstream, and drop its answers. At most 256 copies are under way at once; past that, requests are not copied. The requests themselves do not wait for their copies."
         },
         "retry": {
           "$ref": "#/$defs/proxy.Retry",
@@ -809,13 +817,17 @@
           "type": "array"
         },
         "upstream": {
-          "description": "The name of the upstream requests go to.",
+          "description": "The name of the upstream requests go to; or upstreams.",
           "type": "string"
+        },
+        "upstreams": {
+          "description": "Upstreams requests are spread over at random by weight, as a canary release does, in place of upstream.",
+          "items": {
+            "$ref": "#/$defs/proxy.Split"
+          },
+          "type": "array"
         }
       },
-      "required": [
-        "upstream"
-      ],
       "type": "object"
     },
     "http.handlers.respond": {
@@ -1472,6 +1484,26 @@
       },
       "type": "object"
     },
+    "proxy.Mirror": {
+      "additionalProperties": false,
+      "properties": {
+        "percent": {
+          "default": 100,
+          "description": "The share of requests copied, chosen at random; all of them when left out.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "upstream": {
+          "description": "The name of the upstream the copies go to.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upstream"
+      ],
+      "type": "object"
+    },
     "proxy.Retry": {
       "additionalProperties": false,
       "properties": {
@@ -1503,6 +1535,26 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "proxy.Split": {
+      "additionalProperties": false,
+      "properties": {
+        "upstream": {
+          "description": "The name of the upstream.",
+          "type": "string"
+        },
+        "weight": {
+          "description": "Its share of the requests, against the others' weights.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "upstream",
+        "weight"
+      ],
       "type": "object"
     }
   },

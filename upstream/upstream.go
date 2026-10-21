@@ -236,6 +236,20 @@ func (p *Pool) Pick(r *stdhttp.Request) *Backend {
 	return b
 }
 
+// Available reports whether any of the upstream's backends is in rotation:
+// not taken out for its failures or its probes. A pool none of whose
+// backends is still picks one, as a last resort; a proxy with a failover
+// upstream sends it there instead.
+func (p *Pool) Available() bool {
+	var now int64
+	for _, b := range p.backends {
+		if b.up(&now) {
+			return true
+		}
+	}
+	return false
+}
+
 // SetCookie returns the Set-Cookie field a response to r, which went to b,
 // carries: the sticky cookie naming b, unless r's names it already; or ""
 // without a sticky cookie.

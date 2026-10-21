@@ -392,7 +392,7 @@ func TestConfigErrors(t *testing.T) {
 		{`{"upstream": "nope"}`, `routes[0].handler.params.upstream: there is no upstream named "nope"`},
 		{`{"upstream": "app", "trusted_proxies": ["10.0.0.0/8", "nope"]}`, `routes[0].handler.params.trusted_proxies[1]: "nope" is not an IP address or a network, as in "10.0.0.1" or "10.0.0.0/8"`},
 		{`{"upstream": "app", "host_header": "a b"}`, `routes[0].handler.params.host_header: "a b" is not a host`},
-		{`{}`, `routes[0].handler.params.upstream: missing required field`},
+		{`{}`, `routes[0].handler.params.upstream: upstream or upstreams is needed`},
 	}
 	for _, tt := range tests {
 		c, err := config.Load([]byte(strings.Replace(config1(tt.params), "%s", `"127.0.0.1:1"`, 1)))

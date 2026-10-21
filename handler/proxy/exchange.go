@@ -67,7 +67,14 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
 		return
 	}
-	backend := p.pool.Pick(c.Request)
+	pool := p.pool
+	if p.split != nil || p.failover != nil {
+		pool = p.pickPool()
+	}
+	if p.mirror != nil {
+		p.mirror.copyTo(c, &x.base)
+	}
+	backend := pool.Pick(c.Request)
 	// The request goes without a context of its own: it is abandoned through
 	// its Call, which costs nothing, rather than a context fib would watch.
 	out := &x.base
@@ -76,8 +83,8 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	// and the config, so that a download that outlasts a reload stays on
 	// the config it started on, until the drain timeout.
 	p.graph.Retain()
-	x.out, x.start, x.timeouts = out, time.Now(), p.pool.Timeouts()
-	x.stall, x.pool, x.backend, x.setCookie, x.graph = p.stall, p.pool, backend, p.pool.SetCookie(c.Request, backend), p.graph
+	x.out, x.start, x.timeouts = out, time.Now(), pool.Timeouts()
+	x.stall, x.pool, x.backend, x.setCookie, x.graph = p.stall, pool, backend, pool.SetCookie(c.Request, backend), p.graph
 	x.open = &p.open[rand.Uint32()%openShards]
 	x.open.add(x)
 	if x.policy = p.retry; x.policy != nil {
