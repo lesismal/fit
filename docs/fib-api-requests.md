@@ -39,6 +39,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A24 | A new taskpool ring that writes none of its cells | done, `a6d78cd` (main after v1.5.6) | 11 | — |
 | A25 | A per-request limit on a request body, streamed or not | done, `cfb4f09` (main after v1.5.6) | 7, 11 | I39 |
 | A26 | More than one `OnCancel` callback on a Context | done, `cfb4f09` (main after v1.5.6) | 1, 12 | I39 |
+| A27 | A hook that transforms a response body as it is written | done, `fc7ec5e` (main after v1.5.6) | 5, 7, 11 | I46 |
 
 ## Evidence
 
@@ -820,3 +821,38 @@ field, with a slice only for a second).
 
 **How fit would use it.** `concurrency_limit` registers `OnCancel` beside `OnFinish` before the
 handler runs, and no longer asks for the request's context.
+
+## A27: A hook that transforms a response body as it is written
+
+**Status.** Done on fib's `main` in `fc7ec5e`, made by fit's session with the maintainer's leave;
+fit uses it by commit (`v1.5.7-0.20261021111325-fc7ec5e327d4`, rule 19). fib's `http`, `http3` and middleware race tests pass on the benchmark host, `go vet`
+and staticcheck pass for linux, darwin, windows and freebsd, and fib's root package fails there
+only in its UDP and socket-buffer tests, as it does on `main` in the same container.
+
+**Problem.** fit's `compress` middleware (I46) must compress responses whichever way the handler
+writes them. fib's only hook that sees a body is `OnResponse`, and registering it holds a response
+written through the ResponseWriter methods whole until the handler is done: without a bound, and
+without streaming. The proxy streams every response past 64 KB, and server-sent events through
+it; holding them would break rules 5, 7 and 11.
+
+**Evidence.** `holdsWhole` in `http/response_writer.go` holds every write once an `OnResponse`
+hook is registered (`hooks.whole`); nothing limits `w.buf`, and `Flush` does nothing for such a
+response.
+
+**As built.** `Context.OnBodyFilter(fn func(status int, header http.Header) BodyFilter)`. `fn` runs
+as the header is settled, in turn with the OnHeader hooks, may change the header, and returns a
+`BodyFilter` (`Filter(p) ([]byte, error)`, `Close() ([]byte, error)`) or nil. Every part of the
+body goes through it as it is written: `Write`, `WriteNoWait`, `ReadFrom` (which then copies rather
+than sendfiles); `Flush` and `FlushError` hand over what a filter that is also a `BodyFlusher`
+holds back; `Finish` sends what `Close` leaves. A response sent whole (`WriteResponse`, `Respond`)
+is filtered whole, and its hook sees the body's length as its `Content-Length`. A filtered response
+goes without `Content-Length`; HEAD and statuses without a body are not filtered. Filters
+registered on one response run in turn. fib's `TestBodyFilter`, `TestBodyFilterFlush` and
+`TestBodyFilterChainAndSkips` cover HTTP/1.1 and h2c. `bench/microbench.sh` on the benchmark host,
+10 alternating runs, `cfb4f09` against it: `BenchmarkServerKeepAlive`, `ServerKeepAliveHooked`,
+`StreamRespond` and `StreamAccessLog`, no slowdown and the same allocations.
+
+**How fit uses it.** `compress` registers an `OnBodyFilter` that decides from the status and the
+header, sets `Content-Encoding`, `Vary` and a weak `ETag`, and returns a streaming zstd, brotli or
+gzip encoder.
+

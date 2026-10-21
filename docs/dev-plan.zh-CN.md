@@ -156,7 +156,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I43 | 重试与按路由超时 | I17 | done |
 | I44 | 熔断 | I43 | done |
 | I45 | 流量拆分：加权、镜像、故障转移 | I19 | done |
-| I46 | 压缩 | I36 | todo |
+| I46 | 压缩 | I36 | done |
 | I47 | WebSocket 代理 | I17 | todo |
 | I48 | HTTP/2、HTTP/3 入口上的 WebSocket | I47、I10 | todo |
 | I49 | gRPC 代理 | I18 | todo |

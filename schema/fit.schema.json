@@ -999,6 +999,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "compress"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.compress"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "concurrency_limit"
               }
             }
@@ -1116,6 +1132,7 @@
             "body_limit",
             "circuit_breaker",
             "client_cert",
+            "compress",
             "concurrency_limit",
             "forward_auth",
             "headers",
@@ -1244,6 +1261,51 @@
         "subject_header": {
           "description": "A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent is removed, with or without a certificate.",
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.middleware.compress": {
+      "additionalProperties": false,
+      "properties": {
+        "encodings": {
+          "default": [
+            "zstd",
+            "br",
+            "gzip"
+          ],
+          "description": "The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, br and gzip when left out.",
+          "items": {
+            "enum": [
+              "zstd",
+              "br",
+              "gzip"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "level": {
+          "default": "default",
+          "description": "How hard the compressors work: fastest, default (gzip 5, zstd's default, brotli 4) or better (gzip 7, zstd's better, brotli 6); default when left out.",
+          "enum": [
+            "fastest",
+            "default",
+            "better"
+          ],
+          "type": "string"
+        },
+        "max_in_flight": {
+          "default": 1024,
+          "description": "How many responses are compressed at once; past it, responses go uncompressed, so that the compressors' memory, a few hundred kilobytes each, is bounded. 1024 when left out.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_length": {
+          "default": 1024,
+          "description": "The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed.",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "type": "object"

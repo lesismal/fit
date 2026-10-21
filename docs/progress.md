@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I45) |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no compression (I46), WebSocket proxying (I47) or the rest of M3 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I46) |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021111325-fc7ec5e327d4` (fib's `main` at `fc7ec5e`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no WebSocket proxying (I47, I48) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I45 are done; next, I46 (compression).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I46 are done; next, I47 (WebSocket proxying).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I46 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I47 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -71,6 +71,7 @@ To continue, start a session with:
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
 | `middleware/auth` | `jwt` (JWS verified with the standard library, keys from PEM files, a secret or a JWK set fetched by the control plane, verified tokens kept); `forward_auth` (a subrequest to an auth service through fib's asynchronous client); `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
 | `middleware/breaker` | `circuit_breaker`: closed, open and half-open on a route's error and slow-response ratios |
+| `middleware/compress` | `compress`: zstd, brotli and gzip through fib's body filters, streaming, encoders pooled and bounded |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -2552,9 +2553,54 @@ Differences from the plan:
   `upstream` gained only `Pool.Available`. Streamed request bodies are not mirrored, since copying
   them would mean buffering them.
 
+### I46 Compression — done
+
+- `middleware/compress`'s `compress` compresses responses with zstd, brotli or gzip, the one the
+  request's `Accept-Encoding` prefers most (q-values, `*`, `x-gzip`), and among those it prefers as
+  much the first of `encodings` (zstd, br, gzip by default). A response is compressed when its
+  status carries a body and is not 206, it has no `Content-Encoding` or `Content-Range` of its own,
+  its `Cache-Control` does not say `no-transform`, its type is one that compresses (fib's
+  `compress.Compressible`: text, JSON, JavaScript, XML, SVG, fonts), and its declared length, if
+  any, is at least `min_length` (1024). Such a response gets `Vary: Accept-Encoding`, also when the
+  client accepts none of the encodings or the request is HEAD, and a strong `ETag` is made weak.
+  `level` is fastest, default (gzip 5, zstd's default, brotli 4) or better (gzip 7, zstd's better,
+  brotli 6).
+- Compression is a fib body filter ([A27](fib-api-requests.md#a27-a-hook-that-transforms-a-response-body-as-it-is-written),
+  `Context.OnBodyFilter`, made by this session in fib and pushed to its `main` as `fc7ec5e`): the
+  body is compressed as it is written, so a response that streams, the proxy's past 64 KB or
+  server-sent events, stays streamed, and what the handler flushes is flushed out of the encoder
+  too; a response sent whole is compressed whole. Nothing is buffered beyond an encoder's window.
+- Encoders come from pools per encoding and are reset for each response; zstd runs with one
+  goroutine's concurrency (its caller's), and every encoder's window is 256 KB, so one costs a few
+  hundred kilobytes. `max_in_flight` (1024) bounds the responses compressed at once: past it they go
+  uncompressed. A response gives its place back when its body ends, or, when its client goes first,
+  in `OnCancel`, leaving its encoder to the collector rather than the pool, since a write may still
+  hold it.
+- New dependencies, `github.com/klauspost/compress` v1.20.3 (zstd, gzip) and
+  `github.com/andybalholm/brotli` v1.2.6, both pure Go and with no requirements of their own:
+  [decision 008](decisions/008-compression-libraries.md).
+- Tests: `TestCompress` (over HTTP/1.1 and h2c: each encoding, preferences and q-values, `*`,
+  `identity` and q=0, a whole response with an ETag and a large one written in parts, each
+  decompressed to the body and at most a tenth of it on the wire; small, image, already encoded,
+  206 and no-transform responses left alone; HEAD), `TestCompressStream` (a server-sent event,
+  through each encoding, arrives decompressed before the handler writes the next),
+  `TestCompressBounded` (`max_in_flight` 1: a second response goes uncompressed, and the place
+  comes back once the streaming client goes), `TestNegotiate` and `TestCompressParams`. The full
+  race suite passes on the benchmark host; `go vet` and staticcheck for linux, darwin and windows
+  pass.
+- Benchmark on the benchmark host (`BenchmarkCompress`, a 16 KB JSON body sent whole through
+  fibtest, 3 runs): uncompressed 2.3 µs; gzip 8.8 µs fastest and 9.1 µs default; brotli 10.6 µs and
+  16.6 µs; zstd 6.2 µs and 6.4 µs; 21 or 22 allocations, about 2 KB.
+
+Differences from the plan:
+
+- It needed fib's body filters (A27), which this session added to fib: fib's only hook that saw a
+  body held streamed responses whole. fib's own `middleware/compress` (gzip and deflate, through
+  `OnResponse`) is not used, but its `Compressible` is.
+
 ## Notes for later iterations
 
-- **fib version.** fit uses fib's `main` at `cfb4f09` (`v1.5.7-0.20261021080904-cfb4f09f0283`), which is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
+- **fib version.** fit uses fib's `main` at `fc7ec5e` (`v1.5.7-0.20261021111325-fc7ec5e327d4`), which is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
   lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`

@@ -37,6 +37,7 @@
 | A24 | taskpool 新建的环不写任何单元 | 已完成，`a6d78cd`（v1.5.6 之后的 main） | 11 | — |
 | A25 | 按请求限制请求体大小，流式的也包括在内 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 7、11 | I39 |
 | A26 | 一个 Context 上可以有多个 `OnCancel` 回调 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 1、12 | I39 |
+| A27 | 在写出时改写响应体的钩子 | 已完成，`fc7ec5e`（v1.5.6 之后的 main） | 5、7、11 | I46 |
 
 ## 证据
 
@@ -602,3 +603,31 @@ HTTP/3）：这些字节送到处理器的 `OnBody` 回调，中间件看不到�
 第二个回调才用切片）。
 
 **fit 如何使用。** `concurrency_limit` 在处理器运行之前与 `OnFinish` 一起注册 `OnCancel`，不再获取请求的 context。
+
+## A27：在写出时改写响应体的钩子
+
+**状态。** 已在 fib 的 `main` 上完成（`fc7ec5e`），由 fit 的会话经维护者同意实现；fit 按 commit 依赖它
+（`v1.5.7-0.20261021111325-fc7ec5e327d4`，规则 19）。fib 的 `http`、
+`http3` 和中间件的竞态测试在基准机上通过，linux、darwin、windows 和 freebsd 的 `go vet` 与 staticcheck 通过；fib 根包
+在那里只有 UDP 和 socket 缓冲区相关的测试失败，在同一容器中 `main` 也一样。
+
+**问题。** fit 的 `compress` 中间件（I46）必须压缩处理器以任何方式写出的响应。fib 唯一能看到响应体的钩子是
+`OnResponse`，而注册它会让经 ResponseWriter 方法写出的响应整体缓存到处理器结束：没有上限，也不再流式发送。代理对超过
+64 KB 的响应和经它的 server-sent events 都是流式的；缓存它们会违反规则 5、7 和 11。
+
+**证据。** `http/response_writer.go` 中的 `holdsWhole` 在注册了 `OnResponse` 钩子（`hooks.whole`）后缓存每次写入；
+`w.buf` 没有上限，`Flush` 对这样的响应不起作用。
+
+**实现。** `Context.OnBodyFilter(fn func(status int, header http.Header) BodyFilter)`。`fn` 在响应头定下来时与
+OnHeader 钩子依次运行，可以修改 header，返回一个 `BodyFilter`（`Filter(p) ([]byte, error)`、`Close() ([]byte, error)`）
+或 nil。响应体的每一部分在写出时都经过它：`Write`、`WriteNoWait`、`ReadFrom`（此时复制而不是 sendfile）；`Flush` 和
+`FlushError` 交出同时实现了 `BodyFlusher` 的过滤器所缓冲的部分；`Finish` 发送 `Close` 剩下的部分。整体发送的响应
+（`WriteResponse`、`Respond`）整体过滤，其钩子看到的 `Content-Length` 是 body 的长度。有过滤器的响应不带
+`Content-Length`；HEAD 和没有 body 的状态码不过滤。同一响应上注册的多个过滤器依次运行。fib 的 `TestBodyFilter`、
+`TestBodyFilterFlush` 和 `TestBodyFilterChainAndSkips` 覆盖 HTTP/1.1 和 h2c。基准机上的 `bench/microbench.sh`，
+10 次交替运行，`cfb4f09` 对比本改动：`BenchmarkServerKeepAlive`、`ServerKeepAliveHooked`、`StreamRespond` 和
+`StreamAccessLog` 没有变慢，分配次数相同。
+
+**fit 如何使用。** `compress` 注册一个 `OnBodyFilter`，根据状态码和 header 判断，设置 `Content-Encoding`、`Vary` 和
+弱 `ETag`，并返回流式的 zstd、brotli 或 gzip 编码器。
+
