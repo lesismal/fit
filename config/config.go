@@ -10,6 +10,7 @@ package config
 import (
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 )
@@ -286,7 +287,7 @@ type AccessLog struct {
 // listeners, to an upstream.
 type Service struct {
 	Name          string   `json:"name" fit:"required" doc:"A name unique among the services."`
-	Listeners     []string `json:"listeners" fit:"required" doc:"The names of the tcp and udp listeners whose connections the service takes; each is one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client."`
+	Listeners     []string `json:"listeners" fit:"required" doc:"The names of the listeners whose connections the service takes: those that serve tcp, alone or beside other protocols, and udp listeners, each one service's. A udp listener's session is a client's address: the datagrams it sends go to one upstream address, from a socket of the session's own, and what comes back to that socket goes to the client."`
 	Upstream      string   `json:"upstream" fit:"required" doc:"The name of the upstream connections go to: one of its addresses, picked by its load_balancing (ip_hash by the client's address; header, cookie and URI hashes, which a connection has none of, in turn), out of rotation for its max_fails and health checks as for HTTP, dialed within its connect_timeout. A connect that fails is tried on the next address picked, up to three addresses. Its protocol and HTTP settings are not used."`
 	IdleTimeout   Duration `json:"idle_timeout,omitempty" doc:"How long a connection or a udp session may carry nothing either way before both sides are closed; 10m for a connection and 1m for a udp session when left out."`
 	MaxConns      int      `json:"max_conns,omitempty" min:"0" default:"10000" doc:"The most connections and udp sessions the service proxies at once; a connection past it is closed as soon as it is accepted, and the datagrams of a session past it are dropped. 10000 when left out or 0."`
@@ -336,12 +337,41 @@ const (
 	ProtocolH2    = "h2"
 	ProtocolH3    = "h3"
 	// ProtocolTCP is raw TCP, which a service proxies to its upstream as
-	// it is; a listener that serves it serves nothing else.
+	// it is. A listener that serves it beside HTTP or SOCKS tells them
+	// apart by what a client sends first.
 	ProtocolTCP = "tcp"
 	// ProtocolUDP is UDP, whose datagrams a service proxies to its upstream
 	// as they are; a listener that serves it serves nothing else.
 	ProtocolUDP = "udp"
+	// ProtocolSOCKS is SOCKS5, SOCKS4 and SOCKS4a: a forward proxy, which
+	// connects its clients where they ask, as the listener's socks allows.
+	ProtocolSOCKS = "socks"
 )
+
+// ServesHTTP reports whether a listener of protocols serves HTTP: one that
+// names none serves the default protocols.
+func ServesHTTP(protocols []string) bool {
+	return len(protocols) == 0 || slices.ContainsFunc(protocols, func(p string) bool {
+		return p == ProtocolHTTP1 || p == ProtocolH2C || p == ProtocolH2 || p == ProtocolH3
+	})
+}
+
+// Sniffs reports whether a listener of protocols serves more than one kind
+// of them on its TCP port, HTTP, raw TCP and SOCKS, which it tells apart by
+// what each client sends first.
+func Sniffs(protocols []string) bool {
+	kinds := 0
+	if slices.ContainsFunc(protocols, func(p string) bool { return p == ProtocolHTTP1 || p == ProtocolH2C || p == ProtocolH2 }) {
+		kinds++
+	}
+	if slices.Contains(protocols, ProtocolTCP) {
+		kinds++
+	}
+	if slices.Contains(protocols, ProtocolSOCKS) {
+		kinds++
+	}
+	return kinds > 1
+}
 
 // DefaultProtocols are what a listener that names none serves, and
 // DefaultTLSProtocols what one with TLS does.
@@ -354,11 +384,41 @@ var (
 type Listener struct {
 	Name          string         `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
 	Address       string         `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
-	Protocols     []string       `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream; or udp alone, whose datagrams it proxies. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
-	TLS           *TLS           `json:"tls,omitempty" doc:"Serve TLS, with these certificates."`
+	Protocols     []string       `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp,socks" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); tcp, raw TCP, whose connections the services that list the listener proxy to their upstreams; socks, a SOCKS5 and SOCKS4 forward proxy, as socks says; or udp alone, whose datagrams a service proxies. A listener that serves more than one of HTTP, tcp and socks tells them apart on its port by what a client sends first: a TLS ClientHello goes to the service whose server_names hold its name, or else, with tls, is served HTTPS, or else goes to the service without server_names; a SOCKS greeting to socks; an HTTP request, in the clear, to HTTP; and whatever else to the service without server_names, or it is closed. A client that waits for the server to speak first is closed after 10s: such a protocol needs a listener of its own. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	TLS           *TLS           `json:"tls,omitempty" doc:"Serve TLS, with these certificates: the listener's HTTP is HTTPS."`
+	SOCKS         *ForwardProxy  `json:"socks,omitempty" doc:"Who may use the listener's socks, and where it connects them: needed with socks. It serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE."`
 	ProxyProtocol *ProxyProtocol `json:"proxy_protocol,omitempty" doc:"Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// ForwardProxy is who may use a forward proxy, SOCKS or HTTP CONNECT, and
+// where it may connect them to.
+type ForwardProxy struct {
+	Clients        []string `json:"clients" fit:"required" doc:"The addresses and CIDR ranges of the clients that may use the proxy, as \"10.0.0.0/8\"; others are refused."`
+	Allow          []string `json:"allow,omitempty" doc:"The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out."`
+	Deny           []string `json:"deny,omitempty" doc:"Destinations refused, written as in allow, whatever allow holds: a host name that resolves to an address deny holds is refused once it is connected, before anything is sent."`
+	Ports          []int    `json:"ports,omitempty" doc:"The destination ports allowed; any when left out."`
+	ConnectTimeout Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long resolving and connecting to a destination may take. 10s when left out."`
+	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"5m\"" doc:"How long a proxied connection may carry nothing either way before both sides are closed. 5m when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// The defaults ForwardProxy's fields stand for when left out.
+const (
+	DefaultForwardConnectTimeout = Duration(10 * time.Second)
+	DefaultForwardIdleTimeout    = Duration(5 * time.Minute)
+)
+
+// Connect returns the proxy's connect timeout, or its default.
+func (f *ForwardProxy) Connect() time.Duration {
+	return time.Duration(orDefault(int64(f.ConnectTimeout), int64(DefaultForwardConnectTimeout)))
+}
+
+// Idle returns the proxy's idle timeout, or its default.
+func (f *ForwardProxy) Idle() time.Duration {
+	return time.Duration(orDefault(int64(f.IdleTimeout), int64(DefaultForwardIdleTimeout)))
 }
 
 // ProxyProtocol is what a listener takes PROXY protocol headers from.

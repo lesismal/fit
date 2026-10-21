@@ -156,10 +156,13 @@ func TestEntryPick(t *testing.T) {
 	e.Add(w, []string{"*.w.example.com"})
 	e.Add(f, nil)
 	for name, want := range map[string]*Service{
-		"a.example.com": a, "x.w.example.com": w, "w.example.com": f, "y.x.w.example.com": f, "": f, "b.example.com": f,
+		"a.example.com": a, "x.w.example.com": w, "w.example.com": nil, "y.x.w.example.com": nil, "": nil, "b.example.com": nil,
 	} {
-		if got := e.pick(name); got != want {
-			t.Errorf("pick(%q) = %s, want %s", name, got.name, want.name)
+		if got := e.named(name); got != want {
+			t.Errorf("named(%q) = %v, want %v", name, got, want)
 		}
+	}
+	if e.fallback != f {
+		t.Errorf("fallback %v", e.fallback)
 	}
 }

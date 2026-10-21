@@ -173,7 +173,8 @@ Status: `todo`, `doing` or `done`.
 | I50 | TCP proxying | I05 | done |
 | I51 | UDP proxying | I50 | done |
 | I52 | SNI routing and PROXY protocol | I50 | done |
-| I53 | One port, many protocols; SOCKS and CONNECT | I52 | todo |
+| I53 | One port, many protocols; SOCKS and CONNECT | I52 | done |
+| I53b | The CONNECT forward proxy | I53 | done |
 | I54 | Upstream TLS | I18 | todo |
 | I55 | M3 exit tests | I37–I54 | todo |
 | **M4** | | | |
@@ -829,6 +830,17 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
 - **Done when**: one port serves HTTP/1.1, h2, TLS passthrough and SOCKS in an e2e test.
 - **Touches**: `listener`, `l4`.
 - **Read**: fib `mux`, `multiproto`, `socks`, `http/connect_proxy.go`.
+- **Split**: the CONNECT handler went to I53b, since fib's `ConnectProxy` first had to stop waiting
+  for its dial on the worker.
+
+### I53b The CONNECT forward proxy
+
+- **Do**: a `forward_proxy` route handler that serves CONNECT over HTTP/1.1, HTTP/2 and HTTP/3 with
+  the access rules SOCKS has, on fib's `ConnectProxy`, made not to wait for its dial (A37) and given
+  an idle timeout (A36).
+- **Done when**: tests tunnel through it over HTTP/1.1 and h2c, refuse clients and destinations the
+  rules do not allow, a host name by the address it resolves to too, and close idle tunnels.
+- **Touches**: `handler/forward`, `l4`.
 
 ### I54 Upstream TLS
 

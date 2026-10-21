@@ -48,6 +48,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
 | A34 | A UDP peer's own idle timeout, or none | done, `11de9eb` | 10, 11 | I51 |
 | A35 | A connection's peer address replaced, as a PROXY header gives it | done, `530d222` | 13 | I52 |
+| A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` (branch `feat/a36-a37-forward-proxy`) | 10 | I53, I53b |
+| A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` (branch `feat/a36-a37-forward-proxy`) | 1 | I53b |
 
 ## Evidence
 
@@ -1018,3 +1020,45 @@ and invalid or zoned addresses are left alone. fib's `TestSetRemoteAddrPort`.
 **How fit uses it.** `l4.AcceptProxy` wraps the HTTP (and TLS) handler of a listener with
 `proxy_protocol`, and `l4` sets it on a tcp listener's connection, so `ip_hash` and the PROXY
 header it sends on name the client.
+
+## A36: An idle timeout for SOCKS and CONNECT relays
+
+**Status.** Done (`4f1c3e9` on fib's branch `feat/a36-a37-forward-proxy`, for `main`), made by fit's
+session.
+
+**Problem.** A relayed SOCKS CONNECT and a `ConnectProxy` tunnel stayed open as long as both peers
+kept their connections, with nothing passing: rule 10 asks for an idle timeout on every exchange
+with the outside, and fit's own tcp relays have one.
+
+**Evidence.** I53's `TestSOCKSIdleTimeout` and I53b's `TestConnectIdleTimeout`: without it, a
+client that connects and goes quiet holds two sockets until the peers time out on their own.
+
+**As built.** `socks.Config.IdleTimeout` and `ConnectProxyConfig.IdleTimeout`: a relay that carries
+nothing either way for that long closes both sides; zero or less keeps the old behaviour. Each relay
+keeps the time it last carried something, an atomic store per callback, and one timer that looks
+at it, from the reply (or the tunnel's open) until a side closes. fib's `TestRelayIdleTimeout` and
+`TestConnectProxyIdleTimeout`.
+
+**How fit uses it.** `l4.NewSOCKS` and the `forward_proxy` handler set it from the rules'
+`idle_timeout` (5 minutes by default).
+
+## A37: `ConnectProxy` answers from its dial's callback
+
+**Status.** Done (`4f1c3e9` on fib's branch `feat/a36-a37-forward-proxy`, for `main`), made by fit's
+session.
+
+**Problem.** `ConnectProxy.ServeHTTP` waited on a channel for its dial, on the goroutine serving
+the request, which is a fib worker: rule 1. A destination slow to answer held a worker for up to
+the dial timeout, and enough of them stalled every request on the engine.
+
+**Evidence.** Its own documentation said so ("its handler waits for the dial"); I53b serves CONNECT
+on fit's listeners, which share one task pool with every route.
+
+**As built.** `ServeHTTP` retains the request and returns; the dial's callback opens the tunnel with
+`Context.Connect`, or answers 502, 504 or 400, and releases it (`Connect` on a retained request
+after its handler returned is A28's). fib's `TestConnectProxyDoesNotWait` holds the dial until the
+handler has returned.
+
+**How fit uses it.** The `forward_proxy` handler is a `ConnectProxy` whose `Allow` checks the client
+and the destination, and whose `Dial` is `l4.Rules.Dial`, which refuses a host name whose address
+the rules refuse.

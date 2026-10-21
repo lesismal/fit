@@ -421,6 +421,9 @@ func (Clients) OnData(c *fib.Connection, data []byte) {
 		a.fromClient(data)
 	case *opening:
 		a.data(c, data)
+	case handoff:
+		c.SetAttachment(nil)
+		handOff(c, a.h, data)
 	}
 }
 

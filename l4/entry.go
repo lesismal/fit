@@ -54,9 +54,8 @@ func (e *Entry) Add(s *Service, names []string) {
 // routes reports whether the entry picks services by SNI.
 func (e *Entry) routes() bool { return e.exact != nil || e.wild != nil }
 
-// pick returns the service for the server name name, which "" is for a
-// client that asked for none or did not speak TLS.
-func (e *Entry) pick(name string) *Service {
+// named returns the service whose server_names hold name, or nil.
+func (e *Entry) named(name string) *Service {
 	if s := e.exact[name]; s != nil {
 		return s
 	}
@@ -65,7 +64,7 @@ func (e *Entry) pick(name string) *Service {
 			return s
 		}
 	}
-	return e.fallback
+	return nil
 }
 
 // Open hands c, a connection one of the entry's listeners has just
@@ -74,8 +73,18 @@ func (e *Entry) pick(name string) *Service {
 // it comes from a trusted address, its PROXY header is read, and when the
 // entry routes by SNI, its ClientHello. release is called once, when the
 // connection is over.
-func (e *Entry) Open(c *fib.Connection, release func()) {
+//
+// term, when not nil, is the TLS handler of a listener that tells its
+// protocols apart and has tls, and c is a TLS connection: one whose server
+// name no service's server_names hold is handed to term, which terminates
+// it, rather than to the service without server_names.
+func (e *Entry) Open(c *fib.Connection, release func(), term fib.Handler) {
 	proxy := !c.IsUDP() && len(e.trusted) > 0 && e.trusted.Contains(c.RemoteAddrPort().Addr())
+	if term != nil && !proxy && !e.routes() {
+		release()
+		HandOff(c, term)
+		return
+	}
 	if !proxy && (!e.routes() || c.IsUDP()) {
 		if e.fallback == nil {
 			_ = c.Close()
@@ -85,7 +94,7 @@ func (e *Entry) Open(c *fib.Connection, release func()) {
 		e.fallback.start(c, release, nil, netip.AddrPort{})
 		return
 	}
-	c.SetAttachment(&opening{e: e, release: release, proxy: proxy})
+	c.SetAttachment(&opening{e: e, release: release, proxy: proxy, term: term})
 	_ = c.SetReadDeadline(time.Now().Add(OpeningTimeout))
 }
 
@@ -95,6 +104,7 @@ type opening struct {
 	e       *Entry
 	release func()
 	proxy   bool
+	term    fib.Handler
 	buf     []byte
 	// dst is where the PROXY header says the client connected to.
 	dst netip.AddrPort
@@ -134,13 +144,40 @@ func (o *opening) data(c *fib.Connection, data []byte) {
 			return
 		}
 	}
-	s := o.e.pick(name)
+	s := o.e.named(name)
+	if s == nil && o.term != nil {
+		_ = c.SetReadDeadline(time.Time{})
+		o.release()
+		c.SetAttachment(nil)
+		handOff(c, o.term, o.buf)
+		return
+	}
+	if s == nil {
+		s = o.e.fallback
+	}
 	if s == nil {
 		_ = c.Close()
 		return
 	}
 	_ = c.SetReadDeadline(time.Time{})
 	s.start(c, o.release, o.buf, o.dst)
+}
+
+// HandOff has h serve c, from the OnOpen of the handler that serves it now,
+// whose OnData must be Clients': h takes over with the data that comes
+// next, as if it had accepted c itself.
+func HandOff(c *fib.Connection, h fib.Handler) { c.SetAttachment(handoff{h}) }
+
+// handoff is a connection HandOff gives to h at its first data.
+type handoff struct{ h fib.Handler }
+
+// handOff has h serve c, which has sent data so far.
+func handOff(c *fib.Connection, h fib.Handler, data []byte) {
+	c.SetHandler(h)
+	h.OnOpen(c)
+	if len(data) > 0 {
+		h.OnData(c, data)
+	}
 }
 
 // Conns returns how many connections and udp sessions the entry's services

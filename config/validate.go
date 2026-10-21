@@ -81,14 +81,21 @@ func (c *Config) Validate() Errors {
 				add(l.At.Field("protocols").Index(i), "h3 needs tls")
 			case p == ProtocolH2C && l.TLS != nil:
 				add(l.At.Field("protocols").Index(i), "h2c is HTTP/2 in the clear, which a listener with tls does not serve; use h2")
-			case (p == ProtocolTCP || p == ProtocolUDP) && len(l.Protocols) > 1:
-				add(l.At.Field("protocols").Index(i), "a %s listener serves %s alone: list %s without other protocols", p, strings.ToUpper(p), p)
-			case p == ProtocolTCP && l.TLS != nil:
-				add(l.At.Field("tls"), "a tcp listener proxies its connections as they are, TLS and all: it takes no tls")
-			case p == ProtocolUDP && l.TLS != nil:
-				add(l.At.Field("tls"), "a udp listener proxies its datagrams as they are: it takes no tls")
+			case p == ProtocolUDP && len(l.Protocols) > 1:
+				add(l.At.Field("protocols").Index(i), "a udp listener serves UDP alone: list udp without other protocols")
+			case p == ProtocolSOCKS && l.SOCKS == nil:
+				add(l.At.Field("protocols").Index(i), "socks needs the listener's socks, which says who may use it")
 			}
 			seen[p] = true
+		}
+		if l.TLS != nil && !ServesHTTP(l.Protocols) {
+			add(l.At.Field("tls"), "tls serves the listener's HTTP, and this one serves none: tcp and udp are proxied as they are, TLS and all")
+		}
+		if l.SOCKS != nil {
+			if !slices.Contains(l.Protocols, ProtocolSOCKS) {
+				add(l.SOCKS.At, "socks is for a listener whose protocols include socks")
+			}
+			checkForwardProxy(l.SOCKS, add)
 		}
 		if pp := l.ProxyProtocol; pp != nil {
 			if nets := l.networks(); len(nets) == 1 && nets[0] == "udp" {
@@ -139,13 +146,22 @@ func (c *Config) Validate() Errors {
 		}
 	}
 
-	// l4 holds the tcp and udp listeners, which services serve.
+	// l4 holds the listeners that serve tcp or udp, which services serve,
+	// and noRoutes what serves the listeners that serve no HTTP.
 	l4 := map[string]string{}
+	noRoutes := map[string]string{}
 	for _, l := range c.Listeners {
 		for _, p := range [...]string{ProtocolTCP, ProtocolUDP} {
 			if slices.Contains(l.Protocols, p) {
 				l4[l.Name] = p
 			}
+		}
+		switch {
+		case ServesHTTP(l.Protocols):
+		case l4[l.Name] != "":
+			noRoutes[l.Name] = "a " + l4[l.Name] + " listener, which a service serves"
+		default:
+			noRoutes[l.Name] = "a socks listener"
 		}
 	}
 	routes := map[string]bool{}
@@ -162,8 +178,8 @@ func (c *Config) Validate() Errors {
 		for i, name := range r.Listeners {
 			if !listeners[name] {
 				add(r.At.Field("listeners").Index(i), "there is no listener named %q", name)
-			} else if p := l4[name]; p != "" {
-				add(r.At.Field("listeners").Index(i), "%q is a %s listener, which a service serves, not routes", name, p)
+			} else if what := noRoutes[name]; what != "" {
+				add(r.At.Field("listeners").Index(i), "%q is %s, not routes: it serves no HTTP", name, what)
 			}
 		}
 		if r.Match != nil {
@@ -280,7 +296,7 @@ func (c *Config) Validate() Errors {
 			case !listeners[name]:
 				add(sv.At.Field("listeners").Index(i), "there is no listener named %q", name)
 			case l4[name] == "":
-				add(sv.At.Field("listeners").Index(i), "%q is not a tcp or udp listener: a service takes the connections of listeners whose protocols are [\"tcp\"] or [\"udp\"]", name)
+				add(sv.At.Field("listeners").Index(i), "%q is not a tcp or udp listener: a service takes the connections of listeners whose protocols include tcp, or are [\"udp\"]", name)
 			case l4[name] == ProtocolUDP && taken:
 				add(sv.At.Field("listeners").Index(i), "listener %q is already service %q's", name, other)
 			case l4[name] == ProtocolUDP:
@@ -474,6 +490,45 @@ var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$`)
 // HTTP-01 challenge, which acme.challenges allows when left out.
 func (c *Config) answersHTTP01() bool {
 	return c.ACME == nil || len(c.ACME.Challenges) == 0 || slices.Contains(c.ACME.Challenges, ChallengeHTTP01)
+}
+
+// Check checks f, as Validate checks a listener's socks: for the params of
+// a handler that takes the same rules.
+func (f *ForwardProxy) Check() Errors {
+	var errs Errors
+	checkForwardProxy(f, func(v Value, format string, args ...any) { errs = append(errs, v.Errorf(format, args...)) })
+	return errs
+}
+
+// checkForwardProxy checks who may use a forward proxy, and where to.
+func checkForwardProxy(f *ForwardProxy, add func(Value, string, ...any)) {
+	if len(f.Clients) == 0 {
+		add(f.At.Field("clients"), "at least one address is needed")
+	}
+	for i, s := range f.Clients {
+		if _, err := router.ParsePrefix(s); err != nil {
+			add(f.At.Field("clients").Index(i), "%q is not an IP address or CIDR range", s)
+		}
+	}
+	for _, field := range [...]string{"allow", "deny"} {
+		dests := f.Allow
+		if field == "deny" {
+			dests = f.Deny
+		}
+		for i, d := range dests {
+			if _, err := router.ParsePrefix(d); err == nil {
+				continue
+			}
+			if msg := checkHost(d); msg != "" || net.ParseIP(strings.Trim(d, "[]")) != nil {
+				add(f.At.Field(field).Index(i), "%q is not a host name, an IP address or a CIDR range", d)
+			}
+		}
+	}
+	for i, p := range f.Ports {
+		if p < 1 || p > 65535 {
+			add(f.At.Field("ports").Index(i), "%d is not a port", p)
+		}
+	}
 }
 
 func checkHost(host string) string {

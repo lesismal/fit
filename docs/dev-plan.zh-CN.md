@@ -163,7 +163,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I50 | TCP 代理 | I05 | done |
 | I51 | UDP 代理 | I50 | done |
 | I52 | SNI 分流与 PROXY protocol | I50 | done |
-| I53 | 一个端口多种协议；SOCKS 与 CONNECT | I52 | todo |
+| I53 | 一个端口多种协议；SOCKS 与 CONNECT | I52 | done |
+| I53b | CONNECT 正向代理 | I53 | done |
 | I54 | 上游 TLS | I18 | todo |
 | I55 | M3 退出测试 | I37–I54 | todo |
 | **M4** | | | |
@@ -733,6 +734,14 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 - **完成标准**：e2e 测试中一个端口同时服务 HTTP/1.1、h2、TLS 透传和 SOCKS。
 - **涉及**：`listener`、`l4`。
 - **参考**：fib `mux`、`multiproto`、`socks`、`http/connect_proxy.go`。
+- **拆分**：CONNECT handler 移到 I53b，因为 fib 的 `ConnectProxy` 要先改成不在 worker 上等拨号。
+
+### I53b CONNECT 正向代理
+
+- **做什么**：`forward_proxy` 路由 handler，基于 fib 的 `ConnectProxy`（改为不等拨号，A37；加上空闲超时，A36），在 HTTP/1.1、
+  HTTP/2 和 HTTP/3 上提供 CONNECT，访问规则与 SOCKS 相同。
+- **完成标准**：测试经它在 HTTP/1.1 和 h2c 上建立隧道，拒绝规则不允许的客户端和目标（主机名也按解析出的地址判断），并关闭空闲隧道。
+- **涉及**：`handler/forward`、`l4`。
 
 ### I54 上游 TLS
 

@@ -46,6 +46,8 @@
 | A33 | 读取被暂停时看到的对端结束不再丢失 | 已完成，`9ab22e8` | 8、9 | I50 |
 | A34 | UDP 对端自己的空闲超时，或不超时 | 已完成，`11de9eb` | 10、11 | I51 |
 | A35 | 按 PROXY 头替换连接的对端地址 | 已完成，`530d222` | 13 | I52 |
+| A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9`（分支 `feat/a36-a37-forward-proxy`） | 10 | I53、I53b |
+| A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9`（分支 `feat/a36-a37-forward-proxy`） | 1 | I53b |
 
 ## 证据
 
@@ -758,3 +760,35 @@ UDP 连接以及无效或带 zone 的地址不受影响。fib 的 `TestSetRemote
 
 **fit 如何使用。** `l4.AcceptProxy` 包装配置了 `proxy_protocol` 的监听器的 HTTP（及 TLS）处理器；`l4` 对 tcp 监听器的连接设置它，
 使 `ip_hash` 和它向上游发送的 PROXY 头都指向客户端。
+
+## A36：SOCKS 与 CONNECT 中继的空闲超时
+
+**状态。** 已完成（fib 分支 `feat/a36-a37-forward-proxy` 的 `4f1c3e9`，待合入 `main`），由 fit 的会话实现。
+
+**问题。** 中继中的 SOCKS CONNECT 和 `ConnectProxy` 隧道，只要两端都不关连接，即使什么都不传也一直保持：规则 10 要求每个对外交互都有
+空闲超时，fit 自己的 tcp 中继也有。
+
+**证据。** I53 的 `TestSOCKSIdleTimeout` 与 I53b 的 `TestConnectIdleTimeout`：没有它，连上后不再说话的客户端会占住两个 socket，
+直到两端自己超时。
+
+**实现。** `socks.Config.IdleTimeout` 与 `ConnectProxyConfig.IdleTimeout`：中继在这么长时间里双向都没有数据，就关闭两端；零或负值
+保持原有行为。每个中继记下最后一次传数据的时间（每次回调一次原子写），由一个定时器查看，从应答（或隧道打开）起到任一端关闭为止。
+fib 的 `TestRelayIdleTimeout` 与 `TestConnectProxyIdleTimeout`。
+
+**fit 如何使用。** `l4.NewSOCKS` 与 `forward_proxy` 处理器按规则的 `idle_timeout`（默认 5 分钟）设置它。
+
+## A37：`ConnectProxy` 在拨号回调里应答
+
+**状态。** 已完成（fib 分支 `feat/a36-a37-forward-proxy` 的 `4f1c3e9`，待合入 `main`），由 fit 的会话实现。
+
+**问题。** `ConnectProxy.ServeHTTP` 在服务请求的 goroutine 上用 channel 等拨号结果，而那正是 fib 的 worker：违反规则 1。应答慢的目标
+最多会占住一个 worker 直到拨号超时，足够多时整个引擎的请求都会停住。
+
+**证据。** 它自己的文档就这么写（“its handler waits for the dial”）；I53b 在 fit 的监听器上提供 CONNECT，而这些监听器与所有路由共用
+一个任务池。
+
+**实现。** `ServeHTTP` retain 请求后立即返回；拨号回调用 `Context.Connect` 打开隧道，或应答 502、504、400，然后 release（处理器
+返回后对 retain 的请求调用 `Connect` 由 A28 提供）。fib 的 `TestConnectProxyDoesNotWait` 把拨号压到处理器返回之后。
+
+**fit 如何使用。** `forward_proxy` 处理器是一个 `ConnectProxy`：它的 `Allow` 检查客户端和目标，`Dial` 是 `l4.Rules.Dial`，后者拒绝
+解析到规则所拒地址的主机名。

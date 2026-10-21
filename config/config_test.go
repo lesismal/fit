@@ -90,7 +90,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "enum",
 			doc:  `{"listeners": [{"name": "a", "address": ":1", "protocols": ["http/1.1", "spdy"]}]}`,
-			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3", "tcp", "udp"`},
+			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3", "tcp", "udp", "socks"`},
 		},
 		{
 			name: "null for a list",
@@ -287,16 +287,37 @@ func TestValidate(t *testing.T) {
   {"name": "x", "listeners": [], "upstream": "db"}
 ]}`,
 			want: []string{
-				`3:67: listeners[1].protocols[1]: a tcp listener serves TCP alone: list tcp without other protocols`,
-				`5:71: listeners[3].tls: a tcp listener proxies its connections as they are, TLS and all: it takes no tls`,
-				`8:27: routes[0].listeners[0]: "raw" is a tcp listener, which a service serves, not routes`,
-				`10:39: services[0].listeners[1]: "web" is not a tcp or udp listener: a service takes the connections of listeners whose protocols are ["tcp"] or ["udp"]`,
+				`5:71: listeners[3].tls: tls serves the listener's HTTP, and this one serves none: tcp and udp are proxied as they are, TLS and all`,
+				`8:27: routes[0].listeners[0]: "raw" is a tcp listener, which a service serves, not routes: it serves no HTTP`,
+				`10:39: services[0].listeners[1]: "web" is not a tcp or udp listener: a service takes the connections of listeners whose protocols include tcp, or are ["udp"]`,
 				`10:46: services[0].listeners[2]: there is no listener named "nope"`,
 				`11:12: services[1].name: another service is already named "pg"`,
 				`11:32: services[1].listeners[0]: listener "raw" is already service "pg"'s: services that share a tcp listener take the connections of their server_names, and only one of them may have none`,
 				`11:52: services[1].upstream: there is no upstream named "none"`,
 				`12:30: services[2].listeners: a service needs at least one tcp or udp listener`,
 				`4:55: listeners[2].protocols: no service takes this tcp listener's connections: list it in a service's listeners`,
+			},
+		},
+		{
+			name: "listeners of many protocols, and socks",
+			doc: `{"listeners": [
+  {"name": "one", "address": ":443", "protocols": ["http/1.1", "h2", "tcp", "socks"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}, "socks": {"clients": ["10.0.0.0/8"]}},
+  {"name": "nosocks", "address": ":1080", "protocols": ["socks"]},
+  {"name": "extra", "address": ":1081", "socks": {"clients": [], "allow": ["x..y", "*.ok.example", "10.1.0.0/16", "nope/8"], "deny": ["1.2.3.4"], "ports": [0, 443, 70000]}},
+  {"name": "s", "address": ":1082", "protocols": ["socks"], "socks": {"clients": ["bad"]}}
+], "upstreams": [{"name": "a", "addresses": ["a:1"]}],
+"services": [{"name": "pass", "listeners": ["one"], "upstream": "a", "server_names": ["a.example.com"]}],
+"routes": [{"listeners": ["one", "s"], "handler": {"module": "respond"}}]}`,
+			want: []string{
+				`3:57: listeners[1].protocols[0]: socks needs the listener's socks, which says who may use it`,
+				`4:50: listeners[2].socks: socks is for a listener whose protocols include socks`,
+				`4:62: listeners[2].socks.clients: at least one address is needed`,
+				`4:76: listeners[2].socks.allow[0]: "x..y" is not a host name, an IP address or a CIDR range`,
+				`4:115: listeners[2].socks.allow[3]: "nope/8" is not a host name, an IP address or a CIDR range`,
+				`4:157: listeners[2].socks.ports[0]: 0 is not a port`,
+				`4:165: listeners[2].socks.ports[2]: 70000 is not a port`,
+				`5:83: listeners[3].socks.clients[0]: "bad" is not an IP address or CIDR range`,
+				`8:34: routes[0].listeners[1]: "s" is a socks listener, not routes: it serves no HTTP`,
 			},
 		},
 		{
@@ -314,8 +335,7 @@ func TestValidate(t *testing.T) {
 			want: []string{
 				`4:31: listeners[2].address: listener "dns" already listens on :53`,
 				`5:53: listeners[3].protocols[0]: a udp listener serves UDP alone: list udp without other protocols`,
-				`5:60: listeners[3].protocols[1]: a tcp listener serves TCP alone: list tcp without other protocols`,
-				`6:69: listeners[4].tls: a udp listener proxies its datagrams as they are: it takes no tls`,
+				`6:69: listeners[4].tls: tls serves the listener's HTTP, and this one serves none: tcp and udp are proxied as they are, TLS and all`,
 				`8:31: listeners[6].address: listener "web" already listens on :443`,
 			},
 		},

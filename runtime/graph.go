@@ -133,13 +133,20 @@ type Listener struct {
 	Requests  []*observe.RequestMetrics
 	Unmatched *observe.RequestMetrics
 
-	// L4 is what a tcp or udp listener's connections are proxied by, or nil
-	// for a listener of HTTP.
+	// L4 is what the connections of a listener that serves tcp or udp are
+	// proxied by, or nil for one that serves neither.
 	L4 *l4.Entry
-	// ProxyTrusted, for a listener of HTTP, are the addresses it takes PROXY
-	// protocol headers from; none when it is empty.
+	// ProxyTrusted, for a listener that does not serve tcp or udp alone, are
+	// the addresses it takes PROXY protocol headers from, before anything
+	// else; none when it is empty. L4 reads those of one that does.
 	ProxyTrusted l4.Trusted
+	// SOCKS, for a listener that serves socks, is who may use it and where
+	// to.
+	SOCKS *l4.Rules
 }
+
+// ServesHTTP reports whether l serves HTTP, and so routes.
+func (l *Listener) ServesHTTP() bool { return config.ServesHTTP(l.Protocols) && l.RedirectHTTPS == 0 }
 
 // RequestMetrics returns where a request route answered on l is counted,
 // or nil; route is nil for a request no route takes.
@@ -241,6 +248,12 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			}
 		}
 	}
+	// A listener that serves tcp beside other protocols takes the PROXY
+	// header before it tells them apart; its entry reads none.
+	l4Alone := map[string]bool{}
+	for _, lc := range c.Listeners {
+		l4Alone[lc.Name] = !config.Sniffs(lc.Protocols)
+	}
 	entries := map[string]*l4.Entry{}
 	for i := range c.Services {
 		sc := &c.Services[i]
@@ -249,7 +262,11 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		g.modules = append(g.modules, svc)
 		for _, name := range sc.Listeners {
 			if entries[name] == nil {
-				entries[name] = l4.NewEntry(trusted[name])
+				var t l4.Trusted
+				if l4Alone[name] {
+					t = trusted[name]
+				}
+				entries[name] = l4.NewEntry(t)
 			}
 			entries[name].Add(svc, sc.ServerNames)
 		}
@@ -306,18 +323,21 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 			}
 		}
 		l.L4 = entries[lc.Name]
-		if l.L4 == nil {
+		if l.L4 == nil || !l4Alone[lc.Name] {
 			l.ProxyTrusted = trusted[lc.Name]
 		}
+		if lc.SOCKS != nil {
+			l.SOCKS = l4.NewRules(lc.SOCKS)
+		}
 		for i, rc := range c.Routes {
-			if l.RedirectHTTPS != 0 || l.L4 != nil {
+			if !l.ServesHTTP() {
 				break // it serves no routes
 			}
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
 				l.Routes = append(l.Routes, routes[i])
 			}
 		}
-		if m := g.Metrics; m != nil && l.L4 == nil {
+		if m := g.Metrics; m != nil && config.ServesHTTP(l.Protocols) {
 			l.Requests = make([]*observe.RequestMetrics, len(routes))
 			for _, r := range l.Routes {
 				l.Requests[r.Index] = m.Requests(l.Name, metricsName(r))

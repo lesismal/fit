@@ -32,6 +32,7 @@ import (
 	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 	"github.com/lesismal/fib/http3"
+	"github.com/lesismal/fib/mux"
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
@@ -77,9 +78,11 @@ type binding struct {
 	// with; a reload that changes them binds it anew.
 	maxHeaderBytes int
 	maxBodyBytes   int64
-	// proxyTrusted are the addresses its HTTP takes PROXY headers from; a
-	// reload that changes them binds it anew.
+	// proxyTrusted are the addresses its HTTP takes PROXY headers from, and
+	// socks identifies its SOCKS rules; a reload that changes either binds
+	// it anew.
 	proxyTrusted l4.Trusted
+	socks        string
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -96,7 +99,7 @@ func (b *binding) same(l *runtime.Listener) bool {
 	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) &&
 		(b.certs.Load() != nil) == (l.Certificates != nil) &&
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
-		slices.Equal(b.proxyTrusted, l.ProxyTrusted) &&
+		slices.Equal(b.proxyTrusted, l.ProxyTrusted) && b.socks == l.SOCKS.Key() &&
 		b.clientAuth == clientAuthSum(l)
 }
 
@@ -178,7 +181,7 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
-		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted}
+		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key()}
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
@@ -223,6 +226,9 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 	}
 	h3 := slices.Contains(l.Protocols, config.ProtocolH3)
 	tcp := slices.ContainsFunc(l.Protocols, func(p string) bool { return p != config.ProtocolH3 })
+	httpTCP := slices.ContainsFunc(l.Protocols, func(p string) bool {
+		return p == config.ProtocolHTTP1 || p == config.ProtocolH2C || p == config.ProtocolH2
+	})
 	udpAddress := l.Address
 	var tcpDispatcher *dispatcher
 	if tcp {
@@ -231,15 +237,24 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 				return fail(err)
 			}
 		}
-		tcpDispatcher = &dispatcher{rt: s.rt, name: l.Name}
-		if h3 {
-			tcpDispatcher.announceH3()
+		var h fib.Handler
+		if httpTCP {
+			tcpDispatcher = &dispatcher{rt: s.rt, name: l.Name}
+			if h3 {
+				tcpDispatcher.announceH3()
+			}
+			h = fibhttp.NewHandlerWithConfig(httpConfig(l), tcpDispatcher)
+			if tlsConfig != nil {
+				// fib's TLS hands the HTTP handler plaintext, which serves
+				// HTTP/2 or HTTP/1.1 as ALPN chose.
+				h = fibtls.NewServer(tlsConfig, h)
+			}
 		}
-		var h fib.Handler = fibhttp.NewHandlerWithConfig(httpConfig(l), tcpDispatcher)
-		if tlsConfig != nil {
-			// fib's TLS hands the HTTP handler plaintext, which serves HTTP/2
-			// or HTTP/1.1 as ALPN chose.
-			h = fibtls.NewServer(tlsConfig, h)
+		switch {
+		case config.Sniffs(l.Protocols):
+			h = s.sniff(l, h, tlsConfig != nil)
+		case l.SOCKS != nil:
+			h = l4.NewSOCKS(l.SOCKS)
 		}
 		if len(l.ProxyTrusted) > 0 {
 			// The PROXY header comes first, before TLS.
@@ -272,6 +287,46 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 		b.addr = b.udpAddr
 	}
 	return b, nil
+}
+
+// sniff returns the handler of a listener that serves more than one of
+// HTTP, tcp and socks on its port, which tells them apart by what a client
+// sends first, with fib's mux: a TLS ClientHello goes to the service whose
+// server_names hold its name, or else is terminated, as HTTPS, when the
+// listener has tls, or else goes to its service without server_names; a
+// SOCKS greeting to SOCKS; an HTTP request, on a listener in the clear, to
+// HTTP; and the rest to the service without server_names, or it is closed.
+// web is the listener's HTTP handler, with its TLS when tls says it has.
+func (s *Server) sniff(l *runtime.Listener, web fib.Handler, tls bool) fib.Handler {
+	var routes []mux.Route
+	var fallback fib.Handler
+	switch {
+	case slices.Contains(l.Protocols, config.ProtocolTCP):
+		var term fib.Handler
+		if tls {
+			term = web
+		}
+		routes = append(routes, mux.Route{Match: mux.TLS(),
+			Handler: &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}, term: term}})
+		fallback = &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
+	case tls:
+		routes = append(routes, mux.Route{Match: mux.TLS(), Handler: web})
+	}
+	if l.SOCKS != nil {
+		routes = append(routes, mux.Route{Match: mux.SOCKS(), Handler: l4.NewSOCKS(l.SOCKS)})
+	}
+	if web != nil && !tls {
+		h1, h2c := slices.Contains(l.Protocols, config.ProtocolHTTP1), slices.Contains(l.Protocols, config.ProtocolH2C)
+		match := mux.HTTP()
+		switch {
+		case !h2c:
+			match = mux.HTTP1()
+		case !h1:
+			match = mux.HTTP2()
+		}
+		routes = append(routes, mux.Route{Match: match, Handler: web})
+	}
+	return mux.NewWithConfig(mux.Config{Fallback: fallback, Timeout: l4.OpeningTimeout}, routes...)
 }
 
 // addBinding adds a binding to the engine and returns its index and the
@@ -538,6 +593,10 @@ func (s *Server) close() error {
 type l4Listener struct {
 	l4.Clients
 	dispatcher dispatcher
+	// term, on a listener with tls that tells its protocols apart, is its
+	// HTTPS handler, which takes the TLS connections whose server name no
+	// service's server_names hold.
+	term fib.Handler
 }
 
 func (t *l4Listener) OnOpen(c *fib.Connection) {
@@ -547,12 +606,17 @@ func (t *l4Listener) OnOpen(c *fib.Connection) {
 		return
 	}
 	l := t.dispatcher.listener(g)
-	if l == nil || l.L4 == nil {
+	switch {
+	case l != nil && l.L4 != nil:
+		l.L4.Open(c, g.Release, t.term)
+	case l != nil && t.term != nil:
+		// No service: the listener's own TLS serves every TLS connection.
+		g.Release()
+		l4.HandOff(c, t.term)
+	default:
 		g.Release()
 		_ = c.Close()
-		return
 	}
-	l.L4.Open(c, g.Release)
 }
 
 // dispatcher serves one listener's requests from whatever graph is current.
