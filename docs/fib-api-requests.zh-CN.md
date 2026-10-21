@@ -35,8 +35,8 @@
 | A22 | 客户端连接的空闲计时不必每个请求重置定时器 | 已完成，`7f632cb`（v1.5.6 之后的 main） | 12 | R07f |
 | A23 | `Engine.Close` 切断的连接也运行 `OnClose` | 已完成，v1.5.6 | 11、13 | — |
 | A24 | taskpool 新建的环不写任何单元 | 已完成，`a6d78cd`（v1.5.6 之后的 main） | 11 | — |
-| A25 | 按请求限制请求体大小，流式的也包括在内 | 待办 | 7、11 | I39 |
-| A26 | 一个 Context 上可以有多个 `OnCancel` 回调 | 待办 | 1、12 | I39 |
+| A25 | 按请求限制请求体大小，流式的也包括在内 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 7、11 | I39 |
+| A26 | 一个 Context 上可以有多个 `OnCancel` 回调 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 1、12 | I39 |
 
 ## 证据
 
@@ -554,7 +554,18 @@ GOMAXPROCS=4 时峰值占用为 1.25GB，而 `TestHostHeader` 这类测试的 Go
 
 ## A25：按请求限制请求体大小，流式的也包括在内
 
-**状态。** 待办。
+**状态。** 已在 fib 的 `main` 上完成（`ad0d175`，测试在 `cfb4f09` 中改为稳定），`cfb4f09` 的 CI 全部通过
+（run 39569138260）；fit 按提交使用它（`v1.5.7-0.20261021080904-cfb4f09f0283`，规则 19）。
+
+**实际实现。** `func (c *Context) LimitBody(n int64) error`，在服务该请求的 goroutine 上、取请求体之前且回应之前调用；
+`n` 为负时什么也不做，`n` 为 0 表示不允许请求体。`n` 与 `MaxBodyBytes`（整体读取的请求体）或 `MaxStreamedBodyBytes`
+（流式请求体）取较小者。已知超过 `n` 的请求体——`Content-Length` 超过 `n`、整体到达且更长、或流式且已到达超过 `n`
+字节——立即拒绝：请求体以 `ErrBodyTooLarge` 结束，响应尚未开始时 fib 回应 413（HTTP/1 连接在响应后以 lingering close
+关闭；HTTP/2 和 HTTP/3 只拒绝该流），`LimitBody` 返回 `ErrBodyTooLarge`。否则返回 nil，没有声明长度的请求体
+（HTTP/1 的 chunked，没有 content-length 的 HTTP/2 和 HTTP/3）超过 `n` 时以 `ErrBodyTooLarge` 结束，`Read` 和
+`OnBody` 回调都能看到，与超过 `MaxStreamedBodyBytes` 时一样。流式请求体因大小被结束、又没有被回应就放手的请求，
+回应 413 而不是空的 200（超过 `MaxStreamedBodyBytes` 时同样如此）。fib 的 `TestLimitBody` 覆盖 HTTP/1.1、h2c、
+TLS 上的 h2 和 HTTP/3，服务端整体读取、流式、超过阈值才流式三种配置，以及声明和未声明长度的请求体。
 
 **问题。** fit 的 `body_limit` 中间件把一个路由的请求体限制在低于监听器 `max_body_bytes` 的大小。它可以拒绝
 `Content-Length` 声明过大的请求体，但无法拒绝没有声明长度的请求体（HTTP/1.1 的 chunked，或没有该字段的 HTTP/2 和
@@ -565,11 +576,20 @@ HTTP/3）：这些字节送到处理器的 `OnBody` 回调，中间件看不到�
 `OnBody` 能看到（与超过 `MaxStreamedBodyBytes` 时一样），在响应尚未开始时自行回应 413；`Content-Length` 超过 `n` 时立即
 拒绝。`n` 与连接的限制取较小者。
 
-**fit 如何使用。** `body_limit` 调用 `c.LimitBody(max_bytes)`，不再自己检查 `Content-Length`。
+**fit 如何使用。** `body_limit` 调用 `c.LimitBody(max_bytes)`，返回错误时不再调用下一个处理器（fib 已经回应），
+并不再自己检查 `Content-Length`。
 
 ## A26：一个 Context 上可以有多个 `OnCancel` 回调
 
-**状态。** 待办。
+**状态。** 已在 fib 的 `main` 上完成（`ad0d175`，与 A25 一起；`cfb4f09` 的 CI 通过）；fit 按提交使用它
+（`v1.5.7-0.20261021080904-cfb4f09f0283`，规则 19）。
+
+**实际实现。** `Context.OnCancel(fn func(error))` 签名不变，保留所有注册的回调，按注册的逆序运行。每个回调仍只运行
+一次，在 engine 的 handler 池上运行，从不在响应写出之后运行，请求已结束时注册则立即运行；响应写出后注册什么也不做。
+第一个回调存在字段里，其余的存在一个指针指向的切片里，Context 回收时保留，所以一个或多个回调都不分配内存。fib 的
+`BenchmarkOnCancel`（一次注册加一次回收，在基准测试主机上交替运行 10 轮）：一个回调 7.00 → 7.48ns，多出的部分是
+回收时清除 hooks 多出的一个字；两个回调 10.4 → 14.4ns，而之前第二个会替换第一个；前后都没有内存分配。fib 的测试覆盖
+连接被切断的请求上的多个回调，以及回收后的 Context。
 
 **问题。** `Context.OnCancel` 只保存一个回调：第二个会替换第一个。必须知道客户端离开的中间件（例如 fit 的
 `concurrency_limit` 要归还请求的名额）会在处理器注册自己的回调时失去它的回调，而 fit 的代理对每个请求都会注册。fit 的

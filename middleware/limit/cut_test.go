@@ -1,8 +1,11 @@
 package limit
 
 import (
+	"io"
 	"net"
 	stdhttp "net/http"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: module.Handlers + ".test_hang", New: func() any { return new(hang) }})
+	module.Register(module.Info{ID: module.Handlers + ".test_count", New: func() any { return new(count) }})
 }
 
 // hang answers /ok at once, and keeps every other request until its client
@@ -31,13 +35,34 @@ func (hang) ServeHTTP(c *fibhttp.Context) {
 	c.OnCancel(func(error) { c.Release() })
 }
 
-// TestConcurrencyClientGone checks, over the network, that a request whose
-// client hangs up gives its place back: the third way a request ends.
-func TestConcurrencyClientGone(t *testing.T) {
-	c, err := config.Load([]byte(`{
-  "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "routes": [{"middleware": [{"module": "concurrency_limit", "params": {"max": 1}}], "handler": {"module": "test_hang"}}]
-}`))
+// count answers with how many bytes the request's body had, taking a
+// streamed one with OnBody; a body that fails is let go unanswered.
+type count struct{}
+
+func (count) ServeHTTP(c *fibhttp.Context) {
+	if c.RequestBody() == nil {
+		_ = c.Respond(200, "text/plain", []byte(strconv.Itoa(len(c.Body()))))
+		return
+	}
+	c.Retain()
+	n := 0
+	c.OnBody(func(data []byte, fin bool, err error) {
+		n += len(data)
+		switch {
+		case err != nil:
+			c.Release()
+		case fin:
+			_ = c.Respond(200, "text/plain", []byte(strconv.Itoa(n)))
+			c.Release()
+		}
+	})
+}
+
+// serve starts a listener for config, closed when the test ends, and
+// returns its address.
+func serve(t *testing.T, cfg string) string {
+	t.Helper()
+	c, err := config.Load([]byte(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +76,64 @@ func TestConcurrencyClientGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		_ = s.Close()
 		rt.Close()
-	}()
-	addr := s.Addrs()[0].Addr.String()
+	})
+	return s.Addrs()[0].Addr.String()
+}
+
+// TestBodyOverNetwork checks body_limit on bodies sent chunked, with no
+// declared length, small enough to arrive whole and large enough to
+// stream, and on declared lengths, over HTTP/1.1.
+func TestBodyOverNetwork(t *testing.T) {
+	addr := serve(t, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+  "routes": [{"middleware": [{"module": "body_limit", "params": {"max_bytes": 100000}}], "handler": {"module": "test_count"}}]
+}`)
+	client := &stdhttp.Client{Timeout: 10 * time.Second}
+	for _, tt := range []struct {
+		size    int
+		chunked bool
+		want    int
+	}{
+		{1000, true, 200}, {100000, true, 200}, {100001, true, 413}, {1 << 20, true, 413},
+		{100000, false, 200}, {100001, false, 413},
+	} {
+		var body io.Reader = strings.NewReader(strings.Repeat("x", tt.size))
+		if tt.chunked {
+			body = io.MultiReader(body) // hides the length: sent chunked
+		}
+		req, err := stdhttp.NewRequest("POST", "http://"+addr+"/", body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			// The server may refuse before the client has sent the whole
+			// body, and close: a 413 the client did not get to read.
+			if tt.want == 413 {
+				continue
+			}
+			t.Fatalf("%d bytes, chunked %v: %v", tt.size, tt.chunked, err)
+		}
+		got, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != tt.want {
+			t.Errorf("%d bytes, chunked %v: %d, want %d", tt.size, tt.chunked, res.StatusCode, tt.want)
+		} else if tt.want == 200 && string(got) != strconv.Itoa(tt.size) {
+			t.Errorf("%d bytes, chunked %v: the handler saw %s", tt.size, tt.chunked, got)
+		}
+	}
+}
+
+// TestConcurrencyClientGone checks, over the network, that a request whose
+// client hangs up gives its place back: the third way a request ends.
+func TestConcurrencyClientGone(t *testing.T) {
+	addr := serve(t, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+  "routes": [{"middleware": [{"module": "concurrency_limit", "params": {"max": 1}}], "handler": {"module": "test_hang"}}]
+}`)
 	get := func(path string) int {
 		res, err := (&stdhttp.Client{Timeout: 5 * time.Second}).Get("http://" + addr + path)
 		if err != nil {

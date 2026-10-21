@@ -37,8 +37,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A22 | A client connection's idle clock without a timer reset per request | done, `7f632cb` (main after v1.5.6) | 12 | R07f |
 | A23 | `OnClose` for the connections `Engine.Close` cuts | done, v1.5.6 | 11, 13 | — |
 | A24 | A new taskpool ring that writes none of its cells | done, `a6d78cd` (main after v1.5.6) | 11 | — |
-| A25 | A per-request limit on a request body, streamed or not | open | 7, 11 | I39 |
-| A26 | More than one `OnCancel` callback on a Context | open | 1, 12 | I39 |
+| A25 | A per-request limit on a request body, streamed or not | done, `cfb4f09` (main after v1.5.6) | 7, 11 | I39 |
+| A26 | More than one `OnCancel` callback on a Context | done, `cfb4f09` (main after v1.5.6) | 1, 12 | I39 |
 
 ## Evidence
 
@@ -755,7 +755,23 @@ test was tried, and changed nothing beyond the noise: fit's listener cuts them w
 
 ## A25: A per-request limit on a request body, streamed or not
 
-**Status.** Open.
+**Status.** Done on fib's `main` in `ad0d175`, with its test made reliable in `cfb4f09`, whose CI
+passed on every job (run 39569138260); fit uses it by commit (`v1.5.7-0.20261021080904-cfb4f09f0283`, rule 19).
+
+**As built.** `func (c *Context) LimitBody(n int64) error`, called on the goroutine serving the
+request, before the body is taken and before anything answers it; a negative `n` does nothing, and
+`n` of zero allows no body. The lower of `n` and `MaxBodyBytes` (a body read whole) or
+`MaxStreamedBodyBytes` (one that streams) applies. A body known to be past `n` already — a
+`Content-Length` past it, a body that arrived whole and is longer, or a streamed one that has
+brought more than `n` bytes — is refused at once: the body ends with `ErrBodyTooLarge`, fib answers
+413 unless a response has been begun (closing an HTTP/1 connection with a lingering close; HTTP/2
+and HTTP/3 refuse only the stream), and `LimitBody` returns `ErrBodyTooLarge`. Otherwise it returns
+nil, and a body of no declared length (HTTP/1 chunked, HTTP/2 and HTTP/3 without content-length) is
+ended past `n` with `ErrBodyTooLarge`, which `Read` and the `OnBody` callback see, as past
+`MaxStreamedBodyBytes`. A request whose streamed body was ended for its size and that is let go
+unanswered is answered with 413 rather than the empty 200 (this holds for `MaxStreamedBodyBytes`
+too). fib's `TestLimitBody` covers HTTP/1.1, h2c and h2 over TLS, and HTTP/3, for servers that read
+bodies whole, stream them, and stream them past a threshold, with declared and undeclared lengths.
 
 **Problem.** fit's `body_limit` middleware bounds a route's request bodies below the listener's
 `max_body_bytes`. It can refuse a body whose `Content-Length` declares too much, but not one of no
@@ -769,12 +785,23 @@ fib ends the body with an error the handler's `OnBody` sees (as it does past
 `MaxStreamedBodyBytes`), and answers 413 itself when no response has begun; a `Content-Length`
 past `n` is refused at once. The lower of `n` and the connection's limits applies.
 
-**How fit would use it.** `body_limit` calls `c.LimitBody(max_bytes)` and drops its own
-`Content-Length` check.
+**How fit would use it.** `body_limit` calls `c.LimitBody(max_bytes)`, returns without calling the
+next handler when it reports an error (fib has answered), and drops its own `Content-Length` check.
 
 ## A26: More than one `OnCancel` callback on a Context
 
-**Status.** Open.
+**Status.** Done on fib's `main` in `ad0d175` (with A25; CI passed on `cfb4f09`); fit uses it by
+commit (`v1.5.7-0.20261021080904-cfb4f09f0283`, rule 19).
+
+**As built.** `Context.OnCancel(fn func(error))`, its signature unchanged, keeps every callback and
+runs them in the reverse of the order they were registered. Each still runs once, on the engine's
+handler pool, never after the response is written, and at once on a request already ended;
+registering one once the response is written does nothing. The first is a field, the rest a slice
+behind a pointer that a recycled Context keeps, so neither one callback nor several allocate. fib's
+`BenchmarkOnCancel` (a registration and a recycle, on the benchmark host, 10 alternating runs): one
+callback 7.00 → 7.48ns, the residual being the hooks' extra word cleared on recycle; two 10.4 →
+14.4ns, where before the second replaced the first; no allocations before or after. fib's tests
+cover several callbacks on a request whose connection is cut, and a recycled Context.
 
 **Problem.** `Context.OnCancel` keeps one callback: a second replaces the first. A middleware that
 must hear of a client leaving, as fit's `concurrency_limit` must to give a request's place back,

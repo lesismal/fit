@@ -5,7 +5,6 @@
 package limit
 
 import (
-	"context"
 	"hash/maphash"
 	"math"
 	stdhttp "net/http"
@@ -332,27 +331,16 @@ func (cl *Concurrency) Wrap(next module.Handler) module.Handler {
 		}
 		// The request ends one of three ways: the handler returns without
 		// retaining it, which settles it; its response is sent; or its
-		// client goes first. OnFinish is set before the handler runs, since
-		// one that answers elsewhere may be done before it returns. The
-		// client going is heard through the request's context, since
-		// OnCancel holds one callback, the handler's (see fib-api-requests,
-		// A26); the context costs allocations, so it is asked for only once
-		// the handler has returned with the request retained, which it may
-		// be while the server holds the Context, and one asked for then of
-		// a request already over is cancelled already. Whichever comes first
-		// gives the place back; AfterFunc's goroutine runs only for a
-		// request that is cancelled.
+		// client goes first. OnFinish and OnCancel are set before the
+		// handler runs, since one that answers elsewhere may be done before
+		// it returns; fib runs the handler's OnCancel before this one.
+		// Whichever comes first gives the place back.
 		s := &slot{cl: cl}
 		c.OnFinish(s.finish)
+		c.OnCancel(s.cancel)
 		next.ServeHTTP(c)
 		if !c.Retained() {
 			s.release()
-			return
-		}
-		stop := context.AfterFunc(c.Context(), s.release)
-		s.stop.Store(&stop)
-		if s.done.Load() {
-			stop()
 		}
 	})
 }
@@ -360,7 +348,6 @@ func (cl *Concurrency) Wrap(next module.Handler) module.Handler {
 // slot is one request's place under the limit.
 type slot struct {
 	cl   *Concurrency
-	stop atomic.Pointer[func() bool] // the AfterFunc's, once set
 	done atomic.Bool
 }
 
@@ -371,19 +358,17 @@ func (s *slot) release() {
 	}
 }
 
-// finish gives the place back once the response is sent, and stops the
-// AfterFunc if it is set; if it is set later, whoever set it stops it.
-func (s *slot) finish(int, stdhttp.Header, int64) {
-	s.release()
-	if stop := s.stop.Load(); stop != nil {
-		(*stop)()
-	}
-}
+// finish gives the place back once the response is sent.
+func (s *slot) finish(int, stdhttp.Header, int64) { s.release() }
 
-// Body limits the size of a request's body, as its Content-Length declares
-// it: one past the limit is answered 413 Content Too Large before the
-// handler sees it. A body of no declared length is bounded by the
-// listener's limits alone; see fib-api-requests, A25.
+// cancel gives the place back once the client has gone.
+func (s *slot) cancel(error) { s.release() }
+
+// Body limits the size of a request's body: one whose Content-Length is
+// past the limit, or that has brought more already, is answered 413 Content
+// Too Large before the handler sees it, and one of no declared length that
+// grows past it is ended with fib's ErrBodyTooLarge, which the handler's
+// OnBody sees, and answered 413 unless the handler has begun a response.
 type Body struct {
 	MaxBytes int64 `json:"max_bytes" fit:"required" min:"0" doc:"The most bytes a request's body may have."`
 }
@@ -391,9 +376,8 @@ type Body struct {
 // Wrap returns next behind the limit.
 func (bl *Body) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		if c.Request.ContentLength > bl.MaxBytes {
-			_ = c.Respond(stdhttp.StatusRequestEntityTooLarge, "", nil)
-			return
+		if c.LimitBody(bl.MaxBytes) != nil {
+			return // fib has answered
 		}
 		next.ServeHTTP(c)
 	})

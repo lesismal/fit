@@ -325,13 +325,13 @@ func TestConcurrency(t *testing.T) {
 func TestBody(t *testing.T) {
 	h := mustLoad[*Body](t, "body_limit", `{"max_bytes": 5}`).Wrap(ok)
 	for _, tt := range []struct {
-		length int64
-		want   int
-	}{{0, 200}, {5, 200}, {6, 413}, {1 << 40, 413}, {-1, 200}} {
-		r := httptest.NewRequest("POST", "/", strings.NewReader(strings.Repeat("x", int(max(tt.length, 0)%100))))
+		size, length int64
+		want         int
+	}{{0, 0, 200}, {5, 5, 200}, {6, 6, 413}, {76, 1 << 40, 413}} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(strings.Repeat("x", int(tt.size))))
 		r.ContentLength = tt.length
 		if s := fibtest.ServeRequest(h, r).Response.StatusCode; s != tt.want {
-			t.Errorf("Content-Length %d: %d, want %d", tt.length, s, tt.want)
+			t.Errorf("%d bytes, Content-Length %d: %d, want %d", tt.size, tt.length, s, tt.want)
 		}
 	}
 }
