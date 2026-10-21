@@ -49,8 +49,11 @@ pkgs=$(go list -test -f '{{.ImportPath}} {{join .Deps " "}}' ./... | SEEDS="$see
 	BEGIN { n = split(ENVIRON["SEEDS"], s, "\n"); for (i = 1; i <= n; i++) if (s[i] != "") seed[s[i]] = 1 }
 	{
 		p = $1
+		# Skip the variants built for a test binary, "p [p.test]" and an
+		# external test package "p_test [p.test]": "p.test" stands for them.
+		if ($2 ~ /^\[/) next
 		if (p ~ /\.test$/) sub(/\.test$/, "", p)
-		else if (p ~ / \[/ || $1 ~ /\]$/) next
+		else if (p ~ /_test$/) next
 		hit = (p in seed)
 		for (i = 2; i <= NF && !hit; i++) if ($i in seed) hit = 1
 		if (hit) print p
