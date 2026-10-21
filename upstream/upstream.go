@@ -73,6 +73,9 @@ type Pool struct {
 	balancer  Balancer
 	sticky    *sticky // nil without a sticky cookie
 	timeouts  Timeouts
+	// connect bounds opening a connection, for the pool's client and for
+	// what dials the addresses itself, as a TCP service does.
+	connect time.Duration
 	// maxFails failures within failTimeout take a backend out of rotation
 	// for failTimeout.
 	maxFails    int
@@ -104,6 +107,7 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 		ResponseIdle:   orDefault(c.ResponseIdleTimeout.Std(), DefaultResponseIdleTimeout),
 	}}
 	p.users.Store(1)
+	p.connect = orDefault(c.ConnectTimeout.Std(), DefaultConnectTimeout)
 	for i, addr := range c.Addresses {
 		weight := 1
 		if i < len(c.Weights) {
@@ -171,10 +175,7 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	if cc.IdleConnTimeout == 0 {
 		cc.IdleConnTimeout = DefaultIdleTimeout
 	}
-	cc.DialTimeout = c.ConnectTimeout.Std()
-	if cc.DialTimeout == 0 {
-		cc.DialTimeout = DefaultConnectTimeout
-	}
+	cc.DialTimeout = p.connect
 	// h2c speaks HTTP/2 to http:// addresses with prior knowledge; h2 offers
 	// h2 and http/1.1 through ALPN, which the client does when its TLS
 	// config names no protocols. HTTP/2 multiplexes requests over each
@@ -204,6 +205,10 @@ func orDefault(d, def time.Duration) time.Duration {
 	}
 	return d
 }
+
+// ConnectTimeout returns how long opening a connection to one of the
+// upstream's addresses may take.
+func (p *Pool) ConnectTimeout() time.Duration { return p.connect }
 
 // Timeouts returns the upstream's response timeouts.
 func (p *Pool) Timeouts() Timeouts { return p.timeouts }

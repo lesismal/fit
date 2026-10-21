@@ -218,6 +218,10 @@ func (h *hashRing) keyHash(r *stdhttp.Request) (uint64, bool) {
 	case IPHash:
 		key = hostOf(r.RemoteAddr)
 	case URIHash:
+		if r.URL == nil {
+			// A TCP service's connection, which has no URI.
+			return 0, false
+		}
 		s := fnvAdd(fnvOffset, r.URL.Path)
 		if r.URL.RawQuery != "" {
 			s = fnvAdd(fnvAdd(s, "?"), r.URL.RawQuery)

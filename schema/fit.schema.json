@@ -321,13 +321,14 @@
           "type": "string"
         },
         "protocols": {
-          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc). http/1.1 alone when left out, or http/1.1 and h2 with tls.",
+          "description": "The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); or tcp alone, raw TCP, whose connections the service that lists the listener proxies to its upstream. http/1.1 alone when left out, or http/1.1 and h2 with tls.",
           "items": {
             "enum": [
               "http/1.1",
               "h2c",
               "h2",
-              "h3"
+              "h3",
+              "tcp"
             ],
             "type": "string"
           },
@@ -493,6 +494,44 @@
       },
       "required": [
         "handler"
+      ],
+      "type": "object"
+    },
+    "config.Service": {
+      "additionalProperties": false,
+      "properties": {
+        "idle_timeout": {
+          "default": "10m",
+          "description": "How long a connection may carry nothing either way before both sides are closed; 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listeners": {
+          "description": "The names of the tcp listeners whose connections the service takes; each tcp listener is one service's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_conns": {
+          "default": 10000,
+          "description": "The most connections the service proxies at once; one past it is closed as soon as it is accepted. 10000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "A name unique among the services.",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "The name of the upstream connections go to: one of its addresses, picked by its load_balancing (ip_hash by the client's address; header, cookie and URI hashes, which a connection has none of, in turn), out of rotation for its max_fails and health checks as for HTTP, dialed within its connect_timeout. A connect that fails is tried on the next address picked, up to three addresses. Its protocol and HTTP settings are not used.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "listeners",
+        "upstream"
       ],
       "type": "object"
     },
@@ -1665,6 +1704,13 @@
       "description": "How requests are matched, and what handles them.",
       "items": {
         "$ref": "#/$defs/config.Route"
+      },
+      "type": "array"
+    },
+    "services": {
+      "description": "Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte.",
+      "items": {
+        "$ref": "#/$defs/config.Service"
       },
       "type": "array"
     },

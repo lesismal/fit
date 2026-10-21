@@ -23,6 +23,7 @@ import (
 	fib "github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/router"
@@ -131,6 +132,10 @@ type Listener struct {
 	// Graph.Metrics.
 	Requests  []*observe.RequestMetrics
 	Unmatched *observe.RequestMetrics
+
+	// Service is what a tcp listener's connections are proxied by, or nil
+	// for a listener of HTTP.
+	Service *l4.Service
 }
 
 // RequestMetrics returns where a request route answered on l is counted,
@@ -223,6 +228,17 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		return nil, errs
 	}
 
+	services := map[string]*l4.Service{}
+	for i := range c.Services {
+		sc := &c.Services[i]
+		svc := l4.NewService(sc, g.upstreams[sc.Upstream], env.Engine)
+		// A drain closes its connections, as it does the proxy's.
+		g.modules = append(g.modules, svc)
+		for _, name := range sc.Listeners {
+			services[name] = svc
+		}
+	}
+
 	// The listeners written, or those HTTPS by default makes.
 	listeners, redirect := c.Effective()
 	for _, lc := range listeners {
@@ -273,15 +289,16 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 				}
 			}
 		}
+		l.Service = services[lc.Name]
 		for i, rc := range c.Routes {
-			if l.RedirectHTTPS != 0 {
+			if l.RedirectHTTPS != 0 || l.Service != nil {
 				break // it serves no routes
 			}
 			if len(rc.Listeners) == 0 || slices.Contains(rc.Listeners, lc.Name) {
 				l.Routes = append(l.Routes, routes[i])
 			}
 		}
-		if m := g.Metrics; m != nil {
+		if m := g.Metrics; m != nil && l.Service == nil {
 			l.Requests = make([]*observe.RequestMetrics, len(routes))
 			for _, r := range l.Routes {
 				l.Requests[r.Index] = m.Requests(l.Name, metricsName(r))

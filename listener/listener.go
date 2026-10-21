@@ -35,6 +35,7 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tlsmgr"
@@ -186,6 +187,20 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 	fail := func(err error) (*binding, error) {
 		s.unbind(b)
 		return nil, fmt.Errorf("listener %q: %w", l.Name, err)
+	}
+	if slices.Equal(l.Protocols, []string{config.ProtocolTCP}) {
+		// Raw TCP, which the listener's service proxies.
+		if !shared {
+			if err := checkFree(l.Address); err != nil {
+				return fail(err)
+			}
+		}
+		h := &tcpListener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
+		var err error
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
+			return fail(err)
+		}
+		return b, nil
 	}
 	h3 := slices.Contains(l.Protocols, config.ProtocolH3)
 	tcp := slices.ContainsFunc(l.Protocols, func(p string) bool { return p != config.ProtocolH3 })
@@ -492,6 +507,29 @@ func (s *Server) close() error {
 	s.running <- err // for a later Close or Shutdown
 	_ = s.engine.Close()
 	return err
+}
+
+// tcpListener hands a tcp listener's connections to the service the
+// current graph has for it. A connection keeps the graph it started on until
+// it ends.
+type tcpListener struct {
+	l4.Clients
+	dispatcher dispatcher
+}
+
+func (t *tcpListener) OnOpen(c *fib.Connection) {
+	g := t.dispatcher.rt.Current()
+	if g == nil {
+		_ = c.Close()
+		return
+	}
+	l := t.dispatcher.listener(g)
+	if l == nil || l.Service == nil {
+		g.Release()
+		_ = c.Close()
+		return
+	}
+	l.Service.Open(c, g.Release)
 }
 
 // dispatcher serves one listener's requests from whatever graph is current.

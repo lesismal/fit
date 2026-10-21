@@ -90,7 +90,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "enum",
 			doc:  `{"listeners": [{"name": "a", "address": ":1", "protocols": ["http/1.1", "spdy"]}]}`,
-			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3"`},
+			want: []string{`1:73: listeners[0].protocols[1]: "spdy" is not one of "http/1.1", "h2c", "h2", "h3", "tcp"`},
 		},
 		{
 			name: "null for a list",
@@ -269,6 +269,34 @@ func TestValidate(t *testing.T) {
 			want: []string{
 				`2:58: upstreams[0].tls_server_name: tls_server_name needs protocol h2`,
 				`2:78: upstreams[0].tls_ca_file: tls_ca_file needs protocol h2`,
+			},
+		},
+		{
+			name: "tcp listeners and services",
+			doc: `{"listeners": [
+  {"name": "raw", "address": ":5432", "protocols": ["tcp"]},
+  {"name": "mixed", "address": ":5433", "protocols": ["http/1.1", "tcp"]},
+  {"name": "lonely", "address": ":5434", "protocols": ["tcp"]},
+  {"name": "secure", "address": ":5435", "protocols": ["tcp"], "tls": {"certificates": [{"cert_file": "c", "key_file": "k"}]}},
+  {"name": "web", "address": ":80"}
+], "upstreams": [{"name": "db", "addresses": ["a:1"]}],
+"routes": [{"listeners": ["raw"], "handler": {"module": "respond"}}],
+"services": [
+  {"name": "pg", "listeners": ["raw", "web", "nope", "secure", "mixed"], "upstream": "db"},
+  {"name": "pg", "listeners": ["raw"], "upstream": "none"},
+  {"name": "x", "listeners": [], "upstream": "db"}
+]}`,
+			want: []string{
+				`3:67: listeners[1].protocols[1]: a tcp listener serves raw TCP alone: list tcp without HTTP's protocols`,
+				`5:71: listeners[3].tls: a tcp listener proxies its connections as they are, TLS and all: it takes no tls`,
+				`8:27: routes[0].listeners[0]: "raw" is a tcp listener, which a service serves, not routes`,
+				`10:39: services[0].listeners[1]: "web" is not a tcp listener: a service takes the connections of listeners whose protocols are ["tcp"]`,
+				`10:46: services[0].listeners[2]: there is no listener named "nope"`,
+				`11:12: services[1].name: another service is already named "pg"`,
+				`11:32: services[1].listeners[0]: listener "raw" is already service "pg"'s`,
+				`11:52: services[1].upstream: there is no upstream named "none"`,
+				`12:30: services[2].listeners: a service needs at least one tcp listener`,
+				`4:55: listeners[2].protocols: no service takes this tcp listener's connections: list it in a service's listeners`,
 			},
 		},
 		{

@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I49） |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392`（fib `main` 的 `929924e`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理；I49 需要 A32，它在 fib 的分支 `feat/a32-stream-at-header` 上，尚未进入其 `main`，进入后再更新 `go.mod` |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 TCP/UDP 代理（I50）及 M3 的其余部分 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I50） |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021130553-929924e17392`（fib `main` 的 `929924e`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理；I49 和 I50 需要 A32 和 A33，它们在 fib 的分支 `feat/a32-stream-at-header` 上，尚未进入其 `main`，进入后再更新 `go.mod` |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游（services）；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 UDP 代理（I51）及 M3 的其余部分 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I49 已完成；下一步是 I50（TCP 代理）。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I50 已完成；下一步是 I51（UDP 代理）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I50。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I51。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -59,6 +59,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
+| `l4` | 四层代理：`Service` 把 tcp 监听器的连接代理到其上游的一个地址，经 fib 引擎拨号，每一侧的数据在其回调中发往另一侧，另一侧未发送超过 64 KB 时暂停这一侧的读取；空闲超时、`max_conns`，随所属 graph 一起 drain；`Clients`：服务接手连接后监听器处理器的回调 |
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
@@ -1954,6 +1955,33 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 - 需要 fib 的 A32，由本会话实现。监听器的请求体读取超时（fib 的 5 分钟）仍限制客户端流式发送的调用，上游的
   `response_idle_timeout`（60 秒）限制静默这么久的调用：更长的流需要调大它们。
+
+### I50 TCP 代理 — 已完成
+
+- `protocols` 为 `["tcp"]` 的监听器提供原始 TCP，在新的顶层 `services` 中列出它的服务把它的连接逐字节代理到服务的上游：
+  `{"name": "pg", "listeners": ["db"], "upstream": "postgres"}`。tcp 监听器不提供其他协议、不接受 `tls`；每个只属于一个服务，
+  路由不能指定它。上游就是 HTTP 用的那个：它的地址、`load_balancing`（`ip_hash` 按客户端地址；连接没有的 header、cookie 和
+  URI 哈希依次轮转）、`max_fails` 和健康检查，以及它的 `connect_timeout`（`upstream.Pool.ConnectTimeout`）；连接失败时换到下一个
+  选中的地址重试，最多三个。服务的 `idle_timeout`（10 分钟）关闭两个方向都没有数据的连接，`max_conns`（10,000）限制它同时代理的
+  连接：超出的连接一被接受就关闭，监听器自己的 `limits.max_conns` 也照常生效。
+- 包 `l4` 的中继不做任何等待，与 I47 的中继相同：上游连接经 fib 引擎异步拨号（`Engine.DialWithHandler`），期间暂停客户端读取；
+  每一侧的数据在收到它的回调里发往另一侧；另一侧未发送的数据超过 64 KB 时暂停这一侧的读取，`Connection.NotifyOutput` 告知排空后
+  恢复；两个连接自己的写背压都关闭。一侧结束后，等它发出的数据送完再结束另一侧（不支持半关闭，与 nginx 默认关闭的
+  `proxy_half_close` 相同）。连接保留它开始时的 graph：保留监听器的重载把新连接交给新服务，旧连接在 drain 超时后关闭。
+- 测试（`l4/l4_test.go`、`config`）：`TestTCPEcho`（回显，以及同时 50 个连接）、`TestTCPLarge`（同时每个方向 32 MB）、
+  `TestTCPSlowClient`（客户端一秒内不读，上游发送 64 MB：上游发出的不到一半，之后客户端收到全部）、`TestTCPSlowUpstream`
+  （反方向同理）、`TestTCPHangUp`（上游关闭前发送的内容到达客户端，然后结束；上游得知客户端关闭）、`TestTCPConnectFailure`
+  （上游拒绝连接时关闭客户端；一个拒绝的地址和一个可用的地址，每个连接都到达可用的那个）、`TestTCPIdleTimeout`、
+  `TestTCPMaxConns`、`TestTCPReload` 以及配置检查。在上游仍在拨号、读取被暂停时写入并关闭的客户端，其关闭一直不被察觉：fib 会丢失读取暂停期间看到的对端结束
+  （[A33](fib-api-requests.zh-CN.md#a33读取被暂停时看到的对端结束不再丢失)），由本会话在 fib 中修复。竞态测试在基准机上通过，
+  `l4` 连续 28 次通过；更早的一次 `l4` 运行失败过一次，之后没有再现，原因未查到。
+- 基准机上的 `BenchmarkTCPProxy`，一个连接在 loopback 上每次回显 256 KB（5 次）：直连回显服务器 11.0 GB/s，经 fit 2.18 GB/s。
+  没有 `bench/ab.sh`：HTTP 路径只是每个监听器绑定时多一次判断，每个请求没有。
+
+与计划的差异：
+
+- TCP 服务是顶层的 `services` 列表，而不是路由上的处理器，因为连接没有可供路由的请求；I52 的 SNI 分流会给它们加上匹配条件。
+  服务还没有访问日志和指标。
 
 ## 给后续迭代的说明
 

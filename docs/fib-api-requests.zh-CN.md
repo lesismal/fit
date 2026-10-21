@@ -43,6 +43,7 @@
 | A30 | HTTP/3 客户端发送 extended CONNECT | 已完成，`929924e`（与 A28 一起） | 13 | I48 的测试 |
 | A31 | HTTP/2、HTTP/3 tunnel 的未发送输出排空时的回调 | 待实现 | 1、8、9 | I48 |
 | A32 | 按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers` | 已在 fib 的分支 `feat/a32-stream-at-header`（`98cc39c`）实现，尚未进入 `main` | 1、5、9 | I49 |
+| A33 | 读取被暂停时看到的对端结束不再丢失 | 已在 fib 的分支 `feat/a32-stream-at-header`（`1e9d14a`）修复，尚未进入 `main` | 8、9 | I50 |
 
 ## 证据
 
@@ -707,3 +708,20 @@ h2 上游都是如此。
 
 **fit 如何使用。** 监听器选中 gRPC 调用（`application/grpc` 或其子类型的 HTTP/2 或 HTTP/3 POST），代理带 `TE: trailers`
 把它们发往上游。
+
+## A33：读取被暂停时看到的对端结束不再丢失
+
+**状态。** 由 fit 的会话在 fib 的分支 `feat/a32-stream-at-header`（`1e9d14a`）修复；尚未推送到 `main`。
+
+**问题。** 读取被暂停的连接，如果对端发送数据后结束了自己一侧，就永远收不到这个结束：看到结束的那一轮把读取挂起并丢掉了
+结束，而它的边沿触发事件已经用掉；解除暂停后交回的读取读走数据，在短读处停下，没有读到结束。连接一直不关闭，`OnClose`
+不运行。因还有待发送输出而推迟的读取，也以同样方式丢失结束。
+
+**证据。** I50 的 `TestTCPHangUp`：客户端在 fit 仍在拨号上游（暂停着客户端的读取）时写入并关闭，上游等了 10 秒；fib 的
+`TestHoldReadsFromOpenThenHangup` 用在 `OnOpen` 中暂停读取复现了它。
+
+**实现。** 连接把结束（`hupOwed`）与挂起或推迟的读取一起记下，下一轮读取时一并交回。fib 的
+`TestHoldReadsFromOpenThenHangup`。
+
+**fit 如何使用。** `l4` 从 `OnOpen` 起暂停客户端的读取，直到上游连接打开，并按另一侧的积压暂停任一侧的读取。
+

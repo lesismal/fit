@@ -45,6 +45,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A30 | Extended CONNECT from the HTTP/3 client | done, `929924e` (with A28) | 13 | I48 tests |
 | A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
 | A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | made on fib's branch `feat/a32-stream-at-header` (`98cc39c`), not yet on `main` | 1, 5, 9 | I49 |
+| A33 | A peer's end seen while reads are held is not lost | made on fib's branch `feat/a32-stream-at-header` (`1e9d14a`), not yet on `main` | 8, 9 | I50 |
 
 ## Evidence
 
@@ -954,3 +955,25 @@ other. fib's `TestStreamRequestBodyAtHeaderH2`, `TestStreamRequestBodyAtHeaderH1
 
 **How fit uses it.** The listener picks gRPC calls (HTTP/2 or HTTP/3 POSTs of `application/grpc` or
 a subtype of it), and the proxy sends them upstream with `TE: trailers`.
+
+## A33: A peer's end seen while reads are held is not lost
+
+**Status.** Fixed by fit's session on fib's branch `feat/a32-stream-at-header` (`1e9d14a`); not yet
+pushed to `main`.
+
+**Problem.** A connection whose reads are held when its peer sends and then ends its side never
+hears the end: the round that saw the end stalled the read and dropped the end, whose edge-triggered
+event was spent, and the read the release handed back took the data and stopped at a short read,
+before reaching the end. The connection stayed open, and `OnClose` never ran. A read deferred
+behind queued output lost the end the same way.
+
+**Evidence.** I50's `TestTCPHangUp`: a client that writes and closes while fit still dials its
+upstream, holding the client's reads, left the upstream waiting for 10 s; fib's
+`TestHoldReadsFromOpenThenHangup` reproduces it with a hold from `OnOpen`.
+
+**As built.** The connection keeps the end owed (`hupOwed`) with the stalled or deferred read, and
+the round that next reads is handed both. fib's `TestHoldReadsFromOpenThenHangup`.
+
+**How fit uses it.** `l4` holds a client's reads from `OnOpen` until its upstream has opened, and
+holds either side's for the other's backlog.
+

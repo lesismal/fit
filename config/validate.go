@@ -72,6 +72,10 @@ func (c *Config) Validate() Errors {
 				add(l.At.Field("protocols").Index(i), "h3 needs tls")
 			case p == ProtocolH2C && l.TLS != nil:
 				add(l.At.Field("protocols").Index(i), "h2c is HTTP/2 in the clear, which a listener with tls does not serve; use h2")
+			case p == ProtocolTCP && len(l.Protocols) > 1:
+				add(l.At.Field("protocols").Index(i), "a tcp listener serves raw TCP alone: list tcp without HTTP's protocols")
+			case p == ProtocolTCP && l.TLS != nil:
+				add(l.At.Field("tls"), "a tcp listener proxies its connections as they are, TLS and all: it takes no tls")
 			}
 			seen[p] = true
 		}
@@ -111,6 +115,12 @@ func (c *Config) Validate() Errors {
 		}
 	}
 
+	tcp := map[string]bool{}
+	for _, l := range c.Listeners {
+		if slices.Contains(l.Protocols, ProtocolTCP) {
+			tcp[l.Name] = true
+		}
+	}
 	routes := map[string]bool{}
 	for _, r := range c.Routes {
 		if r.Name != "" {
@@ -125,6 +135,8 @@ func (c *Config) Validate() Errors {
 		for i, name := range r.Listeners {
 			if !listeners[name] {
 				add(r.At.Field("listeners").Index(i), "there is no listener named %q", name)
+			} else if tcp[name] {
+				add(r.At.Field("listeners").Index(i), "%q is a tcp listener, which a service serves, not routes", name)
 			}
 		}
 		if r.Match != nil {
@@ -215,6 +227,44 @@ func (c *Config) Validate() Errors {
 	}
 
 	upstreams := map[string]bool{}
+	for _, u := range c.Upstreams {
+		upstreams[u.Name] = true
+	}
+	services := map[string]bool{}
+	servedBy := map[string]string{}
+	for _, sv := range c.Services {
+		switch {
+		case !namePattern.MatchString(sv.Name):
+			add(sv.At.Field("name"), "%q is not a valid name: use letters, digits, '_', '.' and '-', starting with a letter or digit", sv.Name)
+		case services[sv.Name]:
+			add(sv.At.Field("name"), "another service is already named %q", sv.Name)
+		}
+		services[sv.Name] = true
+		if len(sv.Listeners) == 0 {
+			add(sv.At.Field("listeners"), "a service needs at least one tcp listener")
+		}
+		for i, name := range sv.Listeners {
+			switch other, taken := servedBy[name]; {
+			case !listeners[name]:
+				add(sv.At.Field("listeners").Index(i), "there is no listener named %q", name)
+			case !tcp[name]:
+				add(sv.At.Field("listeners").Index(i), "%q is not a tcp listener: a service takes the connections of listeners whose protocols are [\"tcp\"]", name)
+			case taken:
+				add(sv.At.Field("listeners").Index(i), "listener %q is already service %q's", name, other)
+			}
+			servedBy[name] = sv.Name
+		}
+		if !upstreams[sv.Upstream] {
+			add(sv.At.Field("upstream"), "there is no upstream named %q", sv.Upstream)
+		}
+	}
+	for _, l := range c.Listeners {
+		if _, ok := servedBy[l.Name]; tcp[l.Name] && !ok {
+			add(l.At.Field("protocols"), "no service takes this tcp listener's connections: list it in a service's listeners")
+		}
+	}
+
+	upstreams = map[string]bool{}
 	for _, u := range c.Upstreams {
 		switch {
 		case !namePattern.MatchString(u.Name):
