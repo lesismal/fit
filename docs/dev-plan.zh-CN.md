@@ -150,7 +150,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I37 | 表达式匹配器 | I36 | done |
 | I38 | 重写、跳转与头处理 | I36 | done |
 | I39 | 限流、并发与大小限制 | I36 | done |
-| I40 | Basic 认证与客户端 mTLS | I36 | todo |
+| I40 | Basic 认证与客户端 mTLS | I36 | done |
 | I41 | ForwardAuth | I40 | todo |
 | I42 | JWT 与 JWKS | I40 | todo |
 | I43 | 重试与按路由超时 | I17 | todo |

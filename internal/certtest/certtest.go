@@ -118,6 +118,17 @@ func NewCA(name string) (*CA, error) {
 // and its key, as PEM files in dir. ocspServer, if not empty, is the OCSP
 // responder the certificate names.
 func (ca *CA) Issue(dir, ocspServer string, names ...string) (*Cert, error) {
+	return ca.issue(dir, ocspServer, pkix.Name{CommonName: names[0]}, x509.ExtKeyUsageServerAuth, names...)
+}
+
+// IssueClient writes a client certificate for subject that ca signs,
+// followed by ca's own, and its key, as PEM files in dir named after the
+// subject's common name.
+func (ca *CA) IssueClient(dir string, subject pkix.Name) (*Cert, error) {
+	return ca.issue(dir, "", subject, x509.ExtKeyUsageClientAuth, subject.CommonName)
+}
+
+func (ca *CA) issue(dir, ocspServer string, subject pkix.Name, usage x509.ExtKeyUsage, names ...string) (*Cert, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -128,16 +139,19 @@ func (ca *CA) Issue(dir, ocspServer string, names ...string) (*Cert, error) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: names[0]},
+		Subject:      subject,
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:  []x509.ExtKeyUsage{usage},
 	}
 	if ocspServer != "" {
 		tmpl.OCSPServer = []string{ocspServer}
 	}
 	for _, n := range names {
+		if usage == x509.ExtKeyUsageClientAuth {
+			break // a client is named by its subject
+		}
 		if ip := net.ParseIP(n); ip != nil {
 			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
 		} else {
@@ -173,4 +187,9 @@ func (ca *CA) Pool() *x509.CertPool {
 	p := x509.NewCertPool()
 	p.AddCert(ca.Cert)
 	return p
+}
+
+// WriteCert writes ca's certificate as a PEM file at path.
+func (ca *CA) WriteCert(path string) error {
+	return os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Cert.Raw}), 0o644)
 }

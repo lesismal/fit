@@ -313,6 +313,22 @@ type TLS struct {
 	Certificates []Certificate `json:"certificates,omitempty" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
 	ACME         []string      `json:"acme,omitempty" doc:"Host names to obtain certificates for with ACME, as the top-level acme says, through its challenges: the CA must reach fit at each name on port 80, where any listener of fit's in the clear answers HTTP-01, or on port 443, where this listener answers TLS-ALPN-01. A client asking for one of these names is given its certificate once there is one; until then, and for other names, the certificates from files."`
 	OnDemand     bool          `json:"on_demand,omitempty" doc:"Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it."`
+	ClientAuth   *ClientAuth   `json:"client_auth,omitempty" doc:"Ask clients for certificates and verify them (mutual TLS)."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Client authentication modes.
+const (
+	ClientAuthRequire       = "require"
+	ClientAuthVerifyIfGiven = "verify_if_given"
+)
+
+// ClientAuth is how a TLS listener authenticates its clients by their
+// certificates.
+type ClientAuth struct {
+	CAFiles []string `json:"ca_files" fit:"required" doc:"PEM files of the certificate authorities a client's certificate must chain to. They are watched as certificate files are: a change loads the config again."`
+	Mode    string   `json:"mode,omitempty" enum:"require,verify_if_given" default:"\"require\"" doc:"require: a client without a valid certificate is refused in the handshake; verify_if_given: a client may send none, and a route that needs one says so with the client_cert middleware, but one it sends must be valid. require when left out. A listener that requires certificates cannot answer ACME's TLS-ALPN-01 challenge, whose CA sends none."`
 
 	At Value `json:"-" fit:"self"`
 }

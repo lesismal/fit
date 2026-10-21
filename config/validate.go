@@ -86,6 +86,14 @@ func (c *Config) Validate() Errors {
 			if t.OnDemand && (c.ACME == nil || c.ACME.OnDemand == nil) {
 				add(t.At.Field("on_demand"), "on_demand needs acme.on_demand, which says whom to ask whether a name may have a certificate")
 			}
+			if ca := t.ClientAuth; ca != nil {
+				if len(ca.CAFiles) == 0 {
+					add(ca.At.Field("ca_files"), "at least one file is needed")
+				}
+				if ca.Mode != ClientAuthVerifyIfGiven && (len(t.ACME) > 0 || t.OnDemand || emptyTLS(t)) && !c.answersHTTP01() {
+					add(ca.At, "a listener that requires client certificates cannot answer TLS-ALPN-01, the only challenge acme.challenges allows; set mode verify_if_given or allow http-01")
+				}
+			}
 			names := map[string]bool{}
 			for i, name := range t.ACME {
 				switch msg := checkHost(name); {
@@ -346,6 +354,12 @@ func checkAddress(address string) (uint64, string) {
 }
 
 var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$`)
+
+// answersHTTP01 reports whether certificates may be obtained through ACME's
+// HTTP-01 challenge, which acme.challenges allows when left out.
+func (c *Config) answersHTTP01() bool {
+	return c.ACME == nil || len(c.ACME.Challenges) == 0 || slices.Contains(c.ACME.Challenges, ChallengeHTTP01)
+}
 
 func checkHost(host string) string {
 	name := strings.TrimPrefix(host, "*.")

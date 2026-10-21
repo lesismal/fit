@@ -1,5 +1,23 @@
 {
   "$defs": {
+    "auth.User": {
+      "additionalProperties": false,
+      "properties": {
+        "password_hash": {
+          "description": "The bcrypt hash of the user's password, as fit hash-password or htpasswd -B makes it.",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user's name; it may not contain a colon.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password_hash"
+      ],
+      "type": "object"
+    },
     "config.ACME": {
       "additionalProperties": false,
       "properties": {
@@ -159,6 +177,31 @@
       "required": [
         "cert_file",
         "key_file"
+      ],
+      "type": "object"
+    },
+    "config.ClientAuth": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_files": {
+          "description": "PEM files of the certificate authorities a client's certificate must chain to. They are watched as certificate files are: a change loads the config again.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "default": "require",
+          "description": "require: a client without a valid certificate is refused in the handshake; verify_if_given: a client may send none, and a route that needs one says so with the client_cert middleware, but one it sends must be valid. require when left out. A listener that requires certificates cannot answer ACME's TLS-ALPN-01 challenge, whose CA sends none.",
+          "enum": [
+            "require",
+            "verify_if_given"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ca_files"
       ],
       "type": "object"
     },
@@ -494,6 +537,10 @@
             "$ref": "#/$defs/config.Certificate"
           },
           "type": "array"
+        },
+        "client_auth": {
+          "$ref": "#/$defs/config.ClientAuth",
+          "description": "Ask clients for certificates and verify them (mutual TLS)."
         },
         "on_demand": {
           "description": "Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it.",
@@ -867,6 +914,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "basic_auth"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.basic_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "body_limit"
               }
             }
@@ -875,6 +938,22 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/http.middleware.body_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "client_cert"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.client_cert"
               }
             }
           }
@@ -964,7 +1043,9 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "basic_auth",
             "body_limit",
+            "client_cert",
             "concurrency_limit",
             "headers",
             "rate_limit",
@@ -982,6 +1063,35 @@
       ],
       "type": "object"
     },
+    "http.middleware.basic_auth": {
+      "additionalProperties": false,
+      "properties": {
+        "forward_authorization": {
+          "description": "Leave the Authorization field, with the password, on the request the handler sees; it is removed when left out.",
+          "type": "boolean"
+        },
+        "realm": {
+          "default": "fit",
+          "description": "The realm the browser shows when it asks for a user and password; fit when left out.",
+          "type": "string"
+        },
+        "user_header": {
+          "description": "A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent is replaced.",
+          "type": "string"
+        },
+        "users": {
+          "description": "The users allowed in, with their passwords' bcrypt hashes.",
+          "items": {
+            "$ref": "#/$defs/auth.User"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "type": "object"
+    },
     "http.middleware.body_limit": {
       "additionalProperties": false,
       "properties": {
@@ -994,6 +1104,20 @@
       "required": [
         "max_bytes"
       ],
+      "type": "object"
+    },
+    "http.middleware.client_cert": {
+      "additionalProperties": false,
+      "properties": {
+        "optional": {
+          "description": "Let a request without a certificate through as well, unauthenticated; refused with 403 Forbidden when left out.",
+          "type": "boolean"
+        },
+        "subject_header": {
+          "description": "A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent is removed, with or without a certificate.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "http.middleware.concurrency_limit": {

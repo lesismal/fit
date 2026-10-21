@@ -56,7 +56,7 @@ type Graph struct {
 	// answers HTTP-01 challenges on the listeners in the clear.
 	ACME      *tlsmgr.ACME
 	ACMENames []string
-	// CertFiles holds the SHA-256 of each certificate and key file the
+	// CertFiles holds the SHA-256 of each certificate, key and CA file the
 	// listeners loaded, by path, for a tlsmgr.FileWatcher; nil when they
 	// loaded none.
 	CertFiles map[string][sha256.Size]byte
@@ -109,6 +109,9 @@ type Listener struct {
 	// Certificates picks the certificate of each TLS handshake, or is nil
 	// for a listener in the clear.
 	Certificates tlsmgr.Manager
+	// ClientAuth, when not nil, is how a TLS listener verifies its clients'
+	// certificates.
+	ClientAuth *tlsmgr.ClientAuth
 	// MaxHeaderBytes and MaxBodyBytes bound the requests it takes; see
 	// config.Limits.
 	MaxHeaderBytes int
@@ -240,21 +243,19 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 					continue
 				}
 				static = certs
-				for p, sum := range certs.Files() {
-					if g.CertFiles == nil {
-						g.CertFiles = map[string][sha256.Size]byte{}
-					}
-					if prev, ok := g.CertFiles[p]; ok && prev != sum {
-						// Changed while the config was compiled, so that two
-						// listeners loaded it differently: a sum no file has
-						// has the watcher load it again.
-						sum = [sha256.Size]byte{}
-					}
-					g.CertFiles[p] = sum
-				}
+				g.watchFiles(certs.Files())
 				if env.OCSP != nil {
 					static.Staple(env.OCSP)
 				}
+			}
+			if t.ClientAuth != nil {
+				ca, err := tlsmgr.LoadClientAuth(t.ClientAuth)
+				if err != nil {
+					errs = append(errs, config.AsErrors(err)...)
+					continue
+				}
+				l.ClientAuth = ca
+				g.watchFiles(ca.Files())
 			}
 			switch {
 			case len(t.ACME) == 0 && !t.OnDemand:
@@ -453,6 +454,22 @@ func upstreamKey(u *config.Upstream) (string, bool) {
 		key += "\x00" + hex.EncodeToString(sum[:])
 	}
 	return key, true
+}
+
+// watchFiles adds files, sums by path, to those g.CertFiles has watched.
+func (g *Graph) watchFiles(files map[string][sha256.Size]byte) {
+	for p, sum := range files {
+		if g.CertFiles == nil {
+			g.CertFiles = map[string][sha256.Size]byte{}
+		}
+		if prev, ok := g.CertFiles[p]; ok && prev != sum {
+			// Changed while the config was compiled, so that two listeners
+			// loaded it differently: a sum no file has has the watcher load
+			// it again.
+			sum = [sha256.Size]byte{}
+		}
+		g.CertFiles[p] = sum
+	}
 }
 
 // retire starts g's drain timer, now that it is swapped out: if requests

@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-21 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I39） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：进行中（I36–I40） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283`（fib `main` 的 `cfb4f09`，v1.5.6 之后；按 commit 而非 tag 依赖，见规则 19），来自模块代理 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小；`fit validate`、`fit schema`、`fit version`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | 还没有 Basic 认证和客户端 mTLS（I40） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS）；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | 还没有 ForwardAuth（I41）、JWT（I42）、重试（I43）及 M3 的其余部分 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -23,7 +23,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I39 已完成；下一步是 I40（Basic 认证与客户端 mTLS）。** M2 已完成 I24、I25（带配置版本、局部
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 进行中：I36–I40 已完成；下一步是 I41（ForwardAuth）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -35,7 +35,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I40。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I41。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -43,7 +43,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载）、`validate`、`schema`、`version`、`help` |
+| `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载）、`validate`、`schema`、`version`、`hash-password`、`help` |
 | `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出） |
 | `config` | 原生配置类型；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
@@ -51,6 +51,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `handler/proxy` | `proxy` handler：转发到具名上游，去掉逐跳头，按可信代理列表设置 `X-Forwarded-*` 和 `Forwarded`；两个方向都不等待地流式转发，上传由 `HoldBody` 和 `OnDrain` 控制节奏，下载由 `WriteNoWait` 和 `OnWritable` 控制 |
 | `middleware/rewrite` | `rewrite` 中间件（去前缀、正则、加前缀）和 `redirect` |
 | `middleware/limit` | `rate_limit`（按客户端 IP、头部或路由的令牌桶，键数有上限）、`concurrency_limit`、`body_limit` |
+| `middleware/auth` | `basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
 | `middleware/headers` | `headers` 中间件：删除、设置和添加请求与响应的字段 |
 | `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
@@ -59,7 +60,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
-| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
+| `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`ClientAuth`：监听器验证客户端证书所用的 CA；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：先用 map 按 host 和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`，以及它们的表达式 `ParseExpr`），依次看优先级、具体程度和匹配器个数，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
@@ -1681,6 +1682,44 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
 context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制的分块请求体（小到整体到达的和大到流式的）以及声明长度的
 请求体；`TestBody` 和 `TestConcurrencyClientGone` 照旧通过。完整的竞态测试在基准机上通过。没有基准：不使用这两个中间件的
 路由不经过它们，`OnCancel` 已由 fib 测量（A26）。
+
+### I40 Basic 认证与客户端 mTLS — 已完成
+
+- `middleware/auth` 的 `basic_auth` 用 HTTP Basic 认证要求用户名和密码（回应 401 并带
+  `WWW-Authenticate: Basic realm="…", charset="UTF-8"`），并用 bcrypt 哈希校验，`users` 由 `username` 和
+  `password_hash` 组成。`realm` 默认为 fit；`user_header` 把一个请求字段设为用户名，替换客户端发来的同名字段；除非设置
+  `forward_authorization`，Authorization 字段在处理器之前删除。`fit hash-password` 输出标准输入中密码的哈希（`-cost`，
+  默认 10）；`htpasswd -B` 生成的也一样。
+- 一次 bcrypt 校验要几十毫秒 CPU，放在 fib worker 上会拖住它上面的所有连接（规则 1），因此在单独的池上运行：CPU 数的
+  四分之一，至少一个 worker，队列 1024。请求以保留状态（`Context.Async`）等待，并持有它的配置；密码通过后，链的其余部分
+  在池的 goroutine 上运行，和在别处回应的处理器一样。队列没有空位的、或等待超过 5 秒的校验回应 503 并带
+  `Retry-After: 1`；客户端已离开的直接丢弃。通过的密码按用户以中间件自己的密钥做 SHA-256 记住，该用户之后的请求直接在
+  worker 上放行；每个用户只记一个，内存受配置约束。因此大量错误密码最多占用池的那份 CPU，已登录的用户照常放行。未知用户的
+  密码同样对另一个用户的哈希校验一次，使拒绝所需时间与用户是否存在无关。
+- TLS 监听器的 `tls.client_auth` 要求客户端提供证书，并以 `ca_files` 验证：`mode` 为 `require`（默认）时，没有有效证书的
+  客户端在握手时被拒绝；`verify_if_given` 允许客户端不提供证书。验证由 fib 的 TLS 自己完成（监听器配置中的 `ClientAuth`
+  和 `ClientCAs`），覆盖 HTTP/1.1、h2 和 HTTP/3。CA 文件像证书文件一样被监视；改变模式或 CA 的重载会重新绑定监听器（绑定后
+  TLS 配置不可变），不改变的重载保留它。`config.Validate` 拒绝这样的监听器：要求客户端证书、经 ACME 获取自己的证书、且只
+  允许 TLS-ALPN-01（CA 不会发送证书）。
+- `client_cert` 只放行带有监听器验证过的证书（`VerifiedChains`）的请求，其余回应 403，除非设置 `optional`；
+  `subject_header` 把一个请求字段设为证书主体（`CN=alice,O=Example`，控制字符被替换），并删除客户端发来的同名字段。请求
+  被认证为谁（Basic 认证的用户，否则是证书主体）记录在 `observe.Entry.User`，访问日志写为 `user`，后续中间件用
+  `auth.UserOf` 读取。
+- 测试：`TestBasic`（无凭据、错误密码、未知用户、别的用户的密码、记住与未记住、伪造的用户字段）、
+  `TestBasicForwardAuthorization`、`TestBasicBusy`（池没有空位、等待过久的校验、池满时已记住的密码照常放行）、
+  `TestBasicParams`、`TestClientCert`（已验证、没有、未验证、明文、可选、与 `basic_auth` 一起）、`TestHeaderSafe`；经网络的
+  `TestClientAuthRequire` 和 `TestClientAuthVerifyIfGiven`（CA 的客户端、无证书、另一个 CA 的证书，覆盖 HTTP/1.1、h2 和
+  HTTP/3）、`TestClientAuthReload`，以及 `TestBasicOverNetwork`（1 MB 的分块和声明长度的请求体经过 `basic_auth` 和其后的
+  `body_limit`，第一个在请求体到达期间等待校验，另有一个超过限制）；`TestLoadClientAuth`、`config` 的校验用例、
+  `TestHashPassword` 和访问日志的 `user`。所有改动的包及其依赖者的竞态测试在基准机上通过；linux、darwin 和 windows 的
+  `go vet` 与 staticcheck 通过。
+- 没有基准：不使用新中间件的路由照旧运行，没有 `client_auth` 的监听器得到相同的 TLS 配置。
+
+与计划的差异：
+
+- 证书主体经 `auth.UserOf` 和请求字段提供给后续中间件，而不是一个通用的按请求存储；I42 的 claims 可能需要它。bcrypt
+  来自 fit 已依赖的 `golang.org/x/crypto`（决策 007），没有需要记录的新依赖。
+- Basic 认证的用户写在配置中；像 htpasswd 那样的用户文件留待以后。
 
 ## 给后续迭代的说明
 

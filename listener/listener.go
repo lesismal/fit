@@ -15,6 +15,7 @@ package listener
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -67,6 +68,10 @@ type binding struct {
 	// TLS: the Manager of the graph's listener, replaced when a reload keeps
 	// the binding, so that a change of certificates needs no new binding.
 	certs atomic.Pointer[certs]
+	// clientAuth identifies how it verifies client certificates, if it
+	// does; a reload that changes it binds it anew, since the TLS
+	// configuration is fixed once the binding is made.
+	clientAuth [sha256.Size]byte
 	// maxHeaderBytes and maxBodyBytes are the limits its handlers were made
 	// with; a reload that changes them binds it anew.
 	maxHeaderBytes int
@@ -86,7 +91,17 @@ type certs struct{ tlsmgr.Manager }
 func (b *binding) same(l *runtime.Listener) bool {
 	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) &&
 		(b.certs.Load() != nil) == (l.Certificates != nil) &&
-		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes
+		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
+		b.clientAuth == clientAuthSum(l)
+}
+
+// clientAuthSum identifies how l verifies client certificates: zero for a
+// listener that does not.
+func clientAuthSum(l *runtime.Listener) [sha256.Size]byte {
+	if l.ClientAuth == nil {
+		return [sha256.Size]byte{}
+	}
+	return l.ClientAuth.Sum
 }
 
 // getCertificate is the GetCertificate of b's TLS configuration.
@@ -158,11 +173,15 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
-		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes}
+		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l)}
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
 		tlsConfig = tlsmgr.ServerConfig(l.Protocols, b.getCertificate)
+		if ca := l.ClientAuth; ca != nil {
+			tlsConfig.ClientAuth = ca.Type
+			tlsConfig.ClientCAs = ca.CAs
+		}
 	}
 	fail := func(err error) (*binding, error) {
 		s.unbind(b)

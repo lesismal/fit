@@ -46,7 +46,7 @@ func TestLine(t *testing.T) {
 	r.Header.Set("User-Agent", "agent \"quoted\"\n\x01\xff")
 	r.Header.Set("Referer", "https://ref.example/")
 	start := time.Now().Add(-1500 * time.Millisecond)
-	e := &Entry{Start: start, Listener: "web", Route: "api", Upstream: "10.0.0.1:8080", UpstreamDuration: 1200 * time.Millisecond, BytesIn: 4}
+	e := &Entry{Start: start, Listener: "web", Route: "api", Upstream: "10.0.0.1:8080", UpstreamDuration: 1200 * time.Millisecond, BytesIn: 4, User: "alice"}
 	line := appendLine(nil, e, r, 201, 512, start.Add(1500*time.Millisecond))
 	if !bytes.HasSuffix(line, []byte("}\n")) || bytes.Count(line, []byte("\n")) != 1 {
 		t.Fatalf("not one line: %q", line)
@@ -56,7 +56,7 @@ func TestLine(t *testing.T) {
 		t.Fatalf("%q: %v", line, err)
 	}
 	want := map[string]any{
-		"listener": "web", "route": "api", "client": "2001:db8::1", "proto": "HTTP/1.1", "method": "POST",
+		"listener": "web", "route": "api", "client": "2001:db8::1", "user": "alice", "proto": "HTTP/1.1", "method": "POST",
 		"host": "example.com", "uri": "/api/x?q=1&s=%22", "status": 201.0, "bytes_in": 4.0, "bytes_out": 512.0,
 		"duration": 1.5, "upstream": "10.0.0.1:8080", "upstream_duration": 1.2,
 		"user_agent": "agent \"quoted\"\n\x01�", "referer": "https://ref.example/",
@@ -73,13 +73,14 @@ func TestLine(t *testing.T) {
 		t.Errorf("fields: %v", got)
 	}
 
-	// A request no route took and nothing proxied leaves those fields out.
+	// A request no route took, nobody authenticated and nothing proxied
+	// leaves those fields out.
 	r = httptest.NewRequest("GET", "/", nil)
 	got = nil
 	if err := json.Unmarshal(appendLine(nil, &Entry{Start: time.Now(), Listener: "web"}, r, 404, 19, time.Now()), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"route", "upstream", "upstream_duration"} {
+	for _, k := range []string{"route", "user", "upstream", "upstream_duration"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("%s is there: %v", k, got)
 		}

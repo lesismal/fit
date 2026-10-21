@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I39) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I40) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021080904-cfb4f09f0283` (fib's `main` at `cfb4f09`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, and limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no Basic auth or client mTLS (I40) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no ForwardAuth (I41), JWT (I42), retries (I43) or the rest of M3 |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I39 are done; next, I40 (Basic auth and client mTLS).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I40 are done; next, I41 (ForwardAuth).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I40 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I41 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -61,7 +61,7 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file), `validate`, `schema`, `version`, `help` |
+| `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file), `validate`, `schema`, `version`, `hash-password`, `help` |
 | `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}`, `GET /metrics`, which `WriteMetrics` writes |
 | `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
@@ -69,6 +69,7 @@ To continue, start a session with:
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
 | `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
 | `middleware/limit` | `rate_limit` (token buckets by client IP, header or route, keys bounded), `concurrency_limit`, `body_limit` |
+| `middleware/auth` | `basic_auth` (bcrypt hashes checked on a bounded pool of their own, a password that passed remembered as a keyed SHA-256) and `client_cert` (a verified client certificate required or optional, its subject passed on); `UserOf` |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
@@ -77,7 +78,7 @@ To continue, start a session with:
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
-| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
+| `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
@@ -2314,6 +2315,62 @@ enough to arrive whole and large enough to stream, and declared ones, over HTTP/
 and `TestConcurrencyClientGone` pass as before. The full race suite passes on the benchmark host.
 No benchmark: the two middleware are off the hot path of routes that do not use them, and fib
 measured `OnCancel` (A26).
+
+### I40 Basic auth and client mTLS — done
+
+- `middleware/auth`'s `basic_auth` asks for a user and password with HTTP Basic authentication
+  (401 with `WWW-Authenticate: Basic realm="…", charset="UTF-8"`) and checks them against bcrypt
+  hashes, `users` of `username` and `password_hash`. `realm` is fit by default; `user_header` sets a
+  request field to the user's name, replacing any the client sent; the Authorization field is
+  removed before the handler unless `forward_authorization` is set. `fit hash-password` prints the
+  hash of the password on its standard input (`-cost`, 10 by default); `htpasswd -B` makes the same.
+- A bcrypt check takes tens of milliseconds of CPU, which would hold up every connection on a fib
+  worker (rule 1), so it runs on a pool of its own: a quarter of the CPUs, at least one worker, and
+  a queue of 1024. The request waits retained (`Context.Async`), holding its config; once the
+  password passes, the rest of the chain runs on the pool's goroutine, as a handler that answers
+  from elsewhere does. A check the queue has no room for, or that waited past 5 seconds, is
+  answered 503 with `Retry-After: 1`; one whose client has gone is dropped. A password that passed
+  is remembered for its user as a SHA-256 keyed with a secret of the middleware's, so the user's
+  next requests are let in on the worker at once; each user keeps one, so the memory is bounded by
+  the config. A flood of wrong passwords therefore costs at most the pool's share of the CPU, and
+  users already in are let in meanwhile. An unknown user's password is checked against another
+  user's hash all the same, so that a refusal takes as long either way.
+- A TLS listener's `tls.client_auth` asks clients for certificates and verifies them against
+  `ca_files`: `mode` `require` (the default) refuses a client without a valid one in the handshake,
+  and `verify_if_given` lets a client send none. fib's TLS does the verification itself (the
+  `ClientAuth` and `ClientCAs` of the listener's configuration), over HTTP/1.1, h2 and HTTP/3. The
+  CA files are watched as certificate files are; a reload that changes the mode or the authorities
+  binds the listener anew (its TLS configuration is fixed once bound), and one that does not keeps
+  it. `config.Validate` refuses a listener that requires certificates and gets its own through
+  ACME when only TLS-ALPN-01 is allowed, whose CA sends no certificate.
+- `client_cert` lets a request through only with a certificate the listener verified
+  (`VerifiedChains`), and refuses the rest with 403 unless `optional`; `subject_header` sets a
+  request field to the subject (`CN=alice,O=Example`), with control characters replaced, removing
+  any the client sent. Who a request was authenticated as, the Basic auth user or else the
+  subject, is `observe.Entry.User`, which the access log writes as `user` and `auth.UserOf` returns
+  to later middleware.
+- Tests: `TestBasic` (no credentials, wrong password, unknown user, another user's password,
+  remembered and not, a forged user field), `TestBasicForwardAuthorization`, `TestBasicBusy` (no
+  room in the pool, a check that waited too long, a remembered password let in while the pool is
+  full), `TestBasicParams`, `TestClientCert` (verified, none, unverified, in the clear, optional,
+  with `basic_auth`), `TestHeaderSafe`; over the network, `TestClientAuthRequire` and
+  `TestClientAuthVerifyIfGiven` (a client of the CA, none, another CA's, over HTTP/1.1, h2 and
+  HTTP/3), `TestClientAuthReload`, and `TestBasicOverNetwork` (1 MB bodies chunked and declared
+  through `basic_auth` and a `body_limit` after it, the first waiting for its check with the body
+  arriving, and one past the limit); `TestLoadClientAuth`, `config`'s validation cases,
+  `TestHashPassword`, and the access log's `user`. The race tests of every package touched and
+  their dependents pass on the benchmark host; `go vet` and staticcheck for linux, darwin and
+  windows pass.
+- No benchmark: routes without the new middleware run as before, and a listener without
+  `client_auth` gets the same TLS configuration.
+
+Differences from the plan:
+
+- The subject is available to later middleware through `auth.UserOf` and the request field, not a
+  general per-request store; I42's claims may need one. bcrypt is `golang.org/x/crypto`'s, a module
+  fit already depends on (decision 007), so there is no new dependency to note.
+- Basic auth's users are written in the config; a file of users, as htpasswd keeps, is left for
+  later.
 
 ## Notes for later iterations
 

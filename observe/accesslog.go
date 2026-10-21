@@ -268,6 +268,9 @@ type Entry struct {
 	Upstream         string
 	UpstreamDuration time.Duration
 	BytesIn          int64
+	// User is who the request was authenticated as, by Basic auth or a
+	// client certificate's subject; empty when it was not.
+	User string
 }
 
 // Track gives the request c serves a new entry, for EntryOf to find, and
@@ -342,6 +345,10 @@ func appendFields(b []byte, e *Entry, r *stdhttp.Request, status int, size int64
 	}
 	b = append(b, `,"client":`...)
 	b = appendString(b, clientIP(r.RemoteAddr))
+	if e.User != "" {
+		b = append(b, `,"user":`...)
+		b = appendString(b, e.User)
+	}
 	b = append(b, `,"proto":`...)
 	b = appendString(b, r.Proto)
 	b = append(b, `,"method":`...)

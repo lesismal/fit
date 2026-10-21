@@ -310,6 +310,19 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:73: admin.address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`},
 		},
 		{
+			name: "client_auth without files, requiring certificates where only tls-alpn-01 obtains them",
+			doc:  `{"listeners": [{"name": "web", "address": ":443", "tls": {"acme": ["a.example"], "client_auth": {"ca_files": []}}}], "acme": {"challenges": ["tls-alpn-01"]}}`,
+			want: []string{
+				`1:110: listeners[0].tls.client_auth.ca_files: at least one file is needed`,
+				`1:97: listeners[0].tls.client_auth: a listener that requires client certificates cannot answer TLS-ALPN-01, the only challenge acme.challenges allows; set mode verify_if_given or allow http-01`,
+			},
+		},
+		{
+			name: "client_auth's mode",
+			doc:  `{"listeners": [{"name": "web", "address": ":443", "tls": {"acme": ["a.example"], "client_auth": {"ca_files": ["ca.pem"], "mode": "maybe"}}}]}`,
+			want: []string{`1:130: listeners[0].tls.client_auth.mode: "maybe" is not one of "require", "verify_if_given"`},
+		},
+		{
 			name: "acme challenges",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"challenges": ["http-01", "dns-01"]}}`,
 			want: []string{`1:87: acme.challenges[1]: "dns-01" is not one of "http-01", "tls-alpn-01"`},

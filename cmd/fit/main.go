@@ -22,6 +22,9 @@ Commands:
 	validate   check a config file without running it
 	schema     print the JSON Schema of the native config
 	version    print the versions of fit, fib and Go
+	hash-password
+	           print the bcrypt hash of the password read from standard input,
+	           for basic_auth
 	help       print this help
 `
 
@@ -45,6 +48,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSchema(args[1:], stdout, stderr)
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
+	case "hash-password":
+		return runHashPassword(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
