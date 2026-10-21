@@ -1877,8 +1877,12 @@ Differences from the plan:
 - Listeners written out get no redirect: HTTPS by default fills in what a config leaves out, and
   does not change what it says. A redirect for a written listener comes with I38's redirects.
 - The `https` listener serves HTTP/1.1 and h2, not h3, as a written TLS listener does by default.
-- The Let's Encrypt staging test has not been run: it needs a public name and ports 80 and 443,
-  which the benchmark host does not have.
+- The Let's Encrypt staging test needs a public name and ports 80 and 443, which the benchmark
+  host does not have. It was run by hand on 2026-10-21, at 1f56c44, on a public Debian 12 host
+  with a DuckDNS name: fit obtained a certificate from the staging CA ("(STAGING) Baloney Bulgur
+  YE2") through a config naming only the host, and served it, in 10s. The host's Go is older than
+  fit's, so the fit binary and `go test -c`'s were cross-built and copied over, with a stand-in
+  `go` on the test's `PATH` that copies the prebuilt fit where `TestMain` builds it.
 
 ### I30c ACME Renewal Information (ARI) — done
 
@@ -1959,7 +1963,8 @@ Differences from the plan:
 Differences from the plan:
 
 - The certificate test is against Pebble in CI; Let's Encrypt staging needs a public name and
-  ports 80 and 443, and is documented to be run by hand, as I30's done-when allows.
+  ports 80 and 443, and is documented to be run by hand, as I30's done-when allows. It passed by
+  hand on 2026-10-21 (I30b), so all three of the roadmap's exit criteria have been met as written.
 - The plan's I35 has no benchmarks; the comparison with nginx that R07c's notes left for M2's end
   is the [M2 report](../bench/results/m2-report-2026-10-20.md), run after I35 at 59083f3. The
   harness's summary now names the servers of a run of idle connections alone, which it left out.
