@@ -3,6 +3,7 @@
 package fibtest
 
 import (
+	"bytes"
 	"errors"
 	stdhttp "net/http"
 	"net/http/httptest"
@@ -22,13 +23,17 @@ type Recorder struct {
 	written  chan struct{}
 }
 
-// WriteResponse records the response.
+// WriteResponse records the response, with a copy of its header and body: a
+// stream reads them before it returns, and fib may reuse them after, as
+// Respond does its header.
 func (r *Recorder) WriteResponse(_ *stdhttp.Request, response fibhttp.Response) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.Written {
 		return errors.New("fibtest: response written twice")
 	}
+	response.Header = response.Header.Clone()
+	response.Body = bytes.Clone(response.Body)
 	r.Response, r.Written = response, true
 	if r.written != nil {
 		close(r.written)

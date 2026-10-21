@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-21 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I37) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I38) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114` (fib's `main` at `8e04da9`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | no rewrites, redirects or header middleware (I38) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | no rate, concurrency or body size limits per route (I39) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -31,7 +31,7 @@ nginx's throughput over HTTP/1.1.
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
 Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
-HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36 and I37 are done; next, I38 (rewrites, redirects and headers).**
+HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is under way: I36–I38 are done; next, I39 (rate, concurrency and size limits).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -52,7 +52,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I38 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I39 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -67,6 +67,8 @@ To continue, start a session with:
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
 | `handler/proxy` | the `proxy` handler: forwards to a named upstream, drops hop-by-hop fields, sets `X-Forwarded-*` and `Forwarded` with a trusted-proxy list; streams both directions without waiting, paced by `HoldBody` and `OnDrain` up and `WriteNoWait` and `OnWritable` down |
+| `middleware/rewrite` | the `rewrite` middleware (strip prefix, regexp, add prefix) and `redirect` |
+| `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
@@ -2209,6 +2211,42 @@ Differences from the plan:
 - None in substance. The expression does not feed the router's host and path maps: an expression's
   hosts and paths are checked by evaluating it, after the maps found the route's candidates by its
   `host` and `path` fields, which may be set beside `expr` for that.
+
+### I38 Rewrites, redirects and headers — done
+
+- `middleware/rewrite`, the first middleware fit ships: `rewrite` changes the request's path before
+  the handler, and the upstream a proxy sends it to, sees it: `strip_prefix` (the first of a list
+  the path starts with at a segment boundary, so `/api` makes `/api/users` `/users` and `/api`
+  `/`, and leaves `/apix` alone), `regexp` and `replacement` (Go's `ReplaceAllString`, `$1` and
+  `${name}`), and `add_prefix`, in that order. The route was already picked by the path as sent.
+  The new path is escaped afresh (`RawPath` is cleared), so a `%2F` the client sent is a `/` once
+  rewritten. `redirect` answers with a redirect to `to`, in which `{scheme}`, `{host}`, `{path}`,
+  `{query}` and `{uri}` stand for the request's; with `regexp`, only paths it matches are
+  redirected, `$1` in `to` standing for its groups, and the rest go on to the handler. `status`
+  is 301, 302 (the default), 303, 307 or 308.
+- `middleware/headers`: `headers` with `request` and `response`, each `delete` (names, or a prefix
+  ending in `*`), then `set`, then `add`. Request changes are made before the handler; response
+  changes in an `OnHeader` hook, a function made once at provision, so they reach every
+  response whichever way the handler writes it. Names are canonical at provision; each request
+  gets values of its own, since what reads a header may change them.
+- Both register in `modules/standard`, and the schema has their params.
+- `internal/fibtest`'s `Recorder` now keeps a copy of a response's header and body: fib's
+  `Respond` hands a pooled header to the stream and clears it once the stream returns, so the
+  recorder saw a response's hook-added fields vanish.
+- Tests: table tests per middleware, `TestRewrite` (strip prefix at segment boundaries and with a
+  trailing `/`, an escaped slash, regexp with numbered and named groups and every match, a
+  replacement dropping the leading `/`, add prefix, all three in order), `TestRedirect` (every
+  request, permanent, each placeholder over TLS, a fixed URL, regexp matched and not),
+  `TestHeaders` (set, add, delete, deletion by prefix, delete everything, request and response,
+  values not shared between requests), `TestResponseOfAnyKind` (`Respond` and `Write`), and the
+  params' errors. `go vet ./...` and the race tests of middleware, modules, schema, runtime,
+  internal, handler and listener pass on the benchmark host; `go vet` and staticcheck for linux,
+  darwin and windows pass.
+- No benchmark: a route without these middleware runs as before, and they are new.
+
+Differences from the plan:
+
+- `redirect` is in `middleware/rewrite` with `rewrite`. Header values take no placeholders yet.
 
 ## Notes for later iterations
 

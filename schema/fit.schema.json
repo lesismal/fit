@@ -637,6 +637,36 @@
       ],
       "type": "object"
     },
+    "headers.Ops": {
+      "additionalProperties": false,
+      "properties": {
+        "add": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Values to add to fields, after any already there.",
+          "type": "object"
+        },
+        "delete": {
+          "description": "Fields to delete: names, or a prefix ending in \"*\", as in \"X-Debug-*\".",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "set": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Fields to set, each replacing any of the same name.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "http.handlers": {
       "additionalProperties": false,
       "allOf": [
@@ -832,10 +862,64 @@
     },
     "http.middleware": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "headers"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.headers"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "redirect"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.redirect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "rewrite"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.rewrite"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "module": {
           "description": "The module's name within its namespace.",
-          "enum": [],
+          "enum": [
+            "headers",
+            "redirect",
+            "rewrite"
+          ],
           "type": "string"
         },
         "params": {
@@ -845,6 +929,67 @@
       "required": [
         "module"
       ],
+      "type": "object"
+    },
+    "http.middleware.headers": {
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/headers.Ops",
+          "description": "Changes to the request's fields, made before the handler, and the upstream a proxy sends the request to, sees them."
+        },
+        "response": {
+          "$ref": "#/$defs/headers.Ops",
+          "description": "Changes to the response's fields, made just before it is sent, whichever handler wrote it."
+        }
+      },
+      "type": "object"
+    },
+    "http.middleware.redirect": {
+      "additionalProperties": false,
+      "properties": {
+        "regexp": {
+          "description": "A regular expression in Go's syntax that the path must match for the request to be redirected; the rest go on to the handler. Every request is redirected when left out.",
+          "type": "string"
+        },
+        "status": {
+          "default": 302,
+          "description": "The status: 301 and 308 are permanent, 302, 303 and 307 temporary; 307 and 308 keep the method and body. 302 when left out.",
+          "type": "integer"
+        },
+        "to": {
+          "description": "Where to: a URL or a path, in which {scheme}, {host} (with its port, as the client sent it), {path}, {query} (without the '?') and {uri} (the path and query) stand for the request's, and, with regexp, $1 or ${name} for its groups, as in \"https://{host}{uri}\" or \"/new/$1\".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "type": "object"
+    },
+    "http.middleware.rewrite": {
+      "additionalProperties": false,
+      "properties": {
+        "add_prefix": {
+          "description": "A prefix put before the path, as in \"/v2\".",
+          "type": "string"
+        },
+        "regexp": {
+          "description": "A regular expression in Go's syntax; each match in the path is replaced with replacement.",
+          "type": "string"
+        },
+        "replacement": {
+          "description": "What replaces each match of regexp, in which $1 or ${name} stand for the regexp's groups.",
+          "type": "string"
+        },
+        "strip_prefix": {
+          "description": "Prefixes to take off the path: the first that the path starts with, at a segment boundary, is removed, and what is left starts with '/'. \"/api\" makes \"/api/users\" \"/users\" and \"/api\" \"/\", and leaves \"/apix\" alone.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     }
   },

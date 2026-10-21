@@ -158,7 +158,7 @@ Status: `todo`, `doing` or `done`.
 | **M3** | | | |
 | I36 | Matchers v2 and priorities | I11 | done |
 | I37 | Expression matcher | I36 | done |
-| I38 | Rewrites, redirects and headers | I36 | todo |
+| I38 | Rewrites, redirects and headers | I36 | done |
 | I39 | Rate, concurrency and size limits | I36 | todo |
 | I40 | Basic auth and client mTLS | I36 | todo |
 | I41 | ForwardAuth | I40 | todo |
