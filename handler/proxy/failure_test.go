@@ -334,6 +334,7 @@ func TestStatusOf(t *testing.T) {
 		{os.ErrDeadlineExceeded, 504},
 		{fibhttp.ErrResponseHeaderTimeout, 504},
 		{upstream.ErrBusy, 503},
+		{upstream.ErrClosed, 503},
 		{&uploadError{errors.New("bad chunk")}, 400},
 		{&uploadError{os.ErrDeadlineExceeded}, 408},
 	} {

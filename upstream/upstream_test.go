@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"errors"
 	"io"
 	"net"
 	stdhttp "net/http"
@@ -384,10 +385,20 @@ func TestCloseDrains(t *testing.T) {
 	slow := goDo(t, p, "/slow")
 	<-arrived
 	p.Close()
-	// Requests still go while one is in flight: one that started on the
-	// pool's graph may yet need it.
-	if got := do(t, p, "/"); got.err != nil || got.status != 200 {
-		t.Fatalf("a request while draining: %+v", got)
+	if n := p.InFlight(); n != 1 {
+		t.Fatalf("in flight after Close: %d, want 1", n)
+	}
+	// Once the last hold is given back, a new request is refused even while
+	// one is in flight. It used to be sent, and could keep the count from
+	// ever reaching none, leaving the pool open.
+	if got := do(t, p, "/"); !errors.Is(got.err, ErrClosed) {
+		t.Fatalf("a request while draining: %+v, want ErrClosed", got)
+	}
+	if n := p.InFlight(); n != 1 {
+		t.Fatalf("in flight after the refused request: %d, want 1", n)
+	}
+	if fails := p.Backends()[0].failures.Load(); fails != 0 {
+		t.Fatalf("the refused request counted %d failures against the backend", fails)
 	}
 	unblock()
 	if got := <-slow; got.err != nil || got.body != "ok" {

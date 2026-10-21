@@ -52,6 +52,11 @@ const (
 // ErrNoEngine is what a request through a pool made without an engine gets.
 var ErrNoEngine = errors.New("upstream: the pool has no engine to dial through")
 
+// ErrClosed is what a request gets that is sent through a pool after its
+// last hold was given back with Close. The proxy answers it with 503, and it
+// counts against no backend's health.
+var ErrClosed = errors.New("upstream: the pool is closed")
+
 // ErrBusy is what a request gets when max_pending requests already wait for
 // a connection to its address: fib's client refuses it at once. The proxy
 // answers it with 503, and it counts against no backend's health.
@@ -216,9 +221,8 @@ func (p *Pool) Backends() []*Backend { return p.backends }
 
 // Pick chooses the backend for r by the upstream's sticky cookie and policy,
 // and counts the request as under way on it until Done. r may be nil, for a
-// request with nothing to go by. A pool that Close was called on still
-// serves requests until those under way are done, so that a request that
-// started on it can still use it.
+// request with nothing to go by. Every Pick needs its Done, even one whose
+// Send fails at once, as it does with ErrClosed.
 func (p *Pool) Pick(r *stdhttp.Request) *Backend {
 	p.inFlight.Add(1)
 	var b *Backend
@@ -282,10 +286,16 @@ func (p *Pool) done() {
 // the reason there is none, and returns the Call that abandons it. It sets
 // req.URL's scheme and host to b's address and leaves the rest of the
 // request, its Host field included, as it is. See fib's Client.Start for how
-// the body is sent and the callback run: the callback must not block.
+// the body is sent and the callback run: the callback must not block. A
+// pool whose last hold was given back fails it at once with ErrClosed; Pick
+// counted it first, so that Close either sees it under way or it sees Close.
 func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) fibhttp.Call {
 	if p.client == nil {
 		callback(nil, ErrNoEngine)
+		return fibhttp.Call{}
+	}
+	if p.closing.Load() {
+		callback(nil, ErrClosed)
 		return fibhttp.Call{}
 	}
 	req.URL.Scheme = p.scheme
@@ -295,13 +305,13 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 
 // Do is Pick, Send and Done for a caller that is done with the response
 // when its callback returns, as one that reads a body that arrived whole is.
-// An error counts as a failure of the backend, but for ErrBusy and a
-// cancelled request.
+// An error counts as a failure of the backend, but for ErrBusy, ErrClosed
+// and a cancelled request.
 func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, error)) {
 	b := p.Pick(req)
 	p.Send(b, req, func(resp *fibhttp.ClientResponse, err error) {
 		callback(resp, err)
-		p.Done(b, err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrBusy))
+		p.Done(b, err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrClosed))
 	})
 }
 
@@ -312,9 +322,11 @@ func (p *Pool) Do(req *stdhttp.Request, callback func(*fibhttp.ClientResponse, e
 func (p *Pool) Acquire() { p.users.Add(1) }
 
 // Close gives back a hold on the pool, as a graph's cleanup does, and the
-// last one closes it once the requests in flight are done: a request whose
-// response arrives later can still finish. The idle connections are closed
-// then, and later requests fail. Probes stop at once. Closing more often
+// last one closes it once the requests in flight are done: a request sent
+// before then still finishes, its response and body arriving later. Requests
+// sent after it fail at once with ErrClosed, even while others are still in
+// flight, and the idle connections are closed once those are done. Probes
+// stop at once. Closing more often
 // than the pool is held does nothing more.
 func (p *Pool) Close() {
 	if p.users.Add(-1) > 0 {
