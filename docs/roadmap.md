@@ -46,8 +46,9 @@ On top of that, fib gives fit two things none of the three has: several protocol
 ## Non-goals
 
 - **A mail proxy.** nginx's `mail` module has few users today; fit leaves it out.
-- **A service mesh.** fit is an edge and gateway proxy, not a sidecar, and it does not try to
-  replace Envoy or Linkerd inside a cluster.
+- **A service mesh in this roadmap.** This roadmap is for fit as an edge and gateway proxy. fit as
+  a mesh data plane (the ambient node proxy and waypoint) is a separate track, in the
+  [service mesh data plane roadmap](mesh-roadmap.md).
 - **API management.** Developer portals, API monetisation and API key self-service belong in tools
   that sit on top of a gateway.
 - **Compatibility with Lua, njs or Yaegi plugins.** fit's runtime extensions are WASM.

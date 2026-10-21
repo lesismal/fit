@@ -42,7 +42,8 @@ SOCKS 代理。
 ## 非目标
 
 - **邮件代理。** nginx 的 `mail` 模块如今用户很少，fit 不做。
-- **服务网格。** fit 是边缘和网关代理，不是 sidecar，不打算在集群内部替代 Envoy 或 Linkerd。
+- **本路线图中的服务网格。** 本路线图针对作为边缘和网关代理的 fit。fit 作为网格数据面（ambient 的节点代理和
+  waypoint）是另一条独立路线，见 [服务网格数据面路线图](mesh-roadmap.zh-CN.md)。
 - **API 管理。** 开发者门户、API 计费、API key 自助申请等属于建在网关之上的工具。
 - **兼容 Lua、njs 或 Yaegi 插件。** fit 的运行时扩展是 WASM。
 - **完整兼容 nginx 配置。** M5 的转换器只覆盖常见子集，用于降低迁移成本，不追求每条指令。
