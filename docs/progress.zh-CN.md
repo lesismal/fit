@@ -1575,7 +1575,8 @@ M2 报告显示，fit 的代理在 HTTP/1.1 上是 nginx 的 86%，每个请求�
   schema、admin、cmd/fit、handler/...、module、observe、tlsmgr、upstream、test/e2e）的 `go test -race`，均通过；linux、darwin 和 windows 的 `go vet` 与 staticcheck 通过。
 - 在基准机上用 `bench/microbench.sh` 比较 main 和本改动，各 10 轮交替：`router` 的 `BenchmarkMatch`（101 个路由，
   无匹配器）92.4 ns → 56.5 ns（−39%：条目改为按指针传递而不是复制，并且先尝试精确 host），`listener` 的
-  `BenchmarkDispatch/bare` 111.0 ns → 109.5 ns（−1.4%），分配次数不变（0 和 4）。
+  `BenchmarkDispatch/bare` 111.0 ns → 109.5 ns（−1.4%），分配次数不变（0 和 4）。`bench/ab.sh` 单独测 fit 的固定响应，
+  10 秒一轮、交替三轮：HTTP/1.1 每秒 778k → 778k 个请求（−0.1%），h2c 3,842k → 3,852k（+0.2%），都在噪声范围内。
 
 与计划的差异：
 

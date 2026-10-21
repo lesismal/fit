@@ -2168,6 +2168,8 @@ Differences from the plan:
   change: `router`'s `BenchmarkMatch` (101 routes, no matchers) 92.4 ns → 56.5 ns (−39%: entries
   are now passed by pointer rather than copied, and the exact host is tried first), `listener`'s
   `BenchmarkDispatch/bare` 111.0 ns → 109.5 ns (−1.4%), allocations unchanged (0 and 4).
+  `bench/ab.sh`, fit alone, the fixed response, three rounds of 10s alternating: HTTP/1.1 778k →
+  778k requests a second (−0.1%), h2c 3,842k → 3,852k (+0.2%), both within the noise.
 
 Differences from the plan:
 
