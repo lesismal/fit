@@ -12,7 +12,7 @@ this file says what was done, and where the work differs from the plan.
 | --- | --- |
 | Last updated | 2026-10-22 |
 | Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: under way (I36–I52) |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261021163335-530d222d4f8f` (`530d222` on fib's branch `udp-peer-idle`, which is fib's `main` at `9ab22e8` with A34 and A35; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52 |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261021163335-530d222d4f8f` (fib's `main` at `530d222`, which is `9ab22e8` with A34 and A35; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52 |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no one port for many protocols, SOCKS or CONNECT (I53), or the rest of M3 |
 
@@ -2767,8 +2767,8 @@ Differences from the plan:
 - The engine's own sweep of silent UDP peers is one timeout for the whole engine, which HTTP/3 also
   relies on, so a session opts out of it and keeps its own timer, as a TCP relay does:
   [A34](fib-api-requests.md#a34-a-udp-peers-own-idle-timeout-or-none),
-  `Connection.SetUDPIdleTimeout`, made in fib by this session on the branch `udp-peer-idle`
-  (`11de9eb`), which fit depends on by its hash until it is merged into fib's `main`.
+  `Connection.SetUDPIdleTimeout`, made in fib by this session and pushed to fib's `main`
+  (`11de9eb`).
 - Tests (`l4/udp_test.go`, `config`): `TestUDPEcho` (datagrams of 1, 1,400 and 60,000 bytes each
   come back whole; 200 clients at once, 10 round trips each, each one session and one address at
   the upstream), `TestUDPSessionsExpire` (an idle session ends after 300 ms while a busy one keeps
@@ -2781,7 +2781,7 @@ Differences from the plan:
 
 Differences from the plan:
 
-- It needed A34 of fib, which this session made on a branch of fib, not yet on its `main`.
+- It needed A34 of fib, which this session made and pushed to fib's `main`.
   fib's own `TestUDPSendBatch`, `TestUDPSendBatchSegments` and `TestUDPBurstFromManyPeers` fail in
   the benchmark host's Docker container on fib's `main` as on the branch; they are not this
   change's, and fib's CI is where they are judged.
@@ -2803,7 +2803,7 @@ Differences from the plan:
   for tcp listeners, for `ip_hash` and what is sent on; for listeners of HTTP over TCP, with or
   without TLS (the header comes before TLS), the requests' `RemoteAddr`, which `X-Forwarded-For` and
   the access log then name. That needed [A35](fib-api-requests.md#a35-a-connections-peer-address-replaced-as-a-proxy-header-gives-it),
-  `Connection.SetRemoteAddrPort`, made in fib by this session on the same branch as A34 (`530d222`).
+  `Connection.SetRemoteAddrPort`, made in fib by this session and pushed to fib's `main` (`530d222`).
   A service's `proxy_protocol: "v1"` or `"v2"` sends its upstream a header first, naming the client
   and the address it connected to (the incoming header's, when there was one).
 - Tests (`l4/codec_test.go`, `l4/sni_test.go`, `config`): `TestReadSNI` (a crypto/tls hello whole,
@@ -2825,11 +2825,11 @@ Differences from the plan:
 Differences from the plan:
 
 - PROXY headers are sent by tcp services, not yet by the HTTP proxy to its upstreams, nor taken on
-  UDP or HTTP/3; and it needed A35 of fib, on fib's branch with A34.
+  UDP or HTTP/3; and it needed A35 of fib.
 
 ## Notes for later iterations
 
-- **fib version.** fit uses `530d222` on fib's branch `udp-peer-idle` (`v1.5.7-0.20261021163335-530d222d4f8f`), which is fib's `main` at `9ab22e8` with A34 (`11de9eb`, a UDP peer's own idle timeout) and A35 (`530d222`, a connection's peer address replaced); it moves to fib's `main` once that is merged there. `9ab22e8` is `929924e` with A32 (`0bd2447`, a request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client) and A33 (`9ab22e8`, a peer's end seen while reads are held is not lost). `929924e` is `fc7ec5e` with A28-A30 (a retained request upgraded after its handler returned, `Client.StartUpgrade`, extended CONNECT from the HTTP/3 client). `fc7ec5e` is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
+- **fib version.** fit uses fib's `main` at `530d222` (`v1.5.7-0.20261021163335-530d222d4f8f`), which is `9ab22e8` with A34 (`11de9eb`, a UDP peer's own idle timeout) and A35 (`530d222`, a connection's peer address replaced). `9ab22e8` is `929924e` with A32 (`0bd2447`, a request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client) and A33 (`9ab22e8`, a peer's end seen while reads are held is not lost). `929924e` is `fc7ec5e` with A28-A30 (a retained request upgraded after its handler returned, `Client.StartUpgrade`, extended CONNECT from the HTTP/3 client). `fc7ec5e` is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
   lifted before HTTP/2 takes a connection over) and `OnClose` run for the connections `Close`

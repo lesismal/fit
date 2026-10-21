@@ -46,8 +46,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
 | A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | done, `0bd2447` | 1, 5, 9 | I49 |
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
-| A34 | A UDP peer's own idle timeout, or none | made, `11de9eb` on fib's branch `udp-peer-idle`; to `main` with the user's word | 10, 11 | I51 |
-| A35 | A connection's peer address replaced, as a PROXY header gives it | made, `530d222` on fib's branch `udp-peer-idle`; to `main` with the user's word | 13 | I52 |
+| A34 | A UDP peer's own idle timeout, or none | done, `11de9eb` | 10, 11 | I51 |
+| A35 | A connection's peer address replaced, as a PROXY header gives it | done, `530d222` | 13 | I52 |
 
 ## Evidence
 
@@ -979,8 +979,7 @@ holds either side's for the other's backlog.
 
 ## A34: A UDP peer's own idle timeout, or none
 
-**Status.** Made by fit's session: `11de9eb` on fib's branch `udp-peer-idle`, which fit depends on
-by its hash until it is merged into fib's `main` with the user's word.
+**Status.** Done (`11de9eb` on fib's `main`), made by fit's session.
 
 **Problem.** fib closes a UDP listener's peer that has been silent for `Config.UDPIdleTimeout`, one
 value for the whole engine (60 s by default), which also bounds the peers of HTTP/3, whose QUIC
@@ -1001,8 +1000,7 @@ own timer, as it does a TCP relay.
 
 ## A35: A connection's peer address replaced, as a PROXY header gives it
 
-**Status.** Made by fit's session: `530d222` on fib's branch `udp-peer-idle`, after A34, which fit
-depends on by its hash until it is merged into fib's `main`.
+**Status.** Done (`530d222` on fib's `main`), made by fit's session.
 
 **Problem.** A listener behind a load balancer that sends the PROXY protocol learns the client's
 address from the header, but fib's HTTP handler takes a request's `RemoteAddr` from the
