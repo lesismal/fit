@@ -69,11 +69,9 @@ var servers = []server{
 		ready: "/proxy",
 	},
 	{
-		name: "fit",
-		// WebSocket comes with I47: add it here, and to configs/fit/fit.json,
-		// when it lands.
+		name:      "fit",
 		scenarios: []string{"fixed", "static", "proxy"},
-		idle:      []string{"http1", "tls"},
+		idle:      []string{"http1", "tls", "ws"},
 		mounts:    [][2]string{{"fit/fit.json", "/etc/fit/fit.json"}, {"www", "/srv/www"}, {"certs", "/certs"}},
 		cmd:       []string{"/usr/local/bin/fit", "run", "-c", "/etc/fit/fit.json"},
 		version:   []string{"/usr/local/bin/fit", "version"},

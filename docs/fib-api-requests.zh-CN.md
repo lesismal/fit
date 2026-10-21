@@ -38,6 +38,10 @@
 | A25 | 按请求限制请求体大小，流式的也包括在内 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 7、11 | I39 |
 | A26 | 一个 Context 上可以有多个 `OnCancel` 回调 | 已完成，`cfb4f09`（v1.5.6 之后的 main） | 1、12 | I39 |
 | A27 | 在写出时改写响应体的钩子 | 已完成，`fc7ec5e`（v1.5.6 之后的 main） | 5、7、11 | I46 |
+| A28 | 处理器返回后再 Upgrade 被保留的请求 | 已完成，`929924e`（v1.5.6 之后的 main） | 1、9 | I47、I48 |
+| A29 | 客户端请求收到 101 时把连接移交为 tunnel | 已完成，`929924e`（与 A28 一起） | 1、9 | I47 |
+| A30 | HTTP/3 客户端发送 extended CONNECT | 已完成，`929924e`（与 A28 一起） | 13 | I48 的测试 |
+| A31 | HTTP/2、HTTP/3 tunnel 的未发送输出排空时的回调 | 待实现 | 1、8、9 | I48 |
 
 ## 证据
 
@@ -630,4 +634,55 @@ OnHeader 钩子依次运行，可以修改 header，返回一个 `BodyFilter`（
 
 **fit 如何使用。** `compress` 注册一个 `OnBodyFilter`，根据状态码和 header 判断，设置 `Content-Encoding`、`Vary` 和
 弱 `ETag`，并返回流式的 zstd、brotli 或 gzip 编码器。
+
+## A28：处理器返回后再 Upgrade 被保留的请求
+
+**状态。** 已在 fib 的 `main` 上完成（`929924e`），由 fit 的会话经维护者同意实现；fit 按 commit 依赖它（`v1.5.7-0.20261021130553-929924e17392`，规则 19）。
+
+**问题。** 代理只有在上游回应 101（以及它选定的子协议和扩展）之后，才能把客户端的请求切换为 WebSocket，而代理是在 fib
+客户端的回调中、处理器返回之后才知道的。`Context.Upgrade` 拒绝处理器已不在运行的请求；在处理器中等待上游会阻塞 worker。
+
+**实现。** `Upgrade` 和 `Connect` 也接受处理器保留着、尚未回应的请求，可以从任何 goroutine 调用。HTTP/1 上切换时获取连接的
+parser 锁：请求等待期间客户端发来的数据（请求忙时由 parser 保存）是 tunnel 的第一批数据，期间读到数据的轮次把它交给
+tunnel，最后一次 `Release` 不再让连接继续处理下一个请求。HTTP/2 和 HTTP/3 的流照旧在各自的锁下切换；先到的 DATA 有界地
+排在流的 tunnel 中。fib 的 `TestLateUpgradeHTTP1`、`TestLateUpgradeHTTP2`、`TestCcTunnelLateUpgrade` 和
+`TestLateUpgradeAfterAnswer`。
+
+**fit 如何使用。** 代理保留要求切换协议的请求，把握手发往上游，在回调中用上游的回应调用 `Upgrade`。
+
+## A29：客户端请求收到 101 时把连接移交为 tunnel
+
+**状态。** 与 A28 一起完成（`929924e`）。
+
+**问题。** fib 的客户端收到 101 时在回调运行之前就关闭了连接：代理无法保留上游切换了的连接。
+
+**实现。** `Client.StartUpgrade(req, handler, callback)`。收到 101 时连接离开客户端，不再计入 `MaxConnsPerHost`，成为
+tunnel（`ClientResponse.Tunnel()`），其 handler 在回调返回后打开，101 之后到达的数据排队。其他回应是普通响应。会经
+HTTP/2 连接发出的请求以 `ErrNotUpgradable` 失败。fib 的 `TestClientStartUpgrade` 和 `TestClientStartUpgradeHTTP2`。
+
+**fit 如何使用。** `upstream.Pool.SendUpgrade` 经上游的池发送握手，使用池的拨号、TLS 和限制。
+
+## A30：HTTP/3 客户端发送 extended CONNECT
+
+**状态。** 与 A28 一起完成（`929924e`）。
+
+**问题。** I48 的测试要经 h3 入口打开 WebSocket，而 fit 能用的客户端都不能经 HTTP/3 发送 extended CONNECT。
+
+**实现。** HTTP/3 客户端把 header 中带 `:protocol` 的 CONNECT 作为 extended CONNECT（RFC 9220）发送，与 net/http 的
+HTTP/2 transport 相同。fib 的 `TestClientExtendedConnect`。
+
+## A31：HTTP/2、HTTP/3 tunnel 的未发送输出排空时的回调
+
+**状态。** 待实现。
+
+**问题。** 中继在一侧未发送的数据过多时暂停另一侧的读取，排空后再恢复。HTTP/1 上 `Connection.NotifyOutput` 会告知何时
+排空，不需要任何等待；HTTP/2 和 HTTP/3 的 tunnel 只有 `WaitSendable`，在此期间阻塞一个 goroutine。
+
+**证据。** fit 的代理把经 h2 或 h3 进来的 WebSocket 中继到 HTTP/1.1 上游；客户端读得慢时，每个被暂停的 tunnel 有一个
+goroutine 在 `WaitSendable` 中等待（fib 自己的 `ConnectProxy` 也是如此）。
+
+**建议的 API。** `Tunnel.NotifySendable(limit int, fn func(error)) bool`，与 `Connection.NotifyOutput` 相同：未发送超过
+limit 时，在不超过一半时运行 fn 一次，tunnel 结束时带错误运行，并返回 true。
+
+**fit 如何使用。** 中继用它代替那个 goroutine。
 

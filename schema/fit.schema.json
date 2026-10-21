@@ -816,6 +816,12 @@
           },
           "type": "array"
         },
+        "tunnel_idle_timeout": {
+          "default": "10m",
+          "description": "How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
         "upstream": {
           "description": "The name of the upstream requests go to; or upstreams.",
           "type": "string"

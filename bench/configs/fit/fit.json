@@ -7,7 +7,8 @@
       "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}}
   ],
   "upstreams": [
-    {"name": "backend", "addresses": ["{{BACKEND}}"], "max_conns": 4096, "max_idle_conns": 4096}
+    {"name": "backend", "addresses": ["{{BACKEND}}"], "max_conns": 4096, "max_idle_conns": 4096},
+    {"name": "wsbackend", "addresses": ["{{WSBACKEND}}"]}
   ],
   "routes": [
     {
@@ -24,6 +25,11 @@
       "name": "proxy",
       "match": {"path": ["/proxy"]},
       "handler": {"module": "proxy", "params": {"upstream": "backend"}}
+    },
+    {
+      "name": "ws",
+      "match": {"path": ["/ws"]},
+      "handler": {"module": "proxy", "params": {"upstream": "wsbackend"}}
     }
   ]
 }

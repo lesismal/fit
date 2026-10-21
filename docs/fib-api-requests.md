@@ -40,6 +40,10 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A25 | A per-request limit on a request body, streamed or not | done, `cfb4f09` (main after v1.5.6) | 7, 11 | I39 |
 | A26 | More than one `OnCancel` callback on a Context | done, `cfb4f09` (main after v1.5.6) | 1, 12 | I39 |
 | A27 | A hook that transforms a response body as it is written | done, `fc7ec5e` (main after v1.5.6) | 5, 7, 11 | I46 |
+| A28 | Upgrade a request the handler retained, after it returned | done, `929924e` (main after v1.5.6) | 1, 9 | I47, I48 |
+| A29 | A client request whose 101 hands over its connection as a tunnel | done, `929924e` (with A28) | 1, 9 | I47 |
+| A30 | Extended CONNECT from the HTTP/3 client | done, `929924e` (with A28) | 13 | I48 tests |
+| A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | open | 1, 8, 9 | I48 |
 
 ## Evidence
 
@@ -855,4 +859,71 @@ registered on one response run in turn. fib's `TestBodyFilter`, `TestBodyFilterF
 **How fit uses it.** `compress` registers an `OnBodyFilter` that decides from the status and the
 header, sets `Content-Encoding`, `Vary` and a weak `ETag`, and returns a streaming zstd, brotli or
 gzip encoder.
+
+## A28: Upgrade a request the handler retained, after it returned
+
+**Status.** Done on fib's `main` in `929924e`, made by fit's session with the maintainer's leave;
+fit uses it by commit (`v1.5.7-0.20261021130553-929924e17392`, rule 19).
+
+**Problem.** A proxy can switch its client's request to WebSocket only once the upstream has
+answered 101, with the subprotocol and extensions it chose, which the proxy learns in the fib
+client's callback, after its handler has returned. `Context.Upgrade` refused a request whose
+handler was no longer running; waiting for the upstream in the handler would block a worker.
+
+**As built.** `Upgrade` and `Connect` also take a request the handler retained, before anything
+answered it, from any goroutine. On HTTP/1 the switch takes the connection's parser lock: what the
+client sent while the request waited (the parser keeps it while the request is busy) is the
+tunnel's first data, a round that read meanwhile hands its bytes to the tunnel, and the last
+`Release` no longer carries the connection on to another request. HTTP/2 and HTTP/3 streams switch
+under their own locks, as before; the DATA that came first is queued, bounded, in the stream's
+tunnel. fib's `TestLateUpgradeHTTP1`, `TestLateUpgradeHTTP2`, `TestCcTunnelLateUpgrade` and
+`TestLateUpgradeAfterAnswer`.
+
+**How fit uses it.** The proxy retains a request that asks to switch, sends the handshake
+upstream, and calls `Upgrade` in the callback, with the upstream's answer.
+
+## A29: A client request whose 101 hands over its connection as a tunnel
+
+**Status.** Done with A28 (`929924e`).
+
+**Problem.** fib's client closed a connection on a 101 before the callback ran: a proxy had no way
+to keep the connection the upstream switched.
+
+**As built.** `Client.StartUpgrade(req, handler, callback)`. On a 101 the connection leaves the
+client, no longer counted against `MaxConnsPerHost`, and becomes a tunnel,
+`ClientResponse.Tunnel()`, whose handler opens once the callback returns, with what followed the
+101 queued. Any other answer is an ordinary response. A request that would go out on an HTTP/2
+connection fails with `ErrNotUpgradable`. fib's `TestClientStartUpgrade` and
+`TestClientStartUpgradeHTTP2`.
+
+**How fit uses it.** `upstream.Pool.SendUpgrade` sends the handshake through the upstream's pool,
+with its dial, TLS and limits.
+
+## A30: Extended CONNECT from the HTTP/3 client
+
+**Status.** Done with A28 (`929924e`).
+
+**Problem.** I48's tests open WebSockets over h3 entries, and no client fit could use sent an
+extended CONNECT over HTTP/3.
+
+**As built.** The HTTP/3 client sends a CONNECT whose header has `:protocol` as an extended CONNECT
+(RFC 9220), as net/http's HTTP/2 transport does. fib's `TestClientExtendedConnect`.
+
+## A31: A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains
+
+**Status.** Open.
+
+**Problem.** A relay holds one side's reads while the other has too much unsent, and resumes them
+once it drains. Over HTTP/1 `Connection.NotifyOutput` says when, with nothing waiting; over HTTP/2
+and HTTP/3 a tunnel only has `WaitSendable`, which blocks a goroutine for the while.
+
+**Evidence.** fit's proxy relays a WebSocket that came in over h2 or h3 to an HTTP/1.1 upstream;
+when its client reads slowly, one goroutine per held tunnel waits in `WaitSendable` (fib's own
+`ConnectProxy` does the same).
+
+**Suggested API.** `Tunnel.NotifySendable(limit int, fn func(error)) bool`, as
+`Connection.NotifyOutput`: when more than limit is unsent, run fn once no more than half is, or
+with an error once the tunnel ends, and report true.
+
+**How fit would use it.** The relay registers it in place of the goroutine, which goes.
 

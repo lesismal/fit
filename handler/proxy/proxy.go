@@ -48,23 +48,29 @@ func init() {
 
 // Proxy forwards requests to an upstream.
 type Proxy struct {
-	Upstream       string          `json:"upstream,omitempty" doc:"The name of the upstream requests go to; or upstreams."`
-	Upstreams      []Split         `json:"upstreams,omitempty" doc:"Upstreams requests are spread over at random by weight, as a canary release does, in place of upstream."`
-	Failover       string          `json:"failover,omitempty" doc:"An upstream that takes the requests when none of the chosen upstream's backends is in rotation, for failing or for its health checks, and one of its own is."`
-	Mirror         *Mirror         `json:"mirror,omitempty" doc:"Send a copy of a share of the requests whose bodies arrive whole (64KB at most) to another upstream, and drop its answers. At most 256 copies are under way at once; past that, requests are not copied. The requests themselves do not wait for their copies."`
-	TrustedProxies []string        `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out."`
-	HostHeader     string          `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
-	Retry          *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
-	Timeout        config.Duration `json:"timeout,omitempty" doc:"The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out."`
+	Upstream          string          `json:"upstream,omitempty" doc:"The name of the upstream requests go to; or upstreams."`
+	Upstreams         []Split         `json:"upstreams,omitempty" doc:"Upstreams requests are spread over at random by weight, as a canary release does, in place of upstream."`
+	Failover          string          `json:"failover,omitempty" doc:"An upstream that takes the requests when none of the chosen upstream's backends is in rotation, for failing or for its health checks, and one of its own is."`
+	Mirror            *Mirror         `json:"mirror,omitempty" doc:"Send a copy of a share of the requests whose bodies arrive whole (64KB at most) to another upstream, and drop its answers. At most 256 copies are under way at once; past that, requests are not copied. The requests themselves do not wait for their copies."`
+	TrustedProxies    []string        `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out."`
+	HostHeader        string          `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
+	Retry             *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
+	TunnelIdleTimeout config.Duration `json:"tunnel_idle_timeout,omitempty" default:"\"10m\"" doc:"How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out."`
+	Timeout           config.Duration `json:"timeout,omitempty" doc:"The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out."`
 
 	pool     *upstream.Pool
 	split    []weighted
 	failover *upstream.Pool
 	mirror   *mirror
 	retry    *retryPolicy
-	timeout  time.Duration
-	trusted  []netip.Prefix
-	stall    time.Duration
+	// tunnelIdle bounds a tunnel's silence; relays are the requests that
+	// asked to switch protocols, their handshakes and tunnels, which Drain
+	// closes.
+	tunnelIdle time.Duration
+	relays     [openShards]relaySet
+	timeout    time.Duration
+	trusted    []netip.Prefix
+	stall      time.Duration
 	// graph is the config the proxy belongs to, held by each exchange until
 	// it is over; open are the exchanges under way, which Drain cuts off.
 	// They are spread over several sets, so that exchanges starting at once
@@ -114,6 +120,7 @@ func (p *Proxy) Drain() {
 	for _, x := range open {
 		x.cancel(errDrained)
 	}
+	p.drainRelays()
 }
 
 // Provision finds the upstream and parses the trusted proxies.
@@ -142,6 +149,9 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 		p.retry = newRetryPolicy(r)
 	}
 	p.timeout = p.Timeout.Std()
+	if p.tunnelIdle = p.TunnelIdleTimeout.Std(); p.tunnelIdle <= 0 {
+		p.tunnelIdle = DefaultTunnelIdleTimeout
+	}
 	return nil
 }
 
@@ -170,6 +180,11 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
 	header := make(stdhttp.Header, len(r.Header)+4)
 	for key, values := range r.Header {
+		if strings.HasPrefix(key, ":") {
+			// A pseudo-header the server kept, as an extended CONNECT's
+			// :protocol; the upstream's request has its own framing.
+			continue
+		}
 		if !validToken(key) {
 			return false
 		}

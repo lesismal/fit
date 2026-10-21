@@ -167,8 +167,8 @@ Status: `todo`, `doing` or `done`.
 | I44 | Circuit breakers | I43 | done |
 | I45 | Traffic splitting: weights, mirroring, failover | I19 | done |
 | I46 | Compression | I36 | done |
-| I47 | WebSocket proxying | I17 | todo |
-| I48 | WebSocket over HTTP/2 and HTTP/3 entries | I47, I10 | todo |
+| I47 | WebSocket proxying | I17 | done |
+| I48 | WebSocket over HTTP/2 and HTTP/3 entries | I47, I10 | done |
 | I49 | gRPC proxying | I18 | todo |
 | I50 | TCP proxying | I05 | todo |
 | I51 | UDP proxying | I50 | todo |

@@ -317,6 +317,25 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 	return p.client.Start(req, callback)
 }
 
+// SendUpgrade is Send for a request that asks the server to switch
+// protocols, as a WebSocket handshake does: on a 101 the connection leaves
+// the pool and becomes a tunnel (ClientResponse.Tunnel), which handler
+// takes. See fib's Client.StartUpgrade; the switch needs an HTTP/1.1
+// connection, so an h2c upstream fails it.
+func (p *Pool) SendUpgrade(b *Backend, req *stdhttp.Request, handler fibhttp.TunnelHandler, callback func(*fibhttp.ClientResponse, error)) fibhttp.Call {
+	if p.client == nil {
+		callback(nil, ErrNoEngine)
+		return fibhttp.Call{}
+	}
+	if p.closing.Load() {
+		callback(nil, ErrClosed)
+		return fibhttp.Call{}
+	}
+	req.URL.Scheme = p.scheme
+	req.URL.Host = b.Address
+	return p.client.StartUpgrade(req, handler, callback)
+}
+
 // Do is Pick, Send and Done for a caller that is done with the response
 // when its callback returns, as one that reads a body that arrived whole is.
 // An error counts as a failure of the backend, but for ErrBusy, ErrClosed
