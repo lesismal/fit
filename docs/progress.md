@@ -10,8 +10,8 @@ this file says what was done, and where the work differs from the plan.
 
 | | |
 | --- | --- |
-| Last updated | 2026-10-20 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07d are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
+| Last updated | 2026-10-21 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: next |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021033319-8e04da9ea114` (fib's `main` at `8e04da9`, after v1.5.6; by commit, not tag, rule 19), from the module proxy |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams, with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and shuts down gracefully; routes match by host and path, by priority and then specificity; `fit validate`, `fit schema`, `fit version`; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | no method, header or other matchers (I36) |
@@ -2090,7 +2090,8 @@ The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times its 
   (0.23 µs). Asked as [A20](fib-api-requests.md#a20-client-requests-written-and-response-heads-read-without-nethttp),
   [A21](fib-api-requests.md#a21-one-epoll_ctl-per-park-of-an-event-loop-not-two) and
   [A22](fib-api-requests.md#a22-a-client-connections-idle-clock-without-a-timer-reset-per-request);
-  A20 is in fib v1.5.6 (below); A21 and A22 are still asked.
+  A20 is in fib v1.5.6 (below), and A22 in fib `7f632cb`, which fit uses from `a6d78cd`; A21 is
+  closed as not doable, since `EPOLLONESHOT` cannot save the call (see A21 in fib-api-requests).
 - fit's: the proxy skips hop-by-hop fields, `Content-Length` and `Expect` as it copies the
   request's header, rather than deleting each name after, and `removeHopByHop` (also used on
   responses) looks at each field once; `validToken` reads a table. `BenchmarkOutgoing`, new, which
@@ -2111,8 +2112,9 @@ The M2 report put fit's proxy at 86% of nginx over HTTP/1.1, with 1.5 times its 
 Differences from the plan:
 
 - What fit could take out is small: most of its 1.8 µs is building the `net/http` header map and
-  `Request` that fib's `Client.Do` takes, which A20 leaves as they are. The rest of the proxy's
-  gap to nginx waits on A21 and A22.
+  `Request` that fib's `Client.Do` takes, which A20 leaves as they are. Of the rest of the proxy's gap
+  to nginx, A22 has since been made in fib, and A21 is closed as not doable, since `EPOLLONESHOT`
+  cannot save the call.
 
 ## Notes for later iterations
 
@@ -2129,7 +2131,8 @@ Differences from the plan:
   2026-10-19, brought `fib.New(config, bindings...)` with `AddBinding`, `RemoveBinding` and
   `ShutdownBinding`, `Connection.NotifyOutput`, `Context.HoldBody` and `BodyWriter`; v1.3.1 adds
   `ClientConfig.StreamUnknownLengthAtHeader` (A10) and nothing else. If an iteration needs something
-  newer, tag a fib release rather than committing a `replace` directive.
+  newer, move to a fib commit by its hash (`go get github.com/lesismal/fib@<hash>`, rule 19),
+  never to a `replace` directive or a `go.work`.
 - **SO_REUSEPORT.** fib v1.3.0 listens with `ReusePort` on by default, which would let a second
   process bind a listener's address too. `listener` checks each address with a plain bind first and
   fails if it is taken.
