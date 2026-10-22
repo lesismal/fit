@@ -79,10 +79,14 @@ func (a *ACME) LookupHTTPChallenge(token string, done func(answer string, ok boo
 		return
 	}
 	go func() {
-		defer func() { <-a.lookups }()
-		ctx, cancel := context.WithTimeout(a.ctx, sharedLookupTimeout)
-		defer cancel()
-		data, err := a.storage.Load(ctx, a.httpChallengeKey(token))
+		// The slot is free again before done runs, so that one whom done
+		// answers may look up again at once.
+		data, err := func() ([]byte, error) {
+			defer func() { <-a.lookups }()
+			ctx, cancel := context.WithTimeout(a.ctx, sharedLookupTimeout)
+			defer cancel()
+			return a.storage.Load(ctx, a.httpChallengeKey(token))
+		}()
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				a.logf("acme: looking up a challenge in the shared storage: %v", err)
