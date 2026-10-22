@@ -184,7 +184,7 @@ Status: `todo`, `doing` or `done`.
 | I59 | Kubernetes Gateway API II: other routes and status | I58 | done |
 | I60 | Kubernetes Ingress | I58 | done |
 | I61 | Gateway API conformance | I59 | done |
-| I62 | Consul and etcd providers | I56 | todo |
+| I62 | Consul and etcd providers | I56 | done |
 | I63 | Shared certificate storage | I30 | todo |
 | I64 | Dashboard | I56 | todo |
 | I65 | OpenTelemetry | I34 | todo |

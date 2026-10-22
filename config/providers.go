@@ -4,6 +4,7 @@ import (
 	"net"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,6 +15,9 @@ import (
 type Provider struct {
 	Name       string              `json:"name,omitempty" doc:"The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out."`
 	Docker     *DockerProvider     `json:"docker,omitempty" doc:"Routes, upstreams and services from the labels of running Docker containers."`
+	Consul     *ConsulProvider     `json:"consul,omitempty" doc:"Routes, upstreams and services from the tags of the services in a Consul catalog, sending to their instances whose health checks pass."`
+	ConsulKV   *ConsulKVProvider   `json:"consul_kv,omitempty" doc:"Listeners, routes, upstreams and services from the keys under a prefix in Consul's KV store, each holding a JSON object of them."`
+	Etcd       *EtcdProvider       `json:"etcd,omitempty" doc:"Listeners, routes, upstreams and services from the keys under a prefix in etcd, each holding a JSON object of them."`
 	Kubernetes *KubernetesProvider `json:"kubernetes,omitempty" doc:"Listeners, routes, services and upstreams from a Kubernetes cluster's Gateway API resources: the Gateways of the GatewayClasses whose controllerName is fit's, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, whose status fit writes back."`
 
 	At Value `json:"-" fit:"self"`
@@ -24,6 +28,12 @@ func (p *Provider) Kind() string {
 	switch {
 	case p.Docker != nil:
 		return "docker"
+	case p.Consul != nil:
+		return "consul"
+	case p.ConsulKV != nil:
+		return "consul_kv"
+	case p.Etcd != nil:
+		return "etcd"
 	case p.Kubernetes != nil:
 		return "kubernetes"
 	}
@@ -120,14 +130,13 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 	seen := map[string]bool{}
 	for _, p := range ps {
 		kinds := 0
-		if p.Docker != nil {
-			kinds++
-		}
-		if p.Kubernetes != nil {
-			kinds++
+		for _, set := range []bool{p.Docker != nil, p.Consul != nil, p.ConsulKV != nil, p.Etcd != nil, p.Kubernetes != nil} {
+			if set {
+				kinds++
+			}
 		}
 		if kinds != 1 {
-			add(p.At, "set exactly one kind of provider: docker or kubernetes")
+			add(p.At, "set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes")
 			continue
 		}
 		id := p.ID()
@@ -154,6 +163,29 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 			}
 			if d.LabelPrefix != "" && !namePattern.MatchString(d.LabelPrefix) {
 				add(d.At.Field("label_prefix"), "%q is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit", d.LabelPrefix)
+			}
+		}
+		if c := p.Consul; c != nil {
+			checkEndpoint(c.At.Field("endpoint"), c.Endpoint, add)
+			checkTLSFiles(c.At, c.CertFile, c.KeyFile, add)
+			if c.TagPrefix != "" && !namePattern.MatchString(c.TagPrefix) {
+				add(c.At.Field("tag_prefix"), "%q is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit", c.TagPrefix)
+			}
+		}
+		if c := p.ConsulKV; c != nil {
+			checkEndpoint(c.At.Field("endpoint"), c.Endpoint, add)
+			checkTLSFiles(c.At, c.CertFile, c.KeyFile, add)
+		}
+		if e := p.Etcd; e != nil {
+			for i, ep := range e.Endpoints {
+				checkEndpoint(e.At.Field("endpoints").Index(i), ep, add)
+			}
+			checkTLSFiles(e.At, e.CertFile, e.KeyFile, add)
+			switch {
+			case e.Username != "" && e.PasswordFile == "":
+				add(e.At.Field("username"), "username needs password_file")
+			case e.PasswordFile != "" && e.Username == "":
+				add(e.At.Field("password_file"), "password_file needs username")
 			}
 		}
 		if k := p.Kubernetes; k != nil {
@@ -184,6 +216,189 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 		}
 	}
 }
+
+// checkEndpoint checks an endpoint of an HTTP API, http:// or https://
+// and a host and port; empty is the default.
+func checkEndpoint(at Value, ep string, add func(Value, string, ...any)) {
+	if ep == "" {
+		return
+	}
+	rest, ok := strings.CutPrefix(ep, "http://")
+	if !ok {
+		rest, ok = strings.CutPrefix(ep, "https://")
+	}
+	if !ok {
+		add(at, "%q is neither http://<host>:<port> nor https://<host>:<port>", ep)
+		return
+	}
+	_, port, err := net.SplitHostPort(rest)
+	if n, perr := strconv.Atoi(port); err != nil || perr != nil || n < 1 || n > 65535 || strings.ContainsAny(rest, "/?#") {
+		add(at, "%q is not a host and port alone", ep)
+	}
+}
+
+func checkTLSFiles(at Value, cert, key string, add func(Value, string, ...any)) {
+	switch {
+	case cert != "" && key == "":
+		add(at.Field("cert_file"), "cert_file needs key_file")
+	case key != "" && cert == "":
+		add(at.Field("key_file"), "key_file needs cert_file")
+	}
+}
+
+// The defaults of ConsulProvider, ConsulKVProvider and EtcdProvider.
+const (
+	DefaultConsulEndpoint    = "http://127.0.0.1:8500"
+	DefaultConsulTagPrefix   = "fit"
+	DefaultConsulMaxServices = 1000
+	DefaultEtcdEndpoint      = "http://127.0.0.1:2379"
+	DefaultKVPrefix          = "fit/"
+	DefaultKVMaxKeys         = 1000
+)
+
+// The defaults of their durations.
+var (
+	DefaultWatchRefreshInterval = Duration(30 * time.Second)
+	DefaultWatchRequestTimeout  = Duration(10 * time.Second)
+)
+
+func refreshOr(d Duration) time.Duration {
+	if d <= 0 {
+		return DefaultWatchRefreshInterval.Std()
+	}
+	return d.Std()
+}
+
+func timeoutOr(d Duration) time.Duration {
+	if d <= 0 {
+		return DefaultWatchRequestTimeout.Std()
+	}
+	return d.Std()
+}
+
+func kvPrefixOr(p string) string {
+	if p == "" {
+		return DefaultKVPrefix
+	}
+	return p
+}
+
+// ConsulProvider turns the services of a Consul catalog into upstreams, of
+// their instances whose health checks pass, and the routes and services
+// their tags write, as a container's labels do for the Docker provider:
+// <tag_prefix>.routes.web.host=example.com, say. It follows the catalog
+// and the health checks with blocking queries.
+type ConsulProvider struct {
+	Endpoint        string   `json:"endpoint,omitempty" default:"\"http://127.0.0.1:8500\"" doc:"Where Consul's HTTP API is, as of the local agent: http:// or https:// and a host and port. http://127.0.0.1:8500 when left out."`
+	Datacenter      string   `json:"datacenter,omitempty" doc:"The datacenter whose catalog is read; the agent's when left out."`
+	TokenFile       string   `json:"token_file,omitempty" doc:"A file holding the ACL token to send, read each time a watch starts; none when left out. The token needs to read the services and nodes served."`
+	CAFile          string   `json:"ca_file,omitempty" doc:"A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out."`
+	CertFile        string   `json:"cert_file,omitempty" doc:"A PEM file with the client certificate sent over https, as Consul's verify_incoming asks for; with key_file."`
+	KeyFile         string   `json:"key_file,omitempty" doc:"A PEM file with cert_file's private key."`
+	ExposeAll       bool     `json:"expose_all,omitempty" doc:"Take every service in the catalog; only those tagged <tag_prefix>.enable=true when left out or false. An instance tagged <tag_prefix>.enable=false is never taken."`
+	TagPrefix       string   `json:"tag_prefix,omitempty" default:"\"fit\"" doc:"What the tags read start with, as in fit.routes.web.host=example.com; tags without '=' are passed over. Besides the routes, services and upstream settings a Docker container's labels may set, <tag_prefix>.name names the upstream, the service's name when left out. fit when left out."`
+	MaxServices     int      `json:"max_services,omitempty" min:"0" default:"1000" doc:"The most services taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0."`
+	RefreshInterval Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often the catalog is read again whether or not it changed. 30s when left out."`
+	RequestTimeout  Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// URL, Prefix, Services, Refresh and Timeout return c's settings, their
+// defaults when left out.
+func (c *ConsulProvider) URL() string {
+	if c.Endpoint == "" {
+		return DefaultConsulEndpoint
+	}
+	return c.Endpoint
+}
+
+func (c *ConsulProvider) Prefix() string {
+	if c.TagPrefix == "" {
+		return DefaultConsulTagPrefix
+	}
+	return c.TagPrefix
+}
+
+func (c *ConsulProvider) Services() int {
+	return int(orDefault(int64(c.MaxServices), DefaultConsulMaxServices))
+}
+
+func (c *ConsulProvider) Refresh() time.Duration { return refreshOr(c.RefreshInterval) }
+
+func (c *ConsulProvider) Timeout() time.Duration { return timeoutOr(c.RequestTimeout) }
+
+// ConsulKVProvider reads the keys under a prefix in Consul's KV store, each
+// holding a JSON object of listeners, routes, upstreams and services, and
+// provides them together, in the order of their keys. It follows them with
+// blocking queries.
+type ConsulKVProvider struct {
+	Endpoint        string   `json:"endpoint,omitempty" default:"\"http://127.0.0.1:8500\"" doc:"Where Consul's HTTP API is, as of the local agent: http:// or https:// and a host and port. http://127.0.0.1:8500 when left out."`
+	Datacenter      string   `json:"datacenter,omitempty" doc:"The datacenter whose KV store is read; the agent's when left out."`
+	TokenFile       string   `json:"token_file,omitempty" doc:"A file holding the ACL token to send, read each time a watch starts; none when left out. The token needs to read the keys under prefix."`
+	CAFile          string   `json:"ca_file,omitempty" doc:"A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out."`
+	CertFile        string   `json:"cert_file,omitempty" doc:"A PEM file with the client certificate sent over https, as Consul's verify_incoming asks for; with key_file."`
+	KeyFile         string   `json:"key_file,omitempty" doc:"A PEM file with cert_file's private key."`
+	Prefix          string   `json:"prefix,omitempty" default:"\"fit/\"" doc:"The keys read are those starting with it. Each holds a JSON object of listeners, routes, upstreams and services, as a config holds them; keys ending in '/' and empty ones are passed over, and a key whose value is not such an object is left out and reported. fit/ when left out."`
+	MaxKeys         int      `json:"max_keys,omitempty" min:"0" default:"1000" doc:"The most keys taken; past it, the rest, by key, are left out and reported. 1000 when left out or 0."`
+	RefreshInterval Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often what the keys provide is sent again whether or not it changed, so that a part refused because of the rest of the config is tried again. 30s when left out."`
+	RequestTimeout  Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// URL, KeyPrefix, Keys, Refresh and Timeout return c's settings, their
+// defaults when left out.
+func (c *ConsulKVProvider) URL() string {
+	if c.Endpoint == "" {
+		return DefaultConsulEndpoint
+	}
+	return c.Endpoint
+}
+
+func (c *ConsulKVProvider) KeyPrefix() string { return kvPrefixOr(c.Prefix) }
+
+func (c *ConsulKVProvider) Keys() int { return int(orDefault(int64(c.MaxKeys), DefaultKVMaxKeys)) }
+
+func (c *ConsulKVProvider) Refresh() time.Duration { return refreshOr(c.RefreshInterval) }
+
+func (c *ConsulKVProvider) Timeout() time.Duration { return timeoutOr(c.RequestTimeout) }
+
+// EtcdProvider reads the keys under a prefix in etcd, each holding a JSON
+// object of listeners, routes, upstreams and services, and provides them
+// together, in the order of their keys. It follows them with a watch,
+// through etcd's JSON gateway to its v3 API.
+type EtcdProvider struct {
+	Endpoints       []string `json:"endpoints,omitempty" default:"[\"http://127.0.0.1:2379\"]" doc:"Where etcd's client API is: http:// or https:// and a host and port, for each member to try, in turn when one fails. http://127.0.0.1:2379 when left out."`
+	Username        string   `json:"username,omitempty" doc:"The user to authenticate as, with password_file, when etcd's authentication is on; none when left out."`
+	PasswordFile    string   `json:"password_file,omitempty" doc:"A file holding username's password, read each time a watch starts."`
+	CAFile          string   `json:"ca_file,omitempty" doc:"A PEM file with the CAs etcd's certificate is verified with, over https; the system's when left out."`
+	CertFile        string   `json:"cert_file,omitempty" doc:"A PEM file with the client certificate sent over https, as etcd's client-cert-auth asks for; with key_file."`
+	KeyFile         string   `json:"key_file,omitempty" doc:"A PEM file with cert_file's private key."`
+	Prefix          string   `json:"prefix,omitempty" default:"\"fit/\"" doc:"The keys read are those starting with it. Each holds a JSON object of listeners, routes, upstreams and services, as a config holds them; keys ending in '/' and empty ones are passed over, and a key whose value is not such an object is left out and reported. fit/ when left out."`
+	MaxKeys         int      `json:"max_keys,omitempty" min:"0" default:"1000" doc:"The most keys taken; past it, the rest, by key, are left out and reported. 1000 when left out or 0."`
+	RefreshInterval Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often the keys are read again whether or not a watch event came. 30s when left out."`
+	RequestTimeout  Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to etcd may take, connecting included, and a watch to start; a watch then lasts until it fails. 10s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// URLs, KeyPrefix, Keys, Refresh and Timeout return e's settings, their
+// defaults when left out.
+func (e *EtcdProvider) URLs() []string {
+	if len(e.Endpoints) == 0 {
+		return []string{DefaultEtcdEndpoint}
+	}
+	return e.Endpoints
+}
+
+func (e *EtcdProvider) KeyPrefix() string { return kvPrefixOr(e.Prefix) }
+
+func (e *EtcdProvider) Keys() int { return int(orDefault(int64(e.MaxKeys), DefaultKVMaxKeys)) }
+
+func (e *EtcdProvider) Refresh() time.Duration { return refreshOr(e.RefreshInterval) }
+
+func (e *EtcdProvider) Timeout() time.Duration { return timeoutOr(e.RequestTimeout) }
 
 // The defaults of KubernetesProvider.
 const (

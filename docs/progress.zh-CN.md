@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-22 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I61 已完成） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I62 已完成） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9`（fib `main` 的 `4f1c3e9`，即 `c3e27ed` 加上 A36 和 A37；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M4 平台集成：Consul 和 etcd provider、共享证书存储、dashboard、OpenTelemetry、打包（I62–I66） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M4 平台集成：共享证书存储、dashboard、OpenTelemetry、打包（I63–I66） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）和 I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）已完成，下一步是 I62（Consul 和 etcd provider）。** M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）和 I62（Consul 与 etcd provider）已完成，下一步是 I63（共享证书存储）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -67,6 +67,10 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider` | `Provider`：发送片段的配置来源；`Run`：运行 provider，并一次一个地应用它们最新的片段；`Parse` 和 `Merge`：按决策 009 的规则把片段合并进基础配置，记录每个元素的来源和被遮蔽的内容，并把错误映射回写下它的地方 |
 | `provider/docker` | Docker provider：用普通 HTTP 访问 Engine API（事件，然后列出容器），把容器标签转换为上游、路由和服务，副本共享上游 |
+| `provider/labels` | 从前缀下的标签读取路由、服务和上游设置（Docker 的标签和 Consul 的 tag 都这样读），并生成片段 |
+| `provider/consul` | 基于 net/http 和阻塞查询的 Consul provider：`Catalog` 把为 fit 打了 tag 的服务转换为其通过检查的实例组成的上游，以及 tag 写出的路由和服务；`KV` 从前缀下的键获取片段 |
+| `provider/etcd` | etcd provider：etcd 的 v3 JSON 网关，先 watch 前缀再读取键，从键获取片段，支持用户认证，端点轮流尝试 |
+| `provider/internal/watch`、`provider/internal/kvpart` | `Follower`：保持 watch、在变化后和每个间隔读取来源并退避重试的循环；带 TLS 文件的 HTTP 客户端；由保存片段的键生成片段 |
 | `provider/kubernetes` | Kubernetes provider：基于 net/http 的自有客户端（service account 或 kubeconfig），每种资源一个 list-and-watch informer（使用服务器提供的第一个版本），把 Gateway API 的 GatewayClass 和 Gateway（HTTP、证书来自 Secret 并写成文件的 HTTPS、TLS 透传、TCP、UDP）及其 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute 转换为 listener、路由、service 和以 Service endpoint 为地址的上游；状态以 merge patch 回写；设置 `ingress` 时还有属于 fit 的 IngressClass 的 Ingress 和少量注解 |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
@@ -2393,6 +2397,54 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   在其测试通过后在 `run.sh` 中用 flag 逐个声明。
 - 所有 Gateway 都在同一地址上访问：fit 把共享端口的 Gateway 合并成一个 listener，所以请求能到达该端口上所有 Gateway
   的路由。core 测试不区分它们；扩展测试 `GatewayHTTPListenerIsolation` 会区分。
+
+### I62 Consul 与 etcd provider — 已完成
+
+- `config`：三种 provider。`consul`（`ConsulProvider`）：`endpoint`（http 或 https，默认本地 agent）、`datacenter`、
+  `token_file`、`ca_file`、`cert_file` 与 `key_file`、`expose_all`、`tag_prefix`（`fit`）、`max_services`（1000）、
+  `refresh_interval`（30s）和 `request_timeout`（10s）。`consul_kv`（`ConsulKVProvider`）和 `etcd`（`EtcdProvider`，
+  用 `endpoints`、`username` 和 `password_file` 代替 token 和 datacenter）取 `prefix`（`fit/`）和 `max_keys`（1000）。
+  端点须为 http 或 https 加主机和端口，不带路径；证书需要私钥，用户需要密码文件。
+- `provider/labels`：Docker provider 读取标签的部分被移出，使 Consul 的 tag 以同样方式读取：前缀下的路由、服务和上游
+  设置，以及一组分组生成的片段。`provider/docker` 改用它，提供的内容不变。
+- `provider/internal/watch`：三者共用的循环 `Follower`。它在 `Source` 上保持一个 watch，watch 就位后整体读取来源
+  （两者之间的变化不会漏掉），变化后（去抖 200ms）和每个 `refresh_interval` 再读，片段变化或到了间隔时发送，每个
+  问题在持续期间只报告一次，来源失败时每隔 1s 到 30s 重试；`Run` 在 watch 结束后才返回。`Client`：带 CA 和客户端
+  证书的 HTTP 客户端，每次 watch 新建，以便读到新文件。
+- `provider/internal/kvpart`：前缀下的每个键保存一个片段，即 `provider.Parse` 接受的含 listeners、routes、upstreams
+  和 services 的 JSON 对象；provider 的片段是它们按键顺序的合并。以 '/' 结尾的键和空值被跳过；值不是片段的键，或超出
+  `max_keys` 的键，被排除并报告。
+- `provider/consul`：`Catalog` 用阻塞查询轮询 `/v1/catalog/services` 和 `/v1/health/state/any`，任一变化时列出服务，
+  取带 `<prefix>.enable=true` tag 的服务（`expose_all` 时取全部），并从 `/v1/health/service/<name>?passing=1` 读取每个
+  服务通过检查的实例。每个服务是一个上游，地址取实例的地址（否则取其节点的），端口取 `<prefix>.port` 或注册的端口；
+  形如 `<prefix>.<key>=<value>` 的 tag 与容器的标签一样读取，`<prefix>.name` 为上游命名。`KV` 轮询
+  `/v1/kv/<prefix>?recurse`（404 即没有键）。阻塞查询遵循 Consul 的指引（index 回退时重新开始，小于 1 时取 1，同一
+  轮询的查询至少相隔 1s）；token 放在 `X-Consul-Token`，datacenter 放在 `dc`。
+- `provider/etcd`：经 JSON 网关访问 etcd 的 v3 API。对前缀范围的 watch（`POST /v3/watch`，每行一个 JSON 对象）须在
+  `request_timeout` 内说明已创建；然后 `POST /v3/kv/range` 读取键，最多 `max_keys` 个（超出的报告）。事件触发（去抖后）
+  重新读取，进度通知不触发；watch 被取消（例如压缩之后）或流结束时，在下一个端点上重新开始。设置用户时，
+  `POST /v3/auth/authenticate` 为 watch 的请求取得 token，密码文件每次都重新读取。
+- `cmd/fit`：`fit run` 启动这三种 provider，并说明各自监视什么。
+- 决策 [013](decisions/013-consul-and-etcd-over-http.zh-CN.md)：用 net/http，不用客户端库，不增加依赖。
+- 测试：`provider/consul` 针对支持阻塞查询的假 Consul（`TestTranslate`：tag、名称、端口、取自节点的地址、服务自己的
+  上游、所有问题；`TestCatalog`：实例注册、检查失败和注销，Consul 失败后恢复，每个请求都带 token 和 datacenter，未启用
+  的服务从不查询；`TestCatalogMaxServices`；`TestKV`：键的增删、404、index 回退）；`provider/etcd` 针对假网关（经 watch
+  跟进键的写入和删除、进度通知、压缩和流结束、不可达的端点、认证、`max_keys`、从未创建的 watch、错误密码、`rangeEnd`、
+  `readWatch`）；`provider/internal/watch`（`TestFollower`、`TestFollowerInterval`）；`provider/internal/kvpart`；
+  `config`（各种 provider 的设置）。`test/e2e` 的 `TestConsulProviders` 让 fit 针对 Docker 中 dev 模式的 Consul 1.21.5
+  运行，刷新间隔保持 30s：服务实例的注册、一个实例 TTL 检查失败、最后一个注销，以及来自键的路由的写入和删除；
+  `TestEtcdProvider` 针对开启认证的 etcd v3.6.5：键的写入、修改和删除。两者、`TestDockerProvider`（移到
+  `provider/labels` 之后）以及涉及的包都在基准测试主机上通过竞态检测；linux、darwin 和 windows 的 vet 与 staticcheck
+  通过。
+- 第一次运行发现了假服务暴露出的竞态：`Follower` 返回时没有等待 watch 的 goroutine，轮询可能比 `Run` 活得更久。现在
+  它会等待；测试的 `background` 辅助函数也会在测试清理前等待 `Run` 返回。
+- 无基准测试：provider 属于控制面（规则 21）。
+
+与计划的差别：
+
+- KV 的值是 JSON 片段，一个键一个，而不是 Traefik 那样一个设置一个键的键树：与配置文件和 Admin API 形状相同，由同一个
+  解析器检查，多个键也让多个写入方各自维护自己的片段。
+- 不支持 Consul Enterprise 的命名空间和分区，也不支持 etcd 的 v2 API（决策 013）。
 
 ## 给后续迭代的说明
 

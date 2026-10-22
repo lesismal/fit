@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/provider"
+	"github.com/lesismal/fit/provider/consul"
 	"github.com/lesismal/fit/provider/docker"
+	"github.com/lesismal/fit/provider/etcd"
 	"github.com/lesismal/fit/provider/kubernetes"
 )
 
@@ -26,6 +29,15 @@ func startProviders(c *config.Config, configs *admin.Configs, stdout, stderr io.
 			ps = append(ps, docker.New(name, pc.Docker, logf))
 			network, address := pc.Docker.Dial()
 			fmt.Fprintf(stdout, "fit: provider %s watching Docker at %s:%s\n", name, network, address)
+		case pc.Consul != nil:
+			ps = append(ps, consul.NewCatalog(name, pc.Consul, logf))
+			fmt.Fprintf(stdout, "fit: provider %s watching Consul's catalog at %s\n", name, pc.Consul.URL())
+		case pc.ConsulKV != nil:
+			ps = append(ps, consul.NewKV(name, pc.ConsulKV, logf))
+			fmt.Fprintf(stdout, "fit: provider %s watching Consul's keys under %q at %s\n", name, pc.ConsulKV.KeyPrefix(), pc.ConsulKV.URL())
+		case pc.Etcd != nil:
+			ps = append(ps, etcd.New(name, pc.Etcd, logf))
+			fmt.Fprintf(stdout, "fit: provider %s watching etcd's keys under %q at %s\n", name, pc.Etcd.KeyPrefix(), strings.Join(pc.Etcd.URLs(), ", "))
 		case pc.Kubernetes != nil:
 			ps = append(ps, kubernetes.New(name, pc.Kubernetes, logf))
 			fmt.Fprintf(stdout, "fit: provider %s watching Kubernetes for GatewayClasses of %s\n", name, pc.Kubernetes.Controller())

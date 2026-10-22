@@ -205,6 +205,118 @@
       ],
       "type": "object"
     },
+    "config.ConsulKVProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https, as Consul's verify_incoming asks for; with key_file.",
+          "type": "string"
+        },
+        "datacenter": {
+          "description": "The datacenter whose KV store is read; the agent's when left out.",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "http://127.0.0.1:8500",
+          "description": "Where Consul's HTTP API is, as of the local agent: http:// or https:// and a host and port. http://127.0.0.1:8500 when left out.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "max_keys": {
+          "default": 1000,
+          "description": "The most keys taken; past it, the rest, by key, are left out and reported. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "default": "fit/",
+          "description": "The keys read are those starting with it. Each holds a JSON object of listeners, routes, upstreams and services, as a config holds them; keys ending in '/' and empty ones are passed over, and a key whose value is not such an object is left out and reported. fit/ when left out.",
+          "type": "string"
+        },
+        "refresh_interval": {
+          "default": "30s",
+          "description": "How often what the keys provide is sent again whether or not it changed, so that a part refused because of the rest of the config is tried again. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "token_file": {
+          "description": "A file holding the ACL token to send, read each time a watch starts; none when left out. The token needs to read the keys under prefix.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.ConsulProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https, as Consul's verify_incoming asks for; with key_file.",
+          "type": "string"
+        },
+        "datacenter": {
+          "description": "The datacenter whose catalog is read; the agent's when left out.",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "http://127.0.0.1:8500",
+          "description": "Where Consul's HTTP API is, as of the local agent: http:// or https:// and a host and port. http://127.0.0.1:8500 when left out.",
+          "type": "string"
+        },
+        "expose_all": {
+          "description": "Take every service in the catalog; only those tagged <tag_prefix>.enable=true when left out or false. An instance tagged <tag_prefix>.enable=false is never taken.",
+          "type": "boolean"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "max_services": {
+          "default": 1000,
+          "description": "The most services taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refresh_interval": {
+          "default": "30s",
+          "description": "How often the catalog is read again whether or not it changed. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tag_prefix": {
+          "default": "fit",
+          "description": "What the tags read start with, as in fit.routes.web.host=example.com; tags without '=' are passed over. Besides the routes, services and upstream settings a Docker container's labels may set, <tag_prefix>.name names the upstream, the service's name when left out. fit when left out.",
+          "type": "string"
+        },
+        "token_file": {
+          "description": "A file holding the ACL token to send, read each time a watch starts; none when left out. The token needs to read the services and nodes served.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.DockerProvider": {
       "additionalProperties": false,
       "properties": {
@@ -247,6 +359,65 @@
         "use_published_ports": {
           "description": "Send to the port a container's port is published on, on the host, rather than to the container's own address: for a fit outside Docker that cannot reach containers' addresses, as on Docker Desktop.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "config.EtcdProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs etcd's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https, as etcd's client-cert-auth asks for; with key_file.",
+          "type": "string"
+        },
+        "endpoints": {
+          "default": [
+            "http://127.0.0.1:2379"
+          ],
+          "description": "Where etcd's client API is: http:// or https:// and a host and port, for each member to try, in turn when one fails. http://127.0.0.1:2379 when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "max_keys": {
+          "default": 1000,
+          "description": "The most keys taken; past it, the rest, by key, are left out and reported. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "password_file": {
+          "description": "A file holding username's password, read each time a watch starts.",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "fit/",
+          "description": "The keys read are those starting with it. Each holds a JSON object of listeners, routes, upstreams and services, as a config holds them; keys ending in '/' and empty ones are passed over, and a key whose value is not such an object is left out and reported. fit/ when left out.",
+          "type": "string"
+        },
+        "refresh_interval": {
+          "default": "30s",
+          "description": "How often the keys are read again whether or not a watch event came. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long each request to etcd may take, connecting included, and a watch to start; a watch then lasts until it fails. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to authenticate as, with password_file, when etcd's authentication is on; none when left out.",
+          "type": "string"
         }
       },
       "type": "object"
@@ -648,9 +819,21 @@
     "config.Provider": {
       "additionalProperties": false,
       "properties": {
+        "consul": {
+          "$ref": "#/$defs/config.ConsulProvider",
+          "description": "Routes, upstreams and services from the tags of the services in a Consul catalog, sending to their instances whose health checks pass."
+        },
+        "consul_kv": {
+          "$ref": "#/$defs/config.ConsulKVProvider",
+          "description": "Listeners, routes, upstreams and services from the keys under a prefix in Consul's KV store, each holding a JSON object of them."
+        },
         "docker": {
           "$ref": "#/$defs/config.DockerProvider",
           "description": "Routes, upstreams and services from the labels of running Docker containers."
+        },
+        "etcd": {
+          "$ref": "#/$defs/config.EtcdProvider",
+          "description": "Listeners, routes, upstreams and services from the keys under a prefix in etcd, each holding a JSON object of them."
         },
         "kubernetes": {
           "$ref": "#/$defs/config.KubernetesProvider",

@@ -452,7 +452,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "a provider of no kind",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{}]}`,
-			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker or kubernetes"},
+			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes"},
 		},
 		{
 			name: "two providers of one name",
@@ -487,7 +487,32 @@ func TestValidate(t *testing.T) {
 		{
 			name: "two kinds in one provider",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {}, "kubernetes": {}}]}`,
-			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker or kubernetes"},
+			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes"},
+		},
+		{
+			name: "consul settings",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"consul": {"endpoint": "tcp://x:1", "tag_prefix": "-x", "cert_file": "c.pem"}}]}`,
+			want: []string{
+				`1:90: providers[0].consul.endpoint: "tcp://x:1" is neither http://<host>:<port> nor https://<host>:<port>`,
+				`1:136: providers[0].consul.cert_file: cert_file needs key_file`,
+				`1:117: providers[0].consul.tag_prefix: "-x" is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit`,
+			},
+		},
+		{
+			name: "consul_kv settings",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"consul_kv": {"endpoint": "http://x:1/v1", "key_file": "k.pem"}}]}`,
+			want: []string{
+				`1:93: providers[0].consul_kv.endpoint: "http://x:1/v1" is not a host and port alone`,
+				`1:122: providers[0].consul_kv.key_file: key_file needs cert_file`,
+			},
+		},
+		{
+			name: "etcd settings",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"etcd": {"endpoints": ["http://ok:2379", "https://nohost"], "username": "u"}}]}`,
+			want: []string{
+				`1:108: providers[0].etcd.endpoints[1]: "https://nohost" is not a host and port alone`,
+				`1:139: providers[0].etcd.username: username needs password_file`,
+			},
 		},
 		{
 			name: "kubernetes settings",
