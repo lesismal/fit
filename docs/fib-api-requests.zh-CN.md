@@ -48,6 +48,7 @@
 | A35 | 按 PROXY 头替换连接的对端地址 | 已完成，`530d222` | 13 | I52 |
 | A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9` | 10 | I53、I53b |
 | A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9` | 1 | I53b |
+| A38 | 请求体失败时，HTTP/1 响应声明连接将关闭 | 已实现，尚未进入 `main` | 13 | CI |
 
 ## 证据
 
@@ -792,3 +793,21 @@ fib 的 `TestRelayIdleTimeout` 与 `TestConnectProxyIdleTimeout`。
 
 **fit 如何使用。** `forward_proxy` 处理器是一个 `ConnectProxy`：它的 `Allow` 检查客户端和目标，`Dial` 是 `l4.Rules.Dial`，后者拒绝
 解析到规则所拒地址的主机名。
+
+## A38：请求体失败时，HTTP/1 响应声明连接将关闭
+
+**状态。** 由 fit 的会话在 fib 的工作区实现；尚未进入 `main`。
+
+**问题。** 在 HTTP/1 上，流式请求体失败时（超过上限、分块格式错误、暂停过久或被截断），由于剩余的请求体不会再读取，fib 在响应发出后
+关闭连接。但响应头没有这样声明：`commit` 和 `writeHTTP1` 只在请求自己带 `Connection: close`、响应带了它或服务器正在 drain 时才设置
+`Connection: close`。客户端以为连接会保持，就留下它，并在一条正在关闭的连接上发出下一个请求，结果被重置。
+
+**证据。** fit 的 `TestBodyOverNetwork`（`middleware/limit`）在 CI 的 Linux runner 上失败（run 39777797515）：一个 1 MiB 的
+chunked 请求体被 413 拒绝后，Go 的客户端在同一连接上发出下一个 POST，得到 `connection reset by peer`。在基准机上用 1、2、4 个 CPU
+运行 1500 次，约失败 10 次。
+
+**实现。** `Context.bodyFailed` 判断流式请求体是否已失败，写 HTTP/1 响应头的两处都据此关闭连接。fib 的
+`TestLimitBodyEndedPastTheLimitCloses` 用 net/http 的解析器读取两种 413：处理器不应答时 fib 写的，以及处理器自己写的，要求两者都带
+`Connection: close`；不改时前者没有。改后 fit 的测试 1500 次全部通过。
+
+**fit 如何使用。** 无需调用：`body_limit` 的拒绝，以及任何路由对上传失败的请求的应答，现在都会让客户端新开连接。

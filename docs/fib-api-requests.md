@@ -50,6 +50,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A35 | A connection's peer address replaced, as a PROXY header gives it | done, `530d222` | 13 | I52 |
 | A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` | 10 | I53, I53b |
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
+| A38 | An HTTP/1 response to a request whose body failed says the connection ends | made, not yet on `main` | 13 | CI |
 
 ## Evidence
 
@@ -1060,3 +1061,28 @@ handler has returned.
 **How fit uses it.** The `forward_proxy` handler is a `ConnectProxy` whose `Allow` checks the client
 and the destination, and whose `Dial` is `l4.Rules.Dial`, which refuses a host name whose address
 the rules refuse.
+
+## A38: An HTTP/1 response to a request whose body failed says the connection ends
+
+**Status.** Made by fit's session, in fib's working tree; not yet on `main`.
+
+**Problem.** On HTTP/1, when a streamed request body fails (it grows past its limit, is misframed,
+is held too long or is cut), fib ends the connection once the response is out, since the rest of
+the body is never read. But the response's head did not say so: `commit` and `writeHTTP1` set
+`Connection: close` only for the request's own `Connection: close`, the response's, or a server
+draining. A client was told the connection stays open, kept it, and sent its next request on a
+connection that was closing, which reset it.
+
+**Evidence.** fit's `TestBodyOverNetwork` (`middleware/limit`) failed on CI's Linux runner (run
+39777797515): after a 1 MiB chunked body refused with 413, Go's client sent the next POST on the
+same connection and got `connection reset by peer`. On the benchmark host it failed about 10 times
+in 1,500 runs on one, two and four CPUs.
+
+**As built.** `Context.bodyFailed` reports a streamed body that failed, and both places that write
+an HTTP/1 response's head close the connection for it. fib's `TestLimitBodyEndedPastTheLimitCloses`
+reads, with net/http's parser, the 413 fib writes for a handler that leaves such a request
+unanswered and the 413 a handler writes itself, and wants `Connection: close` on both; without the
+change the first has none. With it, fit's test passed 1,500 runs out of 1,500.
+
+**How fit uses it.** Nothing to call: `body_limit`'s refusals, and any route's answer to a request
+whose upload failed, now tell the client to open a new connection.
