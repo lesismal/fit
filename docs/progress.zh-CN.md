@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66） |
-| fib | `github.com/lesismal/fib v1.5.7-0.20261022124907-86071b8bb871`（fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M5 缓存与扩展（I67–I74）：HTTP 缓存、`fit build` 与编译期模块、WASM 插件、更友好的配置格式和 nginx 配置转换 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67 已完成 |
+| fib | `github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b`（fib 分支 `a40-filter-abort` 上的 `3998953`：`86071b8` 加上为 I67 实现的 A40，等待 fib 的 CI 并合入 `main`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在内存中的 HTTP 缓存里（同一 zone 的路由共享，reload 后保留），在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M5 的其余部分（I68–I75）：缓存的磁盘层、锁、陈旧应答与清除，`fit build` 与编译期模块、WASM 插件、更友好的配置格式和 nginx 配置转换 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。下一步是 M5，从 I67 开始。 M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）已完成。** 下一步是 I68。 M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -57,6 +57,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `middleware/limit` | `rate_limit`（按客户端 IP、头部或路由的令牌桶，键数有上限）、`concurrency_limit`、`body_limit` |
 | `middleware/auth` | `jwt`（用标准库验证 JWS，密钥来自 PEM 文件、密钥文件或由控制面获取的 JWK 集合，保存已验证的令牌）；`forward_auth`（经 fib 异步客户端向认证服务发送子请求）；`basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
 | `middleware/breaker` | `circuit_breaker`：按路由的错误率和慢响应率在关闭、打开、半开之间切换 |
+| `middleware/cache` | `cache`：按 RFC 9111 实现的共享 HTTP 缓存，响应经响应体过滤器随发送保存，以 `Age` 应答，按 `Vary` 区分变体，304，请求指令，失效，`Cache-Status`；内存层，每个 zone 16 个分片，各有 LRU，reload 后保留 |
 | `middleware/compress` | `compress`：经 fib 响应体过滤器的 zstd、brotli 和 gzip，流式，编码器池化且有上限 |
 | `middleware/headers` | `headers` 中间件：删除、设置和添加请求与响应的字段 |
 | `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
@@ -2597,10 +2598,67 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - Dockerfile 放在仓库根目录，`docker build .` 能直接找到，而不在 `deploy` 下。
 - 还没有发布镜像：发布流程等待打标签，所以 chart 和示例在运行处构建镜像并载入。
 
+### I67 缓存 I：HTTP 语义与内存层 — 已完成
+
+- **`middleware/cache` 的 `cache`**，按 RFC 9111 对共享缓存的规则实现的 HTTP 缓存：保存 GET 的响应，
+  条件是状态码可理解（200、203、300、301、308、404、405、410、414、501，以及带自身有效期的 302 和 307），
+  不含 `no-store`、`private` 或 `no-cache`，不对一切请求变化（`Vary: *`），不设置 cookie（与 nginx 一样不保存），
+  不带 trailer，且不超过 `max_entry_size`；带 `Authorization` 的请求，其响应只有在声明 `public`、`s-maxage`
+  或 `must-revalidate` 时才保存。新鲜期取自 `s-maxage`、`max-age`，或 `Expires` 相对 `Date` 的差；否则对允许
+  推断的状态码，取 `default_ttl`，或距 `Last-Modified` 时间的十分之一，最多一天；年龄由 `Date`、`Age` 和请求
+  耗时算出（第 4.2.3 节）。已超过新鲜期的响应不保存。
+- **应答。** 新鲜的响应以其 `Age` 回答 GET 和 HEAD；对 `If-None-Match`（弱比较或 `*`）或
+  `If-Modified-Since` 满足的请求回答 304，带上 RFC 9110 列出的字段。请求的 `no-cache`（以及没有
+  `Cache-Control` 时的 `Pragma: no-cache`）、`max-age` 和 `min-fresh` 会让它转发；`max-stale` 可以接受陈旧响应，
+  除非该响应声明了 `must-revalidate`、`proxy-revalidate` 或 `s-maxage`；`only-if-cached` 在没有保存时得到 504。
+  带 `Range` 的请求转发，其 200 响应会被保存。可能改变资源的请求（GET、HEAD、OPTIONS、TRACE 之外）成功后，
+  删除其 URI 以及同主机的 `Location`、`Content-Location` 所保存的内容。对 GET 和 HEAD 的每个应答都用
+  `Cache-Status`（RFC 9211）说明缓存的处理：`fit; hit; ttl=N`，或
+  `fit; fwd=uri-miss|vary-miss|stale|request|bypass`，响应被保存时加上 `; stored`。
+- **变体。** 响应的 `Vary` 指明随之保存的请求字段，比较其值时去掉列表成员两侧的空白；每个 key 最多保存
+  8 个变体，最旧的先移除。key 是 scheme、主机和请求目标。
+- **再验证。** 客户端自己的验证器匹配的陈旧响应，会被源站对它们回答的 304 刷新：按 304 更新字段
+  （RFC 9111 第 3.2 节）并重新计算有效期。客户端没有发送验证器时，缓存尚不发送自己的验证器；这需要缓存自己
+  发出的请求，由 I69 的锁和后台更新带来。
+- **内存层**（`store`）：一个 zone 的响应分在 16 个分片中，每个分片有自己的锁、`max_size`（128 MiB）的
+  十六分之一和最近最少使用顺序；每条计入响应体、字段、key 和 256 字节。`max_entry_size`（1 MiB，最多为
+  `max_size` 的十六分之一）限制单个响应体。zone（`zone`，默认 `default`）由所有指定它的缓存共享，并在
+  reload 后保留：新配置的缓存在旧配置的缓存归还之前就拿到它，无人使用时释放。
+- **随发送保存。** 响应经过一个不改动内容的 fib 响应体过滤器时被复制，因此不会为保存而压住响应，流式响应
+  照常流式，全部发送完毕后才保存：长度与声明一致，且没有因错误或 trailer（代理的 `Fit-Error`）而中断。
+  进行中的副本合计不超过 `max_size` 的四分之一；超出时响应照常发送但不保存。客户端离开或写入失败的响应，
+  通过 fib 新增的 `BodyAborter`（见下）归还其副本。
+- **fib**（A40，由本会话在 fib 分支 `a40-filter-abort` 上实现，`3998953`）：`BodyAborter`，响应在响应体结束前
+  就结束时，以 `Abort` 代替 `Close`；以及在已返回过滤器的钩子之后运行的钩子拿不到 `Content-Length`。没有前者，
+  中途离开的客户端会永久占用上限中的一份；compress 也有同样的缺口，它在 `OnCancel` 中归还在途名额，而写入
+  失败的响应写完后 `OnCancel` 不再运行，现在它在 `Abort` 中归还名额和编码器。没有后者，排在 compress 之后的
+  缓存把未压缩的长度当作压缩后响应体的长度，于是什么也不保存。fib 的测试、竞态检测（fib 根包有四个 UDP 和
+  套接字缓冲区测试在基准机上失败，`main` 与该分支相同）、linux、darwin、windows、freebsd 的 vet，以及 linux、
+  darwin、windows 的 staticcheck 均通过；`bench/microbench.sh -C ../fib-a40 -pkg ./http -bench BenchmarkStream`
+  没有发现变化（benchstat ~）。
+- **测试**（`middleware/cache`，凡经网络的都在 HTTP/1.1 和 h2c 上）：`TestHit`（保存后以 `Age` 和验证器回答，
+  HEAD 由 GET 的响应回答并带长度，另一查询串分开）、`TestStorable`（21 种响应，按规则保存或不保存）、
+  `TestFreshness`（在移动的时钟上检查 max-age、Expires 和推断）、`TestDefaultTTL`、`TestVary`、
+  `TestConditional`（缓存自己回答 304，以及不满足的前置条件）、`TestRevalidate`、`TestRequestDirectives`、
+  `TestInvalidate`、`TestBodies`（分段写出的响应体连同长度被保存；短于声明长度的不保存；超过 `max_entry_size`
+  的完整透传）、`TestClientGone`（慢源站的客户端离开：不保存，归还上限，下一个请求被保存）、
+  `TestCompressed`（在 compress 之后，每种编码是一个变体）、`TestEviction`、`TestVariantsBounded`、`TestZones`
+  和 `TestParams`。`test/workers` 为缓存加了一个用例。完整的竞态测试在基准机上通过；`go vet` 通过。
+- **基准**，在基准机上（`BenchmarkHit`，通过 fibtest 由缓存回答 4 KB 响应，5 次）：每次命中 1.48–1.50 µs，
+  15 次分配、5.4 KB，其中大部分字节是 fibtest 对响应体的复制。
+
+与计划的差别：
+
+- 缓存回答客户端的验证器，并用源站对它们的 304 刷新陈旧响应，但不发送自己的验证器：缓存自己的请求随 I69 到来。
+- 设置 cookie 的响应不保存，与 nginx 的 `proxy_cache` 一致；204 和 206 不保存，因为缓存借以保存响应的 fib
+  响应体过滤器对没有响应体的状态码不运行，而缓存不回答范围请求。
+- 需要 fib 的 A40，由本会话实现。fit 的 `go.mod` 指向它在 fib 分支 `a40-filter-abort` 上的 commit；按规则 15 和
+  19，在 fib 的 CI 在该 commit 上通过、且它进入 fib 的 `main`（需维护者同意）之前，不推送 fit。
+
 ## 给后续迭代的说明
 
 - **h2c 比 M3 慢 1.5–1.8%（见 [M4 报告](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）。** 用 `bench/ab.sh` 对比 M3 的构建（`1486c28`）与 M4 的构建（`0dd5956`）：fixed h2c −1.8%，proxy h2c −1.5%，其余在噪声范围内。二分后发现它在 I59–I64 间逐步累积，每一步都在噪声范围内（I59–I61 −0.8%，I62–I64 −0.8%）；不是 fib 升到 `86071b8`，也不是 I65 的 tracer 检查；I61 加入 `**.` 主机后，`router.Match` 的微基准没有变化。这几个迭代因 provider、各类客户端、共享存储和仪表盘使 fit 的代码段从 6.14 MB 增至 6.42 MB，这暗示是代码布局的影响，但未能证明。由于请求路径没有改动，按规则 22 记录而不修复；I70 的编译期模块可以构建不含 provider 的 fit，届时应对比有无 provider 时 fixed 和 proxy 在 h2c 上的表现。
-- **fib 版本。** fit 使用 fib `main` 的 `86071b8`（`v1.5.7-0.20261022124907-86071b8bb871`），即 `4f1c3e9` 加上 `5fc8250` 和 `aa0ba7e`（prefork，以及用 eBPF 在 reuseport 组内均衡连接，fit 的 `main` 尚未使用）和 A38（`86071b8`，请求体失败时 HTTP/1 响应声明连接将关闭；没有它，fit 的 `TestBodyOverNetwork` 会遇到重置）。`4f1c3e9`（`v1.5.7-0.20261021175136-4f1c3e9c13c9`）即 `c3e27ed` 加上 A36（SOCKS 与 CONNECT 中继的空闲超时）和 A37（`ConnectProxy` 在拨号回调里应答）。`c3e27ed`（`v1.5.7-0.20261021172359-c3e27ed1667e`）即 `9ab22e8` 加上 A34（`11de9eb`，UDP 对端自己的空闲超时）、A35（`530d222`，替换连接的对端地址）和 `c3e27ed`（http3 原始测试客户端的竞态：在读取方就绪前到达的流数据会丢失，导致 fib 的 macOS CI 失败）。`9ab22e8` 即 `929924e` 加上 A32（`0bd2447`，按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers`）和 A33（`9ab22e8`，读取被暂停时看到的对端结束不再丢失）。`929924e` 即 `fc7ec5e` 加上 A28-A30（处理器返回后 Upgrade 被保留的请求、`Client.StartUpgrade`、HTTP/3 客户端的 extended CONNECT）。`fc7ec5e` 即 `cfb4f09` 加上 A27（`Context.OnBodyFilter`）。`cfb4f09` 即 `8e04da9` 加上 A25（`Context.LimitBody`）、A26（保留每个 `OnCancel` 回调）和一处 QUIC 修复。`8e04da9` 即 `06992a5` 加上两处测试修复（HTTP/2 保留 body 的测试等 handler 返回后再释放；SOCKS UDP 测试等所有数据报到齐后再放行拨号）。`06992a5` 即 `b101811` 加上一处修复，让内核分配的 UDP 端口在 bind 时不带 SO_REUSEADDR 和 SO_REUSEPORT，改在 bind 之后设置，因为 Linux 可能把已被占用的端口再分给另一个服务器（在 fib 的测试里，客户端的 QUIC 握手连到了别的测试的服务器，并正确地拒绝了它的证书）。`b101811` 即 `a6d78cd` 加上 fib 偶发失败测试的修复，以及由此发现的一个 taskpool bug 的修复（一个分片能用光共享额度，MaxWorkers 为 16 时同时跑了 17 个阻塞任务）。`a6d78cd` 在 v1.5.6 之后带来：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
+- **fib 版本。** 自 I67 起，fit 使用 fib 分支 `a40-filter-abort` 上的 `3998953`（`v1.5.7-0.20261022203111-39989533638b`），即 `86071b8` 加上 A40（`BodyAborter`，以及过滤器之后的钩子拿不到 `Content-Length`）。fib 的 CI 尚未在它上面运行：其 workflow 只在 `main` 和 pull request 上运行，手动触发需要本会话不使用的凭据。在它通过并进入 fib 的 `main`（需维护者同意）之前，不推送 fit。此前 fit 使用 fib `main` 的 `86071b8`（`v1.5.7-0.20261022124907-86071b8bb871`），即 `4f1c3e9` 加上 `5fc8250` 和 `aa0ba7e`（prefork，以及用 eBPF 在 reuseport 组内均衡连接，fit 的 `main` 尚未使用）和 A38（`86071b8`，请求体失败时 HTTP/1 响应声明连接将关闭；没有它，fit 的 `TestBodyOverNetwork` 会遇到重置）。`4f1c3e9`（`v1.5.7-0.20261021175136-4f1c3e9c13c9`）即 `c3e27ed` 加上 A36（SOCKS 与 CONNECT 中继的空闲超时）和 A37（`ConnectProxy` 在拨号回调里应答）。`c3e27ed`（`v1.5.7-0.20261021172359-c3e27ed1667e`）即 `9ab22e8` 加上 A34（`11de9eb`，UDP 对端自己的空闲超时）、A35（`530d222`，替换连接的对端地址）和 `c3e27ed`（http3 原始测试客户端的竞态：在读取方就绪前到达的流数据会丢失，导致 fib 的 macOS CI 失败）。`9ab22e8` 即 `929924e` 加上 A32（`0bd2447`，按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers`）和 A33（`9ab22e8`，读取被暂停时看到的对端结束不再丢失）。`929924e` 即 `fc7ec5e` 加上 A28-A30（处理器返回后 Upgrade 被保留的请求、`Client.StartUpgrade`、HTTP/3 客户端的 extended CONNECT）。`fc7ec5e` 即 `cfb4f09` 加上 A27（`Context.OnBodyFilter`）。`cfb4f09` 即 `8e04da9` 加上 A25（`Context.LimitBody`）、A26（保留每个 `OnCancel` 回调）和一处 QUIC 修复。`8e04da9` 即 `06992a5` 加上两处测试修复（HTTP/2 保留 body 的测试等 handler 返回后再释放；SOCKS UDP 测试等所有数据报到齐后再放行拨号）。`06992a5` 即 `b101811` 加上一处修复，让内核分配的 UDP 端口在 bind 时不带 SO_REUSEADDR 和 SO_REUSEPORT，改在 bind 之后设置，因为 Linux 可能把已被占用的端口再分给另一个服务器（在 fib 的测试里，客户端的 QUIC 握手连到了别的测试的服务器，并正确地拒绝了它的证书）。`b101811` 即 `a6d78cd` 加上 fib 偶发失败测试的修复，以及由此发现的一个 taskpool bug 的修复（一个分片能用光共享额度，MaxWorkers 为 16 时同时跑了 17 个阻塞任务）。`a6d78cd` 在 v1.5.6 之后带来：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
   fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
   运行 `OnClose`（A23：没有它，空闲 HTTP/2 连接的 idle 定时器会把每个已关闭的引擎留在内存中，`handler/proxy` 在竞态检测下峰值达 5.3GB，交换导致 macOS 上一次 h2c 上传超时）。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），
   v1.5.0 带来了 A12 的其余部分（`Client.Start`），v1.5.1 带来了 A14 和 A15，v1.5.2 带来了 A16 的第一部分，v1.5.3 带来了

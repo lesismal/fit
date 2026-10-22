@@ -9,6 +9,7 @@ import (
 	_ "github.com/lesismal/fit/handler/static"
 	_ "github.com/lesismal/fit/middleware/auth"
 	_ "github.com/lesismal/fit/middleware/breaker"
+	_ "github.com/lesismal/fit/middleware/cache"
 	_ "github.com/lesismal/fit/middleware/compress"
 	_ "github.com/lesismal/fit/middleware/headers"
 	_ "github.com/lesismal/fit/middleware/limit"

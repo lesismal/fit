@@ -190,7 +190,7 @@ Status: `todo`, `doing` or `done`.
 | I65 | OpenTelemetry | I34 | done |
 | I66 | Packaging and examples | I57 | done |
 | **M5** | | | |
-| I67 | Cache I: HTTP semantics and memory tier | I23 | todo |
+| I67 | Cache I: HTTP semantics and memory tier | I23 | done |
 | I68 | Cache II: disk tier | I67 | todo |
 | I69 | Cache III: locks, stale, purge | I68, I25 | todo |
 | I70 | `fit build` and compile-time modules | I04 | todo |

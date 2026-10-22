@@ -4,6 +4,8 @@ github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTf
 github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/lesismal/fib v1.5.7-0.20261022124907-86071b8bb871 h1:fSyrr78NPKhpP0wdKr5j1iOl6f8nh5smKvfL3kbD1V4=
 github.com/lesismal/fib v1.5.7-0.20261022124907-86071b8bb871/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
+github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b h1:8UzhjKKaZ53dHoLFVwfcsfbfW/H8ykw9bfDKZCGWAio=
+github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
 github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=

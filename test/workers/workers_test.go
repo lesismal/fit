@@ -149,6 +149,9 @@ func cases(e *env) []tc {
 		jwt,
 		mw("circuit_breaker", `{}`),
 		compress,
+		// The slow handler's response is not kept, so every request goes
+		// through to it.
+		mw("cache", `{"zone": "workers"}`),
 		{module: "proxy", handler: `{"module": "proxy", "params": {"upstream": "app"}}`, status: 200},
 		{module: "static", handler: `{"module": "static", "params": {"root": "` + e.root + `"}}`, status: 200, inline: true},
 		{module: "respond", handler: `{"module": "respond", "params": {"body": "x"}}`, status: 200, inline: true},

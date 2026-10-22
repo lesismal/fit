@@ -52,6 +52,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
 | A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
+| A40 | Body filters aborted when their response ends without its body; no length after a filter | made, `3998953` on fib's branch `a40-filter-abort` | 6, 11 | I67 |
 
 ## Evidence
 
@@ -1176,3 +1177,38 @@ pays is fib's to measure:
 **How fit uses it.** Nothing changes in fit. It is measured with `bench/ab.sh -scenarios proxy`
 over HTTP/1.1 and h2c, by the CPU a request; the profile above is the baseline, and the target is
 most of the 1.65 µs.
+
+## A40: Body filters aborted when their response ends without its body; no length after a filter
+
+**Status.** Made by fit's session, `3998953` on fib's branch `a40-filter-abort`, waiting for fib's
+CI and for the maintainer's word to go on `main`.
+
+**Problem.** Two gaps in fib's body filters (A27), met by I67's cache, which keeps a copy of a
+response as it goes through a filter that changes nothing:
+
+1. A `BodyFilter` whose response ended without its body ending was dropped without a word: a
+   response whose client went in the middle of it, or whose write failed, one retained and
+   cancelled, a response to HEAD, and the filters after one whose `Close` failed. A filter that
+   holds something cannot give it back: the cache's copy of the body counts against a bound on
+   what all the copies hold, and compress's in-flight place and encoder. compress gave its place
+   back in `OnCancel`, which does not run once a response whose write failed has been written:
+   after 1024 such responses (`max_in_flight`), nothing would be compressed again.
+2. A hook that runs after one that returned a filter was given the `Content-Length` of the body
+   before that filter, and for a response sent whole fib added it back for each hook. The cache,
+   run after compress, took it for the length of what it saw, found the compressed body short of
+   it, and kept nothing.
+
+**Evidence.** I67's `TestClientGone`: with a client gone in the middle of a streamed response, the
+cache's bound kept 2 KB for good, over HTTP/1.1 and h2c, as neither `Close` nor `OnCancel` came.
+`TestCompressed`: behind compress, no compressed variant was ever kept.
+
+**As built.** `BodyAborter`, an optional interface of a `BodyFilter`: `Abort(err)` is called in
+place of `Close`, once, with why, when the `Context` ends with filters still open
+(`Context.ended`, so for every kind of stream), when a response to HEAD drops its filters, and
+for the filters after one whose `Close` fails. Once a hook has returned a filter, the hooks after
+it are given no `Content-Length`. fib's `TestBodyFilterAbort` and
+`TestBodyFilterLengthAfterFilter` cover both, over HTTP/1.1 and HTTP/2.
+
+**How fit uses it.** The cache's copy and compress's filter implement `Abort`, which gives back
+what they hold; compress no longer registers `OnCancel`. The cache trusts a `Content-Length` it is
+given as the length of the body it copies.

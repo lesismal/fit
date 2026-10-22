@@ -155,9 +155,6 @@ func (cm *Compress) Wrap(next module.Handler) module.Handler {
 			if tag := h.Get("Etag"); tag != "" && !strings.HasPrefix(tag, "W/") {
 				h["Etag"] = []string{"W/" + tag}
 			}
-			// A response that is never finished, as one whose client goes
-			// first, gives its place back as it is cancelled.
-			c.OnCancel(f.cancel)
 			return f
 		})
 		next.ServeHTTP(c)
@@ -245,12 +242,13 @@ func negotiate(fields []string, offered []string) string {
 	return best
 }
 
-// filter compresses one response's body.
+// filter compresses one response's body. fib calls its methods one at a
+// time, and ends it with Close, or with Abort when the response ends without
+// its body ending, as one whose client goes first does.
 type filter struct {
 	cm   *Compress
 	pool *sync.Pool
 	enc  *encoder
-	done atomic.Bool
 }
 
 func (f *filter) Filter(p []byte) ([]byte, error) {
@@ -271,20 +269,16 @@ func (f *filter) Close() ([]byte, error) {
 	f.enc.buf.Reset()
 	err := f.enc.w.Close()
 	tail := bytes.Clone(f.enc.buf.Bytes())
-	if f.done.CompareAndSwap(false, true) {
-		f.enc.buf.Reset()
-		f.pool.Put(f.enc)
-		f.cm.inFlight.Add(-1)
-	}
+	f.Abort(nil)
 	return tail, err
 }
 
-// cancel gives the place of a response whose client went back. Its
-// compressor is not given back, since a write may still be using it.
-func (f *filter) cancel(error) {
-	if f.done.CompareAndSwap(false, true) {
-		f.cm.inFlight.Add(-1)
-	}
+// Abort gives the compressor and the response's place back.
+func (f *filter) Abort(error) {
+	f.enc.buf.Reset()
+	f.pool.Put(f.enc)
+	f.enc = nil
+	f.cm.inFlight.Add(-1)
 }
 
 // InFlight returns how many responses are being compressed.
