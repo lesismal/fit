@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I65 done) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: its iterations are done (I56–I66), and its exit criteria hold; its report, the full harness at the milestone's end, remains |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M4, platform integration: packaging (I66) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | M4's report: the full benchmark harness at the milestone's end |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **M4 has begun: I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, and I65, OpenTelemetry traces and metrics over OTLP, are done. Next, I66 (packaging and examples).**
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, I65, OpenTelemetry traces and metrics over OTLP, and I66, packaging and examples, are done, and M4's exit criteria hold: fit passes the Gateway API's conformance suite for the core HTTP profile (I61), and the Docker Compose example routes by labels and follows its containers as they start and stop (I66). Next, M4's end: the full harness on the benchmark host and the M4 report; then M5, from I67.**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -105,7 +105,8 @@ To continue, start a session with:
 | `internal/fibtest` | runs fib handlers in tests without a network, as fib's servers run them, waiting for one that answers later: `Serve`, `ServeRequest` |
 | `test/e2e` | builds the fit binary and drives `fit run` over the network |
 | `bench` | the benchmark harness: `cmd/fitbench`, `cmd/idleconn`, configs for the four servers, results |
-| `examples` | `hello.json`, `proxy.json` |
+| `deploy` | `Dockerfile` (at the root): the container image; `deploy/helm/fit`: the Helm chart; `deploy/systemd`: `fit.service`, `fit@.service`, the sysusers file and their test |
+| `examples` | `hello.json`, `proxy.json`; `docker-compose` and `kubernetes`, each with a `test.sh` CI runs |
 
 A config today looks like this:
 
@@ -3559,6 +3560,47 @@ Differences from the plan:
 
 - No SDK, and OTLP/HTTP with JSON only (decision 015).
 - One server span per request; the upstream call has no client span of its own.
+
+### I66 Packaging and examples — done
+
+- **The container image** ([Dockerfile](../Dockerfile), decision
+  [016](decisions/016-container-image.md)): fit built without cgo, with `-trimpath` and
+  `-X main.version`, cross-compiled on the builder's platform with BuildKit's caches, on
+  `gcr.io/distroless/static-debian12:nonroot`, running as 65532; a placeholder config at
+  `/etc/fit/fit.json`. `.dockerignore` sends only what the build needs.
+  [release.yml](../.github/workflows/release.yml) publishes it for linux/amd64 and linux/arm64 to
+  `ghcr.io/lesismal/fit:<version>` and `:<major>.<minor>` on a tag `v<semver>`; none is tagged yet.
+- **The Helm chart** (`deploy/helm/fit`): a Deployment of fit as the image's user, read-only root,
+  no capabilities, ports below 1024 by the safe sysctl `net.ipv4.ip_unprivileged_port_start`; a
+  ConfigMap of a listener of its own on `healthPort` (9099) answering `/healthz` to the probes and
+  the Kubernetes provider (in-cluster, through the service account), rolled on change; a Service of
+  the Gateways' ports; a ClusterRole of what the provider lists, watches and patches; the
+  GatewayClass `fit`, when the cluster has the CRDs, and the IngressClass `fit`. Values for the
+  image, replicas, classes, Ingress ports, more provider settings, a whole config, extra flags and
+  the usual pod settings.
+- **systemd** (`deploy/systemd`): `fit.service` and `fit@.service` (`/etc/fit/<name>.json`), as the
+  sysusers user `fit` with `CAP_NET_BIND_SERVICE` alone and the file system read-only but for
+  `/var/lib/fit` and `/run/fit`; `fit validate` before start and on reload, which then sends
+  SIGHUP; stop waits 40s against fit's 30s shutdown. `systemd-analyze security`: 3.1, OK.
+- **Examples**: `examples/docker-compose`, fit's image with the Docker provider in front of two
+  replicas of `traefik/whoami`, routed by their labels; `examples/kubernetes`, the chart in a kind
+  cluster with a Gateway and HTTPRoute and an Ingress to the same app. [deploy/README.md](../deploy/README.md)
+  and the examples' READMEs (both languages) say how.
+- **Tests**: each example's `test.sh` runs its README's steps and checks the answers: the Compose
+  example answers for its host from both replicas, gives 404 once they stop and answers again once
+  they start (M4's exit criterion); the Kubernetes one installs the chart with the image built
+  there, waits for the Gateway to be Programmed and gets answers from both pods through the Gateway
+  and through the Ingress. `deploy/systemd/test.sh` installs the units, serves port 80 as `fit`,
+  reloads a changed config, refuses an invalid one while still serving, and runs `fit@second`.
+  CI runs them in two new jobs, `packaging` and `helm` (with `helm lint`). All three passed on the
+  benchmark host: the examples with Docker Compose v2.39.1, buildx v0.26.1 and Helm v3.18.4 kept
+  in a scratch directory there, the systemd test in a throwaway systemd container.
+
+Differences from the plan:
+
+- The Dockerfile is at the repository's root, where `docker build .` finds it, not under `deploy`.
+- No image is published yet: the release workflow waits for a tag, so the chart and examples build
+  the image and load it where they run it.
 
 ## Notes for later iterations
 

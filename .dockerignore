@@ -1,0 +1,12 @@
+# Only what building fit needs; see Dockerfile.
+.git
+.github
+.claude
+bin
+bench
+docs
+examples
+test
+deploy
+!deploy/docker/fit.json
+*.md

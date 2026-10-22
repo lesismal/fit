@@ -182,6 +182,45 @@ jobs:
             ${{ runner.temp }}/report.yaml
             ${{ runner.temp }}/fit.log
 
+  # The container image with the Docker Compose example, and the systemd
+  # units, each run as deploy/README.md and the examples' READMEs say (I66).
+  packaging:
+    name: Packaging (image, Compose, systemd)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Docker Compose example
+        run: examples/docker-compose/test.sh
+      - name: systemd units
+        run: |
+          go build -o "$RUNNER_TEMP/fit" ./cmd/fit
+          sudo deploy/systemd/test.sh "$RUNNER_TEMP/fit"
+
+  # The Helm chart, installed in a kind cluster of the example's own with the
+  # image built here, serving the Kubernetes example's Gateway and Ingress.
+  helm:
+    name: Helm chart and Kubernetes example (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        run: |
+          if ! command -v kind >/dev/null; then
+            go install sigs.k8s.io/kind@v0.30.0
+            echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          fi
+      - name: helm lint
+        run: helm lint deploy/helm/fit
+      - name: Kubernetes example
+        run: examples/kubernetes/test.sh
+
   fuzz:
     name: Fuzz (short)
     runs-on: ubuntu-latest

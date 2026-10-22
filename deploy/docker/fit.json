@@ -1,0 +1,11 @@
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "routes": [
+    {
+      "name": "placeholder",
+      "handler": {"module": "respond", "params": {"body": "fit is running; mount a config of your own at /etc/fit/fit.json\n"}}
+    }
+  ]
+}

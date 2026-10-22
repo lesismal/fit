@@ -1,0 +1,11 @@
+fit serves the Gateways of GatewayClass {{ .Values.gatewayClass.name }}
+{{- if .Values.ingress.enabled }} and the Ingresses of IngressClass {{ .Values.ingress.className }}{{ end }}, on the ports of Service {{ include "fit.fullname" . }}:
+{{- range .Values.service.ports }} {{ .port }}{{ end }}.
+
+Its log:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "fit.fullname" . }}
+{{- if not (.Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1/GatewayClass") }}
+
+The cluster has no Gateway API CRDs yet, so no GatewayClass was made; install
+them and upgrade the release to make it.
+{{- end }}

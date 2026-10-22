@@ -1,0 +1,42 @@
+# What the Kubernetes provider reads, across the cluster, and the status it
+# writes back.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "fit.fullname" . }}
+  labels:
+    {{- include "fit.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    # Secrets: only those of type kubernetes.io/tls are listed.
+    resources: [namespaces, services, secrets]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses, gateways, httproutes, grpcroutes, tlsroutes, tcproutes, udproutes, referencegrants]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses/status, gateways/status, httproutes/status, grpcroutes/status, tlsroutes/status, tcproutes/status, udproutes/status]
+    verbs: [patch]
+  {{- if .Values.ingress.enabled }}
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, ingressclasses]
+    verbs: [get, list, watch]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "fit.fullname" . }}
+  labels:
+    {{- include "fit.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "fit.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "fit.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

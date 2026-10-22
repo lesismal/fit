@@ -1,0 +1,30 @@
+# fit in front of an app's containers, which it finds by their labels with
+# the Docker provider and follows as they start and stop. See README.md.
+name: fit-example
+
+services:
+  fit:
+    build: ../..
+    image: fit:local
+    # The Docker socket is root's, so fit reads it as root here. A socket
+    # proxy, as the provider's endpoint "tcp://...", lets fit keep the
+    # image's own user.
+    user: root
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./fit.json:/etc/fit/fit.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # Two replicas, one upstream: fit balances between them and checks their
+  # health. Its labels are the whole of its routing.
+  whoami:
+    image: traefik/whoami:v1.11.0
+    deploy:
+      replicas: 2
+    labels:
+      fit.enable: "true"
+      fit.port: "80"
+      fit.routes.web.host: whoami.localhost
+      fit.upstream: '{"health_check": {"path": "/health", "interval": "5s"}}'

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: fit
+description: fit as a Kubernetes Gateway API and Ingress controller.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/lesismal/fit
+sources:
+  - https://github.com/lesismal/fit
+keywords: [gateway-api, ingress, reverse-proxy, load-balancer]

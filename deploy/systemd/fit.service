@@ -1,0 +1,53 @@
+# fit as a systemd service, with its config at /etc/fit/fit.json. See
+# deploy/README.md: it runs as the user fit (fit.sysusers), may bind ports
+# below 1024, keeps state such as ACME's certificates in /var/lib/fit, and
+# reloads its config on `systemctl reload fit`.
+[Unit]
+Description=fit, a reverse proxy and API gateway
+Documentation=https://github.com/lesismal/fit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=fit
+Group=fit
+ExecStartPre=/usr/local/bin/fit validate -c /etc/fit/fit.json
+ExecStart=/usr/local/bin/fit run -c /etc/fit/fit.json
+# A config that does not validate fails the reload, and fit keeps the one it runs.
+ExecReload=/usr/local/bin/fit validate -c /etc/fit/fit.json
+ExecReload=/bin/kill -HUP $MAINPID
+# fit waits up to its -shutdown-timeout, 30s, for requests in flight.
+TimeoutStopSec=40
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=1048576
+UMask=0077
+
+StateDirectory=fit
+RuntimeDirectory=fit
+ConfigurationDirectory=fit
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

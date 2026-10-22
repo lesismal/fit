@@ -188,7 +188,7 @@ Status: `todo`, `doing` or `done`.
 | I63 | Shared certificate storage | I30 | done |
 | I64 | Dashboard | I56 | done |
 | I65 | OpenTelemetry | I34 | done |
-| I66 | Packaging and examples | I57 | todo |
+| I66 | Packaging and examples | I57 | done |
 | **M5** | | | |
 | I67 | Cache I: HTTP semantics and memory tier | I23 | todo |
 | I68 | Cache II: disk tier | I67 | todo |

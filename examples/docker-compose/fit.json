@@ -1,0 +1,15 @@
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "providers": [
+    {"docker": {}}
+  ],
+  "routes": [
+    {
+      "name": "not-found",
+      "priority": -1,
+      "handler": {"module": "respond", "params": {"status": 404, "body": "no route for this host\n"}}
+    }
+  ]
+}

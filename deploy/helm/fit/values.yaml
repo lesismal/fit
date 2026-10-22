@@ -1,0 +1,92 @@
+# fit's Helm chart: fit in the cluster, serving the Gateways of its
+# GatewayClass and, with ingress.enabled, the Ingresses of its IngressClass.
+# See deploy/README.md.
+
+image:
+  repository: ghcr.io/lesismal/fit
+  # The chart's appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Each replica serves every Gateway, and writes the same status back.
+replicas: 1
+
+# The controllerName of the GatewayClasses fit serves.
+controllerName: lesismal.github.io/fit
+
+gatewayClass:
+  # Make a GatewayClass of fit's, when the cluster has the Gateway API's CRDs.
+  create: true
+  name: fit
+
+ingress:
+  # Serve Ingresses too, and make an IngressClass of fit's.
+  enabled: true
+  className: fit
+  # Make it the cluster's default IngressClass, for Ingresses naming none.
+  default: false
+  httpPort: 80
+  httpsPort: 443
+
+# More of the Kubernetes provider's settings (fit schema, providers'
+# kubernetes): namespaces, backends, addresses, max_objects, request_timeout.
+provider: {}
+
+# A port of fit's own, apart from any a Gateway listens on, serving
+# /healthz to the kubelet's probes.
+healthPort: 9099
+
+# A whole config of your own in place of the one the chart writes (its
+# health listener, route and Kubernetes provider); it should keep them.
+config: {}
+
+# fit run's other flags, as ["-shutdown-timeout", "20s"].
+extraArgs: []
+
+# The Service in front of fit: the ports the Gateways and Ingresses listen on.
+service:
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+    - name: https
+      port: 443
+      protocol: TCP
+  # Local keeps clients' addresses on a LoadBalancer or NodePort Service.
+  externalTrafficPolicy: ""
+
+serviceAccount:
+  create: true
+  # The release's full name when empty.
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# The image's user, with the ports below 1024 that Gateways listen on
+# opened to it by a safe sysctl rather than a capability.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+  sysctls:
+    - name: net.ipv4.ip_unprivileged_port_start
+      value: "0"
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+terminationGracePeriodSeconds: 40

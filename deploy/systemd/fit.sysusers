@@ -1,0 +1,3 @@
+# The system user fit runs as: install as /usr/lib/sysusers.d/fit.conf and
+# run systemd-sysusers.
+u fit - "fit" /var/lib/fit

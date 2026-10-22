@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fit.fullname" . }}
+  labels:
+    {{- include "fit.labels" . | nindent 4 }}
+data:
+  fit.json: |
+    {{- include "fit.config" . | nindent 4 }}

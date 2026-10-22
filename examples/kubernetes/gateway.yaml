@@ -1,0 +1,27 @@
+# A Gateway of fit's GatewayClass, listening for HTTP on port 80, and an
+# HTTPRoute sending whoami.example's requests to the app.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: web
+spec:
+  gatewayClassName: fit
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: whoami
+spec:
+  parentRefs:
+    - name: web
+  hostnames: [whoami.example]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - name: whoami
+          port: 80
