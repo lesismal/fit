@@ -53,6 +53,9 @@ func serveBackend(t testing.TB, proto string, h stdhttp.Handler) string {
 	t.Cleanup(s.Close)
 	addr := s.Listener.Addr().String()
 	backendFields.Store(addr, fields)
+	// Forgotten before the server closes, which frees its port: a backend
+	// another test starts on it would otherwise be given these fields.
+	t.Cleanup(func() { backendFields.Delete(addr) })
 	return addr
 }
 

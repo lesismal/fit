@@ -182,6 +182,10 @@ func grpcUpstream(t *testing.T, proto string) (string, *grpcService, func()) {
 	}
 	addr := addrs[0].String()
 	backendFields.Store(addr, fields)
+	// Forgotten before the engine stops, which frees the port, as in
+	// serveBackend; stop, which a test may call early, forgets it first too.
+	forget := func() { backendFields.Delete(addr) }
+	t.Cleanup(forget)
 	t.Cleanup(func() {
 		for _, ch := range []chan struct{}{svc.hang, svc.gate} {
 			select {
@@ -191,7 +195,7 @@ func grpcUpstream(t *testing.T, proto string) (string, *grpcService, func()) {
 			}
 		}
 	})
-	return addr, svc, stop
+	return addr, svc, func() { forget(); stop() }
 }
 
 // grpcClient is a gRPC client of fit's listener at base.
