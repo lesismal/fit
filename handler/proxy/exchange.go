@@ -244,8 +244,10 @@ type exchange struct {
 	// timer is the response idle timeout's.
 	timer atomic.Pointer[time.Timer]
 	// open is the proxy's shard of open exchanges this one is in, for a
-	// drain to find it.
-	open *openSet
+	// drain to find it, and prev and next its neighbours there, under the
+	// shard's lock.
+	open       *openSet
+	prev, next *exchange
 
 	// call abandons the upstream request, once Send has returned it, and
 	// cause is why it was abandoned, or nil; callMu orders the two.

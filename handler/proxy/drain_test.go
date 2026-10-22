@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
@@ -200,5 +201,43 @@ func TestDrainBeforeResponse(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the request was not drained")
+	}
+}
+
+// TestOpenSet: exchanges leave a shard's list from its head, its middle and
+// its tail alike, and a shard is a cache line.
+func TestOpenSet(t *testing.T) {
+	if size := unsafe.Sizeof(openSet{}); size != 64 {
+		t.Errorf("openSet is %d bytes, want 64", size)
+	}
+	var s openSet
+	list := func() []*exchange {
+		var got []*exchange
+		for x := s.head; x != nil; x = x.next {
+			if x.next != nil && x.next.prev != x {
+				t.Fatal("prev does not mirror next")
+			}
+			got = append(got, x)
+		}
+		return got
+	}
+	xs := make([]*exchange, 5)
+	for i := range xs {
+		xs[i] = &exchange{}
+		s.add(xs[i])
+	}
+	for _, i := range []int{2, 4, 0} { // the middle, the head, the tail
+		s.remove(xs[i])
+		if x := xs[i]; x.prev != nil || x.next != nil {
+			t.Fatalf("exchange %d keeps its neighbours", i)
+		}
+	}
+	if got := list(); len(got) != 2 || got[0] != xs[3] || got[1] != xs[1] || got[0].prev != nil {
+		t.Fatalf("left %v, want exchanges 3 and 1", got)
+	}
+	s.remove(xs[3])
+	s.remove(xs[1])
+	if s.head != nil {
+		t.Fatal("the shard is not empty")
 	}
 }

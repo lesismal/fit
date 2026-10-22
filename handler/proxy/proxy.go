@@ -82,25 +82,36 @@ type Proxy struct {
 
 const openShards = 32
 
-// openSet is a shard of a proxy's open exchanges.
+// openSet is a shard of a proxy's open exchanges: a list through the
+// exchanges' own prev and next, so that adding and removing one moves
+// pointers rather than hashing into a map.
 type openSet struct {
-	mu        sync.Mutex
-	exchanges map[*exchange]struct{}
-	_         [40]byte // a shard to a cache line
+	mu   sync.Mutex
+	head *exchange
+	_    [48]byte // a shard to a cache line
 }
 
 func (s *openSet) add(x *exchange) {
 	s.mu.Lock()
-	if s.exchanges == nil {
-		s.exchanges = make(map[*exchange]struct{})
+	x.next = s.head
+	if s.head != nil {
+		s.head.prev = x
 	}
-	s.exchanges[x] = struct{}{}
+	s.head = x
 	s.mu.Unlock()
 }
 
 func (s *openSet) remove(x *exchange) {
 	s.mu.Lock()
-	delete(s.exchanges, x)
+	if x.prev != nil {
+		x.prev.next = x.next
+	} else {
+		s.head = x.next
+	}
+	if x.next != nil {
+		x.next.prev = x.prev
+	}
+	x.prev, x.next = nil, nil
 	s.mu.Unlock()
 }
 
@@ -113,7 +124,7 @@ func (p *Proxy) Drain() {
 	for i := range p.open {
 		s := &p.open[i]
 		s.mu.Lock()
-		for x := range s.exchanges {
+		for x := s.head; x != nil; x = x.next {
 			open = append(open, x)
 		}
 		s.mu.Unlock()
