@@ -146,7 +146,7 @@ func TestUDPEcho(t *testing.T) {
 	b := startUDPBackend(t, udpEcho)
 	f := startFit(t, udpConfig("", b.addr))
 	c := f.dialUDP()
-	for _, size := range []int{1, 1400, 60000} {
+	for _, size := range []int{1, 1400, maxDatagram} {
 		want := pattern(size, byte(size))
 		got, err := exchange(c, want, time.Second)
 		if err != nil || !bytes.Equal(got, want) {

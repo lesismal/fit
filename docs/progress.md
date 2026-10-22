@@ -2776,7 +2776,7 @@ Differences from the plan:
   [A34](fib-api-requests.md#a34-a-udp-peers-own-idle-timeout-or-none),
   `Connection.SetUDPIdleTimeout`, made in fib by this session and pushed to fib's `main`
   (`11de9eb`).
-- Tests (`l4/udp_test.go`, `config`): `TestUDPEcho` (datagrams of 1, 1,400 and 60,000 bytes each
+- Tests (`l4/udp_test.go`, `config`): `TestUDPEcho` (datagrams of 1, 1,400 and 60,000 bytes (9,000 on macOS and the BSDs, which send none past 9,216 by default) each
   come back whole; 200 clients at once, 10 round trips each, each one session and one address at
   the upstream), `TestUDPSessionsExpire` (an idle session ends after 300 ms while a busy one keeps
   its socket, and the idle client's next datagram comes from a new one), `TestUDPMaxConns`,

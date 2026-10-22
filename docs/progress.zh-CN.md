@@ -1999,7 +1999,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - 引擎自己对静默 UDP 对端的清扫，整个引擎只有一个超时，HTTP/3 也依赖它，因此会话不参与它，而像 TCP 中继那样用自己的定时器：
   [A34](fib-api-requests.zh-CN.md#a34udp-对端自己的空闲超时或不超时)，`Connection.SetUDPIdleTimeout`，由本会话在 fib 中实现，
   已推送到 fib 的 `main`（`11de9eb`）。
-- 测试（`l4/udp_test.go`、`config`）：`TestUDPEcho`（1、1,400 和 60,000 字节的数据报都完整返回；同时 200 个客户端，每个往返
+- 测试（`l4/udp_test.go`、`config`）：`TestUDPEcho`（1、1,400 和 60,000 字节（macOS 和各 BSD 默认不发送超过 9,216 字节的数据报，在那里是 9,000）的数据报都完整返回；同时 200 个客户端，每个往返
   10 次，每个都是一个会话，在上游是一个地址）、`TestUDPSessionsExpire`（空闲的会话在 300 毫秒后结束，繁忙的会话保持它的 socket，
   空闲客户端的下一个数据报来自新的 socket）、`TestUDPMaxConns`、`TestUDPRefused`（上游拒绝时结束会话；一个拒绝的地址和一个可用
   的地址时，客户端得到可用地址的回答）和 `TestUDPReload`（会话保持它的服务直到 drain 超时，之后转到新服务），以及配置检查。
