@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/apiclient"
 	"github.com/lesismal/fit/provider/internal/kvpart"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
@@ -30,7 +31,7 @@ func NewKV(name string, opts *config.ConsulKVProvider, logf func(format string, 
 		endpoint:   opts.URL(),
 		datacenter: opts.Datacenter,
 		tokenFile:  opts.TokenFile,
-		files:      watch.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
+		files:      apiclient.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
 		timeout:    opts.Timeout(),
 	}}
 	return &KV{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Logf: logf, Source: src}}

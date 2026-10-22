@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lesismal/fit/provider/internal/watch"
+	"github.com/lesismal/fit/internal/apiclient"
 )
 
 // Bounds and timings, variables for tests to shorten.
@@ -38,7 +38,7 @@ type conn struct {
 	endpoint   string
 	datacenter string
 	tokenFile  string
-	files      watch.TLSFiles
+	files      apiclient.TLSFiles
 	timeout    time.Duration
 }
 
@@ -59,7 +59,7 @@ func (c conn) open() (*client, error) {
 		}
 		cl.token = strings.TrimSpace(string(data))
 	}
-	hc, err := watch.Client(c.files, c.timeout, 4)
+	hc, err := apiclient.Client(c.files, c.timeout, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -118,9 +118,9 @@ func (c *client) get(ctx context.Context, path string, query url.Values, index u
 		resp.Body.Close()
 		return nil, next, nil
 	default:
-		return nil, 0, watch.StatusError(resp, what)
+		return nil, 0, apiclient.StatusError(resp, what)
 	}
-	data, err := watch.ReadBody(resp, maxBodyBytes, what)
+	data, err := apiclient.ReadBody(resp, maxBodyBytes, what)
 	return data, next, err
 }
 

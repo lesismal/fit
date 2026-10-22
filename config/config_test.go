@@ -490,6 +490,40 @@ func TestValidate(t *testing.T) {
 			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes"},
 		},
 		{
+			name: "storage and shared_storage",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"storage": "/d", "shared_storage": {"redis": {}, "etcd": {}}}}`,
+			want: []string{
+				`1:72: acme.storage: storage and shared_storage are two places to keep certificates: set one`,
+				`1:96: acme.shared_storage: set exactly one kind of shared storage: redis, etcd or consul`,
+			},
+		},
+		{
+			name: "redis storage",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"shared_storage": {"redis": {"address": "nohost", "username": "u", "ca_file": "ca.pem"}, "lock_ttl": "5s"}}}`,
+			want: []string{
+				`1:162: acme.shared_storage.lock_ttl: 5s is too short: at least 10s, which Consul's sessions need, and more than a renewal takes`,
+				`1:101: acme.shared_storage.redis.address: "nohost" is not a host and port`,
+				`1:123: acme.shared_storage.redis.username: username needs password_file`,
+				`1:139: acme.shared_storage.redis.ca_file: ca_file needs tls`,
+			},
+		},
+		{
+			name: "etcd storage",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"shared_storage": {"etcd": {"endpoints": ["tcp://x:1"], "password_file": "p"}}}}`,
+			want: []string{
+				`1:103: acme.shared_storage.etcd.endpoints[0]: "tcp://x:1" is neither http://<host>:<port> nor https://<host>:<port>`,
+				`1:134: acme.shared_storage.etcd.password_file: password_file needs username`,
+			},
+		},
+		{
+			name: "consul storage",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "acme": {"shared_storage": {"consul": {"endpoint": "http://x", "cert_file": "c"}}}}`,
+			want: []string{
+				`1:103: acme.shared_storage.consul.endpoint: "http://x" is not a host and port alone`,
+				`1:128: acme.shared_storage.consul.cert_file: cert_file needs key_file`,
+			},
+		},
+		{
 			name: "consul settings",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"consul": {"endpoint": "tcp://x:1", "tag_prefix": "-x", "cert_file": "c.pem"}}]}`,
 			want: []string{

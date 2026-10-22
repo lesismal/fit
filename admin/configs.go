@@ -411,7 +411,9 @@ func sameAccessLog(a, b *config.AccessLog) bool {
 	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
 }
 
-func sameProviders(a, b []config.Provider) bool {
+func sameProviders(a, b []config.Provider) bool { return sameJSON(a, b) }
+
+func sameJSON(a, b any) bool {
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
 	return bytes.Equal(ja, jb)
@@ -423,7 +425,8 @@ func sameACME(a, b *config.ACME) bool {
 	}
 	return a.Directory == b.Directory && a.Email == b.Email && a.CAFile == b.CAFile && a.Storage == b.Storage &&
 		a.MaxConcurrent == b.MaxConcurrent && a.Timeout == b.Timeout && a.RequestTimeout == b.RequestTimeout &&
-		slices.Equal(a.ChallengeTypes(), b.ChallengeTypes()) && sameOnDemand(a.OnDemand, b.OnDemand)
+		slices.Equal(a.ChallengeTypes(), b.ChallengeTypes()) && sameOnDemand(a.OnDemand, b.OnDemand) &&
+		sameJSON(a.SharedStorage, b.SharedStorage)
 }
 
 func sameOnDemand(a, b *config.OnDemand) bool {

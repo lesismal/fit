@@ -78,6 +78,19 @@ var adminListening = regexp.MustCompile(`^fit: admin API on (\S+)$`)
 // the Admin API as "admin".
 func startFit(t *testing.T, doc string, args ...string) (*fit, map[string]string) {
 	t.Helper()
+	// A listener for each address written, the Admin API's included; a
+	// config that writes no listeners gets HTTPS by default's two.
+	want := strings.Count(doc, `"address"`)
+	if !strings.Contains(doc, `"listeners"`) {
+		want += 2
+	}
+	return startFitWant(t, doc, want, args...)
+}
+
+// startFitWant is startFit for a config whose listeners, want of them,
+// the Admin API's included, cannot be counted by its "address" keys.
+func startFitWant(t *testing.T, doc string, want int, args ...string) (*fit, map[string]string) {
+	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "fit.json")
 	if err := os.WriteFile(cfg, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
@@ -108,12 +121,6 @@ func startFit(t *testing.T, doc string, args ...string) (*fit, map[string]string
 	})
 
 	addrs := map[string]string{}
-	// A listener for each address written, the Admin API's included; a
-	// config that writes no listeners gets HTTPS by default's two.
-	want := strings.Count(doc, `"address"`)
-	if !strings.Contains(doc, `"listeners"`) {
-		want += 2
-	}
 	deadline := time.After(10 * time.Second)
 	for {
 		select {

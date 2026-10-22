@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-22 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I62 已完成） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I63 已完成） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9`（fib `main` 的 `4f1c3e9`，即 `c3e27ed` 加上 A36 和 A37；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M4 平台集成：共享证书存储、dashboard、OpenTelemetry、打包（I63–I66） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M4 平台集成：dashboard、OpenTelemetry、打包（I64–I66） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）和 I62（Consul 与 etcd provider）已完成，下一步是 I63（共享证书存储）。** M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）和 I63（证书共享于 Redis、etcd 或 Consul）已完成，下一步是 I64（仪表盘）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -70,10 +70,12 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `provider/labels` | 从前缀下的标签读取路由、服务和上游设置（Docker 的标签和 Consul 的 tag 都这样读），并生成片段 |
 | `provider/consul` | 基于 net/http 和阻塞查询的 Consul provider：`Catalog` 把为 fit 打了 tag 的服务转换为其通过检查的实例组成的上游，以及 tag 写出的路由和服务；`KV` 从前缀下的键获取片段 |
 | `provider/etcd` | etcd provider：etcd 的 v3 JSON 网关，先 watch 前缀再读取键，从键获取片段，支持用户认证，端点轮流尝试 |
-| `provider/internal/watch`、`provider/internal/kvpart` | `Follower`：保持 watch、在变化后和每个间隔读取来源并退避重试的循环；带 TLS 文件的 HTTP 客户端；由保存片段的键生成片段 |
+| `provider/internal/watch`、`provider/internal/kvpart` | `Follower`：保持 watch、在变化后和每个间隔读取来源并退避重试的循环；由保存片段的键生成片段 |
 | `provider/kubernetes` | Kubernetes provider：基于 net/http 的自有客户端（service account 或 kubeconfig），每种资源一个 list-and-watch informer（使用服务器提供的第一个版本），把 Gateway API 的 GatewayClass 和 Gateway（HTTP、证书来自 Secret 并写成文件的 HTTPS、TLS 透传、TCP、UDP）及其 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute 转换为 listener、路由、service 和以 Service endpoint 为地址的上游；状态以 merge patch 回写；设置 `ingress` 时还有属于 fit 的 IngressClass 的 Ingress 和少量注解 |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
+| `tlsmgr/sharedstore` | `Store`：保存在 Redis（RESP2）、etcd（JSON 网关）或 Consul（KV）中的 `tlsmgr.Storage`，带持有期间续期的租约锁 |
+| `internal/apiclient` | 访问服务 API 的 HTTP 客户端（带 TLS 文件）和有界读取，供 provider 和共享存储使用 |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`ClientAuth`：监听器验证客户端证书所用的 CA；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：先用 map 按 host（精确、匹配一级标签的 `*.`、匹配一级或多级的 `**.`）和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`，以及它们的表达式 `ParseExpr`），依次看优先级、具体程度和匹配器个数，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
@@ -2445,6 +2447,49 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - KV 的值是 JSON 片段，一个键一个，而不是 Traefik 那样一个设置一个键的键树：与配置文件和 Admin API 形状相同，由同一个
   解析器检查，多个键也让多个写入方各自维护自己的片段。
 - 不支持 Consul Enterprise 的命名空间和分区，也不支持 etcd 的 v2 API（决策 013）。
+
+### I63 共享证书存储 — 已完成
+
+- `config`：`acme.shared_storage`，`redis`（`address`、`username`、`password_file`、`db`、`tls`、`ca_file`、
+  `cert_file`、`key_file`）、`etcd`（`endpoints`、`username`、`password_file` 和 TLS 文件）与 `consul`（`endpoint`、
+  `datacenter`、`token_file` 和 TLS 文件）三者恰好设一个，另有 `prefix`（`fit/`）、`lock_ttl`（30s，至少 10s）和
+  `request_timeout`（10s）；不能与 `storage` 同时设置。修改它的重载会被拒绝，与对 `acme` 的任何修改相同。
+- `tlsmgr/sharedstore`：`Store`，基于各种后端的 `tlsmgr.Storage`，负责加前缀，拒绝 `FileStorage` 拒绝的键和超过
+  4 MiB 的值，`List` 不列出 `<prefix>locks/` 下的锁，每把锁由一个 goroutine 每隔三分之一 TTL 续期直到 `Unlock`（同一
+  进程的另一个 goroutine 与另一个进程一样等待）。Redis：最多四个连接上的 RESP2（带用户的 AUTH、SELECT、TLS），应答
+  有界；GET、SET、DEL，以及对前缀中通配字符转义后的 SCAN；锁用带随机 token 的 `SET NX PX`，由校验 token 的脚本续期和
+  删除。etcd：JSON 网关，`/v3/kv/range`、`put`、`deleterange`，用户的 token（被拒时重新获取一次），端点不可达时换下
+  一个；锁用 lease 加针对键的 create revision 的事务，用 `/v3/lease/keepalive` 续期，撤销 lease 来释放。Consul：
+  `/v1/kv` 上的 `?raw`、`?keys`、PUT 和 DELETE；锁由 session（`TTL`、`Behavior: delete`、无锁延迟）获取键，续期和
+  销毁。
+- `internal/apiclient`：I62 为 provider 写的带 TLS 文件的 HTTP 客户端和有界读取，从 `provider/internal/watch` 移出，
+  供 `tlsmgr/sharedstore` 一起使用。
+- `tlsmgr`：`newACME` 根据 `shared_storage` 构建存储（并在 `Close` 中关闭）；存储表明自己是 `Shared` 时，ACME 在质询
+  进行期间把应答保存在其中：HTTP-01 的 key authorization 按 token，TLS-ALPN-01 的证书按名称，结束后删除。
+  `LookupHTTPChallenge` 在 ACME 的 goroutine 上到存储中查找 token，同时最多 16 个，每个限时 5s；token 不是 base64url
+  或所有槽位都被占用时立即应答。对列出的名称，若本实例没有其 TLS-ALPN-01 质询，握手时在 fib 的握手池上到存储中查找。
+- `listener`：使用共享存储时，内存中没有应答的质询请求先 `Retain`，由 `LookupHTTPChallenge` 的回调应答：应答内容，
+  或 404。
+- 决策 [014](decisions/014-shared-certificate-storage.zh-CN.md)：不用客户端库的三种存储、租约锁、共享质询。
+- 测试：`tlsmgr/sharedstore` 的 `TestStores` 针对 Docker 中的 Redis 8.2.2（带密码和数据库）、etcd v3.6.5（第一个
+  端点不存在）和 Consul 1.21.5 并行运行同一套测试：键的存储、替换、由第二个存储读取、按前缀列出（不含锁，通配字符按
+  字面处理）、删除、错误的键、值的上限、已取消的 context；两个存储上的八个持有者轮流取得锁，从不同时有两个；持有超过
+  TTL 的锁会续期并被等待，释放后被取得；停止续期的持有者的锁在 TTL 后被取得（10s；Consul 为 20s）。`TestReadReply`
+  读取 RESP 应答并拒绝错误和超大的应答。`tlsmgr` 的 `TestSharedPebble`：同一共享存储上的两个 ACME 针对 Pebble，
+  Pebble 只能到达第二个；第一个的证书经存储中的应答完成质询后获得，第二个被要求管理同一名称时取用该证书而不另行获取；
+  之后存储中不再有质询。`TestLookupHTTPChallenge`（无存储、错误的 token、16 的上限）和 `TestCertsSharedALPN`。
+  `test/e2e` 的 `TestACMESharedStorage`：两个 `fit run` 进程依次使用 Redis、etcd 和 Consul，Pebble 只能到达第一个的
+  HTTP-01 端口：第二个获得只有它管理的名称，两者都管理的名称只获取一次并由两者提供同一张证书。`config`（各种存储的
+  设置、`storage` 与 `shared_storage` 同时设置）。`startFitWant` 用于 "address" 键不全属于 listener 的配置，直接给出
+  listener 数量。涉及的包和 ACME e2e 测试在基准测试主机上通过竞态检测；该主机现在有与 CI 相同的 Pebble v2.10.1，位于
+  `/root/dev/gopath/bin`；linux、darwin、windows 和 freebsd 的 vet 与 staticcheck 通过。
+- 无基准测试：证书管理属于控制面（规则 21）；dispatcher 的改动只在使用共享存储时、`/.well-known/acme-challenge/`
+  下的请求才会走到。
+
+与计划的差别：
+
+- 除证书外还共享质询：否则同一地址后的两个实例只有在 CA 恰好到达下单的那个时才能共享签发。
+- 使用共享存储时，token 在哪里都找不到的质询路径得到 404，而不是交给路由（决策 014）。
 
 ## 给后续迭代的说明
 

@@ -263,6 +263,12 @@ func (c *Config) Validate() Errors {
 				add(o.At.Field("ask"), "%q is not an http or https URL", o.Ask)
 			}
 		}
+		if a.SharedStorage != nil {
+			if a.Storage != "" {
+				add(a.At.Field("storage"), "storage and shared_storage are two places to keep certificates: set one")
+			}
+			checkSharedStorage(a.SharedStorage, add)
+		}
 		for i, ch := range a.Challenges {
 			if slices.Index(a.Challenges, ch) < i {
 				add(a.At.Field("challenges").Index(i), "%q is listed twice", ch)

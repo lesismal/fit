@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I62 done) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I63 done) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M4, platform integration: shared certificate storage, the dashboard, OpenTelemetry, packaging (I63–I66) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | M4, platform integration: the dashboard, OpenTelemetry, packaging (I64–I66) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **M4 has begun: I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, and I62, the Consul and etcd providers, are done. Next, I63 (shared certificate storage).**
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, and I63, certificates shared in Redis, etcd or Consul, are done. Next, I64 (dashboard).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -91,10 +91,12 @@ To continue, start a session with:
 | `provider/labels` | routes, services and an upstream's settings read from labels under a prefix, as Docker's labels and Consul's tags are, and the part they make |
 | `provider/consul` | the Consul providers on net/http with blocking queries: `Catalog`, services tagged for fit turned into upstreams of their passing instances, with the routes and services their tags write; `KV`, parts from the keys under a prefix |
 | `provider/etcd` | the etcd provider: etcd's v3 JSON gateway, a watch on the prefix then the keys read, parts from them, users authenticated, endpoints in turn |
-| `provider/internal/watch`, `provider/internal/kvpart` | `Follower`, the loop that keeps a watch, reads the source after changes and every interval and backs off; an HTTP client with TLS files; the part made from keys holding parts |
+| `provider/internal/watch`, `provider/internal/kvpart` | `Follower`, the loop that keeps a watch, reads the source after changes and every interval and backs off; the part made from keys holding parts |
 | `provider/kubernetes` | the Kubernetes provider: a client of its own on net/http (service account or kubeconfig), list-and-watch informers per kind (at the first version served), the Gateway API's GatewayClasses and Gateways (HTTP, HTTPS with certificates from Secrets written to files, TLS passthrough, TCP, UDP) and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes turned into listeners, routes, services and upstreams of Services' endpoints; statuses written back as merge patches; with `ingress`, Ingresses of fit's IngressClasses and a few annotations |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
+| `tlsmgr/sharedstore` | `Store`, a `tlsmgr.Storage` in Redis (RESP2), etcd (JSON gateway) or Consul (KV), with leased locks renewed while held |
+| `internal/apiclient` | the HTTP client of services' APIs, with TLS files, and bounded reads, for the providers and the shared storage |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host (exact, `*.` for one label, `**.` for one or more) and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
@@ -3397,6 +3399,68 @@ Differences from the plan:
   let several writers keep parts of their own.
 - Consul Enterprise's namespaces and partitions, and etcd's v2 API, are not supported (decision
   013).
+
+### I63 Shared certificate storage — done
+
+- `config`: `acme.shared_storage`, with exactly one of `redis` (`address`, `username`,
+  `password_file`, `db`, `tls`, `ca_file`, `cert_file`, `key_file`), `etcd` (`endpoints`,
+  `username`, `password_file` and the TLS files) and `consul` (`endpoint`, `datacenter`,
+  `token_file` and the TLS files), and `prefix` (`fit/`), `lock_ttl` (30s, at least 10s) and
+  `request_timeout` (10s); not with `storage`. A reload that changes it is refused, as any change to
+  `acme` is.
+- `tlsmgr/sharedstore`: `Store`, a `tlsmgr.Storage` over a backend of each kind, which applies the
+  prefix, refuses the keys `FileStorage` refuses and values over 4 MiB, keeps locks under
+  `<prefix>locks/` out of `List`, and holds each lock with a goroutine that renews it every third of
+  the TTL until `Unlock` (another goroutine of the process waits, as another process does).
+  Redis: RESP2 on at most four connections (AUTH with a user, SELECT, TLS), replies bounded; GET,
+  SET, DEL, SCAN with the prefix's glob characters escaped; locks by `SET NX PX` with a random
+  token, renewed and deleted by scripts that check it. etcd: the JSON gateway, `/v3/kv/range`,
+  `put`, `deleterange`, a user's token (taken again once when refused), the next endpoint when one
+  cannot be reached; locks by a lease and a transaction on the key's create revision, renewed by
+  `/v3/lease/keepalive` and given back by revoking the lease. Consul: `?raw`, `?keys`, PUT and
+  DELETE on `/v1/kv`; locks by a session (`TTL`, `Behavior: delete`, no lock delay) acquiring the
+  key, renewed and destroyed.
+- `internal/apiclient`: the HTTP client with TLS files and the bounded reads I62 wrote for its
+  providers, moved out of `provider/internal/watch` so that `tlsmgr/sharedstore` uses them too.
+- `tlsmgr`: `newACME` builds the store from `shared_storage` (and closes it in `Close`); a storage
+  that says it is `Shared` makes ACME keep each challenge's answer in it while the challenge is under
+  way, the HTTP-01 key authorization by token and the TLS-ALPN-01 certificate by name, deleted
+  afterwards. `LookupHTTPChallenge` looks a token up there on ACME's goroutines, at most 16 at once,
+  each within 5s, answering at once when the token is not base64url or every slot is taken; a
+  TLS-ALPN-01 handshake for a listed name that this instance has no challenge for looks the name up
+  there, on fib's handshake pool.
+- `listener`: a request for a challenge's answer that is not in memory, with a shared storage,
+  takes `Retain` and is answered from `LookupHTTPChallenge`'s callback: the answer, or a 404.
+- Decision [014](decisions/014-shared-certificate-storage.md): the three stores without client
+  libraries, leased locks, shared challenges.
+- Tests: `tlsmgr/sharedstore` `TestStores` runs one suite against Redis 8.2.2 (with a password and
+  a database), etcd v3.6.5 (its first endpoint not there) and Consul 1.21.5, each in Docker, in
+  parallel: keys stored, replaced, loaded by a second store, listed by prefix (locks left out, glob
+  characters taken literally), deleted, bad keys, the value limit, a cancelled context; eight holders
+  over two stores take a lock in turn, never two at once; a lock held past its TTL is renewed and
+  waited for, and taken once given back; a lock whose holder stopped renewing is taken after the TTL
+  (10s; 20s on Consul). `TestReadReply` reads RESP replies and refuses bad and oversized ones.
+  `tlsmgr` `TestSharedPebble`: two ACMEs on one shared storage against Pebble, which reaches only
+  the second; the first's certificate is obtained with the challenge answered from the storage, and
+  the second, asked for the same name, takes it rather than obtaining another; the challenge is gone
+  from the storage after. `TestLookupHTTPChallenge` (no storage, bad tokens, the bound of 16) and
+  `TestCertsSharedALPN`. `test/e2e` `TestACMESharedStorage`: two `fit run` processes on Redis, etcd
+  and Consul in turn, Pebble reaching only the first's HTTP-01 port: the second obtains a name only
+  it manages, and a name both manage is obtained once and served by both, the same certificate.
+  `config` (each kind's settings, `storage` with `shared_storage`). `startFitWant` takes the
+  listeners' count for a config whose "address" keys are not all listeners'. The touched packages
+  and the ACME e2e tests pass under the race detector on the benchmark host, which now has Pebble
+  v2.10.1 in `/root/dev/gopath/bin`, as CI installs it; vet for linux, darwin, windows and freebsd
+  and staticcheck pass.
+- No benchmark: certificate management is the control plane (rule 21); the dispatcher's change is
+  on a path only `/.well-known/acme-challenge/` requests with a shared storage take.
+
+Differences from the plan:
+
+- Challenges are shared as well as certificates: without it, two instances behind one address can
+  share issuance only when the CA happens to reach the one that ordered.
+- With a shared storage, a challenge path whose token is nowhere gets a 404 rather than the routes
+  (decision 014).
 
 ## Notes for later iterations
 

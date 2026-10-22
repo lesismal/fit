@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -198,5 +199,93 @@ func TestLetsEncryptStaging(t *testing.T) {
 			t.Fatalf("no certificate within 5 minutes: %v", err)
 		}
 		time.Sleep(2 * time.Second)
+	}
+}
+
+// TestACMESharedStorage runs two instances of fit on one shared storage,
+// in Redis, etcd and Consul in turn, as on two hosts: Pebble reaches only
+// the first, on its HTTP-01 port. The second obtains a name only it
+// manages, the first answering the challenge from the storage, and a name
+// both manage is obtained once and served by both.
+func TestACMESharedStorage(t *testing.T) {
+	servers := map[string]func(t *testing.T) string{
+		"redis": func(t *testing.T) string {
+			return fmt.Sprintf(`{"redis": {"address": %q}}`, startServer(t, "redis:8.2.2", 6379))
+		},
+		"etcd": func(t *testing.T) string {
+			ep := "http://" + startServer(t, etcdImage, 2379, "etcd",
+				"--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://127.0.0.1:2379")
+			return fmt.Sprintf(`{"etcd": {"endpoints": [%q]}}`, ep)
+		},
+		"consul": func(t *testing.T) string {
+			ep := "http://" + startServer(t, consulImage, 8500, "agent", "-dev", "-client", "0.0.0.0")
+			return fmt.Sprintf(`{"consul": {"endpoint": %q}}`, ep)
+		},
+	}
+	for _, kind := range []string{"redis", "etcd", "consul"} {
+		t.Run(kind, func(t *testing.T) {
+			storage := servers[kind](t)
+			port := pebbletest.FreePort(t)
+			p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
+			acme := fmt.Sprintf(`{"directory": %q, "ca_file": %q, "timeout": "20s", "challenges": ["http-01"], "shared_storage": %s}`, p.Directory, p.CAFile, storage)
+			// The store may take a moment to answer once it has started;
+			// fit tries again. Each instance has two listeners.
+			first, addrs1 := startFitWant(t, fmt.Sprintf(`{
+  "acme": %s,
+  "listeners": [
+    {"name": "http", "address": "127.0.0.1:%d"},
+    {"name": "https", "address": "127.0.0.1:0", "tls": {"acme": ["both.fit.test"]}}
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "first"}}}]
+}`, acme, port), 2)
+			second, addrs2 := startFitWant(t, fmt.Sprintf(`{
+  "acme": %s,
+  "listeners": [
+    {"name": "http", "address": "127.0.0.1:0"},
+    {"name": "https", "address": "127.0.0.1:0", "tls": {"acme": ["both.fit.test", "b.fit.test"]}}
+  ],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "second"}}}]
+}`, acme), 2)
+			for _, f := range []*fit{first, second} {
+				go func() {
+					for range f.lines {
+					}
+				}()
+			}
+			if body := getObtained(t, p, addrs2["https"], "b.fit.test"); body != "second" {
+				t.Errorf("b.fit.test: %q", body)
+			}
+			leaf1 := servedLeaf(t, p, addrs1["https"], "both.fit.test")
+			leaf2 := servedLeaf(t, p, addrs2["https"], "both.fit.test")
+			if !leaf1.Equal(leaf2) {
+				t.Errorf("the instances serve different certificates for both.fit.test: serials %s and %s", leaf1.SerialNumber, leaf2.SerialNumber)
+			}
+			logs := first.stderr.String() + second.stderr.String()
+			if n := strings.Count(logs, "both.fit.test: obtained a certificate"); n != 1 {
+				t.Errorf("both.fit.test obtained %d times:\n%s", n, logs)
+			}
+			if n := strings.Count(logs, "b.fit.test: obtained a certificate"); n != 1 {
+				t.Errorf("b.fit.test obtained %d times:\n%s", n, logs)
+			}
+		})
+	}
+}
+
+// servedLeaf returns the certificate addr serves for name, once it has
+// one Pebble's roots verify.
+func servedLeaf(t *testing.T, p *pebbletest.Pebble, addr, name string) *x509.Certificate {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", addr, &tls.Config{RootCAs: p.Roots(t), ServerName: name})
+		if err == nil {
+			leaf := conn.ConnectionState().PeerCertificates[0]
+			conn.Close()
+			return leaf
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no certificate for %s within 30s: %v", name, err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

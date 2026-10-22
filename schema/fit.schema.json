@@ -65,6 +65,10 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "shared_storage": {
+          "$ref": "#/$defs/config.SharedStorage",
+          "description": "Keep accounts, keys and certificates in Redis, etcd or Consul instead of a directory, for instances of fit on several hosts: one instance obtains a certificate, holding a lock there, and the others take it from there; each challenge's answer is kept there too, so that whichever instance the CA reaches answers it. Not with storage."
+        },
         "storage": {
           "description": "The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out.",
           "type": "string"
@@ -317,6 +321,37 @@
       },
       "type": "object"
     },
+    "config.ConsulStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https; with key_file.",
+          "type": "string"
+        },
+        "datacenter": {
+          "description": "The datacenter whose KV store is used; the agent's when left out.",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "http://127.0.0.1:8500",
+          "description": "Where Consul's HTTP API is, as of the local agent: http:// or https:// and a host and port. http://127.0.0.1:8500 when left out.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "token_file": {
+          "description": "A file holding the ACL token to send, read when fit starts; none when left out. The token needs to read and write the keys under prefix and to make sessions.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.DockerProvider": {
       "additionalProperties": false,
       "properties": {
@@ -413,6 +448,42 @@
           "default": "10s",
           "description": "How long each request to etcd may take, connecting included, and a watch to start; a watch then lasts until it fails. 10s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "username": {
+          "description": "The user to authenticate as, with password_file, when etcd's authentication is on; none when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.EtcdStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs etcd's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https; with key_file.",
+          "type": "string"
+        },
+        "endpoints": {
+          "default": [
+            "http://127.0.0.1:2379"
+          ],
+          "description": "Where etcd's client API is: http:// or https:// and a host and port, for each member to try, in turn when one fails. http://127.0.0.1:2379 when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "password_file": {
+          "description": "A file holding username's password, read each time fit authenticates.",
           "type": "string"
         },
         "username": {
@@ -862,6 +933,46 @@
       ],
       "type": "object"
     },
+    "config.RedisStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "default": "127.0.0.1:6379",
+          "description": "The server's host and port. 127.0.0.1:6379 when left out.",
+          "type": "string"
+        },
+        "ca_file": {
+          "description": "A PEM file with the CAs the server's certificate is verified with, over TLS; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over TLS; with key_file.",
+          "type": "string"
+        },
+        "db": {
+          "description": "The database selected. 0 when left out.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "password_file": {
+          "description": "A file holding the password to authenticate with, read at each connection; none when left out.",
+          "type": "string"
+        },
+        "tls": {
+          "description": "Connect over TLS.",
+          "type": "boolean"
+        },
+        "username": {
+          "description": "The ACL user to authenticate as, with password_file; the default user when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.Route": {
       "additionalProperties": false,
       "properties": {
@@ -951,6 +1062,41 @@
         "listeners",
         "upstream"
       ],
+      "type": "object"
+    },
+    "config.SharedStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "consul": {
+          "$ref": "#/$defs/config.ConsulStorage",
+          "description": "Keep them in Consul's KV store, with locks held by sessions."
+        },
+        "etcd": {
+          "$ref": "#/$defs/config.EtcdStorage",
+          "description": "Keep them in etcd, through its v3 JSON gateway, with locks held by leases."
+        },
+        "lock_ttl": {
+          "default": "30s",
+          "description": "How long a lock outlives an instance that stopped holding it without giving it back; its holder renews it every third of that. At least 10s; 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "fit/",
+          "description": "What the keys kept start with, as fit/certificates/<CA>/<name>.pem; instances that share certificates share it. fit/ when left out.",
+          "type": "string"
+        },
+        "redis": {
+          "$ref": "#/$defs/config.RedisStorage",
+          "description": "Keep them in Redis, a standalone server or a primary (not Redis Cluster), with locks of SET NX and an expiry."
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long each request to the store may take, connecting included. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "config.StickyCookie": {

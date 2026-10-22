@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/apiclient"
 	"github.com/lesismal/fit/provider/internal/watch"
 	"github.com/lesismal/fit/provider/labels"
 )
@@ -40,7 +41,7 @@ func NewCatalog(name string, opts *config.ConsulProvider, logf func(format strin
 		endpoint:   opts.URL(),
 		datacenter: opts.Datacenter,
 		tokenFile:  opts.TokenFile,
-		files:      watch.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
+		files:      apiclient.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
 		timeout:    opts.Timeout(),
 	}}
 	return &Catalog{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Logf: logf, Source: src}}

@@ -678,9 +678,26 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	defer g.Release()
 	if g.ACME != nil && c.Request.TLS == nil && strings.HasPrefix(c.Request.URL.Path, tlsmgr.ACMEChallengePrefix) {
 		// The CA checks an HTTP-01 challenge in the clear; the answer is in
-		// memory. A token with no challenge under way goes to the routes.
-		if answer, ok := g.ACME.HTTPChallenge(c.Request.URL.Path[len(tlsmgr.ACMEChallengePrefix):]); ok {
+		// memory. Without a shared storage, a token with no challenge under
+		// way goes to the routes.
+		token := c.Request.URL.Path[len(tlsmgr.ACMEChallengePrefix):]
+		if answer, ok := g.ACME.HTTPChallenge(token); ok {
 			_ = c.Respond(stdhttp.StatusOK, "text/plain", []byte(answer))
+			return
+		}
+		if g.ACME.Shared() {
+			// Another instance's challenge, maybe: looked up in the shared
+			// storage off the worker, and answered then; one there is not
+			// gets a 404, not the routes.
+			c.Retain()
+			g.ACME.LookupHTTPChallenge(token, func(answer string, ok bool) {
+				defer c.Release()
+				if ok {
+					_ = c.Respond(stdhttp.StatusOK, "text/plain", []byte(answer))
+				} else {
+					_ = c.Respond(stdhttp.StatusNotFound, "text/plain; charset=utf-8", notFound)
+				}
+			})
 			return
 		}
 	}

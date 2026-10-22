@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"io/fs"
 	"math/big"
 	mathrand "math/rand/v2"
@@ -27,6 +28,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/tlsmgr/sharedstore"
 )
 
 // ACMEChallengePrefix is where a CA asks for an HTTP-01 challenge's answer:
@@ -52,9 +54,16 @@ const (
 // A certificate in the storage is used as it is until it is due for
 // renewal, so that a restart, or another instance sharing the storage, does
 // not obtain it again. Instances sharing a storage take a lock in it before
-// they obtain a certificate, and look again once they hold it.
+// they obtain a certificate, and look again once they hold it. With a
+// shared storage, one that instances on other hosts share (acme's
+// shared_storage), each challenge's answer is kept there too while it is
+// under way, so that the instance the CA reaches answers it: HTTP-01 off
+// the worker (LookupHTTPChallenge), TLS-ALPN-01 on the handshake pool.
 type ACME struct {
 	storage   Storage
+	shared    bool          // storage is shared between hosts
+	closer    io.Closer     // the storage, when ACME made it from the config
+	lookups   chan struct{} // a slot for each lookup of a shared challenge under way
 	directory string
 	email     string
 	caKey     string // the CA's part of the storage's keys
@@ -140,6 +149,14 @@ func NewACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 // newACME is NewACME without starting, for tests to change what they change
 // first.
 func newACME(c *config.ACME, storage Storage, logf func(format string, args ...any)) (*ACME, error) {
+	var closer io.Closer
+	if storage == nil && c != nil && c.SharedStorage != nil {
+		st, err := sharedstore.New(c.SharedStorage, logf)
+		if err != nil {
+			return nil, c.At.Field("shared_storage").Errorf("%v", err)
+		}
+		storage, closer = st, st
+	}
 	if storage == nil {
 		// A process with no home to keep certificates in fails when it
 		// first needs one, not when it starts.
@@ -166,6 +183,9 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 	}
 	a := &ACME{
 		storage:   storage,
+		shared:    isShared(storage),
+		closer:    closer,
+		lookups:   make(chan struct{}, maxSharedLookups),
 		directory: c.DirectoryURL(),
 		http:      &http.Client{Transport: transport, Timeout: c.HTTPTimeout()},
 		timeout:   c.OrderTimeout(),
@@ -404,6 +424,9 @@ func (a *ACME) Close() error {
 	a.mu.Unlock()
 	a.cancel()
 	a.done.Wait()
+	if a.closer != nil {
+		return a.closer.Close()
+	}
 	return nil
 }
 
@@ -812,6 +835,11 @@ func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string, att
 		}
 		a.tokens.Store(chal.Token, answer)
 		defer a.tokens.Delete(chal.Token)
+		if a.shared {
+			key := a.httpChallengeKey(chal.Token)
+			a.shareChallenge(ctx, key, []byte(answer))
+			defer a.unshareChallenge(key)
+		}
 	case config.ChallengeTLSALPN01:
 		name := normalizeName(authz.Identifier.Value)
 		cert, err := client.TLSALPN01ChallengeCert(chal.Token, name)
@@ -820,6 +848,15 @@ func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string, att
 		}
 		a.alpnCerts.Store(name, &cert)
 		defer a.alpnCerts.Delete(name)
+		if a.shared {
+			data, err := encodeCert(&cert)
+			if err != nil {
+				return err
+			}
+			key := a.alpnChallengeKey(name)
+			a.shareChallenge(ctx, key, data)
+			defer a.unshareChallenge(key)
+		}
 	}
 	if _, err := client.Accept(ctx, chal); err != nil {
 		return fmt.Errorf("accepting the challenge: %w", err)

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/apiclient"
 	"github.com/lesismal/fit/provider/internal/kvpart"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
@@ -70,7 +71,7 @@ func (s *source) Open(ctx context.Context) (func(), error) {
 	eps := s.opts.URLs()
 	s.endpoint = strings.TrimSuffix(eps[s.tries%len(eps)], "/")
 	s.tries++
-	hc, err := watch.Client(watch.TLSFiles{CA: s.opts.CAFile, Cert: s.opts.CertFile, Key: s.opts.KeyFile}, s.opts.Timeout(), 4)
+	hc, err := apiclient.Client(apiclient.TLSFiles{CA: s.opts.CAFile, Cert: s.opts.CertFile, Key: s.opts.KeyFile}, s.opts.Timeout(), 4)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +112,7 @@ func (s *source) post(ctx context.Context, path string, in any) (*http.Response,
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, watch.StatusError(resp, "POST "+path+" at "+s.endpoint)
+		return nil, apiclient.StatusError(resp, "POST "+path+" at "+s.endpoint)
 	}
 	return resp, nil
 }
@@ -125,7 +126,7 @@ func (s *source) call(ctx context.Context, path string, in, out any) error {
 	if err != nil {
 		return err
 	}
-	data, err := watch.ReadBody(resp, maxBodyBytes, "POST "+path)
+	data, err := apiclient.ReadBody(resp, maxBodyBytes, "POST "+path)
 	if err != nil {
 		return err
 	}

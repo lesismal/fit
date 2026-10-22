@@ -53,15 +53,16 @@ var (
 // renew at once; a failure is tried again later and later, up to an hour
 // apart.
 type ACME struct {
-	Directory      string    `json:"directory,omitempty" default:"\"https://acme-v02.api.letsencrypt.org/directory\"" doc:"The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests."`
-	Email          string    `json:"email,omitempty" doc:"The address the CA may write to about the account's certificates; none when left out."`
-	CAFile         string    `json:"ca_file,omitempty" doc:"A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own."`
-	Storage        string    `json:"storage,omitempty" doc:"The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out."`
-	MaxConcurrent  int       `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
-	Timeout        Duration  `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
-	RequestTimeout Duration  `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
-	OnDemand       *OnDemand `json:"on_demand,omitempty" doc:"How certificates are obtained during handshakes, for listeners whose tls sets on_demand: whom to ask whether a name may have one, and how fast and how many."`
-	Challenges     []string  `json:"challenges,omitempty" enum:"http-01,tls-alpn-01" default:"[\"http-01\",\"tls-alpn-01\"]" doc:"The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out."`
+	Directory      string         `json:"directory,omitempty" default:"\"https://acme-v02.api.letsencrypt.org/directory\"" doc:"The URL of the CA's ACME directory. Let's Encrypt's when left out; https://acme-staging-v02.api.letsencrypt.org/directory is its staging CA, for tests."`
+	Email          string         `json:"email,omitempty" doc:"The address the CA may write to about the account's certificates; none when left out."`
+	CAFile         string         `json:"ca_file,omitempty" doc:"A PEM file of the certificates the directory's is checked against, in place of the system's roots, for a CA of one's own."`
+	Storage        string         `json:"storage,omitempty" doc:"The directory accounts, keys and certificates are kept in, which instances of fit may share. $XDG_DATA_HOME/fit, or ~/.local/share/fit, when left out."`
+	SharedStorage  *SharedStorage `json:"shared_storage,omitempty" doc:"Keep accounts, keys and certificates in Redis, etcd or Consul instead of a directory, for instances of fit on several hosts: one instance obtains a certificate, holding a lock there, and the others take it from there; each challenge's answer is kept there too, so that whichever instance the CA reaches answers it. Not with storage."`
+	MaxConcurrent  int            `json:"max_concurrent,omitempty" min:"0" default:"2" doc:"How many certificates are obtained at once; the rest wait their turn. 2 when left out or 0."`
+	Timeout        Duration       `json:"timeout,omitempty" default:"\"10m\"" doc:"How long obtaining one certificate may take, challenges included, before it is given up and tried again later. 10m when left out."`
+	RequestTimeout Duration       `json:"request_timeout,omitempty" default:"\"30s\"" doc:"How long each request to the CA may take. 30s when left out."`
+	OnDemand       *OnDemand      `json:"on_demand,omitempty" doc:"How certificates are obtained during handshakes, for listeners whose tls sets on_demand: whom to ask whether a name may have one, and how fast and how many."`
+	Challenges     []string       `json:"challenges,omitempty" enum:"http-01,tls-alpn-01" default:"[\"http-01\",\"tls-alpn-01\"]" doc:"The challenges answered, in the order tried: http-01, which the CA checks on port 80 at the name, answered by any listener of fit's in the clear, and tls-alpn-01, which it checks on port 443, answered by the TLS listener that lists the name. A failed attempt is tried again with the next. Both, http-01 first, when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
