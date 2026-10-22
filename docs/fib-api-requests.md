@@ -50,7 +50,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A35 | A connection's peer address replaced, as a PROXY header gives it | done, `530d222` | 13 | I52 |
 | A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` | 10 | I53, I53b |
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
-| A38 | An HTTP/1 response to a request whose body failed says the connection ends | made, not yet on `main` | 13 | CI |
+| A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
 
 ## Evidence
 
@@ -1064,7 +1064,7 @@ the rules refuse.
 
 ## A38: An HTTP/1 response to a request whose body failed says the connection ends
 
-**Status.** Made by fit's session, in fib's working tree; not yet on `main`.
+**Status.** Done (`86071b8` on fib's `main`), made by fit's session.
 
 **Problem.** On HTTP/1, when a streamed request body fails (it grows past its limit, is misframed,
 is held too long or is cut), fib ends the connection once the response is out, since the rest of

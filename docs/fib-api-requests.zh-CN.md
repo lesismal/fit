@@ -48,7 +48,7 @@
 | A35 | 按 PROXY 头替换连接的对端地址 | 已完成，`530d222` | 13 | I52 |
 | A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9` | 10 | I53、I53b |
 | A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9` | 1 | I53b |
-| A38 | 请求体失败时，HTTP/1 响应声明连接将关闭 | 已实现，尚未进入 `main` | 13 | CI |
+| A38 | 请求体失败时，HTTP/1 响应声明连接将关闭 | 已完成，`86071b8` | 13 | I66 的 CI 修复 |
 
 ## 证据
 
@@ -796,7 +796,7 @@ fib 的 `TestRelayIdleTimeout` 与 `TestConnectProxyIdleTimeout`。
 
 ## A38：请求体失败时，HTTP/1 响应声明连接将关闭
 
-**状态。** 由 fit 的会话在 fib 的工作区实现；尚未进入 `main`。
+**状态。** 已完成（fib `main` 的 `86071b8`），由 fit 的会话实现。
 
 **问题。** 在 HTTP/1 上，流式请求体失败时（超过上限、分块格式错误、暂停过久或被截断），由于剩余的请求体不会再读取，fib 在响应发出后
 关闭连接。但响应头没有这样声明：`commit` 和 `writeHTTP1` 只在请求自己带 `Connection: close`、响应带了它或服务器正在 drain 时才设置
