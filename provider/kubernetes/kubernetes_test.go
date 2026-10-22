@@ -441,7 +441,7 @@ func TestProviderUnauthorized(t *testing.T) {
 		mu.Lock()
 		tries := n
 		mu.Unlock()
-		if tries >= 2*len(watchedKinds) { // twice for each kind
+		if tries >= 2*len(watched(&config.KubernetesProvider{})) { // twice for each kind
 			break
 		}
 		if time.Now().After(deadline) {

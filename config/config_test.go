@@ -497,6 +497,16 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "kubernetes ingress ports",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"kubernetes": {"ingress": {"http_port": 70000}}}]}`,
+			want: []string{`1:107: providers[0].kubernetes.ingress.http_port: 70000 is not a port`},
+		},
+		{
+			name: "kubernetes ingress on one port",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"kubernetes": {"ingress": {"https_port": 80}}}]}`,
+			want: []string{`1:108: providers[0].kubernetes.ingress.https_port: port 80 serves HTTP already: HTTPS needs a port of its own`},
+		},
+		{
 			name: "kubernetes backends",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"kubernetes": {"backends": "nodes"}}]}`,
 			want: []string{`1:94: providers[0].kubernetes.backends: "nodes" is not one of "endpoints", "cluster_ip"`},

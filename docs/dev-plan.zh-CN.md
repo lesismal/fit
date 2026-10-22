@@ -172,7 +172,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I57 | Docker provider | I56 | done |
 | I58 | Kubernetes Gateway API I：HTTPRoute | I56 | done |
 | I59 | Kubernetes Gateway API II：其他路由与状态 | I58 | done |
-| I60 | Kubernetes Ingress | I58 | todo |
+| I60 | Kubernetes Ingress | I58 | done |
 | I61 | Gateway API 一致性测试 | I59 | todo |
 | I62 | Consul 与 etcd provider | I56 | todo |
 | I63 | 共享证书存储 | I30 | todo |

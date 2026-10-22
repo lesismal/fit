@@ -163,6 +163,19 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 			if k.ControllerName != "" && !controllerPattern.MatchString(k.ControllerName) {
 				add(k.At.Field("controller_name"), "%q is not a domain-prefixed path, as example.net/gateway-controller", k.ControllerName)
 			}
+			if in := k.Ingress; in != nil {
+				for _, f := range []struct {
+					name string
+					port int
+				}{{"http_port", in.HTTPPort}, {"https_port", in.HTTPSPort}} {
+					if f.port < 0 || f.port > 65535 {
+						add(in.At.Field(f.name), "%d is not a port", f.port)
+					}
+				}
+				if in.HTTP() == in.HTTPS() {
+					add(in.At.Field("https_port"), "port %d serves HTTP already: HTTPS needs a port of its own", in.HTTPS())
+				}
+			}
 		}
 	}
 }
@@ -186,20 +199,34 @@ var controllerPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-
 // listener of a Gateway of fit's GatewayClasses is a listener of fit's on
 // its port, each HTTPRoute and GRPCRoute attached to one is a set of
 // routes, and each TLSRoute, TCPRoute and UDPRoute a service, to upstreams
-// of the Services they name.
+// of the Services they name. With ingress, it serves Ingresses as well.
 type KubernetesProvider struct {
-	Kubeconfig      string   `json:"kubeconfig,omitempty" doc:"A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported."`
-	Context         string   `json:"context,omitempty" doc:"The kubeconfig's context to use; its current-context when left out."`
-	ControllerName  string   `json:"controller_name,omitempty" default:"\"lesismal.github.io/fit\"" doc:"The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out."`
-	Namespaces      []string `json:"namespaces,omitempty" doc:"The namespaces whose Gateways and routes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide, Secrets of type kubernetes.io/tls among them, and to patch the status of GatewayClasses, Gateways and routes."`
-	ListenHost      string   `json:"listen_host,omitempty" doc:"The IP address Gateway listeners are bound on, each on its port; every address when left out."`
-	Backends        string   `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
-	MaxObjects      int      `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
-	RequestTimeout  Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
-	CertificatesDir string   `json:"certificates_dir,omitempty" doc:"The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out."`
+	Kubeconfig      string             `json:"kubeconfig,omitempty" doc:"A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported."`
+	Context         string             `json:"context,omitempty" doc:"The kubeconfig's context to use; its current-context when left out."`
+	ControllerName  string             `json:"controller_name,omitempty" default:"\"lesismal.github.io/fit\"" doc:"The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out."`
+	Namespaces      []string           `json:"namespaces,omitempty" doc:"The namespaces whose Gateways and routes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide, Secrets of type kubernetes.io/tls among them, and to patch the status of GatewayClasses, Gateways and routes."`
+	ListenHost      string             `json:"listen_host,omitempty" doc:"The IP address Gateway listeners are bound on, each on its port; every address when left out."`
+	Backends        string             `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
+	MaxObjects      int                `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
+	RequestTimeout  Duration           `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
+	Ingress         *KubernetesIngress `json:"ingress,omitempty" doc:"Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out."`
+	CertificatesDir string             `json:"certificates_dir,omitempty" doc:"The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
+
+// KubernetesIngress is where Ingresses are served.
+type KubernetesIngress struct {
+	HTTPPort  int `json:"http_port,omitempty" default:"80" doc:"The port Ingresses' rules are served on over HTTP. 80 when left out or 0."`
+	HTTPSPort int `json:"https_port,omitempty" default:"443" doc:"The port the hosts of Ingresses' tls are served on over HTTPS. 443 when left out or 0."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// HTTP and HTTPS return the ports Ingresses are served on.
+func (k *KubernetesIngress) HTTP() int { return int(orDefault(int64(k.HTTPPort), 80)) }
+
+func (k *KubernetesIngress) HTTPS() int { return int(orDefault(int64(k.HTTPSPort), 443)) }
 
 // Controller, Objects, Timeout and BackendMode return k's settings, their
 // defaults when left out.

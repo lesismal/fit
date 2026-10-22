@@ -32,6 +32,8 @@ type objects struct {
 	services                        []*Service
 	slices                          []*EndpointSlice
 	secrets                         []*Secret
+	ingresses                       []*Ingress
+	ingressClasses                  []*IngressClass
 }
 
 // snapshot is what the informers hold, at one moment.
@@ -108,6 +110,7 @@ type (
 		Method     []string            `json:"method,omitempty"`
 		Header     map[string][]string `json:"header,omitempty"`
 		Query      map[string][]string `json:"query,omitempty"`
+		RemoteIP   []string            `json:"remote_ip,omitempty"`
 	}
 )
 
@@ -226,6 +229,7 @@ func (t *translator) run() []byte {
 			}
 		}
 	}
+	t.ingresses()
 
 	var out struct {
 		Listeners []*outListener `json:"listeners,omitempty"`
@@ -413,29 +417,43 @@ func (t *translator) listener(g *Gateway, l Listener) *gwListener {
 			return gl
 		}
 	}
-	name := t.provider + "-" + strconv.Itoa(l.Port)
-	if family == familyUDP {
-		name += "-udp"
-	} else if f, ok := t.ports[l.Port]; ok && f != family {
-		gl.conflict, gl.conflictMsg = "ProtocolConflict", fmt.Sprintf("port %d serves %s already", l.Port, f)
+	fl, other := t.portListener(l.Port, family)
+	if fl == nil {
+		gl.conflict, gl.conflictMsg = "ProtocolConflict", fmt.Sprintf("port %d serves %s already", l.Port, other)
 		t.problem("%s: %s", where, gl.conflictMsg)
 		return gl
+	}
+	fl.addCerts(certs)
+	gl.fit = fl.name
+	return gl
+}
+
+// portListener returns fit's listener of family on port, made if need be;
+// or nil and the family the port serves already, when it is another.
+func (t *translator) portListener(port int, family string) (*fitListener, string) {
+	name := t.provider + "-" + strconv.Itoa(port)
+	if family == familyUDP {
+		name += "-udp"
+	} else if f, ok := t.ports[port]; ok && f != family {
+		return nil, f
 	} else {
-		t.ports[l.Port] = family
+		t.ports[port] = family
 	}
 	fl := t.listeners[name]
 	if fl == nil {
-		fl = &fitListener{name: name, address: net.JoinHostPort(t.opts.ListenHost, strconv.Itoa(l.Port)), port: l.Port,
+		fl = &fitListener{name: name, address: net.JoinHostPort(t.opts.ListenHost, strconv.Itoa(port)), port: port,
 			family: family, names: map[string]string{}}
 		t.listeners[name] = fl
 	}
+	return fl, ""
+}
+
+func (fl *fitListener) addCerts(certs []outCert) {
 	for _, c := range certs {
 		if !slices.Contains(fl.certs, c) {
 			fl.certs = append(fl.certs, c)
 		}
 	}
-	gl.fit = name
-	return gl
 }
 
 // maxCertBytes bounds a certificate file, as fit's TLS does when it reads
@@ -473,27 +491,35 @@ func (t *translator) certificates(g *Gateway, gl *gwListener, where string) []ou
 			bad("RefNotPermitted", "certificateRef %d: secret %s/%s is in another namespace, and no ReferenceGrant there allows it", i, ns, ref.Name)
 			continue
 		}
-		sec := t.s.secret[ns+"/"+ref.Name]
-		if sec == nil {
-			bad("InvalidCertificateRef", "certificateRef %d: there is no secret %s/%s of type kubernetes.io/tls", i, ns, ref.Name)
+		c, err := t.secretCert(ns, ref.Name)
+		if err != nil {
+			bad("InvalidCertificateRef", "certificateRef %d: %v", i, err)
 			continue
 		}
-		crt, key := sec.Data["tls.crt"], sec.Data["tls.key"]
-		if _, err := tls.X509KeyPair(crt, key); err != nil {
-			bad("InvalidCertificateRef", "certificateRef %d: secret %s/%s: %v", i, ns, ref.Name, err)
-			continue
-		}
-		data := slices.Concat(crt, []byte("\n"), key)
-		if len(data) > maxCertBytes {
-			bad("InvalidCertificateRef", "certificateRef %d: secret %s/%s is larger than %d bytes", i, ns, ref.Name, maxCertBytes)
-			continue
-		}
-		sum := sha256.Sum256(data)
-		path := filepath.Join(t.certDir, fmt.Sprintf("%s.%s.%x.pem", ns, ref.Name, sum[:6]))
-		t.certs[path] = data
-		out = append(out, outCert{CertFile: path, KeyFile: path})
+		out = append(out, c)
 	}
 	return out
+}
+
+// secretCert returns the certificate file of the Secret ns/name, of type
+// kubernetes.io/tls, and gives the file to write. t.certDir must be set.
+func (t *translator) secretCert(ns, name string) (outCert, error) {
+	sec := t.s.secret[ns+"/"+name]
+	if sec == nil {
+		return outCert{}, fmt.Errorf("there is no secret %s/%s of type kubernetes.io/tls", ns, name)
+	}
+	crt, key := sec.Data["tls.crt"], sec.Data["tls.key"]
+	if _, err := tls.X509KeyPair(crt, key); err != nil {
+		return outCert{}, fmt.Errorf("secret %s/%s: %v", ns, name, err)
+	}
+	data := slices.Concat(crt, []byte("\n"), key)
+	if len(data) > maxCertBytes {
+		return outCert{}, fmt.Errorf("secret %s/%s is larger than %d bytes", ns, name, maxCertBytes)
+	}
+	sum := sha256.Sum256(data)
+	path := filepath.Join(t.certDir, fmt.Sprintf("%s.%s.%x.pem", ns, name, sum[:6]))
+	t.certs[path] = data
+	return outCert{CertFile: path, KeyFile: path}, nil
 }
 
 // routeState is a route being translated, and what its status says.

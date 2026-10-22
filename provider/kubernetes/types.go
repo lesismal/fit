@@ -12,6 +12,7 @@ type meta struct {
 	Generation        int64             `json:"generation,omitempty"`
 	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
 }
 
 // key is how a store keys an object: its namespace and name.
@@ -370,4 +371,57 @@ type EndpointSlice struct {
 		Protocol *string `json:"protocol,omitempty"`
 		Port     *int    `json:"port,omitempty"`
 	} `json:"ports"`
+}
+
+// IngressClass is a networking.k8s.io/v1 IngressClass.
+type IngressClass struct {
+	Metadata meta `json:"metadata"`
+	Spec     struct {
+		Controller string `json:"controller"`
+	} `json:"spec"`
+}
+
+// Ingress is a networking.k8s.io/v1 Ingress.
+type Ingress struct {
+	Metadata meta `json:"metadata"`
+	Spec     struct {
+		IngressClassName *string         `json:"ingressClassName,omitempty"`
+		DefaultBackend   *IngressBackend `json:"defaultBackend,omitempty"`
+		TLS              []struct {
+			Hosts      []string `json:"hosts,omitempty"`
+			SecretName string   `json:"secretName,omitempty"`
+		} `json:"tls,omitempty"`
+		Rules []IngressRule `json:"rules,omitempty"`
+	} `json:"spec"`
+}
+
+// IngressRule is an Ingress's paths for a host, or for any.
+type IngressRule struct {
+	Host string `json:"host,omitempty"`
+	HTTP *struct {
+		Paths []IngressPath `json:"paths"`
+	} `json:"http,omitempty"`
+}
+
+// IngressPath is a path of a rule and its backend.
+type IngressPath struct {
+	Path     string         `json:"path,omitempty"`
+	PathType string         `json:"pathType"`
+	Backend  IngressBackend `json:"backend"`
+}
+
+// IngressBackend is a Service's port, by number or name, or another
+// resource.
+type IngressBackend struct {
+	Service *struct {
+		Name string `json:"name"`
+		Port struct {
+			Name   string `json:"name,omitempty"`
+			Number int    `json:"number,omitempty"`
+		} `json:"port"`
+	} `json:"service,omitempty"`
+	Resource *struct {
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	} `json:"resource,omitempty"`
 }

@@ -48,8 +48,9 @@ func gatewayPort(t *testing.T) int {
 // fit's GatewayClass and an HTTPRoute to a Deployment's Service are served,
 // and their statuses written back; an HTTPS listener with a Secret's
 // certificate and, with the experimental channel's CRDs, a TCPRoute are
-// served; a second replica joins, a change to the route is followed, and
-// the route gone is no longer served.
+// served, and so is an Ingress of fit's IngressClass; a second replica
+// joins, a change to the route is followed, and the route gone is no longer
+// served.
 //
 // It needs FIT_E2E_KUBECONFIG, the kubeconfig of a cluster with the Gateway
 // API's CRDs installed, and kubectl; CI's "Kubernetes e2e (kind)" job makes
@@ -64,11 +65,12 @@ func TestKubernetesGateway(t *testing.T) {
 	}
 	ns := fmt.Sprintf("fit-e2e-%d", os.Getpid())
 	class := ns
-	port := gatewayPort(t)
+	port, ingressPort, ingressTLSPort := gatewayPort(t), gatewayPort(t), gatewayPort(t)
 	kubectl(t, kc, "", "create", "namespace", ns)
 	t.Cleanup(func() {
 		_ = exec.Command("kubectl", "--kubeconfig", kc, "delete", "namespace", ns, "--wait=false").Run()
 		_ = exec.Command("kubectl", "--kubeconfig", kc, "delete", "gatewayclass", class, "--wait=false").Run()
+		_ = exec.Command("kubectl", "--kubeconfig", kc, "delete", "ingressclass", class, "--wait=false").Run()
 	})
 	route := func(filters string) string {
 		return `apiVersion: gateway.networking.k8s.io/v1
@@ -123,7 +125,8 @@ spec:
 	f, addrs := startFit(t, `{
   "listeners": [{"name": "base", "address": "127.0.0.1:0"}],
   "admin": {"address": "127.0.0.1:0"},
-  "providers": [{"kubernetes": {"kubeconfig": "`+kc+`", "listen_host": "127.0.0.1", "namespaces": ["`+ns+`"]}}]
+  "providers": [{"kubernetes": {"kubeconfig": "`+kc+`", "listen_host": "127.0.0.1", "namespaces": ["`+ns+`"],
+    "ingress": {"http_port": `+fmt.Sprint(ingressPort)+`, "https_port": `+fmt.Sprint(ingressTLSPort)+`}}}]
 }`)
 	go func() {
 		for range f.lines { // read what fit prints, so that it never waits on its stdout
@@ -254,6 +257,23 @@ spec:
 	} else {
 		t.Log("no TCPRoute CRD: the TCP listener is not tried")
 	}
+
+	// An Ingress of fit's IngressClass is served on the Ingress port.
+	kubectl(t, kc, `apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata: {name: `+class+`}
+spec: {controller: lesismal.github.io/fit}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: echo, namespace: `+ns+`}
+spec:
+  ingressClassName: `+class+`
+  rules:
+  - http:
+      paths: [{path: /, pathType: Prefix, backend: {service: {name: echo, port: {number: 80}}}}]
+`, "apply", "-f", "-")
+	reaches("the Ingress", client(false), fmt.Sprintf("http://127.0.0.1:%d/hostname", ingressPort))
 
 	kubectl(t, kc, "", "-n", ns, "scale", "deployment/echo", "--replicas=2")
 	kubectl(t, kc, "", "-n", ns, "rollout", "status", "deployment/echo", "--timeout=180s")

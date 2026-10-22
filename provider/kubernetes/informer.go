@@ -70,8 +70,10 @@ var (
 	kindUDPRoutes = kindOf("udproutes", gatewayAPI+"v1alpha2/udproutes", func(o *L4Route) *meta { return &o.Metadata })
 	kindGrants    = kindOf("referencegrants", gatewayAPI+"v1beta1/referencegrants", func(o *ReferenceGrant) *meta { return &o.Metadata }).
 			or(gatewayAPI + "v1/referencegrants")
-	kindServices = kindOf("services", "/api/v1/services", func(o *Service) *meta { return &o.Metadata })
-	kindSlices   = kindOf("endpointslices", "/apis/discovery.k8s.io/v1/endpointslices", func(o *EndpointSlice) *meta { return &o.Metadata })
+	kindServices       = kindOf("services", "/api/v1/services", func(o *Service) *meta { return &o.Metadata })
+	kindSlices         = kindOf("endpointslices", "/apis/discovery.k8s.io/v1/endpointslices", func(o *EndpointSlice) *meta { return &o.Metadata })
+	kindIngresses      = kindOf("ingresses", "/apis/networking.k8s.io/v1/ingresses", func(o *Ingress) *meta { return &o.Metadata })
+	kindIngressClasses = kindOf("ingressclasses", "/apis/networking.k8s.io/v1/ingressclasses", func(o *IngressClass) *meta { return &o.Metadata })
 	// Only the Secrets of TLS certificates, which HTTPS listeners name.
 	kindSecrets = kindOf("secrets", "/api/v1/secrets", func(o *Secret) *meta { return &o.Metadata }).
 			where("type=kubernetes.io/tls")

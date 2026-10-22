@@ -74,9 +74,16 @@ func New(name string, opts *config.KubernetesProvider, logf func(format string, 
 // Name returns the provider's name.
 func (p *Provider) Name() string { return p.name }
 
-// watchedKinds are the kinds the provider watches.
-var watchedKinds = []kind{kindNamespaces, kindClasses, kindGateways, kindRoutes, kindGRPCRoutes, kindTLSRoutes, kindTCPRoutes,
-	kindUDPRoutes, kindGrants, kindServices, kindSlices, kindSecrets}
+// watched returns the kinds a provider of opts watches: Ingresses and
+// IngressClasses only with ingress.
+func watched(opts *config.KubernetesProvider) []kind {
+	kinds := []kind{kindNamespaces, kindClasses, kindGateways, kindRoutes, kindGRPCRoutes, kindTLSRoutes, kindTCPRoutes,
+		kindUDPRoutes, kindGrants, kindServices, kindSlices, kindSecrets}
+	if opts.Ingress != nil {
+		kinds = append(kinds, kindIngresses, kindIngressClasses)
+	}
+	return kinds
+}
 
 // Run follows the cluster until ctx ends, calling update with what it
 // provides once every kind has been listed, after each change, and every
@@ -116,7 +123,7 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 	changed := make(chan struct{}, 1)
 	informers := map[string]*informer{}
 	var wg sync.WaitGroup
-	for _, k := range watchedKinds {
+	for _, k := range watched(p.opts) {
 		in := newInformer(k, c, p.opts.Objects(), changed, p.logf)
 		informers[k.name] = in
 		wg.Add(1)
@@ -184,6 +191,9 @@ func (p *Provider) send(in map[string]*informer, update func([]byte), sw *status
 		slices:     values[EndpointSlice](in[kindSlices.name]),
 		secrets:    values[Secret](in[kindSecrets.name]),
 	})
+	if p.opts.Ingress != nil {
+		s.ingresses, s.ingressClasses = values[Ingress](in[kindIngresses.name]), values[IngressClass](in[kindIngressClasses.name])
+	}
 	t := newTranslator(p.name, p.opts, s, p.certDir)
 	part := t.run()
 	reported := make(map[string]bool, len(t.problems))

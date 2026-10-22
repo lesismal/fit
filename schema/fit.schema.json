@@ -368,6 +368,22 @@
       },
       "type": "object"
     },
+    "config.KubernetesIngress": {
+      "additionalProperties": false,
+      "properties": {
+        "http_port": {
+          "default": 80,
+          "description": "The port Ingresses' rules are served on over HTTP. 80 when left out or 0.",
+          "type": "integer"
+        },
+        "https_port": {
+          "default": 443,
+          "description": "The port the hosts of Ingresses' tls are served on over HTTPS. 443 when left out or 0.",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "config.KubernetesProvider": {
       "additionalProperties": false,
       "properties": {
@@ -392,6 +408,10 @@
           "default": "lesismal.github.io/fit",
           "description": "The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out.",
           "type": "string"
+        },
+        "ingress": {
+          "$ref": "#/$defs/config.KubernetesIngress",
+          "description": "Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out."
         },
         "kubeconfig": {
           "description": "A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported.",
