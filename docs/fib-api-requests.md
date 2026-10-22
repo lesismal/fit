@@ -51,7 +51,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` | 10 | I53, I53b |
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
-| A39 | A cheaper read round for a client connection's response | open | 12 | — |
+| A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
 
 ## Evidence
 
@@ -1090,7 +1090,27 @@ whose upload failed, now tell the client to open a new connection.
 
 ## A39: A cheaper read round for a client connection's response
 
-**Status.** Open.
+**Status.** Not done, and dropped: items 1 and 2 were made and save no measurable CPU, so fib
+keeps neither. On a fib branch that was not pushed, one commit let a read round's uncork wait for
+the lock the next pass of `process` takes anyway, and another read into a buffer kept per P (with
+a `linkname` into the runtime) rather than one borrowed from `bufferpool`; tests, the race
+detector, vet and staticcheck passed for the four systems. fib's `BenchmarkReadRound` for a client
+round went 1.701 → 1.684 µs (noise), and the profile showed the uncork's saving partly back in
+`process` and the per-P buffers costing about what the pool calls did: about 0.06 µs a request.
+Item 3 was not tried.
+
+With fit's own share (`fad911f`: the open exchanges as a list through the exchanges rather than a
+map; `be8cf0c`: the `Forwarded` element and a whole body's reader kept in the exchange; both kept),
+on the benchmark host on 2026-10-23, fit's `main` (4aa8196) against those on fib's change, 3
+alternating rounds: the proxy over h2c 235.4k → 236.2k requests a second and
+25.88 → 25.64 µs of CPU a request; over HTTP/1.1 242.6k → 242.1k and 23.72 → 23.63. Both within
+the noise. The open set without its map saves 0.05 µs, not 0.14, since its shard lock stays.
+
+So the 1.65 µs below is not overhead that can be cut from the round: the blocking client paid for
+the same work, waking for the upstream's response and reading it, in Go's netpoller and scheduler,
+which the attribution charged to it only in part. Where the blocking path's 2.7 µs comes from is
+not explained by any one function; it is spread thin over the h2 server, fit and the GC, as the
+cache misses of handing an exchange from one core to another would be. That was not measured.
 
 **Problem.** Every response fit's proxy gets from an upstream costs a full read round of fib's
 engine on the upstream connection, on top of the client's own work: the poller wakes for it and
