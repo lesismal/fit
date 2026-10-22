@@ -8,9 +8,13 @@
 package admin
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +23,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/provider"
 	"github.com/lesismal/fit/runtime"
 )
 
@@ -37,9 +42,14 @@ const (
 var ErrChanged = errors.New("admin: the config has changed since the ETag given in If-Match")
 
 // Configs applies configs to a running server, one at a time and by one
-// path whatever their source: SIGHUP, the Admin API, the file provider and
-// the watcher of certificate files. It keeps the configs it applied, numbered by the versions the
-// runtime gave their graphs.
+// path whatever their source: SIGHUP, the Admin API, the file provider, the
+// watcher of certificate files and providers. It keeps the configs it
+// applied, numbered by the versions the runtime gave their graphs.
+//
+// What runs is the base config, the one the file and the Admin API write,
+// with what each provider provides merged into it, by package provider's
+// rules: the base config wins over every provider, and a provider added
+// earlier over those added later.
 type Configs struct {
 	rt     *runtime.Runtime
 	server *listener.Server
@@ -51,6 +61,12 @@ type Configs struct {
 
 	mu      sync.Mutex // held for a whole Apply, so that applies follow one another
 	history []*Version // oldest first; the last is the running config
+
+	// providers are the names of the providers, in their order of
+	// precedence, and parts what each provided last that was applied;
+	// both under mu.
+	providers []string
+	parts     map[string]*provider.Part
 
 	// reloads and failures count the configs Update tried to apply, from
 	// loading on, and those that failed.
@@ -70,10 +86,24 @@ type Version struct {
 	ETag  string `json:"etag"`
 
 	data []byte
+	// baseSource is where data came from: the source of the last change to
+	// the base config, or of the version a rollback took it from.
+	baseSource string
+	// effective is the config that ran: data with what providers provided
+	// merged into it, data itself when they provided nothing. sources and
+	// shadowed say where its parts came from and what was left out.
+	effective []byte
+	sources   []provider.Source
+	shadowed  []provider.Shadowed
 }
 
-// Data returns the config as it was written. The caller must not change it.
+// Data returns the base config as it was written: without what providers
+// provided. The caller must not change it.
 func (v *Version) Data() []byte { return v.data }
+
+// Effective returns the config that ran: the base config with what
+// providers provided merged into it. The caller must not change it.
+func (v *Version) Effective() []byte { return v.effective }
 
 // Result is what applying a config did.
 type Result struct {
@@ -92,20 +122,25 @@ type Result struct {
 // env, and keep is how many configs, the running one included, are kept to
 // be read back.
 func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, first *config.Config, data []byte, source string, keep int) *Configs {
-	cs := &Configs{rt: rt, server: server, env: env, first: first, keep: max(keep, 1)}
+	cs := &Configs{rt: rt, server: server, env: env, first: first, keep: max(keep, 1), parts: map[string]*provider.Part{}}
 	var version uint64
 	if g := rt.Current(); g != nil {
 		version = g.Version
 		g.Release()
 	}
-	cs.record(version, data, source)
+	m, err := provider.Merge(data, source, nil)
+	if err != nil {
+		m = &provider.Merged{Data: data}
+	}
+	cs.record(version, data, source, source, m)
 	return cs
 }
 
-func (cs *Configs) record(version uint64, data []byte, source string) {
+func (cs *Configs) record(version uint64, data []byte, source, baseSource string, m *provider.Merged) {
 	sum := sha256.Sum256(data)
 	cs.history = append(cs.history, &Version{Number: version, Applied: time.Now(), Source: source, Bytes: len(data),
-		ETag: `"` + hex.EncodeToString(sum[:12]) + `"`, data: data})
+		ETag: `"` + hex.EncodeToString(sum[:12]) + `"`, data: data, baseSource: baseSource,
+		effective: m.Data, sources: m.Sources, shadowed: m.Shadowed})
 	if n := len(cs.history) - cs.keep; n > 0 {
 		clear(cs.history[:n])
 		cs.history = slices.Delete(cs.history, 0, n)
@@ -128,23 +163,32 @@ func (cs *Configs) Apply(data []byte, source string) (Result, error) {
 // calling nothing, unless it names the running config's ETag or is "*". An
 // error from edit is returned as it is.
 func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byte, error)) (Result, error) {
+	return cs.update(source, ifMatch, func(cur *Version) ([]byte, string, error) {
+		data, err := edit(cur)
+		return data, source, err
+	})
+}
+
+// update is Update with edit saying where the base config it gives came
+// from.
+func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data []byte, baseSource string, err error)) (Result, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cur := cs.history[len(cs.history)-1]
 	if ifMatch != "" && !etagMatches(ifMatch, cur.ETag) {
 		return Result{}, ErrChanged
 	}
-	data, err := edit(cur)
+	data, baseSource, err := edit(cur)
 	if err != nil {
 		return Result{}, err
 	}
 	cs.reloads.Add(1)
-	r, c, err := cs.apply(data, source)
+	r, c, m, err := cs.apply(data, baseSource, cs.parts, source)
 	if err != nil {
 		cs.failures.Add(1)
 		return Result{}, err
 	}
-	cs.record(r.Version, data, source)
+	cs.record(r.Version, data, source, baseSource, m)
 	r.ETag = cs.history[len(cs.history)-1].ETag
 	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
 		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
@@ -158,11 +202,32 @@ func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byt
 	return r, nil
 }
 
-// apply loads, compiles and applies data. cs.mu must be held.
-func (cs *Configs) apply(data []byte, source string) (Result, *config.Config, error) {
-	c, err := config.Load(data)
+// apply merges parts into data, the base config, whose source is
+// baseSource, and loads, compiles and applies the result. Errors are
+// reported where they were written: in the base config, or in what a
+// provider provided. cs.mu must be held.
+func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provider.Part, source string) (Result, *config.Config, *provider.Merged, error) {
+	var ordered []*provider.Part
+	for _, name := range cs.providers {
+		if p := parts[name]; p != nil {
+			ordered = append(ordered, p)
+		}
+	}
+	m := &provider.Merged{Data: data}
+	if json.Valid(data) {
+		merged, err := provider.Merge(data, baseSource, ordered)
+		switch {
+		case err == nil:
+			m = merged
+		case len(ordered) > 0:
+			return Result{}, nil, nil, err
+		}
+		// With nothing to merge, a base config that cannot take parts
+		// is loaded as it is, for its own errors.
+	}
+	c, err := config.Load(m.Data)
 	if err != nil {
-		return Result{}, nil, err
+		return Result{}, nil, nil, m.Errors(err)
 	}
 	env := cs.env
 	env.Previous = cs.rt.Current()
@@ -171,15 +236,15 @@ func (cs *Configs) apply(data []byte, source string) (Result, *config.Config, er
 		env.Previous.Release()
 	}
 	if err != nil {
-		return Result{}, nil, err
+		return Result{}, nil, nil, m.Errors(err)
 	}
 	added, removed, err := cs.server.Reload(g)
 	if err != nil {
-		return Result{}, nil, err
+		return Result{}, nil, nil, err
 	}
 	// The runtime holds g now, and only Apply swaps graphs while fit runs,
 	// so g is still current.
-	return Result{Version: g.Version, Source: source, Added: added, Removed: removed}, c, nil
+	return Result{Version: g.Version, Source: source, Added: added, Removed: removed}, c, m, nil
 }
 
 // Reloads returns how many configs were tried, from loading on, since fit
@@ -190,19 +255,107 @@ func (cs *Configs) Reloads() (tried, failed uint64) { return cs.reloads.Load(), 
 // Reapply applies the running config again, as a new version, so that what
 // it loads from files, its certificates, is loaded again.
 func (cs *Configs) Reapply(source string) (Result, error) {
-	return cs.Update(source, "", func(cur *Version) ([]byte, error) { return cur.data, nil })
+	return cs.update(source, "", func(cur *Version) ([]byte, string, error) { return cur.data, cur.baseSource, nil })
 }
 
 // Rollback applies again the config applied as version n, as a new version.
 // It gives a *RequestError with status 404 when n is no longer kept.
 func (cs *Configs) Rollback(n uint64, ifMatch string) (Result, error) {
-	return cs.Update(SourceRollback, ifMatch, func(*Version) ([]byte, error) {
-		// Update holds the lock.
+	return cs.update(SourceRollback, ifMatch, func(*Version) ([]byte, string, error) {
+		// update holds the lock.
 		if v := cs.find(n); v != nil {
-			return v.data, nil
+			return v.data, v.baseSource, nil
 		}
-		return nil, notFound("version %d is not kept", n)
+		return nil, "", notFound("version %d is not kept", n)
 	})
+}
+
+// providerName is what a provider's name must look like.
+var providerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,62}$`)
+
+// AddProvider adds a provider, named name, whose parts Provide applies. A
+// provider added earlier wins over those added later. The names of the
+// base config's sources, file, admin, rollback and certificates, are
+// taken.
+func (cs *Configs) AddProvider(name string) error {
+	if !providerName.MatchString(name) {
+		return fmt.Errorf("admin: provider name %q: lower-case letters, digits, '.', '_' and '-', starting with a letter or digit, at most 63", name)
+	}
+	if slices.Contains([]string{SourceFile, SourceAdmin, SourceRollback, SourceCertificates}, name) {
+		return fmt.Errorf("admin: provider name %q is a source of the base config", name)
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if slices.Contains(cs.providers, name) {
+		return fmt.Errorf("admin: provider %q is added already", name)
+	}
+	cs.providers = append(cs.providers, name)
+	return nil
+}
+
+// Provide applies data, all that the provider name provides now, as
+// provider.Parse reads it, merged into the running base config, as a new
+// version whose source is name. On any failure the running config stays,
+// and so does what the provider provided before; errors in data are
+// config.Errors with positions in data. Data the same as the provider's
+// last is not applied again. Provide keeps data, which the caller must not
+// change afterwards.
+func (cs *Configs) Provide(name string, data []byte) (Result, error) {
+	p, err := provider.Parse(name, data)
+	if err != nil {
+		return Result{}, err
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if !slices.Contains(cs.providers, name) {
+		return Result{}, fmt.Errorf("admin: no provider %q was added", name)
+	}
+	cur := cs.history[len(cs.history)-1]
+	if old := cs.parts[name]; old != nil && bytes.Equal(old.Data(), p.Data()) {
+		return Result{Version: cur.Number, ETag: cur.ETag, Source: name}, nil
+	}
+	parts := make(map[string]*provider.Part, len(cs.parts)+1)
+	for k, v := range cs.parts {
+		parts[k] = v
+	}
+	parts[name] = p
+	cs.reloads.Add(1)
+	r, _, m, err := cs.apply(cur.data, cur.baseSource, parts, name)
+	if err != nil {
+		cs.failures.Add(1)
+		return Result{}, err
+	}
+	cs.parts = parts
+	cs.record(r.Version, cur.data, name, cur.baseSource, m)
+	r.ETag = cur.ETag
+	return r, nil
+}
+
+// Effective is the running config as it runs, and where its parts came
+// from: GET /config/effective's answer.
+type Effective struct {
+	Version uint64 `json:"version"`
+	// ETag is the base config's.
+	ETag string `json:"etag"`
+	// Precedence lists the sources, the base config's first, from the one
+	// that wins to the one that loses.
+	Precedence []string        `json:"precedence"`
+	Config     json.RawMessage `json:"config"`
+	// Sources says where each member of Config came from, element by
+	// element in its arrays.
+	Sources []provider.Source `json:"sources"`
+	// Shadowed lists what providers provided and Config leaves out,
+	// because a source before them took its name.
+	Shadowed []provider.Shadowed `json:"shadowed,omitempty"`
+}
+
+// Effective returns the running config as it runs.
+func (cs *Configs) Effective() Effective {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	v := cs.history[len(cs.history)-1]
+	return Effective{Version: v.Number, ETag: v.ETag, Precedence: append([]string{v.baseSource}, cs.providers...),
+		Config: v.effective, Sources: v.sources, Shadowed: v.shadowed}
 }
 
 // etagMatches reports whether an If-Match field's value names etag: "*",

@@ -178,7 +178,7 @@ Status: `todo`, `doing` or `done`.
 | I54 | Upstream TLS | I18 | done |
 | I55 | M3 exit tests | I37–I54 | done |
 | **M4** | | | |
-| I56 | Provider framework and effective config | I27 | todo |
+| I56 | Provider framework and effective config | I27 | done |
 | I57 | Docker provider | I56 | todo |
 | I58 | Kubernetes Gateway API I: HTTPRoute | I56 | todo |
 | I59 | Kubernetes Gateway API II: other routes and status | I58 | todo |

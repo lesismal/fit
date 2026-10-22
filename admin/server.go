@@ -47,11 +47,18 @@ const VersionHeader = "Fit-Config-Version"
 //	POST   /rollback/{n}        apply version n again, as a new version
 //	GET    /versions            the configs kept, oldest first
 //	GET    /versions/{n}        the config applied as version n
+//	GET    /config/effective    the config as it runs, with what providers
+//	                            provided merged in, and where each part
+//	                            came from
 //
 // Every config carries an ETag, a hash of it as written; a change sent with
 // If-Match is applied only if the running config is still that one, and is
 // otherwise answered 412. A change applies a whole new config, so an edit
 // that leaves the config invalid is refused, with its errors.
+//
+// /config is the base config, as the file or the API wrote it; what
+// providers provide is merged into it, and only GET /config/effective
+// shows that.
 type Server struct {
 	configs  *Configs
 	report   func(Result)
@@ -104,6 +111,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		mux.HandleFunc("PATCH "+p, s.patchConfig)
 		mux.HandleFunc("DELETE "+p, s.deleteConfig)
 	}
+	mux.HandleFunc("GET /config/effective", s.effective)
 	mux.HandleFunc("POST /load", s.load)
 	mux.HandleFunc("POST /rollback/{n}", s.rollback)
 	mux.HandleFunc("GET /versions", s.versions)
@@ -389,6 +397,12 @@ func writeUpdateError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "the config was not applied; the running config stays: "+err.Error())
 	}
+}
+
+func (s *Server) effective(w http.ResponseWriter, r *http.Request) {
+	e := s.configs.Effective()
+	w.Header().Set(VersionHeader, strconv.FormatUint(e.Version, 10))
+	writeJSON(w, http.StatusOK, e)
 }
 
 func (s *Server) versions(w http.ResponseWriter, r *http.Request) {
