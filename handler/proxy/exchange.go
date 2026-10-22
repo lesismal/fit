@@ -218,9 +218,12 @@ type exchange struct {
 	base      stdhttp.Request
 	url       url.URL
 	forwarded [4]string
-	out       *stdhttp.Request
-	start     time.Time
-	timeouts  upstream.Timeouts
+	// traceparent is the value of the field naming the request's span,
+	// when it is traced.
+	traceparent [1]string
+	out         *stdhttp.Request
+	start       time.Time
+	timeouts    upstream.Timeouts
 	// stall bounds each wait for the client to take what was written.
 	stall   time.Duration
 	pool    *upstream.Pool

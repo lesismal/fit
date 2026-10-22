@@ -187,7 +187,7 @@ Status: `todo`, `doing` or `done`.
 | I62 | Consul and etcd providers | I56 | done |
 | I63 | Shared certificate storage | I30 | done |
 | I64 | Dashboard | I56 | done |
-| I65 | OpenTelemetry | I34 | todo |
+| I65 | OpenTelemetry | I34 | done |
 | I66 | Packaging and examples | I57 | todo |
 | **M5** | | | |
 | I67 | Cache I: HTTP semantics and memory tier | I23 | todo |

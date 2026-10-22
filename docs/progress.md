@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I64 done) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I65 done) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, and a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M4, platform integration: OpenTelemetry, packaging (I65–I66) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | M4, platform integration: packaging (I66) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **M4 has begun: I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, and I64, the read-only dashboard, are done. Next, I65 (OpenTelemetry).**
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, and I65, OpenTelemetry traces and metrics over OTLP, are done. Next, I66 (packaging and examples).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -94,7 +94,7 @@ To continue, start a session with:
 | `provider/internal/watch`, `provider/internal/kvpart` | `Follower`, the loop that keeps a watch, reads the source after changes and every interval and backs off; the part made from keys holding parts |
 | `provider/kubernetes` | the Kubernetes provider: a client of its own on net/http (service account or kubeconfig), list-and-watch informers per kind (at the first version served), the Gateway API's GatewayClasses and Gateways (HTTP, HTTPS with certificates from Secrets written to files, TLS passthrough, TCP, UDP) and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes turned into listeners, routes, services and upstreams of Services' endpoints; statuses written back as merge patches; with `ingress`, Ingresses of fit's IngressClasses and a few annotations |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
-| `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
+| `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format; `Tracer`, W3C trace context and sampling, server spans written as OTLP JSON into bounded shards and exported over OTLP/HTTP; `MetricWriter`, `OTLPWriter` and `MetricsExporter`, metrics over OTLP |
 | `tlsmgr/sharedstore` | `Store`, a `tlsmgr.Storage` in Redis (RESP2), etcd (JSON gateway) or Consul (KV), with leased locks renewed while held |
 | `internal/apiclient` | the HTTP client of services' APIs, with TLS files, and bounded reads, for the providers and the shared storage |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
@@ -3498,6 +3498,67 @@ Differences from the plan:
 
 - `GET /status` is new: upstream health and certificates were only in the Prometheus metrics,
   which a page should not parse.
+
+### I65 OpenTelemetry — done
+
+- `config`: `telemetry`, read when fit starts: `endpoint` (OTLP/HTTP, `http://127.0.0.1:4318`),
+  `headers_file` (`Name: value` lines, as an API key), `ca_file`, `cert_file`, `key_file`,
+  `service_name` (`fit`), `timeout` (10s), and at least one of `traces` (`sample_ratio`, 0 by
+  default: only what callers sample; `max_queue_bytes`, 4 MiB; `interval`, 5s) and `metrics`
+  (`interval`, 30s). `telemetry.metrics` counts requests as `metrics` does, without the Admin API.
+  A reload that changes `telemetry` warns that it takes effect on a restart.
+- `observe` (decision [015](decisions/015-opentelemetry-without-the-sdk.md), no SDK):
+  `Tracer.Sample` reads `traceparent` (W3C, version 00 and later versions' first fields; an
+  invalid one is not followed), follows a caller's decision, and samples a request without one at
+  the ratio, from `math/rand/v2`; with ratio 0 an unsampled parent is not even parsed.
+  `TrackTraced` gives a sampled request its `Entry` and its trace in one allocation; the trace and
+  a JWT's claims now sit behind one pointer of the entry's (`Trace()`, `Claims()`, `SetClaims`),
+  so that the entry of every other request stays 112 bytes. `Tracer.End` writes the server span
+  as OTLP JSON (`<method> <route>`, the HTTP semantic conventions' attributes and fit's, error
+  status for 5xx) into one of eight shards, dropping and counting what passes `max_queue_bytes`;
+  a goroutine exports every interval, or once 256 KiB wait, to `/v1/traces`, handing the shards'
+  buffers back for the next spans, and reports a failure once while it lasts. `MetricWriter` is
+  what `TextWriter` and the new `OTLPWriter` are: counters as cumulative monotonic sums, gauges,
+  duration histograms as explicit-bucket ones in seconds; `MetricsExporter` posts them to
+  `/v1/metrics` every interval, and once more when fit stops.
+- `listener`: the dispatcher asks the tracer, when there is one, and a sampled request gets its
+  span recorded when its response finishes, beside the access log's line and the metrics; the
+  closure without a tracer is as it was. `handler/proxy`: `outgoing` sends a traced request's
+  `traceparent`, naming fit's span, to the upstream (WebSocket upgrades too); an untraced one's
+  goes on as it came. `admin`: `WriteMetricsTo(MetricWriter)`, and `fit_trace_spans_total`
+  (exported, failed, dropped). `cmd/fit`: the tracer closed after the graph, the metrics exporter
+  started once the configs are, and `observe.Version` set for the resource.
+- Tests: `observe` (`TestParseTraceparent`: valid, unsampled, other flags, later versions, and
+  eleven invalid forms; `TestSample`: following callers, ratio 0, 1 and 0.5 over 20000 requests;
+  `TestTracerExport`: the OTLP JSON of two spans against a receiver, attributes, escaping, the
+  headers file, the resource; `TestTracerBounds`: drops past `max_queue_bytes`, a failing receiver
+  reported once and its recovery; `TestMetricsExporter`: a counter, a gauge and a histogram's
+  buckets), `listener` `TestDispatchTrace`, `handler/proxy` `TestOutgoingTraceparent`, `config`
+  (`TestParseHeaders`, telemetry settings, a ratio past 1). `test/e2e` `TestTelemetry` against an
+  OpenTelemetry Collector 0.137.0 in Docker, its file exporter writing what it receives: a request
+  a caller sampled reaches the upstream with a `traceparent` in the caller's trace naming fit's
+  span, which the collector gets under the caller's span; one without a `traceparent` is neither
+  traced nor given one; the collector gets fit's metrics and the resource's `service.name`. The
+  packages touched and the e2e tests pass under the race detector on the benchmark host; vet for
+  linux, darwin, windows and freebsd and staticcheck pass.
+- Benchmarks (rule 21, the dispatcher and the proxy's `outgoing` being on the hot path), on the
+  benchmark host with the kind node stopped meanwhile. `bench/ab.sh` (fixed and proxy, HTTP/1.1 and
+  h2c, 3 rounds of 10s, no telemetry): every pair within noise, -0.4% to +0.7%.
+  `bench/microbench.sh` of `BenchmarkDispatch`, `main` against this change: bare 205.8 to 205.8 ns,
+  log 256.7 to 260.9 (not significant), log+metrics 258.4 to 260.2 (not significant), metrics
+  219.1 to 222.1 (+1.4%, p=0.017: the tracer's nil check), allocations and bytes unchanged; with a
+  tracer, 226.6 ns sampling nothing and 889 ns sampling every request, 6 KiB a request of which
+  most is the exporter's in the same process. `BenchmarkSample`: 4.5 ns without a traceparent,
+  8.9 ns for an unsampled one at ratio 0, 26 ns to start a trace and 54 ns to follow a caller's,
+  none allocating; `BenchmarkEnd`: 314 ns to write an 847-byte span, without allocating. The first
+  run had found the dispatcher 1.4% slower bare, an entry 62 bytes larger, and `End` at 1.2 µs
+  and 47 ns for an unsampled parent; the changes above (a trace touched only with a tracer, the
+  trace beside the claims, buffers reused, the unsampled parent not parsed) brought them here.
+
+Differences from the plan:
+
+- No SDK, and OTLP/HTTP with JSON only (decision 015).
+- One server span per request; the upstream call has no client span of its own.
 
 ## Notes for later iterations
 

@@ -279,6 +279,9 @@ func (c *Config) Validate() Errors {
 	if m := c.Metrics; m != nil && c.Admin == nil {
 		add(m.At, "the Admin API serves metrics: set admin too")
 	}
+	if t := c.Telemetry; t != nil {
+		checkTelemetry(t, add)
+	}
 
 	upstreams := map[string]bool{}
 	for _, u := range c.Upstreams {

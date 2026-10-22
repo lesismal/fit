@@ -81,9 +81,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	defer stopEngine()
 	env := fitruntime.Env{Engine: engine}
-	if c.Admin != nil {
+	telemetry := c.Telemetry
+	if c.Admin != nil || telemetry != nil && telemetry.Metrics != nil {
 		// Where requests are counted, by the configs that have metrics,
-		// for the Admin API's /metrics: a reload may turn it on or off.
+		// for the Admin API's /metrics and OTLP: a reload may turn it on
+		// or off.
 		env.Metrics = observe.NewMetrics()
 	}
 	if c.AccessLog != nil {
@@ -96,6 +98,15 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		defer env.AccessLog.Close()
 	}
 	logf := func(format string, args ...any) { fmt.Fprintf(stderr, "fit: "+format+"\n", args...) }
+	observe.Version, _ = versions()
+	if telemetry != nil && telemetry.Traces != nil {
+		if env.Tracer, err = observe.NewTracer(telemetry, logf); err != nil {
+			printConfigError(stderr, "fit run", *cfgFile, telemetry.At.Errorf("%v", err))
+			return 1
+		}
+		// Closed after the graph, so that every span finished is exported.
+		defer env.Tracer.Close()
+	}
 	// OCSP responses are stapled to every certificate that names a
 	// responder, from files or obtained.
 	env.OCSP = tlsmgr.NewOCSP(logf)
@@ -143,6 +154,21 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			return 1
 		}
 		fmt.Fprintf(stdout, "fit: admin API on %s\n", as.Addr())
+	}
+	if telemetry != nil && telemetry.Metrics != nil {
+		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, logf)
+		if err != nil {
+			printConfigError(stderr, "fit run", *cfgFile, telemetry.At.Errorf("%v", err))
+			if as != nil {
+				_ = as.Shutdown(context.Background())
+			}
+			_ = s.Close()
+			return 1
+		}
+		defer exporter.Close()
+	}
+	if telemetry != nil {
+		fmt.Fprintf(stdout, "fit: exporting telemetry to %s\n", telemetry.URL())
 	}
 	stopProviders, err := startProviders(c, configs, stdout, stderr)
 	if err != nil {

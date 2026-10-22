@@ -177,7 +177,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I62 | Consul 与 etcd provider | I56 | done |
 | I63 | 共享证书存储 | I30 | done |
 | I64 | 仪表盘 | I56 | done |
-| I65 | OpenTelemetry | I34 | todo |
+| I65 | OpenTelemetry | I34 | done |
 | I66 | 打包与示例 | I57 | todo |
 | **M5** | | | |
 | I67 | 缓存 I：HTTP 语义与内存层 | I23 | todo |

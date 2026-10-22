@@ -848,6 +848,18 @@
       "properties": {},
       "type": "object"
     },
+    "config.MetricsExport": {
+      "additionalProperties": false,
+      "properties": {
+        "interval": {
+          "default": "30s",
+          "description": "How often the metrics are exported. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.OnDemand": {
       "additionalProperties": false,
       "properties": {
@@ -1152,6 +1164,76 @@
         "on_demand": {
           "description": "Obtain a certificate during the handshake for a name a client asks for that neither the files nor acme have, as the top-level acme.on_demand allows; needs it.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "config.Telemetry": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "description": "A PEM file with the CAs the receiver's certificate is verified with, over https; the system's when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the client certificate sent over https; with key_file.",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "http://127.0.0.1:4318",
+          "description": "The OTLP/HTTP receiver: http:// or https:// and a host and port, as of an OpenTelemetry Collector; traces go to its /v1/traces and metrics to /v1/metrics, as JSON. http://127.0.0.1:4318 when left out.",
+          "type": "string"
+        },
+        "headers_file": {
+          "description": "A file of header fields sent with each export, one \"Name: value\" a line, as an API key a receiver asks for; read when fit starts. None when left out.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with cert_file's private key.",
+          "type": "string"
+        },
+        "metrics": {
+          "$ref": "#/$defs/config.MetricsExport",
+          "description": "Export the metrics the Admin API's /metrics serves, requests counted included, every interval. No metrics over OTLP when left out."
+        },
+        "service_name": {
+          "default": "fit",
+          "description": "The service.name of the resource traces and metrics are about. fit when left out.",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "How long an export may take, connecting included; a batch not sent by then is dropped and counted. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "traces": {
+          "$ref": "#/$defs/config.TracesExport",
+          "description": "Trace requests: a server span for each one sampled, and its context sent on to upstreams in traceparent. No traces when left out."
+        }
+      },
+      "type": "object"
+    },
+    "config.TracesExport": {
+      "additionalProperties": false,
+      "properties": {
+        "interval": {
+          "default": "5s",
+          "description": "How often spans are exported, and sooner when 256 KiB of them wait. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_queue_bytes": {
+          "default": 4194304,
+          "description": "The most bytes of spans waiting to be exported, besides the batch being sent; spans past it are dropped and counted. 4 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sample_ratio": {
+          "description": "The share of requests traced among those whose caller did not decide: from 0 to 1. A request whose traceparent says its caller sampled it is always traced, and one that says it did not is never. 0, only those a caller sampled, when left out.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "type": "object"
@@ -2362,6 +2444,10 @@
         "$ref": "#/$defs/config.Service"
       },
       "type": "array"
+    },
+    "telemetry": {
+      "$ref": "#/$defs/config.Telemetry",
+      "description": "OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."
     },
     "upstreams": {
       "description": "The servers requests can be proxied to, by name.",

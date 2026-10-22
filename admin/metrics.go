@@ -34,6 +34,13 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 // a few of the Go runtime's.
 func (cs *Configs) WriteMetrics(b []byte) []byte {
 	w := &observe.TextWriter{B: b}
+	cs.WriteMetricsTo(w)
+	return w.B
+}
+
+// WriteMetricsTo writes fit's metrics to w, as WriteMetrics does, for
+// another format: OTLP's, say.
+func (cs *Configs) WriteMetricsTo(w observe.MetricWriter) {
 	if m := cs.env.Metrics; m != nil {
 		all := m.AllRequests()
 		w.Family("fit_http_requests_total", "counter", "Requests answered, by listener, route and the class of their status.")
@@ -127,6 +134,12 @@ func (cs *Configs) WriteMetrics(b []byte) []byte {
 	w.Family("fit_config_last_applied_timestamp_seconds", "gauge", "When the running config was applied, in seconds since the Unix epoch.")
 	w.Sample("fit_config_last_applied_timestamp_seconds", float64(cur.Applied.UnixMilli())/1e3)
 
+	if t := cs.env.Tracer; t != nil {
+		w.Family("fit_trace_spans_total", "counter", "Spans of traced requests, by what became of them: exported, failed (in an export the receiver did not take) or dropped (for want of room while they waited).")
+		w.Sample("fit_trace_spans_total", float64(t.Exported()), "result", "exported")
+		w.Sample("fit_trace_spans_total", float64(t.Failed()), "result", "failed")
+		w.Sample("fit_trace_spans_total", float64(t.Dropped()), "result", "dropped")
+	}
 	if log := cs.env.AccessLog; log != nil {
 		w.Family("fit_access_log_dropped_total", "counter", "Access log lines dropped because the log's buffer was full.")
 		w.Sample("fit_access_log_dropped_total", float64(log.Dropped()))
@@ -144,5 +157,4 @@ func (cs *Configs) WriteMetrics(b []byte) []byte {
 		w.Family(m.metric, "gauge", m.help)
 		w.Sample(m.metric, float64(samples[i].Value.Uint64()))
 	}
-	return w.B
 }

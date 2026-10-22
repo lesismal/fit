@@ -29,6 +29,13 @@ const (
 // removed when the test ends. It skips the test without Docker.
 func startServer(t *testing.T, image string, port int, args ...string) string {
 	t.Helper()
+	return startServerWith(t, image, port, nil, args...)
+}
+
+// startServerWith is startServer with docker run's options opts, as
+// volumes.
+func startServerWith(t *testing.T, image string, port int, opts []string, args ...string) string {
+	t.Helper()
 	if os.Getenv("FIT_E2E_DOCKER") == "0" {
 		t.Skip("FIT_E2E_DOCKER=0")
 	}
@@ -38,7 +45,8 @@ func startServer(t *testing.T, image string, port int, args ...string) string {
 	if exec.Command("docker", "image", "inspect", image).Run() != nil {
 		docker(t, "pull", image)
 	}
-	id := docker(t, append([]string{"run", "-d", "--rm", "-p", fmt.Sprintf("127.0.0.1::%d", port), image}, args...)...)
+	run := append([]string{"run", "-d", "--rm", "-p", fmt.Sprintf("127.0.0.1::%d", port)}, opts...)
+	id := docker(t, append(append(run, image), args...)...)
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
 	addr := docker(t, "port", id, fmt.Sprintf("%d/tcp", port))
 	if i := strings.IndexByte(addr, '\n'); i >= 0 {

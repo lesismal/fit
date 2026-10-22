@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-22 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I64 已完成） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I65 已完成） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9`（fib `main` 的 `4f1c3e9`，即 `c3e27ed` 加上 A36 和 A37；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M4 平台集成：OpenTelemetry、打包（I65–I66） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M4 平台集成：打包（I66） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）和 I64（只读仪表盘）已完成，下一步是 I65（OpenTelemetry）。** M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）和 I65（OpenTelemetry：通过 OTLP 导出追踪和指标）已完成，下一步是 I66（打包与示例）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -73,7 +73,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `provider/internal/watch`、`provider/internal/kvpart` | `Follower`：保持 watch、在变化后和每个间隔读取来源并退避重试的循环；由保存片段的键生成片段 |
 | `provider/kubernetes` | Kubernetes provider：基于 net/http 的自有客户端（service account 或 kubeconfig），每种资源一个 list-and-watch informer（使用服务器提供的第一个版本），把 Gateway API 的 GatewayClass 和 Gateway（HTTP、证书来自 Secret 并写成文件的 HTTPS、TLS 透传、TCP、UDP）及其 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute 转换为 listener、路由、service 和以 Service endpoint 为地址的上游；状态以 merge patch 回写；设置 `ingress` 时还有属于 fit 的 IngressClass 的 Ingress 和少量注解 |
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
-| `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
+| `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter`；`Tracer`：W3C trace context 与采样，server span 写成 OTLP JSON 放入有界分片，经 OTLP/HTTP 导出；`MetricWriter`、`OTLPWriter` 和 `MetricsExporter`：通过 OTLP 导出指标 |
 | `tlsmgr/sharedstore` | `Store`：保存在 Redis（RESP2）、etcd（JSON 网关）或 Consul（KV）中的 `tlsmgr.Storage`，带持有期间续期的租约锁 |
 | `internal/apiclient` | 访问服务 API 的 HTTP 客户端（带 TLS 文件）和有界读取，供 provider 和共享存储使用 |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`ClientAuth`：监听器验证客户端证书所用的 CA；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
@@ -2518,6 +2518,51 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 与计划的差别：
 
 - 新增 `GET /status`：上游健康状态和证书原先只在 Prometheus 指标中，不应让页面去解析。
+
+### I65 OpenTelemetry — 已完成
+
+- `config`：`telemetry`，在 fit 启动时读取：`endpoint`（OTLP/HTTP，`http://127.0.0.1:4318`）、`headers_file`
+  （`Name: value` 行，如 API key）、`ca_file`、`cert_file`、`key_file`、`service_name`（`fit`）、`timeout`（10s），
+  以及 `traces`（`sample_ratio`，默认 0：只追踪调用方采样的；`max_queue_bytes`，4 MiB；`interval`，5s）和
+  `metrics`（`interval`，30s）至少一个。`telemetry.metrics` 像 `metrics` 一样统计请求，无需 Admin API。修改
+  `telemetry` 的重载会提示重启后生效。
+- `observe`（决策 [015](decisions/015-opentelemetry-without-the-sdk.zh-CN.md)，不用 SDK）：`Tracer.Sample` 读取
+  `traceparent`（W3C，版本 00 以及更高版本的前几个字段；无效的不跟随），遵循调用方的决定，没有调用方的请求按比例
+  采样，随机数来自 `math/rand/v2`；比例为 0 时，未采样的父级甚至不解析。`TrackTraced` 用一次分配为采样的请求创建
+  `Entry` 及其 trace；trace 和 JWT 的 claims 现在放在 entry 的同一个指针后面（`Trace()`、`Claims()`、`SetClaims`），
+  使其他请求的 entry 保持 112 字节。`Tracer.End` 把 server span 写成 OTLP JSON（`<method> <route>`、HTTP 语义约定的
+  属性和 fit 自己的、5xx 时为错误状态），放进八个分片之一，超过 `max_queue_bytes` 的丢弃并计数；一个 goroutine 每隔
+  interval 或积累 256 KiB 时导出到 `/v1/traces`，把分片的缓冲区还回去供后续 span 使用，失败在持续期间只报告一次。
+  `MetricWriter` 由 `TextWriter` 和新的 `OTLPWriter` 实现：计数器为累积单调 sum，gauge，耗时直方图为以秒为单位的
+  显式分桶直方图；`MetricsExporter` 每隔 interval 发往 `/v1/metrics`，fit 停止时再发一次。
+- `listener`：dispatcher 在有 tracer 时询问它，采样的请求在响应结束时记录 span，与访问日志的行和指标并列；没有 tracer
+  时的闭包与以前相同。`handler/proxy`：`outgoing` 把被追踪请求的 `traceparent`（指向 fit 的 span）发给上游（WebSocket
+  升级也是）；未追踪的原样转发。`admin`：`WriteMetricsTo(MetricWriter)`，以及 `fit_trace_spans_total`（exported、
+  failed、dropped）。`cmd/fit`：tracer 在 graph 之后关闭，指标导出器在 configs 建好后启动，并为 resource 设置
+  `observe.Version`。
+- 测试：`observe`（`TestParseTraceparent`：有效、未采样、其他标志、更高版本以及十一种无效形式；`TestSample`：遵循
+  调用方、比例 0、1 和 20000 个请求上的 0.5；`TestTracerExport`：针对接收方的两个 span 的 OTLP JSON、属性、转义、
+  headers 文件、resource；`TestTracerBounds`：超过 `max_queue_bytes` 时丢弃、失败的接收方只报告一次及其恢复；
+  `TestMetricsExporter`：计数器、gauge 和直方图的分桶），`listener` 的 `TestDispatchTrace`，`handler/proxy` 的
+  `TestOutgoingTraceparent`，`config`（`TestParseHeaders`、telemetry 设置、超过 1 的比例）。`test/e2e` 的
+  `TestTelemetry` 针对 Docker 中的 OpenTelemetry Collector 0.137.0，其 file exporter 写出收到的内容：调用方采样的
+  请求以调用方 trace 中、指向 fit span 的 `traceparent` 到达上游，collector 收到该 span 且其父为调用方的 span；没有
+  `traceparent` 的请求既不被追踪，也不会被加上；collector 收到 fit 的指标和 resource 的 `service.name`。涉及的包和
+  e2e 测试在基准测试主机上通过竞态检测；linux、darwin、windows 和 freebsd 的 vet 与 staticcheck 通过。
+- 基准测试（规则 21，dispatcher 和代理的 `outgoing` 在热路径上），在基准测试主机上进行，期间停止 kind 节点。
+  `bench/ab.sh`（fixed 和 proxy，HTTP/1.1 和 h2c，3 轮各 10s，无 telemetry）：每组都在噪声范围内，-0.4% 到 +0.7%。
+  `bench/microbench.sh` 的 `BenchmarkDispatch`，`main` 对比本次改动：bare 205.8 到 205.8 ns，log 256.7 到 260.9（不
+  显著），log+metrics 258.4 到 260.2（不显著），metrics 219.1 到 222.1（+1.4%，p=0.017：tracer 的 nil 检查），分配
+  次数和字节数不变；有 tracer 时，不采样为 226.6 ns，全部采样为 889 ns，每个请求 6 KiB，其中大部分是同一进程中导出器
+  的。`BenchmarkSample`：没有 traceparent 4.5 ns，比例 0 时未采样的 8.9 ns，开始新 trace 26 ns，跟随调用方 54 ns，
+  都不分配；`BenchmarkEnd`：写一个 847 字节的 span 314 ns，不分配。第一次运行发现 bare 慢 1.4%、entry 大 62 字节、
+  `End` 1.2 µs、未采样父级 47 ns；上面的改动（只在有 tracer 时才处理 trace、trace 与 claims 放在一起、缓冲区复用、
+  不解析未采样的父级）把它们降到了现在的数值。
+
+与计划的差别：
+
+- 不用 SDK，只支持 JSON 的 OTLP/HTTP（决策 015）。
+- 每个请求一个 server span；对上游的调用没有单独的 client span。
 
 ## 给后续迭代的说明
 

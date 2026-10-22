@@ -40,6 +40,8 @@ type Graph struct {
 	Listeners []*Listener
 	// AccessLog is where a line goes for each request, or nil.
 	AccessLog *observe.AccessLog
+	// Tracer samples requests and records their spans, or is nil.
+	Tracer *observe.Tracer
 	// Metrics is where the listeners' requests are counted, or nil when
 	// the config does not count them.
 	Metrics *observe.Metrics
@@ -87,6 +89,9 @@ type Env struct {
 	// AccessLog is the log made from the config's access_log, which the
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
+	// Tracer is made from the config's telemetry.traces, which the caller
+	// owns and closes, or nil.
+	Tracer *observe.Tracer
 	// ACME is the certificate manager made from the config's acme, which
 	// the caller owns and closes, or nil. Nil obtains no certificates for
 	// the names listeners list in tls.acme, for a config that is only
@@ -189,9 +194,9 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
+	g := &Graph{AccessLog: env.AccessLog, Tracer: env.Tracer, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
-	if c.Metrics != nil {
+	if c.Metrics != nil || c.Telemetry != nil && c.Telemetry.Metrics != nil {
 		g.Metrics = env.Metrics
 	}
 	g.refs.Store(1)

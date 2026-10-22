@@ -1,5 +1,5 @@
-// Package observe is fit's view of the traffic it serves: access logs for
-// now, metrics (I34) and tracing (I65) later.
+// Package observe is fit's view of the traffic it serves: access logs,
+// metrics, and traces exported over OTLP (trace.go).
 //
 // An access log line is one JSON object per request, written when the
 // response has been handed to the connection:
@@ -271,9 +271,41 @@ type Entry struct {
 	// User is who the request was authenticated as, by Basic auth or a
 	// client certificate's subject; empty when it was not.
 	User string
-	// Claims are those of the JSON Web Token the request was let in with,
-	// for later middleware; the access log does not write them.
-	Claims map[string]any
+	// more is what few requests have, kept apart so that the entry of
+	// every other stays small: a token's claims, a trace.
+	more *entryMore
+}
+
+type entryMore struct {
+	claims map[string]any
+	trace  Trace
+	traced bool
+}
+
+// Claims are those of the JSON Web Token the request was let in with, for
+// later middleware, or nil; the access log does not write them.
+func (e *Entry) Claims() map[string]any {
+	if e.more == nil {
+		return nil
+	}
+	return e.more.claims
+}
+
+// SetClaims keeps a token's claims.
+func (e *Entry) SetClaims(claims map[string]any) {
+	if e.more == nil {
+		e.more = &entryMore{}
+	}
+	e.more.claims = claims
+}
+
+// Trace is the request's place in a trace when the tracer sampled it, and
+// nil when it did not; the proxy sends it on to the upstream.
+func (e *Entry) Trace() *Trace {
+	if e.more == nil || !e.more.traced {
+		return nil
+	}
+	return &e.more.trace
 }
 
 // Track gives the request c serves a new entry, for EntryOf to find, and
@@ -283,6 +315,18 @@ func Track(c *fibhttp.Context) *Entry {
 	e := &Entry{}
 	c.SetValue(e)
 	return e
+}
+
+// TrackTraced is Track for a request the tracer sampled: the entry and its
+// trace are one allocation.
+func TrackTraced(c *fibhttp.Context, tc Trace) *Entry {
+	te := &struct {
+		Entry
+		more entryMore
+	}{more: entryMore{trace: tc, traced: true}}
+	te.Entry.more = &te.more
+	c.SetValue(&te.Entry)
+	return &te.Entry
 }
 
 // EntryOf returns the entry of the request c serves, or nil when the request

@@ -398,7 +398,7 @@ func (jw *JWT) admit(c *fibhttp.Context, claims map[string]any, next module.Hand
 	if e == nil {
 		e = observe.Track(c)
 	}
-	e.Claims = claims
+	e.SetClaims(claims)
 	if sub, ok := claims["sub"].(string); ok && e.User == "" {
 		e.User = sub
 	}
@@ -440,7 +440,7 @@ func (jw *JWT) refuse(c *fibhttp.Context, invalid bool) {
 // and must not be changed.
 func ClaimsOf(c *fibhttp.Context) map[string]any {
 	if e := observe.EntryOf(c); e != nil {
-		return e.Claims
+		return e.Claims()
 	}
 	return nil
 }

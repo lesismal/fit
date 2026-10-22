@@ -716,8 +716,14 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	// returns, which are counted then rather than by a hook.
 	var inline *observe.RequestMetrics
 	var start time.Time
-	if log := g.AccessLog; log != nil {
-		d.logRequest(c, log, route, metrics)
+	var traced *observe.Entry
+	if t := g.Tracer; t != nil {
+		if trace, ok := t.Sample(c.Request); ok {
+			traced = observe.TrackTraced(c, trace)
+		}
+	}
+	if log := g.AccessLog; log != nil || traced != nil {
+		d.logRequest(c, log, g.Tracer, traced, route, metrics)
 	} else if metrics != nil {
 		start = time.Now()
 		if route == nil || route.Inline {
@@ -773,13 +779,18 @@ func redirectHTTPS(c *fibhttp.Context, port int) {
 		Header: stdhttp.Header{"Location": {location + target}}})
 }
 
-// logRequest has the access log write a line for c's request once its
-// response is finished, and metrics, if not nil, count it. The log and the
-// metrics outlive the graph, so a response finished after the graph is
-// released still has somewhere to go.
-func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, route *runtime.Route, metrics *observe.RequestMetrics) {
+// logRequest has the access log, if not nil, write a line for c's request
+// once its response is finished, metrics, if not nil, count it, and, for a
+// traced request, whose entry traced is, the tracer record its span. The
+// log, the tracer and the metrics outlive the graph, so a response finished
+// after the graph is released still has somewhere to go.
+func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, tracer *observe.Tracer, traced *observe.Entry,
+	route *runtime.Route, metrics *observe.RequestMetrics) {
 	r := c.Request
-	e := observe.Track(c)
+	e := traced
+	if e == nil {
+		e = observe.Track(c)
+	}
 	e.Start, e.Listener, e.BytesIn = time.Now(), d.name, r.ContentLength
 	if body := c.Body(); body != nil {
 		e.BytesIn = int64(len(body))
@@ -789,8 +800,22 @@ func (d *dispatcher) logRequest(c *fibhttp.Context, log *observe.AccessLog, rout
 	if route != nil {
 		e.Route = route.Name
 	}
+	if traced == nil {
+		// Without the tracer, so that the closure stays as small as it
+		// was before there was one.
+		c.OnFinish(func(status int, _ stdhttp.Header, size int64) {
+			log.Log(e, r, status, size)
+			if metrics != nil {
+				metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(e.Start))
+			}
+		})
+		return
+	}
 	c.OnFinish(func(status int, _ stdhttp.Header, size int64) {
-		log.Log(e, r, status, size)
+		if log != nil {
+			log.Log(e, r, status, size)
+		}
+		tracer.End(e, r, status, size)
 		if metrics != nil {
 			metrics.Observe(uintptr(unsafe.Pointer(c)), status, time.Since(e.Start))
 		}

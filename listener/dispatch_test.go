@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	stdhttp "net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,17 +40,20 @@ func BenchmarkDispatch(b *testing.B) {
 	for _, bb := range []struct {
 		name         string
 		log, metrics bool
+		trace        float64 // the tracer's sample ratio; no tracer when negative
 	}{
-		{"bare", false, false},
-		{"log", true, false},
-		{"metrics", false, true},
-		{"log+metrics", true, true},
+		{"bare", false, false, -1},
+		{"log", true, false, -1},
+		{"metrics", false, true, -1},
+		{"log+metrics", true, true, -1},
+		{"trace-off", false, false, 0},
+		{"trace-on", false, false, 1},
 	} {
-		b.Run(bb.name, func(b *testing.B) { benchmarkDispatch(b, bb.log, bb.metrics) })
+		b.Run(bb.name, func(b *testing.B) { benchmarkDispatch(b, bb.log, bb.metrics, bb.trace) })
 	}
 }
 
-func benchmarkDispatch(b *testing.B, withLog, withMetrics bool) {
+func benchmarkDispatch(b *testing.B, withLog, withMetrics bool, trace float64) {
 	doc := dispatchDoc
 	if withMetrics {
 		doc = strings.Replace(doc, "{", `{"admin": {}, "metrics": {},`, 1)
@@ -64,6 +69,16 @@ func benchmarkDispatch(b *testing.B, withLog, withMetrics bool) {
 	}
 	if withMetrics {
 		env.Metrics = observe.NewMetrics()
+	}
+	if trace >= 0 {
+		// A receiver that takes every export, so that spans are not
+		// dropped for one that fails.
+		rcv := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) { _, _ = io.Copy(io.Discard, r.Body) }))
+		defer rcv.Close()
+		if env.Tracer, err = observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{SampleRatio: trace}}, nil); err != nil {
+			b.Fatal(err)
+		}
+		defer env.Tracer.Close()
 	}
 	g, err := runtime.Compile(c, env)
 	if err != nil {
@@ -124,5 +139,59 @@ func TestDispatchFollowsReload(t *testing.T) {
 				t.Fatalf("listeners %v: %q, want %q", step.names, got, step.want)
 			}
 		}
+	}
+}
+
+// TestDispatchTrace serves requests through a dispatcher with a tracer that
+// samples only what callers sampled: one whose caller did is recorded, as
+// a span of the route under the caller's, and the others are not.
+func TestDispatchTrace(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	rcv := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+	}))
+	defer rcv.Close()
+	c, err := config.Load([]byte(dispatchDoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracer, err := observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{}}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := runtime.Compile(c, runtime.Env{Tracer: tracer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := new(runtime.Runtime)
+	rt.Swap(g)
+	defer rt.Close()
+	d := &dispatcher{rt: rt, name: "web"}
+	for _, tp := range []string{
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+		"",
+	} {
+		r := &stdhttp.Request{Method: "GET", URL: &url.URL{Path: "/hello"}, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header: stdhttp.Header{}, Host: "example.com", RemoteAddr: "192.0.2.1:4321", RequestURI: "/hello"}
+		if tp != "" {
+			r.Header.Set("Traceparent", tp)
+		}
+		if rec := fibtest.ServeRequest(d, r); rec.Response.StatusCode != 200 {
+			t.Fatalf("status %d", rec.Response.StatusCode)
+		}
+	}
+	tracer.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 || strings.Count(bodies[0], `"spanId"`) != 1 ||
+		!strings.Contains(bodies[0], `"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"`) ||
+		!strings.Contains(bodies[0], `"parentSpanId":"00f067aa0ba902b7","name":"GET hello"`) ||
+		!strings.Contains(bodies[0], `{"key":"http.response.status_code","value":{"intValue":"200"}}`) {
+		t.Errorf("exports: %q", bodies)
 	}
 }

@@ -524,6 +524,20 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "telemetry settings",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "telemetry": {"endpoint": "grpc://x:4317", "cert_file": "c"}}`,
+			want: []string{
+				`1:78: telemetry.endpoint: "grpc://x:4317" is neither http://<host>:<port> nor https://<host>:<port>`,
+				`1:108: telemetry.cert_file: cert_file needs key_file`,
+				`1:65: telemetry: set traces, metrics or both: telemetry exports nothing without them`,
+			},
+		},
+		{
+			name: "a sample ratio past 1",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "telemetry": {"traces": {"sample_ratio": 1.5}}}`,
+			want: []string{`1:93: telemetry.traces.sample_ratio: 1.5 is greater than the maximum 1`},
+		},
+		{
 			name: "consul settings",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"consul": {"endpoint": "tcp://x:1", "tag_prefix": "-x", "cert_file": "c.pem"}}]}`,
 			want: []string{
@@ -675,5 +689,17 @@ func TestMetrics(t *testing.T) {
 	_, err = Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": {}, "metrics": {"per_host": true}}`))
 	if err == nil || !strings.Contains(err.Error(), "1:77: metrics.per_host: unknown field") {
 		t.Errorf("an unknown field: %v", err)
+	}
+}
+
+func TestParseHeaders(t *testing.T) {
+	h, err := ParseHeaders("# comment\nX-Api-Key: s3cret\n\n  Authorization:Bearer a:b  \nX-Api-Key: two\n")
+	if err != nil || h.Get("Authorization") != "Bearer a:b" || len(h["X-Api-Key"]) != 2 {
+		t.Fatalf("%v %v", h, err)
+	}
+	for _, bad := range []string{"no colon", ": no name", "Bad Name: v"} {
+		if _, err := ParseHeaders("Ok: 1\n" + bad); err == nil || !strings.Contains(err.Error(), "2:") {
+			t.Errorf("%q: %v", bad, err)
+		}
 	}
 }

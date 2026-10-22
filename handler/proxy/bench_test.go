@@ -13,6 +13,8 @@ import (
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
+
+	"github.com/lesismal/fit/observe"
 )
 
 // BenchmarkProxy sends small GETs through the proxy to an HTTP/1.1 backend,
@@ -155,5 +157,39 @@ func BenchmarkOutgoing(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// TestOutgoingTraceparent checks what the upstream is told of the trace: a
+// traceparent naming fit's span for a traced request, the client's as it
+// came for one that is not, and tracestate as it came either way.
+func TestOutgoingTraceparent(t *testing.T) {
+	p := &Proxy{}
+	const client = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	for _, traced := range []bool{true, false} {
+		r := httptest.NewRequest(stdhttp.MethodGet, "http://example.com/x", nil)
+		r.Header.Set("Traceparent", client)
+		r.Header.Set("Tracestate", "vendor=1")
+		c := fibhttp.NewStreamContext(nil, r, nil)
+		tc := observe.Trace{TraceID: [16]byte{0x4b, 0xf9}, SpanID: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
+		if traced {
+			observe.TrackTraced(c, tc)
+		} else {
+			observe.Track(c)
+		}
+		x := &exchange{}
+		if !p.outgoing(c, x) {
+			t.Fatal("refused")
+		}
+		want := client
+		if traced {
+			want = tc.Traceparent()
+		}
+		if got := x.base.Header["Traceparent"]; len(got) != 1 || got[0] != want {
+			t.Errorf("traced %v: traceparent %q, want %q", traced, got, want)
+		}
+		if got := x.base.Header.Get("Tracestate"); got != "vendor=1" {
+			t.Errorf("traced %v: tracestate %q", traced, got)
+		}
 	}
 }

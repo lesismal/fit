@@ -39,6 +39,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -201,6 +202,12 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		header["User-Agent"] = []string{}
 	}
 	p.setForwarded(c, header, &x.forwarded)
+	if e := observe.EntryOf(c); e != nil && e.Trace() != nil {
+		// The upstream's parent is fit's span; tracestate goes on as it
+		// came, with the rest of the fields.
+		x.traceparent[0] = e.Trace().Traceparent()
+		header["Traceparent"] = x.traceparent[:]
+	}
 
 	host := r.Host
 	if p.HostHeader != "" {
