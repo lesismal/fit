@@ -67,8 +67,15 @@ type Gateway struct {
 
 // GatewayStatus is the part of a Gateway's status fit writes.
 type GatewayStatus struct {
+	Addresses  []GatewayAddress `json:"addresses,omitempty"`
 	Conditions []Condition      `json:"conditions,omitempty"`
 	Listeners  []ListenerStatus `json:"listeners,omitempty"`
+}
+
+// GatewayAddress is where a Gateway is reached.
+type GatewayAddress struct {
+	Type  *string `json:"type,omitempty"`
+	Value string  `json:"value"`
 }
 
 // ListenerStatus is the status of one of a Gateway's listeners.

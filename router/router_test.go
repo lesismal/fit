@@ -73,6 +73,37 @@ func TestHost(t *testing.T) {
 	})
 }
 
+// TestDeepWildcard checks "**." hosts: one label or more, below an exact
+// host and a "*." wildcard, the longest suffix first, and only where their
+// paths match.
+func TestDeepWildcard(t *testing.T) {
+	r := New([]Route[string]{
+		route("deep", 0, list("**.example.com"), nil),
+		route("deeper", 0, list("**.b.example.com"), list("/b/*")),
+		route("wild", 0, list("*.example.com"), list("/w")),
+		route("exact", 0, list("a.b.example.com"), list("/e")),
+		route("any", 0, nil, nil),
+	})
+	check(t, r, [][3]string{
+		{"x.example.com", "/", "deep"},
+		{"x.y.z.example.com", "/", "deep"},
+		{"X.Y.Example.COM", "/", "deep"},
+		{"example.com", "/", "any"},
+		{"x.example.org", "/", "any"},
+		{"a.b.example.com", "/b/1", "deeper"},
+		{"A.B.Example.com", "/b/1", "deeper"},
+		{"a.b.example.com", "/", "deep"}, // deeper's path does not match
+		{"x.example.com", "/w", "wild"},
+		{"x.y.example.com", "/w", "deep"}, // * is one label
+		{"a.b.example.com", "/e", "exact"},
+	})
+	// Without "**." hosts, nothing is looked for: a host of many labels
+	// costs no more.
+	if r := New([]Route[string]{route("wild", 0, list("*.example.com"), nil)}); len(r.deep) != 0 {
+		t.Error("deep nodes without deep hosts")
+	}
+}
+
 func TestPath(t *testing.T) {
 	r := New([]Route[string]{
 		route("hello", 0, nil, list("/hello", "/hi")),

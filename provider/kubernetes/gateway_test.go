@@ -216,7 +216,7 @@ func TestTranslateGateway(t *testing.T) {
 		t.Errorf("main's middleware: %s", r.Middleware)
 	}
 	r1 := p.Routes[p.route(t, "default.main.r0.m0.g1")]
-	if toJSON(r1.Listeners) != `["k8s-8080"]` || toJSON(r1.Match.Host) != `["*.example.com"]` || r1.Priority <= r.Priority {
+	if toJSON(r1.Listeners) != `["k8s-8080"]` || toJSON(r1.Match.Host) != `["**.example.com"]` || r1.Priority <= r.Priority {
 		t.Errorf("main, m0, g1: %+v %+v", r1, r1.Match)
 	}
 	m1 := p.Routes[p.route(t, "default.main.r0.m1.g0")]
@@ -350,6 +350,10 @@ func TestPrecedence(t *testing.T) {
 	}
 	if !(pri["default.exact.r0.m0"] > pri["default.wild.r0.m0"] && pri["default.wild.r0.m0"] > pri["default.any.r0.m0"]) {
 		t.Errorf("priorities: %v", pri)
+	}
+	// The Gateway API's wildcard stands for one label or more: fit's "**.".
+	if got := toJSON(p.Routes[p.route(t, "default.wild.r0.m0")].Match.Host); got != `["**.example.com"]` {
+		t.Errorf("a wildcard host: %s", got)
 	}
 }
 

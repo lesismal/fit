@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I60 done) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I61 done) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M4, platform integration: the Gateway API's conformance run, Consul and etcd providers, shared certificate storage, the dashboard, OpenTelemetry, packaging (I61–I66) |
+| What does not | M4, platform integration: Consul and etcd providers, shared certificate storage, the dashboard, OpenTelemetry, packaging (I62–I66) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **M4 has begun: I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, and I60, Kubernetes Ingress, are done. Next, I61 (Gateway API conformance).**
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, and I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, are done. Next, I62 (Consul and etcd providers).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -58,7 +58,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I61 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I62 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -92,7 +92,7 @@ To continue, start a session with:
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
-| `router` | `Router[T]`: picks a route by host and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
+| `router` | `Router[T]`: picks a route by host (exact, `*.` for one label, `**.` for one or more) and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
 | `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
 | `internal/pebbletest` | runs Pebble, the ACME test server, and its DNS server for tests; skips them without the binaries |
@@ -3270,6 +3270,61 @@ Differences from the plan:
   defaults differ (ingress-nginx redirects TLS hosts by default), and reading its names would
   promise what fit does not do. A user moving from it renames the few kept.
 - The e2e addition runs in CI only, as I58's.
+
+### I61 Gateway API conformance — done
+
+- The suite: `test/conformance`, a Go module of its own (decision
+  [012](decisions/012-gateway-conformance.md)) requiring `sigs.k8s.io/gateway-api` v1.3.0, whose
+  test runs the Gateway API's conformance suite; `test/conformance/run.sh` makes fit's
+  GatewayClass, starts `fit run` with the Kubernetes provider (Gateways on 127.0.0.1, written into
+  their status) and runs the suite with `-conformance-profiles GATEWAY-HTTP`, writing its report.
+  fit claims the profile's core: its 33 tests, Gateway, HTTPRoute and ReferenceGrant.
+- `config`: the Kubernetes provider's `addresses`, IP addresses or host names written into each
+  Gateway's `status.addresses` (`IPAddress` or `Hostname`), as clients and the suite read where a
+  Gateway is reached; left as they are when none are given.
+- `router` and `config`: a route's host may be a `**.` wildcard, `**.example.com`, which stands for
+  one label or more, as the Gateway API's `*.example.com` does (fit's `*.` stays one label). The
+  router keeps such hosts in a map of their own, by suffix, below `*.` and above no host in
+  specificity, and looks the request's suffixes up, the longest first and at most four, only when
+  there are any; HTTPS by default obtains no certificate for one.
+- `provider/kubernetes`: the hosts of HTTPRoutes and GRPCRoutes are written with `**.` for the
+  Gateway API's wildcards (Ingresses keep `*.`, which is one label in theirs). A listener accepted
+  but not served, as one whose certificates are missing, still takes routes and counts them in
+  `attachedRoutes`, and a route it takes is accepted and has its backends resolved for its status,
+  though it makes no route of fit's.
+- The first run on the benchmark host passed 30 of the 33 tests: `HTTPRouteHostnameIntersection`
+  and `HTTPRouteListenerHostnameMatching` sent `foo.bar.anotherwildcard.io` to `*.` wildcards of one
+  label, and `GatewayWithAttachedRoutes` wanted `attachedRoutes` and `ResolvedRefs` on a listener
+  whose Secret is missing; the changes above fix them, and the second run passes all 33.
+- CI: a job of its own, "Gateway API conformance (kind)": a kind cluster with the experimental
+  CRDs, fit built with `CAP_NET_BIND_SERVICE` for ports 80 and 443, `run.sh`, and the report and
+  fit's log kept as an artifact.
+- Tests: `router` `TestDeepWildcard` (one label and more, case, the bare domain, specificity
+  below `*.` and above none, the longest suffix first when its path matches); `config` (`**.`
+  route hosts, `**.` alone refused, no certificate by default for `**.`); `provider/kubernetes`
+  (the wildcard written as `**.`, a route on a listener whose certificate is missing attached,
+  accepted and its missing backend reported). The 28 packages `make test-changed` picks pass under
+  the race detector on the benchmark host; vet for linux, darwin and windows and staticcheck pass,
+  the conformance module's included. `scripts/test-changed.sh` now leaves nested modules out: the
+  conformance module's `go.mod` had made it test everything.
+- Benchmarks (rule 21, the router being on the hot path): `bench/microbench.sh` of
+  `BenchmarkMatch`, `main` against this change, first found the per-level loop with its new branch
+  3.7% slower (56.8 to 58.9 ns); with the levels unrolled, the deep step a loop over none when no
+  `**.` host matched, it is 1.0% faster (56.8 to 56.2 ns, p=0.002), without allocating.
+  `bench/ab.sh` (fixed, static and proxy, HTTP/1.1 and h2c, 3 rounds of 10s, the kind node stopped
+  meanwhile): every pair within noise, from -0.5% to +0.5%.
+- The benchmark host now has kind v0.30.0 (built with its Go) and kubectl v1.34.0 (the release
+  binary, its checksum checked) in `/root/dev/bin`, and a kind cluster, `fitconf`, whose pod
+  network is routed through its node, for conformance runs.
+
+Differences from the plan:
+
+- Only the profile's core is claimed: its extended features (redirects by path and port,
+  rewrites, mirrors, method and query matches, and the rest) are left for a later run, which
+  claims each with a flag in `run.sh` once its tests pass.
+- Every Gateway is reached at the same address: fit merges Gateways that share a port into one
+  listener, so a request reaches the routes of every Gateway on it. The core tests do not tell
+  them apart; `GatewayHTTPListenerIsolation`, an extended test, would.
 
 ## Notes for later iterations
 

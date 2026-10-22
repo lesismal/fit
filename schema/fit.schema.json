@@ -387,6 +387,13 @@
     "config.KubernetesProvider": {
       "additionalProperties": false,
       "properties": {
+        "addresses": {
+          "description": "The addresses where clients reach fit's Gateways, IP addresses or host names, written into each one's status.addresses, as clients of the Gateway API and its conformance tests read them. None are written when left out, and those there are kept.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "backends": {
           "default": "endpoints",
           "description": "Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out.",
@@ -543,7 +550,7 @@
           "type": "object"
         },
         "host": {
-          "description": "Host names, exact or with a leading \"*.\" wildcard.",
+          "description": "Host names, exact, or with a leading \"*.\" wildcard, which stands for one label, or a leading \"**.\" wildcard, which stands for one label or more, as the Gateway API's wildcards do.",
           "items": {
             "type": "string"
           },

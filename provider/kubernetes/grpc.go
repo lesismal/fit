@@ -11,7 +11,9 @@ import (
 func (t *translator) grpcRoute(r *GRPCRoute) {
 	t.begin("GRPCRoute", &r.Metadata, r.Spec.ParentRefs, &r.Status)
 	groups := t.attach(r.Spec.Hostnames)
-	if len(groups) == 0 {
+	// A route taken only by listeners fit does not serve makes no routes
+	// of fit's, but its backends are still resolved, for its status.
+	if len(groups) == 0 && !t.cur.accepted() {
 		return
 	}
 	for i, rule := range r.Spec.Rules {
@@ -41,7 +43,7 @@ func (t *translator) grpcRoute(r *GRPCRoute) {
 // method is the path /<service>/<method>.
 func (t *translator) grpcMatch(where string, m GRPCRouteMatch, rule GRPCRouteRule, b ruleBackends, at *attachment) *outRoute {
 	out := &outRoute{Listeners: at.listeners}
-	om := &outMatch{Host: at.hosts}
+	om := &outMatch{Host: routeHosts(at.hosts)}
 	service, method := "", ""
 	if mm := m.Method; mm != nil {
 		service, method = deref(mm.Service, ""), deref(mm.Method, "")

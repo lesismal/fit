@@ -501,7 +501,7 @@ type Route struct {
 // Match is what a request must match for a route to take it. Each field
 // that is set must match; within a field, any one entry may.
 type Match struct {
-	Host       []string            `json:"host,omitempty" doc:"Host names, exact or with a leading \"*.\" wildcard."`
+	Host       []string            `json:"host,omitempty" doc:"Host names, exact, or with a leading \"*.\" wildcard, which stands for one label, or a leading \"**.\" wildcard, which stands for one label or more, as the Gateway API's wildcards do."`
 	Path       []string            `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix."`
 	PathRegexp []string            `json:"path_regexp,omitempty" doc:"Regular expressions in Go's syntax, matched against the path anywhere in it unless anchored with ^ and $."`
 	Method     []string            `json:"method,omitempty" doc:"Methods, as in \"GET\"; compared as written, since methods are case-sensitive."`

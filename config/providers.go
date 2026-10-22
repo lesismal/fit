@@ -163,6 +163,11 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 			if k.ControllerName != "" && !controllerPattern.MatchString(k.ControllerName) {
 				add(k.At.Field("controller_name"), "%q is not a domain-prefixed path, as example.net/gateway-controller", k.ControllerName)
 			}
+			for i, a := range k.Addresses {
+				if net.ParseIP(a) == nil && (strings.HasPrefix(a, "*.") || checkHost(a) != "") {
+					add(k.At.Field("addresses").Index(i), "%q is not an IP address or host name", a)
+				}
+			}
 			if in := k.Ingress; in != nil {
 				for _, f := range []struct {
 					name string
@@ -209,6 +214,7 @@ type KubernetesProvider struct {
 	Backends        string             `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
 	MaxObjects      int                `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
 	RequestTimeout  Duration           `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
+	Addresses       []string           `json:"addresses,omitempty" doc:"The addresses where clients reach fit's Gateways, IP addresses or host names, written into each one's status.addresses, as clients of the Gateway API and its conformance tests read them. None are written when left out, and those there are kept."`
 	Ingress         *KubernetesIngress `json:"ingress,omitempty" doc:"Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out."`
 	CertificatesDir string             `json:"certificates_dir,omitempty" doc:"The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out."`
 

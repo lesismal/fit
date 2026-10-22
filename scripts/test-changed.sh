@@ -24,8 +24,13 @@ changed=$( {
 	git diff --name-only HEAD
 	git ls-files --others --exclude-standard
 } | sort -u)
+# Nested modules, as test/conformance, are not fit's: their files are left
+# out.
+for m in $(git ls-files --cached --others --exclude-standard '*/go.mod'); do
+	changed=$(printf '%s\n' "$changed" | grep -v "^$(dirname "$m")/" || true)
+done
 
-if printf '%s\n' "$changed" | grep -qE '(^|/)go\.(mod|sum)$'; then
+if printf '%s\n' "$changed" | grep -qE '^go\.(mod|sum)$'; then
 	echo "test-changed: go.mod or go.sum changed; testing everything"
 	exec go test -race "$@" ./...
 fi

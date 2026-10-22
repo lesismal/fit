@@ -140,6 +140,48 @@ jobs:
       - name: go test
         run: go test -race -count=1 -v -run '^TestKubernetesGateway$' ./test/e2e
 
+  # The Gateway API's conformance suite, the core of the GATEWAY-HTTP profile,
+  # against fit outside a kind cluster (I61): Gateways on 127.0.0.1's ports
+  # 80 and 443, which fit may bind with CAP_NET_BIND_SERVICE.
+  conformance:
+    name: Gateway API conformance (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Create a kind cluster
+        run: |
+          if ! command -v kind >/dev/null; then
+            go install sigs.k8s.io/kind@v0.30.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
+          fi
+          kind create cluster --name fit --wait 120s --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Install the Gateway API's CRDs
+        run: kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/experimental-install.yaml
+      - name: Route the pod network through the node
+        run: |
+          node=$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' fit-control-plane)
+          cidr=$(kubectl get node fit-control-plane -o jsonpath='{.spec.podCIDR}')
+          sudo ip route add "$cidr" via "$node"
+      - name: Build fit and the suite
+        run: |
+          go build -o "$RUNNER_TEMP/fit" ./cmd/fit
+          sudo setcap cap_net_bind_service=+ep "$RUNNER_TEMP/fit"
+          cd test/conformance && go test -c -o "$RUNNER_TEMP/conformance.test" .
+      - name: Run the suite
+        run: REPORT="$RUNNER_TEMP/report.yaml" FIT_LOG="$RUNNER_TEMP/fit.log" test/conformance/run.sh "$RUNNER_TEMP/fit" "$RUNNER_TEMP/conformance.test"
+      - name: Keep the report and fit's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance
+          path: |
+            ${{ runner.temp }}/report.yaml
+            ${{ runner.temp }}/fit.log
+
   fuzz:
     name: Fuzz (short)
     runs-on: ubuntu-latest

@@ -32,6 +32,9 @@ func statusWorld(t *testing.T) *world {
 		route("outside", "far", `{"parentRefs": [{"namespace": "default", "name": "gw", "sectionName": "web"}], "rules": [{}]}`, ""),
 		route("default", "broken", `{"parentRefs": [{"name": "gw", "port": 80}], "rules": [
   {"matches": [{"headers": [{"type": "RegularExpression", "name": "X", "value": ".*"}]}], "backendRefs": [{"name": "nothere", "port": 80}]}]}`, ""),
+		// On a listener accepted but not served, its certificate missing:
+		// attached and accepted all the same.
+		route("default", "secure", `{"parentRefs": [{"name": "gw", "sectionName": "tls"}], "rules": [{"backendRefs": [{"name": "nothere", "port": 80}]}]}`, ""),
 		// No longer on fit's Gateway: its entry of fit's goes, the other's
 		// stays.
 		route("default", "stale", `{"parentRefs": [{"name": "theirs"}], "rules": [{}]}`,
@@ -157,7 +160,7 @@ func TestStatus(t *testing.T) {
 			"Accepted": "True Accepted", "Programmed": "True Programmed", "ResolvedRefs": "True ResolvedRefs", "Conflicted": "False NoConflicts"}},
 		"web": {`[{"group":"gateway.networking.k8s.io","kind":"HTTPRoute"},{"group":"gateway.networking.k8s.io","kind":"GRPCRoute"}]`, 0, map[string]string{
 			"Accepted": "True Accepted", "Programmed": "True Programmed"}},
-		"tls": {`[{"group":"gateway.networking.k8s.io","kind":"HTTPRoute"},{"group":"gateway.networking.k8s.io","kind":"GRPCRoute"}]`, 0, map[string]string{
+		"tls": {`[{"group":"gateway.networking.k8s.io","kind":"HTTPRoute"},{"group":"gateway.networking.k8s.io","kind":"GRPCRoute"}]`, 1, map[string]string{
 			"Accepted": "True Accepted", "Programmed": "False Invalid", "ResolvedRefs": "False InvalidCertificateRef"}},
 		"odd":   {`[]`, 0, map[string]string{"Accepted": "False UnsupportedProtocol", "Programmed": "False Invalid"}},
 		"kinds": {`[]`, 0, map[string]string{"Accepted": "True Accepted", "ResolvedRefs": "False InvalidRouteKinds"}},
@@ -177,6 +180,7 @@ func TestStatus(t *testing.T) {
 	// Routes: on fit's Gateway, accepted or not and why; their backends.
 	for name, want := range map[string]map[string]string{
 		"ok":        {"Accepted": "True Accepted", "ResolvedRefs": "True ResolvedRefs"},
+		"secure":    {"Accepted": "True Accepted", "ResolvedRefs": "False BackendNotFound"},
 		"nosection": {"Accepted": "False NoMatchingParent"},
 		"host":      {"Accepted": "False NoMatchingListenerHostname"},
 		"far":       {"Accepted": "False NotAllowedByListeners"},

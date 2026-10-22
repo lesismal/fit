@@ -10,7 +10,7 @@ func TestAutoHTTPSName(t *testing.T) {
 	for name, want := range map[string]bool{
 		"a.example": true, "WWW.Example.COM.": true, "x.fit.test": true,
 		"localhost": false, "a.localhost": false, "printer.local": false, "db.internal": false,
-		"nas.home.arpa": false, "x.invalid": false, "intranet": false, "*.a.example": false,
+		"nas.home.arpa": false, "x.invalid": false, "intranet": false, "*.a.example": false, "**.a.example": false,
 		"10.0.0.1": false, "[::1]": false,
 	} {
 		if got := AutoHTTPSName(name); got != want {

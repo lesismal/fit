@@ -199,7 +199,7 @@ func TestValidate(t *testing.T) {
 			name: "routes",
 			doc: `{"listeners": [{"name": "web", "address": ":80"}], "routes": [
   {"name": "r", "listeners": ["web", "api"], "handler": {"module": "m"}},
-  {"name": "r", "match": {"host": ["", "a..b", "*.1.2.3.4", "[::1]", "*.ok.com"], "path": ["x", "/a*b", "/ok/*"]}, "handler": {"module": ""}}
+  {"name": "r", "match": {"host": ["", "a..b", "*.1.2.3.4", "[::1]", "*.ok.com", "**.ok.org", "**."], "path": ["x", "/a*b", "/ok/*"]}, "handler": {"module": ""}}
 ]}`,
 			want: []string{
 				`2:38: routes[0].listeners[1]: there is no listener named "api"`,
@@ -207,9 +207,10 @@ func TestValidate(t *testing.T) {
 				`3:36: routes[1].match.host[0]: the host is empty`,
 				`3:40: routes[1].match.host[1]: "a..b" is not a valid host name`,
 				`3:48: routes[1].match.host[2]: "*.1.2.3.4" puts a wildcard on an IP address`,
-				`3:92: routes[1].match.path[0]: "x" does not start with '/'`,
-				`3:97: routes[1].match.path[1]: "/a*b" has a '*' other than at its end`,
-				`3:138: routes[1].handler.module: the module name is empty`,
+				`3:95: routes[1].match.host[6]: the host is empty`,
+				`3:112: routes[1].match.path[0]: "x" does not start with '/'`,
+				`3:117: routes[1].match.path[1]: "/a*b" has a '*' other than at its end`,
+				`3:158: routes[1].handler.module: the module name is empty`,
 			},
 		},
 		{

@@ -16,7 +16,9 @@ func (t *translator) l4Route(kind string, r *L4Route) {
 		hostnames = r.Spec.Hostnames
 	}
 	groups := t.attach(hostnames)
-	if len(groups) == 0 {
+	// A route taken only by listeners fit does not serve makes no routes
+	// of fit's, but its backends are still resolved, for its status.
+	if len(groups) == 0 && !t.cur.accepted() {
 		return
 	}
 	where := fmt.Sprintf("%s %s", strings.ToLower(kind), r.Metadata.key())

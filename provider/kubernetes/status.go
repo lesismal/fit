@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"strings"
 	"time"
 )
@@ -63,7 +64,18 @@ func (t *translator) statuses(now time.Time) []statusUpdate {
 	for _, gw := range t.gws {
 		g := gw.g
 		gen := g.Metadata.Generation
-		want := GatewayStatus{}
+		// Addresses as opts give them, or as they are, when it gives none.
+		want := GatewayStatus{Addresses: g.Status.Addresses}
+		if len(t.opts.Addresses) > 0 {
+			want.Addresses = nil
+			for _, a := range t.opts.Addresses {
+				typ := "Hostname"
+				if net.ParseIP(a) != nil {
+					typ = "IPAddress"
+				}
+				want.Addresses = append(want.Addresses, GatewayAddress{Type: ptr(typ), Value: a})
+			}
+		}
 		accepted, programmed, valid := 0, 0, 0
 		for _, gl := range gw.listeners {
 			ls := ListenerStatus{Name: gl.l.Name, SupportedKinds: gl.kinds, AttachedRoutes: gl.attached}

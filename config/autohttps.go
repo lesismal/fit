@@ -59,11 +59,11 @@ func (a *AutoHTTPS) redirects() bool { return a == nil || !a.DisableRedirects }
 var privateSuffixes = []string{"localhost", "local", "internal", "home.arpa", "invalid"}
 
 // AutoHTTPSName reports whether HTTPS by default obtains a certificate for
-// host: a host name of two labels or more, and not a wildcard, an IP address
-// or a name only a private network resolves.
+// host: a host name of two labels or more, and not a wildcard ("*." or
+// "**."), an IP address or a name only a private network resolves.
 func AutoHTTPSName(host string) bool {
 	name := strings.ToLower(strings.TrimSuffix(host, "."))
-	if strings.HasPrefix(name, "*.") || net.ParseIP(strings.Trim(name, "[]")) != nil || !strings.Contains(name, ".") {
+	if strings.HasPrefix(name, "*") || net.ParseIP(strings.Trim(name, "[]")) != nil || !strings.Contains(name, ".") {
 		return false
 	}
 	for _, s := range privateSuffixes {

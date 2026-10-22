@@ -184,6 +184,10 @@ func (c *Config) Validate() Errors {
 		}
 		if r.Match != nil {
 			for i, h := range r.Match.Host {
+				// "**." is a wildcard of one label or more, for routes alone.
+				if rest, ok := strings.CutPrefix(h, "**."); ok {
+					h = "*." + rest
+				}
 				if msg := checkHost(h); msg != "" {
 					add(r.Match.At.Field("host").Index(i), "%s", msg)
 				}

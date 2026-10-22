@@ -542,6 +542,12 @@ type parentState struct {
 	reason, msg string // why not
 }
 
+// accepted reports whether a listener of one of fit's Gateways takes the
+// route.
+func (st *routeState) accepted() bool {
+	return slices.ContainsFunc(st.parents, func(ps *parentState) bool { return ps.accepted })
+}
+
 // begin starts translating a route.
 func (t *translator) begin(kind string, m *meta, refs []ParentRef, status *RouteStatus) {
 	t.cur = &routeState{kind: kind, m: m, refs: refs, status: status}
@@ -584,7 +590,9 @@ func (t *translator) attach(hostnames []string) []*attachment {
 				continue
 			}
 			named = true
-			if gl.fit == "" || !t.allowed(gl, gw.g, st) {
+			// A listener accepted takes routes, and counts them, whether or
+			// not fit serves it (its certificates may be missing).
+			if gl.refused != "" || !t.allowed(gl, gw.g, st) {
 				continue
 			}
 			allowed = true
@@ -597,7 +605,7 @@ func (t *translator) attach(hostnames []string) []*attachment {
 				continue
 			}
 			hostOK = true
-			if l4 {
+			if l4 && gl.fit != "" {
 				if other := t.claim(gl.fit, hs, st.kind+" "+key); other != "" {
 					taken = other
 					continue
@@ -605,9 +613,11 @@ func (t *translator) attach(hostnames []string) []*attachment {
 			}
 			gl.attached++
 			ps.accepted = true
-			if hs == nil {
+			switch {
+			case gl.fit == "":
+			case hs == nil:
 				anyHost[gl.fit] = true
-			} else {
+			default:
 				hosts[gl.fit] = append(hosts[gl.fit], hs...)
 			}
 		}
@@ -639,7 +649,11 @@ func (t *translator) attach(hostnames []string) []*attachment {
 		groups[k].listeners = append(groups[k].listeners, fl)
 	}
 	if len(groups) == 0 {
-		t.problem("%s %s: no listener of its Gateways takes it: their sections, ports, allowed routes or host names leave it out", strings.ToLower(st.kind), key)
+		if st.accepted() {
+			t.problem("%s %s: the listeners that take it are not served: see their status", strings.ToLower(st.kind), key)
+		} else {
+			t.problem("%s %s: no listener of its Gateways takes it: their sections, ports, allowed routes or host names leave it out", strings.ToLower(st.kind), key)
+		}
 		return nil
 	}
 	var out []*attachment
@@ -773,6 +787,23 @@ func intersect(listener *string, hostnames []string) ([]string, bool) {
 	return out, len(out) > 0
 }
 
+// routeHosts returns the host names of a route of fit's for the Gateway
+// API's hosts: its wildcards stand for one label or more, as fit's "**."
+// wildcards do.
+func routeHosts(hosts []string) []string {
+	if hosts == nil {
+		return nil
+	}
+	out := make([]string, len(hosts))
+	for i, h := range hosts {
+		if strings.HasPrefix(h, "*.") {
+			h = "*" + h
+		}
+		out[i] = h
+	}
+	return out
+}
+
 // hostMatches reports whether the host name pattern p, maybe a wildcard,
 // takes h: equal, or h below p's domain for "*.".
 func hostMatches(p, h string) bool {
@@ -790,7 +821,9 @@ func hostMatches(p, h string) bool {
 func (t *translator) httpRoute(r *HTTPRoute) {
 	t.begin("HTTPRoute", &r.Metadata, r.Spec.ParentRefs, &r.Status)
 	groups := t.attach(r.Spec.Hostnames)
-	if len(groups) == 0 {
+	// A route taken only by listeners fit does not serve makes no routes
+	// of fit's, but its backends are still resolved, for its status.
+	if len(groups) == 0 && !t.cur.accepted() {
 		return
 	}
 	for i, rule := range r.Spec.Rules {
@@ -992,7 +1025,7 @@ func (t *translator) granted(fromKind, from, to, toKind, name string) bool {
 // attachment at, or nil, saying why, when it cannot.
 func (t *translator) match(where string, m HTTPRouteMatch, rule HTTPRouteRule, b ruleBackends, at *attachment) *outRoute {
 	out := &outRoute{Listeners: at.listeners}
-	om := &outMatch{Host: at.hosts}
+	om := &outMatch{Host: routeHosts(at.hosts)}
 
 	pathType, pathValue := "PathPrefix", "/"
 	if m.Path != nil {

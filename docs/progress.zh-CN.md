@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-22 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I60 已完成） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I61 已完成） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9`（fib `main` 的 `4f1c3e9`，即 `c3e27ed` 加上 A36 和 A37；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期，或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M4 平台集成：Gateway API 一致性测试、Consul 和 etcd provider、共享证书存储、dashboard、OpenTelemetry、打包（I61–I66） |
+| 尚不可用 | M4 平台集成：Consul 和 etcd provider、共享证书存储、dashboard、OpenTelemetry、打包（I62–I66） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）和 I60（Kubernetes Ingress）已完成，下一步是 I61（Gateway API 一致性测试）。** M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）和 I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）已完成，下一步是 I62（Consul 和 etcd provider）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -38,7 +38,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 可以用下面的话开始下一次会话：
 
-> 实现 docs/dev-plan.zh-CN.md 中的迭代 I61。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
+> 实现 docs/dev-plan.zh-CN.md 中的迭代 I62。先读 docs/progress.zh-CN.md、docs/rules.zh-CN.md、docs/dev-plan.zh-CN.md
 > 的索引和该迭代的小节，以及 docs/roadmap.zh-CN.md 中的设计原则，然后只读它列出的包。改动限制在该迭代范围内，补上
 > 测试，完成后在两个 dev-plan 文件中标记为 done，并记录到两个 progress 文件中。
 
@@ -71,7 +71,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `provider/file` | `Watcher`：轮询配置文件，在文件不再变化且内容与上次应用的不同时应用它 |
 | `observe` | 访问日志：每个请求一行 JSON，缓冲在各有一把锁的分片中，由单独的 goroutine 写出，宁可丢行也不阻塞；`Track` 和 `EntryOf` 取得请求的日志条目；指标：`Histogram`、按 listener 和路由的 `RequestMetrics`（分片的原子计数器，在有图使用时保存在 `Metrics` 中），以及写 Prometheus 文本格式的 `TextWriter` |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`ClientAuth`：监听器验证客户端证书所用的 CA；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
-| `router` | `Router[T]`：先用 map 按 host 和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`，以及它们的表达式 `ParseExpr`），依次看优先级、具体程度和匹配器个数，不分配内存 |
+| `router` | `Router[T]`：先用 map 按 host（精确、匹配一级标签的 `*.`、匹配一级或多级的 `**.`）和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`，以及它们的表达式 `ParseExpr`），依次看优先级、具体程度和匹配器个数，不分配内存 |
 | `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
 | `internal/pebbletest` | 为测试运行 ACME 测试服务器 Pebble 及其 DNS 服务器；没有二进制文件时跳过测试 |
@@ -2353,6 +2353,46 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - 注解是 fit 自己前缀下的，不是 ingress-nginx 的：两者含义和默认值不同（ingress-nginx 默认重定向 TLS 主机），读取它的
   名字等于承诺 fit 做不到的事。从它迁移的用户改一下保留的几个注解名即可。
 - 与 I58 一样，e2e 新增的部分只在 CI 中运行。
+
+### I61 Gateway API 一致性测试 — 已完成
+
+- 测试套件：`test/conformance`，单独的 Go 模块（决策 [012](decisions/012-gateway-conformance.zh-CN.md)），依赖
+  `sigs.k8s.io/gateway-api` v1.3.0，其测试运行 Gateway API 的一致性测试套件；`test/conformance/run.sh` 创建 fit 的
+  GatewayClass，启动带 Kubernetes provider 的 `fit run`（Gateway 在 127.0.0.1 上，并写进它们的状态），以
+  `-conformance-profiles GATEWAY-HTTP` 运行测试套件并写出报告。fit 声明该 profile 的 core：它的 33 个测试，即
+  Gateway、HTTPRoute 和 ReferenceGrant。
+- `config`：Kubernetes provider 的 `addresses`，即写进每个 Gateway 的 `status.addresses` 的 IP 地址或主机名
+  （`IPAddress` 或 `Hostname`），客户端和测试套件从这里读取 Gateway 的访问地址；未设置时保留原有的地址。
+- `router` 和 `config`：路由的 host 可以是 `**.` 通配，如 `**.example.com`，表示一级或多级标签，与 Gateway API 的
+  `*.example.com` 相同（fit 的 `*.` 仍表示一级）。router 把这类 host 按后缀放进单独的 map，具体程度低于 `*.`、高于
+  无 host，且只在存在这类 host 时才查找请求 host 的后缀，最长的优先，最多四个；默认 HTTPS 不为它申请证书。
+- `provider/kubernetes`：HTTPRoute 和 GRPCRoute 的主机名中 Gateway API 的通配写成 `**.`（Ingress 仍用 `*.`，在
+  Ingress 中它表示一级）。已被接受但未服务的 listener（例如证书缺失）仍接受路由并计入 `attachedRoutes`，它接受的路由
+  为 Accepted，并为状态解析其后端，只是不产生 fit 的路由。
+- 第一次在基准主机上运行时 33 个测试通过 30 个：`HTTPRouteHostnameIntersection` 和
+  `HTTPRouteListenerHostnameMatching` 把 `foo.bar.anotherwildcard.io` 发给只匹配一级的 `*.` 通配，
+  `GatewayWithAttachedRoutes` 要求 Secret 缺失的 listener 也有 `attachedRoutes` 和 `ResolvedRefs`；以上改动修复了
+  它们，第二次运行 33 个全部通过。
+- CI：单独的任务 "Gateway API conformance (kind)"：带 experimental CRD 的 kind 集群，用 `CAP_NET_BIND_SERVICE`
+  构建的 fit 以绑定 80 和 443 端口，运行 `run.sh`，并把报告和 fit 的日志保留为 artifact。
+- 测试：`router` 的 `TestDeepWildcard`（一级和多级、大小写、裸域名、具体程度低于 `*.` 高于无 host、路径匹配时最长
+  后缀优先）；`config`（`**.` 路由主机、拒绝单独的 `**.`、默认不为 `**.` 申请证书）；`provider/kubernetes`（通配写成
+  `**.`、证书缺失的 listener 上的路由被挂载、接受并报告缺失的后端）。`make test-changed` 选出的 28 个包在基准主机上
+  通过竞态检测；linux、darwin、windows 的 vet 和 staticcheck 通过，包括一致性测试模块。`scripts/test-changed.sh`
+  现在略去嵌套模块：一致性测试模块的 `go.mod` 曾让它测试全部包。
+- 基准（规则 21，router 在热路径上）：`bench/microbench.sh` 比较 `main` 与本次改动的 `BenchmarkMatch`，起初按级别
+  循环加上新分支慢了 3.7%（56.8 到 58.9 ns）；把各级展开、没有 `**.` 主机匹配时深层一步是空循环后，快了 1.0%（56.8 到
+  56.2 ns，p=0.002），且不分配内存。`bench/ab.sh`（fixed、static 和 proxy，HTTP/1.1 和 h2c，3 轮各 10s，期间停掉
+  kind 节点）：每一组都在噪声范围内，-0.5% 到 +0.5%。
+- 基准主机现在在 `/root/dev/bin` 中有 kind v0.30.0（用它的 Go 构建）和 kubectl v1.34.0（发布的二进制，已校验
+  checksum），以及一个 kind 集群 `fitconf`，其 pod 网络经节点路由，用于运行一致性测试。
+
+与计划的不同：
+
+- 只声明了该 profile 的 core：其扩展特性（按路径和端口重定向、重写、镜像、按方法和查询参数匹配等）留给以后的运行，
+  在其测试通过后在 `run.sh` 中用 flag 逐个声明。
+- 所有 Gateway 都在同一地址上访问：fit 把共享端口的 Gateway 合并成一个 listener，所以请求能到达该端口上所有 Gateway
+  的路由。core 测试不区分它们；扩展测试 `GatewayHTTPListenerIsolation` 会区分。
 
 ## 给后续迭代的说明
 

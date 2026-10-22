@@ -3,8 +3,10 @@
 // A route matches a request when one of its hosts matches the request's host,
 // one of its paths matches the request's path, and each of its matchers
 // matches the request; a route with no hosts matches every host, and one with
-// no paths every path. Hosts are exact, as in "example.com", or a "*."
-// wildcard, as in "*.example.com", which stands for exactly one label. Paths
+// no paths every path. Hosts are exact, as in "example.com", a "*."
+// wildcard, as in "*.example.com", which stands for exactly one label, or a
+// "**." wildcard, as in "**.example.com", which stands for one label or more
+// (the Gateway API's wildcards). Paths
 // are exact, as in "/hello", or end in "*" to match a prefix, as in "/api/*".
 // Hosts ignore case; paths do not. Matchers test anything else: the method,
 // headers, the query, the client's address, a regular expression on the path
@@ -15,7 +17,8 @@
 //
 //  1. the one with the highest priority;
 //  2. the one whose host matched most specifically: an exact host, then a
-//     wildcard, then a route with no hosts;
+//     "*." wildcard, then a "**." wildcard, the longest suffix first, then a
+//     route with no hosts;
 //  3. the one whose path matched most specifically: an exact path, then the
 //     longest prefix, then a route with no paths;
 //  4. the one with the most matchers;
@@ -61,16 +64,22 @@ type Matcher interface {
 // Router finds the route for a request.
 type Router[T any] struct {
 	exact map[string]*node[T] // by lower-case host
-	wild  map[string]*node[T] // by lower-case suffix, from the dot on: ".example.com"
+	wild  map[string]*node[T] // "*." patterns, by lower-case suffix from the dot on: ".example.com"
+	deep  map[string]*node[T] // "**." patterns, likewise
 	any   *node[T]            // routes with no hosts
 }
 
 // Host specificity, from least to most specific.
 const (
 	hostAny = iota
+	hostDeep
 	hostWild
 	hostExact
 )
+
+// maxDeep bounds the "**." patterns one host is matched against: the
+// longest suffixes first.
+const maxDeep = 4
 
 // pathExact is the specificity of an exact path; a prefix's is its length.
 const pathExact = math.MaxInt
@@ -108,7 +117,7 @@ func (e *entry[T]) matches(r *stdhttp.Request) bool {
 // New builds a Router from routes. Routes that tie on priority and
 // specificity are picked in the order given.
 func New[T any](routes []Route[T]) *Router[T] {
-	r := &Router[T]{exact: map[string]*node[T]{}, wild: map[string]*node[T]{}}
+	r := &Router[T]{exact: map[string]*node[T]{}, wild: map[string]*node[T]{}, deep: map[string]*node[T]{}}
 	for i, rt := range routes {
 		hosts := rt.Hosts
 		if len(hosts) == 0 {
@@ -142,7 +151,9 @@ func (r *Router[T]) nodeFor(h string) *node[T] {
 	}
 	m := r.exact
 	h = strings.ToLower(strings.TrimSuffix(strings.Trim(h, "[]"), "."))
-	if suffix, ok := strings.CutPrefix(h, "*"); ok {
+	if suffix, ok := strings.CutPrefix(h, "**"); ok {
+		m, h = r.deep, suffix
+	} else if suffix, ok := strings.CutPrefix(h, "*"); ok {
 		m, h = r.wild, suffix
 	}
 	n := m[h]
@@ -159,6 +170,9 @@ func (r *Router[T]) nodes() []*node[T] {
 		ns = append(ns, n)
 	}
 	for _, n := range r.wild {
+		ns = append(ns, n)
+	}
+	for _, n := range r.deep {
 		ns = append(ns, n)
 	}
 	if r.any != nil {
@@ -284,10 +298,19 @@ func (r *Router[T]) Match(req *stdhttp.Request) (T, bool) {
 	host = strings.TrimSuffix(host, ".")
 
 	var exact, wild *node[T]
+	// The "**." nodes the host's suffixes lead to, the longest first; looked
+	// for only when there are any.
+	var deep [maxDeep]*node[T]
+	nd := 0
 	if !hasUpper(host) {
 		exact = r.exact[host]
 		if i := strings.IndexByte(host, '.'); i > 0 {
 			wild = r.wild[host[i:]]
+			for ; len(r.deep) > 0 && i >= 0 && nd < maxDeep; i = nextDot(host, i) {
+				if n := r.deep[host[i:]]; n != nil {
+					deep[nd], nd = n, nd+1
+				}
+			}
 		}
 	} else if len(host) <= maxHost {
 		var buf [maxHost]byte
@@ -302,6 +325,11 @@ func (r *Router[T]) Match(req *stdhttp.Request) (T, bool) {
 		exact = r.exact[string(b)]
 		if i := strings.IndexByte(host, '.'); i > 0 {
 			wild = r.wild[string(b[i:])]
+			for ; len(r.deep) > 0 && i >= 0 && nd < maxDeep; i = nextDot(host, i) {
+				if n := r.deep[string(b[i:])]; n != nil {
+					deep[nd], nd = n, nd+1
+				}
+			}
 		}
 	}
 
@@ -309,13 +337,24 @@ func (r *Router[T]) Match(req *stdhttp.Request) (T, bool) {
 	bestHost := hostAny
 	// The most specific host first, so that a less specific one's matchers
 	// run only when it has a higher priority.
-	for h := hostExact; h >= hostAny; h-- {
-		n := [...]*node[T]{hostAny: r.any, hostWild: wild, hostExact: exact}[h]
-		if n == nil {
-			continue
+	if exact != nil {
+		if e := exact.match(path, best, hostExact, bestHost, req); e != nil {
+			best, bestHost = e, hostExact
 		}
-		if e := n.match(path, best, h, bestHost, req); e != nil {
-			best, bestHost = e, h
+	}
+	if wild != nil {
+		if e := wild.match(path, best, hostWild, bestHost, req); e != nil {
+			best, bestHost = e, hostWild
+		}
+	}
+	for _, n := range deep[:nd] {
+		if e := n.match(path, best, hostDeep, bestHost, req); e != nil {
+			best, bestHost = e, hostDeep
+		}
+	}
+	if r.any != nil {
+		if e := r.any.match(path, best, hostAny, bestHost, req); e != nil {
+			best, bestHost = e, hostAny
 		}
 	}
 	if best == nil {
@@ -323,6 +362,15 @@ func (r *Router[T]) Match(req *stdhttp.Request) (T, bool) {
 		return zero, false
 	}
 	return best.value, true
+}
+
+// nextDot returns the index of the dot after the one at i in host, or -1.
+func nextDot(host string, i int) int {
+	j := strings.IndexByte(host[i+1:], '.')
+	if j < 0 {
+		return -1
+	}
+	return i + 1 + j
 }
 
 func hasUpper(s string) bool {
