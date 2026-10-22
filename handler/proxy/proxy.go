@@ -34,6 +34,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -212,7 +213,7 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		// Present and empty: no client adds its own, and none is sent.
 		header["User-Agent"] = []string{}
 	}
-	p.setForwarded(c, header, &x.forwarded)
+	p.setForwarded(c, header, x)
 	if e := observe.EntryOf(c); e != nil && e.Trace() != nil {
 		// The upstream's parent is fit's span; tracestate goes on as it
 		// came, with the rest of the fields.
@@ -235,17 +236,23 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		Host:       host,
 	}
 	if body := c.Body(); len(body) > 0 {
-		x.base.Body = io.NopCloser(bytes.NewReader(body))
+		x.body.Reset(body)
+		x.base.Body = &x.body
 		x.base.ContentLength = int64(len(body))
 		x.base.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	}
 	return true
 }
 
+// wholeBody is a request body that arrived whole, read where it is.
+type wholeBody struct{ bytes.Reader }
+
+func (*wholeBody) Close() error { return nil }
+
 // setForwarded sets the fields that tell the upstream about the client. The
-// fields' values go in values, which the caller keeps for as long as the
-// header.
-func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, values *[4]string) {
+// fields' values go in x.forwarded, and the Forwarded element is written in
+// x.element when it fits, so that x keeps them for as long as the header.
+func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *exchange) {
 	r := c.Request
 	clientIP, ip := clientAddr(r.RemoteAddr)
 	trusted := p.isTrusted(clientIP)
@@ -253,6 +260,7 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, values *
 	if r.TLS != nil {
 		proto = "https"
 	}
+	values := &x.forwarded
 	field := func(i int, v string) []string {
 		values[i] = v
 		return values[i : i+1 : i+1]
@@ -272,7 +280,10 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, values *
 		header["X-Forwarded-Host"] = field(2, r.Host)
 	}
 
-	element := forwardedElement(clientIP, ip, r.Host, proto)
+	// The bytes are x's and are not written again, so the string may be
+	// made of them without a copy.
+	b := appendForwardedElement(x.element[:0], clientIP, ip, r.Host, proto)
+	element := unsafe.String(unsafe.SliceData(b), len(b))
 	if prior := header["Forwarded"]; trusted && len(prior) > 0 {
 		header["Forwarded"] = field(3, strings.Join(prior, ", ")+", "+element)
 	} else {
@@ -312,39 +323,35 @@ func clientAddr(remote string) (netip.Addr, string) {
 	return ip, ip.String()
 }
 
-// forwardedElement is a Forwarded element (RFC 7239) for the client at ip,
-// written as s.
-func forwardedElement(ip netip.Addr, s, host, proto string) string {
-	var b strings.Builder
-	b.Grow(len(`for="[]";host="";proto=https`) + len(s) + len(host))
-	b.WriteString("for=")
+// appendForwardedElement appends to dst a Forwarded element (RFC 7239) for
+// the client at ip, written as s.
+func appendForwardedElement(dst []byte, ip netip.Addr, s, host, proto string) []byte {
+	dst = append(dst, "for="...)
 	switch {
 	case !ip.IsValid():
-		b.WriteString("unknown")
+		dst = append(dst, "unknown"...)
 	case ip.Is6():
-		b.WriteString(`"[`)
-		b.WriteString(s)
-		b.WriteString(`]"`)
+		dst = append(dst, `"[`...)
+		dst = append(dst, s...)
+		dst = append(dst, `]"`...)
 	default:
-		b.WriteString(s)
+		dst = append(dst, s...)
 	}
 	if host != "" {
-		b.WriteString(";host=")
-		writeForwardedValue(&b, host)
+		dst = append(dst, ";host="...)
+		dst = appendForwardedValue(dst, host)
 	}
-	b.WriteString(";proto=")
-	b.WriteString(proto)
-	return b.String()
+	dst = append(dst, ";proto="...)
+	return append(dst, proto...)
 }
 
-// writeForwardedValue writes v as a Forwarded parameter value: a token as it
-// is, anything else quoted.
-func writeForwardedValue(b *strings.Builder, v string) {
+// appendForwardedValue appends v as a Forwarded parameter value: a token as
+// it is, anything else quoted.
+func appendForwardedValue(dst []byte, v string) []byte {
 	if validToken(v) {
-		b.WriteString(v)
-		return
+		return append(dst, v...)
 	}
-	b.WriteString(strconv.Quote(v))
+	return strconv.AppendQuote(dst, v)
 }
 
 // tokenChars are the bytes an HTTP token may hold.

@@ -218,6 +218,10 @@ type exchange struct {
 	base      stdhttp.Request
 	url       url.URL
 	forwarded [4]string
+	// element holds the Forwarded element's bytes, when they fit, and body
+	// reads a request body that arrived whole.
+	element [96]byte
+	body    wholeBody
 	// traceparent is the value of the field naming the request's span,
 	// when it is traced.
 	traceparent [1]string

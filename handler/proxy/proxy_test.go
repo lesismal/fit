@@ -363,7 +363,7 @@ func TestForwardedElement(t *testing.T) {
 		if tt.ip != "" {
 			ip = netip.MustParseAddr(tt.ip)
 		}
-		if got := forwardedElement(ip, ipString(ip), tt.host, tt.proto); got != tt.want {
+		if got := string(appendForwardedElement(nil, ip, ipString(ip), tt.host, tt.proto)); got != tt.want {
 			t.Errorf("%s %s: %s, want %s", tt.ip, tt.host, got, tt.want)
 		}
 	}
