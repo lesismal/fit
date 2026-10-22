@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -9,11 +9,16 @@ import (
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/provider"
-	"github.com/lesismal/fit/provider/consul"
-	"github.com/lesismal/fit/provider/docker"
-	"github.com/lesismal/fit/provider/etcd"
-	"github.com/lesismal/fit/provider/kubernetes"
 )
+
+// kindList lists the provider kinds this fit has, for an error.
+func kindList() string {
+	kinds := provider.RegisteredKinds()
+	if len(kinds) == 0 {
+		return "none"
+	}
+	return strings.Join(kinds, ", ")
+}
 
 // startProviders runs the providers c lists, in their order of precedence,
 // applying what they provide through configs, until the function it
@@ -21,29 +26,21 @@ import (
 // reported once, until the provider's part applies again.
 func startProviders(c *config.Config, configs *admin.Configs, stdout, stderr io.Writer) (stop func(), err error) {
 	var ps []provider.Provider
-	for _, pc := range c.Providers {
+	for i := range c.Providers {
+		pc := &c.Providers[i]
 		name := pc.ID()
 		logf := func(format string, args ...any) { fmt.Fprintf(stderr, "fit: "+format+"\n", args...) }
-		switch {
-		case pc.Docker != nil:
-			ps = append(ps, docker.New(name, pc.Docker, logf))
-			network, address := pc.Docker.Dial()
-			fmt.Fprintf(stdout, "fit: provider %s watching Docker at %s:%s\n", name, network, address)
-		case pc.Consul != nil:
-			ps = append(ps, consul.NewCatalog(name, pc.Consul, logf))
-			fmt.Fprintf(stdout, "fit: provider %s watching Consul's catalog at %s\n", name, pc.Consul.URL())
-		case pc.ConsulKV != nil:
-			ps = append(ps, consul.NewKV(name, pc.ConsulKV, logf))
-			fmt.Fprintf(stdout, "fit: provider %s watching Consul's keys under %q at %s\n", name, pc.ConsulKV.KeyPrefix(), pc.ConsulKV.URL())
-		case pc.Etcd != nil:
-			ps = append(ps, etcd.New(name, pc.Etcd, logf))
-			fmt.Fprintf(stdout, "fit: provider %s watching etcd's keys under %q at %s\n", name, pc.Etcd.KeyPrefix(), strings.Join(pc.Etcd.URLs(), ", "))
-		case pc.Kubernetes != nil:
-			ps = append(ps, kubernetes.New(name, pc.Kubernetes, logf))
-			fmt.Fprintf(stdout, "fit: provider %s watching Kubernetes for GatewayClasses of %s\n", name, pc.Kubernetes.Controller())
-		default:
+		kind := pc.Kind()
+		if kind == "" {
 			return nil, fmt.Errorf("provider %s: no kind is set", name)
 		}
+		newProvider, ok := provider.LookupKind(kind)
+		if !ok {
+			return nil, fmt.Errorf("provider %s: this fit was built without the %s provider (it has %s)", name, kind, kindList())
+		}
+		p, watching := newProvider(name, pc, logf)
+		ps = append(ps, p)
+		fmt.Fprintf(stdout, "fit: provider %s %s\n", name, watching)
 		if err := configs.AddProvider(name); err != nil {
 			return nil, err
 		}

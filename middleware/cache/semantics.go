@@ -241,14 +241,6 @@ func weakEqual(a, b string) bool {
 	return strings.TrimPrefix(a, "W/") == strings.TrimPrefix(b, "W/")
 }
 
-// conditional reports whether a request carries a precondition the cache
-// answers for itself.
-func conditional(h stdhttp.Header) bool {
-	_, inm := h["If-None-Match"]
-	_, ims := h["If-Modified-Since"]
-	return inm || ims
-}
-
 // unstored are the fields a stored response is kept without: those that
 // belong to one connection, Age, which is worked out when the response is
 // served, and the length, which the stored body gives.

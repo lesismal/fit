@@ -384,10 +384,8 @@ type miss struct {
 	c           *fibhttp.Context
 	key         string
 	requestTime time.Time
-	// status is what Cache-Status says, one of the fwd kinds, and stored
-	// whether the response is being kept.
+	// status is what Cache-Status says, one of the fwd kinds.
 	status int
-	stored bool
 	// stale is the stored response the request did not take, freshened if
 	// the 304 it is answered with is for it.
 	stale *entry

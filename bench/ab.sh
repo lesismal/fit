@@ -7,8 +7,9 @@
 #   bench/ab.sh -report ID        fetch what has finished and summarize it
 #   bench/ab.sh -wait ID          wait for it to finish, then summarize
 #
-# A and B are git refs of this repository (main, HEAD, a commit), or "work"
-# for the working tree. Options:
+# A and B are git refs of this repository (main, HEAD, a commit), "work"
+# for the working tree, or bin:PATH for a fit already built for
+# linux/amd64, as one fit build made. Options:
 #
 #   -scenarios LIST   fixed,static,proxy                  (default: all three)
 #   -protocols LIST   http/1.1,h2c                        (default: both)
@@ -82,6 +83,13 @@ linux() { env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOWORK=off "$@"; }
 
 # build REF DIR builds fit at REF into DIR.
 build() {
+	case "$1" in
+	bin:*)
+		cp "${1#bin:}" "$2/fit"
+		echo "$1" > "$2/ref"
+		return
+		;;
+	esac
 	if [ "$1" = work ]; then
 		(cd "$root" && linux go build -o "$2/fit" ./cmd/fit)
 		echo "work (uncommitted changes of $(git -C "$root" rev-parse --short HEAD))" > "$2/ref"
