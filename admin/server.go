@@ -50,6 +50,11 @@ const VersionHeader = "Fit-Config-Version"
 //	GET    /config/effective    the config as it runs, with what providers
 //	                            provided merged in, and where each part
 //	                            came from
+//	GET    /status              what fit is doing now: listeners,
+//	                            connections, upstreams and their backends'
+//	                            health, certificates
+//	GET    /dashboard/          read-only web pages of the GET endpoints,
+//	                            unless admin.disable_dashboard
 //
 // Every config carries an ETag, a hash of it as written; a change sent with
 // If-Match is applied only if the running config is still that one, and is
@@ -117,6 +122,11 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	mux.HandleFunc("GET /versions", s.versions)
 	mux.HandleFunc("GET /versions/{n}", s.version)
 	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.HandleFunc("GET /status", s.status)
+	if !a.DisableDashboard {
+		mux.Handle("GET /dashboard/", dashboardHandler())
+		mux.Handle("GET /dashboard", http.RedirectHandler("/dashboard/", http.StatusMovedPermanently))
+	}
 	s.srv = &http.Server{
 		Handler:           s.guard(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -165,12 +175,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // guard refuses what must not reach the API: a request without the token,
-// when one is asked for; one from a web page, which a browser marks with
-// Origin; and, on a TCP address without a token, one whose Host is not a
-// loopback name, as a web page's is after DNS rebinding.
+// when one is asked for, but for the dashboard's files, which hold no data
+// and ask for the token themselves; one from a web page, which a browser
+// marks with Origin, but a GET from the API's own origin, as the
+// dashboard's are; and, on a TCP address without a token, one whose Host is
+// not a loopback name, as a web page's is after DNS rebinding.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.token != nil {
+		if s.token != nil && !isDashboard(r) {
 			got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if !ok || subtle.ConstantTimeCompare([]byte(got), s.token) != 1 {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="fit admin"`)
@@ -178,7 +190,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if r.Header.Get("Origin") != "" {
+		if o := r.Header.Get("Origin"); o != "" && !sameOriginRead(r, o) {
 			writeError(w, http.StatusForbidden, "requests from web pages are refused")
 			return
 		}

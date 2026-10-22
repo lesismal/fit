@@ -40,6 +40,18 @@ I24 加入 Admin API，用来读取和替换运行中的配置，以及已应用
   过期的写入得到 412。
 - **`POST /rollback/{n}`** 在版本 `n` 仍在历史中时，把它的配置作为新版本再次应用。
 
+更新，I64（2026-10-22）：
+
+- **仪表盘由 API 自己提供**，位于 `/dashboard/`，除非设置了 `admin.disable_dashboard`：嵌入二进制的 HTML、CSS 和
+  JavaScript，其 Content-Security-Policy 只允许自身的文件和对自身源的请求。它读取 `GET /status`（新增：listener、
+  连接、上游及其后端的健康状态、证书）、`/config/effective` 和 `/versions`，不发送其他请求；有一个测试读取这些文件，
+  出现其他方法即失败。
+- **guard 的两个有限例外。** 仪表盘的文件无需 token 即可获取，因为它们不含数据，页面会自己要求输入 token，保存在该
+  标签页的 `sessionStorage` 中并作为 `Authorization` 发送；所有端点仍然要求 token。另外，`Origin` 为 API 自身源
+  （协议加请求的 `Host`）的 `GET` 或 `HEAD` 会被放行：浏览器在某些同源读取时也会发送 `Origin`；其他源的页面仍得到
+  403，任何带 `Origin` 的写入也是如此。回环 `Host` 检查不变，所以仪表盘要用回环名称访问，或在设置 token 后从任何地方
+  访问。
+
 ## 影响
 
 - 通过 API 加载的配置持续到下一次 SIGHUP（它会重新应用文件）或重启。把 API 加载的配置写回磁盘（像 Caddy 的

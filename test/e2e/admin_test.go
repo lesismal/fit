@@ -164,3 +164,36 @@ func TestAdminLoad(t *testing.T) {
 		t.Fatalf("stop: exit %d %q", code, out)
 	}
 }
+
+// TestDashboard runs fit with the Admin API and reads the dashboard's page
+// and files, and the endpoints it reads, as a browser on the API's origin
+// would.
+func TestDashboard(t *testing.T) {
+	_, addrs := startFit(t, adminConfig("v1"))
+	api := "http://" + addrs["admin"]
+	page := get(t, api+"/dashboard/")
+	for _, want := range []string{`<script src="app.js">`, `href="app.css"`, `data-tab="certificates"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %s", want)
+		}
+	}
+	get(t, api+"/dashboard/app.js")
+	get(t, api+"/dashboard/app.css")
+	for _, path := range []string{"/status", "/config/effective", "/versions"} {
+		req, _ := stdhttp.NewRequest("GET", api+path, nil)
+		req.Header.Set("Origin", api)
+		resp, err := client(false).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&v)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || err != nil {
+			t.Errorf("GET %s from the dashboard's origin: %d %v", path, resp.StatusCode, err)
+		}
+		if path == "/status" && (v["version"] != float64(1) || len(v["listeners"].([]any)) != 1) {
+			t.Errorf("/status: %v", v)
+		}
+	}
+}

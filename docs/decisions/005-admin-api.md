@@ -53,6 +53,21 @@ Update, I25 (2026-10-19):
 - **`POST /rollback/{n}`** applies version `n`'s config again as a new version, while `n` is in
   the history.
 
+Update, I64 (2026-10-22):
+
+- **The dashboard is served by the API itself**, at `/dashboard/` unless `admin.disable_dashboard`:
+  HTML, CSS and JavaScript embedded in the binary, with a Content-Security-Policy that allows only
+  its own files and requests to its own origin. It reads `GET /status` (new: listeners,
+  connections, upstreams and their backends' health, certificates), `/config/effective` and
+  `/versions`, and sends nothing else; a test reads its files and fails on any other method.
+- **Two narrow exceptions to the guard.** The dashboard's files are served without the token,
+  since they hold no data and the page asks for the token, keeping it in the tab's
+  `sessionStorage` and sending it as `Authorization`; every endpoint still asks for it. And a
+  `GET` or `HEAD` whose `Origin` is the API's own (scheme and the request's `Host`) is let through:
+  a browser sends `Origin` on some same-origin reads, a page on another origin still gets 403, as
+  every write with any `Origin` does. The loopback `Host` check is unchanged, so the dashboard is
+  reached at a loopback name, or anywhere with a token.
+
 ## Consequences
 
 - A config loaded through the API lasts until the next SIGHUP, which applies the file again, or a

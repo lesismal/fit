@@ -194,11 +194,12 @@ const AdminUnixPrefix = "unix/"
 
 // Admin is where the Admin API listens, and who may use it.
 type Admin struct {
-	Address        string `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
-	TokenFile      string `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
-	History        int    `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
-	MaxConfigBytes int64  `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
-	MaxConns       int    `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
+	Address          string `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	TokenFile        string `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
+	History          int    `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
+	MaxConfigBytes   int64  `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
+	MaxConns         int    `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
+	DisableDashboard bool   `json:"disable_dashboard,omitempty" doc:"Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false."`
 
 	At Value `json:"-" fit:"self"`
 }

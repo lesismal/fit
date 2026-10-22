@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-22 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I63 已完成） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：进行中（I56–I64 已完成） |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9`（fib `main` 的 `4f1c3e9`，即 `c3e27ed` 加上 A36 和 A37；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标，按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M4 平台集成：dashboard、OpenTelemetry、打包（I64–I66） |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M4 平台集成：OpenTelemetry、打包（I65–I66） |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）和 I63（证书共享于 Redis、etcd 或 Consul）已完成，下一步是 I64（仪表盘）。** M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 已开始：I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）和 I64（只读仪表盘）已完成，下一步是 I65（OpenTelemetry）。** M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -47,7 +47,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | 包 | 内容 |
 | --- | --- |
 | `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并运行配置中的 provider）、`validate`、`schema`、`version`、`hash-password`、`help` |
-| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective` |
+| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective`；`GET /status`（listener、连接、上游及后端健康状态、证书）；嵌入的仪表盘，位于 `/dashboard/` |
 | `config` | 原生配置类型（包括 `providers`）；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -2490,6 +2490,34 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 - 除证书外还共享质询：否则同一地址后的两个实例只有在 CA 恰好到达下单的那个时才能共享签发。
 - 使用共享存储时，token 在哪里都找不到的质询路径得到 404，而不是交给路由（决策 014）。
+
+### I64 仪表盘 — 已完成
+
+- `admin`：`GET /status`，即 fit 当前在做而配置中没有的信息：运行中配置的版本、应用时间和来源、重载次数、绑定的
+  listener 及其协议、打开和被拒绝的连接及待发送字节、每个上游进行中的请求及其后端（是否在轮转中，是否被健康检查移出；
+  进行中、成功和失败的请求），以及每个 listener 提供的证书（名称、签发者、序列号、有效期），按上游排序，证书按
+  listener 和到期时间排序。它读取的内容与 `WriteMetrics` 相同。
+- `admin/dashboard`：仪表盘，用 `go:embed` 嵌入的 HTML、CSS 和纯 JavaScript，在 `/dashboard/` 提供（`/dashboard` 会
+  重定向），Content-Security-Policy 只允许自身文件和源，另有 `nosniff`、禁止嵌入框架和 `no-cache`。六个标签页：概览
+  （版本、重载、连接、路由、在线后端、14 天内到期的证书；listener；按优先级排列的来源，及各自提供了什么、什么被遮蔽）、
+  路由（listener、匹配、中间件、handler 和上游、来源）、四层服务、上游及其后端的健康状态（可按名称或地址过滤）、带剩余
+  天数的证书，以及配置版本（可查看每个版本的配置）。每 5s 刷新一次（可关闭），数据只作为文本写入，从不作为 HTML，API
+  返回 401 时要求输入 token。`admin.disable_dashboard` 可关闭它。
+- `admin` 的 guard：仪表盘的文件无需 token 即可获取，来自 API 自身源的 GET 或 HEAD 会被放行；决策 005 增加了 I64 的
+  更新说明。
+- 测试：`admin` 的 `TestStatus`（请求后一个在线、一个失效的后端，以及证书）、`TestDashboard`（重定向、安全头、页面
+  引用的每个文件、404 和 405、允许来自自身源的读取并拒绝其他源、拒绝来自自身源的写入）、`TestDashboardToken`（文件
+  无需 token，端点和 `/dashboard/` 下的写入需要 token）、`TestDashboardDisabled`，以及 `TestDashboardReadOnly`：读取
+  嵌入的文件，出现 GET 以外的方法、提交的表单、其他源或 `innerHTML` 即失败；`test/e2e` 的 `TestDashboard` 针对
+  `fit run`。页面在浏览器中经 ssh 隧道针对基准测试主机上的 `fit run` 目视检查过：一个在线后端和一个被健康检查移出的
+  后端、一张证书和两个版本，浅色和深色模式下每个标签页都正常渲染，控制台没有错误，并修复了一处被包在表格单元格里的
+  表头行。`admin` 和 `config` 在基准测试主机上通过竞态检测；linux、darwin、windows 和 freebsd 的 vet 与
+  staticcheck 通过。
+- 无基准测试：Admin API 属于控制面（规则 21）。
+
+与计划的差别：
+
+- 新增 `GET /status`：上游健康状态和证书原先只在 Prometheus 指标中，不应让页面去解析。
 
 ## 给后续迭代的说明
 

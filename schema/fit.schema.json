@@ -113,6 +113,10 @@
           "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out.",
           "type": "string"
         },
+        "disable_dashboard": {
+          "description": "Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false.",
+          "type": "boolean"
+        },
         "history": {
           "default": 10,
           "description": "How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0.",

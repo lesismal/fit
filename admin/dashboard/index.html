@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fit dashboard</title>
+<link rel="stylesheet" href="app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23176b5b'/%3E%3C/svg%3E">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="mark"></span>fit</div>
+  <nav id="tabs">
+    <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#routes" data-tab="routes">Routes</a>
+    <a href="#services" data-tab="services">Services</a>
+    <a href="#upstreams" data-tab="upstreams">Upstreams</a>
+    <a href="#certificates" data-tab="certificates">Certificates</a>
+    <a href="#versions" data-tab="versions">Versions</a>
+  </nav>
+  <div class="state">
+    <span id="updated"></span>
+    <label class="auto"><input type="checkbox" id="auto" checked> auto-refresh</label>
+  </div>
+</header>
+
+<main>
+  <div id="error" class="banner" hidden></div>
+
+  <form id="login" class="card login" hidden>
+    <h2>Token needed</h2>
+    <p>This Admin API asks for a bearer token. It is kept in this tab only, and sent with the dashboard's requests.</p>
+    <input type="password" id="token" autocomplete="off" placeholder="token" aria-label="token">
+    <button type="submit">Use token</button>
+  </form>
+
+  <section id="overview" class="tab">
+    <div class="tiles" id="tiles"></div>
+    <h2>Listeners</h2>
+    <table id="listeners"><thead><tr><th>Name</th><th>Address</th><th>Protocols</th></tr></thead><tbody></tbody></table>
+    <h2>Sources</h2>
+    <p class="hint">From the one that wins to the one that loses. Elements a source provided but an earlier one had already named are shadowed.</p>
+    <table id="sources"><thead><tr><th>Source</th><th>Listeners</th><th>Routes</th><th>Upstreams</th><th>Services</th></tr></thead><tbody></tbody></table>
+    <div id="shadowed"></div>
+  </section>
+
+  <section id="routes" class="tab" hidden>
+    <input type="search" class="filter" data-for="routes-table" placeholder="Filter routes" aria-label="filter routes">
+    <table id="routes-table"><thead><tr><th>Route</th><th>Listeners</th><th>Match</th><th>Middleware</th><th>Handler</th><th>Source</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="services" class="tab" hidden>
+    <table id="services-table"><thead><tr><th>Service</th><th>Listeners</th><th>Upstream</th><th>Server names</th><th>PROXY protocol</th><th>Source</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="upstreams" class="tab" hidden>
+    <input type="search" class="filter" data-for="upstreams-list" placeholder="Filter upstreams" aria-label="filter upstreams">
+    <div id="upstreams-list"></div>
+  </section>
+
+  <section id="certificates" class="tab" hidden>
+    <table id="certificates-table"><thead><tr><th>Listener</th><th>Names</th><th>Issuer</th><th>Valid from</th><th>Expires</th><th>Serial</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="versions" class="tab" hidden>
+    <table id="versions-table"><thead><tr><th>Version</th><th>Applied</th><th>Source</th><th>Size</th><th>ETag</th><th></th></tr></thead><tbody></tbody></table>
+    <div id="version-view" hidden>
+      <h2 id="version-title"></h2>
+      <pre id="version-body"></pre>
+    </div>
+  </section>
+</main>
+<footer>Read-only: this dashboard only reads the Admin API.</footer>
+<script src="app.js"></script>
+</body>
+</html>
