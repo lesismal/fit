@@ -14,4 +14,5 @@ import (
 	_ "github.com/lesismal/fit/middleware/headers"
 	_ "github.com/lesismal/fit/middleware/limit"
 	_ "github.com/lesismal/fit/middleware/rewrite"
+	_ "github.com/lesismal/fit/plugin/wasm"
 )

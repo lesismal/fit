@@ -1932,6 +1932,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "wasm"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.middleware.wasm"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -1950,7 +1966,8 @@
             "jwt",
             "rate_limit",
             "redirect",
-            "rewrite"
+            "rewrite",
+            "wasm"
           ],
           "type": "string"
         },
@@ -2407,6 +2424,61 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "http.middleware.wasm": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "description": "A string the plugin reads, for settings of its own.",
+          "type": "string"
+        },
+        "instances": {
+          "description": "How many instances of the plugin run calls at once, each with its own memory: the CPUs fit has, at most 16, when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_memory": {
+          "default": 134217728,
+          "description": "The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "on_error": {
+          "default": "fail",
+          "description": "What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out.",
+          "enum": [
+            "fail",
+            "skip"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "description": "The plugin: a WebAssembly module that exports fit_on_request, as a WASI reactor; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
+          "type": "string"
+        },
+        "queue": {
+          "default": 1024,
+          "description": "How many requests may wait for an instance; past it a request is answered 503. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "100ms",
+          "description": "How long a call may run; past it the call is stopped and its instance replaced, and the request goes as a failure does (on_error). 100ms when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "wait_timeout": {
+          "default": "1s",
+          "description": "How long a request may wait for an instance; past it it is answered 503. 1s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
       "type": "object"
     },
     "proxy.Mirror": {

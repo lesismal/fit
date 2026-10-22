@@ -166,6 +166,10 @@ var notCovered = map[string]string{
 	// TestConnectProxyDoesNotWait checks that its handler returns while
 	// the dial is under way.
 	"forward_proxy": "fib's TestConnectProxyDoesNotWait",
+	// A plugin is built for the test with the go command:
+	// plugin/wasm's TestNeverBlocks checks that the call runs on the
+	// module's pool and ServeHTTP returns at once.
+	"wasm": "plugin/wasm's TestNeverBlocks",
 }
 
 // handlerOf compiles a config of c's route and returns its handler.
