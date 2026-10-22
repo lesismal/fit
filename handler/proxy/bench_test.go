@@ -158,6 +158,21 @@ func BenchmarkOutgoing(b *testing.B) {
 			}
 		})
 	}
+	// A form posted whole, whose body goes up from where it is.
+	b.Run("post", func(b *testing.B) {
+		sr := &fibhttp.StreamRequest{}
+		sr.Request = *httptest.NewRequest(stdhttp.MethodPost, "http://example.com/form", nil)
+		sr.Request.RemoteAddr = "192.0.2.10:54321"
+		sr.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		c := sr.Context(nil, nil, []byte("name=fit&lang=go"))
+		x := &exchange{}
+		b.ReportAllocs()
+		for b.Loop() {
+			if !p.outgoing(c, x) || x.base.Body == nil {
+				b.Fatal("refused")
+			}
+		}
+	})
 }
 
 // TestOutgoingTraceparent checks what the upstream is told of the trace: a
