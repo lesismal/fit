@@ -199,6 +199,9 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	if !sameACME(cs.first.ACME, c.ACME) {
 		r.Warnings = append(r.Warnings, "acme changed; the change takes effect when fit restarts")
 	}
+	if !sameProviders(cs.first.Providers, c.Providers) {
+		r.Warnings = append(r.Warnings, "providers changed; the change takes effect when fit restarts")
+	}
 	return r, nil
 }
 
@@ -406,6 +409,12 @@ func sameAccessLog(a, b *config.AccessLog) bool {
 		return a == b
 	}
 	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
+}
+
+func sameProviders(a, b []config.Provider) bool {
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	return bytes.Equal(ja, jb)
 }
 
 func sameACME(a, b *config.ACME) bool {

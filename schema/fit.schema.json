@@ -205,6 +205,52 @@
       ],
       "type": "object"
     },
+    "config.DockerProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "default": "unix:///var/run/docker.sock",
+          "description": "Where the Docker daemon's API is: unix:// and a socket's path, or tcp:// and a host and port, as of a socket proxy, in plain HTTP. unix:///var/run/docker.sock when left out.",
+          "type": "string"
+        },
+        "expose_all": {
+          "description": "Take every running container with routes or services in its labels; only those labelled <label_prefix>.enable=true when left out or false. A container labelled <label_prefix>.enable=false is never taken.",
+          "type": "boolean"
+        },
+        "label_prefix": {
+          "default": "fit",
+          "description": "What the labels read start with, as in fit.routes.web.host. fit when left out.",
+          "type": "string"
+        },
+        "max_containers": {
+          "default": 1000,
+          "description": "The most containers taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "network": {
+          "description": "The Docker network whose address of a container's is used, when the container is on several and has no <label_prefix>.network label; the first by name when left out.",
+          "type": "string"
+        },
+        "refresh_interval": {
+          "default": "30s",
+          "description": "How often the containers are listed again whether or not an event came, in case one was missed. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long listing the containers may take, connecting included. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "use_published_ports": {
+          "description": "Send to the port a container's port is published on, on the host, rather than to the container's own address: for a fit outside Docker that cannot reach containers' addresses, as on Docker Desktop.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "config.ForwardProxy": {
       "additionalProperties": false,
       "properties": {
@@ -515,6 +561,20 @@
       "required": [
         "ask"
       ],
+      "type": "object"
+    },
+    "config.Provider": {
+      "additionalProperties": false,
+      "properties": {
+        "docker": {
+          "$ref": "#/$defs/config.DockerProvider",
+          "description": "Routes, upstreams and services from the labels of running Docker containers."
+        },
+        "name": {
+          "description": "The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "config.ProxyProtocol": {
@@ -1862,6 +1922,13 @@
     "metrics": {
       "$ref": "#/$defs/config.Metrics",
       "description": "Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."
+    },
+    "providers": {
+      "description": "Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts.",
+      "items": {
+        "$ref": "#/$defs/config.Provider"
+      },
+      "type": "array"
     },
     "routes": {
       "description": "How requests are matched, and what handles them.",

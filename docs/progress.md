@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-22 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56 done) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: under way (I56–I57 done) |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261021175136-4f1c3e9c13c9` (fib's `main` at `4f1c3e9`, which is `c3e27ed` with A36 and A37; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b |
-| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | M4, platform integration: the providers themselves (Docker, Kubernetes, Consul, etcd), the dashboard, OpenTelemetry (I57–I66) |
+| What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the benchmark harness runs nginx, Caddy, Traefik and fit |
+| What does not | M4, platform integration: Kubernetes, Consul and etcd providers, the dashboard, OpenTelemetry (I58–I66) |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **M4 has begun: I56, the provider framework
-and the effective config, is done. Next, I57 (Docker provider).**
+and the effective config, and I57, the Docker provider, are done. Next, I58 (Kubernetes Gateway API I: HTTPRoute).**
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -58,7 +58,7 @@ before I24 and I32.
 
 To continue, start a session with:
 
-> Implement iteration I57 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
+> Implement iteration I58 from docs/dev-plan.md. Read docs/progress.md, docs/rules.md, the index
 > and that iteration's section in docs/dev-plan.md, and the design principles in docs/roadmap.md;
 > then only the packages it lists. Keep the change within the iteration's scope, add tests, and when
 > done mark it done in both dev-plan files and record it in both progress files.
@@ -67,9 +67,9 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file), `validate`, `schema`, `version`, `hash-password`, `help` |
+| `cmd/fit` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file, and the config's providers), `validate`, `schema`, `version`, `hash-password`, `help` |
 | `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}`, `GET /metrics`, which `WriteMetrics` writes; `AddProvider` and `Provide`, which merge providers' parts into the base config on every apply; `GET /config/effective` |
-| `config` | the native config types; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
+| `config` | the native config types, `providers` among them; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
 | `handler/forward` | the `forward_proxy` handler: CONNECT over HTTP/1.1, HTTP/2 and HTTP/3, fib's `ConnectProxy` with `l4.Rules` |
@@ -87,6 +87,7 @@ To continue, start a session with:
 | `l4` | layer 4: `Service`, which proxies a tcp listener's connections to an address of its upstream, dialed through fib's engine, each side's data sent on from its callback, its reads held while the other side has 64 KB unsent; idle timeout, `max_conns`, drained with its graph; `Clients`, the listener handler's callbacks once a service has a connection; `Entry`, a listener's services by SNI, handing a TLS connection no service names to the listener's own TLS when it has one (`HandOff`); `Rules`, who may use a forward proxy and where to, a host name decided by the address it resolves to once connected; `NewSOCKS`, fib's SOCKS server with them |
 | `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider` | `Provider`, a source of config that sends parts; `Run`, which runs providers and applies their latest parts one at a time; `Parse` and `Merge`, which merge parts into the base config by decision 009's rules, recording each element's source and what was shadowed, and map errors back to where they were written |
+| `provider/docker` | the Docker provider: the Engine API over plain HTTP (events, then the containers listed), container labels turned into upstreams, routes and services, replicas sharing an upstream |
 | `provider/file` | `Watcher`, which polls the config file and applies it once it has stopped changing and its contents differ from what was applied last |
 | `observe` | the access log: one JSON line per request, buffered in shards with a lock each and written by a goroutine of its own, dropping lines rather than blocking; `Track` and `EntryOf` for a request's entry; metrics: `Histogram`, `RequestMetrics` per listener and route, sharded atomic counters, kept in `Metrics` while a graph uses them, and `TextWriter` for Prometheus's text format |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
@@ -3009,6 +3010,61 @@ Differences from the plan:
 
 - Providers' names are not namespaced (Traefik's `name@provider`): references to them sit inside
   module params, which fit does not interpret; a name taken earlier shadows instead (decision 009).
+
+### I57 Docker provider — done
+
+- `config`: `providers`, a list in order of precedence, each of one kind with an optional name
+  (its kind by default; lower-case, unique, not a base config source's). `docker` has `endpoint`
+  (`unix:///var/run/docker.sock`, or `tcp://host:port` for a socket proxy), `expose_all` (off:
+  only containers labelled `<prefix>.enable=true`), `network`, `use_published_ports` (for a fit
+  outside Docker that cannot reach containers' addresses), `label_prefix` (`fit`),
+  `max_containers` (1000), `refresh_interval` (30s) and `request_timeout` (10s). Read at start; a
+  change to them is a restart warning, as `admin` and `acme` are.
+- `provider/docker` (new): the Engine API over plain `net/http` with unversioned paths (decision
+  [010](decisions/010-docker-api-over-http.md)): `GET /events` filtered to containers, then `GET
+  /containers/json` (with a label filter unless `expose_all`), again 200ms after events (exec
+  events, which health checks make, are passed over) and every `refresh_interval`, when the part is
+  sent even unchanged, so that one refused because of the rest of the config is tried again. A
+  lost stream or a failing daemon is reported and tried again 1s to 30s apart, and the last part
+  stays meanwhile. Bounded: the list at most 16 MiB within `request_timeout`, an event line 1 MiB,
+  `max_containers` containers. Labels: `fit.enable`, `fit.name` (the upstream's name; the Compose
+  project and service as `<project>-<service>`, else the container's name), `fit.port` (else the
+  only TCP port), `fit.network`, `fit.upstream` (a JSON object of more upstream settings), routes
+  as `fit.routes.<r>.{host,path,path_regexp,method,expr,priority,listeners,middleware,handler}`
+  (named `<name>.<r>`, proxying to the upstream unless `handler` says otherwise) and layer 4
+  services as `fit.services.<s>.{listeners,port,server_names,proxy_protocol}`. Replicas, the
+  containers of one name, share an upstream; containers unhealthy or starting their health check
+  wait. A container whose labels are wrong is left out and reported once, with why; the part is the
+  same bytes for the same containers.
+- `cmd/fit`: `fit run` adds the config's providers to `admin.Configs` in their order and runs them
+  with `provider.Run`, printing `fit: provider <name> watching Docker at <endpoint>`, each part
+  applied as `fit: applied what provider <name> provides (config version N)`, and a refused part
+  once, with its errors where the provider wrote them, until one applies. They stop before
+  shutdown, with the file watcher. Under `-prefork` each child runs its own.
+- Tests: `config` (a provider of no kind, two of one name, a base source's name, a bad name,
+  endpoints, a label prefix); `provider/docker` `TestTranslate` (Compose replicas in one upstream,
+  a named container with a chosen port, a handler, middleware and a service on its own port,
+  containers not enabled, enabled false, unhealthy or starting left out, and nine kinds of wrong
+  labels reported; order does not change the part), `TestTranslateOptions` (`expose_all` under
+  another prefix, the host's network, two networks, `network`, `use_published_ports`,
+  `max_containers`), `TestProvider` against a fake daemon on a Unix socket (start and stop events,
+  exec events listing nothing, three events one listing, the stream lost and found again, a
+  daemon answering 500 and coming back), `TestProviderRefresh`, `TestProviderNoDaemon`,
+  `TestReadEvents`; `test/e2e` `TestDockerProvider` runs `fit run` with the provider against the
+  real daemon: one replica served, a second added to its upstream, the first stopped and dropped,
+  the route gone with the last, and `/config/effective` showing the source. They, `config`,
+  `schema` (regenerated), `provider/...`, `admin`, `cmd/fit` and all of `test/e2e` pass under the
+  race detector on the benchmark host, from a worktree of HEAD with this change; vet for linux,
+  darwin and windows and staticcheck pass.
+- No benchmark: control plane only (rule 21).
+
+Differences from the plan:
+
+- The e2e test uses `docker compose` where it is installed, as on CI's runners, and otherwise
+  `docker run` with the labels Compose sets, which is all the provider sees of Compose. The
+  benchmark host has no Compose (installing it there was declined), so there it ran with `docker
+  run`; CI runs it with Compose. It skips without a Docker daemon, off Linux (containers'
+  addresses are not reachable from a macOS host), and with `FIT_E2E_DOCKER=0`.
 
 ## Notes for later iterations
 

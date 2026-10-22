@@ -449,6 +449,41 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:63: metrics: the Admin API serves metrics: set admin too`},
 		},
 		{
+			name: "a provider of no kind",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{}]}`,
+			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker"},
+		},
+		{
+			name: "two providers of one name",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {}}, {"docker": {"endpoint": "tcp://127.0.0.1:2375"}}]}`,
+			want: []string{"1:82: providers[1].name: another provider is already named \"docker\": give one a name"},
+		},
+		{
+			name: "a provider named as a base source",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"name": "file", "docker": {}}]}`,
+			want: []string{"1:75: providers[0].name: \"file\" names a source of the base config: pick another name"},
+		},
+		{
+			name: "a provider name",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"name": "Bad", "docker": {}}]}`,
+			want: []string{"1:75: providers[0].name: \"Bad\" is not a valid name: use lower-case letters, digits, '_', '.' and '-', starting with a letter or digit, at most 63"},
+		},
+		{
+			name: "a docker endpoint",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {"endpoint": "http://x"}}]}`,
+			want: []string{"1:90: providers[0].docker.endpoint: \"http://x\" is neither unix://<path> nor tcp://<host>:<port>"},
+		},
+		{
+			name: "a docker tcp endpoint",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {"endpoint": "tcp://nohost"}}]}`,
+			want: []string{"1:90: providers[0].docker.endpoint: \"tcp://nohost\" has no host and port"},
+		},
+		{
+			name: "a docker label prefix",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {"label_prefix": "-x"}}]}`,
+			want: []string{"1:94: providers[0].docker.label_prefix: \"-x\" is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit"},
+		},
+		{
 			name: "admin limits",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"history": -1}}`,
 			want: []string{`1:73: admin.history: -1 is less than the minimum 0`},

@@ -144,6 +144,15 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		}
 		fmt.Fprintf(stdout, "fit: admin API on %s\n", as.Addr())
 	}
+	stopProviders, err := startProviders(c, configs, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "fit run: %v\n", err)
+		if as != nil {
+			_ = as.Shutdown(context.Background())
+		}
+		_ = s.Close()
+		return 1
+	}
 
 	var watcher *file.Watcher
 	stopWatch := func() {}
@@ -212,6 +221,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	stopSignals()
 	// No config is applied while the server shuts down.
 	stopWatch()
+	stopProviders()
 	stopCertWatch()
 	fmt.Fprintln(stdout, "fit: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), *grace)

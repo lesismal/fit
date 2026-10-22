@@ -265,6 +265,7 @@ func (c *Config) Validate() Errors {
 			}
 		}
 	}
+	checkProviders(c.Providers, add)
 	if m := c.Metrics; m != nil && c.Admin == nil {
 		add(m.At, "the Admin API serves metrics: set admin too")
 	}
