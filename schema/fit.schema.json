@@ -380,6 +380,10 @@
           ],
           "type": "string"
         },
+        "certificates_dir": {
+          "description": "The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out.",
+          "type": "string"
+        },
         "context": {
           "description": "The kubeconfig's context to use; its current-context when left out.",
           "type": "string"
@@ -404,7 +408,7 @@
           "type": "integer"
         },
         "namespaces": {
-          "description": "The namespaces whose Gateways and HTTPRoutes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide.",
+          "description": "The namespaces whose Gateways and routes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide, Secrets of type kubernetes.io/tls among them, and to patch the status of GatewayClasses, Gateways and routes.",
           "items": {
             "type": "string"
           },
@@ -623,7 +627,7 @@
         },
         "kubernetes": {
           "$ref": "#/$defs/config.KubernetesProvider",
-          "description": "Listeners, routes and upstreams from a Kubernetes cluster's Gateway API resources: the Gateways of the GatewayClasses whose controllerName is fit's, and their HTTPRoutes."
+          "description": "Listeners, routes, services and upstreams from a Kubernetes cluster's Gateway API resources: the Gateways of the GatewayClasses whose controllerName is fit's, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, whose status fit writes back."
         },
         "name": {
           "description": "The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out.",

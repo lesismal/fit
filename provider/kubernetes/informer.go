@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -23,6 +24,11 @@ var (
 type kind struct {
 	name string // the resource's plural, for messages
 	path string // its path on the API server, across namespaces
+	// older are paths of the kind's other versions, tried in turn when the
+	// API server does not serve path.
+	older []string
+	// query narrows what is listed and watched, as a field selector.
+	query url.Values
 	// decode decodes an object, returning its store key and resource
 	// version.
 	decode func(data []byte) (obj any, m *meta, err error)
@@ -38,15 +44,37 @@ func kindOf[T any](name, path string, metaOf func(*T) *meta) kind {
 	}}
 }
 
-// The kinds the provider watches.
+func (k kind) or(older ...string) kind {
+	k.older = older
+	return k
+}
+
+func (k kind) where(selector string) kind {
+	k.query = url.Values{"fieldSelector": {selector}}
+	return k
+}
+
+const gatewayAPI = "/apis/gateway.networking.k8s.io/"
+
+// The kinds the provider watches. TLSRoutes, TCPRoutes and UDPRoutes are
+// in the Gateway API's experimental channel, at v1alpha2 so far.
 var (
 	kindNamespaces = kindOf("namespaces", "/api/v1/namespaces", func(o *Namespace) *meta { return &o.Metadata })
-	kindClasses    = kindOf("gatewayclasses", "/apis/gateway.networking.k8s.io/v1/gatewayclasses", func(o *GatewayClass) *meta { return &o.Metadata })
-	kindGateways   = kindOf("gateways", "/apis/gateway.networking.k8s.io/v1/gateways", func(o *Gateway) *meta { return &o.Metadata })
-	kindRoutes     = kindOf("httproutes", "/apis/gateway.networking.k8s.io/v1/httproutes", func(o *HTTPRoute) *meta { return &o.Metadata })
-	kindGrants     = kindOf("referencegrants", "/apis/gateway.networking.k8s.io/v1beta1/referencegrants", func(o *ReferenceGrant) *meta { return &o.Metadata })
-	kindServices   = kindOf("services", "/api/v1/services", func(o *Service) *meta { return &o.Metadata })
-	kindSlices     = kindOf("endpointslices", "/apis/discovery.k8s.io/v1/endpointslices", func(o *EndpointSlice) *meta { return &o.Metadata })
+	kindClasses    = kindOf("gatewayclasses", gatewayAPI+"v1/gatewayclasses", func(o *GatewayClass) *meta { return &o.Metadata })
+	kindGateways   = kindOf("gateways", gatewayAPI+"v1/gateways", func(o *Gateway) *meta { return &o.Metadata })
+	kindRoutes     = kindOf("httproutes", gatewayAPI+"v1/httproutes", func(o *HTTPRoute) *meta { return &o.Metadata })
+	kindGRPCRoutes = kindOf("grpcroutes", gatewayAPI+"v1/grpcroutes", func(o *GRPCRoute) *meta { return &o.Metadata })
+	kindTLSRoutes  = kindOf("tlsroutes", gatewayAPI+"v1/tlsroutes", func(o *L4Route) *meta { return &o.Metadata }).
+			or(gatewayAPI+"v1alpha3/tlsroutes", gatewayAPI+"v1alpha2/tlsroutes")
+	kindTCPRoutes = kindOf("tcproutes", gatewayAPI+"v1alpha2/tcproutes", func(o *L4Route) *meta { return &o.Metadata })
+	kindUDPRoutes = kindOf("udproutes", gatewayAPI+"v1alpha2/udproutes", func(o *L4Route) *meta { return &o.Metadata })
+	kindGrants    = kindOf("referencegrants", gatewayAPI+"v1beta1/referencegrants", func(o *ReferenceGrant) *meta { return &o.Metadata }).
+			or(gatewayAPI + "v1/referencegrants")
+	kindServices = kindOf("services", "/api/v1/services", func(o *Service) *meta { return &o.Metadata })
+	kindSlices   = kindOf("endpointslices", "/apis/discovery.k8s.io/v1/endpointslices", func(o *EndpointSlice) *meta { return &o.Metadata })
+	// Only the Secrets of TLS certificates, which HTTPS listeners name.
+	kindSecrets = kindOf("secrets", "/api/v1/secrets", func(o *Secret) *meta { return &o.Metadata }).
+			where("type=kubernetes.io/tls")
 )
 
 // informer keeps the objects of one kind as the API server has them: it
@@ -62,6 +90,9 @@ type informer struct {
 	mu     sync.Mutex
 	objs   map[string]any
 	synced bool // a list has been taken, or the kind is not installed
+	// at is the path of the version the API server serves: path, or one of
+	// older.
+	at string
 
 	// What was reported, so that it is reported once: the kind missing,
 	// and objects left out past max.
@@ -69,7 +100,14 @@ type informer struct {
 }
 
 func newInformer(k kind, c *client, max int, changed chan<- struct{}, logf func(string, ...any)) *informer {
-	return &informer{kind: k, c: c, max: max, changed: changed, logf: logf, objs: map[string]any{}}
+	return &informer{kind: k, c: c, max: max, changed: changed, logf: logf, objs: map[string]any{}, at: k.path}
+}
+
+// served returns the path of the kind's version the API server serves.
+func (in *informer) served() string {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.at
 }
 
 func (in *informer) signal() {
@@ -158,9 +196,22 @@ func (in *informer) run(ctx context.Context) {
 	}
 }
 
-// list lists the kind and replaces the store with it.
+// list lists the kind, at the first of its versions the API server
+// serves, and replaces the store with it.
 func (in *informer) list(ctx context.Context) (string, error) {
-	items, rv, truncated, err := in.c.list(ctx, in.path, in.max)
+	var items []json.RawMessage
+	var rv string
+	var truncated bool
+	var err error
+	for _, path := range append([]string{in.path}, in.older...) {
+		items, rv, truncated, err = in.c.list(ctx, path, in.query, in.max)
+		if !errors.Is(err, errNotFound) {
+			in.mu.Lock()
+			in.at = path
+			in.mu.Unlock()
+			break
+		}
+	}
 	if err != nil {
 		return "", err
 	}
@@ -200,7 +251,7 @@ func (in *informer) reportFull(full bool) {
 func (in *informer) watch(ctx context.Context, rv string) (string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	body, err := in.c.watch(ctx, in.path, rv)
+	body, err := in.c.watch(ctx, in.served(), in.query, rv)
 	if err != nil {
 		return rv, err
 	}

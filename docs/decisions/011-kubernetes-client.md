@@ -41,6 +41,10 @@ events.
 ## Consequences
 
 - One new dependency, `go.yaml.in/yaml/v3`.
-- Status written back to resources (I59) uses the same client, with `PATCH` on the status
-  subresource.
+- Status written back to resources (I59) uses the same client: a JSON merge patch of the status
+  subresource that names the resource version it was made from, so that a write from an older
+  object is refused (409) rather than overwriting a newer one.
 - A kind the provider needs later is a type of its own and a line in the list of what it watches.
+  A kind may name older versions to fall back to, listed in turn while the server answers 404
+  (I59's TLSRoutes: v1, v1alpha3, v1alpha2), and a field selector (I59's Secrets, of type
+  `kubernetes.io/tls` only, so that other Secrets are neither read nor kept).

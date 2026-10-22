@@ -31,5 +31,8 @@ Go 类型。另一种做法是 fit 自己的客户端：API server 的 REST API 
 ## 影响
 
 - 新增一个依赖：`go.yaml.in/yaml/v3`。
-- 回写资源状态（I59）使用同一个客户端，对 status 子资源发 `PATCH`。
-- 以后需要的资源种类，只需一个自己的类型，并在监视列表中加一行。
+- 回写资源状态（I59）使用同一个客户端：对 status 子资源发 JSON merge patch，并写明它基于的 resourceVersion，
+  这样基于旧对象的写入会被拒绝（409），而不会覆盖更新的对象。
+- 以后需要的资源种类，只需一个自己的类型，并在监视列表中加一行。资源种类可以写明服务器回答 404 时依次退回的旧版本
+  （I59 的 TLSRoute：v1、v1alpha3、v1alpha2），以及 field selector（I59 的 Secret 只取类型为 `kubernetes.io/tls`
+  的，其他 Secret 既不读取也不保存）。

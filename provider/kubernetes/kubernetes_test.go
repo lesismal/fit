@@ -33,13 +33,16 @@ type apiServer struct {
 	watchers map[string][]chan string
 	lists    map[string]int
 	watches  map[string]int
+	patches  map[string]int // status patches by collection
+	// conflicts is how many status patches are yet to be refused with 409.
+	conflicts int
 }
 
 const testToken = "test-token"
 
 func newAPIServer(t *testing.T) *apiServer {
 	a := &apiServer{t: t, objs: map[string]map[string]json.RawMessage{}, missing: map[string]bool{},
-		watchers: map[string][]chan string{}, lists: map[string]int{}, watches: map[string]int{}}
+		watchers: map[string][]chan string{}, lists: map[string]int{}, watches: map[string]int{}, patches: map[string]int{}}
 	a.srv = httptest.NewTLSServer(http.HandlerFunc(a.serve))
 	t.Cleanup(a.srv.Close)
 	return a
@@ -51,6 +54,10 @@ func (a *apiServer) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
+	if r.Method == http.MethodPatch {
+		a.patch(w, r)
+		return
+	}
 	a.mu.Lock()
 	if a.missing[path] {
 		a.mu.Unlock()
@@ -112,15 +119,22 @@ func (a *apiServer) del(path, doc string) {
 func (a *apiServer) event(path, doc string, deleted bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.rv++
 	var o map[string]any
 	if err := json.Unmarshal([]byte(doc), &o); err != nil {
 		a.t.Fatalf("%v: %s", err, doc)
 	}
+	a.store(path, o, deleted)
+}
+
+// store stores o at path, or deletes it, with a new resource version, and
+// tells the watches; a.mu is held.
+func (a *apiServer) store(path string, o map[string]any, deleted bool) {
+	a.rv++
 	m := o["metadata"].(map[string]any)
 	m["resourceVersion"] = strconv.Itoa(a.rv)
 	data, _ := json.Marshal(o)
-	key := fmt.Sprint(m["namespace"]) + "/" + fmt.Sprint(m["name"])
+	ns, _ := m["namespace"].(string)
+	key := ns + "/" + fmt.Sprint(m["name"])
 	if a.objs[path] == nil {
 		a.objs[path] = map[string]json.RawMessage{}
 	}
@@ -139,6 +153,76 @@ func (a *apiServer) event(path, doc string, deleted bool) {
 	for _, ch := range a.watchers[path] {
 		ch <- string(e)
 	}
+}
+
+// patch applies a JSON merge patch to an object's status, as the API
+// server does: refused with 409 when the patch names another resource
+// version than the object's.
+func (a *apiServer) patch(w http.ResponseWriter, r *http.Request) {
+	path, ok := strings.CutSuffix(r.URL.Path, "/status")
+	if !ok || r.Header.Get("Content-Type") != "application/merge-patch+json" {
+		http.Error(w, `{"kind":"Status","code":400}`, http.StatusBadRequest)
+		return
+	}
+	coll, ns, name := path[:strings.LastIndex(path, "/")], "", path[strings.LastIndex(path, "/")+1:]
+	if before, rest, found := strings.Cut(coll, "/namespaces/"); found {
+		ns, rest, _ = strings.Cut(rest, "/")
+		coll = before + "/" + rest
+	}
+	var p struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+		Status map[string]any `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, `{"kind":"Status","code":400}`, http.StatusBadRequest)
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.patches[coll]++
+	data, ok := a.objs[coll][ns+"/"+name]
+	if !ok {
+		http.Error(w, `{"kind":"Status","code":404}`, http.StatusNotFound)
+		return
+	}
+	var o map[string]any
+	_ = json.Unmarshal(data, &o)
+	if rv := o["metadata"].(map[string]any)["resourceVersion"]; a.conflicts > 0 || p.Metadata.ResourceVersion != rv {
+		a.conflicts = max(a.conflicts-1, 0)
+		http.Error(w, `{"kind":"Status","code":409,"message":"the object has been modified"}`, http.StatusConflict)
+		return
+	}
+	status, _ := o["status"].(map[string]any)
+	if status == nil {
+		status = map[string]any{}
+	}
+	for k, v := range p.Status {
+		if v == nil {
+			delete(status, k)
+		} else {
+			status[k] = v
+		}
+	}
+	o["status"] = status
+	a.store(coll, o, false)
+	_ = json.NewEncoder(w).Encode(o)
+}
+
+// object returns the object at path of namespace ns and name, decoded.
+func (a *apiServer) object(path, ns, name string) map[string]any {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var o map[string]any
+	_ = json.Unmarshal(a.objs[path][ns+"/"+name], &o)
+	return o
+}
+
+func (a *apiServer) patchCount(path string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.patches[path]
 }
 
 // send sends raw events to the watches of path.
@@ -237,6 +321,7 @@ func TestProvider(t *testing.T) {
 	shorten(t)
 	a := newAPIServer(t)
 	a.missing[kindGrants.path] = true
+	a.missing[kindGrants.older[0]] = true
 	a.put(kindClasses.path, `{"metadata": {"name": "fit"}, "spec": {"controllerName": "lesismal.github.io/fit"}}`)
 	a.put(kindGateways.path, `{"metadata": {"namespace": "default", "name": "gw"}, "spec": {"gatewayClassName": "fit", "listeners": [{"name": "http", "port": 8000, "protocol": "HTTP"}]}}`)
 	a.put(kindServices.path, `{"metadata": {"namespace": "default", "name": "web"}, "spec": {"ports": [{"port": 80}]}}`)
@@ -356,7 +441,7 @@ func TestProviderUnauthorized(t *testing.T) {
 		mu.Lock()
 		tries := n
 		mu.Unlock()
-		if tries >= 14 { // twice for each of the seven kinds
+		if tries >= 2*len(watchedKinds) { // twice for each kind
 			break
 		}
 		if time.Now().After(deadline) {
@@ -479,4 +564,161 @@ func TestTokenRotates(t *testing.T) {
 	if got, err := tk.get(); got != "two" || err != nil {
 		t.Errorf("with the file gone: %q %v", got, err)
 	}
+}
+
+// waitFor fails t unless ok holds within 10s.
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: not within 10s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// condition returns the status and reason of the condition of type typ in
+// conds, a status's conditions decoded.
+func condition(conds any, typ string) string {
+	list, _ := conds.([]any)
+	for _, c := range list {
+		if m := c.(map[string]any); m["type"] == typ {
+			return fmt.Sprint(m["status"], " ", m["reason"])
+		}
+	}
+	return ""
+}
+
+// TestProviderStatus runs the provider against the fake API server and
+// follows what it writes back: the statuses of the class, the Gateway and
+// its listeners, and routes, written once and then left; a write refused
+// made again; a TLSRoute at the version the server has; and an HTTPS
+// listener's certificate written to a file, and removed with its Secret.
+func TestProviderStatus(t *testing.T) {
+	shorten(t)
+	r := resync
+	resync = 200 * time.Millisecond
+	t.Cleanup(func() { resync = r })
+	a := newAPIServer(t)
+	a.missing[kindTLSRoutes.path] = true
+	a.missing[kindTLSRoutes.older[0]] = true
+	tlsPath := kindTLSRoutes.older[1]
+	crt, key := testCert(t, "a.example.com")
+	a.put(kindSecrets.path, secretDoc("default", "a", crt, key))
+	a.put(kindClasses.path, `{"metadata": {"name": "fit"}, "spec": {"controllerName": "lesismal.github.io/fit"}}`)
+	a.put(kindGateways.path, `{"metadata": {"namespace": "default", "name": "gw", "generation": 1}, "spec": {"gatewayClassName": "fit", "listeners": [
+  {"name": "http", "port": 8000, "protocol": "HTTP"},
+  {"name": "https", "port": 8443, "protocol": "HTTPS", "tls": {"certificateRefs": [{"name": "a"}]}},
+  {"name": "pass", "port": 9443, "protocol": "TLS", "tls": {"mode": "Passthrough"}}]}}`)
+	a.put(kindServices.path, `{"metadata": {"namespace": "default", "name": "web"}, "spec": {"ports": [{"port": 80}]}}`)
+	a.put(kindSlices.path, `{"metadata": {"namespace": "default", "name": "web-1", "labels": {"kubernetes.io/service-name": "web"}},
+  "endpoints": [{"addresses": ["10.1.0.1"]}], "ports": [{"port": 8080}]}`)
+	a.put(kindRoutes.path, `{"metadata": {"namespace": "default", "name": "r", "generation": 1}, "spec": {"parentRefs": [{"name": "gw", "sectionName": "http"}],
+  "rules": [{"backendRefs": [{"name": "web", "port": 80}]}]}}`)
+	a.put(tlsPath, `{"metadata": {"namespace": "default", "name": "db", "generation": 1}, "spec": {"parentRefs": [{"name": "gw"}],
+  "rules": [{"backendRefs": [{"name": "web", "port": 80}]}]}}`)
+
+	dir := filepath.Join(t.TempDir(), "certs")
+	var mu sync.Mutex
+	var last []byte
+	p := New("k8s", &config.KubernetesProvider{Kubeconfig: a.kubeconfig(t), CertificatesDir: dir}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.Run(ctx, func(data []byte) {
+			mu.Lock()
+			last = data
+			mu.Unlock()
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	current := func() part {
+		mu.Lock()
+		defer mu.Unlock()
+		var out part
+		_ = json.Unmarshal(last, &out)
+		return out
+	}
+
+	routeStatus := func(path, name string) string {
+		st, _ := a.object(path, "default", name)["status"].(map[string]any)
+		parents, _ := st["parents"].([]any)
+		if len(parents) != 1 {
+			return ""
+		}
+		c := parents[0].(map[string]any)["conditions"]
+		return condition(c, "Accepted") + ", " + condition(c, "ResolvedRefs")
+	}
+	waitFor(t, "the statuses", func() bool {
+		gs, _ := a.object(kindGateways.path, "default", "gw")["status"].(map[string]any)
+		cs, _ := a.object(kindClasses.path, "", "fit")["status"].(map[string]any)
+		return condition(gs["conditions"], "Programmed") == "True Programmed" && condition(cs["conditions"], "Accepted") == "True Accepted" &&
+			routeStatus(kindRoutes.path, "r") == "True Accepted, True ResolvedRefs" && routeStatus(tlsPath, "db") == "True Accepted, True ResolvedRefs"
+	})
+	gs := a.object(kindGateways.path, "default", "gw")["status"].(map[string]any)
+	for _, l := range gs["listeners"].([]any) {
+		l := l.(map[string]any)
+		want := map[string]string{
+			"http":  `1 [{"group":"gateway.networking.k8s.io","kind":"HTTPRoute"},{"group":"gateway.networking.k8s.io","kind":"GRPCRoute"}]`,
+			"https": `0 [{"group":"gateway.networking.k8s.io","kind":"HTTPRoute"},{"group":"gateway.networking.k8s.io","kind":"GRPCRoute"}]`,
+			"pass":  `1 [{"group":"gateway.networking.k8s.io","kind":"TLSRoute"}]`,
+		}[l["name"].(string)]
+		if got := fmt.Sprint(l["attachedRoutes"], " ", toJSON(l["supportedKinds"])); got != want {
+			t.Errorf("listener %s: %s, want %s", l["name"], got, want)
+		}
+	}
+
+	// The certificate is in a file of its own, which the part names.
+	files, _ := filepath.Glob(filepath.Join(dir, "default.a.*.pem"))
+	if len(files) != 1 {
+		t.Fatalf("certificate files: %v", files)
+	}
+	if data, err := os.ReadFile(files[0]); err != nil || string(data) != string(crt)+"\n"+string(key) {
+		t.Errorf("%s: %v", files[0], err)
+	}
+	if fi, err := os.Stat(files[0]); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("%s: %v", files[0], fi.Mode())
+	}
+	waitFor(t, "the HTTPS listener", func() bool {
+		ls := current().Listeners
+		return len(ls) == 3 && ls[1].TLS != nil && ls[1].TLS.Certificates[0].CertFile == files[0]
+	})
+
+	// Written once: resyncs and the watches of what was written write
+	// nothing more.
+	count := func() int {
+		return a.patchCount(kindClasses.path) + a.patchCount(kindGateways.path) + a.patchCount(kindRoutes.path) + a.patchCount(tlsPath)
+	}
+	before := count()
+	time.Sleep(3 * resync)
+	if n := count(); n != before {
+		t.Fatalf("%d more status writes with nothing changed", n-before)
+	}
+
+	// A write refused is made again: the next resync finds the status
+	// still to write.
+	a.mu.Lock()
+	a.conflicts = 1
+	a.mu.Unlock()
+	a.put(kindRoutes.path, `{"metadata": {"namespace": "default", "name": "r", "generation": 2}, "spec": {"parentRefs": [{"name": "gw", "sectionName": "http"}],
+  "rules": [{"backendRefs": [{"name": "gone", "port": 80}]}]}}`)
+	waitFor(t, "the route's status after a refused write", func() bool {
+		return routeStatus(kindRoutes.path, "r") == "True Accepted, False BackendNotFound"
+	})
+
+	// The Secret gone: the listener is not served, and its file goes.
+	a.del(kindSecrets.path, secretDoc("default", "a", crt, key))
+	waitFor(t, "the certificate file removed", func() bool {
+		_, err := os.Stat(files[0])
+		return os.IsNotExist(err)
+	})
+	waitFor(t, "the HTTPS listener's status", func() bool {
+		gs, _ := a.object(kindGateways.path, "default", "gw")["status"].(map[string]any)
+		return strings.Contains(toJSON(gs["listeners"]), `"reason":"InvalidCertificateRef"`)
+	})
 }

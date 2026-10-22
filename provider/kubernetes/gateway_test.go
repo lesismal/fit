@@ -22,19 +22,9 @@ func obj[T any](t *testing.T, doc string) *T {
 }
 
 // world is a cluster's objects, for translate.
-type world struct {
-	namespaces []*Namespace
-	classes    []*GatewayClass
-	gateways   []*Gateway
-	routes     []*HTTPRoute
-	grants     []*ReferenceGrant
-	services   []*Service
-	slices     []*EndpointSlice
-}
+type world = objects
 
-func (w *world) snapshot() *snapshot {
-	return newSnapshot(w.namespaces, w.classes, w.gateways, w.routes, w.grants, w.services, w.slices)
-}
+func (w *world) snapshot() *snapshot { return newSnapshot(*w) }
 
 func service(t *testing.T, ns, name string, port int, portName string, extra string) *Service {
 	return obj[Service](t, `{"metadata": {"namespace": "`+ns+`", "name": "`+name+`"}, "spec": {"clusterIP": "10.96.0.`+
@@ -99,6 +89,7 @@ func base(t *testing.T) *world {
 type part struct {
 	Listeners []outListener `json:"listeners"`
 	Upstreams []outUpstream `json:"upstreams"`
+	Services  []outService  `json:"services"`
 	Routes    []struct {
 		Name       string            `json:"name"`
 		Listeners  []string          `json:"listeners"`
@@ -119,7 +110,16 @@ func run(t *testing.T, w *world, opts *config.KubernetesProvider) (part, []byte,
 	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatalf("%v: %s", err, data)
 	}
+	checkPart(t, data)
 	return p, data, problems
+}
+
+// checkPart fails t unless fit takes the part as a config of its own.
+func checkPart(t *testing.T, data []byte) {
+	t.Helper()
+	if _, err := config.Load(data); err != nil {
+		t.Errorf("the part is not a valid config: %v\n%s", err, data)
+	}
 }
 
 func (p part) route(t *testing.T, name string) int {
@@ -248,7 +248,7 @@ func TestTranslateGateway(t *testing.T) {
 	}
 
 	wantProblems := []string{
-		"gateway default/gw: listener tls: protocol HTTPS is not served yet",
+		"gateway default/gw: listener tls: an HTTPS listener needs a certificateRef",
 		"httproute outside/denied: no listener of its Gateways takes it: their sections, ports, allowed routes or host names leave it out",
 		"httproute default/broken: rule 0: backend 0: service team/shop is in another namespace, and no ReferenceGrant there allows it",
 		"httproute default/broken: rule 4: match 0: header X: match type RegularExpression is not supported yet",
@@ -455,7 +455,7 @@ func TestMirror(t *testing.T) {
 		t.Errorf("mirror: %s", got)
 	}
 	if !reflect.DeepEqual(problems, []string{
-		"gateway default/gw: listener tls: protocol HTTPS is not served yet",
+		"gateway default/gw: listener tls: an HTTPS listener needs a certificateRef",
 		"httproute default/m: rule 0: match 0: only one RequestMirror is supported; the others are left out",
 	}) {
 		t.Errorf("problems: %v", problems)

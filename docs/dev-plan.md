@@ -181,7 +181,7 @@ Status: `todo`, `doing` or `done`.
 | I56 | Provider framework and effective config | I27 | done |
 | I57 | Docker provider | I56 | done |
 | I58 | Kubernetes Gateway API I: HTTPRoute | I56 | done |
-| I59 | Kubernetes Gateway API II: other routes and status | I58 | todo |
+| I59 | Kubernetes Gateway API II: other routes and status | I58 | done |
 | I60 | Kubernetes Ingress | I58 | todo |
 | I61 | Gateway API conformance | I59 | todo |
 | I62 | Consul and etcd providers | I56 | todo |

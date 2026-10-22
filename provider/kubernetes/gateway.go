@@ -2,9 +2,14 @@ package kubernetes
 
 import (
 	"cmp"
+	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -15,31 +20,47 @@ import (
 
 const gatewayGroup = "gateway.networking.k8s.io"
 
-// snapshot is what the informers hold, at one moment.
-type snapshot struct {
-	namespaces map[string]*Namespace
-	classes    []*GatewayClass
-	gateways   []*Gateway
-	routes     []*HTTPRoute
-	grants     []*ReferenceGrant
-	services   map[string]*Service         // by namespace/name
-	slices     map[string][]*EndpointSlice // by namespace/service
+// objects are the objects of each kind the informers hold.
+type objects struct {
+	namespaces                      []*Namespace
+	classes                         []*GatewayClass
+	gateways                        []*Gateway
+	routes                          []*HTTPRoute
+	grpcRoutes                      []*GRPCRoute
+	tlsRoutes, tcpRoutes, udpRoutes []*L4Route
+	grants                          []*ReferenceGrant
+	services                        []*Service
+	slices                          []*EndpointSlice
+	secrets                         []*Secret
 }
 
-func newSnapshot(namespaces []*Namespace, classes []*GatewayClass, gateways []*Gateway, routes []*HTTPRoute,
-	grants []*ReferenceGrant, services []*Service, slices []*EndpointSlice) *snapshot {
-	s := &snapshot{namespaces: map[string]*Namespace{}, classes: classes, gateways: gateways, routes: routes, grants: grants,
-		services: map[string]*Service{}, slices: map[string][]*EndpointSlice{}}
-	for _, n := range namespaces {
-		s.namespaces[n.Metadata.Name] = n
+// snapshot is what the informers hold, at one moment.
+type snapshot struct {
+	objects
+	namespace map[string]*Namespace       // by name
+	service   map[string]*Service         // by namespace/name
+	endpoints map[string][]*EndpointSlice // by namespace/service
+	secret    map[string]*Secret          // by namespace/name
+}
+
+func newSnapshot(o objects) *snapshot {
+	s := &snapshot{objects: o, namespace: map[string]*Namespace{}, service: map[string]*Service{},
+		endpoints: map[string][]*EndpointSlice{}, secret: map[string]*Secret{}}
+	for _, n := range o.namespaces {
+		s.namespace[n.Metadata.Name] = n
 	}
-	for _, sv := range services {
-		s.services[sv.Metadata.key()] = sv
+	for _, sv := range o.services {
+		s.service[sv.Metadata.key()] = sv
 	}
-	for _, es := range slices {
+	for _, es := range o.slices {
 		if svc := es.Metadata.Labels["kubernetes.io/service-name"]; svc != "" {
 			k := es.Metadata.Namespace + "/" + svc
-			s.slices[k] = append(s.slices[k], es)
+			s.endpoints[k] = append(s.endpoints[k], es)
+		}
+	}
+	for _, sec := range o.secrets {
+		if sec.Type == "kubernetes.io/tls" {
+			s.secret[sec.Metadata.key()] = sec
 		}
 	}
 	return s
@@ -51,11 +72,26 @@ type (
 		Name      string   `json:"name"`
 		Address   string   `json:"address"`
 		Protocols []string `json:"protocols"`
+		TLS       *outTLS  `json:"tls,omitempty"`
+	}
+	outTLS struct {
+		Certificates []outCert `json:"certificates"`
+	}
+	outCert struct {
+		CertFile string `json:"cert_file"`
+		KeyFile  string `json:"key_file"`
 	}
 	outUpstream struct {
 		Name      string   `json:"name"`
 		Addresses []string `json:"addresses"`
+		Weights   []int    `json:"weights,omitempty"`
 		Protocol  string   `json:"protocol,omitempty"`
+	}
+	outService struct {
+		Name        string   `json:"name"`
+		Listeners   []string `json:"listeners"`
+		Upstream    string   `json:"upstream"`
+		ServerNames []string `json:"server_names,omitempty"`
 	}
 	outRoute struct {
 		Name       string            `json:"name"`
@@ -75,33 +111,119 @@ type (
 	}
 )
 
+// The protocol families of a port: what the Gateway API lets listeners on
+// one port share, and what one listener of fit's serves.
+const (
+	familyHTTP = "http" // HTTP
+	familyTLS  = "tls"  // HTTPS and TLS passed through, told apart by server name
+	familyTCP  = "tcp"
+	familyUDP  = "udp"
+)
+
+// fitListener is a listener of fit's: the Gateway listeners on one port,
+// of one family.
+type fitListener struct {
+	name, address string
+	port          int
+	family        string
+	certs         []outCert // HTTPS listeners' certificates
+	services      int       // the services that take it
+	// What its connections go to: the route that takes those naming no
+	// server, every one on tcp and udp, and the route that takes each
+	// server name.
+	fallback string
+	names    map[string]string
+}
+
+// out returns the listener's element of the part, or nil when it would
+// serve nothing: a listener of tcp or udp needs a service.
+func (fl *fitListener) out() *outListener {
+	o := &outListener{Name: fl.name, Address: fl.address}
+	switch fl.family {
+	case familyHTTP:
+		o.Protocols = []string{"http/1.1", "h2c"}
+	case familyTLS:
+		if len(fl.certs) > 0 {
+			o.Protocols, o.TLS = []string{"http/1.1", "h2"}, &outTLS{Certificates: fl.certs}
+		}
+		if fl.services > 0 {
+			o.Protocols = append(o.Protocols, "tcp")
+		}
+	case familyTCP, familyUDP:
+		if fl.services > 0 {
+			o.Protocols = []string{fl.family}
+		}
+	}
+	if len(o.Protocols) == 0 {
+		return nil
+	}
+	return o
+}
+
 // translator turns a snapshot into a part.
 type translator struct {
 	opts     *config.KubernetesProvider
 	provider string
 	s        *snapshot
+	// certDir is where certificate files are written; "" when there is
+	// nowhere, and HTTPS listeners are not served.
+	certDir string
 
 	problems  []string
-	listeners map[int]*outListener
+	listeners map[string]*fitListener // by name
+	ports     map[int]string          // the family each TCP port serves
 	upstreams map[string]*outUpstream
 	routes    []*outRoute
+	services  []*outService
+	// certs are the certificate files the part names, by path: each a
+	// Secret's chain and key.
+	certs map[string][]byte
+
+	// For the statuses: fit's Gateways, in order and by namespace/name, and
+	// the routes in the namespaces watched, as each one is being and has
+	// been translated.
+	gws    []*gateway
+	byKey  map[string]*gateway
+	states []*routeState
+	cur    *routeState
 }
 
-// translate turns s into a part: a listener for each port of fit's
-// Gateways' HTTP listeners, upstreams for the Services their HTTPRoutes
-// send to, and routes for those HTTPRoutes' rules. It says why it left out
-// what it did. The part is the same bytes for the same objects.
+func newTranslator(provider string, opts *config.KubernetesProvider, s *snapshot, certDir string) *translator {
+	return &translator{opts: opts, provider: provider, s: s, certDir: certDir, listeners: map[string]*fitListener{},
+		ports: map[int]string{}, upstreams: map[string]*outUpstream{}, certs: map[string][]byte{}, byKey: map[string]*gateway{}}
+}
+
+// translate turns s into a part, and says why it left out what it did; see
+// translator.run.
 func translate(provider string, opts *config.KubernetesProvider, s *snapshot) (part []byte, problems []string) {
-	t := &translator{opts: opts, provider: provider, s: s, listeners: map[int]*outListener{}, upstreams: map[string]*outUpstream{}}
-	gateways := t.gateways()
-	routes := slices.Clone(s.routes)
-	slices.SortFunc(routes, func(a, b *HTTPRoute) int {
-		return cmp.Or(strings.Compare(a.Metadata.CreationTimestamp, b.Metadata.CreationTimestamp),
-			strings.Compare(a.Metadata.Namespace, b.Metadata.Namespace), strings.Compare(a.Metadata.Name, b.Metadata.Name))
-	})
-	for _, r := range routes {
+	t := newTranslator(provider, opts, s, opts.CertificatesDir)
+	return t.run(), t.problems
+}
+
+// run makes the part: a listener for each port of fit's Gateways'
+// listeners, routes for their HTTPRoutes' and GRPCRoutes' rules, services
+// for their TLSRoutes, TCPRoutes and UDPRoutes, and upstreams for the
+// Services those send to. The part is the same bytes for the same objects.
+func (t *translator) run() []byte {
+	t.gateways()
+	for _, r := range byCreation(t.s.routes, func(r *HTTPRoute) *meta { return &r.Metadata }) {
 		if t.watched(r.Metadata.Namespace) {
-			t.route(r, gateways)
+			t.httpRoute(r)
+		}
+	}
+	for _, r := range byCreation(t.s.grpcRoutes, func(r *GRPCRoute) *meta { return &r.Metadata }) {
+		if t.watched(r.Metadata.Namespace) {
+			t.grpcRoute(r)
+		}
+	}
+	for _, k := range []struct {
+		kind   string
+		routes []*L4Route
+	}{{"TLSRoute", t.s.tlsRoutes}, {"TCPRoute", t.s.tcpRoutes}, {"UDPRoute", t.s.udpRoutes}} {
+		for _, r := range byCreation(k.routes, func(r *L4Route) *meta { return &r.Metadata }) {
+			if t.watched(r.Metadata.Namespace) {
+				t.l4Route(k.kind, r)
+			}
 		}
 	}
 
@@ -109,16 +231,35 @@ func translate(provider string, opts *config.KubernetesProvider, s *snapshot) (p
 		Listeners []*outListener `json:"listeners,omitempty"`
 		Upstreams []*outUpstream `json:"upstreams,omitempty"`
 		Routes    []*outRoute    `json:"routes,omitempty"`
+		Services  []*outService  `json:"services,omitempty"`
 	}
-	for _, port := range sortedKeys(t.listeners) {
-		out.Listeners = append(out.Listeners, t.listeners[port])
+	fls := slices.Collect(maps.Values(t.listeners))
+	slices.SortFunc(fls, func(a, b *fitListener) int {
+		return cmp.Or(cmp.Compare(a.port, b.port), strings.Compare(a.name, b.name))
+	})
+	for _, fl := range fls {
+		if o := fl.out(); o != nil {
+			out.Listeners = append(out.Listeners, o)
+		}
 	}
 	for _, name := range sortedKeys(t.upstreams) {
 		out.Upstreams = append(out.Upstreams, t.upstreams[name])
 	}
-	out.Routes = t.routes
-	part, _ = json.Marshal(out)
-	return part, t.problems
+	out.Routes, out.Services = t.routes, t.services
+	part, _ := json.Marshal(out)
+	return part
+}
+
+// byCreation returns objs oldest first, as the Gateway API orders routes
+// and Gateways that conflict, then by namespace and name.
+func byCreation[T any](objs []*T, metaOf func(*T) *meta) []*T {
+	out := slices.Clone(objs)
+	slices.SortFunc(out, func(a, b *T) int {
+		ma, mb := metaOf(a), metaOf(b)
+		return cmp.Or(strings.Compare(ma.CreationTimestamp, mb.CreationTimestamp),
+			strings.Compare(ma.Namespace, mb.Namespace), strings.Compare(ma.Name, mb.Name))
+	})
+	return out
 }
 
 func sortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
@@ -134,61 +275,251 @@ func (t *translator) problem(format string, args ...any) {
 	t.problems = append(t.problems, fmt.Sprintf(format, args...))
 }
 
+// badRef reports a backend of the route being translated that cannot be
+// resolved, which its status says.
+func (t *translator) badRef(where string, err error) {
+	t.problem("%s: %v", where, err)
+	var re *refError
+	if t.cur != nil && t.cur.unresolved == "" && errors.As(err, &re) {
+		t.cur.unresolved, t.cur.unresolvedMsg = re.reason, re.msg
+	}
+}
+
+// leftOut reports a part of the route being translated that fit does not
+// serve, which its status says.
+func (t *translator) leftOut(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	t.problems = append(t.problems, msg)
+	if t.cur != nil && t.cur.partial == "" {
+		t.cur.partial = msg
+	}
+}
+
 func (t *translator) watched(ns string) bool {
 	return len(t.opts.Namespaces) == 0 || slices.Contains(t.opts.Namespaces, ns)
 }
 
-// gateway is one of fit's Gateways, by namespace/name.
+// gateway is one of fit's Gateways.
 type gateway struct {
-	g *Gateway
-	// listeners are its HTTP listeners, with the name of fit's listener
-	// on each one's port.
-	listeners []gwListener
+	g         *Gateway
+	listeners []*gwListener
 }
 
+// gwListener is one of a Gateway's listeners, and its state.
 type gwListener struct {
 	l   Listener
-	fit string
+	fit string // the name of fit's listener serving it; "" when none does
+	// kinds are the kinds of routes it takes.
+	kinds    []RouteGroupKind
+	attached int // routes attached
+	// Its conditions: why it is not accepted, its conflict, and why its
+	// references are not resolved; "" for none.
+	refused, refusedMsg       string
+	conflict, conflictMsg     string
+	unresolved, unresolvedMsg string
 }
 
-// gateways returns fit's Gateways: those of GatewayClasses whose
+// gateways finds fit's Gateways: those of GatewayClasses whose
 // controllerName is fit's, in the namespaces watched. It makes a listener
-// for each port of their HTTP listeners.
-func (t *translator) gateways() map[string]*gateway {
+// of fit's for each port, and family, of their listeners.
+func (t *translator) gateways() {
 	classes := map[string]bool{}
 	for _, c := range t.s.classes {
 		if c.Spec.ControllerName == t.opts.Controller() {
 			classes[c.Metadata.Name] = true
 		}
 	}
-	gws := slices.Clone(t.s.gateways)
-	slices.SortFunc(gws, func(a, b *Gateway) int { return strings.Compare(a.Metadata.key(), b.Metadata.key()) })
-	out := map[string]*gateway{}
-	for _, g := range gws {
+	for _, g := range byCreation(t.s.gateways, func(g *Gateway) *meta { return &g.Metadata }) {
 		if !classes[g.Spec.GatewayClassName] || !t.watched(g.Metadata.Namespace) {
 			continue
 		}
 		gw := &gateway{g: g}
 		for _, l := range g.Spec.Listeners {
-			if l.Protocol != "HTTP" {
-				t.problem("gateway %s: listener %s: protocol %s is not served yet", g.Metadata.key(), l.Name, l.Protocol)
-				continue
-			}
-			if l.Port < 1 || l.Port > 65535 {
-				t.problem("gateway %s: listener %s: %d is not a port", g.Metadata.key(), l.Name, l.Port)
-				continue
-			}
-			fl := t.listeners[l.Port]
-			if fl == nil {
-				fl = &outListener{Name: t.provider + "-" + strconv.Itoa(l.Port),
-					Address: net.JoinHostPort(t.opts.ListenHost, strconv.Itoa(l.Port)), Protocols: []string{"http/1.1", "h2c"}}
-				t.listeners[l.Port] = fl
-			}
-			gw.listeners = append(gw.listeners, gwListener{l: l, fit: fl.Name})
+			gw.listeners = append(gw.listeners, t.listener(g, l))
 		}
-		out[g.Metadata.key()] = gw
+		t.gws = append(t.gws, gw)
+		t.byKey[g.Metadata.key()] = gw
+	}
+}
+
+// The route kinds of each protocol.
+var protocolKinds = map[string][]string{
+	"HTTP":  {"HTTPRoute", "GRPCRoute"},
+	"HTTPS": {"HTTPRoute", "GRPCRoute"},
+	"TLS":   {"TLSRoute"},
+	"TCP":   {"TCPRoute"},
+	"UDP":   {"UDPRoute"},
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// listener takes listener l of Gateway g: on fit's listener of its port and
+// family, unless it is not valid or conflicts with one before it.
+func (t *translator) listener(g *Gateway, l Listener) *gwListener {
+	gl := &gwListener{l: l}
+	where := fmt.Sprintf("gateway %s: listener %s", g.Metadata.key(), l.Name)
+	refuse := func(reason, format string, args ...any) *gwListener {
+		gl.refused, gl.refusedMsg = reason, fmt.Sprintf(format, args...)
+		t.problem("%s: %s", where, gl.refusedMsg)
+		return gl
+	}
+	kinds, ok := protocolKinds[l.Protocol]
+	if !ok {
+		return refuse("UnsupportedProtocol", "protocol %s is not supported", l.Protocol)
+	}
+	for _, k := range kinds {
+		if a := l.AllowedRoutes; a == nil || len(a.Kinds) == 0 || slices.ContainsFunc(a.Kinds, func(rk RouteGroupKind) bool {
+			return deref(rk.Group, gatewayGroup) == gatewayGroup && rk.Kind == k
+		}) {
+			gl.kinds = append(gl.kinds, RouteGroupKind{Group: ptr(gatewayGroup), Kind: k})
+		}
+	}
+	if a := l.AllowedRoutes; a != nil {
+		for _, rk := range a.Kinds {
+			if deref(rk.Group, gatewayGroup) != gatewayGroup || !slices.Contains(kinds, rk.Kind) {
+				gl.unresolved, gl.unresolvedMsg = "InvalidRouteKinds", fmt.Sprintf("a %s listener takes no %s", l.Protocol, rk.Kind)
+				t.problem("%s: %s", where, gl.unresolvedMsg)
+				break
+			}
+		}
+	}
+	if l.Port < 1 || l.Port > 65535 {
+		return refuse("PortUnavailable", "%d is not a port", l.Port)
+	}
+	mode := ""
+	if l.TLS != nil {
+		mode = deref(l.TLS.Mode, "Terminate")
+	}
+	family := familyTLS
+	switch l.Protocol {
+	case "HTTP":
+		family = familyHTTP
+	case "HTTPS":
+		if mode == "Passthrough" {
+			return refuse("UnsupportedValue", "an HTTPS listener terminates TLS; a TLS listener passes it through")
+		}
+	case "TLS":
+		if mode != "Passthrough" {
+			return refuse("UnsupportedValue", "fit passes the connections of TLS listeners through (tls.mode Passthrough), and does not terminate them yet")
+		}
+	case "TCP":
+		family = familyTCP
+	case "UDP":
+		family = familyUDP
+	}
+	var certs []outCert
+	if l.Protocol == "HTTPS" {
+		if certs = t.certificates(g, gl, where); len(certs) == 0 {
+			return gl
+		}
+	}
+	name := t.provider + "-" + strconv.Itoa(l.Port)
+	if family == familyUDP {
+		name += "-udp"
+	} else if f, ok := t.ports[l.Port]; ok && f != family {
+		gl.conflict, gl.conflictMsg = "ProtocolConflict", fmt.Sprintf("port %d serves %s already", l.Port, f)
+		t.problem("%s: %s", where, gl.conflictMsg)
+		return gl
+	} else {
+		t.ports[l.Port] = family
+	}
+	fl := t.listeners[name]
+	if fl == nil {
+		fl = &fitListener{name: name, address: net.JoinHostPort(t.opts.ListenHost, strconv.Itoa(l.Port)), port: l.Port,
+			family: family, names: map[string]string{}}
+		t.listeners[name] = fl
+	}
+	for _, c := range certs {
+		if !slices.Contains(fl.certs, c) {
+			fl.certs = append(fl.certs, c)
+		}
+	}
+	gl.fit = name
+	return gl
+}
+
+// maxCertBytes bounds a certificate file, as fit's TLS does when it reads
+// one (tlsmgr.MaxCertFileBytes).
+const maxCertBytes = 1 << 20
+
+// certificates returns the certificate files of HTTPS listener gl of
+// Gateway g, from the Secrets it names, and gives the files to write. It
+// says why it leaves out those it does.
+func (t *translator) certificates(g *Gateway, gl *gwListener, where string) []outCert {
+	bad := func(reason, format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		t.problem("%s: %s", where, msg)
+		if gl.unresolved == "" {
+			gl.unresolved, gl.unresolvedMsg = reason, msg
+		}
+	}
+	l := gl.l
+	if l.TLS == nil || len(l.TLS.CertificateRefs) == 0 {
+		bad("InvalidCertificateRef", "an HTTPS listener needs a certificateRef")
+		return nil
+	}
+	if t.certDir == "" {
+		bad("InvalidCertificateRef", "there is no directory to write certificates to")
+		return nil
+	}
+	var out []outCert
+	for i, ref := range l.TLS.CertificateRefs {
+		if deref(ref.Group, "") != "" || deref(ref.Kind, "Secret") != "Secret" {
+			bad("InvalidCertificateRef", "certificateRef %d: %s/%s is not a Secret", i, deref(ref.Group, ""), deref(ref.Kind, "Secret"))
+			continue
+		}
+		ns := deref(ref.Namespace, g.Metadata.Namespace)
+		if ns != g.Metadata.Namespace && !t.granted("Gateway", g.Metadata.Namespace, ns, "Secret", ref.Name) {
+			bad("RefNotPermitted", "certificateRef %d: secret %s/%s is in another namespace, and no ReferenceGrant there allows it", i, ns, ref.Name)
+			continue
+		}
+		sec := t.s.secret[ns+"/"+ref.Name]
+		if sec == nil {
+			bad("InvalidCertificateRef", "certificateRef %d: there is no secret %s/%s of type kubernetes.io/tls", i, ns, ref.Name)
+			continue
+		}
+		crt, key := sec.Data["tls.crt"], sec.Data["tls.key"]
+		if _, err := tls.X509KeyPair(crt, key); err != nil {
+			bad("InvalidCertificateRef", "certificateRef %d: secret %s/%s: %v", i, ns, ref.Name, err)
+			continue
+		}
+		data := slices.Concat(crt, []byte("\n"), key)
+		if len(data) > maxCertBytes {
+			bad("InvalidCertificateRef", "certificateRef %d: secret %s/%s is larger than %d bytes", i, ns, ref.Name, maxCertBytes)
+			continue
+		}
+		sum := sha256.Sum256(data)
+		path := filepath.Join(t.certDir, fmt.Sprintf("%s.%s.%x.pem", ns, ref.Name, sum[:6]))
+		t.certs[path] = data
+		out = append(out, outCert{CertFile: path, KeyFile: path})
 	}
 	return out
+}
+
+// routeState is a route being translated, and what its status says.
+type routeState struct {
+	kind    string // HTTPRoute, GRPCRoute, TLSRoute, TCPRoute or UDPRoute
+	m       *meta
+	refs    []ParentRef
+	status  *RouteStatus
+	parents []*parentState // for each parentRef to one of fit's Gateways
+	// Why a backend is not resolved, and the first part of the route fit
+	// leaves out; "" for none.
+	unresolved, unresolvedMsg string
+	partial                   string
+}
+
+// parentState is whether one of fit's Gateways takes a route.
+type parentState struct {
+	ref         ParentRef
+	accepted    bool
+	reason, msg string // why not
+}
+
+// begin starts translating a route.
+func (t *translator) begin(kind string, m *meta, refs []ParentRef, status *RouteStatus) {
+	t.cur = &routeState{kind: kind, m: m, refs: refs, status: status}
+	t.states = append(t.states, t.cur)
 }
 
 // attachment is where a route's rules are served: fit's listeners, for the
@@ -198,45 +529,77 @@ type attachment struct {
 	hosts     []string
 }
 
-// route translates r, attached to gateways.
-func (t *translator) route(r *HTTPRoute, gateways map[string]*gateway) {
-	key := r.Metadata.key()
-	// The hosts each fit listener serves r for; nil for any.
+// attach attaches the route being translated, of the host names hostnames,
+// to the listeners of fit's Gateways its parentRefs name and take it, and
+// records whether each one does. It returns where the route is served, with
+// listeners serving the same host names together, in a fixed order; none
+// when it is not fit's or no listener takes it.
+func (t *translator) attach(hostnames []string) []*attachment {
+	st := t.cur
+	key := st.m.key()
+	l4 := st.kind != "HTTPRoute" && st.kind != "GRPCRoute"
+	// The hosts each fit listener serves the route for; nil for any.
 	hosts := map[string][]string{}
 	anyHost := map[string]bool{}
-	ours := false
-	for _, ref := range r.Spec.ParentRefs {
+	for _, ref := range st.refs {
 		if deref(ref.Group, gatewayGroup) != gatewayGroup || deref(ref.Kind, "Gateway") != "Gateway" {
 			continue
 		}
-		gw := gateways[deref(ref.Namespace, r.Metadata.Namespace)+"/"+ref.Name]
+		gw := t.byKey[deref(ref.Namespace, st.m.Namespace)+"/"+ref.Name]
 		if gw == nil {
 			continue // not fit's
 		}
-		ours = true
+		ps := &parentState{ref: ref}
+		st.parents = append(st.parents, ps)
+		named, allowed, hostOK, taken := false, false, false, ""
 		for _, gl := range gw.listeners {
 			l := gl.l
 			if ref.SectionName != nil && *ref.SectionName != l.Name || ref.Port != nil && *ref.Port != l.Port {
 				continue
 			}
-			if !t.allowed(l, gw.g, r) {
+			named = true
+			if gl.fit == "" || !t.allowed(gl, gw.g, st) {
 				continue
 			}
-			hs, ok := intersect(l.Hostname, r.Spec.Hostnames)
+			allowed = true
+			var lh *string
+			if l.Protocol != "TCP" && l.Protocol != "UDP" {
+				lh = l.Hostname
+			}
+			hs, ok := intersect(lh, hostnames)
 			if !ok {
 				continue
 			}
+			hostOK = true
+			if l4 {
+				if other := t.claim(gl.fit, hs, st.kind+" "+key); other != "" {
+					taken = other
+					continue
+				}
+			}
+			gl.attached++
+			ps.accepted = true
 			if hs == nil {
 				anyHost[gl.fit] = true
 			} else {
 				hosts[gl.fit] = append(hosts[gl.fit], hs...)
 			}
 		}
+		switch {
+		case ps.accepted:
+		case !named:
+			ps.reason, ps.msg = "NoMatchingParent", "the Gateway has no listener of the section name or port given"
+		case !allowed:
+			ps.reason, ps.msg = "NotAllowedByListeners", "no listener of the Gateway takes it: their protocols, states, or allowed routes' namespaces and kinds leave it out"
+		case !hostOK:
+			ps.reason, ps.msg = "NoMatchingListenerHostname", "no listener's host name matches the route's"
+		default:
+			ps.reason, ps.msg = "NotAllowedByListeners", "the listener carries "+taken+" already"
+		}
 	}
-	if !ours {
-		return
+	if len(st.parents) == 0 {
+		return nil
 	}
-	// Listeners serving the same hosts share routes.
 	groups := map[string]*attachment{}
 	for _, fl := range sortedKeys(union(hosts, anyHost)) {
 		var hs []string
@@ -250,29 +613,37 @@ func (t *translator) route(r *HTTPRoute, gateways map[string]*gateway) {
 		groups[k].listeners = append(groups[k].listeners, fl)
 	}
 	if len(groups) == 0 {
-		t.problem("httproute %s: no listener of its Gateways takes it: their sections, ports, allowed routes or host names leave it out", key)
-		return
+		t.problem("%s %s: no listener of its Gateways takes it: their sections, ports, allowed routes or host names leave it out", strings.ToLower(st.kind), key)
+		return nil
 	}
-	gkeys := sortedKeys(groups)
-	for i, rule := range r.Spec.Rules {
-		backend := t.backends(r, i, rule)
-		matches := rule.Matches
-		if len(matches) == 0 {
-			matches = []HTTPRouteMatch{{}}
+	var out []*attachment
+	for _, k := range sortedKeys(groups) {
+		out = append(out, groups[k])
+	}
+	return out
+}
+
+// claim gives fit's listener name's connections for the server names hosts,
+// or those naming none when hosts is nil, to the route owner, and returns
+// "", or the route that has them already.
+func (t *translator) claim(name string, hosts []string, owner string) string {
+	fl := t.listeners[name]
+	if hosts == nil {
+		if fl.fallback != "" && fl.fallback != owner {
+			return fl.fallback
 		}
-		for j, m := range matches {
-			for gi, gk := range gkeys {
-				name := fmt.Sprintf("%s.%s.r%d.m%d", r.Metadata.Namespace, r.Metadata.Name, i, j)
-				if len(gkeys) > 1 {
-					name += fmt.Sprintf(".g%d", gi)
-				}
-				if out := t.match(r, i, j, m, rule, backend, groups[gk]); out != nil {
-					out.Name = name
-					t.routes = append(t.routes, out)
-				}
-			}
+		fl.fallback = owner
+		return ""
+	}
+	for _, h := range hosts {
+		if other := fl.names[strings.ToLower(h)]; other != "" && other != owner {
+			return other
 		}
 	}
+	for _, h := range hosts {
+		fl.names[strings.ToLower(h)] = owner
+	}
+	return ""
 }
 
 func union(a map[string][]string, b map[string]bool) map[string]bool {
@@ -293,36 +664,29 @@ func deref[T any](p *T, def T) T {
 	return *p
 }
 
-// allowed reports whether listener l of gateway g takes route r: its
-// allowedRoutes' namespaces and kinds.
-func (t *translator) allowed(l Listener, g *Gateway, r *HTTPRoute) bool {
+// allowed reports whether listener gl of gateway g takes the route st: its
+// kinds, and its allowedRoutes' namespaces.
+func (t *translator) allowed(gl *gwListener, g *Gateway, st *routeState) bool {
+	if !slices.ContainsFunc(gl.kinds, func(k RouteGroupKind) bool { return k.Kind == st.kind }) {
+		return false
+	}
 	from := "Same"
 	var sel *LabelSelector
-	if a := l.AllowedRoutes; a != nil {
-		if a.Namespaces != nil {
-			from = cmp.Or(a.Namespaces.From, "Same")
-			sel = a.Namespaces.Selector
-		}
-		if len(a.Kinds) > 0 && !slices.ContainsFunc(a.Kinds, func(k struct {
-			Group *string `json:"group,omitempty"`
-			Kind  string  `json:"kind"`
-		}) bool {
-			return deref(k.Group, gatewayGroup) == gatewayGroup && k.Kind == "HTTPRoute"
-		}) {
-			return false
-		}
+	if a := gl.l.AllowedRoutes; a != nil && a.Namespaces != nil {
+		from = cmp.Or(a.Namespaces.From, "Same")
+		sel = a.Namespaces.Selector
 	}
 	switch from {
 	case "All":
 		return true
 	case "Selector":
-		ns := t.s.namespaces[r.Metadata.Namespace]
+		ns := t.s.namespace[st.m.Namespace]
 		if ns == nil || sel == nil {
 			return false
 		}
 		return selects(sel, ns.Metadata.Labels)
 	default:
-		return r.Metadata.Namespace == g.Metadata.Namespace
+		return st.m.Namespace == g.Metadata.Namespace
 	}
 }
 
@@ -395,6 +759,36 @@ func hostMatches(p, h string) bool {
 	return false
 }
 
+// httpRoute translates r: each match of each rule is a route of fit's on
+// the listeners r is attached to.
+func (t *translator) httpRoute(r *HTTPRoute) {
+	t.begin("HTTPRoute", &r.Metadata, r.Spec.ParentRefs, &r.Status)
+	groups := t.attach(r.Spec.Hostnames)
+	if len(groups) == 0 {
+		return
+	}
+	for i, rule := range r.Spec.Rules {
+		where := fmt.Sprintf("httproute %s: rule %d", r.Metadata.key(), i)
+		backend := t.backends(where, rule.BackendRefs, false)
+		matches := rule.Matches
+		if len(matches) == 0 {
+			matches = []HTTPRouteMatch{{}}
+		}
+		for j, m := range matches {
+			for gi, at := range groups {
+				name := fmt.Sprintf("%s.%s.r%d.m%d", r.Metadata.Namespace, r.Metadata.Name, i, j)
+				if len(groups) > 1 {
+					name += fmt.Sprintf(".g%d", gi)
+				}
+				if out := t.match(fmt.Sprintf("%s: match %d", where, j), m, rule, backend, at); out != nil {
+					out.Name = name
+					t.routes = append(t.routes, out)
+				}
+			}
+		}
+	}
+}
+
 // ruleBackends is where a rule's requests go.
 type ruleBackends struct {
 	splits []split
@@ -408,22 +802,24 @@ type split struct {
 	weight   int
 }
 
-// backends resolves rule i's backendRefs of route r.
-func (t *translator) backends(r *HTTPRoute, i int, rule HTTPRouteRule) ruleBackends {
+// backends resolves the backendRefs of the rule at where, of the route
+// being translated; h2c makes their upstreams speak HTTP/2 in the clear,
+// as gRPC's do.
+func (t *translator) backends(where string, refs []HTTPBackendRef, h2c bool) ruleBackends {
 	var b ruleBackends
 	invalid := false
-	for k, ref := range rule.BackendRefs {
+	for k, ref := range refs {
 		w := deref(ref.Weight, 1)
 		if w == 0 {
 			continue
 		}
 		if len(ref.Filters) > 0 {
-			t.problem("httproute %s: rule %d: backend %d: filters on a backend are not supported yet; they are left out", r.Metadata.key(), i, k)
+			t.leftOut("%s: backend %d: filters on a backend are not supported yet; they are left out", where, k)
 		}
-		name, ok, err := t.upstream(r, ref.BackendObjectRef)
+		name, ok, err := t.upstream(ref.BackendObjectRef, "TCP", h2c)
 		switch {
 		case err != nil:
-			t.problem("httproute %s: rule %d: backend %d: %v", r.Metadata.key(), i, k, err)
+			t.badRef(fmt.Sprintf("%s: backend %d", where, k), err)
 			invalid = true
 		case ok:
 			b.splits = append(b.splits, split{name, min(w, 1000)})
@@ -431,7 +827,7 @@ func (t *translator) backends(r *HTTPRoute, i int, rule HTTPRouteRule) ruleBacke
 	}
 	switch {
 	case len(b.splits) > 0:
-	case invalid || len(rule.BackendRefs) == 0:
+	case invalid || len(refs) == 0:
 		b.status = 500
 	default:
 		b.status = 503
@@ -439,51 +835,72 @@ func (t *translator) backends(r *HTTPRoute, i int, rule HTTPRouteRule) ruleBacke
 	return b
 }
 
-// upstream makes the upstream of the Service port ref names, for route r,
-// and returns its name; ok is false when it has no endpoints ready.
-func (t *translator) upstream(r *HTTPRoute, ref BackendObjectRef) (name string, ok bool, err error) {
+// refError is a backend that cannot be resolved, with the reason a route's
+// ResolvedRefs condition gives.
+type refError struct{ reason, msg string }
+
+func (e *refError) Error() string { return e.msg }
+
+func badRef(reason, format string, args ...any) error {
+	return &refError{reason: reason, msg: fmt.Sprintf(format, args...)}
+}
+
+// upstream makes the upstream of the Service port ref names, for the route
+// being translated, and returns its name; ok is false when it has no
+// endpoints ready. proto is the port's protocol, TCP or UDP; h2c makes the
+// upstream speak HTTP/2 in the clear.
+func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (name string, ok bool, err error) {
+	from := t.cur.m.Namespace
 	if deref(ref.Group, "") != "" || deref(ref.Kind, "Service") != "Service" {
-		return "", false, fmt.Errorf("%s/%s is not a Service", deref(ref.Group, ""), deref(ref.Kind, "Service"))
+		return "", false, badRef("InvalidKind", "%s/%s is not a Service", deref(ref.Group, ""), deref(ref.Kind, "Service"))
 	}
-	ns := deref(ref.Namespace, r.Metadata.Namespace)
-	if ns != r.Metadata.Namespace && !t.granted(r.Metadata.Namespace, ns, ref.Name) {
-		return "", false, fmt.Errorf("service %s/%s is in another namespace, and no ReferenceGrant there allows it", ns, ref.Name)
+	ns := deref(ref.Namespace, from)
+	if ns != from && !t.granted(t.cur.kind, from, ns, "Service", ref.Name) {
+		return "", false, badRef("RefNotPermitted", "service %s/%s is in another namespace, and no ReferenceGrant there allows it", ns, ref.Name)
 	}
 	if ref.Port == nil {
-		return "", false, fmt.Errorf("service %s/%s: a port is needed", ns, ref.Name)
+		return "", false, badRef("UnsupportedValue", "service %s/%s: a port is needed", ns, ref.Name)
 	}
-	svc := t.s.services[ns+"/"+ref.Name]
+	svc := t.s.service[ns+"/"+ref.Name]
 	if svc == nil {
-		return "", false, fmt.Errorf("service %s/%s does not exist", ns, ref.Name)
+		return "", false, badRef("BackendNotFound", "service %s/%s does not exist", ns, ref.Name)
 	}
 	var sp *ServicePort
 	for i := range svc.Spec.Ports {
-		if svc.Spec.Ports[i].Port == *ref.Port && cmp.Or(svc.Spec.Ports[i].Protocol, "TCP") == "TCP" {
+		if svc.Spec.Ports[i].Port == *ref.Port && cmp.Or(svc.Spec.Ports[i].Protocol, "TCP") == proto {
 			sp = &svc.Spec.Ports[i]
 		}
 	}
 	if sp == nil {
-		return "", false, fmt.Errorf("service %s/%s has no TCP port %d", ns, ref.Name, *ref.Port)
+		return "", false, badRef("BackendNotFound", "service %s/%s has no %s port %d", ns, ref.Name, proto, *ref.Port)
 	}
 	name = fmt.Sprintf("%s.%s.%d", ns, ref.Name, sp.Port)
+	appH2C := deref(sp.AppProtocol, "") == "kubernetes.io/h2c"
+	switch {
+	case proto == "UDP":
+		name += ".udp"
+	case h2c && !appH2C:
+		name += ".h2c"
+	}
 	if _, done := t.upstreams[name]; done {
 		return name, true, nil
 	}
-	addrs := t.addresses(svc, sp)
+	addrs := t.addresses(svc, sp, proto)
 	if len(addrs) == 0 {
 		return name, false, nil
 	}
 	u := &outUpstream{Name: name, Addresses: addrs}
-	if deref(sp.AppProtocol, "") == "kubernetes.io/h2c" {
+	if proto == "TCP" && (h2c || appH2C) {
 		u.Protocol = "h2c"
 	}
 	t.upstreams[name] = u
 	return name, true, nil
 }
 
-// addresses returns where svc's port sp is reached: its cluster IP, with
-// backends cluster_ip, or else its ready endpoints; an ExternalName's name.
-func (t *translator) addresses(svc *Service, sp *ServicePort) []string {
+// addresses returns where svc's port sp, of protocol proto, is reached: its
+// cluster IP, with backends cluster_ip, or else its ready endpoints; an
+// ExternalName's name.
+func (t *translator) addresses(svc *Service, sp *ServicePort, proto string) []string {
 	port := strconv.Itoa(sp.Port)
 	if svc.Spec.Type == "ExternalName" {
 		if svc.Spec.ExternalName == "" {
@@ -495,10 +912,10 @@ func (t *translator) addresses(svc *Service, sp *ServicePort) []string {
 		return []string{net.JoinHostPort(svc.Spec.ClusterIP, port)}
 	}
 	var out []string
-	for _, es := range t.s.slices[svc.Metadata.key()] {
+	for _, es := range t.s.endpoints[svc.Metadata.key()] {
 		target := 0
 		for _, p := range es.Ports {
-			if deref(p.Name, "") == sp.Name && deref(p.Protocol, "TCP") == "TCP" && p.Port != nil {
+			if deref(p.Name, "") == sp.Name && deref(p.Protocol, "TCP") == proto && p.Port != nil {
 				target = *p.Port
 			}
 		}
@@ -516,9 +933,10 @@ func (t *translator) addresses(svc *Service, sp *ServicePort) []string {
 	return slices.Compact(out)
 }
 
-// granted reports whether a ReferenceGrant in namespace to lets HTTPRoutes
-// of namespace from refer to its Service name.
-func (t *translator) granted(from, to, name string) bool {
+// granted reports whether a ReferenceGrant in namespace to lets objects of
+// the Gateway API's kind fromKind in namespace from refer to the core
+// object of kind toKind named name.
+func (t *translator) granted(fromKind, from, to, toKind, name string) bool {
 	for _, g := range t.s.grants {
 		if g.Metadata.Namespace != to {
 			continue
@@ -528,14 +946,14 @@ func (t *translator) granted(from, to, name string) bool {
 			Kind      string `json:"kind"`
 			Namespace string `json:"namespace"`
 		}) bool {
-			return f.Group == gatewayGroup && f.Kind == "HTTPRoute" && f.Namespace == from
+			return f.Group == gatewayGroup && f.Kind == fromKind && f.Namespace == from
 		})
 		okTo := slices.ContainsFunc(g.Spec.To, func(tt struct {
 			Group string  `json:"group"`
 			Kind  string  `json:"kind"`
 			Name  *string `json:"name,omitempty"`
 		}) bool {
-			return tt.Group == "" && tt.Kind == "Service" && (tt.Name == nil || *tt.Name == name)
+			return tt.Group == "" && tt.Kind == toKind && (tt.Name == nil || *tt.Name == name)
 		})
 		if okFrom && okTo {
 			return true
@@ -544,10 +962,9 @@ func (t *translator) granted(from, to, name string) bool {
 	return false
 }
 
-// match translates match j of rule i of route r into a route of fit's on
+// match translates m, the match at where of rule, into a route of fit's on
 // attachment at, or nil, saying why, when it cannot.
-func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRouteRule, b ruleBackends, at *attachment) *outRoute {
-	where := fmt.Sprintf("httproute %s: rule %d: match %d", r.Metadata.key(), i, j)
+func (t *translator) match(where string, m HTTPRouteMatch, rule HTTPRouteRule, b ruleBackends, at *attachment) *outRoute {
 	out := &outRoute{Listeners: at.listeners}
 	om := &outMatch{Host: at.hosts}
 
@@ -559,13 +976,13 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 	switch pathType {
 	case "Exact":
 		if !strings.HasPrefix(pathValue, "/") {
-			t.problem("%s: path %q does not start with '/'", where, pathValue)
+			t.leftOut("%s: path %q does not start with '/'", where, pathValue)
 			return nil
 		}
 		om.Path, pathClass = []string{pathValue}, 3
 	case "PathPrefix":
 		if !strings.HasPrefix(pathValue, "/") {
-			t.problem("%s: path %q does not start with '/'", where, pathValue)
+			t.leftOut("%s: path %q does not start with '/'", where, pathValue)
 			return nil
 		}
 		prefix = strings.TrimRight(pathValue, "/")
@@ -575,17 +992,17 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 		pathClass = 2
 	case "RegularExpression":
 		if _, err := regexp.Compile(pathValue); err != nil {
-			t.problem("%s: path %q is not a regular expression fit takes: %v", where, pathValue, err)
+			t.leftOut("%s: path %q is not a regular expression fit takes: %v", where, pathValue, err)
 			return nil
 		}
 		om.PathRegexp, pathClass = []string{"^(?:" + pathValue + ")$"}, 1
 	default:
-		t.problem("%s: path type %s is not supported", where, pathType)
+		t.leftOut("%s: path type %s is not supported", where, pathType)
 		return nil
 	}
 	for _, h := range m.Headers {
 		if deref(h.Type, "Exact") != "Exact" {
-			t.problem("%s: header %s: match type %s is not supported yet", where, h.Name, deref(h.Type, ""))
+			t.leftOut("%s: header %s: match type %s is not supported yet", where, h.Name, deref(h.Type, ""))
 			return nil
 		}
 		if om.Header == nil {
@@ -595,7 +1012,7 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 	}
 	for _, q := range m.QueryParams {
 		if deref(q.Type, "Exact") != "Exact" {
-			t.problem("%s: query parameter %s: match type %s is not supported yet", where, q.Name, deref(q.Type, ""))
+			t.leftOut("%s: query parameter %s: match type %s is not supported yet", where, q.Name, deref(q.Type, ""))
 			return nil
 		}
 		if om.Query == nil {
@@ -628,11 +1045,17 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 		out.Priority += 500
 	}
 
-	// Filters, then the backends.
+	t.handle(where, out, rule.Filters, b, pathType, prefix)
+	return out
+}
+
+// handle gives out the middleware of filters and a handler sending to b,
+// for a match of pathType whose prefix, for PathPrefix, is prefix.
+func (t *translator) handle(where string, out *outRoute, filters []HTTPRouteFilter, b ruleBackends, pathType, prefix string) {
 	reqHeaders, respHeaders := map[string]any{}, map[string]any{}
 	proxyParams := map[string]any{}
 	fail := 0
-	for _, f := range rule.Filters {
+	for _, f := range filters {
 		switch f.Type {
 		case "RequestHeaderModifier":
 			if f.RequestHeaderModifier != nil {
@@ -651,7 +1074,7 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 				proxyParams["host_header"] = *rw.Hostname
 			}
 			if mw, err := rewrite(rw.Path, pathType, prefix); err != nil {
-				t.problem("%s: URLRewrite: %v", where, err)
+				t.leftOut("%s: URLRewrite: %v", where, err)
 				fail = 500
 			} else if mw != nil {
 				out.Middleware = append(out.Middleware, mw)
@@ -662,7 +1085,7 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 			}
 			mw, err := redirect(f.RequestRedirect, pathType, prefix)
 			if err != nil {
-				t.problem("%s: RequestRedirect: %v", where, err)
+				t.leftOut("%s: RequestRedirect: %v", where, err)
 				fail = 500
 				continue
 			}
@@ -673,15 +1096,16 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 				continue
 			}
 			if _, has := proxyParams["mirror"]; has {
-				t.problem("%s: only one RequestMirror is supported; the others are left out", where)
+				t.leftOut("%s: only one RequestMirror is supported; the others are left out", where)
 				continue
 			}
-			name, ok, err := t.upstream(r, rm.BackendRef)
-			if err != nil || !ok {
-				if err == nil {
-					err = fmt.Errorf("it has no endpoints ready")
-				}
-				t.problem("%s: RequestMirror: %v; no copies are sent", where, err)
+			name, ok, err := t.upstream(rm.BackendRef, "TCP", t.cur.kind == "GRPCRoute")
+			if err != nil {
+				t.badRef(where+": RequestMirror", fmt.Errorf("%w; no copies are sent", err))
+				continue
+			}
+			if !ok {
+				t.problem("%s: RequestMirror: it has no endpoints ready; no copies are sent", where)
 				continue
 			}
 			mirror := map[string]any{"upstream": name}
@@ -693,7 +1117,7 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 			}
 			proxyParams["mirror"] = mirror
 		default:
-			t.problem("%s: filter %s is not supported; the rule answers 500", where, f.Type)
+			t.leftOut("%s: filter %s is not supported; the rule answers 500", where, f.Type)
 			fail = 500
 		}
 	}
@@ -726,7 +1150,6 @@ func (t *translator) match(r *HTTPRoute, i, j int, m HTTPRouteMatch, rule HTTPRo
 		}
 		out.Handler, _ = json.Marshal(map[string]any{"module": "proxy", "params": proxyParams})
 	}
-	return out
 }
 
 func respond(status int) json.RawMessage {

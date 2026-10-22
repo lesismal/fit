@@ -129,8 +129,9 @@ jobs:
           fi
           kind create cluster --name fit --wait 120s --kubeconfig "$RUNNER_TEMP/kubeconfig"
           echo "FIT_E2E_KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      # The experimental channel, for TCPRoutes, TLSRoutes and UDPRoutes (I59).
       - name: Install the Gateway API's CRDs
-        run: kubectl --kubeconfig "$FIT_E2E_KUBECONFIG" apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+        run: kubectl --kubeconfig "$FIT_E2E_KUBECONFIG" apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/experimental-install.yaml
       - name: Route the pod network through the node
         run: |
           node=$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' fit-control-plane)

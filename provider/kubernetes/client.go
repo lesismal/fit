@@ -43,6 +43,7 @@ var (
 var (
 	errNotFound = errors.New("not found")
 	errGone     = errors.New("the resource version is too old")
+	errConflict = errors.New("the object changed")
 )
 
 // client calls the API server.
@@ -339,8 +340,11 @@ func (c *client) get(ctx context.Context, path string, query url.Values) (*http.
 // list lists every object at path, page by page, each within the request
 // timeout, and returns them with the list's resource version. It stops
 // once it has more than max objects, and says so.
-func (c *client) list(ctx context.Context, path string, max int) (items []json.RawMessage, rv string, truncated bool, err error) {
+func (c *client) list(ctx context.Context, path string, query url.Values, max int) (items []json.RawMessage, rv string, truncated bool, err error) {
 	q := url.Values{"limit": {fmt.Sprint(pageSize)}}
+	for k, v := range query {
+		q[k] = v
+	}
 	for {
 		var page struct {
 			Metadata listMeta          `json:"metadata"`
@@ -388,17 +392,65 @@ func (c *client) page(ctx context.Context, path string, q url.Values, v any) err
 	return nil
 }
 
-// watch opens a watch of path from the resource version rv, which lasts
-// watchSeconds, until ctx ends, or until the server ends it.
-func (c *client) watch(ctx context.Context, path, rv string) (io.ReadCloser, error) {
-	resp, err := c.get(ctx, path, url.Values{
+// watch opens a watch of path, narrowed by query, from the resource
+// version rv, which lasts watchSeconds, until ctx ends, or until the
+// server ends it.
+func (c *client) watch(ctx context.Context, path string, query url.Values, rv string) (io.ReadCloser, error) {
+	q := url.Values{
 		"watch":               {"1"},
 		"resourceVersion":     {rv},
 		"allowWatchBookmarks": {"true"},
 		"timeoutSeconds":      {fmt.Sprint(watchSeconds)},
-	})
+	}
+	for k, v := range query {
+		q[k] = v
+	}
+	resp, err := c.get(ctx, path, q)
 	if err != nil {
 		return nil, err
 	}
 	return resp.Body, nil
+}
+
+// patchStatus sends a JSON merge patch to the status of the object at path
+// (its path on the API server, without "/status"), within the request
+// timeout. A 404 gives errNotFound, a 409 errConflict: the patch names the
+// resource version it was made from, and the object changed since.
+func (c *client) patchStatus(ctx context.Context, path string, patch []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.server+path+"/status", bytes.NewReader(patch))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	req.Header.Set("Accept", "application/json")
+	if c.token != nil {
+		t, err := c.token.get()
+		if err != nil {
+			return fmt.Errorf("token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes))
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return errNotFound
+	case http.StatusConflict:
+		return errConflict
+	}
+	var status struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(msg, &status) == nil && status.Message != "" {
+		msg = []byte(status.Message)
+	}
+	return fmt.Errorf("PATCH %s/status: %s: %s", path, resp.Status, bytes.TrimSpace(msg))
 }
