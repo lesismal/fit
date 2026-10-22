@@ -8,7 +8,8 @@
   ],
   "upstreams": [
     {"name": "backend", "addresses": ["{{BACKEND}}"], "max_conns": 4096, "max_idle_conns": 4096},
-    {"name": "wsbackend", "addresses": ["{{WSBACKEND}}"]}
+    {"name": "wsbackend", "addresses": ["{{WSBACKEND}}"]},
+    {"name": "cachebackend", "addresses": ["{{CACHEBACKEND}}"], "max_conns": 4096, "max_idle_conns": 4096}
   ],
   "routes": [
     {
@@ -25,6 +26,12 @@
       "name": "proxy",
       "match": {"path": ["/proxy"]},
       "handler": {"module": "proxy", "params": {"upstream": "backend"}}
+    },
+    {
+      "name": "cache",
+      "match": {"path": ["/cache/*"]},
+      "middleware": [{"module": "cache", "params": {"zone": "bench", "max_size": 1073741824, "max_entry_size": 65536}}],
+      "handler": {"module": "proxy", "params": {"upstream": "cachebackend"}}
     },
     {
       "name": "ws",

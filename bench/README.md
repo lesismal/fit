@@ -66,6 +66,9 @@ Every process runs in a container pinned to CPUs of its own, with `nofile` raise
   the run, on `ubuntu:24.04`);
 - **the load generators**: wrk and h2load, Ubuntu's glibc builds, with curl and `idleconn`;
 - **the proxy backend**: fit answering every request with the fixed response, on port 9000;
+- **the cache backend**: fit answering every path under `/cache/` with 4 KiB fresh for 10
+  minutes (`Cache-Control: max-age=600`), on port 9003, counting what it answers on its Admin API
+  at 127.0.0.1:9004;
 - **the WebSocket backend**: `idleconn -serve-ws`, which accepts upgrades and holds them, on port
   9001.
 
@@ -83,6 +86,16 @@ HTTP/1.1, driven by wrk, and 8081 for h2c (HTTP/2 with prior knowledge), driven 
 | `fixed` | `/fixed` | 200, `text/plain`, `hello, world` |
 | `static` | `/static/small.html` | [`www/static/small.html`](www/static/small.html), 1 KiB |
 | `proxy` | `/proxy` | proxied to the backend over HTTP/1.1 with keep-alive; `hello, world` |
+| `cache-hot` | `/cache/hot` | through the server's cache to the cache backend: one path, asked again and again; 4 KiB |
+| `cache-zipf` | `/cache/1` to `/cache/100000` | the same, 100,000 paths, the n-th most popular asked for as often as 1/n (Zipf's law, by [`loadgen/zipf.lua`](loadgen/zipf.lua)); HTTP/1.1 only |
+
+The cache scenarios are not run unless named (`-scenarios cache-hot,cache-zipf`). Each server keeps
+64 MiB of responses: nginx's `proxy_cache` on disk (and so in the page cache), with a lock, and
+fit's `cache` in memory; 4 KiB responses to 100,000 paths are about 430 MB, so the Zipf scenario
+measures what each keeps of the popular paths as much as its speed. Their results add the requests
+that reached the cache backend during the run, from its counters, and the hit ratio, the share of
+the requests the server answered without it. Only Linux host networking reaches the backend's
+counters.
 
 Every proxy keeps up to 4096 idle connections to the backend, more than the load generators have
 requests in flight. With their defaults (32 for Caddy, 200 for Traefik) they close and reopen
@@ -92,7 +105,8 @@ the proxy.
 Before each run, the harness fetches the path once over the protocol and checks the status, the
 protocol and the body against the expected ones, so a server whose config drifted fails rather
 than being measured doing something else. A server that cannot serve a scenario is recorded as
-skipped: Traefik only proxies, and fit gains `static` in I12 and `proxy` in I15.
+skipped: Traefik only proxies, Caddy and Traefik have no cache of their own, and fit gains
+`static` in I12, `proxy` in I15 and the cache scenarios in I69.
 
 Each measured run records requests per second, latency (percentiles from wrk; mean, standard
 deviation and maximum from h2load, which reports no percentiles), errors by kind, the CPU the

@@ -53,6 +53,10 @@ const VersionHeader = "Fit-Config-Version"
 //	GET    /status              what fit is doing now: listeners,
 //	                            connections, upstreams and their backends'
 //	                            health, certificates
+//	GET    /cache               what each cache zone keeps
+//	POST   /cache/purge         remove responses a cache zone keeps, by
+//	                            URL, by tag (Cache-Tag, Surrogate-Key) or
+//	                            all: {"zone", "urls", "tags", "all"}
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //
@@ -123,6 +127,8 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	mux.HandleFunc("GET /versions/{n}", s.version)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /cache", s.cacheZones)
+	mux.HandleFunc("POST /cache/purge", s.purge)
 	if !a.DisableDashboard {
 		mux.Handle("GET /dashboard/", dashboardHandler())
 		mux.Handle("GET /dashboard", http.RedirectHandler("/dashboard/", http.StatusMovedPermanently))

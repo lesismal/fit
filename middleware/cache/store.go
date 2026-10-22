@@ -29,6 +29,11 @@ type entry struct {
 	// noStale is set for a response that must not be served stale:
 	// must-revalidate, proxy-revalidate or s-maxage.
 	noStale bool
+	// swr and sie are how long past its lifetime it may be answered while
+	// it is fetched again, and when fetching it again fails (RFC 5861).
+	swr, sie time.Duration
+	// tags are what it can be purged by.
+	tags []string
 
 	etag, lastModified string
 	size               int64
@@ -37,6 +42,12 @@ type entry struct {
 // age returns the entry's current age.
 func (e *entry) age(now time.Time) time.Duration {
 	return e.initialAge + max(now.Sub(e.responseTime), 0)
+}
+
+// staleFor reports whether the entry, stale at now, is so by no more than
+// window.
+func (e *entry) staleFor(now time.Time, window time.Duration) bool {
+	return window > 0 && e.age(now)-e.lifetime <= window
 }
 
 // matches reports whether the entry answers a request with header h: the
@@ -79,6 +90,9 @@ func sizeOf(key string, e *entry) int64 {
 	for i := range e.varyValues {
 		n += int64(len(e.varyNames[i]) + len(e.varyValues[i]))
 	}
+	for _, t := range e.tags {
+		n += int64(len(t)) + 16
+	}
 	return n
 }
 
@@ -102,13 +116,21 @@ type store struct {
 	shards    [shards]shard
 	// disk is the zone's disk tier, or nil.
 	disk atomic.Pointer[disk]
+	// tags index the keys of the responses, in memory and on disk, by tag.
+	tags tagIndex
+	// background counts the fetches under way that no request waits for.
+	background atomic.Int64
 
 	refs int // under zones.mu
 }
 
 type shard struct {
 	mu    sync.Mutex
+	tags  *tagIndex
 	items map[string]*item
+	// fetches are the fetches under way, by key, that requests for the
+	// same key wait for rather than fetch again.
+	fetches map[string]*fetch
 	// lru is the sentinel of a ring of items, the most recently used next
 	// to it.
 	lru  item
@@ -124,11 +146,13 @@ type item struct {
 }
 
 func newStore(name string, maxSize int64) *store {
-	s := &store{name: name, seed: maphash.MakeSeed()}
+	s := &store{name: name, seed: maphash.MakeSeed(), tags: tagIndex{m: map[string]map[string]int{}}}
 	s.maxSize.Store(maxSize)
 	for i := range s.shards {
 		sh := &s.shards[i]
 		sh.items = map[string]*item{}
+		sh.fetches = map[string]*fetch{}
+		sh.tags = &s.tags
 		sh.lru.prev, sh.lru.next = &sh.lru, &sh.lru
 	}
 	return s
@@ -184,16 +208,19 @@ func (s *store) put(key string, e *entry) {
 		if v.sameVariant(e) {
 			it.variants = append(it.variants[:i], it.variants[i+1:]...)
 			sh.grow(it, -v.size)
+			sh.tags.remove(key, v.tags)
 			replaced = true
 			break
 		}
 	}
 	if !replaced && len(it.variants) == maxVariants {
 		sh.grow(it, -it.variants[0].size)
+		sh.tags.remove(key, it.variants[0].tags)
 		it.variants = append(it.variants[:0], it.variants[1:]...)
 	}
 	it.variants = append(it.variants, e)
 	sh.grow(it, e.size)
+	sh.tags.add(key, e.tags)
 	for sh.size > limit && sh.lru.prev != &sh.lru {
 		sh.drop(sh.lru.prev)
 	}
@@ -221,6 +248,8 @@ func (s *store) replace(key string, old, e *entry) {
 			if v == old {
 				it.variants[i] = e
 				sh.grow(it, e.size-old.size)
+				sh.tags.remove(key, old.tags)
+				sh.tags.add(key, e.tags)
 				replaced = true
 				break
 			}
@@ -232,17 +261,40 @@ func (s *store) replace(key string, old, e *entry) {
 	}
 }
 
-// remove drops every variant under key, in memory and on disk.
-func (s *store) remove(key string) {
+// remove drops every variant under key, in memory and on disk, and
+// reports whether there was any.
+func (s *store) remove(key string) bool {
 	sh := s.shard(key)
 	sh.mu.Lock()
-	if it := sh.items[key]; it != nil {
+	it := sh.items[key]
+	if it != nil {
 		sh.drop(it)
 	}
 	sh.mu.Unlock()
-	if d := s.disk.Load(); d != nil {
-		d.remove(key)
+	found := it != nil
+	if d := s.disk.Load(); d != nil && d.remove(key) {
+		found = true
 	}
+	return found
+}
+
+// clear drops everything the store keeps, in memory and on disk, and
+// returns how many keys it held.
+func (s *store) clear() int {
+	n := 0
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		n += len(sh.items)
+		for sh.lru.next != &sh.lru {
+			sh.drop(sh.lru.next)
+		}
+		sh.mu.Unlock()
+	}
+	if d := s.disk.Load(); d != nil {
+		n = max(n, d.clear())
+	}
+	return n
 }
 
 // stats returns how many keys the store holds, and its size.
@@ -284,6 +336,60 @@ func (sh *shard) drop(it *item) {
 	sh.unlink(it)
 	delete(sh.items, it.key)
 	sh.size -= it.size
+	for _, v := range it.variants {
+		sh.tags.remove(it.key, v.tags)
+	}
+}
+
+// tagIndex is the keys of a zone's responses by tag, each key counted once
+// for each response, in memory or on disk, that carries the tag.
+type tagIndex struct {
+	mu sync.Mutex
+	m  map[string]map[string]int
+}
+
+func (t *tagIndex) add(key string, tags []string) {
+	if len(tags) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, tag := range tags {
+		keys := t.m[tag]
+		if keys == nil {
+			keys = map[string]int{}
+			t.m[tag] = keys
+		}
+		keys[key]++
+	}
+}
+
+func (t *tagIndex) remove(key string, tags []string) {
+	if len(tags) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, tag := range tags {
+		keys := t.m[tag]
+		if keys[key]--; keys[key] <= 0 {
+			delete(keys, key)
+			if len(keys) == 0 {
+				delete(t.m, tag)
+			}
+		}
+	}
+}
+
+// keys returns the keys of the responses tagged tag.
+func (t *tagIndex) keys(tag string) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	keys := make([]string, 0, len(t.m[tag]))
+	for k := range t.m[tag] {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // zones are the stores in use, by name, so that a config reloaded keeps
@@ -318,7 +424,7 @@ func acquire(name string, maxSize int64, cfg *Disk) (*store, error) {
 				return nil, fmt.Errorf("the directory %s is zone %q's", dir, other)
 			}
 		}
-		nd, err := newDisk(cfg, diskPool())
+		nd, err := newDisk(cfg, diskPool(), &s.tags)
 		if err != nil {
 			return nil, err
 		}

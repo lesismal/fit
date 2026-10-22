@@ -192,7 +192,7 @@ Status: `todo`, `doing` or `done`.
 | **M5** | | | |
 | I67 | Cache I: HTTP semantics and memory tier | I23 | done |
 | I68 | Cache II: disk tier | I67 | done |
-| I69 | Cache III: locks, stale, purge | I68, I25 | todo |
+| I69 | Cache III: locks, stale, purge | I68, I25 | done |
 | I70 | `fit build` and compile-time modules | I04 | todo |
 | I71 | WASM I: runtime and plugin pool | I36 | todo |
 | I72 | WASM II: Proxy-Wasm subset | I71 | todo |

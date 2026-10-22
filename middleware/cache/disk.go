@@ -59,6 +59,8 @@ var diskPool = sync.OnceValue(func() *filepool.Pool {
 type disk struct {
 	dir  string
 	pool *filepool.Pool
+	// tags is the zone's tag index, which the disk's entries are in too.
+	tags *tagIndex
 
 	maxSize    atomic.Int64
 	maxEntries atomic.Int64
@@ -78,6 +80,9 @@ type disk struct {
 	// trash are files whose entries are gone, to be removed on the pool.
 	trash    []string
 	draining bool
+	// cleared is the seq of the last clear: a write queued before it is not
+	// kept.
+	cleared uint64
 }
 
 // diskItem is a key's variants on disk. removed, when set, is the seq of
@@ -97,12 +102,12 @@ type diskEntry struct {
 	size int64
 }
 
-func newDisk(cfg *Disk, pool *filepool.Pool) (*disk, error) {
+func newDisk(cfg *Disk, pool *filepool.Pool, tags *tagIndex) (*disk, error) {
 	dir := filepath.Clean(cfg.Path)
 	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o700); err != nil {
 		return nil, err
 	}
-	d := &disk{dir: dir, pool: pool, items: map[string]*diskItem{}, ready: make(chan struct{})}
+	d := &disk{dir: dir, pool: pool, tags: tags, items: map[string]*diskItem{}, ready: make(chan struct{})}
 	d.lru.prev, d.lru.next = &d.lru, &d.lru
 	d.setLimits(cfg)
 	// Reading the index back is one goroutine's work, once, and requests do
@@ -178,9 +183,9 @@ func (d *disk) write(key string, e *entry) {
 	}
 }
 
-// remove drops key's responses: their files go on the pool, and a write of
-// key queued before now is not kept.
-func (d *disk) remove(key string) {
+// remove drops key's responses, and reports whether it had any: their
+// files go on the pool, and a write of key queued before now is not kept.
+func (d *disk) remove(key string) bool {
 	seq := d.seq.Add(1)
 	d.mu.Lock()
 	it := d.items[key]
@@ -191,14 +196,39 @@ func (d *disk) remove(key string) {
 	} else {
 		d.touch(it)
 	}
+	found := len(it.variants) > 0
 	for _, de := range it.variants {
-		d.forget(de)
+		d.forget(key, de)
 	}
 	it.variants = nil
 	it.removed = seq
 	d.evict()
 	d.mu.Unlock()
 	d.drainLater()
+	return found
+}
+
+// clear drops every response on disk, and returns how many keys had one: a
+// write queued before now is not kept.
+func (d *disk) clear() int {
+	seq := d.seq.Add(1)
+	d.mu.Lock()
+	n := 0
+	for d.lru.next != &d.lru {
+		it := d.lru.next
+		if len(it.variants) > 0 {
+			n++
+		}
+		for _, de := range it.variants {
+			d.forget(it.key, de)
+		}
+		d.unlink(it)
+		delete(d.items, it.key)
+	}
+	d.cleared = seq
+	d.mu.Unlock()
+	d.drainLater()
+	return n
 }
 
 // add puts de in the index under key, in place of the variant it answers
@@ -214,7 +244,7 @@ func (d *disk) add(key string, de *diskEntry, seq uint64) {
 	} else {
 		d.touch(it)
 	}
-	if seq < it.removed {
+	if seq < it.removed || seq != 0 && seq < d.cleared {
 		d.trash = append(d.trash, de.file)
 		return
 	}
@@ -227,6 +257,7 @@ func (d *disk) add(key string, de *diskEntry, seq uint64) {
 			}
 			d.size -= v.size
 			d.count--
+			d.tags.remove(key, v.meta.tags)
 			it.variants = append(it.variants[:i], it.variants[i+1:]...)
 			if v.file != de.file {
 				d.trash = append(d.trash, v.file)
@@ -235,12 +266,13 @@ func (d *disk) add(key string, de *diskEntry, seq uint64) {
 		}
 	}
 	if len(it.variants) == maxVariants {
-		d.forget(it.variants[0])
+		d.forget(key, it.variants[0])
 		it.variants = append(it.variants[:0], it.variants[1:]...)
 	}
 	it.variants = append(it.variants, de)
 	d.size += de.size
 	d.count++
+	d.tags.add(key, de.meta.tags)
 	d.evict()
 }
 
@@ -251,7 +283,7 @@ func (d *disk) drop(key string, de *diskEntry) {
 		for i, v := range it.variants {
 			if v == de {
 				it.variants = append(it.variants[:i], it.variants[i+1:]...)
-				d.forget(de)
+				d.forget(key, de)
 				break
 			}
 		}
@@ -260,10 +292,12 @@ func (d *disk) drop(key string, de *diskEntry) {
 	d.drainLater()
 }
 
-// forget drops de from the counts and trashes its file. d.mu is held.
-func (d *disk) forget(de *diskEntry) {
+// forget drops de, key's entry, from the counts and the tags, and trashes
+// its file. d.mu is held.
+func (d *disk) forget(key string, de *diskEntry) {
 	d.size -= de.size
 	d.count--
+	d.tags.remove(key, de.meta.tags)
 	d.trash = append(d.trash, de.file)
 }
 
@@ -275,7 +309,7 @@ func (d *disk) evict() {
 	for (d.size > maxSize || int64(len(d.items)) > maxEntries) && d.lru.prev != &d.lru {
 		it := d.lru.prev
 		for _, de := range it.variants {
-			d.forget(de)
+			d.forget(it.key, de)
 		}
 		d.unlink(it)
 		delete(d.items, it.key)
@@ -361,6 +395,8 @@ type fileMeta struct {
 	InitialAge   time.Duration  `json:"initial_age"`
 	Lifetime     time.Duration  `json:"lifetime"`
 	NoStale      bool           `json:"no_stale,omitempty"`
+	SWR          time.Duration  `json:"stale_while_revalidate,omitempty"`
+	SIE          time.Duration  `json:"stale_if_error,omitempty"`
 	BodyLen      int64          `json:"body_len"`
 }
 
@@ -371,7 +407,7 @@ func (d *disk) writeFile(key string, e *entry) (*diskEntry, error) {
 	meta, err := json.Marshal(fileMeta{
 		Key: key, Status: e.status, Header: e.header, VaryNames: e.varyNames, VaryValues: e.varyValues,
 		ResponseTime: e.responseTime.UnixNano(), InitialAge: e.initialAge, Lifetime: e.lifetime,
-		NoStale: e.noStale, BodyLen: int64(len(e.body)),
+		NoStale: e.noStale, SWR: e.swr, SIE: e.sie, BodyLen: int64(len(e.body)),
 	})
 	if err != nil {
 		return nil, err
@@ -493,8 +529,8 @@ func entryOfMeta(m *fileMeta) *entry {
 		status: m.Status, header: m.Header,
 		varyNames: m.VaryNames, varyValues: m.VaryValues,
 		responseTime: time.Unix(0, m.ResponseTime), initialAge: m.InitialAge, lifetime: m.Lifetime,
-		noStale: m.NoStale,
-		etag:    m.Header.Get("Etag"), lastModified: m.Header.Get("Last-Modified"),
+		noStale: m.NoStale, swr: m.SWR, sie: m.SIE, tags: tagsOf(m.Header),
+		etag: m.Header.Get("Etag"), lastModified: m.Header.Get("Last-Modified"),
 	}
 }
 

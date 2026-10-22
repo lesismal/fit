@@ -1,0 +1,61 @@
+{
+  "started": "2026-10-22T21:16:14.14725166Z",
+  "finished": "2026-10-22T21:16:57.47772918Z",
+  "host": {
+    "architecture": "x86_64",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "kernel": "Linux 7.0.0-38-generic",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "os": "linux"
+  },
+  "params": {
+    "duration": "30s",
+    "warmup": "10s",
+    "connections": 256,
+    "h2_connections": 64,
+    "h2_streams": 32,
+    "idle_connections": 10000,
+    "idle_settle": "5s",
+    "network": "host",
+    "server_cpus": "0-6",
+    "client_cpus": "7-13",
+    "backend_cpus": "14-15"
+  },
+  "versions": {
+    "docker": "29.1.3",
+    "h2load": "h2load nghttp2/1.59.0",
+    "nginx": "nginx version: nginx/1.31.4",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {
+    "nginx": "nginx@sha256:b34848eff6db786b6b1282d3a9c3fd0b5563dfb6d261df4923378b419e0d24f0"
+  },
+  "results": [
+    {
+      "server": "nginx",
+      "scenario": "cache-zipf",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 249261.7008484165,
+      "requests": 7502590,
+      "backend_requests": 401656,
+      "hit_ratio": 0.946464354309645,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.917,
+        "p90": 1.824,
+        "p99": 282.804,
+        "p99.9": 480.171,
+        "mean": 6.78167,
+        "stdev": 43.35605,
+        "max": 512.461
+      },
+      "cpu_cores": 6.933859407603734,
+      "memory_bytes": 954765312,
+      "anon_bytes": 211550208
+    }
+  ]
+}

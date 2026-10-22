@@ -113,3 +113,17 @@ func TestPick(t *testing.T) {
 		t.Fatal("an unknown scenario was picked")
 	}
 }
+
+func TestParseRequestCount(t *testing.T) {
+	out := `# TYPE fit_http_requests_total counter
+fit_http_requests_total{listener="cachebackend",route="cache",code="2xx"} 1234
+fit_http_requests_total{listener="cachebackend",route="cache",code="4xx"} 6
+fit_http_requests_total{listener="cachebackend",route="other",code="2xx"} 99
+`
+	if n, err := parseRequestCount(out, "cache"); n != 1240 || err != nil {
+		t.Errorf("%d %v", n, err)
+	}
+	if _, err := parseRequestCount(out, "nothing"); err == nil {
+		t.Error("no samples")
+	}
+}

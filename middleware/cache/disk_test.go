@@ -309,7 +309,7 @@ func TestDiskInvalidate(t *testing.T) {
 // responses go, and their files with them.
 func TestDiskBounds(t *testing.T) {
 	dir := t.TempDir()
-	d, err := newDisk(&Disk{Path: dir, MaxEntries: 10, MaxSize: 1 << 20}, filepool.New(2, 64, time.Second))
+	d, err := newDisk(&Disk{Path: dir, MaxEntries: 10, MaxSize: 1 << 20}, filepool.New(2, 64, time.Second), &tagIndex{m: map[string]map[string]int{}})
 	if err != nil {
 		t.Fatal(err)
 	}

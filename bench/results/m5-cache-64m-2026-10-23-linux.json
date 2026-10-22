@@ -1,0 +1,180 @@
+{
+  "started": "2026-10-22T21:06:33.636036623Z",
+  "finished": "2026-10-22T21:10:40.048037484Z",
+  "host": {
+    "architecture": "x86_64",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "kernel": "Linux 7.0.0-38-generic",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "os": "linux"
+  },
+  "params": {
+    "duration": "30s",
+    "warmup": "10s",
+    "connections": 256,
+    "h2_connections": 64,
+    "h2_streams": 32,
+    "idle_connections": 10000,
+    "idle_settle": "5s",
+    "network": "host",
+    "server_cpus": "0-6",
+    "client_cpus": "7-13",
+    "backend_cpus": "14-15"
+  },
+  "versions": {
+    "docker": "29.1.3",
+    "fit": "fit v0.0.0-20261022204814-c23015c6fabe+dirty; fib v1.5.7-0.20261022203111-39989533638b; go1.27.3 linux/amd64",
+    "h2load": "h2load nghttp2/1.59.0",
+    "nginx": "nginx version: nginx/1.31.4",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {
+    "fit": "ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac",
+    "nginx": "nginx@sha256:b34848eff6db786b6b1282d3a9c3fd0b5563dfb6d261df4923378b419e0d24f0"
+  },
+  "results": [
+    {
+      "server": "nginx",
+      "scenario": "cache-hot",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 333712.5058262725,
+      "requests": 10022076,
+      "hit_ratio": 1,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.832,
+        "p90": 0.927,
+        "p99": 0.95,
+        "p99.9": 0.966,
+        "mean": 0.7513099999999999,
+        "stdev": 0.16632,
+        "max": 4.286
+      },
+      "cpu_cores": 6.981719204418254,
+      "memory_bytes": 213573632,
+      "anon_bytes": 209145856
+    },
+    {
+      "server": "nginx",
+      "scenario": "cache-hot",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 294771.93,
+      "requests": 8843158,
+      "hit_ratio": 1,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 7.21,
+        "stdev": 2.91,
+        "max": 27.54
+      },
+      "cpu_cores": 6.988184095720382,
+      "memory_bytes": 213422080,
+      "anon_bytes": 209604608
+    },
+    {
+      "server": "nginx",
+      "scenario": "cache-zipf",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 304707.35018103506,
+      "requests": 9171598,
+      "backend_requests": 55967,
+      "hit_ratio": 0.9938977918569916,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.824,
+        "p90": 0.988,
+        "p99": 2.306,
+        "p99.9": 89.047,
+        "mean": 1.15252,
+        "stdev": 10.07794,
+        "max": 501.877
+      },
+      "cpu_cores": 6.916160258420595,
+      "memory_bytes": 1296400384,
+      "anon_bytes": 211038208
+    },
+    {
+      "server": "nginx",
+      "scenario": "cache-zipf",
+      "protocol": "h2c",
+      "skipped": "the scenario runs over http/1.1",
+      "errors": 0
+    },
+    {
+      "server": "fit",
+      "scenario": "cache-hot",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 688479.6335070967,
+      "requests": 20673800,
+      "hit_ratio": 1,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.319,
+        "p90": 0.612,
+        "p99": 1.365,
+        "p99.9": 3.649,
+        "mean": 0.37515,
+        "stdev": 0.31468,
+        "max": 17.718
+      },
+      "cpu_cores": 6.920228090843695,
+      "memory_bytes": 27566080,
+      "anon_bytes": 25665536
+    },
+    {
+      "server": "fit",
+      "scenario": "cache-hot",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 1576330.37,
+      "requests": 47289911,
+      "hit_ratio": 1,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 1.18,
+        "stdev": 0.863,
+        "max": 37.6
+      },
+      "cpu_cores": 6.950555293476419,
+      "memory_bytes": 68907008,
+      "anon_bytes": 66555904
+    },
+    {
+      "server": "fit",
+      "scenario": "cache-zipf",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 444374.4986152686,
+      "requests": 13374737,
+      "backend_requests": 2939446,
+      "hit_ratio": 0.7802240148722177,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.451,
+        "p90": 1.773,
+        "p99": 7.008,
+        "p99.9": 10.137,
+        "mean": 0.84169,
+        "stdev": 1.23074,
+        "max": 19.356
+      },
+      "cpu_cores": 6.9360211226377855,
+      "memory_bytes": 225075200,
+      "anon_bytes": 220745728
+    },
+    {
+      "server": "fit",
+      "scenario": "cache-zipf",
+      "protocol": "h2c",
+      "skipped": "the scenario runs over http/1.1",
+      "errors": 0
+    }
+  ]
+}

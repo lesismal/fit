@@ -22,6 +22,11 @@ type Result struct {
 
 	RequestsPerSec float64 `json:"requests_per_sec,omitempty"`
 	Requests       int64   `json:"requests,omitempty"`
+	// BackendRequests counts the requests that reached the backend during
+	// the run, and HitRatio is the share of Requests the server answered
+	// without it, for a cache scenario.
+	BackendRequests int64    `json:"backend_requests,omitempty"`
+	HitRatio        *float64 `json:"hit_ratio,omitempty"`
 	// Errors counts requests that failed or were answered with a status
 	// other than 2xx.
 	Errors int64 `json:"errors"`
@@ -186,4 +191,28 @@ func cgroupField(stat, name string, unit time.Duration) (time.Duration, bool) {
 		}
 	}
 	return 0, false
+}
+
+// parseRequestCount sums fit's fit_http_requests_total samples for route in
+// out, the text of its Admin API's /metrics.
+func parseRequestCount(out, route string) (int64, error) {
+	var n int64
+	found := false
+	label := `route="` + route + `"`
+	for line := range strings.SplitSeq(out, "\n") {
+		if !strings.HasPrefix(line, "fit_http_requests_total{") || !strings.Contains(line, label) {
+			continue
+		}
+		i := strings.LastIndexByte(line, ' ')
+		v, err := strconv.ParseFloat(line[i+1:], 64)
+		if err != nil {
+			return 0, fmt.Errorf("metrics: %q: %v", line, err)
+		}
+		n += int64(v)
+		found = true
+	}
+	if !found {
+		return 0, fmt.Errorf("metrics: no fit_http_requests_total for route %q", route)
+	}
+	return n, nil
 }

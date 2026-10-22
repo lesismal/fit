@@ -2014,9 +2014,19 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "disable_lock": {
+          "description": "Lets every request that misses fetch for itself. When left out, a request that misses while another fetches the same response waits for that fetch, up to lock_timeout, and is answered from what it keeps (a cache lock), so that many requests for a response not kept make one fetch.",
+          "type": "boolean"
+        },
         "disk": {
           "$ref": "#/$defs/cache.Disk",
           "description": "A disk tier for the zone: every response kept in memory is written to disk too, on a pool of goroutines of its own, and one the memory no longer holds is read back from disk, on that pool, and kept in memory again. None when left out. Caches of one zone take the disk of the last one loaded."
+        },
+        "lock_timeout": {
+          "default": "5s",
+          "description": "How long a request waits for another's fetch of its response before it goes on to fetch for itself. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         },
         "max_entry_size": {
           "default": 1048576,
@@ -2029,6 +2039,16 @@
           "description": "The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded.",
           "minimum": 0,
           "type": "integer"
+        },
+        "stale_if_error": {
+          "description": "How long past its lifetime a response may still be answered when fetching it again fails, with no response or a 500, 502, 503 or 504, for a response that does not say how long itself (Cache-Control stale-if-error, RFC 5861). None when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "stale_while_revalidate": {
+          "description": "How long past its lifetime a response may still be answered while the cache fetches it again in the background, for a response that does not say how long itself (Cache-Control stale-while-revalidate, RFC 5861). None when left out. A response that says must-revalidate, proxy-revalidate or s-maxage is never answered stale.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         },
         "zone": {
           "default": "default",

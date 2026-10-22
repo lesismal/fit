@@ -71,6 +71,7 @@ type Params struct {
 const (
 	serverName    = "fitbench-server"
 	backendName   = "fitbench-backend"
+	cacheName     = "fitbench-cachebackend"
 	wsBackendName = "fitbench-wsbackend"
 	loadgenName   = "fitbench-loadgen"
 	networkName   = "fitbench"
@@ -103,7 +104,10 @@ type harness struct {
 	clientCPUs  []string
 	backendCPUs []string
 	threads     int // load generator threads: one per client CPU
-	report      Report
+	// cacheAdmin is the cache backend's Admin API, or "" when the load
+	// generators cannot reach it.
+	cacheAdmin string
+	report     Report
 }
 
 func run(ctx context.Context, args []string) error {
@@ -184,13 +188,17 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("docker info: %q: %v", info, err)
 	}
 
-	backendAddr, wsBackendAddr := "127.0.0.1:9000", "127.0.0.1:9001"
+	backendAddr, wsBackendAddr, cacheAddr := "127.0.0.1:9000", "127.0.0.1:9001", "127.0.0.1:9003"
+	h.cacheAdmin = "127.0.0.1:9004"
 	switch *network {
 	case "host":
 		h.netArgs, h.serverHost = []string{"--network", "host"}, "127.0.0.1"
 	case "bridge":
 		h.netArgs, h.serverHost = []string{"--network", networkName}, serverName
-		backendAddr, wsBackendAddr = backendName+":9000", wsBackendName+":9001"
+		backendAddr, wsBackendAddr, cacheAddr = backendName+":9000", wsBackendName+":9001", cacheName+":9003"
+		// Its Admin API listens on its own loopback, which the load
+		// generators cannot reach: no hit ratios.
+		h.cacheAdmin = ""
 	default:
 		return fmt.Errorf("-network: %q is neither host nor bridge", *network)
 	}
@@ -236,7 +244,8 @@ func run(ctx context.Context, args []string) error {
 	} else if err := h.buildTools(ctx, root, arch); err != nil {
 		return err
 	}
-	if err := h.renderConfigs(map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr, "{{WORKERS}}": strconv.Itoa(serverThreads)}); err != nil {
+	if err := h.renderConfigs(map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr,
+		"{{CACHEBACKEND}}": cacheAddr, "{{CACHEBODY}}": cacheBody, "{{WORKERS}}": strconv.Itoa(serverThreads)}); err != nil {
 		return err
 	}
 	if err := writeCert(filepath.Join(h.work, "certs")); err != nil {
@@ -280,6 +289,15 @@ func run(ctx context.Context, args []string) error {
 	wsArgs := append(append([]string{"run", "-d", "--name", wsBackendName, "--ulimit", "nofile=1048576:1048576",
 		"-v", filepath.Join(h.work, "idleconn") + ":/usr/local/bin/idleconn:ro"}, h.netArgs...), h.backendCPUs...)
 	if _, err := docker(ctx, append(wsArgs, h.baseImage, "/usr/local/bin/idleconn", "-serve-ws", ":9001")...); err != nil {
+		return err
+	}
+
+	// It runs whatever is chosen too, for nginx's config to resolve.
+	step("starting the cache backend")
+	if err := h.start(ctx, cacheBackend, cacheName, h.backendCPUs); err != nil {
+		return err
+	}
+	if err := h.waitReady(ctx, cacheName, "http://"+cacheAddr+cacheBackend.ready); err != nil {
 		return err
 	}
 
@@ -579,6 +597,15 @@ func (h *harness) runServer(ctx context.Context, s server) {
 			}
 		}
 	}
+	runs := func(sc string) []string {
+		var ps []string
+		for _, p := range h.protocols {
+			if only := scenarioOf(sc).protocols; only == nil || slices.Contains(only, p) {
+				ps = append(ps, p)
+			}
+		}
+		return ps
+	}
 	if len(todo) == 0 {
 		return
 	}
@@ -607,9 +634,30 @@ func (h *harness) runServer(ctx context.Context, s server) {
 			if ctx.Err() != nil {
 				return
 			}
+			if !slices.Contains(runs(sc), p) {
+				add(Result{Server: s.name, Scenario: sc, Protocol: p, Skipped: "the scenario runs over " + strings.Join(scenarioOf(sc).protocols, ", ")})
+				continue
+			}
 			add(h.measure(ctx, s, sc, p))
 		}
 	}
+}
+
+// scenarioOf returns the scenario named name.
+func scenarioOf(name string) scenario {
+	return scenarios[slices.IndexFunc(scenarios, func(x scenario) bool { return x.name == name })]
+}
+
+// backendCount returns how many requests the cache backend has answered.
+func (h *harness) backendCount(ctx context.Context) (int64, error) {
+	if h.cacheAdmin == "" {
+		return 0, errors.New("the cache backend's Admin API is not reachable on a bridge network")
+	}
+	out, err := docker(ctx, "exec", loadgenName, "curl", "-s", "--max-time", "5", "http://"+h.cacheAdmin+"/metrics")
+	if err != nil {
+		return 0, err
+	}
+	return parseRequestCount(out, "cache")
 }
 
 func imageDigest(ctx context.Context, image string) string {
@@ -622,11 +670,11 @@ func imageDigest(ctx context.Context, image string) string {
 
 // measure checks that s answers scenario sc over protocol p as every other
 // server does, warms it up, and measures it.
-func (h *harness) measure(ctx context.Context, s server, sc, p string) Result {
-	r := Result{Server: s.name, Scenario: sc, Protocol: p}
-	i := slices.IndexFunc(scenarios, func(x struct{ name, path, body string }) bool { return x.name == sc })
+func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result) {
+	var err error
+	r = Result{Server: s.name, Scenario: sc, Protocol: p}
 	j := slices.IndexFunc(protocols, func(x struct{ name, port, tool string }) bool { return x.name == p })
-	scenario, proto := scenarios[i], protocols[j]
+	scenario, proto := scenarioOf(sc), protocols[j]
 	r.Tool = proto.tool
 	url := "http://" + h.serverHost + ":" + proto.port + scenario.path
 
@@ -635,18 +683,32 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) Result {
 		return r
 	}
 	if h.warmup > 0 {
-		if _, err := docker(ctx, h.loadArgs(proto.tool, url, h.warmup)...); err != nil {
+		if _, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.warmup)...); err != nil {
 			r.Error = "warmup: " + err.Error()
+			return r
+		}
+	}
+	var backend0 int64
+	if scenario.hitRatio {
+		if backend0, err = h.backendCount(ctx); err != nil {
+			r.Error = "the backend's count: " + err.Error()
 			return r
 		}
 	}
 	cpu0, cpuOK := h.serverCPU(ctx)
 	start := time.Now()
-	out, err := docker(ctx, h.loadArgs(proto.tool, url, h.duration)...)
+	out, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.duration)...)
 	elapsed := time.Since(start)
 	if err != nil {
 		r.Error = err.Error()
 		return r
+	}
+	var backend1 int64
+	if scenario.hitRatio {
+		if backend1, err = h.backendCount(ctx); err != nil {
+			r.Error = "the backend's count: " + err.Error()
+			return r
+		}
 	}
 	if cpu1, ok := h.serverCPU(ctx); ok && cpuOK {
 		r.CPUCores = float64(cpu1-cpu0) / float64(elapsed)
@@ -664,6 +726,11 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) Result {
 	}
 	if err != nil {
 		r.Error = err.Error()
+	}
+	if scenario.hitRatio && r.Requests > 0 {
+		r.BackendRequests = backend1 - backend0
+		ratio := 1 - float64(r.BackendRequests)/float64(r.Requests)
+		r.HitRatio = &ratio
 	}
 	return r
 }
@@ -701,13 +768,17 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 	return nil
 }
 
-// loadArgs is the docker exec that runs tool against url for d.
-func (h *harness) loadArgs(tool, url string, d time.Duration) []string {
+// loadArgs is the docker exec that runs tool against url for d, wrk with
+// script, or report.lua when it is empty.
+func (h *harness) loadArgs(tool, url, script string, d time.Duration) []string {
 	secs := strconv.Itoa(max(1, int(d.Round(time.Second).Seconds())))
 	t := strconv.Itoa(h.threads)
 	if tool == "wrk" {
+		if script == "" {
+			script = "report.lua"
+		}
 		c := strconv.Itoa(max(h.conns, h.threads))
-		return []string{"exec", loadgenName, "wrk", "-t", t, "-c", c, "-d", secs + "s", "--timeout", "10s", "--latency", "-s", "/fitbench/report.lua", url}
+		return []string{"exec", loadgenName, "wrk", "-t", t, "-c", c, "-d", secs + "s", "--timeout", "10s", "--latency", "-s", "/fitbench/" + script, url}
 	}
 	c := strconv.Itoa(max(h.h2conns, h.threads))
 	return []string{"exec", loadgenName, "h2load", "-t", t, "-c", c, "-m", strconv.Itoa(h.h2streams), "-D", secs, url}
@@ -726,7 +797,7 @@ func (h *harness) serverCPU(ctx context.Context) (time.Duration, bool) {
 // this run or an earlier one that was interrupted.
 func cleanup(network bool) {
 	ctx := context.Background()
-	_, _ = docker(ctx, "rm", "-f", serverName, backendName, wsBackendName, loadgenName)
+	_, _ = docker(ctx, "rm", "-f", serverName, backendName, wsBackendName, cacheName, loadgenName)
 	_, _ = docker(ctx, "volume", "rm", wwwVolume)
 	if network {
 		_, _ = docker(ctx, "network", "rm", networkName)
@@ -744,15 +815,19 @@ func docker(ctx context.Context, args ...string) (string, error) {
 func step(msg string) { fmt.Println("==>", msg) }
 
 func printResult(r Result) {
-	name := fmt.Sprintf("%-8s %-7s %-9s", r.Server, r.Scenario, r.Protocol)
+	name := fmt.Sprintf("%-8s %-10s %-9s", r.Server, r.Scenario, r.Protocol)
 	switch {
 	case r.Skipped != "":
 		fmt.Printf("    %s skipped: %s\n", name, r.Skipped)
 	case r.Error != "":
 		fmt.Printf("    %s error: %s\n", name, r.Error)
 	default:
-		fmt.Printf("    %s %12.0f req/s  mean %7.2fms  max %8.2fms  errors %d  cpu %.2f\n",
-			name, r.RequestsPerSec, r.Latency.Mean, r.Latency.Max, r.Errors, r.CPUCores)
+		hits := ""
+		if r.HitRatio != nil {
+			hits = fmt.Sprintf("  hits %.1f%%", 100**r.HitRatio)
+		}
+		fmt.Printf("    %s %12.0f req/s  mean %7.2fms  max %8.2fms  errors %d  cpu %.2f%s\n",
+			name, r.RequestsPerSec, r.Latency.Mean, r.Latency.Max, r.Errors, r.CPUCores, hits)
 	}
 }
 
@@ -787,13 +862,13 @@ func printSummary(results []Result, idle []IdleResult) {
 			names = append(names, r.Server)
 		}
 	}
-	fmt.Printf("\n%-18s", "req/s")
+	fmt.Printf("\n%-22s", "req/s")
 	for _, n := range names {
 		fmt.Printf("%14s", n)
 	}
 	fmt.Println()
 	for _, key := range order {
-		fmt.Printf("%-18s", key)
+		fmt.Printf("%-22s", key)
 		for _, n := range names {
 			fmt.Printf("%14s", rows[key][n])
 		}

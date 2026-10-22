@@ -3,6 +3,7 @@ package cache
 import (
 	stdhttp "net/http"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,8 @@ import (
 // request or a response. Durations are -1 when the directive is absent.
 type directives struct {
 	maxAge, sMaxAge, maxStale, minFresh time.Duration
+	// staleWhileRevalidate and staleIfError are RFC 5861's, -1 when absent.
+	staleWhileRevalidate, staleIfError time.Duration
 	// maxStaleAny is max-stale with no value: any staleness will do.
 	maxStaleAny                                                        bool
 	noStore, noCache, private, public, mustRevalidate, proxyRevalidate bool
@@ -27,7 +30,7 @@ const maxDelta = time.Duration(1<<31) * time.Second
 // cache that does not track fields must. A delta that does not parse is
 // taken as 0, which makes a response stale, as section 4.2.1 says to.
 func parseDirectives(fields []string) directives {
-	d := directives{maxAge: -1, sMaxAge: -1, maxStale: -1, minFresh: -1}
+	d := directives{maxAge: -1, sMaxAge: -1, maxStale: -1, minFresh: -1, staleWhileRevalidate: -1, staleIfError: -1}
 	for _, field := range fields {
 		for member := range strings.SplitSeq(field, ",") {
 			name, value, _ := strings.Cut(member, "=")
@@ -46,6 +49,10 @@ func parseDirectives(fields []string) directives {
 				}
 			case "min-fresh":
 				d.minFresh = delta(value)
+			case "stale-while-revalidate":
+				d.staleWhileRevalidate = delta(value)
+			case "stale-if-error":
+				d.staleIfError = delta(value)
 			case "no-store":
 				d.noStore = true
 			case "no-cache":
@@ -259,4 +266,33 @@ var notModifiedFields = []string{"Cache-Control", "Content-Location", "Date", "E
 // response it freshens (RFC 9111 section 3.2).
 var updateExcluded = map[string]bool{
 	"Content-Length": true, "Content-Encoding": true, "Content-Type": true, "Content-Range": true,
+}
+
+// The bounds on a response's tags.
+const (
+	maxTags   = 32
+	maxTagLen = 128
+)
+
+// tagsOf returns a response's tags, by which it can be purged: the members
+// of its Cache-Tag fields, comma-separated, and of its Surrogate-Key fields,
+// space-separated, at most maxTags of them, none longer than maxTagLen.
+func tagsOf(h stdhttp.Header) []string {
+	var tags []string
+	add := func(tag string) {
+		if tag = strings.TrimSpace(tag); tag != "" && len(tag) <= maxTagLen && len(tags) < maxTags && !slices.Contains(tags, tag) {
+			tags = append(tags, tag)
+		}
+	}
+	for _, v := range h["Cache-Tag"] {
+		for tag := range strings.SplitSeq(v, ",") {
+			add(tag)
+		}
+	}
+	for _, v := range h["Surrogate-Key"] {
+		for _, tag := range strings.Fields(v) {
+			add(tag)
+		}
+	}
+	return tags
 }

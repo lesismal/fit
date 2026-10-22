@@ -32,6 +32,8 @@ var (
 	answer atomic.Pointer[func(c *fibhttp.Context)]
 	// release lets the slow stream go on.
 	release = make(chan struct{}, 1)
+	// failing has the paths that answer 500 when it is set do so.
+	failing atomic.Bool
 )
 
 func hitsOf(path string) int64 {
@@ -136,6 +138,45 @@ func (origin) ServeHTTP(c *fibhttp.Context) {
 			_ = c.WriteResponse(fibhttp.Response{StatusCode: 304, Header: h})
 			return
 		}
+	case "/late", "/late-private":
+		// Answered later, from a timer, as an upstream that takes its time.
+		h["Cache-Control"] = []string{"max-age=60"}
+		if p == "/late-private" {
+			h["Cache-Control"] = []string{"private"}
+		}
+		delay := 200 * time.Millisecond
+		if d, err := time.ParseDuration(c.Request.URL.Query().Get("delay")); err == nil {
+			delay = d
+		}
+		c.Retain()
+		time.AfterFunc(delay, func() {
+			_ = c.WriteResponse(fibhttp.Response{StatusCode: 200, Header: h, Body: []byte(body)})
+			c.Release()
+		})
+		return
+	case "/swr":
+		h["Cache-Control"] = []string{"max-age=10, stale-while-revalidate=60"}
+		h["Etag"] = []string{`"s1"`}
+		if c.Request.Header.Get("If-None-Match") == `"s1"` {
+			_ = c.WriteResponse(fibhttp.Response{StatusCode: 304, Header: h})
+			return
+		}
+	case "/sie", "/sie-param":
+		h["Cache-Control"] = []string{"max-age=10, stale-if-error=60"}
+		if p == "/sie-param" {
+			h["Cache-Control"] = []string{"max-age=10"}
+		}
+		if failing.Load() {
+			status = 500
+			h["Cache-Control"] = nil
+		}
+	case "/tagged":
+		h["Cache-Control"] = []string{"max-age=60"}
+		h["Cache-Tag"] = []string{"t1, t2"}
+		if c.Request.URL.RawQuery == "b" {
+			h["Cache-Tag"] = nil
+			h["Surrogate-Key"] = []string{"t2 t3"}
+		}
 	case "/gzip":
 		h["Cache-Control"] = []string{"max-age=60"}
 		h["Content-Type"] = []string{"application/json"}
@@ -161,6 +202,7 @@ func serve(t *testing.T, middleware string) string {
 		stop()
 		resetHits()
 		answer.Store(nil)
+		failing.Store(false)
 	})
 	return base
 }
@@ -209,6 +251,13 @@ type reply struct {
 }
 
 func (r reply) cacheStatus() string { return r.header.Get("Cache-Status") }
+
+// freshHit reports whether r was answered with a fresh response the cache
+// keeps in memory.
+func freshHit(r reply) bool {
+	cs := r.cacheStatus()
+	return strings.HasPrefix(cs, "fit; hit; ttl=") && !strings.Contains(cs, "ttl=-") && !strings.Contains(cs, "detail")
+}
 
 func get(t *testing.T, c *stdhttp.Client, method, url string, fields ...string) reply {
 	t.Helper()
@@ -321,14 +370,16 @@ func TestFreshness(t *testing.T) {
 	if r := get(t, c, "GET", base+"/fresh"); r.header.Get("Age") != "30" || r.cacheStatus() != "fit; hit; ttl=29" && r.cacheStatus() != "fit; hit; ttl=30" {
 		t.Errorf("at 30s: age %q, %q", r.header.Get("Age"), r.cacheStatus())
 	}
-	if r := get(t, c, "GET", base+"/heuristic"); r.cacheStatus() != "fit; fwd=stale; stored" {
-		t.Errorf("heuristic at 30s: %q", r.cacheStatus())
+	// Stale: fetched again by the cache, with its validators, and answered
+	// from what that keeps.
+	if r := get(t, c, "GET", base+"/heuristic"); !strings.HasPrefix(r.cacheStatus(), "fit; hit") || hitsOf("/heuristic") != 2 {
+		t.Errorf("heuristic at 30s: %q, %d fetches", r.cacheStatus(), hitsOf("/heuristic"))
 	}
 	if r := get(t, c, "GET", base+"/expires"); !strings.HasPrefix(r.cacheStatus(), "fit; hit") {
 		t.Errorf("expires at 30s: %q", r.cacheStatus())
 	}
 	at(t, start, 61*time.Second)
-	if r := get(t, c, "GET", base+"/fresh"); r.cacheStatus() != "fit; fwd=stale; stored" || r.body != "/fresh 2" {
+	if r := get(t, c, "GET", base+"/fresh"); !freshHit(r) || r.body != "/fresh 2" {
 		t.Errorf("at 61s: %q %q", r.cacheStatus(), r.body)
 	}
 	if r := get(t, c, "GET", base+"/fresh"); !strings.HasPrefix(r.cacheStatus(), "fit; hit") || r.body != "/fresh 2" {
@@ -407,8 +458,9 @@ func TestConditional(t *testing.T) {
 	}
 }
 
-// TestRevalidate checks that a stale response the client's own validators
-// match is freshened by the origin's 304.
+// TestRevalidate checks that a stale response is fetched again by the
+// cache with its own validators, and freshened by the origin's 304, for a
+// client that sent none and for one that sent its own.
 func TestRevalidate(t *testing.T) {
 	start := time.Now()
 	at(t, start, 0)
@@ -416,14 +468,18 @@ func TestRevalidate(t *testing.T) {
 	c := clients()["h2c"]
 	get(t, c, "GET", base+"/revalidate")
 	at(t, start, 90*time.Second)
-	r := get(t, c, "GET", base+"/revalidate", "If-None-Match", `"r1"`)
-	if r.status != 304 || r.cacheStatus() != "fit; fwd=stale" || hitsOf("/revalidate") != 2 {
-		t.Fatalf("revalidated: %d %q", r.status, r.cacheStatus())
-	}
-	r = get(t, c, "GET", base+"/revalidate")
+	r := get(t, c, "GET", base+"/revalidate")
 	if r.status != 200 || r.body != "/revalidate 1" || !strings.HasPrefix(r.cacheStatus(), "fit; hit") ||
 		r.header.Get("Cache-Control") != "max-age=120" || hitsOf("/revalidate") != 2 {
-		t.Errorf("then: %d %q %q %q", r.status, r.body, r.cacheStatus(), r.header.Get("Cache-Control"))
+		t.Fatalf("revalidated: %d %q %q %q, %d fetches", r.status, r.body, r.cacheStatus(), r.header.Get("Cache-Control"), hitsOf("/revalidate"))
+	}
+	at(t, start, 300*time.Second)
+	r = get(t, c, "GET", base+"/revalidate", "If-None-Match", `"r1"`)
+	if r.status != 304 || !strings.HasPrefix(r.cacheStatus(), "fit; hit") || hitsOf("/revalidate") != 3 {
+		t.Errorf("with the client's validators: %d %q, %d fetches", r.status, r.cacheStatus(), hitsOf("/revalidate"))
+	}
+	if r := get(t, c, "GET", base+"/revalidate"); r.status != 200 || !strings.HasPrefix(r.cacheStatus(), "fit; hit") || hitsOf("/revalidate") != 3 {
+		t.Errorf("then: %d %q", r.status, r.cacheStatus())
 	}
 }
 
@@ -466,7 +522,8 @@ func TestRequestDirectives(t *testing.T) {
 	}{
 		{"/fresh", []string{"Cache-Control", "max-stale"}, "fit; hit; ttl=-2"},
 		{"/fresh", []string{"Cache-Control", "max-stale=30"}, "fit; hit"},
-		{"/fresh", []string{"Cache-Control", "max-stale=10"}, "fit; fwd=stale; stored"},
+		// Fetched again by the cache, and answered from what that keeps.
+		{"/fresh", []string{"Cache-Control", "max-stale=10"}, "fit; hit; ttl=59"},
 		{"/must", []string{"Cache-Control", "max-stale"}, "fit; fwd=stale; stored"},
 	} {
 		if r := get(t, c, "GET", base+tt.path, tt.fields...); !strings.HasPrefix(r.cacheStatus(), tt.want) {

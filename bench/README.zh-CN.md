@@ -57,6 +57,8 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 - **被测服务器**：一次一个，用官方镜像（fit 用本次编译的二进制，跑在 `ubuntu:24.04` 上）；
 - **压测客户端**：wrk 和 h2load，用 Ubuntu 的 glibc 版本，另有 curl 和 `idleconn`；
 - **代理后端**：fit，对所有请求返回固定响应，端口 9000；
+- **缓存后端**：fit 对 `/cache/` 下的每个路径都回答 4 KiB、新鲜期 10 分钟（`Cache-Control: max-age=600`），
+  端口 9003，并在 127.0.0.1:9004 的 Admin API 上计数它回答的请求；
 - **WebSocket 后端**：`idleconn -serve-ws`，接受升级并保持连接，端口 9001。
 
 有 N 个 CPU 时，后端分八分之一（至少一个），其余的服务器和压测客户端各一半。nginx 每个服务器 CPU
@@ -72,13 +74,20 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 | `fixed` | `/fixed` | 200，`text/plain`，`hello, world` |
 | `static` | `/static/small.html` | [`www/static/small.html`](www/static/small.html)，1 KiB |
 | `proxy` | `/proxy` | 经 HTTP/1.1 长连接代理到后端；`hello, world` |
+| `cache-hot` | `/cache/hot` | 经服务器的缓存到缓存后端：同一个路径，反复请求；4 KiB |
+| `cache-zipf` | `/cache/1` 到 `/cache/100000` | 同上，100,000 个路径，第 n 热门的路径被请求的频率为 1/n（齐夫定律，见 [`loadgen/zipf.lua`](loadgen/zipf.lua)）；只用 HTTP/1.1 |
+
+缓存场景只有点名时才运行（`-scenarios cache-hot,cache-zipf`）。每个服务器保存 64 MiB 的响应：nginx 的
+`proxy_cache` 在磁盘上（因而在页缓存中），并开启锁；fit 的 `cache` 在内存中。100,000 个路径的 4 KiB 响应约
+430 MB，因此齐夫场景既测速度，也测各自保住了多少热门路径。其结果另外记录本轮中到达缓存后端的请求数（取自
+其计数器），以及命中率，即服务器不经后端回答的请求所占比例。只有 Linux 的 host 网络能访问到后端的计数器。
 
 每个代理都保持最多 4096 个到后端的空闲连接，多于压测客户端同时在途的请求数。用默认值（Caddy 为 32，
 Traefik 为 200）时，它们在压力下不断关闭、重开后端连接直到端口耗尽，测到的是默认值而不是代理本身。
 
 每轮之前，工具先用该协议请求一次，检查状态码、协议和响应体是否符合预期，配置走样的服务器会报错，
-而不是测了别的东西。服务器不支持的场景记为跳过：Traefik 只能代理；fit 在 I12 支持 `static`，在 I15
-支持 `proxy`。
+而不是测了别的东西。服务器不支持的场景记为跳过：Traefik 只能代理，Caddy 和 Traefik 没有自带的缓存；fit 在 I12 支持
+`static`，在 I15 支持 `proxy`，在 I69 支持缓存场景。
 
 每轮测量记录每秒请求数、延迟（wrk 给出百分位；h2load 不给百分位，只有均值、标准差和最大值）、按
 类型分的错误数、服务器用掉的 CPU（取自其 cgroup 的 `cpu.stat`，以核数计），以及结束时的内存

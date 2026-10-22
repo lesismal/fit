@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67 和 I68 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67–I69 已完成 |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b`（fib 分支 `a40-filter-abort` 上的 `3998953`：`86071b8` 加上为 I67 实现的 A40，等待 fib 的 CI 并合入 `main`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
-| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M5 的其余部分（I69–I75）：缓存的锁、陈旧应答与清除，`fit build` 与编译期模块、WASM 插件、更友好的配置格式和 nginx 配置转换 |
+| 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
+| 尚不可用 | M5 的其余部分（I70–I75）：`fit build` 与编译期模块、WASM 插件、更友好的配置格式和 nginx 配置转换 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）和 I68（其磁盘层）已完成。** 下一步是 I69。 M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。** 下一步是 I70。 M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -47,7 +47,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | 包 | 内容 |
 | --- | --- |
 | `cmd/fit` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并运行配置中的 provider）、`validate`、`schema`、`version`、`hash-password`、`help` |
-| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective`；`GET /status`（listener、连接、上游及后端健康状态、证书）；嵌入的仪表盘，位于 `/dashboard/` |
+| `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective`；`GET /status`（listener、连接、上游及后端健康状态、证书）；`GET /cache` 与 `POST /cache/purge`；嵌入的仪表盘，位于 `/dashboard/` |
 | `config` | 原生配置类型（包括 `providers`）；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
@@ -57,7 +57,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `middleware/limit` | `rate_limit`（按客户端 IP、头部或路由的令牌桶，键数有上限）、`concurrency_limit`、`body_limit` |
 | `middleware/auth` | `jwt`（用标准库验证 JWS，密钥来自 PEM 文件、密钥文件或由控制面获取的 JWK 集合，保存已验证的令牌）；`forward_auth`（经 fib 异步客户端向认证服务发送子请求）；`basic_auth`（bcrypt 哈希在单独的有界池上校验，通过的密码以带密钥的 SHA-256 记住）和 `client_cert`（要求或可选经验证的客户端证书，并传递其主体）；`UserOf` |
 | `middleware/breaker` | `circuit_breaker`：按路由的错误率和慢响应率在关闭、打开、半开之间切换 |
-| `middleware/cache` | `cache`：按 RFC 9111 实现的共享 HTTP 缓存，响应经响应体过滤器随发送保存，以 `Age` 应答，按 `Vary` 区分变体，304，请求指令，失效，`Cache-Status`；内存层，每个 zone 16 个分片，各有 LRU，reload 后保留；磁盘层，每个响应一个文件，索引在内存中，读写在自己的池上进行，启动时读回 |
+| `middleware/cache` | `cache`：按 RFC 9111 实现的共享 HTTP 缓存，响应经响应体过滤器随发送保存，以 `Age` 应答，按 `Vary` 区分变体，304，请求指令，失效，`Cache-Status`；内存层，每个 zone 16 个分片，各有 LRU，reload 后保留；磁盘层，每个响应一个文件，索引在内存中，读写在自己的池上进行，启动时读回；缓存锁，经自己的流发出的缓存自身请求，stale-while-revalidate 与 stale-if-error，按 URL、标签或全部清除（`Purge`、`Zones`） |
 | `middleware/compress` | `compress`：经 fib 响应体过滤器的 zstd、brotli 和 gzip，流式，编码器池化且有上限 |
 | `middleware/headers` | `headers` 中间件：删除、设置和添加请求与响应的字段 |
 | `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
@@ -2685,6 +2685,56 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - 磁盘上的响应体就是内存层保存的那些，最多 `max_entry_size`：磁盘能保存更多响应，而不是更大的响应。磁盘上的陈旧
   响应不会被 304 刷新，因为刷新需要其响应体在内存中；请求作为未命中转发。
 - 一个目录只能由一个 fit 进程使用：两个进程共用一个目录时，各自会有自己的索引。
+
+### I69 缓存 III：锁、陈旧内容、清除 — 已完成
+
+- **缓存锁。** GET 未命中时，若已有另一个请求在获取同一个 key，它就等待那次获取（连同配置一起被持有），并由
+  其保存的内容回答；获取在响应被保存后结束，或者一旦确知不会保存就结束（不保存的响应其头部确定之时、响应体
+  超过 `max_entry_size`、客户端离开），此时等待者各自去获取。等待者在 `lock_timeout`（5s）后自行转发，每个
+  key 最多 4096 个等待者，超过两倍 `lock_timeout` 的获取视为不会结束。`disable_lock` 关闭此功能。等待者在结束
+  获取的 goroutine 上被唤醒，各自不阻塞地被回答或转发。
+- **缓存自己的请求。** fib 的 `NewStreamContext` 为缓存发出的请求运行路由的处理器，响应写到缓存自己的流
+  （`fetchStream`）上；该流在缓存的钩子保存响应后丢弃收到的内容，并在请求结束时结束获取（`StreamEnder`）。借此
+  缓存用自己的验证器（`If-None-Match`，否则 `If-Modified-Since`）再验证陈旧响应，这是 I67 做不到的：发现它的
+  请求与其他请求一起等待这次获取，304 会刷新该响应。
+- **stale-while-revalidate**（RFC 5861，响应未声明时用 `stale_while_revalidate` 参数）：窗口内的陈旧响应立即
+  回答（`detail=stale-while-revalidate`），并在后台重新获取，每个 key 一次，每个 zone 同时最多 256 个；在此期间已
+  被刷新的不再重新获取。**stale-if-error**（`stale_if_error`）：重新获取陈旧响应失败（没有响应，或 500、502、503、
+  504）时，在窗口内用它回答等待的请求（`detail=stale-if-error`）。声明了 `must-revalidate`、`proxy-revalidate`
+  或 `s-maxage` 的响应两者都不适用。两者对磁盘上的响应同样有效。
+- **清除**（`cache.Purge`，以及 Admin API 的 `POST /cache/purge`，`{"zone", "urls", "tags", "all"}`，回答
+  `{"purged": n}`，没有缓存使用的 zone 回答 404）：按 URL，所有变体；按标签，即响应的 `Cache-Tag`（逗号分隔）和
+  `Surrogate-Key`（空格分隔）字段，最多 32 个、每个 128 字节，保存在每个 zone 的索引中，计数内存和磁盘上的响应；
+  或全部。清除会到达磁盘，并丢弃仍在排队的写入。`GET /cache` 显示每个 zone 保存的内容。
+- **基准工具**（`bench`）：两个场景，`cache-hot`（一个路径，两种协议）和 `cache-zipf`（100,000 个路径，按齐夫
+  定律 s = 1 请求，由 HTTP/1.1 压测客户端的脚本生成），经每个服务器的缓存到一个单独的缓存后端，后者在其 Admin API
+  上计数到达它的请求，由此得出每个结果的命中率。nginx 用 `proxy_cache` 和 `proxy_cache_lock`，fit 用 `cache`；
+  Caddy 和 Traefik 没有自带的缓存。只有点名时才运行。
+- **结果**，在基准机上（[m5-cache-2026-10-23-linux.json](../bench/results/m5-cache-2026-10-23-linux.json)，
+  缓存均为 1 GiB，足以容纳所有路径；预热 10s 后测 30s）：
+
+  | 场景 | nginx | fit |
+  | --- | ---: | ---: |
+  | `cache-hot` HTTP/1.1 | 332,436 req/s | 684,362 req/s |
+  | `cache-hot` h2c | 291,559 req/s | 1,573,104 req/s |
+  | `cache-zipf` HTTP/1.1 | 318,132 req/s，命中 99.975% | 650,532 req/s，命中 99.9996% |
+
+  两者都保存了被请求的每个响应；在同样的 7 个 CPU 上，fit 在 HTTP/1.1 上回答约两倍的请求，在 h2c 上约五倍。
+  改用 64 MiB 的缓存（约为路径的 15%）时，fit 自己回答了 78.0%，接近只保存最热门路径的缓存可达的 84%
+  （[m5-cache-64m-2026-10-23-linux.json](../bench/results/m5-cache-64m-2026-10-23-linux.json)），为 444,374 req/s；
+  nginx 在这个速率下守不住自己的大小：它的 `max_size` 由缓存管理进程执行，跟不上，缓存在磁盘上涨到 100–770 MB
+  （命中 94.6% 到 99.4%，见[加快管理进程的那次运行](../bench/results/m5-cache-64m-nginx-manager-2026-10-23-linux.json)），
+  而小到足以限制它的 key 区一满就让 482,684 个请求失败。因此场景比较的是能容纳工作集的缓存。
+- **测试**：`TestStampede`（100 个客户端，HTTP/1.1 和 h2c，请求一个冷路径，源站 200 ms 后回答：一次获取，全部
+  得到回答）、`TestLockNotKept`（一旦确知响应不会保存，等待者立即转发）、`TestLockTimeout`、`TestDisableLock`、
+  `TestStaleWhileRevalidate`（立即以陈旧响应回答，一次后台获取，一个 304，之后新鲜；超出窗口则先获取再回答）、
+  `TestStaleIfError`（响应自己的窗口和参数的窗口）、`TestRevalidate`（缓存的验证器和客户端的）、`TestPurge`
+  （按 URL（主机大小写不同）、按两种字段的标签、全部；内存和磁盘）和 `TestTagsOf`；`admin` 的 `TestCachePurge`；
+  fitbench 的 `TestParseRequestCount`。缓存的测试在基准机上的竞态检测下运行十次均通过，变更涉及的包也都通过。
+
+与计划的差别：
+
+- 64 MiB 的比较无法让 nginx 守住其大小，因此公布的比较是能容纳工作集的缓存；两组数字都已记录。
 
 ## 给后续迭代的说明
 
