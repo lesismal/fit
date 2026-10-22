@@ -1,0 +1,58 @@
+# bench/ab.sh summaries for the M4 report (2026-10-23), on the benchmark host.
+# 10s runs after a 2s warm-up, rounds alternating A and B; see m4-report-2026-10-23.md.
+
+== 20261023-012517
+A: 1486c28 (1486c28)
+B: 0dd5956 (0dd5956)
+scenarios=fixed,static,proxy protocols=http/1.1,h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3838k      3769k    -1.8%      1.81     1.85  3/3     SLOWER
+fixed    http/1.1        767k       769k    +0.2%      8.32     8.40  3/3     within noise
+proxy    h2c             239k       236k    -1.5%     25.61    25.80  3/3     SLOWER
+proxy    http/1.1        244k       242k    -0.8%     23.50    23.62  3/3     within noise
+static   h2c            2438k      2433k    -0.2%      2.85     2.86  3/3     within noise
+static   http/1.1        765k       762k    -0.4%      8.97     8.97  3/3     within noise
+
+== 20261023-013608
+A: 740a4db (740a4db)
+B: 2839742 (2839742)
+scenarios=fixed,proxy protocols=h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3772k      3786k    +0.4%      1.85     1.84  2/2     within noise
+proxy    h2c             234k       236k    +1.0%     25.98    25.85  2/2     within noise
+
+== 20261023-014403
+A: e4579bb (e4579bb)
+B: c8ffc8f (c8ffc8f)
+scenarios=fixed,proxy protocols=h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3769k      3789k    +0.5%      1.85     1.84  3/3     within noise
+proxy    h2c             235k       234k    -0.5%     25.79    26.00  3/3     within noise
+
+== 20261023-015247
+A: 1486c28 (1486c28)
+B: 15f6620 (15f6620)
+scenarios=fixed protocols=h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3825k      3829k    +0.1%      1.82     1.82  3/3     within noise
+
+== 20261023-015629
+A: 15f6620 (15f6620)
+B: 4f80a5a (4f80a5a)
+scenarios=fixed protocols=h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3829k      3800k    -0.8%      1.82     1.83  3/3     within noise
+
+== 20261023-020058
+A: 4f80a5a (4f80a5a)
+B: e4579bb (e4579bb)
+scenarios=fixed protocols=h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3813k      3784k    -0.8%      1.82     1.84  3/3     within noise
+
