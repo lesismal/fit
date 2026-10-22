@@ -197,7 +197,7 @@ func (jw *JWT) Wrap(next module.Handler) module.Handler {
 				}
 				jw.admit(c, claims, next)
 			}
-			if !jw.jwks.wait(run) {
+			if !jw.jwks.wait(keys, run) {
 				jw.graph.Release()
 				c.Release()
 				jw.refuse(c, true)

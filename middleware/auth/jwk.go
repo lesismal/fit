@@ -233,9 +233,19 @@ func newJWKS(url string, refresh time.Duration, static []*key) *jwks {
 }
 
 // wait queues then to run once the next fetch is done, and asks for one;
-// it reports false when too many wait already.
-func (j *jwks) wait(then func()) bool {
+// it reports false when too many wait already. seen is the set the request
+// was checked against: when a fetch has brought another since, then runs at
+// once, since the fetch that would answer it is done already and the next
+// may be minRefetch away.
+func (j *jwks) wait(seen *keySet, then func()) bool {
 	j.mu.Lock()
+	// A fetch stores its keys before it takes the waiters under j.mu, so a
+	// request that finds seen still current here is taken by the next.
+	if j.keys.Load() != seen {
+		j.mu.Unlock()
+		then()
+		return true
+	}
 	if len(j.waiters) >= maxKeyWaiters {
 		j.mu.Unlock()
 		return false

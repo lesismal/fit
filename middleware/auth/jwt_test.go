@@ -479,6 +479,36 @@ func TestJWKSRotation(t *testing.T) {
 	}
 }
 
+// TestJWKSWaitStale checks that a request checked against a set that a
+// fetch has replaced since runs at once, rather than waiting minRefetch for
+// the fetch after: a request that came while the first fetch was under way
+// waited 10s, and TestJWKSRefresh's ServeRequest gave up on it.
+func TestJWKSWaitStale(t *testing.T) {
+	j := &jwks{wake: make(chan struct{}, 1)}
+	ran := 0
+	run := func() { ran++ }
+
+	// Before the first fetch, and after it, against the set it brought:
+	// the request waits for the next.
+	if !j.wait(nil, run) || ran != 0 || len(j.waiters) != 1 {
+		t.Fatalf("before the first fetch: ran %d, %d waiting", ran, len(j.waiters))
+	}
+	first := newKeySet()
+	j.keys.Store(first)
+	if !j.wait(first, run) || ran != 0 || len(j.waiters) != 2 {
+		t.Fatalf("against the current set: ran %d, %d waiting", ran, len(j.waiters))
+	}
+
+	// Against a set replaced since: at once.
+	if !j.wait(nil, run) || ran != 1 || len(j.waiters) != 2 {
+		t.Fatalf("checked before the first fetch: ran %d, %d waiting", ran, len(j.waiters))
+	}
+	j.keys.Store(newKeySet())
+	if !j.wait(first, run) || ran != 2 || len(j.waiters) != 2 {
+		t.Fatalf("checked before a rotation: ran %d, %d waiting", ran, len(j.waiters))
+	}
+}
+
 func TestJWKSRefresh(t *testing.T) {
 	k := testKeys()
 	s := newJWKSServer(t)
