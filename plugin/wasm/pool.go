@@ -56,6 +56,8 @@ type worker struct {
 	cancel  context.CancelFunc
 	stack   [1]uint64
 	current *call
+	// pw is a Proxy-Wasm plugin's own, or nil for one of fit's ABI.
+	pw      *proxyWasm
 	started atomic.Int64
 	// mu guards cancel, which the watchdog calls while the worker may be
 	// making its instance again.
@@ -100,6 +102,12 @@ func (w *worker) instantiate() error {
 		return err
 	}
 	w.mod, w.fn = mod, mod.ExportedFunction(exportOnRequest)
+	if w.p.m.plugin.proxyWasm {
+		if err := w.startProxyWasm(); err != nil {
+			w.close()
+			return err
+		}
+	}
 	return nil
 }
 
@@ -164,7 +172,14 @@ func (w *worker) serve(cl *call) {
 	}
 	w.current = cl
 	w.started.Store(time.Now().UnixNano())
-	err := w.fn.CallWithStack(w.ctx, w.stack[:])
+	var err error
+	paused := false
+	if w.pw != nil {
+		paused, err = w.servePW(cl)
+	} else {
+		err = w.fn.CallWithStack(w.ctx, w.stack[:])
+		paused = uint32(w.stack[0]) == actionStop
+	}
 	w.started.Store(0)
 	w.current = nil
 	if err != nil {
@@ -176,7 +191,13 @@ func (w *worker) serve(cl *call) {
 		w.fail(cl)
 		return
 	}
-	if cl.status != 0 || uint32(w.stack[0]) == actionStop {
+	if paused && cl.status == 0 && w.pw != nil {
+		// A Proxy-Wasm plugin that pauses a request without answering it
+		// waits for a resume fit does not offer.
+		w.fail(cl)
+		return
+	}
+	if cl.status != 0 || paused {
 		status := cl.status
 		if status == 0 {
 			status = stdhttp.StatusOK

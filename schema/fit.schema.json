@@ -2457,6 +2457,13 @@
           "description": "The plugin: a WebAssembly module that exports fit_on_request, as a WASI reactor; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared.",
           "type": "string"
         },
+        "properties": {
+          "description": "For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name.",
+          "items": {
+            "$ref": "#/$defs/wasm.Property"
+          },
+          "type": "array"
+        },
         "queue": {
           "default": 1024,
           "description": "How many requests may wait for an instance; past it a request is answered 503. 1024 when left out or 0.",
@@ -2467,6 +2474,10 @@
           "default": "100ms",
           "description": "How long a call may run; past it the call is stopped and its instance replaced, and the request goes as a failure does (on_error). 100ms when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "vm_config": {
+          "description": "For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration.",
           "type": "string"
         },
         "wait_timeout": {
@@ -2551,6 +2562,26 @@
       "required": [
         "upstream",
         "weight"
+      ],
+      "type": "object"
+    },
+    "wasm.Property": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "The property's path, by segment, as [\"route_metadata\", \"filter_metadata\", \"envoy.filters.http.wasm\", \"auth\"].",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "value": {
+          "description": "Its value.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     }

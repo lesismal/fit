@@ -64,8 +64,10 @@ func instantiateHost(ctx context.Context, rt wazero.Runtime) error {
 	export("request_get", requestGet, []api.ValueType{i32, i32, i32}, []api.ValueType{i32})
 	export("respond", respond, []api.ValueType{i32, i32, i32}, nil)
 	export("log", logMessage, []api.ValueType{i32, i32, i32}, nil)
-	_, err := b.Instantiate(ctx)
-	return err
+	if _, err := b.Instantiate(ctx); err != nil {
+		return err
+	}
+	return instantiateProxyWasmHost(ctx, rt)
 }
 
 // callOf returns the call the instance running a host function serves.

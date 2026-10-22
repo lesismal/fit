@@ -52,6 +52,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
 | A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
+| A41 | A response's header held back while an asynchronous hook runs | not done | 1, 4 | I72 |
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | made, `3998953` on fib's branch `a40-filter-abort` | 6, 11 | I67 |
 
 ## Evidence
@@ -1212,3 +1213,29 @@ it are given no `Content-Length`. fib's `TestBodyFilterAbort` and
 **How fit uses it.** The cache's copy and compress's filter implement `Abort`, which gives back
 what they hold; compress no longer registers `OnCancel`. The cache trusts a `Content-Length` it is
 given as the length of the body it copies.
+
+## A41: A response's header held back while an asynchronous hook runs
+
+**Status.** Not done. I72 does without it, and Proxy-Wasm's response callbacks wait for it
+([decision 018](decisions/018-proxy-wasm-subset.md)).
+
+**Problem.** A middleware that must decide on a response's header with work it cannot do on the
+goroutine settling it, as a WebAssembly plugin's `proxy_on_response_headers` (which fit runs on a
+pool of its own, rule 4), has no way to hold the header back. `OnHeader`, `OnBodyFilter` and
+`OnResponse` all run where the header is settled and must decide there; `OnResponse` holds the
+response, but whole and without bound, and only until the handler is done.
+
+**Evidence.** I72: the Proxy-Wasm Go SDK's `http_headers` example adds its response headers in
+`OnHttpResponseHeaders`, which fit cannot call without running the plugin on a fib worker.
+
+**Suggested API.** `Context.OnHeaderAsync(fn func(status int, header http.Header, resume func(err error)))`:
+fn runs where the header would be settled, and the header does not go until `resume` is called,
+from any goroutine, with the header as fn's caller left it (nil), or with an error that fails the
+response. Meanwhile what the handler writes is held: whole responses as they are, a streamed body
+up to the response's 64 KB bound, past which `WriteNoWait` reports above and `OnWritable` waits for
+the resume and the drain, and `Write` waits as it would for a slow client. A response whose client
+goes meanwhile ends as one cut short does, and `resume` then does nothing.
+
+**How fit would use it.** The wasm middleware registers it for a Proxy-Wasm plugin, hands
+`proxy_on_response_headers` to its pool with the status and header, and resumes once the call
+returns, the plugin's changes made; a local response it sends replaces the response.

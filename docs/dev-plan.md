@@ -195,7 +195,7 @@ Status: `todo`, `doing` or `done`.
 | I69 | Cache III: locks, stale, purge | I68, I25 | done |
 | I70 | `fit build` and compile-time modules | I04 | done |
 | I71 | WASM I: runtime and plugin pool | I36 | done |
-| I72 | WASM II: Proxy-Wasm subset | I71 | todo |
+| I72 | WASM II: Proxy-Wasm subset | I71 | done |
 | I73 | Friendly config format | I03 | todo |
 | I74 | nginx config converter | I73 | todo |
 | I75 | FastCGI | I17 | todo |

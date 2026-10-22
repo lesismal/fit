@@ -50,6 +50,7 @@
 | A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9` | 1 | I53b |
 | A38 | 请求体失败时，HTTP/1 响应声明连接将关闭 | 已完成，`86071b8` | 13 | I66 的 CI 修复 |
 | A39 | 客户端连接为每个响应运行的读轮次更便宜 | 未完成，已放弃：第 1、2 项没有可测的 CPU 节省 | 12 | — |
+| A41 | 异步钩子运行期间压住响应头 | 未完成 | 1, 4 | I72 |
 | A40 | 响应未写完响应体就结束时中止其响应体过滤器；过滤器之后不再给出长度 | 已实现，fib 分支 `a40-filter-abort` 上的 `3998953` | 6, 11 | I67 |
 
 ## 证据
@@ -904,3 +905,24 @@ A21 已经试过唤醒后让 relay 保持注册，省了调用但没有提高吞
 
 **fit 如何使用。** 缓存的副本和 compress 的过滤器实现 `Abort`，归还其持有的资源；compress 不再
 注册 `OnCancel`。缓存把拿到的 `Content-Length` 当作它所复制的响应体的长度。
+
+## A41：异步钩子运行期间压住响应头
+
+**状态。** 未完成。I72 在没有它的情况下完成，Proxy-Wasm 的响应回调有待它实现（[决策 018](decisions/018-proxy-wasm-subset.zh-CN.md)）。
+
+**问题。** 有的中间件需要根据无法在确定响应头的 goroutine 上完成的工作来决定响应头，例如 WebAssembly 插件的
+`proxy_on_response_headers`（fit 在自己的池上运行它，见规则 4），而它没有办法压住响应头。`OnHeader`、`OnBodyFilter`
+和 `OnResponse` 都在确定响应头的地方运行，必须当场决定；`OnResponse` 会暂存响应，但要整体暂存、没有上限，而且只到处理器
+完成为止。
+
+**证据。** I72：Proxy-Wasm Go SDK 的 `http_headers` 示例在 `OnHttpResponseHeaders` 中添加响应头，fit 无法在不让插件在
+fib worker 上运行的前提下调用它。
+
+**建议的 API。** `Context.OnHeaderAsync(fn func(status int, header http.Header, resume func(err error)))`：fn 在响应头
+本应确定的地方运行，在 `resume` 被调用（可以来自任何 goroutine）之前响应头不会发出；以 nil 调用时，响应头按 fn 的调用者
+留下的样子发出，以错误调用时响应失败。在此期间处理器写出的内容被暂存：整体响应原样暂存，流式响应体在响应的 64 KB 上限内
+暂存，超过时 `WriteNoWait` 报告超限，`OnWritable` 等待恢复和排空，`Write` 像面对慢客户端那样等待。期间客户端离开的响应
+按被中断处理，此后 `resume` 不起作用。
+
+**fit 如何使用。** wasm 中间件为 Proxy-Wasm 插件注册它，把 `proxy_on_response_headers` 连同状态码和响应头交给池，在调用
+返回、插件的修改完成后恢复；插件发送的本地响应替换原响应。

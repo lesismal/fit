@@ -33,6 +33,14 @@
 //
 // The response's fields a plugin sets or deletes are applied as the
 // response's header is settled, whoever writes it.
+//
+// # Proxy-Wasm
+//
+// A plugin that exports proxy_abi_version_0_2_0 or proxy_abi_version_0_2_1
+// is a Proxy-Wasm filter, as Envoy runs them, and gets Proxy-Wasm's request
+// phase, as proxywasm.go describes: filters written for Envoy that act on
+// requests run unchanged. Its response callbacks are not made yet
+// (decision 018).
 package wasm
 
 import (
@@ -75,6 +83,8 @@ type WASM struct {
 	Timeout     config.Duration `json:"timeout,omitempty" default:"\"100ms\"" doc:"How long a call may run; past it the call is stopped and its instance replaced, and the request goes as a failure does (on_error). 100ms when left out."`
 	WaitTimeout config.Duration `json:"wait_timeout,omitempty" default:"\"1s\"" doc:"How long a request may wait for an instance; past it it is answered 503. 1s when left out."`
 	MaxMemory   int64           `json:"max_memory,omitempty" min:"0" default:"134217728" doc:"The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0."`
+	VMConfig    string          `json:"vm_config,omitempty" doc:"For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration."`
+	Properties  []Property      `json:"properties,omitempty" doc:"For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name."`
 	OnError     string          `json:"on_error,omitempty" enum:"fail,skip" default:"\"fail\"" doc:"What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out."`
 
 	plugin *plugin
@@ -138,6 +148,12 @@ func (m *WASM) Wrap(next module.Handler) module.Handler {
 	})
 }
 
+// Property is a property a Proxy-Wasm plugin reads.
+type Property struct {
+	Path  []string `json:"path" fit:"required" doc:"The property's path, by segment, as [\"route_metadata\", \"filter_metadata\", \"envoy.filters.http.wasm\", \"auth\"]."`
+	Value string   `json:"value" doc:"Its value."`
+}
+
 // plugin is a compiled plugin and the runtime it runs in, shared by the
 // configs that load the same code with the same memory bound, so that a
 // reload does not compile it again.
@@ -146,7 +162,9 @@ type plugin struct {
 	maxPages uint32
 	runtime  wazero.Runtime
 	compiled wazero.CompiledModule
-	refs     int // under plugins.mu
+	// proxyWasm says the plugin speaks Proxy-Wasm, rather than fit's ABI.
+	proxyWasm bool
+	refs      int // under plugins.mu
 }
 
 var plugins = struct {
@@ -189,11 +207,12 @@ func loadPlugin(code []byte, maxMemory int64) (*plugin, error) {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("compiling the plugin: %w", err)
 	}
-	if _, ok := mod.ExportedFunctions()[exportOnRequest]; !ok {
+	pw := isProxyWasm(mod)
+	if _, ok := mod.ExportedFunctions()[exportOnRequest]; !ok && !pw {
 		_ = rt.Close(ctx)
-		return nil, errors.New("the plugin does not export " + exportOnRequest)
+		return nil, errors.New("the plugin exports neither " + exportOnRequest + " nor Proxy-Wasm's ABI version")
 	}
-	p := &plugin{key: key.sum, maxPages: pages, runtime: rt, compiled: mod, refs: 1}
+	p := &plugin{key: key.sum, maxPages: pages, runtime: rt, compiled: mod, proxyWasm: pw, refs: 1}
 	plugins.m[key] = p
 	return p, nil
 }
