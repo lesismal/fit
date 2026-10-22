@@ -170,7 +170,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | **M4** | | | |
 | I56 | Provider 框架与生效配置 | I27 | done |
 | I57 | Docker provider | I56 | done |
-| I58 | Kubernetes Gateway API I：HTTPRoute | I56 | todo |
+| I58 | Kubernetes Gateway API I：HTTPRoute | I56 | done |
 | I59 | Kubernetes Gateway API II：其他路由与状态 | I58 | todo |
 | I60 | Kubernetes Ingress | I58 | todo |
 | I61 | Gateway API 一致性测试 | I59 | todo |
@@ -780,7 +780,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 
 ### I59 Kubernetes Gateway API II：其他路由与状态
 
-- **做什么**：GRPCRoute、TLSRoute、TCPRoute、UDPRoute；把状态条件写回资源。
+- **做什么**：GRPCRoute、TLSRoute、TCPRoute、UDPRoute；HTTPS listener，证书来自 Secret（I58 留下的）；把状态条件写回资源。
 - **完成标准**：每种路由类型都有测试；状态反映被接受和被拒绝的路由。
 - **涉及**：`provider/kubernetes`。
 

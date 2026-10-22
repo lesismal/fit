@@ -451,7 +451,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "a provider of no kind",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{}]}`,
-			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker"},
+			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker or kubernetes"},
 		},
 		{
 			name: "two providers of one name",
@@ -482,6 +482,24 @@ func TestValidate(t *testing.T) {
 			name: "a docker label prefix",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {"label_prefix": "-x"}}]}`,
 			want: []string{"1:94: providers[0].docker.label_prefix: \"-x\" is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit"},
+		},
+		{
+			name: "two kinds in one provider",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {}, "kubernetes": {}}]}`,
+			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker or kubernetes"},
+		},
+		{
+			name: "kubernetes settings",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"kubernetes": {"listen_host": "example.com", "controller_name": "fit"}}]}`,
+			want: []string{
+				`1:97: providers[0].kubernetes.listen_host: "example.com" is not an IP address or localhost`,
+				`1:131: providers[0].kubernetes.controller_name: "fit" is not a domain-prefixed path, as example.net/gateway-controller`,
+			},
+		},
+		{
+			name: "kubernetes backends",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"kubernetes": {"backends": "nodes"}}]}`,
+			want: []string{`1:94: providers[0].kubernetes.backends: "nodes" is not one of "endpoints", "cluster_ip"`},
 		},
 		{
 			name: "admin limits",

@@ -12,16 +12,20 @@ import (
 // what it provides is merged into the config, by the rules of
 // docs/decisions/009-provider-merging.md. Exactly one of its kinds is set.
 type Provider struct {
-	Name   string          `json:"name,omitempty" doc:"The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out."`
-	Docker *DockerProvider `json:"docker,omitempty" doc:"Routes, upstreams and services from the labels of running Docker containers."`
+	Name       string              `json:"name,omitempty" doc:"The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out."`
+	Docker     *DockerProvider     `json:"docker,omitempty" doc:"Routes, upstreams and services from the labels of running Docker containers."`
+	Kubernetes *KubernetesProvider `json:"kubernetes,omitempty" doc:"Listeners, routes and upstreams from a Kubernetes cluster's Gateway API resources: the Gateways of the GatewayClasses whose controllerName is fit's, and their HTTPRoutes."`
 
 	At Value `json:"-" fit:"self"`
 }
 
 // Kind returns which kind of provider p is, or "" when none is set.
 func (p *Provider) Kind() string {
-	if p.Docker != nil {
+	switch {
+	case p.Docker != nil:
 		return "docker"
+	case p.Kubernetes != nil:
+		return "kubernetes"
 	}
 	return ""
 }
@@ -119,8 +123,11 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 		if p.Docker != nil {
 			kinds++
 		}
+		if p.Kubernetes != nil {
+			kinds++
+		}
 		if kinds != 1 {
-			add(p.At, "set exactly one kind of provider: docker")
+			add(p.At, "set exactly one kind of provider: docker or kubernetes")
 			continue
 		}
 		id := p.ID()
@@ -149,5 +156,72 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 				add(d.At.Field("label_prefix"), "%q is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit", d.LabelPrefix)
 			}
 		}
+		if k := p.Kubernetes; k != nil {
+			if k.ListenHost != "" && net.ParseIP(k.ListenHost) == nil && k.ListenHost != "localhost" {
+				add(k.At.Field("listen_host"), "%q is not an IP address or localhost", k.ListenHost)
+			}
+			if k.ControllerName != "" && !controllerPattern.MatchString(k.ControllerName) {
+				add(k.At.Field("controller_name"), "%q is not a domain-prefixed path, as example.net/gateway-controller", k.ControllerName)
+			}
+		}
 	}
+}
+
+// The defaults of KubernetesProvider.
+const (
+	DefaultKubernetesControllerName = "lesismal.github.io/fit"
+	DefaultKubernetesMaxObjects     = 10000
+	KubernetesBackendsEndpoints     = "endpoints"
+	KubernetesBackendsClusterIP     = "cluster_ip"
+)
+
+// The default of KubernetesProvider.RequestTimeout.
+var DefaultKubernetesRequestTimeout = Duration(10 * time.Second)
+
+// controllerPattern is what a Gateway API controller name looks like: a
+// domain, then a path.
+var controllerPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/[A-Za-z0-9/\-._~%!$&'()*+,;=:]+$`)
+
+// KubernetesProvider follows a cluster's Gateway API resources: each
+// listener of a Gateway of fit's GatewayClasses is a listener of fit's on
+// its port, and each HTTPRoute attached to one is a set of routes, to
+// upstreams of the Services it names.
+type KubernetesProvider struct {
+	Kubeconfig     string   `json:"kubeconfig,omitempty" doc:"A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported."`
+	Context        string   `json:"context,omitempty" doc:"The kubeconfig's context to use; its current-context when left out."`
+	ControllerName string   `json:"controller_name,omitempty" default:"\"lesismal.github.io/fit\"" doc:"The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out."`
+	Namespaces     []string `json:"namespaces,omitempty" doc:"The namespaces whose Gateways and HTTPRoutes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide."`
+	ListenHost     string   `json:"listen_host,omitempty" doc:"The IP address Gateway listeners are bound on, each on its port; every address when left out."`
+	Backends       string   `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
+	MaxObjects     int      `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
+	RequestTimeout Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Controller, Objects, Timeout and BackendMode return k's settings, their
+// defaults when left out.
+func (k *KubernetesProvider) Controller() string {
+	if k.ControllerName == "" {
+		return DefaultKubernetesControllerName
+	}
+	return k.ControllerName
+}
+
+func (k *KubernetesProvider) Objects() int {
+	return int(orDefault(int64(k.MaxObjects), DefaultKubernetesMaxObjects))
+}
+
+func (k *KubernetesProvider) Timeout() time.Duration {
+	if k.RequestTimeout <= 0 {
+		return DefaultKubernetesRequestTimeout.Std()
+	}
+	return k.RequestTimeout.Std()
+}
+
+func (k *KubernetesProvider) BackendMode() string {
+	if k.Backends == "" {
+		return KubernetesBackendsEndpoints
+	}
+	return k.Backends
 }

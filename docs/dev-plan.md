@@ -180,7 +180,7 @@ Status: `todo`, `doing` or `done`.
 | **M4** | | | |
 | I56 | Provider framework and effective config | I27 | done |
 | I57 | Docker provider | I56 | done |
-| I58 | Kubernetes Gateway API I: HTTPRoute | I56 | todo |
+| I58 | Kubernetes Gateway API I: HTTPRoute | I56 | done |
 | I59 | Kubernetes Gateway API II: other routes and status | I58 | todo |
 | I60 | Kubernetes Ingress | I58 | todo |
 | I61 | Gateway API conformance | I59 | todo |
@@ -880,7 +880,8 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
 
 ### I59 Kubernetes Gateway API II: other routes and status
 
-- **Do**: GRPCRoute, TLSRoute, TCPRoute and UDPRoute; write status conditions back to resources.
+- **Do**: GRPCRoute, TLSRoute, TCPRoute and UDPRoute; HTTPS listeners, with certificates from
+  Secrets (left from I58); write status conditions back to resources.
 - **Done when**: tests per route type; status reflects accepted and refused routes.
 - **Touches**: `provider/kubernetes`.
 

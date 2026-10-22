@@ -368,6 +368,57 @@
       },
       "type": "object"
     },
+    "config.KubernetesProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "backends": {
+          "default": "endpoints",
+          "description": "Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out.",
+          "enum": [
+            "endpoints",
+            "cluster_ip"
+          ],
+          "type": "string"
+        },
+        "context": {
+          "description": "The kubeconfig's context to use; its current-context when left out.",
+          "type": "string"
+        },
+        "controller_name": {
+          "default": "lesismal.github.io/fit",
+          "description": "The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out.",
+          "type": "string"
+        },
+        "kubeconfig": {
+          "description": "A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported.",
+          "type": "string"
+        },
+        "listen_host": {
+          "description": "The IP address Gateway listeners are bound on, each on its port; every address when left out.",
+          "type": "string"
+        },
+        "max_objects": {
+          "default": 10000,
+          "description": "The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "namespaces": {
+          "description": "The namespaces whose Gateways and HTTPRoutes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "request_timeout": {
+          "default": "10s",
+          "description": "How long each request to the API server may take, but watches, which last five minutes each. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "config.Limits": {
       "additionalProperties": false,
       "properties": {
@@ -569,6 +620,10 @@
         "docker": {
           "$ref": "#/$defs/config.DockerProvider",
           "description": "Routes, upstreams and services from the labels of running Docker containers."
+        },
+        "kubernetes": {
+          "$ref": "#/$defs/config.KubernetesProvider",
+          "description": "Listeners, routes and upstreams from a Kubernetes cluster's Gateway API resources: the Gateways of the GatewayClasses whose controllerName is fit's, and their HTTPRoutes."
         },
         "name": {
           "description": "The name the provider goes by in the Admin API's /config/effective and in logs: lower-case letters, digits, '_', '.' and '-', unique among the providers. Its kind, as docker, when left out.",

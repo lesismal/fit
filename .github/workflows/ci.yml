@@ -111,6 +111,34 @@ jobs:
       - name: make m3-exit
         run: make m3-exit
 
+  # The Kubernetes provider against a kind cluster (I58): the runner reaches
+  # the pods through a route to the node, as fit outside the cluster needs.
+  kubernetes:
+    name: Kubernetes e2e (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Create a kind cluster
+        run: |
+          if ! command -v kind >/dev/null; then
+            go install sigs.k8s.io/kind@v0.30.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
+          fi
+          kind create cluster --name fit --wait 120s --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          echo "FIT_E2E_KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Install the Gateway API's CRDs
+        run: kubectl --kubeconfig "$FIT_E2E_KUBECONFIG" apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+      - name: Route the pod network through the node
+        run: |
+          node=$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' fit-control-plane)
+          cidr=$(kubectl --kubeconfig "$FIT_E2E_KUBECONFIG" get node fit-control-plane -o jsonpath='{.spec.podCIDR}')
+          sudo ip route add "$cidr" via "$node"
+      - name: go test
+        run: go test -race -count=1 -v -run '^TestKubernetesGateway$' ./test/e2e
+
   fuzz:
     name: Fuzz (short)
     runs-on: ubuntu-latest

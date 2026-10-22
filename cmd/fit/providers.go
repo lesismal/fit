@@ -9,6 +9,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/provider"
 	"github.com/lesismal/fit/provider/docker"
+	"github.com/lesismal/fit/provider/kubernetes"
 )
 
 // startProviders runs the providers c lists, in their order of precedence,
@@ -25,6 +26,9 @@ func startProviders(c *config.Config, configs *admin.Configs, stdout, stderr io.
 			ps = append(ps, docker.New(name, pc.Docker, logf))
 			network, address := pc.Docker.Dial()
 			fmt.Fprintf(stdout, "fit: provider %s watching Docker at %s:%s\n", name, network, address)
+		case pc.Kubernetes != nil:
+			ps = append(ps, kubernetes.New(name, pc.Kubernetes, logf))
+			fmt.Fprintf(stdout, "fit: provider %s watching Kubernetes for GatewayClasses of %s\n", name, pc.Kubernetes.Controller())
 		default:
 			return nil, fmt.Errorf("provider %s: no kind is set", name)
 		}
