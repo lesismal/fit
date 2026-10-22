@@ -49,6 +49,7 @@
 | A36 | SOCKS 与 CONNECT 中继的空闲超时 | 已完成，`4f1c3e9` | 10 | I53、I53b |
 | A37 | `ConnectProxy` 在拨号回调里应答，不在 worker 上等待 | 已完成，`4f1c3e9` | 1 | I53b |
 | A38 | 请求体失败时，HTTP/1 响应声明连接将关闭 | 已完成，`86071b8` | 13 | I66 的 CI 修复 |
+| A39 | 客户端连接为每个响应运行的读轮次更便宜 | 未完成 | 12 | — |
 
 ## 证据
 
@@ -811,3 +812,52 @@ chunked 请求体被 413 拒绝后，Go 的客户端在同一连接上发出下�
 `Connection: close`；不改时前者没有。改后 fit 的测试 1500 次全部通过。
 
 **fit 如何使用。** 无需调用：`body_limit` 的拒绝，以及任何路由对上传失败的请求的应答，现在都会让客户端新开连接。
+
+## A39：客户端连接为每个响应运行的读轮次更便宜
+
+**状态。** 未完成。
+
+**问题。** fit 的代理从上游收到的每个响应，除了客户端自身的工作，还要在上游连接上走一整轮 fib 引擎的读轮次：poller 为它唤醒并重新
+注册（`epollWaiter.wait`、`arm`、`pollEvents`、`runLoop`），把连接交给一个 worker（`submitReady`、taskpool），worker 执行这一轮
+（`process`、`readLoop`）：从 `bufferpool` 借一个读缓冲再归还；因为引擎合并写，开始时 cork 连接，结束时在连接的锁下 uncork
+（`uncork`、`foldCorkedLocked`、`flushLocked`）。在客户端连接上，cork 没有收益：这一轮里 `OnData` 写的是另一条连接，也就是下游
+客户端的连接；上游连接上唯一的发送是下一个请求，`Client.release` 可能在这一轮里把它交给这条连接。每个响应都走同样的一轮，12 字节的
+响应也一样，代理在 HTTP/1.1 和 h2c 上都是每个请求付一次。
+
+**证据。** fit 的分支 `exp/blocking-quota`（未合并；报告和数据在 `bench/results/exp-blocking-quota/`，CPU profile 在其中的
+`profile/`）上做了一个实验：h2c 代理走 fit 自己写的一个最简阻塞 client，它在 handler 的协程上通过 Go 的 netpoller 读写上游连接，
+与 fit 经由 fib client 的异步路径对比。在基准机上（fitbench `proxy` 场景，h2c，server 7 个 CPU，3 轮交替），阻塞路径每秒 250.2k
+请求，异步路径 235.0k（+6.3%，达到 nginx 253.5k 的 98.7%），每个请求 CPU 23.2 µs，对比 25.9。这条路走不通：它阻塞 handler 的
+协程，放弃了 drain、取消和流式转发；但它显示了异步路径付出的代价。
+
+对 fit server 做 `perf record`（`-F 1999 -g`，在计量区间内采 5 秒，两种各两次），每个采样记到离叶子最近的 fit 或 fib 帧上，只计
+用户态采样（内核时间两者相同，每个请求 14.0 对 14.1 µs），单位为每个请求 µs：
+
+| | 异步 | 阻塞 | 异步 − 阻塞 |
+| --- | ---: | ---: | ---: |
+| 上游 client：fib 的 `Client` / fit 自己的，含 Go 的网络读写 | 2.93 | 2.81 | +0.12 |
+| fib 引擎处理连接（poller、读轮次、发送队列、bufferpool、系统调用封装） | 3.21 | 1.57 | **+1.65** |
+| fib 的 HTTP/2 server 和 `Context` | 1.95 | 1.57 | +0.38 |
+| fit 的 exchange | 0.46 | 0.18 | +0.28 |
+| GC，后台 | 0.59 | 0.31 | +0.28 |
+| fib 的 taskpool | 0.99 | 0.86 | +0.12 |
+| 合计 | 26.11 | 23.40 | +2.71 |
+
+所以差距不在 client 自己的解析和组帧，而在引擎对上游连接的处理。阻塞路径下 fib 引擎只服务客户端连接；异步路径多出的 1.65 µs
+中，最大的几部分是 poller 的等待和重新注册（`epollWaiter.wait` +0.14、`pollEvents` +0.12、`runLoop` +0.09、relay 的回调 +0.05、
+`arm` +0.04），系统调用封装（`rawSockIO6` +0.29、`sys.Read`/`Write` +0.10，阻塞路径改在 Go 自己的封装里付这部分），读缓冲
+（`bufferpool.Get` +0.11、`Put` +0.08），uncork（+0.14，加上 `flushLocked` +0.03），以及读轮次本身（`process` +0.06、
+`readLoop` +0.05）。差距的其余部分在 fit（它的 exchange 和分配），由 fit 自己削减。
+
+A21 已经试过唤醒后让 relay 保持注册，省了调用但没有提高吞吐；本请求针对的是每一轮周围的工作，而不是让事件循环挂起的那些调用。
+
+**请求。** 让客户端连接为每个响应运行的读轮次更便宜；以下哪些值得做，由 fib 测量决定：
+
+- **客户端连接的读轮次不 cork**，或者在这一轮里没有发送时 cork 不花代价：`uncork` 可以不加锁先看出这一点，再决定是否合并和 flush。
+- **读缓冲不走池的借还**：缓冲不会活过这一轮（`OnData` 的数据只在调用期间有效），所以由 worker 持有一个缓冲，或者每个 poller 一
+  组，就足够了，也不会增加空闲连接的内存。
+- **短响应少几次交接**：例如 poller 发现多个客户端连接就绪时一起交给一个 worker，或者 worker 结束一个客户端读轮次后，在挂起前先
+  看看有没有下一个就绪的客户端连接。
+
+**fit 如何使用。** fit 不需要改动。用 `bench/ab.sh -scenarios proxy` 在 HTTP/1.1 和 h2c 上按每个请求的 CPU 衡量；以上 profile 是
+基线，目标是拿回 1.65 µs 中的大部分。

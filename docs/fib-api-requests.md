@@ -51,6 +51,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A36 | An idle timeout for SOCKS and CONNECT relays | done, `4f1c3e9` | 10 | I53, I53b |
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
+| A39 | A cheaper read round for a client connection's response | open | 12 | — |
 
 ## Evidence
 
@@ -1086,3 +1087,72 @@ change the first has none. With it, fit's test passed 1,500 runs out of 1,500.
 
 **How fit uses it.** Nothing to call: `body_limit`'s refusals, and any route's answer to a request
 whose upload failed, now tell the client to open a new connection.
+
+## A39: A cheaper read round for a client connection's response
+
+**Status.** Open.
+
+**Problem.** Every response fit's proxy gets from an upstream costs a full read round of fib's
+engine on the upstream connection, on top of the client's own work: the poller wakes for it and
+re-arms (`epollWaiter.wait`, `arm`, `pollEvents`, `runLoop`), hands the connection to a worker
+(`submitReady`, the taskpool), and the worker runs the round (`process`, `readLoop`), which
+borrows a read buffer from `bufferpool` and gives it back, corks the connection at the start
+because the engine coalesces writes, and uncorks it at the end under the connection's lock
+(`uncork`, `foldCorkedLocked`, `flushLocked`). On a client connection the cork buys nothing: what
+`OnData` writes in the round goes to another connection, the client's, and the only send on the
+upstream connection is the next request, which `Client.release` may hand it during the round. The
+round is the same for every response, a 12-byte one included, and the proxy pays it once per
+request over HTTP/1.1 and h2c alike.
+
+**Evidence.** An experiment on fit's branch `exp/blocking-quota` (not merged; report and data in
+`bench/results/exp-blocking-quota/`, the CPU profile in its `profile/`) proxied h2c through a
+minimal blocking client of fit's own, which reads and writes its upstream connections on the
+handler's goroutine through Go's netpoller, and compared it with fit's async path through fib's
+client. On the benchmark host (fitbench `proxy` over h2c, 7 server CPUs, 3 alternating rounds),
+the blocking path served 250.2k requests a second against 235.0k (+6.3%, 98.7% of nginx's
+253.5k), at 23.2 µs of CPU a request against 25.9. It is no way forward, since it blocks the
+handler's goroutine and gives up drain, cancellation and streaming, but it shows what the async
+path pays.
+
+`perf record` of the fit server (`-F 1999 -g`, 5 s inside the measured window, two runs of each),
+each sample charged to its nearest fit or fib frame from the leaf, user-space samples only (the
+kernel's time is the same in both, 14.0 against 14.1 µs a request), in µs per request:
+
+| | async | blocking | async − blocking |
+| --- | ---: | ---: | ---: |
+| The upstream client: fib's `Client` / fit's own, Go's net read and write included | 2.93 | 2.81 | +0.12 |
+| fib's engine for connections (pollers, read rounds, send queue, bufferpool, syscall wrappers) | 3.21 | 1.57 | **+1.65** |
+| fib's HTTP/2 server and `Context` | 1.95 | 1.57 | +0.38 |
+| fit's exchange | 0.46 | 0.18 | +0.28 |
+| GC, in the background | 0.59 | 0.31 | +0.28 |
+| fib's taskpool | 0.99 | 0.86 | +0.12 |
+| Everything | 26.11 | 23.40 | +2.71 |
+
+So the client's own parsing and framing are not the gap; the engine's handling of the upstream
+connection is. With the blocking path fib's engine serves only the client connections, and of the
+1.65 µs it costs more with the async path, the largest parts are the poller's wait and re-arm
+(`epollWaiter.wait` +0.14, `pollEvents` +0.12, `runLoop` +0.09, the relay's callback +0.05,
+`arm` +0.04), the syscall wrappers (`rawSockIO6` +0.29, `sys.Read`/`Write` +0.10, which the
+blocking path pays in Go's own wrappers instead), the read buffer (`bufferpool.Get` +0.11,
+`Put` +0.08), the uncork (+0.14, with `flushLocked` +0.03) and the round itself (`process` +0.06,
+`readLoop` +0.05). The rest of the gap is fit's (its exchange and allocations) and is fit's to
+trim.
+
+A21 already tried leaving the relay armed after a wake-up, which saved calls but no throughput;
+this request is about the work around each round rather than the calls that park the loop.
+
+**Request.** Make the round a client connection runs for each response cheaper; which of these
+pays is fib's to measure:
+
+- **No cork for a client connection's round**, or a cork that costs nothing when nothing was
+  sent during the round: `uncork` could see that, without the lock, before folding and flushing.
+- **No pool round trip for the read buffer**: the buffer never outlives the round (`OnData`'s
+  data is valid only during the call), so a buffer owned by the worker, or a stack of them per
+  poller, would do, without growing an idle connection.
+- **Fewer hand-offs for a short response**: for instance, a poller that finds several client
+  connections ready hands them to one worker together, or a worker that ends a client round
+  looks for the next ready client connection before parking.
+
+**How fit uses it.** Nothing changes in fit. It is measured with `bench/ab.sh -scenarios proxy`
+over HTTP/1.1 and h2c, by the CPU a request; the profile above is the baseline, and the target is
+most of the 1.65 µs.
