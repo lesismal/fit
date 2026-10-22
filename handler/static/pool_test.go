@@ -4,6 +4,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/internal/filepool"
 )
 
 // TestNoDiskOnHit checks that a path the cache knows, within check_interval,
@@ -13,8 +15,8 @@ func TestNoDiskOnHit(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa", "dir/index.html": "<p>i</p>", "big.bin": "0123456789abcdefghij"})
 	s := mustLoad(t, root, `, "max_file_bytes": 16, "check_interval": "200ms"`)
 	var jobs atomic.Int32
-	s.pool = newFilePool(2, 16, time.Second)
-	s.pool.hook = func() { jobs.Add(1) }
+	s.pool = filepool.New(2, 16, time.Second)
+	s.pool.Hook = func() { jobs.Add(1) }
 	for _, target := range []string{"/a.txt", "/dir/", "/dir", "/missing"} {
 		before := jobs.Load()
 		first := get(s, "GET", target, nil).Response
@@ -54,13 +56,13 @@ func TestNoDiskOnHit(t *testing.T) {
 func TestSlowDisk(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa", "b.txt": "bbb"})
 	s := mustLoad(t, root, `, "check_interval": "1h"`)
-	s.pool = newFilePool(1, 4, 300*time.Millisecond)
+	s.pool = filepool.New(1, 4, 300*time.Millisecond)
 	if got := get(s, "GET", "/a.txt", nil).Response; string(got.Body) != "aaa" {
 		t.Fatalf("a.txt: %d %q", got.StatusCode, got.Body)
 	}
 	stuck := make(chan struct{})
 	defer close(stuck)
-	s.pool.hook = func() { <-stuck }
+	s.pool.Hook = func() { <-stuck }
 	start := time.Now()
 	if got := get(s, "GET", "/b.txt", nil).Response; got.StatusCode != 503 || time.Since(start) > 2*time.Second {
 		t.Fatalf("b.txt on a stuck disk: %d after %v", got.StatusCode, time.Since(start))

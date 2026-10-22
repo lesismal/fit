@@ -13,9 +13,9 @@ import (
 type directives struct {
 	maxAge, sMaxAge, maxStale, minFresh time.Duration
 	// maxStaleAny is max-stale with no value: any staleness will do.
-	maxStaleAny bool
+	maxStaleAny                                                        bool
 	noStore, noCache, private, public, mustRevalidate, proxyRevalidate bool
-	onlyIfCached                                                        bool
+	onlyIfCached                                                       bool
 }
 
 // maxDelta bounds delta-seconds, as RFC 9111 section 1.2.2 has caches do:

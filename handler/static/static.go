@@ -46,6 +46,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/filepool"
 	"github.com/lesismal/fit/module"
 )
 
@@ -79,7 +80,7 @@ type Static struct {
 	precompressed []encoding
 	cache         cache
 	stall         time.Duration
-	pool          *filePool
+	pool          *filepool.Pool
 }
 
 // Provision checks the root and the index names.
@@ -290,7 +291,7 @@ func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 			c.Release()
 		}
 	}
-	q.timer = time.AfterFunc(s.pool.timeout, timeout)
+	q.timer = time.AfterFunc(s.pool.Timeout(), timeout)
 	// The pool's own ways out, which come after q.timer is set.
 	expire := func() {
 		q.timer.Stop()
@@ -311,7 +312,7 @@ func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 			c.Release()
 		}
 	}
-	if !s.pool.submit(run, expire) {
+	if !s.pool.Submit(run, expire) {
 		expire()
 	}
 }

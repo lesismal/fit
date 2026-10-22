@@ -156,6 +156,19 @@ func at(t *testing.T, start time.Time, d time.Duration) {
 // address.
 func serve(t *testing.T, middleware string) string {
 	t.Helper()
+	base, stop := start(t, middleware)
+	t.Cleanup(func() {
+		stop()
+		resetHits()
+		answer.Store(nil)
+	})
+	return base
+}
+
+// start runs fit with middleware in front of the origin, and returns its
+// address and what stops it.
+func start(t *testing.T, middleware string) (string, func()) {
+	t.Helper()
 	c, err := config.Load([]byte(`{
   "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
   "routes": [{"middleware": ` + middleware + `, "handler": {"module": "test_origin"}}]
@@ -173,13 +186,10 @@ func serve(t *testing.T, middleware string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
+	return "http://" + s.Addrs()[0].Addr.String(), func() {
 		_ = s.Close()
 		rt.Close()
-		resetHits()
-		answer.Store(nil)
-	})
-	return "http://" + s.Addrs()[0].Addr.String()
+	}
 }
 
 func clients() map[string]*stdhttp.Client {
@@ -204,6 +214,10 @@ func get(t *testing.T, c *stdhttp.Client, method, url string, fields ...string) 
 	t.Helper()
 	req, _ := stdhttp.NewRequest(method, url, nil)
 	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i] == "Host" {
+			req.Host = fields[i+1]
+			continue
+		}
 		req.Header.Add(fields[i], fields[i+1])
 	}
 	resp, err := c.Do(req)

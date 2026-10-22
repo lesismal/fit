@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"fmt"
 	"hash/maphash"
 	stdhttp "net/http"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,6 +100,8 @@ type store struct {
 	// quarter of maxSize: past it, a response goes without being kept.
 	capturing atomic.Int64
 	shards    [shards]shard
+	// disk is the zone's disk tier, or nil.
+	disk atomic.Pointer[disk]
 
 	refs int // under zones.mu
 }
@@ -195,33 +199,49 @@ func (s *store) put(key string, e *entry) {
 	}
 }
 
-// replace stores e in place of old, if old is still stored under key: a
-// response freshened by a 304 does not bring back one removed meanwhile.
+// keep stores e under key in memory, and on disk when the zone has one.
+func (s *store) keep(key string, e *entry) {
+	s.put(key, e)
+	if d := s.disk.Load(); d != nil {
+		d.write(key, e)
+	}
+}
+
+// replace stores e in place of old, if old is still stored under key, and
+// on disk: a response freshened by a 304 does not bring back one removed
+// meanwhile.
 func (s *store) replace(key string, old, e *entry) {
 	e.size = sizeOf(key, e)
 	sh := s.shard(key)
 	sh.mu.Lock()
-	defer sh.mu.Unlock()
 	it := sh.items[key]
-	if it == nil {
-		return
-	}
-	for i, v := range it.variants {
-		if v == old {
-			it.variants[i] = e
-			sh.grow(it, e.size-old.size)
-			return
+	replaced := false
+	if it != nil {
+		for i, v := range it.variants {
+			if v == old {
+				it.variants[i] = e
+				sh.grow(it, e.size-old.size)
+				replaced = true
+				break
+			}
 		}
+	}
+	sh.mu.Unlock()
+	if d := s.disk.Load(); replaced && d != nil {
+		d.write(key, e)
 	}
 }
 
-// remove drops every variant under key.
+// remove drops every variant under key, in memory and on disk.
 func (s *store) remove(key string) {
 	sh := s.shard(key)
 	sh.mu.Lock()
-	defer sh.mu.Unlock()
 	if it := sh.items[key]; it != nil {
 		sh.drop(it)
+	}
+	sh.mu.Unlock()
+	if d := s.disk.Load(); d != nil {
+		d.remove(key)
 	}
 }
 
@@ -274,19 +294,42 @@ var zones = struct {
 	m map[string]*store
 }{m: map[string]*store{}}
 
-// acquire returns the store named name, sized maxSize, made if it is not in
-// use.
-func acquire(name string, maxSize int64) *store {
+// acquire returns the store named name, sized maxSize, with the disk tier
+// cfg describes or none, made if it is not in use. A zone whose disk changed
+// directory takes the new one, read back from what it holds; one that names
+// the directory of another zone's disk is refused.
+func acquire(name string, maxSize int64, cfg *Disk) (*store, error) {
 	zones.Lock()
 	defer zones.Unlock()
 	s := zones.m[name]
-	if s == nil {
+	fresh := s == nil
+	if fresh {
 		s = newStore(name, maxSize)
+	}
+	switch d := s.disk.Load(); {
+	case cfg == nil:
+		s.disk.Store(nil)
+	case d != nil && d.dir == filepath.Clean(cfg.Path):
+		d.setLimits(cfg)
+	default:
+		dir := filepath.Clean(cfg.Path)
+		for other, o := range zones.m {
+			if od := o.disk.Load(); other != name && od != nil && od.dir == dir {
+				return nil, fmt.Errorf("the directory %s is zone %q's", dir, other)
+			}
+		}
+		nd, err := newDisk(cfg, diskPool())
+		if err != nil {
+			return nil, err
+		}
+		s.disk.Store(nd)
+	}
+	if fresh {
 		zones.m[name] = s
 	}
 	s.maxSize.Store(maxSize)
 	s.refs++
-	return s
+	return s, nil
 }
 
 // release gives back a hold acquire took; the store goes once none is left.

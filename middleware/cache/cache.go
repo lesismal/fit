@@ -8,7 +8,9 @@
 // that copies what passes, so that a response is never held back to be
 // stored, and is stored only once all of it has gone. Responses are kept in
 // memory, in a store of a bounded size shared by every cache of the same
-// zone and kept across reloads.
+// zone and kept across reloads, and, with a disk tier, on disk too, where
+// they are found again when fit starts: the disk is read and written on a
+// pool of goroutines of its own, and never by a fib worker.
 package cache
 
 import (
@@ -18,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
@@ -62,8 +65,10 @@ type Cache struct {
 	MaxSize      int64           `json:"max_size,omitempty" min:"0" default:"134217728" doc:"The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded."`
 	MaxEntrySize int64           `json:"max_entry_size,omitempty" min:"0" default:"1048576" doc:"The largest body kept; a larger response goes to its client without being kept. At most a sixteenth of max_size. 1 MiB when left out or 0."`
 	DefaultTTL   config.Duration `json:"default_ttl,omitempty" doc:"How long a response is fresh for when it gives no lifetime of its own (no s-maxage, max-age or Expires) and its status allows one to be assumed (200, 203, 300, 301, 308, 404, 405, 410, 414, 501): in place of a tenth of the time since its Last-Modified, at most a day, which is used when this is left out."`
+	Disk         *Disk           `json:"disk,omitempty" doc:"A disk tier for the zone: every response kept in memory is written to disk too, on a pool of goroutines of its own, and one the memory no longer holds is read back from disk, on that pool, and kept in memory again. None when left out. Caches of one zone take the disk of the last one loaded."`
 
 	store *store
+	graph module.Holder
 }
 
 // Provision checks the params and takes the zone's store.
@@ -80,7 +85,11 @@ func (m *Cache) Provision(ctx *module.Context) error {
 	if m.MaxEntrySize > m.MaxSize/shards {
 		return ctx.Errorf("max_entry_size", "is more than a sixteenth of max_size (%d)", m.MaxSize/shards)
 	}
-	m.store = acquire(m.Zone, m.MaxSize)
+	store, err := acquire(m.Zone, m.MaxSize, m.Disk)
+	if err != nil {
+		return ctx.Errorf("disk", "%v", err)
+	}
+	m.store, m.graph = store, ctx.Graph()
 	return nil
 }
 
@@ -133,40 +142,123 @@ func (m *Cache) serve(c *fibhttp.Context, next module.Handler) {
 	key := keyOf(r, r.URL.RequestURI())
 	now := clock()
 	req := requestDirectives(r.Header)
-	x := &miss{m: m, c: c, key: key, requestTime: now, status: fwdMiss}
+	x := &miss{m: m, c: c, key: key, requestTime: now, status: fwdMiss, req: req}
 	if _, ranged := r.Header["Range"]; ranged {
 		x.status, x.ranged = fwdBypass, true
-	} else if e, found := m.store.get(key, r.Header); e == nil && found {
-		x.status = fwdVaryMiss
-	} else if e != nil {
-		age := e.age(now)
-		fresh := age < e.lifetime
-		switch {
-		case req.noCache || req.maxAge >= 0 && age > req.maxAge:
-			x.status = fwdRequest
-		case fresh && (req.minFresh < 0 || e.lifetime-age >= req.minFresh):
-			m.hit(c, e, age)
+	} else if e, found := m.store.get(key, r.Header); e != nil {
+		hit, status := usable(e, req, now)
+		if hit {
+			m.hit(c, e, e.age(now), "")
 			return
-		case fresh:
-			x.status = fwdRequest
-		case !e.noStale && (req.maxStaleAny || req.maxStale >= 0 && age-e.lifetime <= req.maxStale):
-			m.hit(c, e, age)
-			return
-		default:
-			x.status = fwdStale
 		}
-		x.stale = e
+		x.status, x.stale = status, e
+	} else {
+		if found {
+			x.status = fwdVaryMiss
+		}
+		if d := m.store.disk.Load(); d != nil {
+			if de := d.get(key, r.Header); de != nil {
+				hit, status := usable(de.meta, req, now)
+				if hit {
+					m.fromDisk(c, next, d, de, x)
+					return
+				}
+				x.status = status
+			}
+		}
 	}
-	if req.onlyIfCached {
+	x.forward(next)
+}
+
+// usable reports whether e may answer a request with directives req at now,
+// or else why the request goes on.
+func usable(e *entry, req directives, now time.Time) (bool, int) {
+	age := e.age(now)
+	fresh := age < e.lifetime
+	switch {
+	case req.noCache || req.maxAge >= 0 && age > req.maxAge:
+		return false, fwdRequest
+	case fresh && (req.minFresh < 0 || e.lifetime-age >= req.minFresh):
+		return true, 0
+	case fresh:
+		return false, fwdRequest
+	case !e.noStale && (req.maxStaleAny || req.maxStale >= 0 && age-e.lifetime <= req.maxStale):
+		return true, 0
+	}
+	return false, fwdStale
+}
+
+// forward sends the request on to next, with the hooks that keep its
+// response, or answers 504 for one that is only to be answered from the
+// cache.
+func (x *miss) forward(next module.Handler) {
+	c, r := x.c, x.c.Request
+	if x.req.onlyIfCached {
 		_ = c.Respond(stdhttp.StatusGatewayTimeout, "text/plain; charset=utf-8", []byte("504 Gateway Timeout\n"))
 		return
 	}
-	x.storable = r.Method == stdhttp.MethodGet && !req.noStore
+	x.storable = r.Method == stdhttp.MethodGet && !x.req.noStore
 	_, x.authorized = r.Header["Authorization"]
 	// The hooks run in the reverse of this order: the header's first.
 	c.OnBodyFilter(x.filter)
 	c.OnHeader(x.header)
 	next.ServeHTTP(c)
+}
+
+// fromDisk answers c from de, read back from d on the disk pool, and keeps
+// it in memory again. A read that fails, or does not come within the
+// pool's timeout, as from a disk that hangs, leaves the request to go on as
+// a miss, from wherever it is.
+func (m *Cache) fromDisk(c *fibhttp.Context, next module.Handler, d *disk, de *diskEntry, x *miss) {
+	c.Retain()
+	m.graph.Retain()
+	release := func() {
+		c.Release()
+		m.graph.Release()
+	}
+	// claimed says whether the read (1) or the timeout (2) answers.
+	var claimed atomic.Int32
+	miss := func() {
+		x.forward(next)
+		release()
+	}
+	timer := time.AfterFunc(d.pool.Timeout(), func() {
+		if claimed.CompareAndSwap(0, 2) {
+			miss()
+		}
+	})
+	run := func() {
+		if c.Err() != nil {
+			if claimed.CompareAndSwap(0, 1) {
+				timer.Stop()
+				release()
+			}
+			return
+		}
+		e, err := d.read(de)
+		if !claimed.CompareAndSwap(0, 1) {
+			return
+		}
+		timer.Stop()
+		if err != nil {
+			d.drop(x.key, de)
+			miss()
+			return
+		}
+		m.store.put(x.key, e)
+		m.hit(c, e, e.age(clock()), "disk")
+		release()
+	}
+	expire := func() {
+		if claimed.CompareAndSwap(0, 2) {
+			timer.Stop()
+			miss()
+		}
+	}
+	if !d.pool.Submit(run, expire) && claimed.CompareAndSwap(0, 2) {
+		timer.Stop()
+		miss()
+	}
 }
 
 // keyOf returns the key of a request's response: its scheme, host and
@@ -211,8 +303,8 @@ func (m *Cache) invalidate(r *stdhttp.Request, h stdhttp.Header) {
 	}
 }
 
-// hit answers c from e, which is age old.
-func (m *Cache) hit(c *fibhttp.Context, e *entry, age time.Duration) {
+// hit answers c from e, which is age old; detail, if any, says where e was.
+func (m *Cache) hit(c *fibhttp.Context, e *entry, age time.Duration, detail string) {
 	h := make(stdhttp.Header, len(e.header)+2)
 	status, body := e.status, e.body
 	if status == stdhttp.StatusOK && notModified(c.Request.Header, e.etag, e.lastModified) {
@@ -226,7 +318,11 @@ func (m *Cache) hit(c *fibhttp.Context, e *entry, age time.Duration) {
 		maps.Copy(h, e.header)
 	}
 	h["Age"] = []string{strconv.FormatInt(int64(age/time.Second), 10)}
-	h["Cache-Status"] = []string{"fit; hit; ttl=" + strconv.FormatInt(int64((e.lifetime-age)/time.Second), 10)}
+	cs := "fit; hit; ttl=" + strconv.FormatInt(int64((e.lifetime-age)/time.Second), 10)
+	if detail != "" {
+		cs += "; detail=" + detail
+	}
+	h["Cache-Status"] = []string{cs}
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: status, Header: h, Body: body})
 }
 
@@ -247,6 +343,8 @@ type miss struct {
 	// authorized when it carries Authorization, and ranged when it asked for
 	// a range.
 	storable, authorized, ranged bool
+	// req are the request's directives.
+	req directives
 }
 
 // header runs as the response's header is settled: it says what the cache
@@ -417,7 +515,7 @@ func (f *capture) Close() ([]byte, error) {
 	f.Abort(nil)
 	if (f.want < 0 || int64(len(body)) == f.want) && f.c.Err() == nil && !hasTrailer(f.c.Header()) {
 		f.e.body = body
-		f.store.put(f.key, f.e)
+		f.store.keep(f.key, f.e)
 	}
 	return nil, nil
 }
