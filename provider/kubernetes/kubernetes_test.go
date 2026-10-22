@@ -21,7 +21,8 @@ import (
 )
 
 // apiServer is a fake Kubernetes API server: it lists the objects a test
-// puts, in pages, and streams their changes to watches.
+// puts, in pages, and streams their changes to watches, from the resource
+// version each asks for.
 type apiServer struct {
 	t   *testing.T
 	srv *httptest.Server
@@ -31,18 +32,27 @@ type apiServer struct {
 	objs     map[string]map[string]json.RawMessage // by path, then namespace/name
 	missing  map[string]bool                       // paths answered 404
 	watchers map[string][]chan string
-	lists    map[string]int
-	watches  map[string]int
-	patches  map[string]int // status patches by collection
+	// events are the changes stored at each path, by resource version, which
+	// a watch from an older version is sent first, as the API server does.
+	events  map[string][]storedEvent
+	lists   map[string]int
+	watches map[string]int
+	patches map[string]int // status patches by collection
 	// conflicts is how many status patches are yet to be refused with 409.
 	conflicts int
+}
+
+// storedEvent is a watch event and the resource version it made.
+type storedEvent struct {
+	rv    int
+	event string
 }
 
 const testToken = "test-token"
 
 func newAPIServer(t *testing.T) *apiServer {
 	a := &apiServer{t: t, objs: map[string]map[string]json.RawMessage{}, missing: map[string]bool{},
-		watchers: map[string][]chan string{}, lists: map[string]int{}, watches: map[string]int{}, patches: map[string]int{}}
+		watchers: map[string][]chan string{}, events: map[string][]storedEvent{}, lists: map[string]int{}, watches: map[string]int{}, patches: map[string]int{}}
 	a.srv = httptest.NewTLSServer(http.HandlerFunc(a.serve))
 	t.Cleanup(a.srv.Close)
 	return a
@@ -66,11 +76,23 @@ func (a *apiServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("watch") == "1" {
 		a.watches[path]++
+		// The changes since the version listed come first: one made between
+		// the list and this watch is not lost.
+		from, _ := strconv.Atoi(r.URL.Query().Get("resourceVersion"))
+		var missed []string
+		for _, e := range a.events[path] {
+			if e.rv > from {
+				missed = append(missed, e.event)
+			}
+		}
 		ch := make(chan string, 64)
 		a.watchers[path] = append(a.watchers[path], ch)
 		a.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		for _, e := range missed {
+			fmt.Fprintln(w, e)
+		}
 		w.(http.Flusher).Flush()
 		for {
 			select {
@@ -150,6 +172,7 @@ func (a *apiServer) store(path string, o map[string]any, deleted bool) {
 		a.objs[path][key] = data
 	}
 	e, _ := json.Marshal(map[string]any{"type": typ, "object": json.RawMessage(data)})
+	a.events[path] = append(a.events[path], storedEvent{a.rv, string(e)})
 	for _, ch := range a.watchers[path] {
 		ch <- string(e)
 	}
