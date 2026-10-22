@@ -190,7 +190,10 @@ func TestWebSocketExtendedConnect(t *testing.T) {
 // h2Connect sends an extended CONNECT over conn as a bare HTTP/2 client:
 // net/http's Transport refuses a :protocol field, and x/net's would be a
 // dependency for a test. The request's body goes out in DATA frames as it
-// is read; the response's DATA comes back through the reader returned, the
+// is read, within the windows the server gives it, as a client's must: one
+// sent past them has its stream reset with FLOW_CONTROL_ERROR, as fib's
+// server does once a tunnel's reads are held and the window stops coming
+// back. The response's DATA comes back through the reader returned, the
 // window given back as it arrives.
 func h2Connect(t *testing.T, conn net.Conn) func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
 	return func(req *stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
@@ -220,12 +223,30 @@ func h2Connect(t *testing.T, conn net.Conn) func(*stdhttp.Request) (int, stdhttp
 			}
 		}
 		write(0x1, 0x4, 1, block) // HEADERS, END_HEADERS
+		// The server's windows for what this side sends: 65535 bytes each
+		// until its SETTINGS and WINDOW_UPDATEs say otherwise (RFC 9113
+		// section 6.9). gone says the connection has ended.
+		flow := sync.NewCond(new(sync.Mutex))
+		connWindow, streamWindow, initialWindow, gone := int64(65535), int64(65535), int64(65535), false
 		go func() {
 			buf := make([]byte, 16<<10)
 			for {
 				n, err := req.Body.Read(buf)
-				if n > 0 {
-					write(0x0, 0, 1, buf[:n])
+				for p := buf[:n]; len(p) > 0; {
+					flow.L.Lock()
+					for (connWindow <= 0 || streamWindow <= 0) && !gone {
+						flow.Wait()
+					}
+					if gone {
+						flow.L.Unlock()
+						return
+					}
+					m := min(int64(len(p)), connWindow, streamWindow)
+					connWindow -= m
+					streamWindow -= m
+					flow.L.Unlock()
+					write(0x0, 0, 1, p[:m])
+					p = p[m:]
 				}
 				if err != nil {
 					return
@@ -240,6 +261,12 @@ func h2Connect(t *testing.T, conn net.Conn) func(*stdhttp.Request) (int, stdhttp
 		pr, pw := io.Pipe()
 		go func() {
 			defer pw.Close()
+			defer func() {
+				flow.L.Lock()
+				gone = true
+				flow.Broadcast()
+				flow.L.Unlock()
+			}()
 			dec := hpack.NewDecoder(4096)
 			hdr := make([]byte, 9)
 			for {
@@ -253,7 +280,27 @@ func h2Connect(t *testing.T, conn net.Conn) func(*stdhttp.Request) (int, stdhttp
 				typ, flags, stream := hdr[3], hdr[4], binary.BigEndian.Uint32(hdr[5:])&0x7fffffff
 				switch {
 				case typ == 0x4 && flags&0x1 == 0:
+					flow.L.Lock()
+					for i := 0; i+6 <= len(payload); i += 6 {
+						if binary.BigEndian.Uint16(payload[i:]) == 0x4 { // SETTINGS_INITIAL_WINDOW_SIZE
+							v := int64(binary.BigEndian.Uint32(payload[i+2:]))
+							streamWindow += v - initialWindow
+							initialWindow = v
+						}
+					}
+					flow.Broadcast()
+					flow.L.Unlock()
 					write(0x4, 0x1, 0, nil) // SETTINGS ACK
+				case typ == 0x8 && len(payload) == 4 && (stream == 0 || stream == 1):
+					flow.L.Lock()
+					inc := int64(binary.BigEndian.Uint32(payload) & 0x7fffffff)
+					if stream == 0 {
+						connWindow += inc
+					} else {
+						streamWindow += inc
+					}
+					flow.Broadcast()
+					flow.L.Unlock()
 				case typ == 0x1 && stream == 1:
 					h := head{header: stdhttp.Header{}}
 					_ = dec.Decode(payload, func(f hpack.HeaderField) error {
