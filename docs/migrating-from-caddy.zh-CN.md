@@ -3,8 +3,9 @@
 [English](migrating-from-caddy.md) | [简体中文](migrating-from-caddy.zh-CN.md)
 
 fit 与 Caddy 理念相同：默认 HTTPS、严格的结构化配置，以及原子替换配置的 Admin API。不同在于内置了什么（缓存、限流、
-四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。没有从 Caddyfile 或 Caddy JSON 的转换器；本指南给出两者的
-对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
+四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。`fit adapt` 把 Caddyfile 的常用子集转换为 fit 的 JSON，`fit run` 和
+`fit validate` 也直接接受 Caddyfile（名为 `Caddyfile` 或以 `.caddyfile` 结尾的文件）；没有从 Caddy JSON 的转换器。本指南
+给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
 
 ## 一个站点
 
@@ -75,6 +76,36 @@ example.com {
 | `xcaddy build --with ...` | `fit build --with ...`（见 [模块](modules.zh-CN.md)） |
 | `caddy run --watch`、`caddy reload` | `fit run -watch`、SIGHUP 或 Admin API 的 `POST /load` |
 | `caddy validate`、`caddy hash-password` | `fit validate`、`fit hash-password` |
+
+## 转换 Caddyfile
+
+```bash
+fit adapt -c Caddyfile -o fit.json
+```
+
+写出 fit 的 JSON，并在标准错误上按行号列出未转换或转换存疑的指令。可转换的有：
+
+- **全局选项**：`email`、`acme_ca`、`acme_ca_root`、`storage file_system`、`admin`、`auto_https`、`http_port`、
+  `https_port`、`on_demand_tls` 和 `servers { protocols }`。
+- **片段**（snippet）及其 `import`，支持 `{args[N]}`；`{$ENV}` 和 `{$ENV:default}`；`#` 注释，双引号、反引号和 heredoc
+  字符串。`import` 文件不转换。
+- **站点**地址：域名、`*.` 通配、`http://`、`https://`、端口、路径以及 `bind`。只在 HTTPS 端口上提供的站点不写 listener，
+  由 fit 的默认 HTTPS 提供，与 Caddy 一样；否则写出 listener，并把 HTTPS 站点的域名从 HTTP 跳转到 HTTPS。`localhost` 和
+  IP 地址以 HTTP 提供：fit 没有内部 CA。
+- **匹配器**：`*`、路径（任意位置可含 `*`），以及由 `path`、`path_regexp`、`host`、`method`、`header`、`query`、
+  `remote_ip`、`client_ip` 和 `not` 组成的命名匹配器。CEL 表达式不转换。
+- **指令**：`handle`、`handle_path`、`route`、`reverse_proxy`（upstream、`lb_policy`、健康检查、`header_up`、
+  `header_down`、`transport http`）、`file_server`、`root`、`try_files`、`respond`、`redir`、`rewrite`、`uri`、
+  `header`、`request_header`、`encode`、`basic_auth`（`basicauth`）、`forward_auth`、`request_body`、`php_fastcgi`、
+  `tls` 和 `log`。
+
+Caddyfile 按指令顺序和匹配器为请求挑选多个处理器；fit 只挑一条路由。转换器为每个处理器生成一条路由，并把每个中间件指令
+放到它覆盖的路由上，只覆盖一部分的路由会被拆开：整个站点的 `file_server` 加上 `basic_auth /admin/*`，会在站点路由之外
+生成一条带认证的 `/admin/*` 路由。不同之处：
+
+- `rewrite` 和 `uri` 在 fit 选定路由之后才改写路径，改写后的路径不会再选别的路由。
+- `php_fastcgi` 与 `file_server` 并用时，脚本和目录交给 PHP，其余交给文件；两者都不是的路径不会转给 `index.php`。
+- `templates`、`map`、`vars`、`handle_errors`、`abort` 以及 fit 没有对应物的占位符不转换，各自列出。
 
 ## Admin API
 

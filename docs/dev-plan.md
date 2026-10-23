@@ -203,6 +203,7 @@ Status: `todo`, `doing` or `done`.
 | I76 | Continuous fuzzing | I55 | done |
 | I77 | Config and Admin API v1 freeze | I69, I74 | done |
 | I78 | Reference docs and migration guides | I77 | done |
+| I79 | Caddyfile converter, JSON with comments | I74 | done |
 
 ## M0, foundations
 
@@ -1022,6 +1023,15 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   from nginx, Caddy and Traefik, in English and Chinese.
 - **Done when**: the docs build and every config field has a description.
 - **Touches**: `docs`.
+
+### I79 Caddyfile converter, JSON with comments
+
+- **Do**: convert a common subset of Caddy's Caddyfile to native JSON, as I74 does nginx's, listing
+  everything skipped by line; let native JSON have `//` and `/* */` comments and trailing commas,
+  with errors still at their lines and columns ([decision 020](decisions/020-caddyfile-and-jsonc.md)).
+- **Done when**: sample Caddyfiles convert, each skipped directive reported, and a converted one is
+  served end to end; JSON with comments loads from a file and through the Admin API.
+- **Touches**: `adapter/caddyfile`, `adapter`, `config`, `admin`, `cli`.
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.

@@ -4,9 +4,10 @@
 
 fit shares Caddy's ideas: HTTPS by default, a strict structured config, and an Admin API that swaps
 configs atomically. It differs in what is built in (caching, rate limiting, layer 4 proxying, which
-Caddy leaves to plugins) and in costing less per connection. There is no converter from the
-Caddyfile or Caddy's JSON; this guide maps one to the other, and the
-[config reference](reference/config.md) has every field.
+Caddy leaves to plugins) and in costing less per connection. `fit adapt` converts a Caddyfile's common subset to fit's
+JSON, and `fit run` and `fit validate` take a Caddyfile as it is (a file named `Caddyfile`, or
+ending in `.caddyfile`); there is no converter from Caddy's JSON. This guide maps one to the other,
+and the [config reference](reference/config.md) has every field.
 
 ## A site
 
@@ -78,6 +79,44 @@ Let's Encrypt for the routes' host names, and port 80 redirects to it.
 | `xcaddy build --with ...` | `fit build --with ...` ([modules](modules.md)) |
 | `caddy run --watch`, `caddy reload` | `fit run -watch`, SIGHUP or the Admin API's `POST /load` |
 | `caddy validate`, `caddy hash-password` | `fit validate`, `fit hash-password` |
+
+## Converting a Caddyfile
+
+```bash
+fit adapt -c Caddyfile -o fit.json
+```
+
+writes fit's JSON and lists on standard error, with their lines, the directives it left out or
+converted with doubts. What converts:
+
+- **Global options**: `email`, `acme_ca`, `acme_ca_root`, `storage file_system`, `admin`,
+  `auto_https`, `http_port`, `https_port`, `on_demand_tls` and `servers { protocols }`.
+- **Snippets** and `import` of them, with `{args[N]}`; `{$ENV}` and `{$ENV:default}`; `#`
+  comments, quoted, backquoted and heredoc strings. `import` of files is not converted.
+- **Sites** by their addresses: names, `*.` wildcards, `http://`, `https://`, ports, a path, and
+  `bind`. Sites served only on the HTTPS port write no listeners, and fit's HTTPS by default serves
+  them, as Caddy does; otherwise listeners are written, with HTTP redirected to HTTPS for the
+  names served over it. `localhost` and IP addresses are served over HTTP: fit has no internal CA.
+- **Matchers**: `*`, paths (with `*` anywhere), and named matchers of `path`, `path_regexp`,
+  `host`, `method`, `header`, `query`, `remote_ip`, `client_ip` and `not`. CEL expressions are
+  not converted.
+- **Directives**: `handle`, `handle_path`, `route`, `reverse_proxy` (its upstreams, `lb_policy`,
+  health checks, `header_up`, `header_down`, `transport http`), `file_server`, `root`, `try_files`,
+  `respond`, `redir`, `rewrite`, `uri`, `header`, `request_header`, `encode`, `basic_auth`
+  (`basicauth`), `forward_auth`, `request_body`, `php_fastcgi`, `tls` and `log`.
+
+A Caddyfile picks a request's handlers by its directives' order and their matchers; fit picks one
+route. The converter makes a route for each handler, and puts each middleware directive on the
+routes it covers, splitting a route it covers only in part: `basic_auth /admin/*` over a whole
+site's `file_server` becomes a route for `/admin/*`, with the authentication, beside the site's.
+What differs:
+
+- `rewrite` and `uri` rewrite the path after fit has picked the route, so a rewritten path does not
+  choose another one.
+- `php_fastcgi` beside `file_server` sends scripts and directories to PHP and the rest to the
+  files; a path that is neither is not sent to `index.php`.
+- `templates`, `map`, `vars`, `handle_errors`, `abort` and placeholders that fit has no counterpart
+  for are left out, each listed.
 
 ## The Admin API
 

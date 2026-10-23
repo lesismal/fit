@@ -40,8 +40,10 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
-A config may also be written in YAML (`examples/hello.yaml`), and `fit adapt` converts between the
-two, and converts a common subset of nginx configs, listing what it left out.
+JSON configs may have `//` and `/* */` comments and trailing commas. A config may also be written
+in YAML (`examples/hello.yaml`), and `fit adapt` converts between the two, and converts a common
+subset of nginx configs and of Caddy's Caddyfile, listing what it left out; `fit run` takes any of
+them as it is.
 
 `fit run` reloads its config file on SIGHUP, keeping the listeners that did not change and the
 running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.

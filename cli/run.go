@@ -49,7 +49,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	cfgFile := flags.String("c", "fit.json", "the config file to run: native JSON, or YAML (.yaml, .yml)")
+	cfgFile := flags.String("c", "fit.json", "the config file to run: native JSON (comments and trailing commas allowed), YAML (.yaml, .yml), nginx (.conf) or a Caddyfile")
 	grace := flags.Duration("shutdown-timeout", 30*time.Second, "how long shutdown waits for requests in flight before closing their connections, and how long requests may keep using a config after a reload")
 	watch := flags.Bool("watch", false, "apply the config file again each time it changes, as SIGHUP does")
 	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "how often a watched file is looked at: the config file, with -watch, and certificate files, with -watch-certs")

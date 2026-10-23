@@ -185,6 +185,12 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	if err != nil {
 		return Result{}, err
 	}
+	// Comments and trailing commas are blanked out, so that what is kept,
+	// merged with providers and edited by JSON pointer is standard JSON.
+	if data, err = config.Standardize(data); err != nil {
+		cs.failures.Add(1)
+		return Result{}, config.Errors{err.(*config.Error)}
+	}
 	cs.reloads.Add(1)
 	r, c, m, err := cs.apply(data, baseSource, cs.parts, source)
 	if err != nil {

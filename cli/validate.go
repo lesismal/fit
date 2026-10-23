@@ -16,7 +16,7 @@ import (
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	file := flags.String("c", "fit.json", "the config file to check: native JSON, or YAML (.yaml, .yml)")
+	file := flags.String("c", "fit.json", "the config file to check: native JSON (comments and trailing commas allowed), YAML (.yaml, .yml), nginx (.conf) or a Caddyfile")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}

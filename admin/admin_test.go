@@ -146,6 +146,25 @@ func TestLoadAndReadBack(t *testing.T) {
 	}
 }
 
+// TestLoadWithComments loads a config with comments and trailing commas,
+// which is kept as standard JSON, so that it can be edited by pointer.
+func TestLoadWithComments(t *testing.T) {
+	f := start(t, doc("v1"), &config.Admin{})
+	src := "// v2\n{\"listeners\": [{\"name\": \"web\", \"address\": \"127.0.0.1:0\",},], /* routes */\n \"routes\": [{\"handler\": {\"module\": \"respond\", \"params\": {\"body\": \"v2\"}}}],}"
+	if resp, body := f.load(t, src); resp.StatusCode != 200 {
+		t.Fatalf("POST /load: %d %s", resp.StatusCode, body)
+	}
+	if got := f.served(t); got != "v2" {
+		t.Fatalf("served %q", got)
+	}
+	if _, body := f.get(t, "/config"); !json.Valid([]byte(body)) || strings.Contains(body, "//") {
+		t.Errorf("GET /config: %q", body)
+	}
+	if resp, body := f.load(t, "{/* open"); resp.StatusCode != 400 || !strings.Contains(body, "does not end") {
+		t.Errorf("an unended comment: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestLoadRefused(t *testing.T) {
 	f := start(t, doc("v1"), &config.Admin{MaxConfigBytes: 1024})
 	taken, err := net.Listen("tcp", "127.0.0.1:0")

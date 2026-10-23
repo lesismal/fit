@@ -11,7 +11,7 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-23 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78) |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261023031529-5d8db99adc37` (fib's `main` at `5d8db99`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and a fix of `benchmark/rpc`'s intermittent `TestClientCountsFailures`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | Proxy-Wasm's response callbacks (A41); 1.0's external security review, which is arranged outside the code |
@@ -67,7 +67,7 @@ To continue, start a session with:
 
 | Package | Contents |
 | --- | --- |
-| `adapter`, `adapter/yaml`, `adapter/nginx` | adapters from other formats to native JSON, by name and extension, with errors mapped to the source; YAML, both ways; a common subset of nginx's, what it leaves out reported by line |
+| `adapter`, `adapter/yaml`, `adapter/nginx`, `adapter/caddyfile` | adapters from other formats to native JSON, by name, extension or file name, with errors mapped to the source; YAML, both ways; common subsets of nginx's configs and Caddy's Caddyfile, what they leave out reported by line |
 | `cmd/fit` | fit's main package: `cli.Main` with every module and provider imported |
 | `cli` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file, and the config's providers, by their registered kinds), `validate`, `adapt`, `schema`, `build`, `version`, `hash-password`, `help` |
 | `plugin/build` | `Build`: the main module of a fit with more modules or fewer, generated and built with the go command; `ParseModule`, `Imports`, `MainSource` |
@@ -4120,6 +4120,50 @@ Differences from the plan:
 - **Tests**: `TestReferenceUpToDate`, `TestReferenceNeedsDescriptions` (schema), `TestSchema`
   with `-reference` (cli), `TestLinks` (docs). They pass under the race detector on the benchmark
   host, with the packages whose modules gained descriptions.
+
+### I79 Caddyfile converter, JSON with comments — done
+
+- **`adapter/caddyfile`**, registered for files named `Caddyfile` and ending in `.caddyfile`
+  (`adapter.Register` now takes whole file names beside extensions, and `ForPath` matches them):
+  a lexer and parser of Caddy's syntax (bare, quoted, backquoted and heredoc tokens, `#` comments,
+  lines continued with `\`, `{$ENV}` and `{$ENV:default}`, snippets and their `import` with
+  `{args[N]}`, a Caddyfile of one site without braces; bounded in tokens, nesting and imports),
+  and a converter of a common subset ([decision 020](decisions/020-caddyfile-and-jsonc.md)):
+  global options (`email`, `acme_ca`, `acme_ca_root`, `storage file_system`, `admin`,
+  `auto_https`, `http_port`, `https_port`, `on_demand_tls`, `servers { protocols }`); site
+  addresses with schemes, ports, paths and `bind`; named matchers (`path` with `*` anywhere,
+  `path_regexp`, `host`, `method`, `header`, `query`, `remote_ip`, `client_ip`, `not` as
+  `match.expr`); `handle`, `handle_path`, `route`, `reverse_proxy` (upstreams with port ranges and
+  schemes, `lb_policy`, health checks, `header_up`, `header_down`, `transport http`, retries),
+  `file_server`, `root`, `try_files`, `respond`, `redir`, `rewrite`, `uri`, `header`,
+  `request_header`, `encode`, `basic_auth` (old base64 hashes too), `forward_auth`,
+  `request_body`, `php_fastcgi`, `tls` (files, on demand, client auth) and `log`. Sites served only
+  on the HTTPS port write no listeners, for HTTPS by default; otherwise listeners are written, and
+  a route on the HTTP port redirects the HTTPS names. Each handler is a route; each middleware
+  directive goes on the routes it covers, in Caddy's directive order, splitting a route it covers
+  in part, root, try_files, rewrite, uri and redir taking the most specific of a block, as Caddy
+  does. Everything skipped is a warning with its line. `fit adapt`, `fit run` and `fit validate`
+  take Caddyfiles; the migration guide from Caddy says what converts and what works differently.
+- **JSON with comments and trailing commas**: `config.Standardize` blanks out `//` and `/* */`
+  comments and a comma before `]` or `}` (not in strings, and `[,]` stays an error), byte for
+  byte, so positions stay the source's. fit's JSON parser runs it, so `config.Load` and
+  `ParseValue` take such JSON; `adapter.Adapt` runs it for JSON files, and the Admin API's
+  `Configs.update` before keeping a config, so that what is merged with providers, edited by
+  pointer and read back is standard JSON.
+- **Known gaps**, listed by the converter: `rewrite` and `uri` act after the route is picked;
+  `php_fastcgi` beside `file_server` sends no path that is neither a file nor a script to
+  `index.php`, since fit's FastCGI handler cannot fall back from files to the front controller;
+  Caddy's internal CA, CEL expressions, `templates`, `map`, `handle_errors` and file imports are
+  not converted.
+- **Tests**: `TestSamples`, `TestSiteSample`, `TestFullSample`, `TestLex` (comments, strings,
+  heredocs, environment, continued lines, errors), `TestParse` (snippets, keys across lines, a
+  site without braces), `TestDirectives` (addresses, matchers, splits, handle, route, PHP, proxy
+  options, global options), `TestIntersect`, `TestUnits`, `TestServe` (a converted Caddyfile
+  served end to end) and `FuzzConvert`, in CI's fuzz jobs, with its corpus (adapter/caddyfile);
+  `TestStandardize`, `TestLoadJSONC` (config); `TestLoadWithComments` (admin);
+  `TestAdaptCaddyfile`, `TestJSONWithComments` (cli). They pass under the race detector on the
+  benchmark host; `FuzzConvert` ran 30s there, about a million inputs, without a failure.
+  Control-plane only: no benchmark (rule 21).
 
 ## Notes for later iterations
 

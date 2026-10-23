@@ -248,6 +248,7 @@ jobs:
           ./handler/proxy FuzzGRPCTimeout
           ./handler/fastcgi FuzzReader
           ./adapter/nginx FuzzConvert
+          ./adapter/caddyfile FuzzConvert
           ./adapter/yaml FuzzAdapt
           ./middleware/cache FuzzDirectives
           TARGETS

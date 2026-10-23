@@ -23,7 +23,8 @@ fit version
 
 ## 第一个配置
 
-fit 的配置是 JSON，也可以用字段相同的 YAML。把下面的内容保存为 `fit.json`：
+fit 的配置是 JSON（可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），也可以用字段相同的 YAML；Caddyfile 和
+nginx 配置也能转换。把下面的内容保存为 `fit.json`：
 
 ```json
 {

@@ -25,7 +25,8 @@ fit version
 
 ## A first config
 
-fit's config is JSON, or YAML with the same fields. Save this as `fit.json`:
+fit's config is JSON, with `//` and `/* */` comments and trailing commas allowed, or YAML with the same
+fields; a Caddyfile or an nginx config converts too. Save this as `fit.json`:
 
 ```json
 {

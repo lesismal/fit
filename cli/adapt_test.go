@@ -55,3 +55,32 @@ func TestAdaptNginx(t *testing.T) {
 		t.Errorf("%d %q %q", code, out, stderr)
 	}
 }
+
+// TestAdaptCaddyfile converts a Caddyfile, the adapter picked by the file's
+// name, and lists what it skipped.
+func TestAdaptCaddyfile(t *testing.T) {
+	data, err := os.ReadFile("../adapter/caddyfile/testdata/full.caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "Caddyfile")
+	_ = os.WriteFile(f, data, 0o644)
+	code, out, stderr := runFit("adapt", "-c", f)
+	if code != 0 || !strings.Contains(out, `"listeners"`) || !strings.Contains(stderr, "Caddyfile: warning: line 44: templates: skipped") {
+		t.Errorf("%d %q %q", code, out, stderr)
+	}
+}
+
+// TestJSONWithComments checks that fit validate takes JSON with comments
+// and trailing commas, and points its errors at their lines.
+func TestJSONWithComments(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "fit.json")
+	_ = os.WriteFile(f, []byte("// a comment\n{\n  \"listeners\": [{\"name\": \"web\", \"address\": \":8080\",}],\n  \"routes\": [\n    /* hello */ {\"handler\": {\"module\": \"respond\",},},\n  ],\n}\n"), 0o644)
+	if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") {
+		t.Errorf("%d %q %q", code, stdout, stderr)
+	}
+	_ = os.WriteFile(f, []byte("{\n  // a comment\n  \"listeners\": [{\"name\": \"web\", \"address\": \"nowhere\",},],\n}\n"), 0o644)
+	if code, _, stderr := runFit("validate", "-c", f); code != 1 || !strings.Contains(stderr, f+":3:") {
+		t.Errorf("%d %q", code, stderr)
+	}
+}

@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261023031529-5d8db99adc37`（fib `main` 的 `5d8db99`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及 `benchmark/rpc` 中偶发失败的 `TestClientCountsFailures` 的修复；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | Proxy-Wasm 的响应回调（A41）；1.0 的外部安全审计，在代码之外安排 |
@@ -46,7 +46,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 | 包 | 内容 |
 | --- | --- |
-| `adapter`、`adapter/yaml`、`adapter/nginx` | 把其他格式转换成原生 JSON 的适配器，按名称和扩展名选择，错误映射回源文件；YAML 双向转换；nginx 常用子集，未转换的部分按行报告 |
+| `adapter`、`adapter/yaml`、`adapter/nginx`、`adapter/caddyfile` | 把其他格式转换成原生 JSON 的适配器，按名称、扩展名或文件名选择，错误映射回源文件；YAML 双向转换；nginx 配置和 Caddy 的 Caddyfile 的常用子集，未转换的部分按行报告 |
 | `cmd/fit` | fit 的 main 包：导入所有模块和 provider 后调用 `cli.Main` |
 | `cli` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并按已注册的种类运行配置中的 provider）、`validate`、`adapt`、`schema`、`build`、`version`、`hash-password`、`help` |
 | `plugin/build` | `Build`：生成并用 go 命令构建一个带更多或更少模块的 fit 的 main 模块；`ParseModule`、`Imports`、`MainSource` |
@@ -2967,6 +2967,37 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - README 改为说明 fit 现在能做什么，并链接到这些指南。
 - **测试**：`TestReferenceUpToDate`、`TestReferenceNeedsDescriptions`（schema），带 `-reference` 的 `TestSchema`（cli），
   `TestLinks`（docs）。它们与模块增加了说明的各包一起，在基准机上的竞态检测下通过。
+
+### I79 Caddyfile 转换器、带注释的 JSON — 已完成
+
+- **`adapter/caddyfile`**，注册给名为 `Caddyfile` 和以 `.caddyfile` 结尾的文件（`adapter.Register` 现在除扩展名外也接受
+  完整文件名，`ForPath` 会匹配它们）：Caddy 语法的词法和语法分析器（普通、双引号、反引号和 heredoc token，`#` 注释，
+  `\` 续行，`{$ENV}` 和 `{$ENV:default}`，片段及带 `{args[N]}` 的 `import`，单站点可省略大括号；token 数、嵌套和导入都有
+  上限），以及常用子集的转换器（[决定 020](decisions/020-caddyfile-and-jsonc.zh-CN.md)）：全局选项（`email`、`acme_ca`、
+  `acme_ca_root`、`storage file_system`、`admin`、`auto_https`、`http_port`、`https_port`、`on_demand_tls`、
+  `servers { protocols }`）；带协议、端口、路径和 `bind` 的站点地址；命名匹配器（任意位置含 `*` 的 `path`、`path_regexp`、
+  `host`、`method`、`header`、`query`、`remote_ip`、`client_ip`，`not` 写成 `match.expr`）；`handle`、`handle_path`、
+  `route`、`reverse_proxy`（含端口范围和协议的 upstream、`lb_policy`、健康检查、`header_up`、`header_down`、
+  `transport http`、重试）、`file_server`、`root`、`try_files`、`respond`、`redir`、`rewrite`、`uri`、`header`、
+  `request_header`、`encode`、`basic_auth`（包括旧的 base64 哈希）、`forward_auth`、`request_body`、`php_fastcgi`、`tls`
+  （证书文件、按需、客户端认证）和 `log`。只在 HTTPS 端口上提供的站点不写 listener，交给默认 HTTPS；否则写出 listener，
+  并在 HTTP 端口上用一条路由把 HTTPS 域名跳转过去。每个处理器是一条路由；每个中间件指令按 Caddy 的指令顺序放到它覆盖的
+  路由上，只覆盖一部分的路由会被拆开，root、try_files、rewrite、uri 和 redir 在一个块里只取最具体的，与 Caddy 一致。
+  所有跳过的部分都按行给出警告。`fit adapt`、`fit run` 和 `fit validate` 接受 Caddyfile；从 Caddy 迁移的指南写明了能转换
+  什么、哪些行为不同。
+- **带注释和末尾逗号的 JSON**：`config.Standardize` 把 `//` 和 `/* */` 注释以及 `]`、`}` 前的逗号（字符串内的不算，`[,]`
+  仍是错误）逐字节替换为空白，位置保持与源文件一致。fit 的 JSON 解析器会调用它，所以 `config.Load` 和 `ParseValue` 接受
+  这样的 JSON；`adapter.Adapt` 对 JSON 文件调用它，Admin API 的 `Configs.update` 在保存配置前调用它，因此与 provider
+  合并、按 pointer 编辑和读回的都是标准 JSON。
+- **已知差距**（转换器会列出）：`rewrite` 和 `uri` 在选定路由之后生效；`php_fastcgi` 与 `file_server` 并用时，既不是文件
+  也不是脚本的路径不会转给 `index.php`，因为 fit 的 FastCGI 处理器无法从文件回退到前端控制器；Caddy 的内部 CA、CEL 表达式、
+  `templates`、`map`、`handle_errors` 和导入文件不转换。
+- **测试**：`TestSamples`、`TestSiteSample`、`TestFullSample`、`TestLex`（注释、字符串、heredoc、环境变量、续行、错误）、
+  `TestParse`（片段、跨行的地址、无大括号的站点）、`TestDirectives`（地址、匹配器、拆分、handle、route、PHP、代理选项、
+  全局选项）、`TestIntersect`、`TestUnits`、`TestServe`（转换后的 Caddyfile 端到端提供服务）和 `FuzzConvert`（加入 CI 的
+  fuzz 任务，附语料）（adapter/caddyfile）；`TestStandardize`、`TestLoadJSONC`（config）；`TestLoadWithComments`（admin）；
+  `TestAdaptCaddyfile`、`TestJSONWithComments`（cli）。它们在基准测试机上以竞态检测器通过；`FuzzConvert` 在那里跑了 30 秒、
+  约一百万个输入，没有失败。只涉及控制面：不做基准测试（规则 21）。
 
 ## 给后续迭代的说明
 

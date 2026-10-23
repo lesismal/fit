@@ -1,0 +1,12 @@
+# A site served over HTTPS by default, as the migration guide's.
+example.com {
+	encode zstd gzip
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:9000 127.0.0.1:9001 {
+			lb_policy least_conn
+			health_uri /healthz
+		}
+	}
+	root * /srv/www
+	file_server
+}

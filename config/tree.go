@@ -109,11 +109,16 @@ func (s *source) pos(off int) (line, col int) {
 	return line, utf8.RuneCount(before[start:]) + 1
 }
 
-// parse parses data, which must hold exactly one JSON value. Unlike
-// encoding/json it refuses an object with the same key twice, rather than
-// silently keeping the last.
+// parse parses data, which must hold exactly one JSON value, with comments
+// and trailing commas allowed (see Standardize). Unlike encoding/json it
+// refuses an object with the same key twice, rather than silently keeping
+// the last.
 func parse(data []byte) (*node, error) {
-	p := &parser{src: &source{data: data}, dec: json.NewDecoder(bytes.NewReader(data))}
+	std, err := Standardize(data)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{src: &source{data: std}, dec: json.NewDecoder(bytes.NewReader(std))}
 	p.dec.UseNumber()
 	tok, off, err := p.next()
 	if err != nil {

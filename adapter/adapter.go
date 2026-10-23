@@ -1,7 +1,8 @@
 // Package adapter turns configs written in other formats into fit's native
-// JSON: YAML, and a subset of nginx's. An adapter registers itself under a
-// name and the file extensions it takes, and fit run, fit validate and fit
-// adapt pick one by a file's extension, or by name.
+// JSON: YAML, and subsets of nginx's configs and Caddy's Caddyfile. An
+// adapter registers itself under a name and the file extensions (or whole
+// file names) it takes, and fit run, fit validate and fit adapt pick one by
+// a file's extension or name, or by its own name.
 package adapter
 
 import (
@@ -42,7 +43,7 @@ var (
 )
 
 // Register makes an adapter known by name, for files with exts, as
-// ".yaml". It panics if name is taken, a mistake in the adapter's code.
+// ".yaml", or with a whole name, as "Caddyfile", which has no dot. It panics if name is taken, a mistake in the adapter's code.
 func Register(name string, a Adapter, exts ...string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -73,25 +74,34 @@ func Names() []string {
 }
 
 // ForPath returns the name of the adapter a file at path takes by its
-// extension, or "" for native JSON, as a .json file or one no adapter
-// claims.
+// extension or its name, or "" for native JSON, as a .json file or one no
+// adapter claims.
 func ForPath(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
+	base := filepath.Base(path)
 	mu.RLock()
 	defer mu.RUnlock()
 	for name, e := range adapters {
-		if slices.Contains(e.exts, ext) {
+		if ext != "" && slices.Contains(e.exts, ext) {
+			return name
+		}
+		if slices.ContainsFunc(e.exts, func(x string) bool { return !strings.HasPrefix(x, ".") && strings.EqualFold(x, base) }) {
 			return name
 		}
 	}
 	return ""
 }
 
-// Adapt adapts data with the adapter named name, or returns it as it is
-// for "" or "json".
+// Adapt adapts data with the adapter named name, or, for "" or "json",
+// returns it as standard JSON, its comments and trailing commas blanked out
+// (config.Standardize), every position kept.
 func Adapt(name string, data []byte) (*Result, error) {
 	if name == "" || name == "json" {
-		return &Result{JSON: data}, nil
+		std, err := config.Standardize(data)
+		if err != nil {
+			return nil, config.Errors{err.(*config.Error)}
+		}
+		return &Result{JSON: std}, nil
 	}
 	a, ok := Lookup(name)
 	if !ok {

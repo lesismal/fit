@@ -193,6 +193,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I76 | 持续 fuzz | I55 | done |
 | I77 | 配置与 Admin API v1 冻结 | I69、I74 | done |
 | I78 | 参考文档与迁移指南 | I77 | done |
+| I79 | Caddyfile 转换器、带注释的 JSON | I74 | done |
 
 ## M0 基础
 
@@ -907,5 +908,13 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 - **做什么**：快速上手指南；由 schema 生成的配置参考；从 nginx、Caddy、Traefik 迁移的指南，中英文各一份。
 - **完成标准**：文档能构建，每个配置字段都有描述。
 - **涉及**：`docs`。
+
+### I79 Caddyfile 转换器、带注释的 JSON
+
+- **做什么**：像 I74 转换 nginx 配置那样，把 Caddy 的 Caddyfile 的常用子集转换为原生 JSON，按行列出所有跳过的部分；
+  原生 JSON 允许 `//` 和 `/* */` 注释及末尾逗号，错误仍指向原来的行和列（[决定 020](decisions/020-caddyfile-and-jsonc.zh-CN.md)）。
+- **完成标准**：示例 Caddyfile 能转换，每个跳过的指令都被报告，转换结果能端到端提供服务；带注释的 JSON 能从文件和
+  Admin API 加载。
+- **涉及**：`adapter/caddyfile`、`adapter`、`config`、`admin`、`cli`。
 
 路线图 1.0 中的外部安全审计不是一个迭代：它在 I77 完成后于代码之外安排。
