@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Host(\"0000000\xe9000000000\")")

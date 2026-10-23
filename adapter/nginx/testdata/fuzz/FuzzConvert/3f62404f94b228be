@@ -1,0 +1,2 @@
+go test fuzz v1
+string(" \nhttp{server{listen 0000;server_name .00000000;root 00000000;add_header 000000000000000 0000;location = 00000{return 100 00;}location ~* &0(0000000000){add_header 0000000000000 \"000000000000000000000\";}location ^~000000000000{alias 0000000000;}location 00001{rewrite 0 0000000 ;}\n\nlocation 0000{\nrewrite 000 00000000;\ntry_files $uri $uri0;\n}\n\nlocation /{\n0;}}}")

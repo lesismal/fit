@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\x8b0:\n:\n\xde0:\x9b0\n0:\xc30")

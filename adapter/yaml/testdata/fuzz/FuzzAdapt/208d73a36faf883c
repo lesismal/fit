@@ -1,0 +1,2 @@
+go test fuzz v1
+string("listIners:\n  - name: web\n    address: \":8080\"\n")

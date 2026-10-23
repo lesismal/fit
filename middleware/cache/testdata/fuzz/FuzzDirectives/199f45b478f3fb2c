@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xc6")
+string("\xcc, \x8a")
+string("\x80")

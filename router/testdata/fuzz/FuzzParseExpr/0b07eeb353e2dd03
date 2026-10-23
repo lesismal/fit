@@ -1,0 +1,2 @@
+go test fuzz v1
+string("(Method(\"\x1e\x8b\")||Header(\"\xd7\x11\"))")

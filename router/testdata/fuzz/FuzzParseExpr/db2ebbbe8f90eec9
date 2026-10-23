@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\"\U00014924𘔤𘔤𘔤𘔤𘔤𘔤𔔤\"")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"[027097A0 79 7# 80A0079ACX9A2702970 7027902702 720A2902702702]\")")

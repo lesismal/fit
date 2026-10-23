@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\"\u0098\u00a0\u0081\u0098\"")

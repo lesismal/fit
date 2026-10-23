@@ -1,0 +1,2 @@
+go test fuzz v1
+string("# old path.\nhttp {server {\n      .test *.app.test;\n        root /srv/app;\n  header X-F DENY;\n\n        location = /health {\n   add_header Cache-Control \"public, max-\";\n        }\n\n        location ^~ /downloads/ {\n                  }\n\n        location /old/ {\n    }\n\n        location /docs/ {\n       ( C2 r&write ^/doak;\n            try_files $uri $uri/ =404;\n        }\n\n        location / {\n    1    NNNNNN_;  } }\n}\n")

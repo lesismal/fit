@@ -1,0 +1,2 @@
+go test fuzz v1
+string("listeners:\xe9\xe9\xe9\xe9\xe9name: web\n    address: \":8080\"\n")

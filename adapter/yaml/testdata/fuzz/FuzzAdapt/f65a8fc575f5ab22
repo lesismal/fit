@@ -1,0 +1,2 @@
+go test fuzz v1
+string("0: &a [0, 0]\nA: !0\nA: 000: 0000000")

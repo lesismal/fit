@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"00|01|00|1\")")

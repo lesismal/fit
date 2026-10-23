@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"^[27')9A C#%X0]*8$\")")

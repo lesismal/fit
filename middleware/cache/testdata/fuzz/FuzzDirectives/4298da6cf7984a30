@@ -1,0 +1,4 @@
+go test fuzz v1
+string("0")
+string("0")
+string("1,2,7,8,9,A,B,C,X,0,Y,0,")

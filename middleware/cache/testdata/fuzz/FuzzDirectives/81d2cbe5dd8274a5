@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xe40,\xb50,\xf60")
+string("\xed0")
+string("0")

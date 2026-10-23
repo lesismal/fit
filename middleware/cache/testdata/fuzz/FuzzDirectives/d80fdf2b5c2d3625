@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xf3,\xdf,\xdf,\xf3,\xf3,\xf3,\xdf,\xdf,\xdf,\xf3,\xdf")
+string("0")
+string("0")

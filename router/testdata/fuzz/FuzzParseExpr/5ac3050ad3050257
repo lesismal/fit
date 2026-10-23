@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\"Ø\u0081Ơބ\xf0\"")

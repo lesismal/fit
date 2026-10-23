@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"^[29A7CXZac x#%z0]*8$\")")

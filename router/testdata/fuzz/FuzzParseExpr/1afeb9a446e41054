@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"\x880|\x88||\x88\x8800|\x88\x88|\x88\")")

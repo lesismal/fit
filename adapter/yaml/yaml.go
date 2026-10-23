@@ -246,6 +246,9 @@ func (c *converter) scalar(n *yamlv3.Node) error {
 		if math.IsInf(v, 0) || math.IsNaN(v) {
 			return errAt(n, "%s is not a number JSON can hold", n.Value)
 		}
+		if v == 0 {
+			v = 0 // not -0, which would come back from JSON an integer, 0
+		}
 		c.b.WriteString(strconv.FormatFloat(v, 'g', -1, 64))
 	case "!!str", "!!timestamp", "!!binary":
 		s, _ := json.Marshal(n.Value)
@@ -318,8 +321,12 @@ func node(dec *json.Decoder) (*yamlv3.Node, error) {
 		}
 	case string:
 		n := &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!str", Value: t}
-		if strings.Contains(t, "\n") {
+		switch {
+		case strings.Contains(t, "\n"):
 			n.Style = yamlv3.LiteralStyle
+		case t == "<<":
+			// Plain, it would be a merge key; the encoder does not quote it.
+			n.Style = yamlv3.DoubleQuotedStyle
 		}
 		return n, nil
 	case json.Number:

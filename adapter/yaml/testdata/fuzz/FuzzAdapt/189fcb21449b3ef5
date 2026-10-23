@@ -1,0 +1,2 @@
+go test fuzz v1
+string("a: &a 91, 2]\nb: *a\nc: {<<: {x: 1}, y: 2}\n")

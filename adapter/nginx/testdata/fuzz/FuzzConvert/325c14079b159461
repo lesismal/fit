@@ -1,0 +1,2 @@
+go test fuzz v1
+string("http { server { listen q0; location0~ ( { return 200 \"x\"; } } }")

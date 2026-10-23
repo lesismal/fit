@@ -1,0 +1,4 @@
+go test fuzz v1
+string("И,И,Ә,Ә,И,И,И,Ă")
+string("0")
+string("0")

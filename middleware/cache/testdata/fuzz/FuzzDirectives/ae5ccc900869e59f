@@ -1,0 +1,4 @@
+go test fuzz v1
+string("햓\xe6")
+string("0")
+string("0")

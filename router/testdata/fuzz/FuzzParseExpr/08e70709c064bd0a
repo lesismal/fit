@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"[97207207A\f0 #2 70270920]\")")

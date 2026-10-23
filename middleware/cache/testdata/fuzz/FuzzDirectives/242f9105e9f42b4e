@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xe2")
+string("\xa5")
+string("\xe8 ")

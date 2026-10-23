@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Connection: ,,  ,t\xa2e\nTE: trailers\nUpgrade: websocket")

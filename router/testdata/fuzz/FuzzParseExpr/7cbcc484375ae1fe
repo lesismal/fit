@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Host(\"Ɍ\x00ܵƋӵƆŞѬĩԶݴҋе݆ŞѬĩԶݒ\xb4Ҵ\")")

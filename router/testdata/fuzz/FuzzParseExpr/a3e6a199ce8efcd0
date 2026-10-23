@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"\xea\xea\xe5\xe5\xea\xea\xea\xea\")")

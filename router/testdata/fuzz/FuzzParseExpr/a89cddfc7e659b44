@@ -1,0 +1,2 @@
+go test fuzz v1
+string("(Method(\"000\",\"00000000\")||Header(\"0000\"))&&Query(\"0\")")

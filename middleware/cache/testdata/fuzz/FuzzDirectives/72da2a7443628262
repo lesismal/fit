@@ -1,0 +1,4 @@
+go test fuzz v1
+string("max-age=60, s-maxage=\"30\", stale-while-revalidate=99999999999999999999, no-cache")
+string("AcceHpt-Encoding, *")
+string("a, b")

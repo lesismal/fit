@@ -2911,6 +2911,22 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   文件名、path info、查询串、方法、URI、字段、主机和地址，且不含 httpoxy；POST 表单和 3 MB 上传；状态码、字段和 cookie；
   重定向；4 MiB 响应；经 `try_files` 的前端控制器。`test/workers` 为该处理器加了用例。它们在基准机上的竞态检测下通过。
 
+### I76 持续 fuzz — 已完成
+
+- **十一个 fuzz 目标**：原有的四个（配置加载的 `FuzzLoad`、路由表达式解析器的 `FuzzParseExpr`、四层嗅探与 PROXY protocol 的
+  `FuzzReadSNI` 和 `FuzzParseProxy`），以及新增的七个：`FuzzHopByHop`（代理不留下任何逐跳字段，也不留下 Connection 点名的字段）、
+  `FuzzForwarded`（由任意地址和主机生成的 Forwarded 元素是一个字段值，不含控制字符）、`FuzzGRPCTimeout`（grpc-timeout 的解析器，
+  以及代理写出的值读回后不会更短）、`FuzzReader`（FastCGI 的记录读取器，以任意分片喂入任意内容，保留的数据不超过一条记录）、
+  `FuzzConvert`（nginx 转换器从不 panic，输出 JSON 和带行号的警告）、`FuzzAdapt`（YAML 转换为 JSON，该 JSON 写回 YAML 后转换
+  结果相同）和 `FuzzDirectives`（缓存的 Cache-Control、Vary 和 Cache-Tag 解析器给出有界的值）。
+- **CI 中**：每次推送的 `fuzz` 任务从已提交的语料把每个目标各跑 15s；`.github/workflows/fuzz.yml` 每天把每个目标各跑 10 分钟
+  （也可以按需运行任意时长），增长的语料通过 Actions 缓存在各次运行间延续，失败的输入作为 artifact 保存，修复时加入
+  `testdata/fuzz`。
+- **语料**：每个目标在基准机上跑了两分钟，发现的有价值输入提交在各包的 `testdata/fuzz` 下（约 2,700 个输入，260 KB），`go test`
+  会把它们作为种子运行。
+- **发现**：YAML 适配器的两个往返缺陷，均已修复并保留输入：`-0.` 变成 JSON 的 `-0`，经 YAML 回来后成为整数 0（负零现在写为 0）；
+  字符串 `<<` 不加引号写回 YAML 后被读作合并键（现在加引号）。其他目标没有发现问题。
+
 ## 给后续迭代的说明
 
 - **h2c 比 M3 慢 1.5–1.8%（见 [M4 报告](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）。** 用 `bench/ab.sh` 对比 M3 的构建（`1486c28`）与 M4 的构建（`0dd5956`）：fixed h2c −1.8%，proxy h2c −1.5%，其余在噪声范围内。二分后发现它在 I59–I64 间逐步累积，每一步都在噪声范围内（I59–I61 −0.8%，I62–I64 −0.8%）；不是 fib 升到 `86071b8`，也不是 I65 的 tracer 检查；I61 加入 `**.` 主机后，`router.Match` 的微基准没有变化。这几个迭代因 provider、各类客户端、共享存储和仪表盘使 fit 的代码段从 6.14 MB 增至 6.42 MB，这暗示是代码布局的影响，但未能证明。由于请求路径没有改动，按规则 22 记录而不修复；I70 测量了不带 provider 构建的 fit：h2c 上 fixed 快 1.0%，proxy 在噪声范围内；因此代码体积解释了 fixed 的 1.8% 的一部分，不能解释 proxy 的 1.5%，后者仍未查明。

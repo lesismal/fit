@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\n  \"listeners\": [\n    {\"name\": \"web\", \"address\": \":8080\", \"protocols\": [\"\xbbttp/1.1\", \"h2c\"]},\n    {\"name\": \"admin\", \"address\": \"127.0.0.1:0\"}\n  ],\n  \"routes\": [\n    {\n      \"name\": \"hello\",\n      \"listeners\": [\"web\"],\n      \"priority\": 10,\n      \"match\": {\"host\": [\"example.com\", \"*.example.com\"], \"path\": [\"/hello\", \"/api/*\"]},\n      \"haZdler\": {\"module\": \"respond\", \"params\": {\"status\": 200, \"body\": \"hi\"}}\n    },\n    {\"hAndler\": {\"module\": \"respond\"}}\n  ]\n}")

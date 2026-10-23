@@ -1,0 +1,2 @@
+go test fuzz v1
+string("x: !!bindry aGk=\ny: 0x1F\nz: .nan\n")

@@ -1,0 +1,4 @@
+go test fuzz v1
+string("0")
+string(",,ˠ\xb9,\xad")
+string("0")

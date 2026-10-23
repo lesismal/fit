@@ -1,0 +1,59 @@
+# Fuzzing on a schedule: each target for ten minutes a day, its corpus
+# carried from one run to the next in the Actions cache, beside the seed
+# corpus committed under each package's testdata/fuzz. A failing input is
+# kept as an artifact; add it to testdata/fuzz with the fix.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: How long each target runs
+        default: 10m
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {pkg: ./config, target: FuzzLoad}
+          - {pkg: ./router, target: FuzzParseExpr}
+          - {pkg: ./l4, target: FuzzReadSNI}
+          - {pkg: ./l4, target: FuzzParseProxy}
+          - {pkg: ./handler/proxy, target: FuzzHopByHop}
+          - {pkg: ./handler/proxy, target: FuzzForwarded}
+          - {pkg: ./handler/proxy, target: FuzzGRPCTimeout}
+          - {pkg: ./handler/fastcgi, target: FuzzReader}
+          - {pkg: ./adapter/nginx, target: FuzzConvert}
+          - {pkg: ./adapter/yaml, target: FuzzAdapt}
+          - {pkg: ./middleware/cache, target: FuzzDirectives}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Where the corpus is cached
+        id: cache-dir
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.cache-dir.outputs.dir }}
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.target }}-
+      - name: Fuzz
+        run: go test ${{ matrix.pkg }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime ${{ inputs.fuzztime || '10m' }}
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-${{ matrix.target }}
+          path: ${{ matrix.pkg }}/testdata/fuzz

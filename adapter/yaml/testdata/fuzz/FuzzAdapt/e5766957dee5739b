@@ -1,0 +1,2 @@
+go test fuzz v1
+string("x: !!binary aGF\nzy: sssssss .nan\n")

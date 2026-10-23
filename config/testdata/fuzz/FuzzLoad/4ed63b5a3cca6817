@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"listene{s\": [{\"name\": \"a\", \"address\": \":1\"}]}")

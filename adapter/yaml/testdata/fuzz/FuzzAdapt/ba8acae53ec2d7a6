@@ -1,0 +1,2 @@
+go test fuzz v1
+string("l\xe8\x03\x00\x00ners:\n  - name: web\n    address: \":8080\"\n")

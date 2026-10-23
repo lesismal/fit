@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Host(\"0\xbf\xe5000\xfe0\xef0\"")

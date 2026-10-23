@@ -1,0 +1,2 @@
+go test fuzz v1
+string("PathRegexp(\"00000000000000000000000\x8900000000000\")")

@@ -1,0 +1,3 @@
+go test fuzz v1
+string("0")
+string("\xdb0\xf7000")

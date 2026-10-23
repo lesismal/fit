@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xae,\xc1")
+string("0")
+string("\x97,\x8a")

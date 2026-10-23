@@ -4037,6 +4037,30 @@ Differences from the plan:
   `try_files`. `test/workers` has a case for the handler. They pass under the race detector on
   the benchmark host.
 
+### I76 Continuous fuzzing — done
+
+- **Eleven fuzz targets**, the four there were (`FuzzLoad` of config loading, `FuzzParseExpr` of
+  the route expression parser, `FuzzReadSNI` and `FuzzParseProxy` of the layer 4 sniffers and the
+  PROXY protocol) and seven new: `FuzzHopByHop` (the proxy leaves no hop-by-hop field, nor one
+  Connection names), `FuzzForwarded` (a Forwarded element made from any address and host is one
+  field value, with no control characters), `FuzzGRPCTimeout` (grpc-timeout's parser, and that
+  what the proxy writes reads back no shorter), `FuzzReader` (FastCGI's record reader, fed
+  anything in any pieces, keeps no more than a record), `FuzzConvert` (the nginx converter never
+  panics, and gives JSON and warnings with lines), `FuzzAdapt` (YAML adapts to JSON, and that JSON
+  written back as YAML adapts to the same) and `FuzzDirectives` (the cache's Cache-Control, Vary and
+  Cache-Tag parsers give bounded values).
+- **In CI**: the `fuzz` job of every push runs each target for 15s from its committed corpus;
+  `.github/workflows/fuzz.yml` runs each for 10 minutes every day (and on demand, for as long as
+  asked), the corpus it grows carried from run to run in the Actions cache, and a failing input
+  kept as an artifact, to be added to `testdata/fuzz` with its fix.
+- **Corpora**: each target ran for two minutes on the benchmark host, and what it found
+  interesting is committed under its package's `testdata/fuzz` (about 2,700 inputs, 260 KB), so
+  that `go test` runs them as seeds.
+- **Found**: two round-trip bugs in the YAML adapter, both fixed with their inputs kept: `-0.`
+  became JSON's `-0`, which came back from YAML an integer, 0 (negative zero is now written 0); and
+  the string `<<`, written back to YAML unquoted, read as a merge key (now quoted). The other
+  targets found nothing.
+
 ## Notes for later iterations
 
 - **h2c 1.5–1.8% slower since M3 (the [M4 report](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)).** `bench/ab.sh` of M3's build (`1486c28`) against M4's (`0dd5956`): fixed h2c −1.8%, proxy h2c −1.5%, the rest within noise. Bisected, it builds up over I59–I64 in steps each within noise (−0.8% for I59–I61, −0.8% for I62–I64); neither fib's move to `86071b8` nor I65's tracer check is it, and `router.Match`'s micro-benchmark did not move with I61's `**.` hosts. Those iterations grew fit's text from 6.14 MB to 6.42 MB with the providers, their clients, shared storage and the dashboard, which suggests code layout without proving it. Recorded, not fixed (rule 22), since nothing on the request path changed; I70 measured fit built without the providers: fixed over h2c 1.0% faster, the proxy within noise; so the code size accounts for part of fixed's 1.8% and none of the proxy's 1.5%, which stays unexplained.

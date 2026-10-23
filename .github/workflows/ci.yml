@@ -229,5 +229,25 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: FuzzLoad
-        run: go test ./config -run '^$' -fuzz FuzzLoad -fuzztime 30s
+      # Each target briefly, from its committed corpus; fuzz.yml runs them
+      # for longer on a schedule.
+      - name: Fuzz each target
+        run: |
+          set -e
+          while read -r pkg target; do
+            echo "::group::$target"
+            go test "$pkg" -run '^$' -fuzz "^$target\$" -fuzztime 15s
+            echo "::endgroup::"
+          done <<'TARGETS'
+          ./config FuzzLoad
+          ./router FuzzParseExpr
+          ./l4 FuzzReadSNI
+          ./l4 FuzzParseProxy
+          ./handler/proxy FuzzHopByHop
+          ./handler/proxy FuzzForwarded
+          ./handler/proxy FuzzGRPCTimeout
+          ./handler/fastcgi FuzzReader
+          ./adapter/nginx FuzzConvert
+          ./adapter/yaml FuzzAdapt
+          ./middleware/cache FuzzDirectives
+          TARGETS

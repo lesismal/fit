@@ -1,0 +1,2 @@
+go test fuzz v1
+string("a: &a [1, 2]\nb: Da\nc: {<<: {x: 1}, y: 2}\n")

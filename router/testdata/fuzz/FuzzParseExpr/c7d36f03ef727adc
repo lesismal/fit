@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Host(\"\fA\x8b\xff\xcb0\xae\")")

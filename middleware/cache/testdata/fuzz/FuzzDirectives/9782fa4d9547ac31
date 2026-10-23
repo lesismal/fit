@@ -1,0 +1,4 @@
+go test fuzz v1
+string("ث,ͼ,ث,ͼ")
+string("0")
+string("0")

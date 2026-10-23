@@ -1,0 +1,2 @@
+go test fuzz v1
+string("!(Met3333hod(\"GET\", \"HEAD\") || Header(\"X-A\", \"1\")) && Query(\"q\")")

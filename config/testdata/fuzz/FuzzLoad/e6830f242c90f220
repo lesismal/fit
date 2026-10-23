@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\"\\u\U000b8e38")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Connection:a\n0A:\n0A00:")
