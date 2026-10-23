@@ -126,7 +126,9 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 	h.graph, h.stall = ctx.Graph(), ctx.WriteStallTimeout()
 	engine := ctx.Engine()
 	if engine == nil {
-		return ctx.Errorf("", "no engine to dial the application through")
+		// Compiled only to be checked, as fit validate does, and as
+		// upstreams are: there is nothing to dial with, nor any request.
+		return nil
 	}
 	h.pool = &pool{engine: engine, network: network, addr: addr, connect: h.ConnectTimeout.Std(), idle: h.IdleTimeout.Std(),
 		maxConns: h.MaxConns, maxIdle: h.MaxIdleConns, maxPending: h.MaxPending}

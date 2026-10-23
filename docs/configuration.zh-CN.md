@@ -12,7 +12,8 @@ YAML 的字段与它完全相同，Caddyfile 会被转换成这些字段。
 | YAML | fit 的全部字段，可写注释，可用锚点复用重复内容 | [YAML 参考](reference/yaml.zh-CN.md) |
 | JSON | fit 的全部字段；Admin API 收发的格式，工具生成的格式 | [JSON 参考](reference/json.zh-CN.md) |
 
-每个字段的类型、默认值和含义，以及三种格式的示例，见 [配置参考](reference/config.zh-CN.md)。
+每个字段的类型、默认值和含义，以及三种格式的示例，见 [配置参考](reference/config.zh-CN.md)。[配置模板](../templates/README.zh-CN.md)
+为每种格式提供一份包含全部字段的完整配置，可复制后修改。
 
 ## 三种格式
 

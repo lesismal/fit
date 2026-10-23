@@ -77,7 +77,7 @@ func (c *converter) modifier(s *site, d *directive) *modifier {
 			if h.trySet {
 				return false
 			}
-			h.tryFiles, h.trySet = files, true
+			h.tryFiles, h.trySet, h.tryLine = files, true, d.line
 			return true
 		}
 		return m

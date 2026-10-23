@@ -18,6 +18,8 @@ external security review is still to come; see [progress](docs/progress.md) for 
 - [Configuration](docs/configuration.md): the three formats a config may be written in,
   [Caddyfile](docs/reference/caddyfile.md), [YAML](docs/reference/yaml.md) and
   [JSON](docs/reference/json.md), and how a config is run, checked, converted and changed.
+- [Config templates](templates/README.md): a complete config as a Caddyfile, in YAML and in JSON,
+  every field in it with its choices in comments.
 - [Config reference](docs/reference/config.md): every field and every module's params, chapter by
   chapter, with examples in all three formats; generated from the code.
 - Migrating from [nginx](docs/migrating-from-nginx.md), [Caddy](docs/migrating-from-caddy.md) and

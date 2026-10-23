@@ -15,6 +15,7 @@ Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要�
 - [快速上手](docs/getting-started.zh-CN.md)：从零开始搭起一个 HTTPS 站点。
 - [配置](docs/configuration.zh-CN.md)：配置可用的三种格式 [Caddyfile](docs/reference/caddyfile.zh-CN.md)、
   [YAML](docs/reference/yaml.zh-CN.md) 和 [JSON](docs/reference/json.zh-CN.md)，以及配置如何运行、检查、转换和修改。
+- [配置模板](templates/README.zh-CN.md)：Caddyfile、YAML 和 JSON 各一份完整配置，包含全部字段，可选值写在注释中。
 - [配置参考](docs/reference/config.zh-CN.md)：逐章列出全部字段和每个模块的参数，附三种格式的示例；由代码生成。
 - 从 [nginx](docs/migrating-from-nginx.zh-CN.md)、[Caddy](docs/migrating-from-caddy.zh-CN.md) 和
   [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。

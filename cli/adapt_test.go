@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -92,5 +93,17 @@ func TestExampleCaddyfiles(t *testing.T) {
 		if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") || stderr != "" {
 			t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
 		}
+	}
+}
+
+// TestValidateFastCGI checks that fit validate takes a config with the
+// fastcgi handler, which it compiles with nothing to dial with.
+func TestValidateFastCGI(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "fit.json")
+	_ = os.WriteFile(f, []byte(`{"listeners": [{"name": "web", "address": ":8080"}],
+  "routes": [{"handler": {"module": "fastcgi", "params": {"address": "127.0.0.1:9000", "root": `+strconv.Quote(dir)+`}}}]}`), 0o644)
+	if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") {
+		t.Errorf("%d %q %q", code, stdout, stderr)
 	}
 }

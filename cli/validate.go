@@ -88,12 +88,16 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("schema", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	reference := flags.Bool("reference", false, "print the config reference, in Markdown, rather than the JSON Schema")
+	template := flags.String("template", "", "print a config template, json or yaml, with every field commented, rather than the JSON Schema")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	generate := schema.Generate
-	if *reference {
+	switch {
+	case *reference:
 		generate = schema.Reference
+	case *template != "":
+		generate = func() ([]byte, error) { return schema.Template(*template) }
 	}
 	out, err := generate()
 	if err != nil {

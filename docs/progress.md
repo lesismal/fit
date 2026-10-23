@@ -4177,6 +4177,19 @@ Differences from the plan:
   each module's params with the module and converts each Caddyfile without a warning;
   `TestConfigExamples` (docs) loads every config on the format pages; `TestExampleCaddyfiles`
   (cli) validates `examples/hello.caddyfile` and `proxy.caddyfile`, the JSON examples' twins.
+- **Config templates**: [templates](../templates/README.md) holds a complete config in each
+  format. `templates/yaml/fit.yaml` and `templates/json/fit.json` are made by `schema.Template`
+  (also `fit schema -template yaml|json`) from the same types and tags as the reference: every
+  field of the config and of every module's params, each with its description, type, choices and
+  default in a comment, a small config written out and the rest commented out with defaults or
+  examples; the routes show every handler and every middleware with all their params.
+  `templates/caddyfile/Caddyfile` is written by hand: every global option, address form, matcher,
+  directive and subdirective the converter takes. `TestTemplatesUpToDate`, `TestTemplatesLoad`
+  (each loads, and holds every field) and `TestCaddyfileTemplate` (schema). Two fixes found on
+  the way: `fit validate` refused every config with the `fastcgi` handler, which needed an engine
+  to compile (it now compiles to be checked, as upstreams do; `TestValidateFastCGI`), and the
+  Caddyfile converter wrote a `php_fastcgi` with no root as `"."`, which fit refuses (it is now
+  left out, with a warning), and warned of a site-wide `try_files` once per route (now once).
 
 ## Notes for later iterations
 

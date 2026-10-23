@@ -34,6 +34,7 @@ type handler struct {
 	rootSet  bool
 	tryFiles []string
 	trySet   bool
+	tryLine  int
 }
 
 func (r *route) clone() *route {
@@ -132,19 +133,18 @@ func (c *converter) finish(s *site, g *group, r *route) {
 		}
 	case "fastcgi":
 		if _, ok := h.Params["root"]; !ok {
-			root := r.h.root
 			if !r.h.rootSet {
-				root = "."
-				c.warn(r.h.line, "php_fastcgi with no root: written as \".\", the directory fit runs in")
+				c.warn(r.h.line, "php_fastcgi: skipped: it needs a root, which fit takes as an absolute path; write root")
+				return
 			}
-			h.Params["root"] = root
+			h.Params["root"] = r.h.root
 		}
 		if _, ok := h.Params["try_files"]; !ok && len(r.h.tryFiles) > 0 {
 			h.Params["try_files"] = r.h.tryFiles
 		}
 	default:
-		if r.h.trySet {
-			c.warn(r.h.line, "try_files: not converted for %s: fit tries files for static files and FastCGI", h.Module)
+		if r.h.trySet && r.hint != "default" {
+			c.warn(r.h.tryLine, "try_files: applies to static files and FastCGI only, not to the %s routes it covers", h.Module)
 		}
 	}
 	out := &outRoute{Name: c.routeName(s.name, r.hint), Listeners: g.listeners, Handler: h, line: r.line, hLine: r.h.line}

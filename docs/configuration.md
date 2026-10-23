@@ -15,7 +15,8 @@ converted to them.
 | JSON | Every field of fit; what the Admin API takes and returns, and what tools write | [JSON reference](reference/json.md) |
 
 Every field, its type, default and meaning, with examples in all three formats, is in the
-[config reference](reference/config.md).
+[config reference](reference/config.md). [Templates](../templates/README.md) holds a complete
+config in each format, every field in it, ready to copy and edit.
 
 ## The formats
 

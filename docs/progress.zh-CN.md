@@ -3006,6 +3006,14 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   嵌入后由 `schema.Reference` 编入生成的页面；YAML 示例由 JSON 生成。`TestChapterExamples`（schema）加载每章的 JSON，
   用模块解码每个模块的参数，并无警告地转换每个 Caddyfile；`TestConfigExamples`（docs）加载格式页面上的每个配置；
   `TestExampleCaddyfiles`（cli）验证 `examples/hello.caddyfile` 和 `proxy.caddyfile`，即 JSON 示例的 Caddyfile 版本。
+- **配置模板**：[templates](../templates/README.zh-CN.md) 为每种格式提供一份完整配置。`templates/yaml/fit.yaml` 和
+  `templates/json/fit.json` 由 `schema.Template`（也可用 `fit schema -template yaml|json`）从与配置参考相同的类型和标签生成：
+  包含配置和每个模块参数的全部字段，每个字段的说明、类型、可选值和默认值写在注释中，一个小配置是启用的，其余以默认值或
+  示例值注释掉；路由部分列出每个处理器和每个中间件的全部参数。`templates/caddyfile/Caddyfile` 手写：包含转换器接受的全部
+  全局选项、地址形式、匹配器、指令和子指令。测试：`TestTemplatesUpToDate`、`TestTemplatesLoad`（都能加载，且包含全部字段）
+  和 `TestCaddyfileTemplate`（schema）。顺带修复两处问题：`fit validate` 拒绝所有带 `fastcgi` 处理器的配置，因为编译时需要
+  engine（现在与 upstream 一样只为检查而编译；`TestValidateFastCGI`）；Caddyfile 转换器把没有 root 的 `php_fastcgi` 写成
+  fit 不接受的 `"."`（现在跳过并给出警告），并对站点级的 `try_files` 每条路由警告一次（现在只警告一次）。
 
 ## 给后续迭代的说明
 
