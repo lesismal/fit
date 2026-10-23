@@ -485,6 +485,11 @@ func TestQueued(t *testing.T) {
 		t.Errorf("busy: %d", code)
 	}
 
+	// A pool of its own: the application closes /hang.php's connection
+	// after answering, and fit may not have heard by the time the next
+	// request takes it from the idle set.
+	a = newFakeApp(t)
+	base = serveTop(t, "", `{"address": "`+a.addr+`", "root": "/srv", "max_conns": 1}`)
 	go func() {
 		req, _ := stdhttp.NewRequest("GET", base+"/die.php", nil)
 		resp, _ := get(t, c, req)

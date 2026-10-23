@@ -307,14 +307,7 @@ func (a *ACME) Manage(names []string) {
 // pruneCerts stops serving the certificates of names a no longer manages,
 // and gives back their OCSP responses. a.mu is held.
 func (a *ACME) pruneCerts() {
-	certs := *a.certs.Load()
-	kept := make(map[string]*tls.Certificate, len(certs))
-	for n, c := range certs {
-		if a.names[n] != nil {
-			kept[n] = c
-		}
-	}
-	a.certs.Store(&kept)
+	// The staples first, as Certificate looks there first.
 	if sts := a.staples.Load(); sts != nil {
 		keptStaples := make(map[string]*Staple, len(*sts))
 		for n, st := range *sts {
@@ -326,6 +319,14 @@ func (a *ACME) pruneCerts() {
 		}
 		a.staples.Store(&keptStaples)
 	}
+	certs := *a.certs.Load()
+	kept := make(map[string]*tls.Certificate, len(certs))
+	for n, c := range certs {
+		if a.names[n] != nil {
+			kept[n] = c
+		}
+	}
+	a.certs.Store(&kept)
 }
 
 // dropIdle drops the names taken on demand that no handshake has asked for
@@ -529,13 +530,16 @@ func (a *ACME) run(m *managed) {
 			}
 			certs := *a.certs.Load()
 			if certs[m.name] != cert {
+				// The staple first: Certificate looks there before certs,
+				// so a certificate is never seen without its staple, nor
+				// the last one's staple served in its place.
+				a.staple(m.name, cert)
 				next := make(map[string]*tls.Certificate, len(certs)+1)
 				for n, c := range certs {
 					next[n] = c
 				}
 				next[m.name] = cert
 				a.certs.Store(&next)
-				a.staple(m.name, cert)
 			}
 		} else if m.onDemand && (*a.certs.Load())[m.name] == nil {
 			// A name taken on during a handshake whose first certificate

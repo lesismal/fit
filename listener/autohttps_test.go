@@ -9,18 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/internal/pebbletest"
 )
 
-// freePort returns a TCP port nothing listens on.
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
+// freePort returns a TCP port nothing listens on, a different one each call.
+func freePort(t *testing.T) int { return pebbletest.FreePort(t) }
 
 // TestAutoHTTPSRedirect serves a config that writes no listeners: HTTPS by
 // default makes an https listener and an http one, which redirects every

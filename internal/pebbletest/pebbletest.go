@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,15 +58,38 @@ type Options struct {
 	Validity time.Duration
 }
 
-// FreePort returns a TCP port on 127.0.0.1 that nothing listens on.
+// handed holds the ports FreePort has returned.
+var handed struct {
+	sync.Mutex
+	ports map[int]bool
+}
+
+// FreePort returns a TCP port on 127.0.0.1 that nothing listens on, and
+// that it has not returned before: a port it returned may not be listened
+// on yet, as when a process started with it has yet to bind it, and the
+// system would hand it out again.
 func FreePort(t testing.TB) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 100 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		l.Close()
+		handed.Lock()
+		if !handed.ports[port] {
+			if handed.ports == nil {
+				handed.ports = map[int]bool{}
+			}
+			handed.ports[port] = true
+			handed.Unlock()
+			return port
+		}
+		handed.Unlock()
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no free port that was not returned before")
+	return 0
 }
 
 // binary returns the path of name, or skips t.
