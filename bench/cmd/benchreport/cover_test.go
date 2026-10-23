@@ -167,3 +167,43 @@ func TestMainCommand(t *testing.T) {
 		t.Errorf("got:\n%s", text)
 	}
 }
+
+// -sweep renders the runs it names as scaling tables, in the order given.
+func TestMainSweep(t *testing.T) {
+	dir := t.TempDir()
+	cur, old := coverRuns()
+	a, b := writeRun(t, dir, "a.json", old), writeRun(t, dir, "b.json", cur)
+	stdout, err := os.Create(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	oldOut, oldArgs, oldFlags := os.Stdout, os.Args, flag.CommandLine
+	defer func() { os.Stdout, os.Args, flag.CommandLine = oldOut, oldArgs, oldFlags }()
+	os.Stdout = stdout
+	os.Args = []string{"benchreport", "-sweep", a + "," + b, "-level", "4"}
+	flag.CommandLine = flag.NewFlagSet("benchreport", flag.ContinueOnError)
+	main()
+	got, err := os.ReadFile(stdout.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(got); !strings.HasPrefix(text, "#### ") || !strings.Contains(text, "Peak TPS [↓1]") {
+		t.Errorf("got:\n%s", text)
+	}
+}
+
+// A sweep leaves out a scenario no server ran, and names a protocol it has
+// no name for as it is.
+func TestRenderSweepEdges(t *testing.T) {
+	r := &run{Results: []result{
+		{Server: "a", Scenario: "fixed", Protocol: "h9", RequestsPerSec: 10, CPUCores: 1},
+		{Server: "a", Scenario: "static", Protocol: "h9", Skipped: "a cannot serve it"},
+	}}
+	var out strings.Builder
+	renderSweep(&out, []*run{r}, 3)
+	text := out.String()
+	if !strings.Contains(text, "### fixed, h9") || strings.Contains(text, "static") {
+		t.Errorf("got:\n%s", text)
+	}
+}

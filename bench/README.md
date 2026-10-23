@@ -182,6 +182,17 @@ row's throughput change from an earlier run:
 go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
 ```
 
+Throughput counts successful responses only: what the load generator counted as errors (5xx,
+timeouts) is left out, and the Errors column gives their number and share. A run with no result
+says why: **hung** (the load generator did not finish), **did not start**, or **no responses**.
+`-sweep` takes runs made at rising connection counts (`-connections`, `-h2-connections`) and
+renders, for each scenario and protocol, a row for each server and a column for each run, ranked by
+the most the server answered at any of them:
+
+```bash
+go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/sweep-l2.json
+```
+
 A run's JSON holds `host` (CPU, kernel, memory), `versions` and `images` (with digests),
 `params`, one entry in `results` per server, scenario and protocol, and one in `idle` per server
 and kind.

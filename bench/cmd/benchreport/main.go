@@ -7,7 +7,12 @@
 //	go run ./bench/cmd/benchreport -in bench/results/run.json [-prev earlier.json]
 //
 // With -prev, each row also gives its throughput's change from the same
-// server, scenario and protocol in the earlier run.
+// server, scenario and protocol in the earlier run. With -sweep, a list of
+// runs made at rising connection counts, it renders instead a table for each
+// scenario and protocol with a column for each run.
+//
+// Throughput counts successful responses only: a response the load generator
+// counted as an error is not served.
 package main
 
 import (
@@ -30,7 +35,21 @@ func main() {
 	idle := flag.Bool("idle", true, "also render the idle connections")
 	idleOnly := flag.Bool("idle-only", false, "render the idle connections alone")
 	idleHeading := flag.String("idle-heading", "Idle connections, bytes each", "the idle connections table's title")
+	sweep := flag.String("sweep", "", "runs at rising connection counts, comma-separated, to render as scaling tables")
 	flag.Parse()
+	if *sweep != "" {
+		var runs []*run
+		for _, path := range strings.Split(*sweep, ",") {
+			r, err := load(path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "benchreport:", err)
+				os.Exit(1)
+			}
+			runs = append(runs, r)
+		}
+		renderSweep(os.Stdout, runs, *level)
+		return
+	}
 	if *in == "" {
 		fmt.Fprintln(os.Stderr, "benchreport: -in is required")
 		os.Exit(2)
@@ -55,6 +74,11 @@ func main() {
 
 // run is the part of a fitbench report that the tables need.
 type run struct {
+	Params struct {
+		Connections   int `json:"connections"`
+		H2Connections int `json:"h2_connections"`
+		H2Streams     int `json:"h2_streams"`
+	} `json:"params"`
 	Results []result `json:"results"`
 	Idle    []struct {
 		Server       string  `json:"server"`
@@ -73,6 +97,7 @@ type result struct {
 	Skipped        string  `json:"skipped"`
 	Error          string  `json:"error"`
 	RequestsPerSec float64 `json:"requests_per_sec"`
+	Requests       int64   `json:"requests"`
 	Errors         int64   `json:"errors"`
 	CPUCores       float64 `json:"cpu_cores"`
 	AnonBytes      int64   `json:"anon_bytes"`
@@ -100,12 +125,46 @@ func load(path string) (*run, error) {
 	return &r, nil
 }
 
-// cpuEER is requests per CPU-second: throughput for each core kept busy.
+// tps is the successful responses a second: the requests the load generator
+// counted, less those it counted as errors.
+func (r result) tps() float64 {
+	if r.Requests > 0 && r.Errors > 0 {
+		return r.RequestsPerSec * float64(max(0, r.Requests-r.Errors)) / float64(r.Requests)
+	}
+	return r.RequestsPerSec
+}
+
+// cpuEER is successful responses per CPU-second: throughput for each core
+// kept busy.
 func (r result) cpuEER() float64 {
 	if r.CPUCores <= 0 {
 		return 0
 	}
-	return r.RequestsPerSec / r.CPUCores
+	return r.tps() / r.CPUCores
+}
+
+// failure says why a run gave no result: the load generator hung and was
+// killed, the server did not start, or the run failed otherwise.
+func (r result) failure() string {
+	switch {
+	case strings.Contains(r.Error, "exit status 137"):
+		return "hung"
+	case strings.Contains(r.Error, "did not answer"):
+		return "did not start"
+	}
+	return "error"
+}
+
+// errorsCell is the errors and their share of the requests, or says that the
+// run had no responses at all.
+func (r result) errorsCell() string {
+	switch {
+	case r.Requests == 0 && r.RequestsPerSec == 0:
+		return "no responses"
+	case r.Errors > 0 && r.Requests > 0:
+		return fmt.Sprintf("%s (%.0f%%)", group(float64(r.Errors), 0), float64(r.Errors)/float64(r.Requests)*100)
+	}
+	return strconv.FormatInt(r.Errors, 10)
 }
 
 // memory is the server's peak anonymous memory where the run sampled it, its
@@ -120,7 +179,7 @@ func (r result) memory() int64 {
 // memEER is requests a second for each MiB of memory.
 func (r result) memEER() float64 {
 	if m := r.memory(); m > 0 {
-		return r.RequestsPerSec / (float64(m) / (1 << 20))
+		return r.tps() / (float64(m) / (1 << 20))
 	}
 	return 0
 }
@@ -165,7 +224,7 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 			continue
 		}
 		slices.SortStableFunc(rows, func(a, b result) int {
-			for _, c := range [][2]float64{{a.RequestsPerSec, b.RequestsPerSec}, {a.cpuEER(), b.cpuEER()}, {a.memEER(), b.memEER()}} {
+			for _, c := range [][2]float64{{a.tps(), b.tps()}, {a.cpuEER(), b.cpuEER()}, {a.memEER(), b.memEER()}} {
 				if c[0] != c[1] {
 					if c[0] > c[1] {
 						return -1
@@ -177,7 +236,7 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		})
 		var bestTPS, bestCPU, bestMem float64
 		for _, r := range rows {
-			bestTPS, bestCPU, bestMem = max(bestTPS, r.RequestsPerSec), max(bestCPU, r.cpuEER()), max(bestMem, r.memEER())
+			bestTPS, bestCPU, bestMem = max(bestTPS, r.tps()), max(bestCPU, r.cpuEER()), max(bestMem, r.memEER())
 		}
 		inFlight := slices.ContainsFunc(rows, func(r result) bool { return r.BytesPerInFlight > 0 })
 		hits := slices.ContainsFunc(rows, func(r result) bool { return r.HitRatio != nil })
@@ -195,7 +254,7 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		table := [][]string{header}
 		for _, r := range rows {
 			row := []string{r.Server,
-				share(r.RequestsPerSec, bestTPS, 0), share(r.cpuEER(), bestCPU, 0), share(r.memEER(), bestMem, 0),
+				share(r.tps(), bestTPS, 0), share(r.cpuEER(), bestCPU, 0), share(r.memEER(), bestMem, 0),
 				latency(r), fmt.Sprintf("%.2f", r.CPUCores), mib(r.memory())}
 			if inFlight {
 				row = append(row, group(r.BytesPerInFlight/1024, 1))
@@ -207,7 +266,7 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 				}
 				row = append(row, ratio)
 			}
-			row = append(row, strconv.FormatInt(r.Errors, 10))
+			row = append(row, r.errorsCell())
 			if old != nil {
 				row = append(row, change(r, old))
 			}
@@ -215,7 +274,7 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		}
 		for _, r := range failed {
 			row := make([]string, len(header))
-			row[0], row[1] = r.Server, "error"
+			row[0], row[1] = r.Server, r.failure()
 			table = append(table, row)
 		}
 		name := protocolNames[k.protocol]
@@ -263,8 +322,8 @@ func mib(b int64) string {
 // old.
 func change(r result, old *run) string {
 	for _, o := range old.Results {
-		if o.Server == r.Server && o.Scenario == r.Scenario && o.Protocol == r.Protocol && o.RequestsPerSec > 0 {
-			pct := math.Round((r.RequestsPerSec/o.RequestsPerSec - 1) * 100)
+		if o.Server == r.Server && o.Scenario == r.Scenario && o.Protocol == r.Protocol && o.tps() > 0 {
+			pct := math.Round((r.tps()/o.tps() - 1) * 100)
 			if pct == 0 {
 				return "0%"
 			}
@@ -450,5 +509,116 @@ func writeTable(w io.Writer, table [][]string, left int) {
 	line(sep)
 	for _, row := range table[1:] {
 		line(row)
+	}
+}
+
+// renderSweep renders runs made at rising connection counts: for each
+// scenario and protocol, a row for each server and a column for each run,
+// with the server's successful responses a second there and their share of
+// that run's best, ranked by the most the server answered at any count, then
+// by its CPU efficiency there.
+func renderSweep(w io.Writer, runs []*run, level int) {
+	type key struct{ scenario, protocol string }
+	var keys []key
+	var servers []string
+	for _, rn := range runs {
+		for _, r := range rn.Results {
+			if !slices.Contains(servers, r.Server) {
+				servers = append(servers, r.Server)
+			}
+			if k := (key{r.Scenario, r.Protocol}); !slices.Contains(keys, k) {
+				keys = append(keys, k)
+			}
+		}
+	}
+	find := func(rn *run, server string, k key) (result, bool) {
+		for _, r := range rn.Results {
+			if r.Server == server && r.Scenario == k.scenario && r.Protocol == k.protocol {
+				return r, true
+			}
+		}
+		return result{}, false
+	}
+	hashes := strings.Repeat("#", level)
+	for _, k := range keys {
+		type row struct {
+			server string
+			peak   result
+		}
+		var rows []row
+		for _, s := range servers {
+			var peak result
+			ran := false
+			for _, rn := range runs {
+				r, ok := find(rn, s, k)
+				if !ok || r.Skipped != "" {
+					continue
+				}
+				ran = true
+				if r.Error == "" && (peak.Server == "" || r.tps() > peak.tps()) {
+					peak = r
+				}
+			}
+			if ran {
+				rows = append(rows, row{s, peak})
+			}
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		slices.SortStableFunc(rows, func(a, b row) int {
+			for _, c := range [][2]float64{{a.peak.tps(), b.peak.tps()}, {a.peak.cpuEER(), b.peak.cpuEER()}} {
+				if c[0] != c[1] {
+					if c[0] > c[1] {
+						return -1
+					}
+					return 1
+				}
+			}
+			return slices.Index(servers, a.server) - slices.Index(servers, b.server)
+		})
+		header := []string{"Server", "Peak TPS [↓1]", "CPU EER at peak [↓2]"}
+		best := make([]float64, len(runs))
+		for i, rn := range runs {
+			if k.protocol == "http/1.1" {
+				header = append(header, group(float64(rn.Params.Connections), 0))
+			} else {
+				header = append(header, fmt.Sprintf("%s×%d", group(float64(rn.Params.H2Connections), 0), rn.Params.H2Streams))
+			}
+			for _, s := range servers {
+				if r, ok := find(rn, s, k); ok && r.Error == "" && r.Skipped == "" {
+					best[i] = max(best[i], r.tps())
+				}
+			}
+		}
+		var bestPeak, bestCPU float64
+		for _, r := range rows {
+			bestPeak, bestCPU = max(bestPeak, r.peak.tps()), max(bestCPU, r.peak.cpuEER())
+		}
+		table := [][]string{header}
+		for _, r := range rows {
+			line := []string{r.server, share(r.peak.tps(), bestPeak, 0), share(r.peak.cpuEER(), bestCPU, 0)}
+			for i, rn := range runs {
+				res, ok := find(rn, r.server, k)
+				switch {
+				case !ok || res.Skipped != "":
+					line = append(line, "—")
+				case res.Error != "":
+					line = append(line, res.failure())
+				case res.tps() == 0:
+					line = append(line, "0")
+				default:
+					line = append(line, fmt.Sprintf("%sk %3d%%", group(res.tps()/1000, 0), int(math.Floor(res.tps()/best[i]*100))))
+				}
+			}
+			table = append(table, line)
+		}
+		name := protocolNames[k.protocol]
+		if name == "" {
+			name = k.protocol
+		}
+		fmt.Fprintf(w, "%s %s, %s\n\n", hashes, k.scenario, name)
+		writeTable(w, table, 1)
+		fmt.Fprintln(w)
 	}
 }

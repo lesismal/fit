@@ -150,5 +150,14 @@ CPU 能效（每 CPU 秒的请求数）、内存能效（每 MiB 的每秒请求
 go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
 ```
 
+吞吐只计成功的响应：压测客户端判为错误的（5xx、超时）不计入，Errors 列给出其数量和比例。没有结果的轮次会说明原因：
+**hung**（压测客户端没有结束）、**did not start**（服务器没能启动）或 **no responses**（没有任何应答）。`-sweep` 接受
+按连接数从低到高跑出的多次结果（`-connections`、`-h2-connections`），为每个场景和协议生成一张表，每个服务器一行、每次
+运行一列，按服务器在任一次达到的最大值排序：
+
+```bash
+go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/sweep-l2.json
+```
+
 结果 JSON 包含 `host`（CPU、内核、内存）、`versions` 和 `images`（带摘要）、`params`，`results`
 里每个服务器、场景、协议一项，`idle` 里每个服务器、连接类型一项。
