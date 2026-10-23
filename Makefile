@@ -48,8 +48,11 @@ schema:
 # coming back. The certificate test needs Pebble; see internal/pebbletest.
 M2_EXIT = TestChurn|TestAutoHTTPSFromPebble|TestHealthCheckRotation
 
+# How the exit tests report: CI sets -json, for internal/testsummary.
+EXIT_FLAGS ?= -v
+
 m2-exit:
-	$(GO) test -race -count=1 -v -run '^($(M2_EXIT))$$' ./test/e2e
+	$(GO) test -race -count=1 $(EXIT_FLAGS) -run '^($(M2_EXIT))$$' ./test/e2e
 
 # M3's exit criteria (docs/roadmap.md): no middleware or handler blocks a
 # worker, and each has a benchmark (test/workers); WebSocket, gRPC (unary and
@@ -59,7 +62,7 @@ M3_EXIT = TestEveryModuleCovered|TestNoModuleBlocks|TestWebSocketEcho|TestWebSoc
 M3_EXIT_PKGS = ./test/workers ./handler/proxy ./l4 ./test/e2e
 
 m3-exit:
-	$(GO) test -race -count=1 -v -run '^($(M3_EXIT))$$' $(M3_EXIT_PKGS)
+	$(GO) test -race -count=1 $(EXIT_FLAGS) -run '^($(M3_EXIT))$$' $(M3_EXIT_PKGS)
 
 fuzz:
 	$(GO) test ./config -run '^$$' -fuzz FuzzLoad -fuzztime 30s

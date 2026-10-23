@@ -102,10 +102,17 @@ jobs:
       # No -race here: the test jobs run it, and under it every coverage
       # counter is an atomic the race detector intercepts, which slows the
       # tests that move data many times over.
+      # Its failures are annotated as the test jobs' are.
       - name: Test with coverage
+        shell: bash
         run: |
-          go test -count=1 -timeout 20m -covermode=atomic \
-            -coverpkg=./... -coverprofile="$RUNNER_TEMP/cover.out" ./...
+          go test -json -count=1 -timeout 20m -covermode=atomic \
+            -coverpkg=./... -coverprofile="$RUNNER_TEMP/cover.out" ./... |
+            tee test.json | go run ./internal/testsummary
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: go run ./internal/testsummary -annotate < test.json
       - name: Summarize
         id: cover
         run: |
@@ -155,7 +162,12 @@ jobs:
           echo "FIT_PEBBLE_BIN=$(go env GOPATH)/bin" >> "$GITHUB_ENV"
           echo "FIT_PEBBLE_REQUIRED=1" >> "$GITHUB_ENV"
       - name: make m2-exit
-        run: make m2-exit
+        shell: bash
+        run: make -s m2-exit EXIT_FLAGS=-json | tee test.json | go run ./internal/testsummary
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: go run ./internal/testsummary -annotate < test.json
 
   # M3's exit criteria, a check of their own as M2's are.
   m3-exit:
@@ -167,7 +179,12 @@ jobs:
         with:
           go-version-file: go.mod
       - name: make m3-exit
-        run: make m3-exit
+        shell: bash
+        run: make -s m3-exit EXIT_FLAGS=-json | tee test.json | go run ./internal/testsummary
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: go run ./internal/testsummary -annotate < test.json
 
   # The Kubernetes provider against a kind cluster (I58): the runner reaches
   # the pods through a route to the node, as fit outside the cluster needs.
