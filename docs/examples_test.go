@@ -14,16 +14,18 @@ import (
 
 var configBlock = regexp.MustCompile("(?s)```(caddyfile|yaml|json)\n(.*?)\n```")
 
-// TestConfigExamples loads every config in the pages on config formats, in
-// either language: each Caddyfile converts without a warning, and each
-// Caddyfile, YAML and JSON config loads.
+// TestConfigExamples loads every config in the pages on config formats and
+// in the getting started guide, in either language: each Caddyfile converts
+// without a warning, and each Caddyfile, YAML and JSON config loads.
 func TestConfigExamples(t *testing.T) {
 	files, _ := filepath.Glob("configuration*.md")
+	guide, _ := filepath.Glob("getting-started*.md")
+	files = append(files, guide...)
 	for _, f := range []string{"caddyfile", "yaml", "json"} {
 		more, _ := filepath.Glob("reference/" + f + "*.md")
 		files = append(files, more...)
 	}
-	if len(files) < 8 {
+	if len(files) < 10 {
 		t.Fatalf("only %v", files)
 	}
 	n := 0

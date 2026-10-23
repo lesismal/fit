@@ -7,8 +7,8 @@ fit is a reverse proxy, load balancer, TLS terminator, static file server and AP
 
 It serves HTTP/1.1, HTTP/2 and HTTP/3, with HTTPS by default; proxies HTTP, WebSockets, gRPC, TCP
 and UDP, with health checks and load balancing; serves static files; caches responses; and takes
-its routes from a strict JSON or YAML config, changed in place through an Admin API, or from Docker,
-Consul, etcd and Kubernetes. Every milestone's iterations are done, 1.0's included, and 1.0's
+its routes from a config written as a Caddyfile, in YAML or in strict JSON, changed in place through
+an Admin API, or from Docker, Consul, etcd and Kubernetes. Every milestone's iterations are done, 1.0's included, and 1.0's
 external security review is still to come; see [progress](docs/progress.md) for what works, and
 [bench](bench/README.md) for how it is measured against nginx, Caddy and Traefik.
 
@@ -42,8 +42,24 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.json
-./bin/fit run -c examples/hello.json
+./bin/fit validate -c examples/hello.caddyfile
+./bin/fit run -c examples/hello.caddyfile
+```
+
+`examples/hello.caddyfile` answers `/hello` on port 8080:
+
+```caddyfile
+{
+	admin off
+	servers {
+		protocols h1 h2c
+	}
+}
+
+:8080 {
+	respond /hello "hello from fit"
+	respond "not found" 404
+}
 ```
 
 A config may be a Caddyfile (`examples/hello.caddyfile`), YAML (`examples/hello.yaml`) or JSON

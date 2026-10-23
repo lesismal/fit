@@ -6,7 +6,7 @@ fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均
 定位与 nginx、Caddy、Traefik 相同。
 
 它支持 HTTP/1.1、HTTP/2 和 HTTP/3，默认启用 HTTPS；代理 HTTP、WebSocket、gRPC、TCP 和 UDP，带健康检查和负载均衡；
-提供静态文件；缓存响应；路由来自严格的 JSON 或 YAML 配置（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
+提供静态文件；缓存响应；路由来自 Caddyfile、YAML 或严格的 JSON 配置（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
 Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
 对比测量方法见 [bench](bench/README.zh-CN.md)。
 
@@ -37,8 +37,24 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.json
-./bin/fit run -c examples/hello.json
+./bin/fit validate -c examples/hello.caddyfile
+./bin/fit run -c examples/hello.caddyfile
+```
+
+`examples/hello.caddyfile` 在 8080 端口上回答 `/hello`：
+
+```caddyfile
+{
+	admin off
+	servers {
+		protocols h1 h2c
+	}
+}
+
+:8080 {
+	respond /hello "hello from fit"
+	respond "not found" 404
+}
 ```
 
 配置可以是 Caddyfile（`examples/hello.caddyfile`）、YAML（`examples/hello.yaml`）或 JSON（`examples/hello.json`，可以写
