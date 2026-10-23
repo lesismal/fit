@@ -32,7 +32,7 @@ make build
 ```
 
 A config may also be written in YAML (`examples/hello.yaml`), and `fit adapt` converts between the
-two.
+two, and converts a common subset of nginx configs, listing what it left out.
 
 `fit run` reloads its config file on SIGHUP, keeping the listeners that did not change and the
 running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.

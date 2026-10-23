@@ -46,3 +46,12 @@ func TestAdapt(t *testing.T) {
 		}
 	}
 }
+
+// TestAdaptNginx converts an nginx config, the adapter picked by its
+// extension, and lists what it skipped.
+func TestAdaptNginx(t *testing.T) {
+	code, out, stderr := runFit("adapt", "-c", "../adapter/nginx/testdata/full.conf")
+	if code != 0 || !strings.Contains(out, `"listeners"`) || !strings.Contains(stderr, "full.conf: warning: line 55: stream: skipped") {
+		t.Errorf("%d %q %q", code, out, stderr)
+	}
+}

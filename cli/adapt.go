@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/lesismal/fit/adapter"
+	_ "github.com/lesismal/fit/adapter/nginx"
 	"github.com/lesismal/fit/adapter/yaml"
 	"github.com/lesismal/fit/config"
 )
@@ -16,8 +17,9 @@ import (
 const adaptUsage = `Usage: fit adapt [flags]
 
 Converts a config to fit's native JSON, checked as fit run would load it,
-or writes native JSON as YAML. What could not be converted is listed on
-standard error.
+or writes native JSON as YAML: a YAML config (.yaml, .yml), or an nginx
+config (.conf), of which a common subset converts. What could not be
+converted is listed on standard error.
 
 Flags:
 
