@@ -443,7 +443,7 @@ func (l *lockedBuffer) Write(p []byte) (int, error) {
 
 func TestAccessLog(t *testing.T) {
 	var out lockedBuffer
-	log := observe.NewAccessLogTo(&out, time.Hour, 0)
+	log := observe.NewAccessLogTo(&out, 10*time.Millisecond, 0)
 	backend := echoBackend(t, "http/1.1")
 	base := startFitLog(t, `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c"]}],
@@ -465,6 +465,17 @@ func TestAccessLog(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
+	// A line is logged as its response finishes on the server, which may be
+	// after the client has the response, and one logged after Close is
+	// dropped: the log is closed once every line is out.
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		out.mu.Lock()
+		n := strings.Count(out.b.String(), "\n")
+		out.mu.Unlock()
+		if n >= 4 {
+			break
+		}
+	}
 	if err := log.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -474,8 +485,7 @@ func TestAccessLog(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("%d lines: %q", len(lines), lines)
 	}
-	// A line is written as its response finishes, which may be after the
-	// client has the response: the lines' order is not the requests'.
+	// The lines' order is not the requests'.
 	protos := map[string]int{}
 	for i, line := range lines {
 		var got map[string]any
