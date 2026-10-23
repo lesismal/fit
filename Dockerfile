@@ -20,7 +20,9 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 	go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/fit ./cmd/fit
 
 FROM gcr.io/distroless/static-debian12:nonroot
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=build /out/fit /usr/local/bin/fit
+COPY LICENSE /usr/share/doc/fit/LICENSE
 COPY deploy/docker/fit.json /etc/fit/fit.json
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fit"]

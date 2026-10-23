@@ -1,5 +1,7 @@
 # fit
 
+[![CI](https://github.com/lesismal/fit/actions/workflows/ci.yml/badge.svg)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flesismal%2Ffit%2Fbadges%2Fcoverage.json)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 fit is a reverse proxy, load balancer, TLS terminator, static file server and API gateway built on
@@ -114,3 +116,7 @@ and Caddyfiles, listing what it left out. [Configuration](docs/configuration.md)
 running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.
 
 `make check` runs gofmt, go vet, staticcheck and the tests with the race detector.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).

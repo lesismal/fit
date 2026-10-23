@@ -33,7 +33,7 @@ for t in $targets; do
 	# and later, all have ARMv7.
 	CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch GOARM=7 \
 		go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$stage/$bin" ./cmd/fit
-	cp README.md README.zh-CN.md "$stage/"
+	cp LICENSE README.md README.zh-CN.md "$stage/"
 
 	if [ "$goos" = windows ]; then
 		(cd dist/.stage && zip -qr "../$name.zip" "$name")

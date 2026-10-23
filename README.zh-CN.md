@@ -1,5 +1,7 @@
 # fit
 
+[![CI](https://github.com/lesismal/fit/actions/workflows/ci.yml/badge.svg)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flesismal%2Ffit%2Fbadges%2Fcoverage.json)](https://github.com/lesismal/fit/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均衡、TLS 终结、静态文件服务和 API 网关，
@@ -108,3 +110,7 @@ route not-found {
 SIGINT 或 SIGTERM 时优雅退出。
 
 `make check` 会运行 gofmt、go vet、staticcheck，以及开启 race 检测的测试。
+
+## 许可证
+
+Apache License 2.0，详见 [LICENSE](LICENSE)。
