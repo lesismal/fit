@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-The harness runs nginx, Caddy, Traefik and fit with equivalent configs under the same load
+The harness runs nginx, Caddy, Traefik, Envoy and fit with equivalent configs under the same load
 generators, and writes the results as JSON along with the hardware, the versions and the
 settings they were measured with. It is how fit checks itself against the
 [roadmap's](../docs/roadmap.md#performance-targets) performance targets.
@@ -22,17 +22,17 @@ common ones are:
 
 | Flag | Default | |
 | --- | --- | --- |
-| `-servers` | `nginx,caddy,traefik,fit` | the servers to run |
+| `-servers` | `nginx,caddy,traefik,envoy,fit` | the servers to run |
 | `-scenarios` | `fixed,static,proxy` | the throughput scenarios; empty for none |
-| `-protocols` | `http/1.1,h2c` | |
+| `-protocols` | `http/1.1,h2c,h3` | |
 | `-idle` | `http1,tls,ws` | the kinds of idle connection to measure memory for; empty for none |
 | `-duration`, `-warmup` | `30s`, `5s` | each measured run, and the unmeasured load before it |
 | `-connections` | `256` | wrk's connections |
-| `-h2-connections`, `-h2-streams` | `64`, `32` | h2load's connections and streams per connection |
+| `-h2-connections`, `-h2-streams` | `64`, `32` | h2load's connections and streams per connection, for h2c and h3 alike |
 | `-idle-connections`, `-idle-settle` | `10000`, `5s` | |
 | `-network` | `host` on Linux, `bridge` elsewhere | |
 | `-server-cpus`, `-client-cpus`, `-backend-cpus` | split from what Docker has | CPU lists, as in `0-7` |
-| `-nginx-image`, `-caddy-image`, `-traefik-image`, `-base-image` | pinned versions | |
+| `-nginx-image`, `-caddy-image`, `-traefik-image`, `-envoy-image`, `-base-image` | pinned versions | |
 | `-out` | `bench/results/run-<time>.json` | |
 
 fit's results come only from the benchmark host, a Linux machine with `-network host`
@@ -64,7 +64,11 @@ Every process runs in a container pinned to CPUs of its own, with `nofile` raise
 
 - **the server under test**: one at a time, from its official image (fit from the binary built for
   the run, on `ubuntu:24.04`);
-- **the load generators**: wrk and h2load, Ubuntu's glibc builds, with curl and `idleconn`;
+- **the load generators**: wrk and h2load, Ubuntu's glibc builds, with curl and `idleconn`; and
+  for HTTP/3, h2load 1.68 built with HTTP/3 (on ngtcp2 1.16 and nghttp3 1.12 over OpenSSL 3.5's
+  QUIC API, [`loadgen/Dockerfile.h3`](loadgen/Dockerfile.h3)) with Debian trixie's curl, in a
+  container of its own on the same CPUs; no distribution packages an h2load that speaks HTTP/3,
+  so it is built from source the first time, in a few minutes;
 - **the proxy backend**: fit answering every request with the fixed response, on port 9000;
 - **the cache backend**: fit answering every path under `/cache/` with 4 KiB fresh for 10
   minutes (`Cache-Control: max-age=600`), on port 9003, counting what it answers on its Admin API
@@ -78,8 +82,14 @@ through their affinity.
 
 ## Scenarios
 
-Every server's config, in [`configs`](configs), serves the same routes on two ports: 8080 for
-HTTP/1.1, driven by wrk, and 8081 for h2c (HTTP/2 with prior knowledge), driven by h2load.
+Every server's config, in [`configs`](configs), serves the same routes on three ports: 8080 for
+HTTP/1.1, driven by wrk; 8081 for h2c (HTTP/2 with prior knowledge), driven by h2load; and UDP
+8444 for HTTP/3, over TLS 1.3 with the harness's throwaway certificate, driven by the HTTP/3
+h2load with the same connections and streams as h2c.
+
+QUIC servers that size their own UDP socket buffers (Caddy and Traefik, through quic-go, ask for
+about 7 MB) get no more than the host's `net.core.rmem_max` and `wmem_max`. The benchmark host
+sets both to 7500000, in `/etc/sysctl.d/90-fitbench-udp-buffers.conf`, since 2026-10-23.
 
 | Scenario | Path | Response |
 | --- | --- | --- |
@@ -105,13 +115,21 @@ the proxy.
 Before each run, the harness fetches the path once over the protocol and checks the status, the
 protocol and the body against the expected ones, so a server whose config drifted fails rather
 than being measured doing something else. A server that cannot serve a scenario is recorded as
-skipped: Traefik only proxies, Caddy and Traefik have no cache of their own, and fit gains
+skipped: Traefik only proxies, Envoy serves no files, Caddy, Traefik and Envoy have no cache of
+their own here, and fit gains
 `static` in I12, `proxy` in I15 and the cache scenarios in I69.
 
 Each measured run records requests per second, latency (percentiles from wrk; mean, standard
 deviation and maximum from h2load, which reports no percentiles), errors by kind, the CPU the
 server used (from its cgroup's `cpu.stat`, in cores) and its memory at the end of the run (cgroup
 `memory.current`, and `anon` from `memory.stat`).
+
+fit's goroutines are counted from `go_goroutines` on its Admin API, which its config has listen at
+127.0.0.1:9005 (only with host networking does the harness reach it): once a second after it is
+ready (`startup_goroutines`), every 100ms during each warm-up and measured run, of which the most is
+kept (`goroutines_max`), and before and with the idle connections (`goroutines_before`,
+`goroutines_after`). The count includes the Admin API's own few goroutines; a spike shorter than
+100ms can fall between two samples.
 
 ## Idle connections
 
@@ -139,7 +157,7 @@ M0's baseline for nginx, Caddy and Traefik, measured on Docker Desktop and kept 
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
-go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,fit -out bench/results/baseline-$(date +%Y%m%d).json
+go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
 ```
 
 A run's JSON holds `host` (CPU, kernel, memory), `versions` and `images` (with digests),

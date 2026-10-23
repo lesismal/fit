@@ -50,6 +50,10 @@ type IdleResult struct {
 	// ClosedByServer counts connections the server closed while they were
 	// held, which make BytesPerConn an underestimate.
 	ClosedByServer int `json:"closed_by_server"`
+	// GoroutinesBefore and GoroutinesAfter are a Go server's goroutines at
+	// the same two moments, for a server with an Admin API.
+	GoroutinesBefore int `json:"goroutines_before,omitempty"`
+	GoroutinesAfter  int `json:"goroutines_after,omitempty"`
 }
 
 func idleKindNames() []string {
@@ -90,6 +94,9 @@ func (h *harness) measureIdle(ctx context.Context, s server, kind string, r *Idl
 	}
 	time.Sleep(time.Second) // let the server settle after starting
 	r.AnonBefore, r.MemoryBefore = h.serverMemory(ctx)
+	if h.canCount(s) {
+		r.GoroutinesBefore, _ = h.goroutines(ctx, s)
+	}
 
 	var u, mode string
 	for _, k := range idleKinds {
@@ -133,6 +140,9 @@ func (h *harness) measureIdle(ctx context.Context, s server, kind string, r *Idl
 	if ready {
 		time.Sleep(h.idleSettle)
 		r.AnonAfter, r.MemoryAfter = h.serverMemory(ctx)
+		if h.canCount(s) {
+			r.GoroutinesAfter, _ = h.goroutines(ctx, s)
+		}
 	}
 	stdin.Close()
 	for lines.Scan() {

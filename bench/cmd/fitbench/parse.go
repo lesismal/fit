@@ -44,6 +44,10 @@ type Result struct {
 	// itself holds.
 	MemoryBytes int64 `json:"memory_bytes,omitempty"`
 	AnonBytes   int64 `json:"anon_bytes,omitempty"`
+	// GoroutinesMax is the most goroutines a Go server had during the
+	// warm-up and the measured run, sampled from its Admin API, for a server
+	// that has one.
+	GoroutinesMax int `json:"goroutines_max,omitempty"`
 }
 
 // Latency is a latency distribution, in milliseconds.
@@ -215,4 +219,19 @@ func parseRequestCount(out, route string) (int64, error) {
 		return 0, fmt.Errorf("metrics: no fit_http_requests_total for route %q", route)
 	}
 	return n, nil
+}
+
+// parseGoroutines reads go_goroutines from out, the text of fit's Admin
+// API's /metrics.
+func parseGoroutines(out string) (int, error) {
+	for line := range strings.SplitSeq(out, "\n") {
+		if v, ok := strings.CutPrefix(line, "go_goroutines "); ok {
+			n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			if err != nil {
+				return 0, fmt.Errorf("metrics: %q: %v", line, err)
+			}
+			return int(n), nil
+		}
+	}
+	return 0, fmt.Errorf("metrics: no go_goroutines")
 }

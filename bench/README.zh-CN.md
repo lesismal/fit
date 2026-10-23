@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-这套工具用等价的配置、同样的压测客户端跑 nginx、Caddy、Traefik 和 fit，把结果连同硬件、版本和
+这套工具用等价的配置、同样的压测客户端跑 nginx、Caddy、Traefik、Envoy 和 fit，把结果连同硬件、版本和
 参数一起写成 JSON。fit 用它对照[路线图](../docs/roadmap.zh-CN.md)里的性能目标检查自己。
 
 ## 运行
@@ -19,17 +19,17 @@ go run ./bench/cmd/fitbench
 
 | 参数 | 默认值 | |
 | --- | --- | --- |
-| `-servers` | `nginx,caddy,traefik,fit` | 要跑的服务器 |
+| `-servers` | `nginx,caddy,traefik,envoy,fit` | 要跑的服务器 |
 | `-scenarios` | `fixed,static,proxy` | 吞吐场景；为空则不跑 |
-| `-protocols` | `http/1.1,h2c` | |
+| `-protocols` | `http/1.1,h2c,h3` | |
 | `-idle` | `http1,tls,ws` | 要测内存的空闲连接类型；为空则不测 |
 | `-duration`、`-warmup` | `30s`、`5s` | 每轮测量时长，以及测量前不计入的预热 |
 | `-connections` | `256` | wrk 的连接数 |
-| `-h2-connections`、`-h2-streams` | `64`、`32` | h2load 的连接数和每连接并发流数 |
+| `-h2-connections`、`-h2-streams` | `64`、`32` | h2load 的连接数和每连接并发流数，h2c 和 h3 相同 |
 | `-idle-connections`、`-idle-settle` | `10000`、`5s` | |
 | `-network` | Linux 上为 `host`，其他系统为 `bridge` | |
 | `-server-cpus`、`-client-cpus`、`-backend-cpus` | 按 Docker 可用的 CPU 划分 | CPU 列表，如 `0-7` |
-| `-nginx-image`、`-caddy-image`、`-traefik-image`、`-base-image` | 固定的版本 | |
+| `-nginx-image`、`-caddy-image`、`-traefik-image`、`-envoy-image`、`-base-image` | 固定的版本 | |
 | `-out` | `bench/results/run-<时间>.json` | |
 
 fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[规则 16](../docs/rules.zh-CN.md#八压测)）。
@@ -55,7 +55,10 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 每个进程都在自己的容器里，绑定到各自的 CPU，`nofile` 调到 1048576：
 
 - **被测服务器**：一次一个，用官方镜像（fit 用本次编译的二进制，跑在 `ubuntu:24.04` 上）；
-- **压测客户端**：wrk 和 h2load，用 Ubuntu 的 glibc 版本，另有 curl 和 `idleconn`；
+- **压测客户端**：wrk 和 h2load，用 Ubuntu 的 glibc 版本，另有 curl 和 `idleconn`；HTTP/3 用从源码构建的
+  h2load 1.68（ngtcp2 1.16、nghttp3 1.12，基于 OpenSSL 3.5 的 QUIC API，见
+  [`loadgen/Dockerfile.h3`](loadgen/Dockerfile.h3)）和 Debian trixie 的 curl，在单独的容器里、同样的 CPU 上；
+  没有发行版提供支持 HTTP/3 的 h2load，所以第一次运行时要花几分钟构建；
 - **代理后端**：fit，对所有请求返回固定响应，端口 9000；
 - **缓存后端**：fit 对 `/cache/` 下的每个路径都回答 4 KiB、新鲜期 10 分钟（`Cache-Control: max-age=600`），
   端口 9003，并在 127.0.0.1:9004 的 Admin API 上计数它回答的请求；
@@ -66,8 +69,13 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 
 ## 场景
 
-[`configs`](configs) 里每个服务器的配置都在两个端口上提供同样的路由：8080 是 HTTP/1.1，由 wrk 压；
-8081 是 h2c（预先知道的明文 HTTP/2），由 h2load 压。
+[`configs`](configs) 里每个服务器的配置都在三个端口上提供同样的路由：8080 是 HTTP/1.1，由 wrk 压；
+8081 是 h2c（预先知道的明文 HTTP/2），由 h2load 压；UDP 8444 是 HTTP/3，走 TLS 1.3 和工具自带的一次性证书，
+由支持 HTTP/3 的 h2load 压，连接数和并发流数与 h2c 相同。
+
+自己设置 UDP socket 缓冲区的 QUIC 服务器（Caddy 和 Traefik 通过 quic-go 申请约 7 MB）最多只能拿到主机的
+`net.core.rmem_max` 和 `wmem_max`。压测机自 2026-10-23 起把两者设为 7500000，写在
+`/etc/sysctl.d/90-fitbench-udp-buffers.conf`。
 
 | 场景 | 路径 | 响应 |
 | --- | --- | --- |
@@ -86,12 +94,17 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 Traefik 为 200）时，它们在压力下不断关闭、重开后端连接直到端口耗尽，测到的是默认值而不是代理本身。
 
 每轮之前，工具先用该协议请求一次，检查状态码、协议和响应体是否符合预期，配置走样的服务器会报错，
-而不是测了别的东西。服务器不支持的场景记为跳过：Traefik 只能代理，Caddy 和 Traefik 没有自带的缓存；fit 在 I12 支持
+而不是测了别的东西。服务器不支持的场景记为跳过：Traefik 只能代理，Envoy 不提供静态文件，Caddy、Traefik 和 Envoy 在这里没有自带的缓存；fit 在 I12 支持
 `static`，在 I15 支持 `proxy`，在 I69 支持缓存场景。
 
 每轮测量记录每秒请求数、延迟（wrk 给出百分位；h2load 不给百分位，只有均值、标准差和最大值）、按
 类型分的错误数、服务器用掉的 CPU（取自其 cgroup 的 `cpu.stat`，以核数计），以及结束时的内存
 （cgroup 的 `memory.current`，和 `memory.stat` 里的 `anon`）。
+
+fit 的协程数取自其 Admin API 的 `go_goroutines`，压测配置让它监听 127.0.0.1:9005（只有主机网络下工具才
+连得到）：就绪一秒后读一次（`startup_goroutines`），每次预热和测量期间每 100ms 读一次并保留最大值
+（`goroutines_max`），空闲连接打开前和保持时各读一次（`goroutines_before`、`goroutines_after`）。计数包括
+Admin API 自己的几个协程；短于 100ms 的峰值可能落在两次采样之间。
 
 ## 空闲连接
 
@@ -115,7 +128,7 @@ Traefik 测得的基线，在 Docker Desktop 上测得，只作为记录保留�
 `m2-*` 及其报告。要复现某个结果，在压测机上用其中记录的 `params` 运行：
 
 ```bash
-go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,fit -out bench/results/baseline-$(date +%Y%m%d).json
+go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
 ```
 
 结果 JSON 包含 `host`（CPU、内核、内存）、`versions` 和 `images`（带摘要）、`params`，`results`

@@ -127,3 +127,13 @@ fit_http_requests_total{listener="cachebackend",route="other",code="2xx"} 99
 		t.Error("no samples")
 	}
 }
+
+func TestParseGoroutines(t *testing.T) {
+	out := "# TYPE go_goroutines gauge\ngo_goroutines 37\ngo_memory_total_bytes 1.2e+07\n"
+	if n, err := parseGoroutines(out); n != 37 || err != nil {
+		t.Errorf("%d %v", n, err)
+	}
+	if _, err := parseGoroutines("go_memory_total_bytes 1\n"); err == nil {
+		t.Error("no samples")
+	}
+}

@@ -3,8 +3,8 @@
 #
 # Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
 # with the same routes on both, /ws proxying WebSockets. Port 8443 is
-# HTTP/1.1 over TLS, for idle TLS connections. Caddy logs no requests unless
-# asked to.
+# HTTP/1.1 over TLS, for idle TLS connections, and UDP port 8444 HTTP/3,
+# with the same routes but /ws. Caddy logs no requests unless asked to.
 {
 	admin off
 	auto_https off
@@ -17,9 +17,12 @@
 	servers :8443 {
 		protocols h1
 	}
+	servers :8444 {
+		protocols h3
+	}
 }
 
-http://:8080, http://:8081 {
+(routes) {
 	handle /fixed {
 		header Content-Type text/plain
 		respond "hello, world" 200
@@ -38,12 +41,21 @@ http://:8080, http://:8081 {
 			}
 		}
 	}
-	handle /ws {
-		reverse_proxy {{WSBACKEND}}
-	}
 	handle {
 		respond 404
 	}
+}
+
+http://:8080, http://:8081 {
+	handle /ws {
+		reverse_proxy {{WSBACKEND}}
+	}
+	import routes
+}
+
+https://:8444 {
+	tls /certs/cert.pem /certs/key.pem
+	import routes
 }
 
 :8443 {

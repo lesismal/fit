@@ -1,4 +1,4 @@
-// Command fitbench runs nginx, Caddy, Traefik and fit through the same
+// Command fitbench runs nginx, Caddy, Traefik, Envoy and fit through the same
 // scenarios under the same load generators, and writes the results as JSON
 // with the hardware and the versions they were measured on.
 //
@@ -16,7 +16,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,6 +28,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -50,6 +54,9 @@ type Report struct {
 	Images   map[string]string `json:"images"`
 	Results  []Result          `json:"results"`
 	Idle     []IdleResult      `json:"idle,omitempty"`
+	// StartupGoroutines are the goroutines each Go server with an Admin API
+	// had a second after it became ready, before any load.
+	StartupGoroutines map[string]int `json:"startup_goroutines,omitempty"`
 }
 
 // Params are the settings a run was made with.
@@ -76,6 +83,9 @@ const (
 	loadgenName   = "fitbench-loadgen"
 	networkName   = "fitbench"
 	loadgenTag    = "fitbench-loadgen"
+	// The HTTP/3 load generators, from bench/loadgen/Dockerfile.h3.
+	loadgenH3Name = "fitbench-loadgen-h3"
+	loadgenH3Tag  = "fitbench-loadgen-h3"
 	// wwwVolume holds the static files: a volume rather than a bind mount,
 	// which on Docker Desktop is slow enough to be what is measured.
 	wwwVolume = "fitbench-www"
@@ -113,9 +123,9 @@ type harness struct {
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("fitbench", flag.ContinueOnError)
 	h := &harness{images: map[string]string{}}
-	serverList := flags.String("servers", "nginx,caddy,traefik,fit", "the servers to run")
+	serverList := flags.String("servers", "nginx,caddy,traefik,envoy,fit", "the servers to run")
 	scenarioList := flags.String("scenarios", "fixed,static,proxy", "the scenarios to run")
-	protocolList := flags.String("protocols", "http/1.1,h2c", "the protocols to run")
+	protocolList := flags.String("protocols", "http/1.1,h2c,h3", "the protocols to run")
 	flags.DurationVar(&h.duration, "duration", 30*time.Second, "how long each measured run lasts")
 	flags.DurationVar(&h.warmup, "warmup", 5*time.Second, "how long the load runs, unmeasured, before each measured run")
 	flags.IntVar(&h.conns, "connections", 256, "HTTP/1.1 connections (wrk)")
@@ -225,10 +235,11 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	h.report = Report{
-		Started:  time.Now().UTC(),
-		Host:     map[string]string{"docker_cpus": strconv.Itoa(ncpu), "docker_arch": arch},
-		Versions: map[string]string{},
-		Images:   map[string]string{},
+		Started:           time.Now().UTC(),
+		Host:              map[string]string{"docker_cpus": strconv.Itoa(ncpu), "docker_arch": arch},
+		Versions:          map[string]string{},
+		Images:            map[string]string{},
+		StartupGoroutines: map[string]int{},
 		Params: Params{
 			Duration: h.duration.String(), Warmup: h.warmup.String(),
 			Connections: max(h.conns, h.threads), H2Connections: max(h.h2conns, h.threads), H2Streams: h.h2streams,
@@ -244,8 +255,14 @@ func run(ctx context.Context, args []string) error {
 	} else if err := h.buildTools(ctx, root, arch); err != nil {
 		return err
 	}
-	if err := h.renderConfigs(map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr,
-		"{{CACHEBACKEND}}": cacheAddr, "{{CACHEBODY}}": cacheBody, "{{WORKERS}}": strconv.Itoa(serverThreads)}); err != nil {
+	vars := map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr,
+		"{{CACHEBACKEND}}": cacheAddr, "{{CACHEBODY}}": cacheBody, "{{WORKERS}}": strconv.Itoa(serverThreads)}
+	// Envoy takes a backend's host and port apart.
+	for name, addr := range map[string]string{"BACKEND": backendAddr, "WSBACKEND": wsBackendAddr} {
+		host, port, _ := net.SplitHostPort(addr)
+		vars["{{"+name+"_HOST}}"], vars["{{"+name+"_PORT}}"] = host, port
+	}
+	if err := h.renderConfigs(vars); err != nil {
 		return err
 	}
 	if err := writeCert(filepath.Join(h.work, "certs")); err != nil {
@@ -272,6 +289,20 @@ func run(ctx context.Context, args []string) error {
 		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro"},
 		h.netArgs...), h.clientCPUs...), loadgenTag, "sleep", "infinity")...); err != nil {
 		return err
+	}
+	if slices.Contains(h.protocols, "h3") {
+		// h2load is built from source the first time, a few minutes.
+		step("building and starting the HTTP/3 load generators")
+		if _, err := docker(ctx, "build", "-q", "-t", loadgenH3Tag, "-f", filepath.Join(h.bench, "loadgen", "Dockerfile.h3"),
+			filepath.Join(h.bench, "loadgen")); err != nil {
+			return err
+		}
+		if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenH3Name, "--ulimit", "nofile=1048576:1048576"},
+			h.netArgs...), h.clientCPUs...), loadgenH3Tag, "sleep", "infinity")...); err != nil {
+			return err
+		}
+		out, _ := docker(ctx, "exec", loadgenH3Name, "h2load", "--version")
+		h.report.Versions["h2load-h3"] = firstLine(out, "h2load")
 	}
 	h.describeHost(ctx)
 
@@ -321,6 +352,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	printSummary(h.report.Results, h.report.Idle)
+	printGoroutines(h.report)
 	fmt.Println("results written to", *out)
 	return nil
 }
@@ -628,6 +660,12 @@ func (h *harness) runServer(ctx context.Context, s server) {
 	} else {
 		h.report.Images[s.name] = imageDigest(ctx, h.images[s.name])
 	}
+	if h.canCount(s) {
+		time.Sleep(time.Second) // let the server settle after starting
+		if n, err := h.goroutines(ctx, s); err == nil {
+			h.report.StartupGoroutines[s.name] = n
+		}
+	}
 
 	for _, sc := range todo {
 		for _, p := range h.protocols {
@@ -677,10 +715,17 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result
 	scenario, proto := scenarioOf(sc), protocols[j]
 	r.Tool = proto.tool
 	url := "http://" + h.serverHost + ":" + proto.port + scenario.path
+	if p == "h3" {
+		url = "https://" + h.serverHost + ":" + proto.port + scenario.path
+	}
 
 	if err := h.check(ctx, url, p, scenario.body); err != nil {
 		r.Error = err.Error()
 		return r
+	}
+	if h.canCount(s) {
+		stop := h.sampleGoroutines(ctx, s)
+		defer func() { r.GoroutinesMax = stop() }()
 	}
 	if h.warmup > 0 {
 		if _, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.warmup)...); err != nil {
@@ -745,11 +790,15 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 		}
 		body = string(data)
 	}
-	flag := "--http1.1"
-	if p == "h2c" {
-		flag = "--http2-prior-knowledge"
+	container, flag, want := loadgenName, "--http1.1", "200 1.1"
+	switch p {
+	case "h2c":
+		flag, want = "--http2-prior-knowledge", "200 2"
+	case "h3":
+		// The certificate is the harness's own, self-signed.
+		container, flag, want = loadgenH3Name, "--http3-only", "200 3"
 	}
-	out, err := docker(ctx, "exec", loadgenName, "curl", "-s", "--max-time", "5", flag, "-w", "\n%{http_code} %{http_version}", url)
+	out, err := docker(ctx, "exec", container, "curl", "-s", "-k", "--max-time", "5", flag, "-w", "\n%{http_code} %{http_version}", url)
 	if err != nil {
 		return fmt.Errorf("check %s: %v", url, err)
 	}
@@ -758,10 +807,6 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 		return fmt.Errorf("check %s: curl printed %q", url, out)
 	}
 	got, status := out[:i], strings.TrimSpace(out[i+1:])
-	want := "200 1.1"
-	if p == "h2c" {
-		want = "200 2"
-	}
 	if status != want || got != body {
 		return fmt.Errorf("check %s: got %q with body %.80q, want %q with body %.80q", url, status, got, want, body)
 	}
@@ -769,7 +814,7 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 }
 
 // loadArgs is the docker exec that runs tool against url for d, wrk with
-// script, or report.lua when it is empty.
+// script, or report.lua when it is empty, and h2load-h3 over HTTP/3.
 func (h *harness) loadArgs(tool, url, script string, d time.Duration) []string {
 	secs := strconv.Itoa(max(1, int(d.Round(time.Second).Seconds())))
 	t := strconv.Itoa(h.threads)
@@ -781,7 +826,71 @@ func (h *harness) loadArgs(tool, url, script string, d time.Duration) []string {
 		return []string{"exec", loadgenName, "wrk", "-t", t, "-c", c, "-d", secs + "s", "--timeout", "10s", "--latency", "-s", "/fitbench/" + script, url}
 	}
 	c := strconv.Itoa(max(h.h2conns, h.threads))
+	if tool == "h2load-h3" {
+		return []string{"exec", loadgenH3Name, "h2load", "--alpn-list=h3", "-t", t, "-c", c, "-m", strconv.Itoa(h.h2streams), "-D", secs, url}
+	}
 	return []string{"exec", loadgenName, "h2load", "-t", t, "-c", c, "-m", strconv.Itoa(h.h2streams), "-D", secs, url}
+}
+
+// canCount says whether s's goroutines can be counted: it has an Admin API,
+// which listens on the server's loopback, reached from here only through
+// host networking.
+func (h *harness) canCount(s server) bool {
+	return s.admin != "" && h.serverHost == "127.0.0.1"
+}
+
+var adminClient = &http.Client{Timeout: 2 * time.Second}
+
+// goroutines reads how many goroutines s has from its Admin API.
+func (h *harness) goroutines(ctx context.Context, s server) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+s.admin+"/metrics", nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := adminClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	return parseGoroutines(string(data))
+}
+
+// sampleGoroutines counts s's goroutines every 100ms until the function it
+// returns is called, which returns the most it saw. A spike shorter than
+// that can fall between two samples.
+func (h *harness) sampleGoroutines(ctx context.Context, s server) (stop func() int) {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	most := 0
+	sample := func() {
+		if n, err := h.goroutines(ctx, s); err == nil {
+			most = max(most, n)
+		}
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		tick := time.NewTicker(100 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			sample()
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	return func() int {
+		close(done)
+		wg.Wait()
+		sample()
+		return most
+	}
 }
 
 // serverCPU is the CPU time the server's container has used so far.
@@ -797,7 +906,7 @@ func (h *harness) serverCPU(ctx context.Context) (time.Duration, bool) {
 // this run or an earlier one that was interrupted.
 func cleanup(network bool) {
 	ctx := context.Background()
-	_, _ = docker(ctx, "rm", "-f", serverName, backendName, wsBackendName, cacheName, loadgenName)
+	_, _ = docker(ctx, "rm", "-f", serverName, backendName, wsBackendName, cacheName, loadgenName, loadgenH3Name)
 	_, _ = docker(ctx, "volume", "rm", wwwVolume)
 	if network {
 		_, _ = docker(ctx, "network", "rm", networkName)
@@ -825,6 +934,9 @@ func printResult(r Result) {
 		hits := ""
 		if r.HitRatio != nil {
 			hits = fmt.Sprintf("  hits %.1f%%", 100**r.HitRatio)
+		}
+		if r.GoroutinesMax > 0 {
+			hits += fmt.Sprintf("  goroutines %d", r.GoroutinesMax)
 		}
 		fmt.Printf("    %s %12.0f req/s  mean %7.2fms  max %8.2fms  errors %d  cpu %.2f%s\n",
 			name, r.RequestsPerSec, r.Latency.Mean, r.Latency.Max, r.Errors, r.CPUCores, hits)
@@ -904,4 +1016,30 @@ func printSummary(results []Result, idle []IdleResult) {
 		}
 	}
 	fmt.Println()
+}
+
+// printGoroutines prints, for each server whose goroutines were counted,
+// how many it had once started and the most during each kind of load.
+func printGoroutines(rep Report) {
+	var names []string
+	for n := range rep.StartupGoroutines {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	for _, n := range names {
+		fmt.Printf("goroutines %-8s started %d", n, rep.StartupGoroutines[n])
+		most := 0
+		for _, r := range rep.Results {
+			if r.Server == n && r.GoroutinesMax > 0 {
+				most = max(most, r.GoroutinesMax)
+			}
+		}
+		fmt.Printf("  under load at most %d", most)
+		for _, r := range rep.Idle {
+			if r.Server == n && r.GoroutinesAfter > 0 {
+				fmt.Printf("  idle-%s %d -> %d", r.Kind, r.GoroutinesBefore, r.GoroutinesAfter)
+			}
+		}
+		fmt.Println()
+	}
 }

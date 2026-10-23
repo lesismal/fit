@@ -23,6 +23,9 @@ type server struct {
 	ready string
 	// fit marks a server run from the fit binary built for the harness.
 	fit bool
+	// admin is the address of the server's Admin API, whose /metrics has
+	// go_goroutines, for counting its goroutines; "" when it has none.
+	admin string
 }
 
 // scenario is what the load generators ask a server for.
@@ -53,10 +56,12 @@ var scenarios = []scenario{
 }
 
 // The protocols, each on its own port in every server's config, and the
-// load generator that drives it.
+// load generator that drives it: HTTP/3's on UDP, over TLS, by h2load built
+// with HTTP/3 in an image of its own.
 var protocols = []struct{ name, port, tool string }{
 	{"http/1.1", "8080", "wrk"},
 	{"h2c", "8081", "h2load"},
+	{"h3", "8444", "h2load-h3"},
 }
 
 var servers = []server{
@@ -90,6 +95,18 @@ var servers = []server{
 		ready: "/proxy",
 	},
 	{
+		name:      "envoy",
+		image:     "envoyproxy/envoy:v1.40.0",
+		scenarios: []string{"fixed", "proxy"},
+		idle:      []string{"http1", "tls", "ws"},
+		mounts:    [][2]string{{"envoy/envoy.yaml", "/etc/envoy/envoy.yaml"}, {"certs", "/certs"}},
+		// One worker per CPU the container is pinned to, not per CPU of the
+		// host.
+		cmd:     []string{"envoy", "-c", "/etc/envoy/envoy.yaml", "--cpuset-threads", "--log-level", "error"},
+		version: []string{"envoy", "--version"},
+		ready:   "/fixed",
+	},
+	{
 		name:      "fit",
 		scenarios: []string{"fixed", "static", "proxy", "cache-hot", "cache-zipf"},
 		idle:      []string{"http1", "tls", "ws"},
@@ -98,6 +115,7 @@ var servers = []server{
 		version:   []string{"/usr/local/bin/fit", "version"},
 		ready:     "/fixed",
 		fit:       true,
+		admin:     "127.0.0.1:9005",
 	},
 }
 

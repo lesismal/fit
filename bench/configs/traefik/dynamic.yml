@@ -5,6 +5,11 @@ http:
       rule: "Path(`/proxy`)"
       entryPoints: [h1, h2c]
       service: backend
+    proxy-h3:
+      rule: "Path(`/proxy`)"
+      entryPoints: [h3]
+      service: backend
+      tls: {}
     ws:
       rule: "Path(`/ws`)"
       entryPoints: [h1]
