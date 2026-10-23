@@ -188,7 +188,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I72 | WASM II：Proxy-Wasm 子集 | I71 | done |
 | I73 | 友好配置格式 | I03 | done |
 | I74 | nginx 配置转换器 | I73 | done |
-| I75 | FastCGI | I17 | todo |
+| I75 | FastCGI | I17 | done |
 | **1.0** | | | |
 | I76 | 持续 fuzz | I55 | todo |
 | I77 | 配置与 Admin API v1 冻结 | I69、I74 | todo |

@@ -13,7 +13,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	stdhttp "net/http"
+	"net/http/fcgi"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -62,11 +64,11 @@ func (l *late) ServeHTTP(c *fibhttp.Context) {
 // env is what the cases need: an auth service and an upstream that answer
 // after delay, a static root, a JWT secret and a user's password hash.
 type env struct {
-	auth, app string
-	root      string
-	secret    string
-	token     string
-	hash      string
+	auth, app, fcgi string
+	root            string
+	secret          string
+	token           string
+	hash            string
 }
 
 func newEnv(t testing.TB, delay time.Duration) *env {
@@ -79,6 +81,13 @@ func newEnv(t testing.TB, delay time.Duration) *env {
 	app := httptest.NewServer(stdhttp.HandlerFunc(wait))
 	t.Cleanup(auth.Close)
 	t.Cleanup(app.Close)
+	// A FastCGI application as slow, Go's own.
+	fcgiLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = fcgi.Serve(fcgiLn, stdhttp.HandlerFunc(wait)) }()
+	t.Cleanup(func() { _ = fcgiLn.Close() })
 	dir := t.TempDir()
 	// The request's path, /api/index.html, which only rewrite strips.
 	if err := os.Mkdir(filepath.Join(dir, "api"), 0o755); err != nil {
@@ -95,7 +104,7 @@ func newEnv(t testing.TB, delay time.Duration) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{auth: auth.Listener.Addr().String(), app: app.Listener.Addr().String(), root: dir,
+	return &env{auth: auth.Listener.Addr().String(), app: app.Listener.Addr().String(), fcgi: fcgiLn.Addr().String(), root: dir,
 		secret: secret, token: hs256(fmt.Sprintf(`{"sub":"me","exp":%d}`, time.Now().Add(time.Hour).Unix()), "a secret of the test's, 32 bytes or more"), hash: string(hash)}
 }
 
@@ -153,6 +162,7 @@ func cases(e *env) []tc {
 		// through to it.
 		mw("cache", `{"zone": "workers"}`),
 		{module: "proxy", handler: `{"module": "proxy", "params": {"upstream": "app"}}`, status: 200},
+		{module: "fastcgi", handler: `{"module": "fastcgi", "params": {"address": "` + e.fcgi + `", "root": "/srv"}}`, status: 200},
 		{module: "static", handler: `{"module": "static", "params": {"root": "` + e.root + `"}}`, status: 200, inline: true},
 		{module: "respond", handler: `{"module": "respond", "params": {"body": "x"}}`, status: 200, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},

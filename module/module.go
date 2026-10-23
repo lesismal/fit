@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
@@ -128,6 +129,9 @@ type Env struct {
 	WriteStall time.Duration
 	// Graph is the config the module belongs to, or nil, as in tests.
 	Graph Holder
+	// Engine is the fib engine connections to upstreams are dialed
+	// through, or nil, as in tests.
+	Engine *fib.Engine
 }
 
 // Graph returns the hold a module takes on its config for a request that
@@ -144,6 +148,15 @@ type noHolder struct{}
 
 func (noHolder) Retain()  {}
 func (noHolder) Release() {}
+
+// Engine returns the fib engine a module dials its own connections
+// through, as a FastCGI client does, or nil when there is none, as in tests.
+func (c *Context) Engine() *fib.Engine {
+	if c.env == nil {
+		return nil
+	}
+	return c.env.Engine
+}
 
 // WriteStallTimeout returns how long a response may wait, each time, for
 // its client to take what it was sent; a handler that writes a response

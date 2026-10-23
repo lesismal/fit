@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67–I74 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67–I75 已完成 |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b`（fib 分支 `a40-filter-abort` 上的 `3998953`：`86071b8` 加上为 I67 实现的 A40，等待 fib 的 CI 并合入 `main`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M5 的其余部分（I75）：FastCGI；以及 Proxy-Wasm 的响应回调（A41） |
+| 尚不可用 | Proxy-Wasm 的响应回调（A41）；1.0（I76–I78）：持续模糊测试、v1 冻结、参考文档 |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段；I73 接受 YAML 配置，I74 转换 nginx 配置。** 下一步是 I75。 M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段；I73 接受 YAML 配置，I74 转换 nginx 配置；I75 通过 FastCGI 运行 PHP。** M5 的迭代已全部完成；接下来是其基准报告，然后是 1.0，从 I76 开始。 M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -64,6 +64,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `plugin/wasm` | `wasm`：wazero 中的 WebAssembly 插件，在带队列和看门狗的实例池上运行，fit 自己的字段与应答 ABI，以及 Proxy-Wasm 的请求阶段；`guest`：fit ABI 的 wasip1 Go 端 |
 | `middleware/compress` | `compress`：经 fib 响应体过滤器的 zstd、brotli 和 gzip，流式，编码器池化且有上限 |
 | `middleware/headers` | `headers` 中间件：删除、设置和添加请求与响应的字段 |
+| `handler/fastcgi` | `fastcgi`：fit 自己的 FastCGI 客户端，基于 fib 连接，有连接池和上限，双向流式；PHP 参数、split path info、try_files |
 | `handler/static` | `static` handler：根目录下的文件，缓存路径解析结果和小文件内容，所有文件操作都在有界的文件池上，大文件经 `SendFile` 发送；校验器，条件请求和 Range 请求，预压缩副本，`try_files`，目录列表 |
 | `modules/standard` | 引入 fit 自带的所有模块 |
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
@@ -2883,6 +2884,32 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 - 除计划列出的指令外，还转换了 `client_max_body_size`、`add_header`、`gzip`、`try_files`、`alias`、`index` 以及代理的头
   和超时，因为几乎每个配置都有它们。
+
+### I75 FastCGI — 已完成
+
+- **`handler/fastcgi` 的 `fastcgi`** 从 FastCGI 应用（如 PHP-FPM）获取回答，地址为 `address`（主机和端口，或 `unix/` 加
+  socket 路径）。客户端是 fit 自己的：通过 fib 引擎（`module.Env` 和 `module.Context.Engine` 现在把它交给模块）拨号的 fib
+  连接上收发 FastCGI 记录，每个连接一次一个请求并带 `KEEP_CONN`，空闲连接留给后续请求（`max_idle_conns` 16，
+  `idle_timeout` 60s），最多 `max_conns`（64）个，没有空闲连接的请求在长度为 `max_pending`（1024）的队列中等待，超出则回答
+  503。worker 上不等待任何东西。
+- **双向流式且有上限**：请求体随到随发（`OnBody`），连接未发出的数据超过 64 KB 时用 `HoldBody` 压住；响应随应用写出随发回
+  （`WriteNoWait` 并 flush），客户端排队的数据超过 64 KB 时暂停读取该连接，每次等待受写停滞超时限制。CGI 头最多读
+  `max_header_bytes`（64 KiB），其 `Status` 和 `Location`（无状态码时为 302）转换为 HTTP 的。只有请求按 FastCGI 的方式
+  结束、请求体也全部发出时，连接才会保留。
+- **超时**：`connect_timeout`（5s，504）、`response_header_timeout`（60s，504）、`response_idle_timeout`（60s），整体为
+  `timeout`（10m）。开始后中断的响应像代理那样对客户端中断（HTTP/1 关闭连接，HTTP/2 流以 `Fit-Error` trailer 结束）；客户端
+  离开时关闭与应用的连接。应用的标准错误写入 fit 的日志，每秒最多 100 行。
+- **PHP 参数**：CGI/1.1 和 PHP 的参数（`SCRIPT_FILENAME`、`SCRIPT_NAME`、`PATH_INFO`、`PATH_TRANSLATED`、`DOCUMENT_ROOT`、
+  `DOCUMENT_URI`、`REQUEST_URI`、`REQUEST_SCHEME`、`HTTPS`、`REDIRECT_STATUS` 等），请求的字段作为 `HTTP_*`（`Proxy` 除外，
+  防 httpoxy），以及 `env` 中的参数。`split_path`（`.php`）把路径分成脚本和 path info，`index`（`index.php`）是目录的脚本。
+  `try_files` 像 nginx 那样，在处理器自己的池上于 `root` 下查找路径来选定脚本，使不是独立脚本的请求交给前端控制器。
+- **测试**：以 Go 的 `net/http/fcgi` 作为应用，在 HTTP/1.1 和 h2c 上：`TestParams`、`TestKeepAlive`（20 个请求共用一个连接；
+  脚本的状态码和 Location）、`TestLargeBodies`（10.5 MiB 上传，含分块上传，以及开头慢读的 16 MiB 下载）、
+  `TestTimeoutsAndLimits`（慢脚本得到 504；一个忙、一个等待、第三个得到 503）、`TestCutConnections`（应用在响应中途断开连接；
+  客户端离开，随之关闭与应用的连接）、`TestTryFilesAndUnix`（Unix socket、前端控制器）、`TestSplit`、`TestRecords`。
+  **针对 PHP-FPM**（Docker 中的 `php:8.3-fpm-alpine`，`test/e2e` 的 `TestPHPFPM`，HTTP/1.1 和 h2c）：`$_SERVER` 中的脚本、
+  文件名、path info、查询串、方法、URI、字段、主机和地址，且不含 httpoxy；POST 表单和 3 MB 上传；状态码、字段和 cookie；
+  重定向；4 MiB 响应；经 `try_files` 的前端控制器。`test/workers` 为该处理器加了用例。它们在基准机上的竞态检测下通过。
 
 ## 给后续迭代的说明
 

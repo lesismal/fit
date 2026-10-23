@@ -11,10 +11,10 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-10-23 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: I67–I74 done |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: I67–I75 done |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b` (`3998953` on fib's branch `a40-filter-abort`: `86071b8` with A40, made for I67, waiting for fib's CI and for `main`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | The rest of M5 (I75): FastCGI; and Proxy-Wasm's response callbacks (A41) |
+| What does not | Proxy-Wasm's response callbacks (A41); 1.0 (I76–I78): continuous fuzzing, the v1 freeze, reference docs |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -37,7 +37,7 @@ proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1
 through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **In M4, I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, I65, OpenTelemetry traces and metrics over OTLP, and I66, packaging and examples, are done, and M4's exit criteria hold: fit passes the Gateway API's conformance suite for the core HTTP profile (I61), and the Docker Compose example routes by labels and follows its containers as they start and stop (I66).** **M4 is done.** Its benchmarks are in the [M4 report](../bench/results/m4-report-2026-10-23.md): fit still meets every M1 target, the data plane measures as at M3 but for h2c, where an A/B of M3's build against M4's finds fit 1.5% to 1.8% slower, built up over I59–I64 with no change to the request path (recorded below), and idle connections cost it 0.1 to 0.5 KiB more at 10k. **In M5, I67, the HTTP cache's semantics and memory tier, I68, its disk tier, and I69, its locks, stale answers and purges, are done: one fetch for a stampede, and on the harness's cache scenarios fit keeps what nginx's `proxy_cache` keeps, at about twice its rate over HTTP/1.1. I70, `fit build`, builds fit with modules of other modules, or without its providers. I71 runs WebAssembly plugins in wazero, on a pool of their own, and I72 Proxy-Wasm filters' request phase. I73 takes configs in YAML, and I74 converts nginx's.** Next, I75.
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, I65, OpenTelemetry traces and metrics over OTLP, and I66, packaging and examples, are done, and M4's exit criteria hold: fit passes the Gateway API's conformance suite for the core HTTP profile (I61), and the Docker Compose example routes by labels and follows its containers as they start and stop (I66).** **M4 is done.** Its benchmarks are in the [M4 report](../bench/results/m4-report-2026-10-23.md): fit still meets every M1 target, the data plane measures as at M3 but for h2c, where an A/B of M3's build against M4's finds fit 1.5% to 1.8% slower, built up over I59–I64 with no change to the request path (recorded below), and idle connections cost it 0.1 to 0.5 KiB more at 10k. **In M5, I67, the HTTP cache's semantics and memory tier, I68, its disk tier, and I69, its locks, stale answers and purges, are done: one fetch for a stampede, and on the harness's cache scenarios fit keeps what nginx's `proxy_cache` keeps, at about twice its rate over HTTP/1.1. I70, `fit build`, builds fit with modules of other modules, or without its providers. I71 runs WebAssembly plugins in wazero, on a pool of their own, and I72 Proxy-Wasm filters' request phase. I73 takes configs in YAML, and I74 converts nginx's. I75 serves PHP through FastCGI.** M5's iterations are done; its benchmark report comes next, then 1.0, from I76.
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -85,6 +85,7 @@ To continue, start a session with:
 | `plugin/wasm` | `wasm`: WebAssembly plugins in wazero, on a pool of instances with a queue and a watchdog, an ABI of fit's own for fields and answers, and Proxy-Wasm's request phase; `guest`, the Go side of fit's ABI for wasip1 |
 | `middleware/compress` | `compress`: zstd, brotli and gzip through fib's body filters, streaming, encoders pooled and bounded |
 | `middleware/headers` | the `headers` middleware: request and response fields deleted, set and added |
+| `handler/fastcgi` | `fastcgi`: a FastCGI client of fit's own over fib connections, pooled and bounded, streaming both ways; PHP's parameters, split path info, try_files |
 | `handler/static` | the `static` handler: files under a root, with a cache of what paths resolve to and of small files' contents, every file operation on a bounded file pool, large files through `SendFile`; validators, conditional and range requests, precompressed twins, `try_files`, directory listings |
 | `modules/standard` | imports every module fit ships with |
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
@@ -3995,6 +3996,46 @@ Differences from the plan:
 
 - Beyond the plan's list, `client_max_body_size`, `add_header`, `gzip`, `try_files`, `alias`,
   `index` and the proxy's headers and timeouts convert, since nearly every config has them.
+
+### I75 FastCGI — done
+
+- **`handler/fastcgi`'s `fastcgi`** answers requests from a FastCGI application, as PHP-FPM is,
+  at `address` (a host and port, or `unix/` and a socket's path). The client is fit's own: FastCGI
+  records over fib connections dialed through fib's engine (which `module.Env` and
+  `module.Context.Engine` now give modules), one request at a time on each connection with
+  `KEEP_CONN`, idle ones kept for the next (`max_idle_conns`, 16, `idle_timeout`, 60s), at most
+  `max_conns` (64), and a request finding none free waiting in a queue of `max_pending` (1024),
+  past which it is answered 503. Nothing waits on a worker.
+- **Streamed both ways, bounded**: the request's body goes up as it arrives (`OnBody`), held with
+  `HoldBody` while the connection has more than 64 KB unsent; the response comes back as the
+  application writes it (`WriteNoWait`, flushed), the connection's reads held while the client has
+  more than 64 KB queued, each wait bounded by the write stall timeout. The CGI header is read up
+  to `max_header_bytes` (64 KiB), its `Status` and `Location` (302 without a status) taken as
+  HTTP's. A connection is kept only when the request ended as FastCGI says, its body all sent.
+- **Timeouts**: `connect_timeout` (5s, 504), `response_header_timeout` (60s, 504),
+  `response_idle_timeout` (60s), `timeout` for the whole (10m). A response cut short after it
+  began is cut short for the client as the proxy does (the HTTP/1 connection closed, an HTTP/2
+  stream ended with a `Fit-Error` trailer); a client that goes closes the application's connection.
+  The application's standard error goes to fit's log, at most 100 lines a second.
+- **PHP's parameters**: CGI/1.1's and PHP's (`SCRIPT_FILENAME`, `SCRIPT_NAME`, `PATH_INFO`,
+  `PATH_TRANSLATED`, `DOCUMENT_ROOT`, `DOCUMENT_URI`, `REQUEST_URI`, `REQUEST_SCHEME`, `HTTPS`,
+  `REDIRECT_STATUS` and the rest), the request's fields as `HTTP_*` but `Proxy` (httpoxy), and
+  `env`'s. `split_path` (`.php`) splits a path into the script and its path info, and `index`
+  (`index.php`) is a directory's script. `try_files`, as nginx's, picks the script from paths
+  looked up under `root` on a pool of the handler's own, so that a front controller takes what is
+  no script of its own.
+- **Tests**: with Go's `net/http/fcgi` as the application, over HTTP/1.1 and h2c: `TestParams`,
+  `TestKeepAlive` (20 requests on one connection; a script's status and Location),
+  `TestLargeBodies` (a 10.5 MiB upload, chunked too, and a 16 MiB download read slowly at first),
+  `TestTimeoutsAndLimits` (504 for a slow script; one busy, one waiting and the third 503),
+  `TestCutConnections` (an application that cuts its connection mid-response; a client that goes,
+  which closes the application's connection), `TestTryFilesAndUnix` (a Unix socket, a front
+  controller), `TestSplit`, `TestRecords`. **Against PHP-FPM** (`php:8.3-fpm-alpine` in Docker,
+  `test/e2e`'s `TestPHPFPM`, over HTTP/1.1 and h2c): `$_SERVER`'s script, file name, path info,
+  query, method, URI, fields, host and address, httpoxy left out; a POST form and a 3 MB upload;
+  a status, a field and a cookie; a redirect; a 4 MiB response; a front controller through
+  `try_files`. `test/workers` has a case for the handler. They pass under the race detector on
+  the benchmark host.
 
 ## Notes for later iterations
 

@@ -198,7 +198,7 @@ Status: `todo`, `doing` or `done`.
 | I72 | WASM II: Proxy-Wasm subset | I71 | done |
 | I73 | Friendly config format | I03 | done |
 | I74 | nginx config converter | I73 | done |
-| I75 | FastCGI | I17 | todo |
+| I75 | FastCGI | I17 | done |
 | **1.0** | | | |
 | I76 | Continuous fuzzing | I55 | todo |
 | I77 | Config and Admin API v1 freeze | I69, I74 | todo |

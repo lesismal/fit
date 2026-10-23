@@ -1443,6 +1443,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "fastcgi"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.fastcgi"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "forward_proxy"
               }
             }
@@ -1508,6 +1524,7 @@
         "module": {
           "description": "The module's name within its namespace.",
           "enum": [
+            "fastcgi",
             "forward_proxy",
             "proxy",
             "respond",
@@ -1521,6 +1538,107 @@
       },
       "required": [
         "module"
+      ],
+      "type": "object"
+    },
+    "http.handlers.fastcgi": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "Where the application listens: a host and port, as \"127.0.0.1:9000\", or \"unix/\" and a socket's path, as \"unix//run/php/php-fpm.sock\".",
+          "type": "string"
+        },
+        "connect_timeout": {
+          "default": "5s",
+          "description": "How long connecting may take; 5s when left out. A request that times out connecting is answered 504.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "More parameters for the application, set after fit's own.",
+          "type": "object"
+        },
+        "idle_timeout": {
+          "default": "60s",
+          "description": "How long an idle connection is kept; 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "index": {
+          "default": "index.php",
+          "description": "The script a path ending in / runs; index.php when left out.",
+          "type": "string"
+        },
+        "max_conns": {
+          "default": 64,
+          "description": "The most connections to the application, each carrying one request at a time. 64 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_header_bytes": {
+          "default": 65536,
+          "description": "The most bytes the response's CGI header may take; past it the request is answered 502. 64 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_idle_conns": {
+          "default": 16,
+          "description": "The most idle connections kept for later requests. 16 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_pending": {
+          "default": 1024,
+          "description": "How many requests may wait for a connection when max_conns are busy; past it a request is answered 503. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "response_header_timeout": {
+          "default": "60s",
+          "description": "How long the application may take to begin its response; 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "response_idle_timeout": {
+          "default": "60s",
+          "description": "How long the application may go silent in the middle of a response; 60s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "root": {
+          "description": "The document root, which SCRIPT_FILENAME, DOCUMENT_ROOT and PATH_TRANSLATED are made from, as the application sees it.",
+          "type": "string"
+        },
+        "split_path": {
+          "default": [
+            ".php"
+          ],
+          "description": "What ends a script's name in a path, the rest being PATH_INFO: \"/index.php/a/b\" runs /index.php with PATH_INFO /a/b. [\".php\"] when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "default": "10m",
+          "description": "The most a whole exchange may take; 10m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "try_files": {
+          "description": "Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; [\"{path}\", \"{path}/index.php\", \"/index.php\"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "address",
+        "root"
       ],
       "type": "object"
     },
