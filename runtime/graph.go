@@ -53,6 +53,9 @@ type Graph struct {
 	// see config.Limits. The engine takes it when it starts, as it does
 	// MaxPendingBytes.
 	MaxConns int
+	// Engine is the config's engine settings, or nil; the listeners'
+	// engine takes them when it starts, as it does MaxPendingBytes.
+	Engine *config.Engine
 	// ACME obtains the certificates of the names the listeners list in
 	// tls.acme, ACMENames, or is nil. It outlives the graph: once the graph
 	// is current, ACME is told to manage ACMENames, none or some, and it
@@ -194,7 +197,7 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, Tracer: env.Tracer, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(),
+	g := &Graph{AccessLog: env.AccessLog, Tracer: env.Tracer, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(), Engine: c.Engine,
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
 	if c.Metrics != nil || c.Telemetry != nil && c.Telemetry.Metrics != nil {
 		g.Metrics = env.Metrics

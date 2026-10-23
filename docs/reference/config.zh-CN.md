@@ -21,7 +21,8 @@ fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`
 | [Services](config.md#services) | 四层代理：TCP 连接和 UDP 数据报，按 SNI 透传 TLS，向 upstream 发送 PROXY 协议 | [`services[]`](config.md#config-service) |
 | [Access log](config.md#access-log) | 每个请求一行 JSON 的访问日志，带有界缓冲 | [`access_log`](config.md#config-accesslog) |
 | [Telemetry](config.md#telemetry) | OpenTelemetry：链路追踪和指标，经 OTLP/HTTP 导出 | [`telemetry`](config.md#config-telemetry)、[`traces`](config.md#config-tracesexport)、[`metrics`](config.md#config-metricsexport) |
-| [Limits](config.md#limits) | 所有 listener 的上限：连接数、头部和请求体大小、等待慢客户端的响应字节、写停顿超时 | [`limits`](config.md#config-limits) |
+| [Limits](config.md#limits) | 所有 listener 的上限：连接数、头部和请求体大小、等待慢客户端的响应字节（默认为机器内存的一半）、写停顿超时 | [`limits`](config.md#config-limits) |
+| [Engine](config.md#engine) | fib 网络引擎的设置：event loop 数量、worker 数、任务队列、读缓冲、单连接背压水位、backlog；不写的取 fib 的默认值 | [`engine`](config.md#config-engine) |
 | [Admin API](config.md#admin-api) | 读取和替换运行中配置的 Admin API：地址、令牌、保留的版本数、上限、仪表盘 | [`admin`](config.md#config-admin) |
 | [HTTPS by default](config.md#https-by-default) | 默认 HTTPS：不写 listener 时自动生成 443 和跳转用的 80；关闭、关闭跳转、改端口 | [`auto_https`](config.md#config-autohttps) |
 | [Metrics](config.md#metrics) | 按 listener 和路由统计请求，供 Admin API 的 `/metrics` | [`metrics`](config.md#config-metrics) |

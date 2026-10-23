@@ -211,6 +211,9 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	if !sameJSON(cs.first.Telemetry, c.Telemetry) {
 		r.Warnings = append(r.Warnings, "telemetry changed; the change takes effect when fit restarts")
 	}
+	if !sameJSON(cs.first.Engine, c.Engine) {
+		r.Warnings = append(r.Warnings, "engine changed; the change takes effect when fit restarts")
+	}
 	if !sameProviders(cs.first.Providers, c.Providers) {
 		r.Warnings = append(r.Warnings, "providers changed; the change takes effect when fit restarts")
 	}

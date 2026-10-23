@@ -46,7 +46,6 @@ func TestDefaults(t *testing.T) {
 		def, field string
 		want       any
 	}{
-		{"config.Limits", "max_pending_bytes", float64(config.DefaultMaxPendingBytes)},
 		{"config.Limits", "max_header_bytes", float64(config.DefaultMaxHeaderBytes)},
 		{"config.Limits", "max_body_bytes", float64(config.DefaultMaxBodyBytes)},
 		{"config.Limits", "write_stall_timeout", "30s"},

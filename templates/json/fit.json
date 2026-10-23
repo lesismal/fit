@@ -1334,9 +1334,11 @@
   // object.
   // "limits": {
     // // How many bytes of responses may wait, across every connection, for clients to take them;
-    // // past it, every connection stops reading until some go. 256 MiB when left out or 0.
-    // // integer, 0 or more; default 268435456.
-    // "max_pending_bytes": 268435456,
+    // // past it, every connection stops reading until some go. Takes effect at start, not on a
+    // // reload. Half the machine's memory when left out or 0, or half the container's memory limit
+    // // where that is lower; 256 MiB where neither can be read.
+    // // integer, 0 or more.
+    // "max_pending_bytes": 0,
 
     // // The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or
     // // 0.
@@ -1361,6 +1363,54 @@
     // // nothing to send. 30s when left out.
     // // duration, as "1.5s" or "2m"; default "30s".
     // "write_stall_timeout": "30s",
+  // },
+
+  // How fib, the network engine fit serves and dials on, is set up: its event loops, workers and
+  // buffers. fib's own defaults for what is left out, and for all of it when engine is. Read
+  // when fit starts: a change takes effect when fit restarts.
+  // object.
+  // "engine": {
+    // // How many event loops each engine waits for its connections' events on, which spread the
+    // // waits, accepts and wake-ups over cores; the connections' work runs on the workers either
+    // // way. fib's default when left out or 0: 1 on up to 4 CPUs, 2 on up to 16, and the CPUs
+    // // divided by 8 on more. Windows has one loop whatever this says.
+    // // integer, 0 to 1024.
+    // "event_loops": 0,
+
+    // // The most workers each engine's pool runs connections' reads and callbacks on at once. fib's
+    // // default, which follows the CPUs, when left out or 0.
+    // // integer, 0 or more.
+    // "workers": 0,
+
+    // // How many workers an idle pool keeps, rather than retiring every one and starting them again
+    // // when work arrives. None when left out or 0.
+    // // integer, 0 or more.
+    // "min_workers": 0,
+
+    // // How many tasks each engine's pool holds waiting for a worker. fib's default, which follows
+    // // its workers, when left out or 0.
+    // // integer, 0 or more.
+    // "task_queue": 0,
+
+    // // The most events one wait of an event loop collects; the rest wait for the next. 1024 when
+    // // left out or 0.
+    // // integer, 0 or more.
+    // "poll_batch": 0,
+
+    // // The bytes a connection reads its socket into at a time. 16 KiB when left out or 0.
+    // // integer, 0 to 67108864.
+    // "read_buffer_size": 0,
+
+    // // The bytes a connection may have waiting to be written before it stops reading until they
+    // // drain, the backpressure on one connection; limits.max_pending_bytes bounds them all
+    // // together. fib's default, 64 KiB, when left out or 0.
+    // // integer, 0 or more.
+    // "write_watermark": 0,
+
+    // // The length of each listening socket's queue of connections not yet accepted. The system's
+    // // when left out or 0.
+    // // integer, 0 or more.
+    // "backlog": 0,
   // },
 
   // The Admin API, through which the running config is read and replaced, and which serves

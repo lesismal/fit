@@ -9,6 +9,7 @@ A config is one object. Its parts, each with a chapter below:
 | [`access_log`](#access-log) | A JSON line for each request. |
 | [`telemetry`](#telemetry) | OpenTelemetry traces and metrics, over OTLP. |
 | [`limits`](#limits) | Limits on every listener: connections, header and body sizes, memory for responses. |
+| [`engine`](#engine) | The network engine's event loops, workers and buffers; fib's defaults when left out. |
 | [`admin`](#admin-api) | The Admin API, which reads and replaces the running config. |
 | [`auto_https`](#https-by-default) | HTTPS by default, and its ports. |
 | [`metrics`](#metrics) | Requests counted and timed by listener and route. |

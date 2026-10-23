@@ -282,6 +282,9 @@ func (c *Config) Validate() Errors {
 	if t := c.Telemetry; t != nil {
 		checkTelemetry(t, add)
 	}
+	if e := c.Engine; e != nil && e.Workers > 0 && e.MinWorkers > e.Workers {
+		add(e.At.Field("min_workers"), "min_workers, %d, is more than workers, %d", e.MinWorkers, e.Workers)
+	}
 
 	upstreams := map[string]bool{}
 	for _, u := range c.Upstreams {

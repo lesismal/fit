@@ -1,7 +1,9 @@
 Limits that bound what clients can make fit hold, on every listener. Each has a safe default, so a
 config that writes none is still bounded: connections, the sizes of request headers and bodies,
 the bytes of responses waiting for slow clients, and how long a client may stall a response.
-The [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
+The bytes waiting for slow clients default to half the machine's memory, or of the container's
+memory limit where that is lower; the rest have fixed defaults. The
+[`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
 
 ```json
 {

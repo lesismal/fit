@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/internal/sysmem"
 )
 
 func TestDuration(t *testing.T) {
@@ -50,6 +52,10 @@ func TestLimits(t *testing.T) {
 	if got := c.Limits.WriteStall(); got != 30*time.Second {
 		t.Fatalf("default write stall timeout %v", got)
 	}
+	// Half the memory, or the fallback where it cannot be read.
+	if got, n := c.Limits.PendingBytes(), sysmem.Total(); n == 0 && got != FallbackMaxPendingBytes || n > 0 && got != int64(n/2) {
+		t.Fatalf("default max_pending_bytes %d, memory %d", got, n)
+	}
 	c, err = Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "limits": {"write_stall_timeout": "5s"}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -60,5 +66,37 @@ func TestLimits(t *testing.T) {
 	_, err = Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "limits": {"write_stall_timeout": "soon"}}`))
 	if err == nil || !strings.Contains(err.Error(), `limits.write_stall_timeout: "soon" is not a duration`) {
 		t.Fatalf("error %v", err)
+	}
+}
+
+func TestEngine(t *testing.T) {
+	c, err := Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}],
+  "engine": {"event_loops": 4, "workers": 64, "min_workers": 8, "task_queue": 4096, "poll_batch": 512,
+    "read_buffer_size": 32768, "write_watermark": 131072, "backlog": 1024}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Engine{EventLoops: 4, Workers: 64, MinWorkers: 8, TaskQueue: 4096, PollBatch: 512,
+		ReadBufferSize: 32768, WriteWatermark: 131072, Backlog: 1024}
+	got := *c.Engine
+	got.At = want.At
+	if got != want {
+		t.Fatalf("engine %+v", got)
+	}
+	for doc, msg := range map[string]string{
+		`{"event_loops": -1}`:              "engine.event_loops",
+		`{"event_loops": 2048}`:            "engine.event_loops",
+		`{"read_buffer_size": 134217728}`:  "engine.read_buffer_size",
+		`{"loops": 2}`:                     "engine.loops: unknown field",
+		`{"workers": 4, "min_workers": 8}`: "min_workers, 8, is more than workers, 4",
+	} {
+		_, err := Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "engine": ` + doc + `}`))
+		if err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%s: error %v, want %q", doc, err, msg)
+		}
+	}
+	// min_workers alone is checked against fib's default workers by fib.
+	if _, err := Load([]byte(`{"listeners": [{"name": "a", "address": ":1"}], "engine": {"min_workers": 8}}`)); err != nil {
+		t.Fatal(err)
 	}
 }

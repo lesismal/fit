@@ -29,6 +29,7 @@ a config against it and more.
 - [Access log](#access-log): [`access_log`](#config-accesslog)
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
+- [Engine](#engine): [`engine`](#config-engine)
 - [Admin API](#admin-api): [`admin`](#config-admin)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
@@ -50,6 +51,7 @@ A config is one object. Its parts, each with a chapter below:
 | [`access_log`](#access-log) | A JSON line for each request. |
 | [`telemetry`](#telemetry) | OpenTelemetry traces and metrics, over OTLP. |
 | [`limits`](#limits) | Limits on every listener: connections, header and body sizes, memory for responses. |
+| [`engine`](#engine) | The network engine's event loops, workers and buffers; fib's defaults when left out. |
 | [`admin`](#admin-api) | The Admin API, which reads and replaces the running config. |
 | [`auto_https`](#https-by-default) | HTTPS by default, and its ports. |
 | [`metrics`](#metrics) | Requests counted and timed by listener and route. |
@@ -106,6 +108,7 @@ In JSON:
 | `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON; no access log when left out. |
 | `telemetry` | [object](#config-telemetry) |  | OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts. |
 | `limits` | [object](#config-limits) |  | Limits that apply to every listener. |
+| `engine` | [object](#config-engine) |  | How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts. |
 | `admin` | [object](#config-admin) |  | The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. |
 | `auto_https` | [object](#config-autohttps) |  | HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out. |
 | `metrics` | [object](#config-metrics) |  | Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin. |
@@ -903,7 +906,9 @@ In JSON:
 Limits that bound what clients can make fit hold, on every listener. Each has a safe default, so a
 config that writes none is still bounded: connections, the sizes of request headers and bodies,
 the bytes of responses waiting for slow clients, and how long a client may stall a response.
-The [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
+The bytes waiting for slow clients default to half the machine's memory, or of the container's
+memory limit where that is lower; the rest have fixed defaults. The
+[`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
 
 In a .konf file:
 
@@ -964,11 +969,91 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `max_pending_bytes` | integer, 0 or more | `268435456` | How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. 256 MiB when left out or 0. |
+| `max_pending_bytes` | integer, 0 or more |  | How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read. |
 | `max_header_bytes` | integer, 0 or more | `1048576` | The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `100000` | The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0. |
 | `max_body_bytes` | integer, 0 or more | `16777216` | The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0. |
 | `write_stall_timeout` | duration | `"30s"` | How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out. |
+
+<a id="engine"></a>
+
+## Engine
+
+How [fib](https://github.com/lesismal/fib), the network engine fit serves and dials on, is set up.
+fit runs two engines: the listeners', which serves clients, and one that upstream connections are
+dialed through, so that a response waiting for a slow client does not hold up the workers that
+read upstreams. Each takes these settings. What is left out keeps fib's own default, so most
+configs write no `engine` at all; it is for tuning a busy server on the host it runs on.
+
+The engines are made when fit starts: a reload that changes `engine` is applied, with a warning
+that the change waits for a restart. How many bytes may wait for clients across every
+connection, the engine's budget, is [`limits.max_pending_bytes`](#limits), half the machine's
+memory by default; `write_watermark` is the same backpressure on one connection.
+
+In a .konf file:
+
+```fit
+listener web {
+	address :8080
+}
+
+route {
+	handler respond
+}
+
+engine {
+	event_loops 4
+	workers 512
+	read_buffer_size 32768
+	write_watermark 131072
+}
+```
+
+In YAML:
+
+```yaml
+listeners:
+  - name: web
+    address: :8080
+routes:
+  - handler:
+      module: respond
+engine:
+  event_loops: 4
+  workers: 512
+  read_buffer_size: 32768
+  write_watermark: 131072
+```
+
+In JSON:
+
+```json
+{
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "routes": [{"handler": {"module": "respond"}}],
+  "engine": {
+    "event_loops": 4,
+    "workers": 512,
+    "read_buffer_size": 32768,
+    "write_watermark": 131072
+  }
+}
+```
+
+<a id="config-engine"></a>
+
+### `engine`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `event_loops` | integer, 0 to 1024 |  | How many event loops each engine waits for its connections' events on, which spread the waits, accepts and wake-ups over cores; the connections' work runs on the workers either way. fib's default when left out or 0: 1 on up to 4 CPUs, 2 on up to 16, and the CPUs divided by 8 on more. Windows has one loop whatever this says. |
+| `workers` | integer, 0 or more |  | The most workers each engine's pool runs connections' reads and callbacks on at once. fib's default, which follows the CPUs, when left out or 0. |
+| `min_workers` | integer, 0 or more |  | How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0. |
+| `task_queue` | integer, 0 or more |  | How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0. |
+| `poll_batch` | integer, 0 or more |  | The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0. |
+| `read_buffer_size` | integer, 0 to 67108864 |  | The bytes a connection reads its socket into at a time. 16 KiB when left out or 0. |
+| `write_watermark` | integer, 0 or more |  | The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. fib's default, 64 KiB, when left out or 0. |
+| `backlog` | integer, 0 or more |  | The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0. |
 
 <a id="admin-api"></a>
 

@@ -81,7 +81,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	// that a proxied response waiting for a slow client waits on that
 	// engine's pool, not the listeners'. It stops after the graph is
 	// released, which closes the pools.
-	engine, stopEngine, err := upstream.StartEngine()
+	engine, stopEngine, err := upstream.StartEngineWith(c.Engine)
 	if err != nil {
 		fmt.Fprintf(stderr, "fit run: %v\n", err)
 		return 1

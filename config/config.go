@@ -8,11 +8,14 @@
 package config
 
 import (
+	"math"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/lesismal/fit/internal/sysmem"
 )
 
 // SchemaVersion is the version of the config's names and shapes this fit
@@ -31,6 +34,7 @@ type Config struct {
 	AccessLog     *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Telemetry     *Telemetry `json:"telemetry,omitempty" doc:"OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."`
 	Limits        Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
+	Engine        *Engine    `json:"engine,omitempty" doc:"How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts."`
 	Admin         *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
 	AutoHTTPS     *AutoHTTPS `json:"auto_https,omitempty" doc:"HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."`
 	Metrics       *Metrics   `json:"metrics,omitempty" doc:"Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."`
@@ -243,7 +247,7 @@ func (a *Admin) Conns() int         { return int(orDefault(int64(a.MaxConns), De
 // The defaults of Limits.
 const (
 	DefaultWriteStallTimeout = Duration(30 * time.Second)
-	DefaultMaxPendingBytes   = 256 << 20
+	FallbackMaxPendingBytes  = 256 << 20
 	DefaultMaxHeaderBytes    = 1 << 20
 	DefaultMaxBodyBytes      = 16 << 20
 	DefaultMaxConns          = 100000
@@ -251,7 +255,7 @@ const (
 
 // Limits bound what clients can make fit hold for them.
 type Limits struct {
-	MaxPendingBytes int64 `json:"max_pending_bytes,omitempty" min:"0" default:"268435456" doc:"How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. 256 MiB when left out or 0."`
+	MaxPendingBytes int64 `json:"max_pending_bytes,omitempty" min:"0" doc:"How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read."`
 	MaxHeaderBytes  int   `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
 	MaxConns        int   `json:"max_conns,omitempty" min:"0" default:"100000" doc:"The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0."`
 	MaxBodyBytes    int64 `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
@@ -263,11 +267,21 @@ type Limits struct {
 
 // PendingBytes, HeaderBytes and BodyBytes return the limits, their defaults
 // when left out.
-func (l Limits) PendingBytes() int64 { return orDefault(l.MaxPendingBytes, DefaultMaxPendingBytes) }
+func (l Limits) PendingBytes() int64 { return orDefault(l.MaxPendingBytes, DefaultMaxPendingBytes()) }
 func (l Limits) HeaderBytes() int {
 	return int(orDefault(int64(l.MaxHeaderBytes), DefaultMaxHeaderBytes))
 }
 func (l Limits) BodyBytes() int64 { return orDefault(l.MaxBodyBytes, DefaultMaxBodyBytes) }
+
+// DefaultMaxPendingBytes is max_pending_bytes when it is left out: half the
+// memory sysmem.Total reads, or FallbackMaxPendingBytes when it reads none.
+func DefaultMaxPendingBytes() int64 {
+	n := sysmem.Total() / 2
+	if n == 0 {
+		return FallbackMaxPendingBytes
+	}
+	return int64(min(n, math.MaxInt64))
+}
 
 // Conns returns the connection limit, its default when left out.
 func (l Limits) Conns() int { return int(orDefault(int64(l.MaxConns), DefaultMaxConns)) }

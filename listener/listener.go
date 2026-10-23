@@ -36,6 +36,7 @@ import (
 	fibtls "github.com/lesismal/fib/tls"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/fibconf"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
@@ -134,8 +135,7 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	}
 	defer g.Release()
 
-	cfg := fib.DefaultConfig()
-	cfg.Name = "fit"
+	cfg := fibconf.Config("fit", g.Engine)
 	// What waits for clients, across every connection, is bounded; a client
 	// that stops reading loses its response after the write stall timeout,
 	// so it cannot hold the budget for long.

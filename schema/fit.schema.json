@@ -434,6 +434,54 @@
       },
       "type": "object"
     },
+    "config.Engine": {
+      "additionalProperties": false,
+      "properties": {
+        "backlog": {
+          "description": "The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_loops": {
+          "description": "How many event loops each engine waits for its connections' events on, which spread the waits, accepts and wake-ups over cores; the connections' work runs on the workers either way. fib's default when left out or 0: 1 on up to 4 CPUs, 2 on up to 16, and the CPUs divided by 8 on more. Windows has one loop whatever this says.",
+          "maximum": 1024,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_workers": {
+          "description": "How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "poll_batch": {
+          "description": "The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "read_buffer_size": {
+          "description": "The bytes a connection reads its socket into at a time. 16 KiB when left out or 0.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "task_queue": {
+          "description": "How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workers": {
+          "description": "The most workers each engine's pool runs connections' reads and callbacks on at once. fib's default, which follows the CPUs, when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "write_watermark": {
+          "description": "The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. fib's default, 64 KiB, when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "config.EtcdProvider": {
       "additionalProperties": false,
       "properties": {
@@ -750,8 +798,7 @@
           "type": "integer"
         },
         "max_pending_bytes": {
-          "default": 268435456,
-          "description": "How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. 256 MiB when left out or 0.",
+          "description": "How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2765,6 +2812,10 @@
     "auto_https": {
       "$ref": "#/$defs/config.AutoHTTPS",
       "description": "HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."
+    },
+    "engine": {
+      "$ref": "#/$defs/config.Engine",
+      "description": "How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts."
     },
     "limits": {
       "$ref": "#/$defs/config.Limits",

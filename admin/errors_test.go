@@ -208,12 +208,13 @@ func TestConfigsMore(t *testing.T) {
 	// Changes to what takes effect at a restart are warned of.
 	r, err = f.configs.Apply([]byte(`{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "telemetry": {"metrics": {}}, "providers": [{"docker": {}}], "acme": {"email": "a@example.com"},
+  "engine": {"workers": 64},
   "routes": [{"handler": {"module": "respond", "params": {"body": "v2"}}}]}`), SourceAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(r.Warnings, "\n"); !strings.Contains(got, "telemetry changed") || !strings.Contains(got, "providers changed") ||
-		!strings.Contains(got, "acme changed") {
+		!strings.Contains(got, "acme changed") || !strings.Contains(got, "engine changed") {
 		t.Errorf("warnings: %q", r.Warnings)
 	}
 }
