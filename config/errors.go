@@ -7,6 +7,9 @@ import (
 
 // Error is one problem found in a config, and where it was found.
 type Error struct {
+	// File is the file the problem is in, when a config is read from
+	// several; empty otherwise.
+	File string
 	// Path is where in the document the problem is, as in
 	// listeners[0].protocols[1]; it is empty for the document as a whole.
 	Path string
@@ -20,6 +23,13 @@ type Error struct {
 
 func (e *Error) Error() string {
 	var b strings.Builder
+	if e.File != "" {
+		b.WriteString(e.File)
+		b.WriteString(":")
+		if e.Line == 0 {
+			b.WriteString(" ")
+		}
+	}
 	if e.Line > 0 {
 		fmt.Fprintf(&b, "%d:%d: ", e.Line, e.Col)
 	}

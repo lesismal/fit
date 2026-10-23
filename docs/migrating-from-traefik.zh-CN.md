@@ -10,7 +10,7 @@ fit 借鉴了 Traefik 的 provider（把 Docker 标签、Consul 服务目录、K
 
 | Traefik | fit |
 | --- | --- |
-| entryPoints | listener：`{"name": "web", "address": ":80", "protocols": ["http/1.1", "h2c"]}` |
+| entryPoints | listener：`listener web { address :80; protocols http/1.1 h2c }` |
 | entryPoint 的 `http.tls` | listener 的 `tls` |
 | HTTP router | 路由；`entryPoints` 即路由的 `listeners` |
 | router 的 `rule` | 路由的 `match.expr`，或 `match` 的各字段（见下文） |
@@ -36,8 +36,13 @@ fit 借鉴了 Traefik 的 provider（把 Docker 标签、Consul 服务目录、K
 
 fit 的 `match.expr` 对共有的匹配器采用 Traefik 的语法，包括反引号：
 
-```json
-{"match": {"expr": "Host(`example.com`) && (PathPrefix(`/api`) || Method(`POST`))"}}
+```fit
+route api {
+	match {
+		expr "Host(`example.com`) && (PathPrefix(`/api`) || Method(`POST`))"
+	}
+	handler proxy { upstream app }
+}
 ```
 
 它的匹配器有 `Host`、`Path`、`PathPrefix`、`PathRegexp`、`Method`、`Header(name, value...)`、`Query(key, value...)`

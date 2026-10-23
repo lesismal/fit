@@ -15,21 +15,6 @@ An upstream is a named set of servers, which the [proxy](#http-handlers-proxy) h
 - **Protocol**: `http/1.1`, `h2c`, or `h2` over TLS, with `tls_server_name`, `tls_ca_file` and a
   client certificate (`tls_cert_file`, `tls_key_file`).
 
-```caddyfile
-:8080 {
-	reverse_proxy 10.0.0.1:8080 10.0.0.2:8080 {
-		lb_policy least_conn
-		health_uri /healthz
-		health_interval 5s
-		fail_duration 30s
-		max_fails 3
-		transport http {
-			dial_timeout 3s
-		}
-	}
-}
-```
-
 ```json
 {
   "listeners": [{"name": "web", "address": ":8080"}],

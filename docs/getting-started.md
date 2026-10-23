@@ -25,92 +25,157 @@ fit version
 
 ## A first config
 
-A config may be a Caddyfile, YAML or JSON ([Configuration](configuration.md) compares them); this
-guide uses the Caddyfile, the shortest of the three, which fit converts to its native JSON as it
-reads it. Save this as `Caddyfile`:
+A config may be a .fit file, YAML or JSON ([Configuration](configuration.md) compares them); this
+guide uses the .fit format, fit's own, written in blocks of directives. Save this as `fit.fit`:
 
-```caddyfile
-:8080 {
-	respond /hello "hello from fit"
+```fit
+listener web {
+	address :8080
+	protocols http/1.1 h2c
+}
+
+route hello {
+	match {
+		path /hello
+	}
+	handler respond {
+		body "hello from fit\n"
+	}
 }
 ```
 
-A site's address, `:8080`, says where fit listens: HTTP on port 8080, for any host. The
-directives in its block say what answers the requests: `respond` answers those its matcher,
-`/hello`, takes, with a fixed body. Check the config, then run it:
+A listener says where fit listens, and what it speaks there. A route says which requests it takes
+(`match`), what they go through (`middleware`) and what answers them (`handler`), each a module
+with its params in a block. Check the config, then run it:
 
 ```bash
-fit validate -c Caddyfile
-fit run -c Caddyfile
+fit validate -c fit.fit
+fit run -c fit.fit
 ```
 
 ```bash
 curl localhost:8080/hello
 ```
 
-fit checks a config strictly: a directive it does not convert is listed with its line, and the
-config it converts to is checked as any other, so that a wrong value is an error and fit does not
-start. `fit adapt -c Caddyfile` prints the native config it becomes. A request no directive takes
-is answered 200 with no body, as Caddy answers.
+fit checks a config strictly: an unknown field, a value of the wrong type or a missing one is an
+error, with its line and column, and fit does not start. A request no route matches gets 404.
 
 ## Serve files
 
-Add a directory to serve, under the first directive:
+Add a route that serves a directory, after the first:
 
-```caddyfile
-:8080 {
-	respond /hello "hello from fit"
-	root * ./public
-	file_server
+```fit
+listener web {
+	address :8080
+	protocols http/1.1 h2c
+}
+
+route hello {
+	match {
+		path /hello
+	}
+	handler respond {
+		body "hello from fit\n"
+	}
+}
+
+route files {
+	match {
+		path /*
+	}
+	handler static {
+		root ./public
+	}
 }
 ```
 
-`root` says where the files are, for every request (`*`), and `file_server` serves them. A path
-ending in `*` matches a prefix, and a directive with no matcher takes every request; when several
-take a request, the most specific wins: `/hello` before the files, whatever their order.
-`file_server` serves `index.html` for a directory; `file_server browse` lists one that has none,
-and `try_files {path} /index.html` serves a single-page app.
+A path ending in `*` matches a prefix. When several routes match, the most specific wins: `/hello`
+before `/*`, whatever their order. `static` serves `index.html` for a directory; `browse` lists one
+that has none, and `try_files` serves a single-page app.
 
 ## Proxy to an app
 
-`reverse_proxy` sends requests to a set of backends, an upstream:
+An upstream is a set of backends, by name; the `proxy` handler sends requests to one:
 
-```caddyfile
-:8080 {
-	reverse_proxy /api/* 127.0.0.1:9000 127.0.0.1:9001 {
-		health_uri /healthz
-		health_interval 5s
+```fit
+listener web {
+	address :8080
+	protocols http/1.1 h2c
+}
+
+upstream app {
+	addresses 127.0.0.1:9000 127.0.0.1:9001
+	health_check {
+		path /healthz
+		interval 5s
 	}
-	root * ./public
-	file_server
+}
+
+route api {
+	match {
+		path /api/*
+	}
+	handler proxy {
+		upstream app
+	}
+}
+
+route files {
+	match {
+		path /*
+	}
+	handler static {
+		root ./public
+	}
 }
 ```
 
 Requests to `/api/` go to the two backends in turn, and a backend that fails its health check is
 left out until it passes again. WebSockets and gRPC go through the same way. Every connection,
-queue and timeout has a safe default, which `reverse_proxy`'s subdirectives change.
+queue and timeout has a safe default, which the upstream's fields change.
 
 ## HTTPS
 
-Give the site a host name for its address:
+Write the routes in a site named by its host names, and leave the listeners out:
 
-```caddyfile
-example.com {
-	root * ./public
-	file_server
+```fit
+upstream app {
+	addresses 127.0.0.1:9000 127.0.0.1:9001
+}
+
+site example.com {
+	route /api/* {
+		handler proxy { upstream app }
+	}
+	route /* {
+		handler static { root ./public }
+	}
 }
 ```
 
-fit then listens on 443 for HTTPS, with a certificate for `example.com` from Let's Encrypt, which
-it renews, and on 80 only to redirect to HTTPS. The name's DNS must point at the host, and ports 80
-and 443 reach it. The global options `email` and `acme_ca` set the ACME account and CA,
-`auto_https` turns it off. To use certificates of your own, give them with `tls`:
+A site's routes match its host names, and each its own paths. fit then listens on 443 for HTTPS,
+with a certificate for `example.com` from Let's Encrypt, which it renews, and on 80 only to
+redirect to HTTPS. The name's DNS must point at the host, and ports 80 and 443 reach it. `acme`
+sets the CA and where certificates are kept, `auto_https` the ports, or turns it off. To use
+certificates of your own, write the listener, and name it in the site:
 
-```caddyfile
-example.com {
-	tls example.com.pem example.com.key
-	root * ./public
-	file_server
+```fit
+listener web {
+	address :443
+	protocols http/1.1 h2 h3
+	tls {
+		certificates {
+			cert_file example.com.pem
+			key_file example.com.key
+		}
+	}
+}
+
+site example.com {
+	listeners web
+	route /* {
+		handler static { root ./public }
+	}
 }
 ```
 
@@ -118,39 +183,59 @@ fit loads the files again when they change.
 
 ## Middleware
 
-Middleware runs before the handler. This compresses responses, and adds a field to each:
+Middleware runs in order before the handler. In a site, middleware runs for each of its routes;
+this compresses responses, and adds a field to each:
 
-```caddyfile
-example.com {
-	encode
-	header Strict-Transport-Security "max-age=31536000"
-	root * ./public
-	file_server
+```fit
+site example.com {
+	middleware compress
+	middleware headers {
+		response {
+			set {
+				Strict-Transport-Security "max-age=31536000"
+			}
+		}
+	}
+	route /* {
+		handler static { root ./public }
+	}
 }
 ```
 
-The [Caddyfile reference](reference/caddyfile.md#directives) lists the directives that convert,
-and the [config reference](reference/config.md#middleware) every middleware fit has: rewrites and
-redirects, rate and concurrency limits, Basic auth, JWTs, forward auth, client certificates, a
-circuit breaker, a cache, WASM plugins. Those with no Caddyfile directive are written in YAML or
-JSON, starting from `fit adapt`'s output.
+The [reference](reference/config.md#middleware) lists them all: rewrites and redirects, rate and
+concurrency limits, Basic auth, JWTs, forward auth, client certificates, a circuit breaker, a
+cache, WASM plugins.
+
+## Several files
+
+As a config grows, split it: `-c` takes a directory, and every `.fit`, `.yaml`, `.yml` and `.json`
+file in it, in its subdirectories too, is read, the routes and upstreams of each joined:
+
+```bash
+fit run -c /etc/fit
+```
+
+with, say, `/etc/fit/base.fit` holding the listeners and `acme`, and a file in `/etc/fit/sites/`
+for each site. A field other than the lists, as `admin` or `acme`, is given in one file only. The
+[.fit reference](reference/fit.md#several-files-and-directories) has the details.
 
 ## Change it while it runs
 
-`fit run` applies the config file again on SIGHUP, or each time it changes with `-watch`. A config
-that does not load leaves the running one in place, and says why. Listeners that did not change
-keep their connections, and requests under way finish on the config they started with.
+`fit run` applies the config again on SIGHUP, or each time one of its files changes with `-watch`,
+a file added to its directory or taken out included. A config that does not load leaves the running
+one in place, and says why. Listeners that did not change keep their connections, and requests
+under way finish on the config they started with.
 
-A Caddyfile turns the Admin API on, on 127.0.0.1:2019, unless its global options say `admin off`.
-It reads and changes the running config, in fit's native JSON: here, the whole of it, then the
-first route's params, by their JSON pointer, then a whole new config, converted from the Caddyfile
-by `fit adapt`, and back to the first:
+With `admin {}` in the config, the Admin API, on 127.0.0.1:2019 by default, reads and changes
+the running config, in fit's native JSON: here, the whole of it, then the first route's params, by
+their JSON pointer, then a whole new config, converted from the .fit file by `fit adapt`, and back
+to the first:
 
 ```bash
 curl localhost:2019/config
 curl -X PATCH -H 'Content-Type: application/merge-patch+json' \
-  -d '{"body": "hello again"}' localhost:2019/config/routes/0/handler/params
-fit adapt -c Caddyfile -o fit.json
+  -d '{"body": "hello again\n"}' localhost:2019/config/routes/0/handler/params
+fit adapt -c fit.fit -o fit.json
 curl -X POST -H 'Content-Type: application/json' -d @fit.json localhost:2019/load
 curl -X POST localhost:2019/rollback/1
 ```
@@ -160,7 +245,7 @@ and a dashboard at `/dashboard/`.
 
 ## Next
 
-- [Configuration](configuration.md): the same config as a [Caddyfile](reference/caddyfile.md), in
+- [Configuration](configuration.md): the same config as a [.fit file](reference/fit.md), in
   [YAML](reference/yaml.md) or in [JSON](reference/json.md).
 - The [config reference](reference/config.md): every field, its type and default, with examples.
 - Coming from another server: [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md),

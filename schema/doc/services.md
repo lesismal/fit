@@ -1,8 +1,7 @@
 A service proxies at layer 4: the connections of `tcp` listeners, byte for byte, and the datagrams
 of `udp` listeners, a session per client, to an upstream's addresses, picked by its load balancing
 and health. TLS connections can be told apart by the name they ask for (`server_names`) and passed
-through without being terminated; `proxy_protocol` tells the upstream who the client was. A
-Caddyfile has no services.
+through without being terminated; `proxy_protocol` tells the upstream who the client was.
 
 ```json
 {

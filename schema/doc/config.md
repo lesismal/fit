@@ -19,12 +19,6 @@ Nothing else is required: a config of a route alone, whose match names a host, i
 HTTPS with a certificate obtained for that host. Names are matched exactly, an unknown field or a
 value of the wrong type is an error, and so is a key written twice.
 
-```caddyfile
-example.com {
-	respond "hello"
-}
-```
-
 ```json
 {
   "routes": [

@@ -3,9 +3,9 @@
 [English](migrating-from-caddy.md) | [简体中文](migrating-from-caddy.zh-CN.md)
 
 fit 与 Caddy 理念相同：默认 HTTPS、严格的结构化配置，以及原子替换配置的 Admin API。不同在于内置了什么（缓存、限流、
-四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。`fit adapt` 把 Caddyfile 的常用子集转换为 fit 的 JSON，`fit run` 和
-`fit validate` 也直接接受 Caddyfile（名为 `Caddyfile` 或以 `.caddyfile` 结尾的文件）；没有从 Caddy JSON 的转换器。本指南
-给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
+四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。fit 自己的配置格式 [.fit 文件](reference/fit.zh-CN.md) 像
+Caddyfile 一样由指令块组成，每组域名一个 `site`，但指令就是 fit 自己的字段。`fit adapt` 可以把 Caddyfile 的常用子集转换成
+.fit 文件作为起点；没有从 Caddy JSON 的转换器。本指南给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
 
 ## 一个站点
 
@@ -24,6 +24,29 @@ example.com {
 ```
 
 在 fit 中是：
+
+```fit
+upstream app {
+	addresses 127.0.0.1:9000 127.0.0.1:9001
+	load_balancing least_conn
+	health_check {
+		path /healthz
+	}
+}
+
+site example.com {
+	middleware compress
+	route /api/* {
+		middleware rewrite { strip_prefix /api }
+		handler proxy { upstream app }
+	}
+	route /* {
+		handler static { root /srv/www }
+	}
+}
+```
+
+用 fit 的 JSON 写是：
 
 ```json
 {
@@ -48,12 +71,12 @@ example.com {
 
 | Caddy | fit |
 | --- | --- |
-| 站点地址 `example.com` | 路由的 `match.host`；listener 由默认 HTTPS 生成，或手写 |
-| `:8080` | 一个 listener：`{"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}` |
-| 匹配器 `path`、`host`、`method`、`header`、`query`、`remote_ip`、`path_regexp`、`expression` | `match` 中同名的字段，以及 `expr` |
+| 站点地址 `example.com` | `site example.com { ... }`，其中的路由匹配该域名；listener 由默认 HTTPS 生成，或手写 |
+| `:8080` | 一个 listener：`listener web { address :8080; protocols http/1.1 h2c }` |
+| 匹配器 `path`、`host`、`method`、`header`、`query`、`remote_ip`、`path_regexp`、`expression` | 路由的 `match { ... }` 中同名的字段，以及 `expr` |
 | `handle`、`route` 及其顺序 | 路由，按 `priority`、再按最具体的 host 和 path 选取 |
-| `handle_path /api/*` | `match.path` 加上 `rewrite` 中间件的 `strip_prefix` |
-| `reverse_proxy` | `proxy` 处理器和一个 upstream |
+| `handle_path /api/*` | `route /api/* { middleware rewrite { strip_prefix /api } ... }` |
+| `reverse_proxy` | `handler proxy { upstream app }` 和一个 `upstream app { ... }` |
 | `lb_policy` | upstream 的 `load_balancing`：`round_robin`、`weighted_round_robin`、`least_conn`、`random`、`p2c`、`ip_hash`、`uri_hash`、`header_hash`、`cookie_hash` |
 | `health_uri`、`health_interval`、`fail_duration`、`max_fails` | `health_check`、`fail_timeout`、`max_fails` |
 | `transport http { versions h2c }` | upstream 的 `protocol`：`h2c`，或基于 TLS 的 `h2` |
@@ -80,10 +103,10 @@ example.com {
 ## 转换 Caddyfile
 
 ```bash
-fit adapt -c Caddyfile -o fit.json
+fit adapt -c Caddyfile -to fit -o fit.fit
 ```
 
-写出 fit 的 JSON，并在标准错误上按行号列出未转换或转换存疑的指令。可转换的有：
+写出 .fit 文件，并在标准错误上按行号列出未转换或转换存疑的指令；每条指令见 [转换 Caddyfile](reference/caddyfile.zh-CN.md)。可转换的有：
 
 - **全局选项**：`email`、`acme_ca`、`acme_ca_root`、`storage file_system`、`admin`、`auto_https`、`http_port`、
   `https_port`、`on_demand_tls` 和 `servers { protocols }`。

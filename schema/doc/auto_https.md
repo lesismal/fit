@@ -5,16 +5,6 @@ gets the certificates of the routes it serves. `auto_https` turns it off, turns 
 or moves the ports. Names that no public CA certifies (`localhost`, IP addresses, `*.internal`,
 wildcards) get none.
 
-```caddyfile
-{
-	auto_https disable_redirects
-	https_port 8443
-}
-example.com {
-	respond "hello"
-}
-```
-
 ```json
 {
   "auto_https": {"disable_redirects": true, "https_port": 8443},

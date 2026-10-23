@@ -11,9 +11,9 @@ and the [config reference](reference/config.md) has every field.
 
 | Traefik | fit |
 | --- | --- |
-| entryPoints | listeners: `{"name": "web", "address": ":80", "protocols": ["http/1.1", "h2c"]}` |
+| entryPoints | listeners: `listener web { address :80; protocols http/1.1 h2c }` |
 | an entryPoint's `http.tls` | a listener's `tls` |
-| HTTP routers | routes; `entryPoints` is a route's `listeners` |
+| HTTP routers | routes, or a `site`'s routes for a set of host names; `entryPoints` is a route's `listeners` |
 | a router's `rule` | a route's `match.expr`, or `match`'s fields (below) |
 | a router's `priority` | a route's `priority` |
 | services, `loadBalancer.servers` | upstreams and their `addresses`, with the `proxy` handler |
@@ -37,8 +37,13 @@ and the [config reference](reference/config.md) has every field.
 
 fit's `match.expr` takes Traefik's syntax for the matchers it shares, backticks included:
 
-```json
-{"match": {"expr": "Host(`example.com`) && (PathPrefix(`/api`) || Method(`POST`))"}}
+```fit
+route api {
+	match {
+		expr "Host(`example.com`) && (PathPrefix(`/api`) || Method(`POST`))"
+	}
+	handler proxy { upstream app }
+}
 ```
 
 Its matchers are `Host`, `Path`, `PathPrefix`, `PathRegexp`, `Method`, `Header(name, value...)`,

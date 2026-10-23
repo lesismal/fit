@@ -1,0 +1,2 @@
+go test fuzz v1
+string("site 0000000000000000000 {  #000000000000000000\n route 0000 { handler 00000 {} } } ")

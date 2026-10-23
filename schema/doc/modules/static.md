@@ -1,16 +1,6 @@
 Serves files from `root`, small ones from memory, with listings (`browse`), precompressed twins,
 and `try_files` for single-page apps.
 
-```caddyfile
-example.com {
-	root * /srv/www
-	try_files {path} {path}/ /index.html
-	file_server {
-		precompressed br gzip
-	}
-}
-```
-
 ```json route
 {
   "match": {"host": ["example.com"]},

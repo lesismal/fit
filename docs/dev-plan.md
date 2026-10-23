@@ -204,6 +204,7 @@ Status: `todo`, `doing` or `done`.
 | I77 | Config and Admin API v1 freeze | I69, I74 | done |
 | I78 | Reference docs and migration guides | I77 | done |
 | I79 | Caddyfile converter, JSON with comments | I74 | done |
+| I80 | fit's own .fit format; configs in several files | I79 | done |
 
 ## M0, foundations
 
@@ -1032,6 +1033,20 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
 - **Done when**: sample Caddyfiles convert, each skipped directive reported, and a converted one is
   served end to end; JSON with comments loads from a file and through the Admin API.
 - **Touches**: `adapter/caddyfile`, `adapter`, `config`, `admin`, `cli`.
+
+### I80 fit's own .fit format; configs in several files
+
+- **Do**: a block format of fit's own, `.fit`, read field for field from the config's types and
+  each module's params, so that it says everything JSON and YAML do, with `site` to write the
+  routes of a set of host names together, and written back from JSON; configs read from several
+  files and directories, merged, with errors at their files; the Caddyfile and nginx converters
+  kept as migration tools, out of the config docs
+  ([decision 021](decisions/021-fit-format-and-config-files.md)).
+- **Done when**: every template, example and reference example has a `.fit` form that loads as its
+  JSON does; a directory of files in the three formats runs, and is reloaded when a file is added,
+  changed or taken out; the docs and templates speak of `.fit`, YAML and JSON.
+- **Touches**: `adapter/fitconf`, `adapter`, `config`, `provider/file`, `cli`, `schema`, `docs`,
+  `templates`, `examples`.
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.

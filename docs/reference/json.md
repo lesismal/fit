@@ -3,9 +3,9 @@
 [English](json.md) | [简体中文](json.zh-CN.md)
 
 JSON is fit's native config format: what the [config reference](config.md) describes field by
-field, what the Admin API takes and returns, and what a Caddyfile, a YAML file or an nginx config
-becomes. A file that is not a Caddyfile, YAML or nginx config by its name is read as JSON;
-`fit run` reads `fit.json` when given no `-c`. [Configuration](../configuration.md) compares the
+field, what the Admin API takes and returns, and what a .fit or YAML file becomes. A file ending
+in `.json`, or named with `-c` and of no other format by its name, is read as JSON; `fit run`
+reads `fit.json` when given no `-c`. [Configuration](../configuration.md) compares the
 formats.
 
 ## Strict reading
@@ -72,5 +72,5 @@ the file `.jsonc` in the editor, or turn comments on for it.
 
 ## Converting
 
-`fit adapt -c fit.json -to yaml -o fit.yaml` writes the config as YAML; `fit adapt` of a
-Caddyfile, YAML file or nginx config writes this JSON, indented.
+`fit adapt -c fit.json -to fit -o fit.fit` writes the config as a .fit file, and `-to yaml` as
+YAML; `fit adapt` of a .fit or YAML file, or of several, writes this JSON, indented.

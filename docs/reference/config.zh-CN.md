@@ -6,8 +6,8 @@
 fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`，示例由测试逐个加载验证。字段说明写在代码的 `doc` 标签里，是
 英文的，所以完整的字段表只有 [英文版](config.md)；本页用中文说明每一章讲什么，并链接到英文版对应的位置。
 
-配置可以写成 [Caddyfile](caddyfile.zh-CN.md)、[YAML](yaml.zh-CN.md) 或 [JSON](json.zh-CN.md)：YAML 和 JSON 的字段与参考
-完全相同，Caddyfile 会转换成这些字段。参考中每一章的示例都依次给出 Caddyfile（有对应写法时）、YAML 和 JSON 三种写法。
+配置可以写成 [.fit 文件](fit.zh-CN.md)、[YAML](yaml.zh-CN.md) 或 [JSON](json.zh-CN.md)，三者的字段都与参考完全相同，
+也可以分散在多个文件中。参考中每一章的示例都依次给出 .fit、YAML 和 JSON 三种写法。
 配置如何加载、检查和修改，见 [配置](../configuration.zh-CN.md)。
 
 ## 各章内容
@@ -30,29 +30,29 @@ fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`
 | [Handlers](config.md#handlers) | 路由的处理器，每个模块一节，含用途、示例和参数表 | [`fastcgi`](config.md#http-handlers-fastcgi)、[`forward_proxy`](config.md#http-handlers-forward_proxy)、[`proxy`](config.md#http-handlers-proxy)、[`respond`](config.md#http-handlers-respond)、[`static`](config.md#http-handlers-static) |
 | [Middleware](config.md#middleware) | 路由的中间件，每个模块一节，含用途、示例和参数表 | [`basic_auth`](config.md#http-middleware-basic_auth)、[`body_limit`](config.md#http-middleware-body_limit)、[`cache`](config.md#http-middleware-cache)、[`circuit_breaker`](config.md#http-middleware-circuit_breaker)、[`client_cert`](config.md#http-middleware-client_cert)、[`compress`](config.md#http-middleware-compress)、[`concurrency_limit`](config.md#http-middleware-concurrency_limit)、[`forward_auth`](config.md#http-middleware-forward_auth)、[`headers`](config.md#http-middleware-headers)、[`jwt`](config.md#http-middleware-jwt)、[`rate_limit`](config.md#http-middleware-rate_limit)、[`redirect`](config.md#http-middleware-redirect)、[`rewrite`](config.md#http-middleware-rewrite)、[`wasm`](config.md#http-middleware-wasm) |
 
-## 处理器和中间件与 Caddyfile 的对应
+## 处理器和中间件
 
-| 模块 | 用途 | Caddyfile 指令 |
-| --- | --- | --- |
-| `proxy` | 反向代理到 upstream，按权重分流、故障转移、镜像、重试 | `reverse_proxy` |
-| `static` | 提供目录中的文件，目录列表、预压缩文件、`try_files` | `file_server`、`root`、`try_files` |
-| `respond` | 固定的状态码、头部和响应体 | `respond`、`error` |
-| `fastcgi` | FastCGI 应用，如 PHP-FPM | `php_fastcgi` |
-| `forward_proxy` | HTTP CONNECT 正向代理 | 无 |
-| `basic_auth` | 用户名和密码（bcrypt） | `basic_auth` |
-| `body_limit` | 限制请求体大小 | `request_body { max_size }` |
-| `cache` | HTTP 缓存，内存和磁盘两级 | 无 |
-| `circuit_breaker` | 熔断 | 无 |
-| `client_cert` | 要求客户端证书 | 无（listener 上的 `tls { client_auth }`） |
-| `compress` | zstd、brotli、gzip 压缩 | `encode` |
-| `concurrency_limit` | 限制并发请求数 | 无 |
-| `forward_auth` | 询问认证服务 | `forward_auth` |
-| `headers` | 设置、追加、删除请求和响应头 | `header`、`request_header`、`header_up`、`header_down` |
-| `jwt` | 校验 JSON Web Token | 无 |
-| `rate_limit` | 限流 | 无 |
-| `redirect` | 跳转 | `redir` |
-| `rewrite` | 改写路径 | `rewrite`、`uri`、`handle_path` |
-| `wasm` | WebAssembly 插件 | 无 |
+| 模块 | 用途 |
+| --- | --- |
+| `proxy` | 反向代理到 upstream，按权重分流、故障转移、镜像、重试 |
+| `static` | 提供目录中的文件，目录列表、预压缩文件、`try_files` |
+| `respond` | 固定的状态码、头部和响应体 |
+| `fastcgi` | FastCGI 应用，如 PHP-FPM |
+| `forward_proxy` | HTTP CONNECT 正向代理 |
+| `basic_auth` | 用户名和密码（bcrypt） |
+| `body_limit` | 限制请求体大小 |
+| `cache` | HTTP 缓存，内存和磁盘两级 |
+| `circuit_breaker` | 熔断 |
+| `client_cert` | 要求客户端证书 |
+| `compress` | zstd、brotli、gzip 压缩 |
+| `concurrency_limit` | 限制并发请求数 |
+| `forward_auth` | 询问认证服务 |
+| `headers` | 设置、追加、删除请求和响应头 |
+| `jwt` | 校验 JSON Web Token |
+| `rate_limit` | 限流 |
+| `redirect` | 跳转 |
+| `rewrite` | 改写路径 |
+| `wasm` | WebAssembly 插件 |
 
 ## 如何阅读字段表
 

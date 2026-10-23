@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -86,14 +88,77 @@ func TestJSONWithComments(t *testing.T) {
 	}
 }
 
-// TestExampleCaddyfiles checks that the examples' Caddyfiles, the twins of
-// their JSON, are valid.
-func TestExampleCaddyfiles(t *testing.T) {
-	for _, f := range []string{"../examples/hello.caddyfile", "../examples/proxy.caddyfile"} {
+// TestExampleFitFiles checks that the examples' .fit files are valid and
+// say what their JSON twins do.
+func TestExampleFitFiles(t *testing.T) {
+	for _, name := range []string{"hello", "proxy"} {
+		f := "../examples/" + name + ".fit"
 		if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") || stderr != "" {
 			t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
 		}
+		_, fromFit, _ := runFit("adapt", "-c", f)
+		_, fromJSON, _ := runFit("adapt", "-c", "../examples/"+name+".json")
+		if !sameJSON(fromFit, fromJSON) {
+			t.Errorf("%s is not its JSON twin:\n%s\n%s", f, fromFit, fromJSON)
+		}
 	}
+}
+
+// TestAdaptFit writes a config as a .fit file and reads it back.
+func TestAdaptFit(t *testing.T) {
+	code, out, stderr := runFit("adapt", "-c", "../examples/proxy.json", "-to", "fit")
+	if code != 0 || !strings.Contains(out, "upstream app {\n\taddresses 127.0.0.1:9000 127.0.0.1:9001\n") {
+		t.Fatalf("to fit: %d %q %q", code, out, stderr)
+	}
+	f := filepath.Join(t.TempDir(), "proxy.fit")
+	_ = os.WriteFile(f, []byte(out), 0o644)
+	_, back, _ := runFit("adapt", "-c", f)
+	_, want, _ := runFit("adapt", "-c", "../examples/proxy.json")
+	if !sameJSON(back, want) {
+		t.Errorf("the round trip changed it:\n%s\n%s", back, want)
+	}
+}
+
+// TestSeveralFiles checks that a config read from several files, named
+// or in a directory, is merged, and its errors point at their files.
+func TestSeveralFiles(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.fit")
+	_ = os.WriteFile(base, []byte("listener web {\n\taddress :8080\n}\n"), 0o644)
+	sites := filepath.Join(dir, "sites")
+	_ = os.Mkdir(sites, 0o755)
+	_ = os.WriteFile(filepath.Join(sites, "a.fit"), []byte("site a.example {\n\troute { handler respond { body a } }\n}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(sites, "b.yaml"), []byte("routes:\n  - handler: {module: respond, params: {status: 99}}\n"), 0o644)
+
+	code, _, stderr := runFit("validate", "-c", base, "-c", sites)
+	if want := filepath.Join(sites, "b.yaml") + ":2:49: routes[0].handler.params.status"; code != 1 || !strings.Contains(stderr, want) {
+		t.Fatalf("an error in the second file: %d %q, want %q", code, stderr, want)
+	}
+	_ = os.WriteFile(filepath.Join(sites, "b.yaml"), []byte("routes:\n  - handler: {module: respond, params: {status: 204}}\n"), 0o644)
+	if code, stdout, stderr := runFit("validate", "-c", base, "-c", sites); code != 0 || stdout != base+", "+sites+": valid\n" {
+		t.Fatalf("valid: %d %q %q", code, stdout, stderr)
+	}
+	code, out, stderr := runFit("adapt", "-c", dir)
+	if code != 0 || strings.Count(out, `"module": "respond"`) != 2 || !strings.Contains(out, `"a.example"`) {
+		t.Fatalf("adapt a directory: %d %q %q", code, out, stderr)
+	}
+	if code, _, _ := runFit("adapt", "-c", base, "-c", sites, "-from", "fit"); code != 2 {
+		t.Errorf("-from with several files: %d", code)
+	}
+	_ = os.WriteFile(filepath.Join(sites, "c.fit"), []byte("listener web {\n\taddress :8081\n}\n"), 0o644)
+	// The second listener is the first of c.fit's.
+	if code, _, stderr := runFit("validate", "-c", dir); code != 1 || !strings.Contains(stderr, filepath.Join(sites, "c.fit")+":1:10: listeners[0].name") {
+		t.Errorf("two listeners of one name: %d %q", code, stderr)
+	}
+}
+
+// sameJSON says two JSON documents hold the same value.
+func sameJSON(a, b string) bool {
+	var x, y any
+	if json.Unmarshal([]byte(a), &x) != nil || json.Unmarshal([]byte(b), &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }
 
 // TestValidateFastCGI checks that fit validate takes a config with the

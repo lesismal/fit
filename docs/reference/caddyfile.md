@@ -1,18 +1,20 @@
-# Caddyfile reference
+# Converting a Caddyfile
 
 [English](caddyfile.md) | [简体中文](caddyfile.zh-CN.md)
 
-fit reads Caddy's Caddyfile and converts a common subset of it to its native config. A file named
-`Caddyfile`, or ending in `.caddyfile`, is read as one by `fit run`, `fit validate` and
-`fit adapt`. What is not converted is never dropped silently: each directive, option or
-subdirective left out is listed with its line, and `fit adapt` prints the list:
+To help move a site from Caddy, `fit adapt` converts a common subset of Caddy's Caddyfile to fit's
+config, best written out as a [.fit file](fit.md) to keep and edit from then on. What is not
+converted is never dropped silently: each directive, option or subdirective left out is listed
+with its line:
 
 ```bash
-fit adapt -c Caddyfile -o fit.json
+fit adapt -c Caddyfile -to fit -o fit.fit
 ```
 
-This page says what converts and to what; the fields it converts to are in the
-[config reference](config.md), and [Configuration](../configuration.md) compares the formats.
+A file named `Caddyfile`, or ending in `.caddyfile`, is converted by its name; `fit run` and
+`fit validate` take one named with `-c` too, converting it each time it is read. This page says
+what converts and to what; the fields it converts to are in the [config reference](config.md),
+and [migrating from Caddy](../migrating-from-caddy.md) shows a site in both.
 
 - [Syntax](#syntax)
 - [Global options](#global-options)
@@ -280,5 +282,5 @@ Each of these is listed by line when it appears:
 - `import` of files: only snippets defined in the Caddyfile.
 - `rewrite` and `uri` act after fit has picked the route: a rewritten path does not choose another
   route, as it can in Caddy.
-- Layer 4, caching, rate limits, JWT and WASM have no Caddyfile directive here: write them in YAML
-  or JSON, starting from `fit adapt`'s output.
+- Layer 4, caching, rate limits, JWT and WASM have no Caddyfile directive here: add them to the
+  .fit file `fit adapt` writes.

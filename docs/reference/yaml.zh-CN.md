@@ -86,8 +86,8 @@ routes:
 
 ## 转换
 
-`fit adapt -c fit.yaml -o fit.json` 写出原生 JSON；`fit adapt -c fit.json -to yaml` 把 JSON（或转换后的 Caddyfile、nginx
-配置）写成 YAML，再转换回来得到同样的 JSON。Admin API 使用 JSON：`GET /config` 显示 YAML 文件转换成的原生 JSON。
+`fit adapt -c fit.yaml -o fit.json` 写出原生 JSON；`fit adapt -c fit.json -to yaml` 把 JSON（或 .fit 文件）
+写成 YAML，再转换回来得到同样的 JSON。Admin API 使用 JSON：`GET /config` 显示 YAML 文件转换成的原生 JSON。
 
 ## 编辑器
 

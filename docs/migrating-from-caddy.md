@@ -4,10 +4,11 @@
 
 fit shares Caddy's ideas: HTTPS by default, a strict structured config, and an Admin API that swaps
 configs atomically. It differs in what is built in (caching, rate limiting, layer 4 proxying, which
-Caddy leaves to plugins) and in costing less per connection. `fit adapt` converts a Caddyfile's common subset to fit's
-JSON, and `fit run` and `fit validate` take a Caddyfile as it is (a file named `Caddyfile`, or
-ending in `.caddyfile`); there is no converter from Caddy's JSON. This guide maps one to the other,
-and the [config reference](reference/config.md) has every field.
+Caddy leaves to plugins) and in costing less per connection. fit's own config format, the
+[.fit file](reference/fit.md), is written in blocks of directives as a Caddyfile is, with a `site`
+for each set of host names, but its directives are fit's own fields. `fit adapt` converts a
+Caddyfile's common subset to it, to start from; there is no converter from Caddy's JSON. This guide
+maps one to the other, and the [config reference](reference/config.md) has every field.
 
 ## A site
 
@@ -26,6 +27,29 @@ example.com {
 ```
 
 is, in fit:
+
+```fit
+upstream app {
+	addresses 127.0.0.1:9000 127.0.0.1:9001
+	load_balancing least_conn
+	health_check {
+		path /healthz
+	}
+}
+
+site example.com {
+	middleware compress
+	route /api/* {
+		middleware rewrite { strip_prefix /api }
+		handler proxy { upstream app }
+	}
+	route /* {
+		handler static { root /srv/www }
+	}
+}
+```
+
+or, in fit's JSON:
 
 ```json
 {
@@ -51,12 +75,12 @@ Let's Encrypt for the routes' host names, and port 80 redirects to it.
 
 | Caddy | fit |
 | --- | --- |
-| a site address, `example.com` | a route's `match.host`; listeners made by HTTPS by default, or written |
-| `:8080` | a listener: `{"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}` |
-| matchers: `path`, `host`, `method`, `header`, `query`, `remote_ip`, `path_regexp`, `expression` | `match`'s fields of the same names, and `expr` |
+| a site address, `example.com` | `site example.com { ... }`, whose routes match the host; listeners made by HTTPS by default, or written |
+| `:8080` | a listener: `listener web { address :8080; protocols http/1.1 h2c }` |
+| matchers: `path`, `host`, `method`, `header`, `query`, `remote_ip`, `path_regexp`, `expression` | a route's `match { ... }`, with fields of the same names, and `expr` |
 | `handle`, `route` and their order | routes, picked by `priority`, then the most specific host and path |
-| `handle_path /api/*` | `match.path` and the `rewrite` middleware's `strip_prefix` |
-| `reverse_proxy` | the `proxy` handler and an upstream |
+| `handle_path /api/*` | `route /api/* { middleware rewrite { strip_prefix /api } ... }` |
+| `reverse_proxy` | `handler proxy { upstream app }` and an `upstream app { ... }` |
 | `lb_policy` | the upstream's `load_balancing`: `round_robin`, `weighted_round_robin`, `least_conn`, `random`, `p2c`, `ip_hash`, `uri_hash`, `header_hash`, `cookie_hash` |
 | `health_uri`, `health_interval`, `fail_duration`, `max_fails` | `health_check`, `fail_timeout`, `max_fails` |
 | `transport http { versions h2c }` | the upstream's `protocol`: `h2c`, or `h2` over TLS |
@@ -83,11 +107,12 @@ Let's Encrypt for the routes' host names, and port 80 redirects to it.
 ## Converting a Caddyfile
 
 ```bash
-fit adapt -c Caddyfile -o fit.json
+fit adapt -c Caddyfile -to fit -o fit.fit
 ```
 
-writes fit's JSON and lists on standard error, with their lines, the directives it left out or
-converted with doubts. What converts:
+writes a .fit file and lists on standard error, with their lines, the directives it left out or
+converted with doubts; the [Caddyfile conversion](reference/caddyfile.md) page has every
+directive. What converts:
 
 - **Global options**: `email`, `acme_ca`, `acme_ca_root`, `storage file_system`, `admin`,
   `auto_https`, `http_port`, `https_port`, `on_demand_tls` and `servers { protocols }`.

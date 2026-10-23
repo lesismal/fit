@@ -212,8 +212,8 @@ func TestFileAndProviders(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	w := file.New(path, data, file.Options{Interval: 10 * time.Millisecond, Debounce: 30 * time.Millisecond}, func(data []byte) error {
-		_, err := f.configs.Apply(data, SourceFile)
+	w := file.New([]string{path}, []file.File{{Path: path, Data: data}}, file.Options{Interval: 10 * time.Millisecond, Debounce: 30 * time.Millisecond}, func(files []file.File) error {
+		_, err := f.configs.Apply(files[0].Data, SourceFile)
 		return err
 	}, func(err error) { t.Errorf("the file provider: %v", err) })
 	done := make(chan struct{}, 2)

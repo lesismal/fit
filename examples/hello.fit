@@ -1,0 +1,22 @@
+# The .fit twin of hello.json: fit run -c examples/hello.fit
+listener web {
+	address :8080
+	protocols http/1.1 h2c
+}
+
+route hello {
+	match {
+		path /hello
+	}
+	handler respond {
+		body "hello from fit\n"
+	}
+}
+
+route not-found {
+	priority -1
+	handler respond {
+		status 404
+		body "not found\n"
+	}
+}

@@ -4,15 +4,6 @@ the first's addresses is in rotation, `mirror` copies a share of the requests el
 `retry` sends a failed request again, within a budget. WebSockets and gRPC are proxied too,
 streamed both ways.
 
-```caddyfile
-example.com {
-	reverse_proxy /api/* 10.0.0.1:8080 10.0.0.2:8080 {
-		lb_retries 2
-		header_up Host api.internal
-	}
-}
-```
-
 ```json route
 {
   "match": {"host": ["example.com"], "path": ["/api/*"]},

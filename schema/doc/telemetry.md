@@ -1,6 +1,5 @@
 OpenTelemetry over OTLP/HTTP: a span for each request sampled, with W3C trace context sent on to
-upstreams, and fit's metrics exported on a schedule, to a collector. Read when fit starts. A
-Caddyfile's `tracing` is not converted.
+upstreams, and fit's metrics exported on a schedule, to a collector. Read when fit starts.
 
 ```json
 {

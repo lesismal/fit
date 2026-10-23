@@ -13,24 +13,6 @@ by `name`; a route that names none serves every listener.
 - **Behind a proxy.** `proxy_protocol` takes the PROXY protocol header from the proxies it trusts,
   and serves each connection as from the client the header names.
 
-In a Caddyfile, listeners come from the sites' addresses: `:8080` serves HTTP on 8080,
-`example.com` HTTPS on 443, and `servers { protocols }` picks the protocols.
-
-```caddyfile
-{
-	servers {
-		protocols h1 h2 h3
-	}
-}
-example.com {
-	tls /etc/fit/example.pem /etc/fit/example.key
-	respond "secure"
-}
-:8080 {
-	respond "plain"
-}
-```
-
 ```json
 {
   "listeners": [

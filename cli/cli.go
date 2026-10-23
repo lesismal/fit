@@ -17,9 +17,10 @@ Usage:
 
 Commands:
 
-	run        serve a config file until SIGINT or SIGTERM
-	validate   check a config file without running it
-	adapt      convert a config, as YAML, to native JSON, or back
+	run        serve a config, from files or directories, until SIGINT or SIGTERM
+	validate   check a config without running it
+	adapt      convert a config between .fit, YAML and native JSON, or from
+	           nginx or a Caddyfile
 	schema     print the JSON Schema of the native config
 	build      build a fit with more modules, or fewer, as fit build -h says
 	version    print the versions of fit, fib and Go

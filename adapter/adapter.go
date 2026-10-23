@@ -1,8 +1,10 @@
 // Package adapter turns configs written in other formats into fit's native
-// JSON: YAML, and subsets of nginx's configs and Caddy's Caddyfile. An
-// adapter registers itself under a name and the file extensions (or whole
-// file names) it takes, and fit run, fit validate and fit adapt pick one by
-// a file's extension or name, or by its own name.
+// JSON: fit's own .fit files and YAML, and, to help moving to fit, subsets
+// of nginx's configs and Caddy's Caddyfile. An adapter registers itself
+// under a name and the file extensions (or whole file names) it takes, and
+// fit run, fit validate and fit adapt pick one by a file's extension or
+// name, or by its own name. A config may be read from several files and
+// directories, merged (Set).
 package adapter
 
 import (

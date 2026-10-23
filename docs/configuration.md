@@ -2,17 +2,17 @@
 
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
-fit reads one config file, in any of three formats: a **Caddyfile**, **YAML** or **JSON**. Each
-says the same things: the addresses fit listens on, the routes that pick what answers each
-request, the upstreams requests are proxied to, and settings for logs, limits, certificates and
-the Admin API. JSON is fit's native format; YAML has exactly its fields, and a Caddyfile is
-converted to them.
+fit reads its config from one file or several, in any of three formats: a **.fit** file, **YAML**
+or **JSON**. Each says the same things, field for field: the addresses fit listens on, the routes
+that pick what answers each request, the upstreams requests are proxied to, and settings for logs,
+limits, certificates and the Admin API. JSON is what the Admin API takes and returns; the three
+formats have exactly the same fields, and any of them can be converted to the others.
 
 | Format | Best for | Reference |
 | --- | --- | --- |
-| Caddyfile | Short, readable configs of sites; configs brought from Caddy | [Caddyfile reference](reference/caddyfile.md) |
-| YAML | Every field of fit, with comments, and anchors for what repeats | [YAML reference](reference/yaml.md) |
-| JSON | Every field of fit; what the Admin API takes and returns, and what tools write | [JSON reference](reference/json.md) |
+| .fit | Configs written by hand: blocks of directives, as nginx and Caddy write theirs, with sites | [.fit reference](reference/fit.md) |
+| YAML | Configs written by hand or by tools, with anchors for what repeats | [YAML reference](reference/yaml.md) |
+| JSON | What the Admin API takes and returns, and what tools write | [JSON reference](reference/json.md) |
 
 Every field, its type, default and meaning, with examples in all three formats, is in the
 [config reference](reference/config.md). [Templates](../templates/README.md) holds a complete
@@ -20,23 +20,30 @@ config in each format, every field in it, ready to copy and edit.
 
 ## The formats
 
-### Caddyfile
+### .fit
 
-Caddy's own format: a block for each site, named by its address, with directives inside. fit
-converts a common subset of Caddy's directives to its config, and lists, with their lines, what it
-leaves out. A file named `Caddyfile`, or ending in `.caddyfile`, is read as one.
+fit's own format: a directive for each field, a block for each object, and `site` to write the
+routes of a set of host names together. Files ending in `.fit`.
 
-```caddyfile
+```fit
+upstream api {
+	addresses 127.0.0.1:9000
+}
+
 # Served over HTTPS, with a certificate obtained for example.com.
-example.com {
-	encode zstd gzip
-	reverse_proxy /api/* 127.0.0.1:9000
-	root * /srv/www
-	file_server
+site example.com {
+	middleware compress
+	route /api/* {
+		handler proxy { upstream api }
+	}
+	route {
+		handler static { root /srv/www }
+	}
 }
 ```
 
-What converts, directive by directive: the [Caddyfile reference](reference/caddyfile.md).
+The syntax, how each type of field is written, sites, and several files: the
+[.fit reference](reference/fit.md).
 
 ### YAML
 
@@ -63,7 +70,8 @@ How YAML maps onto the config, and its pitfalls: the [YAML reference](reference/
 
 fit's native format, strictly read: an unknown field, a value of the wrong type or a key written
 twice is an error, given with its line and column. `//` and `/* */` comments and a comma after the
-last element are allowed. Any other file, `fit.json` by default.
+last element are allowed. Files ending in `.json`, and any other file named on its own, `fit.json`
+by default.
 
 ```json
 {
@@ -98,42 +106,59 @@ More: the [JSON reference](reference/json.md).
 | `admin` | The Admin API | [Admin API](reference/config.md#admin-api) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
 
-## Running, checking and converting
+## Several files and directories
 
-The format is told from the file's name; the commands are the same for all three:
+A config may be split across files, in any of the formats, and directories of them, each given
+with `-c`:
 
 ```bash
-fit run -c Caddyfile
+fit run -c /etc/fit/base.fit -c /etc/fit/sites
+```
+
+A directory stands for its `.fit`, `.yaml`, `.yml` and `.json` files, in its subdirectories too,
+in lexical order, those whose names begin with a `.` left out. The lists at the top of the config,
+`listeners`, `routes`, `upstreams`, `services` and `providers`, are joined in the files' order;
+any other field is given in one file only. An error names its file. The details:
+[several files and directories](reference/fit.md#several-files-and-directories).
+
+## Running, checking and converting
+
+The format is told from each file's name; the commands are the same for all three:
+
+```bash
+fit run -c fit.fit
 ```
 
 ```bash
-fit validate -c fit.yaml
+fit validate -c fit.yaml -c conf.d
 ```
 
 `fit validate` loads the config as `fit run` would and checks every module's params, printing each
-error with its file, line and column, in the file as written, a Caddyfile's or YAML's included.
-`fit adapt` converts:
+error with its file, line and column, in the file as written, whatever its format. `fit adapt`
+converts between the formats, merging several files into one:
 
 | From | To | Command |
 | --- | --- | --- |
-| Caddyfile | JSON | `fit adapt -c Caddyfile -o fit.json` |
-| nginx | JSON | `fit adapt -c nginx.conf -o fit.json` |
-| YAML | JSON | `fit adapt -c fit.yaml -o fit.json` |
-| JSON (or any of the above) | YAML | `fit adapt -c fit.json -to yaml -o fit.yaml` |
+| JSON or YAML | .fit | `fit adapt -c fit.json -to fit -o fit.fit` |
+| .fit or YAML | JSON | `fit adapt -c fit.fit -o fit.json` |
+| .fit or JSON | YAML | `fit adapt -c fit.fit -to yaml -o fit.yaml` |
+| a directory | one file | `fit adapt -c conf.d -to fit -o fit.fit` |
 
-Converting a Caddyfile or an nginx config lists on standard error what was left out. `fit schema`
-prints the config's JSON Schema, for editors to complete and check JSON and YAML as they are
-written.
+`fit schema` prints the config's JSON Schema, for editors to complete and check JSON and YAML as
+they are written; `fit schema -template fit` prints the .fit template.
 
 ## Changing a running config
 
-`fit run` applies its config file again on SIGHUP, or each time the file changes with `-watch`,
-whatever its format. A config that fails to load or compile is refused, and the running one stays.
-The [Admin API](reference/config.md#admin-api) reads and replaces the running config as JSON, by
-whole config or by JSON pointer, with versions to roll back to.
+`fit run` applies its config files again on SIGHUP, or with `-watch` each time one changes, or a
+directory's files are added or taken out, whatever their format. A config that fails to load or
+compile is refused, and the running one stays. The [Admin API](reference/config.md#admin-api)
+reads and replaces the running config as JSON, by whole config or by JSON pointer, with versions
+to roll back to.
 
 ## Coming from another server
 
-[nginx](migrating-from-nginx.md) and [Caddy](migrating-from-caddy.md) configs convert with
-`fit adapt`; [Traefik](migrating-from-traefik.md)'s map field by field. Each guide shows the same
-setup in both servers.
+`fit adapt` converts an nginx config or a Caddyfile to fit's config, listing what it leaves out,
+to start from: `fit adapt -c nginx.conf -to fit -o fit.fit`. The guides for
+[nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md) and
+[Traefik](migrating-from-traefik.md) show the same setup in each server and in fit, and how their
+parts map onto fit's.

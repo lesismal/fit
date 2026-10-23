@@ -8,24 +8,28 @@ import (
 
 	"github.com/lesismal/fit/adapter"
 	_ "github.com/lesismal/fit/adapter/caddyfile"
+	_ "github.com/lesismal/fit/adapter/fitconf"
 	_ "github.com/lesismal/fit/adapter/yaml"
 	"github.com/lesismal/fit/config"
+	_ "github.com/lesismal/fit/modules/standard"
 )
 
-var configBlock = regexp.MustCompile("(?s)```(caddyfile|yaml|json)\n(.*?)\n```")
+var configBlock = regexp.MustCompile("(?s)```(fit|caddyfile|yaml|json)\n(.*?)\n```")
 
-// TestConfigExamples loads every config in the pages on config formats and
-// in the getting started guide, in either language: each Caddyfile converts
-// without a warning, and each Caddyfile, YAML and JSON config loads.
+// TestConfigExamples loads every config in the pages on config formats, in
+// the getting started guide and in the README, in either language: each
+// .fit, YAML and JSON config loads, and each Caddyfile, on the page on
+// converting them, converts without a warning and loads.
 func TestConfigExamples(t *testing.T) {
 	files, _ := filepath.Glob("configuration*.md")
 	guide, _ := filepath.Glob("getting-started*.md")
-	files = append(files, guide...)
-	for _, f := range []string{"caddyfile", "yaml", "json"} {
+	readme, _ := filepath.Glob("../README*.md")
+	files = append(append(files, guide...), readme...)
+	for _, f := range []string{"fit", "caddyfile", "yaml", "json"} {
 		more, _ := filepath.Glob("reference/" + f + "*.md")
 		files = append(files, more...)
 	}
-	if len(files) < 10 {
+	if len(files) < 14 {
 		t.Fatalf("only %v", files)
 	}
 	n := 0

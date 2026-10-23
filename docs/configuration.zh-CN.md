@@ -2,37 +2,43 @@
 
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
-fit 读取一个配置文件，可以是三种格式之一：**Caddyfile**、**YAML** 或 **JSON**。三者表达的内容相同：fit 监听的地址、
-为每个请求选择应答者的路由、请求被代理到的 upstream，以及日志、限制、证书和 Admin API 的设置。JSON 是 fit 的原生格式；
-YAML 的字段与它完全相同，Caddyfile 会被转换成这些字段。
+fit 从一个或多个文件读取配置，可以是三种格式之一：**.fit** 文件、**YAML** 或 **JSON**。三者逐字段表达相同的内容：fit
+监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，以及日志、限制、证书和 Admin API 的设置。Admin API
+收发的是 JSON；三种格式的字段完全相同，彼此之间都可以转换。
 
 | 格式 | 适合 | 参考 |
 | --- | --- | --- |
-| Caddyfile | 简短易读的站点配置；从 Caddy 带过来的配置 | [Caddyfile 参考](reference/caddyfile.zh-CN.md) |
-| YAML | fit 的全部字段，可写注释，可用锚点复用重复内容 | [YAML 参考](reference/yaml.zh-CN.md) |
-| JSON | fit 的全部字段；Admin API 收发的格式，工具生成的格式 | [JSON 参考](reference/json.zh-CN.md) |
+| .fit | 手写的配置：像 nginx 和 Caddy 那样的指令块，支持站点 | [.fit 参考](reference/fit.zh-CN.md) |
+| YAML | 手写或工具生成的配置，可用锚点复用重复内容 | [YAML 参考](reference/yaml.zh-CN.md) |
+| JSON | Admin API 收发的格式，工具生成的格式 | [JSON 参考](reference/json.zh-CN.md) |
 
 每个字段的类型、默认值和含义，以及三种格式的示例，见 [配置参考](reference/config.zh-CN.md)。[配置模板](../templates/README.zh-CN.md)
 为每种格式提供一份包含全部字段的完整配置，可复制后修改。
 
 ## 三种格式
 
-### Caddyfile
+### .fit
 
-Caddy 自己的格式：每个站点一个块，以地址命名，块内是指令。fit 把 Caddy 指令的常用子集转换为自己的配置，并按行列出
-未转换的部分。名为 `Caddyfile` 或以 `.caddyfile` 结尾的文件按 Caddyfile 读取。
+fit 自己的格式：每个字段一条指令，每个对象一个块，用 `site` 把一组域名的路由写在一起。以 `.fit` 结尾的文件。
 
-```caddyfile
+```fit
+upstream api {
+	addresses 127.0.0.1:9000
+}
+
 # 以 HTTPS 提供，自动为 example.com 申请证书。
-example.com {
-	encode zstd gzip
-	reverse_proxy /api/* 127.0.0.1:9000
-	root * /srv/www
-	file_server
+site example.com {
+	middleware compress
+	route /api/* {
+		handler proxy { upstream api }
+	}
+	route {
+		handler static { root /srv/www }
+	}
 }
 ```
 
-逐条指令的转换规则见 [Caddyfile 参考](reference/caddyfile.zh-CN.md)。
+语法、各类字段的写法、站点和多个文件，见 [.fit 参考](reference/fit.zh-CN.md)。
 
 ### YAML
 
@@ -57,7 +63,7 @@ YAML 如何对应到配置，以及需要注意的地方，见 [YAML 参考](ref
 ### JSON
 
 fit 的原生格式，严格读取：未知字段、类型错误的值、重复的键都是错误，并给出行号和列号。允许 `//` 和 `/* */` 注释，以及
-最后一个元素后的逗号。其他文件都按 JSON 读取，默认是 `fit.json`。
+最后一个元素后的逗号。以 `.json` 结尾的文件，以及单独指定的其他文件，都按 JSON 读取，默认是 `fit.json`。
 
 ```json
 {
@@ -92,38 +98,51 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `admin` | Admin API | [Admin API](reference/config.md#admin-api) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
 
-## 运行、检查和转换
+## 多个文件和目录
 
-格式由文件名判断；三种格式的命令相同：
+一份配置可以分散在多个文件（任一种格式）和目录中，每个用一个 `-c` 给出：
 
 ```bash
-fit run -c Caddyfile
+fit run -c /etc/fit/base.fit -c /etc/fit/sites
+```
+
+目录代表其中（包括子目录中）的 `.fit`、`.yaml`、`.yml` 和 `.json` 文件，按字典序，名字以 `.` 开头的除外。配置顶层的列表
+`listeners`、`routes`、`upstreams`、`services` 和 `providers` 按文件顺序拼接；其他字段只能在一个文件中给出。错误会指出
+所在的文件。详见 [多个文件和目录](reference/fit.zh-CN.md#多个文件和目录)。
+
+## 运行、检查和转换
+
+格式由每个文件的名字判断；三种格式的命令相同：
+
+```bash
+fit run -c fit.fit
 ```
 
 ```bash
-fit validate -c fit.yaml
+fit validate -c fit.yaml -c conf.d
 ```
 
 `fit validate` 像 `fit run` 那样加载配置，并检查每个模块的参数，每个错误都给出文件、行号和列号，指向原始文件中的位置，
-Caddyfile 和 YAML 也一样。`fit adapt` 负责转换：
+无论哪种格式。`fit adapt` 在格式之间转换，并可把多个文件合并为一个：
 
 | 从 | 到 | 命令 |
 | --- | --- | --- |
-| Caddyfile | JSON | `fit adapt -c Caddyfile -o fit.json` |
-| nginx | JSON | `fit adapt -c nginx.conf -o fit.json` |
-| YAML | JSON | `fit adapt -c fit.yaml -o fit.json` |
-| JSON（或以上任何一种） | YAML | `fit adapt -c fit.json -to yaml -o fit.yaml` |
+| JSON 或 YAML | .fit | `fit adapt -c fit.json -to fit -o fit.fit` |
+| .fit 或 YAML | JSON | `fit adapt -c fit.fit -o fit.json` |
+| .fit 或 JSON | YAML | `fit adapt -c fit.fit -to yaml -o fit.yaml` |
+| 一个目录 | 一个文件 | `fit adapt -c conf.d -to fit -o fit.fit` |
 
-转换 Caddyfile 或 nginx 配置时，未转换的部分会打印到标准错误。`fit schema` 打印配置的 JSON Schema，编辑器可以用它在
-编写 JSON 和 YAML 时补全和检查。
+`fit schema` 打印配置的 JSON Schema，编辑器可以用它在编写 JSON 和 YAML 时补全和检查；`fit schema -template fit` 打印
+.fit 模板。
 
 ## 修改运行中的配置
 
-无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当文件变化，都会重新应用配置文件。加载或编译失败的配置会
-被拒绝，运行中的配置保持不变。[Admin API](reference/config.md#admin-api) 以 JSON 读取和替换运行中的配置，可以整体替换，
-也可以按 JSON pointer 修改，并保留版本以便回滚。
+无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当某个文件变化、目录中加入或移除文件，都会重新应用配置。
+加载或编译失败的配置会被拒绝，运行中的配置保持不变。[Admin API](reference/config.md#admin-api) 以 JSON 读取和替换运行中的
+配置，可以整体替换，也可以按 JSON pointer 修改，并保留版本以便回滚。
 
 ## 从其他服务器迁移
 
-[nginx](migrating-from-nginx.zh-CN.md) 和 [Caddy](migrating-from-caddy.zh-CN.md) 的配置可用 `fit adapt` 转换；
-[Traefik](migrating-from-traefik.zh-CN.md) 的配置逐字段对应。每篇指南都给出同一套配置在两种服务器中的写法。
+`fit adapt` 可以把 nginx 配置或 Caddyfile 转换为 fit 的配置，作为起点，并列出未转换的部分：
+`fit adapt -c nginx.conf -to fit -o fit.fit`。[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)
+和 [Traefik](migrating-from-traefik.zh-CN.md) 的迁移指南给出同一套配置在各服务器和 fit 中的写法，以及各部分如何对应到 fit。

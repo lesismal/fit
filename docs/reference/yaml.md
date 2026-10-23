@@ -91,8 +91,7 @@ Errors are given at the YAML's lines and columns: `fit validate -c fit.yaml` say
 ## Converting
 
 `fit adapt -c fit.yaml -o fit.json` writes the native JSON; `fit adapt -c fit.json -to yaml`
-writes JSON (or a Caddyfile or an nginx config, once converted) as YAML that adapts back to the
-same JSON. The Admin API speaks JSON: `GET /config` shows the native JSON a YAML file became.
+writes JSON (or a .fit file) as YAML that adapts back to the same JSON. The Admin API speaks JSON: `GET /config` shows the native JSON a YAML file became.
 
 ## Editors
 

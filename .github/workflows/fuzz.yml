@@ -35,6 +35,7 @@ jobs:
           - {pkg: ./handler/fastcgi, target: FuzzReader}
           - {pkg: ./adapter/nginx, target: FuzzConvert}
           - {pkg: ./adapter/caddyfile, target: FuzzConvert}
+          - {pkg: ./adapter/fitconf, target: FuzzAdapt}
           - {pkg: ./adapter/yaml, target: FuzzAdapt}
           - {pkg: ./middleware/cache, target: FuzzDirectives}
     steps:

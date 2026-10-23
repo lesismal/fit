@@ -2,9 +2,8 @@
 
 [English](json.md) | [简体中文](json.zh-CN.md)
 
-JSON 是 fit 的原生配置格式：[配置参考](config.zh-CN.md) 逐字段描述的就是它，Admin API 收发的是它，Caddyfile、YAML 文件和
-nginx 配置转换后得到的也是它。按文件名不属于 Caddyfile、YAML 或 nginx 配置的文件都按 JSON 读取；不带 `-c` 时 `fit run`
-读取 `fit.json`。三种格式的比较见 [配置](../configuration.zh-CN.md)。
+JSON 是 fit 的原生配置格式：[配置参考](config.zh-CN.md) 逐字段描述的就是它，Admin API 收发的是它，.fit 和 YAML 文件转换后得到的也是它。
+以 `.json` 结尾的文件，以及用 `-c` 指定、按名字不属于其他格式的文件，都按 JSON 读取；不带 `-c` 时 `fit run` 读取 `fit.json`。三种格式的比较见 [配置](../configuration.zh-CN.md)。
 
 ## 严格读取
 
@@ -65,5 +64,5 @@ fit 严格读取配置，写错的地方会报错，而不是被悄悄忽略：
 
 ## 转换
 
-`fit adapt -c fit.json -to yaml -o fit.yaml` 把配置写成 YAML；对 Caddyfile、YAML 文件或 nginx 配置执行 `fit adapt`，会写出
-缩进好的 JSON。
+`fit adapt -c fit.json -to fit -o fit.fit` 把配置写成 .fit 文件，`-to yaml` 写成 YAML；对 .fit 或 YAML 文件（或多个文件）
+执行 `fit adapt`，会写出缩进好的 JSON。

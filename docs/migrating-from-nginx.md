@@ -4,7 +4,9 @@
 
 fit keeps what nginx is good at, event loops and a small footprint per connection, and changes how
 it is configured: one structured config, checked before it runs, and changed in place through the
-Admin API without a reload. This guide maps nginx's directives to fit's config; the
+Admin API without a reload. Its own format, the [.fit file](reference/fit.md), is written in
+blocks of directives as nginx's is, but its directives are fit's own fields, and a config may be
+split across files and directories as `include` splits nginx's. This guide maps nginx's directives to fit's config; the
 [config reference](reference/config.md) has every field.
 
 ## Convert first
@@ -13,8 +15,8 @@ Admin API without a reload. This guide maps nginx's directives to fit's config; 
 directives it left out:
 
 ```bash
-fit adapt -from nginx -c nginx.conf -o fit.json
-fit validate -c fit.json
+fit adapt -from nginx -c nginx.conf -to fit -o fit.fit
+fit validate -c fit.fit
 ```
 
 It converts the `http` block's servers (`listen`, `server_name`, `ssl_certificate`), their
@@ -27,13 +29,13 @@ and `gzip`. Read what it reports, and finish the config by hand with the tables 
 
 | nginx | fit |
 | --- | --- |
-| `server { listen 8080; }` | a listener: `{"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}` |
-| `listen 443 ssl http2;` with `ssl_certificate` and `ssl_certificate_key` | a listener with `"protocols": ["http/1.1", "h2"]` and `"tls": {"certificates": [{"cert_file", "key_file"}]}`; add `h3` for HTTP/3 |
-| `server_name a.example *.example;` | a route's `match.host`; `*.` stands for one label, `**.` for one or more |
+| `server { listen 8080; }` | a listener: `listener web { address :8080; protocols http/1.1 h2c }` |
+| `listen 443 ssl http2;` with `ssl_certificate` and `ssl_certificate_key` | a listener with `protocols http/1.1 h2` and `tls { certificates { cert_file ...; key_file ... } }`; add `h3` for HTTP/3 |
+| `server_name a.example *.example;` | `site a.example *.example { ... }`, or a route's `match.host`; `*.` stands for one label, `**.` for one or more |
 | `location = /x` | `match.path: ["/x"]` |
 | `location /x/` | `match.path: ["/x/*"]` |
 | `location ~ \.php$` | `match.path_regexp: ["\\.php$"]` |
-| `proxy_pass http://app;` and `upstream app { server ...; }` | the `proxy` handler, `{"upstream": "app"}`, and an upstream with `addresses` |
+| `proxy_pass http://app;` and `upstream app { server ...; }` | `handler proxy { upstream app }`, and `upstream app { addresses ... }` |
 | `least_conn;`, `ip_hash;`, `hash $cookie_x;` | the upstream's `load_balancing`: `least_conn`, `ip_hash`, `cookie_hash` with `hash_key` |
 | `server ... weight=3 max_fails=2 fail_timeout=10s;` | `weights`, `max_fails`, `fail_timeout` |
 | `server ... backup;` | the proxy's `failover`: another upstream, used while none of the first is up |

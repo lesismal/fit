@@ -6,7 +6,7 @@
 # out, with its default, or an example where it has none: uncomment what you need.
 # Above each field: what it is, its type, its choices and its default. A field left out
 # takes its default. The config reference, docs/reference/config.md, has the same, with
-# examples; the Caddyfile template is ../caddyfile/Caddyfile.
+# examples; the templates in the other formats are beside this one's directory.
 # The version of fit's config this one is written for, 1; fit refuses a config written for a
 # version it does not read, rather than read it wrongly. Optional: a config that leaves it out
 # is read as version 1.

@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .fit 格式和多文件配置 |
 | fib | `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | Proxy-Wasm 的响应回调（A41）；1.0 的外部安全审计，在代码之外安排 |
@@ -3014,6 +3014,38 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   和 `TestCaddyfileTemplate`（schema）。顺带修复两处问题：`fit validate` 拒绝所有带 `fastcgi` 处理器的配置，因为编译时需要
   engine（现在与 upstream 一样只为检查而编译；`TestValidateFastCGI`）；Caddyfile 转换器把没有 root 的 `php_fastcgi` 写成
   fit 不接受的 `"."`（现在跳过并给出警告），并对站点级的 `try_files` 每条路由警告一次（现在只警告一次）。
+
+### I80 fit 自己的 .fit 格式；多文件配置 — 已完成
+
+- **`adapter/fitconf`**，注册为 `.fit` 文件的适配器（[决定 021](decisions/021-fit-format-and-config-files.zh-CN.md)）：
+  指令块的词法和语法分析器（裸词、双引号和反引号词、`\` 转义、`#` 注释、指令间的 `;`、`{}`、`{$ENV}` 和 `{$ENV:default}`；
+  对词数和嵌套有上限），以及转换器：通过 `config.Fields` 把每条指令当作其所在块要解码成的 Go 类型的一个字段来读取。标量取
+  一个参数，按字段类型解释（类型不对的值作为字符串保留，交给配置检查在所写位置报告）；列表取各个参数，重复的行会追加；
+  对象和 map 取一个块；对象列表每个元素一个块；模块写名字再跟一个按模块自己参数类型解码的块；顶层的 `listener`、`route`、
+  `upstream`、`service` 和 `provider` 用单数，参数是名字。不认识的字段按所写内容转换，交给配置检查指出。
+  `site <hosts...> { route <paths...> { ... } }` 在转换前展开为普通路由，共享站点的 listener、优先级、match 和中间件。每个
+  路径都记录位置，因此配置错误指向 `.fit` 文件。`fitconf.FromJSON` 把原生 JSON 写成 `.fit` 文件，转换回来得到同样的配置
+  （路由逐条写出，不归并成站点）。
+- **多个文件和目录**：`fit run`、`fit validate` 和 `fit adapt` 的 `-c` 可以重复，也可以指定目录；目录代表其中（递归、按字典序）
+  的 `.fit`、`.yaml`、`.yml` 和 `.json` 文件，隐藏文件除外（`adapter.Files`，最多 10,000 个文件、64 MiB）。`adapter.AdaptSet`
+  逐个转换并合并：顶层列表拼接，其他字段只能来自一个文件，`schema_version` 可以来自多个文件但必须一致；`Set.MapErrors` 把
+  合并后配置中的错误映射到所在文件、该文件内的路径和位置（为此 JSON 文件也能按路径查位置）。`config.Error` 增加了 `File`，
+  打印在位置之前。`provider/file` 的监视器监视一组路径，每次查看时重新展开，因此目录中加入或移除文件也算变化，并交出读取的
+  每个文件；SIGHUP 和 `-watch` 都重新读取全部文件。
+- **文档中的格式**：配置文档、快速上手、README 和模板讲的是 `.fit`、YAML 和 JSON。新增 [.fit 参考](reference/fit.zh-CN.md)；
+  Caddyfile 页面改为 [转换 Caddyfile](reference/caddyfile.zh-CN.md)，作为迁移工具，与 nginx 转换器一起保留，推荐用 `-to fit`
+  转换；迁移指南改用 `.fit`。配置参考各章给出由 `FromJSON` 从其 JSON 生成的 `.fit` 示例，或章节自己的示例（路由一章用了
+  站点），`TestChapterExamples` 检查二者是同一份配置；各章的 Caddyfile 示例和 Caddyfile 列已删除。`templates/fit/fit.fit`
+  与其他模板一起生成（`fit schema -template fit`），可直接加载；`templates/caddyfile` 已删除，`examples/*.caddyfile` 改为
+  `examples/*.fit`。
+- **测试**：`TestConvert`、`TestErrors`、`TestPositions`、`TestRoundTrip`（示例、测试配置和 JSON 模板写成 `.fit` 再读回）、
+  `TestWord`、`TestRegistered` 和 `FuzzAdapt`（加入 CI 的模糊测试，附带它发现的两个种子：模块的空参数写回时丢了 `{}`；类型未知的列表中像数字的字符串
+  写回时没加引号）
+  （adapter/fitconf）；`TestFiles`、`TestMerge`、`TestMergeConflicts`、`TestMapErrors`（adapter）；`TestDirectory`
+  （provider/file）；`TestExampleFitFiles`、`TestAdaptFit`、`TestSeveralFiles`（cli）；`TestConfigDirectory`（test/e2e：由
+  `.fit`、YAML 和 JSON 文件组成的目录以 `-watch` 运行，加入、移除和写坏文件）；模板和章节测试（schema）以及
+  `TestConfigExamples`（docs：格式页面、快速上手和 README 中的每个 `.fit` 示例都能加载）。它们在基准测试主机上开启 race
+  检测通过，`FuzzAdapt` 在那里运行 3 分钟、约 180 万个输入，没有失败。仅涉及控制面：无基准测试（规则 21）。
 
 ## 给后续迭代的说明
 

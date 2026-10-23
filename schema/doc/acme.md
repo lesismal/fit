@@ -5,23 +5,6 @@ instances on several hosts, `shared_storage`), the challenges answered (HTTP-01 
 and `on_demand`, which says whom to ask before a certificate is obtained during a handshake. Read
 when fit starts.
 
-```caddyfile
-{
-	email ops@example.com
-	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
-	storage file_system /var/lib/fit
-	on_demand_tls {
-		ask http://localhost:5555/allowed
-	}
-}
-https:// {
-	tls {
-		on_demand
-	}
-	respond "hello"
-}
-```
-
 ```json
 {
   "acme": {

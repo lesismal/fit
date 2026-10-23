@@ -8,8 +8,8 @@ schema/doc; do not edit. Regenerate with: go test ./schema -update -->
 Every field of fit's native config, schema version 1, and of the params of the modules in
 `modules/standard`: what each part of a config is for, an example of it, and a table of
 its fields, with each field's type, default and description. A config may be written as a
-[Caddyfile](caddyfile.md), in [YAML](yaml.md) or in [JSON](json.md); YAML and JSON have exactly the
-fields below, and a Caddyfile converts to them. [Configuration](../configuration.md) says how a
+[.fit file](fit.md), in [YAML](yaml.md) or in [JSON](json.md), each with exactly the fields
+below, and may be split across several files. [Configuration](../configuration.md) says how a
 config is loaded, checked and changed.
 
 How to read the tables: a field left out takes its default, when it has one; a duration is a
@@ -60,11 +60,16 @@ Nothing else is required: a config of a route alone, whose match names a host, i
 HTTPS with a certificate obtained for that host. Names are matched exactly, an unknown field or a
 value of the wrong type is an error, and so is a key written twice.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	respond "hello"
+```fit
+route {
+	match {
+		host example.com
+	}
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -126,23 +131,44 @@ by `name`; a route that names none serves every listener.
 - **Behind a proxy.** `proxy_protocol` takes the PROXY protocol header from the proxies it trusts,
   and serves each connection as from the client the header names.
 
-In a Caddyfile, listeners come from the sites' addresses: `:8080` serves HTTP on 8080,
-`example.com` HTTPS on 443, and `servers { protocols }` picks the protocols.
+In a .fit file:
 
-As a Caddyfile:
+```fit
+listener web {
+	address :8080
+	protocols http/1.1 h2c
+}
 
-```caddyfile
-{
-	servers {
-		protocols h1 h2 h3
+listener secure {
+	address :443
+	protocols http/1.1 h2 h3
+	tls {
+		certificates {
+			cert_file /etc/fit/example.pem
+			key_file /etc/fit/example.key
+		}
 	}
 }
-example.com {
-	tls /etc/fit/example.pem /etc/fit/example.key
-	respond "secure"
+
+listener internal {
+	address 127.0.0.1:8081
+	proxy_protocol {
+		trusted 10.0.0.0/8
+	}
 }
-:8080 {
-	respond "plain"
+
+route {
+	listeners secure
+	handler respond {
+		body secure
+	}
+}
+
+route {
+	listeners web internal
+	handler respond {
+		body plain
+	}
 }
 ```
 
@@ -285,20 +311,39 @@ takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
-[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. A Caddyfile's
-directives become routes: each handler a route, and each middleware directive on the routes it
-covers.
+[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.fit` file,
+a `site` writes the routes of its host names together: each `route` in it takes the site's hosts
+and its own paths, and the site's middleware before its own.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	@write method POST PUT DELETE
-	basic_auth @write {
-		admin $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+```fit
+upstream api {
+	addresses 127.0.0.1:9000
+}
+
+site example.com {
+	route /api/* {
+		name api-writes
+		match {
+			method POST PUT DELETE
+		}
+		middleware basic_auth {
+			users {
+				username admin
+				password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+			}
+		}
+		handler proxy { upstream api }
 	}
-	reverse_proxy /api/* 127.0.0.1:9000
-	respond "home"
+	route /api/* {
+		name api
+		handler proxy { upstream api }
+	}
+	route {
+		name home
+		handler respond { body home }
+	}
 }
 ```
 
@@ -427,19 +472,28 @@ An upstream is a named set of servers, which the [proxy](#http-handlers-proxy) h
 - **Protocol**: `http/1.1`, `h2c`, or `h2` over TLS, with `tls_server_name`, `tls_ca_file` and a
   client certificate (`tls_cert_file`, `tls_key_file`).
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-:8080 {
-	reverse_proxy 10.0.0.1:8080 10.0.0.2:8080 {
-		lb_policy least_conn
-		health_uri /healthz
-		health_interval 5s
-		fail_duration 30s
-		max_fails 3
-		transport http {
-			dial_timeout 3s
-		}
+```fit
+listener web {
+	address :8080
+}
+
+upstream app {
+	addresses 10.0.0.1:8080 10.0.0.2:8080
+	load_balancing least_conn
+	connect_timeout 3s
+	max_fails 3
+	fail_timeout 30s
+	health_check {
+		path /healthz
+		interval 5s
+	}
+}
+
+route {
+	handler proxy {
+		upstream app
 	}
 }
 ```
@@ -553,8 +607,55 @@ In JSON:
 A service proxies at layer 4: the connections of `tcp` listeners, byte for byte, and the datagrams
 of `udp` listeners, a session per client, to an upstream's addresses, picked by its load balancing
 and health. TLS connections can be told apart by the name they ask for (`server_names`) and passed
-through without being terminated; `proxy_protocol` tells the upstream who the client was. A
-Caddyfile has no services.
+through without being terminated; `proxy_protocol` tells the upstream who the client was.
+
+In a .fit file:
+
+```fit
+listener postgres {
+	address :5432
+	protocols tcp
+}
+
+listener dns {
+	address :53
+	protocols udp
+}
+
+listener tls {
+	address :8443
+	protocols tcp
+}
+
+upstream db {
+	addresses 10.0.0.5:5432
+}
+
+upstream resolvers {
+	addresses 10.0.0.53:53 10.0.0.54:53
+}
+
+upstream mail {
+	addresses 10.0.0.25:8443
+}
+
+service postgres {
+	listeners postgres
+	upstream db
+	idle_timeout 30m
+}
+
+service dns {
+	listeners dns
+	upstream resolvers
+}
+
+service mail {
+	listeners tls
+	upstream mail
+	server_names mail.example.com
+}
+```
 
 In YAML:
 
@@ -645,14 +746,21 @@ A JSON line for each request, written to standard output, standard error or a fi
 bounded buffer: when the output cannot keep up, lines past the buffer are dropped and counted
 rather than holding requests up. Read when fit starts.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	log {
-		output file /var/log/fit/access.log
+```fit
+access_log {
+	output /var/log/fit/access.log
+	flush_interval 1s
+}
+
+route {
+	match {
+		host example.com
 	}
-	respond "hello"
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -696,8 +804,30 @@ In JSON:
 ## Telemetry
 
 OpenTelemetry over OTLP/HTTP: a span for each request sampled, with W3C trace context sent on to
-upstreams, and fit's metrics exported on a schedule, to a collector. Read when fit starts. A
-Caddyfile's `tracing` is not converted.
+upstreams, and fit's metrics exported on a schedule, to a collector. Read when fit starts.
+
+In a .fit file:
+
+```fit
+listener web {
+	address :8080
+}
+
+route {
+	handler respond
+}
+
+telemetry {
+	endpoint http://otel-collector:4318
+	service_name edge
+	traces {
+		sample_ratio 0.1
+	}
+	metrics {
+		interval 30s
+	}
+}
+```
 
 In YAML:
 
@@ -773,8 +903,27 @@ In JSON:
 Limits that bound what clients can make fit hold, on every listener. Each has a safe default, so a
 config that writes none is still bounded: connections, the sizes of request headers and bodies,
 the bytes of responses waiting for slow clients, and how long a client may stall a response.
-A Caddyfile's `request_body { max_size }` limits a route's bodies instead, with the
-[`body_limit`](#http-middleware-body_limit) middleware.
+The [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
+
+In a .fit file:
+
+```fit
+listener web {
+	address :8080
+}
+
+route {
+	handler respond
+}
+
+limits {
+	max_conns 50000
+	max_header_bytes 65536
+	max_body_bytes 104857600
+	max_pending_bytes 536870912
+	write_stall_timeout 1m
+}
+```
 
 In YAML:
 
@@ -830,17 +979,23 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out of a JSON or YAML config; a Caddyfile turns it on, as Caddy does,
-unless its global options say `admin off`. Read when fit starts.
+off when `admin` is left out. Read when fit starts.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-{
-	admin localhost:2019
+```fit
+admin {
+	address 127.0.0.1:2019
+	history 20
 }
-example.com {
-	respond "hello"
+
+route {
+	match {
+		host example.com
+	}
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -893,15 +1048,21 @@ gets the certificates of the routes it serves. `auto_https` turns it off, turns 
 or moves the ports. Names that no public CA certifies (`localhost`, IP addresses, `*.internal`,
 wildcards) get none.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-{
-	auto_https disable_redirects
+```fit
+auto_https {
+	disable_redirects true
 	https_port 8443
 }
-example.com {
-	respond "hello"
+
+route {
+	match {
+		host example.com
+	}
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -949,6 +1110,22 @@ Counts and times requests by listener and route, for the Admin API's `/metrics` 
 text format, which serves the rest of fit's metrics without it. It costs every request a little,
 so it is off unless written, and needs `admin`.
 
+In a .fit file:
+
+```fit
+admin {}
+
+metrics {}
+
+listener web {
+	address :8080
+}
+
+route {
+	handler respond
+}
+```
+
 In YAML:
 
 ```yaml
@@ -990,22 +1167,29 @@ instances on several hosts, `shared_storage`), the challenges answered (HTTP-01 
 and `on_demand`, which says whom to ask before a certificate is obtained during a handshake. Read
 when fit starts.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-{
+```fit
+acme {
 	email ops@example.com
-	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
-	storage file_system /var/lib/fit
-	on_demand_tls {
+	directory https://acme-staging-v02.api.letsencrypt.org/directory
+	storage /var/lib/fit
+	on_demand {
 		ask http://localhost:5555/allowed
 	}
 }
-https:// {
+
+listener https {
+	address :443
 	tls {
-		on_demand
+		on_demand true
 	}
-	respond "hello"
+}
+
+route {
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -1137,8 +1321,28 @@ Providers add listeners, routes, upstreams and services from outside the config,
 they change: Docker containers' labels, a Consul catalog's tags, keys in Consul's KV store or
 etcd, and a Kubernetes cluster's Gateway API resources and Ingresses. What the config writes wins
 over every provider, and a provider over those after it; the Admin API's `/config/effective`
-shows the result and where each part came from. Read when fit starts. A Caddyfile has no
-providers.
+shows the result and where each part came from. Read when fit starts.
+
+In a .fit file:
+
+```fit
+listener web {
+	address :80
+}
+
+provider {
+	docker {
+		endpoint unix:///var/run/docker.sock
+	}
+}
+
+provider kv {
+	etcd {
+		endpoints http://etcd:2379
+		prefix fit/
+	}
+}
+```
 
 In YAML:
 
@@ -1281,13 +1485,13 @@ In JSON:
 
 A route's `handler` answers its requests: one of these, named by `module`, with its `params`.
 
-| Module | What it does | Caddyfile |
-| --- | --- | --- |
-| [`fastcgi`](#http-handlers-fastcgi) | A FastCGI application, as PHP-FPM | `php_fastcgi` |
-| [`forward_proxy`](#http-handlers-forward_proxy) | A forward proxy for HTTP CONNECT | none |
-| [`proxy`](#http-handlers-proxy) | A reverse proxy to an upstream | `reverse_proxy` |
-| [`respond`](#http-handlers-respond) | A fixed status, fields and body | `respond`, `error` |
-| [`static`](#http-handlers-static) | Files from a directory | `file_server`, `root`, `try_files` |
+| Module | What it does |
+| --- | --- |
+| [`fastcgi`](#http-handlers-fastcgi) | A FastCGI application, as PHP-FPM |
+| [`forward_proxy`](#http-handlers-forward_proxy) | A forward proxy for HTTP CONNECT |
+| [`proxy`](#http-handlers-proxy) | A reverse proxy to an upstream |
+| [`respond`](#http-handlers-respond) | A fixed status, fields and body |
+| [`static`](#http-handlers-static) | Files from a directory |
 
 <a id="http-handlers-fastcgi"></a>
 
@@ -1298,12 +1502,17 @@ Answers requests from a FastCGI application, as PHP-FPM is, over a bounded pool 
 For PHP applications behind PHP-FPM, or any FastCGI application. `try_files` sends paths that are
 no script of their own to a front controller, as most PHP frameworks want.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	php_fastcgi unix//run/php/php-fpm.sock {
+```fit
+route {
+	match {
+		host example.com
+	}
+	handler fastcgi {
+		address unix//run/php/php-fpm.sock
 		root /var/www/app/public
+		try_files {path} {path}/index.php /index.php
 	}
 }
 ```
@@ -1365,6 +1574,21 @@ A forward proxy for HTTP CONNECT, with access rules for clients and destinations
 An HTTP CONNECT proxy for the clients `clients` lists, to the destinations `allow` and `deny`
 permit; a listener's `socks` does the same for SOCKS5.
 
+In a .fit file:
+
+```fit
+route {
+	match {
+		method CONNECT
+	}
+	handler forward_proxy {
+		clients 10.0.0.0/8
+		allow *.example.com
+		ports 443
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -1416,13 +1640,30 @@ the first's addresses is in rotation, `mirror` copies a share of the requests el
 `retry` sends a failed request again, within a budget. WebSockets and gRPC are proxied too,
 streamed both ways.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	reverse_proxy /api/* 10.0.0.1:8080 10.0.0.2:8080 {
-		lb_retries 2
-		header_up Host api.internal
+```fit
+route {
+	match {
+		host example.com
+		path /api/*
+	}
+	handler proxy {
+		upstreams {
+			upstream app
+			weight 95
+		}
+		upstreams {
+			upstream app-canary
+			weight 5
+		}
+		failover app-backup
+		host_header api.internal
+		retry {
+			attempts 2
+			statuses 502 503
+		}
+		timeout 30s
 	}
 }
 ```
@@ -1517,11 +1758,20 @@ Answers with a fixed status, header fields and body.
 
 A fixed answer: a health check, a maintenance page, a 404 for what no other route takes.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-:8080 {
-	respond /health "ok" 200
+```fit
+route {
+	match {
+		path /health
+	}
+	handler respond {
+		status 200
+		body ok
+		headers {
+			Cache-Control no-store
+		}
+	}
 }
 ```
 
@@ -1564,13 +1814,16 @@ Serves files from a directory, with directory listings, precompressed variants a
 Serves files from `root`, small ones from memory, with listings (`browse`), precompressed twins,
 and `try_files` for single-page apps.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	root * /srv/www
-	try_files {path} {path}/ /index.html
-	file_server {
+```fit
+route {
+	match {
+		host example.com
+	}
+	handler static {
+		root /srv/www
+		try_files {path} {path}/ /index.html
 		precompressed br gzip
 	}
 }
@@ -1629,22 +1882,22 @@ A route's `middleware` is a list of these, each named by `module`, with its `par
 request passes through in order before the handler; a middleware may answer itself, as
 authentication does when it refuses.
 
-| Module | What it does | Caddyfile |
-| --- | --- | --- |
-| [`basic_auth`](#http-middleware-basic_auth) | A user and password, against bcrypt hashes | `basic_auth` |
-| [`body_limit`](#http-middleware-body_limit) | Bounds request bodies | `request_body { max_size }` |
-| [`cache`](#http-middleware-cache) | An HTTP cache, in memory and on disk | none |
-| [`circuit_breaker`](#http-middleware-circuit_breaker) | Stops sending requests on while they fail | none |
-| [`client_cert`](#http-middleware-client_cert) | Requires a client certificate | none (`tls { client_auth }` on the listener) |
-| [`compress`](#http-middleware-compress) | zstd, brotli and gzip | `encode` |
-| [`concurrency_limit`](#http-middleware-concurrency_limit) | Bounds the requests under way | none |
-| [`forward_auth`](#http-middleware-forward_auth) | Asks an auth service | `forward_auth` |
-| [`headers`](#http-middleware-headers) | Sets, adds and deletes fields | `header`, `request_header`, `header_up`, `header_down` |
-| [`jwt`](#http-middleware-jwt) | Verifies JSON Web Tokens | none |
-| [`rate_limit`](#http-middleware-rate_limit) | Limits the rate of requests | none |
-| [`redirect`](#http-middleware-redirect) | Redirects | `redir` |
-| [`rewrite`](#http-middleware-rewrite) | Rewrites the path | `rewrite`, `uri`, `handle_path` |
-| [`wasm`](#http-middleware-wasm) | A WebAssembly plugin | none |
+| Module | What it does |
+| --- | --- |
+| [`basic_auth`](#http-middleware-basic_auth) | A user and password, against bcrypt hashes |
+| [`body_limit`](#http-middleware-body_limit) | Bounds request bodies |
+| [`cache`](#http-middleware-cache) | An HTTP cache, in memory and on disk |
+| [`circuit_breaker`](#http-middleware-circuit_breaker) | Stops sending requests on while they fail |
+| [`client_cert`](#http-middleware-client_cert) | Requires a client certificate |
+| [`compress`](#http-middleware-compress) | zstd, brotli and gzip |
+| [`concurrency_limit`](#http-middleware-concurrency_limit) | Bounds the requests under way |
+| [`forward_auth`](#http-middleware-forward_auth) | Asks an auth service |
+| [`headers`](#http-middleware-headers) | Sets, adds and deletes fields |
+| [`jwt`](#http-middleware-jwt) | Verifies JSON Web Tokens |
+| [`rate_limit`](#http-middleware-rate_limit) | Limits the rate of requests |
+| [`redirect`](#http-middleware-redirect) | Redirects |
+| [`rewrite`](#http-middleware-rewrite) | Rewrites the path |
+| [`wasm`](#http-middleware-wasm) | A WebAssembly plugin |
 
 <a id="http-middleware-basic_auth"></a>
 
@@ -1655,14 +1908,25 @@ Asks for a user name and password (Basic authentication), checked against bcrypt
 Asks for a user name and password. Hashes are bcrypt, as `fit hash-password` or `htpasswd -B`
 makes them.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	basic_auth /admin/* {
-		alice $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+```fit
+route {
+	match {
+		host example.com
+		path /admin/*
 	}
-	respond "hello"
+	middleware basic_auth {
+		realm admin
+		users {
+			username alice
+			password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+		}
+		user_header X-User
+	}
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -1726,14 +1990,19 @@ Limits the size of request bodies, answering 413 past it.
 
 A route's own limit on request bodies, below the listeners' `limits.max_body_bytes`.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	request_body /upload {
-		max_size 100MB
+```fit
+route {
+	match {
+		path /upload
 	}
-	respond "ok"
+	middleware body_limit {
+		max_bytes 100000000
+	}
+	handler respond {
+		body ok
+	}
 }
 ```
 
@@ -1776,6 +2045,29 @@ Keeps responses by RFC 9111's rules, in memory and on disk, shared by the routes
 Keeps responses by RFC 9111's rules, in memory and, with `disk`, on disk, in a zone that routes
 may share; answers stale while refreshing, or when the upstream fails, if told to. Purged through
 the Admin API.
+
+In a .fit file:
+
+```fit
+route {
+	match {
+		path /assets/*
+	}
+	middleware cache {
+		zone assets
+		max_bytes 268435456
+		default_ttl 10m
+		stale_while_revalidate 1m
+		disk {
+			path /var/cache/fit/assets
+			max_bytes 10737418240
+		}
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
 
 In YAML, a route:
 
@@ -1849,6 +2141,22 @@ Stops sending a route's requests on while too many fail or are slow, then lets a
 Answers 503 at once while too many of a route's requests fail or are slow, then lets a few
 through to try again.
 
+In a .fit file:
+
+```fit
+route {
+	middleware circuit_breaker {
+		window 10s
+		error_ratio 0.5
+		slow_threshold 2s
+		open_duration 30s
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -1896,6 +2204,22 @@ Asks for a client certificate, verified by the listener's TLS (mTLS), and passes
 Requires a client certificate on a route of a listener whose `tls.client_auth` mode is
 `verify_if_given`, and passes its subject on.
 
+In a .fit file:
+
+```fit
+route {
+	match {
+		path /internal/*
+	}
+	middleware client_cert {
+		subject_header X-Client-Subject
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -1935,14 +2259,18 @@ Compresses responses with zstd, brotli or gzip as they are written.
 
 Compresses responses as they are written, with the encoding the client prefers.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	encode zstd gzip {
-		minimum_length 512
+```fit
+route {
+	middleware compress {
+		encodings zstd gzip
+		level default
+		min_bytes 512
 	}
-	respond "hello"
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -1988,6 +2316,20 @@ Limits how many of a route's requests are under way at once.
 
 Bounds how many of a route's requests are under way at once, as nginx's `limit_conn` does.
 
+In a .fit file:
+
+```fit
+route {
+	middleware concurrency_limit {
+		max 100
+		status 503
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -2025,15 +2367,18 @@ Asks an auth service whether a request may go on, and passes fields of its answe
 Sends each request's fields to an auth service, as Authelia or oauth2-proxy are: a 2xx lets it
 through with fields copied from the answer, anything else is the client's answer.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	forward_auth auth:9091 {
+```fit
+route {
+	middleware forward_auth {
+		upstream auth
 		uri /api/verify
 		copy_headers Remote-User Remote-Groups
 	}
-	reverse_proxy app:8080
+	handler proxy {
+		upstream app
+	}
 }
 ```
 
@@ -2082,16 +2427,26 @@ Sets, adds and deletes request and response header fields.
 Changes request fields before the handler sees them, and response fields just before they are
 sent.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		-Server
+```fit
+route {
+	middleware headers {
+		request {
+			set {
+				X-Env prod
+			}
+		}
+		response {
+			set {
+				Strict-Transport-Security max-age=31536000
+			}
+			delete Server
+		}
 	}
-	request_header X-Env prod
-	respond "hello"
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -2153,6 +2508,27 @@ Verifies JSON Web Tokens with keys from files, a secret or a JWK set, and passes
 Verifies a JSON Web Token, from the Authorization field, another field, a cookie or the query,
 with keys from a JWK set, files or a secret, and passes claims on as fields.
 
+In a .fit file:
+
+```fit
+route {
+	match {
+		path /api/*
+	}
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		issuer https://auth.example.com/
+		audience api
+		claims_headers {
+			X-User sub
+		}
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -2211,6 +2587,25 @@ Limits the rate of requests, by client address, header field or route, allowing 
 
 Limits the rate of requests, by client address, a header, or the whole route, with a burst.
 
+In a .fit file:
+
+```fit
+route {
+	match {
+		path /login
+	}
+	middleware rate_limit {
+		rate 1
+		burst 5
+		key ip
+		trusted_proxies 10.0.0.0/8
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
+
 In YAML, a route:
 
 ```yaml
@@ -2258,12 +2653,18 @@ Redirects requests whose path a regular expression matches to a URL made from it
 
 Redirects requests, every one or those whose path matches `regexp`, to a URL with placeholders.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	redir /old/* /new{uri} 301
-	respond "hello"
+```fit
+route {
+	middleware redirect {
+		regexp ^/old/(.*)$
+		to /new/$1
+		status 301
+	}
+	handler respond {
+		body hello
+	}
 }
 ```
 
@@ -2306,12 +2707,19 @@ Rewrites the request's path: strips or adds a prefix, or replaces what a regular
 Rewrites the path the handler sees, after the route is picked: strips or adds a prefix, or
 replaces what a regular expression matches.
 
-As a Caddyfile:
+In a .fit file:
 
-```caddyfile
-example.com {
-	handle_path /api/* {
-		reverse_proxy app:8080
+```fit
+route {
+	match {
+		path /api/*
+	}
+	middleware rewrite {
+		strip_prefix /api
+		add_prefix /v2
+	}
+	handler proxy {
+		upstream app
 	}
 }
 ```
@@ -2359,6 +2767,22 @@ Runs a WebAssembly plugin, of fit's own interface or a Proxy-Wasm filter, on eac
 
 Runs a WebAssembly plugin on each request, on a pool of its own: one of fit's interface, or a
 Proxy-Wasm filter.
+
+In a .fit file:
+
+```fit
+route {
+	middleware wasm {
+		path /etc/fit/plugins/auth.wasm
+		config "{\"mode\": \"strict\"}"
+		timeout 50ms
+		on_error fail
+	}
+	handler proxy {
+		upstream app
+	}
+}
+```
 
 In YAML, a route:
 

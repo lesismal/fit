@@ -1,16 +1,17 @@
-# Caddyfile 参考
+# 转换 Caddyfile
 
 [English](caddyfile.md) | [简体中文](caddyfile.zh-CN.md)
 
-fit 读取 Caddy 的 Caddyfile，并把它的常用子集转换为原生配置。名为 `Caddyfile` 或以 `.caddyfile` 结尾的文件，
-`fit run`、`fit validate` 和 `fit adapt` 都按 Caddyfile 读取。未转换的部分从不静默丢弃：每个被跳过的指令、选项或子指令
-都按行列出，`fit adapt` 会打印出来：
+为了帮助把站点从 Caddy 迁移过来，`fit adapt` 把 Caddy 的 Caddyfile 的常用子集转换为 fit 的配置，最好写成
+[.fit 文件](fit.zh-CN.md)，此后保留并在其上修改。未转换的部分从不静默丢弃：每个被跳过的指令、选项或子指令都按行列出：
 
 ```bash
-fit adapt -c Caddyfile -o fit.json
+fit adapt -c Caddyfile -to fit -o fit.fit
 ```
 
-本页说明哪些内容可以转换、转换成什么；转换后的字段见 [配置参考](config.zh-CN.md)，三种格式的比较见 [配置](../configuration.zh-CN.md)。
+名为 `Caddyfile` 或以 `.caddyfile` 结尾的文件按名字转换；`fit run` 和 `fit validate` 也接受用 `-c` 指定的 Caddyfile，
+每次读取时转换。本页说明哪些内容可以转换、转换成什么；转换后的字段见 [配置参考](config.zh-CN.md)，同一站点在两者中的写法
+见 [从 Caddy 迁移](../migrating-from-caddy.zh-CN.md)。
 
 - [语法](#语法)
 - [全局选项](#全局选项)
@@ -258,4 +259,4 @@ fit 只展开少数占位符。fit 有对应物的，Caddy 的占位符会被转
 - `templates`、`map`、`vars`、`handle_errors`、`abort`、`intercept`、`push`、`tracing`、`invoke` 以及插件的指令。
 - 导入文件：只支持 Caddyfile 内定义的片段。
 - `rewrite` 和 `uri` 在 fit 选定路由之后生效：改写后的路径不会像在 Caddy 中那样选择另一条路由。
-- 四层代理、缓存、限流、JWT 和 WASM 在这里没有 Caddyfile 指令：以 `fit adapt` 的输出为起点，用 YAML 或 JSON 编写。
+- 四层代理、缓存、限流、JWT 和 WASM 在这里没有 Caddyfile 指令：把它们加到 `fit adapt` 写出的 .fit 文件中。

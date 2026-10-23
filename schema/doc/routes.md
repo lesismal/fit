@@ -13,18 +13,37 @@ takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
-[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. A Caddyfile's
-directives become routes: each handler a route, and each middleware directive on the routes it
-covers.
+[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.fit` file,
+a `site` writes the routes of its host names together: each `route` in it takes the site's hosts
+and its own paths, and the site's middleware before its own.
 
-```caddyfile
-example.com {
-	@write method POST PUT DELETE
-	basic_auth @write {
-		admin $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+```fit
+upstream api {
+	addresses 127.0.0.1:9000
+}
+
+site example.com {
+	route /api/* {
+		name api-writes
+		match {
+			method POST PUT DELETE
+		}
+		middleware basic_auth {
+			users {
+				username admin
+				password_hash $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
+			}
+		}
+		handler proxy { upstream api }
 	}
-	reverse_proxy /api/* 127.0.0.1:9000
-	respond "home"
+	route /api/* {
+		name api
+		handler proxy { upstream api }
+	}
+	route {
+		name home
+		handler respond { body home }
+	}
 }
 ```
 

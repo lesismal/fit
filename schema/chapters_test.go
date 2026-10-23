@@ -1,12 +1,14 @@
 package schema
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/lesismal/fit/adapter/caddyfile"
+	"github.com/lesismal/fit/adapter/fitconf"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 )
@@ -26,7 +28,7 @@ const routeConfig = `{
 
 // TestChapterExamples loads every example of the reference's chapters:
 // each JSON config, each module's route with its params decoded by the
-// module, and each Caddyfile converted.
+// module, and each .fit example, which must say the same as the JSON.
 func TestChapterExamples(t *testing.T) {
 	err := fs.WalkDir(doc, "doc", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -71,17 +73,25 @@ func TestChapterExamples(t *testing.T) {
 				}
 			}
 		}
-		if c.caddyfile != "" {
-			r, err := caddyfile.Convert([]byte(c.caddyfile))
+		if c.json != "" {
+			// The .fit example, the chapter's own or made from its JSON,
+			// is the same config as the JSON.
+			f, err := c.fitExample()
 			if err != nil {
-				t.Errorf("%s: its Caddyfile: %v", name, err)
+				t.Error(err)
 				return nil
 			}
-			if len(r.Warnings) > 0 {
-				t.Errorf("%s: its Caddyfile converts with warnings: %v", name, r.Warnings)
+			r, err := fitconf.Adapt([]byte(f))
+			if err != nil {
+				t.Errorf("%s: its .fit example: %v\n%s", name, err, f)
+				return nil
 			}
-			if _, err := config.Load(r.JSON); err != nil {
-				t.Errorf("%s: its Caddyfile: %v\n%s", name, r.MapErrors(err), r.JSON)
+			want := c.json
+			if c.route {
+				want = `{"routes": [` + c.json + `]}`
+			}
+			if !sameJSON(t, r.JSON, []byte(want)) {
+				t.Errorf("%s: its .fit example is not its JSON:\n%s\nis\n%s", name, f, r.JSON)
 			}
 		}
 		return nil
@@ -89,4 +99,22 @@ func TestChapterExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// sameJSON says a and b hold the same JSON value, whatever the order of
+// their members.
+func sameJSON(t *testing.T, a, b []byte) bool {
+	t.Helper()
+	var x, y any
+	if err := json.Unmarshal(a, &x); err != nil {
+		t.Fatal(err)
+	}
+	std, err := config.Standardize(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(std, &y); err != nil {
+		t.Fatal(err)
+	}
+	return reflect.DeepEqual(x, y)
 }

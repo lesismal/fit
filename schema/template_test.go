@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/lesismal/fit/adapter"
-	"github.com/lesismal/fit/adapter/caddyfile"
+	_ "github.com/lesismal/fit/adapter/fitconf"
 	_ "github.com/lesismal/fit/adapter/yaml"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 )
 
-var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml"}
+var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml", "fit": "../templates/fit/fit.fit"}
 
 // TestTemplatesUpToDate fails when a config type, a struct tag or a
 // standard module changed without the templates being regenerated.
@@ -93,8 +94,17 @@ func TestTemplatesLoad(t *testing.T) {
 		}
 		for name := range names {
 			key := fmt.Sprintf("%q:", name)
-			if format == "yaml" {
+			switch format {
+			case "yaml":
 				key = " " + name + ":"
+			case "fit":
+				// A module is its name and a block of its params, with
+				// no module or params fields.
+				if name == "module" || name == "params" || fitDirective(string(data), name) || fitDirective(string(data), fitSingular[name]) {
+					continue
+				}
+				t.Errorf("%s has no field %s", file, name)
+				continue
 			}
 			if !strings.Contains(string(data), key) && !strings.HasPrefix(string(data), strings.TrimSpace(key)) && !strings.Contains(string(data), "\n"+strings.TrimSpace(key)) {
 				t.Errorf("%s has no field %s", file, name)
@@ -103,23 +113,11 @@ func TestTemplatesLoad(t *testing.T) {
 	}
 }
 
-// TestCaddyfileTemplate converts the Caddyfile template, with only the
-// warnings of what converts with doubts, and loads it.
-func TestCaddyfileTemplate(t *testing.T) {
-	data, err := os.ReadFile("../templates/caddyfile/Caddyfile")
-	if err != nil {
-		t.Fatal(err)
+// fitDirective says a .fit template has a directive name, written out or
+// commented out.
+func fitDirective(data, name string) bool {
+	if name == "" {
+		return false
 	}
-	r, err := caddyfile.Convert(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, w := range r.Warnings {
-		if !strings.Contains(w, "rewrite: fit picks") && !strings.Contains(w, "error: answered") && !strings.Contains(w, "metrics: fit serves") {
-			t.Errorf("a warning: %s", w)
-		}
-	}
-	if _, err := config.Load(r.JSON); err != nil {
-		t.Fatal(r.MapErrors(err))
-	}
+	return regexp.MustCompile(`(?m)^[\t# ]*` + regexp.QuoteMeta(name) + `( |$)`).MatchString(data)
 }

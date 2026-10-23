@@ -3,15 +3,16 @@
 [English](migrating-from-nginx.md) | [简体中文](migrating-from-nginx.zh-CN.md)
 
 fit 保留了 nginx 擅长的东西——事件循环和每个连接很小的开销——改变的是配置方式：一份结构化的配置，运行前先检查，通过
-Admin API 原地修改而无需 reload。本指南把 nginx 的指令对应到 fit 的配置；每个字段见 [配置参考](reference/config.zh-CN.md)。
+Admin API 原地修改而无需 reload。它自己的格式 [.fit 文件](reference/fit.zh-CN.md) 像 nginx 的配置一样由指令块组成，但
+指令就是 fit 自己的字段；一份配置可以像 nginx 用 `include` 那样分散在多个文件和目录中。本指南把 nginx 的指令对应到 fit 的配置；每个字段见 [配置参考](reference/config.zh-CN.md)。
 
 ## 先转换
 
 `fit adapt` 可以转换 nginx 配置的常用子集，并列出它略过的指令及其行号：
 
 ```bash
-fit adapt -from nginx -c nginx.conf -o fit.json
-fit validate -c fit.json
+fit adapt -from nginx -c nginx.conf -to fit -o fit.fit
+fit validate -c fit.fit
 ```
 
 它转换 `http` 块中的 server（`listen`、`server_name`、`ssl_certificate`）、其中的 location（精确、前缀、`^~` 和正则，
@@ -23,13 +24,13 @@ fit validate -c fit.json
 
 | nginx | fit |
 | --- | --- |
-| `server { listen 8080; }` | 一个 listener：`{"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}` |
-| 带 `ssl_certificate` 和 `ssl_certificate_key` 的 `listen 443 ssl http2;` | `"protocols": ["http/1.1", "h2"]` 且带 `"tls": {"certificates": [{"cert_file", "key_file"}]}` 的 listener；加上 `h3` 即启用 HTTP/3 |
-| `server_name a.example *.example;` | 路由的 `match.host`；`*.` 代表一个标签，`**.` 代表一个或多个 |
+| `server { listen 8080; }` | 一个 listener：`listener web { address :8080; protocols http/1.1 h2c }` |
+| 带 `ssl_certificate` 和 `ssl_certificate_key` 的 `listen 443 ssl http2;` | `protocols http/1.1 h2` 且带 `tls { certificates { cert_file ...; key_file ... } }` 的 listener；加上 `h3` 即启用 HTTP/3 |
+| `server_name a.example *.example;` | `site a.example *.example { ... }`，或路由的 `match.host`；`*.` 代表一个标签，`**.` 代表一个或多个 |
 | `location = /x` | `match.path: ["/x"]` |
 | `location /x/` | `match.path: ["/x/*"]` |
 | `location ~ \.php$` | `match.path_regexp: ["\\.php$"]` |
-| `proxy_pass http://app;` 与 `upstream app { server ...; }` | `proxy` 处理器 `{"upstream": "app"}`，以及带 `addresses` 的 upstream |
+| `proxy_pass http://app;` 与 `upstream app { server ...; }` | `handler proxy { upstream app }`，以及 `upstream app { addresses ... }` |
 | `least_conn;`、`ip_hash;`、`hash $cookie_x;` | upstream 的 `load_balancing`：`least_conn`、`ip_hash`、带 `hash_key` 的 `cookie_hash` |
 | `server ... weight=3 max_fails=2 fail_timeout=10s;` | `weights`、`max_fails`、`fail_timeout` |
 | `server ... backup;` | proxy 的 `failover`：另一个 upstream，在第一个没有可用后端时使用 |

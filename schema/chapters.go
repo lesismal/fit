@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/lesismal/fit/adapter/fitconf"
 	"github.com/lesismal/fit/adapter/yaml"
 )
 
@@ -44,23 +45,24 @@ var standardModules = map[string]struct{}{
 }
 
 // chapter is a chapter's text, and its examples: in JSON, from which the
-// YAML is made, and as a Caddyfile, when one says the same or near it.
+// YAML is made, and the .fit file, made from the JSON too unless the
+// chapter writes its own, which says the same, as with a site.
 type chapter struct {
-	file      string
-	text      string
-	json      string
-	caddyfile string
+	file string
+	text string
+	json string
+	fit  string
 	// route says the JSON is a route's, not a whole config's.
 	route bool
 }
 
 var (
-	jsonBlock      = regexp.MustCompile("(?s)```json( route)?\n(.*?)\n```\n?")
-	caddyfileBlock = regexp.MustCompile("(?s)```caddyfile\n(.*?)\n```\n?")
+	jsonBlock = regexp.MustCompile("(?s)```json( route)?\n(.*?)\n```\n?")
+	fitBlock  = regexp.MustCompile("(?s)```fit\n(.*?)\n```\n?")
 )
 
 // readChapter reads a chapter of schema/doc: Markdown, with at most one
-// JSON example and one Caddyfile example in fenced blocks.
+// JSON example and one .fit example in fenced blocks.
 func readChapter(name string) (*chapter, error) {
 	data, err := doc.ReadFile("doc/" + name)
 	if err != nil {
@@ -72,36 +74,56 @@ func readChapter(name string) (*chapter, error) {
 		c.json, c.route = m[2], m[1] != ""
 		text = strings.Replace(text, m[0], "", 1)
 	}
-	if m := caddyfileBlock.FindStringSubmatch(text); m != nil {
-		c.caddyfile = m[1]
+	if m := fitBlock.FindStringSubmatch(text); m != nil {
+		c.fit = m[1]
 		text = strings.Replace(text, m[0], "", 1)
 	}
-	if jsonBlock.MatchString(text) || caddyfileBlock.MatchString(text) {
+	if jsonBlock.MatchString(text) || fitBlock.MatchString(text) {
 		return nil, fmt.Errorf("schema: chapter %s has more than one example of a kind", name)
 	}
 	c.text = strings.TrimSpace(text)
 	return c, nil
 }
 
-// write writes the chapter: its text, then its examples, as a Caddyfile,
+// write writes the chapter: its text, then its examples, in a .fit file,
 // in YAML and in JSON.
 func (c *chapter) write(buf *bytes.Buffer) error {
 	if c.text != "" {
 		fmt.Fprintf(buf, "\n%s\n", c.text)
 	}
-	if c.caddyfile != "" {
-		fmt.Fprintf(buf, "\nAs a Caddyfile:\n\n```caddyfile\n%s\n```\n", c.caddyfile)
+	if c.json == "" {
+		return nil
 	}
-	if c.json != "" {
-		y, err := yaml.FromJSON([]byte(c.json))
-		if err != nil {
-			return fmt.Errorf("schema: chapter %s: its JSON: %w", c.file, err)
-		}
-		what := ""
-		if c.route {
-			what = ", a route"
-		}
-		fmt.Fprintf(buf, "\nIn YAML%s:\n\n```yaml\n%s```\n\nIn JSON:\n\n```json\n%s\n```\n", what, y, c.json)
+	f, err := c.fitExample()
+	if err != nil {
+		return err
 	}
+	y, err := yaml.FromJSON([]byte(c.json))
+	if err != nil {
+		return fmt.Errorf("schema: chapter %s: its JSON: %w", c.file, err)
+	}
+	what := ""
+	if c.route {
+		what = ", a route"
+	}
+	fmt.Fprintf(buf, "\nIn a .fit file:\n\n```fit\n%s\n```\n\nIn YAML%s:\n\n```yaml\n%s```\n\nIn JSON:\n\n```json\n%s\n```\n",
+		strings.TrimSuffix(f, "\n"), what, y, c.json)
 	return nil
+}
+
+// fitExample is the chapter's .fit example: its own, or one made from its
+// JSON, a route's as a route of a config.
+func (c *chapter) fitExample() (string, error) {
+	if c.fit != "" {
+		return c.fit, nil
+	}
+	src := c.json
+	if c.route {
+		src = `{"routes": [` + c.json + `]}`
+	}
+	f, err := fitconf.FromJSON([]byte(src))
+	if err != nil {
+		return "", fmt.Errorf("schema: chapter %s: its JSON as a .fit file: %w", c.file, err)
+	}
+	return string(f), nil
 }

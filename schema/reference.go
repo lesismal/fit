@@ -131,8 +131,8 @@ schema/doc; do not edit. Regenerate with: go test ./schema -update -->
 Every field of fit's native config, schema version 1, and of the params of the modules in
 ` + "`modules/standard`" + `: what each part of a config is for, an example of it, and a table of
 its fields, with each field's type, default and description. A config may be written as a
-[Caddyfile](caddyfile.md), in [YAML](yaml.md) or in [JSON](json.md); YAML and JSON have exactly the
-fields below, and a Caddyfile converts to them. [Configuration](../configuration.md) says how a
+[.fit file](fit.md), in [YAML](yaml.md) or in [JSON](json.md), each with exactly the fields
+below, and may be split across several files. [Configuration](../configuration.md) says how a
 config is loaded, checked and changed.
 
 How to read the tables: a field left out takes its default, when it has one; a duration is a

@@ -142,7 +142,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("run: %d %q %q", code, out.String(), errOut.String())
 	}
 
-	if code, _, stderr := runFit("run", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.HasPrefix(stderr, "fit run: open ") {
+	if code, _, stderr := runFit("run", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.HasPrefix(stderr, "fit run: stat ") {
 		t.Fatalf("missing file: %d %q", code, stderr)
 	}
 	if err := os.WriteFile(cfg, []byte(`{"listeners": []}`), 0o644); err != nil {

@@ -95,6 +95,13 @@ func startFitWant(t *testing.T, doc string, want int, args ...string) (*fit, map
 	if err := os.WriteFile(cfg, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return startFitAt(t, cfg, want, args...)
+}
+
+// startFitAt runs fit on the config at cfg, a file or a directory, and
+// waits for its listeners, want of them, the Admin API's included.
+func startFitAt(t *testing.T, cfg string, want int, args ...string) (*fit, map[string]string) {
+	t.Helper()
 	cmd := exec.Command(fitBin, append([]string{"run", "-c", cfg}, args...)...)
 	stderr := new(lockedBuffer)
 	cmd.Stderr = io.MultiWriter(os.Stderr, stderr)

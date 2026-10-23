@@ -3,17 +3,7 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out of a JSON or YAML config; a Caddyfile turns it on, as Caddy does,
-unless its global options say `admin off`. Read when fit starts.
-
-```caddyfile
-{
-	admin localhost:2019
-}
-example.com {
-	respond "hello"
-}
-```
+off when `admin` is left out. Read when fit starts.
 
 ```json
 {

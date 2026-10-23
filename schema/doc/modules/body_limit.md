@@ -1,14 +1,5 @@
 A route's own limit on request bodies, below the listeners' `limits.max_body_bytes`.
 
-```caddyfile
-example.com {
-	request_body /upload {
-		max_size 100MB
-	}
-	respond "ok"
-}
-```
-
 ```json route
 {
   "match": {"path": ["/upload"]},

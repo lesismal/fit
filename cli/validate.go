@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 
 	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/config"
@@ -16,7 +17,8 @@ import (
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	file := flags.String("c", "fit.json", "the config file to check: native JSON (comments and trailing commas allowed), YAML (.yaml, .yml), nginx (.conf) or a Caddyfile")
+	var cfgPaths configPaths
+	flags.Var(&cfgPaths, "c", fmt.Sprintf(configFlagUsage, "check"))
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -25,10 +27,12 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	adapted, err := adapter.ReadFile(*file)
+	paths := cfgPaths.orDefault()
+	name := strings.Join(paths, ", ")
+	set, _, err := loadSet(paths)
 	var c *config.Config
 	if err == nil {
-		if c, err = config.Load(adapted.JSON); err == nil {
+		if c, err = config.Load(set.JSON); err == nil {
 			// Compiling provisions every module, which checks their params
 			// too.
 			var g *fitruntime.Graph
@@ -36,39 +40,42 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 				g.Release()
 			}
 		}
-		err = adapted.MapErrors(err)
+		err = set.MapErrors(err)
 	}
 	if err != nil {
-		printConfigError(stderr, "fit validate", *file, err)
+		printConfigError(stderr, "fit validate", name, err)
 		return 1
 	}
-	printWarnings(stderr, *file, adapted)
-	printDeprecated(stderr, *file, adapted, c.Warnings())
-	fmt.Fprintf(stdout, "%s: valid\n", *file)
+	printWarnings(stderr, set)
+	printDeprecated(stderr, set, c.Warnings())
+	fmt.Fprintf(stdout, "%s: valid\n", name)
 	return 0
 }
 
-// printWarnings prints what adapting the config in file left out or
+// printWarnings prints what adapting each of a config's files left out or
 // doubted.
-func printWarnings(stderr io.Writer, file string, r *adapter.Result) {
-	if r == nil {
+func printWarnings(stderr io.Writer, set *adapter.Set) {
+	if set == nil {
 		return
 	}
-	for _, w := range r.Warnings {
-		fmt.Fprintf(stderr, "%s: warning: %s\n", file, w)
+	for i, r := range set.Parts {
+		for _, w := range r.Warnings {
+			fmt.Fprintf(stderr, "%s: warning: %s\n", set.Files[i], w)
+		}
 	}
 }
 
-// printDeprecated prints the renamed names the config in file uses, each
-// at its position in the file, which adapted maps them to.
-func printDeprecated(stderr io.Writer, file string, adapted *adapter.Result, ws config.Errors) {
+// printDeprecated prints the renamed names the config uses, each at its
+// position in its file.
+func printDeprecated(stderr io.Writer, set *adapter.Set, ws config.Errors) {
 	if len(ws) > 0 {
-		printConfigError(stderr, "fit", file, adapted.MapErrors(ws))
+		printConfigError(stderr, "fit", set.Name(), set.MapErrors(ws))
 	}
 }
 
 // printConfigError prints why the config in file could not be loaded or
-// compiled: each error with its position, or why the file could not be read.
+// compiled: each error with its position, in the file it names or in file,
+// or why the file could not be read.
 func printConfigError(stderr io.Writer, cmd, file string, err error) {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
@@ -76,6 +83,10 @@ func printConfigError(stderr io.Writer, cmd, file string, err error) {
 		return
 	}
 	for _, e := range config.AsErrors(err) {
+		if e.File != "" {
+			fmt.Fprintln(stderr, e)
+			continue
+		}
 		sep := ":"
 		if e.Line == 0 {
 			sep = ": "
@@ -88,7 +99,7 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("schema", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	reference := flags.Bool("reference", false, "print the config reference, in Markdown, rather than the JSON Schema")
-	template := flags.String("template", "", "print a config template, json or yaml, with every field commented, rather than the JSON Schema")
+	template := flags.String("template", "", "print a config template, fit, yaml or json, with every field commented, rather than the JSON Schema")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}

@@ -5,30 +5,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/lesismal/fit/adapter/fitconf"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
 )
 
-// Template returns a config template in format, "json" or "yaml", that
+// Template returns a config template in format, "fit", "yaml" or "json", that
 // holds every field of the native config and of every module's params,
 // each with its description, type, default and choices in a comment above
 // it. A small config is written out, which fit loads as it is: a listener,
 // an upstream and a route; every other field is there commented out, with
 // its default or an example value, to be uncommented. The JSON has
 // comments and trailing commas, which fit takes (see config.Standardize).
-// templates/ holds both, for the modules in modules/standard.
+// templates/ holds the three, for the modules in modules/standard.
 func Template(format string) ([]byte, error) {
-	if format != "json" && format != "yaml" {
-		return nil, fmt.Errorf("schema: no template in %q: json or yaml", format)
+	if format != "json" && format != "yaml" && format != "fit" {
+		return nil, fmt.Errorf("schema: no template in %q: fit, yaml or json", format)
 	}
 	t := &templater{}
 	root := t.object(reflect.TypeFor[config.Config](), "", nil)
 	var buf bytes.Buffer
-	w := &tmplWriter{buf: &buf, yaml: format == "yaml"}
+	w := &tmplWriter{buf: &buf, yaml: format == "yaml", fit: format == "fit"}
 	w.head()
+	if w.fit {
+		buf.WriteString("\n")
+		w.fitMembers(root.children, 0, true, true)
+		return buf.Bytes(), nil
+	}
 	indent := 1
 	if w.yaml {
 		indent = 0
@@ -363,14 +370,16 @@ func scalarExample(f config.Field, path string, typ reflect.Type) string {
 	return "null"
 }
 
-// tmplWriter writes the template's nodes as JSON with comments, or YAML.
+// tmplWriter writes the template's nodes as JSON with comments, YAML, or
+// a .fit file.
 type tmplWriter struct {
 	buf  *bytes.Buffer
 	yaml bool
+	fit  bool
 }
 
 func (w *tmplWriter) comment() string {
-	if w.yaml {
+	if w.yaml || w.fit {
 		return "#"
 	}
 	return "//"
@@ -387,7 +396,7 @@ func (w *tmplWriter) head() {
 		"out, with its default, or an example where it has none: uncomment what you need.",
 		"Above each field: what it is, its type, its choices and its default. A field left out",
 		"takes its default. The config reference, docs/reference/config.md, has the same, with",
-		"examples; the Caddyfile template is ../caddyfile/Caddyfile.",
+		"examples; the templates in the other formats are beside this one's directory.",
 	} {
 		if l == "" {
 			fmt.Fprintf(w.buf, "%s\n", c)
@@ -395,7 +404,7 @@ func (w *tmplWriter) head() {
 			fmt.Fprintf(w.buf, "%s %s\n", c, l)
 		}
 	}
-	if !w.yaml {
+	if !w.yaml && !w.fit {
 		w.buf.WriteString("{\n")
 	}
 }
@@ -403,6 +412,9 @@ func (w *tmplWriter) head() {
 // line writes a line at indent, commented out unless on.
 func (w *tmplWriter) line(indent int, on bool, text string) {
 	pad := strings.Repeat("  ", indent)
+	if w.fit {
+		pad = strings.Repeat("\t", indent)
+	}
 	if on {
 		fmt.Fprintf(w.buf, "%s%s\n", pad, text)
 	} else {
@@ -490,4 +502,119 @@ func (w *tmplWriter) element(e *tnode, indent int, parentOn bool) {
 	if !w.yaml {
 		w.line(indent, on, "},")
 	}
+}
+
+// fitMembers writes members as directives of a .fit file; root says they
+// are the config's own, whose lists of objects take their names in the
+// singular.
+func (w *tmplWriter) fitMembers(ms []*tnode, indent int, on, root bool) {
+	for i, m := range ms {
+		if m.scalar == "null" {
+			continue // an old name, which a .fit file need not show
+		}
+		if i > 0 && (root || len(m.doc) > 0) {
+			w.buf.WriteString("\n")
+		}
+		w.fitMember(m, indent, on, root)
+	}
+}
+
+// fitMember writes m; parentOn says the block it is in is written out.
+func (w *tmplWriter) fitMember(m *tnode, indent int, parentOn, root bool) {
+	on := parentOn && m.active
+	w.docs(indent, parentOn, m.doc)
+	name := m.name
+	switch {
+	case m.isObject && len(m.children) == 2 && m.children[0].name == "module":
+		w.fitModule(name, m.children, indent, on)
+	case m.isObject:
+		w.line(indent, on, name+" {")
+		w.fitMembers(m.children, indent+1, on, false)
+		w.line(indent, on, "}")
+	case m.isArray:
+		if root {
+			if s, ok := fitSingular[name]; ok {
+				name = s
+			}
+		}
+		for i, e := range m.elems {
+			if i > 0 {
+				w.buf.WriteString("\n")
+			}
+			eon := on && e.active
+			if len(e.children) == 2 && e.children[0].name == "module" {
+				w.fitModule(name, e.children, indent, eon)
+				continue
+			}
+			w.line(indent, eon, name+" {")
+			w.fitMembers(e.children, indent+1, eon, false)
+			w.line(indent, eon, "}")
+		}
+	default:
+		for _, l := range fitScalar(name, m.scalar) {
+			w.line(indent, on, l)
+		}
+	}
+}
+
+// fitModule writes a module reference: name, the module's, and its params.
+func (w *tmplWriter) fitModule(name string, ref []*tnode, indent int, on bool) {
+	mod, _ := strconv.Unquote(ref[0].scalar)
+	w.docs(indent, on, ref[0].doc)
+	w.line(indent, on, name+" "+mod+" {")
+	w.fitMembers(ref[1].children, indent+1, on, false)
+	w.line(indent, on, "}")
+}
+
+// fitSingular are the names of the config's lists of objects in a .fit
+// file, as fitconf takes them.
+var fitSingular = map[string]string{
+	"listeners": "listener", "routes": "route", "upstreams": "upstream", "services": "service", "providers": "provider",
+}
+
+// fitScalar writes a field whose value is v, as JSON, as the lines of a
+// .fit file: a scalar or a list as arguments, an object as a block of its
+// keys.
+func fitScalar(name, v string) []string {
+	var x any
+	dec := json.NewDecoder(strings.NewReader(v))
+	dec.UseNumber()
+	if err := dec.Decode(&x); err != nil {
+		return []string{name + " " + v}
+	}
+	switch x := x.(type) {
+	case map[string]any:
+		if len(x) == 0 {
+			return []string{name + " {}"}
+		}
+		lines := []string{name + " {"}
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			lines = append(lines, "\t"+strings.Join(append([]string{fitconf.Word(k)}, fitWords(x[k])...), " "))
+		}
+		return append(lines, "}")
+	}
+	return []string{strings.Join(append([]string{name}, fitWords(x)...), " ")}
+}
+
+func fitWords(v any) []string {
+	switch v := v.(type) {
+	case []any:
+		var out []string
+		for _, e := range v {
+			out = append(out, fitWords(e)...)
+		}
+		return out
+	case string:
+		return []string{fitconf.Word(v)}
+	case json.Number:
+		return []string{string(v)}
+	case bool:
+		return []string{strconv.FormatBool(v)}
+	}
+	return nil
 }

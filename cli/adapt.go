@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/lesismal/fit/adapter"
 	_ "github.com/lesismal/fit/adapter/caddyfile"
+	"github.com/lesismal/fit/adapter/fitconf"
 	_ "github.com/lesismal/fit/adapter/nginx"
 	"github.com/lesismal/fit/adapter/yaml"
 	"github.com/lesismal/fit/config"
@@ -17,19 +20,21 @@ import (
 
 const adaptUsage = `Usage: fit adapt [flags]
 
-Converts a config to fit's native JSON, checked as fit run would load it,
-or writes native JSON as YAML: a YAML config (.yaml, .yml), an nginx
-config (.conf) or a Caddyfile (a file named Caddyfile, or .caddyfile), of
-which a common subset converts. What could not be converted is listed on
-standard error.
+Converts a config between fit's formats, .fit, YAML and native JSON,
+checked as fit run would load it, and converts nginx configs (.conf) and
+Caddyfiles (a file named Caddyfile, or .caddyfile), of which a common
+subset converts, to help moving to fit. What could not be converted is
+listed on standard error. Several files, or directories of them, are
+merged into one config, as fit run merges them.
 
 Flags:
 
-	-c file      the config to convert, or - for standard input; fit.json
-	             when left out
-	-from name   its format: json, or an adapter's (%s); by the file's
-	             extension when left out, json for standard input
-	-to name     what to write: json, or yaml; json when left out
+	-c path      a config file or a directory of them, or - for standard
+	             input; give -c again for more; fit.json when left out
+	-from name   the format of a single file or of standard input: json, or
+	             an adapter's (%s); by the file's extension when left out,
+	             json for standard input
+	-to name     what to write: json, yaml or fit; json when left out
 	-o file      where to write it; standard output when left out
 `
 
@@ -37,7 +42,8 @@ func runAdapt(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("adapt", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprintf(stderr, adaptUsage, adapterList()) }
-	file := flags.String("c", "fit.json", "")
+	var cfgPaths configPaths
+	flags.Var(&cfgPaths, "c", "")
 	from := flags.String("from", "", "")
 	to := flags.String("to", "json", "")
 	out := flags.String("o", "", "")
@@ -48,49 +54,62 @@ func runAdapt(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "fit adapt: unexpected argument %q\n", flags.Arg(0))
 		return 2
 	}
-	if *to != "json" && *to != "yaml" {
-		fmt.Fprintf(stderr, "fit adapt: -to %q: json or yaml\n", *to)
+	if *to != "json" && *to != "yaml" && *to != "fit" {
+		fmt.Fprintf(stderr, "fit adapt: -to %q: json, yaml or fit\n", *to)
 		return 2
 	}
-	var data []byte
+	paths := cfgPaths.orDefault()
+	name := strings.Join(paths, ", ")
+	var set *adapter.Set
 	var err error
-	if *file == "-" {
-		data, err = io.ReadAll(io.LimitReader(os.Stdin, 64<<20))
-	} else {
-		data, err = os.ReadFile(*file)
-		if *from == "" {
-			*from = adapter.ForPath(*file)
+	switch {
+	case len(paths) > 1 && slices.Contains(paths, "-"):
+		fmt.Fprintln(stderr, "fit adapt: -c - reads standard input alone")
+		return 2
+	case len(paths) == 1 && paths[0] == "-":
+		var data []byte
+		if data, err = io.ReadAll(io.LimitReader(os.Stdin, adapter.MaxBytes)); err == nil {
+			set, err = adaptOne(name, *from, data)
 		}
+	case *from != "":
+		if len(paths) > 1 {
+			fmt.Fprintln(stderr, "fit adapt: -from is for a single file; several take their formats from their extensions")
+			return 2
+		}
+		var data []byte
+		if data, err = os.ReadFile(paths[0]); err == nil {
+			set, err = adaptOne(name, *from, data)
+		}
+	default:
+		set, _, err = loadSet(paths)
 	}
-	if err != nil {
-		fmt.Fprintf(stderr, "fit adapt: %v\n", err)
-		return 1
-	}
-	adapted, err := adapter.Adapt(*from, data)
 	if err == nil {
-		_, err = config.Load(adapted.JSON)
-		err = adapted.MapErrors(err)
+		_, err = config.Load(set.JSON)
+		err = set.MapErrors(err)
 	}
 	if err != nil {
-		printConfigError(stderr, "fit adapt", *file, err)
+		printConfigError(stderr, "fit adapt", name, err)
 		return 1
 	}
-	printWarnings(stderr, *file, adapted)
+	printWarnings(stderr, set)
 
 	var result []byte
 	switch *to {
 	case "json":
 		var b bytes.Buffer
-		if err := json.Indent(&b, adapted.JSON, "", "  "); err != nil {
+		if err := json.Indent(&b, set.JSON, "", "  "); err != nil {
 			fmt.Fprintf(stderr, "fit adapt: %v\n", err)
 			return 1
 		}
 		result = append(b.Bytes(), '\n')
 	case "yaml":
-		if result, err = yaml.FromJSON(adapted.JSON); err != nil {
-			fmt.Fprintf(stderr, "fit adapt: %v\n", err)
-			return 1
-		}
+		result, err = yaml.FromJSON(set.JSON)
+	case "fit":
+		result, err = fitconf.FromJSON(set.JSON)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fit adapt: %v\n", err)
+		return 1
 	}
 	if *out == "" {
 		_, _ = stdout.Write(result)
@@ -101,6 +120,16 @@ func runAdapt(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// adaptOne adapts data, from the file name, with the adapter from: a set
+// of one.
+func adaptOne(name, from string, data []byte) (*adapter.Set, error) {
+	r, err := adapter.Adapt(from, data)
+	if err != nil {
+		return nil, err
+	}
+	return &adapter.Set{Files: []string{name}, Parts: []*adapter.Result{r}, JSON: r.JSON}, nil
 }
 
 func adapterList() string {

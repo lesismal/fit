@@ -1,17 +1,6 @@
 Changes request fields before the handler sees them, and response fields just before they are
 sent.
 
-```caddyfile
-example.com {
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		-Server
-	}
-	request_header X-Env prod
-	respond "hello"
-}
-```
-
 ```json route
 {
   "middleware": [{"module": "headers", "params": {

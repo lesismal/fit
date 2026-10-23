@@ -19,7 +19,11 @@ type recorder struct {
 	refuse  string // a config apply refuses
 }
 
-func (r *recorder) apply(data []byte) error {
+func (r *recorder) apply(files []File) error {
+	var data []byte
+	for _, f := range files {
+		data = append(data, f.Data...)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if string(data) == r.refuse {
@@ -62,7 +66,7 @@ func start(t *testing.T, initial string, opts Options) (string, *recorder, *Watc
 	path := filepath.Join(t.TempDir(), "fit.json")
 	write(t, path, initial)
 	r := &recorder{}
-	w := New(path, []byte(initial), opts, r.apply, r.report)
+	w := New([]string{path}, []File{{path, []byte(initial)}}, opts, r.apply, r.report)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -126,7 +130,7 @@ func TestEditBeforeWatching(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fit.json")
 	write(t, path, "v2") // the same size as "v1", and not touched again
 	r := &recorder{}
-	w := New(path, []byte("v1"), fast, r.apply, r.report)
+	w := New([]string{path}, []File{{path, []byte("v1")}}, fast, r.apply, r.report)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go w.Run(ctx)
@@ -193,9 +197,41 @@ func TestTooLarge(t *testing.T) {
 func TestApplied(t *testing.T) {
 	path, r, w := start(t, "v1", fast)
 	write(t, path, "by-sighup")
-	w.Applied([]byte("by-sighup"))
+	w.Applied([]File{{path, []byte("by-sighup")}})
 	time.Sleep(200 * time.Millisecond)
 	if applied, _ := r.state(); len(applied) != 0 {
 		t.Fatalf("applied %q again", applied)
 	}
+}
+
+// TestDirectory: the files a directory stands for are found at each look,
+// so that a file added, changed or taken out is applied.
+func TestDirectory(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.fit")
+	write(t, a, "A")
+	expand := func(paths []string) ([]string, error) {
+		var files []string
+		for _, p := range paths {
+			es, err := os.ReadDir(p)
+			if err != nil {
+				return nil, err
+			}
+			for _, e := range es {
+				files = append(files, filepath.Join(p, e.Name()))
+			}
+		}
+		return files, nil
+	}
+	r := &recorder{}
+	w := New([]string{dir}, []File{{a, []byte("A")}}, Options{Interval: 10 * time.Millisecond, Debounce: 50 * time.Millisecond, Expand: expand}, r.apply, r.report)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+	write(t, filepath.Join(dir, "b.fit"), "B")
+	r.waitFor(t, "a file added", func(a []string, _ []error) bool { return len(a) == 1 && a[0] == "AB" })
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor(t, "a file taken out", func(a []string, _ []error) bool { return len(a) == 2 && a[1] == "B" })
 }
