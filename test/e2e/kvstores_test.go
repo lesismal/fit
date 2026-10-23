@@ -98,6 +98,60 @@ func waitServer(t *testing.T, what string, ok func() bool) {
 	}
 }
 
+// startConsul runs Consul in development mode, and returns its URL once it
+// has a leader.
+func startConsul(t *testing.T) string {
+	t.Helper()
+	consul := "http://" + startServer(t, consulImage, 8500, "agent", "-dev", "-client", "0.0.0.0")
+	waitServer(t, "Consul", func() bool {
+		resp, err := http.Get(consul + "/v1/status/leader")
+		if err != nil {
+			return false
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode == 200 && len(bytes.Trim(body, `"`+"\n")) > 0
+	})
+	return consul
+}
+
+// startEtcd runs etcd, and returns its URL once it answers.
+func startEtcd(t *testing.T) string {
+	t.Helper()
+	etcd := "http://" + startServer(t, etcdImage, 2379, "etcd",
+		"--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://127.0.0.1:2379")
+	waitServer(t, "etcd", func() bool {
+		resp, err := http.Post(etcd+"/v3/kv/range", "application/json", strings.NewReader(`{"key": "AA=="}`))
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return resp.StatusCode == 200
+	})
+	return etcd
+}
+
+// startRedis runs Redis, and returns its address once it answers a PING.
+func startRedis(t *testing.T) string {
+	t.Helper()
+	addr := startServer(t, "redis:8.2.2", 6379)
+	waitServer(t, "Redis", func() bool {
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		if err != nil {
+			return false
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(time.Second))
+		buf := make([]byte, 7)
+		if _, err := io.WriteString(conn, "PING\r\n"); err != nil {
+			return false
+		}
+		_, err = io.ReadFull(conn, buf)
+		return err == nil && string(buf) == "+PONG\r\n"
+	})
+	return addr
+}
+
 // answers waits until the bodies of 10 GETs of url, by count, are want, an
 // empty body standing for a 404; it fails the test after 30s.
 func answers(t *testing.T, f *fit, url string, want map[string]int, what string) {
@@ -139,16 +193,7 @@ func answers(t *testing.T, f *fit, url string, want map[string]int, what string)
 // written and deleted. Nothing is read on a timer: the refresh interval is
 // left at 30s, so each change comes through a blocking query.
 func TestConsulProviders(t *testing.T) {
-	consul := "http://" + startServer(t, consulImage, 8500, "agent", "-dev", "-client", "0.0.0.0")
-	waitServer(t, "Consul", func() bool {
-		resp, err := http.Get(consul + "/v1/status/leader")
-		if err != nil {
-			return false
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return resp.StatusCode == 200 && len(bytes.Trim(body, `"`+"\n")) > 0
-	})
+	consul := startConsul(t)
 	register := func(id, body string) {
 		port := backend(t, body)
 		call(t, "PUT", consul+"/v1/agent/service/register", fmt.Sprintf(`{
@@ -192,16 +237,7 @@ func TestConsulProviders(t *testing.T) {
 // authentication on, and follows a key as it is written, changed and
 // deleted, through a watch: the refresh interval is left at 30s.
 func TestEtcdProvider(t *testing.T) {
-	etcd := "http://" + startServer(t, etcdImage, 2379, "etcd",
-		"--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://127.0.0.1:2379")
-	waitServer(t, "etcd", func() bool {
-		resp, err := http.Post(etcd+"/v3/kv/range", "application/json", strings.NewReader(`{"key": "AA=="}`))
-		if err != nil {
-			return false
-		}
-		resp.Body.Close()
-		return resp.StatusCode == 200
-	})
+	etcd := startEtcd(t)
 	b64 := func(s string) string {
 		v, _ := json.Marshal([]byte(s))
 		return string(v)

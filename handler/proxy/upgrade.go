@@ -195,11 +195,23 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	r.up = up
 	r.mu.Unlock()
 	r.last.Store(time.Now().UnixNano())
+	// Given up before the upstream switched, as a client gone before the
+	// handshake was sent, whose cancel came too late for the call.
+	if cause := r.causeErr(); cause != nil {
+		_ = up.Close()
+		r.finish(false)
+		if !errors.Is(cause, errClientGone) {
+			_ = c.Respond(upgradeStatus(cause), "text/plain; charset=utf-8", nil)
+		}
+		return
+	}
 	client, err := c.Upgrade(r.protocol, header, (*clientSide)(r))
 	if err != nil {
 		_ = up.Close()
 		r.finish(false)
-		_ = c.Respond(stdhttp.StatusBadGateway, "text/plain; charset=utf-8", nil)
+		if !errors.Is(r.causeErr(), errClientGone) {
+			_ = c.Respond(stdhttp.StatusBadGateway, "text/plain; charset=utf-8", nil)
+		}
 		return
 	}
 	r.mu.Lock()

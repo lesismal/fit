@@ -210,16 +210,13 @@ func TestLetsEncryptStaging(t *testing.T) {
 func TestACMESharedStorage(t *testing.T) {
 	servers := map[string]func(t *testing.T) string{
 		"redis": func(t *testing.T) string {
-			return fmt.Sprintf(`{"redis": {"address": %q}}`, startServer(t, "redis:8.2.2", 6379))
+			return fmt.Sprintf(`{"redis": {"address": %q}}`, startRedis(t))
 		},
 		"etcd": func(t *testing.T) string {
-			ep := "http://" + startServer(t, etcdImage, 2379, "etcd",
-				"--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://127.0.0.1:2379")
-			return fmt.Sprintf(`{"etcd": {"endpoints": [%q]}}`, ep)
+			return fmt.Sprintf(`{"etcd": {"endpoints": [%q]}}`, startEtcd(t))
 		},
 		"consul": func(t *testing.T) string {
-			ep := "http://" + startServer(t, consulImage, 8500, "agent", "-dev", "-client", "0.0.0.0")
-			return fmt.Sprintf(`{"consul": {"endpoint": %q}}`, ep)
+			return fmt.Sprintf(`{"consul": {"endpoint": %q}}`, startConsul(t))
 		},
 	}
 	for _, kind := range []string{"redis", "etcd", "consul"} {
@@ -228,8 +225,9 @@ func TestACMESharedStorage(t *testing.T) {
 			port := pebbletest.FreePort(t)
 			p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
 			acme := fmt.Sprintf(`{"directory": %q, "ca_file": %q, "timeout": "20s", "challenges": ["http-01"], "shared_storage": %s}`, p.Directory, p.CAFile, storage)
-			// The store may take a moment to answer once it has started;
-			// fit tries again. Each instance has two listeners.
+			// The store answers before fit starts: fit would try it
+			// again, but only after its backoff, past the test's waits.
+			// Each instance has two listeners.
 			first, addrs1 := startFitWant(t, fmt.Sprintf(`{
   "acme": %s,
   "listeners": [
