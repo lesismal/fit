@@ -1,0 +1,69 @@
+{
+  "started": "2026-10-23T01:28:14.949611267Z",
+  "finished": "2026-10-23T01:32:33.559908464Z",
+  "host": {
+    "architecture": "x86_64",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "kernel": "Linux 7.0.0-38-generic",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "os": "linux"
+  },
+  "params": {
+    "duration": "30s",
+    "warmup": "5s",
+    "connections": 256,
+    "h2_connections": 64,
+    "h2_streams": 32,
+    "idle_connections": 100000,
+    "idle_settle": "5s",
+    "network": "host",
+    "server_cpus": "0-6",
+    "client_cpus": "7-13",
+    "backend_cpus": "14-15"
+  },
+  "versions": {
+    "docker": "29.1.3",
+    "h2load": "h2load nghttp2/1.59.0",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {},
+  "results": null,
+  "idle": [
+    {
+      "server": "fit",
+      "kind": "http1",
+      "connections": 100000,
+      "anon_before": 6406144,
+      "anon_after": 119934976,
+      "memory_before": 9064448,
+      "memory_after": 527724544,
+      "bytes_per_conn": 1135.28832,
+      "closed_by_server": 0
+    },
+    {
+      "server": "fit",
+      "kind": "tls",
+      "connections": 100000,
+      "anon_before": 6664192,
+      "anon_after": 836599808,
+      "memory_before": 9375744,
+      "memory_after": 1246060544,
+      "bytes_per_conn": 8299.35616,
+      "closed_by_server": 0
+    },
+    {
+      "server": "fit",
+      "kind": "ws",
+      "error": "idleconn: exit status 1: idleconn: 64499 of 100000 connections opened: http://127.0.0.1:8080/ws answered 502 Bad Gateway, not 101",
+      "anon_before": 6606848,
+      "anon_after": 0,
+      "memory_before": 8904704,
+      "memory_after": 0,
+      "bytes_per_conn": 0,
+      "closed_by_server": 0
+    }
+  ]
+}

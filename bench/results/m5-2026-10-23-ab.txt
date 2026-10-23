@@ -1,0 +1,12 @@
+ab: 20261023-094542: 6 runs finished, done
+A: 0dd5956 (0dd5956)
+B: HEAD (9434ecb)
+scenarios=fixed,static,proxy protocols=http/1.1,h2c rounds=3 duration=10s warmup=2s extra=
+
+scenario protocol     A req/s    B req/s   change  A µs/req B µs/req  rounds  verdict
+fixed    h2c            3786k      3762k    -0.6%      1.84     1.85  3/3     within noise
+fixed    http/1.1        770k       765k    -0.7%      8.37     8.39  3/3     within noise
+proxy    h2c             235k       236k    +0.3%     25.87    25.68  3/3     within noise
+proxy    http/1.1        243k       244k    +0.2%     23.53    23.41  3/3     within noise
+static   h2c            2440k      2449k    +0.4%      2.85     2.84  3/3     within noise
+static   http/1.1        765k       762k    -0.4%      8.96     8.98  3/3     within noise
