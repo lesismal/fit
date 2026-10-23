@@ -117,6 +117,9 @@ func TestSchema(t *testing.T) {
 	if code != 0 || json.Unmarshal([]byte(stdout), &s) != nil || s["title"] != "fit config, schema version 1" {
 		t.Fatalf("schema: %d %.200q", code, stdout)
 	}
+	if code, stdout, _ := runFit("schema", "-reference"); code != 0 || !strings.HasPrefix(stdout, "# Config reference\n") {
+		t.Fatalf("schema -reference: %d %.200q", code, stdout)
+	}
 }
 
 func TestRun(t *testing.T) {

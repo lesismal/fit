@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".headers", New: func() any { return new(Headers) }})
+	module.Register(module.Info{ID: module.Middlewares + ".headers", New: func() any { return new(Headers) }, Doc: "Sets, adds and deletes request and response header fields."})
 }
 
 // Headers changes the request's and the response's header fields.

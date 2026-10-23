@@ -87,10 +87,15 @@ func printConfigError(stderr io.Writer, cmd, file string, err error) {
 func runSchema(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("schema", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	reference := flags.Bool("reference", false, "print the config reference, in Markdown, rather than the JSON Schema")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	out, err := schema.Generate()
+	generate := schema.Generate
+	if *reference {
+		generate = schema.Reference
+	}
+	out, err := generate()
 	if err != nil {
 		fmt.Fprintf(stderr, "fit schema: %v\n", err)
 		return 1

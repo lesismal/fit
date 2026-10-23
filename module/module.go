@@ -195,6 +195,9 @@ type Info struct {
 	// New returns a new, zero module: a pointer to the struct its params are
 	// decoded into.
 	New func() any
+	// Doc says what the module does, in a sentence or two, for the config
+	// reference; its params' fields describe themselves with doc tags.
+	Doc string
 }
 
 // Namespace returns the namespace part of the ID, as in http.handlers.

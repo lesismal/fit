@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".forward_auth", New: func() any { return new(ForwardAuth) }})
+	module.Register(module.Info{ID: module.Middlewares + ".forward_auth", New: func() any { return new(ForwardAuth) }, Doc: "Asks an auth service whether a request may go on, and passes fields of its answer on."})
 }
 
 // DefaultForwardAuthTimeout is how long forward_auth waits for the auth

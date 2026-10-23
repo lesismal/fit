@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".circuit_breaker", New: func() any { return new(Breaker) }})
+	module.Register(module.Info{ID: module.Middlewares + ".circuit_breaker", New: func() any { return new(Breaker) }, Doc: "Stops sending a route's requests on while too many fail or are slow, then lets a few through to try again."})
 }
 
 // State is a breaker's state.

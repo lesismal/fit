@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".compress", New: func() any { return new(Compress) }})
+	module.Register(module.Info{ID: module.Middlewares + ".compress", New: func() any { return new(Compress) }, Doc: "Compresses responses with zstd, brotli or gzip as they are written."})
 }
 
 // The encodings, by their Content-Encoding names.

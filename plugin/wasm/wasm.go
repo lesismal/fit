@@ -62,7 +62,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".wasm", New: func() any { return new(WASM) }})
+	module.Register(module.Info{ID: module.Middlewares + ".wasm", New: func() any { return new(WASM) }, Doc: "Runs a WebAssembly plugin, of fit's own interface or a Proxy-Wasm filter, on each request, on a pool of its own."})
 }
 
 // Defaults of WASM's params.

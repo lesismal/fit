@@ -14,8 +14,8 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".rewrite", New: func() any { return new(Rewrite) }})
-	module.Register(module.Info{ID: module.Middlewares + ".redirect", New: func() any { return new(Redirect) }})
+	module.Register(module.Info{ID: module.Middlewares + ".rewrite", New: func() any { return new(Rewrite) }, Doc: "Rewrites the request's path: strips or adds a prefix, or replaces what a regular expression matches."})
+	module.Register(module.Info{ID: module.Middlewares + ".redirect", New: func() any { return new(Redirect) }, Doc: "Redirects requests whose path a regular expression matches to a URL made from it."})
 }
 
 // Rewrite changes the request's path: it strips a prefix, replaces what a

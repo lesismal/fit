@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".jwt", New: func() any { return new(JWT) }})
+	module.Register(module.Info{ID: module.Middlewares + ".jwt", New: func() any { return new(JWT) }, Doc: "Verifies JSON Web Tokens with keys from files, a secret or a JWK set, and passes claims on as fields."})
 }
 
 // JWT lets a request through only with a JSON Web Token whose signature

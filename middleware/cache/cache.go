@@ -30,7 +30,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".cache", New: func() any { return new(Cache) }})
+	module.Register(module.Info{ID: module.Middlewares + ".cache", New: func() any { return new(Cache) }, Doc: "Keeps responses by RFC 9111's rules, in memory and on disk, shared by the routes of a zone, and answers from them."})
 }
 
 // clock is the time, which tests move.

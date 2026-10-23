@@ -51,7 +51,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Handlers + ".static", New: func() any { return new(Static) }})
+	module.Register(module.Info{ID: module.Handlers + ".static", New: func() any { return new(Static) }, Doc: "Serves files from a directory, with directory listings, precompressed variants and small files kept in memory."})
 }
 
 // The defaults for the cache and listing limits.

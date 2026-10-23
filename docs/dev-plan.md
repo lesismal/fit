@@ -202,7 +202,7 @@ Status: `todo`, `doing` or `done`.
 | **1.0** | | | |
 | I76 | Continuous fuzzing | I55 | done |
 | I77 | Config and Admin API v1 freeze | I69, I74 | done |
-| I78 | Reference docs and migration guides | I77 | todo |
+| I78 | Reference docs and migration guides | I77 | done |
 
 ## M0, foundations
 

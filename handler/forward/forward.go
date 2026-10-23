@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Handlers + ".forward_proxy", New: func() any { return new(ForwardProxy) }})
+	module.Register(module.Info{ID: module.Handlers + ".forward_proxy", New: func() any { return new(ForwardProxy) }, Doc: "A forward proxy for HTTP CONNECT, with access rules for clients and destinations."})
 }
 
 // ForwardProxy serves CONNECT requests, as config.ForwardProxy's rules

@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Handlers + ".respond", New: func() any { return new(Respond) }})
+	module.Register(module.Info{ID: module.Handlers + ".respond", New: func() any { return new(Respond) }, Doc: "Answers with a fixed status, header fields and body."})
 }
 
 // Respond answers with a fixed status, headers and body.

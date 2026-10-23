@@ -45,7 +45,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Handlers + ".proxy", New: func() any { return new(Proxy) }})
+	module.Register(module.Info{ID: module.Handlers + ".proxy", New: func() any { return new(Proxy) }, Doc: "Proxies requests to an upstream, or to several by weight, with retries, mirroring and failover; WebSockets and gRPC calls too, streamed both ways."})
 }
 
 // Proxy forwards requests to an upstream.

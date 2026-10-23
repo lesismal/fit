@@ -37,7 +37,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Handlers + ".fastcgi", New: func() any { return new(FastCGI) }})
+	module.Register(module.Info{ID: module.Handlers + ".fastcgi", New: func() any { return new(FastCGI) }, Doc: "Answers requests from a FastCGI application, as PHP-FPM is, over a bounded pool of connections, streaming both ways."})
 }
 
 // Defaults of FastCGI's params.

@@ -5,11 +5,18 @@
 fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均衡、TLS 终结、静态文件服务和 API 网关，
 定位与 nginx、Caddy、Traefik 相同。
 
-fit 处于早期开发阶段。目前它可以按 JSON 配置通过 HTTP/1.1 和 h2c 返回固定响应；已完成的内容见
-[开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的对比测量方法见 [bench](bench/README.zh-CN.md)。
+它支持 HTTP/1.1、HTTP/2 和 HTTP/3，默认启用 HTTPS；代理 HTTP、WebSocket、gRPC、TCP 和 UDP，带健康检查和负载均衡；
+提供静态文件；缓存响应；路由来自严格的 JSON 或 YAML 配置（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
+Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
+对比测量方法见 [bench](bench/README.zh-CN.md)。
 
 ## 文档
 
+- [快速上手](docs/getting-started.zh-CN.md)：从零开始搭起一个 HTTPS 站点。
+- [配置参考](docs/reference/config.zh-CN.md)：由代码生成的全部字段。
+- 从 [nginx](docs/migrating-from-nginx.zh-CN.md)、[Caddy](docs/migrating-from-caddy.zh-CN.md) 和
+  [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。
+- [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
 - [nginx、Caddy、Traefik 对比](docs/comparison.zh-CN.md)：fit 从三者各借鉴什么。
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。
 - [开发计划](docs/dev-plan.zh-CN.md)：拆分成小迭代的里程碑。

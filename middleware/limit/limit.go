@@ -22,9 +22,9 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".rate_limit", New: func() any { return new(Rate) }})
-	module.Register(module.Info{ID: module.Middlewares + ".concurrency_limit", New: func() any { return new(Concurrency) }})
-	module.Register(module.Info{ID: module.Middlewares + ".body_limit", New: func() any { return new(Body) }})
+	module.Register(module.Info{ID: module.Middlewares + ".rate_limit", New: func() any { return new(Rate) }, Doc: "Limits the rate of requests, by client address, header field or route, allowing a burst."})
+	module.Register(module.Info{ID: module.Middlewares + ".concurrency_limit", New: func() any { return new(Concurrency) }, Doc: "Limits how many of a route's requests are under way at once."})
+	module.Register(module.Info{ID: module.Middlewares + ".body_limit", New: func() any { return new(Body) }, Doc: "Limits the size of request bodies, answering 413 past it."})
 }
 
 // Rate limits how fast requests may come, with a token bucket for each key:

@@ -21,8 +21,8 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{ID: module.Middlewares + ".basic_auth", New: func() any { return new(Basic) }})
-	module.Register(module.Info{ID: module.Middlewares + ".client_cert", New: func() any { return new(ClientCert) }})
+	module.Register(module.Info{ID: module.Middlewares + ".basic_auth", New: func() any { return new(Basic) }, Doc: "Asks for a user name and password (Basic authentication), checked against bcrypt hashes."})
+	module.Register(module.Info{ID: module.Middlewares + ".client_cert", New: func() any { return new(ClientCert) }, Doc: "Asks for a client certificate, verified by the listener's TLS (mTLS), and passes its subject on."})
 }
 
 // Basic asks for a user and password with HTTP Basic authentication and
