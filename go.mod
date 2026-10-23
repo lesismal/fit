@@ -6,11 +6,9 @@ require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/klauspost/compress v1.20.3
 	github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b
+	github.com/tetratelabs/wazero v1.12.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
 )
 
-require (
-	github.com/tetratelabs/wazero v1.12.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-)
+require golang.org/x/sys v0.49.0 // indirect

@@ -31,6 +31,9 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
+A config may also be written in YAML (`examples/hello.yaml`), and `fit adapt` converts between the
+two.
+
 `fit run` reloads its config file on SIGHUP, keeping the listeners that did not change and the
 running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.
 

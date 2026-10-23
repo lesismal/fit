@@ -1,0 +1,55 @@
+# proxy.json, written in YAML: fit run, fit validate and fit adapt take either.
+listeners:
+  - name: web
+    address: :8080
+    protocols:
+      - http/1.1
+      - h2c
+limits:
+  max_conns: 100000
+  max_pending_bytes: 268435456
+  max_header_bytes: 1048576
+  max_body_bytes: 16777216
+  write_stall_timeout: 30s
+admin:
+  address: 127.0.0.1:2019
+upstreams:
+  - name: app
+    addresses:
+      - 127.0.0.1:9000
+      - 127.0.0.1:9001
+    max_conns: 256
+    max_pending: 1024
+    max_idle_conns: 32
+    idle_timeout: 60s
+    connect_timeout: 10s
+    response_header_timeout: 60s
+    response_idle_timeout: 60s
+    response_timeout: 1h
+    max_fails: 1
+    fail_timeout: 10s
+    health_check:
+      path: /healthz
+      interval: 5s
+      timeout: 2s
+      fails: 2
+      passes: 2
+routes:
+  - name: api
+    match:
+      path:
+        - /api/*
+    handler:
+      module: proxy
+      params:
+        upstream: app
+        trusted_proxies:
+          - 10.0.0.0/8
+  - name: fallback
+    priority: -1
+    handler:
+      module: respond
+      params:
+        status: 404
+        body: |
+          not found

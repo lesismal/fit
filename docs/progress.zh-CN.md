@@ -10,10 +10,10 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67–I72 已完成 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：I67–I73 已完成 |
 | fib | `github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b`（fib 分支 `a40-filter-abort` 上的 `3998953`：`86071b8` 加上为 I67 实现的 A40，等待 fib 的 CI 并合入 `main`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | M5 的其余部分（I73–I75）：Proxy-Wasm 的响应回调（A41）、更友好的配置格式和 nginx 配置转换 |
+| 尚不可用 | M5 的其余部分（I74–I75）：Proxy-Wasm 的响应回调（A41）、nginx 配置转换、FastCGI |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -26,7 +26,7 @@ Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 
 **M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
 SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段。** 下一步是 I73。 M2 已完成 I24、I25（带配置版本、局部
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段；I73 接受 YAML 配置。** 下一步是 I74。 M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -46,8 +46,9 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 
 | 包 | 内容 |
 | --- | --- |
+| `adapter`、`adapter/yaml` | 把其他格式转换成原生 JSON 的适配器，按名称和扩展名选择，错误映射回源文件；YAML 双向转换 |
 | `cmd/fit` | fit 的 main 包：导入所有模块和 provider 后调用 `cli.Main` |
-| `cli` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并按已注册的种类运行配置中的 provider）、`validate`、`schema`、`build`、`version`、`hash-password`、`help` |
+| `cli` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并按已注册的种类运行配置中的 provider）、`validate`、`adapt`、`schema`、`build`、`version`、`hash-password`、`help` |
 | `plugin/build` | `Build`：生成并用 go 命令构建一个带更多或更少模块的 fit 的 main 模块；`ParseModule`、`Imports`、`MainSource` |
 | `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective`；`GET /status`（listener、连接、上游及后端健康状态、证书）；`GET /cache` 与 `POST /cache/purge`；嵌入的仪表盘，位于 `/dashboard/` |
 | `config` | 原生配置类型（包括 `providers`）；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
@@ -2823,6 +2824,26 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 与计划的差别：
 
 - 计划要求实现常见过滤器所需的调用，或说明为何不行：请求阶段已实现，并能原样运行已有过滤器；响应阶段如说明所述，等待 A41。
+
+### I73 更友好的配置格式 — 已完成
+
+- **YAML**（[决策 019](decisions/019-yaml-config.zh-CN.md)）：`adapter/yaml` 把 YAML 配置逐键转换成原生 JSON（YAML 1.2
+  的类型；解析锚点、别名和合并键，上限为一百万个节点、256 层、64 MiB 的 JSON；只能有一个文档；键必须是字符串且不重复），
+  并记录每个配置路径的值写在哪里；也把原生 JSON 转换成 YAML（`FromJSON`），再转回来得到同样的 JSON。go.yaml.in/yaml/v3
+  本来就是 fit 的依赖（决策 011）。
+- **`adapter`**：适配器按名称和文件扩展名注册；`Adapt`、`ReadFile`、`ForPath`，以及 `Result.MapErrors`，后者把配置错误
+  的位置移到源文件中，取其路径上适配器知道位置的最近的值。
+- **命令行**：`fit run`（启动时、收到 SIGHUP 时以及 `-watch` 下）和 `fit validate` 像接受 JSON 一样接受 `.yaml` 或
+  `.yml` 文件，错误给出 YAML 中的行列号；`fit adapt`（`-c`、`-from`、`-to json|yaml`、`-o`）进行转换，像 `fit run` 加载时
+  那样检查结果，并列出适配器无法转换的内容。`examples/hello.yaml` 和 `examples/proxy.yaml` 是 JSON 示例的对应版本。
+- **测试**：`TestRoundTrip`（所有示例和基准配置，JSON 到 YAML 再到 JSON 不变，YAML 到 JSON 再到 YAML 稳定）、
+  `TestExamples`（YAML 版本与 JSON 内容一致）、`TestYAML`（类型、YAML 1.2 的字符串、块标量、锚点与合并）、`TestErrors`
+  （两个文档、非字符串或重复的键、无穷大、未知标签、别名炸弹）、`TestPositions`；`adapter` 的 `TestParent` 和 `TestForPath`；
+  命令行的 `TestYAMLConfig`（YAML 文件 4:27 处的错误）和 `TestAdapt`。变更涉及的包在基准机上的竞态检测下通过。
+
+与计划的差别：
+
+- Admin API 仍只接受 JSON；YAML 文件的配置以其转换成的原生 JSON 保存和显示。
 
 ## 给后续迭代的说明
 

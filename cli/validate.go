@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 
+	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/config"
 	fitruntime "github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/schema"
@@ -15,7 +16,7 @@ import (
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	file := flags.String("c", "fit.json", "the config file to check")
+	file := flags.String("c", "fit.json", "the config file to check: native JSON, or YAML (.yaml, .yml)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -24,20 +25,37 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	c, err := config.LoadFile(*file)
+	adapted, err := adapter.ReadFile(*file)
 	if err == nil {
-		// Compiling provisions every module, which checks their params too.
-		var g *fitruntime.Graph
-		if g, err = fitruntime.Compile(c, fitruntime.Env{}); err == nil {
-			g.Release()
+		var c *config.Config
+		if c, err = config.Load(adapted.JSON); err == nil {
+			// Compiling provisions every module, which checks their params
+			// too.
+			var g *fitruntime.Graph
+			if g, err = fitruntime.Compile(c, fitruntime.Env{}); err == nil {
+				g.Release()
+			}
 		}
+		err = adapted.MapErrors(err)
 	}
 	if err != nil {
 		printConfigError(stderr, "fit validate", *file, err)
 		return 1
 	}
+	printWarnings(stderr, *file, adapted)
 	fmt.Fprintf(stdout, "%s: valid\n", *file)
 	return 0
+}
+
+// printWarnings prints what adapting the config in file left out or
+// doubted.
+func printWarnings(stderr io.Writer, file string, r *adapter.Result) {
+	if r == nil {
+		return
+	}
+	for _, w := range r.Warnings {
+		fmt.Fprintf(stderr, "%s: warning: %s\n", file, w)
+	}
 }
 
 // printConfigError prints why the config in file could not be loaded or

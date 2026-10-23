@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
@@ -48,7 +49,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	cfgFile := flags.String("c", "fit.json", "the config file to run")
+	cfgFile := flags.String("c", "fit.json", "the config file to run: native JSON, or YAML (.yaml, .yml)")
 	grace := flags.Duration("shutdown-timeout", 30*time.Second, "how long shutdown waits for requests in flight before closing their connections, and how long requests may keep using a config after a reload")
 	watch := flags.Bool("watch", false, "apply the config file again each time it changes, as SIGHUP does")
 	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "how often a watched file is looked at: the config file, with -watch, and certificate files, with -watch-certs")
@@ -61,15 +62,21 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		return 2
 	}
 
-	data, err := os.ReadFile(*cfgFile)
+	raw, err := os.ReadFile(*cfgFile)
 	var c *config.Config
+	var adapted *adapter.Result
 	if err == nil {
-		c, err = config.Load(data)
+		if adapted, err = adapter.Adapt(adapter.ForPath(*cfgFile), raw); err == nil {
+			c, err = config.Load(adapted.JSON)
+			err = adapted.MapErrors(err)
+		}
 	}
 	if err != nil {
 		printConfigError(stderr, "fit run", *cfgFile, err)
 		return 1
 	}
+	printWarnings(stderr, *cfgFile, adapted)
+	data := adapted.JSON
 	// Upstream connections are dialed through an engine of their own, so
 	// that a proxied response waiting for a slow client waits on that
 	// engine's pool, not the listeners'. It stops after the graph is
@@ -183,7 +190,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	var watcher *file.Watcher
 	stopWatch := func() {}
 	if *watch {
-		watcher = file.New(*cfgFile, data, file.Options{Interval: *watchInterval}, func(data []byte) error {
+		watcher = file.New(*cfgFile, raw, file.Options{Interval: *watchInterval}, func(data []byte) error {
 			fmt.Fprintf(stdout, "fit: %s changed; reloading\n", *cfgFile)
 			applyFile(*cfgFile, data, configs, stdout, stderr)
 			return nil // applyFile reported it
@@ -289,15 +296,22 @@ func reloadConfig(path string, configs *admin.Configs, watcher *file.Watcher, st
 	applyFile(path, data, configs, stdout, stderr)
 }
 
-// applyFile applies data, read from the file at path, and says what
-// happened.
+// applyFile applies data, read from the file at path and adapted by its
+// extension, and says what happened.
 func applyFile(path string, data []byte, configs *admin.Configs, stdout, stderr io.Writer) {
-	r, err := configs.Apply(data, admin.SourceFile)
+	adapted, err := adapter.Adapt(adapter.ForPath(path), data)
+	if err != nil {
+		fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
+		printConfigError(stderr, "fit run", path, err)
+		return
+	}
+	printWarnings(stderr, path, adapted)
+	r, err := configs.Apply(adapted.JSON, admin.SourceFile)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
 			fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
-			printConfigError(stderr, "fit run", path, err)
+			printConfigError(stderr, "fit run", path, adapted.MapErrors(err))
 		} else {
 			fmt.Fprintf(stderr, "fit: reload failed; the running config stays: %v\n", err)
 		}

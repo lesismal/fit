@@ -186,7 +186,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I70 | `fit build` 与编译期模块 | I04 | done |
 | I71 | WASM I：运行时与插件池 | I36 | done |
 | I72 | WASM II：Proxy-Wasm 子集 | I71 | done |
-| I73 | 友好配置格式 | I03 | todo |
+| I73 | 友好配置格式 | I03 | done |
 | I74 | nginx 配置转换器 | I73 | todo |
 | I75 | FastCGI | I17 | todo |
 | **1.0** | | | |

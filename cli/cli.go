@@ -19,6 +19,7 @@ Commands:
 
 	run        serve a config file until SIGINT or SIGTERM
 	validate   check a config file without running it
+	adapt      convert a config, as YAML, to native JSON, or back
 	schema     print the JSON Schema of the native config
 	build      build a fit with more modules, or fewer, as fit build -h says
 	version    print the versions of fit, fib and Go
@@ -45,6 +46,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRun(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
+	case "adapt":
+		return runAdapt(args[1:], stdout, stderr)
 	case "schema":
 		return runSchema(args[1:], stdout, stderr)
 	case "build":

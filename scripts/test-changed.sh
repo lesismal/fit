@@ -32,6 +32,10 @@ done
 
 if printf '%s\n' "$changed" | grep -qE '^go\.(mod|sum)$'; then
 	echo "test-changed: go.mod or go.sum changed; testing everything"
+	if [ "${DRYRUN:-}" = 1 ]; then
+		echo ./...
+		exit 0
+	fi
 	exec go test -race "$@" ./...
 fi
 

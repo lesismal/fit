@@ -2,8 +2,6 @@ github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
 github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
-github.com/lesismal/fib v1.5.7-0.20261022124907-86071b8bb871 h1:fSyrr78NPKhpP0wdKr5j1iOl6f8nh5smKvfL3kbD1V4=
-github.com/lesismal/fib v1.5.7-0.20261022124907-86071b8bb871/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b h1:8UzhjKKaZ53dHoLFVwfcsfbfW/H8ykw9bfDKZCGWAio=
 github.com/lesismal/fib v1.5.7-0.20261022203111-39989533638b/go.mod h1:ECyKMzlRaSlOWKBorTaEushOJZclLtclDlfONJxBB4U=
 github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
