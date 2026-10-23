@@ -172,6 +172,16 @@ reproduce a run, run the harness with the `params` recorded in it, on the benchm
 go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
 ```
 
+The reports' tables are rendered from a run's JSON by `benchreport`: a table for each scenario and
+protocol, a row for each server, ranked by requests a second (TPS), then CPU efficiency (requests
+per CPU-second), then memory efficiency (requests a second per MiB), each ranked value followed by
+its share of the best; and a table of memory per idle connection, lowest first. `-prev` adds each
+row's throughput change from an earlier run:
+
+```bash
+go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
+```
+
 A run's JSON holds `host` (CPU, kernel, memory), `versions` and `images` (with digests),
 `params`, one entry in `results` per server, scenario and protocol, and one in `idle` per server
 and kind.

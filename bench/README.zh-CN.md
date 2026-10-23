@@ -142,5 +142,13 @@ Traefik 测得的基线，在 Docker Desktop 上测得，只作为记录保留�
 go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
 ```
 
+报告里的表格由 `benchreport` 从结果 JSON 生成：每个场景和协议一张表，每个服务器一行，按每秒请求数（TPS）、
+CPU 能效（每 CPU 秒的请求数）、内存能效（每 MiB 的每秒请求数）依次排序，每个参与排序的值后面跟着它占该列最佳值的
+百分比；另有一张每个空闲连接内存的表，最低的排前。`-prev` 为每一行加上相对之前某次运行的吞吐变化：
+
+```bash
+go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
+```
+
 结果 JSON 包含 `host`（CPU、内核、内存）、`versions` 和 `images`（带摘要）、`params`，`results`
 里每个服务器、场景、协议一项，`idle` 里每个服务器、连接类型一项。
