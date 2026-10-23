@@ -21,11 +21,11 @@ go run ./bench/cmd/fitbench
 | --- | --- | --- |
 | `-servers` | `nginx,caddy,traefik,envoy,fit` | 要跑的服务器 |
 | `-scenarios` | `fixed,static,proxy` | 吞吐场景；为空则不跑 |
-| `-protocols` | `http/1.1,h2c,h3` | |
+| `-protocols` | `http/1.1,h2c,h2,h3` | |
 | `-idle` | `http1,tls,ws` | 要测内存的空闲连接类型；为空则不测 |
 | `-duration`、`-warmup` | `30s`、`5s` | 每轮测量时长，以及测量前不计入的预热 |
 | `-connections` | `256` | wrk 的连接数 |
-| `-h2-connections`、`-h2-streams` | `64`、`32` | h2load 的连接数和每连接并发流数，h2c 和 h3 相同 |
+| `-h2-connections`、`-h2-streams` | `64`、`32` | h2load 的连接数和每连接并发流数，h2c、h2 和 h3 相同 |
 | `-idle-connections`、`-idle-settle` | `10000`、`5s` | |
 | `-network` | Linux 上为 `host`，其他系统为 `bridge` | |
 | `-server-cpus`、`-client-cpus`、`-backend-cpus` | 按 Docker 可用的 CPU 划分 | CPU 列表，如 `0-7` |
@@ -69,9 +69,10 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 
 ## 场景
 
-[`configs`](configs) 里每个服务器的配置都在三个端口上提供同样的路由：8080 是 HTTP/1.1，由 wrk 压；
-8081 是 h2c（预先知道的明文 HTTP/2），由 h2load 压；UDP 8444 是 HTTP/3，走 TLS 1.3 和工具自带的一次性证书，
-由支持 HTTP/3 的 h2load 压，连接数和并发流数与 h2c 相同。
+[`configs`](configs) 里每个服务器的配置都在四个端口上提供同样的路由：8080 是 HTTP/1.1，由 wrk 压；
+8081 是 h2c（预先知道的明文 HTTP/2），由 h2load 压；8445 是 h2（走 TLS 1.3、经 ALPN 协商的 HTTP/2），由 h2load
+压；UDP 8444 是 HTTP/3，走 TLS 1.3，由支持 HTTP/3 的 h2load 压。h2 和 HTTP/3 用工具自带的一次性证书，连接数和
+并发流数与 h2c 相同。
 
 自己设置 UDP socket 缓冲区的 QUIC 服务器（Caddy 和 Traefik 通过 quic-go 申请约 7 MB）最多只能拿到主机的
 `net.core.rmem_max` 和 `wmem_max`。压测机自 2026-10-23 起把两者设为 7500000，写在
@@ -101,8 +102,18 @@ Traefik 为 200）时，它们在压力下不断关闭、重开后端连接直�
 类型分的错误数、服务器用掉的 CPU（取自其 cgroup 的 `cpu.stat`，以核数计），以及结束时的内存
 （cgroup 的 `memory.current`，和 `memory.stat` 里的 `anon`）。
 
+每轮都用一个为它新启动的服务器，上一轮留在内存里的东西不会算进下一轮。服务器稳定后读一次匿名内存
+（`anon_start_bytes`），预热和测量期间每 100ms 读一次并保留最大值（`anon_peak_bytes`），都从主机上的 cgroup
+文件读取，不占服务器的资源。由此算出每轮的能效：
+
+| 字段 | |
+| --- | --- |
+| `cpu_us_per_request` | 每个请求花掉服务器的 CPU 时间，单位 µs |
+| `requests_per_sec_per_mib` | 每 MiB 峰值匿名内存对应的每秒请求数 |
+| `bytes_per_in_flight` | 峰值减去起始匿名内存，再除以在途请求数（`in_flight`：HTTP/1.1 为 256 个连接，h2c、h2 和 HTTP/3 为 64 个连接各 32 个流） |
+
 fit 的协程数取自其 Admin API 的 `go_goroutines`，压测配置让它监听 127.0.0.1:9005（只有主机网络下工具才
-连得到）：就绪一秒后读一次（`startup_goroutines`），每次预热和测量期间每 100ms 读一次并保留最大值
+连得到）：就绪一秒后读一次（`startup_goroutines`），每次预热和测量期间（每轮都用新启动的服务器）每 100ms 读一次并保留最大值
 （`goroutines_max`），空闲连接打开前和保持时各读一次（`goroutines_before`、`goroutines_after`）。计数包括
 Admin API 自己的几个协程；短于 100ms 的峰值可能落在两次采样之间。
 

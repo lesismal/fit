@@ -128,6 +128,19 @@ fit_http_requests_total{listener="cachebackend",route="other",code="2xx"} 99
 	}
 }
 
+func TestEfficiency(t *testing.T) {
+	r := Result{RequestsPerSec: 500000, CPUCores: 5, AnonStartBytes: 36 << 20, AnonPeakBytes: 100 << 20, InFlight: 2048}
+	r.efficiency()
+	if !near(r.CPUPerRequestUS, 10) || !near(r.RequestsPerSecPerMiB, 5000) || !near(r.BytesPerInFlight, 32768) {
+		t.Errorf("%+v", r)
+	}
+	none := Result{AnonStartBytes: 1}
+	none.efficiency()
+	if none.CPUPerRequestUS != 0 || none.RequestsPerSecPerMiB != 0 || none.BytesPerInFlight != 0 {
+		t.Errorf("no requests: %+v", none)
+	}
+}
+
 func TestParseGoroutines(t *testing.T) {
 	out := "# TYPE go_goroutines gauge\ngo_goroutines 37\ngo_memory_total_bytes 1.2e+07\n"
 	if n, err := parseGoroutines(out); n != 37 || err != nil {

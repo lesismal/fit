@@ -24,11 +24,11 @@ common ones are:
 | --- | --- | --- |
 | `-servers` | `nginx,caddy,traefik,envoy,fit` | the servers to run |
 | `-scenarios` | `fixed,static,proxy` | the throughput scenarios; empty for none |
-| `-protocols` | `http/1.1,h2c,h3` | |
+| `-protocols` | `http/1.1,h2c,h2,h3` | |
 | `-idle` | `http1,tls,ws` | the kinds of idle connection to measure memory for; empty for none |
 | `-duration`, `-warmup` | `30s`, `5s` | each measured run, and the unmeasured load before it |
 | `-connections` | `256` | wrk's connections |
-| `-h2-connections`, `-h2-streams` | `64`, `32` | h2load's connections and streams per connection, for h2c and h3 alike |
+| `-h2-connections`, `-h2-streams` | `64`, `32` | h2load's connections and streams per connection, for h2c, h2 and h3 alike |
 | `-idle-connections`, `-idle-settle` | `10000`, `5s` | |
 | `-network` | `host` on Linux, `bridge` elsewhere | |
 | `-server-cpus`, `-client-cpus`, `-backend-cpus` | split from what Docker has | CPU lists, as in `0-7` |
@@ -82,10 +82,11 @@ through their affinity.
 
 ## Scenarios
 
-Every server's config, in [`configs`](configs), serves the same routes on three ports: 8080 for
-HTTP/1.1, driven by wrk; 8081 for h2c (HTTP/2 with prior knowledge), driven by h2load; and UDP
-8444 for HTTP/3, over TLS 1.3 with the harness's throwaway certificate, driven by the HTTP/3
-h2load with the same connections and streams as h2c.
+Every server's config, in [`configs`](configs), serves the same routes on four ports: 8080 for
+HTTP/1.1, driven by wrk; 8081 for h2c (HTTP/2 with prior knowledge), driven by h2load; 8445 for
+h2 (HTTP/2 over TLS 1.3, by ALPN), driven by h2load; and UDP 8444 for HTTP/3, over TLS 1.3,
+driven by the HTTP/3 h2load. h2 and HTTP/3 use the harness's throwaway certificate, and the same
+connections and streams as h2c.
 
 QUIC servers that size their own UDP socket buffers (Caddy and Traefik, through quic-go, ask for
 about 7 MB) get no more than the host's `net.core.rmem_max` and `wmem_max`. The benchmark host
@@ -124,10 +125,21 @@ deviation and maximum from h2load, which reports no percentiles), errors by kind
 server used (from its cgroup's `cpu.stat`, in cores) and its memory at the end of the run (cgroup
 `memory.current`, and `anon` from `memory.stat`).
 
+Each run gets a server started for it, so that what one run leaves in memory is not counted in the
+next. Its anonymous memory is read once it has settled (`anon_start_bytes`) and every 100ms during
+the warm-up and the run, of which the most is kept (`anon_peak_bytes`), from the cgroup's files on
+the host, which costs the server nothing. From these, each run's efficiency:
+
+| Field | |
+| --- | --- |
+| `cpu_us_per_request` | the server's CPU time per request, in µs |
+| `requests_per_sec_per_mib` | requests a second for each MiB of peak anonymous memory |
+| `bytes_per_in_flight` | peak less starting anonymous memory, for each request in flight (`in_flight`: wrk's 256 connections, or 64 connections of 32 streams for h2c, h2 and HTTP/3) |
+
 fit's goroutines are counted from `go_goroutines` on its Admin API, which its config has listen at
 127.0.0.1:9005 (only with host networking does the harness reach it): once a second after it is
-ready (`startup_goroutines`), every 100ms during each warm-up and measured run, of which the most is
-kept (`goroutines_max`), and before and with the idle connections (`goroutines_before`,
+ready (`startup_goroutines`), every 100ms during each warm-up and measured run, on its own freshly
+started server, of which the most is kept (`goroutines_max`), and before and with the idle connections (`goroutines_before`,
 `goroutines_after`). The count includes the Admin API's own few goroutines; a spike shorter than
 100ms can fall between two samples.
 

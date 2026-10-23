@@ -56,11 +56,12 @@ var scenarios = []scenario{
 }
 
 // The protocols, each on its own port in every server's config, and the
-// load generator that drives it: HTTP/3's on UDP, over TLS, by h2load built
-// with HTTP/3 in an image of its own.
+// load generator that drives it: h2 is HTTP/2 over TLS, and HTTP/3's on
+// UDP, over TLS, by h2load built with HTTP/3 in an image of its own.
 var protocols = []struct{ name, port, tool string }{
 	{"http/1.1", "8080", "wrk"},
 	{"h2c", "8081", "h2load"},
+	{"h2", "8445", "h2load"},
 	{"h3", "8444", "h2load-h3"},
 }
 

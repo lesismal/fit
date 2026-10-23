@@ -5,9 +5,9 @@ http:
       rule: "Path(`/proxy`)"
       entryPoints: [h1, h2c]
       service: backend
-    proxy-h3:
+    proxy-tls:
       rule: "Path(`/proxy`)"
-      entryPoints: [h3]
+      entryPoints: [h2, h3]
       service: backend
       tls: {}
     ws:

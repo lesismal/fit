@@ -3,8 +3,9 @@
 #
 # Port 8080 serves HTTP/1.1, and port 8081 h2c (HTTP/2 with prior
 # knowledge), which Traefik accepts on any cleartext entry point; 8080 also
-# proxies WebSockets at /ws. Port 8443 is TLS, for idle TLS connections, and
-# UDP port 8444 HTTP/3 (with TLS on TCP 8444 beside it, as Traefik requires).
+# proxies WebSockets at /ws. Port 8443 is TLS, for idle TLS connections; port
+# 8445 HTTP/2 over TLS, and UDP port 8444 HTTP/3 (with TLS on TCP 8444
+# beside it, as Traefik requires).
 entryPoints:
   h1:
     address: ":8080"
@@ -12,6 +13,10 @@ entryPoints:
     address: ":8081"
   tls:
     address: ":8443"
+    http:
+      tls: {}
+  h2:
+    address: ":8445"
     http:
       tls: {}
   h3:

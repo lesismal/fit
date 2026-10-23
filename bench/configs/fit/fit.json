@@ -6,6 +6,8 @@
     {"name": "h2c", "address": ":8081", "protocols": ["h2c"]},
     {"name": "tls", "address": ":8443", "protocols": ["http/1.1"],
       "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}},
+    {"name": "h2", "address": ":8445", "protocols": ["h2"],
+      "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}},
     {"name": "h3", "address": ":8444", "protocols": ["h3"],
       "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}}
   ],

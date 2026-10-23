@@ -44,10 +44,43 @@ type Result struct {
 	// itself holds.
 	MemoryBytes int64 `json:"memory_bytes,omitempty"`
 	AnonBytes   int64 `json:"anon_bytes,omitempty"`
+	// AnonStartBytes is the anonymous memory of the server, started afresh
+	// for the run, once it had settled; AnonPeakBytes the most it held
+	// during the warm-up and the measured run, sampled every 100ms from its
+	// cgroup.
+	AnonStartBytes int64 `json:"anon_start_bytes,omitempty"`
+	AnonPeakBytes  int64 `json:"anon_peak_bytes,omitempty"`
 	// GoroutinesMax is the most goroutines a Go server had during the
 	// warm-up and the measured run, sampled from its Admin API, for a server
 	// that has one.
 	GoroutinesMax int `json:"goroutines_max,omitempty"`
+	// InFlight is how many requests the load generator kept in flight: its
+	// connections over HTTP/1.1, its connections times their streams over
+	// h2c and HTTP/3.
+	InFlight int `json:"in_flight,omitempty"`
+
+	// The server's efficiency. CPUPerRequestUS is the CPU time it spent a
+	// request, in microseconds. RequestsPerSecPerMiB is its requests a
+	// second for each MiB of AnonPeakBytes. BytesPerInFlight is
+	// AnonPeakBytes less AnonStartBytes for each request in flight: what the
+	// load cost it in memory.
+	CPUPerRequestUS      float64 `json:"cpu_us_per_request,omitempty"`
+	RequestsPerSecPerMiB float64 `json:"requests_per_sec_per_mib,omitempty"`
+	BytesPerInFlight     float64 `json:"bytes_per_in_flight,omitempty"`
+}
+
+// efficiency works out r's efficiency from its throughput, CPU and memory.
+func (r *Result) efficiency() {
+	if r.RequestsPerSec <= 0 {
+		return
+	}
+	r.CPUPerRequestUS = r.CPUCores / r.RequestsPerSec * 1e6
+	if r.AnonPeakBytes > 0 {
+		r.RequestsPerSecPerMiB = r.RequestsPerSec / (float64(r.AnonPeakBytes) / (1 << 20))
+	}
+	if r.InFlight > 0 && r.AnonStartBytes > 0 {
+		r.BytesPerInFlight = float64(max(0, r.AnonPeakBytes-r.AnonStartBytes)) / float64(r.InFlight)
+	}
 }
 
 // Latency is a latency distribution, in milliseconds.

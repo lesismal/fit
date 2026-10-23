@@ -57,6 +57,8 @@ type Report struct {
 	// StartupGoroutines are the goroutines each Go server with an Admin API
 	// had a second after it became ready, before any load.
 	StartupGoroutines map[string]int `json:"startup_goroutines,omitempty"`
+	// StartupAnon is each server's anonymous memory at the same moment.
+	StartupAnon map[string]int64 `json:"startup_anon_bytes,omitempty"`
 }
 
 // Params are the settings a run was made with.
@@ -117,7 +119,10 @@ type harness struct {
 	// cacheAdmin is the cache backend's Admin API, or "" when the load
 	// generators cannot reach it.
 	cacheAdmin string
-	report     Report
+	// serverCgroup is the running server's cgroup directory on this host,
+	// or "" when it cannot be read from here.
+	serverCgroup string
+	report       Report
 }
 
 func run(ctx context.Context, args []string) error {
@@ -125,7 +130,7 @@ func run(ctx context.Context, args []string) error {
 	h := &harness{images: map[string]string{}}
 	serverList := flags.String("servers", "nginx,caddy,traefik,envoy,fit", "the servers to run")
 	scenarioList := flags.String("scenarios", "fixed,static,proxy", "the scenarios to run")
-	protocolList := flags.String("protocols", "http/1.1,h2c,h3", "the protocols to run")
+	protocolList := flags.String("protocols", "http/1.1,h2c,h2,h3", "the protocols to run")
 	flags.DurationVar(&h.duration, "duration", 30*time.Second, "how long each measured run lasts")
 	flags.DurationVar(&h.warmup, "warmup", 5*time.Second, "how long the load runs, unmeasured, before each measured run")
 	flags.IntVar(&h.conns, "connections", 256, "HTTP/1.1 connections (wrk)")
@@ -240,6 +245,7 @@ func run(ctx context.Context, args []string) error {
 		Versions:          map[string]string{},
 		Images:            map[string]string{},
 		StartupGoroutines: map[string]int{},
+		StartupAnon:       map[string]int64{},
 		Params: Params{
 			Duration: h.duration.String(), Warmup: h.warmup.String(),
 			Connections: max(h.conns, h.threads), H2Connections: max(h.h2conns, h.threads), H2Streams: h.h2streams,
@@ -643,12 +649,12 @@ func (h *harness) runServer(ctx context.Context, s server) {
 	}
 
 	step("starting " + s.name)
-	defer func() { _, _ = docker(context.Background(), "rm", "-f", serverName) }()
-	if err := h.start(ctx, s, serverName, h.serverCPUs); err != nil {
-		fail(err)
-		return
-	}
-	if err := h.waitReady(ctx, serverName, "http://"+h.serverHost+":8080"+s.ready); err != nil {
+	defer func() {
+		_, _ = docker(context.Background(), "rm", "-f", serverName)
+		h.serverCgroup = ""
+	}()
+	startAnon, err := h.startFresh(ctx, s)
+	if err != nil {
 		fail(err)
 		return
 	}
@@ -660,13 +666,16 @@ func (h *harness) runServer(ctx context.Context, s server) {
 	} else {
 		h.report.Images[s.name] = imageDigest(ctx, h.images[s.name])
 	}
+	h.report.StartupAnon[s.name] = startAnon
 	if h.canCount(s) {
-		time.Sleep(time.Second) // let the server settle after starting
 		if n, err := h.goroutines(ctx, s); err == nil {
 			h.report.StartupGoroutines[s.name] = n
 		}
 	}
 
+	// Each run gets a server started for it, so that the memory and the
+	// goroutines one run leaves behind are not counted in the next.
+	fresh := true
 	for _, sc := range todo {
 		for _, p := range h.protocols {
 			if ctx.Err() != nil {
@@ -676,9 +685,33 @@ func (h *harness) runServer(ctx context.Context, s server) {
 				add(Result{Server: s.name, Scenario: sc, Protocol: p, Skipped: "the scenario runs over " + strings.Join(scenarioOf(sc).protocols, ", ")})
 				continue
 			}
-			add(h.measure(ctx, s, sc, p))
+			if !fresh {
+				if startAnon, err = h.startFresh(ctx, s); err != nil {
+					add(Result{Server: s.name, Scenario: sc, Protocol: p, Error: err.Error()})
+					continue
+				}
+			}
+			fresh = false
+			add(h.measure(ctx, s, sc, p, startAnon))
 		}
 	}
+}
+
+// startFresh starts s as the server, in place of any server running, waits
+// until it is ready and has settled, and returns its anonymous memory then.
+func (h *harness) startFresh(ctx context.Context, s server) (int64, error) {
+	_, _ = docker(ctx, "rm", "-f", serverName)
+	h.serverCgroup = ""
+	if err := h.start(ctx, s, serverName, h.serverCPUs); err != nil {
+		return 0, err
+	}
+	if err := h.waitReady(ctx, serverName, "http://"+h.serverHost+":8080"+s.ready); err != nil {
+		return 0, err
+	}
+	h.serverCgroup = findCgroup(ctx)
+	time.Sleep(time.Second) // let the server settle after starting
+	anon, _ := h.serverAnon(ctx)
+	return anon, nil
 }
 
 // scenarioOf returns the scenario named name.
@@ -708,14 +741,14 @@ func imageDigest(ctx context.Context, image string) string {
 
 // measure checks that s answers scenario sc over protocol p as every other
 // server does, warms it up, and measures it.
-func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result) {
+func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon int64) (r Result) {
 	var err error
 	r = Result{Server: s.name, Scenario: sc, Protocol: p}
 	j := slices.IndexFunc(protocols, func(x struct{ name, port, tool string }) bool { return x.name == p })
 	scenario, proto := scenarioOf(sc), protocols[j]
 	r.Tool = proto.tool
 	url := "http://" + h.serverHost + ":" + proto.port + scenario.path
-	if p == "h3" {
+	if p == "h2" || p == "h3" {
 		url = "https://" + h.serverHost + ":" + proto.port + scenario.path
 	}
 
@@ -723,10 +756,8 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result
 		r.Error = err.Error()
 		return r
 	}
-	if h.canCount(s) {
-		stop := h.sampleGoroutines(ctx, s)
-		defer func() { r.GoroutinesMax = stop() }()
-	}
+	samples := h.sample(ctx, s)
+	defer samples.stop()
 	if h.warmup > 0 {
 		if _, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.warmup)...); err != nil {
 			r.Error = "warmup: " + err.Error()
@@ -758,11 +789,15 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result
 	if cpu1, ok := h.serverCPU(ctx); ok && cpuOK {
 		r.CPUCores = float64(cpu1-cpu0) / float64(elapsed)
 	}
-	if out, err := docker(ctx, "exec", serverName, "cat", "/sys/fs/cgroup/memory.current"); err == nil {
+	r.GoroutinesMax, r.AnonPeakBytes = samples.stop()
+	if out, err := h.serverFile(ctx, "memory.current"); err == nil {
 		r.MemoryBytes, _ = strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	}
-	if out, err := docker(ctx, "exec", serverName, "cat", "/sys/fs/cgroup/memory.stat"); err == nil {
-		r.AnonBytes, _ = cgroupAnon(out)
+	r.AnonBytes, _ = h.serverAnon(ctx)
+	r.AnonPeakBytes = max(r.AnonPeakBytes, r.AnonBytes)
+	r.InFlight = max(h.conns, h.threads)
+	if proto.tool != "wrk" {
+		r.InFlight = max(h.h2conns, h.threads) * h.h2streams
 	}
 	if proto.tool == "wrk" {
 		err = parseWrk(out, &r)
@@ -777,6 +812,8 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string) (r Result
 		ratio := 1 - float64(r.BackendRequests)/float64(r.Requests)
 		r.HitRatio = &ratio
 	}
+	r.AnonStartBytes = startAnon
+	r.efficiency()
 	return r
 }
 
@@ -794,8 +831,10 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 	switch p {
 	case "h2c":
 		flag, want = "--http2-prior-knowledge", "200 2"
+	case "h2":
+		// The certificate is the harness's own, self-signed, as for h3.
+		flag, want = "--http2", "200 2"
 	case "h3":
-		// The certificate is the harness's own, self-signed.
 		container, flag, want = loadgenH3Name, "--http3-only", "200 3"
 	}
 	out, err := docker(ctx, "exec", container, "curl", "-s", "-k", "--max-time", "5", flag, "-w", "\n%{http_code} %{http_version}", url)
@@ -859,43 +898,103 @@ func (h *harness) goroutines(ctx context.Context, s server) (int, error) {
 	return parseGoroutines(string(data))
 }
 
-// sampleGoroutines counts s's goroutines every 100ms until the function it
-// returns is called, which returns the most it saw. A spike shorter than
-// that can fall between two samples.
-func (h *harness) sampleGoroutines(ctx context.Context, s server) (stop func() int) {
-	done := make(chan struct{})
-	var wg sync.WaitGroup
-	most := 0
-	sample := func() {
-		if n, err := h.goroutines(ctx, s); err == nil {
-			most = max(most, n)
+// A sampler reads, every 100ms, the server's anonymous memory, when its
+// cgroup can be read from here, and its goroutines, when it can count them,
+// keeping the most of each. A spike shorter than that can fall between two
+// samples.
+type sampler struct {
+	done chan struct{}
+	wg   sync.WaitGroup
+	once sync.Once
+
+	goroutines int
+	anon       int64
+}
+
+func (h *harness) sample(ctx context.Context, s server) *sampler {
+	sm := &sampler{done: make(chan struct{})}
+	count, mem := h.canCount(s), h.serverCgroup != ""
+	read := func() {
+		if count {
+			if n, err := h.goroutines(ctx, s); err == nil {
+				sm.goroutines = max(sm.goroutines, n)
+			}
+		}
+		if mem {
+			if n, ok := h.serverAnon(ctx); ok {
+				sm.anon = max(sm.anon, n)
+			}
 		}
 	}
-	wg.Add(1)
+	sm.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer sm.wg.Done()
 		tick := time.NewTicker(100 * time.Millisecond)
 		defer tick.Stop()
 		for {
-			sample()
+			read()
 			select {
-			case <-done:
+			case <-sm.done:
+				read()
 				return
 			case <-tick.C:
 			}
 		}
 	}()
-	return func() int {
-		close(done)
-		wg.Wait()
-		sample()
-		return most
+	return sm
+}
+
+// stop stops the sampling, and returns the most goroutines and anonymous
+// memory seen; 0 for what was not sampled. Calls after the first return the
+// same.
+func (sm *sampler) stop() (goroutines int, anon int64) {
+	sm.once.Do(func() {
+		close(sm.done)
+		sm.wg.Wait()
+	})
+	return sm.goroutines, sm.anon
+}
+
+// findCgroup returns the server container's cgroup directory on this host,
+// when fitbench runs where Docker does with systemd's or cgroupfs's layout of
+// cgroup v2; "" otherwise, and its files are read through docker exec.
+func findCgroup(ctx context.Context) string {
+	out, err := docker(ctx, "inspect", "--format", "{{.Id}}", serverName)
+	if err != nil {
+		return ""
 	}
+	id := strings.TrimSpace(out)
+	for _, dir := range []string{"/sys/fs/cgroup/system.slice/docker-" + id + ".scope", "/sys/fs/cgroup/docker/" + id} {
+		if _, err := os.Stat(filepath.Join(dir, "memory.stat")); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
+// serverFile reads one of the server's cgroup files: from this host when
+// its cgroup was found, which costs the server nothing, or through docker
+// exec.
+func (h *harness) serverFile(ctx context.Context, name string) (string, error) {
+	if h.serverCgroup != "" {
+		data, err := os.ReadFile(filepath.Join(h.serverCgroup, name))
+		return string(data), err
+	}
+	return docker(ctx, "exec", serverName, "cat", "/sys/fs/cgroup/"+name)
+}
+
+// serverAnon is the server's anonymous memory now.
+func (h *harness) serverAnon(ctx context.Context) (int64, bool) {
+	out, err := h.serverFile(ctx, "memory.stat")
+	if err != nil {
+		return 0, false
+	}
+	return cgroupAnon(out)
 }
 
 // serverCPU is the CPU time the server's container has used so far.
 func (h *harness) serverCPU(ctx context.Context) (time.Duration, bool) {
-	out, err := docker(ctx, "exec", serverName, "cat", "/sys/fs/cgroup/cpu.stat")
+	out, err := h.serverFile(ctx, "cpu.stat")
 	if err != nil {
 		return 0, false
 	}
@@ -938,8 +1037,9 @@ func printResult(r Result) {
 		if r.GoroutinesMax > 0 {
 			hits += fmt.Sprintf("  goroutines %d", r.GoroutinesMax)
 		}
-		fmt.Printf("    %s %12.0f req/s  mean %7.2fms  max %8.2fms  errors %d  cpu %.2f%s\n",
-			name, r.RequestsPerSec, r.Latency.Mean, r.Latency.Max, r.Errors, r.CPUCores, hits)
+		fmt.Printf("    %s %12.0f req/s  mean %7.2fms  max %8.2fms  errors %d  cpu %.2f (%.2fus/req)  peak %.0fMiB%s\n",
+			name, r.RequestsPerSec, r.Latency.Mean, r.Latency.Max, r.Errors, r.CPUCores, r.CPUPerRequestUS,
+			float64(r.AnonPeakBytes)/(1<<20), hits)
 	}
 }
 
@@ -947,25 +1047,10 @@ func printResult(r Result) {
 // and protocol, a column per server.
 func printSummary(results []Result, idle []IdleResult) {
 	var names []string
-	rows := map[string]map[string]string{}
-	var order []string
 	for _, r := range results {
 		if !slices.Contains(names, r.Server) {
 			names = append(names, r.Server)
 		}
-		key := r.Scenario + " " + r.Protocol
-		if rows[key] == nil {
-			rows[key] = map[string]string{}
-			order = append(order, key)
-		}
-		cell := "-"
-		switch {
-		case r.Error != "":
-			cell = "error"
-		case r.Skipped == "":
-			cell = strconv.FormatFloat(r.RequestsPerSec, 'f', 0, 64)
-		}
-		rows[key][r.Server] = cell
 	}
 	// A run of idle connections alone has no throughput results to name
 	// the servers.
@@ -974,17 +1059,12 @@ func printSummary(results []Result, idle []IdleResult) {
 			names = append(names, r.Server)
 		}
 	}
-	fmt.Printf("\n%-22s", "req/s")
-	for _, n := range names {
-		fmt.Printf("%14s", n)
-	}
-	fmt.Println()
-	for _, key := range order {
-		fmt.Printf("%-22s", key)
-		for _, n := range names {
-			fmt.Printf("%14s", rows[key][n])
-		}
-		fmt.Println()
+	printTable("req/s", names, results, func(r Result) float64 { return r.RequestsPerSec }, 0)
+	if len(results) > 0 {
+		printTable("cpu us/req", names, results, func(r Result) float64 { return r.CPUPerRequestUS }, 2)
+		printTable("peak anon MiB", names, results, func(r Result) float64 { return float64(r.AnonPeakBytes) / (1 << 20) }, 0)
+		printTable("req/s per MiB", names, results, func(r Result) float64 { return r.RequestsPerSecPerMiB }, 0)
+		printTable("bytes/in-flight", names, results, func(r Result) float64 { return r.BytesPerInFlight }, 0)
 	}
 	if len(idle) > 0 {
 		fmt.Printf("\n%-18s", "bytes/idle conn")
@@ -1016,6 +1096,40 @@ func printSummary(results []Result, idle []IdleResult) {
 		}
 	}
 	fmt.Println()
+}
+
+// printTable prints value of the results as a table: a row per scenario
+// and protocol, a column per server, with prec decimals.
+func printTable(title string, names []string, results []Result, value func(Result) float64, prec int) {
+	rows := map[string]map[string]string{}
+	var order []string
+	for _, r := range results {
+		key := r.Scenario + " " + r.Protocol
+		if rows[key] == nil {
+			rows[key] = map[string]string{}
+			order = append(order, key)
+		}
+		cell := "-"
+		switch {
+		case r.Error != "":
+			cell = "error"
+		case r.Skipped == "":
+			cell = strconv.FormatFloat(value(r), 'f', prec, 64)
+		}
+		rows[key][r.Server] = cell
+	}
+	fmt.Printf("\n%-22s", title)
+	for _, n := range names {
+		fmt.Printf("%14s", n)
+	}
+	fmt.Println()
+	for _, key := range order {
+		fmt.Printf("%-22s", key)
+		for _, n := range names {
+			fmt.Printf("%14s", rows[key][n])
+		}
+		fmt.Println()
+	}
 }
 
 // printGoroutines prints, for each server whose goroutines were counted,
