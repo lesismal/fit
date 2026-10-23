@@ -54,6 +54,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
 | A41 | A response's header held back while an asynchronous hook runs | not done | 1, 4 | I72 |
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | made, `3998953` on fib's branch `a40-filter-abort` | 6, 11 | I67 |
+| A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
+| A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 
 ## Evidence
 
@@ -1241,3 +1243,66 @@ goes meanwhile ends as one cut short does, and `resume` then does nothing.
 **How fit would use it.** The wasm middleware registers it for a Proxy-Wasm plugin, hands
 `proxy_on_response_headers` to its pool with the status and header, and resumes once the call
 returns, the plugin's changes made; a local response it sends replaces the response.
+
+## A42: The HTTP/3 server sends a round's datagrams in one batch
+
+**Status.** Done (`a34c5db` on fib's `main`), made by fit's session. On the
+benchmark host, 3 alternating rounds of 10s: cache-hot over HTTP/3 from 308k to 639k requests a
+second, 22.4 to 10.8 µs of CPU a request, all of it GSO's (with GSO off the gain is gone). fixed
+over HTTP/3 measured 2-4% lower in four comparisons, with GSO off and with rounds of two datagrams
+sent one by one alike; its cause is not found yet.
+
+**Problem.** `quic.sendDatagrams` sends a round of more than one datagram with one call when its
+`PacketConn` is a `quic.BatchSender`, and `fib.Connection.SendBatch` sends a batch with one system
+call (sendmmsg, with UDP GSO where it can). The HTTP/3 client hands quic its `fib.Connection`, and
+gets that. The server hands quic an `http3.peerPath`, which has `Send` alone, so every datagram the
+server sends is a system call of its own, and a packet of its own through the kernel's UDP and
+netfilter paths.
+
+**Evidence.** The [v1.0.0 report](../bench/results/v1.0.0-report-2026-10-23.md): fit's cache-hot
+over HTTP/3, a 4 KiB response, answers 309k requests a second against nginx's 490k, at 22.4 µs a
+request against 14.1. A perf profile of that run on the benchmark host has 63.5% of fit's CPU under
+`syscall.Sendto`, reached from `quic.sendDatagrams` through `http3.(*peerPath).Send`, most of it in
+the kernel (`udp_sendmsg` 52%, netfilter 10%). fixed over HTTP/3 spends 7% there, proxy over HTTP/3
+more.
+
+**Suggested API.** None new: `func (p *peerPath) SendBatch(datagrams [][]byte) error { return
+p.peer.c.SendBatch(datagrams) }`, so that the server's path is a `quic.BatchSender`.
+
+**How fit would use it.** As it is: every HTTP/3 listener sends through it. fit measures cache-hot,
+fixed and proxy over HTTP/3 before and after.
+
+## A43: Fewer wakeups and goroutine switches for HTTP/2 over TLS
+
+**Status.** Done (`5a02929` on fib's `main`), made by fit's session: the TLS
+layer holds what a corked connection sends and seals it as one record when the cork comes off
+(`fib.CorkHolder`), where every frame was sealed into a record of its own under the connection's
+lock. On the benchmark host, 3 alternating rounds of 10s: fixed over h2 from 1.64M to 3.52M
+requests a second (h2c 3.82M), 3.65 to 1.97 µs of CPU a request; cache-hot over h2 +6.4%; h2c
+unchanged.
+
+**Problem.** A connection's work under TLS is handed between goroutines far more often than without
+it. fit answers fixed over h2 at 43% of its rate over h2c, spending 3.80 µs a request against 1.83,
+and leaves 0.8 of its 7 CPUs idle while doing it. The crypto is not the cost: AES-GCM is about 1%
+of its CPU.
+
+**Evidence.** The v1.0.0 report's runs, and perf on the benchmark host over 5 seconds of each:
+
+| | h2 (TLS) | h2c |
+| --- | ---: | ---: |
+| requests | 8.1 M | 19.2 M |
+| system calls per request | 0.39 | 0.11 |
+| `epoll_pwait` per request | 0.13 | 0.013 |
+| context switches | 68,453 | 1,826 |
+| CPU migrations | 1,503 | 2 |
+
+The profile has writes going through `http.(*h2Flusher).RunTask` (28% of CPU) rather than inline,
+and some spinning (`runtime.procyield`) in `Context.writeResponse`. nginx answers h2 faster than
+h2c.
+
+**Suggested API.** None new: that h2 over fib's TLS writes and flushes as h2c does, inline from the
+goroutine that answers when it can, so that a round of responses goes out in one write without a
+task of its own, and the poller is woken no more often per request than without TLS.
+
+**How fit would use it.** As it is: every h2 listener. fit measures fixed, static and proxy over h2
+before and after.

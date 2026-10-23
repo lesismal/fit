@@ -52,6 +52,8 @@
 | A39 | 客户端连接为每个响应运行的读轮次更便宜 | 未完成，已放弃：第 1、2 项没有可测的 CPU 节省 | 12 | — |
 | A41 | 异步钩子运行期间压住响应头 | 未完成 | 1, 4 | I72 |
 | A40 | 响应未写完响应体就结束时中止其响应体过滤器；过滤器之后不再给出长度 | 已实现，fib 分支 `a40-filter-abort` 上的 `3998953` | 6, 11 | I67 |
+| A42 | HTTP/3 服务端把一轮的数据报一次批量发出 | 已完成，`a34c5db` | 12 | — |
+| A43 | 减少 TLS 上 HTTP/2 的唤醒和协程切换 | 已完成，`5a02929` | 12 | — |
 
 ## 证据
 
@@ -927,3 +929,52 @@ fib worker 上运行的前提下调用它。
 
 **fit 如何使用。** wasm 中间件为 Proxy-Wasm 插件注册它，把 `proxy_on_response_headers` 连同状态码和响应头交给池，在调用
 返回、插件的修改完成后恢复；插件发送的本地响应替换原响应。
+
+## A42：HTTP/3 服务端把一轮的数据报一次批量发出
+
+**状态。** 已完成（fib `main` 上的 `a34c5db`），由 fit 的会话实现。压测机上 A、B 交替 3 轮、每轮
+10 秒：cache-hot 走 HTTP/3 从每秒 30.8 万提高到 63.9 万请求，每个请求的 CPU 从 22.4 µs 降到 10.8 µs，全部来自 GSO
+（关掉 GSO 后提升消失）。fixed 走 HTTP/3 在四次比较中都低 2-4%，关掉 GSO、或两个数据报的一轮逐个发送时也一样，原因尚未查明。
+
+**问题。** `quic.sendDatagrams` 在一轮要发多个数据报、且其 `PacketConn` 是 `quic.BatchSender` 时，用一次调用发出；
+`fib.Connection.SendBatch` 用一次系统调用发出一批（sendmmsg，能用时带 UDP GSO）。HTTP/3 客户端交给 quic 的是它的
+`fib.Connection`，所以用上了这一点；服务端交给 quic 的是 `http3.peerPath`，只有 `Send`，于是服务端发出的每个数据报
+都是一次单独的系统调用，也各自单独走一遍内核的 UDP 和 netfilter 路径。
+
+**证据。** [v1.0.0 报告](../bench/results/v1.0.0-report-2026-10-23.md)：fit 的 cache-hot 走 HTTP/3（响应 4 KiB）每秒
+30.9 万个请求，nginx 49.0 万；每个请求 22.4 µs，nginx 14.1 µs。在压测机上对这一轮做的 perf 剖析里，fit 63.5% 的 CPU
+在 `syscall.Sendto` 之下，调用路径是 `quic.sendDatagrams` → `http3.(*peerPath).Send`，大部分在内核里
+（`udp_sendmsg` 52%，netfilter 10%）。fixed 走 HTTP/3 时这部分占 7%，proxy 走 HTTP/3 时更多。
+
+**建议的 API。** 不需要新 API：`func (p *peerPath) SendBatch(datagrams [][]byte) error { return
+p.peer.c.SendBatch(datagrams) }`，让服务端的路径成为 `quic.BatchSender`。
+
+**fit 如何使用。** 原样使用：每个 HTTP/3 监听都经由它发送。fit 在改动前后测量 HTTP/3 上的 cache-hot、fixed 和 proxy。
+
+## A43：减少 TLS 上 HTTP/2 的唤醒和协程切换
+
+**状态。** 已完成（fib `main` 上的 `5a02929`），由 fit 的会话实现：连接 cork 期间发送的明文由 TLS
+layer 留着，cork 解除时合成一个 record 加密（`fib.CorkHolder`），而此前每个 frame 都在连接的锁下单独加密成一个 record。
+压测机上 A、B 交替 3 轮、每轮 10 秒：fixed 走 h2 从每秒 164 万提高到 352 万请求（h2c 为 382 万），每个请求的 CPU 从
+3.65 µs 降到 1.97 µs；cache-hot 走 h2 提高 6.4%；h2c 不变。
+
+**问题。** 在 TLS 上，一个连接的工作在协程之间转手的次数远多于不加 TLS 时。fit 的 fixed 走 h2 只有 h2c 速率的 43%，
+每个请求 3.80 µs，h2c 是 1.83 µs，而且 7 个 CPU 里有 0.8 个闲着。开销不在加解密：AES-GCM 只占约 1% 的 CPU。
+
+**证据。** v1.0.0 报告的结果，以及在压测机上对两者各 5 秒的 perf 统计：
+
+| | h2（TLS） | h2c |
+| --- | ---: | ---: |
+| 请求数 | 810 万 | 1,920 万 |
+| 每个请求的系统调用 | 0.39 | 0.11 |
+| 每个请求的 `epoll_pwait` | 0.13 | 0.013 |
+| 上下文切换 | 68,453 | 1,826 |
+| CPU 迁移 | 1,503 | 2 |
+
+剖析显示写入经由 `http.(*h2Flusher).RunTask`（占 CPU 28%）而不是直接写，`Context.writeResponse` 里还有一些自旋
+（`runtime.procyield`）。nginx 的 h2 反而比 h2c 快。
+
+**建议的 API。** 不需要新 API：让 fib 的 TLS 上的 h2 像 h2c 那样写入和刷新——能直接写时由应答的协程直接写，让一轮响应
+一次写出，不另起任务，每个请求唤醒 poller 的次数不多于不加 TLS 时。
+
+**fit 如何使用。** 原样使用：每个 h2 监听。fit 在改动前后测量 h2 上的 fixed、static 和 proxy。
