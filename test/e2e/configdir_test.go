@@ -27,8 +27,8 @@ func TestConfigDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("00-base.conf", "listener web {\n\taddress 127.0.0.1:0\n\tprotocols http/1.1 h2c\n}\n")
-	write("routes/a.conf", "route a {\n\tmatch { path /a }\n\thandler respond { body a }\n}\n")
+	write("00-base.konf", "listener web {\n\taddress 127.0.0.1:0\n\tprotocols http/1.1 h2c\n}\n")
+	write("routes/a.konf", "route a {\n\tmatch { path /a }\n\thandler respond { body a }\n}\n")
 	f, addrs := startFitAt(t, dir, 1, "-watch", "-watch-interval", "50ms")
 	get := func(path string) string {
 		resp, err := client(false).Get("http://" + addrs["web"] + path)
@@ -54,13 +54,13 @@ func TestConfigDirectory(t *testing.T) {
 	write("routes/b.yaml", "routes:\n  - match: {path: [/b]}\n    handler: {module: respond, params: {body: b}}\n")
 	waitGet("/b", "200 OK b")
 
-	if err := os.Remove(filepath.Join(dir, "routes/a.conf")); err != nil {
+	if err := os.Remove(filepath.Join(dir, "routes/a.konf")); err != nil {
 		t.Fatal(err)
 	}
 	waitGet("/a", "404 Not Found 404 page not found\n")
 
-	broken := filepath.Join(dir, "routes/c.conf")
-	write("routes/c.conf", "route c {\n\thandler\n}\n")
+	broken := filepath.Join(dir, "routes/c.konf")
+	write("routes/c.konf", "route c {\n\thandler\n}\n")
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(f.stderr.String(), broken+":2:2: handler takes the name of a module") {
 		if time.Now().After(deadline) {

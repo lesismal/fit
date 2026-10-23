@@ -1,9 +1,9 @@
-# .conf 参考
+# .konf 参考
 
 [English](fit.md) | [简体中文](fit.zh-CN.md)
 
-`.conf` 文件是 fit 自己的配置格式：像 nginx 和 Caddy 的配置那样由指令块组成，逐字段表达 fit 原生 JSON 所表达的内容。
-[配置参考](config.zh-CN.md) 列出的每个字段、每个模块的参数都可以用它来写；`site` 块把一组域名的路由写在一起。以 `.conf`
+`.konf` 文件是 fit 自己的配置格式：像 nginx 和 Caddy 的配置那样由指令块组成，逐字段表达 fit 原生 JSON 所表达的内容。
+[配置参考](config.zh-CN.md) 列出的每个字段、每个模块的参数都可以用它来写；`site` 块把一组域名的路由写在一起。以 `.konf`
 结尾的文件，`fit run`、`fit validate` 和 `fit adapt` 都按这种格式读取；一份配置还可以分散在多个文件和目录中
 （[见下文](#多个文件和目录)）。
 
@@ -200,40 +200,40 @@ site api.example.com {
 `-c` 可以给出多次，也可以指定目录；配置是所有文件合并的结果：
 
 ```bash
-fit run -c /etc/fit/base.conf -c /etc/fit/sites
+fit run -c /etc/fit/base.konf -c /etc/fit/sites
 ```
 
-- **目录**代表其中（包括子目录中）以 `.conf`、`.yaml`、`.yml` 或 `.json` 结尾的文件，按字典序；名字以 `.` 开头的文件和
+- **目录**代表其中（包括子目录中）以 `.konf`、`.yaml`、`.yml` 或 `.json` 结尾的文件，按字典序；名字以 `.` 开头的文件和
   目录被跳过。用 `-c` 直接指定的文件不论名字都会读取，按扩展名决定格式（都不匹配时按 JSON）；同一文件指定两次只读一次。
   nginx 配置和 Caddyfile 不能直接加载，先用 `fit adapt -from nginx` 或 `-from caddyfile` 转换。
 - **合并**：配置顶层的列表 `listeners`、`routes`、`upstreams`、`services` 和 `providers` 按读取文件的顺序拼接。其他字段，
   如 `admin` 或 `acme`，只能在一个文件中给出；`schema_version` 可以在多个文件中给出，但必须一致。每个文件可以是任一种格式。
 - **错误**会给出文件、文件中的位置，以及该文件内的路径，如
-  `sites/api.conf:12:3: routes[0].handler.params.status: ...`。
+  `sites/api.konf:12:3: routes[0].handler.params.status: ...`。
 - **重新加载**：SIGHUP 会重新读取每个文件。使用 `-watch` 时，文件被修改、被加入目录或从目录中移除，都会重新应用配置。
   每次都重新读取全部文件；上限为 10,000 个文件，共 64 MiB。
 
 ## 错误
 
-`.conf` 文件按严格的规则读取。语法错误、写法不对的指令（给块写了值、给单值写了两个值）或重复给出的字段，都会在其行列
+`.konf` 文件按严格的规则读取。语法错误、写法不对的指令（给块写了值、给单值写了两个值）或重复给出的字段，都会在其行列
 报错；配置自身检查发现的问题，如未知字段、超出范围或缺少的值，也会在它所写的位置报告：
 
 ```text
-fit.conf:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
+fit.konf:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
 ```
 
 ## 转换
 
-`fit adapt` 可以把 fit 任一种格式的配置写成 `.conf` 文件，也可以反向转换：
+`fit adapt` 可以把 fit 任一种格式的配置写成 `.konf` 文件，也可以反向转换：
 
 ```bash
-fit adapt -c fit.json -to fit -o fit.conf
+fit adapt -c fit.json -to fit -o fit.konf
 ```
 
 ```bash
-fit adapt -c fit.conf -o fit.json
+fit adapt -c fit.konf -o fit.json
 ```
 
-路由逐条写出，不会归并成站点。nginx 配置和 Caddyfile 也可以这样转换成 `.conf` 文件，见
+路由逐条写出，不会归并成站点。nginx 配置和 Caddyfile 也可以这样转换成 `.konf` 文件，见
 [从 nginx 迁移](../migrating-from-nginx.zh-CN.md) 和 [从 Caddy 迁移](../migrating-from-caddy.zh-CN.md)。
-[templates/fit/fit.conf](../../templates/fit/fit.conf) 包含全部字段，说明和可选值写在注释中。
+[templates/fit/fit.konf](../../templates/fit/fit.konf) 包含全部字段，说明和可选值写在注释中。

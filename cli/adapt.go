@@ -20,7 +20,7 @@ import (
 
 const adaptUsage = `Usage: fit adapt [flags]
 
-Converts a config between fit's formats, .conf, YAML and native JSON,
+Converts a config between fit's formats, .konf, YAML and native JSON,
 checked as fit run would load it, and converts an nginx config (-from
 nginx) or a Caddyfile (-from caddyfile), of which a common subset
 converts, to help moving to fit: fit run loads only its own formats.

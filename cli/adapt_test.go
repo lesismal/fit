@@ -88,11 +88,11 @@ func TestJSONWithComments(t *testing.T) {
 	}
 }
 
-// TestExampleFitFiles checks that the examples' .conf files are valid and
+// TestExampleFitFiles checks that the examples' .konf files are valid and
 // say what their JSON twins do.
 func TestExampleFitFiles(t *testing.T) {
 	for _, name := range []string{"hello", "proxy"} {
-		f := "../examples/" + name + ".conf"
+		f := "../examples/" + name + ".konf"
 		if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") || stderr != "" {
 			t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
 		}
@@ -104,13 +104,13 @@ func TestExampleFitFiles(t *testing.T) {
 	}
 }
 
-// TestAdaptFit writes a config as a .conf file and reads it back.
+// TestAdaptFit writes a config as a .konf file and reads it back.
 func TestAdaptFit(t *testing.T) {
 	code, out, stderr := runFit("adapt", "-c", "../examples/proxy.json", "-to", "fit")
 	if code != 0 || !strings.Contains(out, "upstream app {\n\taddresses 127.0.0.1:9000 127.0.0.1:9001\n") {
 		t.Fatalf("to fit: %d %q %q", code, out, stderr)
 	}
-	f := filepath.Join(t.TempDir(), "proxy.conf")
+	f := filepath.Join(t.TempDir(), "proxy.konf")
 	_ = os.WriteFile(f, []byte(out), 0o644)
 	_, back, _ := runFit("adapt", "-c", f)
 	_, want, _ := runFit("adapt", "-c", "../examples/proxy.json")
@@ -123,11 +123,11 @@ func TestAdaptFit(t *testing.T) {
 // or in a directory, is merged, and its errors point at their files.
 func TestSeveralFiles(t *testing.T) {
 	dir := t.TempDir()
-	base := filepath.Join(dir, "base.conf")
+	base := filepath.Join(dir, "base.konf")
 	_ = os.WriteFile(base, []byte("listener web {\n\taddress :8080\n}\n"), 0o644)
 	sites := filepath.Join(dir, "sites")
 	_ = os.Mkdir(sites, 0o755)
-	_ = os.WriteFile(filepath.Join(sites, "a.conf"), []byte("site a.example {\n\troute { handler respond { body a } }\n}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(sites, "a.konf"), []byte("site a.example {\n\troute { handler respond { body a } }\n}\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(sites, "b.yaml"), []byte("routes:\n  - handler: {module: respond, params: {status: 99}}\n"), 0o644)
 
 	code, _, stderr := runFit("validate", "-c", base, "-c", sites)
@@ -145,9 +145,9 @@ func TestSeveralFiles(t *testing.T) {
 	if code, _, _ := runFit("adapt", "-c", base, "-c", sites, "-from", "fit"); code != 2 {
 		t.Errorf("-from with several files: %d", code)
 	}
-	_ = os.WriteFile(filepath.Join(sites, "c.conf"), []byte("listener web {\n\taddress :8081\n}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(sites, "c.konf"), []byte("listener web {\n\taddress :8081\n}\n"), 0o644)
 	// The second listener is the first of c.fit's.
-	if code, _, stderr := runFit("validate", "-c", dir); code != 1 || !strings.Contains(stderr, filepath.Join(sites, "c.conf")+":1:10: listeners[0].name") {
+	if code, _, stderr := runFit("validate", "-c", dir); code != 1 || !strings.Contains(stderr, filepath.Join(sites, "c.konf")+":1:10: listeners[0].name") {
 		t.Errorf("two listeners of one name: %d %q", code, stderr)
 	}
 }

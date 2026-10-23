@@ -5,7 +5,7 @@
 fit shares Caddy's ideas: HTTPS by default, a strict structured config, and an Admin API that swaps
 configs atomically. It differs in what is built in (caching, rate limiting, layer 4 proxying, which
 Caddy leaves to plugins) and in costing less per connection. fit's own config format, the
-[.conf file](reference/fit.md), is written in blocks of directives as a Caddyfile is, with a `site`
+[.konf file](reference/fit.md), is written in blocks of directives as a Caddyfile is, with a `site`
 for each set of host names, but its directives are fit's own fields. `fit adapt` converts a
 Caddyfile's common subset to it, to start from; there is no converter from Caddy's JSON. This guide
 maps one to the other, and the [config reference](reference/config.md) has every field.
@@ -107,10 +107,10 @@ Let's Encrypt for the routes' host names, and port 80 redirects to it.
 ## Converting a Caddyfile
 
 ```bash
-fit adapt -from caddyfile -c Caddyfile -to fit -o fit.conf
+fit adapt -from caddyfile -c Caddyfile -to fit -o fit.konf
 ```
 
-writes a .conf file and lists on standard error, with their lines, the directives it left out or
+writes a .konf file and lists on standard error, with their lines, the directives it left out or
 converted with doubts; the [Caddyfile conversion](reference/caddyfile.md) page has every
 directive. What converts:
 

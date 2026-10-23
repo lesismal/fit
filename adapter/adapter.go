@@ -1,5 +1,5 @@
 // Package adapter turns configs written in other formats into fit's native
-// JSON: fit's own .conf files and YAML, and, to help moving to fit, subsets
+// JSON: fit's own .konf files and YAML, and, to help moving to fit, subsets
 // of nginx's configs and Caddy's Caddyfile. An adapter registers itself
 // under a name and the file extensions it takes. fit run and fit validate
 // pick one by a file's extension, and load only fit's own formats; the

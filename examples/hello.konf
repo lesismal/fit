@@ -1,4 +1,4 @@
-# The .conf twin of hello.json: fit run -c examples/hello.conf
+# The .konf twin of hello.json: fit run -c examples/hello.konf
 listener web {
 	address :8080
 	protocols http/1.1 h2c

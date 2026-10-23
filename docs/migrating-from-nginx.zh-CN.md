@@ -3,7 +3,7 @@
 [English](migrating-from-nginx.md) | [简体中文](migrating-from-nginx.zh-CN.md)
 
 fit 保留了 nginx 擅长的东西——事件循环和每个连接很小的开销——改变的是配置方式：一份结构化的配置，运行前先检查，通过
-Admin API 原地修改而无需 reload。它自己的格式 [.conf 文件](reference/fit.zh-CN.md) 像 nginx 的配置一样由指令块组成，但
+Admin API 原地修改而无需 reload。它自己的格式 [.konf 文件](reference/fit.zh-CN.md) 像 nginx 的配置一样由指令块组成，但
 指令就是 fit 自己的字段；一份配置可以像 nginx 用 `include` 那样分散在多个文件和目录中。本指南把 nginx 的指令对应到 fit 的配置；每个字段见 [配置参考](reference/config.zh-CN.md)。
 
 ## 先转换
@@ -11,8 +11,8 @@ Admin API 原地修改而无需 reload。它自己的格式 [.conf 文件](refer
 `fit adapt` 可以转换 nginx 配置的常用子集，并列出它略过的指令及其行号：
 
 ```bash
-fit adapt -from nginx -c nginx.conf -to fit -o fit.conf
-fit validate -c fit.conf
+fit adapt -from nginx -c nginx.conf -to fit -o fit.konf
+fit validate -c fit.konf
 ```
 
 它转换 `http` 块中的 server（`listen`、`server_name`、`ssl_certificate`）、其中的 location（精确、前缀、`^~` 和正则，

@@ -187,7 +187,7 @@ func TestErrors(t *testing.T) {
 	}
 }
 
-// TestPositions checks that the config's errors point at the .conf file.
+// TestPositions checks that the config's errors point at the .konf file.
 func TestPositions(t *testing.T) {
 	src := "listener web {\n\taddress nowhere\n}\nsite a.example {\n\troute /x {\n\t\thandler respond { status 999 }\n\t}\n}\nroute {\n\tmatch { bogus 1 }\n\thandler respond\n}\n"
 	r, err := Adapt([]byte(src))
@@ -215,7 +215,7 @@ func TestPositions(t *testing.T) {
 	}
 }
 
-// TestRoundTrip writes configs as .conf files and reads them back: the
+// TestRoundTrip writes configs as .konf files and reads them back: the
 // templates, the examples and the test configs.
 func TestRoundTrip(t *testing.T) {
 	files, _ := filepath.Glob("../../examples/*.json")
@@ -270,9 +270,9 @@ func TestWord(t *testing.T) {
 	}
 }
 
-// TestRegistered checks that .conf files are adapted by their extension.
+// TestRegistered checks that .konf files are adapted by their extension.
 func TestRegistered(t *testing.T) {
-	if name := adapter.ForPath("conf.d/site.conf"); name != "fit" {
-		t.Errorf("a .conf file is adapted by %q", name)
+	if name := adapter.ForPath("conf.d/site.konf"); name != "fit" {
+		t.Errorf("a .konf file is adapted by %q", name)
 	}
 }

@@ -16,7 +16,7 @@ import (
 	"github.com/lesismal/fit/module"
 )
 
-var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml", "fit": "../templates/fit/fit.conf"}
+var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml", "fit": "../templates/fit/fit.konf"}
 
 // TestTemplatesUpToDate fails when a config type, a struct tag or a
 // standard module changed without the templates being regenerated.
@@ -113,7 +113,7 @@ func TestTemplatesLoad(t *testing.T) {
 	}
 }
 
-// fitDirective says a .conf template has a directive name, written out or
+// fitDirective says a .konf template has a directive name, written out or
 // commented out.
 func fitDirective(data, name string) bool {
 	if name == "" {

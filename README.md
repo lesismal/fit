@@ -9,7 +9,7 @@ fit is a reverse proxy, load balancer, TLS terminator, static file server and AP
 
 It serves HTTP/1.1, HTTP/2 and HTTP/3, with HTTPS by default; proxies HTTP, WebSockets, gRPC, TCP
 and UDP, with health checks and load balancing; serves static files; caches responses; and takes
-its routes from a strict config, written in fit's own .conf format, in YAML or in JSON and changed in
+its routes from a strict config, written in fit's own .konf format, in YAML or in JSON and changed in
 place through an Admin API, or from Docker, Consul, etcd and Kubernetes. Every milestone's iterations are done, 1.0's included, and 1.0's
 external security review is still to come; see [progress](docs/progress.md) for what works, and
 [bench](bench/README.md) for how it is measured against nginx, Caddy and Traefik.
@@ -18,7 +18,7 @@ external security review is still to come; see [progress](docs/progress.md) for 
 
 - [Getting started](docs/getting-started.md): from nothing to a site over HTTPS.
 - [Configuration](docs/configuration.md): the three formats a config may be written in,
-  [.conf](docs/reference/fit.md), [YAML](docs/reference/yaml.md) and [JSON](docs/reference/json.md),
+  [.konf](docs/reference/fit.md), [YAML](docs/reference/yaml.md) and [JSON](docs/reference/json.md),
   how a config is split across files, and how it is run, checked, converted and changed.
 - [Config templates](templates/README.md): a complete config in each format, every field in it with
   its choices in comments.
@@ -76,11 +76,11 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.conf
-./bin/fit run -c examples/hello.conf
+./bin/fit validate -c examples/hello.konf
+./bin/fit run -c examples/hello.konf
 ```
 
-`examples/hello.conf` answers `/hello` on port 8080:
+`examples/hello.konf` answers `/hello` on port 8080:
 
 ```fit
 listener web {
@@ -106,10 +106,10 @@ route not-found {
 }
 ```
 
-A config may be a [.conf file](docs/reference/fit.md), fit's own format, as above, YAML
+A config may be a [.konf file](docs/reference/fit.md), fit's own format, as above, YAML
 (`examples/hello.yaml`) or JSON (`examples/hello.json`, with `//` and `/* */` comments and trailing
 commas allowed), each with the same fields, and may be split across several files and directories
-(`fit run -c base.conf -c conf.d`). `fit adapt` converts between the formats, and from nginx configs
+(`fit run -c base.konf -c conf.d`). `fit adapt` converts between the formats, and from nginx configs
 and Caddyfiles, listing what it left out. [Configuration](docs/configuration.md) has the details.
 
 `fit run` reloads its config files on SIGHUP, keeping the listeners that did not change and the

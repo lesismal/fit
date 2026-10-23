@@ -3,9 +3,9 @@
 [English](migrating-from-caddy.md) | [简体中文](migrating-from-caddy.zh-CN.md)
 
 fit 与 Caddy 理念相同：默认 HTTPS、严格的结构化配置，以及原子替换配置的 Admin API。不同在于内置了什么（缓存、限流、
-四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。fit 自己的配置格式 [.conf 文件](reference/fit.zh-CN.md) 像
+四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。fit 自己的配置格式 [.konf 文件](reference/fit.zh-CN.md) 像
 Caddyfile 一样由指令块组成，每组域名一个 `site`，但指令就是 fit 自己的字段。`fit adapt` 可以把 Caddyfile 的常用子集转换成
-.conf 文件作为起点；没有从 Caddy JSON 的转换器。本指南给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
+.konf 文件作为起点；没有从 Caddy JSON 的转换器。本指南给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
 
 ## 一个站点
 
@@ -103,10 +103,10 @@ site example.com {
 ## 转换 Caddyfile
 
 ```bash
-fit adapt -from caddyfile -c Caddyfile -to fit -o fit.conf
+fit adapt -from caddyfile -c Caddyfile -to fit -o fit.konf
 ```
 
-写出 .conf 文件，并在标准错误上按行号列出未转换或转换存疑的指令；每条指令见 [转换 Caddyfile](reference/caddyfile.zh-CN.md)。可转换的有：
+写出 .konf 文件，并在标准错误上按行号列出未转换或转换存疑的指令；每条指令见 [转换 Caddyfile](reference/caddyfile.zh-CN.md)。可转换的有：
 
 - **全局选项**：`email`、`acme_ca`、`acme_ca_root`、`storage file_system`、`admin`、`auto_https`、`http_port`、
   `https_port`、`on_demand_tls` 和 `servers { protocols }`。

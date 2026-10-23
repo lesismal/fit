@@ -13,7 +13,7 @@ takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
-[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.conf` file,
+[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.konf` file,
 a `site` writes the routes of its host names together: each `route` in it takes the site's hosts
 and its own paths, and the site's middleware before its own.
 

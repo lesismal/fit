@@ -8,14 +8,14 @@ fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均
 定位与 nginx、Caddy、Traefik 相同。
 
 它支持 HTTP/1.1、HTTP/2 和 HTTP/3，默认启用 HTTPS；代理 HTTP、WebSocket、gRPC、TCP 和 UDP，带健康检查和负载均衡；
-提供静态文件；缓存响应；路由来自严格的配置，用 fit 自己的 .conf 格式、YAML 或 JSON 编写（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
+提供静态文件；缓存响应；路由来自严格的配置，用 fit 自己的 .konf 格式、YAML 或 JSON 编写（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
 Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
 对比测量方法见 [bench](bench/README.zh-CN.md)。
 
 ## 文档
 
 - [快速上手](docs/getting-started.zh-CN.md)：从零开始搭起一个 HTTPS 站点。
-- [配置](docs/configuration.zh-CN.md)：配置可用的三种格式 [.conf](docs/reference/fit.zh-CN.md)、
+- [配置](docs/configuration.zh-CN.md)：配置可用的三种格式 [.konf](docs/reference/fit.zh-CN.md)、
   [YAML](docs/reference/yaml.zh-CN.md) 和 [JSON](docs/reference/json.zh-CN.md)，配置如何分散在多个文件中，以及如何运行、检查、
   转换和修改。
 - [配置模板](templates/README.zh-CN.md)：每种格式各一份完整配置，包含全部字段，可选值写在注释中。
@@ -71,11 +71,11 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.conf
-./bin/fit run -c examples/hello.conf
+./bin/fit validate -c examples/hello.konf
+./bin/fit run -c examples/hello.konf
 ```
 
-`examples/hello.conf` 在 8080 端口上回答 `/hello`：
+`examples/hello.konf` 在 8080 端口上回答 `/hello`：
 
 ```fit
 listener web {
@@ -101,9 +101,9 @@ route not-found {
 }
 ```
 
-配置可以是 fit 自己的 [.conf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML（`examples/hello.yaml`）或 JSON
+配置可以是 fit 自己的 [.konf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML（`examples/hello.yaml`）或 JSON
 （`examples/hello.json`，可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），三者字段相同，并可以分散在多个文件和目录中
-（`fit run -c base.conf -c conf.d`）。`fit adapt` 在这些格式之间转换，也能转换 nginx 配置和 Caddyfile，并列出未转换的部分。
+（`fit run -c base.konf -c conf.d`）。`fit adapt` 在这些格式之间转换，也能转换 nginx 配置和 Caddyfile，并列出未转换的部分。
 详见 [配置](docs/configuration.zh-CN.md)。
 
 `fit run` 收到 SIGHUP 时重新加载配置文件，未变化的 listener 保持不动，新配置有错时继续使用正在运行的配置；收到

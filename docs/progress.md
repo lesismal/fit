@@ -4245,10 +4245,11 @@ Differences from the plan:
   in getting started and in the README loads). They pass under the race detector on the benchmark
   host, and `FuzzAdapt` ran 3 minutes there, about 1.8 million inputs, without a failure.
   Control-plane only: no benchmark (rule 21).
-- **Later (2026-10-24): `.fit` became `.conf`.** The format's files take `.conf`, the extension
-  `.fit` is gone, and so are the nginx and Caddyfile adapters' extensions and names: `fit run`
-  and `fit validate` load only fit's own formats, and an nginx config or a Caddyfile is converted
-  with `fit adapt -from nginx` or `-from caddyfile` ([decision 021](decisions/021-fit-format-and-config-files.md#later-the-extension-conf)).
+- **Later (2026-10-24): `.fit` became `.conf`, then `.konf`.** The format's files take `.konf`;
+  neither `.fit` nor `.conf` is read, and the nginx and Caddyfile adapters take no extension or
+  name: `fit run` and `fit validate` load only fit's own formats, and an nginx config or a
+  Caddyfile is converted with `fit adapt -from nginx` or `-from caddyfile`
+  ([decision 021](decisions/021-fit-format-and-config-files.md#later-the-extension-konf)).
   The entries above keep the name they had then.
 
 ## Notes for later iterations

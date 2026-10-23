@@ -13,7 +13,7 @@ import (
 	"github.com/lesismal/fit/module"
 )
 
-// FromJSON writes native JSON as a .conf file, field for field, with tabs
+// FromJSON writes native JSON as a .konf file, field for field, with tabs
 // for indentation: what Adapt turns back into the same config. Routes are
 // written one by one, not gathered into sites.
 func FromJSON(data []byte) ([]byte, error) {
@@ -207,7 +207,7 @@ func (w *writer) field(k string, t reflect.Type, f *config.Field, v any, depth i
 			}
 			return nil
 		case elem.Kind() == reflect.Slice || elem.Kind() == reflect.Map || elem == valueType:
-			return fmt.Errorf("%s: a list of %s, which a .conf file does not hold", k, elem)
+			return fmt.Errorf("%s: a list of %s, which a .konf file does not hold", k, elem)
 		}
 		words, err := scalars(a, elem.Kind() != reflect.String)
 		if err != nil {
@@ -368,7 +368,7 @@ func scalarWord(v any, typeless bool) (string, error) {
 	return "", fmt.Errorf("%s is not a value an argument holds", describe(v))
 }
 
-// Word writes s as an argument of a .conf file: as it is when it reads back
+// Word writes s as an argument of a .konf file: as it is when it reads back
 // so, else quoted.
 func Word(s string) string { return word(s) }
 

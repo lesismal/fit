@@ -7,7 +7,7 @@ import (
 )
 
 // TestAdaptToFitRefused checks that fit adapt fails on a config it cannot
-// write as a .conf file: a list of one value in the params of a module this
+// write as a .konf file: a list of one value in the params of a module this
 // fit does not know, which would read back as the value alone.
 func TestAdaptToFitRefused(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "fit.json")
