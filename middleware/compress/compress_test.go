@@ -48,8 +48,12 @@ func (textHandler) ServeHTTP(c *fibhttp.Context) {
 		h.Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(c, "data: one\n\n")
 		c.Flush()
+		// Its client going ends the wait, as it would a real stream's: the
+		// filter is given back once the response ends.
 		select {
 		case <-events:
+		case <-c.Context().Done():
+			return
 		case <-time.After(5 * time.Second):
 		}
 		_, _ = io.WriteString(c, "data: two\n\n")

@@ -43,6 +43,9 @@ func main() {
 func run(in io.Reader, out io.Writer, annotate bool) error {
 	type key struct{ pkg, test string }
 	output := map[key]*strings.Builder{}
+	// all is each package's output in the order it came, for a package
+	// that failed with no test failing.
+	all := map[string]*strings.Builder{}
 	failed := map[key]bool{}
 	ended := map[key]bool{}
 	var order []key
@@ -78,6 +81,12 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 				order = append(order, k)
 			}
 			b.WriteString(e.Output)
+			a := all[e.Package]
+			if a == nil {
+				a = &strings.Builder{}
+				all[e.Package] = a
+			}
+			a.WriteString(e.Output)
 		case "fail":
 			failed[k] = true
 			ended[k] = true
@@ -118,13 +127,29 @@ func run(in io.Reader, out io.Writer, annotate bool) error {
 		}
 	}
 	sort.Strings(pkgs)
+	testFailed := func(pkg string) bool {
+		for f := range failed {
+			if f.pkg == pkg && f.test != "" {
+				return true
+			}
+		}
+		return false
+	}
 	for _, pkg := range pkgs {
 		var msg strings.Builder
-		for _, k := range order {
-			if k.pkg != pkg || (k.test != "" && (!failed[k] || !leaf(k))) {
-				continue
+		if !testFailed(pkg) && all[pkg] != nil {
+			// No test failed, yet the package did: a race or a panic
+			// reported after a test that passed, or the test binary's
+			// exit. Its cause is in output under a passed test, so the
+			// whole output goes, its start and its end kept.
+			msg.WriteString(all[pkg].String())
+		} else {
+			for _, k := range order {
+				if k.pkg != pkg || (k.test != "" && (!failed[k] || !leaf(k))) {
+					continue
+				}
+				msg.WriteString(output[k].String())
 			}
-			msg.WriteString(output[k].String())
 		}
 		s := msg.String()
 		if len(s) > maxMessage {

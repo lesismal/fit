@@ -86,6 +86,26 @@ func TestAnnotateTimeout(t *testing.T) {
 	}
 }
 
+// A race found after a test passed fails the package with no test failing;
+// the annotation holds the whole output, where the race is.
+func TestAnnotateNoTestFailed(t *testing.T) {
+	in := `{"Action":"output","Package":"p","Test":"TestA","Output":"=== RUN   TestA\n"}
+{"Action":"output","Package":"p","Test":"TestA","Output":"--- PASS: TestA\n"}
+{"Action":"pass","Package":"p","Test":"TestA"}
+{"Action":"output","Package":"p","Test":"TestA","Output":"WARNING: DATA RACE\n"}
+{"Action":"output","Package":"p","Output":"FAIL\n"}
+{"Action":"fail","Package":"p"}
+`
+	var out strings.Builder
+	if err := run(strings.NewReader(in), &out, true); err != nil {
+		t.Fatal(err)
+	}
+	want := "::error title=go test p::=== RUN   TestA%0A--- PASS: TestA%0AWARNING: DATA RACE%0AFAIL%0A\n"
+	if out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+}
+
 func TestAnnotateKeepsTheStart(t *testing.T) {
 	long := "panic: test timed out" + strings.Repeat("x", 2*maxMessage)
 	in := `{"Action":"output","Package":"p","Output":"` + long + `"}
