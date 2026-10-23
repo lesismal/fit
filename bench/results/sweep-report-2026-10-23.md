@@ -417,6 +417,36 @@ above.
    for a comparison of the proxies themselves at high counts, a run with fit's `max_pending` raised
    to match what the others queue would separate the bound from the proxy.
 
+## Follow-up, 2026-10-24
+
+What the proxy's failures at levels 4-7 were, found on the benchmark host with fit's proxy alone
+(the backend, CPU split and h2load as in the sweep) and a goroutine dump during each run:
+
+- **fit's collapse was a bug in fib's HTTP client**, not the host. Past `max_pending`, the client
+  turned each request away only after walking its whole queue of waiting requests, about 1,000,
+  under the client's one lock; past the bound nearly every request is turned away, and the lock is
+  also what the upstream connections' responses and dials take. The upstream event loops waited
+  behind thousands of goroutines in `Client.enqueue` (14,000 at 4,096×32), responses stopped, and
+  the upstream requests in flight stayed frozen: nothing but 503s. fib's
+  [`ee1a859`](https://github.com/lesismal/fib/commit/ee1a859) counts the requests that end while
+  they wait and checks the bound in constant time (fit's request A44). fit itself now answers 503
+  before building a request when its pool holds `max_conns` plus `max_pending` already
+  (`upstream.Pool.Saturated`).
+- **Levels 6 and 7 are past what the proxy test can measure.** With 131,072 or 262,144 requests in
+  flight against one backend that answers about 260k a second on two CPUs, every proxy fails
+  (nginx and Envoy answer nothing, or hang h2load), and fit, past its bound, spends its CPU
+  answering the closed-loop load generator's retries with 503. Future sweeps
+  ([`bench/sweep.sh`](../sweep.sh)) run the proxy at levels 1-5 only.
+
+Successful responses a second, 30 s after a 5 s warm-up, fit on CPUs 0-6:
+
+| Run | fit in the sweep | with fib's fix | and the early 503 | nginx in the sweep |
+| --- | ---: | ---: | ---: | ---: |
+| h2c, 256×32 | 77k | 194k | 196k | 206k |
+| h2c, 1,024×32 | 19k | 133k | 184k | 201k |
+| h2c, 4,096×32 | 0 | 53k | 85k | 0 |
+| HTTP/1.1, 16,384 | 76k | 180k | 189k | 208k |
+
 ## Configs
 
 The configs each server ran with, as the harness rendered them from [`bench/configs`](../configs)

@@ -52,6 +52,18 @@ func TestMaxPending(t *testing.T) {
 	if resp.StatusCode != 503 || time.Since(start) > time.Second {
 		t.Fatalf("one past max_pending: %d after %v", resp.StatusCode, time.Since(start))
 	}
+	// A gRPC call past it is answered as gRPC answers: UNAVAILABLE.
+	req, _ := stdhttp.NewRequest("POST", base+"/svc/Method", strings.NewReader("\x00\x00\x00\x00\x00"))
+	req.Header.Set("Content-Type", "application/grpc")
+	resp, err = client(true).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Grpc-Status") != "14" {
+		t.Fatalf("a gRPC call past max_pending: %d, grpc-status %q", resp.StatusCode, resp.Header.Get("Grpc-Status"))
+	}
 	release <- struct{}{}
 	release <- struct{}{}
 	release <- struct{}{}

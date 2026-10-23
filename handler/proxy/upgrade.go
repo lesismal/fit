@@ -96,10 +96,13 @@ type relay struct {
 	timer *time.Timer
 	shard *relaySet
 	ended atomic.Int32 // sides that have closed
-	once  sync.Once
-	cause atomic.Pointer[error]
-	call  fibhttp.Call
-	mu    sync.Mutex
+	// tunneled is 1 once the upstream's connection became a tunnel and the
+	// pool was told, and 2 once the relay finished, whichever came first.
+	tunneled atomic.Int32
+	once     sync.Once
+	cause    atomic.Pointer[error]
+	call     fibhttp.Call
+	mu       sync.Mutex
 }
 
 // serveUpgrade passes a request that asks to switch protocols on to pool.
@@ -190,6 +193,10 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	}
 	if r.extended {
 		delete(header, "Sec-Websocket-Accept")
+	}
+	if r.tunneled.CompareAndSwap(0, 1) {
+		// Out of the client's pool: its connection is the tunnel's now.
+		r.pool.Tunneled()
 	}
 	r.mu.Lock()
 	r.up = up
@@ -285,6 +292,9 @@ func (r *relay) finish(failed bool) {
 			r.timer.Stop()
 		}
 		r.p.removeRelay(r)
+		if r.tunneled.Swap(2) == 1 {
+			r.pool.Untunneled()
+		}
 		r.pool.Done(r.backend, failed)
 		r.p.graph.Release()
 	})

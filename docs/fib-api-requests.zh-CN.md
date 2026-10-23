@@ -54,6 +54,7 @@
 | A40 | 响应未写完响应体就结束时中止其响应体过滤器；过滤器之后不再给出长度 | 已实现，fib 分支 `a40-filter-abort` 上的 `3998953` | 6, 11 | I67 |
 | A42 | HTTP/3 服务端把一轮的数据报一次批量发出 | 已完成，`a34c5db` | 12 | — |
 | A43 | 减少 TLS 上 HTTP/2 的唤醒和协程切换 | 已完成，`5a02929` | 12 | — |
+| A44 | 客户端超过 `MaxPendingPerHost` 拒绝请求时不再遍历队列 | 已实现，`ee1a859`，尚未推送到 fib 的 `main` | 1, 11, 12 | — |
 
 ## 证据
 
@@ -978,3 +979,26 @@ layer 留着，cork 解除时合成一个 record 加密（`fib.CorkHolder`），
 一次写出，不另起任务，每个请求唤醒 poller 的次数不多于不加 TLS 时。
 
 **fit 如何使用。** 原样使用：每个 h2 监听。fit 在改动前后测量 h2 上的 fixed、static 和 proxy。
+
+## A44：客户端超过 `MaxPendingPerHost` 拒绝请求时不再遍历队列
+
+**状态。** 已实现（fib 的 `ee1a859`），由 fit 的会话完成；尚未推送到 fib 的 `main`。在压测机上，fit 的代理走 h2c、
+256×32（8,192 个请求在途，`max_conns` 4,096，`max_pending` 1,024）从只有 503 提高到每秒 19.4 万个成功响应；在压测
+工具的默认负载下，proxy 走 HTTP/1.1 和 h2c 不变（`bench/ab.sh`，在噪声范围内）。
+
+**问题。** 超过 `MaxPendingPerHost` 后，`overPendingLocked` 清点等待中的请求时先剔除已经结束的（`pendingLocked`），
+在客户端唯一的锁内遍历整个主机队列（约 `MaxPendingPerHost` 个请求），而且每拒绝一个请求都要做一次。超过上限后几乎
+每个请求都被拒绝，而客户端引擎的事件循环处理连接的响应（`release`）和拨号结果（`dialed`）时也要拿这把锁。锁几乎
+一直被占着；事件循环排在成千上万个 `enqueue` 中的 goroutine 之后，响应不再返回，拨号超时，在途的上游请求冻结不动。
+
+**证据。** [2026-10-23 的扫描](../bench/results/sweep-report-2026-10-23.zh-CN.md)：fit 的代理走 h2c 在 256×32 只有每秒
+7.7 万个成功响应（nginx 20.6 万），1,024×32 时 1.9 万，4,096×32 起为零。在压测机上重跑并在第 22 秒抓取 goroutine 栈：
+256×32 时 3,071 个 goroutine 在 `Client.enqueue` 等 `Client.mu`，一个事件循环在 `Client.dialed` 里也在等它；
+4,096×32 时是 13,957 个和两个事件循环。fit 的 `fit_upstream_requests_in_flight` 在 20 秒内停在 8,182 和 19,080，
+没有一个响应是 2xx。
+
+**建议的 API。** 不需要新 API：主机记下在等待中结束的请求数（`hostPool.ended`，通过 `clientRequest.waitingIn`，由请求
+结束和离开队列两者中先发生的一方结算一次），以常数时间检查上限；只有队列大半已结束时才清扫一次。
+
+**fit 如何使用。** 原样使用：每个配置了 `max_pending` 的 HTTP/1.1 上游。fit 还在连接池已持有 `max_conns` 加
+`max_pending` 个请求时，不构造请求直接回答 503（`upstream.Pool.Saturated`），拒绝一个请求只需读一个计数器。

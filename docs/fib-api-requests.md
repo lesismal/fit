@@ -56,6 +56,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | made, `3998953` on fib's branch `a40-filter-abort` | 6, 11 | I67 |
 | A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
+| A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | made, `ee1a859`, not yet on fib's `main` | 1, 11, 12 | — |
 
 ## Evidence
 
@@ -1306,3 +1307,34 @@ task of its own, and the poller is woken no more often per request than without 
 
 **How fit would use it.** As it is: every h2 listener. fit measures fixed, static and proxy over h2
 before and after.
+
+## A44: The client turns a request away past `MaxPendingPerHost` without walking its queue
+
+**Status.** Made (`ee1a859` in fib), by fit's session; not yet pushed to fib's `main`. On the
+benchmark host, fit's proxy over h2c at 256×32 (8,192 requests in flight, `max_conns` 4,096,
+`max_pending` 1,024) went from nothing but 503s to 194k successful responses a second; at the
+harness's default load, proxy over HTTP/1.1 and h2c is unchanged (`bench/ab.sh`, within noise).
+
+**Problem.** Past `MaxPendingPerHost`, `overPendingLocked` counted the waiting requests by
+dropping those that had ended (`pendingLocked`), walking the host's whole queue, about
+`MaxPendingPerHost` requests, under the client's one lock, for every request it then turned away.
+Past the bound almost every request is turned away, and the same lock is taken by the connections'
+responses (`release`) and settled dials (`dialed`), on the client engine's event loops. The lock
+was held nearly all the time; the event loops waited behind thousands of goroutines in `enqueue`,
+responses stopped coming back, dials expired, and the upstream requests in flight froze.
+
+**Evidence.** The [2026-10-23 sweep](../bench/results/sweep-report-2026-10-23.md): fit's proxy fell
+to 77k successful responses a second at 256×32 over h2c (nginx 206k), 19k at 1,024×32, and none at
+all from 4,096×32. Rerun on the host with a goroutine dump at 22 s: at 256×32, 3,071 goroutines in
+`Client.enqueue` waiting for `Client.mu`, and an event loop in `Client.dialed` waiting for it too;
+at 4,096×32, 13,957 and two event loops. fit's `fit_upstream_requests_in_flight` stayed at 8,182
+and 19,080 for 20 s, and not one response was a 2xx.
+
+**Suggested API.** None new: the host counts the requests that end while they wait
+(`hostPool.ended`, through `clientRequest.waitingIn`, settled once by whichever of the request's
+end and its leaving the queue comes first), so the bound is checked in constant time; the queue
+is swept only once most of it has ended.
+
+**How fit would use it.** As it is: every HTTP/1.1 upstream with `max_pending`. fit also answers
+503 before building a request whose pool already holds `max_conns` plus `max_pending` requests
+(`upstream.Pool.Saturated`), so that turning one away costs one counter read.

@@ -81,3 +81,49 @@ func TestResponseTimeout(t *testing.T) {
 		t.Fatalf("after %v: %+v", time.Since(start), got)
 	}
 }
+
+// TestSaturated: an HTTP/1.1 pool is saturated once it holds max_conns and
+// max_pending requests for each backend, and is not once one is done; an
+// HTTP/2 pool, whose connections carry many requests each, never says so.
+func TestSaturated(t *testing.T) {
+	c, err := decode(t, `{"addresses": ["127.0.0.1:1", "127.0.0.1:2"], "max_conns": 2, "max_pending": 1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(nil, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var picked []*Backend
+	for range 5 {
+		picked = append(picked, p.Pick(nil))
+		if p.Saturated() {
+			t.Fatalf("saturated with %d requests in flight, want 6", len(picked))
+		}
+	}
+	b := p.Pick(nil)
+	if !p.Saturated() {
+		t.Fatal("not saturated with 6 requests in flight")
+	}
+	p.Done(b, false)
+	if p.Saturated() {
+		t.Fatal("still saturated once one is done")
+	}
+	for _, b := range picked {
+		p.Done(b, false)
+	}
+
+	c, err = decode(t, `{"addresses": ["127.0.0.1:1"], "protocol": "h2c", "max_conns": 1, "max_pending": 1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err = New(nil, c); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		p.Pick(nil)
+	}
+	if p.Saturated() {
+		t.Fatal("an h2c pool says it is saturated")
+	}
+}

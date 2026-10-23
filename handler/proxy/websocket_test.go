@@ -222,3 +222,28 @@ func TestWebSocketIdleTimeout(t *testing.T) {
 		t.Fatal("the upstream connection outlived the idle timeout")
 	}
 }
+
+// TestWebSocketsLeaveThePool: a WebSocket's upstream connection leaves the
+// pool once it switches, so open WebSockets, however many, do not fill
+// max_conns and max_pending for the requests after them.
+func TestWebSocketsLeaveThePool(t *testing.T) {
+	b := newWSBackend(t)
+	base := startFit(t, retryConfig(`, "max_conns": 1, "max_pending": 1`, ``), b.addr)
+	for range 3 {
+		c, _, resp := wsDial(t, base, "/chat", "")
+		if resp.StatusCode != stdhttp.StatusSwitchingProtocols {
+			t.Fatalf("a WebSocket: %d", resp.StatusCode)
+		}
+		defer c.Close()
+	}
+	// The backend refuses what is not a WebSocket with 403: the request
+	// reached it, rather than being turned away with 503.
+	resp, err := client(false).Get(base + "/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != stdhttp.StatusForbidden {
+		t.Fatalf("a request with three WebSockets open: %d, want 403", resp.StatusCode)
+	}
+}

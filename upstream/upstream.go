@@ -83,11 +83,20 @@ type Pool struct {
 	failTimeout time.Duration
 	// prober runs the active health check, or is nil without one.
 	prober *prober
+	// saturated is how many requests in flight fill the pool, its backends'
+	// connections and their queues, past which the client would turn the
+	// next request away; 0 when it cannot tell, as over HTTP/2, whose
+	// connections carry many requests each.
+	saturated int64
 
 	// inFlight counts requests picked and not yet done, and closing says
 	// Close was called: the client is closed once there are none.
 	inFlight atomic.Int64
 	closing  atomic.Bool
+	// tunnels counts the requests in flight whose connections became
+	// tunnels, as a WebSocket's does, which leave the client's pool and so
+	// fill none of it.
+	tunnels atomic.Int64
 	// responses times the responses' headers, or their failures, from the
 	// requests' start.
 	responses observe.Histogram
@@ -156,6 +165,9 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 			}
 			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
+	}
+	if c.Protocol == "" || c.Protocol == "http/1.1" {
+		p.saturated = int64(maxConns+maxPending) * int64(len(p.backends))
 	}
 	if engine == nil {
 		return p, nil
@@ -298,6 +310,25 @@ func (p *Pool) ObserveResponse(hint uintptr, d time.Duration) { p.responses.Obse
 
 // ResponseTimes returns the times ObserveResponse counted.
 func (p *Pool) ResponseTimes() observe.HistogramSnapshot { return p.responses.Snapshot() }
+
+// Saturated reports whether the pool holds as many requests as its
+// connections and the queues for them take, max_conns and max_pending for
+// each backend, so that the next would be turned away with ErrBusy. A proxy
+// answers it 503 at once, without building the request for the client to
+// refuse: past the bound, refusals are most of what a proxy does. It reads
+// one counter; the client's own bound stays the exact one.
+// A nil pool, as a proxy's in a test without one, is never saturated.
+func (p *Pool) Saturated() bool {
+	return p != nil && p.saturated > 0 && p.inFlight.Load()-p.tunnels.Load() >= p.saturated
+}
+
+// Tunneled records that a request in flight, picked and not yet done, has
+// had its connection become a tunnel, which the client no longer counts
+// against max_conns; Untunneled, before its Done, takes it back.
+func (p *Pool) Tunneled() { p.tunnels.Add(1) }
+
+// Untunneled takes back a request's Tunneled, before its Done.
+func (p *Pool) Untunneled() { p.tunnels.Add(-1) }
 
 // InFlight returns how many requests the pool has picked a backend for and
 // are not done.

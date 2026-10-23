@@ -70,6 +70,16 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		p.serveUpgrade(c, pool, protocol, extended)
 		return
 	}
+	pool := p.pool
+	if p.split != nil || p.failover != nil {
+		pool = p.pickPool()
+	}
+	if pool.Saturated() {
+		// Turned away before anything is built for it, as the pool's
+		// client would turn it away after: max_pending requests wait.
+		p.busy(c)
+		return
+	}
 	x := &exchange{c: c}
 	if !p.outgoing(c, x) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
@@ -80,10 +90,6 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		x.grpc = true
 		x.base.Header["Te"] = teTrailers
 		timeout, why = x.callTimeout(p.timeout)
-	}
-	pool := p.pool
-	if p.split != nil || p.failover != nil {
-		pool = p.pickPool()
 	}
 	if p.mirror != nil {
 		p.mirror.copyTo(c, &x.base)
@@ -173,6 +179,18 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		}
 	})
 }
+
+// busy answers a request the upstream has no room for with 503, as a gRPC
+// call's failure for one.
+func (p *Proxy) busy(c *fibhttp.Context) {
+	if isGRPC(c.Request) {
+		(&exchange{c: c, grpc: true}).grpcFail(stdhttp.StatusServiceUnavailable)
+		return
+	}
+	_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", serviceUnavailable)
+}
+
+var serviceUnavailable = []byte("503 Service Unavailable\n")
 
 // announcedTrailer is the trailer r's body ended with, of the fields it
 // announced.
