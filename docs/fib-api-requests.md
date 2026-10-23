@@ -1181,10 +1181,10 @@ most of the 1.65 µs.
 
 ## A40: Body filters aborted when their response ends without its body; no length after a filter
 
-**Status.** Made by fit's session, `3998953` on fib's branch `a40-filter-abort`, waiting for fib's
-CI and for the maintainer's word to go on `main`. The branch has a fix after it, `b5d406a`, met in
-I77: a whole response sent while the request's body is still arriving, more of it left than the
-server will throw away, says Connection: close.
+**Status.** Made by fit's session, `3998953`, on fib's `main` since 2026-10-23 with a fix after it,
+`b5d406a`, met in I77: a whole response sent while the request's body is still arriving, more of it
+left than the server will throw away, says Connection: close. fit uses `5d8db99`, which adds a fix
+of an intermittent test in fib's `benchmark/rpc`.
 
 **Problem.** Two gaps in fib's body filters (A27), met by I67's cache, which keeps a copy of a
 response as it goes through a filter that changes nothing:
