@@ -8,7 +8,7 @@ config changed while it runs. Each step adds to a config file; the
 
 ## Install
 
-Build it with Go 1.27 or later:
+Build it with Go 1.27.3 or later:
 
 ```bash
 go install github.com/lesismal/fit/cmd/fit@latest

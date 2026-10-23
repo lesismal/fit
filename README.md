@@ -29,7 +29,7 @@ external security review is still to come; see [progress](docs/progress.md) for 
 
 ## Building
 
-fit needs Go 1.27 or later.
+fit needs Go 1.27.3 or later.
 
 ```bash
 make build

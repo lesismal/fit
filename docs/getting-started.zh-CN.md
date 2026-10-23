@@ -7,7 +7,7 @@
 
 ## 安装
 
-用 Go 1.27 或更高版本构建：
+用 Go 1.27.3 或更高版本构建：
 
 ```bash
 go install github.com/lesismal/fit/cmd/fit@latest
