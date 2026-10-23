@@ -26,8 +26,8 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	adapted, err := adapter.ReadFile(*file)
+	var c *config.Config
 	if err == nil {
-		var c *config.Config
 		if c, err = config.Load(adapted.JSON); err == nil {
 			// Compiling provisions every module, which checks their params
 			// too.
@@ -43,6 +43,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printWarnings(stderr, *file, adapted)
+	printDeprecated(stderr, *file, adapted, c.Warnings())
 	fmt.Fprintf(stdout, "%s: valid\n", *file)
 	return 0
 }
@@ -55,6 +56,14 @@ func printWarnings(stderr io.Writer, file string, r *adapter.Result) {
 	}
 	for _, w := range r.Warnings {
 		fmt.Fprintf(stderr, "%s: warning: %s\n", file, w)
+	}
+}
+
+// printDeprecated prints the renamed names the config in file uses, each
+// at its position in the file, which adapted maps them to.
+func printDeprecated(stderr io.Writer, file string, adapted *adapter.Result, ws config.Errors) {
+	if len(ws) > 0 {
+		printConfigError(stderr, "fit", file, adapted.MapErrors(ws))
 	}
 }
 

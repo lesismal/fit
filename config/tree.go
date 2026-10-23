@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -79,6 +80,23 @@ func (n *node) pos(off int) (line, col int) {
 
 type source struct {
 	data []byte
+
+	// warnings are what decoding the document, or the module params in
+	// it, found deprecated; modules may decode their params concurrently.
+	mu       sync.Mutex
+	warnings Errors
+}
+
+// warn records w once.
+func (s *source) warn(w *Error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.warnings {
+		if *x == *w {
+			return
+		}
+	}
+	s.warnings = append(s.warnings, w)
 }
 
 func (s *source) pos(off int) (line, col int) {

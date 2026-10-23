@@ -399,7 +399,11 @@ func (s *Server) applied(w http.ResponseWriter, res Result, err error) {
 	}
 	w.Header().Set("ETag", res.ETag)
 	w.Header().Set(VersionHeader, strconv.FormatUint(res.Version, 10))
-	writeJSON(w, http.StatusOK, loaded{Version: res.Version, ETag: res.ETag, Added: listeners(res.Added), Removed: listeners(res.Removed), Warnings: res.Warnings})
+	warnings := slices.Clone(res.Warnings)
+	for _, e := range res.Deprecated {
+		warnings = append(warnings, e.Error())
+	}
+	writeJSON(w, http.StatusOK, loaded{Version: res.Version, ETag: res.ETag, Added: listeners(res.Added), Removed: listeners(res.Removed), Warnings: warnings})
 }
 
 func writeUpdateError(w http.ResponseWriter, err error) {

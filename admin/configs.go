@@ -115,6 +115,9 @@ type Result struct {
 	// Warnings are changes in the config that take effect only when fit
 	// restarts.
 	Warnings []string
+	// Deprecated are the names the config uses that were renamed, each
+	// with its path and its position in the config applied.
+	Deprecated config.Errors
 }
 
 // NewConfigs returns the Configs of server, whose runtime rt is running
@@ -250,7 +253,11 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	}
 	// The runtime holds g now, and only Apply swaps graphs while fit runs,
 	// so g is still current.
-	return Result{Version: g.Version, Source: source, Added: added, Removed: removed}, c, m, nil
+	var deprecated config.Errors
+	if ws := c.Warnings(); len(ws) > 0 {
+		deprecated = config.AsErrors(m.Errors(ws))
+	}
+	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Deprecated: deprecated}, c, m, nil
 }
 
 // Reloads returns how many configs were tried, from loading on, since fit

@@ -191,7 +191,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I75 | FastCGI | I17 | done |
 | **1.0** | | | |
 | I76 | 持续 fuzz | I55 | done |
-| I77 | 配置与 Admin API v1 冻结 | I69、I74 | todo |
+| I77 | 配置与 Admin API v1 冻结 | I69、I74 | done |
 | I78 | 参考文档与迁移指南 | I77 | todo |
 
 ## M0 基础

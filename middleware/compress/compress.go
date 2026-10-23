@@ -36,7 +36,7 @@ const (
 
 // Defaults of Compress's params.
 const (
-	DefaultMinLength   = 1024
+	DefaultMinBytes    = 1024
 	DefaultMaxInFlight = 1024
 )
 
@@ -46,12 +46,12 @@ const (
 // does not say no-transform, its Content-Type is one that compresses (text,
 // JSON, JavaScript, XML, SVG, fonts and the like, but not images, video or
 // archives, which are compressed already), and its declared length, if it
-// declares one, is at least min_length. Such a response says so in Vary, and
+// declares one, is at least min_bytes. Such a response says so in Vary, and
 // a strong ETag it carries is made weak.
 type Compress struct {
 	Encodings   []string `json:"encodings,omitempty" enum:"zstd,br,gzip" default:"[\"zstd\",\"br\",\"gzip\"]" doc:"The encodings offered, the one the client prefers most chosen, and among those it prefers as much, the first here; zstd, br and gzip when left out."`
 	Level       string   `json:"level,omitempty" enum:"fastest,default,better" default:"\"default\"" doc:"How hard the compressors work: fastest, default (gzip 5, zstd's default, brotli 4) or better (gzip 7, zstd's better, brotli 6); default when left out."`
-	MinLength   int      `json:"min_length,omitempty" min:"0" default:"1024" doc:"The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed."`
+	MinBytes    int      `json:"min_bytes,omitempty" renamed:"min_length" min:"0" default:"1024" doc:"The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed."`
 	MaxInFlight int      `json:"max_in_flight,omitempty" min:"1" default:"1024" doc:"How many responses are compressed at once; past it, responses go uncompressed, so that the compressors' memory, a few hundred kilobytes each, is bounded. 1024 when left out."`
 
 	encodings []string
@@ -79,8 +79,8 @@ func (cm *Compress) Provision(ctx *module.Context) error {
 	case "better":
 		cm.level = 2
 	}
-	if cm.MinLength == 0 {
-		cm.MinLength = DefaultMinLength
+	if cm.MinBytes == 0 {
+		cm.MinBytes = DefaultMinBytes
 	}
 	if cm.MaxInFlight == 0 {
 		cm.MaxInFlight = DefaultMaxInFlight
@@ -179,7 +179,7 @@ func (cm *Compress) eligible(status int, h stdhttp.Header) bool {
 		}
 	}
 	if v := h.Get("Content-Length"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n < int64(cm.MinLength) {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n < int64(cm.MinBytes) {
 			return false
 		}
 	}

@@ -131,6 +131,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		printConfigError(stderr, "fit run", *cfgFile, err)
 		return 1
 	}
+	printDeprecated(stderr, *cfgFile, adapted, c.Warnings())
 	rt := new(fitruntime.Runtime)
 	rt.Swap(g)
 	defer rt.Close()
@@ -317,6 +318,8 @@ func applyFile(path string, data []byte, configs *admin.Configs, stdout, stderr 
 		}
 		return
 	}
+	printDeprecated(stderr, path, adapted, r.Deprecated)
+	r.Deprecated = nil
 	printApplied(stdout, stderr, r)
 	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", path, r.Version)
 }
@@ -331,5 +334,8 @@ func printApplied(stdout, stderr io.Writer, r admin.Result) {
 	}
 	for _, w := range r.Warnings {
 		fmt.Fprintf(stderr, "fit: %s\n", w)
+	}
+	for _, e := range r.Deprecated {
+		fmt.Fprintf(stderr, "fit: %s\n", e)
 	}
 }

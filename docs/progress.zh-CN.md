@@ -51,7 +51,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `cli` | 命令行：`run`（收到 SIGHUP、通过 Admin API 或在 `-watch` 下文件变化时重载，并按已注册的种类运行配置中的 provider）、`validate`、`adapt`、`schema`、`build`、`version`、`hash-password`、`help` |
 | `plugin/build` | `Build`：生成并用 go 命令构建一个带更多或更少模块的 fit 的 main 模块；`ParseModule`、`Imports`、`MainSource` |
 | `admin` | `Configs`：每个新配置到达运行中服务器的唯一路径（加载、编译、`listener.Server.Reload`），一次一个，并保存已应用配置的历史，每个都有 ETag；`Update` 在同一把锁下基于运行中的配置做修改，支持 If-Match；`Rollback`；基于 net/http 的 Admin API：`GET/PUT/PATCH/DELETE /config[/<pointer>]`、`POST /load`、`POST /rollback/{n}`、`GET /versions`、`GET /versions/{n}`、`GET /metrics`（由 `WriteMetrics` 写出）；`AddProvider` 和 `Provide`，每次应用都把 provider 的片段合并进基础配置；`GET /config/effective`；`GET /status`（listener、连接、上游及后端健康状态、证书）；`GET /cache` 与 `POST /cache/purge`；嵌入的仪表盘，位于 `/dashboard/` |
-| `config` | 原生配置类型（包括 `providers`）；带错误路径和位置的严格 JSON 解析器与解码器；`Value`；`Duration`；语义检查 |
+| `config` | 原生配置类型（包括 `providers`）；带错误路径和位置的严格 JSON 解析器与解码器，接受重命名字段的旧名字并给出警告（`Config.Warnings`）；`SchemaVersion`；`Value`；`Duration`；语义检查 |
 | `module` | 模块注册表；`Handler`、`Middleware`、`Matcher` 接口，以及暂定的 `Service`、`Upstream` 接口；`Provisioner`、`Cleaner`；`Env`，把配置中的上游连接池交给 `Provision` |
 | `handler/respond` | `respond` handler |
 | `handler/forward` | `forward_proxy` handler：HTTP/1.1、HTTP/2 和 HTTP/3 上的 CONNECT，即带 `l4.Rules` 的 fib `ConnectProxy` |
@@ -84,7 +84,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `internal/apiclient` | 访问服务 API 的 HTTP 客户端（带 TLS 文件）和有界读取，供 provider 和共享存储使用 |
 | `tlsmgr` | `Manager`：在 `GetCertificate` 后面为握手选择证书；`ClientAuth`：监听器验证客户端证书所用的 CA；`Static`：来自文件、按名字索引的证书；`ServerConfig`：listener 的 TLS 配置，TLS 1.2+、AEAD 密码套件、按协议设置 ALPN；`Storage` 与 `FileStorage`：保存 ACME 的数据，带实例间的锁；`ACME`：在自己的 goroutine 上经 HTTP-01 或 TLS-ALPN-01 获取证书并续期；`OCSP`：保存并 staple OCSP 响应；按需 TLS（`ACME.OnDemand`），带 ask URL 和限制；`Certs`：listener 的 Manager，组合文件证书和经 ACME 获取的名字 |
 | `router` | `Router[T]`：先用 map 按 host（精确、匹配一级标签的 `*.`、匹配一级或多级的 `**.`）和 path 找出路由，再运行其匹配器（`Methods`、`Headers`、`Query`、`RemoteIP`、`PathRegexp`，以及它们的表达式 `ParseExpr`），依次看优先级、具体程度和匹配器个数，不分配内存 |
-| `schema` | JSON Schema 生成；`fit.schema.json`，由测试保证最新 |
+| `schema` | JSON Schema 生成，带 schema 版本，并把重命名字段的旧名字标为 deprecated；`fit.schema.json`，由测试保证最新 |
 | `internal/certtest` | 为测试生成自签名证书 |
 | `internal/pebbletest` | 为测试运行 ACME 测试服务器 Pebble 及其 DNS 服务器；没有二进制文件时跳过测试 |
 | `internal/filepool` | `Pool`：为文件操作专设的 goroutine，以 worker 数和队列为界，超时的任务过期：static 处理器和缓存磁盘层共用此实现 |
@@ -2926,6 +2926,26 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   会把它们作为种子运行。
 - **发现**：YAML 适配器的两个往返缺陷，均已修复并保留输入：`-0.` 变成 JSON 的 `-0`，经 YAML 回来后成为整数 0（负零现在写为 0）；
   字符串 `<<` 不加引号写回 YAML 后被读作合并键（现在加引号）。其他目标没有发现问题。
+
+### I77 配置与 Admin API v1 冻结 — 已完成
+
+- **[`docs/compatibility.zh-CN.md`](compatibility.zh-CN.md)**（及英文版）是 1.0 起的策略：覆盖什么（原生配置 schema 版本
+  1，含标准模块的参数；Admin API v1；命令行；指标；访问日志字段；`module` 和 `plugin/build` 包），不覆盖什么（消息、仪表盘、
+  WASM 宿主函数和 Proxy-Wasm 子集，在 1.0 中是实验性的），1.x 版本可以做什么（增加；只为安全或无上限的资源收紧默认值；
+  重命名，见下文），以及新版本如何到来（改动清单；`fit adapt` 从上一版本转换，新 fit 至少在一个版本内仍带警告地读取上一版本；
+  Admin API v2 在 `/v2/` 下与 v1 并存）。
+- **schema 的版本**：配置可以写 `"schema_version": 1`；它是可选的，读取版本 1 的 fit 拒绝其他版本，而不是错误地读取。schema
+  的标题写明 "schema version 1"（`config.SchemaVersion`）。
+- **重命名的字段保留旧名字**：`renamed:"old"` 标签让解码器接受旧名字，并在其路径、行和列给出警告，警告由文档保存
+  （`Config.Warnings`，包括编译时解码的模块参数中的警告）；同时给出两个名字是错误。`fit validate` 和 `fit run` 在启动和每次
+  重载时打印警告，位置是文件中的位置（YAML 也一样），Admin API 在加载的 `warnings` 中返回它们。schema 把旧名字列为
+  `deprecated`。
+- **审查** 了每个字段的名字，发现六个不符合其他字段遵循的规则（以字节计的大小以 `_bytes` 结尾，周期以 `_interval` 结尾），
+  已重命名：`cache` 的 `max_size`、`max_entry_size` 和 `disk.max_size` 改为 `max_bytes`、`max_entry_bytes` 和
+  `disk.max_bytes`；`compress` 的 `min_length` 改为 `min_bytes`；`jwt` 的 `jwks_refresh` 改为 `jwks_refresh_interval`；
+  `wasm` 的 `max_memory` 改为 `max_memory_bytes`。对应的 Go 字段一并改名。Admin API 的路径和结构保持不变。
+- **测试**：`TestRenamed` 和 `TestSchemaVersion`（config），`TestValidate`（cli）和 `TestWarnings`（admin）中的重命名字段，
+  经 `Apply` 和 `POST /load`。它们在基准机上的竞态检测下通过。
 
 ## 给后续迭代的说明
 

@@ -43,7 +43,7 @@ func hitsOf(path string) int64 {
 
 func resetHits() { hits.Clear() }
 
-// long is a body larger than a test's max_entry_size.
+// long is a body larger than a test's max_entry_bytes.
 var long = strings.Repeat("0123456789abcdef", 64<<10)
 
 // origin answers by path, counting what it answers.
@@ -312,7 +312,7 @@ func TestHit(t *testing.T) {
 // TestStorable checks which responses are kept: a second request for a
 // response that was not is answered by the origin again.
 func TestStorable(t *testing.T) {
-	base := serve(t, `[{"module": "cache", "params": {"zone": "test", "max_size": 1048576, "max_entry_size": 65536}}]`)
+	base := serve(t, `[{"module": "cache", "params": {"zone": "test", "max_bytes": 1048576, "max_entry_bytes": 65536}}]`)
 	c := clients()["http/1.1"]
 	for _, tt := range []struct {
 		path   string
@@ -335,7 +335,7 @@ func TestStorable(t *testing.T) {
 		{"/error", nil, false},
 		{"/found-plain", nil, false}, // a 302 needs a lifetime of its own
 		{"/aged", nil, false},        // older than its lifetime
-		{"/large", nil, false},       // past max_entry_size
+		{"/large", nil, false},       // past max_entry_bytes
 		{"/must", []string{"Authorization", "Bearer x"}, true},
 		{"/s-maxage?auth", []string{"Authorization", "Bearer x"}, true},
 		{"/fresh?auth", []string{"Authorization", "Bearer x"}, false},
@@ -556,9 +556,9 @@ func TestInvalidate(t *testing.T) {
 }
 
 // TestBodies checks a body written in parts, kept once it has all gone, one
-// cut short, and one past max_entry_size, passed through whole.
+// cut short, and one past max_entry_bytes, passed through whole.
 func TestBodies(t *testing.T) {
-	base := serve(t, `[{"module": "cache", "params": {"zone": "test", "max_entry_size": 131072}}]`)
+	base := serve(t, `[{"module": "cache", "params": {"zone": "test", "max_entry_bytes": 131072}}]`)
 	for proto, c := range clients() {
 		resetHits()
 		r := get(t, c, "GET", base+"/stream")
@@ -585,7 +585,7 @@ func TestBodies(t *testing.T) {
 			}
 		}
 		if hitsOf("/large") != 2 {
-			t.Errorf("%s: a body past max_entry_size was kept", proto)
+			t.Errorf("%s: a body past max_entry_bytes was kept", proto)
 		}
 	}
 }
@@ -727,8 +727,8 @@ func TestZones(t *testing.T) {
 
 func TestParams(t *testing.T) {
 	for _, tt := range []struct{ params, err string }{
-		{`{"max_size": 1048576, "max_entry_size": 1048576}`, "more than a sixteenth"},
-		{`{"max_size": -1}`, "less than the minimum 0"},
+		{`{"max_bytes": 1048576, "max_entry_bytes": 1048576}`, "more than a sixteenth"},
+		{`{"max_bytes": -1}`, "less than the minimum 0"},
 	} {
 		v, err := config.ParseValue([]byte(`{"module": "cache", "params": `+tt.params+`}`), "middleware")
 		if err != nil {
@@ -743,9 +743,9 @@ func TestParams(t *testing.T) {
 			t.Errorf("%s: %v, want %q", tt.params, err, tt.err)
 		}
 	}
-	m := &Cache{MaxSize: 1 << 20}
-	if err := m.Provision(&module.Context{}); err != nil || m.MaxEntrySize != 1<<16 {
-		t.Errorf("max_entry_size for 1 MiB: %d %v", m.MaxEntrySize, err)
+	m := &Cache{MaxBytes: 1 << 20}
+	if err := m.Provision(&module.Context{}); err != nil || m.MaxEntryBytes != 1<<16 {
+		t.Errorf("max_entry_bytes for 1 MiB: %d %v", m.MaxEntryBytes, err)
 	}
 	m.Cleanup()
 }

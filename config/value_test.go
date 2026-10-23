@@ -130,3 +130,56 @@ func TestAsErrors(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+type renamedParams struct {
+	MaxBytes int64 `json:"max_bytes,omitempty" renamed:"max_size,size"`
+}
+
+// TestRenamed checks that a field's old names still decode, each with a
+// warning at its position, and that a field given under two names is an
+// error.
+func TestRenamed(t *testing.T) {
+	v, err := ParseValue([]byte("{\n  \"max_size\": 10\n}"), "params")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p renamedParams
+	if err := v.Decode(&p); err != nil || p.MaxBytes != 10 {
+		t.Fatalf("%+v %v", p, err)
+	}
+	// Decoding again warns once.
+	if err := v.Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	ws := v.n.src.warnings
+	want := `2:3: params.max_size: deprecated: renamed "max_bytes", which takes the same value; the old name goes in config version 2`
+	if len(ws) != 1 || ws[0].Error() != want {
+		t.Fatalf("warnings %v, want %s", ws, want)
+	}
+
+	for _, doc := range []string{`{"max_size": 1, "max_bytes": 2}`, `{"max_bytes": 2, "max_size": 1}`, `{"max_size": 1, "size": 2}`} {
+		v, _ := ParseValue([]byte(doc), "params")
+		err := v.Decode(&p)
+		if err == nil || !strings.Contains(err.Error(), `give only "max_bytes"`) {
+			t.Errorf("%s: %v", doc, err)
+		}
+	}
+}
+
+// TestSchemaVersion checks that a config written for another version of
+// the schema is refused, and one for this version, or for none, loads.
+func TestSchemaVersion(t *testing.T) {
+	const rest = `"listeners": [{"name": "web", "address": ":0"}], "routes": [{"handler": {"module": "respond"}}]`
+	for _, doc := range []string{`{` + rest + `}`, `{"schema_version": 1, ` + rest + `}`} {
+		c, err := Load([]byte(doc))
+		if err != nil {
+			t.Fatalf("%s: %v", doc, err)
+		}
+		if ws := c.Warnings(); len(ws) != 0 {
+			t.Fatalf("%s: warnings %v", doc, ws)
+		}
+	}
+	if _, err := Load([]byte(`{"schema_version": 2, ` + rest + `}`)); err == nil || !strings.Contains(err.Error(), "schema_version: 2 is greater than the maximum 1") {
+		t.Fatalf("version 2: %v", err)
+	}
+}

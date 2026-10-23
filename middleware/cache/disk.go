@@ -23,13 +23,13 @@ import (
 // Disk is where a zone keeps responses on disk, beside those in memory.
 type Disk struct {
 	Path       string `json:"path" fit:"required" doc:"The directory the zone's responses are kept in, made if it is missing. It is the zone's alone: no other zone may name it. What it holds is found again when fit starts."`
-	MaxSize    int64  `json:"max_size,omitempty" min:"0" default:"1073741824" doc:"The most bytes the zone keeps on disk; past it the least recently used responses go. 1 GiB when left out or 0."`
+	MaxBytes   int64  `json:"max_bytes,omitempty" renamed:"max_size" min:"0" default:"1073741824" doc:"The most bytes the zone keeps on disk; past it the least recently used responses go. 1 GiB when left out or 0."`
 	MaxEntries int    `json:"max_entries,omitempty" min:"0" default:"100000" doc:"The most responses the zone keeps on disk, which bounds the memory their index takes, a few hundred bytes each. 100000 when left out or 0."`
 }
 
 // Defaults of Disk's params.
 const (
-	DefaultDiskMaxSize    = 1 << 30
+	DefaultDiskMaxBytes   = 1 << 30
 	DefaultDiskMaxEntries = 100000
 )
 
@@ -117,7 +117,7 @@ func newDisk(cfg *Disk, pool *filepool.Pool, tags *tagIndex) (*disk, error) {
 }
 
 func (d *disk) setLimits(cfg *Disk) {
-	d.maxSize.Store(cmpOr(cfg.MaxSize, DefaultDiskMaxSize))
+	d.maxSize.Store(cmpOr(cfg.MaxBytes, DefaultDiskMaxBytes))
 	d.maxEntries.Store(int64(cmpOr(cfg.MaxEntries, DefaultDiskMaxEntries)))
 }
 

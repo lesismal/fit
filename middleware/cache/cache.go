@@ -38,17 +38,17 @@ var clock = time.Now
 
 // Defaults of Cache's params.
 const (
-	DefaultZone         = "default"
-	DefaultMaxSize      = 128 << 20
-	DefaultMaxEntrySize = 1 << 20
-	DefaultLockTimeout  = 5 * time.Second
+	DefaultZone          = "default"
+	DefaultMaxBytes      = 128 << 20
+	DefaultMaxEntryBytes = 1 << 20
+	DefaultLockTimeout   = 5 * time.Second
 )
 
 // Cache answers requests from the responses it keeps. It keeps the responses
 // to GET requests that a shared cache may keep: ones whose status it
 // understands, that do not say no-store, private or no-cache, do not vary on
 // everything (Vary: *), set no cookie, carry no trailers and are no larger
-// than max_entry_size, with a freshness lifetime from s-maxage, max-age or
+// than max_entry_bytes, with a freshness lifetime from s-maxage, max-age or
 // Expires, or, for the statuses that allow one, from default_ttl or a tenth
 // of the time since Last-Modified. A request with Authorization has its
 // response kept only when it says public, s-maxage or must-revalidate.
@@ -63,8 +63,8 @@ const (
 // HEAD says what the cache did in Cache-Status (RFC 9211).
 type Cache struct {
 	Zone                 string          `json:"zone,omitempty" default:"\"default\"" doc:"The store responses are kept in. Caches of the same zone, in one route or several, share it, its size and its keys; it is kept across reloads while a cache uses it. default when left out."`
-	MaxSize              int64           `json:"max_size,omitempty" min:"0" default:"134217728" doc:"The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded."`
-	MaxEntrySize         int64           `json:"max_entry_size,omitempty" min:"0" default:"1048576" doc:"The largest body kept; a larger response goes to its client without being kept. At most a sixteenth of max_size. 1 MiB when left out or 0."`
+	MaxBytes             int64           `json:"max_bytes,omitempty" renamed:"max_size" min:"0" default:"134217728" doc:"The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded."`
+	MaxEntryBytes        int64           `json:"max_entry_bytes,omitempty" renamed:"max_entry_size" min:"0" default:"1048576" doc:"The largest body kept; a larger response goes to its client without being kept. At most a sixteenth of max_bytes. 1 MiB when left out or 0."`
 	DefaultTTL           config.Duration `json:"default_ttl,omitempty" doc:"How long a response is fresh for when it gives no lifetime of its own (no s-maxage, max-age or Expires) and its status allows one to be assumed (200, 203, 300, 301, 308, 404, 405, 410, 414, 501): in place of a tenth of the time since its Last-Modified, at most a day, which is used when this is left out."`
 	DisableLock          bool            `json:"disable_lock,omitempty" doc:"Lets every request that misses fetch for itself. When left out, a request that misses while another fetches the same response waits for that fetch, up to lock_timeout, and is answered from what it keeps (a cache lock), so that many requests for a response not kept make one fetch."`
 	LockTimeout          config.Duration `json:"lock_timeout,omitempty" default:"\"5s\"" doc:"How long a request waits for another's fetch of its response before it goes on to fetch for itself. 5s when left out."`
@@ -81,19 +81,19 @@ func (m *Cache) Provision(ctx *module.Context) error {
 	if m.Zone == "" {
 		m.Zone = DefaultZone
 	}
-	if m.MaxSize == 0 {
-		m.MaxSize = DefaultMaxSize
+	if m.MaxBytes == 0 {
+		m.MaxBytes = DefaultMaxBytes
 	}
-	if m.MaxEntrySize == 0 {
-		m.MaxEntrySize = min(DefaultMaxEntrySize, m.MaxSize/shards)
+	if m.MaxEntryBytes == 0 {
+		m.MaxEntryBytes = min(DefaultMaxEntryBytes, m.MaxBytes/shards)
 	}
 	if m.LockTimeout <= 0 {
 		m.LockTimeout = config.Duration(DefaultLockTimeout)
 	}
-	if m.MaxEntrySize > m.MaxSize/shards {
-		return ctx.Errorf("max_entry_size", "is more than a sixteenth of max_size (%d)", m.MaxSize/shards)
+	if m.MaxEntryBytes > m.MaxBytes/shards {
+		return ctx.Errorf("max_entry_bytes", "is more than a sixteenth of max_bytes (%d)", m.MaxBytes/shards)
 	}
-	store, err := acquire(m.Zone, m.MaxSize, m.Disk)
+	store, err := acquire(m.Zone, m.MaxBytes, m.Disk)
 	if err != nil {
 		return ctx.Errorf("disk", "%v", err)
 	}
@@ -464,7 +464,7 @@ func (x *miss) capture(status int, h stdhttp.Header) *capture {
 	want := int64(-1)
 	if v := h.Get("Content-Length"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n > x.m.MaxEntrySize {
+		if err != nil || n > x.m.MaxEntryBytes {
 			return nil
 		}
 		want = n
@@ -482,7 +482,7 @@ func (x *miss) capture(status int, h stdhttp.Header) *capture {
 	if cs := h["Cache-Status"]; len(cs) > 0 && cs[len(cs)-1] == statusFields[x.status][0] {
 		cs[len(cs)-1] = statusFields[x.status][1]
 	}
-	f := &capture{store: x.m.store, c: x.c, key: x.key, e: e, want: want, limit: x.m.MaxEntrySize, fetch: x.fetch}
+	f := &capture{store: x.m.store, c: x.c, key: x.key, e: e, want: want, limit: x.m.MaxEntryBytes, fetch: x.fetch}
 	if want > 0 {
 		f.buf = make([]byte, 0, want)
 	}

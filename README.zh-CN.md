@@ -14,6 +14,7 @@ fit 处于早期开发阶段。目前它可以按 JSON 配置通过 HTTP/1.1 和
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。
 - [开发计划](docs/dev-plan.zh-CN.md)：拆分成小迭代的里程碑。
 - [开发进度](docs/progress.zh-CN.md)：已完成的内容，以及从哪里继续。
+- [兼容性](docs/compatibility.zh-CN.md)：从 1.0 起保持稳定的内容，以及重命名字段的处理。
 - [部署](deploy/README.zh-CN.md)：容器镜像、Helm chart 和 systemd unit；以及 Docker Compose 和 Kubernetes 的
   [示例](examples/README.zh-CN.md)。
 

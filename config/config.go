@@ -15,20 +15,31 @@ import (
 	"time"
 )
 
+// SchemaVersion is the version of the config's names and shapes this fit
+// reads. Within a version, a config that loads keeps loading: fields are
+// added, and a field renamed keeps its old name, deprecated, until the next
+// version. docs/compatibility.md has the policy.
+const SchemaVersion = 1
+
 // Config is a whole fit config.
 type Config struct {
-	Listeners []Listener `json:"listeners,omitempty" doc:"The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https."`
-	Routes    []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
-	Upstreams []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
-	Services  []Service  `json:"services,omitempty" doc:"Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one."`
-	AccessLog *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
-	Telemetry *Telemetry `json:"telemetry,omitempty" doc:"OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."`
-	Limits    Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
-	Admin     *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
-	AutoHTTPS *AutoHTTPS `json:"auto_https,omitempty" doc:"HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."`
-	Metrics   *Metrics   `json:"metrics,omitempty" doc:"Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."`
-	ACME      *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
-	Providers []Provider `json:"providers,omitempty" doc:"Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts."`
+	SchemaVersion int        `json:"schema_version,omitempty" min:"1" max:"1" doc:"The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1."`
+	Listeners     []Listener `json:"listeners,omitempty" doc:"The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https."`
+	Routes        []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
+	Upstreams     []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
+	Services      []Service  `json:"services,omitempty" doc:"Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one."`
+	AccessLog     *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
+	Telemetry     *Telemetry `json:"telemetry,omitempty" doc:"OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."`
+	Limits        Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
+	Admin         *Admin     `json:"admin,omitempty" doc:"The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."`
+	AutoHTTPS     *AutoHTTPS `json:"auto_https,omitempty" doc:"HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."`
+	Metrics       *Metrics   `json:"metrics,omitempty" doc:"Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."`
+	ACME          *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
+	Providers     []Provider `json:"providers,omitempty" doc:"Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts."`
+
+	// src is the document the config was loaded from, which keeps what
+	// decoding it, and its modules' params, found deprecated.
+	src *source
 }
 
 // Metrics turns on the counting of requests. It has no settings yet.
@@ -636,7 +647,7 @@ func Load(data []byte) (*Config, error) {
 	if err != nil {
 		return nil, Errors{err.(*Error)}
 	}
-	var c Config
+	c := Config{src: root.src}
 	var d decoder
 	d.decode(root, "", reflect.ValueOf(&c).Elem(), nil)
 	if len(d.errs) > 0 {
@@ -646,6 +657,18 @@ func Load(data []byte) (*Config, error) {
 		return nil, errs
 	}
 	return &c, nil
+}
+
+// Warnings returns what was found deprecated in c, each with its path and
+// position: in what Load decoded, and in the module params decoded since,
+// as compiling c decodes them.
+func (c *Config) Warnings() Errors {
+	if c.src == nil {
+		return nil
+	}
+	c.src.mu.Lock()
+	defer c.src.mu.Unlock()
+	return slices.Clone(c.src.warnings)
 }
 
 // LoadFile loads the config in the file at path.

@@ -513,7 +513,7 @@ func TestJWKSRefresh(t *testing.T) {
 	k := testKeys()
 	s := newJWKSServer(t)
 	s.serve(jwkOf(k.ed.Public(), "ed"))
-	jw := mustLoad[*JWT](t, "jwt", `{"jwks_url": "`+s.URL+`", "jwks_refresh": "50ms"}`)
+	jw := mustLoad[*JWT](t, "jwt", `{"jwks_url": "`+s.URL+`", "jwks_refresh_interval": "50ms"}`)
 	defer jw.Cleanup()
 	h := jw.Wrap(claimsEcho)
 	expectStatus(t, h, bearer(sign(t, "EdDSA", "ed", k.ed, valid())), 200, "ed")

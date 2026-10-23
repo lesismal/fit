@@ -15,6 +15,7 @@ measured against nginx, Caddy and Traefik.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.
 - [Development plan](docs/dev-plan.md): the milestones broken into small iterations.
 - [Progress](docs/progress.md): what is done, and where to pick up.
+- [Compatibility](docs/compatibility.md): what stays stable from 1.0, and how renamed fields are handled.
 - [Deploying](deploy/README.md): the container image, the Helm chart and systemd units; and the
   [examples](examples/README.md), with Docker Compose and Kubernetes.
 

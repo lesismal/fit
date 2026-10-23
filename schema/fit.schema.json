@@ -21,6 +21,12 @@
     "cache.Disk": {
       "additionalProperties": false,
       "properties": {
+        "max_bytes": {
+          "default": 1073741824,
+          "description": "The most bytes the zone keeps on disk; past it the least recently used responses go. 1 GiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_entries": {
           "default": 100000,
           "description": "The most responses the zone keeps on disk, which bounds the memory their index takes, a few hundred bytes each. 100000 when left out or 0.",
@@ -29,7 +35,8 @@
         },
         "max_size": {
           "default": 1073741824,
-          "description": "The most bytes the zone keeps on disk; past it the least recently used responses go. 1 GiB when left out or 0.",
+          "deprecated": true,
+          "description": "Renamed max_bytes; the old name goes in config version 2.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2163,15 +2170,29 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "max_bytes": {
+          "default": 134217728,
+          "description": "The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_entry_bytes": {
+          "default": 1048576,
+          "description": "The largest body kept; a larger response goes to its client without being kept. At most a sixteenth of max_bytes. 1 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_entry_size": {
           "default": 1048576,
-          "description": "The largest body kept; a larger response goes to its client without being kept. At most a sixteenth of max_size. 1 MiB when left out or 0.",
+          "deprecated": true,
+          "description": "Renamed max_entry_bytes; the old name goes in config version 2.",
           "minimum": 0,
           "type": "integer"
         },
         "max_size": {
           "default": 134217728,
-          "description": "The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded.",
+          "deprecated": true,
+          "description": "Renamed max_bytes; the old name goes in config version 2.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2299,9 +2320,16 @@
           "minimum": 1,
           "type": "integer"
         },
-        "min_length": {
+        "min_bytes": {
           "default": 1024,
           "description": "The shortest declared body compressed; 1024 when left out. A body that declares no length, as one that streams, is compressed.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_length": {
+          "default": 1024,
+          "deprecated": true,
+          "description": "Renamed min_bytes; the old name goes in config version 2.",
           "minimum": 0,
           "type": "integer"
         }
@@ -2427,6 +2455,13 @@
           "type": "string"
         },
         "jwks_refresh": {
+          "default": "1h",
+          "deprecated": true,
+          "description": "Renamed jwks_refresh_interval; the old name goes in config version 2.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "jwks_refresh_interval": {
           "default": "1h",
           "description": "How often the JWK set is fetched again; 1h when left out. A token naming a kid the set does not have has it fetched sooner, at most every 10s.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
@@ -2557,6 +2592,13 @@
           "type": "integer"
         },
         "max_memory": {
+          "default": 134217728,
+          "deprecated": true,
+          "description": "Renamed max_memory_bytes; the old name goes in config version 2.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_memory_bytes": {
           "default": 134217728,
           "description": "The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0.",
           "minimum": 0,
@@ -2753,6 +2795,12 @@
       },
       "type": "array"
     },
+    "schema_version": {
+      "description": "The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1.",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
     "services": {
       "description": "Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one.",
       "items": {
@@ -2772,6 +2820,6 @@
       "type": "array"
     }
   },
-  "title": "fit config",
+  "title": "fit config, schema version 1",
   "type": "object"
 }

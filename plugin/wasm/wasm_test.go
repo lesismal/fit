@@ -115,7 +115,7 @@ func TestRespond(t *testing.T) {
 // stopped is made again for the next request.
 func TestFailures(t *testing.T) {
 	for _, onError := range []string{"fail", "skip"} {
-		h := load(t, `{"instances": 1, "timeout": "50ms", "max_memory": 67108864, "on_error": "`+onError+`"}`).Wrap(echo)
+		h := load(t, `{"instances": 1, "timeout": "50ms", "max_memory_bytes": 67108864, "on_error": "`+onError+`"}`).Wrap(echo)
 		for _, path := range []string{"/loop", "/panic", "/grow"} {
 			started := time.Now()
 			resp := serve(h, path).Response

@@ -30,7 +30,7 @@
     {
       "name": "cache",
       "match": {"path": ["/cache/*"]},
-      "middleware": [{"module": "cache", "params": {"zone": "bench", "max_size": 1073741824, "max_entry_size": 65536}}],
+      "middleware": [{"module": "cache", "params": {"zone": "bench", "max_bytes": 1073741824, "max_entry_bytes": 65536}}],
       "handler": {"module": "proxy", "params": {"upstream": "cachebackend"}}
     },
     {

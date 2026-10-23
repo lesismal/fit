@@ -456,4 +456,18 @@ func TestWarnings(t *testing.T) {
 	if strings.Join(r.Warnings, "\n") != "access_log changed; the change takes effect when fit restarts\nadmin changed; the change takes effect when fit restarts" {
 		t.Fatalf("warnings: %q", r.Warnings)
 	}
+
+	// A renamed field is reported at its position, and in the response
+	// to a load.
+	renamed := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "admin": {"address": "127.0.0.1:1"}, "access_log": {},
+"routes": [{"middleware": [{"module": "cache", "params": {"zone": "warn", "max_size": 1048576}}], "handler": {"module": "respond"}}]}`
+	want := `2:75: routes[0].middleware[0].params.max_size: deprecated: renamed "max_bytes", which takes the same value; the old name goes in config version 2`
+	if r, err = f.configs.Apply([]byte(renamed), SourceAdmin); err != nil || len(r.Deprecated) != 1 || r.Deprecated[0].Error() != want {
+		t.Fatalf("deprecated: %v %v", r.Deprecated, err)
+	}
+	resp, body := f.load(t, renamed)
+	var loaded struct{ Warnings []string }
+	if err := json.Unmarshal([]byte(body), &loaded); err != nil || resp.StatusCode != 200 || len(loaded.Warnings) != 3 || loaded.Warnings[2] != want {
+		t.Fatalf("load: %d %s", resp.StatusCode, body)
+	}
 }

@@ -29,7 +29,7 @@ func Generate() ([]byte, error) {
 	root := g.structSchema(reflect.TypeFor[config.Config]())
 	root["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	root["$id"] = ID
-	root["title"] = "fit config"
+	root["title"] = fmt.Sprintf("fit config, schema version %d", config.SchemaVersion)
 	root["$defs"] = g.defs
 
 	var buf bytes.Buffer
@@ -145,6 +145,17 @@ func (g *generator) structSchema(t reflect.Type) object {
 			s["default"] = v
 		}
 		props[f.Name] = s
+		for _, old := range f.Renamed {
+			// The old name still loads, with a warning; editors strike it
+			// through.
+			d := object{"deprecated": true, "description": fmt.Sprintf("Renamed %s; the old name goes in config version 2.", f.Name)}
+			for k, v := range s {
+				if k != "description" {
+					d[k] = v
+				}
+			}
+			props[old] = d
+		}
 		if f.Required {
 			required = append(required, f.Name)
 		}

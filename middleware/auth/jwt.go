@@ -34,20 +34,20 @@ func init() {
 //
 // Keys come from PEM files, an HMAC secret file and a JWK set at a URL,
 // which a goroutine of the control plane's fetches when the config is
-// loaded, every jwks_refresh, and when a token names a kid the set does not
+// loaded, every jwks_refresh_interval, and when a token names a kid the set does not
 // have, as a key rotation brings: such a request waits for the fetch
 // retained, as one does before the first fetch is done.
 type JWT struct {
-	JWKSURL        string            `json:"jwks_url,omitempty" doc:"The URL of a JWK set (RFC 7517) whose signing keys tokens are verified with."`
-	JWKSRefresh    config.Duration   `json:"jwks_refresh,omitempty" default:"\"1h\"" doc:"How often the JWK set is fetched again; 1h when left out. A token naming a kid the set does not have has it fetched sooner, at most every 10s."`
-	PublicKeyFiles []string          `json:"public_key_files,omitempty" doc:"PEM files of public keys or certificates (RSA, ECDSA or Ed25519) tokens are verified with."`
-	HMACSecretFile string            `json:"hmac_secret_file,omitempty" doc:"A file whose contents are the secret of tokens signed with HS256, HS384 or HS512; at least 32 bytes."`
-	Algorithms     []string          `json:"algorithms,omitempty" enum:"RS256,RS384,RS512,PS256,PS384,PS512,ES256,ES384,ES512,EdDSA,HS256,HS384,HS512" doc:"The algorithms tokens may be signed with; any that fits the keys when left out. none never is."`
-	Issuer         string            `json:"issuer,omitempty" doc:"The iss a token must have; any when left out."`
-	Audience       []string          `json:"audience,omitempty" doc:"Audiences of which a token's aud must name one; any when left out."`
-	Leeway         config.Duration   `json:"leeway,omitempty" doc:"How far exp and nbf may be off, for clocks that differ; none when left out."`
-	TokenFrom      string            `json:"token_from,omitempty" default:"\"header\"" doc:"Where the token is: header, after Bearer in the Authorization field; header:Name, the whole of that field; cookie:name; or query:name. header when left out."`
-	ClaimsHeaders  map[string]string `json:"claims_headers,omitempty" doc:"Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim."`
+	JWKSURL             string            `json:"jwks_url,omitempty" doc:"The URL of a JWK set (RFC 7517) whose signing keys tokens are verified with."`
+	JWKSRefreshInterval config.Duration   `json:"jwks_refresh_interval,omitempty" renamed:"jwks_refresh" default:"\"1h\"" doc:"How often the JWK set is fetched again; 1h when left out. A token naming a kid the set does not have has it fetched sooner, at most every 10s."`
+	PublicKeyFiles      []string          `json:"public_key_files,omitempty" doc:"PEM files of public keys or certificates (RSA, ECDSA or Ed25519) tokens are verified with."`
+	HMACSecretFile      string            `json:"hmac_secret_file,omitempty" doc:"A file whose contents are the secret of tokens signed with HS256, HS384 or HS512; at least 32 bytes."`
+	Algorithms          []string          `json:"algorithms,omitempty" enum:"RS256,RS384,RS512,PS256,PS384,PS512,ES256,ES384,ES512,EdDSA,HS256,HS384,HS512" doc:"The algorithms tokens may be signed with; any that fits the keys when left out. none never is."`
+	Issuer              string            `json:"issuer,omitempty" doc:"The iss a token must have; any when left out."`
+	Audience            []string          `json:"audience,omitempty" doc:"Audiences of which a token's aud must name one; any when left out."`
+	Leeway              config.Duration   `json:"leeway,omitempty" doc:"How far exp and nbf may be off, for clocks that differ; none when left out."`
+	TokenFrom           string            `json:"token_from,omitempty" default:"\"header\"" doc:"Where the token is: header, after Bearer in the Authorization field; header:Name, the whole of that field; cookie:name; or query:name. header when left out."`
+	ClaimsHeaders       map[string]string `json:"claims_headers,omitempty" doc:"Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim."`
 
 	keys         *keySet // without a JWK set
 	jwks         *jwks
@@ -125,7 +125,7 @@ func (jw *JWT) Provision(ctx *module.Context) error {
 	jw.graph = ctx.Graph()
 	jw.now = time.Now
 	if jw.JWKSURL != "" {
-		refresh := jw.JWKSRefresh.Std()
+		refresh := jw.JWKSRefreshInterval.Std()
 		if refresh <= 0 {
 			refresh = defaultRefresh
 		}

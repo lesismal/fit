@@ -72,7 +72,7 @@ To continue, start a session with:
 | `cli` | the CLI: `run` (with reload on SIGHUP, the Admin API and, with `-watch`, a change to the file, and the config's providers, by their registered kinds), `validate`, `adapt`, `schema`, `build`, `version`, `hash-password`, `help` |
 | `plugin/build` | `Build`: the main module of a fit with more modules or fewer, generated and built with the go command; `ParseModule`, `Imports`, `MainSource` |
 | `admin` | `Configs`, the one path every new config takes to the running server (load, compile, `listener.Server.Reload`), one at a time, with the history of configs applied, each with an ETag; `Update`, a change made from the running config under the same lock, with If-Match; `Rollback`; the Admin API on net/http: `GET/PUT/PATCH/DELETE /config[/<pointer>]`, `POST /load`, `POST /rollback/{n}`, `GET /versions`, `GET /versions/{n}`, `GET /metrics`, which `WriteMetrics` writes; `AddProvider` and `Provide`, which merge providers' parts into the base config on every apply; `GET /config/effective`; `GET /status` (listeners, connections, upstreams and backends' health, certificates); `GET /cache` and `POST /cache/purge`; the dashboard, embedded, at `/dashboard/` |
-| `config` | the native config types, `providers` among them; a strict JSON parser and decoder with error paths and positions; `Value`; `Duration`; semantic checks |
+| `config` | the native config types, `providers` among them; a strict JSON parser and decoder with error paths and positions, and renamed fields' old names taken with warnings (`Config.Warnings`); `SchemaVersion`; `Value`; `Duration`; semantic checks |
 | `module` | the module registry; `Handler`, `Middleware`, `Matcher`, and provisional `Service` and `Upstream` interfaces; `Provisioner`, `Cleaner`; `Env`, which gives `Provision` the config's upstream pools |
 | `handler/respond` | the `respond` handler |
 | `handler/forward` | the `forward_proxy` handler: CONNECT over HTTP/1.1, HTTP/2 and HTTP/3, fib's `ConnectProxy` with `l4.Rules` |
@@ -105,7 +105,7 @@ To continue, start a session with:
 | `internal/apiclient` | the HTTP client of services' APIs, with TLS files, and bounded reads, for the providers and the shared storage |
 | `tlsmgr` | `Manager`, which picks a handshake's certificate behind `GetCertificate`; `ClientAuth`, the authorities a listener verifies client certificates against; `Static`, certificates from files indexed by name; `ServerConfig`, a listener's TLS configuration: TLS 1.2+, AEAD suites, ALPN from its protocols; `Storage` and `FileStorage`, what ACME keeps, with locks between instances; `ACME`, which obtains certificates through HTTP-01 or TLS-ALPN-01 and renews them on goroutines of its own; `OCSP`, which keeps and staples OCSP responses; on-demand TLS (`ACME.OnDemand`), with an ask URL and limits; `Certs`, a listener's Manager of files and names obtained with ACME |
 | `router` | `Router[T]`: picks a route by host (exact, `*.` for one label, `**.` for one or more) and path from maps, then by its matchers (`Methods`, `Headers`, `Query`, `RemoteIP`, `PathRegexp`, and expressions of them, `ParseExpr`), by priority, specificity and how many matchers it has, without allocating |
-| `schema` | JSON Schema generation; `fit.schema.json`, kept up to date by a test |
+| `schema` | JSON Schema generation, with the schema's version and renamed fields' old names as deprecated; `fit.schema.json`, kept up to date by a test |
 | `internal/certtest` | self-signed certificates for tests |
 | `internal/pebbletest` | runs Pebble, the ACME test server, and its DNS server for tests; skips them without the binaries |
 | `internal/filepool` | `Pool`, goroutines of their own for file work, bounded by workers and a queue, jobs expiring past a timeout: the static handler's and the cache's disk tier's |
@@ -4060,6 +4060,35 @@ Differences from the plan:
   became JSON's `-0`, which came back from YAML an integer, 0 (negative zero is now written 0); and
   the string `<<`, written back to YAML unquoted, read as a merge key (now quoted). The other
   targets found nothing.
+
+### I77 Config and Admin API v1 freeze — done
+
+- **[`docs/compatibility.md`](compatibility.md)** (and its Chinese twin) is the policy from 1.0:
+  what is covered (the native config, schema version 1, with the standard modules' params; the
+  Admin API v1; the command line; metrics; the access log's fields; the `module` and
+  `plugin/build` packages), what is not (messages, the dashboard, WASM's host functions and the
+  Proxy-Wasm subset, experimental in 1.0), what a 1.x release may do (add; tighten a default only
+  for security or a resource left unbounded; rename, below), and how a new version comes (a list of
+  changes, `fit adapt` from the version before, which the new fit still reads with warnings for a
+  release; a v2 Admin API under `/v2/` beside v1).
+- **The schema's version**: a config may say `"schema_version": 1`; it is optional, and a fit
+  that reads 1 refuses another rather than read it wrongly. The schema's title says "schema
+  version 1" (`config.SchemaVersion`).
+- **Renamed fields keep their old names**: a `renamed:"old"` tag lets the decoder take the old
+  name, with a warning at its path, line and column, kept by the document (`Config.Warnings`, which
+  includes what compiling decodes of the modules' params); giving both names is an error.
+  `fit validate` and `fit run` print the warnings, at their place in the file, YAML too, at start
+  and on each reload, and the Admin API returns them in a load's `warnings`. The schema lists the
+  old name as `deprecated`.
+- **The review** of every field's name found six that broke the rules the others follow (sizes in
+  bytes end in `_bytes`, periods in `_interval`), renamed: `cache`'s `max_size`, `max_entry_size`
+  and `disk.max_size` to `max_bytes`, `max_entry_bytes` and `disk.max_bytes`; `compress`'s
+  `min_length` to `min_bytes`; `jwt`'s `jwks_refresh` to `jwks_refresh_interval`; `wasm`'s
+  `max_memory` to `max_memory_bytes`. Their Go fields follow. The Admin API's paths and shapes
+  were kept as they are.
+- **Tests**: `TestRenamed` and `TestSchemaVersion` (config), a renamed field in `TestValidate`
+  (cli) and in `TestWarnings` (admin), through `Apply` and `POST /load`. They pass under the race
+  detector on the benchmark host.
 
 ## Notes for later iterations
 

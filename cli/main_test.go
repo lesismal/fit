@@ -91,6 +91,18 @@ func TestValidate(t *testing.T) {
 		t.Fatalf("auto: %d %q %q", code, stdout, stderr)
 	}
 
+	// A renamed field still loads, with a warning at its position.
+	old := filepath.Join(dir, "old.json")
+	doc = `{"listeners": [{"name": "web", "address": ":0"}],
+"routes": [{"middleware": [{"module": "compress", "params": {"min_length": 512}}], "handler": {"module": "respond"}}]}`
+	if err := os.WriteFile(old, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runFit("validate", "-c", old)
+	if want := old + `:2:62: routes[0].middleware[0].params.min_length: deprecated: renamed "min_bytes", which takes the same value; the old name goes in config version 2` + "\n"; code != 0 || stdout != old+": valid\n" || stderr != want {
+		t.Fatalf("renamed: %d %q %q, want %q", code, stdout, stderr, want)
+	}
+
 	if code, _, stderr := runFit("validate", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.Contains(stderr, "missing.json") {
 		t.Fatalf("missing file: %d %q", code, stderr)
 	}
@@ -102,7 +114,7 @@ func TestValidate(t *testing.T) {
 func TestSchema(t *testing.T) {
 	code, stdout, _ := runFit("schema")
 	var s map[string]any
-	if code != 0 || json.Unmarshal([]byte(stdout), &s) != nil || s["title"] != "fit config" {
+	if code != 0 || json.Unmarshal([]byte(stdout), &s) != nil || s["title"] != "fit config, schema version 1" {
 		t.Fatalf("schema: %d %.200q", code, stdout)
 	}
 }

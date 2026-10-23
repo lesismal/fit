@@ -25,6 +25,8 @@ import (
 //	min:"n" max:"n"    a number must lie within these bounds
 //	doc:"..."          what the field is, for the JSON Schema
 //	module:"ns"        on a ModuleRef: the namespace its module comes from
+//	renamed:"a,b"      the names the member had before it was renamed, which
+//	                   still decode, each with a warning that it is deprecated
 //
 // Names are matched exactly: unlike encoding/json, a member whose case
 // differs from the field's name is an unknown field, not the same one.
@@ -44,6 +46,8 @@ type Field struct {
 	// Default is the value a field left out stands for, as JSON, from its
 	// default tag; the schema shows it. Empty for a field without one.
 	Default string
+	// Renamed are the names the field had before, from its renamed tag.
+	Renamed []string
 }
 
 var fieldCache sync.Map // reflect.Type → []Field
@@ -91,6 +95,9 @@ func Fields(t reflect.Type) []Field {
 			name = sf.Name
 		}
 		f.Name = name
+		if renamed := sf.Tag.Get("renamed"); renamed != "" {
+			f.Renamed = strings.Split(renamed, ",")
+		}
 		if enum := sf.Tag.Get("enum"); enum != "" {
 			f.Enum = strings.Split(enum, ",")
 		}
@@ -246,8 +253,21 @@ func (d *decoder) decodeStruct(n *node, path string, rv reflect.Value) {
 	for _, mem := range n.members {
 		i := slices.IndexFunc(fields, func(f Field) bool { return !f.Self && f.Name == mem.key })
 		if i < 0 {
-			d.errorf(n, mem.keyOff, joinField(path, mem.key), "unknown field%s", suggest(mem.key, fields))
-			continue
+			i = slices.IndexFunc(fields, func(f Field) bool { return slices.Contains(f.Renamed, mem.key) })
+			if i < 0 {
+				d.errorf(n, mem.keyOff, joinField(path, mem.key), "unknown field%s", suggest(mem.key, fields))
+				continue
+			}
+			name := fields[i].Name
+			if seen[i] || n.member(name) != nil {
+				d.errorf(n, mem.keyOff, joinField(path, mem.key), "%q is the old name of %q; give only %q", mem.key, name, name)
+				continue
+			}
+			if n.src != nil {
+				line, col := n.pos(mem.keyOff)
+				n.src.warn(&Error{Path: joinField(path, mem.key), Line: line, Col: col,
+					Msg: fmt.Sprintf("deprecated: renamed %q, which takes the same value; the old name goes in config version 2", name)})
+			}
 		}
 		seen[i] = true
 		d.decode(mem.val, joinField(path, mem.key), rv.Field(fields[i].Index), &fields[i])

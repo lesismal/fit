@@ -67,25 +67,25 @@ func init() {
 
 // Defaults of WASM's params.
 const (
-	DefaultQueue       = 1024
-	DefaultTimeout     = 100 * time.Millisecond
-	DefaultWaitTimeout = time.Second
-	DefaultMaxMemory   = 128 << 20
-	maxInstances       = 16
+	DefaultQueue          = 1024
+	DefaultTimeout        = 100 * time.Millisecond
+	DefaultWaitTimeout    = time.Second
+	DefaultMaxMemoryBytes = 128 << 20
+	maxInstances          = 16
 )
 
 // WASM runs a WebAssembly plugin for each request.
 type WASM struct {
-	Path        string          `json:"path" fit:"required" doc:"The plugin: a WebAssembly module that exports fit_on_request, as a WASI reactor; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared."`
-	Config      string          `json:"config,omitempty" doc:"A string the plugin reads, for settings of its own."`
-	Instances   int             `json:"instances,omitempty" min:"0" doc:"How many instances of the plugin run calls at once, each with its own memory: the CPUs fit has, at most 16, when left out or 0."`
-	Queue       int             `json:"queue,omitempty" min:"0" default:"1024" doc:"How many requests may wait for an instance; past it a request is answered 503. 1024 when left out or 0."`
-	Timeout     config.Duration `json:"timeout,omitempty" default:"\"100ms\"" doc:"How long a call may run; past it the call is stopped and its instance replaced, and the request goes as a failure does (on_error). 100ms when left out."`
-	WaitTimeout config.Duration `json:"wait_timeout,omitempty" default:"\"1s\"" doc:"How long a request may wait for an instance; past it it is answered 503. 1s when left out."`
-	MaxMemory   int64           `json:"max_memory,omitempty" min:"0" default:"134217728" doc:"The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0."`
-	VMConfig    string          `json:"vm_config,omitempty" doc:"For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration."`
-	Properties  []Property      `json:"properties,omitempty" doc:"For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name."`
-	OnError     string          `json:"on_error,omitempty" enum:"fail,skip" default:"\"fail\"" doc:"What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out."`
+	Path           string          `json:"path" fit:"required" doc:"The plugin: a WebAssembly module that exports fit_on_request, as a WASI reactor; package plugin/wasm/guest builds one from Go with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared."`
+	Config         string          `json:"config,omitempty" doc:"A string the plugin reads, for settings of its own."`
+	Instances      int             `json:"instances,omitempty" min:"0" doc:"How many instances of the plugin run calls at once, each with its own memory: the CPUs fit has, at most 16, when left out or 0."`
+	Queue          int             `json:"queue,omitempty" min:"0" default:"1024" doc:"How many requests may wait for an instance; past it a request is answered 503. 1024 when left out or 0."`
+	Timeout        config.Duration `json:"timeout,omitempty" default:"\"100ms\"" doc:"How long a call may run; past it the call is stopped and its instance replaced, and the request goes as a failure does (on_error). 100ms when left out."`
+	WaitTimeout    config.Duration `json:"wait_timeout,omitempty" default:"\"1s\"" doc:"How long a request may wait for an instance; past it it is answered 503. 1s when left out."`
+	MaxMemoryBytes int64           `json:"max_memory_bytes,omitempty" renamed:"max_memory" min:"0" default:"134217728" doc:"The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0."`
+	VMConfig       string          `json:"vm_config,omitempty" doc:"For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration."`
+	Properties     []Property      `json:"properties,omitempty" doc:"For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name."`
+	OnError        string          `json:"on_error,omitempty" enum:"fail,skip" default:"\"fail\"" doc:"What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out."`
 
 	plugin *plugin
 	pool   *pool
@@ -107,14 +107,14 @@ func (m *WASM) Provision(ctx *module.Context) error {
 	if m.WaitTimeout <= 0 {
 		m.WaitTimeout = config.Duration(DefaultWaitTimeout)
 	}
-	if m.MaxMemory == 0 {
-		m.MaxMemory = DefaultMaxMemory
+	if m.MaxMemoryBytes == 0 {
+		m.MaxMemoryBytes = DefaultMaxMemoryBytes
 	}
 	code, err := os.ReadFile(m.Path)
 	if err != nil {
 		return ctx.Errorf("path", "%v", err)
 	}
-	if m.plugin, err = loadPlugin(code, m.MaxMemory); err != nil {
+	if m.plugin, err = loadPlugin(code, m.MaxMemoryBytes); err != nil {
 		return ctx.Errorf("path", "%v", err)
 	}
 	m.graph = ctx.Graph()

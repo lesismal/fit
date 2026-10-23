@@ -122,7 +122,7 @@ func TestDiskRestart(t *testing.T) {
 // what memory evicts is read back from disk.
 func TestDiskPromotion(t *testing.T) {
 	dir := t.TempDir()
-	base := serve(t, diskParams(dir, `, "max_size": 1048576, "max_entry_size": 65536`))
+	base := serve(t, diskParams(dir, `, "max_bytes": 1048576, "max_entry_bytes": 65536`))
 	c := clients()["h2c"]
 	const n = 64 // 64 KB each: four times what memory holds
 	for i := range n {
@@ -305,11 +305,11 @@ func TestDiskInvalidate(t *testing.T) {
 	}
 }
 
-// TestDiskBounds checks max_entries and max_size: the least recently used
+// TestDiskBounds checks max_entries and max_bytes: the least recently used
 // responses go, and their files with them.
 func TestDiskBounds(t *testing.T) {
 	dir := t.TempDir()
-	d, err := newDisk(&Disk{Path: dir, MaxEntries: 10, MaxSize: 1 << 20}, filepool.New(2, 64, time.Second), &tagIndex{m: map[string]map[string]int{}})
+	d, err := newDisk(&Disk{Path: dir, MaxEntries: 10, MaxBytes: 1 << 20}, filepool.New(2, 64, time.Second), &tagIndex{m: map[string]map[string]int{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,12 +336,12 @@ func TestDiskBounds(t *testing.T) {
 	if d.get("/k29", nil) == nil || d.get("/k0", nil) != nil {
 		t.Error("not the least recently used evicted")
 	}
-	d.setLimits(&Disk{MaxEntries: 100, MaxSize: 50 << 10})
+	d.setLimits(&Disk{MaxEntries: 100, MaxBytes: 50 << 10})
 	d.write("/big", &entry{status: 200, header: stdhttp.Header{}, body: body, responseTime: clock(), lifetime: time.Minute})
 	waitFor(t, "a write", func() bool { return d.pending.Load() == 0 })
 	d.drain()
 	if n, size := d.stats(); size > 50<<10 || n != 4 || files() != 4 {
-		t.Errorf("max_size 50 KB: %d entries, %d bytes, %d files", n, size, files())
+		t.Errorf("max_bytes 50 KB: %d entries, %d bytes, %d files", n, size, files())
 	}
 }
 
