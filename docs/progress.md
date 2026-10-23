@@ -4164,6 +4164,19 @@ Differences from the plan:
   `TestAdaptCaddyfile`, `TestJSONWithComments` (cli). They pass under the race detector on the
   benchmark host; `FuzzConvert` ran 30s there, about a million inputs, without a failure.
   Control-plane only: no benchmark (rule 21).
+- **The config docs, after I79**: [Configuration](configuration.md), the entry to the three
+  formats in the order Caddyfile, YAML, JSON, with the same site in each, how a config is run,
+  checked, converted and changed; a page for each format ([Caddyfile](reference/caddyfile.md),
+  directive by directive, with the global options, addresses, matchers and how directives become
+  routes; [YAML](reference/yaml.md); [JSON](reference/json.md)); and the
+  [config reference](reference/config.md) in chapters, one for each part of the config and for
+  handlers and middleware, each saying what the part is for, with an example as a Caddyfile (where
+  one says it), in YAML and in JSON, before its tables, and a table of contents. The chapters are
+  Markdown in `schema/doc`, embedded and woven into the generated page by `schema.Reference`; the
+  YAML is made from the JSON. `TestChapterExamples` (schema) loads each chapter's JSON, decodes
+  each module's params with the module and converts each Caddyfile without a warning;
+  `TestConfigExamples` (docs) loads every config on the format pages; `TestExampleCaddyfiles`
+  (cli) validates `examples/hello.caddyfile` and `proxy.caddyfile`, the JSON examples' twins.
 
 ## Notes for later iterations
 

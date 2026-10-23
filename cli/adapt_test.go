@@ -84,3 +84,13 @@ func TestJSONWithComments(t *testing.T) {
 		t.Errorf("%d %q", code, stderr)
 	}
 }
+
+// TestExampleCaddyfiles checks that the examples' Caddyfiles, the twins of
+// their JSON, are valid.
+func TestExampleCaddyfiles(t *testing.T) {
+	for _, f := range []string{"../examples/hello.caddyfile", "../examples/proxy.caddyfile"} {
+		if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") || stderr != "" {
+			t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
+		}
+	}
+}

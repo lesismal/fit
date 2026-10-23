@@ -15,7 +15,11 @@ external security review is still to come; see [progress](docs/progress.md) for 
 ## Docs
 
 - [Getting started](docs/getting-started.md): from nothing to a site over HTTPS.
-- [Config reference](docs/reference/config.md): every field, generated from the code.
+- [Configuration](docs/configuration.md): the three formats a config may be written in,
+  [Caddyfile](docs/reference/caddyfile.md), [YAML](docs/reference/yaml.md) and
+  [JSON](docs/reference/json.md), and how a config is run, checked, converted and changed.
+- [Config reference](docs/reference/config.md): every field and every module's params, chapter by
+  chapter, with examples in all three formats; generated from the code.
 - Migrating from [nginx](docs/migrating-from-nginx.md), [Caddy](docs/migrating-from-caddy.md) and
   [Traefik](docs/migrating-from-traefik.md).
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
@@ -40,10 +44,10 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
-JSON configs may have `//` and `/* */` comments and trailing commas. A config may also be written
-in YAML (`examples/hello.yaml`), and `fit adapt` converts between the two, and converts a common
-subset of nginx configs and of Caddy's Caddyfile, listing what it left out; `fit run` takes any of
-them as it is.
+A config may be a Caddyfile (`examples/hello.caddyfile`), YAML (`examples/hello.yaml`) or JSON
+(`examples/hello.json`, with `//` and `/* */` comments and trailing commas allowed); `fit run` takes
+any of them as it is, and `fit adapt` converts between them, and from nginx configs, listing what
+it left out. [Configuration](docs/configuration.md) has the details.
 
 `fit run` reloads its config file on SIGHUP, keeping the listeners that did not change and the
 running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.

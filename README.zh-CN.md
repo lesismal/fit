@@ -13,7 +13,9 @@ Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要�
 ## 文档
 
 - [快速上手](docs/getting-started.zh-CN.md)：从零开始搭起一个 HTTPS 站点。
-- [配置参考](docs/reference/config.zh-CN.md)：由代码生成的全部字段。
+- [配置](docs/configuration.zh-CN.md)：配置可用的三种格式 [Caddyfile](docs/reference/caddyfile.zh-CN.md)、
+  [YAML](docs/reference/yaml.zh-CN.md) 和 [JSON](docs/reference/json.zh-CN.md)，以及配置如何运行、检查、转换和修改。
+- [配置参考](docs/reference/config.zh-CN.md)：逐章列出全部字段和每个模块的参数，附三种格式的示例；由代码生成。
 - 从 [nginx](docs/migrating-from-nginx.zh-CN.md)、[Caddy](docs/migrating-from-caddy.zh-CN.md) 和
   [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
@@ -38,9 +40,9 @@ make build
 ./bin/fit run -c examples/hello.json
 ```
 
-JSON 配置可以写 `//` 和 `/* */` 注释，数组和对象的最后一个元素后可以带逗号。配置也可以用 YAML 编写（`examples/hello.yaml`），
-`fit adapt` 可在两者之间转换，也能转换 nginx 配置和 Caddy 的 Caddyfile 的常用子集，并列出未转换的部分；`fit run` 直接接受
-其中任何一种。
+配置可以是 Caddyfile（`examples/hello.caddyfile`）、YAML（`examples/hello.yaml`）或 JSON（`examples/hello.json`，可以写
+`//` 和 `/* */` 注释，最后一个元素后可以带逗号）；`fit run` 直接接受其中任何一种，`fit adapt` 在它们之间转换，也能转换
+nginx 配置，并列出未转换的部分。详见 [配置](docs/configuration.zh-CN.md)。
 
 `fit run` 收到 SIGHUP 时重新加载配置文件，未变化的 listener 保持不动，新配置有错时继续使用正在运行的配置；收到
 SIGINT 或 SIGTERM 时优雅退出。

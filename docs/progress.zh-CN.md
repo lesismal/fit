@@ -2998,6 +2998,14 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   fuzz 任务，附语料）（adapter/caddyfile）；`TestStandardize`、`TestLoadJSONC`（config）；`TestLoadWithComments`（admin）；
   `TestAdaptCaddyfile`、`TestJSONWithComments`（cli）。它们在基准测试机上以竞态检测器通过；`FuzzConvert` 在那里跑了 30 秒、
   约一百万个输入，没有失败。只涉及控制面：不做基准测试（规则 21）。
+- **I79 之后的配置文档**：[配置](configuration.zh-CN.md) 是三种格式的入口，顺序为 Caddyfile、YAML、JSON，同一个站点各写
+  一份，并说明配置如何运行、检查、转换和修改；每种格式一页（[Caddyfile](reference/caddyfile.zh-CN.md) 逐条列出指令、全局
+  选项、地址、匹配器以及指令如何变成路由；[YAML](reference/yaml.zh-CN.md)；[JSON](reference/json.zh-CN.md)）；
+  [配置参考](reference/config.md) 分章组织，配置的每个部分以及处理器和中间件各一章，每章说明用途，并在字段表前给出 Caddyfile
+  （有对应写法时）、YAML 和 JSON 的示例，开头有目录；中文页逐章说明并链接到英文字段表。各章是 `schema/doc` 中的 Markdown，
+  嵌入后由 `schema.Reference` 编入生成的页面；YAML 示例由 JSON 生成。`TestChapterExamples`（schema）加载每章的 JSON，
+  用模块解码每个模块的参数，并无警告地转换每个 Caddyfile；`TestConfigExamples`（docs）加载格式页面上的每个配置；
+  `TestExampleCaddyfiles`（cli）验证 `examples/hello.caddyfile` 和 `proxy.caddyfile`，即 JSON 示例的 Caddyfile 版本。
 
 ## 给后续迭代的说明
 

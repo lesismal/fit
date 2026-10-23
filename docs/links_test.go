@@ -66,6 +66,11 @@ func TestLinks(t *testing.T) {
 			case ".git", ".claude", "node_modules", "testdata":
 				return filepath.SkipDir
 			}
+			// The reference's chapters link within the page they are made
+			// into, which is checked.
+			if filepath.ToSlash(path) == "../schema/doc" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {

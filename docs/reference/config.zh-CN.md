@@ -3,18 +3,62 @@
 [English](config.md) | [简体中文](config.zh-CN.md)
 
 配置参考由 `schema.Reference` 从 fit 的配置类型和模块直接生成，与解码器和 JSON Schema 读取的是同一组类型和标签，因而不会与
-fit 实际接受的配置脱节。字段的说明写在代码的 `doc` 标签里，是英文的，所以参考只有 [英文版](config.md)，不另行翻译。
+fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`，示例由测试逐个加载验证。字段说明写在代码的 `doc` 标签里，是
+英文的，所以完整的字段表只有 [英文版](config.md)；本页用中文说明每一章讲什么，并链接到英文版对应的位置。
 
-参考中的每一节是一个对象：
+配置可以写成 [Caddyfile](caddyfile.zh-CN.md)、[YAML](yaml.zh-CN.md) 或 [JSON](json.zh-CN.md)：YAML 和 JSON 的字段与参考
+完全相同，Caddyfile 会转换成这些字段。参考中每一章的示例都依次给出 Caddyfile（有对应写法时）、YAML 和 JSON 三种写法。
+配置如何加载、检查和修改，见 [配置](../configuration.zh-CN.md)。
 
-- **The config** 是配置的顶层：`listeners`、`routes`、`upstreams`、`services` 等，其后是它们各自的对象，标题是它们在配置中
-  的路径，如 `listeners[].tls`。
-- **Handlers** 和 **Middleware** 列出 `modules/standard` 中的每个模块：路由的 `handler` 或 `middleware` 用 `module` 指定其
-  名字，用 `params` 给出参数。
+## 各章内容
+
+| 章 | 讲什么 | 包含的对象 |
+| --- | --- | --- |
+| [The config](config.md#the-config) | 配置的顶层：各部分是什么，最小的配置 | 顶层字段 `schema_version`、`listeners`、`routes` 等 |
+| [Listeners](config.md#listeners) | 监听地址和协议：`http/1.1`、`h2c`、`h2`、`h3`、`tcp`、`udp`、`socks`；TLS 证书（文件、ACME、按需申请）、客户端证书（mTLS）、PROXY 协议 | [`listeners[]`](config.md#config-listener)、[`tls`](config.md#config-tls)、[`certificates[]`](config.md#config-certificate)、[`client_auth`](config.md#config-clientauth)、[`socks`](config.md#config-forwardproxy)、[`proxy_protocol`](config.md#config-proxyprotocol) |
+| [Routes](config.md#routes) | 路由：匹配条件、中间件和处理器；请求如何选中一条路由（优先级、host 和 path 的具体程度、匹配器数量、书写顺序）；`expr` 表达式 | [`routes[]`](config.md#config-route)、[`match`](config.md#config-match) |
+| [Upstreams](config.md#upstreams) | 被代理的服务器：九种负载均衡策略、粘性 cookie、连接数和排队上限、各类超时、被动和主动健康检查、h2c 和 TLS | [`upstreams[]`](config.md#config-upstream)、[`sticky_cookie`](config.md#config-stickycookie)、[`health_check`](config.md#config-healthcheck) |
+| [Services](config.md#services) | 四层代理：TCP 连接和 UDP 数据报，按 SNI 透传 TLS，向 upstream 发送 PROXY 协议 | [`services[]`](config.md#config-service) |
+| [Access log](config.md#access-log) | 每个请求一行 JSON 的访问日志，带有界缓冲 | [`access_log`](config.md#config-accesslog) |
+| [Telemetry](config.md#telemetry) | OpenTelemetry：链路追踪和指标，经 OTLP/HTTP 导出 | [`telemetry`](config.md#config-telemetry)、[`traces`](config.md#config-tracesexport)、[`metrics`](config.md#config-metricsexport) |
+| [Limits](config.md#limits) | 所有 listener 的上限：连接数、头部和请求体大小、等待慢客户端的响应字节、写停顿超时 | [`limits`](config.md#config-limits) |
+| [Admin API](config.md#admin-api) | 读取和替换运行中配置的 Admin API：地址、令牌、保留的版本数、上限、仪表盘 | [`admin`](config.md#config-admin) |
+| [HTTPS by default](config.md#https-by-default) | 默认 HTTPS：不写 listener 时自动生成 443 和跳转用的 80；关闭、关闭跳转、改端口 | [`auto_https`](config.md#config-autohttps) |
+| [Metrics](config.md#metrics) | 按 listener 和路由统计请求，供 Admin API 的 `/metrics` | [`metrics`](config.md#config-metrics) |
+| [ACME](config.md#acme) | 证书的申请和续期：CA、账户邮箱、存储（目录，或 Redis、etcd、Consul 共享）、验证方式、按需申请 | [`acme`](config.md#config-acme)、[`shared_storage`](config.md#config-sharedstorage)、[`redis`](config.md#config-redisstorage)、[`etcd`](config.md#config-etcdstorage)、[`consul`](config.md#config-consulstorage)、[`on_demand`](config.md#config-ondemand) |
+| [Providers](config.md#providers) | 从 Docker、Consul 目录、Consul KV、etcd、Kubernetes（Gateway API 和 Ingress）获取路由等配置，以及合并规则 | [`providers[]`](config.md#config-provider)、[`docker`](config.md#config-dockerprovider)、[`consul`](config.md#config-consulprovider)、[`consul_kv`](config.md#config-consulkvprovider)、[`etcd`](config.md#config-etcdprovider)、[`kubernetes`](config.md#config-kubernetesprovider)、[`ingress`](config.md#config-kubernetesingress) |
+| [Handlers](config.md#handlers) | 路由的处理器，每个模块一节，含用途、示例和参数表 | [`fastcgi`](config.md#http-handlers-fastcgi)、[`forward_proxy`](config.md#http-handlers-forward_proxy)、[`proxy`](config.md#http-handlers-proxy)、[`respond`](config.md#http-handlers-respond)、[`static`](config.md#http-handlers-static) |
+| [Middleware](config.md#middleware) | 路由的中间件，每个模块一节，含用途、示例和参数表 | [`basic_auth`](config.md#http-middleware-basic_auth)、[`body_limit`](config.md#http-middleware-body_limit)、[`cache`](config.md#http-middleware-cache)、[`circuit_breaker`](config.md#http-middleware-circuit_breaker)、[`client_cert`](config.md#http-middleware-client_cert)、[`compress`](config.md#http-middleware-compress)、[`concurrency_limit`](config.md#http-middleware-concurrency_limit)、[`forward_auth`](config.md#http-middleware-forward_auth)、[`headers`](config.md#http-middleware-headers)、[`jwt`](config.md#http-middleware-jwt)、[`rate_limit`](config.md#http-middleware-rate_limit)、[`redirect`](config.md#http-middleware-redirect)、[`rewrite`](config.md#http-middleware-rewrite)、[`wasm`](config.md#http-middleware-wasm) |
+
+## 处理器和中间件与 Caddyfile 的对应
+
+| 模块 | 用途 | Caddyfile 指令 |
+| --- | --- | --- |
+| `proxy` | 反向代理到 upstream，按权重分流、故障转移、镜像、重试 | `reverse_proxy` |
+| `static` | 提供目录中的文件，目录列表、预压缩文件、`try_files` | `file_server`、`root`、`try_files` |
+| `respond` | 固定的状态码、头部和响应体 | `respond`、`error` |
+| `fastcgi` | FastCGI 应用，如 PHP-FPM | `php_fastcgi` |
+| `forward_proxy` | HTTP CONNECT 正向代理 | 无 |
+| `basic_auth` | 用户名和密码（bcrypt） | `basic_auth` |
+| `body_limit` | 限制请求体大小 | `request_body { max_size }` |
+| `cache` | HTTP 缓存，内存和磁盘两级 | 无 |
+| `circuit_breaker` | 熔断 | 无 |
+| `client_cert` | 要求客户端证书 | 无（listener 上的 `tls { client_auth }`） |
+| `compress` | zstd、brotli、gzip 压缩 | `encode` |
+| `concurrency_limit` | 限制并发请求数 | 无 |
+| `forward_auth` | 询问认证服务 | `forward_auth` |
+| `headers` | 设置、追加、删除请求和响应头 | `header`、`request_header`、`header_up`、`header_down` |
+| `jwt` | 校验 JSON Web Token | 无 |
+| `rate_limit` | 限流 | 无 |
+| `redirect` | 跳转 | `redir` |
+| `rewrite` | 改写路径 | `rewrite`、`uri`、`handle_path` |
+| `wasm` | WebAssembly 插件 | 无 |
+
+## 如何阅读字段表
 
 每张表的列是：字段名、类型（`duration` 是如 `"1.5s"`、`"2m"` 的字符串；整数会注明范围；`object` 链接到它自己的一节）、
 默认值（不写时取的值），以及说明。标为 `Required` 的字段必须写出。标为 `Deprecated` 的是重命名前的旧名字，仍可使用，
-但会得到警告，见 [兼容性](../compatibility.zh-CN.md)。
+但会得到警告，见 [兼容性](../compatibility.zh-CN.md)。没有字段的对象（如 `metrics`）写 `{}` 即可开启。
 
-用 `go test ./schema -update` 重新生成；内容过期或有字段缺少说明时，`schema` 包的测试会失败。`fit schema -reference` 打印
-当前二进制（包括 `fit build` 编入的模块）的参考。
+用 `go test ./schema -update` 重新生成；内容过期、有字段缺少说明或某个示例加载失败时，`schema` 包的测试会失败。
+`fit schema -reference` 打印当前二进制（包括 `fit build` 编入的模块）的参考。

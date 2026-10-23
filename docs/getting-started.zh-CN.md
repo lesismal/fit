@@ -23,8 +23,8 @@ fit version
 
 ## 第一个配置
 
-fit 的配置是 JSON（可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），也可以用字段相同的 YAML；Caddyfile 和
-nginx 配置也能转换。把下面的内容保存为 `fit.json`：
+配置可以是 Caddyfile、YAML 或 JSON（[配置](configuration.zh-CN.md) 比较了三者）；本指南使用 fit 的原生格式 JSON，
+其中可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号。把下面的内容保存为 `fit.json`：
 
 ```json
 {
@@ -141,7 +141,9 @@ curl -X POST localhost:2019/rollback/1
 
 ## 接下来
 
-- [配置参考](reference/config.zh-CN.md)：每个字段及其类型和默认值。
+- [配置](configuration.zh-CN.md)：同一个配置写成 [Caddyfile](reference/caddyfile.zh-CN.md)、[YAML](reference/yaml.zh-CN.md)
+  或 [JSON](reference/json.zh-CN.md)。
+- [配置参考](reference/config.zh-CN.md)：每个字段及其类型和默认值，附示例。
 - 从其他服务器迁移：[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)、
   [Traefik](migrating-from-traefik.zh-CN.md)。
 - [兼容性](compatibility.zh-CN.md)：在各 1.x 版本间保持稳定的内容。

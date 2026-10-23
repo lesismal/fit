@@ -25,8 +25,9 @@ fit version
 
 ## A first config
 
-fit's config is JSON, with `//` and `/* */` comments and trailing commas allowed, or YAML with the same
-fields; a Caddyfile or an nginx config converts too. Save this as `fit.json`:
+A config may be a Caddyfile, YAML or JSON ([Configuration](configuration.md) compares them); this
+guide uses JSON, fit's native format, in which `//` and `/* */` comments and trailing commas are
+allowed. Save this as `fit.json`:
 
 ```json
 {
@@ -152,7 +153,9 @@ and a dashboard at `/dashboard/`.
 
 ## Next
 
-- The [config reference](reference/config.md): every field, its type and default.
+- [Configuration](configuration.md): the same config as a [Caddyfile](reference/caddyfile.md), in
+  [YAML](reference/yaml.md) or in [JSON](reference/json.md).
+- The [config reference](reference/config.md): every field, its type and default, with examples.
 - Coming from another server: [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md),
   [Traefik](migrating-from-traefik.md).
 - [Compatibility](compatibility.md): what stays stable across 1.x releases.
