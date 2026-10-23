@@ -32,6 +32,8 @@ var (
 	answer atomic.Pointer[func(c *fibhttp.Context)]
 	// release lets the slow stream go on.
 	release = make(chan struct{}, 1)
+	// gone counts the slow streams whose client the server heard go.
+	gone atomic.Int64
 	// failing has the paths that answer 500 when it is set do so.
 	failing atomic.Bool
 )
@@ -116,6 +118,7 @@ func (origin) ServeHTTP(c *fibhttp.Context) {
 		c.Header().Set("Content-Type", "text/plain")
 		for i := range 64 {
 			if p == "/slow" && i == 1 {
+				c.OnCancel(func(error) { gone.Add(1) })
 				c.Flush()
 				select {
 				case <-release:
@@ -609,6 +612,7 @@ func TestClientGone(t *testing.T) {
 	zones.Unlock()
 	for proto, c := range clients() {
 		resetHits()
+		gone.Store(0)
 		ctx, cancel := context.WithCancel(context.Background())
 		url := base + "/slow?" + proto
 		req, _ := stdhttp.NewRequestWithContext(ctx, "GET", url, nil)
@@ -625,8 +629,18 @@ func TestClientGone(t *testing.T) {
 		}
 		cancel()
 		resp.Body.Close()
-		letGo(t)
+		// The origin goes on only once the server has heard the client go:
+		// the client says so on its own time, and a rest of the body that
+		// went before it does is the whole response, which is kept.
 		deadline := time.Now().Add(5 * time.Second)
+		for gone.Load() == 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if gone.Load() == 0 {
+			t.Fatalf("%s: the server did not hear the client go", proto)
+		}
+		letGo(t)
+		deadline = time.Now().Add(5 * time.Second)
 		for s.capturing.Load() != 0 && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)
 		}
