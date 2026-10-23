@@ -122,14 +122,16 @@ func TestReloadUnderLoad(t *testing.T) {
 	// A broken config: the running one stays.
 	f.reload(t, `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "nope"}}]}`)
 	f.waitLine(t, "fit: reloading")
+	// The failure and its error are written one after the other: wait for
+	// the error, the second.
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(f.stderr.String(), "reload failed") {
+	for !strings.Contains(f.stderr.String(), `there is no module "nope"`) {
 		if time.Now().After(deadline) {
 			t.Fatalf("no reload error on stderr: %q", f.stderr.String())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(f.stderr.String(), `there is no module "nope"`) {
+	if !strings.Contains(f.stderr.String(), "reload failed") {
 		t.Errorf("stderr: %q", f.stderr.String())
 	}
 	time.Sleep(200 * time.Millisecond)
