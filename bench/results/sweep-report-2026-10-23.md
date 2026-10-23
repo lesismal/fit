@@ -40,47 +40,151 @@ In summary:
   reaches 14.1 GiB over HTTP/3, Traefik 12.4 GiB on proxy over h2c.
 - **fit's goroutines** grow with streams in flight, not connections: on fixed, 110–350 over HTTP/1.1
   at every level; 590 at 8×32 to 20,635 at 8,192×32 over h2c.
+- **A caveat on HTTP/3**: the host's UDP buffer limits, raised for the QUIC servers, were found
+  back at their old 16,384 after the sweep; Caddy's and Traefik's HTTP/3 results from level 4 may
+  have run under them ([the environment](#test-environment) says more).
 
 Results: one JSON per level, `sweep-2026-10-23-l<N>-c<C>-h<H>.json` (level, HTTP/1.1 connections,
 and the others' connections), from [`sweep-2026-10-23-l1-c16-h8.json`](sweep-2026-10-23-l1-c16-h8.json)
 to [`sweep-2026-10-23-l7-c32768-h8192.json`](sweep-2026-10-23-l7-c32768-h8192.json). Every level's
 full tables are in [the appendix](sweep-2026-10-23-levels.md).
 
-## Setup
+## Test environment
+
+### Hardware and system
 
 | | |
 | --- | --- |
-| Host | AMD Ryzen 7 7800X3D, 8 cores, 16 threads; 62 GiB; Ubuntu 24.04, Linux 7.0.0-38 |
-| Docker | 29.1.3, host networking |
-| CPUs | server 0-6, load generators 7-13, backends 14-15 |
-| Runs | 30s after a 5s warm-up, each on a freshly started server; every scenario (fixed, static, proxy, cache-hot, cache-zipf) and protocol (HTTP/1.1, h2c, h2, HTTP/3); no idle connection runs |
-| Servers | nginx 1.31.4, Caddy 2.10.2, Traefik 3.5.0, Envoy 1.40.0, fit at e079c83 on fib b0809b4, Go 1.27.3 |
-| Load generators | wrk 4.1.0 (HTTP/1.1), h2load 1.59.0 (h2c, h2), h2load 1.68.0 built with HTTP/3 |
-| Time | 2026-10-23 11:35 to 18:34 UTC, about 7 hours |
+| CPU | AMD Ryzen 7 7800X3D: 8 cores, 16 threads (SMT), 96 MiB L3, up to 5.05 GHz; frequency governor `powersave` (the kernel's default with `amd-pstate`) |
+| Memory | 62 GiB; transparent huge pages `madvise` |
+| OS | Ubuntu 24.04.5 LTS, Linux 7.0.0-38-generic, booted with the distribution's defaults (no mitigations turned off) |
+| Docker | 29.1.3, cgroup v2 with the systemd driver, overlayfs; every container on the host's network (`--network host`) with `--ulimit nofile=1048576:1048576` |
+| Other containers | an idle etcd (`quay.io/coreos/etcd:v3.6.5`) and the `fitconf` kind node (`kindest/node:v1.34.0`, about 5% of one core); nothing else ran |
 
-The servers' configs are the v1.0.0 report's. The ones that matter for the proxy at high counts:
-nginx keeps up to 4,096 idle connections to the backend (`keepalive`) and opens as many as it needs;
-Caddy and Traefik keep 4,096 idle and open as many; Envoy's circuit breakers allow a million; fit
-opens at most 4,096 (`max_conns`) and queues 1,024 more (`max_pending`, its default), answering 503
-past that. The backend is fit on 2 CPUs, answering about 260k requests a second.
+**How the CPUs are split.** Each container is pinned with `--cpuset-cpus`. Linux numbers this CPU's
+first threads 0–7 and their SMT siblings 8–15, so:
+
+| Role | Logical CPUs | Physical cores |
+| --- | --- | --- |
+| Server under test | 0–6 | the first thread of cores 0–6 |
+| Load generators (wrk, h2load) | 7–13 | core 7, and the second thread of cores 0–5 |
+| Proxy, WebSocket and cache backends | 14–15 | the second thread of cores 6 and 7 |
+
+The server shares its six physical cores with load generator threads and one with the backends.
+Every server runs under the same split, as in every report since M1, so the comparison holds;
+absolute numbers are lower than on cores of their own.
+
+### Kernel settings
+
+| Setting | Value | |
+| --- | ---: | --- |
+| `net.core.somaxconn`, `net.ipv4.tcp_max_syn_backlog` | 2,048 | caps every server's accept queue; not raised |
+| `net.ipv4.tcp_syncookies` | 1 | connections past a full SYN queue still open |
+| `net.ipv4.tcp_tw_reuse` | 1 | |
+| `net.ipv4.ip_local_port_range` | 1024–65535 | |
+| `net.ipv4.ip_local_reserved_ports` | 8080-8081, 8443-8445, 9000-9005 | from level 6 on, in `/etc/sysctl.d/91-fitbench-reserved-ports.conf` (see below) |
+| `net.core.rmem_max`, `net.core.wmem_max` | 7,500,000 | in `/etc/sysctl.d/90-fitbench-udp-buffers.conf`; see the note below |
+| `net.core.netdev_max_backlog` | 1,000 | |
+| `net.netfilter.nf_conntrack_max` | 2,000,500 | |
+| `fs.nr_open`, `fs.file-max` | 2,000,500 | |
+
+**The UDP buffer limits.** They were set to 7,500,000 on 2026-10-23, for the QUIC servers (quic-go,
+in Caddy and Traefik, asks for about 7 MB). On 2026-10-24, after the sweep, they read 16,384 again,
+although the file setting them was in place and the host had not restarted: something on the host
+sets them back at runtime, as before 2026-10-23. They were set again from the file. Levels 1–3 ran
+with the raised limits: Caddy's and Traefik's HTTP/3 worst-case latencies there (10–128 ms) are
+those of the raised limits, not the seconds of the old ones. From level 4 every server's worst-case
+latencies grow to seconds, nginx's included, so these runs cannot tell when the limits fell back;
+the HTTP/3 results of Caddy and Traefik from level 4 may have run under the old ones.
+
+### Software
+
+| | Version | Image |
+| --- | --- | --- |
+| nginx | 1.31.4 | `nginx:1.31.4@sha256:b34848eff6db…` |
+| Caddy | 2.10.2 | `caddy:2.10.2@sha256:c3d7ee5d2b11…` |
+| Traefik | 3.5.0 | `traefik:v3.5.0@sha256:4e7175cfe19b…` |
+| Envoy | 1.40.0 (BoringSSL) | `envoyproxy/envoy:v1.40.0@sha256:459f2a6404c3…` |
+| fit | e079c83, on fib b0809b4 (`v1.6.1-0.20261023105547-b0809b4bac8f`), Go 1.27.3 | built for linux/amd64, run on `ubuntu:24.04@sha256:68ee22004a91…` |
+| wrk | 4.1.0 (Debian build) | `fitbench-loadgen`, Ubuntu 24.04 ([`loadgen/Dockerfile`](../loadgen/Dockerfile)) |
+| h2load | 1.59.0, for h2c and h2 | the same |
+| h2load with HTTP/3 | 1.68.0 on ngtcp2 1.16.0, nghttp3 1.12.0, OpenSSL 3.5 | `fitbench-loadgen-h3`, Debian trixie ([`loadgen/Dockerfile.h3`](../loadgen/Dockerfile.h3)) |
+
+The images' full digests are in each level's JSON (`images`).
+
+### How each run is made
+
+Each level is one run of the harness, `fitbench`, from the repository at e079c83:
+
+```bash
+fitbench -scenarios fixed,static,proxy,cache-hot,cache-zipf -idle "" \
+  -connections <HTTP/1.1 connections> -h2-connections <connections> -h2-streams 32
+```
+
+with its defaults otherwise: 30 s measured after a 5 s warm-up, host networking, the CPU split
+above. For each server, scenario and protocol it:
+
+1. starts the server afresh in its container, waits until it answers, and lets it settle 1 s;
+2. fetches the path once with curl over the protocol and checks the status, the protocol and the
+   body, so that a server whose config drifted fails rather than being measured doing something
+   else;
+3. runs the load generator 5 s unmeasured, then 30 s measured:
+   - HTTP/1.1: `wrk -t 7 -c <connections> -d 30s --timeout 10s --latency -s report.lua <url>`;
+   - h2c and h2: `h2load -t 7 -c <connections> -m 32 -D 30 <url>` (h2 over `https://`, by ALPN);
+   - HTTP/3: the same with `--alpn-list=h3`;
+4. reads the server's CPU time from its cgroup's `cpu.stat` over the measured 30 s, and its
+   anonymous memory from `memory.stat` once settled and every 100 ms during the run, from the host,
+   which costs the server nothing.
 
 **What happened during the run.**
 
 - **Hung runs.** The harness waits for each load generator without a time limit. At level 6,
   Traefik's proxy over h2 wedged h2load for 1 h 40 min; from then on a watchdog ended any wrk or
-  h2load past 300 s, and the run counts as hung. Eight runs hung, all proxy or static over h2c or h2
-  at levels 6 and 7 (listed [below](#failures)). They were not run again.
-- **Servers that did not start.** The host's ephemeral port range was 1024–65535, which covers the
-  servers' own ports: at high counts an outgoing connection could hold one, and the next server
-  could not bind it. Traefik did not start for the proxy at levels 4 and 5 (port 8444), nor fit at
-  any run of level 6 (its Admin API's 127.0.0.1:9005). With the user's agreement the host now
-  reserves those ports (`net.ipv4.ip_local_reserved_ports = 8080-8081,8443-8445,9000-9005`, in
-  `/etc/sysctl.d/91-fitbench-reserved-ports.conf`), set during level 6; level 7 had no such failure.
-  Those servers ran again at their levels once the sweep was done, and their results replace the
-  failed ones in the level's JSON (its `reruns` field says which).
-- **The host.** `somaxconn` and `tcp_max_syn_backlog` are 2,048, which caps every server's accept
-  queue; SYN cookies are on, so connections that overflow it still open, later. The `fitconf` kind
-  node and an idle etcd container stayed up. Nothing else ran on the host.
+  h2load past 300 s, and the run counts as hung. Eight runs hung, all proxy or static over h2c or
+  h2 at levels 6 and 7 (listed [below](#failures)). They were not run again.
+- **Servers that did not start.** The host's ephemeral port range covers the servers' own ports:
+  at high counts an outgoing connection could hold one, and the next server could not bind it.
+  Traefik did not start for the proxy at levels 4 and 5 (port 8444), nor fit at any run of level 6
+  (its Admin API's 127.0.0.1:9005). With the user's agreement the host now reserves those ports,
+  set during level 6; level 7 had no such failure. Those servers ran again at their levels once the
+  sweep was done (18:18–18:34 UTC), and their results replace the failed ones in the level's JSON
+  (its `reruns` field says which).
+- **Time.** 2026-10-23 11:35 to 18:34 UTC, about 7 hours.
+
+## What each test measures
+
+Every server serves the same routes on the same ports, so that each test asks every server for the
+same thing:
+
+| Test | Request | What the server does | Response | What it measures |
+| --- | --- | --- | --- | --- |
+| **fixed** | `GET /fixed` | answers from its config, with no file, no backend and no cache | 200, `text/plain`, `hello, world` (12 bytes) | the server's own request path: reading and parsing the request, routing it, writing the response. The ceiling of what the server can do |
+| **static** | `GET /static/small.html` | serves a file from disk (in the page cache after the first request) | 200, a 1 KiB HTML file | the static file handler: finding and opening the file, its headers, sending its bytes |
+| **proxy** | `GET /proxy` | forwards the request over HTTP/1.1 with keep-alive to the proxy backend, fit answering `hello, world` on CPUs 14–15, and relays its answer | 200, `hello, world` | the reverse proxy: forwarding, its pool of backend connections, relaying the response. The backend answers about 260k requests a second, which caps what any proxy reaches here |
+| **cache-hot** | `GET /cache/hot` | answers from its HTTP cache, which fetched it once from the cache backend (4 KiB, `Cache-Control: max-age=600`) | 200, 4 KiB | the cache's hit path: one popular response asked for again and again |
+| **cache-zipf** | `GET /cache/1` … `/cache/100000`, the n-th most popular asked for as often as 1/n (Zipf's law, [`zipf.lua`](../loadgen/zipf.lua)) | answers from its cache what it holds, fetches the rest | 200, 4 KiB | the cache under a realistic spread of paths: its lookups, how much of the working set it keeps (the hit ratio), its memory. HTTP/1.1 only |
+
+Not every server serves every test: Envoy serves no files, Caddy, Traefik and Envoy have no cache
+of their own here, and Traefik only proxies.
+
+| | fixed | static | proxy | cache-hot | cache-zipf |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| nginx | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Caddy | ✓ | ✓ | ✓ | | |
+| Traefik | | | ✓ | | |
+| Envoy | ✓ | | ✓ | | |
+| fit | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Each test runs over four protocols, on ports of their own:
+
+| Protocol | Port | | Load generator |
+| --- | --- | --- | --- |
+| HTTP/1.1 | TCP 8080 | plain HTTP/1.1 with keep-alive; one request in flight per connection | wrk |
+| h2c | TCP 8081 | HTTP/2 in cleartext, with prior knowledge; 32 streams per connection | h2load |
+| h2 | TCP 8445 | HTTP/2 over TLS 1.3, chosen by ALPN; 32 streams per connection | h2load |
+| HTTP/3 | UDP 8444 | HTTP/3 over QUIC, TLS 1.3; 32 streams per connection | h2load built with HTTP/3 |
+
+h2 and HTTP/3 use the harness's throwaway self-signed ECDSA P-256 certificate.
 
 ## Scaling
 
@@ -312,3 +416,604 @@ above.
 4. **The bench config's upstream bound** differs from nginx's, which bounds only idle connections:
    for a comparison of the proxies themselves at high counts, a run with fit's `max_pending` raised
    to match what the others queue would separate the bound from the proxy.
+
+## Configs
+
+The configs each server ran with, as the harness rendered them from [`bench/configs`](../configs)
+at e079c83 for this sweep: the backends' addresses filled in (proxy 127.0.0.1:9000, WebSocket
+127.0.0.1:9001, cache 127.0.0.1:9003) and nginx's workers set to the server's 7 CPUs. The settings
+that matter most:
+
+- **Logging**: no access log for any server.
+- **Workers**: nginx 7 worker processes; Envoy 7 worker threads (`--cpuset-threads`); Caddy,
+  Traefik and fit, all in Go, as many threads as the 7 CPUs they see.
+- **Backend connections**: nginx keeps up to 4,096 idle connections to the backend (`keepalive`)
+  and opens as many as its requests need; Caddy and Traefik keep 4,096 idle and open as many;
+  Envoy's circuit breakers allow a million; fit opens at most 4,096 (`max_conns`) and queues 1,024
+  more (`max_pending`, its default), answering 503 past that.
+- **Streams**: nginx and Envoy allow 256 concurrent streams per HTTP/2 and HTTP/3 connection;
+  Caddy, Traefik and fit keep their defaults, which take the 32 streams each connection uses.
+- **Connections**: nginx `worker_connections 65536` per worker; fit `limits.max_conns` 1,000,000;
+  the others have no limit of their own below the 1,048,576 file descriptors.
+- **Cache**: nginx `proxy_cache` on disk (and so in the page cache), 1 GiB with a lock; fit's
+  `cache` in memory, 1 GiB.
+
+**nginx**: `nginx.conf`, mounted at `/etc/nginx/nginx.conf`; command the image's own (`nginx -g "daemon off;"`).
+
+<details><summary>The full config</summary>
+
+```nginx
+# nginx for the fit benchmark harness. fitbench fills in 7, one
+# worker per CPU the server is pinned to, and the addresses of the proxy,
+# WebSocket and cache backends.
+#
+# Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
+# with the same three locations on both; 8080 also proxies WebSockets at /ws.
+# Port 8443 is HTTP/1.1 over TLS, for idle TLS connections; port 8445 is
+# HTTP/2 over TLS and UDP port 8444 HTTP/3.
+worker_processes 7;
+worker_rlimit_nofile 1048576;
+error_log stderr error;
+
+events {
+    worker_connections 65536;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    access_log off;
+    server_tokens off;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    keepalive_requests 1000000;
+
+    # Every proxy keeps up to 4096 idle connections to the backend, more than
+    # the load generators have requests in flight, so none of them closes and
+    # reopens upstream connections under load.
+    upstream backend {
+        server 127.0.0.1:9000;
+        keepalive 4096;
+        keepalive_requests 1000000;
+    }
+
+    upstream wsbackend {
+        server 127.0.0.1:9001;
+    }
+
+    # The cache scenarios: up to 1 GiB of responses, as fit's cache keeps
+    # in memory, here on disk and so in the page cache; enough for every
+    # path the scenarios ask for (about 430 MB), since nginx's max_size is
+    # enforced only by its cache manager, which at the scenarios' rate lets
+    # the cache grow far past a smaller one. Keys for about 128,000.
+    proxy_cache_path /var/cache/nginx/fitbench levels=1:2 keys_zone=bench:16m max_size=1g inactive=1h use_temp_path=off;
+
+    upstream cachebackend {
+        server 127.0.0.1:9003;
+        keepalive 4096;
+        keepalive_requests 1000000;
+    }
+
+    server {
+        listen 8080 reuseport;
+
+        location = /fixed {
+            default_type text/plain;
+            return 200 "hello, world";
+        }
+        location /static/ {
+            root /srv/www;
+        }
+        location = /proxy {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+        }
+        location /cache/ {
+            proxy_pass http://cachebackend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_cache bench;
+            proxy_cache_lock on;
+        }
+        location = /ws {
+            proxy_pass http://wsbackend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 1h;
+        }
+    }
+
+    server {
+        listen 8081 reuseport;
+        http2 on;
+        http2_max_concurrent_streams 256;
+        keepalive_requests 1000000;
+
+        location = /fixed {
+            default_type text/plain;
+            return 200 "hello, world";
+        }
+        location /static/ {
+            root /srv/www;
+        }
+        location = /proxy {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+        }
+        location /cache/ {
+            proxy_pass http://cachebackend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_cache bench;
+            proxy_cache_lock on;
+        }
+    }
+
+    # HTTP/2 over TLS on port 8445 and HTTP/3 on UDP port 8444, with the
+    # same locations as h2c.
+    server {
+        listen 8445 ssl reuseport;
+        http2 on;
+        http2_max_concurrent_streams 256;
+        listen 8444 quic reuseport;
+        http3 on;
+        http3_max_concurrent_streams 256;
+        ssl_certificate /certs/cert.pem;
+        ssl_certificate_key /certs/key.pem;
+        ssl_protocols TLSv1.3;
+        keepalive_requests 1000000;
+
+        location = /fixed {
+            default_type text/plain;
+            return 200 "hello, world";
+        }
+        location /static/ {
+            root /srv/www;
+        }
+        location = /proxy {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+        }
+        location /cache/ {
+            proxy_pass http://cachebackend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_cache bench;
+            proxy_cache_lock on;
+        }
+    }
+
+    server {
+        listen 8443 ssl reuseport;
+        ssl_certificate /certs/cert.pem;
+        ssl_certificate_key /certs/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+    }
+}
+```
+
+</details>
+
+**Caddy**: `Caddyfile`, mounted at `/etc/caddy/Caddyfile`; command the image's own (`caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`).
+
+<details><summary>The full config</summary>
+
+```caddyfile
+# Caddy for the fit benchmark harness. fitbench fills in the addresses of the
+# proxy and WebSocket backends.
+#
+# Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
+# with the same routes on both, /ws proxying WebSockets. Port 8443 is
+# HTTP/1.1 over TLS, for idle TLS connections; port 8445 HTTP/2 over TLS and
+# UDP port 8444 HTTP/3, with the same routes but /ws. Caddy logs no requests
+# unless asked to.
+{
+	admin off
+	auto_https off
+	servers :8080 {
+		protocols h1
+	}
+	servers :8081 {
+		protocols h1 h2c
+	}
+	servers :8443 {
+		protocols h1
+	}
+	servers :8444 {
+		protocols h3
+	}
+	# With h2 alone, Caddy drops TLS connections after the client hello;
+	# clients that offer h2 still get it, by ALPN.
+	servers :8445 {
+		protocols h1 h2
+	}
+}
+
+(routes) {
+	handle /fixed {
+		header Content-Type text/plain
+		respond "hello, world" 200
+	}
+	handle /static/* {
+		root * /srv/www
+		file_server
+	}
+	handle /proxy {
+		# Up to 4096 idle backend connections, as every proxy here keeps;
+		# Caddy's default of 32 makes it reopen them under load.
+		reverse_proxy 127.0.0.1:9000 {
+			transport http {
+				keepalive_idle_conns 4096
+				keepalive_idle_conns_per_host 4096
+			}
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+http://:8080, http://:8081 {
+	handle /ws {
+		reverse_proxy 127.0.0.1:9001
+	}
+	import routes
+}
+
+https://:8444, https://:8445 {
+	tls /certs/cert.pem /certs/key.pem
+	import routes
+}
+
+:8443 {
+	tls /certs/cert.pem /certs/key.pem
+	respond 404
+}
+```
+
+</details>
+
+**Traefik**: `traefik.yml`, mounted at `/etc/traefik/traefik.yml`; command the image's own (`traefik`).
+
+<details><summary>The full config</summary>
+
+```yaml
+# Traefik for the fit benchmark harness. Traefik only proxies: it has no
+# fixed response and serves no files, so it runs the proxy scenario alone.
+#
+# Port 8080 serves HTTP/1.1, and port 8081 h2c (HTTP/2 with prior
+# knowledge), which Traefik accepts on any cleartext entry point; 8080 also
+# proxies WebSockets at /ws. Port 8443 is TLS, for idle TLS connections; port
+# 8445 HTTP/2 over TLS, and UDP port 8444 HTTP/3 (with TLS on TCP 8444
+# beside it, as Traefik requires).
+entryPoints:
+  h1:
+    address: ":8080"
+  h2c:
+    address: ":8081"
+  tls:
+    address: ":8443"
+    http:
+      tls: {}
+  h2:
+    address: ":8445"
+    http:
+      tls: {}
+  h3:
+    address: ":8444"
+    http3: {}
+    http:
+      tls: {}
+# Up to 4096 idle backend connections, as every proxy here keeps; Traefik's
+# default of 200 makes it reopen them under load.
+serversTransport:
+  maxIdleConnsPerHost: 4096
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+log:
+  level: ERROR
+```
+
+</details>
+
+**Traefik, routes**: `dynamic.yml`, mounted at `/etc/traefik/dynamic.yml`.
+
+<details><summary>The full config</summary>
+
+```yaml
+# fitbench fills in the addresses of the proxy and WebSocket backends.
+http:
+  routers:
+    proxy:
+      rule: "Path(`/proxy`)"
+      entryPoints: [h1, h2c]
+      service: backend
+    proxy-tls:
+      rule: "Path(`/proxy`)"
+      entryPoints: [h2, h3]
+      service: backend
+      tls: {}
+    ws:
+      rule: "Path(`/ws`)"
+      entryPoints: [h1]
+      service: wsbackend
+  services:
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:9000"
+    wsbackend:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:9001"
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/cert.pem
+        keyFile: /certs/key.pem
+```
+
+</details>
+
+**Envoy**: `envoy.yaml`, mounted at `/etc/envoy/envoy.yaml`; command `envoy -c /etc/envoy/envoy.yaml --cpuset-threads --log-level error`.
+
+<details><summary>The full config</summary>
+
+```yaml
+# Envoy for the fit benchmark harness. fitbench fills in the addresses of the
+# proxy and WebSocket backends; Envoy runs one worker per CPU it is pinned to
+# (--cpuset-threads).
+#
+# Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
+# with the same routes on both; 8080 also proxies WebSockets at /ws. Port
+# 8443 is HTTP/1.1 over TLS, for idle TLS connections; port 8445 HTTP/2 over
+# TLS and UDP port 8444 HTTP/3, with the same routes as 8080 but /ws. Envoy serves no
+# files and has no cache of its own here, so it runs the fixed and proxy
+# scenarios. No access log is configured, so none is written.
+static_resources:
+  listeners:
+  - name: h1
+    address: {socket_address: {address: 0.0.0.0, port_value: 8080}}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: h1
+          codec_type: HTTP1
+          upgrade_configs: [{upgrade_type: websocket}]
+          route_config: &routes
+            virtual_hosts:
+            - name: all
+              domains: ["*"]
+              routes:
+              - match: {path: /fixed}
+                direct_response: {status: 200, body: {inline_string: "hello, world"}}
+                response_headers_to_add:
+                - header: {key: content-type, value: text/plain}
+                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - match: {path: /proxy}
+                route: {cluster: backend}
+              - match: {path: /ws}
+                route: {cluster: wsbackend, timeout: 0s, idle_timeout: 3600s}
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  - name: h2c
+    address: {socket_address: {address: 0.0.0.0, port_value: 8081}}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: h2c
+          codec_type: HTTP2
+          http2_protocol_options: {max_concurrent_streams: 256}
+          route_config: *routes
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  - name: tls
+    address: {socket_address: {address: 0.0.0.0, port_value: 8443}}
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+            - certificate_chain: {filename: /certs/cert.pem}
+              private_key: {filename: /certs/key.pem}
+      filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: tls
+          codec_type: HTTP1
+          route_config: {virtual_hosts: [{name: all, domains: ["*"], routes: []}]}
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  - name: h2
+    address: {socket_address: {address: 0.0.0.0, port_value: 8445}}
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            alpn_protocols: [h2]
+            tls_certificates:
+            - certificate_chain: {filename: /certs/cert.pem}
+              private_key: {filename: /certs/key.pem}
+      filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: h2
+          codec_type: HTTP2
+          http2_protocol_options: {max_concurrent_streams: 256}
+          route_config: *routes
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  - name: h3
+    address: {socket_address: {protocol: UDP, address: 0.0.0.0, port_value: 8444}}
+    udp_listener_config:
+      quic_options: {}
+      downstream_socket_config: {prefer_gro: true}
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.quic
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.quic.v3.QuicDownstreamTransport
+          downstream_tls_context:
+            common_tls_context:
+              tls_certificates:
+              - certificate_chain: {filename: /certs/cert.pem}
+                private_key: {filename: /certs/key.pem}
+      filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: h3
+          codec_type: HTTP3
+          http3_protocol_options: {quic_protocol_options: {max_concurrent_streams: 256}}
+          route_config: *routes
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  # Envoy's circuit breakers allow 1024 connections, pending and in-flight
+  # requests by default, fewer than h2load keeps in flight; raised so that
+  # the proxy is measured rather than its defaults. Each worker keeps its
+  # own backend connections, reused with keep-alive.
+  - name: backend
+    type: STRICT_DNS
+    dns_lookup_family: V4_ONLY
+    connect_timeout: 5s
+    circuit_breakers:
+      thresholds: [{max_connections: 1000000, max_pending_requests: 1000000, max_requests: 1000000}]
+    load_assignment:
+      cluster_name: backend
+      endpoints: [{lb_endpoints: [{endpoint: {address: {socket_address: {address: "127.0.0.1", port_value: 9000}}}}]}]
+  - name: wsbackend
+    type: STRICT_DNS
+    dns_lookup_family: V4_ONLY
+    connect_timeout: 5s
+    circuit_breakers:
+      thresholds: [{max_connections: 1000000, max_pending_requests: 1000000, max_requests: 1000000}]
+    load_assignment:
+      cluster_name: wsbackend
+      endpoints: [{lb_endpoints: [{endpoint: {address: {socket_address: {address: "127.0.0.1", port_value: 9001}}}}]}]
+```
+
+</details>
+
+**fit**: `fit.json`, mounted at `/etc/fit/fit.json`; command `fit run -c /etc/fit/fit.json`.
+
+<details><summary>The full config</summary>
+
+```json
+{
+  "admin": {"address": "127.0.0.1:9005"},
+  "limits": {"max_conns": 1000000},
+  "listeners": [
+    {"name": "h1", "address": ":8080", "protocols": ["http/1.1"]},
+    {"name": "h2c", "address": ":8081", "protocols": ["h2c"]},
+    {"name": "tls", "address": ":8443", "protocols": ["http/1.1"],
+      "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}},
+    {"name": "h2", "address": ":8445", "protocols": ["h2"],
+      "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}},
+    {"name": "h3", "address": ":8444", "protocols": ["h3"],
+      "tls": {"certificates": [{"cert_file": "/certs/cert.pem", "key_file": "/certs/key.pem"}]}}
+  ],
+  "upstreams": [
+    {"name": "backend", "addresses": ["127.0.0.1:9000"], "max_conns": 4096, "max_idle_conns": 4096},
+    {"name": "wsbackend", "addresses": ["127.0.0.1:9001"]},
+    {"name": "cachebackend", "addresses": ["127.0.0.1:9003"], "max_conns": 4096, "max_idle_conns": 4096}
+  ],
+  "routes": [
+    {
+      "name": "fixed",
+      "match": {"path": ["/fixed"]},
+      "handler": {"module": "respond", "params": {"body": "hello, world", "headers": {"Content-Type": "text/plain"}}}
+    },
+    {
+      "name": "static",
+      "match": {"path": ["/static/*"]},
+      "handler": {"module": "static", "params": {"root": "/srv/www", "precompressed": ["br", "zstd", "gzip"]}}
+    },
+    {
+      "name": "proxy",
+      "match": {"path": ["/proxy"]},
+      "handler": {"module": "proxy", "params": {"upstream": "backend"}}
+    },
+    {
+      "name": "cache",
+      "match": {"path": ["/cache/*"]},
+      "middleware": [{"module": "cache", "params": {"zone": "bench", "max_bytes": 1073741824, "max_entry_bytes": 65536}}],
+      "handler": {"module": "proxy", "params": {"upstream": "cachebackend"}}
+    },
+    {
+      "name": "ws",
+      "match": {"path": ["/ws"]},
+      "handler": {"module": "proxy", "params": {"upstream": "wsbackend"}}
+    }
+  ]
+}
+```
+
+</details>
+
+**The proxy backend (fit)**: `backend.json`, mounted at `/etc/fit/fit.json`; command `fit run -c /etc/fit/fit.json`.
+
+<details><summary>The full config</summary>
+
+```json
+{
+  "listeners": [{"name": "backend", "address": ":9000"}],
+  "routes": [
+    {"handler": {"module": "respond", "params": {"body": "hello, world", "headers": {"Content-Type": "text/plain"}}}}
+  ]
+}
+```
+
+</details>
+
+**The cache backend (fit)**: `cache-backend.json`, mounted at `/etc/fit/fit.json`; command `fit run -c /etc/fit/fit.json`.
+
+<details><summary>The full config</summary>
+
+```json
+{
+  "admin": {"address": "127.0.0.1:9004"},
+  "metrics": {},
+  "listeners": [{"name": "cachebackend", "address": ":9003"}],
+  "routes": [
+    {
+      "name": "cache",
+      "match": {"path": ["/cache/*"]},
+      "handler": {"module": "respond", "params": {"body": "0123456789abcdef… (4,096 bytes)",
+        "headers": {"Content-Type": "text/plain", "Cache-Control": "max-age=600"}}}
+    }
+  ]
+}
+```
+
+</details>
+
+The cache backend answers every path with 4,096 bytes; its body is shortened here.
