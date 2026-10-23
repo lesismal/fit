@@ -374,11 +374,12 @@ var matcherTypes = map[string]bool{
 }
 
 // namedMatcher converts a named matcher's definition, @name with its
-// matchers on its line or in its block. It returns why not, when it
+// matchers on its line or in its block. A block after a matcher's name,
+// as in @name not { ... }, is that matcher's. It returns why not, when it
 // cannot.
 func namedMatcher(d *directive) (*outMatch, string) {
 	lines := d.block
-	if !d.isBlock {
+	if !d.isBlock || len(d.args) > 0 {
 		if len(d.args) == 0 {
 			return nil, "it has no matchers"
 		}

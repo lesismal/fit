@@ -143,3 +143,70 @@ func TestBuildWithModule(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// TestBuildErrors checks that Build reports each step that fails: the
+// options, the directory it builds in, and each go command.
+func TestBuildErrors(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainDir := filepath.Join(dir, "main")
+	if err := os.MkdirAll(filepath.Join(mainDir, "main.go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "fit")
+	fit := Module{Version: "v1.0.0"}
+	for _, tt := range []struct {
+		name string
+		o    Options
+		err  string
+	}{
+		{"no output", Options{}, "no output"},
+		{"no fit", Options{Output: out}, "no fit to build on"},
+		{"without", Options{Output: out, Fit: fit, Without: []string{"example.com/x"}}, "example.com/x"},
+		{"keep under a file", Options{Output: out, Fit: fit, Keep: filepath.Join(file, "sub")}, "file"},
+		{"main.go a directory", Options{Output: out, Fit: fit, Keep: mainDir}, "main.go"},
+	} {
+		if err := Build(ctx, tt.o); err == nil || !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.err)
+		}
+	}
+
+	if runtime.GOOS != "windows" {
+		t.Run("no temp dir", func(t *testing.T) {
+			t.Setenv("TMPDIR", filepath.Join(dir, "missing"))
+			if err := Build(ctx, Options{Output: out, Fit: fit}); err == nil {
+				t.Error("no error")
+			}
+		})
+	}
+	t.Run("no go", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if err := Build(ctx, Options{Output: out, Fit: fit}); err == nil || !strings.Contains(err.Error(), "go mod init") {
+			t.Errorf("%v", err)
+		}
+	})
+
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go command")
+	}
+	// No network, nor proxy: what is not in the module cache cannot be got.
+	t.Setenv("GOPROXY", "off")
+	for _, tt := range []struct {
+		name string
+		o    Options
+		err  string
+	}{
+		{"fit not found", Options{Fit: Module{Version: "v9.9.9"}}, "go get " + FitModule + "@v9.9.9"},
+		{"module not found", Options{Fit: Module{Dir: repoRoot(t)}, With: []Module{{Path: "example.com/nothing"}}}, "go get example.com/nothing@latest"},
+		{"fit not there", Options{Fit: Module{Dir: t.TempDir()}}, "go mod tidy"},
+	} {
+		tt.o.Output, tt.o.Keep = out, t.TempDir()
+		if err := Build(ctx, tt.o); err == nil || !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.err)
+		}
+	}
+}

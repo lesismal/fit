@@ -303,7 +303,12 @@ func node(dec *json.Decoder) (*yamlv3.Node, error) {
 				if err != nil {
 					return nil, err
 				}
-				n.Content = append(n.Content, &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!str", Value: kt.(string)}, v)
+				k := &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!str", Value: kt.(string)}
+				if k.Value == "<<" {
+					// Plain, the key would be a merge key.
+					k.Style = yamlv3.DoubleQuotedStyle
+				}
+				n.Content = append(n.Content, k, v)
 			}
 			_, err := dec.Token()
 			return n, err

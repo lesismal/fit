@@ -214,7 +214,7 @@ func TestCompileErrors(t *testing.T) {
 		`5:28: routes[1].handler.module: there is no module "nope" in http.handlers (it has "respond", "test_holder", "test_inert", "test_probe", "test_trace")`,
 		`6:28: routes[2].handler.module: http.handlers.test_inert is not a handler`,
 		`7:54: routes[3].middleware[0].params: tag x failed`,
-		`7:95: routes[3].middleware[1].module: there is no module "respond" in http.middleware (it has "test_tag")`,
+		`7:95: routes[3].middleware[1].module: there is no module "respond" in http.middleware (it has "test_not_middleware", "test_tag")`,
 		`8:60: routes[4].handler.params.status: 99 is less than the minimum 100`,
 	}, "\n")
 	if err == nil || err.Error() != want {

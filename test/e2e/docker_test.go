@@ -191,13 +191,21 @@ func TestDockerProvider(t *testing.T) {
 		return hosts[second] == 20
 	})
 
+	// The route goes once the provider sees no replica; until then it is
+	// still there without one, and answers 502.
 	r.stop(2)
-	waitFor("no route", func(hosts map[string]int, none int) bool {
-		return none == 20
-	})
-	if resp, err := c.Get(web); err != nil || resp.StatusCode != 404 {
-		t.Fatalf("with no replicas: %v %v", resp, err)
-	} else {
-		resp.Body.Close()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := c.Get(web)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 404 {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("with no replicas: %v %v\nfit's stderr:\n%s", resp, err, f.stderr.String())
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

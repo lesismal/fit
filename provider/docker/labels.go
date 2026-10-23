@@ -86,13 +86,15 @@ func translate(cs []container, opts *config.DockerProvider) (part []byte, proble
 			problem("%v", err)
 			continue
 		}
+		// The group's first container sets its labels; the group is made
+		// only once a container is taken, so one left out leaves none.
 		g := groups[name]
-		if g == nil {
-			g = &labels.Group{Set: l, SvcAddrs: map[string][]string{}}
-			groups[name] = g
+		set := l
+		if g != nil {
+			set = g.Set
 		}
 		svcAddrs := map[string]string{}
-		for key, s := range g.Set.Services {
+		for key, s := range set.Services {
 			if s.Port() == 0 {
 				continue
 			}
@@ -103,8 +105,12 @@ func translate(cs []container, opts *config.DockerProvider) (part []byte, proble
 			}
 			svcAddrs[key] = a
 		}
-		if len(svcAddrs) != g.Set.Ports() {
+		if len(svcAddrs) != set.Ports() {
 			continue
+		}
+		if g == nil {
+			g = &labels.Group{Set: l, SvcAddrs: map[string][]string{}}
+			groups[name] = g
 		}
 		g.Addrs = append(g.Addrs, addr)
 		for key, a := range svcAddrs {

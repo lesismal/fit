@@ -1,8 +1,13 @@
 package main
 
 import (
+	"errors"
+	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 const events = `{"Action":"run","Package":"p","Test":"TestA"}
@@ -92,5 +97,43 @@ func TestAnnotateKeepsTheStart(t *testing.T) {
 	}
 	if s := out.String(); !strings.HasPrefix(s, "::error title=go test p::panic: test timed out") {
 		t.Fatalf("got %q", s[:60])
+	}
+}
+
+func TestReadError(t *testing.T) {
+	var out strings.Builder
+	if err := run(iotest.ErrReader(errors.New("broken")), &out, false); err == nil || err.Error() != "broken" {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// TestMainCommand runs the command itself, on a file for its input and its output.
+func TestMainCommand(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in")
+	if err := os.WriteFile(in, []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdin, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	stdout, err := os.Create(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	oldIn, oldOut, oldArgs, oldFlags := os.Stdin, os.Stdout, os.Args, flag.CommandLine
+	defer func() { os.Stdin, os.Stdout, os.Args, flag.CommandLine = oldIn, oldOut, oldArgs, oldFlags }()
+	os.Stdin, os.Stdout, os.Args = stdin, stdout, []string{"testsummary", "-annotate"}
+	flag.CommandLine = flag.NewFlagSet("testsummary", flag.ContinueOnError)
+	main()
+	got, err := os.ReadFile(stdout.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "::error title=go test p::    a_test.go:9: 50%25 wrong%0AFAIL%0A\n"; string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

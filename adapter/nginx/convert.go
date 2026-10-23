@@ -1187,6 +1187,9 @@ func duration(args []string) (string, bool) {
 
 // size converts an nginx size, as 10m, to bytes.
 func size(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
+	}
 	mult := int64(1)
 	switch s[len(s)-1] {
 	case 'k', 'K':

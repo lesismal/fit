@@ -238,6 +238,11 @@ func TestUnits(t *testing.T) {
 			t.Errorf("%s: %d", in, got)
 		}
 	}
+	for _, in := range []string{"", "m", "-1k", "big"} {
+		if _, ok := size(in); ok {
+			t.Errorf("%q: ok", in)
+		}
+	}
 }
 
 // TestServe serves a converted config: a file from its root, a return, a

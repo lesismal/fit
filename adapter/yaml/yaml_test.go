@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	yamlv3 "go.yaml.in/yaml/v3"
+
 	"github.com/lesismal/fit/config"
 )
 
@@ -160,5 +162,61 @@ routes:
 	}
 	if line, col, ok := r.Position(`routes[0].handler.params["status"]`); !ok || line != 9 || col != 17 {
 		t.Errorf("a map key's path: %d:%d %v", line, col, ok)
+	}
+}
+
+// TestMoreErrors checks the errors of scalars, merge keys and depth that
+// TestErrors does not.
+func TestMoreErrors(t *testing.T) {
+	for yaml, want := range map[string]string{
+		"a: !!bool maybe\n":                                 "line 1, column 4",
+		"a: !!int 99999999999999999999999\n":                "is not a number JSON can hold",
+		"a: !!int x\n":                                      "is not a number JSON can hold",
+		"a: !!float x\n":                                    "line 1, column 4",
+		"a:\n  <<: [1]\n":                                   "a merge key (<<) needs a mapping",
+		"a:\n  <<: {b: 1, b: 2}\n":                          `"b" is a key twice`,
+		strings.Repeat("[", 300) + strings.Repeat("]", 300): "nested too deep",
+	} {
+		if _, err := Adapt([]byte(yaml)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%.40q: %v, want %q", yaml, err, want)
+		}
+	}
+	// Nodes a parsed document does not hold.
+	for _, tt := range []struct {
+		n    *yamlv3.Node
+		want string
+	}{
+		{&yamlv3.Node{Kind: yamlv3.DocumentNode}, "a document inside a document"},
+		{&yamlv3.Node{Kind: 0}, "a node of unknown kind"},
+	} {
+		c := &converter{pos: map[string][2]int{}}
+		if err := c.value(tt.n, "", 0); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%v, want %q", err, tt.want)
+		}
+	}
+	c := &converter{pos: map[string][2]int{}}
+	if _, err := c.members(&yamlv3.Node{Kind: yamlv3.MappingNode}, maxDepth+1); err == nil || !strings.Contains(err.Error(), "nested too deep") {
+		t.Errorf("members too deep: %v", err)
+	}
+}
+
+func TestFromJSONErrors(t *testing.T) {
+	for _, src := range []string{"", "{", "1 2", `{1: 2}`, `{"a": }`, `[1, }`, `]`} {
+		if _, err := FromJSON([]byte(src)); err == nil || !strings.HasPrefix(err.Error(), "JSON: ") {
+			t.Errorf("%q: %v", src, err)
+		}
+	}
+	// A string <<, value or key, which plain could be read as a merge key,
+	// comes back a string.
+	y, err := FromJSON([]byte(`{"k": "<<", "<<": "x", "s": "a\nb", "n": null, "b": false, "f": 1.5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Adapt(y)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, y)
+	}
+	if !same(t, r.JSON, []byte(`{"k": "<<", "<<": "x", "s": "a\nb", "n": null, "b": false, "f": 1.5}`)) {
+		t.Errorf("%s\n%s", y, r.JSON)
 	}
 }
