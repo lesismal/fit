@@ -2900,6 +2900,10 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - **超时**：`connect_timeout`（5s，504）、`response_header_timeout`（60s，504）、`response_idle_timeout`（60s），整体为
   `timeout`（10m）。开始后中断的响应像代理那样对客户端中断（HTTP/1 关闭连接，HTTP/2 流以 `Fit-Error` trailer 结束）；客户端
   离开时关闭与应用的连接。应用的标准错误写入 fit 的日志，每秒最多 100 行。
+- **失效的空闲连接**（1.0 迭代之后增加）：从空闲集合取出的、或由上一个请求直接交接的连接，可能正被应用关闭（如 PHP-FPM 的
+  worker 达到 `pm.max_requests` 时），而 fit 还没收到通知。连接在本请求未收到任何数据时关闭的话，没有请求体且方法可安全重复
+  （GET、HEAD、OPTIONS、TRACE）的请求会在新拨号的连接上重发一次，而不是回答 502，与 net/http 客户端的做法相同；其他请求仍回答
+  502，因为应用可能已经执行过它。`TestStaleIdle` 检查这两种情况。
 - **PHP 参数**：CGI/1.1 和 PHP 的参数（`SCRIPT_FILENAME`、`SCRIPT_NAME`、`PATH_INFO`、`PATH_TRANSLATED`、`DOCUMENT_ROOT`、
   `DOCUMENT_URI`、`REQUEST_URI`、`REQUEST_SCHEME`、`HTTPS`、`REDIRECT_STATUS` 等），请求的字段作为 `HTTP_*`（`Proxy` 除外，
   防 httpoxy），以及 `env` 中的参数。`split_path`（`.php`）把路径分成脚本和 path info，`index`（`index.php`）是目录的脚本。

@@ -37,14 +37,17 @@ type pool struct {
 // get hands a connection to fn: an idle one at once, a new one once it is
 // dialed, or one another request gives back. fn runs once, maybe on this
 // goroutine, maybe on fib's; it never runs while get holds the pool's lock.
-func (p *pool) get(fn func(*conn, error)) {
+func (p *pool) get(fn func(*conn, error)) { p.take(fn, true) }
+
+// take is get, passing over the idle connections when idle is false.
+func (p *pool) take(fn func(*conn, error), idle bool) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
 		fn(nil, errPoolClosed)
 		return
 	}
-	for len(p.idleSet) > 0 {
+	for idle && len(p.idleSet) > 0 {
 		c := p.idleSet[len(p.idleSet)-1]
 		p.idleSet = p.idleSet[:len(p.idleSet)-1]
 		if c.takeIdle() {
@@ -171,6 +174,10 @@ type conn struct {
 	idle   *time.Timer
 	closed bool
 	r      reader
+	// served counts the requests the connection has carried, and heard
+	// says the application sent something for the one it carries.
+	served int
+	heard  bool
 }
 
 // OnOpen keeps the connection.
@@ -192,6 +199,7 @@ func (c *conn) OnOpen(fc *fib.Connection) {
 func (c *conn) OnData(_ *fib.Connection, data []byte) {
 	c.mu.Lock()
 	x := c.x
+	c.heard = true
 	c.mu.Unlock()
 	if x == nil {
 		c.close()
@@ -205,10 +213,12 @@ func (c *conn) OnData(_ *fib.Connection, data []byte) {
 
 func (c *conn) OnPriorityData(*fib.Connection, []byte) {}
 
-// OnClose fails the request on the connection, if any.
+// OnClose fails the request on the connection, if any, or has it sent
+// again when the connection went stale under it.
 func (c *conn) OnClose(_ *fib.Connection, err error) {
 	c.mu.Lock()
 	x := c.x
+	stale := c.staleLocked()
 	c.x = nil
 	c.closed = true
 	if c.idle != nil {
@@ -220,7 +230,7 @@ func (c *conn) OnClose(_ *fib.Connection, err error) {
 		if err == nil {
 			err = errors.New("fastcgi: the application closed the connection")
 		}
-		x.fail(err)
+		x.lost(c, err, stale)
 	}
 }
 
@@ -228,8 +238,22 @@ func (c *conn) OnClose(_ *fib.Connection, err error) {
 func (c *conn) start(x *exchange) {
 	c.mu.Lock()
 	c.x = x
+	c.served++
+	c.heard = false
 	c.mu.Unlock()
 }
+
+// stale reports whether the connection carried a request before the one it
+// carries, and the application has sent nothing for this one: an idle
+// connection the application closed, maybe before it read the request.
+func (c *conn) stale() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.staleLocked()
+}
+
+// staleLocked is stale with c.mu held.
+func (c *conn) staleLocked() bool { return c.served > 1 && !c.heard }
 
 // done takes the request off the connection, which goes back to the pool
 // when it can carry another.

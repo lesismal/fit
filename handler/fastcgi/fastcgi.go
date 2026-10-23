@@ -8,7 +8,9 @@
 // connection, idle ones kept for the next, their number bounded, and a
 // request that finds none free waits in a bounded queue. Every exchange has
 // its timeouts: connect, the response's header, the response going idle,
-// and the whole.
+// and the whole. A request with no body and a method safe to repeat that
+// took an idle connection the application closed unanswered is sent again,
+// once, on a new one.
 package fastcgi
 
 import (
@@ -242,6 +244,9 @@ type exchange struct {
 	declared       bool
 	// held says the connection's reads are held for the client.
 	held bool
+	// retried says the request was sent again after its connection went
+	// stale.
+	retried bool
 }
 
 // start takes a connection for the request.
@@ -292,7 +297,7 @@ func (x *exchange) connected(c *conn, err error) {
 		x.mu.Unlock()
 	}
 	if err := c.send(b); err != nil {
-		x.fail(err)
+		x.lost(c, err, c.stale())
 		return
 	}
 	if !noBody {
@@ -512,6 +517,41 @@ func (x *exchange) end(complete bool) {
 	_ = x.c.Finish()
 	c.done(reuse)
 	x.release()
+}
+
+// lost ends the exchange for err when its connection is gone, but sends the
+// request again, once, on a new connection when the one it had went stale
+// and the request can be sent again: an idle connection the application
+// closed, as PHP-FPM does when a worker reaches pm.max_requests, may have
+// been taken before fit heard. Only a request with no body and a method
+// that is safe to repeat is sent again, as the application may have run it.
+// c is the connection that went; one x no longer has is no news.
+func (x *exchange) lost(c *conn, err error, stale bool) {
+	x.mu.Lock()
+	if x.conn != c {
+		x.mu.Unlock()
+		return
+	}
+	if x.done || !stale || x.retried || !replayable(x.c.Request) {
+		x.mu.Unlock()
+		x.fail(err)
+		return
+	}
+	x.retried = true
+	x.conn = nil
+	x.mu.Unlock()
+	c.done(false)
+	// A new connection: the other idle ones may have gone stale with it.
+	x.h.pool.take(x.connected, false)
+}
+
+// replayable reports whether r may be sent to the application again.
+func replayable(r *stdhttp.Request) bool {
+	switch r.Method {
+	case stdhttp.MethodGet, stdhttp.MethodHead, stdhttp.MethodOptions, stdhttp.MethodTrace:
+		return r.ContentLength == 0 || r.Method == stdhttp.MethodHead
+	}
+	return false
 }
 
 // fail ends the exchange for err: answered with a status of err's when the

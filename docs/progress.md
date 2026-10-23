@@ -4018,6 +4018,12 @@ Differences from the plan:
   began is cut short for the client as the proxy does (the HTTP/1 connection closed, an HTTP/2
   stream ended with a `Fit-Error` trailer); a client that goes closes the application's connection.
   The application's standard error goes to fit's log, at most 100 lines a second.
+- **Stale idle connections** (added after 1.0's iterations): a connection taken from the idle set,
+  or handed on from the last request, may be one the application is closing, as PHP-FPM does when
+  a worker reaches `pm.max_requests`, before fit hears. When it closes with nothing sent for the
+  request, a request with no body and a method safe to repeat (GET, HEAD, OPTIONS, TRACE) is sent
+  again, once, on a newly dialed connection, rather than answered 502, as net/http's client does;
+  any other is answered 502, as the application may have run it. `TestStaleIdle` checks both.
 - **PHP's parameters**: CGI/1.1's and PHP's (`SCRIPT_FILENAME`, `SCRIPT_NAME`, `PATH_INFO`,
   `PATH_TRANSLATED`, `DOCUMENT_ROOT`, `DOCUMENT_URI`, `REQUEST_URI`, `REQUEST_SCHEME`, `HTTPS`,
   `REDIRECT_STATUS` and the rest), the request's fields as `HTTP_*` but `Proxy` (httpoxy), and

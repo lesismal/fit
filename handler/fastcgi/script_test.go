@@ -198,6 +198,17 @@ func (a *fakeApp) answer(q *fcgiReq, script string) bool {
 		write(out("Status: abc\r\n\r\n"))
 		<-waitClosed(conn)
 		return false
+	case "/bye.php":
+		// Answers, then reads the next request on the connection and
+		// closes it unanswered, as an application that went away while
+		// the connection was idle.
+		_ = q.rest()
+		write(out("\r\n\r\nbye"), end())
+		next := &fcgiReq{conn: conn, r: q.r}
+		if next.read(func() bool { return next.paramsEnd }) == nil {
+			a.got <- "dropped"
+		}
+		return false
 	case "/location.php":
 		_ = q.rest()
 		return write(out("Location: /x\r\n\r\n"), end())
@@ -735,5 +746,77 @@ func TestConnUnconnected(t *testing.T) {
 	}
 	if statusOf(errors.New("x")) != 502 || statusOf(fmt.Errorf("w: %w", errTimeout)) != 504 {
 		t.Error("statusOf")
+	}
+}
+
+// TestStaleIdle checks a request that takes an idle connection the
+// application closes unanswered: sent again on a new connection when it has
+// no body and a method safe to repeat, answered 502 otherwise.
+func TestStaleIdle(t *testing.T) {
+	a := newFakeApp(t)
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	h, err := loadHandler(t, `{"address": "`+a.addr+`", "root": "/srv"}`, &module.Env{Engine: engine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Cleanup()
+	for _, tc := range []struct {
+		method, body string
+		code         int
+	}{
+		{"GET", "", 200},
+		{"HEAD", "", 200},
+		{"POST", "", 502},
+		{"POST", "abc", 502},
+	} {
+		if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", "/bye.php", nil)); rec.Response.StatusCode != 200 {
+			t.Fatalf("bye: %d", rec.Response.StatusCode)
+		}
+		// The response ends before the connection is given back.
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			h.pool.mu.Lock()
+			idle := len(h.pool.idleSet)
+			h.pool.mu.Unlock()
+			if idle == 1 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the connection not idle")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		var body io.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		}
+		rec := fibtest.ServeRequest(h, httptest.NewRequest(tc.method, "/lf.php", body))
+		if got := waitFor(t, a.got, "the dropped request"); got != "dropped" {
+			t.Fatalf("%s %q: %q", tc.method, tc.body, got)
+		}
+		if rec.Response.StatusCode != tc.code {
+			t.Errorf("%s %q: %d", tc.method, tc.body, rec.Response.StatusCode)
+		}
+	}
+}
+
+func TestReplayable(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		length int64
+		want   bool
+	}{
+		{"GET", 0, true}, {"OPTIONS", 0, true}, {"TRACE", 0, true}, {"HEAD", 5, true},
+		{"GET", 5, false}, {"GET", -1, false}, {"POST", 0, false}, {"PUT", 0, false}, {"DELETE", 0, false},
+	} {
+		r := httptest.NewRequest(tc.method, "/", nil)
+		r.ContentLength = tc.length
+		if got := replayable(r); got != tc.want {
+			t.Errorf("%s %d: %v", tc.method, tc.length, got)
+		}
 	}
 }
