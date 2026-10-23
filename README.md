@@ -33,6 +33,38 @@ external security review is still to come; see [progress](docs/progress.md) for 
 - [Deploying](deploy/README.md): the container image, the Helm chart and systemd units; and the
   [examples](examples/README.md), with Docker Compose and Kubernetes.
 
+## Installing
+
+With Go 1.27.3 or later, `go install` builds fit into `$(go env GOPATH)/bin`, the latest release
+or any version, tag or commit you name:
+
+```bash
+go install github.com/lesismal/fit/cmd/fit@latest
+```
+
+```bash
+go install github.com/lesismal/fit/cmd/fit@v1.0.0
+```
+
+`go get github.com/lesismal/fit@latest` (or `@v1.0.0`) adds fit to a module of your own, to use
+it as a library or to build fit with plugins (`fit build`); it installs no command.
+
+Without Go, download a prebuilt binary from
+[GitHub Releases](https://github.com/lesismal/fit/releases): Linux (amd64, arm64, armv7, 386),
+macOS (amd64, arm64), Windows (amd64, arm64) and FreeBSD (amd64, arm64), each a `.tar.gz` (a
+`.zip` for Windows) named `fit_<version>_<os>_<arch>`, with their SHA-256 sums in
+`checksums.txt`. The latest release, for Linux on amd64:
+
+```bash
+VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lesismal/fit/releases/latest | sed 's|.*/v||')
+curl -fsSLO "https://github.com/lesismal/fit/releases/download/v${VERSION}/fit_${VERSION}_linux_amd64.tar.gz"
+tar -xzf "fit_${VERSION}_linux_amd64.tar.gz"
+sudo install "fit_${VERSION}_linux_amd64/fit" /usr/local/bin/fit
+```
+
+Set `VERSION=1.0.0` instead for a given version. A container image is published as well:
+`ghcr.io/lesismal/fit` ([deploy/README.md](deploy/README.md)).
+
 ## Building
 
 fit needs Go 1.27.3 or later.

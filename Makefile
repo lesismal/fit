@@ -1,4 +1,4 @@
-.PHONY: all build test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit m3-exit
+.PHONY: all build dist test race test-changed vet lint fmt fmt-check schema fuzz bench check m2-exit m3-exit
 
 GO ?= go
 STATICCHECK ?= staticcheck
@@ -7,6 +7,10 @@ all: check build
 
 build:
 	$(GO) build -o bin/fit ./cmd/fit
+
+# fit's release archives for every platform, in dist/ (scripts/dist.sh).
+dist:
+	scripts/dist.sh
 
 test:
 	$(GO) test ./...

@@ -1,3 +1,4 @@
 /bin/
 bench/.work/
 bench/results/run-*.json
+/dist/

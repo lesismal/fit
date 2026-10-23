@@ -29,6 +29,37 @@ Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要�
 - [部署](deploy/README.zh-CN.md)：容器镜像、Helm chart 和 systemd unit；以及 Docker Compose 和 Kubernetes 的
   [示例](examples/README.zh-CN.md)。
 
+## 安装
+
+有 Go 1.27.3 或更高版本时，`go install` 把 fit 构建到 `$(go env GOPATH)/bin`，可以是最新发布的版本，
+也可以是指定的版本、标签或提交：
+
+```bash
+go install github.com/lesismal/fit/cmd/fit@latest
+```
+
+```bash
+go install github.com/lesismal/fit/cmd/fit@v1.0.0
+```
+
+`go get github.com/lesismal/fit@latest`（或 `@v1.0.0`）把 fit 加入你自己的模块，用作库，或者构建带插件的
+fit（`fit build`）；它不安装命令。
+
+没有 Go 时，从 [GitHub Releases](https://github.com/lesismal/fit/releases) 下载预编译的二进制：
+Linux（amd64、arm64、armv7、386）、macOS（amd64、arm64）、Windows（amd64、arm64）和 FreeBSD
+（amd64、arm64），每个是一个 `.tar.gz`（Windows 为 `.zip`），名为 `fit_<版本>_<系统>_<架构>`，
+SHA-256 校验和在 `checksums.txt` 里。下载最新版本，以 amd64 上的 Linux 为例：
+
+```bash
+VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lesismal/fit/releases/latest | sed 's|.*/v||')
+curl -fsSLO "https://github.com/lesismal/fit/releases/download/v${VERSION}/fit_${VERSION}_linux_amd64.tar.gz"
+tar -xzf "fit_${VERSION}_linux_amd64.tar.gz"
+sudo install "fit_${VERSION}_linux_amd64/fit" /usr/local/bin/fit
+```
+
+要指定版本，改为设置 `VERSION=1.0.0`。另外也发布了容器镜像：`ghcr.io/lesismal/fit`
+（[deploy/README.zh-CN.md](deploy/README.zh-CN.md)）。
+
 ## 构建
 
 fit 需要 Go 1.27.3 或更高版本。

@@ -31,6 +31,9 @@ docker run --rm -p 8080:8080 -v "$PWD/examples/hello.json:/etc/fit/fit.json:ro" 
 
 打 `v<semver>` 标签会把 linux/amd64 和 linux/arm64 的镜像发布为 `ghcr.io/lesismal/fit:<version>` 和
 `:<major>.<minor>`（[release.yml](../.github/workflows/release.yml)）。
+同一个标签还会把 fit 的二进制附到它的 GitHub Release 上，与 README 一起打包，SHA-256 校验和在
+`checksums.txt` 里：Linux（amd64、arm64、armv7、386）、macOS（amd64、arm64）、Windows（amd64、arm64）
+和 FreeBSD（amd64、arm64）。`make dist` 在 `dist/` 里构建同样的包。
 
 ## Helm chart
 

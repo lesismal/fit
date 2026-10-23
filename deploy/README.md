@@ -33,6 +33,9 @@ docker run --rm -p 8080:8080 -v "$PWD/examples/hello.json:/etc/fit/fit.json:ro" 
 
 A tag `v<semver>` publishes the image for linux/amd64 and linux/arm64 as
 `ghcr.io/lesismal/fit:<version>` and `:<major>.<minor>` ([release.yml](../.github/workflows/release.yml)).
+The same tag attaches fit's binaries to its GitHub Release, packed with the READMEs, with their
+SHA-256 sums in `checksums.txt`: Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64), Windows
+(amd64, arm64) and FreeBSD (amd64, arm64). `make dist` builds the same archives in `dist/`.
 
 ## The Helm chart
 

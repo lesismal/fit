@@ -3,18 +3,68 @@ name: Release
 # A tag v<semver> publishes fit's container image, for linux/amd64 and
 # linux/arm64, as ghcr.io/<owner>/fit:<version> and :<major>.<minor>; the
 # Helm chart's appVersion names the image it runs. See deploy/README.md.
+# It also builds fit's binaries for Linux, macOS, Windows and FreeBSD
+# (scripts/dist.sh) and attaches them to the tag's GitHub Release. Run by
+# hand, the workflow only builds the binaries, kept as a workflow artifact.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
+  binaries:
+    name: Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build and pack
+        run: scripts/dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fit-binaries
+          path: dist/*
+
+  github-release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: fit-binaries
+          path: dist
+      # A release made for the tag beforehand keeps its notes; the
+      # archives are added to it, replacing any of the same name.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes
+          fi
+
   image:
     name: Container image
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
