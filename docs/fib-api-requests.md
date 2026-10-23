@@ -56,7 +56,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | made, `3998953` on fib's branch `a40-filter-abort` | 6, 11 | I67 |
 | A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
-| A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | made, `ee1a859`, not yet on fib's `main` | 1, 11, 12 | — |
+| A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
 
 ## Evidence
 
@@ -1310,7 +1310,7 @@ before and after.
 
 ## A44: The client turns a request away past `MaxPendingPerHost` without walking its queue
 
-**Status.** Made (`ee1a859` in fib), by fit's session; not yet pushed to fib's `main`. On the
+**Status.** Done (`ee1a859` on fib's `main`), made by fit's session; fit is on it. On the
 benchmark host, fit's proxy over h2c at 256×32 (8,192 requests in flight, `max_conns` 4,096,
 `max_pending` 1,024) went from nothing but 503s to 194k successful responses a second; at the
 harness's default load, proxy over HTTP/1.1 and h2c is unchanged (`bench/ab.sh`, within noise).
