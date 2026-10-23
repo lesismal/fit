@@ -1,4 +1,4 @@
-// Package fitconf reads and writes fit's own config format, .fit files: the
+// Package fitconf reads and writes fit's own config format, .conf files: the
 // native config written as blocks of directives, as nginx and Caddy write
 // theirs, which says what the JSON would, field for field (decision 021).
 //
@@ -12,7 +12,7 @@
 // { upstream app }. A site, site <hosts...> { route <paths...> { ... } },
 // writes the routes of its hosts together. Which fields there are, and
 // their types, are the config's Go types and each module's params, so
-// that every field JSON and YAML can set, a .fit file can too.
+// that every field JSON and YAML can set, a .conf file can too.
 package fitconf
 
 import (
@@ -30,7 +30,7 @@ import (
 )
 
 func init() {
-	adapter.Register("fit", Adapt, ".fit")
+	adapter.Register("fit", Adapt, ".conf")
 }
 
 var (
@@ -40,12 +40,12 @@ var (
 )
 
 // singular are the names the config's top-level lists of objects take in a
-// .fit file, one directive for each element.
+// .conf file, one directive for each element.
 var singular = map[string]string{
 	"listener": "listeners", "route": "routes", "upstream": "upstreams", "service": "services", "provider": "providers",
 }
 
-// Adapt turns a .fit config into native JSON.
+// Adapt turns a .conf config into native JSON.
 func Adapt(data []byte) (*adapter.Result, error) {
 	ds, err := parse(data)
 	if err != nil {

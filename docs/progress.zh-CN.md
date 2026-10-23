@@ -3050,6 +3050,9 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   `.fit`、YAML 和 JSON 文件组成的目录以 `-watch` 运行，加入、移除和写坏文件）；模板和章节测试（schema）以及
   `TestConfigExamples`（docs：格式页面、快速上手和 README 中的每个 `.fit` 示例都能加载）。它们在基准测试主机上开启 race
   检测通过，`FuzzAdapt` 在那里运行 3 分钟、约 180 万个输入，没有失败。仅涉及控制面：无基准测试（规则 21）。
+- **后续（2026-10-24）：`.fit` 改为 `.conf`。** 该格式的文件改用 `.conf`，`.fit` 扩展名不再使用；nginx 和 Caddyfile 适配器也
+  不再认扩展名和文件名：`fit run` 和 `fit validate` 只加载 fit 自己的格式，nginx 配置或 Caddyfile 用 `fit adapt -from nginx`
+  或 `-from caddyfile` 转换（[决策 021](decisions/021-fit-format-and-config-files.zh-CN.md#后续扩展名改为-conf)）。上面的条目保留当时的名字。
 
 ## 给后续迭代的说明
 

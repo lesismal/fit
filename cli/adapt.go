@@ -20,12 +20,13 @@ import (
 
 const adaptUsage = `Usage: fit adapt [flags]
 
-Converts a config between fit's formats, .fit, YAML and native JSON,
-checked as fit run would load it, and converts nginx configs (.conf) and
-Caddyfiles (a file named Caddyfile, or .caddyfile), of which a common
-subset converts, to help moving to fit. What could not be converted is
-listed on standard error. Several files, or directories of them, are
-merged into one config, as fit run merges them.
+Converts a config between fit's formats, .conf, YAML and native JSON,
+checked as fit run would load it, and converts an nginx config (-from
+nginx) or a Caddyfile (-from caddyfile), of which a common subset
+converts, to help moving to fit: fit run loads only its own formats.
+What could not be converted is listed on standard error. Several files,
+or directories of them, are merged into one config, as fit run merges
+them.
 
 Flags:
 

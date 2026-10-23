@@ -1,9 +1,10 @@
 // Package adapter turns configs written in other formats into fit's native
-// JSON: fit's own .fit files and YAML, and, to help moving to fit, subsets
+// JSON: fit's own .conf files and YAML, and, to help moving to fit, subsets
 // of nginx's configs and Caddy's Caddyfile. An adapter registers itself
-// under a name and the file extensions (or whole file names) it takes, and
-// fit run, fit validate and fit adapt pick one by a file's extension or
-// name, or by its own name. A config may be read from several files and
+// under a name and the file extensions it takes. fit run and fit validate
+// pick one by a file's extension, and load only fit's own formats; the
+// nginx and Caddyfile adapters take no extension, and only fit adapt -from
+// names them, to convert a config into one of fit's. A config may be read from several files and
 // directories, merged (Set).
 package adapter
 
@@ -45,7 +46,7 @@ var (
 )
 
 // Register makes an adapter known by name, for files with exts, as
-// ".yaml", or with a whole name, as "Caddyfile", which has no dot. It panics if name is taken, a mistake in the adapter's code.
+// ".yaml". It panics if name is taken, a mistake in the adapter's code.
 func Register(name string, a Adapter, exts ...string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -76,18 +77,14 @@ func Names() []string {
 }
 
 // ForPath returns the name of the adapter a file at path takes by its
-// extension or its name, or "" for native JSON, as a .json file or one no
-// adapter claims.
+// extension, or "" for native JSON, as a .json file or one no adapter
+// claims.
 func ForPath(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
-	base := filepath.Base(path)
 	mu.RLock()
 	defer mu.RUnlock()
 	for name, e := range adapters {
 		if ext != "" && slices.Contains(e.exts, ext) {
-			return name
-		}
-		if slices.ContainsFunc(e.exts, func(x string) bool { return !strings.HasPrefix(x, ".") && strings.EqualFold(x, base) }) {
 			return name
 		}
 	}

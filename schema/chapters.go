@@ -45,7 +45,7 @@ var standardModules = map[string]struct{}{
 }
 
 // chapter is a chapter's text, and its examples: in JSON, from which the
-// YAML is made, and the .fit file, made from the JSON too unless the
+// YAML is made, and the .conf file, made from the JSON too unless the
 // chapter writes its own, which says the same, as with a site.
 type chapter struct {
 	file string
@@ -62,7 +62,7 @@ var (
 )
 
 // readChapter reads a chapter of schema/doc: Markdown, with at most one
-// JSON example and one .fit example in fenced blocks.
+// JSON example and one .conf example in fenced blocks.
 func readChapter(name string) (*chapter, error) {
 	data, err := doc.ReadFile("doc/" + name)
 	if err != nil {
@@ -85,7 +85,7 @@ func readChapter(name string) (*chapter, error) {
 	return c, nil
 }
 
-// write writes the chapter: its text, then its examples, in a .fit file,
+// write writes the chapter: its text, then its examples, in a .conf file,
 // in YAML and in JSON.
 func (c *chapter) write(buf *bytes.Buffer) error {
 	if c.text != "" {
@@ -106,12 +106,12 @@ func (c *chapter) write(buf *bytes.Buffer) error {
 	if c.route {
 		what = ", a route"
 	}
-	fmt.Fprintf(buf, "\nIn a .fit file:\n\n```fit\n%s\n```\n\nIn YAML%s:\n\n```yaml\n%s```\n\nIn JSON:\n\n```json\n%s\n```\n",
+	fmt.Fprintf(buf, "\nIn a .conf file:\n\n```fit\n%s\n```\n\nIn YAML%s:\n\n```yaml\n%s```\n\nIn JSON:\n\n```json\n%s\n```\n",
 		strings.TrimSuffix(f, "\n"), what, y, c.json)
 	return nil
 }
 
-// fitExample is the chapter's .fit example: its own, or one made from its
+// fitExample is the chapter's .conf example: its own, or one made from its
 // JSON, a route's as a route of a config.
 func (c *chapter) fitExample() (string, error) {
 	if c.fit != "" {
@@ -123,7 +123,7 @@ func (c *chapter) fitExample() (string, error) {
 	}
 	f, err := fitconf.FromJSON([]byte(src))
 	if err != nil {
-		return "", fmt.Errorf("schema: chapter %s: its JSON as a .fit file: %w", c.file, err)
+		return "", fmt.Errorf("schema: chapter %s: its JSON as a .conf file: %w", c.file, err)
 	}
 	return string(f), nil
 }

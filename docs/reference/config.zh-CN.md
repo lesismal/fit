@@ -6,8 +6,8 @@
 fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`，示例由测试逐个加载验证。字段说明写在代码的 `doc` 标签里，是
 英文的，所以完整的字段表只有 [英文版](config.md)；本页用中文说明每一章讲什么，并链接到英文版对应的位置。
 
-配置可以写成 [.fit 文件](fit.zh-CN.md)、[YAML](yaml.zh-CN.md) 或 [JSON](json.zh-CN.md)，三者的字段都与参考完全相同，
-也可以分散在多个文件中。参考中每一章的示例都依次给出 .fit、YAML 和 JSON 三种写法。
+配置可以写成 [.conf 文件](fit.zh-CN.md)、[YAML](yaml.zh-CN.md) 或 [JSON](json.zh-CN.md)，三者的字段都与参考完全相同，
+也可以分散在多个文件中。参考中每一章的示例都依次给出 .conf、YAML 和 JSON 三种写法。
 配置如何加载、检查和修改，见 [配置](../configuration.zh-CN.md)。
 
 ## 各章内容

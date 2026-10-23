@@ -27,8 +27,8 @@ func (p configPaths) orDefault() []string {
 }
 
 const configFlagUsage = "a config file, or a directory of them, to %s; give -c again for more, which are merged (fit.json when none is given). " +
-	"A file is fit's .fit format, YAML (.yaml, .yml) or JSON (comments and trailing commas allowed); " +
-	"a directory's are those, in its subdirectories too; an nginx config (.conf) or a Caddyfile named is converted"
+	"A file is fit's .conf format, YAML (.yaml, .yml) or JSON (comments and trailing commas allowed); " +
+	"a directory's are those, in its subdirectories too; an nginx config or a Caddyfile is converted with fit adapt -from first"
 
 // loadSet reads and adapts the config paths name, merged.
 func loadSet(paths []string) (*adapter.Set, []adapter.Source, error) {

@@ -8,12 +8,12 @@ default in a comment above it:
 
 | Template | Format |
 | --- | --- |
-| [fit/fit.fit](fit/fit.fit) | fit's own [.fit format](../docs/reference/fit.md) |
+| [fit/fit.conf](fit/fit.conf) | fit's own [.conf format](../docs/reference/fit.md) |
 | [yaml/fit.yaml](yaml/fit.yaml) | YAML |
 | [json/fit.json](json/fit.json) | JSON with comments and trailing commas, which fit reads |
 
 In each, a small config is written out and the rest is commented out, with its default or an
-example value, to be uncommented as needed. Each runs as it is (`fit run -c templates/fit/fit.fit`):
+example value, to be uncommented as needed. Each runs as it is (`fit run -c templates/fit/fit.conf`):
 a listener on :8080, an upstream and a route answering "hello from fit". In a commented-out
 block, a field's comment is a comment within the comment (`# #` or `// //`), so that uncommenting
 the block leaves it a comment. The routes show every handler, one route each, and every

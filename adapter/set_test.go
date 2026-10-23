@@ -32,10 +32,10 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 func TestFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"b.fit": "", "a.json": "", "sites/c.yaml": "", "sites/d.YML": "", "notes.txt": "", "nginx.conf": "",
-		".hidden.fit": "", ".git/x.fit": "", "Caddyfile": "",
+		"b.conf": "", "a.json": "", "sites/c.yaml": "", "sites/d.YML": "", "notes.txt": "",
+		".hidden.conf": "", ".git/x.conf": "", "Caddyfile": "",
 	})
-	got, err := adapter.Files([]string{dir, filepath.Join(dir, "b.fit"), filepath.Join(dir, "nginx.conf")})
+	got, err := adapter.Files([]string{dir, filepath.Join(dir, "b.conf"), filepath.Join(dir, "Caddyfile")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestFiles(t *testing.T) {
 		r, _ := filepath.Rel(dir, f)
 		rel = append(rel, filepath.ToSlash(r))
 	}
-	if want := []string{"a.json", "b.fit", "sites/c.yaml", "sites/d.YML", "nginx.conf"}; !reflect.DeepEqual(rel, want) {
+	if want := []string{"a.json", "b.conf", "sites/c.yaml", "sites/d.YML", "Caddyfile"}; !reflect.DeepEqual(rel, want) {
 		t.Errorf("%v, want %v", rel, want)
 	}
 	empty := filepath.Join(dir, "empty")
@@ -52,7 +52,7 @@ func TestFiles(t *testing.T) {
 	if _, err := adapter.Files([]string{empty}); err == nil || !strings.Contains(err.Error(), "no config files") {
 		t.Errorf("an empty directory: %v", err)
 	}
-	if _, err := adapter.Files([]string{filepath.Join(dir, "missing.fit")}); !os.IsNotExist(err) {
+	if _, err := adapter.Files([]string{filepath.Join(dir, "missing.conf")}); !os.IsNotExist(err) {
 		t.Errorf("a missing file: %v", err)
 	}
 }
@@ -72,8 +72,8 @@ func loadDir(t *testing.T, files map[string]string) (*adapter.Set, error) {
 // the files' order, in whatever format each is written.
 func TestMerge(t *testing.T) {
 	set, err := loadDir(t, map[string]string{
-		"1-base.fit":   "schema_version 1\nlistener web {\n\taddress :8080\n}\nadmin {}\n",
-		"2-api.fit":    "schema_version 1\nsite api.example {\n\troute /v1/* { handler respond { body v1 } }\n}\n",
+		"1-base.conf":  "schema_version 1\nlistener web {\n\taddress :8080\n}\nadmin {}\n",
+		"2-api.conf":   "schema_version 1\nsite api.example {\n\troute /v1/* { handler respond { body v1 } }\n}\n",
 		"3-www.yaml":   "routes:\n  - match: {host: [www.example]}\n    handler: {module: respond}\n",
 		"4-more.json":  `{"listeners": [{"name": "other", "address": ":8081"}], /* a comment */ "routes": []}`,
 		"5-empty.yaml": "{}\n",
@@ -100,16 +100,16 @@ func TestMerge(t *testing.T) {
 // TestMergeConflicts checks that a field other than a list is given by one
 // file only, and that schema_version agrees.
 func TestMergeConflicts(t *testing.T) {
-	_, err := loadDir(t, map[string]string{"a.fit": "admin {}\n", "b.fit": "\nadmin {\n\taddress :1\n}\n"})
-	if err == nil || !strings.Contains(err.Error(), "b.fit:2:1: admin: also given in ") || !strings.Contains(err.Error(), "a.fit") {
+	_, err := loadDir(t, map[string]string{"a.conf": "admin {}\n", "b.conf": "\nadmin {\n\taddress :1\n}\n"})
+	if err == nil || !strings.Contains(err.Error(), "b.conf:2:1: admin: also given in ") || !strings.Contains(err.Error(), "a.conf") {
 		t.Errorf("admin twice: %v", err)
 	}
-	_, err = loadDir(t, map[string]string{"a.fit": "schema_version 1\n", "b.json": `{"schema_version": 2}`})
+	_, err = loadDir(t, map[string]string{"a.conf": "schema_version 1\n", "b.json": `{"schema_version": 2}`})
 	if err == nil || !strings.Contains(err.Error(), "b.json:1:20: schema_version: differs from the one in") {
 		t.Errorf("schema_version: %v", err)
 	}
-	_, err = loadDir(t, map[string]string{"a.fit": "listener a {\n}\n", "b.fit": "listener b {\n}\n\nroute {\n\thandler\n}\n"})
-	if err == nil || !strings.Contains(err.Error(), "b.fit:5:2: handler takes the name of a module") {
+	_, err = loadDir(t, map[string]string{"a.conf": "listener a {\n}\n", "b.conf": "listener b {\n}\n\nroute {\n\thandler\n}\n"})
+	if err == nil || !strings.Contains(err.Error(), "b.conf:5:2: handler takes the name of a module") {
 		t.Errorf("a file that does not adapt: %v", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestMergeConflicts(t *testing.T) {
 // file, its path there and its place.
 func TestMapErrors(t *testing.T) {
 	set, err := loadDir(t, map[string]string{
-		"a.fit":  "listener web {\n\taddress :8080\n}\nroute {\n\thandler respond\n}\n",
+		"a.conf": "listener web {\n\taddress :8080\n}\nroute {\n\thandler respond\n}\n",
 		"b.json": "{\n  \"routes\": [\n    {\"handler\": {\"module\": \"respond\"}},\n    {\"handler\": {\"module\": \"respond\", \"params\": {}}, \"bogus\": 1}\n  ]\n}\n",
 		"c.yaml": "listeners:\n  - name: other\n    address: nowhere\n",
 	})
@@ -133,7 +133,7 @@ func TestMapErrors(t *testing.T) {
 	// Once the config decodes, its checks find the address, in the third
 	// file.
 	set, err = loadDir(t, map[string]string{
-		"a.fit":  "listener web {\n\taddress :8080\n}\nroute {\n\thandler respond\n}\n",
+		"a.conf": "listener web {\n\taddress :8080\n}\nroute {\n\thandler respond\n}\n",
 		"c.yaml": "listeners:\n  - name: other\n    address: nowhere\n",
 	})
 	if err != nil {

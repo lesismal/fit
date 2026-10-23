@@ -1,11 +1,11 @@
-# .fit reference
+# .conf reference
 
 [English](fit.md) | [简体中文](fit.zh-CN.md)
 
-A `.fit` file is fit's own config format: blocks of directives, as nginx's and Caddy's configs
+A `.conf` file is fit's own config format: blocks of directives, as nginx's and Caddy's configs
 are written, saying what fit's native JSON says, field for field. Every field the
 [config reference](config.md) lists, and every module's params, can be written in it; a `site`
-block writes the routes of a set of host names together. A file ending in `.fit` is read as one
+block writes the routes of a set of host names together. A file ending in `.conf` is read as one
 by `fit run`, `fit validate` and `fit adapt`, and a config may be split across several files and
 directories ([below](#several-files-and-directories)).
 
@@ -219,47 +219,48 @@ too.
 `-c` may be given more than once, and may name a directory; the config is all the files merged:
 
 ```bash
-fit run -c /etc/fit/base.fit -c /etc/fit/sites
+fit run -c /etc/fit/base.conf -c /etc/fit/sites
 ```
 
-- **A directory** stands for its files ending in `.fit`, `.yaml`, `.yml` or `.json`, in its
+- **A directory** stands for its files ending in `.conf`, `.yaml`, `.yml` or `.json`, in its
   subdirectories too, in lexical order; files and directories whose names begin with a `.` are
-  left out. A file named with `-c` is read whatever its name, an nginx config or a Caddyfile
-  included, and a file named twice is read once.
+  left out. A file named with `-c` is read whatever its name, in the format its extension says (JSON when
+  none does), and a file named twice is read once. An nginx config or a Caddyfile is not loaded:
+  convert it with `fit adapt -from nginx` or `-from caddyfile` first.
 - **Merging.** The lists at the top of the config, `listeners`, `routes`, `upstreams`,
   `services` and `providers`, are joined in the order the files are read. Any other field,
   `admin` or `acme` say, is given in one file only; `schema_version` may be given in several, if
   they agree. Each file may be in any of the formats.
 - **Errors** name the file and the place in it, and the path within that file, as
-  `sites/api.fit:12:3: routes[0].handler.params.status: ...`.
+  `sites/api.conf:12:3: routes[0].handler.params.status: ...`.
 - **Reloading.** SIGHUP reads every file again. With `-watch`, a file changed, added to a
   directory or taken out of one applies the config again. Every file is read again each time;
   bounds: 10,000 files, and 64 MiB in all.
 
 ## Errors
 
-A `.fit` file is read strictly. A syntax error, a directive in the wrong form (a value for a
+A `.conf` file is read strictly. A syntax error, a directive in the wrong form (a value for a
 block, two values for one), or a field given twice is an error at its line and column; so is
 everything the config's own check finds, an unknown field, a value out of range or a missing
 one, reported where it was written:
 
 ```text
-fit.fit:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
+fit.conf:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
 ```
 
 ## Converting
 
-`fit adapt` writes a config in any of fit's formats as a `.fit` file, and back:
+`fit adapt` writes a config in any of fit's formats as a `.conf` file, and back:
 
 ```bash
-fit adapt -c fit.json -to fit -o fit.fit
+fit adapt -c fit.json -to fit -o fit.conf
 ```
 
 ```bash
-fit adapt -c fit.fit -o fit.json
+fit adapt -c fit.conf -o fit.json
 ```
 
 Routes are written one by one, not gathered into sites. An nginx config or a Caddyfile converts
-to a `.fit` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
-[from Caddy](../migrating-from-caddy.md). [templates/fit/fit.fit](../../templates/fit/fit.fit)
+to a `.conf` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
+[from Caddy](../migrating-from-caddy.md). [templates/fit/fit.conf](../../templates/fit/fit.conf)
 holds every field, with its description and choices in comments.

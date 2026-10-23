@@ -2,7 +2,7 @@
 
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
-fit reads its config from one file or several, in any of three formats: a **.fit** file, **YAML**
+fit reads its config from one file or several, in any of three formats: a **.conf** file, **YAML**
 or **JSON**. Each says the same things, field for field: the addresses fit listens on, the routes
 that pick what answers each request, the upstreams requests are proxied to, and settings for logs,
 limits, certificates and the Admin API. JSON is what the Admin API takes and returns; the three
@@ -10,7 +10,7 @@ formats have exactly the same fields, and any of them can be converted to the ot
 
 | Format | Best for | Reference |
 | --- | --- | --- |
-| .fit | Configs written by hand: blocks of directives, as nginx and Caddy write theirs, with sites | [.fit reference](reference/fit.md) |
+| .conf | Configs written by hand: blocks of directives, as nginx and Caddy write theirs, with sites | [.conf reference](reference/fit.md) |
 | YAML | Configs written by hand or by tools, with anchors for what repeats | [YAML reference](reference/yaml.md) |
 | JSON | What the Admin API takes and returns, and what tools write | [JSON reference](reference/json.md) |
 
@@ -20,10 +20,10 @@ config in each format, every field in it, ready to copy and edit.
 
 ## The formats
 
-### .fit
+### .conf
 
 fit's own format: a directive for each field, a block for each object, and `site` to write the
-routes of a set of host names together. Files ending in `.fit`.
+routes of a set of host names together. Files ending in `.conf`.
 
 ```fit
 upstream api {
@@ -43,7 +43,7 @@ site example.com {
 ```
 
 The syntax, how each type of field is written, sites, and several files: the
-[.fit reference](reference/fit.md).
+[.conf reference](reference/fit.md).
 
 ### YAML
 
@@ -112,10 +112,10 @@ A config may be split across files, in any of the formats, and directories of th
 with `-c`:
 
 ```bash
-fit run -c /etc/fit/base.fit -c /etc/fit/sites
+fit run -c /etc/fit/base.conf -c /etc/fit/sites
 ```
 
-A directory stands for its `.fit`, `.yaml`, `.yml` and `.json` files, in its subdirectories too,
+A directory stands for its `.conf`, `.yaml`, `.yml` and `.json` files, in its subdirectories too,
 in lexical order, those whose names begin with a `.` left out. The lists at the top of the config,
 `listeners`, `routes`, `upstreams`, `services` and `providers`, are joined in the files' order;
 any other field is given in one file only. An error names its file. The details:
@@ -126,7 +126,7 @@ any other field is given in one file only. An error names its file. The details:
 The format is told from each file's name; the commands are the same for all three:
 
 ```bash
-fit run -c fit.fit
+fit run -c fit.conf
 ```
 
 ```bash
@@ -139,13 +139,13 @@ converts between the formats, merging several files into one:
 
 | From | To | Command |
 | --- | --- | --- |
-| JSON or YAML | .fit | `fit adapt -c fit.json -to fit -o fit.fit` |
-| .fit or YAML | JSON | `fit adapt -c fit.fit -o fit.json` |
-| .fit or JSON | YAML | `fit adapt -c fit.fit -to yaml -o fit.yaml` |
-| a directory | one file | `fit adapt -c conf.d -to fit -o fit.fit` |
+| JSON or YAML | .conf | `fit adapt -c fit.json -to fit -o fit.conf` |
+| .conf or YAML | JSON | `fit adapt -c fit.conf -o fit.json` |
+| .conf or JSON | YAML | `fit adapt -c fit.conf -to yaml -o fit.yaml` |
+| a directory | one file | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` prints the config's JSON Schema, for editors to complete and check JSON and YAML as
-they are written; `fit schema -template fit` prints the .fit template.
+they are written; `fit schema -template fit` prints the .conf template.
 
 ## Changing a running config
 
@@ -158,7 +158,7 @@ to roll back to.
 ## Coming from another server
 
 `fit adapt` converts an nginx config or a Caddyfile to fit's config, listing what it leaves out,
-to start from: `fit adapt -c nginx.conf -to fit -o fit.fit`. The guides for
+to start from: `fit adapt -from nginx -c nginx.conf -to fit -o fit.conf`. The guides for
 [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md) and
 [Traefik](migrating-from-traefik.md) show the same setup in each server and in fit, and how their
 parts map onto fit's.

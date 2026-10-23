@@ -23,8 +23,8 @@ fit version
 
 ## 第一个配置
 
-配置可以是 .fit 文件、YAML 或 JSON（[配置](configuration.zh-CN.md) 比较了三者）；本指南使用 fit 自己的 .fit 格式，由指令块
-组成。把下面的内容保存为 `fit.fit`：
+配置可以是 .conf 文件、YAML 或 JSON（[配置](configuration.zh-CN.md) 比较了三者）；本指南使用 fit 自己的 .conf 格式，由指令块
+组成。把下面的内容保存为 `fit.conf`：
 
 ```fit
 listener web {
@@ -46,8 +46,8 @@ listener 说明 fit 在哪里监听、说什么协议。route 说明它接收哪
 （`handler`），后两者都是模块，参数写在块中。先检查配置，再运行：
 
 ```bash
-fit validate -c fit.fit
-fit run -c fit.fit
+fit validate -c fit.conf
+fit run -c fit.conf
 ```
 
 ```bash
@@ -198,15 +198,15 @@ site example.com {
 
 ## 多个文件
 
-配置变大后可以拆开：`-c` 可以指定目录，其中（包括子目录中）的每个 `.fit`、`.yaml`、`.yml` 和 `.json` 文件都会被读取，
+配置变大后可以拆开：`-c` 可以指定目录，其中（包括子目录中）的每个 `.conf`、`.yaml`、`.yml` 和 `.json` 文件都会被读取，
 各文件的路由、upstream 等拼接在一起：
 
 ```bash
 fit run -c /etc/fit
 ```
 
-例如 `/etc/fit/base.fit` 写 listener 和 `acme`，`/etc/fit/sites/` 中每个站点一个文件。列表以外的字段，如 `admin` 或 `acme`，
-只能在一个文件中给出。详见 [.fit 参考](reference/fit.zh-CN.md#多个文件和目录)。
+例如 `/etc/fit/base.conf` 写 listener 和 `acme`，`/etc/fit/sites/` 中每个站点一个文件。列表以外的字段，如 `admin` 或 `acme`，
+只能在一个文件中给出。详见 [.conf 参考](reference/fit.zh-CN.md#多个文件和目录)。
 
 ## 运行中修改
 
@@ -214,13 +214,13 @@ fit run -c /etc/fit
 配置不会替换正在运行的配置，并会说明原因。没有变化的 listener 保留其连接，进行中的请求按开始时的配置完成。
 
 配置中写上 `admin {}`，Admin API（默认在 127.0.0.1:2019）就可以以 fit 的原生 JSON 读取和修改运行中的配置：下面依次读取
-整个配置、按 JSON pointer 修改第一个路由的参数、加载一份用 `fit adapt` 从 .fit 文件转换来的新配置，再回滚到第一个版本：
+整个配置、按 JSON pointer 修改第一个路由的参数、加载一份用 `fit adapt` 从 .conf 文件转换来的新配置，再回滚到第一个版本：
 
 ```bash
 curl localhost:2019/config
 curl -X PATCH -H 'Content-Type: application/merge-patch+json' \
   -d '{"body": "hello again\n"}' localhost:2019/config/routes/0/handler/params
-fit adapt -c fit.fit -o fit.json
+fit adapt -c fit.conf -o fit.json
 curl -X POST -H 'Content-Type: application/json' -d @fit.json localhost:2019/load
 curl -X POST localhost:2019/rollback/1
 ```
@@ -229,7 +229,7 @@ curl -X POST localhost:2019/rollback/1
 
 ## 接下来
 
-- [配置](configuration.zh-CN.md)：同一个配置写成 [.fit 文件](reference/fit.zh-CN.md)、[YAML](reference/yaml.zh-CN.md)
+- [配置](configuration.zh-CN.md)：同一个配置写成 [.conf 文件](reference/fit.zh-CN.md)、[YAML](reference/yaml.zh-CN.md)
   或 [JSON](reference/json.zh-CN.md)。
 - [配置参考](reference/config.zh-CN.md)：每个字段及其类型和默认值，附示例。
 - 从其他服务器迁移：[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)、

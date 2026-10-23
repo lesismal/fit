@@ -41,3 +41,11 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
   `examples/*.fit`。
 - 配置错误通过 `config.Error` 的 `File` 指出所在文件。
 - Admin API 仍收发一份 JSON 配置；`-c` 读取的内容先合并，再交给它。
+
+## 后续：扩展名改为 .conf
+
+2026-10-24，该格式的扩展名改为 `.conf`：按文件本身的特点（与 nginx、Caddy 一样由指令块组成）来取，不再与 fit 的名字绑定；
+`.fit` 也是 Garmin 运动数据和 FITS 图像的扩展名。项目尚未发布，`.fit` 不再读取。nginx 的配置也以 `.conf` 结尾，所以 fit 不再按
+扩展名或文件名选用 nginx 或 Caddyfile 适配器：`fit run` 和 `fit validate` 只加载 fit 自己的格式（`.conf`、YAML、JSON），
+其他格式用 `fit adapt -from nginx` 或 `-from caddyfile` 转换成其中之一。该格式仍叫 fit 格式，`-to fit` 仍写出它，包仍是
+`adapter/fitconf`。上面各节保留当时的名字。

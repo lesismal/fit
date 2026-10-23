@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	adapter.Register("nginx", Convert, ".conf", ".nginx")
+	adapter.Register("nginx", Convert)
 }
 
 // The native config the converter writes, its fields in the order the

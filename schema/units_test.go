@@ -112,8 +112,8 @@ func TestChapterErrors(t *testing.T) {
 		t.Error("readChapter of a missing file succeeded")
 	}
 	var buf bytes.Buffer
-	if err := (&chapter{file: "x", json: "{"}).write(&buf); err == nil || !strings.Contains(err.Error(), "as a .fit file") {
-		t.Errorf("JSON that is no .fit file: %v", err)
+	if err := (&chapter{file: "x", json: "{"}).write(&buf); err == nil || !strings.Contains(err.Error(), "as a .conf file") {
+		t.Errorf("JSON that is no .conf file: %v", err)
 	}
 	if err := (&chapter{file: "x", json: "{", fit: "x"}).write(&buf); err == nil || !strings.Contains(err.Error(), "its JSON") {
 		t.Errorf("JSON that is no YAML: %v", err)

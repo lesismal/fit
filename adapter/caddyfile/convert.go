@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	adapter.Register("caddyfile", Convert, ".caddyfile", "Caddyfile")
+	adapter.Register("caddyfile", Convert)
 }
 
 // The native config the converter writes, its fields in the order the

@@ -19,7 +19,7 @@ import (
 // DirExts are the extensions of the files a directory's config is read
 // from: fit's own formats. Other adapters' files, an nginx config or a
 // Caddyfile, are read only when named.
-var DirExts = []string{".fit", ".yaml", ".yml", ".json"}
+var DirExts = []string{".conf", ".yaml", ".yml", ".json"}
 
 // The bounds on a config read from several files.
 const (

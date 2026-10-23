@@ -57,3 +57,14 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
   templates. `examples/*.caddyfile` became `examples/*.fit`.
 - A config's error names its file, through `config.Error`'s `File`.
 - The Admin API still takes and returns one JSON config; what `-c` read is merged before it.
+
+## Later: the extension .conf
+
+On 2026-10-24 the format's extension became `.conf`, chosen for what the files are, blocks of
+directives like nginx's and Caddy's, rather than for fit's name; `.fit` also named Garmin's
+activity files and FITS images. `.fit` is no longer read, the project not having been released.
+Since nginx's configs end in `.conf` too, fit no longer picks the nginx or Caddyfile adapter by a
+file's extension or name: `fit run` and `fit validate` load only fit's own formats (`.conf`,
+YAML, JSON), and `fit adapt -from nginx` or `-from caddyfile` converts the others into one of
+them. The format is still called fit's format, `-to fit` still writes it, and its package is
+still `adapter/fitconf`. The sections above keep the name they had then.

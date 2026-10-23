@@ -208,7 +208,7 @@ func TestApplied(t *testing.T) {
 // so that a file added, changed or taken out is applied.
 func TestDirectory(t *testing.T) {
 	dir := t.TempDir()
-	a := filepath.Join(dir, "a.fit")
+	a := filepath.Join(dir, "a.conf")
 	write(t, a, "A")
 	expand := func(paths []string) ([]string, error) {
 		var files []string
@@ -228,7 +228,7 @@ func TestDirectory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go w.Run(ctx)
-	write(t, filepath.Join(dir, "b.fit"), "B")
+	write(t, filepath.Join(dir, "b.conf"), "B")
 	r.waitFor(t, "a file added", func(a []string, _ []error) bool { return len(a) == 1 && a[0] == "AB" })
 	if err := os.Remove(a); err != nil {
 		t.Fatal(err)
