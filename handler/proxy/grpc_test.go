@@ -212,7 +212,13 @@ func grpcClient(t *testing.T, base string) *grpc.ClientConn {
 }
 
 func grpcContext(t *testing.T) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return grpcContextFor(t, 10*time.Second)
+}
+
+// grpcContextFor is grpcContext with a deadline of d, for a test that moves
+// enough to need more than 10s on a slow machine under the race detector.
+func grpcContextFor(t *testing.T, d time.Duration) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
 	t.Cleanup(cancel)
 	return ctx
 }
@@ -348,11 +354,17 @@ func TestGRPCBidiStreaming(t *testing.T) {
 // client that reads nothing holds back the upstream's stream to it, and an
 // upstream that reads nothing holds back the client's. fit holds neither
 // stream whole, and every message arrives once the slow side reads.
+//
+// It moves 32 MB each way, which takes about 5s on one CPU under the race
+// detector and has taken more than 10s on a CI runner; its deadline is 60s,
+// and a failure says how far each stream got and when, which tells a
+// stream that stopped from one that was slow.
 func TestGRPCBackpressure(t *testing.T) {
 	eachGRPCProto(t, func(t *testing.T, proto string) {
 		addr, svc, _ := grpcUpstream(t, proto)
 		cc := grpcClient(t, startFit(t, config1(`{"upstream": "app"}`), addr))
-		ctx := grpcContext(t)
+		ctx := grpcContextFor(t, 60*time.Second)
+		start := time.Now()
 		const n = 1000
 		pad := strings.Repeat("p", 32<<10)
 
@@ -371,9 +383,10 @@ func TestGRPCBackpressure(t *testing.T) {
 		for i := range n {
 			in := new(msg)
 			if err := down.RecvMsg(in); err != nil || in.N != i {
-				t.Fatalf("message %d: %d, %v", i, in.N, err)
+				t.Fatalf("message %d after %v (the upstream had sent %d): %d, %v", i, time.Since(start), svc.sent.Load(), in.N, err)
 			}
 		}
+		downDone := time.Since(start)
 
 		up, err := cc.NewStream(ctx, &grpcDesc.Streams[1], "/test.Echo/Sum")
 		if err != nil {
@@ -401,7 +414,7 @@ func TestGRPCBackpressure(t *testing.T) {
 		}
 		close(svc.gate)
 		if err := <-done; err != nil {
-			t.Fatal(err)
+			t.Fatalf("the client's stream after %v (the download took %v), %d of %d messages sent: %v", time.Since(start), downDone, sent.Load(), n, err)
 		}
 		out := new(msg)
 		if err := up.RecvMsg(out); err != nil || out.N != n*1000+n+1 {

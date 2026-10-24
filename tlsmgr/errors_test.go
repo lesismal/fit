@@ -129,7 +129,12 @@ func TestACMEStapleRevoked(t *testing.T) {
 	a.UseOCSP(testOCSP(t, &l))
 	a.start()
 	a.Manage([]string{"r.fit.test"})
-	eventually(t, 10*time.Second, "a certificate", func() bool { return a.Certificate("r.fit.test") != nil })
+	// Its first response stapled: the fetch for it is over, and cannot
+	// set the staple's next fetch hours away after the test makes it due.
+	eventually(t, 10*time.Second, "a certificate with its response stapled", func() bool {
+		c := a.Certificate("r.fit.test")
+		return c != nil && len(c.OCSPStaple) > 0
+	})
 	first := a.Certificate("r.fit.test").Leaf.SerialNumber
 	r.set(func(r *responder) { r.status[first.String()] = ocsp.Revoked })
 	a.ocsp.Load().mu.Lock()
