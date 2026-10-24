@@ -107,7 +107,7 @@ func TestExampleFitFiles(t *testing.T) {
 // TestAdaptFit writes a config as a .konf file and reads it back.
 func TestAdaptFit(t *testing.T) {
 	code, out, stderr := runFit("adapt", "-c", "../examples/proxy.json", "-to", "fit")
-	if code != 0 || !strings.Contains(out, "upstream app {\n\taddresses 127.0.0.1:9000 127.0.0.1:9001\n") {
+	if code != 0 || !strings.Contains(out, "upstream app 127.0.0.1:9000 127.0.0.1:9001 {\n\tmax_conns 256\n") {
 		t.Fatalf("to fit: %d %q %q", code, out, stderr)
 	}
 	f := filepath.Join(t.TempDir(), "proxy.konf")

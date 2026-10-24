@@ -14,6 +14,7 @@ directories ([below](#several-files-and-directories)).
 - [Fields](#fields)
 - [Modules](#modules)
 - [Sites](#sites)
+- [Shorthands](#shorthands)
 - [Several files and directories](#several-files-and-directories)
 - [Import and include](#import-and-include)
 - [Errors](#errors)
@@ -97,6 +98,7 @@ What follows a field's name depends on its type:
 | --- | --- | --- |
 | string, duration | one argument | `address :8080` → `"address": ":8080"` |
 | integer, number | one argument | `max_conns 256` → `"max_conns": 256` |
+| number of bytes | one argument, in a unit or none | `max_bytes 1GiB` → `"max_bytes": 1073741824` |
 | boolean | `true` or `false`, or nothing for true | `secure` → `"secure": true` |
 | list of scalars | the arguments, on one line or repeated | `protocols h2 h3` → `"protocols": ["h2", "h3"]` |
 | object | a block of its fields | `health_check { path /healthz }` |
@@ -114,6 +116,10 @@ What follows a field's name depends on its type:
 - A value is read as the field's type has it: `level 5` is a number where the field is one, and
   `body 5` the string `"5"`. A value of the wrong type is reported where it is written, as
   `"100"` quoted for a number.
+- A number of bytes, a field whose name ends in `bytes` or `_size`, may be written in a unit:
+  `KiB`, `MiB`, `GiB` and `TiB` are powers of 1024, `KB`, `MB`, `GB` and `TB` of 1000, and `B` a
+  byte, the case of the letters not minded, as in `16MiB` or `2gb`. A whole number only; quoted, it
+  is a string.
 - An old, renamed field's name still works, with a warning, as in JSON.
 
 ## Modules
@@ -163,7 +169,7 @@ A `site` writes the routes of a set of host names together. It holds what its ro
 the routes themselves:
 
 ```text
-site <hosts...> {
+site <hosts...> {        or site * { for any host
 	listeners <names...>    the routes' listeners, where a route names none
 	priority <n>            their priority, where a route sets none
 	match { ... }           what every route matches too, but host and path;
@@ -177,7 +183,8 @@ Each `route` in a site becomes a route of the config: its `match.host` is the si
 `match.path` the route's arguments, when it has any, and the rest is as a top-level route's:
 `name`, `match`, `middleware`, `handler`, `priority`, `listeners`. Its routes keep the place the
 site is written at among the config's routes. A site's route may not set `host`, nor `path` when
-it has paths as arguments.
+it has paths as arguments. `site *` is a site of any host: its routes match no host, and a route
+with no paths and no match of its own matches every request.
 
 ```fit
 listener web {
@@ -214,6 +221,43 @@ site api.example.com {
 is two routes: `api`, matching the host, the two paths, GET and POST and the client range, with
 `jwt`; and one for `/healthz`, matching the host, its path and the client range, with `jwt`
 too.
+
+## Shorthands
+
+A few fields that are written in nearly every config may be given as arguments; each is the same
+config as its long form, and a block may follow with the rest:
+
+| Short | Long |
+| --- | --- |
+| `listener web :8080 http/1.1 h2c` | `listener web { address :8080; protocols http/1.1 h2c }` |
+| `upstream app 10.0.0.1:80 10.0.0.2:80 { ... }` | `upstream app { addresses 10.0.0.1:80 10.0.0.2:80; ... }` |
+| `tls cert.pem key.pem` | `tls { certificates { cert_file cert.pem; key_file key.pem } }` |
+| `site * { ... }` | routes that match any host |
+| `max_bytes 1GiB` | `max_bytes 1073741824` |
+
+A listener takes its name, its address, then its protocols; an upstream its name, then its
+addresses. A field given as an argument is not given in the block too. `tls` with a block after
+its two files gives the block's certificates after that one. With [snippets](#snippets) for what
+several blocks share, the config of the [first look](#a-first-look) and more fits in a few lines:
+
+```fit
+snippet pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
+
+listener web :8080 http/1.1 h2c
+listener secure :8443 h2 h3 { tls /certs/cert.pem /certs/key.pem }
+
+upstream app 127.0.0.1:9000 127.0.0.1:9001 { include pool }
+upstream auth 127.0.0.1:9100 { include pool }
+
+site * {
+	route /api/* {
+		middleware cache { max_bytes 1GiB; max_entry_bytes 2MiB }
+		handler proxy { upstream app }
+	}
+	route /auth/* { handler proxy { upstream auth } }
+	route { handler respond { status 404 } }
+}
+```
 
 ## Several files and directories
 
@@ -254,6 +298,23 @@ A `.konf` file may name other files itself, with two directives:
 
 A path is relative to the directory of the file naming it. A glob that matches nothing names
 nothing; a path that is not there is an error.
+
+### Snippets
+
+`snippet <name> { ... }`, at the top of a file, defines directives that `include <name>` then
+reads in its place, anywhere after it, as Caddy's snippets are imported:
+
+```fit
+snippet pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
+
+listener web :8080
+upstream backend 127.0.0.1:9001 { include pool }
+upstream cache 127.0.0.1:9003 { include pool }
+```
+
+`include` names a snippet defined before it, in the file or in one included earlier, else a
+file. A snippet may include snippets and files, these relative to the file that defined it, but
+not itself. Its name holds no `/`, `\`, `*`, `?` or `[`, and is defined once.
 
 ```text
 # fit.konf
@@ -303,7 +364,9 @@ fit adapt -c fit.json -to fit -o fit.konf
 fit adapt -c fit.konf -o fit.json
 ```
 
-Routes are written one by one, not gathered into sites. An nginx config or a Caddyfile converts
+Routes are written one by one, not gathered into sites. The file is written with the
+[shorthands](#shorthands), and a block that fits in 80 columns on one line, as in
+`match { path /api/* }`. An nginx config or a Caddyfile converts
 to a `.konf` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
 [from Caddy](../migrating-from-caddy.md). [templates/konf/fit.konf](../../templates/konf/fit.konf)
 holds every field, with its description and choices in comments.

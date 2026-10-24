@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
 	"strconv"
@@ -34,6 +35,7 @@ func init() {
 }
 
 var (
+	tlsType       = reflect.TypeFor[config.TLS]()
 	valueType     = reflect.TypeFor[config.Value]()
 	moduleRefType = reflect.TypeFor[config.ModuleRef]()
 	configType    = reflect.TypeFor[config.Config]()
@@ -43,6 +45,15 @@ var (
 // .konf file, one directive for each element.
 var singular = map[string]string{
 	"listener": "listeners", "route": "routes", "upstream": "upstreams", "service": "services", "provider": "providers",
+}
+
+// shorthands are the fields an element of a top-level list takes as
+// arguments after its name, in order: listener web :8080 http/1.1 h2c is
+// listener web { address :8080; protocols http/1.1 h2c }. The last, a list,
+// takes every argument left.
+var shorthands = map[reflect.Type][]string{
+	reflect.TypeFor[config.Listener](): {"address", "protocols"},
+	reflect.TypeFor[config.Upstream](): {"addresses"},
 }
 
 // Adapt turns a .konf config into native JSON. It cannot include other
@@ -56,7 +67,7 @@ func Adapt(data []byte) (*adapter.Result, error) {
 // files it includes read with include. The files it imports are not read:
 // adapter.Files finds them, and adapter.AdaptSet merges them after it.
 func AdaptFile(path string, data []byte, include adapter.Includer) (*adapter.Result, error) {
-	r := &reader{include: include, stack: []string{path}}
+	r := newReader(path, include)
 	ds, err := r.read(path, data, true)
 	if err != nil {
 		return nil, err
@@ -256,14 +267,23 @@ func (c *converter) appendTo(arr *jnode, t reflect.Type, f *config.Field, d *dir
 		c.at(p, d.name)
 		fields := config.Fields(elem)
 		_, named := lookup(fields, "name")
-		if len(d.args) > 1 || len(d.args) == 1 && !named {
+		short := shorthands[elem]
+		if len(d.args) > 1 && short == nil || len(d.args) == 1 && !named {
 			what := "no arguments"
 			if named {
 				what = "one argument, its name,"
 			}
 			return errTok(d.name, "%s takes %s and a block", d.name.text, what)
 		}
-		v, err := c.object(elem, d.block, p, false)
+		block := d.block
+		if len(d.args) > 1 {
+			var err error
+			if block, err = shorthand(d, d.args[1:], short); err != nil {
+				return err
+			}
+			d = &directive{name: d.name, args: d.args[:1], block: block, hasBlock: true}
+		}
+		v, err := c.object(elem, block, p, false)
 		if err != nil {
 			return err
 		}
@@ -296,6 +316,32 @@ func (c *converter) appendTo(arr *jnode, t reflect.Type, f *config.Field, d *dir
 	return nil
 }
 
+// shorthand returns the block of d with the fields its arguments after its
+// name, args, give, by the shorthand fields: each one argument, but the
+// last, a list, which takes those left.
+func shorthand(d *directive, args []token, fields []string) ([]*directive, error) {
+	var out []*directive
+	for i, name := range fields {
+		if len(args) == 0 {
+			break
+		}
+		if slices.ContainsFunc(d.block, func(b *directive) bool { return b.name.text == name }) {
+			return nil, errTok(args[0], "%s is given twice, as an argument and in the block", name)
+		}
+		n := 1
+		if i == len(fields)-1 {
+			n = len(args)
+		}
+		a := args[0]
+		out = append(out, &directive{name: token{text: name, file: a.file, line: a.line, col: a.col}, args: args[:n]})
+		args = args[n:]
+	}
+	if len(args) > 0 {
+		return nil, errTok(args[0], "%s takes its name, then %s, then a block", d.name.text, strings.Join(fields, " and "))
+	}
+	return append(out, d.block...), nil
+}
+
 // value converts directive d into a value of type t, which is not a list.
 func (c *converter) value(t reflect.Type, f *config.Field, d *directive, path string) (*jnode, error) {
 	switch {
@@ -306,10 +352,23 @@ func (c *converter) value(t reflect.Type, f *config.Field, d *directive, path st
 		return c.module(f.Module, d, path)
 	case isObject(t):
 		c.at(path, d.name)
-		if len(d.args) > 0 {
+		block := d.block
+		switch {
+		case t == tlsType && len(d.args) == 2:
+			// tls <cert file> <key file> is a certificate, before any
+			// the block gives.
+			a := d.args
+			cert := &directive{name: token{text: "certificates", file: a[0].file, line: a[0].line, col: a[0].col}, hasBlock: true, block: []*directive{
+				{name: token{text: "cert_file", file: a[0].file, line: a[0].line, col: a[0].col}, args: a[:1]},
+				{name: token{text: "key_file", file: a[1].file, line: a[1].line, col: a[1].col}, args: a[1:2]},
+			}}
+			block = append([]*directive{cert}, d.block...)
+		case t == tlsType && len(d.args) > 0:
+			return nil, errTok(d.args[0], "tls takes a certificate's file and its key's, as in tls cert.pem key.pem, or a block, or both")
+		case len(d.args) > 0:
 			return nil, errTok(d.args[0], "%s takes a block, not arguments", d.name.text)
 		}
-		return c.object(t, d.block, path, false)
+		return c.object(t, block, path, false)
 	case t.Kind() == reflect.Map:
 		c.at(path, d.name)
 		if len(d.args) > 0 {
@@ -331,7 +390,69 @@ func (c *converter) value(t reflect.Type, f *config.Field, d *directive, path st
 		return nil, errTok(d.args[1], "%s takes one value; quote one that holds spaces", d.name.text)
 	}
 	c.at(path, d.args[0])
+	if a := d.args[0]; !a.quoted && isBytesField(path, t) {
+		if n, ok := parseBytes(a.text); ok {
+			return scalarNode(strconv.FormatInt(n, 10)), nil
+		}
+	}
 	return scalar(t, d.args[0]), nil
+}
+
+// isBytesField says the field at path, of type t, is a number of bytes: an
+// integer whose name ends in bytes or _size.
+func isBytesField(path string, t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64:
+	default:
+		return false
+	}
+	if strings.HasSuffix(path, "]") {
+		return false
+	}
+	name := path[strings.LastIndexByte(path, '.')+1:]
+	return strings.HasSuffix(name, "bytes") || strings.HasSuffix(name, "_size")
+}
+
+// byteUnits are the units a number of bytes may be written in, as 16MiB or
+// 2GB: powers of 1024 and of 1000, the case of the letters not minded.
+var byteUnits = []struct {
+	name string
+	n    int64
+}{
+	{"kib", 1 << 10}, {"mib", 1 << 20}, {"gib", 1 << 30}, {"tib", 1 << 40},
+	{"kb", 1e3}, {"mb", 1e6}, {"gb", 1e9}, {"tb", 1e12}, {"b", 1},
+}
+
+// parseBytes reads a whole number of bytes in a unit, as 16MiB, or false.
+// A number alone is left as it is.
+func parseBytes(s string) (int64, bool) {
+	lower := strings.ToLower(s)
+	for _, u := range byteUnits {
+		num, ok := strings.CutSuffix(lower, u.name)
+		if !ok || num == "" {
+			continue
+		}
+		v, err := strconv.ParseInt(num, 10, 64)
+		if err != nil || v < 0 || v > math.MaxInt64/u.n {
+			return 0, false
+		}
+		return v * u.n, true
+	}
+	return 0, false
+}
+
+// formatBytes writes n in the largest power of 1024 it is a whole number
+// of, from KiB up, or as it is.
+func formatBytes(n int64) string {
+	for _, u := range []struct {
+		name string
+		n    int64
+	}{{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}} {
+		if n > 0 && n%u.n == 0 {
+			return strconv.FormatInt(n/u.n, 10) + u.name
+		}
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 // mapBlock converts a block of keys and their values into an object

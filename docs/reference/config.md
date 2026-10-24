@@ -66,14 +66,7 @@ value of the wrong type is an error, and so is a key written twice.
 In a .konf file:
 
 ```fit
-route {
-	match {
-		host example.com
-	}
-	handler respond {
-		body hello
-	}
-}
+route { match { host example.com }; handler respond { body hello } }
 ```
 
 In YAML:
@@ -138,42 +131,16 @@ by `name`; a route that names none serves every listener.
 In a .konf file:
 
 ```fit
-listener web {
-	address :8080
-	protocols http/1.1 h2c
+listener web :8080 http/1.1 h2c
+
+listener secure :443 http/1.1 h2 h3 {
+	tls /etc/fit/example.pem /etc/fit/example.key
 }
 
-listener secure {
-	address :443
-	protocols http/1.1 h2 h3
-	tls {
-		certificates {
-			cert_file /etc/fit/example.pem
-			key_file /etc/fit/example.key
-		}
-	}
-}
+listener internal 127.0.0.1:8081 { proxy_protocol { trusted 10.0.0.0/8 } }
 
-listener internal {
-	address 127.0.0.1:8081
-	proxy_protocol {
-		trusted 10.0.0.0/8
-	}
-}
-
-route {
-	listeners secure
-	handler respond {
-		body secure
-	}
-}
-
-route {
-	listeners web internal
-	handler respond {
-		body plain
-	}
-}
+route { listeners secure; handler respond { body secure } }
+route { listeners web internal; handler respond { body plain } }
 ```
 
 In YAML:
@@ -479,27 +446,17 @@ An upstream is a named set of servers, which the [proxy](#http-handlers-proxy) h
 In a .konf file:
 
 ```fit
-listener web {
-	address :8080
-}
+listener web :8080
 
-upstream app {
-	addresses 10.0.0.1:8080 10.0.0.2:8080
+upstream app 10.0.0.1:8080 10.0.0.2:8080 {
 	load_balancing least_conn
 	connect_timeout 3s
 	max_fails 3
 	fail_timeout 30s
-	health_check {
-		path /healthz
-		interval 5s
-	}
+	health_check { path /healthz; interval 5s }
 }
 
-route {
-	handler proxy {
-		upstream app
-	}
-}
+route { handler proxy { upstream app } }
 ```
 
 In YAML:
@@ -616,49 +573,17 @@ through without being terminated; `proxy_protocol` tells the upstream who the cl
 In a .konf file:
 
 ```fit
-listener postgres {
-	address :5432
-	protocols tcp
-}
+listener postgres :5432 tcp
+listener dns :53 udp
+listener tls :8443 tcp
 
-listener dns {
-	address :53
-	protocols udp
-}
+upstream db 10.0.0.5:5432
+upstream resolvers 10.0.0.53:53 10.0.0.54:53
+upstream mail 10.0.0.25:8443
 
-listener tls {
-	address :8443
-	protocols tcp
-}
-
-upstream db {
-	addresses 10.0.0.5:5432
-}
-
-upstream resolvers {
-	addresses 10.0.0.53:53 10.0.0.54:53
-}
-
-upstream mail {
-	addresses 10.0.0.25:8443
-}
-
-service postgres {
-	listeners postgres
-	upstream db
-	idle_timeout 30m
-}
-
-service dns {
-	listeners dns
-	upstream resolvers
-}
-
-service mail {
-	listeners tls
-	upstream mail
-	server_names mail.example.com
-}
+service postgres { listeners postgres; upstream db; idle_timeout 30m }
+service dns { listeners dns; upstream resolvers }
+service mail { listeners tls; upstream mail; server_names mail.example.com }
 ```
 
 In YAML:
@@ -753,19 +678,9 @@ rather than holding requests up. Read when fit starts.
 In a .konf file:
 
 ```fit
-access_log {
-	output /var/log/fit/access.log
-	flush_interval 1s
-}
+access_log { output /var/log/fit/access.log; flush_interval 1s }
 
-route {
-	match {
-		host example.com
-	}
-	handler respond {
-		body hello
-	}
-}
+route { match { host example.com }; handler respond { body hello } }
 ```
 
 In YAML:
@@ -813,23 +728,15 @@ upstreams, and fit's metrics exported on a schedule, to a collector. Read when f
 In a .konf file:
 
 ```fit
-listener web {
-	address :8080
-}
+listener web :8080
 
-route {
-	handler respond
-}
+route { handler respond }
 
 telemetry {
 	endpoint http://otel-collector:4318
 	service_name edge
-	traces {
-		sample_ratio 0.1
-	}
-	metrics {
-		interval 30s
-	}
+	traces { sample_ratio 0.1 }
+	metrics { interval 30s }
 }
 ```
 
@@ -915,18 +822,14 @@ where that is lower, half by default; the rest have fixed defaults. The
 In a .konf file:
 
 ```fit
-listener web {
-	address :8080
-}
+listener web :8080
 
-route {
-	handler respond
-}
+route { handler respond }
 
 limits {
 	max_conns 50000
-	max_header_bytes 65536
-	max_body_bytes 104857600
+	max_header_bytes 64KiB
+	max_body_bytes 100MiB
 	max_pending_bytes 25%
 	write_stall_timeout 1m
 }
@@ -995,18 +898,14 @@ memory by default; `write_watermark` is the same backpressure on one connection.
 In a .konf file:
 
 ```fit
-listener web {
-	address :8080
-}
+listener web :8080
 
-route {
-	handler respond
-}
+route { handler respond }
 
 engine {
 	event_loops 4
 	workers 512
-	read_buffer_size 32768
+	read_buffer_size 32KiB
 	write_watermark 131072
 }
 ```
@@ -1071,19 +970,9 @@ off when `admin` is left out. Read when fit starts.
 In a .konf file:
 
 ```fit
-admin {
-	address 127.0.0.1:2019
-	history 20
-}
+admin { address 127.0.0.1:2019; history 20 }
 
-route {
-	match {
-		host example.com
-	}
-	handler respond {
-		body hello
-	}
-}
+route { match { host example.com }; handler respond { body hello } }
 ```
 
 In YAML:
@@ -1138,19 +1027,9 @@ wildcards) get none.
 In a .konf file:
 
 ```fit
-auto_https {
-	disable_redirects true
-	https_port 8443
-}
+auto_https { disable_redirects true; https_port 8443 }
 
-route {
-	match {
-		host example.com
-	}
-	handler respond {
-		body hello
-	}
-}
+route { match { host example.com }; handler respond { body hello } }
 ```
 
 In YAML:
@@ -1204,13 +1083,9 @@ admin {}
 
 metrics {}
 
-listener web {
-	address :8080
-}
+listener web :8080
 
-route {
-	handler respond
-}
+route { handler respond }
 ```
 
 In YAML:
@@ -1261,23 +1136,12 @@ acme {
 	email ops@example.com
 	directory https://acme-staging-v02.api.letsencrypt.org/directory
 	storage /var/lib/fit
-	on_demand {
-		ask http://localhost:5555/allowed
-	}
+	on_demand { ask http://localhost:5555/allowed }
 }
 
-listener https {
-	address :443
-	tls {
-		on_demand true
-	}
-}
+listener https :443 { tls { on_demand true } }
 
-route {
-	handler respond {
-		body hello
-	}
-}
+route { handler respond { body hello } }
 ```
 
 In YAML:
@@ -1413,22 +1277,10 @@ shows the result and where each part came from. Read when fit starts.
 In a .konf file:
 
 ```fit
-listener web {
-	address :80
-}
+listener web :80
 
-provider {
-	docker {
-		endpoint unix:///var/run/docker.sock
-	}
-}
-
-provider kv {
-	etcd {
-		endpoints http://etcd:2379
-		prefix fit/
-	}
-}
+provider { docker { endpoint unix:///var/run/docker.sock } }
+provider kv { etcd { endpoints http://etcd:2379; prefix fit/ } }
 ```
 
 In YAML:
@@ -1593,9 +1445,7 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		host example.com
-	}
+	match { host example.com }
 	handler fastcgi {
 		address unix//run/php/php-fpm.sock
 		root /var/www/app/public
@@ -1665,14 +1515,8 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		method CONNECT
-	}
-	handler forward_proxy {
-		clients 10.0.0.0/8
-		allow *.example.com
-		ports 443
-	}
+	match { method CONNECT }
+	handler forward_proxy { clients 10.0.0.0/8; allow *.example.com; ports 443 }
 }
 ```
 
@@ -1731,25 +1575,13 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		host example.com
-		path /api/*
-	}
+	match { host example.com; path /api/* }
 	handler proxy {
-		upstreams {
-			upstream app
-			weight 95
-		}
-		upstreams {
-			upstream app-canary
-			weight 5
-		}
+		upstreams { upstream app; weight 95 }
+		upstreams { upstream app-canary; weight 5 }
 		failover app-backup
 		host_header api.internal
-		retry {
-			attempts 2
-			statuses 502 503
-		}
+		retry { attempts 2; statuses 502 503 }
 		timeout 30s
 	}
 }
@@ -1849,16 +1681,8 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /health
-	}
-	handler respond {
-		status 200
-		body ok
-		headers {
-			Cache-Control no-store
-		}
-	}
+	match { path /health }
+	handler respond { status 200; body ok; headers { Cache-Control no-store } }
 }
 ```
 
@@ -1905,9 +1729,7 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		host example.com
-	}
+	match { host example.com }
 	handler static {
 		root /srv/www
 		try_files {path} {path}/ /index.html
@@ -1999,10 +1821,7 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		host example.com
-		path /admin/*
-	}
+	match { host example.com; path /admin/* }
 	middleware basic_auth {
 		realm admin
 		users {
@@ -2011,9 +1830,7 @@ route {
 		}
 		user_header X-User
 	}
-	handler respond {
-		body hello
-	}
+	handler respond { body hello }
 }
 ```
 
@@ -2081,15 +1898,9 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /upload
-	}
-	middleware body_limit {
-		max_bytes 100000000
-	}
-	handler respond {
-		body ok
-	}
+	match { path /upload }
+	middleware body_limit { max_bytes 100000000 }
+	handler respond { body ok }
 }
 ```
 
@@ -2137,22 +1948,15 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /assets/*
-	}
+	match { path /assets/* }
 	middleware cache {
 		zone assets
-		max_bytes 268435456
+		max_bytes 256MiB
 		default_ttl 10m
 		stale_while_revalidate 1m
-		disk {
-			path /var/cache/fit/assets
-			max_bytes 10737418240
-		}
+		disk { path /var/cache/fit/assets; max_bytes 10GiB }
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 
@@ -2238,9 +2042,7 @@ route {
 		slow_threshold 2s
 		open_duration 30s
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 
@@ -2295,15 +2097,9 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /internal/*
-	}
-	middleware client_cert {
-		subject_header X-Client-Subject
-	}
-	handler proxy {
-		upstream app
-	}
+	match { path /internal/* }
+	middleware client_cert { subject_header X-Client-Subject }
+	handler proxy { upstream app }
 }
 ```
 
@@ -2350,14 +2146,8 @@ In a .konf file:
 
 ```fit
 route {
-	middleware compress {
-		encodings zstd gzip
-		level default
-		min_bytes 512
-	}
-	handler respond {
-		body hello
-	}
+	middleware compress { encodings zstd gzip; level default; min_bytes 512 }
+	handler respond { body hello }
 }
 ```
 
@@ -2407,13 +2197,8 @@ In a .konf file:
 
 ```fit
 route {
-	middleware concurrency_limit {
-		max 100
-		status 503
-	}
-	handler proxy {
-		upstream app
-	}
+	middleware concurrency_limit { max 100; status 503 }
+	handler proxy { upstream app }
 }
 ```
 
@@ -2463,9 +2248,7 @@ route {
 		uri /api/verify
 		copy_headers Remote-User Remote-Groups
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 
@@ -2519,21 +2302,13 @@ In a .konf file:
 ```fit
 route {
 	middleware headers {
-		request {
-			set {
-				X-Env prod
-			}
-		}
+		request { set { X-Env prod } }
 		response {
-			set {
-				Strict-Transport-Security max-age=31536000
-			}
+			set { Strict-Transport-Security max-age=31536000 }
 			delete Server
 		}
 	}
-	handler respond {
-		body hello
-	}
+	handler respond { body hello }
 }
 ```
 
@@ -2599,20 +2374,14 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /api/*
-	}
+	match { path /api/* }
 	middleware jwt {
 		jwks_url https://auth.example.com/.well-known/jwks.json
 		issuer https://auth.example.com/
 		audience api
-		claims_headers {
-			X-User sub
-		}
+		claims_headers { X-User sub }
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 
@@ -2678,18 +2447,14 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /login
-	}
+	match { path /login }
 	middleware rate_limit {
 		rate 1
 		burst 5
 		key ip
 		trusted_proxies 10.0.0.0/8
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 
@@ -2744,14 +2509,8 @@ In a .konf file:
 
 ```fit
 route {
-	middleware redirect {
-		regexp ^/old/(.*)$
-		to /new/$1
-		status 301
-	}
-	handler respond {
-		body hello
-	}
+	middleware redirect { regexp ^/old/(.*)$; to /new/$1; status 301 }
+	handler respond { body hello }
 }
 ```
 
@@ -2798,16 +2557,9 @@ In a .konf file:
 
 ```fit
 route {
-	match {
-		path /api/*
-	}
-	middleware rewrite {
-		strip_prefix /api
-		add_prefix /v2
-	}
-	handler proxy {
-		upstream app
-	}
+	match { path /api/* }
+	middleware rewrite { strip_prefix /api; add_prefix /v2 }
+	handler proxy { upstream app }
 }
 ```
 
@@ -2865,9 +2617,7 @@ route {
 		timeout 50ms
 		on_error fail
 	}
-	handler proxy {
-		upstream app
-	}
+	handler proxy { upstream app }
 }
 ```
 

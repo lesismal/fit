@@ -12,6 +12,7 @@
 - [字段](#字段)
 - [模块](#模块)
 - [站点](#站点)
+- [简写](#简写)
 - [多个文件和目录](#多个文件和目录)
 - [import 与 include](#import-与-include)
 - [错误](#错误)
@@ -88,6 +89,7 @@ site example.com www.example.com {
 | --- | --- | --- |
 | 字符串、时长 | 一个参数 | `address :8080` → `"address": ":8080"` |
 | 整数、数字 | 一个参数 | `max_conns 256` → `"max_conns": 256` |
+| 字节数 | 一个参数，可带单位 | `max_bytes 1GiB` → `"max_bytes": 1073741824` |
 | 布尔 | `true` 或 `false`，不写表示 true | `secure` → `"secure": true` |
 | 标量列表 | 各个参数，写在一行或重复多行 | `protocols h2 h3` → `"protocols": ["h2", "h3"]` |
 | 对象 | 由其字段组成的块 | `health_check { path /healthz }` |
@@ -101,6 +103,8 @@ site example.com www.example.com {
 - 不带参数的列表是空列表：`match { query { debug } }` 中的 `debug` 是一个必须出现、值不限的查询参数。
 - 值按字段的类型读取：在数字字段中 `level 5` 是数字，而 `body 5` 是字符串 `"5"`。类型不对的值会在它所写的位置报错，
   例如给数字字段写了带引号的 `"100"`。
+- 字节数（名字以 `bytes` 或 `_size` 结尾的字段）可以带单位：`KiB`、`MiB`、`GiB`、`TiB` 是 1024 的幂，`KB`、`MB`、
+  `GB`、`TB` 是 1000 的幂，`B` 是一个字节，不分大小写，如 `16MiB` 或 `2gb`。只能是整数；加了引号就是字符串。
 - 改名前的旧字段名仍然可用，并给出警告，与 JSON 相同。
 
 ## 模块
@@ -147,7 +151,7 @@ route api {
 `site` 把一组域名的路由写在一起。它包含这些路由共有的内容，以及路由本身：
 
 ```text
-site <hosts...> {
+site <hosts...> {        或 site * {，匹配任意域名
 	listeners <names...>    路由的 listener，路由自己没写时使用
 	priority <n>            路由的优先级，路由自己没写时使用
 	match { ... }           每条路由还要匹配的条件，host 和 path 除外；
@@ -159,7 +163,8 @@ site <hosts...> {
 
 站点中的每个 `route` 都成为配置中的一条路由：它的 `match.host` 是站点的域名，`match.path` 是 route 的参数（有参数时），
 其余与顶层路由相同：`name`、`match`、`middleware`、`handler`、`priority`、`listeners`。这些路由在配置的路由中处于站点
-所写的位置。站点的路由不能设置 `host`；以参数给出路径时，也不能在 `match` 中再写 `path`。
+所写的位置。站点的路由不能设置 `host`；以参数给出路径时，也不能在 `match` 中再写 `path`。`site *` 是匹配任意域名的
+站点：它的路由不匹配 host，没有路径也没有自己的 match 的路由匹配所有请求。
 
 ```fit
 listener web {
@@ -196,6 +201,40 @@ site api.example.com {
 得到两条路由：`api`，匹配域名、两个路径、GET 和 POST 以及客户端地址段，带 `jwt`；另一条匹配域名、`/healthz` 和客户端
 地址段，同样带 `jwt`。
 
+## 简写
+
+几乎每份配置都要写的几个字段可以作为参数给出；每种简写与其完整写法是同一份配置，后面仍可跟一个块写其余字段：
+
+| 简写 | 完整写法 |
+| --- | --- |
+| `listener web :8080 http/1.1 h2c` | `listener web { address :8080; protocols http/1.1 h2c }` |
+| `upstream app 10.0.0.1:80 10.0.0.2:80 { ... }` | `upstream app { addresses 10.0.0.1:80 10.0.0.2:80; ... }` |
+| `tls cert.pem key.pem` | `tls { certificates { cert_file cert.pem; key_file key.pem } }` |
+| `site * { ... }` | 匹配任意域名的路由 |
+| `max_bytes 1GiB` | `max_bytes 1073741824` |
+
+listener 依次接名字、地址、协议；upstream 依次接名字、地址。作为参数给出的字段不能再在块中给出。`tls` 在两个文件之后再跟
+块时，块中的证书排在这一个之后。再用 [snippet](#snippet) 写多个块共有的内容，[初识](#初识)中的配置连同更多内容只需几行：
+
+```fit
+snippet pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
+
+listener web :8080 http/1.1 h2c
+listener secure :8443 h2 h3 { tls /certs/cert.pem /certs/key.pem }
+
+upstream app 127.0.0.1:9000 127.0.0.1:9001 { include pool }
+upstream auth 127.0.0.1:9100 { include pool }
+
+site * {
+	route /api/* {
+		middleware cache { max_bytes 1GiB; max_entry_bytes 2MiB }
+		handler proxy { upstream app }
+	}
+	route /auth/* { handler proxy { upstream auth } }
+	route { handler respond { status 404 } }
+}
+```
+
 ## 多个文件和目录
 
 `-c` 可以给出多次，也可以指定目录；配置是所有文件合并的结果：
@@ -227,6 +266,21 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
   include 自己；它不能 import。
 
 路径相对于写下它的文件所在的目录。glob 没有匹配时什么都不引用；路径不存在则报错。
+
+### snippet
+
+在文件顶层用 `snippet <名字> { ... }` 定义一组指令，之后任意位置的 `include <名字>` 在原处读入它们，同 Caddy 的 snippet：
+
+```fit
+snippet pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
+
+listener web :8080
+upstream backend 127.0.0.1:9001 { include pool }
+upstream cache 127.0.0.1:9003 { include pool }
+```
+
+`include` 先找在它之前（本文件或之前 include 的文件中）定义的同名 snippet，找不到才当作文件。snippet 可以 include 其他
+snippet 和文件（文件路径相对于定义它的文件），但不能 include 自己。名字中不能有 `/`、`\`、`*`、`?` 或 `[`，且只能定义一次。
 
 ```text
 # fit.konf
@@ -272,6 +326,6 @@ fit adapt -c fit.json -to fit -o fit.konf
 fit adapt -c fit.konf -o fit.json
 ```
 
-路由逐条写出，不会归并成站点。nginx 配置和 Caddyfile 也可以这样转换成 `.konf` 文件，见
+路由逐条写出，不会归并成站点。写出的文件使用[简写](#简写)，能在 80 列内放下的块写成一行，如 `match { path /api/* }`。nginx 配置和 Caddyfile 也可以这样转换成 `.konf` 文件，见
 [从 nginx 迁移](../migrating-from-nginx.zh-CN.md) 和 [从 Caddy 迁移](../migrating-from-caddy.zh-CN.md)。
 [templates/konf/fit.konf](../../templates/konf/fit.konf) 包含全部字段，说明和可选值写在注释中。

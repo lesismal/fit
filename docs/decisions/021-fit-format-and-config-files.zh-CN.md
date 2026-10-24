@@ -19,9 +19,12 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
   列表取各个参数，对象或 map 取一个块，对象列表重复写块，模块写名字再跟参数块。有哪些字段、各是什么类型，来自配置解码器
   读取的 Go 类型和每个模块的参数，因此 fit 新增的字段或模块无需修改适配器就能用 `.konf` 书写，格式也不会与 JSON 和 YAML
   脱节。值按字段的类型读取，类型不对的值保留下来交给配置检查，在它所写的位置报错。
-- **站点是唯一的简写。** `site <hosts...> { route <paths...> { ... } }` 把一组域名的路由及其共有的内容（listener、优先级、
+- **站点，以及几种简写。** `site <hosts...> { route <paths...> { ... } }` 把一组域名的路由及其共有的内容（listener、优先级、
   match、中间件）写在一起。它在转换前展开为普通路由，不带任何自己的语义；路由总可以逐条写出。顶层列表用单数书写，参数是
-  元素的名字（`listener web { ... }`），使配置读起来像 nginx 和 Caddy 的配置。
+  元素的名字（`listener web { ... }`），使配置读起来像 nginx 和 Caddy 的配置。后来（2026-10-24），为了和 Caddyfile 一样
+  简短，又加了几种同样在转换前展开、不带自己语义的简写：listener 的地址和协议、upstream 的地址作为名字之后的参数，
+  `tls <cert> <key>`，表示任意域名的 `site *`，带单位的字节数（`1GiB`），以及 snippet：`snippet <名字> { ... }` 由
+  `include <名字>` 原地读入，与 `include`、`import` 文件并列。`FromJSON` 写出这些简写，并把能放在一行的块写成一行。
 - **写回。** `fitconf.FromJSON` 把原生 JSON 写成 `.konf` 文件，转换回来得到同样的配置，用于 `fit adapt -to fit`、`.konf`
   模板，以及配置参考中由 JSON 生成的示例，使它们不会不一致。
 - **Caddy 和 nginx 的配置是被转换的，不按 fit 的配置读取。** `adapter/caddyfile` 和 `adapter/nginx` 保留，作为迁移工具：

@@ -9,7 +9,7 @@ var siteShared = []string{"listeners", "priority", "match", "middleware"}
 // routes, where it was written, so that routes keep the order they were
 // written in.
 //
-//	site <hosts...> {
+//	site <hosts...> {      or site * { for any host
 //		listeners ...      the routes' listeners, where a route sets none
 //		priority <n>       their priority, where a route sets none
 //		match { ... }      what every route matches too, but host and path;
@@ -43,6 +43,16 @@ func siteRoutes(site *directive) ([]*directive, error) {
 	}
 	if !site.hasBlock {
 		return nil, errTok(site.name, "a site needs a block with its routes")
+	}
+	// site * { ... } is a site of any host: its routes match none.
+	anyHost := false
+	for _, a := range site.args {
+		if a.text == "*" && !a.quoted {
+			if len(site.args) > 1 {
+				return nil, errTok(a, "* is a site of any host, given alone: site * { ... }")
+			}
+			anyHost = true
+		}
 	}
 	shared := map[string]*directive{}
 	var middleware, routes []*directive
@@ -78,7 +88,9 @@ func siteRoutes(site *directive) ([]*directive, error) {
 		}
 		route := &directive{name: token{text: "route", file: r.name.file, line: r.name.line, col: r.name.col}, hasBlock: true}
 		match := &directive{name: token{text: "match", file: r.name.file, line: r.name.line, col: r.name.col}, hasBlock: true}
-		match.block = append(match.block, &directive{name: token{text: "host", file: site.name.file, line: site.name.line, col: site.name.col}, args: site.args})
+		if !anyHost {
+			match.block = append(match.block, &directive{name: token{text: "host", file: site.name.file, line: site.name.line, col: site.name.col}, args: site.args})
+		}
 		if len(r.args) > 0 {
 			match.block = append(match.block, &directive{name: token{text: "path", file: r.name.file, line: r.name.line, col: r.name.col}, args: r.args})
 		}
@@ -122,7 +134,9 @@ func siteRoutes(site *directive) ([]*directive, error) {
 				match.block = append(match.block, m)
 			}
 		}
-		route.block = append(route.block, match)
+		if len(match.block) > 0 {
+			route.block = append(route.block, match)
+		}
 		for _, name := range []string{"listeners", "priority"} {
 			if d := shared[name]; d != nil && !set[name] {
 				route.block = append(route.block, d)

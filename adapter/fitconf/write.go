@@ -15,7 +15,10 @@ import (
 
 // FromJSON writes native JSON as a .konf file, field for field, with tabs
 // for indentation: what Adapt turns back into the same config. Routes are
-// written one by one, not gathered into sites.
+// written one by one, not gathered into sites. It writes the shorthands
+// Adapt reads (a listener's address and protocols, an upstream's addresses
+// and a tls's one certificate as arguments, numbers of bytes in units), and
+// a block that fits on a line on one.
 func FromJSON(data []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -34,7 +37,7 @@ func FromJSON(data []byte) ([]byte, error) {
 	if err := w.object(configType, obj, 0, true); err != nil {
 		return nil, err
 	}
-	return w.b.Bytes(), nil
+	return compact(w.b.Bytes())
 }
 
 // ordered is a JSON object, its members in order.
@@ -148,7 +151,15 @@ func (w *writer) field(k string, t reflect.Type, f *config.Field, v any, depth i
 		if !ok {
 			return w.generic(k, v, depth)
 		}
-		return w.block(k, nil, depth, func() error { return w.object(t, o, depth+1, false) }, len(o.keys) == 0)
+		var args []string
+		if t == tlsType {
+			args, o = tlsShorthand(o)
+		}
+		if len(args) > 0 && len(o.keys) == 0 {
+			w.line(depth, append([]string{word(k)}, args...)...)
+			return nil
+		}
+		return w.block(k, args, depth, func() error { return w.object(t, o, depth+1, false) }, len(o.keys) == 0)
 	case t.Kind() == reflect.Map:
 		o, ok := v.(*ordered)
 		if !ok {
@@ -198,8 +209,17 @@ func (w *writer) field(k string, t reflect.Type, f *config.Field, v any, depth i
 						o = without(o, "name")
 					}
 				}
+				if len(args) == 1 {
+					var more []string
+					more, o = shorthandArgs(o, shorthands[elem])
+					args = append(args, more...)
+				}
 				if root && i > 0 {
 					w.b.WriteByte('\n')
+				}
+				if len(args) > 1 && len(o.keys) == 0 {
+					w.line(depth, append([]string{name}, args...)...)
+					continue
 				}
 				if err := w.block(name, args, depth, func() error { return w.object(elem, o, depth+1, false) }, len(o.keys) == 0); err != nil {
 					return err
@@ -215,6 +235,12 @@ func (w *writer) field(k string, t reflect.Type, f *config.Field, v any, depth i
 		}
 		w.line(depth, append([]string{word(k)}, words...)...)
 		return nil
+	}
+	if n, ok := v.(json.Number); ok && f != nil && isBytesField(k, t) {
+		if i, err := n.Int64(); err == nil {
+			w.line(depth, word(k), formatBytes(i))
+			return nil
+		}
 	}
 	// A string where the field takes another kind is quoted, so that it
 	// reads back a string, for the config's check to report.
@@ -385,6 +411,70 @@ func word(s string) string {
 func quote(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`, "\r", `\r`, "{$", `\{$`)
 	return `"` + r.Replace(s) + `"`
+}
+
+// shorthandArgs returns the arguments an element of a top-level list
+// takes for the shorthand fields, as Adapt reads them, and o without them:
+// each a string, the last a list of them, in order, as far as o has them.
+func shorthandArgs(o *ordered, fields []string) ([]string, *ordered) {
+	var args []string
+	for i, name := range fields {
+		v, ok := o.get(name)
+		if !ok {
+			break
+		}
+		last := i == len(fields)-1
+		var words []string
+		switch v := v.(type) {
+		case string:
+			if last {
+				return args, o // the last takes a list
+			}
+			words = []string{word(v)}
+		case []any:
+			if !last || len(v) == 0 {
+				return args, o
+			}
+			for _, e := range v {
+				s, ok := e.(string)
+				if !ok {
+					return args, o
+				}
+				words = append(words, word(s))
+			}
+		default:
+			return args, o
+		}
+		args = append(args, words...)
+		o = without(o, name)
+	}
+	return args, o
+}
+
+// tlsShorthand returns a tls's first certificate as the arguments of tls
+// <cert file> <key file>, when it has nothing else, and o without it.
+func tlsShorthand(o *ordered) ([]string, *ordered) {
+	v, _ := o.get("certificates")
+	certs, ok := v.([]any)
+	if !ok || len(certs) == 0 {
+		return nil, o
+	}
+	first, ok := certs[0].(*ordered)
+	if !ok || len(first.keys) != 2 {
+		return nil, o
+	}
+	cf, _ := first.get("cert_file")
+	kf, _ := first.get("key_file")
+	cert, ok1 := cf.(string)
+	key, ok2 := kf.(string)
+	if !ok1 || !ok2 {
+		return nil, o
+	}
+	rest := without(o, "certificates")
+	if len(certs) > 1 {
+		rest = &ordered{keys: append([]string{"certificates"}, rest.keys...), vals: append([]any{certs[1:]}, rest.vals...)}
+	}
+	return []string{word(cert), word(key)}, rest
 }
 
 func without(o *ordered, k string) *ordered {

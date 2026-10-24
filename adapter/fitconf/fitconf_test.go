@@ -162,7 +162,7 @@ func TestErrors(t *testing.T) {
 		{"admin {\n\taddress { x }\n}\n", "2:2: address takes a value, not a block"},
 		{"admin x\n", "1:7: admin takes a block, not arguments"},
 		{"admin {}\nadmin {}\n", "2:1: admin is given twice"},
-		{"listener a b {}\n", "1:1: listener takes one argument, its name, and a block"},
+		{"route a b {}\n", "1:1: route takes one argument, its name, and a block"},
 		{"listener a {\n\tname b\n}\n", "1:10: the name is given twice"},
 		{"route {\n\thandler\n}\n", "2:2: handler takes the name of a module"},
 		{"route {\n\tmatch {\n\t\tpath x { }\n\t}\n}\n", "3:3: path takes a list of values, not a block"},

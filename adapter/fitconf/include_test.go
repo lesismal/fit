@@ -146,15 +146,15 @@ func TestIncludeErrors(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		{"missing", map[string]string{"fit.konf": "include nope.konf\n"}, "fit.konf: include nope.konf: "},
+		{"missing", map[string]string{"fit.konf": "include nope.konf\n"}, "fit.konf:1:9: include nope.konf: there is no snippet nope.konf defined before it, nor such a file"},
 		{"import missing", map[string]string{"fit.konf": "import nope.konf\n"}, "fit.konf: import nope.konf: "},
 		{"itself", map[string]string{"fit.konf": "include fit.konf\n"}, "includes itself"},
 		{"each other", map[string]string{"fit.konf": "include a.konf\n", "a.konf": "include b.konf\n", "b.konf": "include a.konf\n"},
 			"includes itself: " + "{dir}/a.konf includes {dir}/b.konf includes {dir}/a.konf"},
 		{"import in a block", map[string]string{"fit.konf": "route { import a.konf }\n", "a.konf": ""}, "fit.konf:1:9: import is given at the top of a config file only"},
 		{"import in a file included", map[string]string{"fit.konf": "include a.inc\n", "a.inc": "import b.konf\n", "b.konf": ""}, "a.inc:1:1: import is given at the top of a config file only"},
-		{"no files", map[string]string{"fit.konf": "include\n"}, "fit.konf:1:1: include takes the files to include"},
-		{"a block", map[string]string{"fit.konf": "include a.konf { }\n", "a.konf": ""}, "fit.konf:1:1: include takes the files to include"},
+		{"no files", map[string]string{"fit.konf": "include\n"}, "fit.konf:1:1: include takes the snippets or the files to include"},
+		{"a block", map[string]string{"fit.konf": "include a.konf { }\n", "a.konf": ""}, "fit.konf:1:1: include takes the snippets or the files to include"},
 		{"bad glob", map[string]string{"fit.konf": "include [\n"}, "include ["},
 		{"in the file included", map[string]string{"fit.konf": "route a {\n\tinclude a.inc\n}\n", "a.inc": "handler respond\nhandler respond\n"},
 			"a.inc:2:1: handler is given twice"},
@@ -226,4 +226,24 @@ func TestIncludeNeedsAFile(t *testing.T) {
 
 func incName(i int) string {
 	return "f" + string(rune('0'+i/10)) + string(rune('0'+i%10)) + ".inc"
+}
+
+// TestSnippetFiles checks that a snippet defined in a file included is
+// included by its name after it, and that the files a snippet includes are
+// found from the file that defined it.
+func TestSnippetFiles(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"fit.konf":          "include lib/snippets.konf\nupstream app { addresses 10.0.0.1:80; include pool }\nroute a { include secure; handler respond }\n",
+		"lib/snippets.konf": "snippet pool { max_conns 8 }\nsnippet secure { include headers.inc }\n",
+		"lib/headers.inc":   "middleware headers { response { delete Server } }\n",
+	})
+	set, err := loadTree(t, dir, "fit.konf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"upstreams": [{"name": "app", "addresses": ["10.0.0.1:80"], "max_conns": 8}],
+		"routes": [{"name": "a", "middleware": [{"module": "headers", "params": {"response": {"delete": ["Server"]}}}], "handler": {"module": "respond"}}]}`
+	if !same(t, set.JSON, []byte(want)) {
+		t.Errorf("got\n%s", set.JSON)
+	}
 }

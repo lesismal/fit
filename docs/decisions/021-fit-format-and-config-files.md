@@ -26,12 +26,17 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
   change to the adapter, and the format cannot drift from JSON and YAML. Values are typed by their
   field, and one of the wrong type is kept for the config's check, which reports it where it was
   written.
-- **Sites, as the one shorthand.** `site <hosts...> { route <paths...> { ... } }` writes the
+- **Sites, and a few shorthands.** `site <hosts...> { route <paths...> { ... } }` writes the
   routes of a set of host names together, with what they share (listeners, priority, match,
   middleware). It expands to ordinary routes before the conversion, so it adds no semantics of its
   own; a route can always be written out instead. The top-level lists take their names in the
   singular with the element's name as the argument (`listener web { ... }`), so that a config reads
-  as nginx's and Caddy's do.
+  as nginx's and Caddy's do. Later (2026-10-24), to be as short as a Caddyfile, a few more that
+  expand the same way, before the conversion and with no semantics of their own: a listener's
+  address and protocols and an upstream's addresses as arguments after the name, `tls <cert>
+  <key>`, `site *` for any host, numbers of bytes in units (`1GiB`), and snippets,
+  `snippet <name> { ... }` read in place by `include <name>`, beside `include` and `import` of
+  files. `FromJSON` writes the shorthands, and blocks that fit on a line on one.
 - **Writing back.** `fitconf.FromJSON` writes native JSON as a `.konf` file that adapts back to the
   same config, for `fit adapt -to fit`, for the `.konf` template and for the config reference's
   examples, which are made from their JSON, so that they cannot disagree.
