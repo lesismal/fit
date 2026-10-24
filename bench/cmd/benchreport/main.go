@@ -612,7 +612,7 @@ func renderSweep(w io.Writer, runs []*run, level int) {
 			continue
 		}
 		slices.SortStableFunc(rows, func(a, b row) int {
-			for _, c := range [][2]float64{{a.peak.tps(), b.peak.tps()}, {a.peak.cpuEER(), b.peak.cpuEER()}} {
+			for _, c := range [][2]float64{{a.peak.tps(), b.peak.tps()}, {a.peak.cpuEER(), b.peak.cpuEER()}, {a.peak.memEER(), b.peak.memEER()}} {
 				if c[0] != c[1] {
 					if c[0] > c[1] {
 						return -1
@@ -622,27 +622,41 @@ func renderSweep(w io.Writer, runs []*run, level int) {
 			}
 			return slices.Index(servers, a.server) - slices.Index(servers, b.server)
 		})
-		header := []string{"Server", "Peak TPS [↓1]", "CPU EER at peak [↓2]"}
+		header := []string{"Server", "Peak TPS [↓1]", "CPU EER at peak [↓2]", "MEM EER at peak [↓3]", "Memory at peak"}
+		memHeader := []string{"Server"}
 		best := make([]float64, len(runs))
 		for i, rn := range runs {
-			if k.protocol == "http/1.1" {
+			if k.protocol == "http/1.1" || k.protocol == "https/1.1" {
 				header = append(header, group(float64(rn.Params.Connections), 0))
 			} else {
 				header = append(header, fmt.Sprintf("%s×%d", group(float64(rn.Params.H2Connections), 0), rn.Params.H2Streams))
 			}
+			memHeader = append(memHeader, header[len(header)-1])
 			for _, s := range servers {
 				if r, ok := find(rn, s, k); ok && r.Error == "" && r.Skipped == "" {
 					best[i] = max(best[i], r.tps())
 				}
 			}
 		}
-		var bestPeak, bestCPU float64
+		var bestPeak, bestCPU, bestMem float64
 		for _, r := range rows {
-			bestPeak, bestCPU = max(bestPeak, r.peak.tps()), max(bestCPU, r.peak.cpuEER())
+			bestPeak, bestCPU, bestMem = max(bestPeak, r.peak.tps()), max(bestCPU, r.peak.cpuEER()), max(bestMem, r.peak.memEER())
 		}
 		table := [][]string{header}
+		// The memory table: each server's peak memory at each level.
+		memTable := [][]string{memHeader}
 		for _, r := range rows {
-			line := []string{r.server, share(r.peak.tps(), bestPeak, 0), share(r.peak.cpuEER(), bestCPU, 0)}
+			line := []string{r.server, share(r.peak.tps(), bestPeak, 0), share(r.peak.cpuEER(), bestCPU, 0),
+				share(r.peak.memEER(), bestMem, 0), mib(r.peak.memory())}
+			memLine := []string{r.server}
+			for _, rn := range runs {
+				if res, ok := find(rn, r.server, k); ok && res.Skipped == "" && res.Error == "" && res.memory() > 0 {
+					memLine = append(memLine, mib(res.memory()))
+				} else {
+					memLine = append(memLine, "—")
+				}
+			}
+			memTable = append(memTable, memLine)
 			for i, rn := range runs {
 				res, ok := find(rn, r.server, k)
 				switch {
@@ -664,6 +678,8 @@ func renderSweep(w io.Writer, runs []*run, level int) {
 		}
 		fmt.Fprintf(w, "%s %s, %s\n\n", hashes, k.scenario, name)
 		writeTable(w, table, 1)
+		fmt.Fprintf(w, "\nPeak memory at each level:\n\n")
+		writeTable(w, memTable, 1)
 		fmt.Fprintln(w)
 	}
 }
