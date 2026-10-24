@@ -392,7 +392,7 @@ func TestCheck(t *testing.T) {
 
 func TestLoadRuns(t *testing.T) {
 	h := &harness{threads: 4, conns: 2, h2conns: 8, h2streams: 16}
-	wrk, h2, h3 := protocols[0], protocols[2], protocols[4]
+	wrk, h2, h3 := protocols[0], protocols[3], protocols[4]
 	headers := strings.Join(headerFlags(apiHeaders), " ")
 	for _, tt := range []struct {
 		name string
@@ -657,7 +657,7 @@ func TestHelpers(t *testing.T) {
 	if got := scenarioOf("cache-zipf"); got.script != "zipf.lua" {
 		t.Errorf("scenarioOf %+v", got)
 	}
-	if got := strings.Join(protocolNames(), ","); got != "http/1.1,h2c,h2,h3" {
+	if got := strings.Join(protocolNames(), ","); got != "http/1.1,https/1.1,h2c,h2,h3" {
 		t.Errorf("protocolNames %s", got)
 	}
 	if got := strings.Join(idleKindNames(), ","); got != "http1,tls,ws" {
