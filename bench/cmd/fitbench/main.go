@@ -810,6 +810,9 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon
 		r.Error = err.Error()
 		return r
 	}
+	if scheme == "https://" {
+		r.TLS = h.tlsSession(ctx, base+path, p)
+	}
 	if scenario.kind == kindSite {
 		if err := writeURIs(filepath.Join(h.data, "uris-"+sc+"-"+proto.port+".txt"), base, scenario.arg); err != nil {
 			r.Error = err.Error()
@@ -909,6 +912,28 @@ func (h *harness) expected(sc scenario) (path, body string, err error) {
 		body = string(data)
 	}
 	return path, body, nil
+}
+
+// tlsSession returns what curl and the server agree on over protocol p at
+// url, as curl prints it: "TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 /
+// id-ecPublicKey"; or "" when it says nothing. The HTTP/3 curl is built on
+// OpenSSL 3.5, the other on Ubuntu's OpenSSL 3.0, as the load generators
+// beside them are.
+func (h *harness) tlsSession(ctx context.Context, url, p string) string {
+	container, flag := loadgenName, "--http1.1"
+	switch p {
+	case "h2":
+		flag = "--http2"
+	case "h3":
+		container, flag = loadgenH3Name, "--http3-only"
+	}
+	out, _ := docker(ctx, "exec", container, "curl", "-s", "-v", "-k", "--max-time", "5", flag, "-o", "/dev/null", url)
+	for line := range strings.SplitSeq(out, "\n") {
+		if _, after, ok := strings.Cut(line, "SSL connection using "); ok {
+			return strings.TrimSpace(after)
+		}
+	}
+	return ""
 }
 
 // check fetches url once over protocol p and compares the response with

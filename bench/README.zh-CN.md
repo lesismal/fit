@@ -149,7 +149,10 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 | --- | --- | --- |
 | 后端连接数 | 最多 8,192 | nginx 带共享 `zone` 的 `max_conns`、Caddy `max_conns_per_host`、Envoy 熔断器、fit `max_conns`；Traefik 没有此设置 |
 | 等待后端连接的请求 | 最多 8,192 | fit `max_pending`、Envoy `max_pending_requests`；nginx 不能排队，Caddy 和 Traefik 排队不设上限 |
-| 保持的空闲后端连接 | 共 8,192 | nginx 每个 worker 1,170（共 7 个），Caddy、Traefik、fit 8,192；Envoy 没有此设置 |
+| 保持的空闲后端连接 | 共 8,192，空闲 60 秒后关闭 | nginx 每个 worker 1,170（共 7 个）和 `keepalive_timeout 60s`；Caddy `keepalive_idle_conns` 和 `keepalive 60s`（默认 2 分钟）；Traefik `maxIdleConnsPerHost` 和 `idleConnTimeout 60s`（默认 90 秒）；Envoy 不设上限，`idle_timeout 60s`（默认 1 小时）；fit `max_idle_conns`、`idle_timeout` |
+| 被动健康检查 | 无：一次失败不会让唯一的后端退出轮转 | nginx `max_fails=0`、fit `max_fails 0`（两者默认都是 1）；Caddy、Traefik、Envoy 默认没有 |
+| 发给后端的请求头 | 客户端的 `Host`，以及 `X-Forwarded-For`、`-Proto`、`-Host` | nginx `proxy_set_header`（默认把上游名作为 `Host`，且都不发）；Envoy `use_remote_address`，且不为每个请求生成 `x-request-id`（`generate_request_id: false`）；Caddy、Traefik、fit 默认如此，fit 还多发 `Forwarded` |
+| 监听队列 | 2,048，即压测机的 `somaxconn` | nginx `backlog=2048`（默认 511）、Envoy `tcp_backlog_size`（默认 128）、fit `engine.backlog`；Go 服务器用 `somaxconn` |
 | 请求体大小 | 16 MiB | nginx `client_max_body_size`（默认 1 MiB）、Caddy `request_body`、fit 的默认值；Traefik 和 Envoy 流式转发，不设限 |
 | 代理的消息体 | 流式，或在内存中缓冲 | nginx 在内存中缓冲响应，但不写临时文件，上传流式转发；其余流式 |
 | 等待后端 | 连接 5 秒，响应 60 秒 | nginx `proxy_connect_timeout`、`proxy_read_timeout`；Caddy `dial_timeout`、`response_header_timeout`；Traefik `forwardingTimeouts`；Envoy `connect_timeout` 和路由超时（默认 15 秒）；fit `connect_timeout` 和代理的 `timeout` |
@@ -160,6 +163,11 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 | 工作线程 | 7，每 CPU 一个 | nginx `worker_processes`、Envoy `--cpuset-threads`，Go 服务器按绑定的 CPU 数 |
 | 缓存 | 1 GiB，单条最多 2 MiB | nginx `proxy_cache_path`、fit 的 `cache` |
 | 静态文件 | 对路径所知的信息信任 1 秒 | fit 的静态处理器（`check_interval`），它还把 1 MiB 以内的文件放在内存里，最多 64 MiB；nginx `open_file_cache` 缓存 10,000 个路径，`open_file_cache_valid 1s`，内容经 `sendfile` 来自页缓存；Caddy 每次经页缓存读文件 |
+
+每个 TLS 轮次都记录 curl 和服务器协商的结果（`tls`：版本、加密套件、密钥交换）：与 wrk 和 h2load 同容器的 curl
+基于 OpenSSL 3.0，与 HTTP/3 h2load 同容器的基于 OpenSSL 3.5，和压测客户端的协商一致。
+
+后端则按自身性能调优：2 个 CPU 上各绑一个 worker，连接保持 300 秒，缓存文件元数据，不生成 ETag。
 
 都不写访问日志，也都不压缩，无论是实时压缩还是预压缩文件：nginx 官方镜像只能提供 gzip 预压缩文件，其他服务器
 还能提供 brotli 和 zstd，因此都不启用。工作负载仍发送浏览器和 API 客户端的 `Accept-Encoding`，所有服务器都忽略它。

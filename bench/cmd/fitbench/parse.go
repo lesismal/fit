@@ -62,9 +62,12 @@ type Result struct {
 	// as many as they could; Latency's percentiles then come from h2load's
 	// per-request log. IdleHeld is the idle TLS connections held open during
 	// the run, and IdleClosed those the server closed meanwhile.
-	Rate       int `json:"rate,omitempty"`
-	IdleHeld   int `json:"idle_held,omitempty"`
-	IdleClosed int `json:"idle_closed,omitempty"`
+	Rate int `json:"rate,omitempty"`
+	// TLS is the version, cipher and key exchange curl and the server
+	// agreed on before the run, over a protocol with TLS.
+	TLS        string `json:"tls,omitempty"`
+	IdleHeld   int    `json:"idle_held,omitempty"`
+	IdleClosed int    `json:"idle_closed,omitempty"`
 
 	// The server's efficiency. CPUPerRequestUS is the CPU time it spent a
 	// request, in microseconds. RequestsPerSecPerMiB is its requests a

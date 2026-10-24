@@ -179,7 +179,10 @@ the plan's largest load, 7,168 requests in flight, no server is held back by a l
 | --- | --- | --- |
 | Backend connections | at most 8,192 | nginx `max_conns` with a shared `zone`, Caddy `max_conns_per_host`, Envoy's circuit breakers, fit `max_conns`; Traefik has no such setting |
 | Requests waiting for a backend connection | at most 8,192 | fit `max_pending`, Envoy `max_pending_requests`; nginx cannot queue, Caddy and Traefik do without a bound |
-| Idle backend connections kept | 8,192 in all | nginx 1,170 for each of its 7 workers, Caddy, Traefik and fit 8,192; Envoy has no setting |
+| Idle backend connections kept | 8,192 in all, each closed after 60s idle | nginx 1,170 for each of its 7 workers and `keepalive_timeout 60s`; Caddy `keepalive_idle_conns` and `keepalive 60s` (2m by default); Traefik `maxIdleConnsPerHost` and `idleConnTimeout 60s` (90s by default); Envoy has no bound, `idle_timeout 60s` (1h by default); fit `max_idle_conns`, `idle_timeout` |
+| Passive health checks | none: a failure does not take the only backend out of rotation | nginx `max_fails=0` and fit `max_fails 0` (1 by default for both); Caddy, Traefik and Envoy have none by default |
+| Headers sent to the backend | the client's `Host`, and `X-Forwarded-For`, `-Proto` and `-Host` | nginx `proxy_set_header` (it sends its upstream's name as `Host`, and none of them, by default); Envoy `use_remote_address`, and no `x-request-id` made up for each request (`generate_request_id: false`); Caddy, Traefik and fit by default, fit adding `Forwarded` as well |
+| Listen backlog | 2,048, the host's `somaxconn` | nginx `backlog=2048` (511 by default), Envoy `tcp_backlog_size` (128 by default), fit `engine.backlog`; the Go servers use `somaxconn` |
 | Request body size | 16 MiB | nginx `client_max_body_size` (1 MiB by default), Caddy `request_body`, fit's default; Traefik and Envoy, streaming, set none |
 | Proxied bodies | streamed, or buffered in memory | nginx buffers responses in memory but never in temporary files, and streams uploads; the others stream |
 | Waiting for the backend | 5s to connect, 60s for a response | nginx `proxy_connect_timeout`, `proxy_read_timeout`; Caddy `dial_timeout`, `response_header_timeout`; Traefik `forwardingTimeouts`; Envoy `connect_timeout` and its route's (15s by default); fit `connect_timeout` and the proxy's `timeout` |
@@ -190,6 +193,13 @@ the plan's largest load, 7,168 requests in flight, no server is held back by a l
 | Workers | 7, one a CPU | nginx `worker_processes`, Envoy `--cpuset-threads`, the Go servers by the CPUs they are pinned to |
 | Cache | 1 GiB, entries of up to 2 MiB | nginx `proxy_cache_path`, fit's `cache` |
 | Static files | what is learned of a path trusted for 1s | fit's static handler (`check_interval`), which also keeps files of up to 1 MiB in memory, 64 MiB at most; nginx `open_file_cache` for 10,000 paths, `open_file_cache_valid 1s`, the bytes from the page cache by `sendfile`; Caddy reads each file through the page cache |
+
+Every TLS run records what curl and the server agreed on (`tls`: version, cipher, key exchange):
+curl on OpenSSL 3.0 beside wrk and h2load, on OpenSSL 3.5 beside the HTTP/3 h2load, as the load
+generators negotiate.
+
+The backends are tuned for their own speed instead: a worker pinned to each of their 2 CPUs,
+connections kept 300s, file metadata cached, no ETags.
 
 None writes an access log, and none compresses, on the fly or from precompressed files: nginx's
 official image could serve only gzip from precompressed files, the others gzip, brotli and zstd,
