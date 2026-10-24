@@ -81,6 +81,12 @@ type Params struct {
 	ServerCPUs  string `json:"server_cpus"`
 	ClientCPUs  string `json:"client_cpus"`
 	BackendCPUs string `json:"backend_cpus"`
+	// The aligned settings the configs were rendered with (bench/README.md,
+	// "Aligned settings").
+	Aligned Aligned `json:"aligned"`
+	// Derived is the plan the run belongs to, as fitbench plan derived it,
+	// when the run was given it (-derived).
+	Derived json.RawMessage `json:"derived,omitempty"`
 }
 
 // Container names; one of each runs at a time.
@@ -136,10 +142,15 @@ type harness struct {
 	// backend's and the cache origin's, by container name, once started.
 	serverCgroup   string
 	backendCgroups map[string]string
-	report         Report
+	// machine is what fitbench plan reads of this host; zero off Linux.
+	machine Machine
+	report  Report
 }
 
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "plan" {
+		return runPlan(args[1:], os.Stdout)
+	}
 	flags := flag.NewFlagSet("fitbench", flag.ContinueOnError)
 	h := &harness{images: map[string]string{}}
 	serverList := flags.String("servers", "nginx,caddy,traefik,envoy,fit", "the servers to run")
@@ -155,6 +166,9 @@ func run(ctx context.Context, args []string) error {
 	flags.DurationVar(&h.idleSettle, "idle-settle", 5*time.Second, "how long the idle connections sit before the server's memory is read")
 	flags.IntVar(&h.rate, "rate", 0, "requests a second each run keeps to, with h2load over every protocol; 0 for as many as the load generators can")
 	flags.IntVar(&h.holdIdleConns, "hold-idle", 0, "idle TLS connections to hold open during each run")
+	backendConns := flags.Int("backend-conns", 0, "the backend connection bound every proxy shares, and the requests that may wait for one; when 0, half again the run's requests in flight, rounded up to a power of two, at least 16384")
+	backlog := flags.Int("backlog", 0, "the listen backlog every server shares; the host's somaxconn when 0")
+	derived := flags.String("derived", "", "the plan the run belongs to, from fitbench plan -format json, to keep in its results")
 	label := flags.String("label", "", "a name for the run's workload, kept in its results")
 	network := flags.String("network", defaultNetwork(), `"host" (Linux; what published numbers use) or "bridge"`)
 	cpuFlags := [3]*string{
@@ -257,6 +271,30 @@ func run(ctx context.Context, args []string) error {
 		h.threads = ncpu
 	}
 
+	if runtime.GOOS == "linux" {
+		h.machine, _ = detectMachine(os.DirFS("/"), os.Getpagesize())
+	}
+	idle := h.holdIdleConns
+	if len(h.idle) > 0 {
+		idle = max(idle, h.idleConns)
+	}
+	inFlight := max(h.conns, h.h2conns*h.h2streams)
+	if *backendConns <= 0 {
+		*backendConns = max(minBackendConns, nextPow2(inFlight*3/2))
+	}
+	aligned := alignedFor(inFlight, idle, serverThreads, *backendConns, *backlog, h.machine.Somaxconn)
+	var plan json.RawMessage
+	if *derived != "" {
+		data, err := os.ReadFile(*derived)
+		if err != nil {
+			return err
+		}
+		if !json.Valid(data) {
+			return fmt.Errorf("-derived: %s is not JSON", *derived)
+		}
+		plan = json.RawMessage(data)
+	}
+
 	h.report = Report{
 		Started:           time.Now().UTC(),
 		Host:              map[string]string{"docker_cpus": strconv.Itoa(ncpu), "docker_arch": arch},
@@ -270,6 +308,7 @@ func run(ctx context.Context, args []string) error {
 			IdleConns: h.idleConns, IdleSettle: h.idleSettle.String(),
 			Label: *label, Rate: h.rate, HoldIdle: h.holdIdleConns,
 			Network: *network, ServerCPUs: cpus[0], ClientCPUs: cpus[1], BackendCPUs: cpus[2],
+			Aligned: aligned, Derived: plan,
 		},
 	}
 
@@ -282,7 +321,11 @@ func run(ctx context.Context, args []string) error {
 	}
 	vars := map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr,
 		"{{CACHEBACKEND}}": cacheAddr, "{{WORKERS}}": strconv.Itoa(serverThreads),
-		"{{BACKEND_WORKERS}}": strconv.Itoa(max(1, cpusetCount(cpus[2]))),
+		"{{BACKEND_WORKERS}}":         strconv.Itoa(max(1, cpusetCount(cpus[2]))),
+		"{{BACKEND_CONNS}}":           strconv.Itoa(aligned.BackendConns),
+		"{{BACKEND_IDLE_PER_WORKER}}": strconv.Itoa(aligned.IdlePerWorker),
+		"{{BACKLOG}}":                 strconv.Itoa(aligned.Backlog),
+		"{{WORKER_CONNECTIONS}}":      strconv.Itoa(aligned.WorkerConnections),
 		// The proxy backend's API bodies, which nginx's config quotes.
 		"{{APIBODY}}": apiBody, "{{APIPOSTREPLY}}": apiPostReply}
 	// Envoy takes a backend's host and port apart.
@@ -591,6 +634,14 @@ func (h *harness) describeHost(ctx context.Context) {
 		h.report.Host["memory"] = strings.Join(strings.Fields(out)[1:], " ")
 	}
 	h.report.Host["os"] = runtime.GOOS
+	if m := h.machine; m.CPUs > 0 {
+		for k, v := range map[string]int64{"cores": int64(m.CoreCount), "threads_per_core": int64(m.ThreadsPerCore),
+			"numa_nodes": int64(m.Nodes), "max_mhz": int64(m.MaxFreqMHz), "somaxconn": int64(m.Somaxconn),
+			"nr_open": m.NrOpen, "file_max": m.FileMax, "rmem_max": m.RmemMax, "tcp_mem_pressure_bytes": m.TCPMemPressure} {
+			h.report.Host[k] = strconv.FormatInt(v, 10)
+		}
+		h.report.Host["port_range"] = fmt.Sprintf("%d-%d", m.PortLo, m.PortHi)
+	}
 	if runtime.GOOS == "darwin" {
 		// Docker runs in a VM, whose lscpu knows nothing of the CPU model.
 		if out, err := exec.CommandContext(ctx, "sysctl", "-n", "machdep.cpu.brand_string").Output(); err == nil {

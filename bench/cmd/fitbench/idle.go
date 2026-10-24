@@ -104,12 +104,7 @@ func (h *harness) measureIdle(ctx context.Context, s server, kind string, r *Idl
 			u, mode = fmt.Sprintf(k.url, h.serverHost), k.mode
 		}
 	}
-	// One loopback address has some 64k ports to connect from; every 40k
-	// connections take another, which host networking reaches on loopback.
-	sources := 1
-	if h.serverHost == "127.0.0.1" {
-		sources = (h.idleConns + 39999) / 40000
-	}
+	sources := h.sources(h.idleConns)
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", loadgenName, "/fitbench/idleconn",
 		"-mode", mode, "-url", u, "-n", strconv.Itoa(h.idleConns), "-hold", "5m", "-sources", strconv.Itoa(sources))
 	stdin, err := cmd.StdinPipe()
@@ -217,4 +212,19 @@ func writeCert(dir string) error {
 	}
 	// Readable by the servers' unprivileged users; the key is throwaway.
 	return os.WriteFile(filepath.Join(dir, "key.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o644)
+}
+
+// sources is how many loopback addresses n connections to the server are
+// opened from: one has the local port range to connect from, and every four
+// fifths of it (40k when the range is not known) take another, which host
+// networking reaches on loopback.
+func (h *harness) sources(n int) int {
+	if h.serverHost != "127.0.0.1" {
+		return 1
+	}
+	per := 40000
+	if ports := h.machine.ports(); ports > 0 {
+		per = max(1, ports*8/10)
+	}
+	return max(1, (n+per-1)/per)
 }

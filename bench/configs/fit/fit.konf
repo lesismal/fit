@@ -21,10 +21,10 @@ limits {
 	max_conns 1000000
 }
 
-# Each listening socket queues 2,048 connections not yet accepted, the
+# Each listening socket queues {{BACKLOG}} connections not yet accepted, the
 # host's somaxconn, as every server here does.
 engine {
-	backlog 2048
+	backlog {{BACKLOG}}
 }
 
 listener h1 {
@@ -70,16 +70,16 @@ listener h3 {
 	}
 }
 
-# At most 16,384 backend connections, as every proxy here is bounded, and as
-# many requests waiting for one, more than any run keeps in flight: no
-# request is turned away for the bound. 16,384 of them kept idle, an idle one
+# At most {{BACKEND_CONNS}} backend connections, as every proxy here is
+# bounded, and as many requests waiting for one, more than any run keeps in
+# flight: no request is turned away for the bound. As many kept idle, an idle one
 # closed after 60s, and a 5s connect timeout; a failure does not take the
 # only backend out of rotation (max_fails 0), as no proxy here does.
 upstream backend {
 	addresses {{BACKEND}}
-	max_conns 16384
-	max_pending 16384
-	max_idle_conns 16384
+	max_conns {{BACKEND_CONNS}}
+	max_pending {{BACKEND_CONNS}}
+	max_idle_conns {{BACKEND_CONNS}}
 	idle_timeout 60s
 	connect_timeout 5s
 	max_fails 0
@@ -91,9 +91,9 @@ upstream wsbackend {
 
 upstream cachebackend {
 	addresses {{CACHEBACKEND}}
-	max_conns 16384
-	max_pending 16384
-	max_idle_conns 16384
+	max_conns {{BACKEND_CONNS}}
+	max_pending {{BACKEND_CONNS}}
+	max_idle_conns {{BACKEND_CONNS}}
 	idle_timeout 60s
 	connect_timeout 5s
 	max_fails 0

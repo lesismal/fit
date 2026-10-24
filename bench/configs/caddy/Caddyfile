@@ -50,16 +50,16 @@
 	}
 }
 
-# At most 16,384 backend connections, 16,384 of them kept idle, an idle one
+# At most {{BACKEND_CONNS}} backend connections, as many kept idle, an idle one
 # closed after 60s; a 5s connect timeout and 60s for a response's header.
 # Caddy, as every proxy here, keeps the client's Host and adds
 # X-Forwarded-For, -Proto and -Host, and has no passive health checks.
 (transport) {
 	transport http {
-		max_conns_per_host 16384
+		max_conns_per_host {{BACKEND_CONNS}}
 		keepalive 60s
-		keepalive_idle_conns 16384
-		keepalive_idle_conns_per_host 16384
+		keepalive_idle_conns {{BACKEND_CONNS}}
+		keepalive_idle_conns_per_host {{BACKEND_CONNS}}
 		dial_timeout 5s
 		response_header_timeout 60s
 	}

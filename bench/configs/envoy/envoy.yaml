@@ -15,15 +15,15 @@
 # streams a connection, and HTTP/2 a 1 MiB stream window and a 16 MiB
 # connection window (Envoy's defaults are 256 MiB for each); a route waits
 # 60s for its backend (Envoy's default is 15s). Nothing is compressed: no
-# compressor filter. Each listening socket queues 2,048 connections not yet
-# accepted, the host's somaxconn (Envoy's default is 128); an idle backend
+# compressor filter. Each listening socket queues {{BACKLOG}} connections not
+# yet accepted, the host's somaxconn (Envoy's default is 128); an idle backend
 # connection is closed after 60s (Envoy's default is 1h); and there are no
 # passive health checks (outlier detection), as in every proxy here.
 static_resources:
   listeners:
   - name: h1
     address: {socket_address: {address: 0.0.0.0, port_value: 8080}}
-    tcp_backlog_size: 2048
+    tcp_backlog_size: {{BACKLOG}}
     filter_chains:
     - filters:
       - name: envoy.filters.network.http_connection_manager
@@ -63,7 +63,7 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   - name: h2c
     address: {socket_address: {address: 0.0.0.0, port_value: 8081}}
-    tcp_backlog_size: 2048
+    tcp_backlog_size: {{BACKLOG}}
     filter_chains:
     - filters:
       - name: envoy.filters.network.http_connection_manager
@@ -84,7 +84,7 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   - name: tls
     address: {socket_address: {address: 0.0.0.0, port_value: 8443}}
-    tcp_backlog_size: 2048
+    tcp_backlog_size: {{BACKLOG}}
     filter_chains:
     - transport_socket:
         name: envoy.transport_sockets.tls
@@ -112,7 +112,7 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   - name: h2
     address: {socket_address: {address: 0.0.0.0, port_value: 8445}}
-    tcp_backlog_size: 2048
+    tcp_backlog_size: {{BACKLOG}}
     filter_chains:
     - transport_socket:
         name: envoy.transport_sockets.tls
@@ -174,7 +174,7 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
   # Envoy's circuit breakers allow 1024 connections, pending and in-flight
-  # requests by default; they allow 16,384 here, as every proxy here is
+  # requests by default; they allow {{BACKEND_CONNS}} here, as every proxy here is
   # bounded, more than any run keeps in flight. Each worker keeps its own
   # backend connections, reused with keep-alive.
   - name: backend
@@ -182,7 +182,7 @@ static_resources:
     dns_lookup_family: V4_ONLY
     connect_timeout: 5s
     circuit_breakers:
-      thresholds: [{max_connections: 16384, max_pending_requests: 16384, max_requests: 16384}]
+      thresholds: [{max_connections: {{BACKEND_CONNS}}, max_pending_requests: {{BACKEND_CONNS}}, max_requests: {{BACKEND_CONNS}}}]
     typed_extension_protocol_options:
       envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
         "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions

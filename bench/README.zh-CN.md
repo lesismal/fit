@@ -29,6 +29,8 @@ go run ./bench/cmd/fitbench
 | `-idle-connections`、`-idle-settle` | `10000`、`5s` | |
 | `-network` | Linux 上为 `host`，其他系统为 `bridge` | |
 | `-server-cpus`、`-client-cpus`、`-backend-cpus` | 按 Docker 可用的 CPU 划分 | CPU 列表，如 `0-7` |
+| `-backend-conns`、`-backlog` | 本轮在途请求数的 1.5 倍向上取到 2 的幂、至少 16,384；压测机的 `somaxconn` | 渲染配置所用的[对齐设置](#对齐的设置) |
+| `-derived` | | 本轮所属的方案，即 `fitbench plan -format json` 的输出，记入结果的 `params` |
 | `-nginx-image`、`-caddy-image`、`-traefik-image`、`-envoy-image`、`-base-image` | 固定的版本 | |
 | `-out` | `bench/results/run-<时间>.json` | |
 
@@ -66,7 +68,7 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
   （[`configs/backends/origin.conf`](configs/backends/origin.conf)）；
 - **WebSocket 后端**：`idleconn -serve-ws`，接受升级并保持连接，端口 9001。
 
-有 N 个 CPU 时，后端分八分之一（至少一个），其余的服务器和压测客户端各一半。nginx 每个服务器 CPU
+单独运行、有 N 个 CPU 时，后端分八分之一（至少一个），其余的服务器和压测客户端各一半。nginx 每个服务器 CPU
 一个 worker；Go 写的服务器通过 CPU 亲和性看到分给它的 CPU。
 
 ## 场景
@@ -142,14 +144,16 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 
 ## 对齐的设置
 
-各服务器的压测配置把它们共有的设置设成同样的值，使方案的最大负载（10,000 个请求在途，4 个 worker）之内，没有服务器被自身配置的
-限制拖累：
+各服务器的压测配置把它们共有的设置设成同样的值，使方案的最高档（以其 worker 数）之内，没有服务器被自身配置的限制拖累。这些
+上限是 fitbench 按 `-backend-conns` 和 `-backlog` 填入的模板值（`{{BACKEND_CONNS}}`、`{{BACKEND_IDLE_PER_WORKER}}`、
+`{{BACKLOG}}`，以及 nginx 的 `{{WORKER_CONNECTIONS}}`），由[方案按机器推导](#推导方案)；下表是压测机上的值，即 10,000
+个请求在途、4 个 worker 时的，每轮自己的值记在 `params.aligned`：
 
 | 设置 | 值 | 方式 |
 | --- | --- | --- |
-| 后端连接数 | 最多 16,384 | nginx 带共享 `zone` 的 `max_conns`、Caddy `max_conns_per_host`、Envoy 熔断器、fit `max_conns`；Traefik 没有此设置 |
+| 后端连接数 | 最多 16,384，即最高档的 1.5 倍向上取到 2 的幂 | nginx 带共享 `zone` 的 `max_conns`、Caddy `max_conns_per_host`、Envoy 熔断器、fit `max_conns`；Traefik 没有此设置 |
 | 等待后端连接的请求 | 最多 16,384 | fit `max_pending`、Envoy `max_pending_requests`；nginx 不能排队，Caddy 和 Traefik 排队不设上限 |
-| 保持的空闲后端连接 | 共 16,384，空闲 60 秒后关闭 | nginx 每个 worker 4,096（共 4 个）和 `keepalive_timeout 60s`；Caddy `keepalive_idle_conns` 和 `keepalive 60s`（默认 2 分钟）；Traefik `maxIdleConnsPerHost` 和 `idleConnTimeout 60s`（默认 90 秒）；Envoy 不设上限，`idle_timeout 60s`（默认 1 小时）；fit `max_idle_conns`、`idle_timeout` |
+| 保持的空闲后端连接 | 共 16,384，空闲 60 秒后关闭 | nginx 每个 worker 4,096（共 4 个，即上限除以 worker 数）和 `keepalive_timeout 60s`；Caddy `keepalive_idle_conns` 和 `keepalive 60s`（默认 2 分钟）；Traefik `maxIdleConnsPerHost` 和 `idleConnTimeout 60s`（默认 90 秒）；Envoy 不设上限，`idle_timeout 60s`（默认 1 小时）；fit `max_idle_conns`、`idle_timeout` |
 | 被动健康检查 | 无：一次失败不会让唯一的后端退出轮转 | nginx `max_fails=0`、fit `max_fails 0`（两者默认都是 1）；Caddy、Traefik、Envoy 默认没有 |
 | 发给后端的请求头 | 客户端的 `Host`，以及 `X-Forwarded-For`、`-Proto`、`-Host` | nginx `proxy_set_header`（默认把上游名作为 `Host`，且都不发）；Envoy `use_remote_address`，且不为每个请求生成 `x-request-id`（`generate_request_id: false`）；Caddy、Traefik、fit 默认如此，fit 还多发 `Forwarded` |
 | 监听队列 | 2,048，即压测机的 `somaxconn` | nginx `backlog=2048`（默认 511）、Envoy `tcp_backlog_size`（默认 128）、fit `engine.backlog`；Go 服务器用 `somaxconn` |
@@ -177,11 +181,12 @@ Envoy 按客户端的顺序选择，OpenSSL 默认把 AES-256-GCM 排在前面�
 
 ## 压测方案
 
-[`plan.sh`](plan.sh) 在压测机上跑方案，规模按压测机的承载能力确定：16 个线程按物理核划分（CPU n 和 n+8 是核 n 的两个
+[`plan.sh`](plan.sh) 跑方案，规模[按所在机器推导](#推导方案)。在压测机上推导结果如下，与推导之前为它手工调定的方案相同：
+16 个线程按物理核划分（CPU n 和 n+8 是核 n 的两个
 线程），各角色不共用核：被测服务器用核 0-1（CPU `0-1,8-9`，4 个 worker），后端用核 2-4（`2-4,10-12`），压测客户端用
 核 5-7（`5-7,13-15`）。后端与压测客户端一样多，以免由后端决定速度：每个结果都记录后端的 CPU（`backend_cpu_cores`、
 `origin_cpu_cores`），都远低于它们的 6 个。内核在所有 socket 的 TCP 缓冲超过 1 GiB 时开始限制，每轮在途的字节数都远低于
-此。每轮预热 5 秒、测 15 秒；232 轮约需 1 小时 50 分钟。
+此。每轮预热 5 秒、测 15 秒；232 轮约需 1 小时 33 分钟。
 
 | 工作负载 | 场景 | 协议 | 在途请求 | 服务器 | 轮数 |
 | --- | --- | --- | --- | --- | ---: |
@@ -201,6 +206,48 @@ HTTP/1.1 每个连接一个请求在途，wrk 给它的 6 个线程各 `connecti
 W6 的速率按各服务器在 4 个 CPU、500 个在途时的上限确定：方案开跑前的试跑中约为每秒 4 万到 20 万（Caddy 的 h2 最低，
 nginx 的 HTTP/1.1 最高）。2 万时每个服务器都低于上限，延迟是它自己的而不是排队造成的；10 万时只有 nginx 和 fit
 跟得上，其余的延迟显示它们落后的程度。那次试跑中后端（6 个 CPU 上的 nginx）最多用了其中 2 个。
+
+## 推导方案
+
+`fitbench plan` 从 Linux 的 `/sys` 和 `/proc` 读取机器规格，据此推导方案的规模；`plan.sh` 先运行它，再按它的输出跑方案。
+`bench/plan.sh -n DATE` 只打印推导出的方案，什么也不跑：CPU 划分、各档负载、各工作负载的轮数、对齐设置和预计时长（预热和测量
+之外每轮另加约 4 秒）。`DATE` 之后的参数都交给 `fitbench plan`，用来替代推导出的对应值，方案会列出哪些是显式设置的：
+`-server-cpus`、`-backend-cpus`、`-client-cpus`、`-levels 100,500,2000`、`-top`、`-w5-idle`、`-w6-rates 20000,100000`、
+`-backend-conns`、`-backlog`、`-duration`、`-warmup`。整个方案的试跑是 `bench/plan.sh DATE -duration 3s -warmup 1s`，在压测机上
+约 31 分钟。`DATE` 对应的结果已存在时 `plan.sh` 拒绝运行。`plan.txt` 和 `plan-derived.json` 与结果放在一起保存方案，每轮的
+`params.derived` 也有一份；fitbench 还把读到的机器规格记入 `host`（`cores`、`threads_per_core`、`numa_nodes`、`max_mhz`、
+`somaxconn`、`nr_open`、`file_max`、`port_range`、`rmem_max`、`tcp_mem_pressure_bytes`）。
+
+| 输入 | 来源 | 影响什么 |
+| --- | --- | --- |
+| CPU 及其物理核 | `cpu/online`，各 CPU 的 `topology/thread_siblings_list` | CPU 划分，按物理核，各角色不共用核：被测服务器四分之一的核（至少一个），其余后端和压测客户端各半，多出的一个核给后端，使后端从不少于压测客户端、不决定速度。不足 3 个核时改按线程划分，并警告各角色共用核；不足 3 个 CPU 无法划分，除非三组 CPU 都显式给出。服务器的 worker 数是它的 CPU 数，压测客户端的线程数是它们的 |
+| NUMA 节点 | `node/node*/cpulist` | 按节点依次取核，使每个角色尽量在一个节点内；跨两个节点的角色会被警告 |
+| 服务器的 CPU | CPU 划分 | 最高档的第一个上限：每个服务器 CPU 2,500 个在途请求，压测机的 4 个 CPU 上这已超过每个服务器的上限 |
+| 内存 | `MemTotal` | 四分之一给被测服务器，每个在途请求按 512 KiB（Envoy 在 HTTP/3、10,000 在途时占 4.9 GiB），每个空闲 TLS 连接按 64 KiB（Traefik 保持 40,000 个时 2.4 GiB）；其余留给压测客户端、后端、页缓存（W2 的网站 600 MB）和内核 |
+| `somaxconn` | `net.core.somaxconn` | 所有服务器共用的监听队列，以及最高档不超过它的 5 倍：wrk 一次打开全部连接，超出 accept 队列的要等 SYN 重传（1 秒、3 秒），占用预热时间；压测机上 10,000 对 2,048 能顺利启动 |
+| 本地端口 | `net.ipv4.ip_local_port_range` | 范围的五分之四是最高档的上限，因为每个客户端连接，以及它引起的每个后端连接，都占用一个到同一地址的端口；空闲连接每满五分之四就换一个回环源地址 |
+| TCP 内存 | `tcp_mem` 的压力值 | 它的一半按每个在途请求 16 KiB 的 TCP 缓冲限定最高档，按每个 1 MiB 传输 4 MiB（它经过的四个 socket 各至多 1 MiB）限定 W4 的档位：压测机的 1 GiB 下为 100 |
+| 文件描述符 | `fs.nr_open`、`fs.file-max` | 每个容器的 `nofile` 是 1,048,576，要求 `nr_open` 不低于它，否则方案拒绝；它的四分之一限定最高档（每个在途请求 4 个描述符），一半限定 W5 的空闲连接 |
+| 主频 | `cpuinfo_max_freq`（或 `/proc/cpuinfo`） | 只影响校准之前 W6 速率的估计：以压测机 4 个 CPU、5,053 MHz 下的 2 万和 10 万为基准，按服务器 CPU 数乘主频缩放 |
+| `rmem_max` | `net.core.rmem_max` | 不改变任何值；低于 7.5 MB 时警告 HTTP/3 服务器得到的 UDP 缓冲小于所要的 |
+
+最高档是各上限中最小的，向下取到 1、2 或 5 乘以 10 的幂；各档为 100、500、最高档的五分之一和二分之一（大于 500 时）以及最高档：
+压测机上是 100、500、2,000、5,000 和 10,000。HTTP/1.1 下一档是 wrk 的连接数；h2c、h2 和 HTTP/3 下是 h2load 的连接数乘以流数，
+当每连接 25 个流能有至少 10 个连接、且不少于压测客户端的线程数时用 25 个流，否则取接近正方形（100 为 10 × 10），连接数从不少于
+线程数。W2 在最接近 500 的一档及其下一档，W3 在 100 和 500 个连接，W4 在 100 或 TCP 内存允许的档位，W5 在最接近 500 的一档、
+空闲 TLS 连接为最高档在途请求数的 4 倍（40,000），受内存和描述符限制并向下取两位有效数字，W6 在最接近 500 的一档。后端连接上限
+和等待队列是最高档的 1.5 倍向上取到 2 的幂（16,384），nginx 每个 worker 保持的空闲连接是它除以 worker 数（4,096），它的
+`worker_connections` 至少 65,536，并不少于一个 worker 分到的客户端、后端和空闲连接数的两倍；后端自己的配置仍按自身速度调优。
+被测 nginx 保持 `keepalive_requests 1000000000`，因为更低的限制会让连接数少的 h2 和 HTTP/3 轮次提前中断。
+
+W6 的速率由先于它运行的 W1 在最接近 500 一档的结果校准，正是当初手工选定速率所依据的测量，不需要额外的轮次。每个服务器的上限
+是它在 HTTP/1.1 和 h2 下答得最少的值；低速率是最慢上限的一半，取一位有效数字；按相邻上限之间最大的间隔把服务器分成两侧，高速率
+是慢的一侧最高值（任何协议）与快的一侧最低值之间最整的数，两者重叠时取快的一侧最低值的 0.9。按压测机 2026-10-24 的结果，
+得到 20,000（Caddy 在 h2 下的 39,547 的一半）和 100,000（介于 Envoy 在 h2 下的 80,039 和 fit 的 115,342 之间），与手工选定的
+相同。
+
+在压测机上，推导出的方案与手工调定的每个值都相同：CPU 划分、各档、W2 到 W6、对齐设置和 232 轮。它的各上限显示压测机离极限多近：
+CPU 允许 10,000，`somaxconn` 10,240，内存 31,715，TCP 内存 32,768，端口 51,609。
 
 ## 空闲连接
 

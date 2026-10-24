@@ -222,7 +222,7 @@ func fakeRoot(t *testing.T) (root, bin string) {
 		"bench/configs/fit/fit.konf":     `backend {{BACKEND}} workers {{WORKERS}}`,
 		"bench/www/static/small.html":    smallHTML,
 		"bench/loadgen/Dockerfile.h3":    "FROM scratch\n",
-		"bench/configs/nginx/nginx.conf": "{{BACKEND_HOST}}:{{BACKEND_PORT}}\n",
+		"bench/configs/nginx/nginx.conf": "{{BACKEND_HOST}}:{{BACKEND_PORT}} {{BACKEND_CONNS}} {{BACKEND_IDLE_PER_WORKER}} {{WORKER_CONNECTIONS}}\n",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -44,12 +44,12 @@ entryPoints:
     http3: {}
     http:
       tls: {}
-# 16,384 backend connections kept idle, an idle one closed after 60s, a 5s
+# {{BACKEND_CONNS}} backend connections kept idle, an idle one closed after 60s, a 5s
 # connect timeout and 60s for a response's header. Traefik, as every proxy
 # here, keeps the client's Host and adds X-Forwarded-For, -Proto and -Host,
 # and has no passive health checks.
 serversTransport:
-  maxIdleConnsPerHost: 16384
+  maxIdleConnsPerHost: {{BACKEND_CONNS}}
   forwardingTimeouts:
     dialTimeout: 5s
     responseHeaderTimeout: 60s

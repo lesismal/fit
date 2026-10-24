@@ -32,6 +32,8 @@ common ones are:
 | `-idle-connections`, `-idle-settle` | `10000`, `5s` | |
 | `-network` | `host` on Linux, `bridge` elsewhere | |
 | `-server-cpus`, `-client-cpus`, `-backend-cpus` | split from what Docker has | CPU lists, as in `0-7` |
+| `-backend-conns`, `-backlog` | half again the run's requests in flight, rounded up to a power of two and at least 16,384; the host's `somaxconn` | the [aligned settings](#aligned-settings) the configs are rendered with |
+| `-derived` | | the plan the run belongs to, from `fitbench plan -format json`, kept in the results' `params` |
 | `-nginx-image`, `-caddy-image`, `-traefik-image`, `-envoy-image`, `-base-image` | pinned versions | |
 | `-out` | `bench/results/run-<time>.json` | |
 
@@ -79,7 +81,7 @@ Every process runs in a container pinned to CPUs of its own, with `nofile` raise
 - **the WebSocket backend**: `idleconn -serve-ws`, which accepts upgrades and holds them, on port
   9001.
 
-With N CPUs, the backends get an eighth (at least one) and the server and the load generators
+Run alone, with N CPUs, the backends get an eighth (at least one) and the server and the load generators
 half each of the rest. nginx gets one worker per server CPU; the Go servers see the CPU set
 through their affinity.
 
@@ -172,14 +174,18 @@ each run, and records how many the server closed.
 
 ## Aligned settings
 
-Each server's bench config sets what the servers have in common to the same value, so that within
-the plan's largest load, 10,000 requests in flight, with 4 workers, no server is held back by a limit of its own:
+Each server's bench config sets what the servers have in common to the same value, so that
+within the plan's top level, with its workers, no server is held back by a limit of its own. The
+bounds are template values fitbench fills in from `-backend-conns` and `-backlog` (`{{BACKEND_CONNS}}`,
+`{{BACKEND_IDLE_PER_WORKER}}`, `{{BACKLOG}}`, nginx's `{{WORKER_CONNECTIONS}}`), which
+[the plan derives](#deriving-the-plan) for the machine; the values below are the benchmark host's,
+for 10,000 requests in flight with 4 workers, and each run records its own in `params.aligned`:
 
 | Setting | Value | How |
 | --- | --- | --- |
-| Backend connections | at most 16,384 | nginx `max_conns` with a shared `zone`, Caddy `max_conns_per_host`, Envoy's circuit breakers, fit `max_conns`; Traefik has no such setting |
+| Backend connections | at most 16,384, half again the top level rounded up to a power of two | nginx `max_conns` with a shared `zone`, Caddy `max_conns_per_host`, Envoy's circuit breakers, fit `max_conns`; Traefik has no such setting |
 | Requests waiting for a backend connection | at most 16,384 | fit `max_pending`, Envoy `max_pending_requests`; nginx cannot queue, Caddy and Traefik do without a bound |
-| Idle backend connections kept | 16,384 in all, each closed after 60s idle | nginx 4,096 for each of its 4 workers and `keepalive_timeout 60s`; Caddy `keepalive_idle_conns` and `keepalive 60s` (2m by default); Traefik `maxIdleConnsPerHost` and `idleConnTimeout 60s` (90s by default); Envoy has no bound, `idle_timeout 60s` (1h by default); fit `max_idle_conns`, `idle_timeout` |
+| Idle backend connections kept | 16,384 in all, each closed after 60s idle | nginx 4,096 for each of its 4 workers (the bound divided by its workers) and `keepalive_timeout 60s`; Caddy `keepalive_idle_conns` and `keepalive 60s` (2m by default); Traefik `maxIdleConnsPerHost` and `idleConnTimeout 60s` (90s by default); Envoy has no bound, `idle_timeout 60s` (1h by default); fit `max_idle_conns`, `idle_timeout` |
 | Passive health checks | none: a failure does not take the only backend out of rotation | nginx `max_fails=0` and fit `max_fails 0` (1 by default for both); Caddy, Traefik and Envoy have none by default |
 | Headers sent to the backend | the client's `Host`, and `X-Forwarded-For`, `-Proto` and `-Host` | nginx `proxy_set_header` (it sends its upstream's name as `Host`, and none of them, by default); Envoy `use_remote_address`, and no `x-request-id` made up for each request (`generate_request_id: false`); Caddy, Traefik and fit by default, fit adding `Forwarded` as well |
 | Listen backlog | 2,048, the host's `somaxconn` | nginx `backlog=2048` (511 by default), Envoy `tcp_backlog_size` (128 by default), fit `engine.backlog`; the Go servers use `somaxconn` |
@@ -211,14 +217,15 @@ every server ignores.
 
 ## The load test plan
 
-[`plan.sh`](plan.sh) runs the plan on the benchmark host, its sizes set by what the host can carry:
-16 threads, split by physical core (CPUs n and n+8 are the two threads of core n) so that no role
+[`plan.sh`](plan.sh) runs the plan, its sizes [derived from the machine](#deriving-the-plan) it
+runs on. On the benchmark host they come out as below, the plan hand-tuned for it before the
+derivation: 16 threads, split by physical core (CPUs n and n+8 are the two threads of core n) so that no role
 shares a core with another: the server under test gets cores 0-1 (CPUs `0-1,8-9`, 4 workers), the
 backends cores 2-4 (`2-4,10-12`) and the load generators cores 5-7 (`5-7,13-15`). The backends
 get as much as the load generators so that they never set the pace: every result records their
 CPU (`backend_cpu_cores`, `origin_cpu_cores`), which stays well below their 6. The kernel
 pressures TCP buffers past 1 GiB across all sockets, which keeps the bytes in flight of every run
-well below. Each run is a 5s warm-up and 15s measured; the 232 runs take about 1 h 50 min.
+well below. Each run is a 5s warm-up and 15s measured; the 232 runs take about 1 h 33 min.
 
 | Workload | Scenarios | Protocols | Requests in flight | Servers | Runs |
 | --- | --- | --- | --- | --- | ---: |
@@ -242,6 +249,62 @@ to 200k a second (Caddy over h2 the least, nginx over HTTP/1.1 the most) in the 
 plan: at 20k every server runs below its ceiling, so its latency is its own and not a queue's; at
 100k only nginx and fit can keep up, and the others' latencies show how they fall behind. The
 backends, nginx on 6 CPUs, used at most 2 of them in that trial.
+
+## Deriving the plan
+
+`fitbench plan` reads the machine from Linux's `/sys` and `/proc` and derives the plan's sizes from
+it; `plan.sh` runs it first and runs what it prints, and `bench/plan.sh -n DATE` prints it alone,
+with the split, the levels, each workload's runs, the aligned settings and an estimated duration
+(warm-up and measured load and about 4s a run besides), running nothing. Any flag after `DATE` is
+`fitbench plan`'s and sets what it names in place of what would be derived, and the plan lists what
+was set: `-server-cpus`, `-backend-cpus`, `-client-cpus`, `-levels 100,500,2000`, `-top`,
+`-w5-idle`, `-w6-rates 20000,100000`, `-backend-conns`, `-backlog`, `-duration`, `-warmup`. A trial
+of the whole plan is `bench/plan.sh DATE -duration 3s -warmup 1s`, about 31 minutes on the host.
+`plan.sh` refuses a `DATE` whose results are there already. `plan.txt` and `plan-derived.json` keep
+the plan beside its results, and every run's `params.derived` holds it; fitbench records what it
+reads of the machine in `host` too (`cores`, `threads_per_core`, `numa_nodes`, `max_mhz`,
+`somaxconn`, `nr_open`, `file_max`, `port_range`, `rmem_max`, `tcp_mem_pressure_bytes`).
+
+| Input | Read from | What it changes |
+| --- | --- | --- |
+| CPUs and their cores | `cpu/online`, each CPU's `topology/thread_siblings_list` | the split, by physical core so that no role shares a core with another: the server a quarter of the cores (at least one), the backends and the load generators half each of the rest, the backends taking the odd core, so they are never smaller and never set the pace. With fewer than 3 cores the threads are split instead, with a warning that the roles share cores; fewer than 3 CPUs cannot be split, unless all three CPU lists are given. The server's workers are its CPUs, the load generators' threads theirs |
+| NUMA nodes | `node/node*/cpulist` | the cores are taken node by node, so a role stays within one where it can; a role that spans two is warned of |
+| The server's CPUs | the split | the top level's first bound: 2,500 requests in flight for each server CPU, which on the host's 4 is past every server's ceiling |
+| Memory | `MemTotal` | a quarter of it for the server under test, at 512 KiB a request in flight (Envoy held 4.9 GiB at 10,000 over HTTP/3) and 64 KiB an idle TLS connection (Traefik, 2.4 GiB with 40,000 held); the rest is the load generators', the backends', the page cache's (W2's site is 600 MB) and the kernel's |
+| `somaxconn` | `net.core.somaxconn` | the backlog every server shares, and the top level at 5 times it: wrk opens all its connections at once, and those past the accept queue wait for SYN retransmits (1s, 3s), eating into the warm-up; 10,000 against the host's 2,048 started cleanly |
+| Local ports | `net.ipv4.ip_local_port_range` | four fifths of the range bounds the top level, since each client connection, and each backend connection it causes, takes a port toward one address; idle connections take another loopback source for every four fifths |
+| TCP memory | `tcp_mem`'s pressure value | half of it bounds the top level at 16 KiB in TCP buffers a request in flight, and W4's level at 4 MiB a 1 MiB transfer (up to 1 MiB in each of its four sockets): 100 on the host's 1 GiB |
+| Descriptors | `fs.nr_open`, `fs.file-max` | every container gets `nofile` 1,048,576, which needs `nr_open` at least that, or the plan refuses; a quarter of it bounds the top level (4 descriptors a request in flight), half of it W5's idle connections |
+| Frequency | `cpuinfo_max_freq` (or `/proc/cpuinfo`) | only W6's rates before the calibration sets them: the host's 20k and 100k scaled by the server's CPUs times their frequency against its 4 at 5,053 MHz |
+| `rmem_max` | `net.core.rmem_max` | nothing, but below 7.5 MB a warning that the HTTP/3 servers get smaller UDP buffers than they ask for |
+
+The top level is the least of its bounds, rounded down to 1, 2 or 5 times a power of ten, and the
+levels are 100, 500, a fifth and a half of the top where they are above 500, and the top: on the
+host 100, 500, 2,000, 5,000 and 10,000. Over HTTP/1.1 a level is wrk's connections; over h2c, h2
+and HTTP/3 h2load's connections times 25 streams when that makes at least 10 connections and one for
+each load generator thread, or else near a square (100 as 10 × 10), never fewer connections than
+threads. W2 runs at the level nearest 500 and the next, W3 at 100 and 500 connections, W4 at 100 or
+what TCP memory allows, W5 at the level nearest 500 with 4 idle TLS connections for each request in
+flight at the top level (40,000), bounded by memory and descriptors and rounded down to two
+significant digits, and W6 at the level nearest 500. The backend connection bound and waiting queue
+are half again the top level, rounded up to a power of two (16,384), nginx's idle keep-alive that
+divided by its workers (4,096), its `worker_connections` at least 65,536 and twice a worker's share
+of the client, backend and idle connections; the backends' own configs keep their own tuning. nginx
+under test keeps `keepalive_requests 1000000000`, since a lower limit cut few-connection h2 and
+HTTP/3 runs short.
+
+W6's rates are calibrated from W1's results at the level nearest 500, which run before it: the same
+measurement the rates were chosen from by hand, at no extra run. Each server's ceiling is the least
+it answered over HTTP/1.1 and h2; the low rate is half the slowest ceiling, rounded to one
+significant digit; the servers are split at the widest gap between consecutive ceilings, and the
+high rate is the roundest number between the slower side's most (over any protocol) and the faster
+side's least, or 0.9 of the faster side's least when they overlap. From the host's 2026-10-24
+results this gives 20,000 (Caddy's 39,547 over h2, halved) and 100,000 (between Envoy's 80,039 over
+h2 and fit's 115,342), the rates chosen by hand.
+
+On the benchmark host the derived plan is the hand-tuned one in every value: the split, the levels,
+W2 to W6, the aligned settings and the 232 runs. Its bounds show how near the host is to its limits:
+the CPU allows 10,000, `somaxconn` 10,240, memory 31,715, TCP memory 32,768 and the ports 51,609.
 
 ## Idle connections
 

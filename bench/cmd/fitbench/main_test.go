@@ -141,7 +141,7 @@ func TestRunQuick(t *testing.T) {
 	work := filepath.Join(root, "bench", ".work")
 	for name, want := range map[string]string{
 		"configs/fit/fit.konf":     `backend 127.0.0.1:9000 workers 7`,
-		"configs/nginx/nginx.conf": "127.0.0.1:9000\n",
+		"configs/nginx/nginx.conf": "127.0.0.1:9000 16384 2341 65536\n",
 		"fit":                      "binary",
 		"idleconn":                 "binary",
 	} {
@@ -151,6 +151,39 @@ func TestRunQuick(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(work, "certs", "cert.pem")); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestRunAligned renders the aligned settings set, and keeps them and the
+// plan the run belongs to in its params.
+func TestRunAligned(t *testing.T) {
+	installFake(t)
+	root, bin := fakeRoot(t)
+	dir := t.TempDir()
+	out, derived := filepath.Join(dir, "results.json"), filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(derived, []byte(`{"top": 10000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(context.Background(), runArgs(root, bin, out, "-backend-conns", "1000", "-backlog", "300", "-derived", derived)); err != nil {
+		t.Fatal(err)
+	}
+	p := readReport(t, out).Params
+	if a := p.Aligned; a.BackendConns != 1000 || a.IdlePerWorker != 143 || a.Backlog != 300 || a.WorkerConnections != 65536 ||
+		!strings.Contains(string(p.Derived), `"top": 10000`) {
+		t.Errorf("%+v %s", a, p.Derived)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "bench", ".work", "configs", "nginx", "nginx.conf"))
+	if string(data) != "fitbench-backend:9000 1000 143 65536\n" {
+		t.Errorf("%q", data)
+	}
+	if err := run(context.Background(), runArgs(root, bin, out, "-derived", filepath.Join(dir, "none.json"))); err == nil {
+		t.Error("a plan that is not there")
+	}
+	if err := os.WriteFile(derived, []byte(`top`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(context.Background(), runArgs(root, bin, out, "-derived", derived)); err == nil {
+		t.Error("a plan that is not JSON")
 	}
 }
 

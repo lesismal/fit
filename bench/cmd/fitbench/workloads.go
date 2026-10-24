@@ -461,10 +461,7 @@ func (h *harness) ratePercentiles(ctx context.Context, runs []loadRun, l *Latenc
 // them, and returns a function that closes them and reports how many the
 // server had closed meanwhile, and how many were held.
 func (h *harness) holdIdle(ctx context.Context) (release func() (closed int), held int, err error) {
-	sources := 1
-	if h.serverHost == "127.0.0.1" {
-		sources = (h.holdIdleConns + 39999) / 40000
-	}
+	sources := h.sources(h.holdIdleConns)
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", loadgenName, "/fitbench/idleconn",
 		"-mode", "tls", "-url", "https://"+h.serverHost+":8443/idle", "-n", strconv.Itoa(h.holdIdleConns),
 		"-concurrency", "256", "-hold", "10m", "-sources", strconv.Itoa(sources))
