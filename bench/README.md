@@ -186,6 +186,7 @@ the plan's largest load, 10,000 requests in flight, with 4 workers, no server is
 | Request body size | 16 MiB | nginx `client_max_body_size` (1 MiB by default), Caddy `request_body`, fit's default; Traefik and Envoy, streaming, set none |
 | Proxied bodies | streamed, or buffered in memory | nginx buffers responses in memory but never in temporary files, and streams uploads; the others stream |
 | Waiting for the backend | 5s to connect, 60s for a response | nginx `proxy_connect_timeout`, `proxy_read_timeout`; Caddy `dial_timeout`, `response_header_timeout`; Traefik `forwardingTimeouts`; Envoy `connect_timeout` and its route's (15s by default); fit `connect_timeout` and the proxy's `timeout` |
+| Requests a client connection | no limit | nginx `keepalive_requests` 1,000,000,000 (1,000 by default, for HTTP/2 and HTTP/3 too); the others have none |
 | Idle client connections | closed after 120s | nginx `keepalive_timeout` (65s by default), Caddy `timeouts idle`, Traefik `idleTimeout`, Envoy `idle_timeout`; fit's, fib's default, cannot be set |
 | HTTP/2 and HTTP/3 streams a connection | 250 | the Go servers' and fib's default; nginx and Envoy set to it |
 | HTTP/2 stream receive window | 1 MiB | nginx `http2_body_preread_size` (64 KiB by default), Envoy (256 MiB by default); the others have it |

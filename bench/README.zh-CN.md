@@ -156,6 +156,7 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 | 请求体大小 | 16 MiB | nginx `client_max_body_size`（默认 1 MiB）、Caddy `request_body`、fit 的默认值；Traefik 和 Envoy 流式转发，不设限 |
 | 代理的消息体 | 流式，或在内存中缓冲 | nginx 在内存中缓冲响应，但不写临时文件，上传流式转发；其余流式 |
 | 等待后端 | 连接 5 秒，响应 60 秒 | nginx `proxy_connect_timeout`、`proxy_read_timeout`；Caddy `dial_timeout`、`response_header_timeout`；Traefik `forwardingTimeouts`；Envoy `connect_timeout` 和路由超时（默认 15 秒）；fit `connect_timeout` 和代理的 `timeout` |
+| 每个客户端连接的请求数 | 不限 | nginx `keepalive_requests` 1,000,000,000（默认 1,000，HTTP/2 和 HTTP/3 也适用）；其余的没有此限制 |
 | 空闲客户端连接 | 120 秒后关闭 | nginx `keepalive_timeout`（默认 65 秒）、Caddy `timeouts idle`、Traefik `idleTimeout`、Envoy `idle_timeout`；fit 用 fib 的默认值，不能设置 |
 | 每连接的 HTTP/2、HTTP/3 流 | 250 | Go 服务器和 fib 的默认值；nginx 和 Envoy 设成它 |
 | HTTP/2 流接收窗口 | 1 MiB | nginx `http2_body_preread_size`（默认 64 KiB）、Envoy（默认 256 MiB）；其余已是 |
