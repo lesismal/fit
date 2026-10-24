@@ -109,6 +109,15 @@ func TestYAML(t *testing.T) {
 	}
 }
 
+func TestEmpty(t *testing.T) {
+	for _, src := range []string{"", "\n", "# a: 1\n# b: 2\n"} {
+		r, err := Adapt([]byte(src))
+		if err != nil || string(r.JSON) != "{}" {
+			t.Errorf("%q: %v %s, want {}", src, err, r.JSON)
+		}
+	}
+}
+
 func TestErrors(t *testing.T) {
 	bomb := "a: &a [x, x, x, x, x, x, x, x, x, x]\n"
 	prev := "a"
@@ -117,7 +126,6 @@ func TestErrors(t *testing.T) {
 		prev = n
 	}
 	for yaml, want := range map[string]string{
-		"":                  "no document",
 		"a: 1\n---\nb: 2\n": "more than one document",
 		"[a]: 1\n":          "a key must be a string",
 		"a: 1\na: 2\n":      `"a" is a key twice`,

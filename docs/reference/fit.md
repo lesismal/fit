@@ -262,5 +262,5 @@ fit adapt -c fit.konf -o fit.json
 
 Routes are written one by one, not gathered into sites. An nginx config or a Caddyfile converts
 to a `.konf` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
-[from Caddy](../migrating-from-caddy.md). [templates/fit/fit.konf](../../templates/fit/fit.konf)
+[from Caddy](../migrating-from-caddy.md). [templates/konf/fit.konf](../../templates/konf/fit.konf)
 holds every field, with its description and choices in comments.

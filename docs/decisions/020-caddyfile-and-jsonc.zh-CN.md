@@ -3,7 +3,7 @@
 [English](020-caddyfile-and-jsonc.md) | [简体中文](020-caddyfile-and-jsonc.zh-CN.md)
 
 状态：已采纳，见 I79（2026-10-23）。其第一点（以 Caddyfile 作为 fit 的块语法）已被
-[决定 021](021-fit-format-and-config-files.zh-CN.md) 取代：fit 有了自己的 `.fit` 格式，Caddyfile 作为迁移工具被转换。
+[决定 021](021-fit-format-and-config-files.zh-CN.md) 取代：fit 有了自己的 `.konf` 格式，Caddyfile 作为迁移工具被转换。
 
 ## 背景
 

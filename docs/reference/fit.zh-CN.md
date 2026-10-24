@@ -236,4 +236,4 @@ fit adapt -c fit.konf -o fit.json
 
 路由逐条写出，不会归并成站点。nginx 配置和 Caddyfile 也可以这样转换成 `.konf` 文件，见
 [从 nginx 迁移](../migrating-from-nginx.zh-CN.md) 和 [从 Caddy 迁移](../migrating-from-caddy.zh-CN.md)。
-[templates/fit/fit.konf](../../templates/fit/fit.konf) 包含全部字段，说明和可选值写在注释中。
+[templates/konf/fit.konf](../../templates/konf/fit.konf) 包含全部字段，说明和可选值写在注释中。

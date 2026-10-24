@@ -1333,12 +1333,13 @@
   // Limits that apply to every listener.
   // object.
   // "limits": {
-    // // How many bytes of responses may wait, across every connection, for clients to take them;
-    // // past it, every connection stops reading until some go. Takes effect at start, not on a
-    // // reload. Half the machine's memory when left out or 0, or half the container's memory limit
-    // // where that is lower; 256 MiB where neither can be read.
-    // // integer, 0 or more.
-    // "max_pending_bytes": 0,
+    // // How many bytes of responses may wait, across every connection, for clients to take them, the
+    // // backpressure on them all; past it, every connection stops reading until some go. A number of
+    // // bytes, or a share of the memory fit may use, such as "25%": the machine's, or the
+    // // container's memory limit where that is lower. Takes effect at start, not on a reload. "50%"
+    // // when left out or 0; 256 MiB where the memory cannot be read.
+    // // bytes, an integer, or a share of memory, as "50%"; default "50%".
+    // "max_pending_bytes": "50%",
 
     // // The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or
     // // 0.

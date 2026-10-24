@@ -152,6 +152,10 @@ func (d *decoder) decode(n *node, path string, rv reflect.Value, f *Field) {
 		d.decodeDuration(n, path, rv)
 		return
 	}
+	if t == MemoryType {
+		d.decodeMemory(n, path, rv)
+		return
+	}
 	if t.Kind() == reflect.Pointer {
 		if n.kind == kindNull {
 			rv.SetZero()

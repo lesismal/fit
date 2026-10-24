@@ -798,9 +798,18 @@
           "type": "integer"
         },
         "max_pending_bytes": {
-          "description": "How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read.",
-          "minimum": 0,
-          "type": "integer"
+          "default": "50%",
+          "description": "How many bytes of responses may wait, across every connection, for clients to take them, the backpressure on them all; past it, every connection stops reading until some go. A number of bytes, or a share of the memory fit may use, such as \"25%\": the machine's, or the container's memory limit where that is lower. Takes effect at start, not on a reload. \"50%\" when left out or 0; 256 MiB where the memory cannot be read.",
+          "oneOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\+?(100(\\.0*)?|[0-9]{1,2}(\\.[0-9]*)?|\\.[0-9]+)%$",
+              "type": "string"
+            }
+          ]
         },
         "write_stall_timeout": {
           "default": "30s",

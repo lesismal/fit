@@ -38,7 +38,10 @@ func Adapt(data []byte) (*adapter.Result, error) {
 	dec := yamlv3.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&doc); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, errors.New("the YAML holds no document")
+			// Nothing, or comments alone, as a file of a directory whose
+			// fields are all commented out: an empty config, as an empty
+			// .konf file is.
+			return &adapter.Result{JSON: []byte("{}"), Position: func(string) (int, int, bool) { return 0, 0, false }}, nil
 		}
 		return nil, err
 	}

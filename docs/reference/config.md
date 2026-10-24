@@ -13,7 +13,8 @@ below, and may be split across several files. [Configuration](../configuration.m
 config is loaded, checked and changed.
 
 How to read the tables: a field left out takes its default, when it has one; a duration is a
-string such as `"1.5s"` or `"2m"`; an integer's bounds follow its type; `object`
+string such as `"1.5s"` or `"2m"`; bytes or percent is an integer of bytes or a
+share of the memory fit may use, such as `"50%"`; an integer's bounds follow its type; `object`
 links to the object's own table; a field marked Required must be written; a field marked
 Deprecated is an old name that still works, with a warning. The
 [JSON Schema](../../schema/fit.schema.json) says the same for editors, and `fit validate` checks
@@ -906,8 +907,9 @@ In JSON:
 Limits that bound what clients can make fit hold, on every listener. Each has a safe default, so a
 config that writes none is still bounded: connections, the sizes of request headers and bodies,
 the bytes of responses waiting for slow clients, and how long a client may stall a response.
-The bytes waiting for slow clients default to half the machine's memory, or of the container's
-memory limit where that is lower; the rest have fixed defaults. The
+The bytes waiting for slow clients, the backpressure across every connection, are a number of
+bytes or a share of memory, such as `"25%"`: of the machine's, or of the container's memory limit
+where that is lower, half by default; the rest have fixed defaults. The
 [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
 
 In a .konf file:
@@ -925,7 +927,7 @@ limits {
 	max_conns 50000
 	max_header_bytes 65536
 	max_body_bytes 104857600
-	max_pending_bytes 536870912
+	max_pending_bytes 25%
 	write_stall_timeout 1m
 }
 ```
@@ -943,7 +945,7 @@ limits:
   max_conns: 50000
   max_header_bytes: 65536
   max_body_bytes: 104857600
-  max_pending_bytes: 536870912
+  max_pending_bytes: 25%
   write_stall_timeout: 1m
 ```
 
@@ -957,7 +959,7 @@ In JSON:
     "max_conns": 50000,
     "max_header_bytes": 65536,
     "max_body_bytes": 104857600,
-    "max_pending_bytes": 536870912,
+    "max_pending_bytes": "25%",
     "write_stall_timeout": "1m"
   }
 }
@@ -969,7 +971,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `max_pending_bytes` | integer, 0 or more |  | How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read. |
+| `max_pending_bytes` | bytes or percent | `"50%"` | How many bytes of responses may wait, across every connection, for clients to take them, the backpressure on them all; past it, every connection stops reading until some go. A number of bytes, or a share of the memory fit may use, such as "25%": the machine's, or the container's memory limit where that is lower. Takes effect at start, not on a reload. "50%" when left out or 0; 256 MiB where the memory cannot be read. |
 | `max_header_bytes` | integer, 0 or more | `1048576` | The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `100000` | The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0. |
 | `max_body_bytes` | integer, 0 or more | `16777216` | The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0. |

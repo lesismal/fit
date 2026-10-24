@@ -16,7 +16,7 @@ import (
 	"github.com/lesismal/fit/module"
 )
 
-var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml", "fit": "../templates/fit/fit.konf"}
+var templateFiles = map[string]string{"json": "../templates/json/fit.json", "yaml": "../templates/yaml/fit.yaml", "fit": "../templates/konf/fit.konf"}
 
 // TestTemplatesUpToDate fails when a config type, a struct tag or a
 // standard module changed without the templates being regenerated.

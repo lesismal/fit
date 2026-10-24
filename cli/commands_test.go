@@ -139,6 +139,19 @@ func TestSchemaFlags(t *testing.T) {
 	if code, _, stderr := runFit("schema", "-template", "toml"); code != 1 || !strings.HasPrefix(stderr, "fit schema: ") {
 		t.Errorf("bad template: %d %q", code, stderr)
 	}
+	dir := t.TempDir()
+	if code, _, stderr := runFit("schema", "-template", "fit", "-dir", dir); code != 0 {
+		t.Errorf("template dir: %d %q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sites", "example.com.konf")); err != nil {
+		t.Errorf("template dir: %v", err)
+	}
+	if code, _, stderr := runFit("schema", "-template", "fit", "-dir", dir); code != 1 || !strings.Contains(stderr, "there already") {
+		t.Errorf("template dir over itself: %d %q", code, stderr)
+	}
+	if code, _, _ := runFit("schema", "-dir", dir); code != 2 {
+		t.Errorf("-dir without -template: %d", code)
+	}
 	if code, _, _ := runFit("schema", "-bogus"); code != 2 {
 		t.Errorf("bad flag: %d", code)
 	}

@@ -108,7 +108,9 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
 
 目录代表其中（包括子目录中）的 `.konf`、`.yaml`、`.yml` 和 `.json` 文件，按字典序，名字以 `.` 开头的除外。配置顶层的列表
 `listeners`、`routes`、`upstreams`、`services` 和 `providers` 按文件顺序拼接；其他字段只能在一个文件中给出。错误会指出
-所在的文件。详见 [多个文件和目录](reference/fit.zh-CN.md#多个文件和目录)。
+所在的文件。详见 [多个文件和目录](reference/fit.zh-CN.md#多个文件和目录)。按种类分文件（运行规格、listener、证书、
+可观测性、四层服务、provider，每个站点一个文件）的完整目录模板见 [配置模板](../templates/README.zh-CN.md#目录形式)，
+也可用 `fit schema -template fit -dir <目录>` 生成。
 
 ## 运行、检查和转换
 

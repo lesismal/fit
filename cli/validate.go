@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/lesismal/fit/adapter"
@@ -100,8 +104,20 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	reference := flags.Bool("reference", false, "print the config reference, in Markdown, rather than the JSON Schema")
 	template := flags.String("template", "", "print a config template, fit, yaml or json, with every field commented, rather than the JSON Schema")
+	dir := flags.String("dir", "", "with -template, write the template as a directory of files by kind, one for each site, into this directory, which must not have them yet")
 	if err := flags.Parse(args); err != nil {
 		return 2
+	}
+	if *dir != "" {
+		if *template == "" {
+			fmt.Fprintln(stderr, "fit schema: -dir needs -template")
+			return 2
+		}
+		if err := writeTemplateDir(*template, *dir); err != nil {
+			fmt.Fprintf(stderr, "fit schema: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	generate := schema.Generate
 	switch {
@@ -117,4 +133,29 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 	}
 	_, _ = stdout.Write(out)
 	return 0
+}
+
+// writeTemplateDir writes the directory template in format into dir,
+// refusing to replace a file there.
+func writeTemplateDir(format, dir string) error {
+	files, err := schema.TemplateDir(format)
+	if err != nil {
+		return err
+	}
+	names := slices.Sorted(maps.Keys(files))
+	for _, name := range names {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return fmt.Errorf("%s is there already", filepath.Join(dir, name))
+		}
+	}
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, files[name], 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }

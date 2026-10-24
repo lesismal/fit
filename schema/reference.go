@@ -136,7 +136,8 @@ below, and may be split across several files. [Configuration](../configuration.m
 config is loaded, checked and changed.
 
 How to read the tables: a field left out takes its default, when it has one; a duration is a
-string such as ` + "`\"1.5s\"`" + ` or ` + "`\"2m\"`" + `; an integer's bounds follow its type; ` + "`object`" + `
+string such as ` + "`\"1.5s\"`" + ` or ` + "`\"2m\"`" + `; bytes or percent is an integer of bytes or a
+share of the memory fit may use, such as ` + "`\"50%\"`" + `; an integer's bounds follow its type; ` + "`object`" + `
 links to the object's own table; a field marked Required must be written; a field marked
 Deprecated is an old name that still works, with a warning. The
 [JSON Schema](../../schema/fit.schema.json) says the same for editors, and ` + "`fit validate`" + ` checks
@@ -222,6 +223,8 @@ func (r *reference) typeName(t reflect.Type, f *config.Field, path string) strin
 		return "any"
 	case t == config.DurationType:
 		return "duration"
+	case t == config.MemoryType:
+		return "bytes or percent"
 	case t == moduleRefType:
 		for _, n := range namespaces {
 			if n.ns == f.Module {

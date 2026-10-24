@@ -55,6 +55,9 @@ var (
 // config's durations may not be negative.
 const durationPattern = `^\+?(0|(([0-9]+(\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$`
 
+// memoryPattern is a share of memory, a percentage to 100.
+const memoryPattern = `^\+?(100(\.0*)?|[0-9]{1,2}(\.[0-9]*)?|\.[0-9]+)%$`
+
 func ref(name string) object { return object{"$ref": "#/$defs/" + name} }
 
 // typeSchema returns the schema of a value of type t; f is the struct field
@@ -65,6 +68,8 @@ func (g *generator) typeSchema(t reflect.Type, f *config.Field) object {
 		return object{}
 	case t == config.DurationType:
 		return object{"type": "string", "pattern": durationPattern}
+	case t == config.MemoryType:
+		return object{"oneOf": []object{{"type": "integer", "minimum": 0}, {"type": "string", "pattern": memoryPattern}}}
 	case t == moduleRefType:
 		if f == nil || f.Module == "" {
 			panic(fmt.Sprintf("schema: a ModuleRef needs a module tag naming its namespace (%v)", f))

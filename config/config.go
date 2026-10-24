@@ -8,14 +8,11 @@
 package config
 
 import (
-	"math"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/lesismal/fit/internal/sysmem"
 )
 
 // SchemaVersion is the version of the config's names and shapes this fit
@@ -244,21 +241,27 @@ func (a *Admin) HistoryLen() int    { return int(orDefault(int64(a.History), Def
 func (a *Admin) ConfigBytes() int64 { return orDefault(a.MaxConfigBytes, DefaultAdminMaxConfigBytes) }
 func (a *Admin) Conns() int         { return int(orDefault(int64(a.MaxConns), DefaultAdminMaxConns)) }
 
+// DefaultMaxPendingBytes is max_pending_bytes when it is left out: half the
+// memory.
+var DefaultMaxPendingBytes = MemoryPercent(50)
+
 // The defaults of Limits.
 const (
 	DefaultWriteStallTimeout = Duration(30 * time.Second)
-	FallbackMaxPendingBytes  = 256 << 20
-	DefaultMaxHeaderBytes    = 1 << 20
-	DefaultMaxBodyBytes      = 16 << 20
-	DefaultMaxConns          = 100000
+	// FallbackMaxPendingBytes is max_pending_bytes when it is a share of
+	// memory and the memory cannot be read.
+	FallbackMaxPendingBytes = 256 << 20
+	DefaultMaxHeaderBytes   = 1 << 20
+	DefaultMaxBodyBytes     = 16 << 20
+	DefaultMaxConns         = 100000
 )
 
 // Limits bound what clients can make fit hold for them.
 type Limits struct {
-	MaxPendingBytes int64 `json:"max_pending_bytes,omitempty" min:"0" doc:"How many bytes of responses may wait, across every connection, for clients to take them; past it, every connection stops reading until some go. Takes effect at start, not on a reload. Half the machine's memory when left out or 0, or half the container's memory limit where that is lower; 256 MiB where neither can be read."`
-	MaxHeaderBytes  int   `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
-	MaxConns        int   `json:"max_conns,omitempty" min:"0" default:"100000" doc:"The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0."`
-	MaxBodyBytes    int64 `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
+	MaxPendingBytes Memory `json:"max_pending_bytes,omitempty" default:"\"50%\"" doc:"How many bytes of responses may wait, across every connection, for clients to take them, the backpressure on them all; past it, every connection stops reading until some go. A number of bytes, or a share of the memory fit may use, such as \"25%\": the machine's, or the container's memory limit where that is lower. Takes effect at start, not on a reload. \"50%\" when left out or 0; 256 MiB where the memory cannot be read."`
+	MaxHeaderBytes  int    `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
+	MaxConns        int    `json:"max_conns,omitempty" min:"0" default:"100000" doc:"The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0."`
+	MaxBodyBytes    int64  `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
 
 	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" default:"\"30s\"" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
 
@@ -267,21 +270,17 @@ type Limits struct {
 
 // PendingBytes, HeaderBytes and BodyBytes return the limits, their defaults
 // when left out.
-func (l Limits) PendingBytes() int64 { return orDefault(l.MaxPendingBytes, DefaultMaxPendingBytes()) }
+func (l Limits) PendingBytes() int64 {
+	m := l.MaxPendingBytes
+	if m == 0 {
+		m = DefaultMaxPendingBytes
+	}
+	return m.Bytes(FallbackMaxPendingBytes)
+}
 func (l Limits) HeaderBytes() int {
 	return int(orDefault(int64(l.MaxHeaderBytes), DefaultMaxHeaderBytes))
 }
 func (l Limits) BodyBytes() int64 { return orDefault(l.MaxBodyBytes, DefaultMaxBodyBytes) }
-
-// DefaultMaxPendingBytes is max_pending_bytes when it is left out: half the
-// memory sysmem.Total reads, or FallbackMaxPendingBytes when it reads none.
-func DefaultMaxPendingBytes() int64 {
-	n := sysmem.Total() / 2
-	if n == 0 {
-		return FallbackMaxPendingBytes
-	}
-	return int64(min(n, math.MaxInt64))
-}
 
 // Conns returns the connection limit, its default when left out.
 func (l Limits) Conns() int { return int(orDefault(int64(l.MaxConns), DefaultMaxConns)) }
