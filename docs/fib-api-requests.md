@@ -52,7 +52,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
 | A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
-| A41 | A response's header held back while an asynchronous hook runs | made, fib `992b196`, not pushed yet | 1, 4 | I72 |
+| A41 | A response's header held back while an asynchronous hook runs | made, fib `76c0275`, not pushed yet | 1, 4 | I72 |
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | done, `3998953`, v1.6.0 | 6, 11 | I67 |
 | A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
@@ -1226,7 +1226,7 @@ given as the length of the body it copies.
 
 ## A41: A response's header held back while an asynchronous hook runs
 
-**Status.** Made on 2026-10-24 as suggested, fib `992b196`, not pushed yet. One difference: the
+**Status.** Made on 2026-10-24 as suggested, fib `76c0275`, not pushed yet. One difference: the
 response of `Upgrade` or `Connect` passes over the hook, since it goes at once. Proxy-Wasm's
 response callbacks waited for it ([decision 018](decisions/018-proxy-wasm-subset.md)).
 
