@@ -113,7 +113,7 @@ of the requests the server answered without it. Only Linux host networking reach
 counters.
 
 The backends are nginx, in configs of their own, [`configs/backends`](configs/backends): no server
-under test, fast on their 2 CPUs, and the same for every server, so that a proxy's results are its
+under test, fast on their own CPUs (6 in the load test plan), and the same for every server, so that a proxy's results are its
 own and not its backend's.
 
 The settings the servers share are aligned, as [Aligned settings](#aligned-settings) says, so that
@@ -140,7 +140,7 @@ the host, which costs the server nothing. From these, each run's efficiency:
 | --- | --- |
 | `cpu_us_per_request` | the server's CPU time per request, in µs |
 | `requests_per_sec_per_mib` | requests a second for each MiB of peak anonymous memory |
-| `bytes_per_in_flight` | peak less starting anonymous memory, for each request in flight (`in_flight`: wrk's 256 connections, or 64 connections of 32 streams for h2c, h2 and HTTP/3) |
+| `bytes_per_in_flight` | peak less starting anonymous memory, for each request in flight (`in_flight`: wrk's 256 connections, or the multiple of its threads it opens of them, or 64 connections of 32 streams for h2c, h2 and HTTP/3) |
 
 fit's goroutines are counted from `go_goroutines` on its Admin API, which its config has listen at
 127.0.0.1:9005 (only with host networking does the harness reach it): once a second after it is
@@ -173,13 +173,13 @@ each run, and records how many the server closed.
 ## Aligned settings
 
 Each server's bench config sets what the servers have in common to the same value, so that within
-the plan's largest load, 7,168 requests in flight, no server is held back by a limit of its own:
+the plan's largest load, 10,000 requests in flight, with 4 workers, no server is held back by a limit of its own:
 
 | Setting | Value | How |
 | --- | --- | --- |
-| Backend connections | at most 8,192 | nginx `max_conns` with a shared `zone`, Caddy `max_conns_per_host`, Envoy's circuit breakers, fit `max_conns`; Traefik has no such setting |
-| Requests waiting for a backend connection | at most 8,192 | fit `max_pending`, Envoy `max_pending_requests`; nginx cannot queue, Caddy and Traefik do without a bound |
-| Idle backend connections kept | 8,192 in all, each closed after 60s idle | nginx 1,170 for each of its 7 workers and `keepalive_timeout 60s`; Caddy `keepalive_idle_conns` and `keepalive 60s` (2m by default); Traefik `maxIdleConnsPerHost` and `idleConnTimeout 60s` (90s by default); Envoy has no bound, `idle_timeout 60s` (1h by default); fit `max_idle_conns`, `idle_timeout` |
+| Backend connections | at most 16,384 | nginx `max_conns` with a shared `zone`, Caddy `max_conns_per_host`, Envoy's circuit breakers, fit `max_conns`; Traefik has no such setting |
+| Requests waiting for a backend connection | at most 16,384 | fit `max_pending`, Envoy `max_pending_requests`; nginx cannot queue, Caddy and Traefik do without a bound |
+| Idle backend connections kept | 16,384 in all, each closed after 60s idle | nginx 4,096 for each of its 4 workers and `keepalive_timeout 60s`; Caddy `keepalive_idle_conns` and `keepalive 60s` (2m by default); Traefik `maxIdleConnsPerHost` and `idleConnTimeout 60s` (90s by default); Envoy has no bound, `idle_timeout 60s` (1h by default); fit `max_idle_conns`, `idle_timeout` |
 | Passive health checks | none: a failure does not take the only backend out of rotation | nginx `max_fails=0` and fit `max_fails 0` (1 by default for both); Caddy, Traefik and Envoy have none by default |
 | Headers sent to the backend | the client's `Host`, and `X-Forwarded-For`, `-Proto` and `-Host` | nginx `proxy_set_header` (it sends its upstream's name as `Host`, and none of them, by default); Envoy `use_remote_address`, and no `x-request-id` made up for each request (`generate_request_id: false`); Caddy, Traefik and fit by default, fit adding `Forwarded` as well |
 | Listen backlog | 2,048, the host's `somaxconn` | nginx `backlog=2048` (511 by default), Envoy `tcp_backlog_size` (128 by default), fit `engine.backlog`; the Go servers use `somaxconn` |
@@ -190,7 +190,7 @@ the plan's largest load, 7,168 requests in flight, no server is held back by a l
 | HTTP/2 and HTTP/3 streams a connection | 250 | the Go servers' and fib's default; nginx and Envoy set to it |
 | HTTP/2 stream receive window | 1 MiB | nginx `http2_body_preread_size` (64 KiB by default), Envoy (256 MiB by default); the others have it |
 | HTTP/2 connection receive window | 16 MiB where it can be set | Envoy, fit; Caddy and Traefik, in Go, keep 1 MiB, which can slow their large uploads over h2 |
-| Workers | 7, one a CPU | nginx `worker_processes`, Envoy `--cpuset-threads`, the Go servers by the CPUs they are pinned to |
+| Workers | 4, one a CPU | nginx `worker_processes`, Envoy `--cpuset-threads`, the Go servers by the CPUs they are pinned to |
 | Cache | 1 GiB, entries of up to 2 MiB | nginx `proxy_cache_path`, fit's `cache` |
 | Static files | what is learned of a path trusted for 1s | fit's static handler (`check_interval`), which also keeps files of up to 1 MiB in memory, 64 MiB at most; nginx `open_file_cache` for 10,000 paths, `open_file_cache_valid 1s`, the bytes from the page cache by `sendfile`; Caddy reads each file through the page cache |
 
@@ -200,7 +200,7 @@ AES-128-GCM and offer X25519 alone (an OpenSSL config of fitbench's, `OPENSSL_CO
 Envoy follow the client's order, which by OpenSSL's default put AES-256-GCM first, while the Go
 servers and fit choose AES-128-GCM by their own, so every server agrees on AES-128-GCM and X25519.
 
-The backends are tuned for their own speed instead: a worker pinned to each of their 2 CPUs,
+The backends are tuned for their own speed instead: a worker pinned to each of their 6 CPUs,
 connections kept 300s, file metadata cached, no ETags.
 
 None writes an access log, and none compresses, on the fly or from precompressed files: nginx's
@@ -211,23 +211,36 @@ every server ignores.
 ## The load test plan
 
 [`plan.sh`](plan.sh) runs the plan on the benchmark host, its sizes set by what the host can carry:
-16 threads split 7 for the server, 7 for the load generators and 2 for the backends; about 33 GB/s of loopback TCP with that split; and a kernel
-that pressures TCP buffers past 1 GiB across all sockets, which keeps the bytes in flight of every
-run well below. Each run is a 5s warm-up and 15s measured; the 206 runs take about 1 h 35 min.
+16 threads, split by physical core (CPUs n and n+8 are the two threads of core n) so that no role
+shares a core with another: the server under test gets cores 0-1 (CPUs `0-1,8-9`, 4 workers), the
+backends cores 2-4 (`2-4,10-12`) and the load generators cores 5-7 (`5-7,13-15`). The backends
+get as much as the load generators so that they never set the pace: every result records their
+CPU (`backend_cpu_cores`, `origin_cpu_cores`), which stays well below their 6. The kernel
+pressures TCP buffers past 1 GiB across all sockets, which keeps the bytes in flight of every run
+well below. Each run is a 5s warm-up and 15s measured; the 232 runs take about 1 h 50 min.
 
 | Workload | Scenarios | Protocols | Requests in flight | Servers | Runs |
 | --- | --- | --- | --- | --- | ---: |
-| W1, the API gateway | `api` | HTTP/1.1, h2 | 112, 448, 1,792, 7,168 | all five | 40 |
-| W2, the website | `site`, `edge` | HTTP/1.1 over TLS, h2, HTTP/3 | 448, 1,792 | nginx, Caddy, fit (`edge`: nginx, fit) | 30 |
-| W3, connection churn | `churn-1`, `churn-10` | HTTP/1.1 over TLS | 112, 448 connections | nginx, Caddy, Envoy, fit | 16 |
-| W4, large transfers | `download`, `proxy-download`, `proxy-upload` | HTTP/1.1, h2 | 112 | all that serve them | 26 |
-| W5, idle and active | `api` with 40,000 idle TLS connections | HTTP/1.1, h2 | 448 | all five | 10 |
-| W6, latency at a fixed rate | `api` at 50k and 150k requests a second | HTTP/1.1, h2 | 448 connections | all five | 20 |
-| W7, the raw ceiling | `fixed` | HTTP/1.1, h2c, h2, HTTP/3 | 28, 448, 1,792, 7,168 | nginx, Caddy, Envoy, fit | 64 |
+| W1, the API gateway | `api` | HTTP/1.1, h2 | 100, 500, 2,000, 5,000, 10,000 | all five | 50 |
+| W2, the website | `site`, `edge` | HTTP/1.1 over TLS, h2, HTTP/3 | 500, 2,000 | nginx, Caddy, fit (`edge`: nginx, fit) | 30 |
+| W3, connection churn | `churn-1`, `churn-10` | HTTP/1.1 over TLS | 100, 500 connections | nginx, Caddy, Envoy, fit | 16 |
+| W4, large transfers | `download`, `proxy-download`, `proxy-upload` | HTTP/1.1, h2 | 100 | all that serve them | 26 |
+| W5, idle and active | `api` with 40,000 idle TLS connections | HTTP/1.1, h2 | 500 | all five | 10 |
+| W6, latency at a fixed rate | `api` at 20k and 100k requests a second | HTTP/1.1, h2 | 500 connections | all five | 20 |
+| W7, the raw ceiling | `fixed` | HTTP/1.1, h2c, h2, HTTP/3 | 100, 500, 2,000, 5,000, 10,000 | nginx, Caddy, Envoy, fit | 80 |
 
-Over HTTP/1.1 each connection has one request in flight; over h2c, h2 and HTTP/3 the same number of
-requests is kept by connections of up to 32 streams (112 as 7 × 16, 448 as 14 × 32, 7,168 as
-224 × 32), and every count is a multiple of the load generators' 7 threads.
+Over HTTP/1.1 each connection has one request in flight, and wrk gives each of its 6 threads
+`connections / threads`, so a level is a multiple of 6 just under it: 96, 498, 1,998, 4,998 and
+9,996, as each result's `in_flight` records. Over h2c, h2 and HTTP/3 the level is h2load's
+connections times streams: 100 as 10 × 10, then 25 streams a connection (500 as 20 × 25, 2,000 as
+80 × 25, 5,000 as 200 × 25, 10,000 as 400 × 25), every connection count at least the load
+generators' 6 threads.
+
+W6's rates are set by what the servers answer at most on their 4 CPUs at 500 in flight, about 40k
+to 200k a second (Caddy over h2 the least, nginx over HTTP/1.1 the most) in the trial before the
+plan: at 20k every server runs below its ceiling, so its latency is its own and not a queue's; at
+100k only nginx and fit can keep up, and the others' latencies show how they fall behind. The
+backends, nginx on 6 CPUs, used at most 2 of them in that trial.
 
 ## Idle connections
 

@@ -7,7 +7,7 @@
 # the same routes but /ws. Caddy logs no requests unless asked to.
 #
 # The settings every server shares are aligned (bench/README.md, "Aligned
-# settings"): nothing here limits a run of up to 7,168 requests in flight.
+# settings"): nothing here limits a run of up to 10,000 requests in flight.
 # Caddy, in Go, has 250 HTTP/2 streams a connection and a 1 MiB stream
 # window, which it does not let a config change. Nothing is compressed: no
 # encode directive, and file_server looks for no precompressed files.
@@ -50,16 +50,16 @@
 	}
 }
 
-# At most 8,192 backend connections, 8,192 of them kept idle, an idle one
+# At most 16,384 backend connections, 16,384 of them kept idle, an idle one
 # closed after 60s; a 5s connect timeout and 60s for a response's header.
 # Caddy, as every proxy here, keeps the client's Host and adds
 # X-Forwarded-For, -Proto and -Host, and has no passive health checks.
 (transport) {
 	transport http {
-		max_conns_per_host 8192
+		max_conns_per_host 16384
 		keepalive 60s
-		keepalive_idle_conns 8192
-		keepalive_idle_conns_per_host 8192
+		keepalive_idle_conns 16384
+		keepalive_idle_conns_per_host 16384
 		dial_timeout 5s
 		response_header_timeout 60s
 	}

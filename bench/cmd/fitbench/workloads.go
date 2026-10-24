@@ -293,7 +293,9 @@ func (h *harness) loadRuns(sc scenario, p protocol, url string, d time.Duration,
 		if len(args) > 0 {
 			cmd = append(append(cmd, "--"), args...)
 		}
-		return []loadRun{{args: cmd, tool: "wrk", conns: c, streams: 1}}
+		// wrk gives each thread connections / threads, so it opens a
+		// multiple of its threads, and that is what is kept in flight.
+		return []loadRun{{args: cmd, tool: "wrk", conns: c / h.threads * h.threads, streams: 1}}
 	}
 
 	container, flags := loadgenName, []string(nil)

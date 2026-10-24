@@ -94,7 +94,7 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 430 MB，因此齐夫场景既测速度，也测各自保住了多少热门路径。其结果另外记录本轮中到达缓存后端的请求数（取自
 其 `stub_status`），以及命中率，即服务器不经源站回答的请求所占比例。只有 Linux 的 host 网络能访问到源站的计数器。
 
-后端都是 nginx，配置在单独的 [`configs/backends`](configs/backends) 目录：它不是被测服务器之一，在 2 个 CPU 上
+后端都是 nginx，配置在单独的 [`configs/backends`](configs/backends) 目录：它不是被测服务器之一，在自己的 CPU 上（压测方案中为 6 个）
 足够快，且对每个服务器都相同，代理的结果反映的是代理本身，而不是它的后端。
 
 各服务器共有的设置都已对齐，见[对齐的设置](#对齐的设置)，没有服务器被其他服务器没有的自身配置限制拖累。
@@ -115,7 +115,7 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 | --- | --- |
 | `cpu_us_per_request` | 每个请求花掉服务器的 CPU 时间，单位 µs |
 | `requests_per_sec_per_mib` | 每 MiB 峰值匿名内存对应的每秒请求数 |
-| `bytes_per_in_flight` | 峰值减去起始匿名内存，再除以在途请求数（`in_flight`：HTTP/1.1 为 256 个连接，h2c、h2 和 HTTP/3 为 64 个连接各 32 个流） |
+| `bytes_per_in_flight` | 峰值减去起始匿名内存，再除以在途请求数（`in_flight`：HTTP/1.1 为 256 个连接，或 wrk 实际打开的其线程数的倍数，h2c、h2 和 HTTP/3 为 64 个连接各 32 个流） |
 
 fit 的协程数取自其 Admin API 的 `go_goroutines`，压测配置让它监听 127.0.0.1:9005（只有主机网络下工具才
 连得到）：就绪一秒后读一次（`startup_goroutines`），每次预热和测量期间（每轮都用新启动的服务器）每 100ms 读一次并保留最大值
@@ -142,14 +142,14 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 
 ## 对齐的设置
 
-各服务器的压测配置把它们共有的设置设成同样的值，使方案的最大负载（7,168 个请求在途）之内，没有服务器被自身配置的
+各服务器的压测配置把它们共有的设置设成同样的值，使方案的最大负载（10,000 个请求在途，4 个 worker）之内，没有服务器被自身配置的
 限制拖累：
 
 | 设置 | 值 | 方式 |
 | --- | --- | --- |
-| 后端连接数 | 最多 8,192 | nginx 带共享 `zone` 的 `max_conns`、Caddy `max_conns_per_host`、Envoy 熔断器、fit `max_conns`；Traefik 没有此设置 |
-| 等待后端连接的请求 | 最多 8,192 | fit `max_pending`、Envoy `max_pending_requests`；nginx 不能排队，Caddy 和 Traefik 排队不设上限 |
-| 保持的空闲后端连接 | 共 8,192，空闲 60 秒后关闭 | nginx 每个 worker 1,170（共 7 个）和 `keepalive_timeout 60s`；Caddy `keepalive_idle_conns` 和 `keepalive 60s`（默认 2 分钟）；Traefik `maxIdleConnsPerHost` 和 `idleConnTimeout 60s`（默认 90 秒）；Envoy 不设上限，`idle_timeout 60s`（默认 1 小时）；fit `max_idle_conns`、`idle_timeout` |
+| 后端连接数 | 最多 16,384 | nginx 带共享 `zone` 的 `max_conns`、Caddy `max_conns_per_host`、Envoy 熔断器、fit `max_conns`；Traefik 没有此设置 |
+| 等待后端连接的请求 | 最多 16,384 | fit `max_pending`、Envoy `max_pending_requests`；nginx 不能排队，Caddy 和 Traefik 排队不设上限 |
+| 保持的空闲后端连接 | 共 16,384，空闲 60 秒后关闭 | nginx 每个 worker 4,096（共 4 个）和 `keepalive_timeout 60s`；Caddy `keepalive_idle_conns` 和 `keepalive 60s`（默认 2 分钟）；Traefik `maxIdleConnsPerHost` 和 `idleConnTimeout 60s`（默认 90 秒）；Envoy 不设上限，`idle_timeout 60s`（默认 1 小时）；fit `max_idle_conns`、`idle_timeout` |
 | 被动健康检查 | 无：一次失败不会让唯一的后端退出轮转 | nginx `max_fails=0`、fit `max_fails 0`（两者默认都是 1）；Caddy、Traefik、Envoy 默认没有 |
 | 发给后端的请求头 | 客户端的 `Host`，以及 `X-Forwarded-For`、`-Proto`、`-Host` | nginx `proxy_set_header`（默认把上游名作为 `Host`，且都不发）；Envoy `use_remote_address`，且不为每个请求生成 `x-request-id`（`generate_request_id: false`）；Caddy、Traefik、fit 默认如此，fit 还多发 `Forwarded` |
 | 监听队列 | 2,048，即压测机的 `somaxconn` | nginx `backlog=2048`（默认 511）、Envoy `tcp_backlog_size`（默认 128）、fit `engine.backlog`；Go 服务器用 `somaxconn` |
@@ -160,7 +160,7 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 | 每连接的 HTTP/2、HTTP/3 流 | 250 | Go 服务器和 fib 的默认值；nginx 和 Envoy 设成它 |
 | HTTP/2 流接收窗口 | 1 MiB | nginx `http2_body_preread_size`（默认 64 KiB）、Envoy（默认 256 MiB）；其余已是 |
 | HTTP/2 连接接收窗口 | 能设的设为 16 MiB | Envoy、fit；Caddy 和 Traefik 用 Go 的 1 MiB，可能拖慢它们在 h2 上的大上传 |
-| 工作线程 | 7，每 CPU 一个 | nginx `worker_processes`、Envoy `--cpuset-threads`，Go 服务器按绑定的 CPU 数 |
+| 工作线程 | 4，每 CPU 一个 | nginx `worker_processes`、Envoy `--cpuset-threads`，Go 服务器按绑定的 CPU 数 |
 | 缓存 | 1 GiB，单条最多 2 MiB | nginx `proxy_cache_path`、fit 的 `cache` |
 | 静态文件 | 对路径所知的信息信任 1 秒 | fit 的静态处理器（`check_interval`），它还把 1 MiB 以内的文件放在内存里，最多 64 MiB；nginx `open_file_cache` 缓存 10,000 个路径，`open_file_cache_valid 1s`，内容经 `sendfile` 来自页缓存；Caddy 每次经页缓存读文件 |
 
@@ -169,29 +169,37 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 Envoy 按客户端的顺序选择，OpenSSL 默认把 AES-256-GCM 排在前面；Go 服务器和 fit 自行选择 AES-128-GCM，因此所有服务器
 都协商为 AES-128-GCM 和 X25519。
 
-后端则按自身性能调优：2 个 CPU 上各绑一个 worker，连接保持 300 秒，缓存文件元数据，不生成 ETag。
+后端则按自身性能调优：6 个 CPU 上各绑一个 worker，连接保持 300 秒，缓存文件元数据，不生成 ETag。
 
 都不写访问日志，也都不压缩，无论是实时压缩还是预压缩文件：nginx 官方镜像只能提供 gzip 预压缩文件，其他服务器
 还能提供 brotli 和 zstd，因此都不启用。工作负载仍发送浏览器和 API 客户端的 `Accept-Encoding`，所有服务器都忽略它。
 
 ## 压测方案
 
-[`plan.sh`](plan.sh) 在压测机上跑方案，规模按压测机的承载能力确定：16 个线程分给服务器 7 个、压测客户端 7 个、后端
-2 个；按这样的划分，回环 TCP 约 33 GB/s；内核在所有 socket 的 TCP 缓冲超过
-1 GiB 时开始限制，每轮在途的字节数都远低于此。每轮预热 5 秒、测 15 秒；206 轮约需 1 小时 35 分钟。
+[`plan.sh`](plan.sh) 在压测机上跑方案，规模按压测机的承载能力确定：16 个线程按物理核划分（CPU n 和 n+8 是核 n 的两个
+线程），各角色不共用核：被测服务器用核 0-1（CPU `0-1,8-9`，4 个 worker），后端用核 2-4（`2-4,10-12`），压测客户端用
+核 5-7（`5-7,13-15`）。后端与压测客户端一样多，以免由后端决定速度：每个结果都记录后端的 CPU（`backend_cpu_cores`、
+`origin_cpu_cores`），都远低于它们的 6 个。内核在所有 socket 的 TCP 缓冲超过 1 GiB 时开始限制，每轮在途的字节数都远低于
+此。每轮预热 5 秒、测 15 秒；232 轮约需 1 小时 50 分钟。
 
 | 工作负载 | 场景 | 协议 | 在途请求 | 服务器 | 轮数 |
 | --- | --- | --- | --- | --- | ---: |
-| W1，API 网关 | `api` | HTTP/1.1、h2 | 112、448、1,792、7,168 | 全部五个 | 40 |
-| W2，网站 | `site`、`edge` | TLS 上的 HTTP/1.1、h2、HTTP/3 | 448、1,792 | nginx、Caddy、fit（`edge`：nginx、fit） | 30 |
-| W3，连接频繁新建 | `churn-1`、`churn-10` | TLS 上的 HTTP/1.1 | 112、448 个连接 | nginx、Caddy、Envoy、fit | 16 |
-| W4，大文件传输 | `download`、`proxy-download`、`proxy-upload` | HTTP/1.1、h2 | 112 | 所有支持的 | 26 |
-| W5，空闲加活跃 | `api`，并保持 40,000 个空闲 TLS 连接 | HTTP/1.1、h2 | 448 | 全部五个 | 10 |
-| W6，固定速率下的延迟 | `api`，每秒 5 万和 15 万个请求 | HTTP/1.1、h2 | 448 个连接 | 全部五个 | 20 |
-| W7，原始上限 | `fixed` | HTTP/1.1、h2c、h2、HTTP/3 | 28、448、1,792、7,168 | nginx、Caddy、Envoy、fit | 64 |
+| W1，API 网关 | `api` | HTTP/1.1、h2 | 100、500、2,000、5,000、10,000 | 全部五个 | 50 |
+| W2，网站 | `site`、`edge` | TLS 上的 HTTP/1.1、h2、HTTP/3 | 500、2,000 | nginx、Caddy、fit（`edge`：nginx、fit） | 30 |
+| W3，连接频繁新建 | `churn-1`、`churn-10` | TLS 上的 HTTP/1.1 | 100、500 个连接 | nginx、Caddy、Envoy、fit | 16 |
+| W4，大文件传输 | `download`、`proxy-download`、`proxy-upload` | HTTP/1.1、h2 | 100 | 所有支持的 | 26 |
+| W5，空闲加活跃 | `api`，并保持 40,000 个空闲 TLS 连接 | HTTP/1.1、h2 | 500 | 全部五个 | 10 |
+| W6，固定速率下的延迟 | `api`，每秒 2 万和 10 万个请求 | HTTP/1.1、h2 | 500 个连接 | 全部五个 | 20 |
+| W7，原始上限 | `fixed` | HTTP/1.1、h2c、h2、HTTP/3 | 100、500、2,000、5,000、10,000 | nginx、Caddy、Envoy、fit | 80 |
 
-HTTP/1.1 每个连接一个请求在途；h2c、h2 和 HTTP/3 用最多 32 个流的连接保持同样多的请求（112 为 7 × 16，448 为
-14 × 32，7,168 为 224 × 32），所有数量都是压测客户端 7 个线程的倍数。
+HTTP/1.1 每个连接一个请求在途，wrk 给它的 6 个线程各 `connections / threads` 个连接，所以每档是略低于它的 6 的倍数：
+96、498、1,998、4,998 和 9,996，每个结果的 `in_flight` 都有记录。h2c、h2 和 HTTP/3 的档位是 h2load 的连接数乘以流数：
+100 为 10 × 10，其后每个连接 25 个流（500 为 20 × 25，2,000 为 80 × 25，5,000 为 200 × 25，10,000 为 400 × 25），
+每个连接数都不少于压测客户端的 6 个线程。
+
+W6 的速率按各服务器在 4 个 CPU、500 个在途时的上限确定：方案开跑前的试跑中约为每秒 4 万到 20 万（Caddy 的 h2 最低，
+nginx 的 HTTP/1.1 最高）。2 万时每个服务器都低于上限，延迟是它自己的而不是排队造成的；10 万时只有 nginx 和 fit
+跟得上，其余的延迟显示它们落后的程度。那次试跑中后端（6 个 CPU 上的 nginx）最多用了其中 2 个。
 
 ## 空闲连接
 

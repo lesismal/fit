@@ -3,8 +3,12 @@
 # on the benchmark host: seven workloads, each at the levels of load it is
 # measured at, one fitbench run and one JSON for each. It runs on the host
 # itself, from a directory holding bin/ (fitbench, fit, idleconn for
-# linux/amd64) and bench/ (this repository's), and takes about 1 h 35 min:
+# linux/amd64) and bench/ (this repository's), and takes about 1 h 50 min:
 # start it under nohup with < /dev/null.
+#
+# The host's 16 threads are split by physical core (CPUs n and n+8 are the
+# two threads of core n): the server under test gets cores 0-1, the
+# backends cores 2-4 and the load generators cores 5-7.
 #
 #   bench/plan.sh DATE        results in bench/results/plan-DATE-<workload>-<level>.json
 #
@@ -29,47 +33,56 @@ run() {
 	fi
 	echo "$name start $(date -u +%FT%TZ) rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null || echo ?)" >> plan.log
 	status=0
-	./bin/fitbench -root "$here" -bin "$here/bin" -idle "" -duration 15s -warmup 5s -label "$name" \
+	./bin/fitbench -root "$here" -bin "$here/bin" -idle "" -duration 15s -warmup 5s -label "$name" $cpus \
 		-servers "$servers" -scenarios "$scenarios" -protocols "$protocols" \
 		-connections "$c" -h2-connections "$hc" -h2-streams "$hm" "$@" \
 		-out "bench/results/plan-$date-$name.json" > "$name.log" 2>&1 || status=$?
 	echo "$name exit $status $(date -u +%FT%TZ)" >> plan.log
 }
 
+cpus="-server-cpus 0-1,8-9 -backend-cpus 2-4,10-12 -client-cpus 5-7,13-15"
 all=nginx,caddy,traefik,envoy,fit
 
-# W7, the raw ceiling: the fixed response, at 28 to 7,168 requests in flight.
-for lv in 28:7:4 448:14:32 1792:56:32 7168:224:32; do
+# Over HTTP/1.1 a level is wrk's connections, of which it opens a multiple
+# of its 6 threads (100 is 96, 500 is 498); over h2c, h2 and HTTP/3 it is
+# h2load's connections times streams, 10 x 10 for 100 and 25 streams a
+# connection above it.
+
+# W7, the raw ceiling: the fixed response, at 100 to 10,000 requests in flight.
+for lv in 100:10:10 500:20:25 2000:80:25 5000:200:25 10000:400:25; do
 	c=${lv%%:*} rest=${lv#*:}
 	run "w7-fixed-$c" nginx,caddy,envoy,fit fixed http/1.1,h2c,h2,h3 "$c" "${rest%%:*}" "${rest#*:}"
 done
 
-# W1, the API gateway, at 112 to 7,168 requests in flight.
-for lv in 112:7:16 448:14:32 1792:56:32 7168:224:32; do
+# W1, the API gateway, at 100 to 10,000 requests in flight.
+for lv in 100:10:10 500:20:25 2000:80:25 5000:200:25 10000:400:25; do
 	c=${lv%%:*} rest=${lv#*:}
 	run "w1-api-$c" "$all" api http/1.1,h2 "$c" "${rest%%:*}" "${rest#*:}"
 done
 
 # W2, the website, served and behind a cache, over HTTPS.
-for lv in 448:14:32 1792:56:32; do
+for lv in 500:20:25 2000:80:25; do
 	c=${lv%%:*} rest=${lv#*:}
 	run "w2-site-$c" nginx,caddy,fit site,edge https/1.1,h2,h3 "$c" "${rest%%:*}" "${rest#*:}"
 done
 
 # W3, connection churn: a new TLS connection every request, and every ten.
-for c in 112 448; do
-	run "w3-churn-$c" nginx,caddy,envoy,fit churn-1,churn-10 https/1.1 "$c" 7 1
+for c in 100 500; do
+	run "w3-churn-$c" nginx,caddy,envoy,fit churn-1,churn-10 https/1.1 "$c" 10 1
 done
 
 # W4, 1 MiB downloads and uploads.
-run w4-large-112 "$all" download,proxy-download,proxy-upload http/1.1,h2 112 7 16
+run w4-large-100 "$all" download,proxy-download,proxy-upload http/1.1,h2 100 10 10
 
 # W5, the API gateway with 40,000 idle TLS connections held open.
-run w5-idle-448 "$all" api http/1.1,h2 448 14 32 -hold-idle 40000
+run w5-idle-500 "$all" api http/1.1,h2 500 20 25 -hold-idle 40000
 
-# W6, the API gateway's latency at 50k and 150k requests a second.
-for rate in 50000 150000; do
-	run "w6-rate-$rate" "$all" api http/1.1,h2 448 14 32 -rate "$rate"
+# W6, the API gateway's latency at 20k and 100k requests a second: on the
+# server's 4 CPUs, 20k is about half of what the slowest proxy answers at
+# most, so every server runs below its ceiling; 100k is past the Go servers'
+# and Envoy's ceilings and within nginx's and fit's.
+for rate in 20000 100000; do
+	run "w6-rate-$rate" "$all" api http/1.1,h2 500 20 25 -rate "$rate"
 done
 
 touch done

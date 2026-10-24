@@ -10,7 +10,7 @@
 # access log is configured, so none is written.
 #
 # The settings every server shares are aligned (bench/README.md, "Aligned
-# settings"): nothing here limits a run of up to 7,168 requests in flight. A
+# settings"): nothing here limits a run of up to 10,000 requests in flight. A
 # client connection idle for 120s is closed; HTTP/2 and HTTP/3 take 250
 # streams a connection, and HTTP/2 a 1 MiB stream window and a 16 MiB
 # connection window (Envoy's defaults are 256 MiB for each); a route waits
@@ -174,7 +174,7 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
   # Envoy's circuit breakers allow 1024 connections, pending and in-flight
-  # requests by default; they allow 8,192 here, as every proxy here is
+  # requests by default; they allow 16,384 here, as every proxy here is
   # bounded, more than any run keeps in flight. Each worker keeps its own
   # backend connections, reused with keep-alive.
   - name: backend
@@ -182,7 +182,7 @@ static_resources:
     dns_lookup_family: V4_ONLY
     connect_timeout: 5s
     circuit_breakers:
-      thresholds: [{max_connections: 8192, max_pending_requests: 8192, max_requests: 8192}]
+      thresholds: [{max_connections: 16384, max_pending_requests: 16384, max_requests: 16384}]
     typed_extension_protocol_options:
       envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
         "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions

@@ -431,6 +431,12 @@ func TestLoadRuns(t *testing.T) {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
 		}
 	}
+
+	// wrk opens connections / threads on each thread: 100 over 6 is 96.
+	h = &harness{threads: 6, conns: 100}
+	if runs := h.loadRuns(scenario{name: "fixed"}, wrk, "U", time.Second, true); runs[0].conns != 96 {
+		t.Errorf("wrk keeps %d in flight, want 96", runs[0].conns)
+	}
 }
 
 func TestGoroutines(t *testing.T) {

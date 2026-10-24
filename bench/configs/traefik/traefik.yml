@@ -8,7 +8,7 @@
 # Traefik requires).
 #
 # The settings every server shares are aligned (bench/README.md, "Aligned
-# settings"): nothing here limits a run of up to 7,168 requests in flight. A
+# settings"): nothing here limits a run of up to 10,000 requests in flight. A
 # client connection idle for 120s is closed, and a connection takes 250
 # HTTP/2 streams, as every server here does; Traefik, in Go, has a 1 MiB
 # stream window, which it does not let a config change, opens as many backend
@@ -44,12 +44,12 @@ entryPoints:
     http3: {}
     http:
       tls: {}
-# 8,192 backend connections kept idle, an idle one closed after 60s, a 5s
+# 16,384 backend connections kept idle, an idle one closed after 60s, a 5s
 # connect timeout and 60s for a response's header. Traefik, as every proxy
 # here, keeps the client's Host and adds X-Forwarded-For, -Proto and -Host,
 # and has no passive health checks.
 serversTransport:
-  maxIdleConnsPerHost: 8192
+  maxIdleConnsPerHost: 16384
   forwardingTimeouts:
     dialTimeout: 5s
     responseHeaderTimeout: 60s
