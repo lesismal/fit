@@ -132,9 +132,11 @@ type harness struct {
 	// generators cannot reach it.
 	cacheAdmin string
 	// serverCgroup is the running server's cgroup directory on this host,
-	// or "" when it cannot be read from here.
-	serverCgroup string
-	report       Report
+	// or "" when it cannot be read from here; backendCgroups the proxy
+	// backend's and the cache origin's, by container name, once started.
+	serverCgroup   string
+	backendCgroups map[string]string
+	report         Report
 }
 
 func run(ctx context.Context, args []string) error {
@@ -376,6 +378,12 @@ func run(ctx context.Context, args []string) error {
 	}
 	if err := h.waitReady(ctx, cacheName, "http://"+cacheAddr+cacheBackend.ready); err != nil {
 		return err
+	}
+	h.backendCgroups = map[string]string{}
+	for _, name := range []string{backendName, cacheName} {
+		if dir := findCgroup(ctx, name); dir != "" {
+			h.backendCgroups[name] = dir
+		}
 	}
 
 	for _, s := range h.servers {
@@ -752,7 +760,7 @@ func (h *harness) startFresh(ctx context.Context, s server) (int64, error) {
 	if err := h.waitReady(ctx, serverName, "http://"+h.serverHost+":8080"+s.ready); err != nil {
 		return 0, err
 	}
-	h.serverCgroup = findCgroup(ctx)
+	h.serverCgroup = findCgroup(ctx, serverName)
 	time.Sleep(time.Second) // let the server settle after starting
 	anon, _ := h.serverAnon(ctx)
 	return anon, nil
@@ -846,6 +854,8 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon
 		}
 	}
 	runs := h.loadRuns(scenario, proto, url, h.duration, true)
+	backendCPU0, backendOK := h.backendCPU(backendName)
+	originCPU0, originOK := h.backendCPU(cacheName)
 	cpu0, cpuOK := h.serverCPU(ctx)
 	start := time.Now()
 	outs, err := runLoad(ctx, runs)
@@ -863,6 +873,12 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon
 	}
 	if cpu1, ok := h.serverCPU(ctx); ok && cpuOK {
 		r.CPUCores = float64(cpu1-cpu0) / float64(elapsed)
+	}
+	if cpu1, ok := h.backendCPU(backendName); ok && backendOK {
+		r.BackendCPUCores = float64(cpu1-backendCPU0) / float64(elapsed)
+	}
+	if cpu1, ok := h.backendCPU(cacheName); ok && originOK {
+		r.OriginCPUCores = float64(cpu1-originCPU0) / float64(elapsed)
 	}
 	r.GoroutinesMax, r.AnonPeakBytes = samples.stop()
 	if out, err := h.serverFile(ctx, "memory.current"); err == nil {
@@ -1059,8 +1075,8 @@ func (sm *sampler) stop() (goroutines int, anon int64) {
 // findCgroup returns the server container's cgroup directory on this host,
 // when fitbench runs where Docker does with systemd's or cgroupfs's layout of
 // cgroup v2; "" otherwise, and its files are read through docker exec.
-func findCgroup(ctx context.Context) string {
-	out, err := docker(ctx, "inspect", "--format", "{{.Id}}", serverName)
+func findCgroup(ctx context.Context, container string) string {
+	out, err := docker(ctx, "inspect", "--format", "{{.Id}}", container)
 	if err != nil {
 		return ""
 	}
@@ -1094,6 +1110,20 @@ func (h *harness) serverAnon(ctx context.Context) (int64, bool) {
 }
 
 // serverCPU is the CPU time the server's container has used so far.
+// backendCPU reads the CPU time the backend container name has used, from
+// its cgroup on this host; false when it cannot be read from here.
+func (h *harness) backendCPU(name string) (time.Duration, bool) {
+	dir := h.backendCgroups[name]
+	if dir == "" {
+		return 0, false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cpu.stat"))
+	if err != nil {
+		return 0, false
+	}
+	return cgroupCPU(string(data))
+}
+
 func (h *harness) serverCPU(ctx context.Context) (time.Duration, bool) {
 	out, err := h.serverFile(ctx, "cpu.stat")
 	if err != nil {

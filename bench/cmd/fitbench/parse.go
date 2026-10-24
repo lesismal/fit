@@ -39,6 +39,11 @@ type Result struct {
 	// CPUCores is the CPU time the server used during the measured run
 	// divided by its length: 2.5 is two and a half cores kept busy.
 	CPUCores float64 `json:"cpu_cores,omitempty"`
+	// BackendCPUCores and OriginCPUCores are the same for the proxy backend
+	// and the cache origin, on their 2 CPUs: one near 2 means the backend,
+	// not the server, set the pace.
+	BackendCPUCores float64 `json:"backend_cpu_cores,omitempty"`
+	OriginCPUCores  float64 `json:"origin_cpu_cores,omitempty"`
 	// MemoryBytes is the server's cgroup memory at the end of the run, and
 	// AnonBytes the part of it that is not page cache: what the process
 	// itself holds.

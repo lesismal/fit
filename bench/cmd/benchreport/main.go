@@ -100,8 +100,11 @@ type result struct {
 	Requests       int64   `json:"requests"`
 	Errors         int64   `json:"errors"`
 	CPUCores       float64 `json:"cpu_cores"`
-	AnonBytes      int64   `json:"anon_bytes"`
-	AnonPeakBytes  int64   `json:"anon_peak_bytes"`
+	// BackendCPUCores is the proxy backend's CPU during the run, given by
+	// runs that measured it.
+	BackendCPUCores float64 `json:"backend_cpu_cores"`
+	AnonBytes       int64   `json:"anon_bytes"`
+	AnonPeakBytes   int64   `json:"anon_peak_bytes"`
 	// BytesPerInFlight and HitRatio are given only by runs, and scenarios,
 	// that measure them.
 	BytesPerInFlight float64  `json:"bytes_per_in_flight"`
@@ -269,6 +272,10 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		if idleHeld {
 			header = append(header, "Idle held / closed")
 		}
+		backendCPU := slices.ContainsFunc(rows, func(r result) bool { return r.BackendCPUCores > 0 })
+		if backendCPU {
+			header = append(header, "Backend CPU")
+		}
 		header = append(header, "Errors")
 		if old != nil {
 			header = append(header, "TPS vs "+prevName)
@@ -290,6 +297,9 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 			}
 			if idleHeld {
 				row = append(row, fmt.Sprintf("%s / %d", group(float64(r.IdleHeld), 0), r.IdleClosed))
+			}
+			if backendCPU {
+				row = append(row, fmt.Sprintf("%.2f", r.BackendCPUCores))
 			}
 			row = append(row, r.errorsCell())
 			if old != nil {

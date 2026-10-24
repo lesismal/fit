@@ -246,7 +246,7 @@ func TestFindCgroupFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	installFake(t, fakeRule{Match: "inspect", Out: "../../../.." + dir})
-	if got := findCgroup(context.Background()); filepath.Clean(got) != dir {
+	if got := findCgroup(context.Background(), serverName); filepath.Clean(got) != dir {
 		t.Errorf("found %q, want %q", got, dir)
 	}
 }

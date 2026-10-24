@@ -522,10 +522,10 @@ func TestServerFiles(t *testing.T) {
 func TestFindCgroup(t *testing.T) {
 	installFake(t, fakeRule{Match: "inspect", Fail: true, After: 1})
 	// The fake container's cgroup is nowhere on this host.
-	if dir := findCgroup(context.Background()); dir != "" {
+	if dir := findCgroup(context.Background(), serverName); dir != "" {
 		t.Errorf("found %q", dir)
 	}
-	if dir := findCgroup(context.Background()); dir != "" {
+	if dir := findCgroup(context.Background(), serverName); dir != "" {
 		t.Errorf("found %q", dir)
 	}
 }
