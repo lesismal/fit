@@ -935,7 +935,12 @@ fib worker 上运行的前提下调用它。
 
 **状态。** 已完成（fib `main` 上的 `a34c5db`），由 fit 的会话实现。压测机上 A、B 交替 3 轮、每轮
 10 秒：cache-hot 走 HTTP/3 从每秒 30.8 万提高到 63.9 万请求，每个请求的 CPU 从 22.4 µs 降到 10.8 µs，全部来自 GSO
-（关掉 GSO 后提升消失）。fixed 走 HTTP/3 在四次比较中都低 2-4%，关掉 GSO、或两个数据报的一轮逐个发送时也一样，原因尚未查明。
+（关掉 GSO 后提升消失）。fixed 走 HTTP/3 在四次比较中都低 2-4%，原因是压测机的噪声，不是这次改动：fixed 每轮只有一个数据报，批量路径根本不会执行。
+带 `a34c5db` 的 fixed perf 剖析中，`SendBatch` 和 sendmmsg 下没有一个采样，`syscall.Sendto` 下有 7,738 个，占 fit CPU 的
+7.4%，与没有这次改动时相同。压测机空闲时（2026-10-24，http/1.1 在前），fixed 走 HTTP/3 是每秒 180.0 万对 179.8 万
+请求，−0.1%，两边每个请求都是 3.77 µs；同时 cache-hot 提高 107%。压测机繁忙时会掉到 110-160 万、每个请求 4.1-4.5 µs，
+而且两个版本都会掉：交换 A、B 后，“回退”就跑到了另一边。fib 不需要修改。fitbench 只用 `-protocols h3` 时，会在 fit 的
+UDP 监听就绪之前检查 h3 监听，每次都失败，所以要把 http/1.1 放在前面。
 
 **问题。** `quic.sendDatagrams` 在一轮要发多个数据报、且其 `PacketConn` 是 `quic.BatchSender` 时，用一次调用发出；
 `fib.Connection.SendBatch` 用一次系统调用发出一批（sendmmsg，能用时带 UDP GSO）。HTTP/3 客户端交给 quic 的是它的

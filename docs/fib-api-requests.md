@@ -1250,8 +1250,15 @@ returns, the plugin's changes made; a local response it sends replaces the respo
 **Status.** Done (`a34c5db` on fib's `main`), made by fit's session. On the
 benchmark host, 3 alternating rounds of 10s: cache-hot over HTTP/3 from 308k to 639k requests a
 second, 22.4 to 10.8 µs of CPU a request, all of it GSO's (with GSO off the gain is gone). fixed
-over HTTP/3 measured 2-4% lower in four comparisons, with GSO off and with rounds of two datagrams
-sent one by one alike; its cause is not found yet.
+over HTTP/3 measured 2-4% lower in four comparisons. That was the host's noise, not the change.
+In fixed every round is one datagram, so the batch path never runs: a perf profile of fixed with
+`a34c5db` has no sample under `SendBatch` or sendmmsg, and 7,738 under `syscall.Sendto`, which is
+7.4% of fit's CPU, as without it. On a quiet host (2026-10-24, http/1.1 first) fixed
+over HTTP/3 is 1800k against 1798k requests a second, −0.1%, at 3.77 µs a request on both sides,
+while cache-hot gains +107%. Runs on a busy host dip to 1.1-1.6M at 4.1-4.5 µs a request, and the
+dips land on either build: swapping A and B moved the "regression" to the other side. Nothing in
+fib needs fixing. fitbench with `-protocols h3` alone checks the h3 listener before fit's UDP
+listener is up and fails every run, so put http/1.1 first.
 
 **Problem.** `quic.sendDatagrams` sends a round of more than one datagram with one call when its
 `PacketConn` is a `quic.BatchSender`, and `fib.Connection.SendBatch` sends a batch with one system
