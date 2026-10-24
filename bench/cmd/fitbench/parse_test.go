@@ -114,17 +114,17 @@ func TestPick(t *testing.T) {
 	}
 }
 
-func TestParseRequestCount(t *testing.T) {
-	out := `# TYPE fit_http_requests_total counter
-fit_http_requests_total{listener="cachebackend",route="cache",code="2xx"} 1234
-fit_http_requests_total{listener="cachebackend",route="cache",code="4xx"} 6
-fit_http_requests_total{listener="cachebackend",route="other",code="2xx"} 99
+func TestParseStubStatus(t *testing.T) {
+	out := `Active connections: 3
+server accepts handled requests
+ 12 12 1240
+Reading: 0 Writing: 1 Waiting: 2
 `
-	if n, err := parseRequestCount(out, "cache"); n != 1240 || err != nil {
+	if n, err := parseStubStatus(out); n != 1240 || err != nil {
 		t.Errorf("%d %v", n, err)
 	}
-	if _, err := parseRequestCount(out, "nothing"); err == nil {
-		t.Error("no samples")
+	if _, err := parseStubStatus("Active connections: 3\n"); err == nil {
+		t.Error("no count")
 	}
 }
 

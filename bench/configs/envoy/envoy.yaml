@@ -4,10 +4,18 @@
 #
 # Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
 # with the same routes on both; 8080 also proxies WebSockets at /ws. Port
-# 8443 is HTTP/1.1 over TLS, for idle TLS connections; port 8445 HTTP/2 over
-# TLS and UDP port 8444 HTTP/3, with the same routes as 8080 but /ws. Envoy serves no
-# files and has no cache of its own here, so it runs the fixed and proxy
-# scenarios. No access log is configured, so none is written.
+# 8443 is HTTP/1.1 over TLS, port 8445 HTTP/2 over TLS and UDP port 8444
+# HTTP/3, with the same routes as 8080 but /ws. Envoy serves no files and has
+# no cache of its own here, so it runs the fixed and proxy scenarios. No
+# access log is configured, so none is written.
+#
+# The settings every server shares are aligned (bench/README.md, "Aligned
+# settings"): nothing here limits a run of up to 7,168 requests in flight. A
+# client connection idle for 120s is closed; HTTP/2 and HTTP/3 take 250
+# streams a connection, and HTTP/2 a 1 MiB stream window and a 16 MiB
+# connection window (Envoy's defaults are 256 MiB for each); a route waits
+# 60s for its backend (Envoy's default is 15s). Nothing is compressed: no
+# compressor filter.
 static_resources:
   listeners:
   - name: h1
@@ -18,6 +26,7 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: h1
+          common_http_protocol_options: {idle_timeout: 120s}
           codec_type: HTTP1
           upgrade_configs: [{upgrade_type: websocket}]
           route_config: &routes
@@ -30,8 +39,14 @@ static_resources:
                 response_headers_to_add:
                 - header: {key: content-type, value: text/plain}
                   append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              # The proxy scenario, the large download and upload, and the API
+              # workload.
               - match: {path: /proxy}
-                route: {cluster: backend}
+                route: {cluster: backend, timeout: 60s}
+              - match: {prefix: /proxy/}
+                route: {cluster: backend, timeout: 60s}
+              - match: {prefix: /api/}
+                route: {cluster: backend, timeout: 60s}
               - match: {path: /ws}
                 route: {cluster: wsbackend, timeout: 0s, idle_timeout: 3600s}
           http_filters:
@@ -46,8 +61,9 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: h2c
+          common_http_protocol_options: {idle_timeout: 120s}
           codec_type: HTTP2
-          http2_protocol_options: {max_concurrent_streams: 256}
+          http2_protocol_options: {max_concurrent_streams: 250, initial_stream_window_size: 1048576, initial_connection_window_size: 16777216}
           route_config: *routes
           http_filters:
           - name: envoy.filters.http.router
@@ -69,8 +85,9 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: tls
+          common_http_protocol_options: {idle_timeout: 120s}
           codec_type: HTTP1
-          route_config: {virtual_hosts: [{name: all, domains: ["*"], routes: []}]}
+          route_config: *routes
           http_filters:
           - name: envoy.filters.http.router
             typed_config:
@@ -92,8 +109,9 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: h2
+          common_http_protocol_options: {idle_timeout: 120s}
           codec_type: HTTP2
-          http2_protocol_options: {max_concurrent_streams: 256}
+          http2_protocol_options: {max_concurrent_streams: 250, initial_stream_window_size: 1048576, initial_connection_window_size: 16777216}
           route_config: *routes
           http_filters:
           - name: envoy.filters.http.router
@@ -119,8 +137,9 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: h3
+          common_http_protocol_options: {idle_timeout: 120s}
           codec_type: HTTP3
-          http3_protocol_options: {quic_protocol_options: {max_concurrent_streams: 256}}
+          http3_protocol_options: {quic_protocol_options: {max_concurrent_streams: 250}}
           route_config: *routes
           http_filters:
           - name: envoy.filters.http.router
@@ -128,15 +147,15 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
   # Envoy's circuit breakers allow 1024 connections, pending and in-flight
-  # requests by default, fewer than h2load keeps in flight; raised so that
-  # the proxy is measured rather than its defaults. Each worker keeps its
-  # own backend connections, reused with keep-alive.
+  # requests by default; they allow 8,192 here, as every proxy here is
+  # bounded, more than any run keeps in flight. Each worker keeps its own
+  # backend connections, reused with keep-alive.
   - name: backend
     type: STRICT_DNS
     dns_lookup_family: V4_ONLY
     connect_timeout: 5s
     circuit_breakers:
-      thresholds: [{max_connections: 1000000, max_pending_requests: 1000000, max_requests: 1000000}]
+      thresholds: [{max_connections: 8192, max_pending_requests: 8192, max_requests: 8192}]
     load_assignment:
       cluster_name: backend
       endpoints: [{lb_endpoints: [{endpoint: {address: {socket_address: {address: "{{BACKEND_HOST}}", port_value: {{BACKEND_PORT}}}}}}]}]

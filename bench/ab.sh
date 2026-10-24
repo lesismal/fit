@@ -16,8 +16,8 @@
 #   -rounds N         rounds of A then B                  (default: 3)
 #   -duration D       each measured run                   (default: 10s)
 #   -warmup D         unmeasured load before each run     (default: 2s)
-#   -extra JSON       merged into bench/configs/fit/fit.json for both builds,
-#                     as '{"access_log": {"output": "/dev/null"}}'
+#   -extra KONF       appended to bench/configs/fit/fit.konf for both builds,
+#                     as 'access_log { output /dev/null }'
 #
 # The host is reached through the ssh master of BENCH_SSH (default below); it
 # has no Go, so everything is built here for linux/amd64. A comparison waits
@@ -107,18 +107,12 @@ build "$ref_b" "$stage/$id/b"
 (cd "$root" && linux go build -o "$stage/$id/a/idleconn" ./bench/cmd/idleconn && linux go build -o "$stage/$id/fitbench" ./bench/cmd/fitbench)
 cp "$stage/$id/a/idleconn" "$stage/$id/b/idleconn"
 
-# The harness's tree, from the working tree, with -extra merged into fit's
+# The harness's tree, from the working tree, with -extra appended to fit's
 # config.
 mkdir -p "$stage/$id/root"
 (cd "$root" && COPYFILE_DISABLE=1 tar cf - --exclude bench/.work --exclude bench/results bench) | tar xf - -C "$stage/$id/root"
 if [ -n "$extra" ]; then
-	EXTRA=$extra python3 - "$stage/$id/root/bench/configs/fit/fit.json" <<'EOF'
-import json, os, sys
-p = sys.argv[1]
-c = json.load(open(p))
-c.update(json.loads(os.environ["EXTRA"]))
-json.dump(c, open(p, "w"), indent=2)
-EOF
+	printf '\n%s\n' "$extra" >> "$stage/$id/root/bench/configs/fit/fit.konf"
 fi
 
 cat > "$stage/$id/run.sh" <<EOF

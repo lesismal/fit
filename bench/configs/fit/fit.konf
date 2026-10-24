@@ -1,0 +1,159 @@
+# fit for the fit benchmark harness. fitbench fills in the addresses of the
+# proxy, WebSocket and cache backends.
+#
+# Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge);
+# port 8443 is HTTP/1.1 over TLS, port 8445 HTTP/2 over TLS and UDP port 8444
+# HTTP/3, all with the same routes.
+#
+# The settings every server shares are aligned (bench/README.md, "Aligned
+# settings"): nothing here limits a run of up to 7,168 requests in flight. A
+# client connection idle for 120s is closed (fib's default, which fit keeps),
+# and HTTP/2 takes 250 streams a connection, with a 1 MiB stream window and
+# a 16 MiB connection window, fib's defaults. Nothing is compressed, on the
+# fly or precompressed: no compress middleware, and no static route looks
+# for precompressed twins.
+
+admin {
+	address 127.0.0.1:9005
+}
+
+limits {
+	max_conns 1000000
+}
+
+listener h1 {
+	address :8080
+	protocols http/1.1
+}
+
+listener h2c {
+	address :8081
+	protocols h2c
+}
+
+listener tls {
+	address :8443
+	protocols http/1.1
+	tls {
+		certificates {
+			cert_file /certs/cert.pem
+			key_file /certs/key.pem
+		}
+	}
+}
+
+listener h2 {
+	address :8445
+	protocols h2
+	tls {
+		certificates {
+			cert_file /certs/cert.pem
+			key_file /certs/key.pem
+		}
+	}
+}
+
+listener h3 {
+	address :8444
+	protocols h3
+	tls {
+		certificates {
+			cert_file /certs/cert.pem
+			key_file /certs/key.pem
+		}
+	}
+}
+
+# At most 8,192 backend connections, as every proxy here is bounded, and as
+# many requests waiting for one, more than any run keeps in flight: no
+# request is turned away for the bound. 8,192 of them kept idle, and a 5s
+# connect timeout.
+upstream backend {
+	addresses {{BACKEND}}
+	max_conns 8192
+	max_pending 8192
+	max_idle_conns 8192
+	connect_timeout 5s
+}
+
+upstream wsbackend {
+	addresses {{WSBACKEND}}
+}
+
+upstream cachebackend {
+	addresses {{CACHEBACKEND}}
+	max_conns 8192
+	max_pending 8192
+	max_idle_conns 8192
+	connect_timeout 5s
+}
+
+route fixed {
+	match {
+		path /fixed
+	}
+	handler respond {
+		headers {
+			Content-Type text/plain
+		}
+		body "hello, world"
+	}
+}
+
+route static {
+	match {
+		path /static/*
+	}
+	handler static {
+		root /srv/www
+	}
+}
+
+# The website workload's files.
+route site {
+	match {
+		path /site/*
+	}
+	handler static {
+		root /srv/www
+	}
+}
+
+# The proxy scenario, the large download and upload, and the API workload;
+# a route waits 60s for its backend, as every proxy here does.
+route proxy {
+	match {
+		path /proxy /proxy/* /api/*
+	}
+	handler proxy {
+		upstream backend
+		timeout 60s
+	}
+}
+
+# The cache scenarios, and the website workload behind a cache: 1 GiB of
+# responses, as nginx keeps, each of up to 2 MiB, so that every one the
+# scenarios ask for can be kept.
+route cache {
+	match {
+		path /cache/* /edge/*
+	}
+	middleware cache {
+		zone bench
+		max_bytes 1073741824
+		max_entry_bytes 2097152
+	}
+	handler proxy {
+		upstream cachebackend
+		timeout 60s
+	}
+}
+
+route ws {
+	match {
+		path /ws
+	}
+	handler proxy {
+		upstream wsbackend
+	}
+}

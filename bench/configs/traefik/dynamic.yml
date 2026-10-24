@@ -1,13 +1,15 @@
-# fitbench fills in the addresses of the proxy and WebSocket backends.
+# fitbench fills in the addresses of the proxy and WebSocket backends. The
+# proxy scenario, the large download and upload, and the API workload all go
+# to the proxy backend.
 http:
   routers:
     proxy:
-      rule: "Path(`/proxy`)"
+      rule: "Path(`/proxy`) || PathPrefix(`/proxy/`) || PathPrefix(`/api/`)"
       entryPoints: [h1, h2c]
       service: backend
     proxy-tls:
-      rule: "Path(`/proxy`)"
-      entryPoints: [h2, h3]
+      rule: "Path(`/proxy`) || PathPrefix(`/proxy/`) || PathPrefix(`/api/`)"
+      entryPoints: [tls, h2, h3]
       service: backend
       tls: {}
     ws:

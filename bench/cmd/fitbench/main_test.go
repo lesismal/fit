@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,7 +140,7 @@ func TestRunQuick(t *testing.T) {
 	}
 	work := filepath.Join(root, "bench", ".work")
 	for name, want := range map[string]string{
-		"configs/fit/fit.json":     `{"backend": "127.0.0.1:9000", "workers": 7}`,
+		"configs/fit/fit.konf":     `backend 127.0.0.1:9000 workers 7`,
 		"configs/nginx/nginx.conf": "127.0.0.1:9000\n",
 		"fit":                      "binary",
 		"idleconn":                 "binary",
@@ -243,8 +244,8 @@ func TestMeasure(t *testing.T) {
 	}{
 		{"check", fakeRule{Match: "%{http_version}", Fail: true}, "check "},
 		{"warmup", fakeRule{Match: "-d 1s", Fail: true}, "warmup: "},
-		{"count before", fakeRule{Match: "/metrics", Fail: true}, "the backend's count"},
-		{"count after", fakeRule{Match: "/metrics", Fail: true, After: 1}, "the backend's count"},
+		{"count before", fakeRule{Match: "9004/status", Fail: true}, "the backend's count"},
+		{"count after", fakeRule{Match: "9004/status", Fail: true, After: 1}, "the backend's count"},
 		{"load", fakeRule{Match: "-d 2s", Fail: true}, "docker exec"},
 		{"report", fakeRule{Match: "-d 2s", Out: "garbage"}, "wrk printed no report"},
 	} {
@@ -389,20 +390,45 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func TestLoadArgs(t *testing.T) {
+func TestLoadRuns(t *testing.T) {
 	h := &harness{threads: 4, conns: 2, h2conns: 8, h2streams: 16}
+	wrk, h2, h3 := protocols[0], protocols[2], protocols[4]
+	headers := strings.Join(headerFlags(apiHeaders), " ")
 	for _, tt := range []struct {
-		tool, script string
-		d            time.Duration
-		want         string
+		name string
+		sc   scenario
+		p    protocol
+		d    time.Duration
+		rate int
+		want []string
 	}{
-		{"wrk", "", 30 * time.Second, "exec fitbench-loadgen wrk -t 4 -c 4 -d 30s --timeout 10s --latency -s /fitbench/report.lua U"},
-		{"wrk", "zipf.lua", 100 * time.Millisecond, "exec fitbench-loadgen wrk -t 4 -c 4 -d 1s --timeout 10s --latency -s /fitbench/zipf.lua U"},
-		{"h2load", "", 5 * time.Second, "exec fitbench-loadgen h2load -t 4 -c 8 -m 16 -D 5 U"},
-		{"h2load-h3", "", 5 * time.Second, "exec fitbench-loadgen-h3 h2load --alpn-list=h3 -t 4 -c 8 -m 16 -D 5 U"},
+		{"wrk", scenario{name: "fixed"}, wrk, 30 * time.Second, 0,
+			[]string{"exec fitbench-loadgen wrk -t 4 -c 4 -d 30s --timeout 10s --latency -s /fitbench/report.lua U"}},
+		{"wrk script", scenario{name: "cache-zipf", script: "zipf.lua"}, wrk, 100 * time.Millisecond, 0,
+			[]string{"exec fitbench-loadgen wrk -t 4 -c 4 -d 1s --timeout 10s --latency -s /fitbench/zipf.lua U"}},
+		{"wrk churn", scenario{name: "churn-10", kind: kindChurn, arg: "10"}, wrk, 5 * time.Second, 0,
+			[]string{"exec fitbench-loadgen wrk -t 4 -c 4 -d 5s --timeout 10s --latency -s /fitbench/churn.lua U -- 10"}},
+		{"h2load", scenario{name: "fixed"}, h2, 5 * time.Second, 0,
+			[]string{"exec fitbench-loadgen h2load -t 4 -c 8 -m 16 -D 5 U"}},
+		{"h2load-h3", scenario{name: "fixed"}, h3, 5 * time.Second, 0,
+			[]string{"exec fitbench-loadgen-h3 h2load -t 4 -c 8 -m 16 -D 5 --alpn-list=h3 U"}},
+		{"api over h2", scenario{name: "api", kind: kindAPI}, h2, 5 * time.Second, 0, []string{
+			"exec fitbench-loadgen h2load -t 3 -c 6 -m 16 -D 5 " + headers + " U",
+			"exec fitbench-loadgen h2load -t 1 -c 2 -m 16 -D 5 " + headers + " -d /fitbench/data/api-post.bin U"}},
+		{"api at a rate over HTTP/1.1", scenario{name: "api", kind: kindAPI}, wrk, 5 * time.Second, 1000, []string{
+			"exec fitbench-loadgen h2load -t 3 -c 3 -m 1 -D 5 --h1 " + headers + " --rps 267 --log-file /tmp/fitbench-0.log U",
+			"exec fitbench-loadgen h2load -t 1 -c 1 -m 1 -D 5 --h1 " + headers + " -d /fitbench/data/api-post.bin --rps 200 --log-file /tmp/fitbench-1.log U"}},
+		{"site", scenario{name: "site", kind: kindSite, arg: "/site/"}, h2, 5 * time.Second, 0, []string{
+			"exec fitbench-loadgen h2load -t 4 -c 8 -m 16 -D 5 " + strings.Join(headerFlags(browserHeaders), " ") + " -i /fitbench/data/uris-site-8445.txt"}},
 	} {
-		if got := strings.Join(h.loadArgs(tt.tool, "U", tt.script, tt.d), " "); got != tt.want {
-			t.Errorf("%s %s:\n got %s\nwant %s", tt.tool, tt.script, got, tt.want)
+		h.rate = tt.rate
+		runs := h.loadRuns(tt.sc, tt.p, "U", tt.d, true)
+		var got []string
+		for _, run := range runs {
+			got = append(got, strings.Join(run.args, " "))
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
 		}
 	}
 }
@@ -510,7 +536,7 @@ func TestDockerHelpers(t *testing.T) {
 	if got := imageDigest(ctx, "x:1"); got != "x:1" {
 		t.Errorf("digest %q", got)
 	}
-	if _, err := (&harness{}).backendCount(ctx); err == nil {
+	if _, err := (&harness{}).backendCount(ctx, "cache"); err == nil {
 		t.Error("counted over a bridge network")
 	}
 	cleanup(true)
@@ -678,7 +704,7 @@ func TestParseErrors(t *testing.T) {
 	if err := parseH2load(finished+requests+"time for request:  1us  2us  3us  4us  50%\n", &r); err != nil || r.ErrorKinds != nil {
 		t.Errorf("no status codes: %v %+v", err, r)
 	}
-	if _, err := parseRequestCount(`fit_http_requests_total{route="cache"} x`, "cache"); err == nil {
+	if _, err := parseStubStatus("server accepts handled requests\n 1 1 x\n"); err == nil {
 		t.Error("parsed x")
 	}
 	if _, err := parseGoroutines("go_goroutines x\n"); err == nil {

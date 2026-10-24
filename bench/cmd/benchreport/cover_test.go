@@ -48,7 +48,9 @@ func idleRow(server, kind string, bytes float64, skipped, failed string) struct 
 func coverRuns() (cur, old *run) {
 	half := 0.5
 	type lat = struct {
+		P50  float64 `json:"p50"`
 		P99  float64 `json:"p99"`
+		P999 float64 `json:"p99.9"`
 		Mean float64 `json:"mean"`
 		Max  float64 `json:"max"`
 	}

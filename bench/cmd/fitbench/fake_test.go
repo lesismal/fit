@@ -151,8 +151,8 @@ func fakeExec(state string, args []string) int {
 	case "curl":
 		i := slices.Index(cmd, "-w")
 		switch {
-		case i < 0: // the cache backend's metrics
-			fmt.Println(`fit_http_requests_total{listener="cachebackend",route="cache",code="2xx"} 100`)
+		case i < 0: // the cache origin's stub_status
+			fmt.Print("Active connections: 1\nserver accepts handled requests\n 1 1 100\nReading: 0 Writing: 1 Waiting: 0\n")
 		case cmd[i+1] == "%{http_code}": // waitReady
 			fmt.Print("200")
 		default: // check
@@ -219,7 +219,7 @@ func fakeRoot(t *testing.T) (root, bin string) {
 	t.Helper()
 	root, bin = t.TempDir(), t.TempDir()
 	for name, data := range map[string]string{
-		"bench/configs/fit/fit.json":     `{"backend": "{{BACKEND}}", "workers": {{WORKERS}}}`,
+		"bench/configs/fit/fit.konf":     `backend {{BACKEND}} workers {{WORKERS}}`,
 		"bench/www/static/small.html":    smallHTML,
 		"bench/loadgen/Dockerfile.h3":    "FROM scratch\n",
 		"bench/configs/nginx/nginx.conf": "{{BACKEND_HOST}}:{{BACKEND_PORT}}\n",

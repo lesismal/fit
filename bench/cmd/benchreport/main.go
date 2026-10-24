@@ -107,10 +107,18 @@ type result struct {
 	BytesPerInFlight float64  `json:"bytes_per_in_flight"`
 	HitRatio         *float64 `json:"hit_ratio"`
 	Latency          *struct {
+		P50  float64 `json:"p50"`
 		P99  float64 `json:"p99"`
+		P999 float64 `json:"p99.9"`
 		Mean float64 `json:"mean"`
 		Max  float64 `json:"max"`
 	} `json:"latency_ms"`
+	// Rate is the requests a second a run kept to, 0 for as many as it
+	// could; IdleHeld and IdleClosed the idle connections held open during
+	// it, and those the server closed.
+	Rate       int `json:"rate"`
+	IdleHeld   int `json:"idle_held"`
+	IdleClosed int `json:"idle_closed"`
 }
 
 func load(path string) (*run, error) {
@@ -184,7 +192,7 @@ func (r result) memEER() float64 {
 	return 0
 }
 
-var protocolNames = map[string]string{"http/1.1": "HTTP/1.1", "h2c": "h2c", "h2": "h2", "h3": "HTTP/3"}
+var protocolNames = map[string]string{"http/1.1": "HTTP/1.1", "https/1.1": "HTTP/1.1 over TLS", "h2c": "h2c", "h2": "h2", "h3": "HTTP/3"}
 
 func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, idleHeading string) {
 	var servers []string
@@ -223,8 +231,15 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		if len(rows) == 0 && len(failed) == 0 {
 			continue
 		}
+		// At a fixed rate every server answers about as many, and they are
+		// ranked by their p99 latency instead, the lowest first.
+		rated := slices.ContainsFunc(rows, func(r result) bool { return r.Rate > 0 })
 		slices.SortStableFunc(rows, func(a, b result) int {
-			for _, c := range [][2]float64{{a.tps(), b.tps()}, {a.cpuEER(), b.cpuEER()}, {a.memEER(), b.memEER()}} {
+			keys := [][2]float64{{a.tps(), b.tps()}, {a.cpuEER(), b.cpuEER()}, {a.memEER(), b.memEER()}}
+			if rated && a.Latency != nil && b.Latency != nil {
+				keys = append([][2]float64{{-a.Latency.P99, -b.Latency.P99}}, keys[1:]...)
+			}
+			for _, c := range keys {
 				if c[0] != c[1] {
 					if c[0] > c[1] {
 						return -1
@@ -240,12 +255,19 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		}
 		inFlight := slices.ContainsFunc(rows, func(r result) bool { return r.BytesPerInFlight > 0 })
 		hits := slices.ContainsFunc(rows, func(r result) bool { return r.HitRatio != nil })
-		header := []string{"Server", "TPS [↓1]", "CPU EER [↓2]", "MEM EER [↓3]", latencyTitle(k.protocol), "CPU", memTitle}
+		idleHeld := slices.ContainsFunc(rows, func(r result) bool { return r.IdleHeld > 0 })
+		header := []string{"Server", "TPS [↓1]", "CPU EER [↓2]", "MEM EER [↓3]", latencyTitle(k.protocol, rated), "CPU", memTitle}
+		if rated {
+			header[1], header[4] = "TPS", header[4]+" [↓1]"
+		}
 		if inFlight {
 			header = append(header, "KiB/in-flight")
 		}
 		if hits {
 			header = append(header, "Hits")
+		}
+		if idleHeld {
+			header = append(header, "Idle held / closed")
 		}
 		header = append(header, "Errors")
 		if old != nil {
@@ -266,6 +288,9 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 				}
 				row = append(row, ratio)
 			}
+			if idleHeld {
+				row = append(row, fmt.Sprintf("%s / %d", group(float64(r.IdleHeld), 0), r.IdleClosed))
+			}
 			row = append(row, r.errorsCell())
 			if old != nil {
 				row = append(row, change(r, old))
@@ -281,6 +306,9 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		if name == "" {
 			name = k.protocol
 		}
+		if rated && len(rows) > 0 {
+			name += fmt.Sprintf(", %s requests a second", group(float64(rows[0].Rate), 0))
+		}
 		fmt.Fprintf(w, "%s %s, %s\n\n", hashes, k.scenario, name)
 		writeTable(w, table, 1)
 		if len(skipped) > 0 {
@@ -293,19 +321,26 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 	}
 }
 
-func latencyTitle(protocol string) string {
-	if protocol == "http/1.1" {
+func latencyTitle(protocol string, rated bool) string {
+	switch {
+	case rated:
+		return "p50 / p99 / p99.9"
+	case protocol == "http/1.1" || protocol == "https/1.1":
 		return "p99"
 	}
 	return "Mean / max"
 }
 
-// latency is wrk's p99, or h2load's mean and maximum, which is all it gives.
+// latency is the percentiles of a run at a fixed rate, from h2load's
+// per-request log; wrk's p99; or h2load's mean and maximum, which is all it
+// gives otherwise.
 func latency(r result) string {
-	if r.Latency == nil {
+	switch {
+	case r.Latency == nil:
 		return ""
-	}
-	if r.Protocol == "http/1.1" && r.Latency.P99 > 0 {
+	case r.Rate > 0 && r.Latency.P99 > 0:
+		return fmt.Sprintf("%.2f / %.2f / %.2f ms", r.Latency.P50, r.Latency.P99, r.Latency.P999)
+	case (r.Protocol == "http/1.1" || r.Protocol == "https/1.1") && r.Latency.P99 > 0:
 		return fmt.Sprintf("%.2f ms", r.Latency.P99)
 	}
 	return fmt.Sprintf("%.2f / %.0f ms", r.Latency.Mean, r.Latency.Max)

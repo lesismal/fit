@@ -1,33 +1,56 @@
 # Traefik for the fit benchmark harness. Traefik only proxies: it has no
-# fixed response and serves no files, so it runs the proxy scenario alone.
+# fixed response and serves no files, so it runs the proxy scenarios alone.
 #
 # Port 8080 serves HTTP/1.1, and port 8081 h2c (HTTP/2 with prior
 # knowledge), which Traefik accepts on any cleartext entry point; 8080 also
-# proxies WebSockets at /ws. Port 8443 is TLS, for idle TLS connections; port
-# 8445 HTTP/2 over TLS, and UDP port 8444 HTTP/3 (with TLS on TCP 8444
-# beside it, as Traefik requires).
+# proxies WebSockets at /ws. Port 8443 is HTTP/1.1 over TLS, port 8445 HTTP/2
+# over TLS, and UDP port 8444 HTTP/3 (with TLS on TCP 8444 beside it, as
+# Traefik requires).
+#
+# The settings every server shares are aligned (bench/README.md, "Aligned
+# settings"): nothing here limits a run of up to 7,168 requests in flight. A
+# client connection idle for 120s is closed, and a connection takes 250
+# HTTP/2 streams, as every server here does; Traefik, in Go, has a 1 MiB
+# stream window, which it does not let a config change, opens as many backend
+# connections as its requests need, with no setting to bound them, and sets
+# no limit on request bodies. Nothing is compressed: no compress middleware.
 entryPoints:
   h1:
     address: ":8080"
+    transport: &transport
+      respondingTimeouts:
+        idleTimeout: 120s
+    http2: &http2
+      maxConcurrentStreams: 250
   h2c:
     address: ":8081"
+    transport: *transport
+    http2: *http2
   tls:
     address: ":8443"
+    transport: *transport
     http:
       tls: {}
   h2:
     address: ":8445"
+    transport: *transport
+    http2: *http2
     http:
       tls: {}
   h3:
     address: ":8444"
+    transport: *transport
+    http2: *http2
     http3: {}
     http:
       tls: {}
-# Up to 4096 idle backend connections, as every proxy here keeps; Traefik's
-# default of 200 makes it reopen them under load.
+# 8,192 backend connections kept idle, a 5s connect timeout and 60s for a
+# response's header.
 serversTransport:
-  maxIdleConnsPerHost: 4096
+  maxIdleConnsPerHost: 8192
+  forwardingTimeouts:
+    dialTimeout: 5s
+    responseHeaderTimeout: 60s
 providers:
   file:
     filename: /etc/traefik/dynamic.yml

@@ -33,7 +33,7 @@ type Result struct {
 	// ErrorKinds breaks Errors down by the load generator's own categories.
 	ErrorKinds map[string]int64 `json:"error_kinds,omitempty"`
 	// Latency is in milliseconds. h2load reports no percentiles, only mean,
-	// standard deviation and maximum.
+	// standard deviation and maximum, but at a fixed rate.
 	Latency *Latency `json:"latency_ms,omitempty"`
 
 	// CPUCores is the CPU time the server used during the measured run
@@ -58,6 +58,13 @@ type Result struct {
 	// connections over HTTP/1.1, its connections times their streams over
 	// h2c and HTTP/3.
 	InFlight int `json:"in_flight,omitempty"`
+	// Rate is the requests a second the load generators kept to, or 0 for
+	// as many as they could; Latency's percentiles then come from h2load's
+	// per-request log. IdleHeld is the idle TLS connections held open during
+	// the run, and IdleClosed those the server closed meanwhile.
+	Rate       int `json:"rate,omitempty"`
+	IdleHeld   int `json:"idle_held,omitempty"`
+	IdleClosed int `json:"idle_closed,omitempty"`
 
 	// The server's efficiency. CPUPerRequestUS is the CPU time it spent a
 	// request, in microseconds. RequestsPerSecPerMiB is its requests a
@@ -230,28 +237,21 @@ func cgroupField(stat, name string, unit time.Duration) (time.Duration, bool) {
 	return 0, false
 }
 
-// parseRequestCount sums fit's fit_http_requests_total samples for route in
-// out, the text of its Admin API's /metrics.
-func parseRequestCount(out, route string) (int64, error) {
-	var n int64
-	found := false
-	label := `route="` + route + `"`
-	for line := range strings.SplitSeq(out, "\n") {
-		if !strings.HasPrefix(line, "fit_http_requests_total{") || !strings.Contains(line, label) {
-			continue
+// parseStubStatus reads the requests nginx's stub_status says it has
+// answered: the third number of the line after "server accepts handled
+// requests".
+func parseStubStatus(out string) (int64, error) {
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "server accepts handled requests" && i+1 < len(lines) {
+			f := strings.Fields(lines[i+1])
+			if len(f) != 3 {
+				break
+			}
+			return strconv.ParseInt(f[2], 10, 64)
 		}
-		i := strings.LastIndexByte(line, ' ')
-		v, err := strconv.ParseFloat(line[i+1:], 64)
-		if err != nil {
-			return 0, fmt.Errorf("metrics: %q: %v", line, err)
-		}
-		n += int64(v)
-		found = true
 	}
-	if !found {
-		return 0, fmt.Errorf("metrics: no fit_http_requests_total for route %q", route)
-	}
-	return n, nil
+	return 0, fmt.Errorf("stub_status: no request count in %.200q", out)
 }
 
 // parseGoroutines reads go_goroutines from out, the text of fit's Admin

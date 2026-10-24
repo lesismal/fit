@@ -7,4 +7,4 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends wrk nghttp2-client curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY report.lua zipf.lua /fitbench/
+COPY report.lua zipf.lua api.lua site.lua churn.lua upload.lua /fitbench/

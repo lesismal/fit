@@ -70,10 +70,17 @@ type Params struct {
 	H2Streams     int    `json:"h2_streams"`
 	IdleConns     int    `json:"idle_connections,omitempty"`
 	IdleSettle    string `json:"idle_settle,omitempty"`
-	Network       string `json:"network"`
-	ServerCPUs    string `json:"server_cpus"`
-	ClientCPUs    string `json:"client_cpus"`
-	BackendCPUs   string `json:"backend_cpus"`
+	// Label names the run's workload, as bench/plan.sh gives it. Rate is
+	// the requests a second the load generators kept to, or 0 for as many
+	// as they could; HoldIdle the idle TLS connections held open during
+	// each run.
+	Label       string `json:"label,omitempty"`
+	Rate        int    `json:"rate,omitempty"`
+	HoldIdle    int    `json:"hold_idle,omitempty"`
+	Network     string `json:"network"`
+	ServerCPUs  string `json:"server_cpus"`
+	ClientCPUs  string `json:"client_cpus"`
+	BackendCPUs string `json:"backend_cpus"`
 }
 
 // Container names; one of each runs at a time.
@@ -105,11 +112,16 @@ type harness struct {
 	idle       []string
 	idleConns  int
 	idleSettle time.Duration
-	baseImage  string
-	images     map[string]string
+	// rate, when above 0, is the requests a second each run keeps to, and
+	// holdIdleConns the idle TLS connections held open during each run.
+	rate          int
+	holdIdleConns int
+	baseImage     string
+	images        map[string]string
 
 	bench       string // the bench directory
 	work        string // bench/.work: the fit binary, the rendered configs
+	data        string // bench/.work/data: what the load generators read
 	netArgs     []string
 	serverHost  string
 	serverCPUs  []string // docker run arguments pinning each container
@@ -139,6 +151,9 @@ func run(ctx context.Context, args []string) error {
 	idleList := flags.String("idle", "http1,tls,ws", "the kinds of idle connection to measure memory for; empty for none")
 	flags.IntVar(&h.idleConns, "idle-connections", 10000, "how many idle connections to open")
 	flags.DurationVar(&h.idleSettle, "idle-settle", 5*time.Second, "how long the idle connections sit before the server's memory is read")
+	flags.IntVar(&h.rate, "rate", 0, "requests a second each run keeps to, with h2load over every protocol; 0 for as many as the load generators can")
+	flags.IntVar(&h.holdIdleConns, "hold-idle", 0, "idle TLS connections to hold open during each run")
+	label := flags.String("label", "", "a name for the run's workload, kept in its results")
 	network := flags.String("network", defaultNetwork(), `"host" (Linux; what published numbers use) or "bridge"`)
 	cpuFlags := [3]*string{
 		flags.String("server-cpus", "", "the CPUs the server is pinned to, as in 0-7; split from what Docker has when empty"),
@@ -189,6 +204,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	h.bench = filepath.Join(root, "bench")
 	h.work = filepath.Join(h.bench, ".work")
+	h.data = filepath.Join(h.work, "data")
 	if *out == "" {
 		*out = filepath.Join(h.bench, "results", "run-"+time.Now().UTC().Format("20060102-150405")+".json")
 	}
@@ -250,6 +266,7 @@ func run(ctx context.Context, args []string) error {
 			Duration: h.duration.String(), Warmup: h.warmup.String(),
 			Connections: max(h.conns, h.threads), H2Connections: max(h.h2conns, h.threads), H2Streams: h.h2streams,
 			IdleConns: h.idleConns, IdleSettle: h.idleSettle.String(),
+			Label: *label, Rate: h.rate, HoldIdle: h.holdIdleConns,
 			Network: *network, ServerCPUs: cpus[0], ClientCPUs: cpus[1], BackendCPUs: cpus[2],
 		},
 	}
@@ -262,7 +279,10 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	vars := map[string]string{"{{BACKEND}}": backendAddr, "{{WSBACKEND}}": wsBackendAddr,
-		"{{CACHEBACKEND}}": cacheAddr, "{{CACHEBODY}}": cacheBody, "{{WORKERS}}": strconv.Itoa(serverThreads)}
+		"{{CACHEBACKEND}}": cacheAddr, "{{WORKERS}}": strconv.Itoa(serverThreads),
+		"{{BACKEND_WORKERS}}": strconv.Itoa(max(1, cpusetCount(cpus[2]))),
+		// The proxy backend's API bodies, which nginx's config quotes.
+		"{{APIBODY}}": apiBody, "{{APIPOSTREPLY}}": apiPostReply}
 	// Envoy takes a backend's host and port apart.
 	for name, addr := range map[string]string{"BACKEND": backendAddr, "WSBACKEND": wsBackendAddr} {
 		host, port, _ := net.SplitHostPort(addr)
@@ -272,6 +292,23 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	if err := writeCert(filepath.Join(h.work, "certs")); err != nil {
+		return err
+	}
+	if err := writeData(h.data); err != nil {
+		return err
+	}
+	// The website's files only for the scenarios that ask for them; the
+	// large download's always.
+	site := slices.Contains(h.scenarios, "site") || slices.Contains(h.scenarios, "edge")
+	if site {
+		step("writing the website's files")
+	}
+	siteDir, backendDir := filepath.Join(h.work, "www-site"), filepath.Join(h.work, "www-backend")
+	_ = os.RemoveAll(siteDir)
+	if err := writeSite(siteDir, h.data, site); err != nil {
+		return err
+	}
+	if err := writeBackendFiles(backendDir); err != nil {
 		return err
 	}
 	step("building the load generator image")
@@ -287,12 +324,13 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 	if _, err := docker(ctx, "run", "--rm", "-v", wwwVolume+":/srv/www", "-v", filepath.Join(h.bench, "www")+":/src:ro",
-		h.baseImage, "cp", "-r", "/src/.", "/srv/www/"); err != nil {
+		"-v", siteDir+":/site:ro", "-v", backendDir+":/backend:ro", h.baseImage, "sh", "-c",
+		"cp -r /src/. /srv/www/ && mkdir -p /srv/www/site /srv/www/backend && cp -r /site/. /srv/www/site/ && cp -r /backend/. /srv/www/backend/"); err != nil {
 		return err
 	}
 	step("starting the load generators")
 	if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenName, "--ulimit", "nofile=1048576:1048576",
-		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro"},
+		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro", "-v", h.data + ":/fitbench/data:ro"},
 		h.netArgs...), h.clientCPUs...), loadgenTag, "sleep", "infinity")...); err != nil {
 		return err
 	}
@@ -303,7 +341,8 @@ func run(ctx context.Context, args []string) error {
 			filepath.Join(h.bench, "loadgen")); err != nil {
 			return err
 		}
-		if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenH3Name, "--ulimit", "nofile=1048576:1048576"},
+		if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenH3Name, "--ulimit", "nofile=1048576:1048576",
+			"-v", h.data + ":/fitbench/data:ro"},
 			h.netArgs...), h.clientCPUs...), loadgenH3Tag, "sleep", "infinity")...); err != nil {
 			return err
 		}
@@ -582,6 +621,10 @@ func (h *harness) start(ctx context.Context, s server, name string, cpus []strin
 		args = append(args, "-v", src+":"+m[1]+":ro")
 	}
 	image := h.images[s.name]
+	if image == "" {
+		// A backend, which has no -<name>-image flag.
+		image = s.image
+	}
 	if s.fit {
 		image = h.baseImage
 		args = append(args, "-v", filepath.Join(h.work, "fit")+":/usr/local/bin/fit:ro")
@@ -719,16 +762,19 @@ func scenarioOf(name string) scenario {
 	return scenarios[slices.IndexFunc(scenarios, func(x scenario) bool { return x.name == name })]
 }
 
-// backendCount returns how many requests the cache backend has answered.
-func (h *harness) backendCount(ctx context.Context) (int64, error) {
+// backendCount returns how many requests the cache origin has answered,
+// from its stub_status, which counts its own requests among them. route is
+// the origin's location the scenario asks for; the origin counts them all
+// together, and only one scenario runs at a time.
+func (h *harness) backendCount(ctx context.Context, route string) (int64, error) {
 	if h.cacheAdmin == "" {
 		return 0, errors.New("the cache backend's Admin API is not reachable on a bridge network")
 	}
-	out, err := docker(ctx, "exec", loadgenName, "curl", "-s", "--max-time", "5", "http://"+h.cacheAdmin+"/metrics")
+	out, err := docker(ctx, "exec", loadgenName, "curl", "-s", "--max-time", "5", "http://"+h.cacheAdmin+"/status")
 	if err != nil {
 		return 0, err
 	}
-	return parseRequestCount(out, "cache")
+	return parseStubStatus(out)
 }
 
 func imageDigest(ctx context.Context, image string) string {
@@ -743,45 +789,70 @@ func imageDigest(ctx context.Context, image string) string {
 // server does, warms it up, and measures it.
 func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon int64) (r Result) {
 	var err error
-	r = Result{Server: s.name, Scenario: sc, Protocol: p}
-	j := slices.IndexFunc(protocols, func(x struct{ name, port, tool string }) bool { return x.name == p })
+	r = Result{Server: s.name, Scenario: sc, Protocol: p, Rate: h.rate}
+	j := slices.IndexFunc(protocols, func(x protocol) bool { return x.name == p })
 	scenario, proto := scenarioOf(sc), protocols[j]
 	r.Tool = proto.tool
-	url := "http://" + h.serverHost + ":" + proto.port + scenario.path
-	if p == "h2" || p == "h3" {
-		url = "https://" + h.serverHost + ":" + proto.port + scenario.path
+	if h.rate > 0 {
+		r.Tool = "h2load"
 	}
-
-	if err := h.check(ctx, url, p, scenario.body); err != nil {
+	scheme := "http://"
+	if p == "https/1.1" || p == "h2" || p == "h3" {
+		scheme = "https://"
+	}
+	base := scheme + h.serverHost + ":" + proto.port
+	path, body, err := h.expected(scenario)
+	if err != nil {
 		r.Error = err.Error()
 		return r
+	}
+	if err := h.check(ctx, base+path, p, body); err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	if scenario.kind == kindSite {
+		if err := writeURIs(filepath.Join(h.data, "uris-"+sc+"-"+proto.port+".txt"), base, scenario.arg); err != nil {
+			r.Error = err.Error()
+			return r
+		}
+	}
+	url := base + scenario.path
+	if h.holdIdleConns > 0 {
+		release, held, err := h.holdIdle(ctx)
+		if err != nil {
+			r.Error = "holding idle connections: " + err.Error()
+			return r
+		}
+		r.IdleHeld = held
+		defer func() { r.IdleClosed = release() }()
 	}
 	samples := h.sample(ctx, s)
 	defer samples.stop()
 	if h.warmup > 0 {
-		if _, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.warmup)...); err != nil {
+		if _, err := runLoad(ctx, h.loadRuns(scenario, proto, url, h.warmup, false)); err != nil {
 			r.Error = "warmup: " + err.Error()
 			return r
 		}
 	}
 	var backend0 int64
-	if scenario.hitRatio {
-		if backend0, err = h.backendCount(ctx); err != nil {
+	if scenario.backendRoute != "" {
+		if backend0, err = h.backendCount(ctx, scenario.backendRoute); err != nil {
 			r.Error = "the backend's count: " + err.Error()
 			return r
 		}
 	}
+	runs := h.loadRuns(scenario, proto, url, h.duration, true)
 	cpu0, cpuOK := h.serverCPU(ctx)
 	start := time.Now()
-	out, err := docker(ctx, h.loadArgs(proto.tool, url, scenario.script, h.duration)...)
+	outs, err := runLoad(ctx, runs)
 	elapsed := time.Since(start)
 	if err != nil {
 		r.Error = err.Error()
 		return r
 	}
 	var backend1 int64
-	if scenario.hitRatio {
-		if backend1, err = h.backendCount(ctx); err != nil {
+	if scenario.backendRoute != "" {
+		if backend1, err = h.backendCount(ctx, scenario.backendRoute); err != nil {
 			r.Error = "the backend's count: " + err.Error()
 			return r
 		}
@@ -795,20 +866,19 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon
 	}
 	r.AnonBytes, _ = h.serverAnon(ctx)
 	r.AnonPeakBytes = max(r.AnonPeakBytes, r.AnonBytes)
-	r.InFlight = max(h.conns, h.threads)
-	if proto.tool != "wrk" {
-		r.InFlight = max(h.h2conns, h.threads) * h.h2streams
+	for _, run := range runs {
+		r.InFlight += run.conns * run.streams
 	}
-	if proto.tool == "wrk" {
-		err = parseWrk(out, &r)
-	} else {
-		err = parseH2load(out, &r)
-	}
-	if err != nil {
+	if err := parseRuns(runs, outs, &r); err != nil {
 		r.Error = err.Error()
+	} else if h.rate > 0 {
+		if err := h.ratePercentiles(ctx, runs, r.Latency); err != nil {
+			r.Error = err.Error()
+		}
 	}
-	if scenario.hitRatio && r.Requests > 0 {
-		r.BackendRequests = backend1 - backend0
+	if scenario.backendRoute != "" && r.Requests > 0 {
+		// Less the second count's own request.
+		r.BackendRequests = max(0, backend1-backend0-1)
 		ratio := 1 - float64(r.BackendRequests)/float64(r.Requests)
 		r.HitRatio = &ratio
 	}
@@ -817,8 +887,32 @@ func (h *harness) measure(ctx context.Context, s server, sc, p string, startAnon
 	return r
 }
 
+// expected returns the path a scenario's response is checked at, and the
+// body it must have: the scenario's own, or the file it serves.
+func (h *harness) expected(sc scenario) (path, body string, err error) {
+	path, body = sc.path, sc.body
+	file := ""
+	switch {
+	case sc.kind == kindSite:
+		names, _ := siteFiles()
+		path, file = sc.arg+names[0], filepath.Join(h.work, "www-site", names[0])
+	case strings.HasPrefix(sc.path, "/site/"):
+		file = filepath.Join(h.work, "www-site", strings.TrimPrefix(sc.path, "/site/"))
+	case body == "":
+		file = filepath.Join(h.bench, "www", "static", "small.html")
+	}
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", "", err
+		}
+		body = string(data)
+	}
+	return path, body, nil
+}
+
 // check fetches url once over protocol p and compares the response with
-// body, or with the static file when body is empty.
+// body.
 func (h *harness) check(ctx context.Context, url, p, body string) error {
 	if body == "" {
 		data, err := os.ReadFile(filepath.Join(h.bench, "www", "static", "small.html"))
@@ -850,25 +944,6 @@ func (h *harness) check(ctx context.Context, url, p, body string) error {
 		return fmt.Errorf("check %s: got %q with body %.80q, want %q with body %.80q", url, status, got, want, body)
 	}
 	return nil
-}
-
-// loadArgs is the docker exec that runs tool against url for d, wrk with
-// script, or report.lua when it is empty, and h2load-h3 over HTTP/3.
-func (h *harness) loadArgs(tool, url, script string, d time.Duration) []string {
-	secs := strconv.Itoa(max(1, int(d.Round(time.Second).Seconds())))
-	t := strconv.Itoa(h.threads)
-	if tool == "wrk" {
-		if script == "" {
-			script = "report.lua"
-		}
-		c := strconv.Itoa(max(h.conns, h.threads))
-		return []string{"exec", loadgenName, "wrk", "-t", t, "-c", c, "-d", secs + "s", "--timeout", "10s", "--latency", "-s", "/fitbench/" + script, url}
-	}
-	c := strconv.Itoa(max(h.h2conns, h.threads))
-	if tool == "h2load-h3" {
-		return []string{"exec", loadgenH3Name, "h2load", "--alpn-list=h3", "-t", t, "-c", c, "-m", strconv.Itoa(h.h2streams), "-D", secs, url}
-	}
-	return []string{"exec", loadgenName, "h2load", "-t", t, "-c", c, "-m", strconv.Itoa(h.h2streams), "-D", secs, url}
 }
 
 // canCount says whether s's goroutines can be counted: it has an Admin API,

@@ -3,32 +3,70 @@
 #
 # Port 8080 serves HTTP/1.1 and port 8081 h2c (HTTP/2 with prior knowledge),
 # with the same routes on both, /ws proxying WebSockets. Port 8443 is
-# HTTP/1.1 over TLS, for idle TLS connections; port 8445 HTTP/2 over TLS and
-# UDP port 8444 HTTP/3, with the same routes but /ws. Caddy logs no requests
-# unless asked to.
+# HTTP/1.1 over TLS, port 8445 HTTP/2 over TLS and UDP port 8444 HTTP/3, with
+# the same routes but /ws. Caddy logs no requests unless asked to.
+#
+# The settings every server shares are aligned (bench/README.md, "Aligned
+# settings"): nothing here limits a run of up to 7,168 requests in flight.
+# Caddy, in Go, has 250 HTTP/2 streams a connection and a 1 MiB stream
+# window, which it does not let a config change. Nothing is compressed: no
+# encode directive, and file_server looks for no precompressed files.
 {
 	admin off
 	auto_https off
+	# A client connection idle for 120s is closed, as every server here
+	# does: timeouts idle in each servers block.
 	servers :8080 {
 		protocols h1
+		timeouts {
+			idle 120s
+		}
 	}
 	servers :8081 {
 		protocols h1 h2c
+		timeouts {
+			idle 120s
+		}
 	}
 	servers :8443 {
 		protocols h1
+		timeouts {
+			idle 120s
+		}
 	}
 	servers :8444 {
 		protocols h3
+		timeouts {
+			idle 120s
+		}
 	}
 	# With h2 alone, Caddy drops TLS connections after the client hello;
 	# clients that offer h2 still get it, by ALPN.
 	servers :8445 {
 		protocols h1 h2
+		timeouts {
+			idle 120s
+		}
+	}
+}
+
+# At most 8,192 backend connections, 8,192 of them kept idle; a 5s connect
+# timeout and 60s for a response's header.
+(transport) {
+	transport http {
+		max_conns_per_host 8192
+		keepalive_idle_conns 8192
+		keepalive_idle_conns_per_host 8192
+		dial_timeout 5s
+		response_header_timeout 60s
 	}
 }
 
 (routes) {
+	# Request bodies of up to 16 MiB, as fit allows.
+	request_body {
+		max_size 16MB
+	}
 	handle /fixed {
 		header Content-Type text/plain
 		respond "hello, world" 200
@@ -37,14 +75,17 @@
 		root * /srv/www
 		file_server
 	}
-	handle /proxy {
-		# Up to 4096 idle backend connections, as every proxy here keeps;
-		# Caddy's default of 32 makes it reopen them under load.
+	# The website workload's files.
+	handle /site/* {
+		root * /srv/www
+		file_server
+	}
+	# The proxy scenario, the large download and upload, and the API
+	# workload.
+	@proxied path /proxy /proxy/* /api/*
+	handle @proxied {
 		reverse_proxy {{BACKEND}} {
-			transport http {
-				keepalive_idle_conns 4096
-				keepalive_idle_conns_per_host 4096
-			}
+			import transport
 		}
 	}
 	handle {
@@ -59,12 +100,7 @@ http://:8080, http://:8081 {
 	import routes
 }
 
-https://:8444, https://:8445 {
+https://:8443, https://:8444, https://:8445 {
 	tls /certs/cert.pem /certs/key.pem
 	import routes
-}
-
-:8443 {
-	tls /certs/cert.pem /certs/key.pem
-	respond 404
 }
