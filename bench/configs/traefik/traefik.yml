@@ -50,10 +50,10 @@ entryPoints:
 # and has no passive health checks.
 serversTransport:
   maxIdleConnsPerHost: 8192
-  idleConnTimeout: 60s
   forwardingTimeouts:
     dialTimeout: 5s
     responseHeaderTimeout: 60s
+    idleConnTimeout: 60s
 providers:
   file:
     filename: /etc/traefik/dynamic.yml

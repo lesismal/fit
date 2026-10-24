@@ -164,8 +164,10 @@ benchreport 此时按 p99 排名。`-hold-idle N` 在每轮期间向服务器保
 | 缓存 | 1 GiB，单条最多 2 MiB | nginx `proxy_cache_path`、fit 的 `cache` |
 | 静态文件 | 对路径所知的信息信任 1 秒 | fit 的静态处理器（`check_interval`），它还把 1 MiB 以内的文件放在内存里，最多 64 MiB；nginx `open_file_cache` 缓存 10,000 个路径，`open_file_cache_valid 1s`，内容经 `sendfile` 来自页缓存；Caddy 每次经页缓存读文件 |
 
-每个 TLS 轮次都记录 curl 和服务器协商的结果（`tls`：版本、加密套件、密钥交换）：与 wrk 和 h2load 同容器的 curl
-基于 OpenSSL 3.0，与 HTTP/3 h2load 同容器的基于 OpenSSL 3.5，和压测客户端的协商一致。
+每个 TLS 轮次都记录 curl 和服务器协商的结果（`tls`：版本、加密套件、密钥交换），与同容器的压测客户端协商一致。
+压测客户端和 curl 优先 TLS 1.3 的 AES-128-GCM，只提供 X25519（fitbench 的 OpenSSL 配置，`OPENSSL_CONF`）：nginx 和
+Envoy 按客户端的顺序选择，OpenSSL 默认把 AES-256-GCM 排在前面；Go 服务器和 fit 自行选择 AES-128-GCM，因此所有服务器
+都协商为 AES-128-GCM 和 X25519。
 
 后端则按自身性能调优：2 个 CPU 上各绑一个 worker，连接保持 300 秒，缓存文件元数据，不生成 ETag。
 

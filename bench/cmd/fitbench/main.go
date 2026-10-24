@@ -330,7 +330,8 @@ func run(ctx context.Context, args []string) error {
 	}
 	step("starting the load generators")
 	if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenName, "--ulimit", "nofile=1048576:1048576",
-		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro", "-v", h.data + ":/fitbench/data:ro"},
+		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro", "-v", h.data + ":/fitbench/data:ro",
+		"-e", "OPENSSL_CONF=/fitbench/data/openssl.cnf"},
 		h.netArgs...), h.clientCPUs...), loadgenTag, "sleep", "infinity")...); err != nil {
 		return err
 	}
@@ -342,7 +343,7 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenH3Name, "--ulimit", "nofile=1048576:1048576",
-			"-v", h.data + ":/fitbench/data:ro"},
+			"-v", h.data + ":/fitbench/data:ro", "-e", "OPENSSL_CONF=/fitbench/data/openssl.cnf"},
 			h.netArgs...), h.clientCPUs...), loadgenH3Tag, "sleep", "infinity")...); err != nil {
 			return err
 		}

@@ -194,9 +194,11 @@ the plan's largest load, 7,168 requests in flight, no server is held back by a l
 | Cache | 1 GiB, entries of up to 2 MiB | nginx `proxy_cache_path`, fit's `cache` |
 | Static files | what is learned of a path trusted for 1s | fit's static handler (`check_interval`), which also keeps files of up to 1 MiB in memory, 64 MiB at most; nginx `open_file_cache` for 10,000 paths, `open_file_cache_valid 1s`, the bytes from the page cache by `sendfile`; Caddy reads each file through the page cache |
 
-Every TLS run records what curl and the server agreed on (`tls`: version, cipher, key exchange):
-curl on OpenSSL 3.0 beside wrk and h2load, on OpenSSL 3.5 beside the HTTP/3 h2load, as the load
-generators negotiate.
+Every TLS run records what curl and the server agreed on (`tls`: version, cipher, key exchange),
+as the load generators beside it negotiate. The load generators and their curl prefer TLS 1.3's
+AES-128-GCM and offer X25519 alone (an OpenSSL config of fitbench's, `OPENSSL_CONF`): nginx and
+Envoy follow the client's order, which by OpenSSL's default put AES-256-GCM first, while the Go
+servers and fit choose AES-128-GCM by their own, so every server agrees on AES-128-GCM and X25519.
 
 The backends are tuned for their own speed instead: a worker pinned to each of their 2 CPUs,
 connections kept 300s, file metadata cached, no ETags.

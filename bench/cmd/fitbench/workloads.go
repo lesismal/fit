@@ -168,6 +168,24 @@ func siteContent(name string, size int) []byte {
 	return b
 }
 
+// opensslConf is the OpenSSL config of the load generators and their curl
+// (OPENSSL_CONF): TLS 1.3's AES-128-GCM first and X25519 alone. A server
+// that follows the client's order, as nginx and Envoy do, then agrees on
+// what the Go servers and fit choose by their own, where OpenSSL's default
+// put AES-256-GCM first.
+const opensslConf = `openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+Ciphersuites = TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+Groups = X25519
+`
+
 // writeData writes what the load generators read, into dir, which they
 // mount at /fitbench/data: the headers for wrk's scripts, and the POST
 // bodies for h2load.
@@ -189,6 +207,7 @@ func writeData(dir string) error {
 	}
 	fmt.Fprintf(&lua, "api_post_body = %q\n", apiPostBody)
 	files := map[string]string{
+		"openssl.cnf":  opensslConf,
 		"headers.lua":  lua.String(),
 		"api-post.bin": apiPostBody,
 		"upload.bin":   largeBody,
