@@ -57,6 +57,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 | A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
+| A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
 
 ## Evidence
 
@@ -1345,3 +1346,28 @@ is swept only once most of it has ended.
 **How fit would use it.** As it is: every HTTP/1.1 upstream with `max_pending`. fit also answers
 503 before building a request whose pool already holds `max_conns` plus `max_pending` requests
 (`upstream.Pool.Saturated`), so that turning one away costs one counter read.
+
+## A45: A peer's end that comes with a read the round stops short is not taken for the end of its data
+
+**Status.** Done (`9f99ea5` on fib's `main`), fixed by fit's session.
+
+**Problem.** A read round that is handed the peer's end with its read (the end owed by A33, or a
+fresh one) can stop reading before the socket is empty: the handler holds reads from `OnData`, as a
+relay does for the other side's backlog, or the connection's own write budget fills. It then
+decided what to do with the end by whether reads were held *after* the read: when the hold had
+been lifted meanwhile, on another goroutine, or the stop was the write budget's, which holds
+nothing, it closed the connection with `io.EOF`, and what the peer had sent and was still in the
+socket was lost.
+
+**Evidence.** fit's `TestTCPHangUp/upstream`, a backend that writes 1 MB and closes, failed on
+macOS in CI twice (runs 39776469190 and 40042387673): the client read 606,208 bytes, then the end.
+On macOS's loopback the client takes fit's output so fast that the l4 relay's hold on the upstream
+is lifted within the round. fib's `TestStalledRoundThenHangup`, an echo past a 16 KiB watermark to
+a peer that has sent 64 KiB and ended, loses 16 KiB of it on Linux every time without the fix.
+
+**As built.** The round records that its read stopped short (`roundStalled`), and then owes the
+end, as for a hold, whatever the hold says by then: the read handed back takes the rest and then
+the end.
+
+**How fit uses it.** As it is: `l4` relays, and anything that holds reads or has a write
+watermark.
