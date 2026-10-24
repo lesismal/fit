@@ -4,7 +4,7 @@ The report: [English](plan-report-2026-10-24-646.md) | [简体中文](plan-repor
 
 The tables of every workload of [the load test plan](../README.md#the-load-test-plan), as benchreport
 renders them from `plan-2026-10-24-646-*.json`: 232 runs on the benchmark host, 2026-10-24 07:47 to
-09:19 UTC, fit at 326b2b8 and the harness at e9d4628, every run 5s warm-up and 15s measured, none failed, none
+09:19 UTC, fit at 326b2b8 and the harness at e6e8f09, every run 5s warm-up and 15s measured, none failed, none
 hung, no errors in any. Levels 100 to 10,000 requests in flight; the host split by physical core:
 the server under test on CPUs `0-1,8-9` (4 workers), the backends on `2-4,10-12`, the load
 generators on `5-7,13-15`. A cell is the successful responses a second and their share of the best.
