@@ -48,10 +48,10 @@ all=nginx,caddy,traefik,envoy,fit
 # h2load's connections times streams, 10 x 10 for 100 and 25 streams a
 # connection above it.
 
-# W7, the raw ceiling: the fixed response, at 100 to 10,000 requests in flight.
+# W0, the raw ceiling: the fixed response, at 100 to 10,000 requests in flight.
 for lv in 100:10:10 500:20:25 2000:80:25 5000:200:25 10000:400:25; do
 	c=${lv%%:*} rest=${lv#*:}
-	run "w7-fixed-$c" nginx,caddy,envoy,fit fixed http/1.1,h2c,h2,h3 "$c" "${rest%%:*}" "${rest#*:}"
+	run "w0-fixed-$c" nginx,caddy,envoy,fit fixed http/1.1,h2c,h2,h3 "$c" "${rest%%:*}" "${rest#*:}"
 done
 
 # W1, the API gateway, at 100 to 10,000 requests in flight.

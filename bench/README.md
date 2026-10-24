@@ -222,13 +222,13 @@ well below. Each run is a 5s warm-up and 15s measured; the 232 runs take about 1
 
 | Workload | Scenarios | Protocols | Requests in flight | Servers | Runs |
 | --- | --- | --- | --- | --- | ---: |
+| W0, the raw ceiling | `fixed` | HTTP/1.1, h2c, h2, HTTP/3 | 100, 500, 2,000, 5,000, 10,000 | nginx, Caddy, Envoy, fit | 80 |
 | W1, the API gateway | `api` | HTTP/1.1, h2 | 100, 500, 2,000, 5,000, 10,000 | all five | 50 |
 | W2, the website | `site`, `edge` | HTTP/1.1 over TLS, h2, HTTP/3 | 500, 2,000 | nginx, Caddy, fit (`edge`: nginx, fit) | 30 |
 | W3, connection churn | `churn-1`, `churn-10` | HTTP/1.1 over TLS | 100, 500 connections | nginx, Caddy, Envoy, fit | 16 |
 | W4, large transfers | `download`, `proxy-download`, `proxy-upload` | HTTP/1.1, h2 | 100 | all that serve them | 26 |
 | W5, idle and active | `api` with 40,000 idle TLS connections | HTTP/1.1, h2 | 500 | all five | 10 |
 | W6, latency at a fixed rate | `api` at 20k and 100k requests a second | HTTP/1.1, h2 | 500 connections | all five | 20 |
-| W7, the raw ceiling | `fixed` | HTTP/1.1, h2c, h2, HTTP/3 | 100, 500, 2,000, 5,000, 10,000 | nginx, Caddy, Envoy, fit | 80 |
 
 Over HTTP/1.1 each connection has one request in flight, and wrk gives each of its 6 threads
 `connections / threads`, so a level is a multiple of 6 just under it: 96, 498, 1,998, 4,998 and

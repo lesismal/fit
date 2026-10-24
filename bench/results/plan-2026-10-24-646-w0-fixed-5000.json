@@ -19,7 +19,7 @@
     "h2_streams": 25,
     "idle_connections": 10000,
     "idle_settle": "5s",
-    "label": "w7-fixed-5000",
+    "label": "w0-fixed-5000",
     "network": "host",
     "server_cpus": "0-1,8-9",
     "client_cpus": "5-7,13-15",

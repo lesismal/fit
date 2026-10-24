@@ -185,13 +185,13 @@ Envoy 按客户端的顺序选择，OpenSSL 默认把 AES-256-GCM 排在前面�
 
 | 工作负载 | 场景 | 协议 | 在途请求 | 服务器 | 轮数 |
 | --- | --- | --- | --- | --- | ---: |
+| W0，原始上限 | `fixed` | HTTP/1.1、h2c、h2、HTTP/3 | 100、500、2,000、5,000、10,000 | nginx、Caddy、Envoy、fit | 80 |
 | W1，API 网关 | `api` | HTTP/1.1、h2 | 100、500、2,000、5,000、10,000 | 全部五个 | 50 |
 | W2，网站 | `site`、`edge` | TLS 上的 HTTP/1.1、h2、HTTP/3 | 500、2,000 | nginx、Caddy、fit（`edge`：nginx、fit） | 30 |
 | W3，连接频繁新建 | `churn-1`、`churn-10` | TLS 上的 HTTP/1.1 | 100、500 个连接 | nginx、Caddy、Envoy、fit | 16 |
 | W4，大文件传输 | `download`、`proxy-download`、`proxy-upload` | HTTP/1.1、h2 | 100 | 所有支持的 | 26 |
 | W5，空闲加活跃 | `api`，并保持 40,000 个空闲 TLS 连接 | HTTP/1.1、h2 | 500 | 全部五个 | 10 |
 | W6，固定速率下的延迟 | `api`，每秒 2 万和 10 万个请求 | HTTP/1.1、h2 | 500 个连接 | 全部五个 | 20 |
-| W7，原始上限 | `fixed` | HTTP/1.1、h2c、h2、HTTP/3 | 100、500、2,000、5,000、10,000 | nginx、Caddy、Envoy、fit | 80 |
 
 HTTP/1.1 每个连接一个请求在途，wrk 给它的 6 个线程各 `connections / threads` 个连接，所以每档是略低于它的 6 的倍数：
 96、498、1,998、4,998 和 9,996，每个结果的 `in_flight` 都有记录。h2c、h2 和 HTTP/3 的档位是 h2load 的连接数乘以流数：

@@ -16,7 +16,7 @@ under test used all of its 4 CPUs at every level but W6's.
 Every table has the servers' memory: peak anonymous memory during the run, and MEM EER, successful
 responses a second for each MiB of it; the scaling tables add peak memory at each level.
 
-## W7, the raw ceiling (fixed)
+## W0, the raw ceiling (fixed)
 
 ### fixed, HTTP/1.1
 

@@ -6,13 +6,13 @@ renders them from `plan-2026-10-24-*.json`: 206 runs on the benchmark host, 2026
 run 5s warm-up and 15s measured, none failed, none hung. A cell is the successful responses a
 second and their share of the best.
 
-## W7, the raw ceiling (fixed)
+## W0, the raw ceiling (fixed)
 Every table has the servers' memory: peak anonymous memory during the run, and MEM EER, successful
 responses a second for each MiB of it; the scaling tables add peak memory at each level. nginx's
 memory barely moves with load: it preallocates its connection tables (`worker_connections 65536`
 for each of its 7 workers).
 
-## W7, the raw ceiling (fixed)
+## W0, the raw ceiling (fixed)
 
 ### fixed, HTTP/1.1
 
