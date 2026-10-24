@@ -281,7 +281,7 @@ go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/
 
 [`sweep.sh`](sweep.sh) runs the whole sweep on the benchmark host, seven levels from 16 HTTP/1.1
 connections (8×32 streams) to 32,768 (8,192×32), as the
-[2026-10-23 sweep](results/sweep-report-2026-10-23.md) did; the proxy runs at levels 1-5 only,
+[2026-10-23 sweep](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.md) did; the proxy runs at levels 1-5 only,
 since past them it measures the load generator and the proxy backend rather than the proxies.
 
 A run's JSON holds `host` (CPU, kernel, memory), `versions` and `images` (with digests),

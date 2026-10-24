@@ -948,7 +948,7 @@ UDP 监听就绪之前检查 h3 监听，每次都失败，所以要把 http/1.1
 `fib.Connection`，所以用上了这一点；服务端交给 quic 的是 `http3.peerPath`，只有 `Send`，于是服务端发出的每个数据报
 都是一次单独的系统调用，也各自单独走一遍内核的 UDP 和 netfilter 路径。
 
-**证据。** [v1.0.0 报告](../bench/results/v1.0.0-report-2026-10-23.md)：fit 的 cache-hot 走 HTTP/3（响应 4 KiB）每秒
+**证据。** [v1.0.0 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/v1.0.0-report-2026-10-23.md)：fit 的 cache-hot 走 HTTP/3（响应 4 KiB）每秒
 30.9 万个请求，nginx 49.0 万；每个请求 22.4 µs，nginx 14.1 µs。在压测机上对这一轮做的 perf 剖析里，fit 63.5% 的 CPU
 在 `syscall.Sendto` 之下，调用路径是 `quic.sendDatagrams` → `http3.(*peerPath).Send`，大部分在内核里
 （`udp_sendmsg` 52%，netfilter 10%）。fixed 走 HTTP/3 时这部分占 7%，proxy 走 HTTP/3 时更多。
@@ -997,7 +997,7 @@ layer 留着，cork 解除时合成一个 record 加密（`fib.CorkHolder`），
 每个请求都被拒绝，而客户端引擎的事件循环处理连接的响应（`release`）和拨号结果（`dialed`）时也要拿这把锁。锁几乎
 一直被占着；事件循环排在成千上万个 `enqueue` 中的 goroutine 之后，响应不再返回，拨号超时，在途的上游请求冻结不动。
 
-**证据。** [2026-10-23 的扫描](../bench/results/sweep-report-2026-10-23.zh-CN.md)：fit 的代理走 h2c 在 256×32 只有每秒
+**证据。** [2026-10-23 的扫描](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.zh-CN.md)：fit 的代理走 h2c 在 256×32 只有每秒
 7.7 万个成功响应（nginx 20.6 万），1,024×32 时 1.9 万，4,096×32 起为零。在压测机上重跑并在第 22 秒抓取 goroutine 栈：
 256×32 时 3,071 个 goroutine 在 `Client.enqueue` 等 `Client.mu`，一个事件循环在 `Client.dialed` 里也在等它；
 4,096×32 时是 13,957 个和两个事件循环。fit 的 `fit_upstream_requests_in_flight` 在 20 秒内停在 8,182 和 19,080，

@@ -1268,7 +1268,7 @@ gets that. The server hands quic an `http3.peerPath`, which has `Send` alone, so
 server sends is a system call of its own, and a packet of its own through the kernel's UDP and
 netfilter paths.
 
-**Evidence.** The [v1.0.0 report](../bench/results/v1.0.0-report-2026-10-23.md): fit's cache-hot
+**Evidence.** The [v1.0.0 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/v1.0.0-report-2026-10-23.md): fit's cache-hot
 over HTTP/3, a 4 KiB response, answers 309k requests a second against nginx's 490k, at 22.4 µs a
 request against 14.1. A perf profile of that run on the benchmark host has 63.5% of fit's CPU under
 `syscall.Sendto`, reached from `quic.sendDatagrams` through `http3.(*peerPath).Send`, most of it in
@@ -1331,7 +1331,7 @@ responses (`release`) and settled dials (`dialed`), on the client engine's event
 was held nearly all the time; the event loops waited behind thousands of goroutines in `enqueue`,
 responses stopped coming back, dials expired, and the upstream requests in flight froze.
 
-**Evidence.** The [2026-10-23 sweep](../bench/results/sweep-report-2026-10-23.md): fit's proxy fell
+**Evidence.** The [2026-10-23 sweep](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.md): fit's proxy fell
 to 77k successful responses a second at 256×32 over h2c (nginx 206k), 19k at 1,024×32, and none at
 all from 4,096×32. Rerun on the host with a goroutine dump at 22 s: at 256×32, 3,071 goroutines in
 `Client.enqueue` waiting for `Client.mu`, and an event loop in `Client.dialed` waiting for it too;

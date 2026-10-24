@@ -236,7 +236,7 @@ go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/
 ```
 
 [`sweep.sh`](sweep.sh) 在压测机上跑完整的连接数扫描，七档，从 16 个 HTTP/1.1 连接（8×32 个流）到 32,768
-个（8,192×32），与 [2026-10-23 的扫描](results/sweep-report-2026-10-23.zh-CN.md)相同；proxy 只跑第 1-5 档，
+个（8,192×32），与 [2026-10-23 的扫描](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.zh-CN.md)相同；proxy 只跑第 1-5 档，
 因为超过之后测到的是压测客户端和代理后端，而不是代理本身。
 
 结果 JSON 包含 `host`（CPU、内核、内存）、`versions` 和 `images`（带摘要）、`params`，`results`

@@ -20,13 +20,13 @@
 Docker Desktop 里测的，不是在 Linux 主机上，见 I08。R07b 在 Linux 主机上测了 M0 的 fit：固定响应吞吐与现在相差不到
 1.3%（HTTP/1.1）和 4.2%（h2c）。
 
-**M1 已完成。** I23 的一致性测试和基准见 [M1 报告](../bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
+**M1 已完成。** I23 的一致性测试和基准见 [M1 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m1-report-2026-10-19.md)：h2spec 全部通过；
 在 Linux 主机上，fit 满足路线图中 M1 的所有目标，代理吞吐高于 Caddy 和 Traefik，但在 HTTP/1.1 上是 nginx 的 83%。
 
-**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](../bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
+**M2 已完成。** 它的三个退出测试在 CI 中以单独的任务通过（I35）；CI 的完整竞态测试任务已恢复通过：`TestStuckClientWithoutStallTimeout` 改为按进展等待，而不是固定时间（见下文）。基准见 [M2 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md)：fit 仍满足 M1 的所有目标，静态文件吞吐是 M1 时的 1.3 到 1.8 倍，代理在 HTTP/1.1 上是 nginx 的 86%（M1 时 83%），在 h2c 上是 94%。**M3 已完成。** 它的退出测试是 `make m3-exit` 和 CI 中单独的任务（I55）：中间件和 handler 都不在 worker 上等待（`test/workers`），
 每个都有基准测试；WebSocket、gRPC 和 TCP/UDP 代理在对端慢时压住快的一侧；一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和
-SOCKS。基准见 [M3 报告](../bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
-（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](../bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段；I73 接受 YAML 配置，I74 转换 nginx 配置；I75 通过 FastCGI 运行 PHP。** **M5 已完成。** 基准结果见 [M5 报告](../bench/results/m5-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；M4 与 M5 构建的 A/B 对比中所有场景都在噪声以内（最多 0.7%）；缓存的命中与 nginx 的 `proxy_cache` 相同，速率在 HTTP/1.1 上是其 2.1 倍、h2c 上是 5.4 倍；空闲连接的开销与 M4 相同。**1.0 的迭代已完成**：I76 在 CI 中（也每天）对十一个目标做 fuzz，语料已提交；I77 把配置和 Admin API 冻结为 v1，附 [兼容性策略](compatibility.zh-CN.md)、schema 版本，以及六个重命名字段的弃用旧名；I78 增加了 [快速上手](getting-started.zh-CN.md)、由代码生成的 [配置参考](reference/config.md)，以及从 nginx、Caddy 和 Traefik 迁移的指南。1.0 尚需的是代码之外的外部安全审计，以及 fib 的 `main` 合入 fit 所依赖的分支。 M2 已完成 I24、I25（带配置版本、局部
+SOCKS。基准见 [M3 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m3-report-2026-10-22.md)：fit 仍满足 M1 的所有目标，代理在 HTTP/1.1 上是 nginx 的 94%
+（M2 时 86%），在 h2c 上是 95%，一个空闲 WebSocket 占 5.5 KiB，nginx 为 17.8。**M4 中，I56（provider 框架与生效配置）、I57（Docker provider）、I58（Gateway API 的 HTTPRoute）、I59（其他路由、HTTPS listener 与状态）、I60（Kubernetes Ingress）、I61（Gateway API 一致性测试，fit 通过其 HTTP profile 的 core）、I62（Consul 与 etcd provider）、I63（证书共享于 Redis、etcd 或 Consul）、I64（只读仪表盘）I65（OpenTelemetry：通过 OTLP 导出追踪和指标）和 I66（打包与示例）已完成，M4 的退出标准已满足：fit 通过 Gateway API 一致性测试 HTTP profile 的 core（I61），Docker Compose 示例按 label 路由，并随容器启动和停止而更新（I66）。** **M4 已完成。** 基准结果见 [M4 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；数据面与 M3 相当，但 h2c 例外：M3 与 M4 构建的 A/B 对比显示 fit 慢 1.5% 到 1.8%，是在 I59–I64 间逐步累积的，请求路径并无改动（见下方记录）；10k 空闲连接每个多占 0.1 到 0.5 KiB。**M5 中，I67（HTTP 缓存的语义与内存层）、I68（其磁盘层）和 I69（锁、陈旧应答与清除）已完成：雪崩只获取一次，在基准工具的缓存场景中，fit 保存的内容与 nginx 的 `proxy_cache` 相同，HTTP/1.1 上速率约为其两倍。I70 的 `fit build` 可以构建带有其他模块、或不带 provider 的 fit。I71 在 wazero 中运行 WebAssembly 插件，插件在自己的池上运行；I72 支持 Proxy-Wasm 过滤器的请求阶段；I73 接受 YAML 配置，I74 转换 nginx 配置；I75 通过 FastCGI 运行 PHP。** **M5 已完成。** 基准结果见 [M5 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-report-2026-10-23.md)：fit 仍满足 M1 的全部目标；M4 与 M5 构建的 A/B 对比中所有场景都在噪声以内（最多 0.7%）；缓存的命中与 nginx 的 `proxy_cache` 相同，速率在 HTTP/1.1 上是其 2.1 倍、h2c 上是 5.4 倍；空闲连接的开销与 M4 相同。**1.0 的迭代已完成**：I76 在 CI 中（也每天）对十一个目标做 fuzz，语料已提交；I77 把配置和 Admin API 冻结为 v1，附 [兼容性策略](compatibility.zh-CN.md)、schema 版本，以及六个重命名字段的弃用旧名；I78 增加了 [快速上手](getting-started.zh-CN.md)、由代码生成的 [配置参考](reference/config.md)，以及从 nginx、Caddy 和 Traefik 迁移的指南。1.0 尚需的是代码之外的外部安全审计，以及 fib 的 `main` 合入 fit 所依赖的分支。 M2 已完成 I24、I25（带配置版本、局部
 修改、ETag 和回滚的 Admin API）、I26（旧图排空与连接池共享）、I27（文件 provider）、I28（证书管理器、存储和 ACME 选型）、I29（经 ACME 的 HTTP-01 获取并续期证书）、I30（TLS-ALPN-01 和 OCSP stapling）、I30b（默认 HTTPS）、I30c（按 ARI 续期）、I31（按需 TLS）、I32（主动健康检查）、I33（负载
 均衡 v2）、I34（Prometheus 指标）、I35（退出测试）、I35b（监视证书文件）和 I35c（丢弃闲置的按需名字）。R07f 剖析了代理每个请求的 CPU：余下可省的在 fib 中，已作为 A20–A22 提出。M2 之前的审查修复 R01、R02 已
 完成，热路径工作中不需要 fib 的 R07a、R07b 也已完成；R03–R06 也已完成：fib 提供了这些 API，代理的下载、静态 handler（自 R05b 起包括 sendfile）和这些上限都已使用它们，R07c 也借助 fib 降低了热路径开销。M1 的审查修复已全部完成。
@@ -250,7 +250,7 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 - `fitbench -idle http1,tls,ws` 对新启动的服务器测每种连接：打开连接前、以及连接空闲 `-idle-settle`
   后各读一次服务器 cgroup 的匿名内存，差值除以连接数。TLS listener 用框架生成的一次性 ECDSA P-256
   证书。
-- [`bench/results/baseline-2026-10-19-macos-docker.json`](../bench/results/baseline-2026-10-19-macos-docker.json)，
+- [`bench/results/baseline-2026-10-19-macos-docker.json`](https://github.com/lesismal/fit/blob/3658ae9/bench/results/baseline-2026-10-19-macos-docker.json)，
   使用默认参数（每轮 30 秒、wrk 256 个连接、h2load 64×32 个流、1 万个空闲连接）。`bench/README.zh-CN.md`
   说明如何复现。
 
@@ -682,7 +682,7 @@ I09 和 I10 会加入 `h2` 和 `h3`。
 
 ### I23 M1 一致性测试与基准 — 已完成
 
-详见 [M1 报告](../bench/results/m1-report-2026-10-19.md)。
+详见 [M1 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m1-report-2026-10-19.md)。
 
 - 一致性（在开发机上）：h2spec 2.0.0 针对 h2c 和 TLS h2 入口，分别由 `respond` 应答和经过代理，四次运行均为
   145/145；以及 `test/e2e/conformance_test.go`：通过 `fit` 二进制、逐字节构造请求的代理一致性测试（同时带两种长度的
@@ -1162,7 +1162,7 @@ A11–A13。
 - `response_header_timeout` 现在从请求发完开始计时，与它的文档和 fib 客户端的计时一致；代理原来的定时器从请求开始计时，
   包括建立连接和上传。
 - I23 的问题（代理在 HTTP/1.1 上只有 nginx 的 83%）：在这台主机上，fit 的代理经过 R07a–R07c 从 212k（I23 的构建）提高到
-  每秒 228k 请求，约为 I23 时 nginx 258k 的 88%。[M2 报告](../bench/results/m2-report-2026-10-20.md) 在同一轮里重新对比：226k 对 nginx 的 264k，即 86%，每个请求的 CPU 是 nginx 的 1.5 倍。
+  每秒 228k 请求，约为 I23 时 nginx 258k 的 88%。[M2 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md) 在同一轮里重新对比：226k 对 nginx 的 264k，即 86%，每个请求的 CPU 是 nginx 的 1.5 倍。
 - 打开访问日志时，h2c 固定响应仍比不开时少约 30%（269 万对 377 万），A13 已经去掉了响应头复制：剩下的是在 worker 上格式化
   日志行和钩子本身的开销。这不是回归，也不属于 M1。
 
@@ -1465,7 +1465,7 @@ R07c 之后，开着访问日志时 h2c 固定响应比不开慢约 30%。在压
 与计划的差异：
 
 - CI 中的证书测试针对 Pebble；Let's Encrypt 测试环境需要公网域名和 80、443 端口，按 I30 完成标准的允许，写成文档手动运行。2026-10-21 手动运行通过（见 I30b），路线图的三条退出标准都已按原文达成。
-- 计划中的 I35 不含基准；R07c 的记录留到 M2 结束时做的 nginx 对比，就是 I35 之后在 59083f3 上跑的 [M2 报告](../bench/results/m2-report-2026-10-20.md)。压测工具只测空闲连接时，汇总表原来不列服务器名，现已修正。
+- 计划中的 I35 不含基准；R07c 的记录留到 M2 结束时做的 nginx 对比，就是 I35 之后在 59083f3 上跑的 [M2 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md)。压测工具只测空闲连接时，汇总表原来不列服务器名，现已修正。
 
 ### I35b 监视证书文件 — 已完成
 
@@ -2138,7 +2138,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   - **一个端口同时服务 HTTP/1.1、HTTP/2、按 SNI 透传的 TLS 和 SOCKS**：I53 的 `TestOnePortManyProtocols`，以及 `TestSNIRouting`、
     `TestSOCKS` 和 `TestSniffClear`。
 - 它们在基准主机上、从 `1486c28` 的独立 checkout 运行，竞态检测下通过；fit 推送后由 CI 运行。
-- 里程碑的基准，即带所有服务器的完整测试框架（规则 21）：[M3 报告](../bench/results/m3-report-2026-10-22.md)。
+- 里程碑的基准，即带所有服务器的完整测试框架（规则 21）：[M3 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m3-report-2026-10-22.md)。
 
 与计划的差异：
 
@@ -2716,7 +2716,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   定律 s = 1 请求，由 HTTP/1.1 压测客户端的脚本生成），经每个服务器的缓存到一个单独的缓存后端，后者在其 Admin API
   上计数到达它的请求，由此得出每个结果的命中率。nginx 用 `proxy_cache` 和 `proxy_cache_lock`，fit 用 `cache`；
   Caddy 和 Traefik 没有自带的缓存。只有点名时才运行。
-- **结果**，在基准机上（[m5-cache-2026-10-23-linux.json](../bench/results/m5-cache-2026-10-23-linux.json)，
+- **结果**，在基准机上（[m5-cache-2026-10-23-linux.json](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-2026-10-23-linux.json)，
   缓存均为 1 GiB，足以容纳所有路径；预热 10s 后测 30s）：
 
   | 场景 | nginx | fit |
@@ -2727,9 +2727,9 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
   两者都保存了被请求的每个响应；在同样的 7 个 CPU 上，fit 在 HTTP/1.1 上回答约两倍的请求，在 h2c 上约五倍。
   改用 64 MiB 的缓存（约为路径的 15%）时，fit 自己回答了 78.0%，接近只保存最热门路径的缓存可达的 84%
-  （[m5-cache-64m-2026-10-23-linux.json](../bench/results/m5-cache-64m-2026-10-23-linux.json)），为 444,374 req/s；
+  （[m5-cache-64m-2026-10-23-linux.json](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-64m-2026-10-23-linux.json)），为 444,374 req/s；
   nginx 在这个速率下守不住自己的大小：它的 `max_size` 由缓存管理进程执行，跟不上，缓存在磁盘上涨到 100–770 MB
-  （命中 94.6% 到 99.4%，见[加快管理进程的那次运行](../bench/results/m5-cache-64m-nginx-manager-2026-10-23-linux.json)），
+  （命中 94.6% 到 99.4%，见[加快管理进程的那次运行](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-64m-nginx-manager-2026-10-23-linux.json)），
   而小到足以限制它的 key 区一满就让 482,684 个请求失败。因此场景比较的是能容纳工作集的缓存。
 - **测试**：`TestStampede`（100 个客户端，HTTP/1.1 和 h2c，请求一个冷路径，源站 200 ms 后回答：一次获取，全部
   得到回答）、`TestLockNotKept`（一旦确知响应不会保存，等待者立即转发）、`TestLockTimeout`、`TestDisableLock`、
@@ -2763,7 +2763,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   `test+build`，校验并运行使用该模块的配置（响应带 `X-Hello`），并确认使用 Docker provider 的配置被拒绝；没有 go 命令
   或使用 `-short` 时跳过。另有 `TestParseModule` 和 `TestImports`。命令行的测试随之迁移。变更涉及的包在基准机上的
   竞态检测下通过；linux、darwin、windows 的 vet 和 staticcheck 通过。
-- **不带 provider**（见 [M4 报告中 h2c 变慢的部分](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）：
+- **不带 provider**（见 [M4 报告中 h2c 变慢的部分](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）：
   不带 `provider/standard` 的 `fit build` 生成 19.9 MB 的二进制文件，带上时为 21.1 MB。用 `bench/ab.sh`（现在可以用
   `bin:PATH` 指定在别处构建好的二进制文件）比较两者（都由 `fit build` 构建），h2c 上：fixed 每秒 3.81M → 3.85M 个请求
   （+1.0%，3 轮中 3 轮），proxy 238k → 236k（在噪声范围内）。所以 provider 增加的代码让 h2c 上的 fixed 慢约 1%，
@@ -3057,7 +3057,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 
 ## 给后续迭代的说明
 
-- **h2c 比 M3 慢 1.5–1.8%（见 [M4 报告](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）。** 用 `bench/ab.sh` 对比 M3 的构建（`1486c28`）与 M4 的构建（`0dd5956`）：fixed h2c −1.8%，proxy h2c −1.5%，其余在噪声范围内。二分后发现它在 I59–I64 间逐步累积，每一步都在噪声范围内（I59–I61 −0.8%，I62–I64 −0.8%）；不是 fib 升到 `86071b8`，也不是 I65 的 tracer 检查；I61 加入 `**.` 主机后，`router.Match` 的微基准没有变化。这几个迭代因 provider、各类客户端、共享存储和仪表盘使 fit 的代码段从 6.14 MB 增至 6.42 MB，这暗示是代码布局的影响，但未能证明。由于请求路径没有改动，按规则 22 记录而不修复；I70 测量了不带 provider 构建的 fit：h2c 上 fixed 快 1.0%，proxy 在噪声范围内；因此代码体积解释了 fixed 的 1.8% 的一部分，不能解释 proxy 的 1.5%，后者仍未查明。
+- **h2c 比 M3 慢 1.5–1.8%（见 [M4 报告](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)）。** 用 `bench/ab.sh` 对比 M3 的构建（`1486c28`）与 M4 的构建（`0dd5956`）：fixed h2c −1.8%，proxy h2c −1.5%，其余在噪声范围内。二分后发现它在 I59–I64 间逐步累积，每一步都在噪声范围内（I59–I61 −0.8%，I62–I64 −0.8%）；不是 fib 升到 `86071b8`，也不是 I65 的 tracer 检查；I61 加入 `**.` 主机后，`router.Match` 的微基准没有变化。这几个迭代因 provider、各类客户端、共享存储和仪表盘使 fit 的代码段从 6.14 MB 增至 6.42 MB，这暗示是代码布局的影响，但未能证明。由于请求路径没有改动，按规则 22 记录而不修复；I70 测量了不带 provider 构建的 fit：h2c 上 fixed 快 1.0%，proxy 在噪声范围内；因此代码体积解释了 fixed 的 1.8% 的一部分，不能解释 proxy 的 1.5%，后者仍未查明。
 - **fib 版本。** fit 使用 fib v1.6.0（`55e4140`），并随之使用 Go 1.27.3。v1.6.0 即 `fcb1718` 加上安全修复 `d639b52`：Go 1.27.3（CVE-2026-111943）不再信任一组中间 CA，fib 的完整握手从工具链得到这一点，因此 fib 需要 Go 1.27.3；且恢复的 TLS 会话会像完整握手一样重新验证对端：服务器端验证会话票据中的客户端证书链，QUIC 客户端验证仅按服务器名保存的会话。按规则 19 的例外使用 tag，因为所需的 fib 版本已有 tag。此前 fit 使用 fib `main` 的 `fcb1718`（`v1.5.7-0.20261023040847-fcb1718d079a`），即 `b5d406a` 加上两个在其后使 fib 的 CI 失败的偶发测试的修复。`http` 的 `TestBodyWriterHoldsNoGoroutine` 统计整个进程的 goroutine，而在 h2c 上每个上传的请求体交给引擎共享的处理器池，该池在任务找不到空闲 worker 时新增一个，并每秒回收空闲的 worker，因此在 CI 的 ubuntu runner 上，被测量的 40 个上传增加了 47 个；现在它像 `TestRetainStress` 一样不计入停驻的池 worker。`benchmark/rpc` 的客户端在运行结束时立即读取计数，未等进行中的调用完成，因此 `TestClientCountsFailures` 在慢速 macOS runner 上以竞态检测运行 50ms 时，看不到任何 gRPC 调用完成（calls=0 fails=0），使 fib 在 `b5d406a` 上的 CI 失败；现在每个调用者至少发起一次调用，并在全部完成后读取计数。`b5d406a`（`v1.5.7-0.20261023021744-b5d406a1d28c`）自 I77 起使用，即 `3998953` 加上一处修复：处理器在请求体仍在到达时发出完整响应，而剩下的请求体多于服务器愿意读取丢弃的量（分块请求体、超过 256 KiB 的请求体，或在等 100 Continue 的请求体）时，响应声明 Connection: close，因为请求结束后连接会关闭。没有它，fit 的 `TestBasicOverNetwork` 在基准机上 30 次中失败 17 次：密码错误的 401 以 keep-alive 发出，Go 的客户端把下一个请求发到了 fib 随后关闭的连接上（"use of closed network connection"）。有了它，30 次全部通过；fib 的 `http` 测试在竞态检测下通过，各 OS 的 vet 和 staticcheck 通过，`BenchmarkServerKeepAlive`、`...POST` 和 `...Hooked` 没有变化，分配相同：在基准机上交替运行 10 次时，benchstat 认为 `ServerKeepAlive` 慢了 15%（p=0.023，波动 ±20%），交替运行 20 次未能证实（746 ns 对 753 ns，p=0.92），而这一改动只在该路径上增加了一次类型断言。`3998953`（`v1.5.7-0.20261022203111-39989533638b`，自 I67 起）即 `86071b8` 加上 A40（`BodyAborter`，以及过滤器之后的钩子拿不到 `Content-Length`）。两者于 2026-10-23 经维护者同意进入 fib 的 `main`。此前 fit 使用 fib `main` 的 `86071b8`（`v1.5.7-0.20261022124907-86071b8bb871`），即 `4f1c3e9` 加上 `5fc8250` 和 `aa0ba7e`（prefork，以及用 eBPF 在 reuseport 组内均衡连接，fit 的 `main` 尚未使用）和 A38（`86071b8`，请求体失败时 HTTP/1 响应声明连接将关闭；没有它，fit 的 `TestBodyOverNetwork` 会遇到重置）。`4f1c3e9`（`v1.5.7-0.20261021175136-4f1c3e9c13c9`）即 `c3e27ed` 加上 A36（SOCKS 与 CONNECT 中继的空闲超时）和 A37（`ConnectProxy` 在拨号回调里应答）。`c3e27ed`（`v1.5.7-0.20261021172359-c3e27ed1667e`）即 `9ab22e8` 加上 A34（`11de9eb`，UDP 对端自己的空闲超时）、A35（`530d222`，替换连接的对端地址）和 `c3e27ed`（http3 原始测试客户端的竞态：在读取方就绪前到达的流数据会丢失，导致 fib 的 macOS CI 失败）。`9ab22e8` 即 `929924e` 加上 A32（`0bd2447`，按请求选择从请求头起流式交给处理器的请求体；HTTP/2 客户端发送 `te: trailers`）和 A33（`9ab22e8`，读取被暂停时看到的对端结束不再丢失）。`929924e` 即 `fc7ec5e` 加上 A28-A30（处理器返回后 Upgrade 被保留的请求、`Client.StartUpgrade`、HTTP/3 客户端的 extended CONNECT）。`fc7ec5e` 即 `cfb4f09` 加上 A27（`Context.OnBodyFilter`）。`cfb4f09` 即 `8e04da9` 加上 A25（`Context.LimitBody`）、A26（保留每个 `OnCancel` 回调）和一处 QUIC 修复。`8e04da9` 即 `06992a5` 加上两处测试修复（HTTP/2 保留 body 的测试等 handler 返回后再释放；SOCKS UDP 测试等所有数据报到齐后再放行拨号）。`06992a5` 即 `b101811` 加上一处修复，让内核分配的 UDP 端口在 bind 时不带 SO_REUSEADDR 和 SO_REUSEPORT，改在 bind 之后设置，因为 Linux 可能把已被占用的端口再分给另一个服务器（在 fib 的测试里，客户端的 QUIC 握手连到了别的测试的服务器，并正确地拒绝了它的证书）。`b101811` 即 `a6d78cd` 加上 fib 偶发失败测试的修复，以及由此发现的一个 taskpool bug 的修复（一个分片能用光共享额度，MaxWorkers 为 16 时同时跑了 17 个阻塞任务）。`a6d78cd` 在 v1.5.6 之后带来：A22（`7f632cb`，客户端连接只在没有待触发的空闲定时器时才设置它）和 A24（`a6d78cd`，taskpool 新建的环不写任何单元，`handler/proxy` 在竞态检测下的峰值从 1.42 GB 降到 540–720 MB）。按规则 19 按 commit 依赖，不打 v1.5.7 tag。v1.5.6 带来 A20：HTTP/1 客户端自己写请求头、读响应头（见下文 R07f 的记录），以及 v1.5.5 中修复
   fib CI 的改动（连接在发送中途关闭时关闭排队文件的描述符；HTTP/2 接管连接前先解除 HTTP/1 的空闲期限）和 `Close` 切断的连接也
   运行 `OnClose`（A23：没有它，空闲 HTTP/2 连接的 idle 定时器会把每个已关闭的引擎留在内存中，`handler/proxy` 在竞态检测下峰值达 5.3GB，交换导致 macOS 上一次 h2c 上传超时）。v1.5.4 带来 A16 的停滞上限（`SendFileStall`）、A17 和 A18 的第一部分（`Context.Status`），经维护者同意由 fit 的会话在 fib 中实现（R07e）；在此之前，fib `main` 的 `8c637e0`（v1.5.3 之后）增加了连接调试状态和测试。v1.4.0 带来了 R03 的 API（A1–A7、A9、A11、A13，以及 A8 和 A12 的一部分），

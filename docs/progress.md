@@ -23,21 +23,21 @@ host; see I08. R07b measured M0's fit on the Linux host: within 1.3% (HTTP/1.1) 
 today's fixed throughput.
 
 **M1 is done.** I23's conformance runs and benchmarks are in the
-[M1 report](../bench/results/m1-report-2026-10-19.md): h2spec passes everywhere, and on a Linux host
+[M1 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m1-report-2026-10-19.md): h2spec passes everywhere, and on a Linux host
 fit meets every M1 target in the roadmap, with its proxy above Caddy and Traefik but at 83% of
 nginx's throughput over HTTP/1.1.
 
 **M2 is done.** Its three exit tests pass in CI, in a job of their own (I35); CI's full race test
 jobs pass again since `TestStuckClientWithoutStallTimeout` waits on progress, not a fixed time (below).
-Its benchmarks are in the [M2 report](../bench/results/m2-report-2026-10-20.md): fit still meets every
+Its benchmarks are in the [M2 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md): fit still meets every
 M1 target, static files are 1.3 to 1.8 times as fast as at M1, and the proxy is at 86% of nginx over
 HTTP/1.1 (83% at M1) and 94% over h2c. **M3 is done.** Its exit tests are `make m3-exit` and a CI job of their own (I55): no middleware or
 handler waits on a worker (`test/workers`), each has a benchmark, WebSocket, gRPC and TCP/UDP
 proxying hold back their fast side for a slow peer, and one port serves HTTP/1.1, HTTP/2, TLS passed
-through by SNI and SOCKS. Its benchmarks are in the [M3 report](../bench/results/m3-report-2026-10-22.md):
+through by SNI and SOCKS. Its benchmarks are in the [M3 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m3-report-2026-10-22.md):
 fit still meets every M1 target, the proxy is at 94% of nginx over HTTP/1.1 (86% at M2) and 95% over
 h2c, and an idle WebSocket costs it 5.5 KiB against nginx's 17.8. **In M4, I56, the provider framework
-and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, I65, OpenTelemetry traces and metrics over OTLP, and I66, packaging and examples, are done, and M4's exit criteria hold: fit passes the Gateway API's conformance suite for the core HTTP profile (I61), and the Docker Compose example routes by labels and follows its containers as they start and stop (I66).** **M4 is done.** Its benchmarks are in the [M4 report](../bench/results/m4-report-2026-10-23.md): fit still meets every M1 target, the data plane measures as at M3 but for h2c, where an A/B of M3's build against M4's finds fit 1.5% to 1.8% slower, built up over I59–I64 with no change to the request path (recorded below), and idle connections cost it 0.1 to 0.5 KiB more at 10k. **In M5, I67, the HTTP cache's semantics and memory tier, I68, its disk tier, and I69, its locks, stale answers and purges, are done: one fetch for a stampede, and on the harness's cache scenarios fit keeps what nginx's `proxy_cache` keeps, at about twice its rate over HTTP/1.1. I70, `fit build`, builds fit with modules of other modules, or without its providers. I71 runs WebAssembly plugins in wazero, on a pool of their own, and I72 Proxy-Wasm filters' request phase. I73 takes configs in YAML, and I74 converts nginx's. I75 serves PHP through FastCGI.** **M5 is done.** Its benchmarks are in the [M5 report](../bench/results/m5-report-2026-10-23.md): fit still meets every M1 target, an A/B of M4's build against M5's finds every scenario within noise (0.7% at most), the cache answers as nginx's `proxy_cache` does at 2.1 times its rate over HTTP/1.1 and 5.4 times over h2c, and idle connections cost what they did at M4. **1.0's iterations are done**: I76 fuzzes eleven targets in CI, daily too, with their corpora committed; I77 freezes the config and the Admin API as v1, with [the compatibility policy](compatibility.md), the schema's version and deprecated names for six renamed fields; I78 adds [getting started](getting-started.md), [the config reference](reference/config.md), generated from the code, and migration guides from nginx, Caddy and Traefik. What 1.0 still asks for is the external security review, outside the code, and fib's `main` taking the branch fit depends on.
+and the effective config, I57, the Docker provider, I58, the Gateway API's HTTPRoute, I59, its other routes, HTTPS listeners and status, I60, Kubernetes Ingress, I61, the Gateway API's conformance suite, whose core HTTP profile fit passes, I62, the Consul and etcd providers, I63, certificates shared in Redis, etcd or Consul, I64, the read-only dashboard, I65, OpenTelemetry traces and metrics over OTLP, and I66, packaging and examples, are done, and M4's exit criteria hold: fit passes the Gateway API's conformance suite for the core HTTP profile (I61), and the Docker Compose example routes by labels and follows its containers as they start and stop (I66).** **M4 is done.** Its benchmarks are in the [M4 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md): fit still meets every M1 target, the data plane measures as at M3 but for h2c, where an A/B of M3's build against M4's finds fit 1.5% to 1.8% slower, built up over I59–I64 with no change to the request path (recorded below), and idle connections cost it 0.1 to 0.5 KiB more at 10k. **In M5, I67, the HTTP cache's semantics and memory tier, I68, its disk tier, and I69, its locks, stale answers and purges, are done: one fetch for a stampede, and on the harness's cache scenarios fit keeps what nginx's `proxy_cache` keeps, at about twice its rate over HTTP/1.1. I70, `fit build`, builds fit with modules of other modules, or without its providers. I71 runs WebAssembly plugins in wazero, on a pool of their own, and I72 Proxy-Wasm filters' request phase. I73 takes configs in YAML, and I74 converts nginx's. I75 serves PHP through FastCGI.** **M5 is done.** Its benchmarks are in the [M5 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-report-2026-10-23.md): fit still meets every M1 target, an A/B of M4's build against M5's finds every scenario within noise (0.7% at most), the cache answers as nginx's `proxy_cache` does at 2.1 times its rate over HTTP/1.1 and 5.4 times over h2c, and idle connections cost what they did at M4. **1.0's iterations are done**: I76 fuzzes eleven targets in CI, daily too, with their corpora committed; I77 freezes the config and the Admin API as v1, with [the compatibility policy](compatibility.md), the schema's version and deprecated names for six renamed fields; I78 adds [getting started](getting-started.md), [the config reference](reference/config.md), generated from the code, and migration guides from nginx, Caddy and Traefik. What 1.0 still asks for is the external security review, outside the code, and fib's `main` taking the branch fit depends on.
 M2 has I24 and I25, the Admin API with config versions, patches, ETags and rollback, I26, graph
 draining and shared pools, I27, the file provider, I28, the certificate manager, its storage and the ACME decision, I29, certificates obtained and renewed with ACME through HTTP-01, I30, TLS-ALPN-01 and OCSP stapling, I30b, HTTPS by default, I30c, renewal by ARI, I31, on-demand TLS, I32, active health checks, I33, load
 balancing v2, I34, Prometheus metrics, I35, its exit tests, I35b, certificate files watched, and
@@ -302,7 +302,7 @@ Differences from the plan:
   from the server's cgroup before the connections open and after they have sat for
   `-idle-settle`, divided by the number of connections. The TLS listeners use a throwaway ECDSA
   P-256 certificate the harness writes.
-- [`bench/results/baseline-2026-10-19-macos-docker.json`](../bench/results/baseline-2026-10-19-macos-docker.json),
+- [`bench/results/baseline-2026-10-19-macos-docker.json`](https://github.com/lesismal/fit/blob/3658ae9/bench/results/baseline-2026-10-19-macos-docker.json),
   with the defaults (30-second runs, 256 wrk connections, 64×32 h2load streams, 10,000 idle
   connections). `bench/README.md` says how to reproduce it.
 
@@ -874,7 +874,7 @@ Differences from the plan:
 
 ### I23 M1 conformance and benchmarks — done
 
-The [M1 report](../bench/results/m1-report-2026-10-19.md) has the details.
+The [M1 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m1-report-2026-10-19.md) has the details.
 
 - Conformance (on the development Mac): h2spec 2.0.0 against the h2c and TLS h2 entries, answering
   with `respond` and through the proxy, 145 of 145 in each of the four runs; and
@@ -1548,7 +1548,7 @@ Differences from the plan:
   client measures it; the proxy's timer counted from the start, connect and upload included.
 - I23's question, the proxy's 83% of nginx over HTTP/1.1: on this host fit's proxy went from
   212k (I23's build) to 228k requests a second through R07a–R07c, about 88% of nginx's 258k at
-  I23. The [M2 report](../bench/results/m2-report-2026-10-20.md) compares them again in one run:
+  I23. The [M2 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md) compares them again in one run:
   226k against nginx's 264k, 86%, with half as much CPU again per request.
 - With the access log on, fixed h2c still serves about 30% less than without (2.69M against
   3.77M), where A13 removed the header copy: what is left is the line itself, formatted on the
@@ -1998,7 +1998,7 @@ Differences from the plan:
   ports 80 and 443, and is documented to be run by hand, as I30's done-when allows. It passed by
   hand on 2026-10-21 (I30b), so all three of the roadmap's exit criteria have been met as written.
 - The plan's I35 has no benchmarks; the comparison with nginx that R07c's notes left for M2's end
-  is the [M2 report](../bench/results/m2-report-2026-10-20.md), run after I35 at 59083f3. The
+  is the [M2 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m2-report-2026-10-20.md), run after I35 at 59083f3. The
   harness's summary now names the servers of a run of idle connections alone, which it left out.
 
 ### I35b Certificate files watched — done
@@ -2972,7 +2972,7 @@ Differences from the plan:
 - They pass under the race detector on the benchmark host, run from a checkout of their own at
   `1486c28`; CI runs them once fit is pushed.
 - The milestone's benchmarks, the full harness with every server (rule 21): the
-  [M3 report](../bench/results/m3-report-2026-10-22.md).
+  [M3 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m3-report-2026-10-22.md).
 
 Differences from the plan:
 
@@ -3766,7 +3766,7 @@ Differences from the plan:
   it on its Admin API, from which each result's hit ratio comes. nginx with `proxy_cache` and
   `proxy_cache_lock`, fit with `cache`; Caddy and Traefik have no cache of their own. Run only when
   named.
-- **Results** on the benchmark host ([m5-cache-2026-10-23-linux.json](../bench/results/m5-cache-2026-10-23-linux.json),
+- **Results** on the benchmark host ([m5-cache-2026-10-23-linux.json](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-2026-10-23-linux.json),
   1 GiB caches, enough for every path; 30s after a 10s warm-up):
 
   | Scenario | nginx | fit |
@@ -3778,10 +3778,10 @@ Differences from the plan:
   Both keep every response they are asked for; fit answers about twice as many requests over
   HTTP/1.1, and five times as many over h2c, on the same 7 CPUs. With 64 MiB caches instead,
   about 15% of the paths, fit kept 78.0% of its answers to itself, near the 84% a cache of the most
-  popular paths would ([m5-cache-64m-2026-10-23-linux.json](../bench/results/m5-cache-64m-2026-10-23-linux.json)),
+  popular paths would ([m5-cache-64m-2026-10-23-linux.json](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-64m-2026-10-23-linux.json)),
   at 444,374 req/s; nginx was not held to its size at this rate: its `max_size` is enforced by its
   cache manager, which fell behind and let the cache grow to 100–770 MB on disk (94.6% to 99.4%
-  hits, [the run with a faster manager](../bench/results/m5-cache-64m-nginx-manager-2026-10-23-linux.json)),
+  hits, [the run with a faster manager](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m5-cache-64m-nginx-manager-2026-10-23-linux.json)),
   and a key zone small enough to bound it failed 482,684 requests once full. So the scenarios
   compare caches large enough for the working set.
 - **Tests**: `TestStampede` (100 clients, over HTTP/1.1 and h2c, one cold path from an origin
@@ -3829,7 +3829,7 @@ Differences from the plan:
   without the go command or with `-short`. `TestParseModule` and `TestImports`. The CLI's tests
   moved with it. The packages the change reaches pass under the race detector on the benchmark
   host; vet and staticcheck pass for linux, darwin and windows.
-- **Without the providers** (the [M4 report's h2c slowdown](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)):
+- **Without the providers** (the [M4 report's h2c slowdown](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)):
   `fit build` without `provider/standard` makes a binary of 19.9 MB against 21.1 MB with it.
   `bench/ab.sh` (which now takes `bin:PATH` for a binary built elsewhere) of the two, both from
   `fit build`, over h2c: fixed 3.81M → 3.85M requests a second (+1.0%, 3 of 3 rounds), the proxy
@@ -4254,7 +4254,7 @@ Differences from the plan:
 
 ## Notes for later iterations
 
-- **h2c 1.5–1.8% slower since M3 (the [M4 report](../bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)).** `bench/ab.sh` of M3's build (`1486c28`) against M4's (`0dd5956`): fixed h2c −1.8%, proxy h2c −1.5%, the rest within noise. Bisected, it builds up over I59–I64 in steps each within noise (−0.8% for I59–I61, −0.8% for I62–I64); neither fib's move to `86071b8` nor I65's tracer check is it, and `router.Match`'s micro-benchmark did not move with I61's `**.` hosts. Those iterations grew fit's text from 6.14 MB to 6.42 MB with the providers, their clients, shared storage and the dashboard, which suggests code layout without proving it. Recorded, not fixed (rule 22), since nothing on the request path changed; I70 measured fit built without the providers: fixed over h2c 1.0% faster, the proxy within noise; so the code size accounts for part of fixed's 1.8% and none of the proxy's 1.5%, which stays unexplained.
+- **h2c 1.5–1.8% slower since M3 (the [M4 report](https://github.com/lesismal/fit/blob/3658ae9/bench/results/m4-report-2026-10-23.md#the-h2c-slowdown)).** `bench/ab.sh` of M3's build (`1486c28`) against M4's (`0dd5956`): fixed h2c −1.8%, proxy h2c −1.5%, the rest within noise. Bisected, it builds up over I59–I64 in steps each within noise (−0.8% for I59–I61, −0.8% for I62–I64); neither fib's move to `86071b8` nor I65's tracer check is it, and `router.Match`'s micro-benchmark did not move with I61's `**.` hosts. Those iterations grew fit's text from 6.14 MB to 6.42 MB with the providers, their clients, shared storage and the dashboard, which suggests code layout without proving it. Recorded, not fixed (rule 22), since nothing on the request path changed; I70 measured fit built without the providers: fixed over h2c 1.0% faster, the proxy within noise; so the code size accounts for part of fixed's 1.8% and none of the proxy's 1.5%, which stays unexplained.
 - **fib version.** fit uses fib v1.6.0 (`55e4140`), and Go 1.27.3 with it. v1.6.0 is `fcb1718` with `d639b52`, a security fix: Go 1.27.3 (CVE-2026-111943) distrusts a set of intermediate CAs, which fib's full handshakes get from the toolchain, so fib needs Go 1.27.3; and a resumed TLS session's peer is verified again, as a full handshake would, on the server from a ticket's client chains and on the QUIC client from a session kept by server name alone. The tag is by rule 19's exception, the fib version wanted having one. Before it, fit used fib's `main` at `fcb1718` (`v1.5.7-0.20261023040847-fcb1718d079a`), which is `b5d406a` with fixes of two intermittent tests that failed fib's CI after it. `http`'s `TestBodyWriterHoldsNoGoroutine` counted every goroutine in the process, and over h2c each upload's body goes to the engine's shared handler pool, which grows a worker for a task that finds none idle and retires idle ones every second, so on CI's ubuntu runner the measured batch of 40 uploads added 47; it now leaves parked pool workers out, as `TestRetainStress` does. `benchmark/rpc`'s client read its counts as soon as its run ended, before the calls in flight finished, so `TestClientCountsFailures`' 50ms runs under the race detector on a slow macOS runner saw no gRPC call finish (calls=0 fails=0) and failed fib's CI on `b5d406a`; each caller now makes at least one call and the counts are taken once all have finished. `b5d406a` (`v1.5.7-0.20261023021744-b5d406a1d28c`), since I77, is `3998953` with a fix: a whole response a handler sends while the request's body is still arriving, more of it left than the server will read and throw away (a chunked body, one past 256 KiB, or one waiting for 100 Continue), says Connection: close, since the connection closes once the request is done. Without it, fit's `TestBasicOverNetwork` failed 17 runs in 30 on the benchmark host: the 401 for a wrong password went out keep-alive, and Go's client sent the next request on the connection fib then closed ("use of closed network connection"). With it, 30 in 30 pass; fib's `http` tests pass under the race detector, vet and staticcheck for every OS, and `BenchmarkServerKeepAlive`, `...POST` and `...Hooked` are unchanged, with the same allocations: of 10 alternating runs on the host, benchstat found `ServerKeepAlive` 15% slower (p=0.023, spreads of ±20%), which 20 runs did not bear out (746 ns against 753, p=0.92), and the change adds one type assertion to the path. `3998953` (`v1.5.7-0.20261022203111-39989533638b`), since I67, is `86071b8` with A40 (`BodyAborter`, and no `Content-Length` for the hooks after a filter). Both went on fib's `main` on 2026-10-23, with the maintainer's word. Before it, fit used fib's `main` at `86071b8` (`v1.5.7-0.20261022124907-86071b8bb871`), which is `4f1c3e9` with `5fc8250` and `aa0ba7e` (prefork, and connections balanced over a reuseport group by eBPF, which fit's `main` does not use yet) and A38 (`86071b8`, an HTTP/1 response to a request whose body failed says the connection ends; fit's `TestBodyOverNetwork` met a reset without it). `4f1c3e9` (`v1.5.7-0.20261021175136-4f1c3e9c13c9`) is `c3e27ed` with A36 (an idle timeout for SOCKS and CONNECT relays) and A37 (`ConnectProxy` answers from its dial's callback). `c3e27ed` (`v1.5.7-0.20261021172359-c3e27ed1667e`) is `9ab22e8` with A34 (`11de9eb`, a UDP peer's own idle timeout), A35 (`530d222`, a connection's peer address replaced) and `c3e27ed`, a race in http3's raw test client that lost stream data arriving before its reader and failed fib's macOS CI. `9ab22e8` is `929924e` with A32 (`0bd2447`, a request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client) and A33 (`9ab22e8`, a peer's end seen while reads are held is not lost). `929924e` is `fc7ec5e` with A28-A30 (a retained request upgraded after its handler returned, `Client.StartUpgrade`, extended CONNECT from the HTTP/3 client). `fc7ec5e` is `cfb4f09` with A27 (`Context.OnBodyFilter`). `cfb4f09` is `8e04da9` with A25 (`Context.LimitBody`) and A26 (every `OnCancel` callback kept), and a QUIC fix. `8e04da9` is `06992a5` with two test fixes (the retained HTTP/2 body test releases only once the handler has returned; the SOCKS UDP test opens the dial only once every datagram is in). `06992a5` is `b101811` with a UDP port left to the kernel bound without SO_REUSEADDR and SO_REUSEPORT, set after the bind instead, since Linux could hand a port already held to a second server (in fib's tests, a client's QUIC handshake reached another test's server, whose certificate it rightly refused). `b101811` is `a6d78cd` with the fixes of fib's intermittent tests and of a taskpool bug they found (one shard could take the whole shared budget, so MaxWorkers 16 ran 17 blocking tasks at once). `a6d78cd`, after v1.5.6, brought A22 (`7f632cb`, a client connection's idle timer set only when none is pending) and A24 (`a6d78cd`, a new taskpool ring writes none of its cells, which brings `handler/proxy`'s peak under the race detector from 1.42 GB to 540–720 MB). By commit rather than a v1.5.7 tag, as rule 19 has it. v1.5.6 brings A20, the HTTP/1 client writing request heads
   and reading response heads itself (R07f's notes below), with v1.5.5's fixes for fib's CI (a
   queued file's descriptor closed when its connection closes mid-send; the HTTP/1 idle deadline
