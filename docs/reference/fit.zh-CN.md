@@ -13,6 +13,7 @@
 - [模块](#模块)
 - [站点](#站点)
 - [多个文件和目录](#多个文件和目录)
+- [import 与 include](#import-与-include)
 - [错误](#错误)
 - [转换](#转换)
 
@@ -212,6 +213,43 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
   `sites/api.konf:12:3: routes[0].handler.params.status: ...`。
 - **重新加载**：SIGHUP 会重新读取每个文件。使用 `-watch` 时，文件被修改、被加入目录或从目录中移除，都会重新应用配置。
   每次都重新读取全部文件；上限为 10,000 个文件，共 64 MiB。
+
+## import 与 include
+
+`.konf` 文件自己也可以引用其他文件，用两个指令：
+
+- **`import <路径...>`**：只能写在 config 文件的顶层，引入完整的 config 文件，效果同多给几个 `-c`：每个路径可以是 fit
+  任一格式的文件、代表其中 config 文件的目录，或 glob。它们按[上文](#多个文件和目录)的规则，接在引入它们的文件之后、按书写
+  顺序合并。
+- **`include <路径...>`**：可写在任意位置，顶层或任何块中，在原处读入所指文件的 `.konf` 指令，同 nginx 的 `include`：
+  顶层可以是 listener、upstream 或站点，站点中可以是其路由共享的设置，路由中可以是 middleware 或 handler。每个路径是一个
+  文件（名字不限）或一个 glob，glob 匹配的文件按字典序读入。被 include 的文件可以再 include 其他文件，但不能直接或间接
+  include 自己；它不能 import。
+
+路径相对于写下它的文件所在的目录。glob 没有匹配时什么都不引用；路径不存在则报错。
+
+```text
+# fit.konf
+import upstreams.yaml sites
+include listeners.konf
+
+# sites/api.konf
+site api.example.com {
+	include ../snippets/site-common.konf
+	route /v1/* {
+		include ../snippets/secure.inc
+		handler proxy { upstream api }
+	}
+}
+
+# snippets/secure.inc
+middleware headers { response { delete Server } }
+middleware rate_limit { rate 100 }
+```
+
+被 include 的文件只在 include 它的地方读入，不作为一份独立的配置，即便它位于 `-c` 指定或 import 的目录中，所以片段可以
+和站点放在一起。被 include 的文件中的错误会给出该文件及其中的位置。所有被 import 或 include 的文件都与其他文件一起被监视：
+任一文件变化都会重新应用配置，文件数和字节数的上限也把它们计算在内。
 
 ## 错误
 

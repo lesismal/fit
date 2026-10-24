@@ -30,6 +30,19 @@ type Result struct {
 	// (as config errors name them, listeners[0].address) was written, or
 	// false when it does not know.
 	Position func(path string) (line, col int, ok bool)
+	// File returns the file the value at a config path Position knows was
+	// written in, when it is not the config's own file but one it
+	// includes, or "". Nil when every value is in the config's own file.
+	File func(path string) string
+}
+
+// fileAt returns the file the value at path was written in, when it is
+// one the config includes, or "".
+func (r *Result) fileAt(path string) string {
+	if r == nil || r.File == nil {
+		return ""
+	}
+	return r.File(path)
 }
 
 // Adapter adapts a config in its format.
@@ -38,6 +51,9 @@ type Adapter func(data []byte) (*Result, error)
 type entry struct {
 	adapt Adapter
 	exts  []string
+	// refs and adaptFile read files that name other files (RegisterFiles).
+	refs      RefsFunc
+	adaptFile FileAdapter
 }
 
 var (
@@ -53,7 +69,7 @@ func Register(name string, a Adapter, exts ...string) {
 	if _, ok := adapters[name]; ok {
 		panic("adapter: " + name + " is registered twice")
 	}
-	adapters[name] = entry{a, exts}
+	adapters[name] = entry{adapt: a, exts: exts}
 }
 
 // Lookup returns the adapter registered as name.
@@ -137,6 +153,9 @@ func (r *Result) MapErrors(err error) error {
 		for p := c.Path; ; p = parent(p) {
 			if line, col, ok := r.Position(p); ok {
 				c.Line, c.Col = line, col
+				if f := r.fileAt(p); f != "" {
+					c.File = f
+				}
 				break
 			}
 			if p == "" {

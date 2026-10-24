@@ -45,16 +45,26 @@ var singular = map[string]string{
 	"listener": "listeners", "route": "routes", "upstream": "upstreams", "service": "services", "provider": "providers",
 }
 
-// Adapt turns a .konf config into native JSON.
+// Adapt turns a .konf config into native JSON. It cannot include other
+// files, nor import them, as it has no file to find them from: AdaptFile
+// can.
 func Adapt(data []byte) (*adapter.Result, error) {
-	ds, err := parse(data)
+	return AdaptFile("", data, nil)
+}
+
+// AdaptFile turns the .konf config file at path into native JSON, the
+// files it includes read with include. The files it imports are not read:
+// adapter.Files finds them, and adapter.AdaptSet merges them after it.
+func AdaptFile(path string, data []byte, include adapter.Includer) (*adapter.Result, error) {
+	r := &reader{include: include, stack: []string{path}}
+	ds, err := r.read(path, data, true)
 	if err != nil {
 		return nil, err
 	}
 	if ds, err = expandSites(ds); err != nil {
 		return nil, err
 	}
-	c := &converter{pos: map[string][2]int{}}
+	c := &converter{pos: map[string]token{}}
 	root, err := c.object(configType, ds, "", true)
 	if err != nil {
 		return nil, err
@@ -62,10 +72,19 @@ func Adapt(data []byte) (*adapter.Result, error) {
 	var b bytes.Buffer
 	root.write(&b)
 	pos := c.pos
-	return &adapter.Result{JSON: b.Bytes(), Position: func(path string) (int, int, bool) {
-		p, ok := pos[path]
-		return p[0], p[1], ok
-	}}, nil
+	res := &adapter.Result{JSON: b.Bytes(), Position: func(p string) (int, int, bool) {
+		t, ok := pos[p]
+		return t.line, t.col, ok
+	}}
+	if include != nil {
+		res.File = func(p string) string {
+			if t := pos[p]; t.file != path {
+				return t.file
+			}
+			return ""
+		}
+	}
+	return res, nil
 }
 
 // jnode is a JSON value being built, an object's members in the order
@@ -127,12 +146,12 @@ func (n *jnode) write(b *bytes.Buffer) {
 // converter turns directives into JSON, and records where each path's
 // value was written.
 type converter struct {
-	pos map[string][2]int
+	pos map[string]token // where each path's value was written
 }
 
 func (c *converter) at(path string, t token) {
 	if _, ok := c.pos[path]; !ok {
-		c.pos[path] = [2]int{t.line, t.col}
+		c.pos[path] = token{file: t.file, line: t.line, col: t.col}
 	}
 }
 
@@ -186,7 +205,7 @@ func (c *converter) object(t reflect.Type, ds []*directive, path string, root bo
 		f, ok := lookup(fields, name)
 		if !ok {
 			if obj.member(name) != nil {
-				return nil, errAt(d.name.line, d.name.col, "%s is given twice", d.name.text)
+				return nil, errTok(d.name, "%s is given twice", d.name.text)
 			}
 			c.at(p, d.name)
 			v, err := c.generic(d, p, 0)
@@ -210,7 +229,7 @@ func (c *converter) object(t reflect.Type, ds []*directive, path string, root bo
 			continue
 		}
 		if obj.member(name) != nil {
-			return nil, errAt(d.name.line, d.name.col, "%s is given twice; it takes one value", d.name.text)
+			return nil, errTok(d.name, "%s is given twice; it takes one value", d.name.text)
 		}
 		v, err := c.value(ft, &f, d, p)
 		if err != nil {
@@ -242,7 +261,7 @@ func (c *converter) appendTo(arr *jnode, t reflect.Type, f *config.Field, d *dir
 			if named {
 				what = "one argument, its name,"
 			}
-			return errAt(d.name.line, d.name.col, "%s takes %s and a block", d.name.text, what)
+			return errTok(d.name, "%s takes %s and a block", d.name.text, what)
 		}
 		v, err := c.object(elem, d.block, p, false)
 		if err != nil {
@@ -250,7 +269,7 @@ func (c *converter) appendTo(arr *jnode, t reflect.Type, f *config.Field, d *dir
 		}
 		if len(d.args) == 1 {
 			if v.member("name") != nil {
-				return errAt(d.args[0].line, d.args[0].col, "the name is given twice, as the argument and in the block")
+				return errTok(d.args[0], "the name is given twice, as the argument and in the block")
 			}
 			c.at(field(p, "name"), d.args[0])
 			v.keys = append([]string{"name"}, v.keys...)
@@ -266,7 +285,7 @@ func (c *converter) appendTo(arr *jnode, t reflect.Type, f *config.Field, d *dir
 		arr.elems = append(arr.elems, v)
 	default:
 		if d.hasBlock {
-			return errAt(d.name.line, d.name.col, "%s takes a list of values, not a block", d.name.text)
+			return errTok(d.name, "%s takes a list of values, not a block", d.name.text)
 		}
 		for _, a := range d.args {
 			p := index(path, len(arr.elems))
@@ -288,28 +307,28 @@ func (c *converter) value(t reflect.Type, f *config.Field, d *directive, path st
 	case isObject(t):
 		c.at(path, d.name)
 		if len(d.args) > 0 {
-			return nil, errAt(d.args[0].line, d.args[0].col, "%s takes a block, not arguments", d.name.text)
+			return nil, errTok(d.args[0], "%s takes a block, not arguments", d.name.text)
 		}
 		return c.object(t, d.block, path, false)
 	case t.Kind() == reflect.Map:
 		c.at(path, d.name)
 		if len(d.args) > 0 {
-			return nil, errAt(d.args[0].line, d.args[0].col, "%s takes a block of keys and their values, not arguments", d.name.text)
+			return nil, errTok(d.args[0], "%s takes a block of keys and their values, not arguments", d.name.text)
 		}
 		return c.mapBlock(deref(t.Elem()), d.block, path)
 	}
 	if d.hasBlock {
-		return nil, errAt(d.name.line, d.name.col, "%s takes a value, not a block", d.name.text)
+		return nil, errTok(d.name, "%s takes a value, not a block", d.name.text)
 	}
 	if len(d.args) == 0 {
 		if t.Kind() == reflect.Bool {
 			c.at(path, d.name)
 			return scalarNode("true"), nil
 		}
-		return nil, errAt(d.name.line, d.name.col, "%s takes a value", d.name.text)
+		return nil, errTok(d.name, "%s takes a value", d.name.text)
 	}
 	if len(d.args) > 1 {
-		return nil, errAt(d.args[1].line, d.args[1].col, "%s takes one value; quote one that holds spaces", d.name.text)
+		return nil, errTok(d.args[1], "%s takes one value; quote one that holds spaces", d.name.text)
 	}
 	c.at(path, d.args[0])
 	return scalar(t, d.args[0]), nil
@@ -322,7 +341,7 @@ func (c *converter) mapBlock(t reflect.Type, ds []*directive, path string) (*jno
 	for _, d := range ds {
 		k := d.name.text
 		if obj.member(k) != nil {
-			return nil, errAt(d.name.line, d.name.col, "%q is a key twice", k)
+			return nil, errTok(d.name, "%q is a key twice", k)
 		}
 		p := key(path, k)
 		var v *jnode
@@ -330,7 +349,7 @@ func (c *converter) mapBlock(t reflect.Type, ds []*directive, path string) (*jno
 		switch {
 		case t.Kind() == reflect.Slice && !isObject(deref(t.Elem())) && t.Elem() != valueType:
 			if d.hasBlock {
-				return nil, errAt(d.name.line, d.name.col, "%q takes a list of values, not a block", k)
+				return nil, errTok(d.name, "%q takes a list of values, not a block", k)
 			}
 			c.at(p, d.name)
 			v = &jnode{kind: 'a'}
@@ -359,7 +378,7 @@ func (c *converter) module(ns string, d *directive, path string) (*jnode, error)
 		for _, info := range module.Namespace(ns) {
 			names = append(names, info.Name())
 		}
-		return nil, errAt(d.name.line, d.name.col, "%s takes the name of a module, one of %s, then its params in a block",
+		return nil, errTok(d.name, "%s takes the name of a module, one of %s, then its params in a block",
 			d.name.text, strings.Join(names, ", "))
 	}
 	name := d.args[0]
@@ -391,16 +410,16 @@ func (c *converter) module(ns string, d *directive, path string) (*jnode, error)
 // list of them.
 func (c *converter) generic(d *directive, path string, depth int) (*jnode, error) {
 	if depth > maxDepth {
-		return nil, errAt(d.name.line, d.name.col, "nested too deep")
+		return nil, errTok(d.name, "nested too deep")
 	}
 	switch {
 	case d.hasBlock && len(d.args) > 0:
-		return nil, errAt(d.args[0].line, d.args[0].col, "%s takes either arguments or a block", d.name.text)
+		return nil, errTok(d.args[0], "%s takes either arguments or a block", d.name.text)
 	case d.hasBlock:
 		obj := &jnode{kind: 'o'}
 		for _, e := range d.block {
 			if obj.member(e.name.text) != nil {
-				return nil, errAt(e.name.line, e.name.col, "%s is given twice", e.name.text)
+				return nil, errTok(e.name, "%s is given twice", e.name.text)
 			}
 			p := field(path, e.name.text)
 			c.at(p, e.name)

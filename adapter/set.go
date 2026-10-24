@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -37,61 +34,20 @@ type Source struct {
 
 // Files returns the config files paths name: each file as it is, and each
 // directory's files with one of DirExts, in its subdirectories too, in
-// lexical order. Files and directories whose names start with a dot are
-// left out of a directory's. A file named twice is read once.
+// lexical order, each followed by the files it imports and includes. Files
+// and directories whose names start with a dot are left out of a
+// directory's. A file named twice is read once.
 func Files(paths []string) ([]string, error) {
-	var files []string
-	seen := map[string]bool{}
-	add := func(p string) error {
-		p = filepath.Clean(p)
-		if seen[p] {
-			return nil
-		}
-		seen[p] = true
-		if len(files) == MaxFiles {
-			return fmt.Errorf("a config is read from at most %d files", MaxFiles)
-		}
-		files = append(files, p)
-		return nil
-	}
+	f := &finder{seen: map[string]bool{}}
 	for _, p := range paths {
-		fi, err := os.Stat(p)
-		if err != nil {
+		if err := f.config(p); err != nil {
 			return nil, err
-		}
-		if !fi.IsDir() {
-			if err := add(p); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		n := len(files)
-		err = filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if path != p && strings.HasPrefix(d.Name(), ".") {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() || !slices.Contains(DirExts, strings.ToLower(filepath.Ext(path))) {
-				return nil
-			}
-			return add(path)
-		})
-		if err != nil {
-			return nil, err
-		}
-		if len(files) == n {
-			return nil, fmt.Errorf("%s: no config files in the directory (%s)", p, strings.Join(DirExts, ", "))
 		}
 	}
-	if len(files) == 0 {
+	if len(f.files) == 0 {
 		return nil, errors.New("no config files")
 	}
-	return files, nil
+	return f.files, nil
 }
 
 // ReadSources reads the config files paths name, as Files finds them,
@@ -131,13 +87,15 @@ func readLimited(path string, limit int64) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// Set is a config read from several files, each adapted by its extension
-// and merged into one: the lists at the top of the config (listeners,
+// Set is a config read from several files, each adapted by its extension,
+// the files others include read where they are included, and merged into
+// one: the lists at the top of the config (listeners,
 // routes, upstreams, services, providers) are joined in the files' order,
 // and any other field may be set by one file only, but schema_version,
 // which files may each give if they agree.
 type Set struct {
-	// Files are the files, in the order they were merged.
+	// Files are the files, in the order they were merged; not those
+	// included, which are read as part of the files including them.
 	Files []string
 	// Parts are the files adapted, one for each.
 	Parts []*Result
@@ -154,8 +112,16 @@ type Set struct {
 // config.Errors, each naming its file.
 func AdaptSet(srcs []Source) (*Set, error) {
 	s := &Set{lists: map[string][]int{}, owner: map[string]int{}}
+	snap := newSnapshot(srcs)
+	frag, err := snap.fragments()
+	if err != nil {
+		return nil, err
+	}
 	for _, src := range srcs {
-		r, err := Adapt(ForPath(src.Path), src.Data)
+		if frag[src.Path] {
+			continue
+		}
+		r, err := snap.adaptSource(src)
 		if err != nil {
 			return nil, inFile(src.Path, err)
 		}
@@ -179,13 +145,16 @@ func AdaptSet(srcs []Source) (*Set, error) {
 	return s, nil
 }
 
-// inFile returns err with each of its config errors naming file.
+// inFile returns err with each of its config errors naming file, but those
+// that name a file already, one it includes.
 func inFile(file string, err error) error {
 	errs := config.AsErrors(err)
 	out := make(config.Errors, len(errs))
 	for i, e := range errs {
 		c := *e
-		c.File = file
+		if c.File == "" {
+			c.File = file
+		}
 		out[i] = &c
 	}
 	return out
@@ -273,6 +242,9 @@ func (s *Set) conflict(i int, key string) error {
 	e := &config.Error{File: s.Files[i], Path: key, Msg: msg}
 	if p := s.Parts[i].Position; p != nil {
 		e.Line, e.Col, _ = p(key)
+		if f := s.Parts[i].fileAt(key); f != "" {
+			e.File = f
+		}
 	}
 	return config.Errors{e}
 }
@@ -371,7 +343,9 @@ func (s *Set) MapErrors(err error) error {
 		}
 		mapped := config.AsErrors(s.Parts[part].MapErrors(config.Errors{&c}))
 		m := *mapped[0]
-		m.File = s.Files[part]
+		if m.File == "" {
+			m.File = s.Files[part]
+		}
 		out = append(out, &m)
 	}
 	return out

@@ -119,7 +119,10 @@ A directory stands for its `.konf`, `.yaml`, `.yml` and `.json` files, in its su
 in lexical order, those whose names begin with a `.` left out. The lists at the top of the config,
 `listeners`, `routes`, `upstreams`, `services` and `providers`, are joined in the files' order;
 any other field is given in one file only. An error names its file. The details:
-[several files and directories](reference/fit.md#several-files-and-directories). A whole
+[several files and directories](reference/fit.md#several-files-and-directories). A `.konf`
+file may also name files itself: `import` merges whole config files, as `-c` does, and
+`include` reads a file's directives in its place, in any block
+([import and include](reference/fit.md#import-and-include)). A whole
 template as a directory, with a file for each kind (the runtime, listeners, certificates,
 observability, layer 4 services, providers) and one for each site, is in
 [the config templates](../templates/README.md#as-a-directory); `fit schema -template fit -dir <dir>`

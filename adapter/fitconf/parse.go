@@ -20,6 +20,9 @@ const (
 // token is a word of the file: a directive's name or one of its arguments.
 type token struct {
 	text string
+	// file is the file it was written in: "" for the config's own when
+	// it was read without its path, as Adapt reads it.
+	file string
 	// quoted says it was written in quotes or backquotes: always a string,
 	// never a brace.
 	quoted    bool
@@ -35,9 +38,14 @@ type directive struct {
 	hasBlock bool
 }
 
-// errAt returns an error at a place in the file, as the config's own are.
-func errAt(line, col int, format string, args ...any) error {
-	return config.Errors{{Line: line, Col: col, Msg: fmt.Sprintf(format, args...)}}
+// errAt returns an error at a place in file, as the config's own are.
+func errAt(file string, line, col int, format string, args ...any) error {
+	return config.Errors{{File: file, Line: line, Col: col, Msg: fmt.Sprintf(format, args...)}}
+}
+
+// errTok returns an error at where t was written.
+func errTok(t token, format string, args ...any) error {
+	return errAt(t.file, t.line, t.col, format, args...)
 }
 
 // item is what the lexer gives the parser: a token, the end of a
@@ -63,7 +71,8 @@ const (
 // brace, {} is an empty block, and a ; ending a word ends the directive.
 // {$NAME} and {$NAME:default}, outside backquotes, are replaced with the
 // environment variable's value.
-func lex(data []byte) ([]item, error) {
+// Its tokens are of file.
+func lex(file string, data []byte) ([]item, error) {
 	if !utf8.Valid(data) {
 		return nil, errors.New("the file is not UTF-8")
 	}
@@ -83,8 +92,9 @@ func lex(data []byte) ([]item, error) {
 	}
 	push := func(it item) error {
 		if len(items) >= maxTokens {
-			return errAt(it.tok.line, it.tok.col, "the file holds more than %d words", maxTokens)
+			return errAt(file, it.tok.line, it.tok.col, "the file holds more than %d words", maxTokens)
 		}
+		it.tok.file = file
 		items = append(items, it)
 		return nil
 	}
@@ -117,9 +127,9 @@ func lex(data []byte) ([]item, error) {
 				if s[j] == '{' && strings.HasPrefix(s[j:], "{$") {
 					end := strings.IndexByte(s[j:], '}')
 					if end < 0 {
-						return nil, errAt(l, cl, "{$ is not closed with }")
+						return nil, errAt(file, l, cl, "{$ is not closed with }")
 					}
-					v, err := expandEnv(s[j:j+end+1], l, cl)
+					v, err := expandEnv(file, s[j:j+end+1], l, cl)
 					if err != nil {
 						return nil, err
 					}
@@ -147,21 +157,21 @@ func lex(data []byte) ([]item, error) {
 				b.WriteByte(s[j])
 			}
 			if j >= len(s) {
-				return nil, errAt(l, cl, "a quote is not closed")
+				return nil, errAt(file, l, cl, "a quote is not closed")
 			}
 			advance(j + 1 - i)
-			if err := pushWord(push, token{text: b.String(), quoted: true, line: l, col: cl}, s, i, line, col); err != nil {
+			if err := pushWord(push, token{text: b.String(), quoted: true, line: l, col: cl}, s, i, file, line, col); err != nil {
 				return nil, err
 			}
 		case c == '`':
 			l, cl := line, col
 			j := strings.IndexByte(s[i+1:], '`')
 			if j < 0 {
-				return nil, errAt(l, cl, "a backquote is not closed")
+				return nil, errAt(file, l, cl, "a backquote is not closed")
 			}
 			text := s[i+1 : i+1+j]
 			advance(j + 2)
-			if err := pushWord(push, token{text: text, quoted: true, line: l, col: cl}, s, i, line, col); err != nil {
+			if err := pushWord(push, token{text: text, quoted: true, line: l, col: cl}, s, i, file, line, col); err != nil {
 				return nil, err
 			}
 		default:
@@ -188,7 +198,7 @@ func lex(data []byte) ([]item, error) {
 				}
 			default:
 				var text string
-				if text, err = expandEnv(word, l, cl); err == nil {
+				if text, err = expandEnv(file, word, l, cl); err == nil {
 					err = push(item{tok: token{text: text, line: l, col: cl}})
 				}
 			}
@@ -205,18 +215,18 @@ func lex(data []byte) ([]item, error) {
 
 // pushWord pushes a quoted word; s[i:] is what follows it, which may be a ;
 // ending the directive, lexed next.
-func pushWord(push func(item) error, tok token, s string, i, line, col int) error {
+func pushWord(push func(item) error, tok token, s string, i int, file string, line, col int) error {
 	if err := push(item{tok: tok}); err != nil {
 		return err
 	}
 	if i < len(s) && !strings.ContainsRune(" \t\r\n;", rune(s[i])) {
-		return errAt(line, col, "a quoted word must end at a space, a new line or a ;")
+		return errAt(file, line, col, "a quoted word must end at a space, a new line or a ;")
 	}
 	return nil
 }
 
 // expandEnv replaces {$NAME} and {$NAME:default} in s.
-func expandEnv(s string, line, col int) (string, error) {
+func expandEnv(file, s string, line, col int) (string, error) {
 	if !strings.Contains(s, "{$") {
 		return s, nil
 	}
@@ -229,11 +239,11 @@ func expandEnv(s string, line, col int) (string, error) {
 		}
 		j := strings.IndexByte(s[i:], '}')
 		if j < 0 {
-			return "", errAt(line, col, "{$ is not closed with }")
+			return "", errAt(file, line, col, "{$ is not closed with }")
 		}
 		name, def, hasDef := strings.Cut(s[i+2:i+j], ":")
 		if name == "" {
-			return "", errAt(line, col, "{$} names no environment variable")
+			return "", errAt(file, line, col, "{$} names no environment variable")
 		}
 		v, ok := os.LookupEnv(name)
 		if !ok && hasDef {
@@ -245,12 +255,17 @@ func expandEnv(s string, line, col int) (string, error) {
 	}
 }
 
-// parse parses a file into its directives.
-func parse(data []byte) ([]*directive, error) {
-	items, err := lex(data)
+// parse parses file into its directives, as written, its includes not read.
+func parse(file string, data []byte) ([]*directive, error) {
+	items, err := lex(file, data)
 	if err != nil {
 		return nil, err
 	}
+	return parseItems(items)
+}
+
+// parseItems parses a file's items into its directives.
+func parseItems(items []item) ([]*directive, error) {
 	p := &parser{items: items}
 	ds, err := p.block(0)
 	if err != nil {
@@ -258,7 +273,7 @@ func parse(data []byte) ([]*directive, error) {
 	}
 	if p.i < len(p.items) {
 		t := p.items[p.i].tok
-		return nil, errAt(t.line, t.col, "a } closes no block")
+		return nil, errTok(t, "a } closes no block")
 	}
 	return ds, nil
 }
@@ -281,7 +296,7 @@ func (p *parser) block(depth int) ([]*directive, error) {
 		case itemClose:
 			return ds, nil
 		case itemOpen:
-			return nil, errAt(it.tok.line, it.tok.col, "a block needs a directive before its {")
+			return nil, errTok(it.tok, "a block needs a directive before its {")
 		}
 		d := &directive{name: it.tok}
 		p.i++
@@ -296,7 +311,7 @@ func (p *parser) block(depth int) ([]*directive, error) {
 				break args
 			case itemOpen:
 				if depth+1 > maxDepth {
-					return nil, errAt(it.tok.line, it.tok.col, "blocks nested more than %d deep", maxDepth)
+					return nil, errTok(it.tok, "blocks nested more than %d deep", maxDepth)
 				}
 				p.i++
 				inner, err := p.block(depth + 1)
@@ -304,13 +319,13 @@ func (p *parser) block(depth int) ([]*directive, error) {
 					return nil, err
 				}
 				if p.i >= len(p.items) {
-					return nil, errAt(it.tok.line, it.tok.col, "this { is not closed")
+					return nil, errTok(it.tok, "this { is not closed")
 				}
 				p.i++ // the }
 				d.block, d.hasBlock = inner, true
 				if p.i < len(p.items) && p.items[p.i].kind == itemWord {
 					t := p.items[p.i].tok
-					return nil, errAt(t.line, t.col, "a block's } ends its directive: begin a new line or use ;")
+					return nil, errTok(t, "a block's } ends its directive: begin a new line or use ;")
 				}
 				break args
 			}

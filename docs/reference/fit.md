@@ -15,6 +15,7 @@ directories ([below](#several-files-and-directories)).
 - [Modules](#modules)
 - [Sites](#sites)
 - [Several files and directories](#several-files-and-directories)
+- [Import and include](#import-and-include)
 - [Errors](#errors)
 - [Converting](#converting)
 
@@ -236,6 +237,48 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
 - **Reloading.** SIGHUP reads every file again. With `-watch`, a file changed, added to a
   directory or taken out of one applies the config again. Every file is read again each time;
   bounds: 10,000 files, and 64 MiB in all.
+
+## Import and include
+
+A `.konf` file may name other files itself, with two directives:
+
+- **`import <paths...>`**, at the top of a config file only, imports whole config files, as more
+  `-c` would: each path a file in any of fit's formats, a directory standing for its config
+  files, or a glob. They are merged after the file importing them, in the order named, by the
+  rules [above](#several-files-and-directories).
+- **`include <paths...>`**, anywhere, at the top or in any block, reads the `.konf` directives
+  of the files named in its place, as nginx's `include` does: listeners, upstreams or sites at
+  the top, what a site's routes share in a site, middleware or a handler in a route. Each path is a file,
+  whatever its name, or a glob, whose files are read in lexical order. A file included may
+  include others, but not itself, through others or not; it imports nothing.
+
+A path is relative to the directory of the file naming it. A glob that matches nothing names
+nothing; a path that is not there is an error.
+
+```text
+# fit.konf
+import upstreams.yaml sites
+include listeners.konf
+
+# sites/api.konf
+site api.example.com {
+	include ../snippets/site-common.konf
+	route /v1/* {
+		include ../snippets/secure.inc
+		handler proxy { upstream api }
+	}
+}
+
+# snippets/secure.inc
+middleware headers { response { delete Server } }
+middleware rate_limit { rate 100 }
+```
+
+A file included is read only where it is included, not as a config of its own, also when a
+directory given or imported holds it, so snippets may sit beside the sites. An error in a file
+included names that file and the place in it. Every file imported or included is watched with
+the others: one changed applies the config again, and the bounds on files and bytes count them
+too.
 
 ## Errors
 
