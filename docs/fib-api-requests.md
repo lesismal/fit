@@ -43,7 +43,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A28 | Upgrade a request the handler retained, after it returned | done, `929924e` (main after v1.5.6) | 1, 9 | I47, I48 |
 | A29 | A client request whose 101 hands over its connection as a tunnel | done, `929924e` (with A28) | 1, 9 | I47 |
 | A30 | Extended CONNECT from the HTTP/3 client | done, `929924e` (with A28) | 13 | I48 tests |
-| A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | made, fib `70f76c8`, not pushed yet | 1, 8, 9 | I48 |
+| A31 | A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains | done, fib `70f76c8` on main | 1, 8, 9 | I48 |
 | A32 | A request body streamed from its header, picked per request; `te: trailers` from the HTTP/2 client | done, `0bd2447` | 1, 5, 9 | I49 |
 | A33 | A peer's end seen while reads are held is not lost | done, `9ab22e8` | 8, 9 | I50 |
 | A34 | A UDP peer's own idle timeout, or none | done, `11de9eb` | 10, 11 | I51 |
@@ -52,7 +52,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A37 | `ConnectProxy` answers from its dial's callback, not waiting on the worker | done, `4f1c3e9` | 1 | I53b |
 | A38 | An HTTP/1 response to a request whose body failed says the connection ends | done, `86071b8` | 13 | I66's CI fixes |
 | A39 | A cheaper read round for a client connection's response | not done, dropped: items 1 and 2 save no measurable CPU | 12 | — |
-| A41 | A response's header held back while an asynchronous hook runs | made, fib `76c0275`, not pushed yet | 1, 4 | I72 |
+| A41 | A response's header held back while an asynchronous hook runs | done, fib `76c0275` on main | 1, 4 | I72 |
 | A40 | Body filters aborted when their response ends without its body; no length after a filter | done, `3998953`, v1.6.0 | 6, 11 | I67 |
 | A42 | The HTTP/3 server sends a round's datagrams in one batch | done, `a34c5db` | 12 | — |
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
@@ -925,7 +925,7 @@ extended CONNECT over HTTP/3.
 
 ## A31: A callback when an HTTP/2 or HTTP/3 tunnel's unsent output drains
 
-**Status.** Made on 2026-10-24 as suggested, fib `70f76c8`, not pushed yet: `Tunnel.NotifySendable`
+**Status.** Made on 2026-10-24 as suggested, fib `70f76c8`, on fib's `main` since 2026-10-24: `Tunnel.NotifySendable`
 is `Connection.NotifyOutput` over HTTP/1.1, and over HTTP/2 and HTTP/3 runs fn once what the
 stream's flow control holds back is down to half of limit, or with an error once the stream ends.
 fib's `ConnectProxy` uses it in place of its goroutine. Over HTTP/3 a stream has room for one such
@@ -1226,7 +1226,7 @@ given as the length of the body it copies.
 
 ## A41: A response's header held back while an asynchronous hook runs
 
-**Status.** Made on 2026-10-24 as suggested, fib `76c0275`, not pushed yet. One difference: the
+**Status.** Made on 2026-10-24 as suggested, fib `76c0275`, on fib's `main` since 2026-10-24. One difference: the
 response of `Upgrade` or `Connect` passes over the hook, since it goes at once. Proxy-Wasm's
 response callbacks waited for it ([decision 018](decisions/018-proxy-wasm-subset.md)).
 
