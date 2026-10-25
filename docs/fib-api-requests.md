@@ -58,6 +58,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 | A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
 | A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
+| A47 | A streamed request body passed on without needless copies | done, fib `9a1680ba` on branch `perf/w4-transfer`, for `main` | 1, 5, 8 | W4 |
 
 ## Evidence
 
@@ -1376,3 +1377,28 @@ the end.
 
 **How fit uses it.** As it is: `l4` relays, and anything that holds reads or has a write
 watermark.
+
+## A47: A streamed request body passed on without needless copies
+
+**Status.** Made on 2026-10-25 by fit's session, fib `9a1680ba` on the branch
+`perf/w4-transfer`, for fib's `main`.
+
+**Problem.** Proxying an upload, fit hands fib's `BodyStream` a body piece as the peer's bytes
+arrive and the upstream takes them. Two copies stood between the two. A `BodyStream` whose
+callback was still busy, which on HTTP/2 is every piece handed to the handler pool, buffered what
+came meanwhile by appending into a buffer of its own: from nothing, a copy at a time, and left to
+the collector once handed on. `Pusher.Write` copied every piece into its queue before sending it,
+even when the queue was empty and the piece could go as it was.
+
+**Evidence.** fit's W4 HTTP/2 proxy upload on the benchmark host put 20% of fit's CPU in
+`BodyStream.push`'s copying. With both copies gone, 1 MiB uploads rose from 2748 to 4742 requests
+a second (+73%), the slowest response from 200ms to 62ms, and HTTP/1.1 uploads from 6957 to 8300
+(+18%), with peak memory lower.
+
+**As built.** A `BodyStream`'s buffers come from `bufferpool`; the one handed on comes back as the
+next buffer or as a spare, and both return to the pool once the body is done with them. A
+`Pusher.Write` piece that nothing waits ahead of goes to a sink with room as it is, and is copied
+only when it has to wait.
+
+**How fit uses it.** As it is: `handler/proxy`'s upload path, which passes a streamed body on
+without gathering it.
