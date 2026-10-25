@@ -3093,4 +3093,3 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   stream 运行 fib handler，不经过网络。带 content type 的 `Context.Respond` 会忽略 `c.Header()`；需要其他响应头
   字段时用 `WriteResponse`。
 - **错误位置。** 错误测试比较带 行:列 的完整消息。期望的列号应该从文档计算，而不是手数。
-- **许可证。** 仓库还没有 LICENSE 文件（fib 是 MIT），由维护者决定。

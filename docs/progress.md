@@ -4309,4 +4309,3 @@ Differences from the plan:
   content type ignores `c.Header()`; a response with other fields goes through `WriteResponse`.
 - **Error positions.** Error tests compare whole messages with line:column. Work out expected
   columns from the document rather than counting by hand.
-- **License.** The repository has no LICENSE file yet (fib is MIT); that is the maintainer's call.
