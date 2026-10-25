@@ -9,11 +9,11 @@
 
 | | |
 | --- | --- |
-| 最后更新 | 2026-10-23 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .konf 格式和多文件配置 |
+| 最后更新 | 2026-10-25 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .konf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调 |
 | fib | fib `main` 的 `b0809b4`（`v1.6.1-0.20261023105547-b0809b4bac8f`）：v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON 访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
-| 尚不可用 | Proxy-Wasm 的响应回调（A41）；1.0 的外部安全审计，在代码之外安排 |
+| 尚不可用 | 1.0 的外部安全审计，在代码之外安排。Proxy-Wasm 的响应回调（I81）等待 fib 的 A46 进入 fib 的 `main` |
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
 基于 TLS 的 HTTP/2 在 I09）返回固定响应；nginx、Caddy、Traefik 的基线已提交，但它们是在 Mac 上的
@@ -2826,6 +2826,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 与计划的差别：
 
 - 计划要求实现常见过滤器所需的调用，或说明为何不行：请求阶段已实现，并能原样运行已有过滤器；响应阶段如说明所述，等待 A41。
+- **后来（2026-10-25）：响应回调在 I81 借助 A41 和 A46 实现**（[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)）。
 
 ### I73 更友好的配置格式 — 已完成
 
@@ -3054,6 +3055,35 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   和 Caddyfile 适配器不认扩展名和文件名：`fit run` 和 `fit validate` 只加载 fit 自己的格式，nginx 配置或 Caddyfile 用
   `fit adapt -from nginx` 或 `-from caddyfile` 转换（[决策 021](decisions/021-fit-format-and-config-files.zh-CN.md#后续扩展名改为-konf)）。
   上面的条目保留当时的名字。
+
+### I81 WASM III：Proxy-Wasm 的响应回调 — 已完成
+
+- **响应回调**（[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)）：导出了 `proxy_on_response_headers`、`_body` 或
+  `_trailers` 的 Proxy-Wasm 插件跟随它放行的每个请求的响应，其上下文在创建它的实例上保持打开（每个实例最多 `max_streams`
+  个，默认 1024；超过时返回 503）。这些调用排在该实例的 goroutine 上（`worker.later`），先于新请求，从不在写响应的
+  goroutine 上运行。`proxy_on_response_headers` 在 fib 的 `OnHeaderAsync`（A41）压住响应头时运行：插件读取 `:status` 和
+  字段，修改字段，请求阶段对响应字段的修改先生效。body 经 fib 的 `OnBodyFilterAsync`（A46，fit 的会话为此在 fib 中实现）交给
+  `proxy_on_response_body`：每次调用拿到上次之后写入的部分，用 `proxy_get_buffer_bytes`、`proxy_set_buffer_bytes` 读取和替换；
+  暂停的插件持有 body，下次看到它持有的全部内容，最多 `max_body_bytes`（1 MiB）；最后一次调用带上 trailer（map 类型 3），
+  有 trailer 时交给 `proxy_on_response_trailers`，插件也可以添加。之后，或请求先结束时（`OnCancel`、过滤器被中止），上下文
+  done、log、delete，为它持有的配置随之释放。`response: headers` 只给响应头，`none` 都不给。属性 `response.code` 读取状态码。
+- **失败**：回调失败、trap 或超时，持有的 body 超过 `max_body_bytes`，以及响应开始后发送本地响应，都让响应失败（关闭 HTTP/1
+  连接或重置流）；`on_error: skip` 时响应的其余部分绕过插件继续。重新创建的实例会丢失原有的上下文，它们的响应按失败处理。
+- **测试**：Proxy-Wasm Go SDK 的 `http_headers` 和 `http_body` 示例原样收录于 `testdata/proxywasm`（加上 `http_headers` 需要的
+  `gjson`），另有 fit 自己的过滤器 `testdata/proxywasm/response`：`TestProxyWasmResponseHeaders`、`TestProxyWasmResponseBody`
+  （追加、前置、替换；`response: headers`）、`TestProxyWasmResponseTrailers`（分几次写出的 body 每部分转为大写，trailer 被读取、
+  删除和添加；没有 trailer 的 body 被加上一个；204 不调用 body 回调）、`TestProxyWasmResponseFails`（迟到的本地响应、超时的调用、
+  超过上限的 body，`on_error` 分别为 fail 和 skip）、`TestProxyWasmMaxStreams`、`TestProxyWasmResponseClientGone`、
+  `TestBodyBuffer`；每个测试都检查所有上下文已关闭、对配置的持有都已归还。`test/e2e` 的 `TestProxyWasmResponse` 经过滤器代理
+  带 trailer 流式发送的 5 字节和 300 KB，覆盖 HTTP/1.1、h2c、h2、TLS 上的 HTTP/1.1 和 HTTP/3；`TestProxyWasmResponseSlowPeers`
+  让一个客户端在经过过滤器的 64 MB 响应上停止读取，并经每次调用空转 20ms 的过滤器流式传输 512 KB，同时不经过滤器和经过滤器的
+  请求都立即得到应答。它们在竞态检测下通过，vet 和 staticcheck 也通过。
+- **fib**：A46 在 fib 的 `claude/async-body-filter` 分支上（`136602a`），带测试，所涉及的包及其依赖方在竞态检测下通过，linux、
+  darwin、windows、freebsd 的 vet 和 staticcheck 通过。它进入 fib 的 `main` 且 fib 的 CI 通过后，fit 按 commit 依赖它（规则 15、19）。
+
+与计划的差别：
+
+- 这是计划最后一项之后新增的迭代：它等待 A41，body 部分等待 A46，后者由 fit 的会话加入 fib。
 
 ## 给后续迭代的说明
 

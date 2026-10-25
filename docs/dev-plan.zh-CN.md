@@ -195,6 +195,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I78 | 参考文档与迁移指南 | I77 | done |
 | I79 | Caddyfile 转换器、带注释的 JSON | I74 | done |
 | I80 | fit 自己的 .konf 格式；多文件配置 | I79 | done |
+| I81 | WASM III：Proxy-Wasm 的响应回调 | I72 | done |
 
 ## M0 基础
 
@@ -926,5 +927,14 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 - **完成标准**：每个模板、示例和参考示例都有能与其 JSON 一样加载的 `.konf` 写法；由三种格式的文件组成的目录能运行，加入、
   修改或移除文件时会重新加载；文档和模板讲的是 `.konf`、YAML 和 JSON。
 - **涉及**：`adapter/fitconf`、`adapter`、`config`、`provider/file`、`cli`、`schema`、`docs`、`templates`、`examples`。
+
+### I81 WASM III：Proxy-Wasm 的响应回调
+
+- **做什么**：在插件的池上实现 Proxy-Wasm 的响应回调 `proxy_on_response_headers`、`_body` 和 `_trailers`：响应头由 fib 的 A41
+  压住，body 经 fib 新增的异步响应体过滤器（A46）流式处理；跟随的响应数和持有的 body 都有上限，调用受插件的超时限制
+  （[决定 023](decisions/023-proxy-wasm-response.zh-CN.md)）。
+- **完成标准**：Proxy-Wasm 过滤器能读取和修改响应的头、body 和 trailer，SDK 的 `http_headers` 和 `http_body` 示例原样运行，
+  覆盖 HTTP/1.1、h2c、h2 和 HTTP/3；不读取的客户端或慢插件不拖住其他请求。
+- **涉及**：`plugin/wasm`、fib 的 `http`。
 
 路线图 1.0 中的外部安全审计不是一个迭代：它在 I77 完成后于代码之外安排。

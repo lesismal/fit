@@ -10,11 +10,11 @@ this file says what was done, and where the work differs from the plan.
 
 | | |
 | --- | --- |
-| Last updated | 2026-10-23 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, and I80, fit's own .konf format and configs in several files |
+| Last updated | 2026-10-25 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .konf format and configs in several files, and I81, Proxy-Wasm's response callbacks |
 | fib | fib's `main` at `b0809b4` (`v1.6.1-0.20261023105547-b0809b4bac8f`): v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
-| What does not | Proxy-Wasm's response callbacks (A41); 1.0's external security review, which is arranged outside the code |
+| What does not | 1.0's external security review, which is arranged outside the code. Proxy-Wasm's response callbacks (I81) wait for fib's A46 to reach fib's `main` |
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
 response on HTTP/1.1 and HTTP/2 (h2c; HTTP/2 over TLS comes with I09), and baselines for nginx,
@@ -3919,6 +3919,8 @@ Differences from the plan:
 
 - The plan asked for the calls common filters need, or a note of why not: the request phase is
   done and runs existing filters unchanged; the response phase waits for A41, as the note says.
+- **Later (2026-10-25): the response's callbacks came in I81**, with A41 and A46
+  ([decision 023](decisions/023-proxy-wasm-response.md)).
 
 ### I73 Friendly config format — done
 
@@ -4251,6 +4253,50 @@ Differences from the plan:
   Caddyfile is converted with `fit adapt -from nginx` or `-from caddyfile`
   ([decision 021](decisions/021-fit-format-and-config-files.md#later-the-extension-konf)).
   The entries above keep the name they had then.
+
+### I81 WASM III: Proxy-Wasm's response callbacks — done
+
+- **The response's callbacks** ([decision 023](decisions/023-proxy-wasm-response.md)): a Proxy-Wasm
+  plugin that exports `proxy_on_response_headers`, `_body` or `_trailers` follows the response of
+  each request it lets go on, its context kept open on the instance that made it (at most
+  `max_streams`, 1024, an instance; past them 503). The calls are queued for that instance's
+  goroutine (`worker.later`), before new requests, never run on the goroutine writing the response.
+  `proxy_on_response_headers` runs while fib's `OnHeaderAsync` (A41) holds the header: the plugin
+  reads `:status` and the fields, changes the fields, and its request phase's changes are applied
+  first. The body goes through `proxy_on_response_body` by fib's `OnBodyFilterAsync` (A46, made for
+  this in fib by fit's session): each call gets what was written since the last, read and replaced
+  through `proxy_get_buffer_bytes` and `proxy_set_buffer_bytes`; a plugin that pauses holds the body
+  and sees all it holds next time, up to `max_body_bytes` (1 MiB); the last call carries the trailer
+  (map type 3), given to `proxy_on_response_trailers` when there is one, and the plugin may add one.
+  Then, or when the request ends first (`OnCancel`, a filter aborted), the context is done, logged
+  and deleted, and the config held for it released. `response: headers` gives the header alone,
+  `none` neither. The property `response.code` reads the status.
+- **Failures**: a callback that fails, traps or times out, a body held past `max_body_bytes`, and a
+  local response sent once the response has begun fail it (the HTTP/1 connection closed, the stream
+  reset); with `on_error: skip` the rest of the response goes on without the plugin. An instance made
+  again loses its contexts, whose responses go as a failure does.
+- **Tests**: the Proxy-Wasm Go SDK's `http_headers` and `http_body` examples, copied unchanged into
+  `testdata/proxywasm` (with `gjson`, which `http_headers` needs), and `testdata/proxywasm/response`,
+  a filter of fit's own: `TestProxyWasmResponseHeaders`, `TestProxyWasmResponseBody` (append, prepend,
+  replace; `response: headers`), `TestProxyWasmResponseTrailers` (a body written in parts, each
+  upper-cased, the trailer read, removed and added; a body without a trailer given one; a 204 with
+  no body call), `TestProxyWasmResponseFails` (a late local response, a call past its timeout and a
+  body held past its bound, with `on_error` fail and skip), `TestProxyWasmMaxStreams`,
+  `TestProxyWasmResponseClientGone`, `TestBodyBuffer`; each checks that every context closed and
+  every hold on the config was given back. `test/e2e`'s `TestProxyWasmResponse` proxies 5 bytes and
+  300 KB, streamed with a trailer, through the filter over HTTP/1.1, h2c, h2, HTTP/1.1 over TLS and
+  HTTP/3; `TestProxyWasmResponseSlowPeers` stalls a client on a 64 MB response through the filter
+  and streams 512 KB through one that spins 20ms a call, while requests to a route without the
+  filter and through it answer at once. They pass under the race detector, with vet and staticcheck.
+- **fib**: A46 is on fib's branch `claude/async-body-filter` (`136602a`), with its tests, the race
+  detector on the packages it touches and their dependents, and vet and staticcheck for linux,
+  darwin, windows and freebsd. fit moves to it by its hash once it is on fib's `main` and fib's CI
+  has passed (rules 15, 19).
+
+Differences from the plan:
+
+- A new iteration, after the plan's last: it waited for A41, and the body for A46, which fit's
+  session added to fib.
 
 ## Notes for later iterations
 

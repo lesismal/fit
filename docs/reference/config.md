@@ -2605,7 +2605,10 @@ In JSON:
 Runs a WebAssembly plugin, of fit's own interface or a Proxy-Wasm filter, on each request, on a pool of its own.
 
 Runs a WebAssembly plugin on each request, on a pool of its own: one of fit's interface, or a
-Proxy-Wasm filter.
+Proxy-Wasm filter. A Proxy-Wasm filter that exports response callbacks is given the response's
+header, body and trailer too, its callbacks running on the same pool while the response is held
+for them ([decision 023](../decisions/023-proxy-wasm-response.md)); `response` narrows or turns
+them off.
 
 In a .konf file:
 
@@ -2658,7 +2661,10 @@ In JSON:
 | `max_memory` |  |  | Deprecated: renamed `max_memory_bytes`; the old name goes in config version 2. |
 | `vm_config` | string |  | For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration. |
 | `properties` | list of [object](#wasm-property) |  | For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name. |
-| `on_error` | string: `fail`, `skip` | `"fail"` | What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out. |
+| `on_error` | string: `fail`, `skip` | `"fail"` | What a call that fails, traps or runs past its timeout leads to: fail answers 500, or fails a response under way, closing its HTTP/1 connection or resetting its stream; skip lets the request or its response go on as if the plugin were not there. fail when left out. |
+| `response` | string: `all`, `headers`, `none` | `"all"` | For a Proxy-Wasm plugin that exports response callbacks, which it is given: all, the header, the body and the trailer; headers, the header alone, the body going by untouched; none, none of them, the plugin forgetting each request once it has gone on. all when left out. |
+| `max_streams` | integer, 0 or more | `1024` | For a Proxy-Wasm plugin that follows responses, how many an instance follows at once, each keeping its context; past it a request is answered 503. 1024 when left out or 0. |
+| `max_body_bytes` | integer, 0 or more | `1048576` | For a Proxy-Wasm plugin given the response's body, how much of it the plugin may hold, pausing it to see more, or make it; past it the response fails, or goes on without the plugin when on_error is skip. 1 MiB when left out or 0. |
 
 <a id="wasm-property"></a>
 

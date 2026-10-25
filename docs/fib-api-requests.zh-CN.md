@@ -56,6 +56,7 @@
 | A43 | 减少 TLS 上 HTTP/2 的唤醒和协程切换 | 已完成，`5a02929` | 12 | — |
 | A44 | 客户端超过 `MaxPendingPerHost` 拒绝请求时不再遍历队列 | 已完成，`ee1a859` | 1, 11, 12 | — |
 | A45 | 读取中途停下的一轮收到对端的结束时，不再当作数据已读完 | 已完成，`9f99ea5` | 5, 13 | — |
+| A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `136602a`，在 `claude/async-body-filter` 分支上，待进 `main` | 1, 4, 5, 8 | I81 |
 
 ## 证据
 
@@ -916,7 +917,8 @@ A21 已经试过唤醒后让 relay 保持注册，省了调用但没有提高吞
 ## A41：异步钩子运行期间压住响应头
 
 **状态。** 2026-10-24 按建议实现，fib `76c0275`，自 2026-10-24 起在 fib 的 `main` 上。一处不同：`Upgrade`、`Connect` 的响应立即发出，
-不经过这个钩子。Proxy-Wasm 的响应回调原先有待它实现（[决策 018](decisions/018-proxy-wasm-subset.zh-CN.md)）。
+不经过这个钩子。Proxy-Wasm 的响应回调原先有待它实现（[决策 018](decisions/018-proxy-wasm-subset.zh-CN.md)），借助 A46，fit 自 I81 起
+按下文实现了它们（[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)），只是响应开始后发送的本地响应会让响应失败，因为状态码已经定下。
 
 **问题。** 有的中间件需要根据无法在确定响应头的 goroutine 上完成的工作来决定响应头，例如 WebAssembly 插件的
 `proxy_on_response_headers`（fit 在自己的池上运行它，见规则 4），而它没有办法压住响应头。`OnHeader`、`OnBodyFilter`
@@ -1030,3 +1032,30 @@ layer 留着，cork 解除时合成一个 record 加密（`fib.CorkHolder`），
 之后交回的读取先读完剩下的数据，再处理结束。
 
 **fit 如何使用。** 原样使用：`l4` 中继，以及任何暂停读取或有写水位的连接。
+
+## A46：在别处完成工作的响应体过滤器
+
+**状态。** 2026-10-25 由 fit 的会话实现，fib `136602a`，在 `claude/async-body-filter` 分支上，待进 fib 的 `main`。Proxy-Wasm 的响应 body 和
+trailer 回调（I81，[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)）有待它。
+
+**问题。** 有的中间件需要用不能在写响应的 goroutine 上完成的工作来转换响应体，例如 WebAssembly 插件的 `proxy_on_response_body`
+（fit 在自己的池上运行它，见规则 4），却没有可用的过滤器。`OnBodyFilter` 的过滤器在写 body 的 goroutine 上运行，并在那里返回输出，
+它的 `Close` 也必须在那里返回 body 的结尾。A41 能在别处调用期间压住响应头，但压不住 body，也压不住它的结束。
+
+**证据。** I81：Proxy-Wasm Go SDK 的 `http_body` 示例持有响应 body 直到结束再替换它；fit 无法在不让插件在 fib worker 上运行的前提下
+调用它，也无法在结束时调用 `proxy_on_response_trailers`。
+
+**实现。** `Context.OnBodyFilterAsync(fn func(status int, header http.Header) AsyncBodyFilter)` 注册一个在 `OnBodyFilter` 钩子位置
+运行的钩子。过滤器的 `FilterAsync(p []byte, end bool, trailer http.Header, done func(out []byte, err error))` 拿到 body 的每一部分，
+从任何 goroutine 调用 `done`，给出替代它发出的内容，或者给出让响应失败的错误；在此之前 `p` 归过滤器所有，`out` 在 `done` 返回前
+被发出或复制。一次只有一个调用。期间写入的内容最多暂存 64 KB，整体交给下一次调用：超过时 `Write` 等待，`WriteNoWait` 报告超限，
+`OnWritable` 在暂存的部分经过过滤器、客户端取走其输出后回调；过滤器的输出同样按客户端的速度发送，下一次调用等它。`Finish` 把结束
+交给最后一次调用（`end` 为 true），它拿到可修改、不为 nil 的 trailer；在它返回前响应被持有，handler 没有 finish 就返回时，最后一个
+持有被移交给它。整体发送的响应，或被 `OnHeaderAsync` 整体压住的响应，在一次调用里过滤。注册在它内侧的同步过滤器在写入时运行，
+外侧的在它的输出上运行。过滤器实现 `BodyAborter` 时，响应没结束 body 就结束会中止它。测试覆盖 HTTP/1.1 和 HTTP/2 上各种写响应的
+方式，调用稍后返回、就地返回或持有 body 到结束，并与 `OnHeaderAsync` 和两侧的同步过滤器一起使用；还有 HEAD、调用失败、`Write`
+等待时客户端离开以及过滤器为 nil。竞态检测、linux、darwin、windows 和 freebsd 的 vet 与 staticcheck 都通过。
+
+**fit 如何使用。** wasm 中间件为导出了 `proxy_on_response_body` 或 `proxy_on_response_trailers` 的 Proxy-Wasm 插件注册它：每次调用
+排到持有该请求上下文的插件实例上，用插件持有的内容运行 `proxy_on_response_body`，最后一次调用带着 trailer 运行
+`proxy_on_response_trailers`，然后关闭上下文。

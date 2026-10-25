@@ -26,6 +26,25 @@ type call struct {
 	ops    []headerOp
 	status int
 	body   []byte
+	// A Proxy-Wasm plugin that follows the response keeps the request's
+	// context open on the instance of w that made it, generation gen, with
+	// id; see response.go. closed says it is closed, and skip that on_error
+	// left the plugin out of the rest of the response.
+	w        *worker
+	id       uint32
+	gen      uint64
+	followed bool
+	filtered bool
+	closed   atomic.Bool
+	skip     atomic.Bool
+	// While the response's callbacks run: its status, its header while
+	// on_response_headers runs, its trailer at its end, and its body as the
+	// plugin has it, inBody saying the body is the plugin's to read.
+	respStatus int
+	respHeader stdhttp.Header
+	trailer    stdhttp.Header
+	buf        []byte
+	inBody     bool
 }
 
 func (cl *call) release() {
@@ -59,6 +78,15 @@ type worker struct {
 	// pw is a Proxy-Wasm plugin's own, or nil for one of fit's ABI.
 	pw      *proxyWasm
 	started atomic.Int64
+	// jobs are the calls for the responses whose contexts this instance
+	// has, which go before new requests; dead says the pool has closed and
+	// takes no more, under jobsMu. gen counts the instances made, and open
+	// the contexts the current one keeps for their responses.
+	jobs   chan func()
+	jobsMu sync.Mutex
+	dead   bool
+	gen    uint64
+	open   int
 	// mu guards cancel, which the watchdog calls while the worker may be
 	// making its instance again.
 	mu sync.Mutex
@@ -69,7 +97,7 @@ type workerKey struct{}
 func newPool(m *WASM) (*pool, error) {
 	p := &pool{m: m, calls: make(chan *call, m.Queue), stop: make(chan struct{})}
 	for range m.Instances {
-		w := &worker{p: p}
+		w := &worker{p: p, jobs: make(chan func(), 4*m.MaxStreams)}
 		if err := w.instantiate(); err != nil {
 			for _, w := range p.workers {
 				w.close()
@@ -96,6 +124,9 @@ func (w *worker) instantiate() error {
 	w.mu.Unlock()
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize").
 		WithStdout(io.Discard).WithStderr(io.Discard).WithSysWalltime().WithSysNanotime()
+	// The contexts an instance before it kept are gone with it.
+	w.gen++
+	w.open = 0
 	mod, err := w.p.m.plugin.runtime.InstantiateModule(w.ctx, w.p.m.plugin.compiled, cfg)
 	if err != nil {
 		w.stopCall()
@@ -142,12 +173,38 @@ func (w *worker) run() {
 	defer w.p.wg.Done()
 	defer w.close()
 	for {
+		// The responses' calls go first: their requests are served already.
 		select {
+		case fn := <-w.jobs:
+			fn()
+			continue
+		default:
+		}
+		select {
+		case fn := <-w.jobs:
+			fn()
 		case cl := <-w.p.calls:
 			w.serve(cl)
 		case <-w.p.stop:
 			return
 		}
+	}
+}
+
+// later queues fn to run on w's goroutine, as a response's call, and
+// reports false when it cannot: the pool has closed, or the queue is full.
+// It never waits.
+func (w *worker) later(fn func()) bool {
+	w.jobsMu.Lock()
+	defer w.jobsMu.Unlock()
+	if w.dead {
+		return false
+	}
+	select {
+	case w.jobs <- fn:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -169,6 +226,11 @@ func (w *worker) serve(cl *call) {
 			w.fail(cl)
 			return
 		}
+	}
+	if w.pw != nil && w.follows(cl) && w.open >= m.MaxStreams {
+		// As many responses as an instance follows are under way.
+		_ = c.Respond(stdhttp.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("503 Service Unavailable\n"))
+		return
 	}
 	w.current = cl
 	w.started.Store(time.Now().UnixNano())
@@ -210,7 +272,10 @@ func (w *worker) serve(cl *call) {
 		_ = c.WriteResponse(fibhttp.Response{StatusCode: status, Header: h, Body: cl.body})
 		return
 	}
-	if len(cl.ops) > 0 {
+	switch {
+	case cl.followed:
+		w.follow(cl)
+	case len(cl.ops) > 0:
 		c.OnHeader(func(_ int, h stdhttp.Header) { cl.apply(h) })
 	}
 	cl.next.ServeHTTP(c)
@@ -257,8 +322,19 @@ func (p *pool) watch() {
 // close stops the workers once their calls are done, answering those still
 // queued 503.
 func (p *pool) close() {
+	for _, w := range p.workers {
+		w.jobsMu.Lock()
+		w.dead = true
+		w.jobsMu.Unlock()
+	}
 	close(p.stop)
 	p.wg.Wait()
+	// The responses' calls still queued find their instance gone.
+	for _, w := range p.workers {
+		for len(w.jobs) > 0 {
+			(<-w.jobs)()
+		}
+	}
 	for {
 		select {
 		case cl := <-p.calls:

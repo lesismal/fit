@@ -21,16 +21,15 @@ import (
 // its root context (id 1) with the vm_config and the config when it is
 // made, and fails to load if the plugin refuses either. Each request is a
 // context of its own: created, its request headers handed to the plugin,
-// then done, logged and deleted, so that the plugin forgets it. What the
-// plugin decides then goes: a local response it sent, or the request on,
-// with the changes it made to the request's headers (pseudo-headers
-// :method, :path, :authority included) and to the response's, which apply
-// when its header is settled. The response's own callbacks are not made
-// (decision 018): calling a plugin as the response's header is settled
-// would hold the header back while the call runs on the pool, which fib
-// cannot do yet. Calls out (proxy_http_call), shared
-// data and queues, ticks, foreign functions, body buffers and setting
-// properties answer Unimplemented.
+// then done, logged and deleted, so that the plugin forgets it, unless the
+// plugin follows the response (response.go). What the plugin decides then
+// goes: a local response it sent, or the request on, with the changes it
+// made to the request's headers (pseudo-headers :method, :path, :authority
+// included) and to the response's, which apply when its header is settled.
+// The response's callbacks read and change the response's header, body
+// and trailer. Calls out (proxy_http_call), shared data and queues, ticks,
+// foreign functions, the request's body and trailer, and setting properties
+// answer Unimplemented or NotFound.
 
 // The exports a Proxy-Wasm plugin has, and the ones it may have.
 var proxyWasmVersions = []string{"proxy_abi_version_0_2_1", "proxy_abi_version_0_2_0"}
@@ -80,11 +79,15 @@ func isProxyWasm(m wazero.CompiledModule) bool {
 // the next request's context id, and the plugin's metrics.
 type proxyWasm struct {
 	contextCreate, requestHeaders, done, logFn, deleteFn, allocate api.Function
-	stack                                                          [3]uint64
-	allocStack                                                     [1]uint64
-	nextID                                                         uint32
-	metrics                                                        []int64
-	metricNames                                                    map[string]uint32
+	// The response's callbacks, those the plugin exports; response says it
+	// exports one.
+	responseHeaders, responseBody, responseTrailers api.Function
+	response                                        bool
+	stack                                           [3]uint64
+	allocStack                                      [1]uint64
+	nextID                                          uint32
+	metrics                                         []int64
+	metricNames                                     map[string]uint32
 }
 
 // startProxyWasm finds the plugin's functions and starts its root context.
@@ -98,6 +101,10 @@ func (w *worker) startProxyWasm() error {
 			return errors.New("the Proxy-Wasm plugin does not export " + name)
 		}
 	}
+	pw.responseHeaders = w.mod.ExportedFunction(pwOnResponseHeaders)
+	pw.responseBody = w.mod.ExportedFunction(pwOnResponseBody)
+	pw.responseTrailers = w.mod.ExportedFunction(pwOnResponseTrailers)
+	pw.response = pw.responseHeaders != nil || pw.responseBody != nil || pw.responseTrailers != nil
 	w.pw = pw
 	m := w.p.m
 	if _, err := pw.contextCreate.Call(w.ctx, pwRootContext, 0); err != nil {
@@ -125,7 +132,9 @@ func (w *worker) startProxyWasm() error {
 }
 
 // servePW runs the plugin's request callbacks for cl, in a context of their
-// own, and returns whether the plugin paused the request.
+// own, and returns whether the plugin paused the request. A plugin that
+// follows the response keeps the context open for it, unless it answered
+// the request itself.
 func (w *worker) servePW(cl *call) (paused bool, err error) {
 	pw := w.pw
 	id := pw.nextID
@@ -149,13 +158,19 @@ func (w *worker) servePW(cl *call) (paused bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	paused = uint32(action) == pwActionPause
+	if !paused && cl.status == 0 && w.follows(cl) {
+		cl.w, cl.id, cl.gen, cl.followed = w, id, w.gen, true
+		w.open++
+		return false, nil
+	}
 	// The stream is over, as far as the plugin is to know.
 	for _, fn := range []api.Function{pw.done, pw.logFn, pw.deleteFn} {
 		if _, err := call(fn, uint64(id)); err != nil {
 			return false, err
 		}
 	}
-	return uint32(action) == pwActionPause, nil
+	return paused, nil
 }
 
 // workerOf returns the worker running a host function.
@@ -213,6 +228,7 @@ func instantiateProxyWasmHost(ctx context.Context, rt wazero.Runtime) error {
 	fn("proxy_get_header_map_pairs", pwGetHeaderMapPairs, i32s(3)...)
 	fn("proxy_set_header_map_pairs", pwSetHeaderMapPairs, i32s(3)...)
 	fn("proxy_get_buffer_bytes", pwGetBufferBytes, i32s(5)...)
+	fn("proxy_set_buffer_bytes", pwSetBufferBytes, i32s(5)...)
 	fn("proxy_get_property", pwGetProperty, i32s(4)...)
 	fn("proxy_set_effective_context", status(pwOK), i32s(1)...)
 	fn("proxy_done", status(pwOK))
@@ -221,7 +237,7 @@ func instantiateProxyWasmHost(ctx context.Context, rt wazero.Runtime) error {
 	fn("proxy_record_metric", pwChangeMetric(false), api.ValueTypeI32, api.ValueTypeI64)
 	fn("proxy_get_metric", pwGetMetric, i32s(2)...)
 	for name, n := range map[string]int{
-		"proxy_set_buffer_bytes": 5, "proxy_set_property": 4, "proxy_continue_stream": 1,
+		"proxy_set_property": 4, "proxy_continue_stream": 1,
 		"proxy_close_stream": 1, "proxy_http_call": 10, "proxy_call_foreign_function": 6,
 		"proxy_set_tick_period_milliseconds": 1, "proxy_get_shared_data": 5, "proxy_set_shared_data": 5,
 		"proxy_register_shared_queue": 3, "proxy_resolve_shared_queue": 5,
@@ -307,7 +323,20 @@ func pwGetHeaderMapValue(ctx context.Context, mod api.Module, stack []uint64) {
 			v, ok = vs[0], true
 		}
 	case pwResponseHeaders:
-		v, ok = cl.response(textproto.CanonicalMIMEHeaderKey(name))
+		switch h := cl.respHeader; {
+		case name == ":status" && cl.respStatus != 0:
+			v, ok = strconv.Itoa(cl.respStatus), true
+		case h != nil:
+			if vs := h[textproto.CanonicalMIMEHeaderKey(name)]; len(vs) > 0 {
+				v, ok = vs[0], true
+			}
+		case cl.respStatus == 0:
+			v, ok = cl.response(textproto.CanonicalMIMEHeaderKey(name))
+		}
+	case pwResponseTrailers:
+		if vs := cl.trailer[textproto.CanonicalMIMEHeaderKey(name)]; len(vs) > 0 {
+			v, ok = vs[0], true
+		}
 	}
 	if !ok {
 		stack[0] = pwNotFound
@@ -364,11 +393,51 @@ func pwChange(cl *call, mapType uint32, op int, name, value string) uint32 {
 		}
 		cl.change(kindRequest, headerOp{op, textproto.CanonicalMIMEHeaderKey(name), value})
 	case pwResponseHeaders:
-		cl.change(kindResponse, headerOp{op, textproto.CanonicalMIMEHeaderKey(name), value})
+		switch {
+		case cl.respHeader != nil:
+			if strings.HasPrefix(name, ":") {
+				// Neither the status nor anything else of fib's can change.
+				return pwBadArgument
+			}
+			changeHeader(cl.respHeader, headerOp{op, textproto.CanonicalMIMEHeaderKey(name), value})
+		case cl.respStatus != 0:
+			// The header has gone.
+			return pwBadArgument
+		default:
+			cl.change(kindResponse, headerOp{op, textproto.CanonicalMIMEHeaderKey(name), value})
+		}
+	case pwResponseTrailers:
+		if cl.trailer == nil || strings.HasPrefix(name, ":") {
+			return pwBadArgument
+		}
+		changeHeader(cl.trailer, headerOp{op, textproto.CanonicalMIMEHeaderKey(name), value})
 	default:
 		return pwNotFound
 	}
 	return pwOK
+}
+
+// changeHeader makes op on h.
+func changeHeader(h stdhttp.Header, op headerOp) {
+	switch op.op {
+	case opSet:
+		h[op.name] = []string{op.value}
+	case opAdd:
+		h[op.name] = append(h[op.name], op.value)
+	case opDel:
+		delete(h, op.name)
+	}
+}
+
+// fieldPairs returns h's fields as Proxy-Wasm has them, in lower case,
+// after pairs.
+func fieldPairs(pairs [][2]string, h stdhttp.Header) [][2]string {
+	for k, vs := range h {
+		for _, v := range vs {
+			pairs = append(pairs, [2]string{strings.ToLower(k), v})
+		}
+	}
+	return pairs
 }
 
 func pwGetHeaderMapPairs(ctx context.Context, mod api.Module, stack []uint64) {
@@ -379,13 +448,18 @@ func pwGetHeaderMapPairs(ctx context.Context, mod api.Module, stack []uint64) {
 	case pwRequestHeaders:
 		pairs = requestPairs(cl.c.Request)
 	case pwResponseHeaders:
-		h := stdhttp.Header{}
-		cl.apply(h)
-		for k, vs := range h {
-			for _, v := range vs {
-				pairs = append(pairs, [2]string{strings.ToLower(k), v})
-			}
+		switch {
+		case cl.respHeader != nil:
+			pairs = fieldPairs([][2]string{{":status", strconv.Itoa(cl.respStatus)}}, cl.respHeader)
+		case cl.respStatus != 0:
+			pairs = [][2]string{{":status", strconv.Itoa(cl.respStatus)}}
+		default:
+			h := stdhttp.Header{}
+			cl.apply(h)
+			pairs = fieldPairs(nil, h)
 		}
+	case pwResponseTrailers:
+		pairs = fieldPairs(nil, cl.trailer)
 	default:
 		stack[0] = pwNotFound
 		return
@@ -405,7 +479,21 @@ func pwSetHeaderMapPairs(ctx context.Context, mod api.Module, stack []uint64) {
 	case pwRequestHeaders:
 		clear(cl.c.Request.Header)
 	case pwResponseHeaders:
-		cl.ops = cl.ops[:0]
+		switch {
+		case cl.respHeader != nil:
+			clear(cl.respHeader)
+		case cl.respStatus != 0:
+			stack[0] = pwBadArgument
+			return
+		default:
+			cl.ops = cl.ops[:0]
+		}
+	case pwResponseTrailers:
+		if cl.trailer == nil {
+			stack[0] = pwBadArgument
+			return
+		}
+		clear(cl.trailer)
 	default:
 		stack[0] = pwNotFound
 		return
@@ -413,6 +501,10 @@ func pwSetHeaderMapPairs(ctx context.Context, mod api.Module, stack []uint64) {
 	for _, kv := range pairs {
 		op := opAdd
 		if strings.HasPrefix(kv[0], ":") {
+			if mapType != pwRequestHeaders {
+				// The status stays as it is.
+				continue
+			}
 			op = opSet
 		}
 		if s := pwChange(cl, mapType, op, kv[0], kv[1]); s != pwOK {
@@ -431,6 +523,20 @@ func pwGetBufferBytes(ctx context.Context, mod api.Module, stack []uint64) {
 		data = w.p.m.VMConfig
 	case pwPluginConfiguration:
 		data = w.p.m.Config
+	case pwResponseBody:
+		cl := w.current
+		if cl == nil || !cl.inBody {
+			stack[0] = pwNotFound
+			return
+		}
+		start, size := int(api.DecodeU32(stack[1])), int(api.DecodeU32(stack[2]))
+		if start > len(cl.buf) {
+			stack[0] = pwBadArgument
+			return
+		}
+		body := cl.buf[start : start+min(len(cl.buf)-start, size)]
+		stack[0] = uint64(w.give(mod, body, api.DecodeU32(stack[3]), api.DecodeU32(stack[4])))
+		return
 	default:
 		stack[0] = pwNotFound
 		return
@@ -442,6 +548,17 @@ func pwGetBufferBytes(ctx context.Context, mod api.Module, stack []uint64) {
 	}
 	data = data[start:min(len(data), start+size)]
 	stack[0] = uint64(w.give(mod, []byte(data), api.DecodeU32(stack[3]), api.DecodeU32(stack[4])))
+}
+
+func pwSetBufferBytes(ctx context.Context, mod api.Module, stack []uint64) {
+	w := workerOf(ctx)
+	cl := w.current
+	if api.DecodeU32(stack[0]) != pwResponseBody || cl == nil || !cl.inBody {
+		stack[0] = pwNotFound
+		return
+	}
+	data := read(mod, api.DecodeU32(stack[3]), api.DecodeU32(stack[4]))
+	stack[0] = uint64(cl.setBody(api.DecodeU32(stack[1]), api.DecodeU32(stack[2]), data))
 }
 
 func pwGetProperty(ctx context.Context, mod api.Module, stack []uint64) {
@@ -492,6 +609,10 @@ func (w *worker) property(path []string) (string, bool) {
 		return r.Proto, true
 	case "source.address":
 		return r.RemoteAddr, true
+	case "response.code":
+		if cl.respStatus != 0 {
+			return strconv.Itoa(cl.respStatus), true
+		}
 	}
 	return "", false
 }

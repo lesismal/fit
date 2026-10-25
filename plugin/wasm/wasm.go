@@ -38,9 +38,11 @@
 //
 // A plugin that exports proxy_abi_version_0_2_0 or proxy_abi_version_0_2_1
 // is a Proxy-Wasm filter, as Envoy runs them, and gets Proxy-Wasm's request
-// phase, as proxywasm.go describes: filters written for Envoy that act on
-// requests run unchanged. Its response callbacks are not made yet
-// (decision 018).
+// phase, as proxywasm.go describes, and its response's callbacks, as
+// response.go does: the response's header held while the plugin decides
+// it, and its body and trailer streamed through the plugin, on the pool
+// all the same (decision 023). Filters written for Envoy that act on
+// requests and responses run unchanged.
 package wasm
 
 import (
@@ -71,6 +73,8 @@ const (
 	DefaultTimeout        = 100 * time.Millisecond
 	DefaultWaitTimeout    = time.Second
 	DefaultMaxMemoryBytes = 128 << 20
+	DefaultMaxStreams     = 1024
+	DefaultMaxBodyBytes   = 1 << 20
 	maxInstances          = 16
 )
 
@@ -85,7 +89,10 @@ type WASM struct {
 	MaxMemoryBytes int64           `json:"max_memory_bytes,omitempty" renamed:"max_memory" min:"0" default:"134217728" doc:"The most memory an instance may have; one that asks for more fails its call. 128 MiB when left out or 0."`
 	VMConfig       string          `json:"vm_config,omitempty" doc:"For a Proxy-Wasm plugin, its VM configuration, which it reads as it starts; config is its plugin configuration."`
 	Properties     []Property      `json:"properties,omitempty" doc:"For a Proxy-Wasm plugin, properties it reads by their path (proxy_get_property), beside the request's own: request.path, request.url_path, request.query, request.host, request.method, request.scheme, request.protocol, source.address and plugin_name."`
-	OnError        string          `json:"on_error,omitempty" enum:"fail,skip" default:"\"fail\"" doc:"What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out."`
+	OnError        string          `json:"on_error,omitempty" enum:"fail,skip" default:"\"fail\"" doc:"What a call that fails, traps or runs past its timeout leads to: fail answers 500, or fails a response under way, closing its HTTP/1 connection or resetting its stream; skip lets the request or its response go on as if the plugin were not there. fail when left out."`
+	Response       string          `json:"response,omitempty" enum:"all,headers,none" default:"\"all\"" doc:"For a Proxy-Wasm plugin that exports response callbacks, which it is given: all, the header, the body and the trailer; headers, the header alone, the body going by untouched; none, none of them, the plugin forgetting each request once it has gone on. all when left out."`
+	MaxStreams     int             `json:"max_streams,omitempty" min:"0" default:"1024" doc:"For a Proxy-Wasm plugin that follows responses, how many an instance follows at once, each keeping its context; past it a request is answered 503. 1024 when left out or 0."`
+	MaxBodyBytes   int64           `json:"max_body_bytes,omitempty" min:"0" default:"1048576" doc:"For a Proxy-Wasm plugin given the response's body, how much of it the plugin may hold, pausing it to see more, or make it; past it the response fails, or goes on without the plugin when on_error is skip. 1 MiB when left out or 0."`
 
 	plugin *plugin
 	pool   *pool
@@ -109,6 +116,12 @@ func (m *WASM) Provision(ctx *module.Context) error {
 	}
 	if m.MaxMemoryBytes == 0 {
 		m.MaxMemoryBytes = DefaultMaxMemoryBytes
+	}
+	if m.MaxStreams == 0 {
+		m.MaxStreams = DefaultMaxStreams
+	}
+	if m.MaxBodyBytes == 0 {
+		m.MaxBodyBytes = DefaultMaxBodyBytes
 	}
 	code, err := os.ReadFile(m.Path)
 	if err != nil {

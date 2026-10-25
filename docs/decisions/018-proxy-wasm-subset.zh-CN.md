@@ -2,7 +2,7 @@
 
 [English](018-proxy-wasm-subset.md) | [简体中文](018-proxy-wasm-subset.zh-CN.md)
 
-状态：已采纳，见 I72（2026-10-23）。
+状态：已采纳，见 I72（2026-10-23）。响应回调在 I81 借助 fib 的 A41 和 A46 实现：[决定 023](023-proxy-wasm-response.zh-CN.md)。
 
 ## 背景
 

@@ -58,6 +58,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 | A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
 | A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
+| A46 | A body filter whose work is done elsewhere | done, fib `136602a` on branch `claude/async-body-filter`, for `main` | 1, 4, 5, 8 | I81 |
 
 ## Evidence
 
@@ -1228,7 +1229,9 @@ given as the length of the body it copies.
 
 **Status.** Made on 2026-10-24 as suggested, fib `76c0275`, on fib's `main` since 2026-10-24. One difference: the
 response of `Upgrade` or `Connect` passes over the hook, since it goes at once. Proxy-Wasm's
-response callbacks waited for it ([decision 018](decisions/018-proxy-wasm-subset.md)).
+response callbacks waited for it ([decision 018](decisions/018-proxy-wasm-subset.md)), and with
+A46 fit makes them since I81 ([decision 023](decisions/023-proxy-wasm-response.md)), as below,
+except that a local response sent once the response has begun fails it, the status being fixed.
 
 **Problem.** A middleware that must decide on a response's header with work it cannot do on the
 goroutine settling it, as a WebAssembly plugin's `proxy_on_response_headers` (which fit runs on a
@@ -1376,3 +1379,43 @@ the end.
 
 **How fit uses it.** As it is: `l4` relays, and anything that holds reads or has a write
 watermark.
+
+## A46: A body filter whose work is done elsewhere
+
+**Status.** Made on 2026-10-25 by fit's session, fib `136602a`, on the branch
+`claude/async-body-filter`, for fib's `main`. Proxy-Wasm's response body and trailer callbacks
+(I81, [decision 023](decisions/023-proxy-wasm-response.md)) wait for it.
+
+**Problem.** A middleware that transforms a response body with work it may not run on the goroutine
+writing the response, as a WebAssembly plugin's `proxy_on_response_body`, which fit runs on a pool
+of its own (rule 4), has no filter for it. An `OnBodyFilter` filter runs on the goroutine writing
+the body and returns its output there, and its `Close` must return the end of the body there too.
+A41 holds the header while a call is made elsewhere, but not the body, nor its end.
+
+**Evidence.** I81: the Proxy-Wasm Go SDK's `http_body` example holds the response's body until its
+end and then replaces it; fit cannot call it, nor `proxy_on_response_trailers` at the end, without
+running the plugin on a fib worker.
+
+**As built.** `Context.OnBodyFilterAsync(fn func(status int, header http.Header) AsyncBodyFilter)`
+registers a hook that runs where an `OnBodyFilter` hook would. The filter's
+`FilterAsync(p []byte, end bool, trailer http.Header, done func(out []byte, err error))` takes each
+part of the body and calls `done`, from any goroutine, with what goes out in its place, or an error
+that fails the response; `p` is the filter's until then, and `out` is sent or copied before `done`
+returns. One call is made at a time. What is written meanwhile is held, up to 64 KB, and goes to the
+next call whole: past that `Write` waits, `WriteNoWait` reports above, and `OnWritable` runs once
+what is held has gone through the filter and the client has taken its output; the filter's output
+is paced by the client the same way, the next call waiting for it. `Finish` hands the end to the
+last call (`end` true), which is given the trailer, never nil, to change; the response is retained
+until it comes back, and a handler that returns without finishing hands its last hold over. A
+response sent whole, or held whole by `OnHeaderAsync`, goes through in one last call. Synchronous
+filters registered inside it run as the body is written, those outside it on its output. A filter
+that is a `BodyAborter` is aborted when the response ends without its end. Tests cover each way a
+response is written over HTTP/1.1 and HTTP/2, with calls that come back later, in place or that hold
+the body to its end, beside `OnHeaderAsync` and synchronous filters on either side; HEAD, a failing
+call, a client going while `Write` waits, and a nil filter. The race detector, vet and staticcheck
+for linux, darwin, windows and freebsd pass.
+
+**How fit uses it.** The wasm middleware registers one for a Proxy-Wasm plugin that exports
+`proxy_on_response_body` or `proxy_on_response_trailers`: each call is queued for the plugin
+instance that has the request's context, `proxy_on_response_body` runs with what the plugin holds,
+and the last call runs `proxy_on_response_trailers` with the trailer, then closes the context.

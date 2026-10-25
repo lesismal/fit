@@ -2,7 +2,8 @@
 
 [English](018-proxy-wasm-subset.md) | [简体中文](018-proxy-wasm-subset.zh-CN.md)
 
-Status: accepted, in I72 (2026-10-23).
+Status: accepted, in I72 (2026-10-23). The response's callbacks came in I81, with fib's A41 and
+A46: [decision 023](023-proxy-wasm-response.md).
 
 ## Context
 

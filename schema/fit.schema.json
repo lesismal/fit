@@ -2647,6 +2647,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_body_bytes": {
+          "default": 1048576,
+          "description": "For a Proxy-Wasm plugin given the response's body, how much of it the plugin may hold, pausing it to see more, or make it; past it the response fails, or goes on without the plugin when on_error is skip. 1 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_memory": {
           "default": 134217728,
           "deprecated": true,
@@ -2660,9 +2666,15 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_streams": {
+          "default": 1024,
+          "description": "For a Proxy-Wasm plugin that follows responses, how many an instance follows at once, each keeping its context; past it a request is answered 503. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "on_error": {
           "default": "fail",
-          "description": "What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets the request go on as if the plugin were not there. fail when left out.",
+          "description": "What a call that fails, traps or runs past its timeout leads to: fail answers 500, or fails a response under way, closing its HTTP/1 connection or resetting its stream; skip lets the request or its response go on as if the plugin were not there. fail when left out.",
           "enum": [
             "fail",
             "skip"
@@ -2685,6 +2697,16 @@
           "description": "How many requests may wait for an instance; past it a request is answered 503. 1024 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        },
+        "response": {
+          "default": "all",
+          "description": "For a Proxy-Wasm plugin that exports response callbacks, which it is given: all, the header, the body and the trailer; headers, the header alone, the body going by untouched; none, none of them, the plugin forgetting each request once it has gone on. all when left out.",
+          "enum": [
+            "all",
+            "headers",
+            "none"
+          ],
+          "type": "string"
         },
         "timeout": {
           "default": "100ms",

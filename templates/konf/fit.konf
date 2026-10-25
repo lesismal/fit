@@ -654,10 +654,28 @@ route {
 			# value ...
 		# }
 
-		# # What a call that fails, traps or runs past its timeout leads to: fail answers 500; skip lets
-		# # the request go on as if the plugin were not there. fail when left out.
+		# # What a call that fails, traps or runs past its timeout leads to: fail answers 500, or fails
+		# # a response under way, closing its HTTP/1 connection or resetting its stream; skip lets the
+		# # request or its response go on as if the plugin were not there. fail when left out.
 		# # one of: fail, skip; default "fail".
 		# on_error fail
+
+		# # For a Proxy-Wasm plugin that exports response callbacks, which it is given: all, the header,
+		# # the body and the trailer; headers, the header alone, the body going by untouched; none, none
+		# # of them, the plugin forgetting each request once it has gone on. all when left out.
+		# # one of: all, headers, none; default "all".
+		# response all
+
+		# # For a Proxy-Wasm plugin that follows responses, how many an instance follows at once, each
+		# # keeping its context; past it a request is answered 503. 1024 when left out or 0.
+		# # integer, 0 or more; default 1024.
+		# max_streams 1024
+
+		# # For a Proxy-Wasm plugin given the response's body, how much of it the plugin may hold,
+		# # pausing it to see more, or make it; past it the response fails, or goes on without the
+		# # plugin when on_error is skip. 1 MiB when left out or 0.
+		# # integer, 0 or more; default 1048576.
+		# max_body_bytes 1048576
 	# }
 
 	# What answers the request.

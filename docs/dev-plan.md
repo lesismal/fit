@@ -205,6 +205,7 @@ Status: `todo`, `doing` or `done`.
 | I78 | Reference docs and migration guides | I77 | done |
 | I79 | Caddyfile converter, JSON with comments | I74 | done |
 | I80 | fit's own .konf format; configs in several files | I79 | done |
+| I81 | WASM III: Proxy-Wasm's response callbacks | I72 | done |
 
 ## M0, foundations
 
@@ -1047,6 +1048,17 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   changed or taken out; the docs and templates speak of `.konf`, YAML and JSON.
 - **Touches**: `adapter/fitconf`, `adapter`, `config`, `provider/file`, `cli`, `schema`, `docs`,
   `templates`, `examples`.
+
+### I81 WASM III: Proxy-Wasm's response callbacks
+
+- **Do**: make Proxy-Wasm's response callbacks, `proxy_on_response_headers`, `_body` and
+  `_trailers`, on the plugin's pool, with the header held by fib's A41 and the body streamed through
+  an asynchronous body filter fib adds as A46; bounded in responses followed and body held, with the
+  plugin's timeout ([decision 023](decisions/023-proxy-wasm-response.md)).
+- **Done when**: Proxy-Wasm filters read and change a response's header, body and trailer, the
+  SDK's `http_headers` and `http_body` examples running unchanged, over HTTP/1.1, h2c, h2 and
+  HTTP/3, and a client that does not read or a slow plugin holds up no one else.
+- **Touches**: `plugin/wasm`, fib's `http`.
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.

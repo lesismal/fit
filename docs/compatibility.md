@@ -22,7 +22,7 @@ Not covered:
 - What fit writes for people rather than programs: messages, warnings, the dashboard, `fit adapt`'s
   output beyond its being a valid config, and the text of errors (their JSON shape is covered).
 - The host functions of WASM plugins (the `fit` import module) and fit's subset of Proxy-Wasm
-  (I71, I72), which are experimental in 1.0; the `wasm` module's config is covered.
+  (I71, I72, I81), which are experimental in 1.0; the `wasm` module's config is covered.
 - The nginx converter's coverage of nginx's directives, which only grows.
 - Performance, beyond the [roadmap's targets](roadmap.md#performance-targets).
 
