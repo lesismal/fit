@@ -2,3 +2,4 @@
 bench/.work/
 bench/results/run-*/
 /dist/
+.claude/
