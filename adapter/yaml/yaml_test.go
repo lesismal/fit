@@ -30,11 +30,13 @@ func same(t *testing.T, a, b []byte) bool {
 	return reflect.DeepEqual(decode(a), decode(b))
 }
 
-// TestRoundTrip writes every config the repository has as YAML and adapts
-// it back: the same JSON comes out, and fit loads it as it loads the JSON.
+// TestRoundTrip writes every config the repository has in JSON as YAML and
+// adapts it back: the same JSON comes out, and fit loads it as it loads the
+// JSON. The bench's config is in fit's own format, fit.konf, and the
+// template's JSON has comments, so neither is here.
 func TestRoundTrip(t *testing.T) {
 	var files []string
-	for _, glob := range []string{"../../examples/*.json", "../../bench/configs/fit/*.json"} {
+	for _, glob := range []string{"../../examples/*.json", "../../examples/*/fit.json", "../../deploy/*/fit.json"} {
 		m, _ := filepath.Glob(glob)
 		files = append(files, m...)
 	}
