@@ -6,7 +6,7 @@
 # bench/ (this repository's), and takes hours: start it under nohup with
 # < /dev/null.
 #
-#   bench/sweep.sh DATE       results in bench/results/sweep-DATE-l<N>-c<C>-h<H>.json
+#   bench/sweep.sh DATE       results in bench/results/sweep-DATE/l<N>-c<C>-h<H>.json
 #
 # | Level | HTTP/1.1 connections | h2c, h2, HTTP/3 connections × 32 streams |
 # | 1 | 16     | 8     |
@@ -28,6 +28,13 @@ set -eu
 [ $# -eq 1 ] || { echo "usage: bench/sweep.sh DATE" >&2; exit 2; }
 date=$1
 here=$(pwd)
+# The sweep's results go in a folder of their own, where its report goes too.
+results=bench/results/sweep-$date
+if [ -e "$results" ]; then
+	echo "sweep.sh: $results is there already; give another DATE" >&2
+	exit 1
+fi
+mkdir -p "$results"
 echo "start $(date -u +%FT%TZ)" > sweep.log
 for lv in 1:16:8 2:64:16 3:256:64 4:1024:256 5:4096:1024 6:16384:4096 7:32768:8192; do
 	n=${lv%%:*}
@@ -42,7 +49,7 @@ for lv in 1:16:8 2:64:16 3:256:64 4:1024:256 5:4096:1024 6:16384:4096 7:32768:81
 	status=0
 	./bin/fitbench -root "$here" -bin "$here/bin" -scenarios $scenarios -idle "" \
 		-connections "$c" -h2-connections "$h" -h2-streams 32 \
-		-out "bench/results/sweep-$date-l$n-c$c-h$h.json" > "level$n.log" 2>&1 || status=$?
+		-out "$results/l$n-c$c-h$h.json" > "level$n.log" 2>&1 || status=$?
 	echo "level $n exit $status $(date -u +%FT%TZ)" >> sweep.log
 done
 touch done

@@ -14,13 +14,14 @@
 # would be derived (-server-cpus, -backend-cpus, -client-cpus, -levels,
 # -top, -w5-idle, -w6-rates, -backend-conns, -backlog, -duration, -warmup).
 #
-#   bench/plan.sh DATE [FLAGS]     results in bench/results/plan-DATE-<workload>-<level>.json
+#   bench/plan.sh DATE [FLAGS]     results in bench/results/plan-DATE/<workload>-<level>.json
 #   bench/plan.sh -n DATE [FLAGS]  print the derived plan and run nothing
 #
 # Each run is a 5s warm-up and 15s measured unless set, about 24s a run in
-# all. Progress is in plan.log, each fitbench run's output in
-# <workload>-<level>.log, the plan derived in plan-derived.json and
-# plan.txt; done is touched at the end.
+# all. The plan's results go in a folder of their own, bench/results/plan-DATE,
+# with the plan derived for them (plan.txt, plan-derived.json), where their
+# report goes too. Progress is in plan.log, each fitbench run's output in
+# <workload>-<level>.log; done is touched at the end.
 set -eu
 
 dry=false
@@ -35,15 +36,15 @@ here=$(pwd)
 if $dry; then
 	exec ./bin/fitbench plan "$@"
 fi
-for f in bench/results/plan-"$date"-*.json; do
-	if [ -e "$f" ]; then
-		echo "plan.sh: $f is there already; give another DATE" >&2
-		exit 1
-	fi
-done
+results=bench/results/plan-$date
+if [ -e "$results" ]; then
+	echo "plan.sh: $results is there already; give another DATE" >&2
+	exit 1
+fi
+mkdir -p "$results"
 
-./bin/fitbench plan "$@" > plan.txt
-./bin/fitbench plan -format json "$@" > plan-derived.json
+./bin/fitbench plan "$@" > "$results/plan.txt"
+./bin/fitbench plan -format json "$@" > "$results/plan-derived.json"
 eval "$(./bin/fitbench plan -format sh "$@")"
 echo "start $(date -u +%FT%TZ) runs=$PLAN_RUNS estimated=$PLAN_ESTIMATED" > plan.log
 
@@ -60,10 +61,10 @@ run() {
 	status=0
 	# shellcheck disable=SC2086 # the derived flags are split on purpose
 	./bin/fitbench -root "$here" -bin "$here/bin" -idle "" -duration "$PLAN_DURATION" -warmup "$PLAN_WARMUP" \
-		-label "$name" $PLAN_CPUS $PLAN_ALIGNED -derived "$here/plan-derived.json" \
+		-label "$name" $PLAN_CPUS $PLAN_ALIGNED -derived "$here/$results/plan-derived.json" \
 		-servers "$servers" -scenarios "$scenarios" -protocols "$protocols" \
 		-connections "$c" -h2-connections "$hc" -h2-streams "$hm" "$@" \
-		-out "bench/results/plan-$date-$name.json" > "$name.log" 2>&1 || status=$?
+		-out "$results/$name.json" > "$name.log" 2>&1 || status=$?
 	echo "$name exit $status $(date -u +%FT%TZ)" >> plan.log
 }
 
@@ -111,10 +112,10 @@ run "w5-idle-$(c "$lv")" "$all" api http/1.1,h2 "$(c "$lv")" "$(hc "$lv")" "$(hm
 # server runs below it; the high one past the slower servers' ceilings and
 # within the faster ones'.
 if [ "$PLAN_W6_SET" != true ]; then
-	calibration=bench/results/plan-$date-w1-api-$PLAN_MID.json
+	calibration=$results/w1-api-$PLAN_MID.json
 	if [ -f "$calibration" ]; then
-		./bin/fitbench plan -calibration "$calibration" "$@" > plan.txt
-		./bin/fitbench plan -format json -calibration "$calibration" "$@" > plan-derived.json
+		./bin/fitbench plan -calibration "$calibration" "$@" > "$results/plan.txt"
+		./bin/fitbench plan -format json -calibration "$calibration" "$@" > "$results/plan-derived.json"
 		eval "$(./bin/fitbench plan -format sh -calibration "$calibration" "$@")"
 	fi
 	echo "w6 rates $PLAN_W6_RATES" >> plan.log

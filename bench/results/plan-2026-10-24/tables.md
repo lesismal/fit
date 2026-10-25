@@ -1,7 +1,7 @@
 # Load test plan, 2026-10-24: the tables
 
-The tables of every workload of [the load test plan](../README.md#the-load-test-plan), as benchreport
-renders them from `plan-2026-10-24-*.json`: 206 runs on the benchmark host, 2026-10-24 05:26 to
+The tables of every workload of [the load test plan](../../README.md#the-load-test-plan), as benchreport
+renders them from the JSON in this folder: 206 runs on the benchmark host, 2026-10-24 05:26 to
 06:49 UTC, fit and the harness at aa8a4f6 (the fit binary from 33c3ab1, the same fit code), every
 run 5s warm-up and 15s measured, none failed, none hung. A cell is the successful responses a
 second and their share of the best.

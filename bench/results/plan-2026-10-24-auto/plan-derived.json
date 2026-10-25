@@ -1,0 +1,116 @@
+{
+  "machine": {
+    "model": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "cpus": 16,
+    "cores": 8,
+    "threads_per_core": 2,
+    "numa_nodes": 1,
+    "max_mhz": 5053,
+    "memory_bytes": 66511958016,
+    "somaxconn": 2048,
+    "nr_open": 2000500,
+    "file_max": 9223372036854775807,
+    "port_lo": 1024,
+    "port_hi": 65535,
+    "rmem_max": 7500000,
+    "tcp_mem_pressure_bytes": 1073741824
+  },
+  "server_cpus": "0-1,8-9",
+  "backend_cpus": "2-4,10-12",
+  "client_cpus": "5-7,13-15",
+  "workers": 4,
+  "backend_workers": 6,
+  "client_threads": 6,
+  "top": 10000,
+  "top_bounds": {
+    "cpu": 10000,
+    "memory": 31715,
+    "nofile": 262144,
+    "ports": 51609,
+    "somaxconn": 10240,
+    "tcp_mem": 32768
+  },
+  "levels": [
+    {
+      "in_flight": 100,
+      "connections": 100,
+      "h2_connections": 10,
+      "h2_streams": 10
+    },
+    {
+      "in_flight": 500,
+      "connections": 500,
+      "h2_connections": 20,
+      "h2_streams": 25
+    },
+    {
+      "in_flight": 2000,
+      "connections": 2000,
+      "h2_connections": 80,
+      "h2_streams": 25
+    },
+    {
+      "in_flight": 5000,
+      "connections": 5000,
+      "h2_connections": 200,
+      "h2_streams": 25
+    },
+    {
+      "in_flight": 10000,
+      "connections": 10000,
+      "h2_connections": 400,
+      "h2_streams": 25
+    }
+  ],
+  "mid": {
+    "in_flight": 500,
+    "connections": 500,
+    "h2_connections": 20,
+    "h2_streams": 25
+  },
+  "w2_levels": [
+    {
+      "in_flight": 500,
+      "connections": 500,
+      "h2_connections": 20,
+      "h2_streams": 25
+    },
+    {
+      "in_flight": 2000,
+      "connections": 2000,
+      "h2_connections": 80,
+      "h2_streams": 25
+    }
+  ],
+  "w3_connections": [
+    100,
+    500
+  ],
+  "w4_level": {
+    "in_flight": 100,
+    "connections": 100,
+    "h2_connections": 10,
+    "h2_streams": 10
+  },
+  "w5_idle": 40000,
+  "w5_idle_bounds": {
+    "memory": 249722,
+    "nofile": 523288,
+    "top": 40000
+  },
+  "w6_rates": [
+    20000,
+    100000
+  ],
+  "w6_rates_from": "calibration: the slowest, caddy, answered 39472 a second; caddy, traefik, envoy at most 79657, fit, nginx at least 113050",
+  "aligned": {
+    "backend_conns": 16384,
+    "backend_idle_per_worker": 4096,
+    "backlog": 2048,
+    "nginx_worker_connections": 65536
+  },
+  "duration": "15s",
+  "warmup": "5s",
+  "runs": 232,
+  "estimated": "1h33m0s"
+}

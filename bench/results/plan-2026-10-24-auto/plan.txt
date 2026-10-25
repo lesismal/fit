@@ -1,0 +1,15 @@
+machine     AMD Ryzen 7 7800X3D 8-Core Processor
+            16 CPUs, 8 cores of 2 threads, 1 NUMA node(s), 5053 MHz at most, 61.9 GiB
+            somaxconn 2048, nr_open 2000500, file-max 9223372036854775807, ports 1024-65535, rmem_max 7500000, tcp_mem pressure 1024 MiB
+split       server 0-1,8-9 (4 workers), backends 2-4,10-12 (6), load generators 5-7,13-15 (6 threads)
+top level   10000 in flight; each input allows cpu 10000, memory 31715, nofile 262144, ports 51609, somaxconn 10240, tcp_mem 32768
+levels      100 (wrk 100, h2load 10×10), 500 (wrk 500, h2load 20×25), 2000 (wrk 2000, h2load 80×25), 5000 (wrk 5000, h2load 200×25), 10000 (wrk 10000, h2load 400×25)
+W0, W1      every level: 80 and 50 runs
+W2          500 (wrk 500, h2load 20×25), 2000 (wrk 2000, h2load 80×25): 30 runs
+W3          [100 500] connections: 16 runs
+W4          100 (wrk 100, h2load 10×10): 26 runs
+W5          500 (wrk 500, h2load 20×25) with 40000 idle TLS connections (each input allows memory 249722, nofile 523288, top 40000): 10 runs
+W6          500 (wrk 500, h2load 20×25) at [20000 100000] a second: 20 runs
+            (calibration: the slowest, caddy, answered 39472 a second; caddy, traefik, envoy at most 79657, fit, nginx at least 113050)
+aligned     backend connections and waiting requests 16384, nginx idle 4096 a worker, backlog 2048, nginx worker_connections 65536
+runs        232 of 5s warm-up and 15s measured, about 1h33m0s

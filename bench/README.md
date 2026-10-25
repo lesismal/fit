@@ -16,7 +16,7 @@ go run ./bench/cmd/fitbench
 ```
 
 It builds fit and `idleconn` for Linux, builds the load generator image, pulls the server images,
-runs every server through every scenario, and writes `bench/results/run-<time>.json`. A full run
+runs every server through every scenario, and writes `bench/results/run-<time>/results.json`. A full run
 takes about 20 minutes with the defaults. `go run ./bench/cmd/fitbench -h` lists the flags; the
 common ones are:
 
@@ -35,13 +35,12 @@ common ones are:
 | `-backend-conns`, `-backlog` | half again the run's requests in flight, rounded up to a power of two and at least 16,384; the host's `somaxconn` | the [aligned settings](#aligned-settings) the configs are rendered with |
 | `-derived` | | the plan the run belongs to, from `fitbench plan -format json`, kept in the results' `params` |
 | `-nginx-image`, `-caddy-image`, `-traefik-image`, `-envoy-image`, `-base-image` | pinned versions | |
-| `-out` | `bench/results/run-<time>.json` | |
+| `-out` | `bench/results/run-<time>/results.json` | |
 
 fit's results come only from the benchmark host, a Linux machine with `-network host`
 ([rule 16](../docs/rules.md#8-load-testing)). The harness can still start under Docker Desktop on
 macOS or Windows, in its VM on a bridge network, but those runs are not used: the VM, the bridge
-and the shared CPUs all cost something a Linux host does not pay. The M0 baseline measured that
-way is kept for the record only; the Linux results from M1 on are the reference.
+and the shared CPUs all cost something a Linux host does not pay.
 
 ## Comparing two builds
 
@@ -326,13 +325,17 @@ connection to the backend, since every server here proxies them.
 
 ## Results
 
-[`results`](results) holds the runs that are checked in. `baseline-2026-10-19-macos-docker.json` is
-M0's baseline for nginx, Caddy and Traefik, measured on Docker Desktop and kept for the record only
-(above); the reference is the Linux runs from M1 on, `m1-*` and `m2-*` with their reports. To
+Every run keeps what it measured, and the report on it, in a folder of its own under
+[`results`](results): a plan's `plan-DATE` (or a sweep's `sweep-DATE`) holds one JSON for each
+fitbench run, named by its workload and level (`w1-api-500.json`), the plan derived for it
+(`plan.txt`, `plan-derived.json`), and the report, `report.md` and `report.zh-CN.md`, with the
+tables it cites in `tables.md`. fitbench run alone writes `results/run-<time>/results.json`, which
+git ignores. The latest report is
+[the 2026-10-24 plan derived from the machine](results/plan-2026-10-24-auto/report.md). To
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
-go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
+go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/run-$(date +%Y%m%d)/results.json
 ```
 
 The reports' tables are rendered from a run's JSON by `benchreport`: a table for each scenario and
@@ -342,7 +345,7 @@ its share of the best; and a table of memory per idle connection, lowest first. 
 row's throughput change from an earlier run:
 
 ```bash
-go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
+go run ./bench/cmd/benchreport -in bench/results/RUN/w1-api-500.json -prev bench/results/EARLIER/w1-api-500.json -prev-name EARLIER
 ```
 
 Throughput counts successful responses only: what the load generator counted as errors (5xx,
@@ -353,12 +356,12 @@ renders, for each scenario and protocol, a row for each server and a column for 
 the most the server answered at any of them:
 
 ```bash
-go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/sweep-l2.json
+go run ./bench/cmd/benchreport -sweep bench/results/sweep-DATE/l1-c16-h8.json,bench/results/sweep-DATE/l2-c64-h16.json
 ```
 
 [`sweep.sh`](sweep.sh) runs the whole sweep on the benchmark host, seven levels from 16 HTTP/1.1
-connections (8×32 streams) to 32,768 (8,192×32), as the
-[2026-10-23 sweep](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.md) did; the proxy runs at levels 1-5 only,
+connections (8×32 streams) to 32,768 (8,192×32), as the 2026-10-23 sweep did, into
+`results/sweep-DATE`; the proxy runs at levels 1-5 only,
 since past them it measures the load generator and the proxy backend rather than the proxies.
 
 A run's JSON holds `host` (CPU, kernel, memory), `versions` and `images` (with digests),

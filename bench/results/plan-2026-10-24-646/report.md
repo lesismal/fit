@@ -1,12 +1,12 @@
 # Load test plan, 2026-10-24 (second run): the report
 
-[English](plan-report-2026-10-24-646.md) | [简体中文](plan-report-2026-10-24-646.zh-CN.md)
+[English](report.md) | [简体中文](report.zh-CN.md)
 
 nginx, Caddy, Traefik, Envoy and fit under the seven workloads of [the load test
-plan](../README.md#the-load-test-plan), at 100 to 10,000 requests in flight, each server on 4 CPUs.
+plan](../../README.md#the-load-test-plan), at 100 to 10,000 requests in flight, each server on 4 CPUs.
 232 runs on the benchmark host, 2026-10-24 07:47 to 09:19 UTC: none failed, none hung, and no run
-had a single error. Every table is in [plan-report-2026-10-24-646-tables.md](plan-report-2026-10-24-646-tables.md),
-rendered by benchreport from the runs' JSON, `plan-2026-10-24-646-*.json`, beside this report.
+had a single error. Every table is in [tables.md](tables.md),
+rendered by benchreport from the runs' JSON in this folder, one file for each workload and level.
 
 ## In short
 
@@ -90,12 +90,12 @@ records.
 
 The five servers run from their official images, one at a time, each freshly started for every
 run (so that one run's memory is not counted in the next), with configs in
-[`bench/configs`](../configs) that serve the same routes on the same ports: 8080 HTTP/1.1, 8081 h2c,
+[`bench/configs`](../../configs) that serve the same routes on the same ports: 8080 HTTP/1.1, 8081 h2c,
 8443 HTTP/1.1 over TLS, 8445 h2 over TLS, UDP 8444 HTTP/3.
 
 Their shared settings are aligned so that no server is held back by a limit of its own config that
 the others do not have, within the plan's largest load, 10,000 in flight with 4 workers. The full
-list is the README's [Aligned settings](../README.md#aligned-settings); in short: at most 16,384
+list is the README's [Aligned settings](../../README.md#aligned-settings); in short: at most 16,384
 backend connections and 16,384 requests waiting for one, 16,384 idle backend connections kept
 (nginx 4,096 for each of its 4 workers), no passive health checks, a listen backlog of 2,048, the
 same forwarding headers, no limit on the requests a client connection may make (nginx's raised to

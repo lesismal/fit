@@ -14,7 +14,7 @@ go run ./bench/cmd/fitbench
 ```
 
 它为 Linux 编译 fit 和 `idleconn`，构建压测客户端镜像，拉取各服务器镜像，让每个服务器跑完每个场景，
-写出 `bench/results/run-<时间>.json`。默认参数下全程约 20 分钟。`go run ./bench/cmd/fitbench -h`
+写出 `bench/results/run-<时间>/results.json`。默认参数下全程约 20 分钟。`go run ./bench/cmd/fitbench -h`
 列出全部参数，常用的有：
 
 | 参数 | 默认值 | |
@@ -32,12 +32,11 @@ go run ./bench/cmd/fitbench
 | `-backend-conns`、`-backlog` | 本轮在途请求数的 1.5 倍向上取到 2 的幂、至少 16,384；压测机的 `somaxconn` | 渲染配置所用的[对齐设置](#对齐的设置) |
 | `-derived` | | 本轮所属的方案，即 `fitbench plan -format json` 的输出，记入结果的 `params` |
 | `-nginx-image`、`-caddy-image`、`-traefik-image`、`-envoy-image`、`-base-image` | 固定的版本 | |
-| `-out` | `bench/results/run-<时间>.json` | |
+| `-out` | `bench/results/run-<时间>/results.json` | |
 
 fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[规则 16](../docs/rules.zh-CN.md#八压测)）。
 工具在 macOS 或 Windows 的 Docker Desktop 下（虚拟机里，走 bridge 网络）仍能启动，但这样跑出的结果不采用：
-虚拟机、bridge 网络和共享的 CPU 都有 Linux 主机没有的开销。M0 用这种方式测得的基线只作为记录保留；
-以 M1 起在 Linux 上的结果为准。
+虚拟机、bridge 网络和共享的 CPU 都有 Linux 主机没有的开销。
 
 ## 对比两个版本
 
@@ -266,12 +265,15 @@ worker），不含页缓存；相当于 RSS 去掉文件映射的部分。WebSoc
 
 ## 结果
 
-[`results`](results) 存放提交进仓库的结果。`baseline-2026-10-19-macos-docker.json` 是 M0 为 nginx、Caddy 和
-Traefik 测得的基线，在 Docker Desktop 上测得，只作为记录保留（见上文）；以 M1 起在 Linux 上的结果为准，即 `m1-*`、
-`m2-*` 及其报告。要复现某个结果，在压测机上用其中记录的 `params` 运行：
+每次测试把测得的结果和对它的报告单独放在 [`results`](results) 下的一个文件夹里：方案的 `plan-DATE`（扫描的
+`sweep-DATE`）中，每轮 fitbench 一个 JSON，以工作负载和档位命名（`w1-api-500.json`），还有为它推导的方案（`plan.txt`、
+`plan-derived.json`）和报告 `report.md`、`report.zh-CN.md`，报告引用的表格在 `tables.md`。单独运行 fitbench 时写出
+`results/run-<时间>/results.json`，git 忽略它。最新的报告是
+[2026-10-24 按机器推导的方案](results/plan-2026-10-24-auto/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
+`params` 运行：
 
 ```bash
-go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/baseline-$(date +%Y%m%d).json
+go run ./bench/cmd/fitbench -servers nginx,caddy,traefik,envoy,fit -out bench/results/run-$(date +%Y%m%d)/results.json
 ```
 
 报告里的表格由 `benchreport` 从结果 JSON 生成：每个场景和协议一张表，每个服务器一行，按每秒请求数（TPS）、
@@ -279,7 +281,7 @@ CPU 能效（每 CPU 秒的请求数）、内存能效（每 MiB 的每秒请求
 百分比；另有一张每个空闲连接内存的表，最低的排前。`-prev` 为每一行加上相对之前某次运行的吞吐变化：
 
 ```bash
-go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/earlier.json -prev-name M5
+go run ./bench/cmd/benchreport -in bench/results/RUN/w1-api-500.json -prev bench/results/EARLIER/w1-api-500.json -prev-name EARLIER
 ```
 
 吞吐只计成功的响应：压测客户端判为错误的（5xx、超时）不计入，Errors 列给出其数量和比例。没有结果的轮次会说明原因：
@@ -288,11 +290,11 @@ go run ./bench/cmd/benchreport -in bench/results/run.json -prev bench/results/ea
 运行一列，按服务器在任一次达到的最大值排序：
 
 ```bash
-go run ./bench/cmd/benchreport -sweep bench/results/sweep-l1.json,bench/results/sweep-l2.json
+go run ./bench/cmd/benchreport -sweep bench/results/sweep-DATE/l1-c16-h8.json,bench/results/sweep-DATE/l2-c64-h16.json
 ```
 
 [`sweep.sh`](sweep.sh) 在压测机上跑完整的连接数扫描，七档，从 16 个 HTTP/1.1 连接（8×32 个流）到 32,768
-个（8,192×32），与 [2026-10-23 的扫描](https://github.com/lesismal/fit/blob/3658ae9/bench/results/sweep-report-2026-10-23.zh-CN.md)相同；proxy 只跑第 1-5 档，
+个（8,192×32），与 2026-10-23 的扫描相同，结果写入 `results/sweep-DATE`；proxy 只跑第 1-5 档，
 因为超过之后测到的是压测客户端和代理后端，而不是代理本身。
 
 结果 JSON 包含 `host`（CPU、内核、内存）、`versions` 和 `images`（带摘要）、`params`，`results`

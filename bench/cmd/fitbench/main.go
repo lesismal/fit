@@ -182,7 +182,7 @@ func run(ctx context.Context, args []string) error {
 			flags.StringVar(new(string), s.name+"-image", s.image, "the "+s.name+" image")
 		}
 	}
-	out := flags.String("out", "", "where to write the results; bench/results/run-<time>.json when empty")
+	out := flags.String("out", "", "where to write the results; bench/results/run-<time>/results.json, a folder of its own, when empty")
 	rootDir := flags.String("root", "", "the fit repository; the module go finds when empty")
 	binDir := flags.String("bin", "", "a directory with fit and idleconn already built for the host, for a host without Go; they are built when empty")
 	if err := flags.Parse(args); err != nil {
@@ -222,7 +222,7 @@ func run(ctx context.Context, args []string) error {
 	h.work = filepath.Join(h.bench, ".work")
 	h.data = filepath.Join(h.work, "data")
 	if *out == "" {
-		*out = filepath.Join(h.bench, "results", "run-"+time.Now().UTC().Format("20060102-150405")+".json")
+		*out = filepath.Join(h.bench, "results", "run-"+time.Now().UTC().Format("20060102-150405"), "results.json")
 	}
 
 	info, err := docker(ctx, "info", "--format", "{{.NCPU}} {{.Architecture}}")
