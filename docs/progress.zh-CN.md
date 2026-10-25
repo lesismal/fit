@@ -3098,7 +3098,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   1.6 ms 周期停顿的一部分，不是全部」。h2c：代码段变大的怀疑被**否定**——裁到几乎只剩核心的构建（6.47 MB
   对 8.63）反而比完整版慢 0.9%，去掉 provider 的只快 0.6%，三者的每请求指令数相同而 IPC 下降（M3 的构建
   1.516、main 的 1.504、裁剪版 1.492）。用 profile 指导的构建是唯一同时跑赢两者的：比 M3 快 1.8%、比 main
-  快 3.2%；决定 024（在 PGO 分支上）把 profile 提交在 `cmd/fit/default.pgo`。W1：profile 显示
+  快 3.2%；[决定 024](decisions/024-pgo.zh-CN.md) 把 profile 提交在 `cmd/fit/default.pgo`。W1：profile 显示
   差距在用户态，h2 上 HPACK 的 Huffman 解码占 fit CPU 的 6.96%（h2load 从不索引那个 bearer token）、Go 的
   map 2.88%、GC 2.82%；fib 的表驱动 Huffman 解码让 h2 **+15.1%**，client 池化请求帧让 h1 **+3.6%**、
   h2 **+4.1%**。client 那笔没有合：热路径上 120 行、两个 atomic、以及跨 goroutine 的缓冲生命周期，换几个百分点。

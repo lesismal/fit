@@ -4315,7 +4315,7 @@ Differences from the plan:
   8.63) was 0.9% slower than the full one, one without the providers only 0.6% faster, and the
   instructions a request were the same in all of them while IPC fell (1.516 for M3's build, 1.504
   for main's, 1.492 for the stripped one). A profile-guided build was the only one that beat both,
-  1.8% faster than M3's and 3.2% faster than main's; decision 024, on the PGO branch, commits
+  1.8% faster than M3's and 3.2% faster than main's; [decision 024](decisions/024-pgo.md) commits
   the profile at `cmd/fit/default.pgo`. W1: the profile puts the gap in user space, HPACK's Huffman
   decoding 6.96% of fit's CPU on h2 with a bearer token h2load never indexes, Go's maps 2.88% and GC
   2.82%; fib's table-driven Huffman decoding gave h2 +15.1% and the client's pooled request framing
