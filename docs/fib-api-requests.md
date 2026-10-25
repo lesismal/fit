@@ -58,7 +58,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 | A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
 | A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
-| A47 | A streamed request body passed on without needless copies | done, fib `9a1680ba` on branch `perf/w4-transfer`, for `main` | 1, 5, 8 | W4 |
+| A47 | A streamed request body passed on without needless copies | done, fib `309a6cd4` (`main`) | 1, 5, 8 | W4 |
 
 ## Evidence
 
@@ -1380,8 +1380,7 @@ watermark.
 
 ## A47: A streamed request body passed on without needless copies
 
-**Status.** Made on 2026-10-25 by fit's session, fib `9a1680ba` on the branch
-`perf/w4-transfer`, for fib's `main`.
+**Status.** Made on 2026-10-25 by fit's session, on fib's `main` (`309a6cd4`).
 
 **Problem.** Proxying an upload, fit hands fib's `BodyStream` a body piece as the peer's bytes
 arrive and the upstream takes them. Two copies stood between the two. A `BodyStream` whose
