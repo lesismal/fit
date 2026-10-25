@@ -18,10 +18,15 @@
 #   -warmup D         unmeasured load before each run     (default: 2s)
 #   -extra KONF       appended to bench/configs/fit/fit.konf for both builds,
 #                     as 'access_log { output /dev/null }'
+#   -args FLAGS       more fitbench flags for every run, as the load test
+#                     plan's W1 at 500 in flight: '-connections 500
+#                     -h2-connections 20 -h2-streams 25 -server-cpus 0-1,8-9
+#                     -backend-cpus 2-4,10-12 -client-cpus 5-7,13-15', and
+#                     '-rate 20000' for W6
 #
 # The host is reached through the ssh master of BENCH_SSH (default below); it
-# has no Go, so everything is built here for linux/amd64. A comparison waits
-# on the host until no other fitbench runs there.
+# has no Go, so everything is built here for linux/amd64. Each run waits on
+# the host until no other fitbench, go build or test binary runs there.
 set -eu
 
 BENCH_SSH=${BENCH_SSH:-"ssh -S $HOME/.ssh/fitbench.sock -p 10013 root@127.0.0.1"}
@@ -56,6 +61,7 @@ rounds=3
 duration=10s
 warmup=2s
 extra=
+args=
 while [ $# -gt 2 ]; do
 	case "$1" in
 	-scenarios) scenarios=$2 ;;
@@ -64,6 +70,7 @@ while [ $# -gt 2 ]; do
 	-duration) duration=$2 ;;
 	-warmup) warmup=$2 ;;
 	-extra) extra=$2 ;;
+	-args) args=$2 ;;
 	*) echo "ab: unknown option $1" >&2; exit 2 ;;
 	esac
 	shift 2
@@ -118,11 +125,24 @@ fi
 cat > "$stage/$id/run.sh" <<EOF
 #!/bin/sh
 cd $BENCH_DIR/$id
-until ! pgrep -f '[f]itbench -root' >/dev/null; do sleep 15; done
+# Each run waits for a quiet host: no other harness, and no go build or test
+# binary, which other sessions run there unpinned and which would take CPUs
+# from the run's.
+# A pause and a second look keep two comparisons waiting for the same moment
+# from both starting at it.
+free() { ! pgrep -f '[f]itbench -root' >/dev/null && ! pgrep -x go >/dev/null && ! pgrep -f '[.]test( |\$)' >/dev/null; }
+quiet() {
+  while :; do
+    until free; do sleep 15; done
+    sleep \$(shuf -i 2-12 -n 1)
+    free && return
+  done
+}
 for r in \$(seq 1 $rounds); do
   for v in a b; do
+    quiet
     ./fitbench -root $BENCH_DIR/$id/root -bin $BENCH_DIR/$id/\$v -servers fit -idle "" \\
-      -scenarios $scenarios -protocols $protocols -duration $duration -warmup $warmup \\
+      -scenarios $scenarios -protocols $protocols -duration $duration -warmup $warmup $args \\
       -out \$v-\$r.json > \$v-\$r.log 2>&1
     echo "\$v-\$r exit \$?" >> status
   done
@@ -130,8 +150,8 @@ done
 touch done
 EOF
 chmod +x "$stage/$id/run.sh"
-printf 'scenarios=%s protocols=%s rounds=%s duration=%s warmup=%s extra=%s\n' \
-	"$scenarios" "$protocols" "$rounds" "$duration" "$warmup" "$extra" > "$stage/$id/params"
+printf 'scenarios=%s protocols=%s rounds=%s duration=%s warmup=%s extra=%s args=%s\n' \
+	"$scenarios" "$protocols" "$rounds" "$duration" "$warmup" "$extra" "$args" > "$stage/$id/params"
 
 echo "ab: uploading to the benchmark host"
 COPYFILE_DISABLE=1 tar --no-xattrs -czf - -C "$stage" "$id" | $BENCH_SSH "mkdir -p $BENCH_DIR && tar xzf - -C $BENCH_DIR"
