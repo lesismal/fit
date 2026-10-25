@@ -10,6 +10,8 @@ github.com/lesismal/fib v1.6.1-0.20261024001615-9f99ea573738 h1:f14XlP5ht8gJ/Aqn
 github.com/lesismal/fib v1.6.1-0.20261024001615-9f99ea573738/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
 github.com/lesismal/fib v1.6.1-0.20261024005646-0e63ae8d8e63 h1:WWjUcRM4jKkiyJmklyEJ5EX5hYn77neteZUJmvL7cFs=
 github.com/lesismal/fib v1.6.1-0.20261024005646-0e63ae8d8e63/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
+github.com/lesismal/fib v1.6.1-0.20261024101133-4c0128761af3 h1:LyRsnAklB7BD/MOB0Uk3LFluSkNXlqfwaeZW4vTQQls=
+github.com/lesismal/fib v1.6.1-0.20261024101133-4c0128761af3/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
 github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
 github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
