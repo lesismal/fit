@@ -56,7 +56,7 @@
 | A43 | 减少 TLS 上 HTTP/2 的唤醒和协程切换 | 已完成，`5a02929` | 12 | — |
 | A44 | 客户端超过 `MaxPendingPerHost` 拒绝请求时不再遍历队列 | 已完成，`ee1a859` | 1, 11, 12 | — |
 | A45 | 读取中途停下的一轮收到对端的结束时，不再当作数据已读完 | 已完成，`9f99ea5` | 5, 13 | — |
-| A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `136602a`，在 `claude/async-body-filter` 分支上，待进 `main` | 1, 4, 5, 8 | I81 |
+| A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
 
 ## 证据
 
@@ -1035,7 +1035,7 @@ layer 留着，cork 解除时合成一个 record 加密（`fib.CorkHolder`），
 
 ## A46：在别处完成工作的响应体过滤器
 
-**状态。** 2026-10-25 由 fit 的会话实现，fib `136602a`，在 `claude/async-body-filter` 分支上，待进 fib 的 `main`。Proxy-Wasm 的响应 body 和
+**状态。** 2026-10-25 由 fit 的会话实现，已在 fib 的 `main`（`dbe5c274`）。Proxy-Wasm 的响应 body 和
 trailer 回调（I81，[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)）有待它。
 
 **问题。** 有的中间件需要用不能在写响应的 goroutine 上完成的工作来转换响应体，例如 WebAssembly 插件的 `proxy_on_response_body`

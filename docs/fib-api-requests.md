@@ -58,7 +58,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A43 | Fewer wakeups and goroutine switches for HTTP/2 over TLS | done, `5a02929` | 12 | — |
 | A44 | The client turns a request away past `MaxPendingPerHost` without walking its queue | done, `ee1a859` | 1, 11, 12 | — |
 | A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
-| A46 | A body filter whose work is done elsewhere | done, fib `136602a` on branch `claude/async-body-filter`, for `main` | 1, 4, 5, 8 | I81 |
+| A46 | A body filter whose work is done elsewhere | done, fib `dbe5c274` (`main`) | 1, 4, 5, 8 | I81 |
 
 ## Evidence
 
@@ -1382,8 +1382,7 @@ watermark.
 
 ## A46: A body filter whose work is done elsewhere
 
-**Status.** Made on 2026-10-25 by fit's session, fib `136602a`, on the branch
-`claude/async-body-filter`, for fib's `main`. Proxy-Wasm's response body and trailer callbacks
+**Status.** Made on 2026-10-25 by fit's session, on fib's `main` (`dbe5c274`). Proxy-Wasm's response body and trailer callbacks
 (I81, [decision 023](decisions/023-proxy-wasm-response.md)) wait for it.
 
 **Problem.** A middleware that transforms a response body with work it may not run on the goroutine

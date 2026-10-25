@@ -2,14 +2,8 @@ github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
 github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
-github.com/lesismal/fib v1.6.1-0.20261023105547-b0809b4bac8f h1:uP2xxb7FrbBwiDcJxGOvaxadiL0OtuE4E0MYkvzY2Og=
-github.com/lesismal/fib v1.6.1-0.20261023105547-b0809b4bac8f/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
-github.com/lesismal/fib v1.6.1-0.20261023192246-ee1a859653cf h1:+1/z+1sHPzXtirWxbLK4LwSVe3UsQS4QF3tbfAHtHLk=
-github.com/lesismal/fib v1.6.1-0.20261023192246-ee1a859653cf/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
-github.com/lesismal/fib v1.6.1-0.20261024001615-9f99ea573738 h1:f14XlP5ht8gJ/AqnJekqHGulYLJtlYaD2IHvljYbHDI=
-github.com/lesismal/fib v1.6.1-0.20261024001615-9f99ea573738/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
-github.com/lesismal/fib v1.6.1-0.20261024005646-0e63ae8d8e63 h1:WWjUcRM4jKkiyJmklyEJ5EX5hYn77neteZUJmvL7cFs=
-github.com/lesismal/fib v1.6.1-0.20261024005646-0e63ae8d8e63/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
+github.com/lesismal/fib v1.6.1-0.20261025150053-dbe5c27424ec h1:FRIjpZWbRiS+jdd5itsf1vHuXFbUKZQ0LdwIz6YUZcA=
+github.com/lesismal/fib v1.6.1-0.20261025150053-dbe5c27424ec/go.mod h1:twNZUwXjldYLBTGzZSqA8Y+GDC+o7+Zan8LuyZDTGt4=
 github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
 github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
