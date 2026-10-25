@@ -230,6 +230,10 @@ var badRequest = []byte("400 Bad Request\n")
 // come one at a time.
 type exchange struct {
 	c *fibhttp.Context
+	// own says the upstream's header is a map of its own rather than the
+	// client's edited in place: an upgrade's, whose fields fib reads again
+	// as it switches the client's side.
+	own bool
 	// base is the request outgoing made, which out is with ctx; url and
 	// forwarded are its URL and its forwarding fields' values, kept here so
 	// that the exchange is one allocation rather than several.

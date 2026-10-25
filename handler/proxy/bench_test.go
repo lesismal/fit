@@ -55,6 +55,51 @@ func BenchmarkProxy(b *testing.B) {
 	})
 }
 
+// BenchmarkProxyAPI is BenchmarkProxy with an API client's request, about
+// 700 bytes of headers as the load test plan's API workload sends them, and
+// a backend answering with 1 KiB of JSON and the headers a server sends: the
+// per-request cost of the proxy path, header handling included.
+func BenchmarkProxyAPI(b *testing.B) {
+	body := `{"id":12345,"data":"` + strings.Repeat("x", 1024-23) + `"}`
+	backend := serveBackend(b, "http/1.1", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, body)
+	}))
+	base := startFit(b, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1"]}],
+  "upstreams": [{"name": "app", "addresses": [%s], "max_conns": 4096, "max_idle_conns": 4096}],
+  "routes": [{"handler": {"module": "proxy", "params": {"upstream": "app"}}}]
+}`, backend)
+	addr := strings.TrimPrefix(base, "http://")
+	req := []byte("GET /api/item HTTP/1.1\r\nHost: api.example.com\r\n" +
+		"User-Agent: Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36\r\n" +
+		"Accept: application/json\r\nAccept-Language: en-US,en;q=0.9\r\nAccept-Encoding: gzip, deflate, br\r\n" +
+		"Authorization: Bearer " + strings.Repeat("A1b2C3d4", 40) + "\r\n" +
+		"Cookie: session=" + strings.Repeat("s", 48) + "; prefs=lang-en.theme-dark; _ga=GA1.2.1418925463.1729700000\r\n" +
+		"X-Request-Id: 5f2b8c1e-9d4a-4c3b-8e7f-1a2b3c4d5e6f\r\n\r\n")
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			b.Error(err)
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		for pb.Next() {
+			if _, err := conn.Write(req); err != nil {
+				b.Error(err)
+				return
+			}
+			if err := readResponse(r); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
 // readResponse reads one response with a Content-Length off r.
 func readResponse(r *bufio.Reader) error {
 	n := -1

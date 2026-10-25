@@ -189,26 +189,41 @@ func parsePrefix(s string) (netip.Prefix, error) {
 // it with 400 since v1.4.0; this stays as defence in depth. The request, its
 // URL and its forwarding fields' values live in x, so that they cost no
 // allocations of their own.
+//
+// The upstream's header is the client's own map, edited in place, in one pass
+// over it, as most requests allow: the request is the proxy's until its
+// response is written, and fib read what it needs of the fields
+// (Connection) as it parsed them. A few get a copy instead, as their fields
+// are read again later: a request with Expect, by fib's HTTP/2 server when
+// the body is asked for; one with Trailer, by trailerNames when the body
+// ends; and an upgrade, by fib as it switches the client's side.
 func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
-	header := make(stdhttp.Header, len(r.Header)+4)
+	connection := r.Header["Connection"]
+	header := r.Header
+	_, expect := r.Header["Expect"]
+	_, trailer := r.Header["Trailer"]
+	copied := expect || trailer || x.own
+	if copied {
+		header = make(stdhttp.Header, len(r.Header)+4)
+	}
 	for key, values := range r.Header {
-		if strings.HasPrefix(key, ":") {
-			// A pseudo-header the server kept, as an extended CONNECT's
-			// :protocol; the upstream's request has its own framing.
-			continue
-		}
-		if !validToken(key) {
+		// A pseudo-header the server kept, as an extended CONNECT's
+		// :protocol, is not sent: the upstream's request has its own
+		// framing. The body's length is the request's own, and the client
+		// answers 100 Continue itself, when the body is asked for.
+		drop := strings.HasPrefix(key, ":") || isHopByHop(key) || key == "Content-Length" || key == "Expect"
+		if !drop && !validToken(key) {
 			return false
 		}
-		// The body's length is the request's own, and the client answers
-		// 100 Continue itself, when the body is asked for.
-		if isHopByHop(key) || key == "Content-Length" || key == "Expect" {
-			continue
+		switch {
+		case !copied && drop:
+			delete(header, key)
+		case copied && !drop:
+			header[key] = values
 		}
-		header[key] = values
 	}
-	removeConnectionNamed(header, r.Header["Connection"])
+	removeConnectionNamed(header, connection)
 	if _, ok := header["User-Agent"]; !ok {
 		// Present and empty: no client adds its own, and none is sent.
 		header["User-Agent"] = []string{}

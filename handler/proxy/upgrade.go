@@ -112,7 +112,7 @@ func (p *Proxy) serveUpgrade(c *fibhttp.Context, pool *upstream.Pool, protocol s
 		_ = c.Respond(stdhttp.StatusNotImplemented, "text/plain; charset=utf-8", []byte("501 Not Implemented\n"))
 		return
 	}
-	x := &exchange{c: c}
+	x := &exchange{c: c, own: true}
 	if !p.outgoing(c, x) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
 		return
