@@ -8,11 +8,22 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// Config returns fib's default config for an engine named name, with what e
-// sets in place of fib's defaults; e may be nil.
+// ReadBufferSize is how much a connection reads its socket into at a time
+// when the config does not say: 64 KiB, four times fib's default. A proxied
+// body goes on as it is read, a write for each read, so the read's size is
+// the size of every write too; at 16 KiB, a 1 MiB transfer over HTTP/1.1
+// costs 64 reads, 64 writes and as many ACKs, which was four fifths of fit's
+// CPU in the large-transfer workload. A small request is read whole either
+// way, and the buffer is the round's, taken from fib's pool, not each
+// connection's.
+const ReadBufferSize = 64 << 10
+
+// Config returns fib's default config for an engine named name, with fit's
+// own ReadBufferSize, and with what e sets in place of those; e may be nil.
 func Config(name string, e *config.Engine) fib.Config {
 	cfg := fib.DefaultConfig()
 	cfg.Name = name
+	cfg.ReadBufferSize = ReadBufferSize
 	if e == nil {
 		return cfg
 	}

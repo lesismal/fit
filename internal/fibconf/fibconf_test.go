@@ -10,6 +10,7 @@ import (
 
 func TestDefaults(t *testing.T) {
 	want := fib.DefaultConfig()
+	want.ReadBufferSize = ReadBufferSize
 	for _, e := range []*config.Engine{nil, {}} {
 		got := Config("fit", e)
 		if got.Name != "fit" {
@@ -17,7 +18,7 @@ func TestDefaults(t *testing.T) {
 		}
 		got.Name = want.Name
 		if got != want {
-			t.Errorf("Config(%v) = %+v, want fib's defaults %+v", e, got, want)
+			t.Errorf("Config(%v) = %+v, want fib's defaults with fit's read buffer %+v", e, got, want)
 		}
 	}
 }

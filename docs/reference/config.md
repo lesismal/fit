@@ -952,7 +952,7 @@ In JSON:
 | `min_workers` | integer, 0 or more |  | How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0. |
 | `task_queue` | integer, 0 or more |  | How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0. |
 | `poll_batch` | integer, 0 or more |  | The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0. |
-| `read_buffer_size` | integer, 0 to 67108864 |  | The bytes a connection reads its socket into at a time. 16 KiB when left out or 0. |
+| `read_buffer_size` | integer, 0 to 67108864 |  | The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0. |
 | `write_watermark` | integer, 0 or more |  | The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. fib's default, 64 KiB, when left out or 0. |
 | `backlog` | integer, 0 or more |  | The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0. |
 
