@@ -128,8 +128,15 @@ cd $BENCH_DIR/$id
 # Each run waits for a quiet host: no other harness, and no go build or test
 # binary, which other sessions run there unpinned and which would take CPUs
 # from the run's.
+# A pause and a second look keep two comparisons waiting for the same moment
+# from both starting at it.
+free() { ! pgrep -f '[f]itbench -root' >/dev/null && ! pgrep -x go >/dev/null && ! pgrep -f '[.]test( |\$)' >/dev/null; }
 quiet() {
-  until ! pgrep -f '[f]itbench -root' >/dev/null && ! pgrep -x go >/dev/null && ! pgrep -f '[.]test( |\$)' >/dev/null; do sleep 15; done
+  while :; do
+    until free; do sleep 15; done
+    sleep \$(shuf -i 2-12 -n 1)
+    free && return
+  done
 }
 for r in \$(seq 1 $rounds); do
   for v in a b; do
