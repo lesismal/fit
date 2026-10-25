@@ -57,6 +57,7 @@
 | A44 | 客户端超过 `MaxPendingPerHost` 拒绝请求时不再遍历队列 | 已完成，`ee1a859` | 1, 11, 12 | — |
 | A45 | 读取中途停下的一轮收到对端的结束时，不再当作数据已读完 | 已完成，`9f99ea5` | 5, 13 | — |
 | A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
+| A47 | 流式请求体转交时不必要的拷贝 | 已完成，fib `309a6cd4`（`main`） | 1, 5, 8 | W4 |
 
 ## 证据
 
@@ -1059,3 +1060,20 @@ trailer 回调（I81，[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)�
 **fit 如何使用。** wasm 中间件为导出了 `proxy_on_response_body` 或 `proxy_on_response_trailers` 的 Proxy-Wasm 插件注册它：每次调用
 排到持有该请求上下文的插件实例上，用插件持有的内容运行 `proxy_on_response_body`，最后一次调用带着 trailer 运行
 `proxy_on_response_trailers`，然后关闭上下文。
+## A47：流式请求体转交时不必要的拷贝
+
+**状态。** 2026-10-25 由 fit 的会话实现，已在 fib 的 `main`（`309a6cd4`）。
+
+**问题。** 代理上传时，fit 把对端到达的 body 分片交给 fib 的 `BodyStream`，由它交给上游，两步之间有两处拷贝。
+回调还忙时的 `BodyStream`（在 HTTP/2 上就是每一片交给 handler 池的时候）用 append 把这段时间到达的数据缓冲到自己的
+缓冲区里：从零开始、一次增长一次拷贝，交出去后再留给垃圾回收。`Pusher.Write` 则在发送前把每一片都拷进自己的队列，
+即使队列是空的、这一片本来可以直接发出去。
+
+**证据。** 基准机上 fit 的 W4 HTTP/2 代理上传里，`BodyStream.push` 的拷贝占 fit CPU 的 20%。去掉这两处拷贝后，1 MiB
+上传从每秒 2748 个请求升到 4742（+73%），最慢响应从 200ms 降到 62ms，HTTP/1.1 上传从 6957 升到 8300（+18%），峰值
+内存更低。
+
+**实现。** `BodyStream` 的缓冲区来自 `bufferpool`；交出去的那块作为下一个缓冲区或备用块回来，body 结束后两块都还给池。
+`Pusher.Write` 前面没人等的那一片直接进有空间的 sink，只有必须等待时才拷贝。
+
+**fit 如何使用。** 原样使用：`handler/proxy` 的上传路径，它把流式的 body 转交出去而不聚合成整包。

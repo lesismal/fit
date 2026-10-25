@@ -90,7 +90,8 @@ schema_version 1
 	# # integer, 0 or more.
 	# poll_batch 0
 
-	# # The bytes a connection reads its socket into at a time. 16 KiB when left out or 0.
+	# # The bytes a connection reads its socket into at a time, which is also the most a proxied
+	# # body is passed on in one write. 64 KiB when left out or 0.
 	# # integer, 0 to 67108864.
 	# read_buffer_size 0
 
