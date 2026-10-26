@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
 
@@ -189,18 +190,18 @@ func shorten(t *testing.T) {
 	})
 }
 
-type logs struct {
+type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logs) logf(format string, args ...any) {
+func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
 }
 
-func (l *logs) all() string {
+func (l *logLines) all() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, "\n")
@@ -333,8 +334,8 @@ func TestCatalog(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte("s3cret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var l logs
-	p := NewCatalog("consul", &config.ConsulProvider{Endpoint: f.srv.URL, Datacenter: "dc2", TokenFile: tokenFile, RefreshInterval: config.Duration(time.Hour)}, l.logf)
+	var l logLines
+	p := NewCatalog("consul", &config.ConsulProvider{Endpoint: f.srv.URL, Datacenter: "dc2", TokenFile: tokenFile, RefreshInterval: config.Duration(time.Hour)}, logs.Func(l.logf))
 	if p.Name() != "consul" {
 		t.Fatalf("Name: %q", p.Name())
 	}
@@ -407,8 +408,8 @@ func TestCatalogMaxServices(t *testing.T) {
 			f.insts = append(f.insts, inst{svc: name, id: name, node: "n", addr: "10.0.0.1", port: 80, passing: true, tags: []string{"fit.enable=true"}})
 		}
 	})
-	var l logs
-	p := NewCatalog("consul", &config.ConsulProvider{Endpoint: f.srv.URL, MaxServices: 2, RefreshInterval: config.Duration(time.Hour)}, l.logf)
+	var l logLines
+	p := NewCatalog("consul", &config.ConsulProvider{Endpoint: f.srv.URL, MaxServices: 2, RefreshInterval: config.Duration(time.Hour)}, logs.Func(l.logf))
 	parts := make(chan []byte, 4)
 	background(t, p.Run, func(b []byte) { parts <- b })
 	got := upstreams(t, nextPart(t, parts, func([]byte) bool { return true }))
@@ -431,8 +432,8 @@ func TestKV(t *testing.T) {
 		f.kv["fit/bad"] = `{"limits": {}}`
 		f.kv["other/x"] = route("x")
 	})
-	var l logs
-	p := NewKV("kv", &config.ConsulKVProvider{Endpoint: f.srv.URL, RefreshInterval: config.Duration(time.Hour)}, l.logf)
+	var l logLines
+	p := NewKV("kv", &config.ConsulKVProvider{Endpoint: f.srv.URL, RefreshInterval: config.Duration(time.Hour)}, logs.Func(l.logf))
 	parts := make(chan []byte, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

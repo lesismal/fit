@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider"
 )
 
@@ -40,25 +41,25 @@ func TestRedirectRefused(t *testing.T) {
 	}
 }
 
-// logs collects what is logged.
-type logs struct {
+// logLines collects what is logged.
+type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logs) logf(format string, args ...any) {
+func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
 }
 
-func (l *logs) all() string {
+func (l *logLines) all() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, "\n")
 }
 
-func (l *logs) waitFor(t *testing.T, want string) {
+func (l *logLines) waitFor(t *testing.T, want string) {
 	t.Helper()
 	waitFor(t, "a log of "+want, func() bool { return strings.Contains(l.all(), want) })
 }
@@ -268,8 +269,8 @@ func TestInformerWatch(t *testing.T) {
 			fmt.Fprintln(w, `{"type": "ADDED", "object": 1}`)
 		}
 	})
-	var l logs
-	in := newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 1, make(chan struct{}, 1), l.logf)
+	var l logLines
+	in := newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 1, make(chan struct{}, 1), logs.Func(l.logf))
 	rv, err := in.watch(context.Background(), "1")
 	if rv != "9" || err == nil || err.Error() != "the watch failed: 500 boom" {
 		t.Errorf("watch: %q %v", rv, err)
@@ -304,8 +305,8 @@ func TestInformerRun(t *testing.T) {
 			fmt.Fprint(w, `{"metadata": {"resourceVersion": "1"}, "items": []}`)
 		}
 	})
-	var l logs
-	in := newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), l.logf)
+	var l logLines
+	in := newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), logs.Func(l.logf))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -323,8 +324,8 @@ func TestInformerRun(t *testing.T) {
 
 	// A watch that keeps failing is tried again, later each time.
 	minBackoff = 10 * time.Millisecond
-	l = logs{}
-	in = newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), l.logf)
+	l = logLines{}
+	in = newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), logs.Func(l.logf))
 	ctx, cancel = context.WithCancel(context.Background())
 	done = make(chan struct{})
 	go func() {
@@ -341,7 +342,7 @@ func TestInformerRun(t *testing.T) {
 		close(entered)
 		<-r.Context().Done()
 	})
-	in = newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), l.logf)
+	in = newInformer(kind{name: "things", path: "/a", decode: kindNamespaces.decode}, c, 10, make(chan struct{}, 1), logs.Func(l.logf))
 	ctx, cancel = context.WithCancel(context.Background())
 	done = make(chan struct{})
 	go func() {
@@ -379,9 +380,9 @@ func TestStatusWriter(t *testing.T) {
 		}
 		w.Write([]byte("{}"))
 	})
-	var l logs
-	in := newInformer(kindRoutes, c, 10, make(chan struct{}, 1), l.logf)
-	sw := &statusWriter{c: c, informers: map[string]*informer{"httproutes": in}, logf: l.logf, wake: make(chan struct{}, 1), failing: map[string]bool{}}
+	var l logLines
+	in := newInformer(kindRoutes, c, 10, make(chan struct{}, 1), logs.Func(l.logf))
+	sw := &statusWriter{c: c, informers: map[string]*informer{"httproutes": in}, log: logs.Func(l.logf), wake: make(chan struct{}, 1), failing: map[string]bool{}}
 	u := statusUpdate{kind: "httproutes", ns: "default", name: "r", patch: []byte("{}")}
 	fail.Store(true)
 	sw.write(context.Background(), u)
@@ -428,8 +429,8 @@ func TestProviderSetupFails(t *testing.T) {
 	shorten(t)
 	run := func(opts *config.KubernetesProvider, want string) {
 		t.Helper()
-		var l logs
-		p := New("k8s", opts, l.logf)
+		var l logLines
+		p := New("k8s", opts, logs.Func(l.logf))
 		if p.Name() != "k8s" {
 			t.Errorf("Name: %q", p.Name())
 		}
@@ -450,8 +451,8 @@ func TestProviderSetupFails(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing")
 	// Tried again: logged twice.
-	var l logs
-	p := New("k8s", &config.KubernetesProvider{Kubeconfig: missing}, l.logf)
+	var l logLines
+	p := New("k8s", &config.KubernetesProvider{Kubeconfig: missing}, logs.Func(l.logf))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -479,12 +480,12 @@ func TestProviderSetupFails(t *testing.T) {
 // written is not sent.
 func TestSendCertsFail(t *testing.T) {
 	crt, key := testCert(t, "a.example.com")
-	var l logs
-	p := New("k8s", &config.KubernetesProvider{}, l.logf)
+	var l logLines
+	p := New("k8s", &config.KubernetesProvider{}, logs.Func(l.logf))
 	p.certDir = filepath.Join(t.TempDir(), "missing")
 	informers := map[string]*informer{}
 	for _, k := range watched(p.opts) {
-		in := newInformer(k, nil, 100, make(chan struct{}, 1), l.logf)
+		in := newInformer(k, nil, 100, make(chan struct{}, 1), logs.Func(l.logf))
 		in.replace(nil, false)
 		informers[k.name] = in
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/pebbletest"
+	"github.com/lesismal/fit/logs"
 )
 
 // sharedStorage is a FileStorage that says it is shared between hosts, as
@@ -36,9 +37,9 @@ func (s *sharedStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	return s.FileStorage.Load(ctx, key)
 }
 
-func sharedACME(t *testing.T, c *config.ACME, st Storage, l *logs) *ACME {
+func sharedACME(t *testing.T, c *config.ACME, st Storage, l *logLines) *ACME {
 	t.Helper()
-	a, err := newACME(c, st, l.logf)
+	a, err := newACME(c, st, logs.Func(l.logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestSharedPebble(t *testing.T) {
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
 	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
 	c := &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"http-01"}}
-	var la, lb logs
+	var la, lb logLines
 	a, b := sharedACME(t, c, st, &la), sharedACME(t, c, st, &lb)
 	if !a.Shared() {
 		t.Fatal("a shared storage's ACME is not shared")
@@ -125,7 +126,7 @@ func TestSharedPebble(t *testing.T) {
 }
 
 func TestLookupHTTPChallenge(t *testing.T) {
-	var l logs
+	var l logLines
 	// Without a shared storage, nothing is looked up.
 	plain := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
 	if plain.Shared() {
@@ -171,7 +172,7 @@ func TestLookupHTTPChallenge(t *testing.T) {
 }
 
 func TestCertsSharedALPN(t *testing.T) {
-	var l logs
+	var l logLines
 	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
 	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
 	certs := NewCerts(nil, a, []string{"a.fit.test", "b.fit.test"}, false)

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // Timings, variables for tests to shorten.
@@ -87,7 +89,7 @@ type informer struct {
 	c       *client
 	max     int
 	changed chan<- struct{}
-	logf    func(format string, args ...any)
+	log     *logs.Logger
 
 	mu     sync.Mutex
 	objs   map[string]any
@@ -101,8 +103,8 @@ type informer struct {
 	missing, full bool
 }
 
-func newInformer(k kind, c *client, max int, changed chan<- struct{}, logf func(string, ...any)) *informer {
-	return &informer{kind: k, c: c, max: max, changed: changed, logf: logf, objs: map[string]any{}, at: k.path}
+func newInformer(k kind, c *client, max int, changed chan<- struct{}, log *logs.Logger) *informer {
+	return &informer{kind: k, c: c, max: max, changed: changed, log: log, objs: map[string]any{}, at: k.path}
 }
 
 // served returns the path of the kind's version the API server serves.
@@ -158,7 +160,7 @@ func (in *informer) run(ctx context.Context) {
 		case errors.Is(err, errNotFound):
 			if !in.missing {
 				in.missing = true
-				in.logf("%s are not served by the API server (is the Gateway API installed?); looking again every %s", in.name, maxBackoff)
+				in.log.Warnf("%s are not served by the API server (is the Gateway API installed?); looking again every %s", in.name, maxBackoff)
 			}
 			in.replace(nil, false)
 			if !wait(maxBackoff) {
@@ -166,7 +168,7 @@ func (in *informer) run(ctx context.Context) {
 			}
 			continue
 		case err != nil:
-			in.logf("listing %s: %v; trying again in %s", in.name, err, backoff)
+			in.log.Warnf("listing %s: %v; trying again in %s", in.name, err, backoff)
 			if !wait(backoff) {
 				return
 			}
@@ -175,7 +177,7 @@ func (in *informer) run(ctx context.Context) {
 		}
 		if in.missing {
 			in.missing = false
-			in.logf("%s are served now", in.name)
+			in.log.Infof("%s are served now", in.name)
 		}
 		backoff = minBackoff
 		for {
@@ -187,7 +189,7 @@ func (in *informer) run(ctx context.Context) {
 				continue // the watch ended in time: watch again from rv
 			}
 			if !errors.Is(err, errGone) {
-				in.logf("watching %s: %v; listing them again in %s", in.name, err, backoff)
+				in.log.Warnf("watching %s: %v; listing them again in %s", in.name, err, backoff)
 				if !wait(backoff) {
 					return
 				}
@@ -242,7 +244,7 @@ func (in *informer) replace(objs map[string]any, truncated bool) {
 
 func (in *informer) reportFull(full bool) {
 	if full && !in.full {
-		in.logf("more than max_objects, %d, %s: the rest are left out", in.max, in.name)
+		in.log.Warnf("more than max_objects, %d, %s: the rest are left out", in.max, in.name)
 	}
 	in.full = full
 }

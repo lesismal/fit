@@ -23,7 +23,8 @@ It converts the `http` block's servers (`listen`, `server_name`, `ssl_certificat
 locations (exact, prefix, `^~` and regular expressions, nested), and in them `proxy_pass` and
 `upstream` blocks, `root`, `alias`, `index`, `try_files`, `return`, `rewrite`, `limit_req` with
 `limit_req_zone`, `client_max_body_size`, `add_header`, `proxy_set_header` with literal values,
-and `gzip`. Read what it reports, and finish the config by hand with the tables below.
+and `gzip`, and `error_log` and `access_log`. Read what it reports, and finish the config by hand
+with the tables below.
 
 ## How the parts map
 
@@ -56,7 +57,8 @@ and `gzip`. Read what it reports, and finish the config by hand with the tables 
 | `fastcgi_pass` with `fastcgi_param` | the `fastcgi` handler, with PHP's parameters set for you |
 | `stream { server { listen 5432; proxy_pass db; } }` | a listener of `tcp` (or `udp`) and a service naming it and an upstream |
 | `ssl_preread` and `map $ssl_preread_server_name` | a service's `server_names`, which passes TLS through by SNI |
-| `access_log` | `access_log`, in JSON |
+| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log`'s `output`, `buffer_bytes` and `flush_interval`; fit's lines are JSON, so `log_format`, a format named and `if=` are not converted, and one access log takes every request |
+| `error_log /var/log/error.log warn;` | `log`'s `output` and `level`: `notice` is `info`, and `crit`, `alert` and `emerg` are `error`; with no level, `error`, as nginx's. One log, the process's, which `log.levels` divides by logger |
 | `nginx -s reload` | SIGHUP, `fit run -watch`, or the Admin API's `POST /load` |
 
 ## What works differently

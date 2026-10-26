@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // The images of the servers the stores are tested against, as test/e2e's.
@@ -109,7 +110,7 @@ func configs(t *testing.T) map[string]*config.SharedStorage {
 
 func open(t *testing.T, c *config.SharedStorage) *Store {
 	t.Helper()
-	s, err := New(c, t.Logf)
+	s, err := New(c, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}

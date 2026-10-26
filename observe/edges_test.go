@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // TestAccessLogStdOutputs opens access logs to the standard outputs.
@@ -114,7 +115,7 @@ func TestMetricsExporterTicks(t *testing.T) {
 		func(w MetricWriter) {
 			w.Family("fit_up", "gauge", "Up.")
 			w.Sample("fit_up", 1)
-		}, t.Logf)
+		}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func waitFor(t *testing.T, ok func() bool) {
 // TestTracerTicks exports spans every interval.
 func TestTracerTicks(t *testing.T) {
 	rcv := newReceiver(t)
-	tr, err := NewTracer(&config.Telemetry{Endpoint: rcv.srv.URL, Traces: &config.TracesExport{SampleRatio: 1, Interval: config.Duration(10 * time.Millisecond)}}, t.Logf)
+	tr, err := NewTracer(&config.Telemetry{Endpoint: rcv.srv.URL, Traces: &config.TracesExport{SampleRatio: 1, Interval: config.Duration(10 * time.Millisecond)}}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}

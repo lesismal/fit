@@ -8,6 +8,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/apiclient"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider/internal/kvpart"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
@@ -21,12 +22,9 @@ type KV struct {
 }
 
 // NewKV returns a Consul KV provider named name, with the settings opts.
-// logf, which may be nil, hears what the provider reports: keys left out
+// log, which may be nil, hears what the provider reports: keys left out
 // and Consul failing.
-func NewKV(name string, opts *config.ConsulKVProvider, logf func(format string, args ...any)) *KV {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
+func NewKV(name string, opts *config.ConsulKVProvider, log *logs.Logger) *KV {
 	src := &kvSource{opts: opts, conn: conn{
 		endpoint:   opts.URL(),
 		datacenter: opts.Datacenter,
@@ -34,7 +32,7 @@ func NewKV(name string, opts *config.ConsulKVProvider, logf func(format string, 
 		files:      apiclient.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
 		timeout:    opts.Timeout(),
 	}}
-	return &KV{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Logf: logf, Source: src}}
+	return &KV{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Log: log, Source: src}}
 }
 
 // Name returns the provider's name.

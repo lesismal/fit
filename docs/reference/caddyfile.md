@@ -75,9 +75,12 @@ example.com, www.example.com {
 | `http_port <port>`, `https_port <port>` | `auto_https.http_port`, `auto_https.https_port`, and the ports sites default to |
 | `on_demand_tls { ask <url>; interval <d>; burst <n> }` | `acme.on_demand`'s `ask`, `interval` and `rate`; `permission http { endpoint <url> }` too |
 | `servers { protocols h1 h2 h2c h3 }` | each listener's `protocols`, those its TLS allows |
+| `debug` | `log.level` `debug` |
+| `log [default] { output; format; level }` | `log`: `output` (stdout, stderr or `file <path>`; stderr when left out, as Caddy's), `format` (`console` is `text`, `json`), `level` (`DEBUG`, `INFO`, `WARN`, `ERROR`; `PANIC` and `FATAL` are `error`); `include` and `exclude` are not converted, `log.levels` divides fit's log by logger |
+| `log <name> { include http.log.access...; output; level }` | `access_log`, as a site's `log` |
 
-The Admin API is on unless `admin off` says otherwise, as Caddy's is. Options for logs, timeouts,
-PKI, events and the like are listed as not converted: fit's defaults stand in for them.
+The Admin API is on unless `admin off` says otherwise, as Caddy's is. Options for timeouts, PKI,
+events and the like are listed as not converted: fit's defaults stand in for them.
 
 ## Site addresses
 
@@ -112,7 +115,7 @@ Within a site:
 | `tls { issuer acme { email; dir } }`, `tls { ca <url> }` | `acme.email`, `acme.directory` |
 | `tls { protocols; ciphers; curves; dns }` | not converted: fit picks TLS versions and ciphers, and answers HTTP-01 and TLS-ALPN-01, not DNS-01 |
 | `bind <address>` | the host the site's listeners bind |
-| `log { output stdout\|stderr\|file <path> }` | `access_log.output`; fit has one access log, of JSON lines |
+| `log { output stdout\|stderr\|file <path>; level <level> }` | `access_log.output` and `access_log.level` (`WARN` writes the requests answered with 4xx and 5xx, `ERROR` those with 5xx); fit has one access log, of JSON lines |
 
 ## Matchers
 

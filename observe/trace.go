@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // Traces follow W3C Trace Context: a request's traceparent field names its
@@ -127,9 +128,9 @@ type spanShard struct {
 }
 
 // NewTracer returns a tracer that samples and exports as c says, and starts
-// its exporter; Close stops it. logf hears exports that fail.
-func NewTracer(c *config.Telemetry, logf func(format string, args ...any)) (*Tracer, error) {
-	exp, err := newExporter(c, "/v1/traces", logf)
+// its exporter; Close stops it. log hears exports that fail.
+func NewTracer(c *config.Telemetry, log *logs.Logger) (*Tracer, error) {
+	exp, err := newExporter(c, "/v1/traces", log)
 	if err != nil {
 		return nil, err
 	}

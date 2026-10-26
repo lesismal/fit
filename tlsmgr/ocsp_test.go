@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/ocsp"
 
 	"github.com/lesismal/fit/internal/certtest"
+	"github.com/lesismal/fit/logs"
 )
 
 // responder is an OCSP responder for a test CA, whose answers a test sets.
@@ -116,9 +117,9 @@ func (r *responder) issue(t *testing.T, name string) *tls.Certificate {
 	return &cert
 }
 
-func testOCSP(t *testing.T, l *logs) *OCSP {
+func testOCSP(t *testing.T, l *logLines) *OCSP {
 	t.Helper()
-	o := newOCSP(l.logf)
+	o := newOCSP(logs.Func(l.logf))
 	o.retryBase, o.retryMax = 20*time.Millisecond, 200*time.Millisecond
 	o.start()
 	t.Cleanup(func() { o.Close() })
@@ -141,7 +142,7 @@ func stapled(t *testing.T, st *Staple, r *responder) int {
 
 func TestOCSPStaple(t *testing.T) {
 	r := newResponder(t)
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	cert := r.issue(t, "a.fit.test")
 	st := o.Add(cert, nil)
@@ -163,7 +164,7 @@ func TestOCSPStaple(t *testing.T) {
 func TestOCSPRefresh(t *testing.T) {
 	r := newResponder(t)
 	r.set(func(r *responder) { r.validity = 2 * time.Second })
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	st := o.Add(r.issue(t, "a.fit.test"), nil)
 	eventually(t, 5*time.Second, "a stapled response", func() bool { return stapled(t, st, r) == ocsp.Good })
@@ -191,7 +192,7 @@ func TestOCSPRefresh(t *testing.T) {
 
 func TestOCSPRevoked(t *testing.T) {
 	r := newResponder(t)
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	cert := r.issue(t, "a.fit.test")
 	r.set(func(r *responder) { r.status[cert.Leaf.SerialNumber.String()] = ocsp.Revoked })
@@ -208,7 +209,7 @@ func TestOCSPRevoked(t *testing.T) {
 
 func TestOCSPShared(t *testing.T) {
 	r := newResponder(t)
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	cert := r.issue(t, "a.fit.test")
 	// The same chain loaded again, as a reload's graph loads its files.
@@ -244,7 +245,7 @@ func TestOCSPSlowResponder(t *testing.T) {
 	hold := make(chan struct{})
 	r.set(func(r *responder) { r.hold = hold })
 	defer close(hold)
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	var staples []*Staple
 	for i := range 6 {
@@ -269,7 +270,7 @@ func TestOCSPSlowResponder(t *testing.T) {
 
 func TestStaticStaple(t *testing.T) {
 	r := newResponder(t)
-	var l logs
+	var l logLines
 	o := testOCSP(t, &l)
 	cert := r.issue(t, "a.fit.test")
 	other := keyCert(t, false, "b.fit.test")

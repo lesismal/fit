@@ -23,6 +23,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/apiclient"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider/internal/kvpart"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
@@ -36,14 +37,11 @@ type Provider struct {
 	f    *watch.Follower
 }
 
-// New returns an etcd provider named name, with the settings opts. logf,
+// New returns an etcd provider named name, with the settings opts. log,
 // which may be nil, hears what the provider reports: keys left out and
 // etcd failing.
-func New(name string, opts *config.EtcdProvider, logf func(format string, args ...any)) *Provider {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	return &Provider{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Logf: logf, Source: &source{opts: opts}}}
+func New(name string, opts *config.EtcdProvider, log *logs.Logger) *Provider {
+	return &Provider{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Log: log, Source: &source{opts: opts}}}
 }
 
 // Name returns the provider's name.

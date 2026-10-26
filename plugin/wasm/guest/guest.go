@@ -168,9 +168,21 @@ func Respond(status int, body string) Action {
 	return Stop
 }
 
-// Log writes msg to fit's log; a plugin's lines past 100 a second are
-// dropped.
-func Log(msg string) {
+// Log writes msg to fit's log at info; a plugin's lines past 100 a second
+// are dropped.
+func Log(msg string) { LogAt(LevelInfo, msg) }
+
+// The levels of LogAt, as Go's log/slog numbers them.
+const (
+	LevelDebug int32 = -4
+	LevelInfo  int32 = 0
+	LevelWarn  int32 = 4
+	LevelError int32 = 8
+)
+
+// LogAt writes msg to fit's log at level, if the plugin logger's level lets
+// it; a plugin's lines past 100 a second are dropped.
+func LogAt(level int32, msg string) {
 	p, n := str(msg)
-	logMessage(0, p, n)
+	logMessage(uint32(level), p, n)
 }

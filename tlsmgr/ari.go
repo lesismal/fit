@@ -175,7 +175,7 @@ func (a *ACME) checkARI(ctx context.Context, m *managed, cert *x509.Certificate)
 	}
 	s, err := a.renewalInfo(ctx, cert)
 	if err != nil {
-		a.logf("acme: %s: renewal information: %v", m.name, err)
+		a.log.Warnf("acme: %s: renewal information: %v", m.name, err)
 		if s == nil {
 			s = &ariState{serial: cert.SerialNumber, checkAt: now.Add(min(ariCheckDefault, a.ariMax))}
 		}

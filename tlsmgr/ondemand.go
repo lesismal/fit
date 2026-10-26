@@ -165,7 +165,7 @@ func (a *ACME) allow(name string) error {
 			od.refused[name] = a.now().Add(refusedFor)
 			od.mu.Unlock()
 		}
-		a.logf("acme: %s: on demand: %v", name, err)
+		a.log.Warnf("acme: %s: on demand: %v", name, err)
 		return err
 	}
 	return od.room(a.now(), true)

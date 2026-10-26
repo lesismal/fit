@@ -2,13 +2,16 @@ package wasm
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	stdhttp "net/http"
 	"net/textproto"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+
+	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // The names the ABI uses.
@@ -194,11 +197,20 @@ func respond(ctx context.Context, mod api.Module, stack []uint64) {
 // maxLogs bounds a plugin's log lines a second; past it they are dropped.
 const maxLogs = 100
 
+// pluginLog is where plugins' lines go.
+var pluginLog = logs.Named(config.LoggerPlugin)
+
+// logMessage writes a plugin's line at its level, as Go's log/slog numbers
+// them: -4 debug, 0 info, 4 warn and 8 error.
 func logMessage(ctx context.Context, mod api.Module, stack []uint64) {
 	cl := callOf(ctx)
+	level := slog.Level(int32(api.DecodeU32(stack[0])))
+	if !pluginLog.Enabled(level) {
+		return
+	}
 	msg := readField(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2]))
 	if cl.m.pool.logs.Add(1) <= maxLogs {
-		log.Printf("fit: wasm plugin %s: %s", cl.m.Path, msg)
+		pluginLog.Logf(level, "wasm plugin %s: %s", cl.m.Path, msg)
 	}
 }
 

@@ -217,3 +217,30 @@ func TestDecodeKinds(t *testing.T) {
 		}()
 	}
 }
+
+func TestLogConfig(t *testing.T) {
+	routes := `"listeners": [{"name": "web", "address": ":8080"}], "routes": [{"handler": {"module": "respond"}}]`
+	c, err := Load([]byte(`{"log": {"level": "warn", "levels": {"tls": "debug"}, "format": "json"}, "access_log": {"level": "error"}, ` + routes + `}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Log.LevelOf(LoggerTLS) != LevelDebug || c.Log.LevelOf(LoggerEngine) != LevelWarn || (*Log)(nil).LevelOf(LoggerTLS) != LevelInfo ||
+		(&Log{}).LevelOf(LoggerTLS) != LevelInfo {
+		t.Errorf("levels of %+v", c.Log)
+	}
+	if c.AccessLog.MinStatus() != 500 || (&AccessLog{Level: "warn"}).MinStatus() != 400 || (&AccessLog{}).MinStatus() != 0 {
+		t.Errorf("access log's least status")
+	}
+	for doc, want := range map[string]string{
+		`{"log": {"levels": {"http": "info"}}, ` + routes + `}`: `log.levels.http: no logger is named "http"`,
+		`{"log": {"levels": {"tls": "loud"}}, ` + routes + `}`:  `log.levels.tls: "loud" is not a level`,
+		`{"log": {"level": "trace"}, ` + routes + `}`:           `log.level`,
+		`{"log": {"format": "xml"}, ` + routes + `}`:            `log.format`,
+		`{"access_log": {"level": "debug"}, ` + routes + `}`:    `access_log.level`,
+	} {
+		_, err := Load([]byte(doc))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", doc, err, want)
+		}
+	}
+}

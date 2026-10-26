@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/lesismal/fit/internal/fibtest"
+	"github.com/lesismal/fit/logs"
 )
 
 // hostEnv runs the host functions, called directly as a plugin's call would
@@ -310,12 +312,12 @@ func TestHostProxyWasm(t *testing.T) {
 	_, p := e.callIn(context.Background(), pwLog, 0, 0, 0)
 	e.mustPanic("outside an instance", p, "outside an instance")
 	line := str("a line")
-	for _, level := range []int{1, pwLogInfo} {
+	for _, level := range []int{1, 2, 3, 4} {
 		r, p := e.call(pwLog, args(level, line)...)
 		e.mustReturn("proxy_log", r, p, pwOK)
 	}
 	e.w.p.logs.Store(maxLogs)
-	r, p := e.call(pwLog, args(pwLogInfo, line)...)
+	r, p := e.call(pwLog, args(2, line)...)
 	e.mustReturn("proxy_log past the bound", r, p, pwOK)
 
 	// proxy_get_buffer_bytes, and give, which hands its data over.
@@ -612,5 +614,13 @@ func TestHostProxyWasm(t *testing.T) {
 
 	if pairs, ok := deserializePairs(nil); !ok || pairs != nil {
 		t.Errorf("no pairs: %v %v", pairs, ok)
+	}
+}
+
+func TestProxyWasmLogLevels(t *testing.T) {
+	for l, want := range []slog.Level{logs.LevelDebug, logs.LevelDebug, logs.LevelInfo, logs.LevelWarn, logs.LevelError, logs.LevelError} {
+		if got := pwLevel(uint32(l)); got != want {
+			t.Errorf("Proxy-Wasm level %d is %v, want %v", l, got, want)
+		}
 	}
 }

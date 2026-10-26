@@ -1192,6 +1192,35 @@ upstreams:
     # # one of: v1, v2.
     # proxy_protocol: "v1"
 
+# fit's own log: what it says about starting, reloading, certificates, providers and the
+# engine, by logger, each with the least level written. Messages at info and debug to stdout
+# and the rest to stderr, at info and above, as lines of text, when left out.
+# object.
+# log:
+  # # The least level written, of every logger levels does not name: debug, info, warn or error.
+  # # info when left out. A change takes effect on reload.
+  # # one of: debug, info, warn, error; default "info".
+  # level: "info"
+
+  # # The least level of some loggers, by name, over level: server (listeners, loading and
+  # # reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP,
+  # # certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the
+  # # access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write
+  # # to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log
+  # # and log/slog). A change takes effect on reload.
+  # # object of string.
+  # levels: {"tls": "debug", "engine": "warn"}
+
+  # # "stdout", "stderr", or the path of a file messages are appended to. When left out, debug and
+  # # info messages go to stdout and warn and error ones to stderr.
+  # # string.
+  # output: "/var/log/fit/fit.log"
+
+  # # text, a line "fit: " and the message, or json, a JSON object a line, with time, level,
+  # # logger and msg, and the attributes of what the engine logs. text when left out.
+  # # one of: text, json; default "text".
+  # format: "text"
+
 # Where a line is written for each request, as JSON; no access log when left out.
 # object.
 # access_log:
@@ -1207,6 +1236,12 @@ upstreams:
   # # out.
   # # integer, 0 or more; default 4194304.
   # buffer_bytes: 4194304
+
+  # # The least level of the requests written: a response with a status below 400 is info, a 4xx
+  # # warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those
+  # # answered with 5xx. Every request when left out. A change takes effect on reload.
+  # # one of: info, warn, error; default "info".
+  # level: "info"
 
 # OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics,
 # exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a

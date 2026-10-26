@@ -12,6 +12,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/pebbletest"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tlsmgr"
 )
@@ -33,7 +34,7 @@ func TestACMEHTTPChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acme, err := tlsmgr.NewACME(c.ACME, nil, t.Logf)
+	acme, err := tlsmgr.NewACME(c.ACME, nil, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}

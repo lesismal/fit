@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // receiver is an OTLP/HTTP receiver that keeps what it is sent.
@@ -94,7 +95,7 @@ func TestParseTraceparent(t *testing.T) {
 
 func tracer(t testing.TB, endpoint string, ratio float64, maxBytes int64) *Tracer {
 	t.Helper()
-	tr, err := NewTracer(&config.Telemetry{Endpoint: endpoint, Traces: &config.TracesExport{SampleRatio: ratio, MaxQueueBytes: maxBytes, Interval: config.Duration(time.Hour)}}, t.Logf)
+	tr, err := NewTracer(&config.Telemetry{Endpoint: endpoint, Traces: &config.TracesExport{SampleRatio: ratio, MaxQueueBytes: maxBytes, Interval: config.Duration(time.Hour)}}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestTracerExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr, err := NewTracer(&config.Telemetry{Endpoint: rcv.srv.URL, HeadersFile: headers, ServiceName: "edge",
-		Traces: &config.TracesExport{SampleRatio: 1, Interval: config.Duration(time.Hour)}}, t.Logf)
+		Traces: &config.TracesExport{SampleRatio: 1, Interval: config.Duration(time.Hour)}}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,13 +269,13 @@ func TestTracerBounds(t *testing.T) {
 	rcv := newReceiver(t)
 	rcv.status = 503
 	var mu sync.Mutex
-	var logs []string
+	var lines []string
 	tr, err := NewTracer(&config.Telemetry{Endpoint: rcv.srv.URL, Traces: &config.TracesExport{SampleRatio: 1, MaxQueueBytes: 2000, Interval: config.Duration(time.Hour)}},
-		func(format string, args ...any) {
+		logs.Func(func(format string, args ...any) {
 			mu.Lock()
-			logs = append(logs, fmt.Sprintf(format, args...))
+			lines = append(lines, fmt.Sprintf(format, args...))
 			mu.Unlock()
-		})
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,8 +315,8 @@ func TestTracerBounds(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(logs) != 2 || !strings.Contains(logs[0], "503") || !strings.Contains(logs[1], "works again") {
-		t.Errorf("logs: %q", logs)
+	if len(lines) != 2 || !strings.Contains(lines[0], "503") || !strings.Contains(lines[1], "works again") {
+		t.Errorf("lines: %q", lines)
 	}
 }
 
@@ -333,7 +334,7 @@ func TestMetricsExporter(t *testing.T) {
 			w.Sample("fit_connections_open", 3)
 			w.Family("fit_http_request_duration_seconds", "histogram", "Durations.")
 			w.Histogram("fit_http_request_duration_seconds", h.Snapshot(), "route", "api")
-		}, t.Logf)
+		}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}

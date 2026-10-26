@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // fakeSource is a source whose watch the test drives.
@@ -91,18 +93,18 @@ func shorten(t *testing.T) {
 	t.Cleanup(func() { Debounce, MinBackoff, MaxBackoff = d, lo, hi })
 }
 
-type logs struct {
+type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logs) logf(format string, args ...any) {
+func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
 }
 
-func (l *logs) all() string {
+func (l *logLines) all() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, "\n")
@@ -122,8 +124,8 @@ func next(t *testing.T, ch <-chan []byte) string {
 func TestFollower(t *testing.T) {
 	shorten(t)
 	src := &fakeSource{part: "one", problems: []string{"bad key"}, watching: make(chan *fakeWatch, 4)}
-	var l logs
-	f := &Follower{Name: "p", Interval: time.Hour, Logf: l.logf, Source: src}
+	var l logLines
+	f := &Follower{Name: "p", Interval: time.Hour, Log: logs.Func(l.logf), Source: src}
 	parts := make(chan []byte, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -200,8 +202,8 @@ func TestFollower(t *testing.T) {
 func TestFollowerInterval(t *testing.T) {
 	shorten(t)
 	src := &fakeSource{part: "p", watching: make(chan *fakeWatch, 16)}
-	var l logs
-	f := &Follower{Name: "p", Interval: 20 * time.Millisecond, Logf: l.logf, Source: src}
+	var l logLines
+	f := &Follower{Name: "p", Interval: 20 * time.Millisecond, Log: logs.Func(l.logf), Source: src}
 	parts := make(chan []byte, 16)
 	background(t, f.Run, func(p []byte) { parts <- p })
 	for range 4 {

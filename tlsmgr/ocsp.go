@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ocsp"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // The defaults of OCSP.
@@ -42,7 +44,7 @@ const (
 // serve, and a certificate no graph serves is dropped.
 type OCSP struct {
 	http *http.Client
-	logf func(format string, args ...any)
+	log  *logs.Logger
 
 	// now, retryBase and retryMax are what tests change.
 	now                 func() time.Time
@@ -89,21 +91,18 @@ func (s *Staple) Certificate() *tls.Certificate {
 	return s.base
 }
 
-// NewOCSP returns an OCSP, running; logf, which may be nil, hears what it
+// NewOCSP returns an OCSP, running; log, which may be nil, hears what it
 // does. Close stops it.
-func NewOCSP(logf func(format string, args ...any)) *OCSP {
-	o := newOCSP(logf)
+func NewOCSP(log *logs.Logger) *OCSP {
+	o := newOCSP(log)
 	o.start()
 	return o
 }
 
-func newOCSP(logf func(format string, args ...any)) *OCSP {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
+func newOCSP(log *logs.Logger) *OCSP {
 	o := &OCSP{
 		http:      &http.Client{Timeout: ocspTimeout},
-		logf:      logf,
+		log:       log,
 		now:       time.Now,
 		retryBase: defaultRetryBase,
 		retryMax:  defaultRetryMax,
@@ -248,7 +247,7 @@ func (o *OCSP) fetch(s *Staple) {
 			// latest, so that it is not stapled past then.
 			s.due = s.expires
 		}
-		o.logf("ocsp: %s: %v; trying again in %s", subject(s.leaf), err, wait.Round(time.Second))
+		o.log.Warnf("ocsp: %s: %v; trying again in %s", subject(s.leaf), err, wait.Round(time.Second))
 	case resp.Status == ocsp.Good:
 		s.failures = 0
 		c := *s.base
@@ -268,10 +267,10 @@ func (o *OCSP) fetch(s *Staple) {
 		s.current.Store(nil)
 		s.due = now.Add(ocspRefresh)
 		if resp.Status == ocsp.Revoked {
-			o.logf("ocsp: %s: revoked at %s", subject(s.leaf), resp.RevokedAt.UTC().Format(time.RFC3339))
+			o.log.Errorf("ocsp: %s: revoked at %s", subject(s.leaf), resp.RevokedAt.UTC().Format(time.RFC3339))
 			revoked = s.revoked
 		} else {
-			o.logf("ocsp: %s: unknown to the responder", subject(s.leaf))
+			o.log.Warnf("ocsp: %s: unknown to the responder", subject(s.leaf))
 		}
 	}
 	// A response is not stapled past its validity, whatever the fetches

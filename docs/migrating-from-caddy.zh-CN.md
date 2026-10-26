@@ -92,7 +92,8 @@ site example.com {
 | `tls cert.pem key.pem` | listener 的 `tls.certificates` |
 | `tls { on_demand }` 与 `on_demand_tls { ask ... }` | listener 的 `tls.on_demand` 与 `acme.on_demand` |
 | `email`、`acme_ca`、`storage`（Redis、Consul） | `acme` 的 `email`、`directory`、`storage`，以及用于 Redis、etcd 或 Consul 的 `shared_storage` |
-| `log` | `access_log` |
+| 站点中的 `log` | `access_log`，含 `output` 和 `level` |
+| 全局的 `log` 和 `debug` | `log`：fit 自身的日志，含 `output`、`format`（`console` 对应 `text`）和 `level`；只 include `http.log.access` 的 `log` 转为访问日志 |
 | `metrics` | `metrics`，由 Admin API 在 `/metrics` 提供 |
 | `tracing` | `telemetry`，通过 OTLP |
 | 插件：限流、缓存、四层 | 内置：`rate_limit`、`cache`、带 service 的 `tcp` 与 `udp` listener |

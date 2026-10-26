@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"log"
+	"log/slog"
 	stdhttp "net/http"
 	"net/textproto"
 	"net/url"
@@ -13,6 +13,8 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // Proxy-Wasm: the ABI Envoy and others run HTTP filters through, v0.2.x,
@@ -249,15 +251,26 @@ func instantiateProxyWasmHost(ctx context.Context, rt wazero.Runtime) error {
 	return err
 }
 
-// pwLogInfo is Proxy-Wasm's info level; lines below it, trace and debug,
-// are dropped.
-const pwLogInfo = 2
+// pwLevel is the level of a line at Proxy-Wasm's level: trace and debug
+// are debug, info info, warn warn, and error and critical error.
+func pwLevel(l uint32) slog.Level {
+	switch l {
+	case 0, 1:
+		return logs.LevelDebug
+	case 2:
+		return logs.LevelInfo
+	case 3:
+		return logs.LevelWarn
+	}
+	return logs.LevelError
+}
 
 func pwLog(ctx context.Context, mod api.Module, stack []uint64) {
 	w := workerOf(ctx)
-	msg := readField(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2]))
-	if api.DecodeU32(stack[0]) >= pwLogInfo && w.p.logs.Add(1) <= maxLogs {
-		log.Printf("fit: wasm plugin %s: %s", w.p.m.Path, msg)
+	level := pwLevel(api.DecodeU32(stack[0]))
+	if pluginLog.Enabled(level) && w.p.logs.Add(1) <= maxLogs {
+		msg := readField(mod, api.DecodeU32(stack[1]), api.DecodeU32(stack[2]))
+		pluginLog.Logf(level, "wasm plugin %s: %s", w.p.m.Path, msg)
 	}
 	stack[0] = pwOK
 }

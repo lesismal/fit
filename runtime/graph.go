@@ -24,6 +24,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/l4"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/router"
@@ -96,6 +97,10 @@ type Env struct {
 	// AccessLog is the log made from the config's access_log, which the
 	// caller owns and closes, or nil.
 	AccessLog *observe.AccessLog
+	// Log is fit's own log, made from the config's log, which the caller
+	// owns and closes, or nil. A config applied sets its loggers' levels,
+	// and the access log's.
+	Log *logs.Root
 	// Tracer is made from the config's telemetry.traces, which the caller
 	// owns and closes, or nil.
 	Tracer *observe.Tracer

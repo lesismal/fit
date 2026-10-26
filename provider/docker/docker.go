@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // Bounds on what is read from the daemon.
@@ -72,20 +73,17 @@ type Provider struct {
 	name string
 	opts *config.DockerProvider
 	c    *client
-	logf func(format string, args ...any)
+	log  *logs.Logger
 
 	last     []byte          // the part sent last
 	problems map[string]bool // the problems reported at the last listing
 }
 
-// New returns a Docker provider named name, with the settings opts. logf,
+// New returns a Docker provider named name, with the settings opts. log,
 // which may be nil, hears what the provider reports: containers left out
 // and the daemon failing.
-func New(name string, opts *config.DockerProvider, logf func(format string, args ...any)) *Provider {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	return &Provider{name: name, opts: opts, c: newClient(opts), logf: logf}
+func New(name string, opts *config.DockerProvider, log *logs.Logger) *Provider {
+	return &Provider{name: name, opts: opts, c: newClient(opts), log: log}
 }
 
 // Name returns the provider's name.
@@ -107,7 +105,7 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 		if listed {
 			backoff = minBackoff
 		}
-		p.logf("provider %s: %v; trying again in %s", p.name, err, backoff)
+		p.log.Warnf("provider %s: %v; trying again in %s", p.name, err, backoff)
 		t := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -190,7 +188,7 @@ func (p *Provider) refresh(ctx context.Context, update func([]byte), always bool
 	reported := make(map[string]bool, len(problems))
 	for _, msg := range problems {
 		if !p.problems[msg] {
-			p.logf("provider %s: %s", p.name, msg)
+			p.log.Warnf("provider %s: %s", p.name, msg)
 		}
 		reported[msg] = true
 	}

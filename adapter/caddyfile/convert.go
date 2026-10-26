@@ -31,6 +31,7 @@ type (
 		Listeners []*outListener `json:"listeners,omitempty"`
 		Routes    []*outRoute    `json:"routes"`
 		Upstreams []*outUpstream `json:"upstreams,omitempty"`
+		Log       *outLog        `json:"log,omitempty"`
 		AccessLog *outAccessLog  `json:"access_log,omitempty"`
 		Admin     *outAdmin      `json:"admin,omitempty"`
 		AutoHTTPS *outAutoHTTPS  `json:"auto_https,omitempty"`
@@ -108,8 +109,14 @@ type (
 		Module string         `json:"module"`
 		Params map[string]any `json:"params,omitempty"`
 	}
+	outLog struct {
+		Level  string `json:"level,omitempty"`
+		Output string `json:"output,omitempty"`
+		Format string `json:"format,omitempty"`
+	}
 	outAccessLog struct {
 		Output string `json:"output,omitempty"`
+		Level  string `json:"level,omitempty"`
 	}
 	outAdmin struct {
 		Address string `json:"address,omitempty"`
@@ -149,7 +156,9 @@ type converter struct {
 	protocols []string
 	adminOff  bool
 	logLine   int
-	scopes    int
+	// globalLogLine is the line of the global log fit's log is made from.
+	globalLogLine int
+	scopes        int
 }
 
 // Convert converts a Caddyfile to fit's native JSON.
@@ -216,6 +225,9 @@ func (c *converter) result() (*adapter.Result, error) {
 	}
 	if c.out.AccessLog != nil {
 		pos["access_log"] = c.logLine
+	}
+	if c.out.Log != nil {
+		pos["log"] = c.globalLogLine
 	}
 	return &adapter.Result{JSON: out, Warnings: ws, Position: func(path string) (int, int, bool) {
 		line, ok := pos[path]
@@ -340,9 +352,17 @@ func (c *converter) global(dirs []*directive) {
 		case "servers":
 			c.servers(d)
 			continue
-		case "debug", "grace_period", "shutdown_delay", "order", "persist_config", "skip_install_trust", "local_certs",
+		case "debug":
+			if len(d.args) == 0 {
+				c.globalLog(d.line).Level = "debug"
+				continue
+			}
+		case "log":
+			c.globalLogDirective(d)
+			continue
+		case "grace_period", "shutdown_delay", "order", "persist_config", "skip_install_trust", "local_certs",
 			"key_type", "renew_interval", "ocsp_interval", "ocsp_stapling", "preferred_chains", "cert_issuer", "pki",
-			"events", "filesystem", "default_sni", "fallback_sni", "log", "default_bind", "cert_lifetime", "metrics":
+			"events", "filesystem", "default_sni", "fallback_sni", "default_bind", "cert_lifetime", "metrics":
 			c.skip(d, "not converted: fit's defaults stand in for it")
 			continue
 		}
@@ -651,7 +671,7 @@ func (c *converter) email(line int, e string) {
 
 // log converts a site's log to the access log, which fit has one of.
 func (c *converter) log(d *directive) {
-	output := "stdout"
+	output, level := "stdout", ""
 	for _, e := range d.block {
 		switch e.name {
 		case "output":
@@ -672,16 +692,139 @@ func (c *converter) log(d *directive) {
 			if len(e.args) == 0 || e.args[0] != "json" {
 				c.skip(e, "fit writes access log lines as JSON")
 			}
+		case "level":
+			if lv, ok := c.logLevel(e); ok {
+				level = accessLevel(lv)
+			}
 		default:
 			c.skip(e, "not converted")
 		}
 	}
-	if l := c.out.AccessLog; l != nil && l.Output != output {
+	if l := c.out.AccessLog; l != nil && (l.Output != output || l.Level != level) {
 		c.warn(d.line, "log: fit has one access log, written to %s", l.Output)
 		return
 	}
-	c.out.AccessLog = &outAccessLog{Output: output}
+	c.out.AccessLog = &outAccessLog{Output: output, Level: level}
 	c.logLine = d.line
+}
+
+// logLevel reads a level directive's Caddy level as fit's: DEBUG, INFO,
+// WARN and ERROR, and PANIC and FATAL as error, fit's highest.
+func (c *converter) logLevel(e *directive) (string, bool) {
+	if len(e.args) != 1 {
+		c.skip(e, "not converted")
+		return "", false
+	}
+	switch strings.ToUpper(e.args[0]) {
+	case "DEBUG":
+		return "debug", true
+	case "INFO":
+		return "info", true
+	case "WARN", "WARNING":
+		return "warn", true
+	case "ERROR":
+		return "error", true
+	case "PANIC", "FATAL", "DPANIC":
+		c.warn(e.line, "level %s is fit's error, its highest", e.args[0])
+		return "error", true
+	}
+	c.skip(e, "not a level")
+	return "", false
+}
+
+// accessLevel is the access log's level for a log's: info writes every
+// request, as debug does.
+func accessLevel(level string) string {
+	if level == "debug" || level == "info" {
+		return ""
+	}
+	return level
+}
+
+// globalLog returns fit's log, made from the global options, which line
+// sets first.
+func (c *converter) globalLog(line int) *outLog {
+	if c.out.Log == nil {
+		// Caddy writes its log to stderr unless told otherwise.
+		c.out.Log = &outLog{Output: "stderr"}
+		c.globalLogLine = line
+	}
+	return c.out.Log
+}
+
+// globalLogDirective converts the global log option: the default logger, or
+// one named, is fit's log, unless it includes only the access logs
+// (http.log.access), when it is fit's access log.
+func (c *converter) globalLogDirective(d *directive) {
+	if len(d.args) > 1 {
+		c.skip(d, "not converted")
+		return
+	}
+	access := false
+	for _, e := range d.block {
+		if e.name == "include" {
+			access = len(e.args) > 0
+			for _, a := range e.args {
+				access = access && strings.HasPrefix(a, "http.log.access")
+			}
+		}
+	}
+	if access {
+		site := *d
+		site.block = slices.DeleteFunc(slices.Clone(d.block), func(e *directive) bool { return e.name == "include" })
+		c.log(&site)
+		return
+	}
+	if len(d.args) == 1 && d.args[0] != "default" {
+		c.skip(d, "fit has one log: the default logger's is converted")
+		return
+	}
+	var out outLog
+	if c.out.Log != nil {
+		out = *c.out.Log
+	} else {
+		out.Output = "stderr"
+	}
+	for _, e := range d.block {
+		switch e.name {
+		case "output":
+			switch {
+			case len(e.args) == 1 && (e.args[0] == "stdout" || e.args[0] == "stderr"):
+				out.Output = e.args[0]
+			case len(e.args) == 2 && e.args[0] == "file":
+				out.Output = e.args[1]
+				if len(e.block) > 0 {
+					c.warn(e.line, "output file: rolling is not converted: fit appends to the file, for logrotate to rotate")
+				}
+			default:
+				c.skip(e, "fit writes its log to stdout, stderr or a file")
+			}
+		case "format":
+			switch {
+			case len(e.args) > 0 && e.args[0] == "json":
+				out.Format = "json"
+			case len(e.args) > 0 && e.args[0] == "console":
+				out.Format = ""
+			default:
+				c.skip(e, "fit writes its log as text or JSON")
+			}
+		case "level":
+			if lv, ok := c.logLevel(e); ok {
+				out.Level = lv
+			}
+		case "exclude":
+			c.skip(e, "fit's log.levels sets the level of each of its loggers, written by hand")
+		case "include":
+			c.skip(e, "fit's log takes every logger's messages")
+		default:
+			c.skip(e, "not converted")
+		}
+	}
+	if out.Level == "info" {
+		out.Level = ""
+	}
+	c.globalLog(d.line)
+	*c.out.Log = out
 }
 
 // group is the addresses of a site served alike: on the same listeners,

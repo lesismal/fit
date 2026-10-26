@@ -206,6 +206,7 @@ Status: `todo`, `doing` or `done`.
 | I79 | Caddyfile converter, JSON with comments | I74 | done |
 | I80 | fit's own .konf format; configs in several files | I79 | done |
 | I81 | WASM III: Proxy-Wasm's response callbacks | I72 | done |
+| I82 | fit's own log: loggers and levels; nginx's and Caddy's logs converted | I21, I79 | done |
 
 ## M0, foundations
 
@@ -1059,6 +1060,20 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   SDK's `http_headers` and `http_body` examples running unchanged, over HTTP/1.1, h2c, h2 and
   HTTP/3, and a client that does not read or a slow plugin holds up no one else.
 - **Touches**: `plugin/wasm`, fib's `http`.
+
+### I82 fit's own log: loggers and levels
+
+- **Do**: a top-level `log` for what fit says about itself, divided into loggers (server, admin,
+  tls, provider, telemetry, access_log, plugin, fastcgi, and engine for fib and Go's `log` and
+  `log/slog`), each with a least level, debug, info, warn or error, that a reload changes; written
+  as text, as before, or JSON, to stdout and stderr by level, or one output. The access log's
+  `level` writes only the requests answered with 4xx and 5xx, or 5xx. `fit adapt` converts nginx's
+  `error_log` and `access_log`, and Caddy's global `log`, `debug` and a site's `log { level }`.
+- **Done when**: every message fit writes has a logger and a level; a config without `log` writes
+  what fit wrote before, byte for byte; levels change on reload; the converters' tests cover each
+  directive; the access log's micro-benchmark shows no cost.
+- **Touches**: `logs` (new), `config`, `cli`, `admin`, `runtime`, `observe`, `tlsmgr`, `provider`,
+  `plugin/wasm`, `handler/fastcgi`, `adapter/nginx`, `adapter/caddyfile`, `schema`, `docs`.
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.

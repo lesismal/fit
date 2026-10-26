@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 func TestKinds(t *testing.T) {
-	k := Kind(func(name string, _ *config.Provider, _ func(string, ...any)) (Provider, string) {
+	k := Kind(func(name string, _ *config.Provider, _ *logs.Logger) (Provider, string) {
 		return &fake{name: name}, "watching nothing"
 	})
 	RegisterKind("test_kind", k)

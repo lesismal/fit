@@ -17,6 +17,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certtest"
+	"github.com/lesismal/fit/logs"
 )
 
 // faultyStorage is a Storage whose calls fail as fault says: fault is given
@@ -77,13 +78,13 @@ var errFault = errors.New("injected fault")
 
 // fakeACME returns an unstarted ACME of ca, on st, or on a directory of t's
 // when st is nil.
-func fakeACME(t *testing.T, ca *fakeCA, c *config.ACME, st Storage, l *logs) *ACME {
+func fakeACME(t *testing.T, ca *fakeCA, c *config.ACME, st Storage, l *logLines) *ACME {
 	t.Helper()
 	c.Directory, c.CAFile = ca.directory(), ca.caFile
 	if st == nil {
 		st = &FileStorage{Root: t.TempDir()}
 	}
-	a, err := newACME(c, st, l.logf)
+	a, err := newACME(c, st, logs.Func(l.logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func fakeACME(t *testing.T, ca *fakeCA, c *config.ACME, st Storage, l *logs) *AC
 // TestPebble does from Pebble, with the scheduler and a worker.
 func TestFakeCA(t *testing.T) {
 	ca := newFakeCA(t)
-	var l logs
+	var l logLines
 	a := fakeACME(t, ca, &config.ACME{Email: "ops@fit.test"}, nil, &l)
 	ca.set(func(f *fakeCA) {
 		f.check = func(typ, token, _ string) error {
@@ -136,7 +137,7 @@ func TestFakeCAChallenges(t *testing.T) {
 		for _, typ := range []string{config.ChallengeHTTP01, config.ChallengeTLSALPN01} {
 			t.Run(typ, func(t *testing.T) {
 				ca := newFakeCA(t)
-				var l logs
+				var l logLines
 				st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}, shared: shared}
 				a := fakeACME(t, ca, &config.ACME{Challenges: []string{typ}}, st, &l)
 				ctx := context.Background()
@@ -183,7 +184,7 @@ func TestFakeCAChallenges(t *testing.T) {
 // reported.
 func TestFakeCASharedFaults(t *testing.T) {
 	ca := newFakeCA(t)
-	var l logs
+	var l logLines
 	st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}, shared: true, fault: func(op, key string) error {
 		if strings.HasPrefix(key, "challenges/") {
 			return errFault
@@ -204,7 +205,7 @@ func TestFakeCAChallengeChoice(t *testing.T) {
 	// The CA offers only the second type: it is taken.
 	ca := newFakeCA(t)
 	ca.set(func(f *fakeCA) { f.offer = []string{config.ChallengeTLSALPN01} })
-	var l logs
+	var l logLines
 	a := fakeACME(t, ca, &config.ACME{}, nil, &l)
 	if _, _, err := a.obtain(ctx, "a.fit.test", 0); err != nil {
 		t.Fatal(err)
@@ -252,7 +253,7 @@ func TestFakeCAFailures(t *testing.T) {
 		t.Run(tt.fail+tt.issue, func(t *testing.T) {
 			ca := newFakeCA(t)
 			ca.set(func(f *fakeCA) { f.fail[tt.fail], f.issue = true, tt.issue })
-			var l logs
+			var l logLines
 			a := fakeACME(t, ca, &config.ACME{}, nil, &l)
 			_, _, err := a.obtain(context.Background(), "f.fit.test", 0)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -283,7 +284,7 @@ func TestEnsureStorage(t *testing.T) {
 	ca := newFakeCA(t)
 
 	// The lock cannot be taken.
-	var l logs
+	var l logLines
 	st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}}
 	a := fakeACME(t, ca, &config.ACME{}, st, &l)
 	st.fault = func(op, key string) error {
@@ -392,7 +393,7 @@ func TestAccountKey(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ca := newFakeCA(t)
-			var l logs
+			var l logLines
 			st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}}
 			a := fakeACME(t, ca, &config.ACME{}, st, &l)
 			if tt.stored != nil {
@@ -485,7 +486,7 @@ func TestStorageRoot(t *testing.T) {
 // TestManageOnDemand lists a name taken on demand, which then counts as the
 // config's, and leaves out another, which stays.
 func TestManageOnDemand(t *testing.T) {
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", OnDemand: &config.OnDemand{Ask: "http://127.0.0.1:1/"}}, &l)
 	used := func() *atomic.Int64 { u := &atomic.Int64{}; u.Store(time.Now().UnixNano()); return u }
 	a.names["listed.fit.test"] = &managed{name: "listed.fit.test", onDemand: true}
@@ -521,7 +522,7 @@ func TestACMEStaples(t *testing.T) {
 	ca := newFakeCA(t)
 	// The responder answers for the CA's certificates.
 	ca.set(func(f *fakeCA) { f.ocsp, f.ca = r.srv.URL, r.ca })
-	var l logs
+	var l logLines
 	a := fakeACME(t, ca, &config.ACME{}, nil, &l)
 	o := testOCSP(t, &l)
 	a.UseOCSP(o)
@@ -570,7 +571,7 @@ func TestHTTPChallengeAnswer(t *testing.T) {
 }
 
 func TestSharedLookupFaults(t *testing.T) {
-	var l logs
+	var l logLines
 	st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}, shared: true, fault: func(op, key string) error {
 		if op == "load" {
 			return errFault

@@ -31,7 +31,6 @@
 package observe
 
 import (
-	"fmt"
 	"hash/maphash"
 	"io"
 	stdhttp "net/http"
@@ -46,6 +45,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // The defaults config.AccessLog's fields stand for when left out.
@@ -89,8 +89,11 @@ type AccessLog struct {
 
 	stop chan struct{}
 	done chan struct{}
-	// warn is where dropped lines are reported.
-	warn io.Writer
+	// log is where dropped lines are reported.
+	log *logs.Logger
+	// minStatus is the least status of the responses whose requests are
+	// written, by the config's level; a reload may change it.
+	minStatus atomic.Int32
 }
 
 // shard is a part of the buffer, with a lock of its own. Shards are padded
@@ -111,7 +114,8 @@ const (
 
 // NewAccessLog opens the log c describes and starts its writer.
 func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
-	l := &AccessLog{interval: c.FlushInterval.Std(), maxBytes: c.BufferBytes, warn: os.Stderr}
+	l := &AccessLog{interval: c.FlushInterval.Std(), maxBytes: c.BufferBytes, log: logs.Named(config.LoggerAccessLog)}
+	l.SetLevel(c)
 	switch c.Output {
 	case "", "stdout":
 		l.out = os.Stdout
@@ -130,7 +134,7 @@ func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
 
 // NewAccessLogTo returns a log writing to w, for tests and embedders.
 func NewAccessLogTo(w io.Writer, interval time.Duration, maxBytes int) *AccessLog {
-	l := &AccessLog{out: w, interval: interval, maxBytes: maxBytes, warn: os.Stderr}
+	l := &AccessLog{out: w, interval: interval, maxBytes: maxBytes, log: logs.Named(config.LoggerAccessLog)}
 	l.start()
 	return l
 }
@@ -227,7 +231,15 @@ func (l *AccessLog) flush() {
 		break
 	}
 	if n := l.dropped.Swap(0); n > 0 {
-		fmt.Fprintf(l.warn, "fit: access log: %d lines dropped, the output was too slow\n", n)
+		l.log.Warnf("access log: %d lines dropped, the output was too slow", n)
+	}
+}
+
+// SetLevel has the log write the requests c's level says from now on, as a
+// reload does; a nil c changes nothing.
+func (l *AccessLog) SetLevel(c *config.AccessLog) {
+	if c != nil {
+		l.minStatus.Store(int32(c.MinStatus()))
 	}
 }
 
@@ -340,6 +352,9 @@ func EntryOf(c *fibhttp.Context) *Entry {
 // body of size bytes. It never waits for the output: a line that does not
 // fit in the buffer is dropped.
 func (l *AccessLog) Log(e *Entry, r *stdhttp.Request, status int, size int64) {
+	if int32(status) < l.minStatus.Load() {
+		return
+	}
 	end := time.Now()
 	var stack [512]byte
 	b := append(stack[:0], `{"time":"`...)

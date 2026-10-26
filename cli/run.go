@@ -17,6 +17,7 @@ import (
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/provider/file"
 	fitruntime "github.com/lesismal/fit/runtime"
@@ -75,7 +76,20 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		printConfigError(stderr, "fit run", cfgName, err)
 		return 1
 	}
-	printWarnings(stderr, set)
+	// fit's own log opens before the engine starts, so that fib's
+	// messages go to it too; from here on what serve prints goes to it, as
+	// the server logger's.
+	root, err := logs.New(c.Log, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "fit run: log: %v\n", err)
+		return 1
+	}
+	defer root.Close()
+	logs.SetDefault(root)
+	defer logs.SetDefault(nil)
+	server := root.Logger(config.LoggerServer)
+	stdout, stderr = logWriter{server, logs.LevelInfo}, logWriter{server, logs.LevelError}
+	printWarnings(warnWriter(stderr), set)
 	data := set.JSON
 	// Upstream connections are dialed through an engine of their own, so
 	// that a proxied response waiting for a slow client waits on that
@@ -87,7 +101,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		return 1
 	}
 	defer stopEngine()
-	env := fitruntime.Env{Engine: engine}
+	env := fitruntime.Env{Engine: engine, Log: root}
 	telemetry := c.Telemetry
 	if c.Admin != nil || telemetry != nil && telemetry.Metrics != nil {
 		// Where requests are counted, by the configs that have metrics,
@@ -104,10 +118,10 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		// line written.
 		defer env.AccessLog.Close()
 	}
-	logf := func(format string, args ...any) { fmt.Fprintf(stderr, "fit: "+format+"\n", args...) }
+	tlsLog, telemetryLog := root.Logger(config.LoggerTLS), root.Logger(config.LoggerTelemetry)
 	observe.Version, _ = versions()
 	if telemetry != nil && telemetry.Traces != nil {
-		if env.Tracer, err = observe.NewTracer(telemetry, logf); err != nil {
+		if env.Tracer, err = observe.NewTracer(telemetry, telemetryLog); err != nil {
 			printConfigError(stderr, "fit run", cfgName, set.MapErrors(telemetry.At.Errorf("%v", err)))
 			return 1
 		}
@@ -116,11 +130,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	// OCSP responses are stapled to every certificate that names a
 	// responder, from files or obtained.
-	env.OCSP = tlsmgr.NewOCSP(logf)
+	env.OCSP = tlsmgr.NewOCSP(tlsLog)
 	defer env.OCSP.Close()
 	// The certificate manager is there whether or not the config lists
 	// names for it, so that a reload may add some; with none it only waits.
-	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, logf); err != nil {
+	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, tlsLog); err != nil {
 		printConfigError(stderr, "fit run", cfgName, set.MapErrors(err))
 		return 1
 	}
@@ -131,7 +145,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		printConfigError(stderr, "fit run", cfgName, set.MapErrors(err))
 		return 1
 	}
-	printDeprecated(stderr, set, c.Warnings())
+	printDeprecated(warnWriter(stderr), set, c.Warnings())
 	rt := new(fitruntime.Runtime)
 	rt.Swap(g)
 	defer rt.Close()
@@ -154,19 +168,20 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	configs := admin.NewConfigs(rt, s, env, c, data, admin.SourceFile, keep)
 	var as *admin.Server
 	if c.Admin != nil {
+		adminLog := root.Logger(config.LoggerAdmin)
 		as, err = admin.Start(c.Admin, configs, func(r admin.Result) {
 			printApplied(stdout, stderr, r)
-			fmt.Fprintf(stdout, "fit: loaded a config from the admin API (config version %d)\n", r.Version)
+			adminLog.Infof("loaded a config from the admin API (config version %d)", r.Version)
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "fit run: %v\n", err)
 			_ = s.Close()
 			return 1
 		}
-		fmt.Fprintf(stdout, "fit: admin API on %s\n", as.Addr())
+		adminLog.Infof("admin API on %s", as.Addr())
 	}
 	if telemetry != nil && telemetry.Metrics != nil {
-		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, logf)
+		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, telemetryLog)
 		if err != nil {
 			printConfigError(stderr, "fit run", cfgName, set.MapErrors(telemetry.At.Errorf("%v", err)))
 			if as != nil {
@@ -178,7 +193,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		defer exporter.Close()
 	}
 	if telemetry != nil {
-		fmt.Fprintf(stdout, "fit: exporting telemetry to %s\n", telemetry.URL())
+		telemetryLog.Infof("exporting telemetry to %s", telemetry.URL())
 	}
 	stopProviders, err := startProviders(c, configs, stdout, stderr)
 	if err != nil {
@@ -224,16 +239,16 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			defer g.Release()
 			return g.Version, g.CertFiles
 		}, func() error {
-			fmt.Fprintln(stdout, "fit: certificate files changed; reloading")
+			tlsLog.Infof("certificate files changed; reloading")
 			r, err := configs.Reapply(admin.SourceCertificates)
 			if err != nil {
 				return err
 			}
 			printApplied(stdout, stderr, r)
-			fmt.Fprintf(stdout, "fit: reloaded certificate files (config version %d)\n", r.Version)
+			tlsLog.Infof("reloaded certificate files (config version %d)", r.Version)
 			return nil
 		}, func(err error) {
-			fmt.Fprintf(stderr, "fit: certificate files: %v; the running certificates stay\n", err)
+			tlsLog.Warnf("certificate files: %v; the running certificates stay", err)
 		})
 		cctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -321,7 +336,7 @@ func applyFiles(name string, srcs []adapter.Source, configs *admin.Configs, stdo
 		printConfigError(stderr, "fit run", name, err)
 		return
 	}
-	printWarnings(stderr, set)
+	printWarnings(warnWriter(stderr), set)
 	r, err := configs.Apply(set.JSON, admin.SourceFile)
 	if err != nil {
 		var errs config.Errors
@@ -333,14 +348,16 @@ func applyFiles(name string, srcs []adapter.Source, configs *admin.Configs, stdo
 		}
 		return
 	}
-	printDeprecated(stderr, set, r.Deprecated)
+	printDeprecated(warnWriter(stderr), set, r.Deprecated)
 	r.Deprecated = nil
 	printApplied(stdout, stderr, r)
 	fmt.Fprintf(stdout, "fit: reloaded %s (config version %d)\n", name, r.Version)
 }
 
-// printApplied prints what applying a config changed.
+// printApplied prints what applying a config changed: its warnings as
+// warnings, when stderr is the log's.
 func printApplied(stdout, stderr io.Writer, r admin.Result) {
+	stderr = warnWriter(stderr)
 	for _, a := range r.Removed {
 		fmt.Fprintf(stdout, "fit: listener %q on %s removed\n", a.Name, a.Addr)
 	}

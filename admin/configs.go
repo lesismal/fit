@@ -202,6 +202,9 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
 		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
 	}
+	if !sameLog(cs.first.Log, c.Log) {
+		r.Warnings = append(r.Warnings, "log's output or format changed; the change takes effect when fit restarts")
+	}
 	if !sameAdmin(cs.first.Admin, c.Admin) {
 		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
 	}
@@ -261,7 +264,13 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 		return Result{}, nil, nil, err
 	}
 	// The runtime holds g now, and only Apply swaps graphs while fit runs,
-	// so g is still current.
+	// so g is still current. The levels of the logs follow the config.
+	if l := cs.env.Log; l != nil {
+		l.SetLevels(c.Log)
+	}
+	if l := cs.env.AccessLog; l != nil {
+		l.SetLevel(c.AccessLog)
+	}
 	var deprecated config.Errors
 	if ws := c.Warnings(); len(ws) > 0 {
 		deprecated = config.AsErrors(m.Errors(ws))
@@ -423,11 +432,33 @@ func (cs *Configs) find(n uint64) *Version {
 	return nil
 }
 
+// sameAccessLog reports whether a and b are the same access log, but for
+// its level, which a reload changes.
 func sameAccessLog(a, b *config.AccessLog) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
 	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
+}
+
+// sameLog reports whether a and b write to the same output in the same
+// format; their levels a reload changes.
+func sameLog(a, b *config.Log) bool {
+	ao, af := logOutput(a)
+	bo, bf := logOutput(b)
+	return ao == bo && af == bf
+}
+
+// logOutput returns where l writes, empty for the default, and its format.
+func logOutput(l *config.Log) (output, format string) {
+	format = "text"
+	if l == nil {
+		return "", format
+	}
+	if l.Format != "" {
+		format = l.Format
+	}
+	return l.Output, format
 }
 
 func sameProviders(a, b []config.Provider) bool { return sameJSON(a, b) }

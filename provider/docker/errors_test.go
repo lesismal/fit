@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider"
 )
 
@@ -122,12 +123,12 @@ func TestProviderListFails(t *testing.T) {
 				refresh = 30 * time.Millisecond
 			}
 			var mu sync.Mutex
-			var logs []string
-			p := New("dk", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(refresh)}, func(format string, args ...any) {
+			var lines []string
+			p := New("dk", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(refresh)}, logs.Func(func(format string, args ...any) {
 				mu.Lock()
-				logs = append(logs, fmt.Sprintf(format, args...))
+				lines = append(lines, fmt.Sprintf(format, args...))
 				mu.Unlock()
-			})
+			}))
 			// Parts sent at a refresh before the daemon fails are let
 			// through.
 			got := &parts{ch: make(chan []byte, 1024)}
@@ -147,13 +148,13 @@ func TestProviderListFails(t *testing.T) {
 			deadline := time.Now().Add(10 * time.Second)
 			for {
 				mu.Lock()
-				all := strings.Join(logs, "\n")
+				all := strings.Join(lines, "\n")
 				mu.Unlock()
 				if strings.Contains(all, "500 Internal Server Error") {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("logs:\n%s", all)
+					t.Fatalf("lines:\n%s", all)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}

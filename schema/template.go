@@ -127,6 +127,8 @@ var templateExamples = map[string]string{
 	"services[].name": `"postgres"`, "services[].listeners": `["postgres"]`, "services[].upstream": `"db"`,
 	"server_names": `["db.example.com"]`, "services[].idle_timeout": `"30m"`,
 	"access_log.output": `"/var/log/fit/access.log"`,
+	"log.levels":        `{"tls": "debug", "engine": "warn"}`,
+	"log.output":        `"/var/log/fit/fit.log"`,
 	"headers_file":      `"/etc/fit/otlp-headers"`, "service_name": `"fit"`, "sample_ratio": `0.1`,
 	"token_file": `"/etc/fit/token"`, "email": `"ops@example.com"`, "storage": `"/var/lib/fit"`,
 	"acme.on_demand.ask": `"http://127.0.0.1:5555/allowed"`,

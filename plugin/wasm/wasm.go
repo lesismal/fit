@@ -29,7 +29,8 @@
 //	    address, 5 the plugin's config
 //	respond(status, body, body_len)  answer the request with status, body
 //	    and the response fields the plugin set
-//	log(level, msg, msg_len)
+//	log(level, msg, msg_len)  write msg to fit's log at level, as Go's
+//	    log/slog numbers them: -4 debug, 0 info, 4 warn, 8 error
 //
 // The response's fields a plugin sets or deletes are applied as the
 // response's header is settled, whoever writes it.

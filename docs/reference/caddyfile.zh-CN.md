@@ -67,8 +67,11 @@ example.com, www.example.com {
 | `http_port <port>`、`https_port <port>` | `auto_https.http_port`、`auto_https.https_port`，以及站点的默认端口 |
 | `on_demand_tls { ask <url>; interval <d>; burst <n> }` | `acme.on_demand` 的 `ask`、`interval` 和 `rate`；也支持 `permission http { endpoint <url> }` |
 | `servers { protocols h1 h2 h2c h3 }` | 每个 listener 的 `protocols`，按其是否有 TLS 取可用的部分 |
+| `debug` | `log.level` 设为 `debug` |
+| `log [default] { output; format; level }` | `log`：`output`（stdout、stderr 或 `file <path>`；不写时与 Caddy 一样为 stderr）、`format`（`console` 对应 `text`，以及 `json`）、`level`（`DEBUG`、`INFO`、`WARN`、`ERROR`；`PANIC` 和 `FATAL` 对应 `error`）；`include` 和 `exclude` 不转换，fit 用 `log.levels` 按 logger 分别设级别 |
+| `log <name> { include http.log.access...; output; level }` | `access_log`，与站点中的 `log` 相同 |
 
-与 Caddy 一样，除非写了 `admin off`，Admin API 是开启的。日志、超时、PKI、事件等选项会被列为未转换：由 fit 的默认值代替。
+与 Caddy 一样，除非写了 `admin off`，Admin API 是开启的。超时、PKI、事件等选项会被列为未转换：由 fit 的默认值代替。
 
 ## 站点地址
 
@@ -101,7 +104,7 @@ host 成为路由的 `match.host`。当所有站点都只在 HTTPS 端口上提�
 | `tls { issuer acme { email; dir } }`、`tls { ca <url> }` | `acme.email`、`acme.directory` |
 | `tls { protocols; ciphers; curves; dns }` | 不转换：fit 自行选择 TLS 版本和密码套件，应答 HTTP-01 和 TLS-ALPN-01，不支持 DNS-01 |
 | `bind <address>` | 站点 listener 绑定的地址 |
-| `log { output stdout\|stderr\|file <path> }` | `access_log.output`；fit 只有一个访问日志，每行一个 JSON |
+| `log { output stdout\|stderr\|file <path>; level <level> }` | `access_log.output` 和 `access_log.level`（`WARN` 记录以 4xx 和 5xx 应答的请求，`ERROR` 记录以 5xx 应答的）；fit 只有一个访问日志，每行一个 JSON |
 
 ## 匹配器
 

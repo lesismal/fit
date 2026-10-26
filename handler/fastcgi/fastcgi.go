@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	stdhttp "net/http"
 	"net/textproto"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/filepool"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/module"
 )
 
@@ -644,6 +644,9 @@ var (
 
 const maxStderrLines = 100
 
+// fastcgiLog is where what applications write to their stderr goes.
+var fastcgiLog = logs.Named(config.LoggerFastCGI)
+
 func logStderr(addr string, p []byte) {
 	if now := time.Now().Unix(); stderrSecond.Swap(now) != now {
 		stderrLines.Store(0)
@@ -652,5 +655,5 @@ func logStderr(addr string, p []byte) {
 		return
 	}
 	msg := strings.TrimSpace(string(p[:min(len(p), 1024)]))
-	log.Printf("fit: fastcgi %s: %s", addr, msg)
+	fastcgiLog.Warnf("fastcgi %s: %s", addr, msg)
 }

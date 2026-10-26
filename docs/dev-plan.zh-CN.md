@@ -196,6 +196,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I79 | Caddyfile 转换器、带注释的 JSON | I74 | done |
 | I80 | fit 自己的 .konf 格式；多文件配置 | I79 | done |
 | I81 | WASM III：Proxy-Wasm 的响应回调 | I72 | done |
+| I82 | fit 自身的日志：logger 与级别；转换 nginx 和 Caddy 的日志配置 | I21、I79 | done |
 
 ## M0 基础
 
@@ -936,5 +937,17 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 - **完成标准**：Proxy-Wasm 过滤器能读取和修改响应的头、body 和 trailer，SDK 的 `http_headers` 和 `http_body` 示例原样运行，
   覆盖 HTTP/1.1、h2c、h2 和 HTTP/3；不读取的客户端或慢插件不拖住其他请求。
 - **涉及**：`plugin/wasm`、fib 的 `http`。
+
+### I82 fit 自身的日志：logger 与级别
+
+- **做什么**：顶层的 `log`，记录 fit 关于自身的消息，按 logger 分类（server、admin、tls、provider、telemetry、access_log、
+  plugin、fastcgi，以及 engine：fib 和写入 Go 的 `log`、`log/slog` 的一切），每个 logger 有最低级别 debug、info、warn 或
+  error，重载即生效；以文本（与原来相同）或 JSON 写出，按级别分到 stdout 和 stderr，或写到同一个输出。访问日志的 `level`
+  可以只记录以 4xx 和 5xx、或只以 5xx 应答的请求。`fit adapt` 转换 nginx 的 `error_log` 和 `access_log`，以及 Caddy 的全局
+  `log`、`debug` 和站点的 `log { level }`。
+- **完成标准**：fit 写出的每条消息都有 logger 和级别；不写 `log` 的配置写出的内容与原来逐字节相同；级别在重载时改变；
+  转换器的测试覆盖每条指令；访问日志的微基准测试显示没有开销。
+- **涉及**：`logs`（新）、`config`、`cli`、`admin`、`runtime`、`observe`、`tlsmgr`、`provider`、`plugin/wasm`、
+  `handler/fastcgi`、`adapter/nginx`、`adapter/caddyfile`、`schema`、`docs`。
 
 路线图 1.0 中的外部安全审计不是一个迭代：它在 I77 完成后于代码之外安排。

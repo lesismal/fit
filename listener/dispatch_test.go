@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibtest"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 )
@@ -159,7 +160,7 @@ func TestDispatchTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracer, err := observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{}}, t.Logf)
+	tracer, err := observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{}}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}

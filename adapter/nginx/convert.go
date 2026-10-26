@@ -3,9 +3,10 @@
 // their locations (exact, prefix, ^~ and regular expressions, nested), and
 // in them proxy_pass, upstream blocks, root, alias, index, try_files,
 // return, rewrite, limit_req with limit_req_zone, client_max_body_size,
-// add_header, proxy_set_header with literal values, and gzip. Every
-// directive it does not convert is reported, with its line, as a warning;
-// fit adapt lists them.
+// add_header, proxy_set_header with literal values, gzip, and error_log
+// and access_log, to fit's log and access log. Every directive it does
+// not convert is reported, with its line, as a warning; fit adapt lists
+// them.
 package nginx
 
 import (
@@ -31,6 +32,17 @@ type (
 		Listeners []*outListener `json:"listeners"`
 		Upstreams []*outUpstream `json:"upstreams,omitempty"`
 		Routes    []*outRoute    `json:"routes"`
+		Log       *outLog        `json:"log,omitempty"`
+		AccessLog *outAccessLog  `json:"access_log,omitempty"`
+	}
+	outLog struct {
+		Level  string `json:"level,omitempty"`
+		Output string `json:"output,omitempty"`
+	}
+	outAccessLog struct {
+		Output        string `json:"output,omitempty"`
+		FlushInterval string `json:"flush_interval,omitempty"`
+		BufferBytes   int64  `json:"buffer_bytes,omitempty"`
 	}
 	outListener struct {
 		Name      string   `json:"name"`
@@ -93,6 +105,9 @@ type converter struct {
 	zones     map[string]zone
 	servers   int
 	names     map[string]bool
+	// logLine and accessLogLine are the lines of the error_log and the
+	// access_log converted, 0 before there is one.
+	logLine, accessLogLine int
 }
 
 // routeName returns a route name, unique among the routes, made of the
@@ -157,9 +172,11 @@ func Convert(data []byte) (*adapter.Result, error) {
 		switch d.name {
 		case "http":
 			c.http(d)
-		case "events", "user", "worker_processes", "worker_rlimit_nofile", "worker_cpu_affinity", "pid", "error_log",
+		case "error_log":
+			c.errorLog(d, "main")
+		case "events", "user", "worker_processes", "worker_rlimit_nofile", "worker_cpu_affinity", "pid",
 			"load_module", "daemon", "master_process", "thread_pool", "env", "worker_shutdown_timeout":
-			c.skip(d, "fit runs as one process with its own workers and logs")
+			c.skip(d, "fit runs as one process with its own workers")
 		case "stream":
 			c.skip(d, "TCP and UDP proxying is fit's tcp and udp listeners, written by hand")
 		default:
@@ -184,6 +201,12 @@ func Convert(data []byte) (*adapter.Result, error) {
 	}
 	for i, r := range c.out.Routes {
 		pos[fmt.Sprintf("routes[%d]", i)] = r.line
+	}
+	if c.logLine > 0 {
+		pos["log"] = c.logLine
+	}
+	if c.accessLogLine > 0 {
+		pos["access_log"] = c.accessLogLine
 	}
 	return &adapter.Result{JSON: out, Warnings: c.warnings, Position: func(path string) (int, int, bool) {
 		line, ok := pos[path]
@@ -300,8 +323,14 @@ func (c *converter) setting(s *settings, d *directive, where string) {
 		"ssl_session_tickets", "ssl_ecdh_curve", "ssl_dhparam", "ssl_stapling", "ssl_stapling_verify":
 		c.skip(d, "fit picks TLS versions and ciphers, and staples OCSP, itself")
 		return
-	case "access_log", "log_format", "error_log":
-		c.skip(d, "fit's access_log is set at the top of its config")
+	case "error_log":
+		c.errorLog(d, where)
+		return
+	case "access_log":
+		c.accessLog(d, where)
+		return
+	case "log_format":
+		c.skip(d, "fit writes its access log lines as JSON, with fields of its own")
 		return
 	case "sendfile", "tcp_nopush", "tcp_nodelay", "keepalive_timeout", "keepalive_requests", "types_hash_max_size",
 		"server_tokens", "default_type", "include", "types", "charset", "client_body_buffer_size",
@@ -1201,4 +1230,115 @@ func size(s string) (int64, bool) {
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	return n * mult, err == nil && n >= 0
+}
+
+// logLevels are fit's log levels for nginx's error_log levels; crit, alert
+// and emerg are error, fit's highest.
+var logLevels = map[string]string{"debug": "debug", "info": "info", "notice": "info", "warn": "warn", "error": "error",
+	"crit": "error", "alert": "error", "emerg": "error"}
+
+// logOutput returns fit's output for an nginx log's file: stdout or stderr
+// for theirs, or the path. Syslog and memory buffers have none.
+func logOutput(file string) (string, bool) {
+	switch {
+	case file == "stderr" || file == "/dev/stderr":
+		return "stderr", true
+	case file == "/dev/stdout":
+		return "stdout", true
+	case strings.HasPrefix(file, "syslog:") || strings.HasPrefix(file, "memory:"):
+		return "", false
+	}
+	return file, true
+}
+
+// errorLog converts an error_log, from the context where, to fit's log,
+// which is the whole process's: the first one converted is it.
+func (c *converter) errorLog(d *directive, where string) {
+	if len(d.args) == 0 || len(d.args) > 2 {
+		c.skip(d, "not converted")
+		return
+	}
+	output, ok := logOutput(d.args[0])
+	if !ok {
+		c.skip(d, "fit writes its log to stdout, stderr or a file")
+		return
+	}
+	// nginx's level when none is named.
+	level := "error"
+	if len(d.args) == 2 {
+		if level, ok = logLevels[d.args[1]]; !ok {
+			c.skip(d, "not a level")
+			return
+		}
+		if d.args[1] == "crit" || d.args[1] == "alert" || d.args[1] == "emerg" {
+			c.warn(d.line, "error_log: %s is fit's error, its highest level", d.args[1])
+		}
+	}
+	if l := c.out.Log; l != nil {
+		if l.Output != output || l.Level != level {
+			c.warn(d.line, "error_log: skipped: fit has one log, for the whole process, which line %d sets", c.logLine)
+		}
+		return
+	}
+	if where == "server" || where == "location" {
+		c.warn(d.line, "error_log: fit has one log, for the whole process, not one for each %s", where)
+	}
+	c.out.Log = &outLog{Level: level, Output: output}
+	c.logLine = d.line
+}
+
+// accessLog converts an access_log, from the context where, to fit's access
+// log, which writes a line for every request: the first one converted is
+// it.
+func (c *converter) accessLog(d *directive, where string) {
+	if len(d.args) == 1 && d.args[0] == "off" {
+		if c.out.AccessLog != nil || where == "location" {
+			c.warn(d.line, "access_log off: skipped: fit's access log, when there is one, writes a line for every request")
+		}
+		return
+	}
+	if len(d.args) == 0 {
+		c.skip(d, "not converted")
+		return
+	}
+	output, ok := logOutput(d.args[0])
+	if !ok {
+		c.skip(d, "fit writes its access log to stdout, stderr or a file")
+		return
+	}
+	l := &outAccessLog{Output: output}
+	for i, a := range d.args[1:] {
+		key, value, _ := strings.Cut(a, "=")
+		switch {
+		case i == 0 && !strings.Contains(a, "="):
+			c.warn(d.line, "access_log: the format %s is not converted: fit writes its lines as JSON, with fields of its own", a)
+		case key == "buffer":
+			if n, ok := size(value); ok && n > 0 {
+				l.BufferBytes = n
+			} else {
+				c.warn(d.line, "access_log: %s: not a size", a)
+			}
+		case key == "flush":
+			if t, ok := duration([]string{value}); ok {
+				l.FlushInterval = t
+			} else {
+				c.warn(d.line, "access_log: %s: not a time", a)
+			}
+		case key == "if":
+			c.warn(d.line, "access_log: %s is not converted: fit writes a line for every request, or as its level says", a)
+		default:
+			c.warn(d.line, "access_log: %s is not converted", a)
+		}
+	}
+	if prev := c.out.AccessLog; prev != nil {
+		if *prev != *l {
+			c.warn(d.line, "access_log: skipped: fit has one access log, which line %d sets", c.accessLogLine)
+		}
+		return
+	}
+	if where == "server" || where == "location" {
+		c.warn(d.line, "access_log: fit has one access log, for every request, not one for each %s", where)
+	}
+	c.out.AccessLog = l
+	c.accessLogLine = d.line
 }

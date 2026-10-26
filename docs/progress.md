@@ -10,8 +10,8 @@ this file says what was done, and where the work differs from the plan.
 
 | | |
 | --- | --- |
-| Last updated | 2026-10-25 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .konf format and configs in several files, and I81, Proxy-Wasm's response callbacks |
+| Last updated | 2026-10-27 |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .konf format and configs in several files, I81, Proxy-Wasm's response callbacks, and I82, fit's own log by logger and level |
 | fib | fib's `main` at `a88c75d2` (`v1.6.1-0.20261025180753-a88c75d2f19b`): `b0809b4` with A46, a body filter whose work is done elsewhere, made for I81, and the HTTP/2, HTTP/3 and TLS work since; `b0809b4` itself: v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes JSON access logs, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | 1.0's external security review, which is arranged outside the code |
@@ -4302,6 +4302,42 @@ Differences from the plan:
 
 - A new iteration, after the plan's last: it waited for A41, and the body for A46, which fit's
   session added to fib.
+
+### I82 fit's own log: loggers and levels — done
+
+- **`log`** (package `logs`): what fit says about itself goes through loggers, `server`, `admin`,
+  `tls`, `provider`, `telemetry`, `access_log`, `plugin`, `fastcgi` and `engine`, each message at
+  debug, info, warn or error. `log.level` sets every logger's least level, `log.levels` some
+  loggers' own; both change on reload (`admin.Configs` sets them as a config applies), while
+  `output` and `format` wait for a restart, with a warning. Without `log` the output is what it
+  was, byte for byte: `fit: ` lines, debug and info to stdout, warn and error to stderr; what
+  `fit run` prints whole (config errors at their positions, `fit run: ...`) is written as it is in
+  text, and without its prefix as JSON's `msg`. JSON writes `time`, `level`, `logger`, `msg`, and
+  the attributes of `log/slog` records.
+- **The engine**: `logs.SetDefault` makes the log Go's `slog` default, so fib's messages, and any
+  library's `log.Printf`, are the `engine` logger's. fit still turns fib's startup lines off.
+- **Levels by call site**: tlsmgr, the providers and the OTLP exporter took a `func(format, ...)`;
+  they take a `*logs.Logger` now, and each message has its level (a retry warn, a certificate
+  obtained info, one dropped or revoked error). Wasm plugins log at the level they ask:
+  fit's ABI's `log(level, ...)` reads it as `log/slog` numbers it, 0 being info as before, and the
+  guest package adds `LogAt`; Proxy-Wasm's trace and debug are debug, critical error. FastCGI's
+  stderr is warn.
+- **`access_log.level`**: a status below 400 is info, 4xx warn, 5xx error; `warn` writes only
+  4xx and 5xx. The check is one atomic load and a comparison before anything is formatted, and a
+  reload changes it.
+- **Converters**: nginx's `error_log` (main, http, server; `notice` is info, `crit`, `alert`,
+  `emerg` error, no level error as nginx's) is `log`, and `access_log` with `buffer=` and
+  `flush=` is `access_log`; `log_format`, named formats and `if=` are reported. Caddy's global
+  `log` and `debug` are `log` (stderr when no output, as Caddy's), a global `log` that includes
+  only `http.log.access` is the access log, and a site's `log { level }` is `access_log.level`.
+- **Tests**: `logs` (levels, reload, text and JSON, slog attributes and groups, the default log,
+  a file), `cli`'s `TestServeLog` (a JSON log in a file, levels by logger, the access log at warn,
+  and a reload to other levels), `config`'s `TestLogConfig`, and the converters' `TestLogs` and
+  cases. They pass under the race detector, with vet and staticcheck.
+- **Benchmark**: the access log's level check is on the request path, so `bench/microbench.sh`
+  ran `observe`'s `BenchmarkLog`, HEAD against the change, 10 alternating runs on the benchmark
+  host: 21.63 ns against 21.54 ns a line, no significant difference (p=0.53), 0 allocations
+  both. The rest is off the request path, and the harness's servers write no logs (rule 21).
 
 ## Notes for later iterations
 

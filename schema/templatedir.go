@@ -34,9 +34,9 @@ var dirFiles = []dirFile{
 	{name: "20-tls", fields: []string{"auto_https", "acme"}, about: []string{
 		"Certificates: HTTPS by default, and how ACME obtains and renews certificates.",
 	}},
-	{name: "30-observability", fields: []string{"access_log", "telemetry", "metrics", "admin"}, about: []string{
-		"What fit tells about itself: the access log, OpenTelemetry, request metrics, and the",
-		"Admin API.",
+	{name: "30-observability", fields: []string{"log", "access_log", "telemetry", "metrics", "admin"}, about: []string{
+		"What fit tells about itself: its own log, the access log, OpenTelemetry, request",
+		"metrics, and the Admin API.",
 	}},
 	{name: "40-services", fields: []string{"services"}, about: []string{
 		"Layer 4 services: the connections of tcp listeners and the datagrams of udp ones,",

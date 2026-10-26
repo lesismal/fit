@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // apiServer is a fake Kubernetes API server: it lists the objects a test
@@ -355,12 +356,12 @@ func TestProvider(t *testing.T) {
 	}
 
 	var logMu sync.Mutex
-	var logs []string
-	p := New("k8s", &config.KubernetesProvider{Kubeconfig: a.kubeconfig(t)}, func(format string, args ...any) {
+	var lines []string
+	p := New("k8s", &config.KubernetesProvider{Kubeconfig: a.kubeconfig(t)}, logs.Func(func(format string, args ...any) {
 		logMu.Lock()
-		logs = append(logs, fmt.Sprintf(format, args...))
+		lines = append(lines, fmt.Sprintf(format, args...))
 		logMu.Unlock()
-	})
+	}))
 	got := make(parts, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -427,10 +428,10 @@ func TestProvider(t *testing.T) {
 	}
 	logMu.Lock()
 	defer logMu.Unlock()
-	all := strings.Join(logs, "\n")
+	all := strings.Join(lines, "\n")
 	if !strings.Contains(all, "provider k8s: watching the cluster at "+a.srv.URL) ||
 		!strings.Contains(all, "provider k8s: referencegrants are not served by the API server") {
-		t.Errorf("logs:\n%s", all)
+		t.Errorf("lines:\n%s", all)
 	}
 }
 
@@ -446,13 +447,13 @@ func TestProviderUnauthorized(t *testing.T) {
 	}
 	var mu sync.Mutex
 	n := 0
-	p := New("k8s", &config.KubernetesProvider{Kubeconfig: path}, func(format string, args ...any) {
+	p := New("k8s", &config.KubernetesProvider{Kubeconfig: path}, logs.Func(func(format string, args ...any) {
 		if strings.Contains(fmt.Sprintf(format, args...), "401 Unauthorized") {
 			mu.Lock()
 			n++
 			mu.Unlock()
 		}
-	})
+	}))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

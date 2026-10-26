@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider/internal/watch"
 )
 
@@ -179,18 +180,18 @@ func shorten(t *testing.T) {
 	t.Cleanup(func() { watch.Debounce, watch.MinBackoff, watch.MaxBackoff = d, lo, hi })
 }
 
-type logs struct {
+type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logs) logf(format string, args ...any) {
+func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
 }
 
-func (l *logs) all() string {
+func (l *logLines) all() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, "\n")
@@ -242,12 +243,12 @@ func TestProvider(t *testing.T) {
 	if err := os.WriteFile(pw, []byte("pa ss\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var l logs
+	var l logLines
 	// The first endpoint is not there: the provider goes on to the next.
 	p := New("etcd", &config.EtcdProvider{
 		Endpoints: []string{"http://127.0.0.1:1", f.srv.URL + "/"}, Username: "fit", PasswordFile: pw,
 		RefreshInterval: config.Duration(time.Hour),
-	}, l.logf)
+	}, logs.Func(l.logf))
 	if p.Name() != "etcd" {
 		t.Fatalf("Name: %q", p.Name())
 	}
@@ -309,8 +310,8 @@ func TestProviderMaxKeys(t *testing.T) {
 	f.put("fit/1", route("one"))
 	f.put("fit/2", route("two"))
 	f.put("fit/3", route("three"))
-	var l logs
-	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, MaxKeys: 2, Prefix: "fit/", RefreshInterval: config.Duration(time.Hour)}, l.logf)
+	var l logLines
+	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, MaxKeys: 2, Prefix: "fit/", RefreshInterval: config.Duration(time.Hour)}, logs.Func(l.logf))
 	parts := make(chan []byte, 4)
 	background(t, p.Run, func(b []byte) { parts <- b })
 	waitPart(t, parts, routesPart("one", "two"))
@@ -323,8 +324,8 @@ func TestProviderWatchNotCreated(t *testing.T) {
 	shorten(t)
 	f := newFakeEtcd(t)
 	f.noCreate = true
-	var l logs
-	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, RequestTimeout: config.Duration(50 * time.Millisecond)}, l.logf)
+	var l logLines
+	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, RequestTimeout: config.Duration(50 * time.Millisecond)}, logs.Func(l.logf))
 	background(t, p.Run, func([]byte) { t.Error("a part without a watch") })
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(l.all(), "the watch was not created within 50ms") {
@@ -343,8 +344,8 @@ func TestProviderBadPassword(t *testing.T) {
 	if err := os.WriteFile(pw, []byte("wrong"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var l logs
-	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, Username: "fit", PasswordFile: pw}, l.logf)
+	var l logLines
+	p := New("etcd", &config.EtcdProvider{Endpoints: []string{f.srv.URL}, Username: "fit", PasswordFile: pw}, logs.Func(l.logf))
 	background(t, p.Run, func([]byte) { t.Error("a part without authenticating") })
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(l.all(), "authentication failed") {

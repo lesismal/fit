@@ -270,11 +270,88 @@ d.example.com {
 	}
 	respond 200
 }
-`, []string{"format: skipped: fit writes access log lines as JSON", "level: skipped: not converted", "output file: rolling is not converted",
+`, []string{"format: skipped: fit writes access log lines as JSON", "output file: rolling is not converted",
 			"line 10: log: fit has one access log, written to stderr", "output: skipped: fit writes to stdout, stderr or a file"},
 			func(t *testing.T, out outConfig) {
 				if out.AccessLog.Output != "stderr" {
 					t.Errorf("%+v", out.AccessLog)
+				}
+			}},
+		{"log level", `:8080 {
+	log {
+		output stdout
+		level WARN
+	}
+	respond 200
+}
+:8081 {
+	log {
+		output stdout
+		level FATAL
+	}
+	respond 200
+}
+:8082 {
+	log {
+		level LOUD
+	}
+	respond 200
+}
+`, []string{"line 11: level FATAL is fit's error, its highest", "line 9: log: fit has one access log, written to stdout",
+			"line 17: level: skipped: not a level"},
+			func(t *testing.T, out outConfig) {
+				if *out.AccessLog != (outAccessLog{Output: "stdout", Level: "warn"}) {
+					t.Errorf("%+v", out.AccessLog)
+				}
+			}},
+		{"global log", `{
+	debug
+	log {
+		output file /var/log/caddy.log {
+			roll_keep 5
+		}
+		format json
+		level INFO
+		exclude http.log.access
+		sampling
+	}
+	log access {
+		include http.log.access.web
+		output stdout
+		level ERROR
+	}
+	log other {
+		output stdout
+	}
+}
+:8080 {
+	respond 200
+}
+`, []string{"line 4: output file: rolling is not converted", "line 9: exclude: skipped: fit's log.levels",
+			"line 10: sampling: skipped: not converted", "line 17: log: skipped: fit has one log"},
+			func(t *testing.T, out outConfig) {
+				if *out.Log != (outLog{Output: "/var/log/caddy.log", Format: "json"}) {
+					t.Errorf("log %+v", out.Log)
+				}
+				if *out.AccessLog != (outAccessLog{Output: "stdout", Level: "error"}) {
+					t.Errorf("access_log %+v", out.AccessLog)
+				}
+			}},
+		{"global debug", `{
+	debug
+	log {
+		format console
+		output discard
+		include http
+	}
+}
+:8080 {
+	respond 200
+}
+`, []string{"line 5: output: skipped: fit writes its log to stdout, stderr or a file", "line 6: include: skipped: fit's log takes every logger's"},
+			func(t *testing.T, out outConfig) {
+				if *out.Log != (outLog{Output: "stderr", Level: "debug"}) {
+					t.Errorf("log %+v", out.Log)
 				}
 			}},
 		{"addresses", `ftp://a.test {

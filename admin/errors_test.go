@@ -267,7 +267,7 @@ func TestStatusAndMetricsMore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracer, err := observe.NewTracer(&config.Telemetry{Endpoint: "http://" + dead, Traces: &config.TracesExport{Interval: config.Duration(time.Hour)}}, func(string, ...any) {})
+	tracer, err := observe.NewTracer(&config.Telemetry{Endpoint: "http://" + dead, Traces: &config.TracesExport{Interval: config.Duration(time.Hour)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

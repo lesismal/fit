@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // endingSource is a source whose watch ends at once, without an error.
@@ -20,7 +22,7 @@ func (endingSource) Watch(_ context.Context, ready, _ func()) error {
 
 func (endingSource) Read(context.Context) ([]byte, []string, error) { return []byte("p"), nil, nil }
 
-func waitLog(t *testing.T, l *logs, want string) {
+func waitLog(t *testing.T, l *logLines, want string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(l.all(), want) {
@@ -33,8 +35,8 @@ func waitLog(t *testing.T, l *logs, want string) {
 
 func TestFollowerWatchEnds(t *testing.T) {
 	shorten(t)
-	var l logs
-	f := &Follower{Name: "p", Interval: time.Hour, Logf: l.logf, Source: endingSource{}}
+	var l logLines
+	f := &Follower{Name: "p", Interval: time.Hour, Log: logs.Func(l.logf), Source: endingSource{}}
 	background(t, f.Run, func([]byte) {})
 	waitLog(t, &l, "provider p: watch: the watch ended; trying again")
 }
@@ -44,8 +46,8 @@ func TestFollowerWatchEnds(t *testing.T) {
 func TestFollowerReadFailsAfterChange(t *testing.T) {
 	shorten(t)
 	src := &fakeSource{part: "p", watching: make(chan *fakeWatch, 16)}
-	var l logs
-	f := &Follower{Name: "p", Interval: time.Hour, Logf: l.logf, Source: src}
+	var l logLines
+	f := &Follower{Name: "p", Interval: time.Hour, Log: logs.Func(l.logf), Source: src}
 	parts := make(chan []byte, 16)
 	background(t, f.Run, func(p []byte) { parts <- p })
 	if p := next(t, parts); p != "p" {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // syncBuffer is a bytes.Buffer safe for the writer goroutine and the test.
@@ -172,7 +174,7 @@ func TestSlowOutputDoesNotBlock(t *testing.T) {
 	w := &blockingWriter{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	l := NewAccessLogTo(w, 10*time.Millisecond, 16<<10)
 	var warn syncBuffer
-	l.warn = &warn
+	l.log = logTo(&warn)
 	logN(l, 1)
 	<-w.entered // the writer is stuck in Write
 	start := time.Now()
@@ -244,7 +246,7 @@ func BenchmarkLog(b *testing.B) {
 	// Lines come faster here than a writer that shares the CPUs with the
 	// loggers can take them: what is dropped is counted, not reported.
 	var dropped atomic.Int64
-	l.warn = countDrops{&dropped}
+	l.log = logTo(countDrops{&dropped})
 	defer l.Close()
 	r := httptest.NewRequest("GET", "/api/items?page=2", nil)
 	r.Header.Set("User-Agent", "Mozilla/5.0 (benchmark)")
@@ -283,7 +285,7 @@ func TestShards(t *testing.T) {
 	var out syncBuffer
 	l := NewAccessLogTo(&out, 5*time.Millisecond, 0)
 	var dropped atomic.Int64
-	l.warn = countDrops{&dropped}
+	l.log = logTo(countDrops{&dropped})
 	if len(l.shards) != 32 {
 		t.Fatalf("%d shards for GOMAXPROCS 8", len(l.shards))
 	}
@@ -461,4 +463,9 @@ func TestLogLine(t *testing.T) {
 	if len(ts) != len("2006-01-02T15:04:05.000Z") || cut(gotRest) != cut(wantRest) {
 		t.Errorf("Log wrote %q, appendLine %q", line, want)
 	}
+}
+
+// logTo returns a logger writing each message to w as fit's text log does.
+func logTo(w io.Writer) *logs.Logger {
+	return logs.Func(func(format string, args ...any) { fmt.Fprintf(w, "fit: "+format+"\n", args...) })
 }

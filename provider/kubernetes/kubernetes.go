@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // Timings, variables for tests to shorten.
@@ -51,7 +52,7 @@ var (
 type Provider struct {
 	name string
 	opts *config.KubernetesProvider
-	logf func(format string, args ...any)
+	log  *logs.Logger
 
 	last     []byte
 	problems map[string]bool
@@ -61,14 +62,9 @@ type Provider struct {
 }
 
 // New returns a Kubernetes provider named name, with the settings opts.
-// logf, which may be nil, hears what the provider reports.
-func New(name string, opts *config.KubernetesProvider, logf func(format string, args ...any)) *Provider {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	return &Provider{name: name, opts: opts, logf: func(format string, args ...any) {
-		logf("provider "+name+": "+format, args...)
-	}}
+// log, which may be nil, hears what the provider reports.
+func New(name string, opts *config.KubernetesProvider, log *logs.Logger) *Provider {
+	return &Provider{name: name, opts: opts, log: log.Prefixed("provider " + name + ": ")}
 }
 
 // Name returns the provider's name.
@@ -97,7 +93,7 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 		if rc, err = loadConfig(p.opts); err == nil {
 			break
 		}
-		p.logf("%v; trying again in %s", err, maxBackoff)
+		p.log.Warnf("%v; trying again in %s", err, maxBackoff)
 		t := time.NewTimer(maxBackoff)
 		select {
 		case <-ctx.Done():
@@ -106,15 +102,15 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 		case <-t.C:
 		}
 	}
-	p.logf("watching the cluster at %s, by %s", rc.server, rc.where)
+	p.log.Infof("watching the cluster at %s, by %s", rc.server, rc.where)
 	if dir := p.opts.CertificatesDir; dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			p.logf("certificates_dir: %v; HTTPS listeners are not served", err)
+			p.log.Errorf("certificates_dir: %v; HTTPS listeners are not served", err)
 		} else {
 			p.certDir = dir
 		}
 	} else if dir, err := os.MkdirTemp("", "fit-"+p.name+"-"); err != nil {
-		p.logf("no directory for the certificates of HTTPS listeners: %v; they are not served", err)
+		p.log.Errorf("no directory for the certificates of HTTPS listeners: %v; they are not served", err)
 	} else {
 		p.certDir = dir
 		defer os.RemoveAll(dir)
@@ -124,7 +120,7 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 	informers := map[string]*informer{}
 	var wg sync.WaitGroup
 	for _, k := range watched(p.opts) {
-		in := newInformer(k, c, p.opts.Objects(), changed, p.logf)
+		in := newInformer(k, c, p.opts.Objects(), changed, p.log)
 		informers[k.name] = in
 		wg.Add(1)
 		go func() {
@@ -132,7 +128,7 @@ func (p *Provider) Run(ctx context.Context, update func([]byte)) {
 			in.run(ctx)
 		}()
 	}
-	sw := &statusWriter{c: c, informers: informers, logf: p.logf, wake: make(chan struct{}, 1), failing: map[string]bool{}}
+	sw := &statusWriter{c: c, informers: informers, log: p.log, wake: make(chan struct{}, 1), failing: map[string]bool{}}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -199,13 +195,13 @@ func (p *Provider) send(in map[string]*informer, update func([]byte), sw *status
 	reported := make(map[string]bool, len(t.problems))
 	for _, msg := range t.problems {
 		if !p.problems[msg] {
-			p.logf("%s", msg)
+			p.log.Warnf("%s", msg)
 		}
 		reported[msg] = true
 	}
 	p.problems = reported
 	if err := writeCerts(t.certs); err != nil {
-		p.logf("writing certificates: %v; the change is not sent", err)
+		p.log.Errorf("writing certificates: %v; the change is not sent", err)
 		return
 	}
 	if always || !bytes.Equal(part, p.last) {
@@ -265,7 +261,7 @@ func removeCerts(dir string, certs map[string][]byte) {
 type statusWriter struct {
 	c         *client
 	informers map[string]*informer // by kind
-	logf      func(format string, args ...any)
+	log       *logs.Logger
 	wake      chan struct{}
 	// failing holds the kinds whose last write failed, and was reported;
 	// run's alone.
@@ -313,10 +309,10 @@ func (w *statusWriter) write(ctx context.Context, u statusUpdate) {
 	case err == nil, errors.Is(err, errConflict), errors.Is(err, errNotFound):
 		if w.failing[u.kind] {
 			delete(w.failing, u.kind)
-			w.logf("the status of %s is written again", u.kind)
+			w.log.Infof("the status of %s is written again", u.kind)
 		}
 	case !w.failing[u.kind]:
 		w.failing[u.kind] = true
-		w.logf("writing the status of %s: %v; trying again with each change and every %s", u.kind, err, resync)
+		w.log.Warnf("writing the status of %s: %v; trying again with each change and every %s", u.kind, err, resync)
 	}
 }

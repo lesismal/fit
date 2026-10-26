@@ -15,6 +15,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/apiclient"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider/internal/watch"
 	"github.com/lesismal/fit/provider/labels"
 )
@@ -31,12 +32,9 @@ type Catalog struct {
 }
 
 // NewCatalog returns a Consul catalog provider named name, with the
-// settings opts. logf, which may be nil, hears what the provider reports:
+// settings opts. log, which may be nil, hears what the provider reports:
 // instances left out and Consul failing.
-func NewCatalog(name string, opts *config.ConsulProvider, logf func(format string, args ...any)) *Catalog {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
+func NewCatalog(name string, opts *config.ConsulProvider, log *logs.Logger) *Catalog {
 	src := &catalogSource{opts: opts, conn: conn{
 		endpoint:   opts.URL(),
 		datacenter: opts.Datacenter,
@@ -44,7 +42,7 @@ func NewCatalog(name string, opts *config.ConsulProvider, logf func(format strin
 		files:      apiclient.TLSFiles{CA: opts.CAFile, Cert: opts.CertFile, Key: opts.KeyFile},
 		timeout:    opts.Timeout(),
 	}}
-	return &Catalog{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Logf: logf, Source: src}}
+	return &Catalog{name: name, f: &watch.Follower{Name: name, Interval: opts.Refresh(), Log: log, Source: src}}
 }
 
 // Name returns the provider's name.

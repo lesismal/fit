@@ -75,7 +75,7 @@ func TestOnDemandAllowed(t *testing.T) {
 	port := pebbletest.FreePort(t)
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
 	ask := newAsker(t, "ok.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"http-01"},
 		OnDemand: &config.OnDemand{Ask: ask.srv.URL + "/check?key=1", Timeout: config.Duration(30 * time.Second)}}, &l)
 	serveHTTP01(t, a, port)
@@ -126,7 +126,7 @@ func TestOnDemandAllowed(t *testing.T) {
 func TestOnDemandRefused(t *testing.T) {
 	dir, caFile := hangingCA(t)
 	ask := newAsker(t)
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.srv.URL}}, &l)
 	var now atomic.Pointer[time.Time]
 	start := time.Now()
@@ -175,7 +175,7 @@ func TestOnDemandRefused(t *testing.T) {
 func TestOnDemandRateLimited(t *testing.T) {
 	dir, caFile := hangingCA(t)
 	ask := newAsker(t, "a.fit.test", "b.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.srv.URL,
 		Rate: 1, Interval: config.Duration(time.Hour), Timeout: config.Duration(100 * time.Millisecond)}}, &l)
 	var now atomic.Pointer[time.Time]
@@ -208,7 +208,7 @@ func TestOnDemandRateLimited(t *testing.T) {
 func TestOnDemandMaxNames(t *testing.T) {
 	dir, caFile := hangingCA(t)
 	ask := newAsker(t, "a.fit.test", "b.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.srv.URL,
 		MaxNames: 1, Timeout: config.Duration(50 * time.Millisecond)}}, &l)
 	a.start()
@@ -240,7 +240,7 @@ func TestOnDemandDropped(t *testing.T) {
 		}
 	}()
 	ask := newAsker(t, "a.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://" + ln.Addr().String() + "/dir",
 		OnDemand: &config.OnDemand{Ask: ask.srv.URL, MaxNames: 1, Timeout: config.Duration(5 * time.Second)}}, &l)
 	a.start()
@@ -263,7 +263,7 @@ func TestOnDemandDropped(t *testing.T) {
 func TestOnDemandNames(t *testing.T) {
 	dir, caFile := hangingCA(t)
 	ask := newAsker(t)
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.srv.URL}}, &l)
 	a.start()
 	for _, name := range []string{"localhost", "127.0.0.1", "a..fit.test", "*.fit.test", "-a.fit.test", "a_b.fit.test",
@@ -307,7 +307,7 @@ func TestOnDemandNames(t *testing.T) {
 // asking the ask URL again.
 func TestOnDemandIdle(t *testing.T) {
 	ask := newAsker(t, "idle.fit.test", "busy.fit.test", "third.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", OnDemand: &config.OnDemand{Ask: ask.srv.URL,
 		MaxNames: 2, IdleTimeout: config.Duration(time.Hour), Timeout: config.Duration(5 * time.Second)}}, &l)
 	for _, name := range []string{"idle.fit.test", "busy.fit.test"} {
@@ -381,7 +381,7 @@ func TestOnDemandIdle(t *testing.T) {
 // itself, on the real clock.
 func TestOnDemandIdleTimer(t *testing.T) {
 	ask := newAsker(t, "idle.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", OnDemand: &config.OnDemand{Ask: ask.srv.URL,
 		IdleTimeout: config.Duration(100 * time.Millisecond)}}, &l)
 	storeIssued(t, a, "idle.fit.test")

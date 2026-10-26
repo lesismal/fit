@@ -28,6 +28,7 @@ type Config struct {
 	Routes        []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams     []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
 	Services      []Service  `json:"services,omitempty" doc:"Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one."`
+	Log           *Log       `json:"log,omitempty" doc:"fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines of text, when left out."`
 	AccessLog     *AccessLog `json:"access_log,omitempty" doc:"Where a line is written for each request, as JSON; no access log when left out."`
 	Telemetry     *Telemetry `json:"telemetry,omitempty" doc:"OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts."`
 	Limits        Limits     `json:"limits,omitzero" doc:"Limits that apply to every listener."`
@@ -322,8 +323,21 @@ type AccessLog struct {
 	Output        string   `json:"output,omitempty" default:"\"stdout\"" doc:"\"stdout\", \"stderr\", or the path of a file lines are appended to; \"stdout\" when left out."`
 	FlushInterval Duration `json:"flush_interval,omitempty" default:"\"1s\"" doc:"How long a line may wait in the buffer before it is written; 1s when left out."`
 	BufferBytes   int      `json:"buffer_bytes,omitempty" min:"0" default:"4194304" doc:"How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out."`
+	Level         string   `json:"level,omitempty" enum:"info,warn,error" default:"\"info\"" doc:"The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// MinStatus returns the least status of the responses whose requests the
+// access log writes, by its level.
+func (l *AccessLog) MinStatus() int {
+	switch l.Level {
+	case LevelWarn:
+		return 400
+	case LevelError:
+		return 500
+	}
+	return 0
 }
 
 // Service proxies the connections of tcp listeners, and the sessions of udp

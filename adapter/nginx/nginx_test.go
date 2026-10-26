@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ func TestSamples(t *testing.T) {
 	}{
 		{"proxy.conf", 3, []int{25, 36}},
 		{"static.conf", 6, nil},
-		{"full.conf", 3, []int{1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 28, 33, 47, 51, 55}},
+		{"full.conf", 3, []int{1, 2, 4, 6, 11, 12, 13, 14, 15, 16, 17, 28, 33, 47, 51, 55}},
 	} {
 		data, err := os.ReadFile(filepath.Join("testdata", tt.file))
 		if err != nil {
@@ -318,6 +319,63 @@ func TestServe(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestLogs converts error_log to fit's log and access_log to its access
+// log, each the process's one.
+func TestLogs(t *testing.T) {
+	for _, tt := range []struct {
+		name, src string
+		log       *outLog
+		access    *outAccessLog
+		warned    []int
+	}{
+		{"main error_log", "error_log /var/log/nginx/error.log warn;\nhttp { server { listen 80; } }",
+			&outLog{Level: "warn", Output: "/var/log/nginx/error.log"}, nil, nil},
+		{"error_log without a level is error", "error_log stderr;\nhttp { server { listen 80; } }",
+			&outLog{Level: "error", Output: "stderr"}, nil, nil},
+		{"crit", "error_log /dev/stderr crit;\nhttp { server { listen 80; } }",
+			&outLog{Level: "error", Output: "stderr"}, nil, []int{1}},
+		{"notice is info", "http {\nerror_log /dev/stdout notice;\nserver { listen 80; } }",
+			&outLog{Level: "info", Output: "stdout"}, nil, nil},
+		{"syslog", "error_log syslog:server=10.0.0.1 warn;\nhttp { server { listen 80; } }", nil, nil, []int{1}},
+		{"a second error_log", "error_log stderr warn;\nhttp { server { listen 80;\nerror_log /tmp/e.log debug; } }",
+			&outLog{Level: "warn", Output: "stderr"}, nil, []int{3}},
+		{"server error_log", "http { server { listen 80;\nerror_log /tmp/e.log info; } }",
+			&outLog{Level: "info", Output: "/tmp/e.log"}, nil, []int{2}},
+		{"bad level", "error_log stderr loud;\nhttp { server { listen 80; } }", nil, nil, []int{1}},
+
+		{"access_log", "http {\naccess_log /var/log/nginx/access.log;\nserver { listen 80; } }",
+			nil, &outAccessLog{Output: "/var/log/nginx/access.log"}, nil},
+		{"buffer and flush", "http {\naccess_log /dev/stdout combined buffer=32k flush=5s;\nserver { listen 80; } }",
+			nil, &outAccessLog{Output: "stdout", BufferBytes: 32 << 10, FlushInterval: "5s"}, []int{2}},
+		{"if and gzip", "http {\naccess_log /tmp/a.log combined gzip if=$loggable;\nserver { listen 80; } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, []int{2, 2, 2}},
+		{"bad buffer and flush", "http {\naccess_log /tmp/a.log combined buffer=lots flush=soon;\nserver { listen 80; } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, []int{2, 2, 2}},
+		{"off", "http {\naccess_log off;\nserver { listen 80; } }", nil, nil, nil},
+		{"off in a location", "http {\naccess_log /tmp/a.log;\nserver { listen 80;\nlocation / {\naccess_log off;\nreturn 200; } } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, []int{5}},
+		{"server access_log", "http { server { listen 80;\naccess_log /tmp/a.log; } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, []int{2}},
+		{"two access_logs", "http {\naccess_log /tmp/a.log;\nserver { listen 80;\naccess_log /tmp/b.log; } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, []int{4}},
+		{"the same access_log again", "http {\naccess_log /tmp/a.log;\nserver { listen 80; }\nserver { listen 81;\naccess_log /tmp/a.log; } }",
+			nil, &outAccessLog{Output: "/tmp/a.log"}, nil},
+		{"syslog access_log", "http {\naccess_log syslog:server=unix:/dev/log;\nserver { listen 80; } }", nil, nil, []int{2}},
+		{"log_format", "http {\nlog_format main '$remote_addr';\nserver { listen 80; } }", nil, nil, []int{2}},
+	} {
+		out, ws := convert(t, tt.src)
+		if !reflect.DeepEqual(out.Log, tt.log) {
+			t.Errorf("%s: log %+v, want %+v", tt.name, out.Log, tt.log)
+		}
+		if !reflect.DeepEqual(out.AccessLog, tt.access) {
+			t.Errorf("%s: access_log %+v, want %+v", tt.name, out.AccessLog, tt.access)
+		}
+		if got := warnedLines(ws); !slices.Equal(got, tt.warned) {
+			t.Errorf("%s: warnings at %v, want %v:\n%s", tt.name, got, tt.warned, strings.Join(ws, "\n"))
 		}
 	}
 }

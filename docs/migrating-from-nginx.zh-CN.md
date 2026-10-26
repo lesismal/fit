@@ -17,7 +17,8 @@ fit validate -c fit.konf
 
 它转换 `http` 块中的 server（`listen`、`server_name`、`ssl_certificate`）、其中的 location（精确、前缀、`^~` 和正则，
 可嵌套），以及其中的 `proxy_pass` 和 `upstream` 块、`root`、`alias`、`index`、`try_files`、`return`、`rewrite`、
-`limit_req` 与 `limit_req_zone`、`client_max_body_size`、`add_header`、取字面值的 `proxy_set_header`，以及 `gzip`。
+`limit_req` 与 `limit_req_zone`、`client_max_body_size`、`add_header`、取字面值的 `proxy_set_header`、`gzip`，以及
+`error_log` 和 `access_log`。
 请阅读它报告的内容，再参照下面的表格手工补全配置。
 
 ## 各部分的对应
@@ -51,7 +52,8 @@ fit validate -c fit.konf
 | 带 `fastcgi_param` 的 `fastcgi_pass` | `fastcgi` 处理器，PHP 的参数已为你设好 |
 | `stream { server { listen 5432; proxy_pass db; } }` | 一个 `tcp`（或 `udp`）listener，以及指向它和某个 upstream 的 service |
 | `ssl_preread` 与 `map $ssl_preread_server_name` | service 的 `server_names`，按 SNI 透传 TLS |
-| `access_log` | `access_log`，JSON 格式 |
+| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log` 的 `output`、`buffer_bytes` 和 `flush_interval`；fit 每行写 JSON，因此 `log_format`、指定的格式和 `if=` 不转换，且只有一个访问日志，记录每个请求 |
+| `error_log /var/log/error.log warn;` | `log` 的 `output` 和 `level`：`notice` 对应 `info`，`crit`、`alert`、`emerg` 对应 `error`；不写级别时与 nginx 一样为 `error`。整个进程只有一个日志，可用 `log.levels` 按 logger 分别设级别 |
 | `nginx -s reload` | SIGHUP、`fit run -watch`，或 Admin API 的 `POST /load` |
 
 ## 行为上的不同

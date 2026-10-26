@@ -19,6 +19,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certtest"
 	"github.com/lesismal/fit/internal/fibtest"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tlsmgr"
@@ -286,7 +287,7 @@ func (s sharedStorage) Load(ctx context.Context, key string) ([]byte, error) {
 // under way from the shared storage, and 404s for those it has not.
 func TestACMESharedChallenge(t *testing.T) {
 	dir := t.TempDir()
-	acme, err := tlsmgr.NewACME(&config.ACME{Storage: dir}, sharedStorage{&tlsmgr.FileStorage{Root: dir}}, t.Logf)
+	acme, err := tlsmgr.NewACME(&config.ACME{Storage: dir}, sharedStorage{&tlsmgr.FileStorage{Root: dir}}, logs.Func(t.Logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ func TestDispatchLogMetricsTrace(t *testing.T) {
 			env := runtime.Env{AccessLog: observe.NewAccessLogTo(&buf, 10*time.Millisecond, 1<<20), Metrics: observe.NewMetrics()}
 			defer env.AccessLog.Close()
 			if traced {
-				if env.Tracer, err = observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{SampleRatio: 1}}, t.Logf); err != nil {
+				if env.Tracer, err = observe.NewTracer(&config.Telemetry{Endpoint: rcv.URL, Traces: &config.TracesExport{SampleRatio: 1}}, logs.Func(t.Logf)); err != nil {
 					t.Fatal(err)
 				}
 				defer env.Tracer.Close()

@@ -92,7 +92,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `services` | TCP 和 UDP 代理 | [Services](reference/config.md#services) |
 | 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy` | [Handlers](reference/config.md#handlers) |
 | 中间件 | 认证、限流、缓存、压缩、头部、改写等 | [Middleware](reference/config.md#middleware) |
-| `access_log`、`telemetry`、`metrics` | 日志、链路追踪和指标 | [Access log](reference/config.md#access-log)、[Telemetry](reference/config.md#telemetry)、[Metrics](reference/config.md#metrics) |
+| `log`、`access_log`、`telemetry`、`metrics` | 日志、链路追踪和指标 | [Log](reference/config.md#log)、[Access log](reference/config.md#access-log)、[Telemetry](reference/config.md#telemetry)、[Metrics](reference/config.md#metrics) |
 | `limits` | 连接、头部、请求体和内存的上限 | [Limits](reference/config.md#limits) |
 | `auto_https`、`acme` | 默认 HTTPS 和证书 | [HTTPS by default](reference/config.md#https-by-default)、[ACME](reference/config.md#acme) |
 | `admin` | Admin API | [Admin API](reference/config.md#admin-api) |

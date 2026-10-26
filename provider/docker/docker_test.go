@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // ctr is a container, written as the daemon lists it.
@@ -367,12 +368,12 @@ func TestProvider(t *testing.T) {
 	d.set(web, other)
 
 	var logMu sync.Mutex
-	var logs []string
-	p := New("docker", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(time.Hour)}, func(format string, args ...any) {
+	var lines []string
+	p := New("docker", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(time.Hour)}, logs.Func(func(format string, args ...any) {
 		logMu.Lock()
-		logs = append(logs, fmt.Sprintf(format, args...))
+		lines = append(lines, fmt.Sprintf(format, args...))
 		logMu.Unlock()
-	})
+	}))
 	if p.Name() != "docker" {
 		t.Fatalf("Name: %q", p.Name())
 	}
@@ -453,9 +454,9 @@ func TestProvider(t *testing.T) {
 	}
 	logMu.Lock()
 	defer logMu.Unlock()
-	all := strings.Join(logs, "\n")
+	all := strings.Join(lines, "\n")
 	if !strings.Contains(all, "the daemon ended the event stream") || !strings.Contains(all, "500 Internal Server Error") {
-		t.Errorf("logs:\n%s", all)
+		t.Errorf("lines:\n%s", all)
 	}
 }
 
@@ -467,12 +468,12 @@ func TestProviderRefresh(t *testing.T) {
 	d.set(ctr("web", map[string]string{"fit.enable": "true"}, "10.0.0.2", 80),
 		ctr("bad", map[string]string{"fit.enable": "true"}, "10.0.0.3", 80, 81))
 	var mu sync.Mutex
-	var logs []string
-	p := New("dk", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(30 * time.Millisecond)}, func(format string, args ...any) {
+	var lines []string
+	p := New("dk", &config.DockerProvider{Endpoint: "unix://" + d.socket, RefreshInterval: config.Duration(30 * time.Millisecond)}, logs.Func(func(format string, args ...any) {
 		mu.Lock()
-		logs = append(logs, fmt.Sprintf(format, args...))
+		lines = append(lines, fmt.Sprintf(format, args...))
 		mu.Unlock()
-	})
+	}))
 	got := &parts{ch: make(chan []byte, 16)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -484,8 +485,8 @@ func TestProviderRefresh(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(logs) != 1 || logs[0] != "provider dk: container bad: it exposes TCP ports [80 81]: set fit.port" {
-		t.Errorf("logs: %q", logs)
+	if len(lines) != 1 || lines[0] != "provider dk: container bad: it exposes TCP ports [80 81]: set fit.port" {
+		t.Errorf("lines: %q", lines)
 	}
 }
 
@@ -495,11 +496,11 @@ func TestProviderNoDaemon(t *testing.T) {
 	shorten(t)
 	var mu sync.Mutex
 	n := 0
-	p := New("docker", &config.DockerProvider{Endpoint: "unix:///nonexistent/fit-test.sock"}, func(format string, args ...any) {
+	p := New("docker", &config.DockerProvider{Endpoint: "unix:///nonexistent/fit-test.sock"}, logs.Func(func(format string, args ...any) {
 		mu.Lock()
 		n++
 		mu.Unlock()
-	})
+	}))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

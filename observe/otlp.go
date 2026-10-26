@@ -15,6 +15,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/apiclient"
+	"github.com/lesismal/fit/logs"
 )
 
 // exporter posts OTLP/HTTP JSON requests to one of a receiver's paths.
@@ -24,17 +25,14 @@ type exporter struct {
 	hc       *stdhttp.Client
 	timeout  time.Duration
 	resource []byte // the resource the data is about, as OTLP JSON
-	logf     func(format string, args ...any)
+	log      *logs.Logger
 
 	mu   sync.Mutex
 	last string // the error reported last, so that one that lasts is reported once
 }
 
-func newExporter(c *config.Telemetry, path string, logf func(format string, args ...any)) (*exporter, error) {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	e := &exporter{url: c.URL() + path, header: stdhttp.Header{}, timeout: c.ExportTimeout(), logf: logf}
+func newExporter(c *config.Telemetry, path string, log *logs.Logger) (*exporter, error) {
+	e := &exporter{url: c.URL() + path, header: stdhttp.Header{}, timeout: c.ExportTimeout(), log: log}
 	if c.HeadersFile != "" {
 		data, err := os.ReadFile(c.HeadersFile)
 		if err != nil {
@@ -101,9 +99,9 @@ func (e *exporter) report(what string, err error) {
 	}
 	switch {
 	case err != nil:
-		e.logf("telemetry: exporting %s: %v", what, err)
+		e.log.Warnf("telemetry: exporting %s: %v", what, err)
 	case e.last != "":
-		e.logf("telemetry: exporting %s works again", what)
+		e.log.Infof("telemetry: exporting %s works again", what)
 	}
 	e.last = msg
 }
@@ -247,8 +245,8 @@ type MetricsExporter struct {
 
 // NewMetricsExporter starts exporting what write writes every interval of
 // c's metrics; Close stops it, after a last export.
-func NewMetricsExporter(c *config.Telemetry, write func(MetricWriter), logf func(format string, args ...any)) (*MetricsExporter, error) {
-	exp, err := newExporter(c, "/v1/metrics", logf)
+func NewMetricsExporter(c *config.Telemetry, write func(MetricWriter), log *logs.Logger) (*MetricsExporter, error) {
+	exp, err := newExporter(c, "/v1/metrics", log)
 	if err != nil {
 		return nil, err
 	}

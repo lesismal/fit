@@ -20,21 +20,22 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certtest"
 	"github.com/lesismal/fit/internal/pebbletest"
+	"github.com/lesismal/fit/logs"
 )
 
-// logs collects what an ACME reports.
-type logs struct {
+// logLines collects what an ACME reports.
+type logLines struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (l *logs) logf(format string, args ...any) {
+func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
 }
 
-func (l *logs) count(substr string) int {
+func (l *logLines) count(substr string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	n := 0
@@ -48,12 +49,12 @@ func (l *logs) count(substr string) int {
 
 // testACME returns an unstarted ACME of directory, keeping what it obtains in
 // a directory of t's, with fast retries.
-func testACME(t *testing.T, c *config.ACME, l *logs) *ACME {
+func testACME(t *testing.T, c *config.ACME, l *logLines) *ACME {
 	t.Helper()
 	if c.Storage == "" {
 		c.Storage = t.TempDir()
 	}
-	a, err := newACME(c, nil, l.logf)
+	a, err := newACME(c, nil, logs.Func(l.logf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestCerts(t *testing.T) {
 }
 
 func TestManage(t *testing.T) {
-	var l logs
+	var l logLines
 	// A CA nobody listens at: every name fails, and is tried again.
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
 	a.start()
@@ -195,7 +196,7 @@ func TestStoredCertificate(t *testing.T) {
 	}
 	certPEM, _ := os.ReadFile(cert.CertFile)
 	keyPEM, _ := os.ReadFile(cert.KeyFile)
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir", Storage: dir}, &l)
 	if err := a.storage.Store(context.Background(), a.certKey("stored.example"), append(certPEM, keyPEM...)); err != nil {
 		t.Fatal(err)
@@ -237,7 +238,7 @@ func TestSlowCA(t *testing.T) {
 	caFile := t.TempDir() + "/ca.pem"
 	writePEM(t, caFile, ca.Certificate())
 
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: ca.URL + "/dir", CAFile: caFile, MaxConcurrent: 2,
 		Timeout: config.Duration(150 * time.Millisecond), RequestTimeout: config.Duration(time.Minute)}, &l)
 	a.start()
@@ -296,7 +297,7 @@ func TestCutCA(t *testing.T) {
 		}
 	}()
 	defer ln.Close()
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://" + ln.Addr().String() + "/dir"}, &l)
 	a.retryBase, a.retryMax = 20*time.Millisecond, time.Hour
 	a.start()
@@ -332,7 +333,7 @@ func writePEM(t *testing.T, file string, cert *x509.Certificate) {
 func TestPebble(t *testing.T) {
 	port := pebbletest.FreePort(t)
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port, Validity: time.Hour})
-	var l logs
+	var l logLines
 	dir := t.TempDir()
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Storage: dir, Email: "ops@fit.test"}, &l)
 	// Renewed 3s after it is obtained, rather than after 40 minutes.
@@ -388,7 +389,7 @@ func TestPebble(t *testing.T) {
 
 	// A second instance on the storage, with renewal far off: it serves
 	// the stored certificate, the renewed one, and obtains none.
-	var l2 logs
+	var l2 logLines
 	b := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Storage: dir}, &l2)
 	b.start()
 	b.Manage([]string{"www.fit.test"})
@@ -458,7 +459,7 @@ func serveTLSALPN01(t *testing.T, certs *Certs, port int) *atomic.Int32 {
 func TestPebbleTLSALPN(t *testing.T) {
 	tlsPort := pebbletest.FreePort(t)
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: pebbletest.FreePort(t), TLSPort: tlsPort})
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"tls-alpn-01"}}, &l)
 	answered := serveTLSALPN01(t, NewCerts(nil, a, []string{"alpn.fit.test"}, false), tlsPort)
 	a.start()
@@ -478,7 +479,7 @@ func TestPebbleTLSALPN(t *testing.T) {
 func TestChallengeFallback(t *testing.T) {
 	httpPort := pebbletest.FreePort(t)
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: httpPort})
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"tls-alpn-01", "http-01"}}, &l)
 	answered := serveHTTP01(t, a, httpPort)
 	a.start()
@@ -491,7 +492,7 @@ func TestChallengeFallback(t *testing.T) {
 }
 
 func TestCertsALPN(t *testing.T) {
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
 	certs := NewCerts(nil, a, []string{"a.fit.test"}, false)
 	alpn := func(name string) *tls.ClientHelloInfo {

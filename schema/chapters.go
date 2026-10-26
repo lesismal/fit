@@ -25,6 +25,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"routes", "Routes", "routes", "routes.md"},
 	{"upstreams", "Upstreams", "upstreams", "upstreams.md"},
 	{"services", "Services", "services", "services.md"},
+	{"log", "Log", "log", "log.md"},
 	{"access_log", "Access log", "access-log", "access_log.md"},
 	{"telemetry", "Telemetry", "telemetry", "telemetry.md"},
 	{"limits", "Limits", "limits", "limits.md"},

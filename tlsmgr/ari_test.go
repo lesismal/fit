@@ -135,7 +135,7 @@ func storeIssued(t *testing.T, a *ACME, name string) *x509.Certificate {
 func TestARIWindowBegun(t *testing.T) {
 	ca, caFile := newARICA(t)
 	ca.window(time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: ca.srv.URL + "/dir", CAFile: caFile}, &l)
 	leaf := storeIssued(t, a, "ari.fit.test")
 	a.start()
@@ -160,7 +160,7 @@ func TestARIWindowLater(t *testing.T) {
 	ca.mu.Lock()
 	ca.retryAfterSe = "1"
 	ca.mu.Unlock()
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: ca.srv.URL + "/dir", CAFile: caFile}, &l)
 	a.ariMin = 100 * time.Millisecond
 	storeIssued(t, a, "later.fit.test")
@@ -188,7 +188,7 @@ func TestARIWindowLater(t *testing.T) {
 func TestPebbleARI(t *testing.T) {
 	port := pebbletest.FreePort(t)
 	p := pebbletest.Start(t, pebbletest.Options{HTTPPort: port})
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: p.Directory, CAFile: p.CAFile, Challenges: []string{"http-01"}}, &l)
 	a.ariMax = 200 * time.Millisecond // Pebble says six hours
 	serveHTTP01(t, a, port)

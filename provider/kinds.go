@@ -6,12 +6,13 @@ import (
 	"sync"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // A Kind makes a provider of one kind, as docker, from pc, its config,
-// with name, the name it goes by, and logf to log through; and says what it
+// with name, the name it goes by, and log to log through; and says what it
 // watches, for the log.
-type Kind func(name string, pc *config.Provider, logf func(format string, args ...any)) (p Provider, watching string)
+type Kind func(name string, pc *config.Provider, log *logs.Logger) (p Provider, watching string)
 
 var (
 	kindsMu sync.RWMutex

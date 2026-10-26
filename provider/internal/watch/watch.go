@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/lesismal/fit/logs"
 )
 
 // Timings, variables for tests to shorten.
@@ -41,9 +43,9 @@ type Source interface {
 
 // Follower follows a source and sends the parts it makes.
 type Follower struct {
-	Name     string                           // the provider's
-	Interval time.Duration                    // how often the source is read whether or not it changed
-	Logf     func(format string, args ...any) // hears what the follower reports
+	Name     string        // the provider's
+	Interval time.Duration // how often the source is read whether or not it changed
+	Log      *logs.Logger  // hears what the follower reports
 	Source   Source
 
 	last     []byte          // the part sent last
@@ -65,7 +67,7 @@ func (f *Follower) Run(ctx context.Context, update func([]byte)) {
 		if read {
 			backoff = MinBackoff
 		}
-		f.Logf("provider %s: %v; trying again in %s", f.Name, err, backoff)
+		f.Log.Warnf("provider %s: %v; trying again in %s", f.Name, err, backoff)
 		t := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -163,7 +165,7 @@ func (f *Follower) refresh(ctx context.Context, update func([]byte), always bool
 	reported := make(map[string]bool, len(problems))
 	for _, msg := range problems {
 		if !f.problems[msg] {
-			f.Logf("provider %s: %s", f.Name, msg)
+			f.Log.Warnf("provider %s: %s", f.Name, msg)
 		}
 		reported[msg] = true
 	}

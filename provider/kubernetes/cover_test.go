@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // TestPageTooLarge: a page larger than maxPageBytes is refused, not
@@ -30,11 +31,11 @@ func TestPageTooLarge(t *testing.T) {
 // TestSendBeforeSynced: nothing is sent while a kind has not been listed
 // yet, even when sending is due regardless of change.
 func TestSendBeforeSynced(t *testing.T) {
-	var l logs
-	p := New("k8s", &config.KubernetesProvider{}, l.logf)
+	var l logLines
+	p := New("k8s", &config.KubernetesProvider{}, logs.Func(l.logf))
 	informers := map[string]*informer{}
 	for _, k := range watched(p.opts) {
-		informers[k.name] = newInformer(k, nil, 100, make(chan struct{}, 1), l.logf)
+		informers[k.name] = newInformer(k, nil, 100, make(chan struct{}, 1), logs.Func(l.logf))
 	}
 	sw := &statusWriter{wake: make(chan struct{}, 1)}
 	p.send(informers, func([]byte) { t.Error("a part sent before every kind was listed") }, sw, true)

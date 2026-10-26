@@ -22,6 +22,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/certtest"
+	"github.com/lesismal/fit/logs"
 )
 
 // The tests here run each store against a fake of its server, which answers
@@ -796,7 +797,7 @@ func (l *fakeLease) renew(context.Context) error   { return l.err }
 func (l *fakeLease) release(context.Context) error { l.released.Add(1); return l.err }
 
 func fakeStore(b backend, ttl time.Duration, logf func(string, ...any)) *Store {
-	return &Store{b: b, kind: "fake", prefix: "p/", ttl: ttl, timeout: 5 * time.Second, logf: logf, held: map[string]*holder{}}
+	return &Store{b: b, kind: "fake", prefix: "p/", ttl: ttl, timeout: 5 * time.Second, log: logs.Func(logf), held: map[string]*holder{}}
 }
 
 func TestStoreErrors(t *testing.T) {
@@ -808,7 +809,7 @@ func TestStoreErrors(t *testing.T) {
 	if err != nil || s.Kind() != "etcd" {
 		t.Fatalf("New: %v", err)
 	}
-	s.logf("a nil logf is replaced")
+	s.log.Warnf("a nil log writes nothing")
 	s.Close()
 
 	boom := errors.New("boom")

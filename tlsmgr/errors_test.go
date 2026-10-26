@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/ocsp"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // TestOCSPGetErrors has each step of fetching a response fail.
@@ -82,7 +83,7 @@ func TestOCSPGetErrors(t *testing.T) {
 
 func TestOCSPOddResponses(t *testing.T) {
 	r := newResponder(t)
-	var l logs
+	var l logLines
 
 	// A chain whose issuer does not parse gets no staple.
 	o := testOCSP(t, &l)
@@ -104,7 +105,7 @@ func TestOCSPOddResponses(t *testing.T) {
 
 	// A response past its half-life when fetched is fetched again before it
 	// expires.
-	late := newOCSP(l.logf)
+	late := newOCSP(logs.Func(l.logf))
 	late.now = func() time.Time { return time.Now().Add(40 * time.Minute) }
 	late.start()
 	t.Cleanup(func() { late.Close() })
@@ -124,7 +125,7 @@ func TestACMEStapleRevoked(t *testing.T) {
 	r := newResponder(t)
 	ca := newFakeCA(t)
 	ca.set(func(f *fakeCA) { f.ocsp, f.ca = r.srv.URL, r.ca })
-	var l logs
+	var l logLines
 	a := fakeACME(t, ca, &config.ACME{}, nil, &l)
 	a.UseOCSP(testOCSP(t, &l))
 	a.start()
@@ -151,7 +152,7 @@ func TestACMEStapleRevoked(t *testing.T) {
 
 func TestARIErrors(t *testing.T) {
 	ctx := context.Background()
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, &l)
 	a.http = &http.Client{Timeout: 5 * time.Second}
 	serve := func(h http.HandlerFunc) string {
@@ -208,7 +209,7 @@ func TestARIErrors(t *testing.T) {
 func TestOnDemandOdds(t *testing.T) {
 	dir, caFile := hangingCA(t)
 	ask := newAsker(t, "a.fit.test", "listed.fit.test")
-	var l logs
+	var l logLines
 	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.srv.URL,
 		Timeout: config.Duration(300 * time.Millisecond)}}, &l)
 	od := a.onDemand

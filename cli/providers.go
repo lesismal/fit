@@ -8,6 +8,7 @@ import (
 
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/provider"
 )
 
@@ -29,7 +30,7 @@ func startProviders(c *config.Config, configs *admin.Configs, stdout, stderr io.
 	for i := range c.Providers {
 		pc := &c.Providers[i]
 		name := pc.ID()
-		logf := func(format string, args ...any) { fmt.Fprintf(stderr, "fit: "+format+"\n", args...) }
+		log := logs.Named(config.LoggerProvider)
 		kind := pc.Kind()
 		if kind == "" {
 			return nil, fmt.Errorf("provider %s: no kind is set", name)
@@ -38,9 +39,9 @@ func startProviders(c *config.Config, configs *admin.Configs, stdout, stderr io.
 		if !ok {
 			return nil, fmt.Errorf("provider %s: this fit was built without the %s provider (it has %s)", name, kind, kindList())
 		}
-		p, watching := newProvider(name, pc, logf)
+		p, watching := newProvider(name, pc, log)
 		ps = append(ps, p)
-		fmt.Fprintf(stdout, "fit: provider %s %s\n", name, watching)
+		log.Infof("provider %s %s", name, watching)
 		if err := configs.AddProvider(name); err != nil {
 			return nil, err
 		}

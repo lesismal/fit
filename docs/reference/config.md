@@ -27,6 +27,7 @@ a config against it and more.
 - [Routes](#routes): [`routes[]`](#config-route), [`routes[].match`](#config-match)
 - [Upstreams](#upstreams): [`upstreams[]`](#config-upstream), [`upstreams[].sticky_cookie`](#config-stickycookie), [`upstreams[].health_check`](#config-healthcheck)
 - [Services](#services): [`services[]`](#config-service)
+- [Log](#log): [`log`](#config-log)
 - [Access log](#access-log): [`access_log`](#config-accesslog)
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
@@ -99,6 +100,7 @@ In JSON:
 | `routes` | list of [object](#config-route) |  | How requests are matched, and what handles them. |
 | `upstreams` | list of [object](#config-upstream) |  | The servers requests can be proxied to, by name. |
 | `services` | list of [object](#config-service) |  | Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one. |
+| `log` | [object](#config-log) |  | fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines of text, when left out. |
 | `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON; no access log when left out. |
 | `telemetry` | [object](#config-telemetry) |  | OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts. |
 | `limits` | [object](#config-limits) |  | Limits that apply to every listener. |
@@ -667,18 +669,46 @@ In JSON:
 | `server_names` | list of string |  | The server names (SNI) of the TLS connections the service takes from its tcp listeners, which it proxies as they are, without terminating their TLS; "*.example.com" takes the names one label below example.com. A tcp listener may then be listed by several services: a connection goes to the one whose names hold the name its ClientHello asks for, or else to the listener's service without server_names, if it has one, as one that is not TLS or asks for no name does; otherwise it is closed. The ClientHello must come within 10s. |
 | `proxy_protocol` | string: `v1`, `v2` |  | Send each upstream connection a PROXY protocol header of this version (v1, text, or v2, binary) first, naming the client's address and the one it connected to. For tcp listeners. |
 
-<a id="access-log"></a>
+<a id="log"></a>
 
-## Access log
+## Log
 
-A JSON line for each request, written to standard output, standard error or a file, through a
-bounded buffer: when the output cannot keep up, lines past the buffer are dropped and counted
-rather than holding requests up. Read when fit starts.
+fit's own log: what it says about itself, as opposed to the [access log](#access-log)'s line for
+each request. Each message comes from a logger and has a level, debug, info, warn or error; a
+message below its logger's level is not written. The loggers are:
+
+| Logger | What it says |
+| --- | --- |
+| `server` | listeners opened and closed, configs loaded and reloaded, and shutting down |
+| `admin` | the Admin API's address, and configs it loaded |
+| `tls` | certificates: obtained and renewed with ACME, OCSP responses, certificate files reloaded |
+| `provider` | what each provider watches, and what it could not read or convert |
+| `telemetry` | exports over OTLP that fail, and that work again |
+| `access_log` | lines the access log dropped because its output could not keep up |
+| `plugin` | what wasm plugins log, at the level each line asks for |
+| `fastcgi` | what FastCGI applications write to their stderr |
+| `engine` | fib, the network engine, and anything else that writes to Go's `log` and `log/slog`; fib's own startup lines are off, since fit prints its own |
+
+`level` sets every logger's level, info when left out, and `levels` sets some loggers' own. A
+change to either takes effect on reload; `output` and `format` take a restart.
+
+Without `log`, messages at info and above are written as lines of text, `fit: ` and the message:
+debug and info ones to standard output, warn and error ones to standard error, as fit has always
+written them. `output` sends them all to one place. The `json` format writes an object a line,
+with `time`, `level`, `logger` and `msg`, and the attributes the engine's messages carry. A
+message is written when it is logged: fit says little about itself, and nothing for each request.
+
+nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 
 In a .konf file:
 
 ```fit
-access_log { output /var/log/fit/access.log; flush_interval 1s }
+log {
+	level warn
+	levels { tls info; engine error }
+	output /var/log/fit/fit.log
+	format json
+}
 
 route { match { host example.com }; handler respond { body hello } }
 ```
@@ -686,9 +716,13 @@ route { match { host example.com }; handler respond { body hello } }
 In YAML:
 
 ```yaml
-access_log:
-  output: /var/log/fit/access.log
-  flush_interval: 1s
+log:
+  level: warn
+  levels:
+    tls: info
+    engine: error
+  output: /var/log/fit/fit.log
+  format: json
 routes:
   - match:
       host:
@@ -703,7 +737,66 @@ In JSON:
 
 ```json
 {
-  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s"},
+  "log": {"level": "warn", "levels": {"tls": "info", "engine": "error"}, "output": "/var/log/fit/fit.log", "format": "json"},
+  "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
+}
+```
+
+<a id="config-log"></a>
+
+### `log`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels does not name: debug, info, warn or error. info when left out. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). A change takes effect on reload. |
+| `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to. When left out, debug and info messages go to stdout and warn and error ones to stderr. |
+| `format` | string: `text`, `json` | `"text"` | text, a line "fit: " and the message, or json, a JSON object a line, with time, level, logger and msg, and the attributes of what the engine logs. text when left out. |
+
+<a id="access-log"></a>
+
+## Access log
+
+A JSON line for each request, written to standard output, standard error or a file, through a
+bounded buffer: when the output cannot keep up, lines past the buffer are dropped and counted
+rather than holding requests up. Read when fit starts, but for `level`, which a reload changes.
+
+A request's level is its response's status: info below 400, warn for 4xx and error for 5xx.
+`level` writes the requests at that level and above: `warn` writes those answered with an error,
+`error` those the server failed. A request below the level costs a comparison, and no line.
+
+nginx's `access_log` and Caddy's `log` in a site convert to it (`fit adapt`).
+
+In a .konf file:
+
+```fit
+access_log { output /var/log/fit/access.log; flush_interval 1s; level warn }
+
+route { match { host example.com }; handler respond { body hello } }
+```
+
+In YAML:
+
+```yaml
+access_log:
+  output: /var/log/fit/access.log
+  flush_interval: 1s
+  level: warn
+routes:
+  - match:
+      host:
+        - example.com
+    handler:
+      module: respond
+      params:
+        body: hello
+```
+
+In JSON:
+
+```json
+{
+  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s", "level": "warn"},
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
 ```
@@ -717,6 +810,7 @@ In JSON:
 | `output` | string | `"stdout"` | "stdout", "stderr", or the path of a file lines are appended to; "stdout" when left out. |
 | `flush_interval` | duration | `"1s"` | How long a line may wait in the buffer before it is written; 1s when left out. |
 | `buffer_bytes` | integer, 0 or more | `4194304` | How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out. |
+| `level` | string: `info`, `warn`, `error` | `"info"` | The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload. |
 
 <a id="telemetry"></a>
 

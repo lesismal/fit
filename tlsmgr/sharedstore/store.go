@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 )
 
 // MaxValueBytes bounds a value stored or loaded, as tlsmgr.MaxValueBytes
@@ -61,7 +62,7 @@ type Store struct {
 	prefix  string
 	ttl     time.Duration
 	timeout time.Duration
-	logf    func(format string, args ...any)
+	log     *logs.Logger
 
 	mu   sync.Mutex
 	held map[string]*holder
@@ -73,13 +74,10 @@ type holder struct {
 	done chan struct{}
 }
 
-// New returns the store c names. logf, which may be nil, hears what the
+// New returns the store c names. log, which may be nil, hears what the
 // store reports: locks that could not be renewed.
-func New(c *config.SharedStorage, logf func(format string, args ...any)) (*Store, error) {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	s := &Store{prefix: c.KeyPrefix(), ttl: c.TTL(), timeout: c.Timeout(), logf: logf, held: map[string]*holder{}}
+func New(c *config.SharedStorage, log *logs.Logger) (*Store, error) {
+	s := &Store{prefix: c.KeyPrefix(), ttl: c.TTL(), timeout: c.Timeout(), log: log, held: map[string]*holder{}}
 	var err error
 	switch {
 	case c.Redis != nil:
@@ -283,7 +281,7 @@ func (s *Store) keep(name string, h *holder) {
 			err := h.l.renew(ctx)
 			cancel()
 			if err != nil {
-				s.logf("%s: renewing lock %s: %v", s.kind, name, err)
+				s.log.Warnf("%s: renewing lock %s: %v", s.kind, name, err)
 			}
 		}
 	}

@@ -28,6 +28,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/tlsmgr/sharedstore"
 )
 
@@ -70,7 +71,7 @@ type ACME struct {
 	http      *http.Client
 	timeout   time.Duration
 	workers   int
-	logf      func(format string, args ...any)
+	log       *logs.Logger
 	// onDemand, when the config has acme.on_demand, takes on names during
 	// handshakes; see OnDemand.
 	onDemand *onDemand
@@ -135,10 +136,10 @@ type managed struct {
 
 // NewACME returns an ACME that obtains certificates as c says, or with the
 // defaults when c is nil, and keeps them in storage, or in c's storage
-// directory when storage is nil. logf reports what it does; it may be nil.
+// directory when storage is nil. log reports what it does; it may be nil.
 // It manages no names until Manage is called; Close stops it.
-func NewACME(c *config.ACME, storage Storage, logf func(format string, args ...any)) (*ACME, error) {
-	a, err := newACME(c, storage, logf)
+func NewACME(c *config.ACME, storage Storage, log *logs.Logger) (*ACME, error) {
+	a, err := newACME(c, storage, log)
 	if err != nil {
 		return nil, err
 	}
@@ -148,10 +149,10 @@ func NewACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 
 // newACME is NewACME without starting, for tests to change what they change
 // first.
-func newACME(c *config.ACME, storage Storage, logf func(format string, args ...any)) (*ACME, error) {
+func newACME(c *config.ACME, storage Storage, log *logs.Logger) (*ACME, error) {
 	var closer io.Closer
 	if storage == nil && c != nil && c.SharedStorage != nil {
-		st, err := sharedstore.New(c.SharedStorage, logf)
+		st, err := sharedstore.New(c.SharedStorage, log)
 		if err != nil {
 			return nil, c.At.Field("shared_storage").Errorf("%v", err)
 		}
@@ -178,9 +179,6 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 		}
 		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 	}
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
 	a := &ACME{
 		storage:   storage,
 		shared:    isShared(storage),
@@ -190,7 +188,7 @@ func newACME(c *config.ACME, storage Storage, logf func(format string, args ...a
 		http:      &http.Client{Transport: transport, Timeout: c.HTTPTimeout()},
 		timeout:   c.OrderTimeout(),
 		workers:   c.Concurrency(),
-		logf:      logf,
+		log:       log,
 		now:       time.Now,
 		retryBase: defaultRetryBase,
 		retryMax:  defaultRetryMax,
@@ -355,7 +353,7 @@ func (a *ACME) dropIdle(now time.Time) time.Time {
 		delete(a.names, n)
 		a.onDemand.drop(n)
 		dropped = true
-		a.logf("acme: %s: on demand: no handshake for %s; dropped", n, a.onDemand.idle)
+		a.log.Infof("acme: %s: on demand: no handshake for %s; dropped", n, a.onDemand.idle)
 	}
 	if dropped {
 		a.pruneCerts()
@@ -547,12 +545,12 @@ func (a *ACME) run(m *managed) {
 			// next handshake for it may take it on again.
 			delete(a.names, m.name)
 			a.onDemand.drop(m.name)
-			a.logf("acme: %s: %v; dropped", m.name, err)
+			a.log.Errorf("acme: %s: %v; dropped", m.name, err)
 		} else if a.ctx.Err() == nil {
 			m.failures++
 			wait := a.backoff(m.failures)
 			m.due = a.now().Add(wait)
-			a.logf("acme: %s: %v; trying again in %s", m.name, err, wait.Round(time.Second))
+			a.log.Warnf("acme: %s: %v; trying again in %s", m.name, err, wait.Round(time.Second))
 		}
 	}
 	// A handshake waiting for the name hears of it, whether or not the name
@@ -645,9 +643,9 @@ func (a *ACME) ensure(ctx context.Context, name string, attempt int, revoked *bi
 	}
 	if err := a.storage.Store(ctx, a.certKey(name), data); err != nil {
 		// Served all the same; the next renewal stores it again.
-		a.logf("acme: %s: storing the certificate: %v", name, err)
+		a.log.Errorf("acme: %s: storing the certificate: %v", name, err)
 	}
-	a.logf("acme: %s: obtained a certificate valid until %s", name, cert.Leaf.NotAfter.UTC().Format(time.RFC3339))
+	a.log.Infof("acme: %s: obtained a certificate valid until %s", name, cert.Leaf.NotAfter.UTC().Format(time.RFC3339))
 	return cert, nil
 }
 
@@ -657,7 +655,7 @@ func (a *ACME) unlock(name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := a.storage.Unlock(ctx, name); err != nil {
-		a.logf("acme: giving back the storage's lock %s: %v", name, err)
+		a.log.Warnf("acme: giving back the storage's lock %s: %v", name, err)
 	}
 }
 
@@ -667,13 +665,13 @@ func (a *ACME) load(ctx context.Context, name string) *tls.Certificate {
 	data, err := a.storage.Load(ctx, a.certKey(name))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			a.logf("acme: %s: loading the certificate: %v", name, err)
+			a.log.Warnf("acme: %s: loading the certificate: %v", name, err)
 		}
 		return nil
 	}
 	cert, err := tls.X509KeyPair(data, data)
 	if err != nil || cert.Leaf == nil || cert.Leaf.VerifyHostname(name) != nil {
-		a.logf("acme: %s: the stored certificate cannot be used; obtaining another", name)
+		a.log.Warnf("acme: %s: the stored certificate cannot be used; obtaining another", name)
 		return nil
 	}
 	return &cert

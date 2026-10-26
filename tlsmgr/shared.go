@@ -46,7 +46,7 @@ func (a *ACME) alpnChallengeKey(name string) string {
 // failure is reported, not returned: this instance can still answer it.
 func (a *ACME) shareChallenge(ctx context.Context, key string, value []byte) {
 	if err := a.storage.Store(ctx, key, value); err != nil {
-		a.logf("acme: keeping the challenge's answer in the shared storage: %v", err)
+		a.log.Warnf("acme: keeping the challenge's answer in the shared storage: %v", err)
 	}
 }
 
@@ -56,7 +56,7 @@ func (a *ACME) unshareChallenge(key string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := a.storage.Delete(ctx, key); err != nil {
-		a.logf("acme: removing the challenge's answer from the shared storage: %v", err)
+		a.log.Warnf("acme: removing the challenge's answer from the shared storage: %v", err)
 	}
 }
 
@@ -89,7 +89,7 @@ func (a *ACME) LookupHTTPChallenge(token string, done func(answer string, ok boo
 		}()
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				a.logf("acme: looking up a challenge in the shared storage: %v", err)
+				a.log.Warnf("acme: looking up a challenge in the shared storage: %v", err)
 			}
 			done("", false)
 			return
@@ -113,13 +113,13 @@ func (a *ACME) sharedALPNChallenge(name string) *tls.Certificate {
 	data, err := a.storage.Load(ctx, a.alpnChallengeKey(name))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			a.logf("acme: looking up a challenge in the shared storage: %v", err)
+			a.log.Warnf("acme: looking up a challenge in the shared storage: %v", err)
 		}
 		return nil
 	}
 	cert, err := tls.X509KeyPair(data, data)
 	if err != nil {
-		a.logf("acme: %s: the shared challenge's certificate: %v", name, err)
+		a.log.Warnf("acme: %s: the shared challenge's certificate: %v", name, err)
 		return nil
 	}
 	return &cert
