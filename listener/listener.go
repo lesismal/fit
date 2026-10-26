@@ -144,14 +144,8 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	// counted in Stats.ConnsRefused.
 	cfg.MaxConns = g.MaxConns
 	cfg.MaxWriteQueueBytes = g.MaxWriteQueueBytes
-	// fib sizes the per-connection watermark from the read buffer and the
-	// machine. An explicit write_watermark still wins.
-	sizing := fib.DefaultSizing(cfg.ReadBufferSize, cfg.MaxPendingBytes, cfg.MaxConns)
-	if g.Engine == nil || g.Engine.WriteWatermark <= 0 {
-		cfg.WriteBufferHighWatermark = sizing.WriteWatermark
-	}
 	if cfg.MaxWriteQueueBytes <= 0 {
-		cfg.MaxWriteQueueBytes = sizing.MaxWriteQueueBytes
+		cfg.MaxWriteQueueBytes = fib.DefaultSizing(cfg.ReadBufferSize, cfg.MaxPendingBytes, cfg.MaxConns).MaxWriteQueueBytes
 	}
 	engine, err := fib.New(cfg)
 	if err != nil {

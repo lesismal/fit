@@ -24,6 +24,9 @@ func Config(name string, e *config.Engine) fib.Config {
 	cfg := fib.DefaultConfig()
 	cfg.Name = name
 	cfg.ReadBufferSize = ReadBufferSize
+	// Zero lets fib size the watermark from the read buffer, the budget and
+	// max_conns when the engine is made; a write_watermark set below wins.
+	cfg.WriteBufferHighWatermark = 0
 	if e == nil {
 		return cfg
 	}

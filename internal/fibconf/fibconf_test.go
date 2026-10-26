@@ -11,6 +11,9 @@ import (
 func TestDefaults(t *testing.T) {
 	want := fib.DefaultConfig()
 	want.ReadBufferSize = ReadBufferSize
+	// The watermark is left at zero so the engine sizes it from the read
+	// buffer, the budget and max_conns.
+	want.WriteBufferHighWatermark = 0
 	for _, e := range []*config.Engine{nil, {}} {
 		got := Config("fit", e)
 		if got.Name != "fit" {
