@@ -27,6 +27,9 @@ func Config(name string, e *config.Engine) fib.Config {
 	// Zero lets fib size the watermark from the read buffer, the budget and
 	// max_conns when the engine is made; a write_watermark set below wins.
 	cfg.WriteBufferHighWatermark = 0
+	// fit prints its own startup configuration, so fib's per-parameter list
+	// would only repeat it, twice over.
+	cfg.LogSettings = false
 	if e == nil {
 		return cfg
 	}
