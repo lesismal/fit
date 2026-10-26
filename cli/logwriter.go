@@ -11,8 +11,7 @@ import (
 
 // logWriter is an io.Writer that writes each line written to it as a
 // message of log's at level, for what serve prints with fmt once the log is
-// open: as text, the line as it is, and as JSON without its own "fit: " or
-// "fit run: ".
+// open, without its own "fit: " or "fit run: ".
 type logWriter struct {
 	log   *logs.Logger
 	level slog.Level
@@ -26,7 +25,7 @@ func (w logWriter) Write(p []byte) (int, error) {
 		} else if m, ok := strings.CutPrefix(msg, "fit: "); ok {
 			msg = m
 		}
-		w.log.Line(w.level, string(line), msg)
+		w.log.Msg(w.level, msg)
 	}
 	return len(p), nil
 }

@@ -129,6 +129,16 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "format": {
+          "default": "json",
+          "description": "How a request's line is written, with the same fields whichever: json, a JSON object; text, time, level, msg and the fields as key=value (logfmt); or line, the time and level, then the fields as key=value, as fit's own log writes lines. A request's level is its status's, as level says. json when left out. A change takes a restart.",
+          "enum": [
+            "json",
+            "text",
+            "line"
+          ],
+          "type": "string"
+        },
         "level": {
           "default": "info",
           "description": "The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload.",
@@ -886,9 +896,10 @@
       "additionalProperties": false,
       "properties": {
         "format": {
-          "default": "text",
-          "description": "text, a line \"fit: \" and the message, or json, a JSON object a line, with time, level, logger and msg, and the attributes of what the engine logs. text when left out.",
+          "default": "line",
+          "description": "How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart.",
           "enum": [
+            "line",
             "text",
             "json"
           ],
@@ -896,7 +907,7 @@
         },
         "level": {
           "default": "info",
-          "description": "The least level written, of every logger levels does not name: debug, info, warn or error. info when left out. A change takes effect on reload.",
+          "description": "The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload.",
           "enum": [
             "debug",
             "info",
@@ -909,11 +920,47 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "type": "object"
+        },
+        "loggers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/config.Logger"
+          },
+          "description": "Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json.",
           "type": "object"
         },
         "output": {
-          "description": "\"stdout\", \"stderr\", or the path of a file messages are appended to. When left out, debug and info messages go to stdout and warn and error ones to stderr.",
+          "description": "\"stdout\", \"stderr\", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.Logger": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "How the logger's messages are written: line, text or json, as the log's format. A change takes a restart.",
+          "enum": [
+            "line",
+            "text",
+            "json"
+          ],
+          "type": "string"
+        },
+        "level": {
+          "description": "The least level the logger writes. A change takes effect on reload.",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "type": "string"
+        },
+        "output": {
+          "description": "\"stdout\", \"stderr\", or the path of a file the logger's messages are appended to. A change takes a restart.",
           "type": "string"
         }
       },
@@ -2883,7 +2930,7 @@
   "properties": {
     "access_log": {
       "$ref": "#/$defs/config.AccessLog",
-      "description": "Where a line is written for each request, as JSON; no access log when left out."
+      "description": "Where a line is written for each request, as JSON or, as its format says, text or line; no access log when left out."
     },
     "acme": {
       "$ref": "#/$defs/config.ACME",
@@ -2914,7 +2961,7 @@
     },
     "log": {
       "$ref": "#/$defs/config.Log",
-      "description": "fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines of text, when left out."
+      "description": "fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written, and the format and output it writes in, as fib writes its own. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines, when left out."
     },
     "metrics": {
       "$ref": "#/$defs/config.Metrics",

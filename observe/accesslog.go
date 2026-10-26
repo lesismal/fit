@@ -13,6 +13,17 @@
 // request that was proxied, and route for one a route took. A request whose
 // response is never written, because its connection went first, has no line.
 //
+// The text and line formats write the same fields, in the same order, as
+// key=value, a value quoted when it has to be, as fib's package log writes
+// its own, with the request's level, its status's (info, warn for a 4xx,
+// error for a 5xx):
+//
+//	time=2026-10-19T07:39:56.123Z level=INFO msg=access listener=web route=api client=192.0.2.1 ...
+//	2026-10-19 15:39:56.123 INFO  access listener=web route=api client=192.0.2.1 ...
+//
+// line's time is local, as fib's line format writes it; json's and text's
+// are UTC.
+//
 // A line is formatted on the goroutine that finished the response and put
 // in a buffer; a goroutine of the log's own writes the buffer out, so a slow
 // disk or a blocked pipe never holds up a fib worker. When the buffer is full,
@@ -94,6 +105,10 @@ type AccessLog struct {
 	// minStatus is the least status of the responses whose requests are
 	// written, by the config's level; a reload may change it.
 	minStatus atomic.Int32
+	// format is how lines are written: formatJSON, formatText or
+	// formatLine. localStamp is stamp in local time, for formatLine.
+	format     int
+	localStamp atomic.Pointer[localStamp]
 }
 
 // shard is a part of the buffer, with a lock of its own. Shards are padded
@@ -112,9 +127,27 @@ const (
 	maxShards     = 64
 )
 
+// The formats of the lines.
+const (
+	formatJSON = iota
+	formatText
+	formatLine
+)
+
+func parseFormat(s string) int {
+	switch s {
+	case config.FormatText:
+		return formatText
+	case config.FormatLine:
+		return formatLine
+	}
+	return formatJSON
+}
+
 // NewAccessLog opens the log c describes and starts its writer.
 func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
-	l := &AccessLog{interval: c.FlushInterval.Std(), maxBytes: c.BufferBytes, log: logs.Named(config.LoggerAccessLog)}
+	l := &AccessLog{interval: c.FlushInterval.Std(), maxBytes: c.BufferBytes, format: parseFormat(c.Format),
+		log: logs.Named(config.LoggerAccessLog)}
 	l.SetLevel(c)
 	switch c.Output {
 	case "", "stdout":
@@ -132,9 +165,17 @@ func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
 	return l, nil
 }
 
-// NewAccessLogTo returns a log writing to w, for tests and embedders.
+// NewAccessLogTo returns a log writing JSON lines to w, for tests and
+// embedders.
 func NewAccessLogTo(w io.Writer, interval time.Duration, maxBytes int) *AccessLog {
-	l := &AccessLog{out: w, interval: interval, maxBytes: maxBytes, log: logs.Named(config.LoggerAccessLog)}
+	return NewAccessLogFormatTo(w, config.FormatJSON, interval, maxBytes)
+}
+
+// NewAccessLogFormatTo returns a log writing lines of format, json, text or
+// line, to w.
+func NewAccessLogFormatTo(w io.Writer, format string, interval time.Duration, maxBytes int) *AccessLog {
+	l := &AccessLog{out: w, interval: interval, maxBytes: maxBytes, format: parseFormat(format),
+		log: logs.Named(config.LoggerAccessLog)}
 	l.start()
 	return l
 }
@@ -357,9 +398,14 @@ func (l *AccessLog) Log(e *Entry, r *stdhttp.Request, status int, size int64) {
 	}
 	end := time.Now()
 	var stack [512]byte
-	b := append(stack[:0], `{"time":"`...)
-	b = l.appendTime(b, end)
-	line := appendFields(b, e, r, status, size, end)
+	var line []byte
+	if l.format == formatJSON {
+		b := append(stack[:0], `{"time":"`...)
+		b = l.appendTime(b, end)
+		line = appendFields(b, e, r, status, size, end)
+	} else {
+		line = l.appendTextLine(stack[:0], e, r, status, size, end)
+	}
 
 	sh := &l.shards[0]
 	if len(l.shards) > 1 {
@@ -440,6 +486,105 @@ func appendFields(b []byte, e *Entry, r *stdhttp.Request, status int, size int64
 	return append(b, "}\n"...)
 }
 
+// appendTextLine appends a request's line of the text or line format to b.
+func (l *AccessLog) appendTextLine(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, end time.Time) []byte {
+	level := statusLevel(status)
+	if l.format == formatText {
+		b = append(b, "time="...)
+		b = l.appendTime(b, end)
+		b = append(b, " level="...)
+		b = append(b, level...)
+		b = append(b, " msg=access"...)
+	} else {
+		b = l.appendLocalTime(b, end)
+		b = append(b, ' ')
+		b = append(b, level...)
+		b = append(b, "  "[:6-len(level)]...) // padded to five, then a space
+		b = append(b, "access"...)
+	}
+	return appendTextFields(b, e, r, status, size, end)
+}
+
+// statusLevel is the level of a request answered with status, as fib's
+// package log writes levels.
+func statusLevel(status int) string {
+	switch {
+	case status >= 500:
+		return "ERROR"
+	case status >= 400:
+		return "WARN"
+	}
+	return "INFO"
+}
+
+// appendTextFields appends what follows the message in a request's line of
+// the text and line formats: the fields appendFields writes, as key=value.
+func appendTextFields(b []byte, e *Entry, r *stdhttp.Request, status int, size int64, end time.Time) []byte {
+	b = append(b, " listener="...)
+	b = appendLogfmt(b, e.Listener)
+	if e.Route != "" {
+		b = append(b, " route="...)
+		b = appendLogfmt(b, e.Route)
+	}
+	b = append(b, " client="...)
+	b = appendLogfmt(b, clientIP(r.RemoteAddr))
+	if e.User != "" {
+		b = append(b, " user="...)
+		b = appendLogfmt(b, e.User)
+	}
+	b = append(b, " proto="...)
+	b = appendLogfmt(b, r.Proto)
+	b = append(b, " method="...)
+	b = appendLogfmt(b, r.Method)
+	b = append(b, " host="...)
+	b = appendLogfmt(b, r.Host)
+	b = append(b, " uri="...)
+	b = appendLogfmt(b, r.RequestURI)
+	b = append(b, " status="...)
+	b = strconv.AppendInt(b, int64(status), 10)
+	b = append(b, " bytes_in="...)
+	b = strconv.AppendInt(b, e.BytesIn, 10)
+	b = append(b, " bytes_out="...)
+	b = strconv.AppendInt(b, size, 10)
+	b = append(b, " duration="...)
+	b = appendSeconds(b, end.Sub(e.Start))
+	if e.Upstream != "" {
+		b = append(b, " upstream="...)
+		b = appendLogfmt(b, e.Upstream)
+		b = append(b, " upstream_duration="...)
+		b = appendSeconds(b, e.UpstreamDuration)
+	}
+	b = append(b, " user_agent="...)
+	b = appendLogfmt(b, headerValue(r.Header, "User-Agent"))
+	b = append(b, " referer="...)
+	b = appendLogfmt(b, headerValue(r.Header, "Referer"))
+	return append(b, '\n')
+}
+
+// bare says which bytes a logfmt value may have unquoted: printable ASCII
+// but the space, the quote and the equals sign.
+var bare = func() (t [256]bool) {
+	for c := 0x21; c < 0x7f; c++ {
+		t[c] = c != '"' && c != '='
+	}
+	return t
+}()
+
+// appendLogfmt appends s as a logfmt value: as it is, or quoted as Go quotes
+// a string when it is empty or has a byte that is not bare, so that no
+// control character, nor a byte that is not valid UTF-8, is written as it is.
+func appendLogfmt(b []byte, s string) []byte {
+	for i := 0; i < len(s); i++ {
+		if !bare[s[i]] {
+			return strconv.AppendQuote(b, s)
+		}
+	}
+	if s == "" {
+		return append(b, `""`...)
+	}
+	return append(b, s...)
+}
+
 // headerValue is h.Get(key) for a key already in canonical form, as the
 // keys of a parsed request's header are, without canonicalizing it again.
 func headerValue(h stdhttp.Header, key string) string {
@@ -493,6 +638,28 @@ func (l *AccessLog) appendTime(b []byte, t time.Time) []byte {
 	ms := t.Nanosecond() / 1e6
 	b = append(b, s.text[:]...)
 	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
+}
+
+// localStamp is a second, and its local time formatted up to its fraction:
+// "2006-01-02 15:04:05.".
+type localStamp struct {
+	sec  int64
+	text []byte
+}
+
+// appendLocalTime appends t in local time as "2006-01-02 15:04:05.000", as
+// fib's line format writes it, the date and time of day formatted once a
+// second.
+func (l *AccessLog) appendLocalTime(b []byte, t time.Time) []byte {
+	sec := t.Unix()
+	s := l.localStamp.Load()
+	if s == nil || s.sec != sec {
+		s = &localStamp{sec: sec, text: t.Local().AppendFormat(nil, "2006-01-02 15:04:05.")}
+		l.localStamp.Store(s)
+	}
+	ms := t.Nanosecond() / 1e6
+	b = append(b, s.text...)
+	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10))
 }
 
 // clientIP is the host part of a RemoteAddr.

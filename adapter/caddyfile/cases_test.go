@@ -270,10 +270,10 @@ d.example.com {
 	}
 	respond 200
 }
-`, []string{"format: skipped: fit writes access log lines as JSON", "output file: rolling is not converted",
+`, []string{"output file: rolling is not converted",
 			"line 10: log: fit has one access log, written to stderr", "output: skipped: fit writes to stdout, stderr or a file"},
 			func(t *testing.T, out outConfig) {
-				if out.AccessLog.Output != "stderr" {
+				if out.AccessLog.Output != "stderr" || out.AccessLog.Format != "line" {
 					t.Errorf("%+v", out.AccessLog)
 				}
 			}},

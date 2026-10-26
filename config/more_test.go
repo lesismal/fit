@@ -231,12 +231,32 @@ func TestLogConfig(t *testing.T) {
 	if c.AccessLog.MinStatus() != 500 || (&AccessLog{Level: "warn"}).MinStatus() != 400 || (&AccessLog{}).MinStatus() != 0 {
 		t.Errorf("access log's least status")
 	}
+
+	// loggers' own settings go over the log's.
+	c, err = Load([]byte(`{"log": {"level": "warn", "output": "stdout", "format": "json", "loggers": {"engine": {"level": "error", "output": "/tmp/e.log", "format": "line"}, "tls": {"format": "text"}}}, "access_log": {"format": "line"}, ` + routes + `}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := c.Log
+	if l.LevelOf(LoggerEngine) != LevelError || l.OutputOf(LoggerEngine) != "/tmp/e.log" || l.FormatOf(LoggerEngine) != FormatLine ||
+		l.LevelOf(LoggerTLS) != LevelWarn || l.OutputOf(LoggerTLS) != "stdout" || l.FormatOf(LoggerTLS) != FormatText ||
+		l.FormatOf(LoggerServer) != FormatJSON || c.AccessLog.Format != FormatLine {
+		t.Errorf("loggers of %+v", l)
+	}
+	if (*Log)(nil).OutputOf(LoggerTLS) != "" || (*Log)(nil).FormatOf(LoggerTLS) != FormatLine || (&Log{}).FormatOf(LoggerTLS) != FormatLine {
+		t.Error("the defaults of no log")
+	}
 	for doc, want := range map[string]string{
-		`{"log": {"levels": {"http": "info"}}, ` + routes + `}`: `log.levels.http: no logger is named "http"`,
-		`{"log": {"levels": {"tls": "loud"}}, ` + routes + `}`:  `log.levels.tls: "loud" is not a level`,
-		`{"log": {"level": "trace"}, ` + routes + `}`:           `log.level`,
-		`{"log": {"format": "xml"}, ` + routes + `}`:            `log.format`,
-		`{"access_log": {"level": "debug"}, ` + routes + `}`:    `access_log.level`,
+		`{"log": {"loggers": {"http": {"level": "info"}}}, ` + routes + `}`:                           `log.loggers.http: no logger is named "http"`,
+		`{"log": {"levels": {"tls": "info"}, "loggers": {"tls": {"level": "warn"}}}, ` + routes + `}`: `log.loggers.tls.level: logger tls has a level in levels too`,
+		`{"log": {"loggers": {"tls": {"format": "xml"}}}, ` + routes + `}`:                            `log.loggers["tls"].format`,
+		`{"log": {"loggers": {"tls": {"level": "loud"}}}, ` + routes + `}`:                            `log.loggers["tls"].level`,
+		`{"access_log": {"format": "xml"}, ` + routes + `}`:                                           `access_log.format`,
+		`{"log": {"levels": {"http": "info"}}, ` + routes + `}`:                                       `log.levels.http: no logger is named "http"`,
+		`{"log": {"levels": {"tls": "loud"}}, ` + routes + `}`:                                        `log.levels.tls: "loud" is not a level`,
+		`{"log": {"level": "trace"}, ` + routes + `}`:                                                 `log.level`,
+		`{"log": {"format": "xml"}, ` + routes + `}`:                                                  `log.format`,
+		`{"access_log": {"level": "debug"}, ` + routes + `}`:                                          `access_log.level`,
 	} {
 		_, err := Load([]byte(doc))
 		if err == nil || !strings.Contains(err.Error(), want) {

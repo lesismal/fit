@@ -52,7 +52,7 @@ fit validate -c fit.konf
 | 带 `fastcgi_param` 的 `fastcgi_pass` | `fastcgi` 处理器，PHP 的参数已为你设好 |
 | `stream { server { listen 5432; proxy_pass db; } }` | 一个 `tcp`（或 `udp`）listener，以及指向它和某个 upstream 的 service |
 | `ssl_preread` 与 `map $ssl_preread_server_name` | service 的 `server_names`，按 SNI 透传 TLS |
-| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log` 的 `output`、`buffer_bytes` 和 `flush_interval`；fit 每行写 JSON，因此 `log_format`、指定的格式和 `if=` 不转换，且只有一个访问日志，记录每个请求 |
+| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log` 的 `output`、`buffer_bytes` 和 `flush_interval`；fit 的每行是 JSON、text 或 line，字段是 fit 自己的，因此 `log_format`、指定的格式和 `if=` 不转换，且只有一个访问日志，记录每个请求 |
 | `error_log /var/log/error.log warn;` | `log` 的 `output` 和 `level`：`notice` 对应 `info`，`crit`、`alert`、`emerg` 对应 `error`；不写级别时与 nginx 一样为 `error`。整个进程只有一个日志，可用 `log.levels` 按 logger 分别设级别 |
 | `nginx -s reload` | SIGHUP、`fit run -watch`，或 Admin API 的 `POST /load` |
 

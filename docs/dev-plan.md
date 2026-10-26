@@ -207,6 +207,7 @@ Status: `todo`, `doing` or `done`.
 | I80 | fit's own .konf format; configs in several files | I79 | done |
 | I81 | WASM III: Proxy-Wasm's response callbacks | I72 | done |
 | I82 | fit's own log: loggers and levels; nginx's and Caddy's logs converted | I21, I79 | done |
+| I83 | fit's log in fib's formats; loggers of their own; the access log's formats | I82 | done |
 
 ## M0, foundations
 
@@ -1074,6 +1075,21 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   directive; the access log's micro-benchmark shows no cost.
 - **Touches**: `logs` (new), `config`, `cli`, `admin`, `runtime`, `observe`, `tlsmgr`, `provider`,
   `plugin/wasm`, `handler/fastcgi`, `adapter/nginx`, `adapter/caddyfile`, `schema`, `docs`.
+
+### I83 fit's log in fib's formats; loggers of their own; the access log's formats
+
+- **Do**: write fit's log with fib's package `log` (fib's `log/log.go`), whose handlers write
+  fib's own lines, so that fit and fib look alike: `log.format` is `line` (the default), `text`
+  (logfmt) or `json`, and fib's messages go to the `engine` logger through `fiblog.SetLogger`.
+  `log.loggers` gives a logger a `level`, an `output` and a `format` of its own over the log's.
+  `access_log.format` writes a request's line as `json` (the default, fields unchanged), `text` or
+  `line`, with the same fields. Caddy's `format console` converts to `line`.
+- **Done when**: each logger writes in its own format to its own output; the engine's messages,
+  fib's among them, are the engine logger's; the access log's three formats carry the same fields,
+  quoting what a client sends; a reload warns when a logger's output or format changed; the JSON
+  access log's benchmarks show no cost.
+- **Touches**: `logs`, `config`, `cli`, `admin`, `observe`, `adapter/caddyfile`, `adapter/nginx`,
+  `schema`, `test/e2e`, `docs`; fib's `log` (fib `185658f1`, `33a039f1`).
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.

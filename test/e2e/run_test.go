@@ -68,6 +68,15 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
+// logLine is a line of fit's log in its default format, line: the time, the
+// level, the message and its logger.
+var logLine = regexp.MustCompile(`^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} (?:DEBUG|INFO|WARN|ERROR) +(.*?) logger=[a-z_]+`)
+
+// plain turns a line of fit's log into "fit: " and its message, with what
+// follows the logger's name, so that a test can look for what fit says
+// whatever time and level it says it at.
+func plain(line string) string { return logLine.ReplaceAllString(line, "fit: $1") }
+
 var listening = regexp.MustCompile(`^fit: listener "([^"]+)" on (\S+) `)
 
 // adminListening is the line fit prints once its Admin API listens.
@@ -116,7 +125,7 @@ func startFitAt(t *testing.T, cfg string, want int, args ...string) (*fit, map[s
 	go func() {
 		s := bufio.NewScanner(stdout)
 		for s.Scan() {
-			f.lines <- s.Text()
+			f.lines <- plain(s.Text())
 		}
 		close(f.lines)
 		f.done <- cmd.Wait()

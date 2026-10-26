@@ -19,8 +19,8 @@ fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`
 | [Routes](config.md#routes) | 路由：匹配条件、中间件和处理器；请求如何选中一条路由（优先级、host 和 path 的具体程度、匹配器数量、书写顺序）；`expr` 表达式 | [`routes[]`](config.md#config-route)、[`match`](config.md#config-match) |
 | [Upstreams](config.md#upstreams) | 被代理的服务器：九种负载均衡策略、粘性 cookie、连接数和排队上限、各类超时、被动和主动健康检查、h2c 和 TLS | [`upstreams[]`](config.md#config-upstream)、[`sticky_cookie`](config.md#config-stickycookie)、[`health_check`](config.md#config-healthcheck) |
 | [Services](config.md#services) | 四层代理：TCP 连接和 UDP 数据报，按 SNI 透传 TLS，向 upstream 发送 PROXY 协议 | [`services[]`](config.md#config-service) |
-| [Log](config.md#log) | fit 自身的日志：按 logger（server、tls、provider、engine 等）分类，每个 logger 可设最低级别；输出到 stdout、stderr 或文件，文本或 JSON | [`log`](config.md#config-log) |
-| [Access log](config.md#access-log) | 每个请求一行 JSON 的访问日志，带有界缓冲；可按状态码对应的级别只记录 4xx/5xx | [`access_log`](config.md#config-accesslog) |
+| [Log](config.md#log) | fit 自身的日志：按 logger（server、tls、provider、engine 等）分类，每个 logger 可单独设最低级别、输出（stdout、stderr 或文件）和格式（与 fib 相同的 line、text、json） | [`log`](config.md#config-log) |
+| [Access log](config.md#access-log) | 每个请求一行的访问日志，格式为 JSON（默认）、text（logfmt）或 line，带有界缓冲；可按状态码对应的级别只记录 4xx/5xx | [`access_log`](config.md#config-accesslog) |
 | [Telemetry](config.md#telemetry) | OpenTelemetry：链路追踪和指标，经 OTLP/HTTP 导出 | [`telemetry`](config.md#config-telemetry)、[`traces`](config.md#config-tracesexport)、[`metrics`](config.md#config-metricsexport) |
 | [Limits](config.md#limits) | 所有 listener 的上限：连接数、头部和请求体大小、等待慢客户端的响应字节（默认为机器内存的一半）、写停顿超时 | [`limits`](config.md#config-limits) |
 | [Engine](config.md#engine) | fib 网络引擎的设置：event loop 数量、worker 数、任务队列、读缓冲、单连接背压水位、backlog；不写的取 fib 的默认值 | [`engine`](config.md#config-engine) |

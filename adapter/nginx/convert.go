@@ -1311,7 +1311,7 @@ func (c *converter) accessLog(d *directive, where string) {
 		key, value, _ := strings.Cut(a, "=")
 		switch {
 		case i == 0 && !strings.Contains(a, "="):
-			c.warn(d.line, "access_log: the format %s is not converted: fit writes its lines as JSON, with fields of its own", a)
+			c.warn(d.line, "access_log: the format %s is not converted: fit writes its lines as JSON, text or line, with fields of its own", a)
 		case key == "buffer":
 			if n, ok := size(value); ok && n > 0 {
 				l.BufferBytes = n

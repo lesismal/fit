@@ -27,7 +27,7 @@ a config against it and more.
 - [Routes](#routes): [`routes[]`](#config-route), [`routes[].match`](#config-match)
 - [Upstreams](#upstreams): [`upstreams[]`](#config-upstream), [`upstreams[].sticky_cookie`](#config-stickycookie), [`upstreams[].health_check`](#config-healthcheck)
 - [Services](#services): [`services[]`](#config-service)
-- [Log](#log): [`log`](#config-log)
+- [Log](#log): [`log`](#config-log), [`log.loggers.*`](#config-logger)
 - [Access log](#access-log): [`access_log`](#config-accesslog)
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
@@ -100,8 +100,8 @@ In JSON:
 | `routes` | list of [object](#config-route) |  | How requests are matched, and what handles them. |
 | `upstreams` | list of [object](#config-upstream) |  | The servers requests can be proxied to, by name. |
 | `services` | list of [object](#config-service) |  | Layer 4 services: the upstreams the connections of tcp listeners are proxied to, byte for byte, and the datagrams of udp listeners, one for one. |
-| `log` | [object](#config-log) |  | fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines of text, when left out. |
-| `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON; no access log when left out. |
+| `log` | [object](#config-log) |  | fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written, and the format and output it writes in, as fib writes its own. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines, when left out. |
+| `access_log` | [object](#config-accesslog) |  | Where a line is written for each request, as JSON or, as its format says, text or line; no access log when left out. |
 | `telemetry` | [object](#config-telemetry) |  | OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics, exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a change takes effect when fit restarts. |
 | `limits` | [object](#config-limits) |  | Limits that apply to every listener. |
 | `engine` | [object](#config-engine) |  | How fib, the network engine fit serves and dials on, is set up: its event loops, workers and buffers. fib's own defaults for what is left out, and for all of it when engine is. Read when fit starts: a change takes effect when fit restarts. |
@@ -690,12 +690,25 @@ message below its logger's level is not written. The loggers are:
 | `engine` | fib, the network engine, and anything else that writes to Go's `log` and `log/slog`; fib's own startup lines are off, since fit prints its own |
 
 `level` sets every logger's level, info when left out, and `levels` sets some loggers' own. A
-change to either takes effect on reload; `output` and `format` take a restart.
+change to either takes effect on reload; `output` and `format` take a restart. `loggers` gives some
+loggers settings of their own, over the log's: a `level`, an `output` and a `format`, so that the
+engine's messages, say, go to a file of their own as JSON while the rest are lines on the terminal.
 
-Without `log`, messages at info and above are written as lines of text, `fit: ` and the message:
-debug and info ones to standard output, warn and error ones to standard error. `output` sends them all to one place. The `json` format writes an object a line,
-with `time`, `level`, `logger` and `msg`, and the attributes the engine's messages carry. A
-message is written when it is logged: fit says little about itself, and nothing for each request.
+The formats are fib's, written by fib's own `log` package, so that fit's lines and fib's look alike;
+each message carries its logger's name as `logger`:
+
+```text
+line  2026-10-27 10:00:00.000 INFO  listening on :443 logger=server
+text  time=2026-10-27T10:00:00.000+08:00 level=INFO msg="listening on :443" logger=server
+json  {"time":"2026-10-27T10:00:00.000+08:00","level":"INFO","msg":"listening on :443","logger":"server"}
+```
+
+`line`, the default, is for people; `text` (logfmt) and `json` are for programs collecting logs. In
+`line`, a value with a line break or another control character is escaped, so that nothing a
+client sends can forge a line. Without `log`, messages at info and above are written as lines:
+debug and info ones to standard output, warn and error ones to standard error. `output` sends them
+all to one place. A message is written when it is logged: fit says little about itself, and nothing
+for each request.
 
 nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 
@@ -704,9 +717,12 @@ In a .konf file:
 ```fit
 log {
 	level warn
-	levels { tls info; engine error }
+	levels { tls info }
 	output /var/log/fit/fit.log
 	format json
+	loggers {
+		engine { level error; output /var/log/fit/engine.log; format line }
+	}
 }
 
 route { match { host example.com }; handler respond { body hello } }
@@ -719,9 +735,13 @@ log:
   level: warn
   levels:
     tls: info
-    engine: error
   output: /var/log/fit/fit.log
   format: json
+  loggers:
+    engine:
+      level: error
+      output: /var/log/fit/engine.log
+      format: line
 routes:
   - match:
       host:
@@ -736,7 +756,10 @@ In JSON:
 
 ```json
 {
-  "log": {"level": "warn", "levels": {"tls": "info", "engine": "error"}, "output": "/var/log/fit/fit.log", "format": "json"},
+  "log": {
+    "level": "warn", "levels": {"tls": "info"}, "output": "/var/log/fit/fit.log", "format": "json",
+    "loggers": {"engine": {"level": "error", "output": "/var/log/fit/engine.log", "format": "line"}}
+  },
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
 ```
@@ -747,18 +770,42 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels does not name: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). A change takes effect on reload. |
-| `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to. When left out, debug and info messages go to stdout and warn and error ones to stderr. |
-| `format` | string: `text`, `json` | `"text"` | text, a line "fit: " and the message, or json, a JSON object a line, with time, level, logger and msg, and the attributes of what the engine logs. text when left out. |
+| `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
+| `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
+| `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json. |
+
+<a id="config-logger"></a>
+
+### `log.loggers.*`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `level` | string: `debug`, `info`, `warn`, `error` |  | The least level the logger writes. A change takes effect on reload. |
+| `output` | string |  | "stdout", "stderr", or the path of a file the logger's messages are appended to. A change takes a restart. |
+| `format` | string: `line`, `text`, `json` |  | How the logger's messages are written: line, text or json, as the log's format. A change takes a restart. |
 
 <a id="access-log"></a>
 
 ## Access log
 
-A JSON line for each request, written to standard output, standard error or a file, through a
+A line for each request, written to standard output, standard error or a file, through a
 bounded buffer: when the output cannot keep up, lines past the buffer are dropped and counted
 rather than holding requests up. Read when fit starts, but for `level`, which a reload changes.
+
+`format` is how a line is written, with the same fields in each: `json`, the default, an object a
+line; or, as fib writes its logs, `text`, every part as key=value (logfmt), or `line`, the time and
+level, then the fields as key=value. A value with a space, a quote, an equals sign, a control
+character or a byte that is not UTF-8 is quoted, so that a request cannot forge a line:
+
+```text
+json  {"time":"2026-10-19T07:39:56.123Z","listener":"web","route":"api","client":"192.0.2.1","proto":"HTTP/1.1","method":"GET",...}
+text  time=2026-10-19T07:39:56.123Z level=INFO msg=access listener=web route=api client=192.0.2.1 proto=HTTP/1.1 method=GET ...
+line  2026-10-19 15:39:56.123 INFO  access listener=web route=api client=192.0.2.1 proto=HTTP/1.1 method=GET ...
+```
+
+`json` and `text` write the time in UTC, `line` in local time.
 
 A request's level is its response's status: info below 400, warn for 4xx and error for 5xx.
 `level` writes the requests at that level and above: `warn` writes those answered with an error,
@@ -769,7 +816,12 @@ nginx's `access_log` and Caddy's `log` in a site convert to it (`fit adapt`).
 In a .konf file:
 
 ```fit
-access_log { output /var/log/fit/access.log; flush_interval 1s; level warn }
+access_log {
+	output /var/log/fit/access.log
+	flush_interval 1s
+	level warn
+	format line
+}
 
 route { match { host example.com }; handler respond { body hello } }
 ```
@@ -781,6 +833,7 @@ access_log:
   output: /var/log/fit/access.log
   flush_interval: 1s
   level: warn
+  format: line
 routes:
   - match:
       host:
@@ -795,7 +848,7 @@ In JSON:
 
 ```json
 {
-  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s", "level": "warn"},
+  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s", "level": "warn", "format": "line"},
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
 ```
@@ -810,6 +863,7 @@ In JSON:
 | `flush_interval` | duration | `"1s"` | How long a line may wait in the buffer before it is written; 1s when left out. |
 | `buffer_bytes` | integer, 0 or more | `4194304` | How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out. |
 | `level` | string: `info`, `warn`, `error` | `"info"` | The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload. |
+| `format` | string: `json`, `text`, `line` | `"json"` | How a request's line is written, with the same fields whichever: json, a JSON object; text, time, level, msg and the fields as key=value (logfmt); or line, the time and level, then the fields as key=value, as fit's own log writes lines. A request's level is its status's, as level says. json when left out. A change takes a restart. |
 
 <a id="telemetry"></a>
 

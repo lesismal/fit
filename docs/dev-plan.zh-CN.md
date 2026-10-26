@@ -197,6 +197,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I80 | fit 自己的 .konf 格式；多文件配置 | I79 | done |
 | I81 | WASM III：Proxy-Wasm 的响应回调 | I72 | done |
 | I82 | fit 自身的日志：logger 与级别；转换 nginx 和 Caddy 的日志配置 | I21、I79 | done |
+| I83 | fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式 | I82 | done |
 
 ## M0 基础
 
@@ -949,5 +950,16 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   转换器的测试覆盖每条指令；访问日志的微基准测试显示没有开销。
 - **涉及**：`logs`（新）、`config`、`cli`、`admin`、`runtime`、`observe`、`tlsmgr`、`provider`、`plugin/wasm`、
   `handler/fastcgi`、`adapter/nginx`、`adapter/caddyfile`、`schema`、`docs`。
+
+### I83 fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式
+
+- **做什么**：fit 的日志改用 fib 的 `log` 包（fib 的 `log/log.go`）写出，由它的 handler 按 fib 自己的格式写行，使 fit 与 fib
+  的日志一致：`log.format` 为 `line`（默认）、`text`（logfmt）或 `json`，fib 的消息通过 `fiblog.SetLogger` 归入 `engine`
+  logger。`log.loggers` 让某个 logger 拥有自己的 `level`、`output` 和 `format`，覆盖 `log` 的设置。`access_log.format` 以
+  `json`（默认，字段不变）、`text` 或 `line` 写出每个请求的一行，字段相同。Caddy 的 `format console` 转为 `line`。
+- **完成标准**：每个 logger 以自己的格式写到自己的输出；engine 的消息（含 fib 的）归 engine logger；访问日志的三种格式字段
+  相同，客户端发来的内容被引号转义；logger 的输出或格式改变时重载给出警告；JSON 访问日志的基准测试显示没有开销。
+- **涉及**：`logs`、`config`、`cli`、`admin`、`observe`、`adapter/caddyfile`、`adapter/nginx`、`schema`、`test/e2e`、
+  `docs`；fib 的 `log`（fib `185658f1`、`33a039f1`）。
 
 路线图 1.0 中的外部安全审计不是一个迭代：它在 I77 完成后于代码之外安排。

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestServeLog(t *testing.T) {
 		t.Errorf("written past the log: %q %q", s.out.String(), s.err.String())
 	}
 	l := find(lines, "server", "listener \"web\" on ")
-	if l["level"] != "info" || l["time"] == nil {
+	if l["level"] != "INFO" || l["time"] == nil {
 		t.Errorf("listener line %v", l)
 	}
 	addr := strings.Fields(l["msg"].(string))[3]
@@ -51,7 +52,7 @@ func TestServeLog(t *testing.T) {
 	writeFile(t, cfg, strings.Replace(doc("warn", "error", "info"), `"format": "json"`, `"format": "text"`, 1))
 	s.reload <- struct{}{}
 	lines = waitLog(t, logFile, func(ms []map[string]any) bool { return find(ms, "server", "(config version 2)") != nil })
-	if w := find(lines, "server", "log's output or format changed"); w == nil || w["level"] != "warn" {
+	if w := find(lines, "server", "log's output or format changed"); w == nil || w["level"] != "WARN" {
 		t.Errorf("no warning of the format's change in %v", lines)
 	}
 	resp, err := http.Get("http://" + addr + "/ok")
@@ -126,5 +127,44 @@ func waitFile(t *testing.T, path, want string) string {
 			t.Fatalf("%s lacks %q: %s", path, want, data)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestServeLoggers runs fit with its log as lines in a file, the engine
+// logger's as JSON in a file of its own, and the access log as lines.
+func TestServeLoggers(t *testing.T) {
+	dir := t.TempDir()
+	cfg, logFile, engineFile, accessFile := filepath.Join(dir, "fit.json"), filepath.Join(dir, "fit.log"),
+		filepath.Join(dir, "engine.log"), filepath.Join(dir, "access.log")
+	writeFile(t, cfg, `{"log": {"output": `+js(logFile)+`, "loggers": {"engine": {"output": `+js(engineFile)+`, "format": "json", "level": "debug"}}},
+"access_log": {"output": `+js(accessFile)+`, "flush_interval": "10ms", "format": "line"},
+"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+"routes": [{"match": {"path": ["/ok"]}, "handler": {"module": "respond"}}]}`)
+	s := startServe(t, "-c", cfg, "-watch-certs=false")
+	listener := regexp.MustCompile(`(?m)^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} INFO  listener "web" on (\S+) \(http/1\.1\) logger=server$`)
+	var m []string
+	for deadline := time.Now().Add(30 * time.Second); m == nil; time.Sleep(10 * time.Millisecond) {
+		data, _ := os.ReadFile(logFile)
+		if m = listener.FindStringSubmatch(string(data)); m == nil && time.Now().After(deadline) {
+			t.Fatalf("no listener line in %q", data)
+		}
+	}
+	if _, err := os.Stat(engineFile); err != nil {
+		t.Errorf("the engine's file: %v", err)
+	}
+	resp, err := http.Get("http://" + m[1] + "/missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	access := waitFile(t, accessFile, " status=404 ")
+	if !regexp.MustCompile(`^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} WARN  access listener=web client=127\.0\.0\.1 proto=HTTP/1\.1 method=GET host=\S+ uri=/missing status=404 `).MatchString(access) {
+		t.Errorf("access line %q", access)
+	}
+	if code := s.stop(t); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if s.out.String() != "" || s.err.String() != "" {
+		t.Errorf("written past the log: %q %q", s.out.String(), s.err.String())
 	}
 }

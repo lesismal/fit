@@ -129,6 +129,7 @@ var templateExamples = map[string]string{
 	"access_log.output": `"/var/log/fit/access.log"`,
 	"log.levels":        `{"tls": "debug", "engine": "warn"}`,
 	"log.output":        `"/var/log/fit/fit.log"`,
+	"log.loggers":       `{"engine": {"output": "/var/log/fit/engine.log", "format": "json"}}`,
 	"headers_file":      `"/etc/fit/otlp-headers"`, "service_name": `"fit"`, "sample_ratio": `0.1`,
 	"token_file": `"/etc/fit/token"`, "email": `"ops@example.com"`, "storage": `"/var/lib/fit"`,
 	"acme.on_demand.ask": `"http://127.0.0.1:5555/allowed"`,
@@ -628,23 +629,32 @@ func fitScalar(name, v string) []string {
 	if err := dec.Decode(&x); err != nil {
 		return []string{name + " " + v}
 	}
-	switch x := x.(type) {
-	case map[string]any:
-		if len(x) == 0 {
-			return []string{name + " {}"}
-		}
-		lines := []string{name + " {"}
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-		for _, k := range keys {
-			lines = append(lines, "\t"+strings.Join(append([]string{fitconf.Word(k)}, fitWords(x[k])...), " "))
-		}
-		return append(lines, "}")
+	return fitValue(name, x)
+}
+
+// fitValue writes a field whose value is x, decoded JSON: an object as a
+// block of its keys, each written the same way, and anything else as
+// arguments.
+func fitValue(name string, x any) []string {
+	m, ok := x.(map[string]any)
+	if !ok {
+		return []string{strings.Join(append([]string{name}, fitWords(x)...), " ")}
 	}
-	return []string{strings.Join(append([]string{name}, fitWords(x)...), " ")}
+	if len(m) == 0 {
+		return []string{name + " {}"}
+	}
+	lines := []string{name + " {"}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		for _, l := range fitValue(fitconf.Word(k), m[k]) {
+			lines = append(lines, "\t"+l)
+		}
+	}
+	return append(lines, "}")
 }
 
 func fitWords(v any) []string {

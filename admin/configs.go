@@ -438,27 +438,19 @@ func sameAccessLog(a, b *config.AccessLog) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes
+	return a.Output == b.Output && a.FlushInterval == b.FlushInterval && a.BufferBytes == b.BufferBytes &&
+		a.Format == b.Format
 }
 
-// sameLog reports whether a and b write to the same output in the same
-// format; their levels a reload changes.
+// sameLog reports whether every logger of a and b writes to the same output
+// in the same format; their levels a reload changes.
 func sameLog(a, b *config.Log) bool {
-	ao, af := logOutput(a)
-	bo, bf := logOutput(b)
-	return ao == bo && af == bf
-}
-
-// logOutput returns where l writes, empty for the default, and its format.
-func logOutput(l *config.Log) (output, format string) {
-	format = "text"
-	if l == nil {
-		return "", format
+	for _, name := range config.Loggers {
+		if a.OutputOf(name) != b.OutputOf(name) || a.FormatOf(name) != b.FormatOf(name) {
+			return false
+		}
 	}
-	if l.Format != "" {
-		format = l.Format
-	}
-	return l.Output, format
+	return true
 }
 
 func sameProviders(a, b []config.Provider) bool { return sameJSON(a, b) }

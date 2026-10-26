@@ -241,8 +241,12 @@ func TestFileOutput(t *testing.T) {
 	}
 }
 
-func BenchmarkLog(b *testing.B) {
-	l := NewAccessLogTo(discard{}, time.Second, 64<<20)
+func BenchmarkLog(b *testing.B)     { benchmarkLog(b, config.FormatJSON) }
+func BenchmarkLogText(b *testing.B) { benchmarkLog(b, config.FormatText) }
+func BenchmarkLogLine(b *testing.B) { benchmarkLog(b, config.FormatLine) }
+
+func benchmarkLog(b *testing.B, format string) {
+	l := NewAccessLogFormatTo(discard{}, format, time.Second, 64<<20)
 	// Lines come faster here than a writer that shares the CPUs with the
 	// loggers can take them: what is dropped is counted, not reported.
 	var dropped atomic.Int64
@@ -468,4 +472,109 @@ func TestLogLine(t *testing.T) {
 // logTo returns a logger writing each message to w as fit's text log does.
 func logTo(w io.Writer) *logs.Logger {
 	return logs.Func(func(format string, args ...any) { fmt.Fprintf(w, "fit: "+format+"\n", args...) })
+}
+
+// parseLogfmt reads the key=value pairs of a line of the text or line
+// format, from its first, quoted values unquoted.
+func parseLogfmt(t *testing.T, s string) map[string]string {
+	t.Helper()
+	m := map[string]string{}
+	for s != "" {
+		key, rest, ok := strings.Cut(s, "=")
+		if !ok {
+			t.Fatalf("no = in %q", s)
+		}
+		var value string
+		if strings.HasPrefix(rest, `"`) {
+			q, err := strconv.QuotedPrefix(rest)
+			if err != nil {
+				t.Fatalf("%q: %v", rest, err)
+			}
+			value, _ = strconv.Unquote(q)
+			rest = rest[len(q):]
+		} else {
+			value, rest, _ = strings.Cut(rest, " ")
+			rest = " " + rest
+		}
+		m[key] = value
+		s = strings.TrimPrefix(rest, " ")
+	}
+	return m
+}
+
+// TestTextAndLineFormats checks the text and line formats: the fields of
+// the JSON line, as key=value, a value with a space, a quote, a control
+// character or a byte that is not UTF-8 quoted, and the level the status's.
+func TestTextAndLineFormats(t *testing.T) {
+	r := httptest.NewRequest("POST", "/api/x?q=1&s=%22", nil)
+	r.RemoteAddr = "[2001:db8::1]:5555"
+	r.Host = "example.com"
+	r.Header.Set("User-Agent", "agent \"quoted\"\n\x01\xff")
+	e := &Entry{Start: time.Now(), Listener: "web", Route: "api", Upstream: "10.0.0.1:8080", UpstreamDuration: time.Millisecond, BytesIn: 4, User: "a=b"}
+	want := map[string]string{
+		"listener": "web", "route": "api", "client": "2001:db8::1", "user": "a=b", "proto": "HTTP/1.1", "method": "POST",
+		"host": "example.com", "uri": "/api/x?q=1&s=%22", "status": "503", "bytes_in": "4", "bytes_out": "512",
+		"upstream": "10.0.0.1:8080", "upstream_duration": "0.001000", "user_agent": "agent \"quoted\"\n\x01\xff", "referer": "",
+	}
+	for _, format := range []string{config.FormatText, config.FormatLine} {
+		var out syncBuffer
+		l := NewAccessLogFormatTo(&out, format, time.Hour, 0)
+		l.Log(e, r, 503, 512)
+		l.Close()
+		line := out.String()
+		if !strings.HasSuffix(line, "\n") || strings.Count(line, "\n") != 1 {
+			t.Fatalf("%s: not one line: %q", format, line)
+		}
+		line = strings.TrimSuffix(line, "\n")
+		if format == config.FormatLine {
+			head := "2006-01-02 15:04:05.000 ERROR access "
+			if len(line) < len(head) || !strings.HasPrefix(line[len("2006-01-02 15:04:05.000"):], " ERROR access ") {
+				t.Fatalf("line: %q", line)
+			}
+			if _, err := time.ParseInLocation("2006-01-02 15:04:05.000", line[:len("2006-01-02 15:04:05.000")], time.Local); err != nil {
+				t.Errorf("line's time: %v", err)
+			}
+			line = line[len(head):]
+		}
+		got := parseLogfmt(t, line)
+		if format == config.FormatText {
+			if got["level"] != "ERROR" || got["msg"] != "access" || !strings.HasSuffix(got["time"], "Z") {
+				t.Errorf("text: %q", line)
+			}
+			delete(got, "time")
+			delete(got, "level")
+			delete(got, "msg")
+		}
+		if _, err := strconv.ParseFloat(got["duration"], 64); err != nil {
+			t.Errorf("%s: duration %q", format, got["duration"])
+		}
+		delete(got, "duration")
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s: %s = %q, want %q", format, k, got[k], v)
+			}
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s: fields %v", format, got)
+		}
+	}
+}
+
+func TestStatusLevel(t *testing.T) {
+	for status, want := range map[int]string{200: "INFO", 399: "INFO", 404: "WARN", 500: "ERROR"} {
+		if got := statusLevel(status); got != want {
+			t.Errorf("statusLevel(%d) = %s, want %s", status, got, want)
+		}
+	}
+	for _, s := range []string{"", "a b", `a"b`, "a=b", "\x7f", "é"} {
+		if got := string(appendLogfmt(nil, s)); got == s || got[0] != '"' {
+			t.Errorf("appendLogfmt(%q) = %s, not quoted", s, got)
+		}
+	}
+	if got := string(appendLogfmt(nil, "/a?b=1")); got != `"/a?b=1"` {
+		t.Errorf("a value with = is %s", got)
+	}
+	if got := string(appendLogfmt(nil, "10.0.0.1:8080")); got != "10.0.0.1:8080" {
+		t.Errorf("a bare value is %s", got)
+	}
 }

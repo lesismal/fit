@@ -117,6 +117,7 @@ type (
 	outAccessLog struct {
 		Output string `json:"output,omitempty"`
 		Level  string `json:"level,omitempty"`
+		Format string `json:"format,omitempty"`
 	}
 	outAdmin struct {
 		Address string `json:"address,omitempty"`
@@ -671,7 +672,7 @@ func (c *converter) email(line int, e string) {
 
 // log converts a site's log to the access log, which fit has one of.
 func (c *converter) log(d *directive) {
-	output, level := "stdout", ""
+	output, level, format := "stdout", "", ""
 	for _, e := range d.block {
 		switch e.name {
 		case "output":
@@ -689,8 +690,13 @@ func (c *converter) log(d *directive) {
 				c.skip(e, "fit writes to stdout, stderr or a file")
 			}
 		case "format":
-			if len(e.args) == 0 || e.args[0] != "json" {
-				c.skip(e, "fit writes access log lines as JSON")
+			switch {
+			case len(e.args) > 0 && e.args[0] == "json":
+				format = ""
+			case len(e.args) > 0 && e.args[0] == "console":
+				format = "line"
+			default:
+				c.skip(e, "fit writes access log lines as JSON, text or line")
 			}
 		case "level":
 			if lv, ok := c.logLevel(e); ok {
@@ -700,11 +706,11 @@ func (c *converter) log(d *directive) {
 			c.skip(e, "not converted")
 		}
 	}
-	if l := c.out.AccessLog; l != nil && (l.Output != output || l.Level != level) {
+	if l := c.out.AccessLog; l != nil && (l.Output != output || l.Level != level || l.Format != format) {
 		c.warn(d.line, "log: fit has one access log, written to %s", l.Output)
 		return
 	}
-	c.out.AccessLog = &outAccessLog{Output: output, Level: level}
+	c.out.AccessLog = &outAccessLog{Output: output, Level: level, Format: format}
 	c.logLine = d.line
 }
 
@@ -806,7 +812,7 @@ func (c *converter) globalLogDirective(d *directive) {
 			case len(e.args) > 0 && e.args[0] == "console":
 				out.Format = ""
 			default:
-				c.skip(e, "fit writes its log as text or JSON")
+				c.skip(e, "fit writes its log as line, text or JSON")
 			}
 		case "level":
 			if lv, ok := c.logLevel(e); ok {

@@ -1264,12 +1264,13 @@
   // ],
 
   // fit's own log: what it says about starting, reloading, certificates, providers and the
-  // engine, by logger, each with the least level written. Messages at info and debug to stdout
-  // and the rest to stderr, at info and above, as lines of text, when left out.
+  // engine, by logger, each with the least level written, and the format and output it writes
+  // in, as fib writes its own. Messages at info and debug to stdout and the rest to stderr, at
+  // info and above, as lines, when left out.
   // object.
   // "log": {
-    // // The least level written, of every logger levels does not name: debug, info, warn or error.
-    // // info when left out. A change takes effect on reload.
+    // // The least level written, of every logger levels and loggers do not set one for: debug, info,
+    // // warn or error. info when left out. A change takes effect on reload.
     // // one of: debug, info, warn, error; default "info".
     // "level": "info",
 
@@ -1278,22 +1279,32 @@
     // // certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the
     // // access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write
     // // to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log
-    // // and log/slog). A change takes effect on reload.
+    // // and log/slog). The same as loggers' level, which a logger may not have both of. A change
+    // // takes effect on reload.
     // // object of string.
     // "levels": {"tls": "debug", "engine": "warn"},
 
-    // // "stdout", "stderr", or the path of a file messages are appended to. When left out, debug and
-    // // info messages go to stdout and warn and error ones to stderr.
+    // // "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers
+    // // does not set one for. When left out, debug and info messages go to stdout and warn and error
+    // // ones to stderr. A change takes a restart.
     // // string.
     // "output": "/var/log/fit/fit.log",
 
-    // // text, a line "fit: " and the message, or json, a JSON object a line, with time, level,
-    // // logger and msg, and the attributes of what the engine logs. text when left out.
-    // // one of: text, json; default "text".
-    // "format": "text",
+    // // How messages are written, those of every logger loggers does not set one for, as fib writes
+    // // its own: line, the time, level and message, then the attributes as key=value; text, every
+    // // part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as
+    // // logger. line when left out. A change takes a restart.
+    // // one of: line, text, json; default "line".
+    // "format": "line",
+
+    // // Settings of some loggers of their own, by name (those levels lists), over level, output and
+    // // format: engine's to a file of its own, say, or access_log's as json.
+    // // object of object.
+    // "loggers": {"engine": {"output": "/var/log/fit/engine.log", "format": "json"}},
   // },
 
-  // Where a line is written for each request, as JSON; no access log when left out.
+  // Where a line is written for each request, as JSON or, as its format says, text or line; no
+  // access log when left out.
   // object.
   // "access_log": {
     // // "stdout", "stderr", or the path of a file lines are appended to; "stdout" when left out.
@@ -1314,6 +1325,13 @@
     // // answered with 5xx. Every request when left out. A change takes effect on reload.
     // // one of: info, warn, error; default "info".
     // "level": "info",
+
+    // // How a request's line is written, with the same fields whichever: json, a JSON object; text,
+    // // time, level, msg and the fields as key=value (logfmt); or line, the time and level, then the
+    // // fields as key=value, as fit's own log writes lines. A request's level is its status's, as
+    // // level says. json when left out. A change takes a restart.
+    // // one of: json, text, line; default "json".
+    // "format": "json",
   // },
 
   // OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics,

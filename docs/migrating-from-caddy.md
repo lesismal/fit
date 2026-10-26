@@ -96,8 +96,8 @@ Let's Encrypt for the routes' host names, and port 80 redirects to it.
 | `tls cert.pem key.pem` | a listener's `tls.certificates` |
 | `tls { on_demand }` and `on_demand_tls { ask ... }` | a listener's `tls.on_demand` and `acme.on_demand` |
 | `email`, `acme_ca`, `storage` (Redis, Consul) | `acme`'s `email`, `directory`, `storage`, and `shared_storage` for Redis, etcd or Consul |
-| `log` in a site | `access_log`, with its `output` and `level` |
-| the global `log` and `debug` | `log`: fit's own log, with `output`, `format` (`console` is `text`) and `level`; a `log` that includes only `http.log.access` is the access log |
+| `log` in a site | `access_log`, with its `output`, `level` and `format` (`console` is `line`, `json` is fit's default) |
+| the global `log` and `debug` | `log`: fit's own log, with `output`, `format` (`console` is `line`, the default) and `level`; a `log` that includes only `http.log.access` is the access log |
 | `metrics` | `metrics`, served by the Admin API at `/metrics` |
 | `tracing` | `telemetry`, over OTLP |
 | plugins: rate limiting, caching, layer 4 | built in: `rate_limit`, `cache`, `tcp` and `udp` listeners with services |

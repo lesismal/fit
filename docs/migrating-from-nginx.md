@@ -57,7 +57,7 @@ with the tables below.
 | `fastcgi_pass` with `fastcgi_param` | the `fastcgi` handler, with PHP's parameters set for you |
 | `stream { server { listen 5432; proxy_pass db; } }` | a listener of `tcp` (or `udp`) and a service naming it and an upstream |
 | `ssl_preread` and `map $ssl_preread_server_name` | a service's `server_names`, which passes TLS through by SNI |
-| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log`'s `output`, `buffer_bytes` and `flush_interval`; fit's lines are JSON, so `log_format`, a format named and `if=` are not converted, and one access log takes every request |
+| `access_log /var/log/access.log buffer=32k flush=5s;` | `access_log`'s `output`, `buffer_bytes` and `flush_interval`; fit's lines are JSON, text or line, with fields of their own, so `log_format`, a format named and `if=` are not converted, and one access log takes every request |
 | `error_log /var/log/error.log warn;` | `log`'s `output` and `level`: `notice` is `info`, and `crit`, `alert` and `emerg` are `error`; with no level, `error`, as nginx's. One log, the process's, which `log.levels` divides by logger |
 | `nginx -s reload` | SIGHUP, `fit run -watch`, or the Admin API's `POST /load` |
 

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync/atomic"
 
+	fiblog "github.com/lesismal/fib/log"
+
 	"github.com/lesismal/fit/config"
 )
 
@@ -13,15 +15,18 @@ import (
 var std atomic.Pointer[Root]
 
 // SetDefault makes r the process's log: Named's loggers write to it, and so
-// do Go's log and log/slog, as the engine logger, fib's messages among
-// them. A nil r has them write to stderr again, at info and up.
+// do fib's package log and Go's log and log/slog, as the engine logger. A
+// nil r has them write to stderr again, at info and up.
 func SetDefault(r *Root) {
 	std.Store(r)
 	if r == nil {
+		fiblog.SetLogger(nil)
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 		return
 	}
-	slog.SetDefault(slog.New(r.Handler(config.LoggerEngine)))
+	engine := slog.New(r.Handler(config.LoggerEngine))
+	fiblog.SetLogger(engine)
+	slog.SetDefault(engine)
 }
 
 // Named returns logger name, one of config.Loggers, of the process's log,

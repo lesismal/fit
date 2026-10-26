@@ -13,7 +13,7 @@ import (
 func runFit(args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
 	code = run(args, &out, &errOut)
-	return code, out.String(), errOut.String()
+	return code, plain(out.String()), plain(errOut.String())
 }
 
 func TestUsage(t *testing.T) {
@@ -136,7 +136,7 @@ func TestRun(t *testing.T) {
 	var out, errOut bytes.Buffer
 	stopped := false
 	code := serve(ctx, func() { stopped = true }, nil, []string{"-c", cfg}, &out, &errOut)
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	lines := strings.Split(strings.TrimSpace(plain(out.String())), "\n")
 	if code != 0 || len(lines) != 5 || !strings.HasPrefix(lines[0], `fit: listener "web" on 127.0.0.1:`) ||
 		!strings.HasSuffix(lines[0], "(http/1.1, h2c)") ||
 		!strings.HasPrefix(lines[1], "fit: config listeners=1 limits{") ||

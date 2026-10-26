@@ -34,11 +34,20 @@ func newSyncBuf() *syncBuf { return &syncBuf{wake: make(chan struct{})} }
 func (s *syncBuf) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n, _ := s.b.Write(p)
+	s.b.WriteString(plain(string(p)))
 	close(s.wake)
 	s.wake = make(chan struct{})
-	return n, nil
+	return len(p), nil
 }
+
+// logLine is a line of fit's log in its default format, line: the time, the
+// level, the message and its logger.
+var logLine = regexp.MustCompile(`(?m)^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} (?:DEBUG|INFO|WARN|ERROR) +(.*?) logger=[a-z_]+`)
+
+// plain turns the lines of fit's log in s into "fit: " and their messages,
+// with what follows the logger's name, so that a test can look for what fit
+// says whatever time and level it says it at.
+func plain(s string) string { return logLine.ReplaceAllString(s, "fit: $1") }
 
 func (s *syncBuf) String() string {
 	s.mu.Lock()
@@ -181,7 +190,7 @@ func TestServeReload(t *testing.T) {
 		{`{"listeners": [`, cfg},
 		{`{"listeners": []}`, "at least one listener is needed"},
 		{`{"listeners": [{"name": "web", "address": ` + js(occupied.Addr().String()) + `}], "routes": [{"handler": {"module": "respond"}}]}`, "the running config stays: "},
-		{"", "fit run: "},
+		{"", "fit: stat "},
 	} {
 		if tt.doc == "" {
 			if err := os.Remove(cfg); err != nil {
@@ -280,13 +289,13 @@ func TestServeErrors(t *testing.T) {
 	missing := js(filepath.Join(dir, "missing", "file"))
 	const rest = `"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond"}}]}`
 	for _, tt := range []struct{ name, doc, want string }{
-		{"access log", `{"access_log": {"output": ` + missing + `}, ` + rest, "fit run: access log: "},
+		{"access log", `{"access_log": {"output": ` + missing + `}, ` + rest, "fit: access log: "},
 		{"traces", `{"telemetry": {"headers_file": ` + missing + `, "traces": {}}, ` + rest, "telemetry"},
 		{"metrics", `{"admin": {"address": "127.0.0.1:0"}, "telemetry": {"headers_file": ` + missing + `, "metrics": {}}, ` + rest, "telemetry"},
 		{"acme", `{"acme": {"ca_file": ` + missing + `}, ` + rest, "acme.ca_file"},
-		{"admin", `{"admin": {"address": "127.0.0.1:0", "token_file": ` + missing + `}, ` + rest, "fit run: admin: token_file"},
+		{"admin", `{"admin": {"address": "127.0.0.1:0", "token_file": ` + missing + `}, ` + rest, "fit: admin: token_file"},
 		{"compile", `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond", "params": {"status": 101}}}]}`, "101 is an informational status"},
-		{"listener", `{"listeners": [{"name": "web", "address": ` + js(occupied.Addr().String()) + `}], "routes": [{"handler": {"module": "respond"}}]}`, "fit run: "},
+		{"listener", `{"listeners": [{"name": "web", "address": ` + js(occupied.Addr().String()) + `}], "routes": [{"handler": {"module": "respond"}}]}`, "fit: listener \"web\": "},
 	} {
 		cfg := filepath.Join(dir, "fit.json")
 		writeFile(t, cfg, tt.doc)
@@ -334,7 +343,7 @@ func TestServeShutdownTimeout(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatalf("the request did not reach the upstream: %q", s.err.String())
 	}
-	if code := s.stop(t); code != 1 || !strings.Contains(s.err.String(), "fit run: shutdown took longer than 200ms; connections still open were closed\n") {
+	if code := s.stop(t); code != 1 || !strings.Contains(s.err.String(), "fit: shutdown took longer than 200ms; connections still open were closed\n") {
 		t.Fatalf("%d %q %q", code, s.out.String(), s.err.String())
 	}
 }
@@ -432,7 +441,7 @@ func TestServeProviders(t *testing.T) {
 	}
 	kv.set(`{"routes": [{"handler": {"module": "respond", "params": {"status": 101}}}]}`)
 	stderr := s.err.waitFor(t, "101 is an informational status", 1)
-	if !strings.Contains(stderr, "fit: what provider kv provides was refused; the running config stays\nprovider kv") {
+	if !strings.Contains(stderr, "fit: what provider kv provides was refused; the running config stays\nfit: provider kv") {
 		t.Errorf("refused: %q", stderr)
 	}
 	// Sent again each refresh_interval, it is refused again, and not
@@ -459,7 +468,7 @@ func TestServeReloadYAML(t *testing.T) {
 	s.out.waitFor(t, "fit: listener ", 1)
 	writeFile(t, cfg, "listeners: [\n")
 	s.reload <- struct{}{}
-	s.err.waitFor(t, "fit: reload failed; the running config stays\n"+cfg, 1)
+	s.err.waitFor(t, "fit: reload failed; the running config stays\nfit: "+cfg, 1)
 	if code := s.stop(t); code != 0 {
 		t.Fatalf("stop: %d %q %q", code, s.out.String(), s.err.String())
 	}
