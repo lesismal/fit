@@ -7,24 +7,24 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// TestShorthands checks the shorter ways to write a config: snippets, tls,
-// a listener's and an upstream's arguments, a site of any host and numbers
-// of bytes in units, each the same config as its long form.
+// TestShorthands checks the shorter ways to write a config: defs and use,
+// tls, a listener's and an upstream's arguments, a site of any host and
+// numbers of bytes in units, each the same config as its long form.
 func TestShorthands(t *testing.T) {
 	for _, c := range []struct{ name, fit, json string }{
-		{"snippet", `
-snippet pool { max_conns 8192; connect_timeout 5s }
-upstream a { addresses 10.0.0.1:80; include pool }
-upstream b { addresses 10.0.0.2:80; include pool }
+		{"def and use", `
+def pool { max_conns 8192; connect_timeout 5s }
+upstream a { addresses 10.0.0.1:80; use pool }
+upstream b { addresses 10.0.0.2:80; use pool }
 `, `{"upstreams": [
 			{"name": "a", "addresses": ["10.0.0.1:80"], "max_conns": 8192, "connect_timeout": "5s"},
 			{"name": "b", "addresses": ["10.0.0.2:80"], "max_conns": 8192, "connect_timeout": "5s"}]}`},
-		{"snippets including snippets, at the top and in blocks", `
-snippet hdr { middleware headers { response { delete Server } } }
-snippet routes {
-	route a { match { path /a }; include hdr; handler respond }
+		{"defs using defs, at the top and in blocks", `
+def hdr { middleware headers { response { delete Server } } }
+def routes {
+	route a { match { path /a }; use hdr; handler respond }
 }
-include routes
+use routes
 `, `{"routes": [{"name": "a", "match": {"path": ["/a"]},
 			"middleware": [{"module": "headers", "params": {"response": {"delete": ["Server"]}}}],
 			"handler": {"module": "respond"}}]}`},
@@ -66,13 +66,15 @@ route a {
 
 func TestShorthandErrors(t *testing.T) {
 	for _, c := range []struct{ fit, want string }{
-		{"upstream a { include pool }\nsnippet pool { max_conns 1 }\n", "1:22: include pool: there is no snippet pool"},
-		{"snippet a { }\nsnippet a { }\n", "2:9: snippet a is defined twice"},
-		{"route r { snippet a { } }\n", "1:11: snippet is given at the top of a file only"},
-		{"snippet a\n", "1:1: snippet takes its name and a block"},
-		{"snippet a/b { }\n", `1:9: "a/b" cannot name a snippet`},
-		{"snippet a { include a }\ninclude a\n", "1:21: snippet a includes itself"},
-		{"snippet a { include b }\nsnippet b { include a }\ninclude a\n", "includes itself"},
+		{"upstream a { use pool }\ndef pool { max_conns 1 }\n", "1:18: use pool: there is no def pool defined before it"},
+		{"def a { }\ndef a { }\n", "2:5: def a is defined twice"},
+		{"route r { def a { } }\n", "1:11: def is given at the top of a file only"},
+		{"def a\n", "1:1: def takes its name and a block"},
+		{"def a/b { }\n", `1:5: "a/b" cannot name a def`},
+		{"def a { use a }\nuse a\n", "def a uses itself"},
+		{"def a { use b }\ndef b { use a }\nuse a\n", "uses itself"},
+		{"use\n", "1:1: use takes the defs to read"},
+		{"def a { }\nuse a { }\n", "2:1: use takes the defs to read"},
 		{"listener a { address :1; tls c.pem }\n", "1:30: tls takes a certificate's file and its key's"},
 		{"listener a :1 { address :2 }\n", "1:12: address is given twice, as an argument and in the block"},
 		{"listener a :1 h2 { protocols h3 }\n", "1:15: protocols is given twice"},

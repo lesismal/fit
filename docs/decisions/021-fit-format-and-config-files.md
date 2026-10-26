@@ -34,8 +34,8 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
   as nginx's and Caddy's do. Later (2026-10-24), to be as short as a Caddyfile, a few more that
   expand the same way, before the conversion and with no semantics of their own: a listener's
   address and protocols and an upstream's addresses as arguments after the name, `tls <cert>
-  <key>`, `site *` for any host, numbers of bytes in units (`1GiB`), and snippets,
-  `snippet <name> { ... }` read in place by `include <name>`, beside `include` and `import` of
+  <key>`, `site *` for any host, numbers of bytes in units (`1GiB`), and defs,
+  `def <name> { ... }` read in place by `use <name>`, beside `include` and `import` of
   files. `FromJSON` writes the shorthands, and blocks that fit on a line on one.
 - **Writing back.** `fitconf.FromJSON` writes native JSON as a `.konf` file that adapts back to the
   same config, for `fit adapt -to fit`, for the `.konf` template and for the config reference's
@@ -74,3 +74,10 @@ project not having been released. `fit run` and `fit validate` load only fit's o
 `fit adapt -from nginx` or `-from caddyfile` converts those configs into one of fit's. The
 format is still called fit's format, `-to fit` still writes it, and its package is still
 `adapter/fitconf`. The sections above have since been written with the current names.
+
+## Later: def and use
+
+On 2026-10-26 the keywords for a block of directives defined once and read by name became
+`def <name> { ... }` and `use <name>`, in place of `snippet` and the `include <name>` that read
+it; `include` now names files only, so that each word says one thing and a name that is not a
+file is an error at its place. The project not having been released, the old names are not read.

@@ -4253,6 +4253,12 @@ Differences from the plan:
   Caddyfile is converted with `fit adapt -from nginx` or `-from caddyfile`
   ([decision 021](decisions/021-fit-format-and-config-files.md#later-the-extension-konf)).
   The entries above keep the name they had then.
+- **Later (2026-10-26): `snippet` became `def`, read by `use`.** A block of directives defined
+  once and read by name is `def <name> { ... }`, read by `use <name>`; `include` names files only,
+  where it used to read a snippet by name too, so a name that is not a file is an error at its
+  place. The docs, [decision 021](decisions/021-fit-format-and-config-files.md#later-def-and-use)
+  and the bench config follow; `adapter/fitconf`'s tests cover the two apart. Control-plane only:
+  no benchmark (rule 21).
 
 ### I81 WASM III: Proxy-Wasm's response callbacks — done
 

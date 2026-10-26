@@ -17,6 +17,7 @@ directories ([below](#several-files-and-directories)).
 - [Shorthands](#shorthands)
 - [Several files and directories](#several-files-and-directories)
 - [Import and include](#import-and-include)
+- [def and use](#def-and-use)
 - [Errors](#errors)
 - [Converting](#converting)
 
@@ -237,17 +238,18 @@ config as its long form, and a block may follow with the rest:
 
 A listener takes its name, its address, then its protocols; an upstream its name, then its
 addresses. A field given as an argument is not given in the block too. `tls` with a block after
-its two files gives the block's certificates after that one. With [snippets](#snippets) for what
-several blocks share, the config of the [first look](#a-first-look) and more fits in a few lines:
+its two files gives the block's certificates after that one. With [defs and use](#def-and-use) for
+what several blocks share, the config of the [first look](#a-first-look) and more fits in a few
+lines:
 
 ```fit
-snippet pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
+def pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
 
 listener web :8080 http/1.1 h2c
 listener secure :8443 h2 h3 { tls /certs/cert.pem /certs/key.pem }
 
-upstream app 127.0.0.1:9000 127.0.0.1:9001 { include pool }
-upstream auth 127.0.0.1:9100 { include pool }
+upstream app 127.0.0.1:9000 127.0.0.1:9001 { use pool }
+upstream auth 127.0.0.1:9100 { use pool }
 
 site * {
 	route /api/* {
@@ -299,22 +301,23 @@ A `.konf` file may name other files itself, with two directives:
 A path is relative to the directory of the file naming it. A glob that matches nothing names
 nothing; a path that is not there is an error.
 
-### Snippets
+## def and use
 
-`snippet <name> { ... }`, at the top of a file, defines directives that `include <name>` then
-reads in its place, anywhere after it, as Caddy's snippets are imported:
+`def <name> { ... }`, at the top of a file, defines directives that `use <name>` then reads in
+their place, anywhere after it, as Caddy imports its `(name)` blocks:
 
 ```fit
-snippet pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
+def pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
 
 listener web :8080
-upstream backend 127.0.0.1:9001 { include pool }
-upstream cache 127.0.0.1:9003 { include pool }
+upstream backend 127.0.0.1:9001 { use pool }
+upstream cache 127.0.0.1:9003 { use pool }
 ```
 
-`include` names a snippet defined before it, in the file or in one included earlier, else a
-file. A snippet may include snippets and files, these relative to the file that defined it, but
-not itself. Its name holds no `/`, `\`, `*`, `?` or `[`, and is defined once.
+`use` names a def defined before it, in the file or in one included earlier; a file is read by
+`include`, a def by `use`, and neither stands in for the other. A def may include files and use
+defs, but not itself; a path it includes is relative to the file that defined it. Its name holds
+no `/`, `\`, `*`, `?` or `[`, and is defined once.
 
 ```text
 # fit.konf
@@ -323,23 +326,24 @@ include listeners.konf
 
 # sites/api.konf
 site api.example.com {
-	include ../snippets/site-common.konf
+	include ../shared/site-common.konf
 	route /v1/* {
-		include ../snippets/secure.inc
+		include ../shared/secure.inc
 		handler proxy { upstream api }
 	}
 }
 
-# snippets/secure.inc
+# shared/secure.inc
 middleware headers { response { delete Server } }
 middleware rate_limit { rate 100 }
 ```
 
-A file included is read only where it is included, not as a config of its own, also when a
-directory given or imported holds it, so snippets may sit beside the sites. An error in a file
-included names that file and the place in it. Every file imported or included is watched with
-the others: one changed applies the config again, and the bounds on files and bytes count them
-too.
+`include` reads a file's directives in its place, while a def is read by `use`. A file included
+is read only where it is included, not as a config of its own, also when a directory given or
+imported holds it, so the files holding defs, and those including them, may sit beside the sites.
+An error in a file included names that file and the place in it. Every file imported or included
+is watched with the others: one changed applies the config again, and the bounds on files and
+bytes count them too.
 
 ## Errors
 

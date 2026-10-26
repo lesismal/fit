@@ -23,8 +23,8 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
   match、中间件）写在一起。它在转换前展开为普通路由，不带任何自己的语义；路由总可以逐条写出。顶层列表用单数书写，参数是
   元素的名字（`listener web { ... }`），使配置读起来像 nginx 和 Caddy 的配置。后来（2026-10-24），为了和 Caddyfile 一样
   简短，又加了几种同样在转换前展开、不带自己语义的简写：listener 的地址和协议、upstream 的地址作为名字之后的参数，
-  `tls <cert> <key>`，表示任意域名的 `site *`，带单位的字节数（`1GiB`），以及 snippet：`snippet <名字> { ... }` 由
-  `include <名字>` 原地读入，与 `include`、`import` 文件并列。`FromJSON` 写出这些简写，并把能放在一行的块写成一行。
+  `tls <cert> <key>`，表示任意域名的 `site *`，带单位的字节数（`1GiB`），以及用 `def <名字> { ... }` 定义、由
+  `use <名字>` 原地读入的块，与 `include`、`import` 文件并列。`FromJSON` 写出这些简写，并把能放在一行的块写成一行。
 - **写回。** `fitconf.FromJSON` 把原生 JSON 写成 `.konf` 文件，转换回来得到同样的配置，用于 `fit adapt -to fit`、`.konf`
   模板，以及配置参考中由 JSON 生成的示例，使它们不会不一致。
 - **Caddy 和 nginx 的配置是被转换的，不按 fit 的配置读取。** `adapter/caddyfile` 和 `adapter/nginx` 保留，作为迁移工具：
@@ -52,3 +52,9 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
 项目尚未发布，`.fit` 和 `.conf` 都不再读取。`fit run` 和 `fit validate` 只加载 fit 自己的格式（`.konf`、YAML、JSON）：nginx 和
 Caddyfile 适配器不认扩展名和文件名，这两种配置用 `fit adapt -from nginx` 或 `-from caddyfile` 转换成 fit 的格式之一。该格式仍叫
 fit 格式，`-to fit` 仍写出它，包仍是 `adapter/fitconf`。上面各节已改用现在的名字。
+
+## 后续：def 与 use
+
+2026-10-26，定义一次、按名字读入的一组指令，其关键字由 `snippet` 和读入它的 `include <名字>` 改为
+`def <名字> { ... }` 和 `use <名字>`；`include` 现在只引用文件，让每个词只表示一件事，不是文件的引用就在所写位置报错。
+项目尚未发布，旧名字不再读取。

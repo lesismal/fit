@@ -15,6 +15,7 @@
 - [简写](#简写)
 - [多个文件和目录](#多个文件和目录)
 - [import 与 include](#import-与-include)
+- [def 与 use](#def-与-use)
 - [错误](#错误)
 - [转换](#转换)
 
@@ -214,16 +215,17 @@ site api.example.com {
 | `max_bytes 1GiB` | `max_bytes 1073741824` |
 
 listener 依次接名字、地址、协议；upstream 依次接名字、地址。作为参数给出的字段不能再在块中给出。`tls` 在两个文件之后再跟
-块时，块中的证书排在这一个之后。再用 [snippet](#snippet) 写多个块共有的内容，[初识](#初识)中的配置连同更多内容只需几行：
+块时，块中的证书排在这一个之后。再用 [def 与 use](#def-与-use) 写多个块共有的内容，[初识](#初识)中的配置连同更多内容
+只需几行：
 
 ```fit
-snippet pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
+def pool { max_conns 1024; max_idle_conns 256; connect_timeout 5s }
 
 listener web :8080 http/1.1 h2c
 listener secure :8443 h2 h3 { tls /certs/cert.pem /certs/key.pem }
 
-upstream app 127.0.0.1:9000 127.0.0.1:9001 { include pool }
-upstream auth 127.0.0.1:9100 { include pool }
+upstream app 127.0.0.1:9000 127.0.0.1:9001 { use pool }
+upstream auth 127.0.0.1:9100 { use pool }
 
 site * {
 	route /api/* {
@@ -267,20 +269,22 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
 
 路径相对于写下它的文件所在的目录。glob 没有匹配时什么都不引用；路径不存在则报错。
 
-### snippet
+## def 与 use
 
-在文件顶层用 `snippet <名字> { ... }` 定义一组指令，之后任意位置的 `include <名字>` 在原处读入它们，同 Caddy 的 snippet：
+在文件顶层用 `def <名字> { ... }` 定义一组指令，之后任意位置的 `use <名字>` 在原处读入它们，同 Caddy 用 `import` 读入
+`(name)` 块那样：
 
 ```fit
-snippet pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
+def pool { max_conns 8192; max_pending 8192; connect_timeout 5s }
 
 listener web :8080
-upstream backend 127.0.0.1:9001 { include pool }
-upstream cache 127.0.0.1:9003 { include pool }
+upstream backend 127.0.0.1:9001 { use pool }
+upstream cache 127.0.0.1:9003 { use pool }
 ```
 
-`include` 先找在它之前（本文件或之前 include 的文件中）定义的同名 snippet，找不到才当作文件。snippet 可以 include 其他
-snippet 和文件（文件路径相对于定义它的文件），但不能 include 自己。名字中不能有 `/`、`\`、`*`、`?` 或 `[`，且只能定义一次。
+`use` 引用在它之前（本文件或之前 include 的文件中）定义的同名 def；文件由 `include` 读入，def 由 `use` 读入，两者不互相
+代替。def 可以 include 文件、use 其他 def，但不能 use 自己；它 include 的路径相对于定义它的文件。名字中不能有 `/`、`\`、
+`*`、`?` 或 `[`，且只能定义一次。
 
 ```text
 # fit.konf
@@ -289,21 +293,22 @@ include listeners.konf
 
 # sites/api.konf
 site api.example.com {
-	include ../snippets/site-common.konf
+	include ../shared/site-common.konf
 	route /v1/* {
-		include ../snippets/secure.inc
+		include ../shared/secure.inc
 		handler proxy { upstream api }
 	}
 }
 
-# snippets/secure.inc
+# shared/secure.inc
 middleware headers { response { delete Server } }
 middleware rate_limit { rate 100 }
 ```
 
-被 include 的文件只在 include 它的地方读入，不作为一份独立的配置，即便它位于 `-c` 指定或 import 的目录中，所以片段可以
-和站点放在一起。被 include 的文件中的错误会给出该文件及其中的位置。所有被 import 或 include 的文件都与其他文件一起被监视：
-任一文件变化都会重新应用配置，文件数和字节数的上限也把它们计算在内。
+`include` 在原处读入一个文件的指令，而 def 由 `use` 读入。被 include 的文件只在 include 它的地方读入，不作为一份独立的
+配置，即便它位于 `-c` 指定或 import 的目录中，所以存放 def 的文件和 include 它们的文件可以和站点放在一起。被 include
+的文件中的错误会给出该文件及其中的位置。所有被 import 或 include 的文件都与其他文件一起被监视：任一文件变化都会重新应用
+配置，文件数和字节数的上限也把它们计算在内。
 
 ## 错误
 

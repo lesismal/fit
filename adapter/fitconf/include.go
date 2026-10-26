@@ -7,8 +7,8 @@ import (
 	"github.com/lesismal/fit/adapter"
 )
 
-// maxIncludeDepth bounds how deep includes nest: a file including one that
-// includes another, and so on.
+// maxIncludeDepth bounds how deep includes and defs nest: a file including
+// one that includes another, and a def using another, and so on.
 const maxIncludeDepth = 16
 
 func init() {
@@ -16,18 +16,12 @@ func init() {
 }
 
 // refs returns the files a .konf file names, as written: those import, at
-// the top, imports, and those include, anywhere, includes, but the snippets
-// the file defines.
+// the top, imports, and those include, anywhere, includes. use reads a def,
+// which is no file, so it names none.
 func refs(data []byte) (imports, includes []string, err error) {
 	ds, err := parse("", data)
 	if err != nil {
 		return nil, nil, err
-	}
-	snippets := map[string]bool{}
-	for _, d := range ds {
-		if !d.name.quoted && d.name.text == "snippet" && len(d.args) == 1 {
-			snippets[d.args[0].text] = true
-		}
 	}
 	var walk func(ds []*directive, top bool)
 	walk = func(ds []*directive, top bool) {
@@ -41,9 +35,7 @@ func refs(data []byte) (imports, includes []string, err error) {
 				continue
 			case d.name.text == "include":
 				for _, a := range d.args {
-					if !snippets[a.text] {
-						includes = append(includes, a.text)
-					}
+					includes = append(includes, a.text)
 				}
 				continue
 			}
@@ -54,32 +46,33 @@ func refs(data []byte) (imports, includes []string, err error) {
 	return imports, includes, nil
 }
 
-// snippet is a block of directives defined once and included by its name.
-type snippet struct {
+// def is a block of directives defined once, with def, and read by name,
+// with use.
+type def struct {
 	file  string // the file it was defined in, which its includes are relative to
 	block []*directive
 }
 
-// frame is a file, or a snippet, being read.
+// frame is a file, or a def, being read.
 type frame struct {
-	name string // the file, or "snippet <name>"
-	file string // the file, or the one the snippet was defined in
+	name string // the file, or "def <name>"
+	file string // the file, or the one the def was defined in
 }
 
-// reader reads a .konf file with the files and snippets it includes.
+// reader reads a .konf file with the files it includes and the defs it uses.
 type reader struct {
 	include adapter.Includer
-	// stack are the files and snippets being read, the config's own file
-	// first, each including the next.
+	// stack are the files and defs being read, the config's own file
+	// first, each including or using the next.
 	stack []frame
-	// snippets are those defined so far, in reading order.
-	snippets map[string]*snippet
+	// defs are those defined so far, in reading order.
+	defs map[string]*def
 	// words are the words read, every file's together.
 	words int
 }
 
 func newReader(path string, include adapter.Includer) *reader {
-	return &reader{include: include, stack: []frame{{name: path, file: path}}, snippets: map[string]*snippet{}}
+	return &reader{include: include, stack: []frame{{name: path, file: path}}, defs: map[string]*def{}}
 }
 
 // read parses file, data, with its includes read in their places. top says
@@ -100,16 +93,16 @@ func (r *reader) read(file string, data []byte, top bool) ([]*directive, error) 
 	return r.splice(ds, top)
 }
 
-// splice returns ds with each include replaced with the directives of the
-// snippets and files it names, each snippet's definition taken out, and
-// each import, at the top of the config's own file, left out: the config's
-// files are found with the files it imports (adapter.Files), which are
-// merged after it.
+// splice returns ds with each use replaced with the directives of the defs
+// it names, each include with those of the files it names, each def's
+// definition taken out, and each import, at the top of the config's own
+// file, left out: the config's files are found with the files it imports
+// (adapter.Files), which are merged after it.
 //
 //	import <paths or globs...>      at the top: config files of their own
-//	snippet <name> { ... }          at the top: directives to include by name
-//	include <snippets, paths or globs...>
-//	                                anywhere: those directives, read here
+//	def <name> { ... }              at the top: directives to use by name
+//	use <defs...>                   anywhere: those directives, read here
+//	include <paths or globs...>     anywhere: those files' directives, read here
 func (r *reader) splice(ds []*directive, top bool) ([]*directive, error) {
 	out := make([]*directive, 0, len(ds))
 	for _, d := range ds {
@@ -126,14 +119,24 @@ func (r *reader) splice(ds []*directive, top bool) ([]*directive, error) {
 				return nil, errTok(d.name, "import reads other files: read the config from its file, as fit run -c does")
 			}
 			continue
-		case d.name.text == "snippet":
+		case d.name.text == "def":
 			if err := r.define(d, top); err != nil {
 				return nil, err
 			}
 			continue
+		case d.name.text == "use":
+			if len(d.args) == 0 || d.hasBlock {
+				return nil, errTok(d.name, "use takes the defs to read, as in use tls-common")
+			}
+			inner, err := r.useAll(d, top)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, inner...)
+			continue
 		case d.name.text == "include":
 			if len(d.args) == 0 || d.hasBlock {
-				return nil, errTok(d.name, "include takes the snippets or the files to include, as in include tls-common or include snippets/*.konf")
+				return nil, errTok(d.name, "include takes the files to include, as in include routes/*.konf")
 			}
 			inner, err := r.includeAll(d, top)
 			if err != nil {
@@ -154,42 +157,38 @@ func (r *reader) splice(ds []*directive, top bool) ([]*directive, error) {
 	return out, nil
 }
 
-// define defines the snippet d.
+// define defines the def d.
 func (r *reader) define(d *directive, top bool) error {
 	if !top {
-		return errTok(d.name, "snippet is given at the top of a file only, not in a block")
+		return errTok(d.name, "def is given at the top of a file only, not in a block")
 	}
 	if len(d.args) != 1 || !d.hasBlock {
-		return errTok(d.name, "snippet takes its name and a block, as in snippet pool { max_conns 1024 }")
+		return errTok(d.name, "def takes its name and a block, as in def pool { max_conns 1024 }")
 	}
 	name := d.args[0]
 	if name.text == "" || strings.ContainsAny(name.text, `*?[/\`) {
-		return errTok(name, "%q cannot name a snippet: a name holds no /, \\, *, ? or [", name.text)
+		return errTok(name, "%q cannot name a def: a name holds no /, \\, *, ? or [", name.text)
 	}
-	if _, ok := r.snippets[name.text]; ok {
-		return errTok(name, "snippet %s is defined twice", name.text)
+	if _, ok := r.defs[name.text]; ok {
+		return errTok(name, "def %s is defined twice", name.text)
 	}
-	r.snippets[name.text] = &snippet{file: r.stack[len(r.stack)-1].file, block: d.block}
+	r.defs[name.text] = &def{file: r.stack[len(r.stack)-1].file, block: d.block}
 	return nil
 }
 
-// includeAll returns the directives of the snippets and files include d
-// names: a snippet defined so far by its name, else a file.
-func (r *reader) includeAll(d *directive, top bool) ([]*directive, error) {
+// useAll returns the directives of the defs use d names, each of which is
+// defined before it.
+func (r *reader) useAll(d *directive, top bool) ([]*directive, error) {
 	if len(r.stack) > maxIncludeDepth {
-		return nil, errTok(d.name, "includes nested more than %d deep", maxIncludeDepth)
+		return nil, errTok(d.name, "uses and includes nested more than %d deep", maxIncludeDepth)
 	}
 	var out []*directive
 	for _, a := range d.args {
-		if sn, ok := r.snippets[a.text]; ok {
-			inner, err := r.useSnippet(a, sn, top)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, inner...)
-			continue
+		df, ok := r.defs[a.text]
+		if !ok {
+			return nil, errTok(a, "use %s: there is no def %s defined before it", a.text, a.text)
 		}
-		inner, err := r.includeFiles(a, top)
+		inner, err := r.useDef(a, df, top)
 		if err != nil {
 			return nil, err
 		}
@@ -198,32 +197,48 @@ func (r *reader) includeAll(d *directive, top bool) ([]*directive, error) {
 	return out, nil
 }
 
-// useSnippet returns a copy of snippet sn's directives, its includes read,
-// for the include at a.
-func (r *reader) useSnippet(a token, sn *snippet, top bool) ([]*directive, error) {
-	name := "snippet " + a.text
+// useDef returns a copy of def df's directives, its includes and uses read,
+// for the use at a.
+func (r *reader) useDef(a token, df *def, top bool) ([]*directive, error) {
+	name := "def " + a.text
 	if slices.ContainsFunc(r.stack, func(f frame) bool { return f.name == name }) {
-		return nil, errTok(a, "%s includes itself", name)
+		return nil, errTok(a, "%s uses itself", name)
 	}
-	r.stack = append(r.stack, frame{name: name, file: sn.file})
+	r.stack = append(r.stack, frame{name: name, file: df.file})
 	defer func() { r.stack = r.stack[:len(r.stack)-1] }()
 	n := 0
-	ds := cloneDirectives(sn.block, &n)
+	ds := cloneDirectives(df.block, &n)
 	if r.words += n; r.words > maxTokens {
-		return nil, errTok(a, "the config holds more than %d words, with the snippets and files it includes", maxTokens)
+		return nil, errTok(a, "the config holds more than %d words, with the defs and files it uses and includes", maxTokens)
 	}
 	return r.splice(ds, top)
 }
 
-// includeFiles returns the directives of the files a names.
-func (r *reader) includeFiles(a token, top bool) ([]*directive, error) {
+// includeAll returns the directives of the files include d names.
+func (r *reader) includeAll(d *directive, top bool) ([]*directive, error) {
+	if len(r.stack) > maxIncludeDepth {
+		return nil, errTok(d.name, "uses and includes nested more than %d deep", maxIncludeDepth)
+	}
+	var out []*directive
+	for _, a := range d.args {
+		inner, err := r.includeFile(a, top)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inner...)
+	}
+	return out, nil
+}
+
+// includeFile returns the directives of the file a names.
+func (r *reader) includeFile(a token, top bool) ([]*directive, error) {
 	if r.include == nil {
-		return nil, errTok(a, "include %s: there is no snippet %s, and include reads other files only from a config's file, as fit run -c reads it", a.text, a.text)
+		return nil, errTok(a, "include %s: include reads other files only from a config's file, as fit run -c reads it", a.text)
 	}
 	from := r.stack[len(r.stack)-1].file
 	srcs, err := r.include(from, a.text)
 	if err != nil {
-		return nil, errTok(a, "include %s: there is no snippet %s defined before it, nor such a file: %v", a.text, a.text, err)
+		return nil, errTok(a, "include %s: %v", a.text, err)
 	}
 	var out []*directive
 	for _, src := range srcs {

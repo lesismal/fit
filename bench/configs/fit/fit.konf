@@ -20,20 +20,20 @@ limits { max_conns 1000000 }
 # host's somaxconn, as every server here does.
 engine { backlog {{BACKLOG}} }
 
-snippet certs { tls /certs/cert.pem /certs/key.pem }
+def certs { tls /certs/cert.pem /certs/key.pem }
 
 listener h1 :8080 http/1.1
 listener h2c :8081 h2c
-listener tls :8443 http/1.1 { include certs }
-listener h2 :8445 h2 { include certs }
-listener h3 :8444 h3 { include certs }
+listener tls :8443 http/1.1 { use certs }
+listener h2 :8445 h2 { use certs }
+listener h3 :8444 h3 { use certs }
 
 # At most {{BACKEND_CONNS}} backend connections, as every proxy here is
 # bounded, and as many requests waiting for one, more than any run keeps in
 # flight: no request is turned away for the bound. As many kept idle, an idle
 # one closed after 60s, and a 5s connect timeout; a failure does not take the
 # only backend out of rotation (max_fails 0), as no proxy here does.
-snippet pool {
+def pool {
 	max_conns {{BACKEND_CONNS}}
 	max_pending {{BACKEND_CONNS}}
 	max_idle_conns {{BACKEND_CONNS}}
@@ -42,9 +42,9 @@ snippet pool {
 	max_fails 0
 }
 
-upstream backend {{BACKEND}} { include pool }
+upstream backend {{BACKEND}} { use pool }
 upstream wsbackend {{WSBACKEND}}
-upstream cachebackend {{CACHEBACKEND}} { include pool }
+upstream cachebackend {{CACHEBACKEND}} { use pool }
 
 route fixed {
 	match { path /fixed }

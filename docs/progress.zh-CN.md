@@ -3055,6 +3055,10 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   和 Caddyfile 适配器不认扩展名和文件名：`fit run` 和 `fit validate` 只加载 fit 自己的格式，nginx 配置或 Caddyfile 用
   `fit adapt -from nginx` 或 `-from caddyfile` 转换（[决策 021](decisions/021-fit-format-and-config-files.zh-CN.md#后续扩展名改为-konf)）。
   上面的条目保留当时的名字。
+- **后续（2026-10-26）：`snippet` 改为 `def`，由 `use` 读入。** 定义一次、按名字读入的指令块写作
+  `def <名字> { ... }`，由 `use <名字>` 读入；`include` 现在只引用文件，不再按名字读入 snippet，因此不是文件的引用会在所写
+  位置报错。文档、[决策 021](decisions/021-fit-format-and-config-files.zh-CN.md#后续def-与-use) 和基准配置随之更新；
+  `adapter/fitconf` 的测试把两者分开覆盖。仅涉及控制面：无基准测试（规则 21）。
 
 ### I81 WASM III：Proxy-Wasm 的响应回调 — 已完成
 

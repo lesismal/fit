@@ -47,19 +47,19 @@ func TestInclude(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"fit.konf": `include listeners.konf
 site a.example {
-	include snippets/site-*.konf
+	include shared/site-*.konf
 	route /api/* {
-		include snippets/proxy.inc
+		include shared/proxy.inc
 	}
 }
 include routes/*.konf
 include none/*.konf
 `,
 		"listeners.konf":         "listener web { address :8080 }\n",
-		"snippets/site-a.konf":   "listeners web\n",
-		"snippets/site-b.konf":   "middleware compress\n",
-		"snippets/proxy.inc":     "include headers.inc\nhandler proxy { upstream app }\n",
-		"snippets/headers.inc":   "middleware headers { response { delete Server } }\n",
+		"shared/site-a.konf":     "listeners web\n",
+		"shared/site-b.konf":     "middleware compress\n",
+		"shared/proxy.inc":       "include headers.inc\nhandler proxy { upstream app }\n",
+		"shared/headers.inc":     "middleware headers { response { delete Server } }\n",
 		"routes/1-hello.konf":    "route hello { handler respond { body hi } }\n",
 		"routes/2-notfound.konf": "route not-found {\n\tpriority -1\n\thandler respond { status 404 }\n}\n",
 	})
@@ -94,14 +94,14 @@ include none/*.konf
 // read only where it is included, also when a directory imported holds it.
 func TestImport(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf":            "import listeners.yaml sites\nroute last { priority -1; handler respond }\n",
-		"listeners.yaml":      "listeners:\n  - name: web\n    address: :8080\n",
-		"sites/a.konf":        "site a.example {\n\troute { include ../snippets/ok.konf }\n}\n",
-		"sites/b.json":        `{"routes": [{"name": "b", "handler": {"module": "respond"}}]}`,
-		"sites/shared.konf":   "handler respond { body shared }\n",
-		"sites/c.konf":        "site c.example {\n\troute { include shared.konf }\n}\n",
-		"snippets/ok.konf":    "handler respond { body ok }\n",
-		"snippets/other.konf": "this is never read\n",
+		"fit.konf":          "import listeners.yaml sites\nroute last { priority -1; handler respond }\n",
+		"listeners.yaml":    "listeners:\n  - name: web\n    address: :8080\n",
+		"sites/a.konf":      "site a.example {\n\troute { include ../shared/ok.konf }\n}\n",
+		"sites/b.json":      `{"routes": [{"name": "b", "handler": {"module": "respond"}}]}`,
+		"sites/shared.konf": "handler respond { body shared }\n",
+		"sites/c.konf":      "site c.example {\n\troute { include shared.konf }\n}\n",
+		"shared/ok.konf":    "handler respond { body ok }\n",
+		"shared/other.konf": "this is never read\n",
 	})
 	files, err := adapter.Files([]string{filepath.Join(dir, "fit.konf")})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestImport(t *testing.T) {
 	}
 	// The files watched: those imported and those included, each after
 	// the file naming it.
-	if want := []string{"fit.konf", "listeners.yaml", "sites/a.konf", "snippets/ok.konf", "sites/b.json", "sites/c.konf", "sites/shared.konf"}; !slices.Equal(rel, want) {
+	if want := []string{"fit.konf", "listeners.yaml", "sites/a.konf", "shared/ok.konf", "sites/b.json", "sites/c.konf", "sites/shared.konf"}; !slices.Equal(rel, want) {
 		t.Errorf("files %v, want %v", rel, want)
 	}
 	set, err := loadTree(t, dir, "fit.konf")
@@ -146,15 +146,18 @@ func TestIncludeErrors(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		{"missing", map[string]string{"fit.konf": "include nope.konf\n"}, "fit.konf:1:9: include nope.konf: there is no snippet nope.konf defined before it, nor such a file"},
+		{"missing", map[string]string{"fit.konf": "include nope.konf\n"}, "fit.konf:1:9: include nope.konf: {dir}/nope.konf is not among the config's files read"},
+		{"a def is not a file", map[string]string{"fit.konf": "def a { }\ninclude a\n"}, "fit.konf:2:9: include a: {dir}/a is not among the config's files read"},
+		{"use of a file", map[string]string{"fit.konf": "use a.inc\n", "a.inc": ""}, "fit.konf:1:5: use a.inc: there is no def a.inc defined before it"},
+		{"use before the def", map[string]string{"fit.konf": "use a\ndef a { }\n"}, "fit.konf:1:5: use a: there is no def a defined before it"},
 		{"import missing", map[string]string{"fit.konf": "import nope.konf\n"}, "fit.konf: import nope.konf: "},
 		{"itself", map[string]string{"fit.konf": "include fit.konf\n"}, "includes itself"},
 		{"each other", map[string]string{"fit.konf": "include a.konf\n", "a.konf": "include b.konf\n", "b.konf": "include a.konf\n"},
 			"includes itself: " + "{dir}/a.konf includes {dir}/b.konf includes {dir}/a.konf"},
 		{"import in a block", map[string]string{"fit.konf": "route { import a.konf }\n", "a.konf": ""}, "fit.konf:1:9: import is given at the top of a config file only"},
 		{"import in a file included", map[string]string{"fit.konf": "include a.inc\n", "a.inc": "import b.konf\n", "b.konf": ""}, "a.inc:1:1: import is given at the top of a config file only"},
-		{"no files", map[string]string{"fit.konf": "include\n"}, "fit.konf:1:1: include takes the snippets or the files to include"},
-		{"a block", map[string]string{"fit.konf": "include a.konf { }\n", "a.konf": ""}, "fit.konf:1:1: include takes the snippets or the files to include"},
+		{"no files", map[string]string{"fit.konf": "include\n"}, "fit.konf:1:1: include takes the files to include"},
+		{"a block", map[string]string{"fit.konf": "include a.konf { }\n", "a.konf": ""}, "fit.konf:1:1: include takes the files to include"},
 		{"bad glob", map[string]string{"fit.konf": "include [\n"}, "include ["},
 		{"in the file included", map[string]string{"fit.konf": "route a {\n\tinclude a.inc\n}\n", "a.inc": "handler respond\nhandler respond\n"},
 			"a.inc:2:1: handler is given twice"},
@@ -228,14 +231,14 @@ func incName(i int) string {
 	return "f" + string(rune('0'+i/10)) + string(rune('0'+i%10)) + ".inc"
 }
 
-// TestSnippetFiles checks that a snippet defined in a file included is
-// included by its name after it, and that the files a snippet includes are
-// found from the file that defined it.
-func TestSnippetFiles(t *testing.T) {
+// TestDefFiles checks that a def defined in a file included is used by its
+// name after it, and that the files a def includes are found from the file
+// that defined it.
+func TestDefFiles(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf":          "include lib/snippets.konf\nupstream app { addresses 10.0.0.1:80; include pool }\nroute a { include secure; handler respond }\n",
-		"lib/snippets.konf": "snippet pool { max_conns 8 }\nsnippet secure { include headers.inc }\n",
-		"lib/headers.inc":   "middleware headers { response { delete Server } }\n",
+		"fit.konf":        "include lib/defs.konf\nupstream app { addresses 10.0.0.1:80; use pool }\nroute a { use secure; handler respond }\n",
+		"lib/defs.konf":   "def pool { max_conns 8 }\ndef secure { include headers.inc }\n",
+		"lib/headers.inc": "middleware headers { response { delete Server } }\n",
 	})
 	set, err := loadTree(t, dir, "fit.konf")
 	if err != nil {

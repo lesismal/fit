@@ -20,8 +20,7 @@ import (
 // a directory given or imported holds it.
 
 // RefsFunc returns the files a file names, as written: the patterns it
-// imports and those it includes, which may name something other than a
-// file, as a snippet .konf files define. A file it cannot parse names none; adapting
+// imports and those it includes. A file it cannot parse names none; adapting
 // it says what is wrong.
 type RefsFunc func(data []byte) (imports, includes []string, err error)
 
@@ -150,8 +149,8 @@ func (f *finder) add(p, format string, fragment bool) error {
 	for _, pat := range includes {
 		paths, err := expandRef(p, pat)
 		if err != nil {
-			// It may name a snippet, of a file included; adapting the
-			// file says what is wrong, at its place.
+			// A glob that names nothing, or a file that is not there:
+			// adapting the file says what is wrong, at its place.
 			continue
 		}
 		for _, q := range paths {
