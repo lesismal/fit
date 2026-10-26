@@ -3094,8 +3094,10 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
 - **`log`**（`logs` 包）：fit 关于自身的消息经 logger 写出：`server`、`admin`、`tls`、`provider`、`telemetry`、
   `access_log`、`plugin`、`fastcgi` 和 `engine`，每条消息的级别为 debug、info、warn 或 error。`log.level` 设定所有 logger
   的最低级别，`log.levels` 单独设定部分 logger 的级别；两者在重载时生效（`admin.Configs` 在应用配置时设置），`output` 和
-  `format` 要等重启，并给出警告。不写 `log` 时输出与原来逐字节相同：`fit: ` 开头的行，debug 和 info 写到 stdout，warn 和
-  error 写到 stderr；`fit run` 整行打印的内容（带位置的配置错误、`fit run: ...`）在文本格式中原样写出，在 JSON 的 `msg`
+  `format` 要等重启，并给出警告。不写 `log` 时各行与原来相同：`fit: ` 加消息，debug 和 info 写到 stdout，warn 和 error
+  写到 stderr。原来经回调写出的消息无论内容都写到 stderr；其中 info 级别的（取得证书、OCSP 或 OTLP 导出恢复、Kubernetes
+  provider 的监视和状态）现在写到 stdout，`test/e2e` 的 `TestACMESharedStorage` 因此改为从 stdout 读取（在 CI 运行 Pebble 的
+  Linux 上，它在改之前失败）。`fit run` 整行打印的内容（带位置的配置错误、`fit run: ...`）在文本格式中原样写出，在 JSON 的 `msg`
   中去掉前缀。JSON 格式写出 `time`、`level`、`logger`、`msg`，以及 `log/slog` 记录的属性。
 - **引擎**：`logs.SetDefault` 把日志设为 Go 的 `slog` 默认值，因此 fib 的消息以及任何库的 `log.Printf` 都归 `engine`
   logger。fit 仍关闭 fib 的启动输出。

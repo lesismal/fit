@@ -18,8 +18,7 @@ message below its logger's level is not written. The loggers are:
 change to either takes effect on reload; `output` and `format` take a restart.
 
 Without `log`, messages at info and above are written as lines of text, `fit: ` and the message:
-debug and info ones to standard output, warn and error ones to standard error, as fit has always
-written them. `output` sends them all to one place. The `json` format writes an object a line,
+debug and info ones to standard output, warn and error ones to standard error. `output` sends them all to one place. The `json` format writes an object a line,
 with `time`, `level`, `logger` and `msg`, and the attributes the engine's messages carry. A
 message is written when it is logged: fit says little about itself, and nothing for each request.
 

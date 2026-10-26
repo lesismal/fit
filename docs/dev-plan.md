@@ -1070,7 +1070,7 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   `level` writes only the requests answered with 4xx and 5xx, or 5xx. `fit adapt` converts nginx's
   `error_log` and `access_log`, and Caddy's global `log`, `debug` and a site's `log { level }`.
 - **Done when**: every message fit writes has a logger and a level; a config without `log` writes
-  what fit wrote before, byte for byte; levels change on reload; the converters' tests cover each
+  the lines fit wrote before, each to stdout or stderr by its level; levels change on reload; the converters' tests cover each
   directive; the access log's micro-benchmark shows no cost.
 - **Touches**: `logs` (new), `config`, `cli`, `admin`, `runtime`, `observe`, `tlsmgr`, `provider`,
   `plugin/wasm`, `handler/fastcgi`, `adapter/nginx`, `adapter/caddyfile`, `schema`, `docs`.

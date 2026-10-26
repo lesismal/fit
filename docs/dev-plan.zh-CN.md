@@ -945,7 +945,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   error，重载即生效；以文本（与原来相同）或 JSON 写出，按级别分到 stdout 和 stderr，或写到同一个输出。访问日志的 `level`
   可以只记录以 4xx 和 5xx、或只以 5xx 应答的请求。`fit adapt` 转换 nginx 的 `error_log` 和 `access_log`，以及 Caddy 的全局
   `log`、`debug` 和站点的 `log { level }`。
-- **完成标准**：fit 写出的每条消息都有 logger 和级别；不写 `log` 的配置写出的内容与原来逐字节相同；级别在重载时改变；
+- **完成标准**：fit 写出的每条消息都有 logger 和级别；不写 `log` 的配置写出与原来相同的各行，按级别写到 stdout 或 stderr；级别在重载时改变；
   转换器的测试覆盖每条指令；访问日志的微基准测试显示没有开销。
 - **涉及**：`logs`（新）、`config`、`cli`、`admin`、`runtime`、`observe`、`tlsmgr`、`provider`、`plugin/wasm`、
   `handler/fastcgi`、`adapter/nginx`、`adapter/caddyfile`、`schema`、`docs`。

@@ -244,9 +244,13 @@ func TestACMESharedStorage(t *testing.T) {
   ],
   "routes": [{"handler": {"module": "respond", "params": {"body": "second"}}}]
 }`, acme), 2)
+			// What the instances say at info, certificates obtained among
+			// it, is on their stdout.
+			var stdout lockedBuffer
 			for _, f := range []*fit{first, second} {
 				go func() {
-					for range f.lines {
+					for line := range f.lines {
+						_, _ = stdout.Write([]byte(line + "\n"))
 					}
 				}()
 			}
@@ -258,7 +262,17 @@ func TestACMESharedStorage(t *testing.T) {
 			if !leaf1.Equal(leaf2) {
 				t.Errorf("the instances serve different certificates for both.fit.test: serials %s and %s", leaf1.SerialNumber, leaf2.SerialNumber)
 			}
-			logs := first.stderr.String() + second.stderr.String()
+			// The lines come through a pipe and the goroutines above:
+			// wait for them, then count.
+			deadline := time.Now().Add(10 * time.Second)
+			for !strings.Contains(stdout.String(), "both.fit.test: obtained a certificate") ||
+				!strings.Contains(stdout.String(), "b.fit.test: obtained a certificate") {
+				if time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			logs := stdout.String()
 			if n := strings.Count(logs, "both.fit.test: obtained a certificate"); n != 1 {
 				t.Errorf("both.fit.test obtained %d times:\n%s", n, logs)
 			}

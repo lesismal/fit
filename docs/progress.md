@@ -4309,8 +4309,12 @@ Differences from the plan:
   `tls`, `provider`, `telemetry`, `access_log`, `plugin`, `fastcgi` and `engine`, each message at
   debug, info, warn or error. `log.level` sets every logger's least level, `log.levels` some
   loggers' own; both change on reload (`admin.Configs` sets them as a config applies), while
-  `output` and `format` wait for a restart, with a warning. Without `log` the output is what it
-  was, byte for byte: `fit: ` lines, debug and info to stdout, warn and error to stderr; what
+  `output` and `format` wait for a restart, with a warning. Without `log` the lines are what they
+  were, `fit: ` and the message, debug and info to stdout, warn and error to stderr. What fit's
+  callbacks wrote went to stderr whatever it said; their info messages, a certificate obtained, an
+  OCSP or OTLP export that works again, a Kubernetes provider's watch and status, are on stdout
+  now, which `test/e2e`'s `TestACMESharedStorage` reads (it failed on CI's Linux, where Pebble
+  runs, until it did). What
   `fit run` prints whole (config errors at their positions, `fit run: ...`) is written as it is in
   text, and without its prefix as JSON's `msg`. JSON writes `time`, `level`, `logger`, `msg`, and
   the attributes of `log/slog` records.
