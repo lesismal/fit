@@ -1318,6 +1318,11 @@ upstream {
 	# # integer, 0 or more; default 16777216.
 	# max_body_bytes 16777216
 
+	# # The bytes one connection may have queued for its client before fit closes it, the bound on a
+	# # peer that stops reading. 32 MiB when left out or 0. Takes effect at start, not on a reload.
+	# # integer, 0 or more; default 33554432.
+	# max_write_queue_bytes 33554432
+
 	# # How long a response may wait for its client to take what it was sent, each time it waits,
 	# # before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset.
 	# # A client that keeps reading, however slowly, is not cut off, and nor is a response that has
@@ -1365,7 +1370,9 @@ upstream {
 
 	# # The bytes a connection may have waiting to be written before it stops reading until they
 	# # drain, the backpressure on one connection; limits.max_pending_bytes bounds them all
-	# # together. fib's default, 64 KiB, when left out or 0.
+	# # together. When left out or 0, fib sizes it from read_buffer_size and the machine: four read
+	# # buffers, at least 64 KiB and at most 256 KiB, so 256 KiB at the default 64 KiB read buffer
+	# # on a machine with enough memory.
 	# # integer, 0 or more.
 	# write_watermark 0
 

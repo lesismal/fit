@@ -433,7 +433,16 @@ func StartEngine() (*fib.Engine, func(), error) { return StartEngineWith(nil) }
 // StartEngineWith is StartEngine with the config's engine settings, e, in
 // place of fib's defaults; e may be nil.
 func StartEngineWith(e *config.Engine) (*fib.Engine, func(), error) {
-	engine, err := fib.New(fibconf.Config("fit-upstream", e))
+	cfg := fibconf.Config("fit-upstream", e)
+	// The upstream engine has no server-wide budget of its own, so its
+	// watermark is sized against the machine's reference budget. An explicit
+	// write_watermark still wins. Its per-connection queue is capped like the
+	// listeners', so an upstream that stops reading cannot hold it forever.
+	cfg.MaxWriteQueueBytes = config.DefaultMaxWriteQueueBytes
+	if e == nil || e.WriteWatermark <= 0 {
+		cfg.WriteBufferHighWatermark = fib.DefaultWriteWatermark(cfg.ReadBufferSize, 0, 0)
+	}
+	engine, err := fib.New(cfg)
 	if err != nil {
 		return nil, nil, err
 	}

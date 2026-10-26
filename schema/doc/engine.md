@@ -7,7 +7,9 @@ configs write no `engine` at all; it is for tuning a busy server on the host it 
 The engines are made when fit starts: a reload that changes `engine` is applied, with a warning
 that the change waits for a restart. How many bytes may wait for clients across every
 connection, the engine's budget, is [`limits.max_pending_bytes`](#limits), half the machine's
-memory by default; `write_watermark` is the same backpressure on one connection.
+memory by default; `write_watermark` is the same backpressure on one connection, sized from the
+read buffer and the machine when it is left out. At startup fit prints the effective limits and
+the settings of both engines, so what it actually runs with can be read from its log.
 
 ```json
 {

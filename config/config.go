@@ -254,6 +254,10 @@ const (
 	DefaultMaxHeaderBytes   = 1 << 20
 	DefaultMaxBodyBytes     = 16 << 20
 	DefaultMaxConns         = 100000
+	// DefaultMaxWriteQueueBytes is max_write_queue_bytes when it is left out:
+	// above what a normal fit response queues, and enough of a backstop for a
+	// peer that stops reading.
+	DefaultMaxWriteQueueBytes = 32 << 20
 )
 
 // Limits bound what clients can make fit hold for them.
@@ -262,6 +266,11 @@ type Limits struct {
 	MaxHeaderBytes  int    `json:"max_header_bytes,omitempty" min:"0" default:"1048576" doc:"The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0."`
 	MaxConns        int    `json:"max_conns,omitempty" min:"0" default:"100000" doc:"The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0."`
 	MaxBodyBytes    int64  `json:"max_body_bytes,omitempty" min:"0" default:"16777216" doc:"The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0."`
+	// MaxWriteQueueBytes caps the bytes one connection may have queued for its
+	// client before fit closes it; see fib's Config.MaxWriteQueueBytes. It is
+	// a backstop for a peer that stops reading, above what the response paths
+	// queue, not a target.
+	MaxWriteQueueBytes int64 `json:"max_write_queue_bytes,omitempty" min:"0" default:"33554432" doc:"The bytes one connection may have queued for its client before fit closes it, the bound on a peer that stops reading. 32 MiB when left out or 0. Takes effect at start, not on a reload."`
 
 	WriteStallTimeout Duration `json:"write_stall_timeout,omitempty" default:"\"30s\"" doc:"How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out."`
 
@@ -284,6 +293,12 @@ func (l Limits) BodyBytes() int64 { return orDefault(l.MaxBodyBytes, DefaultMaxB
 
 // Conns returns the connection limit, its default when left out.
 func (l Limits) Conns() int { return int(orDefault(int64(l.MaxConns), DefaultMaxConns)) }
+
+// QueueBytes returns the per-connection send-queue limit, its default when
+// left out.
+func (l Limits) QueueBytes() int64 {
+	return orDefault(l.MaxWriteQueueBytes, DefaultMaxWriteQueueBytes)
+}
 
 func orDefault(v, def int64) int64 {
 	if v <= 0 {

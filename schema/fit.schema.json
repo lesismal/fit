@@ -475,7 +475,7 @@
           "type": "integer"
         },
         "write_watermark": {
-          "description": "The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. fib's default, 64 KiB, when left out or 0.",
+          "description": "The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. When left out or 0, fib sizes it from read_buffer_size and the machine: four read buffers, at least 64 KiB and at most 256 KiB, so 256 KiB at the default 64 KiB read buffer on a machine with enough memory.",
           "minimum": 0,
           "type": "integer"
         }
@@ -810,6 +810,12 @@
               "type": "string"
             }
           ]
+        },
+        "max_write_queue_bytes": {
+          "default": 33554432,
+          "description": "The bytes one connection may have queued for its client before fit closes it, the bound on a peer that stops reading. 32 MiB when left out or 0. Takes effect at start, not on a reload.",
+          "minimum": 0,
+          "type": "integer"
         },
         "write_stall_timeout": {
           "default": "30s",

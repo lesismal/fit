@@ -53,6 +53,10 @@ type Graph struct {
 	// see config.Limits. The engine takes it when it starts, as it does
 	// MaxPendingBytes.
 	MaxConns int
+	// MaxWriteQueueBytes caps what one connection may have queued for its
+	// client; see config.Limits. The listeners' engine takes it when it
+	// starts.
+	MaxWriteQueueBytes int64
 	// Engine is the config's engine settings, or nil; the listeners'
 	// engine takes them when it starts, as it does MaxPendingBytes.
 	Engine *config.Engine
@@ -197,7 +201,7 @@ type Route struct {
 // The Graph returned holds one reference, its compiler's: Release it, or
 // hand it to Runtime.Swap.
 func Compile(c *config.Config, env Env) (*Graph, error) {
-	g := &Graph{AccessLog: env.AccessLog, Tracer: env.Tracer, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(), Engine: c.Engine,
+	g := &Graph{AccessLog: env.AccessLog, Tracer: env.Tracer, ACME: env.ACME, MaxPendingBytes: c.Limits.PendingBytes(), MaxConns: c.Limits.Conns(), MaxWriteQueueBytes: c.Limits.QueueBytes(), Engine: c.Engine,
 		upstreams: make(map[string]*upstream.Pool, len(c.Upstreams)), upstreamKeys: make(map[string]string, len(c.Upstreams))}
 	if c.Metrics != nil || c.Telemetry != nil && c.Telemetry.Metrics != nil {
 		g.Metrics = env.Metrics

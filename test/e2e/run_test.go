@@ -139,7 +139,10 @@ func startFitAt(t *testing.T, cfg string, want int, args ...string) (*fit, map[s
 				addrs[m[1]] = m[2]
 			} else if m := adminListening.FindStringSubmatch(line); m != nil {
 				addrs["admin"] = m[1]
-			} else if strings.HasPrefix(line, "fit: watching ") {
+			} else if strings.HasPrefix(line, "fit: watching ") ||
+				strings.HasPrefix(line, "fit: config ") ||
+				strings.HasPrefix(line, "fit: upstream engine{") {
+				// Startup diagnostics, not addresses to read.
 				continue
 			} else {
 				t.Fatalf("unexpected output: %q", line)
@@ -168,6 +171,9 @@ func (f *fit) stop(t *testing.T) (code int, output []string) {
 					return f.cmd.ProcessState.ExitCode(), output
 				}
 				return 0, output
+			}
+			if strings.HasPrefix(line, "fit: config ") || strings.HasPrefix(line, "fit: upstream engine{") {
+				continue
 			}
 			output = append(output, line)
 		case <-timeout:

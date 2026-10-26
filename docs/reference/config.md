@@ -816,7 +816,9 @@ config that writes none is still bounded: connections, the sizes of request head
 the bytes of responses waiting for slow clients, and how long a client may stall a response.
 The bytes waiting for slow clients, the backpressure across every connection, are a number of
 bytes or a share of memory, such as `"25%"`: of the machine's, or of the container's memory limit
-where that is lower, half by default; the rest have fixed defaults. The
+where that is lower, half by default; the rest have fixed defaults. One connection's send queue is
+capped at 32 MiB by default, above what the response paths queue, so a peer that stops reading is
+closed rather than holding a share of the budget forever. The
 [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
 
 In a .konf file:
@@ -831,6 +833,7 @@ limits {
 	max_header_bytes 64KiB
 	max_body_bytes 100MiB
 	max_pending_bytes 25%
+	max_write_queue_bytes 32MiB
 	write_stall_timeout 1m
 }
 ```
@@ -849,6 +852,7 @@ limits:
   max_header_bytes: 65536
   max_body_bytes: 104857600
   max_pending_bytes: 25%
+  max_write_queue_bytes: 33554432
   write_stall_timeout: 1m
 ```
 
@@ -863,6 +867,7 @@ In JSON:
     "max_header_bytes": 65536,
     "max_body_bytes": 104857600,
     "max_pending_bytes": "25%",
+    "max_write_queue_bytes": 33554432,
     "write_stall_timeout": "1m"
   }
 }
@@ -878,6 +883,7 @@ In JSON:
 | `max_header_bytes` | integer, 0 or more | `1048576` | The largest request header a listener takes; a larger one gets 431. 1 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `100000` | The most client connections the listeners keep open at once, across all of them; one past it is closed as soon as it is accepted. Takes effect at start, not on a reload. 100000 when left out or 0. |
 | `max_body_bytes` | integer, 0 or more | `16777216` | The largest request body a listener takes, whether it arrives whole or streams through; a larger one gets 413, or, once it has begun to stream, its connection or stream is ended. 16 MiB when left out or 0. |
+| `max_write_queue_bytes` | integer, 0 or more | `33554432` | The bytes one connection may have queued for its client before fit closes it, the bound on a peer that stops reading. 32 MiB when left out or 0. Takes effect at start, not on a reload. |
 | `write_stall_timeout` | duration | `"30s"` | How long a response may wait for its client to take what it was sent, each time it waits, before the client loses it: its HTTP/1 connection closed, its HTTP/2 or HTTP/3 stream reset. A client that keeps reading, however slowly, is not cut off, and nor is a response that has nothing to send. 30s when left out. |
 
 <a id="engine"></a>
@@ -893,7 +899,9 @@ configs write no `engine` at all; it is for tuning a busy server on the host it 
 The engines are made when fit starts: a reload that changes `engine` is applied, with a warning
 that the change waits for a restart. How many bytes may wait for clients across every
 connection, the engine's budget, is [`limits.max_pending_bytes`](#limits), half the machine's
-memory by default; `write_watermark` is the same backpressure on one connection.
+memory by default; `write_watermark` is the same backpressure on one connection, sized from the
+read buffer and the machine when it is left out. At startup fit prints the effective limits and
+the settings of both engines, so what it actually runs with can be read from its log.
 
 In a .konf file:
 
@@ -953,7 +961,7 @@ In JSON:
 | `task_queue` | integer, 0 or more |  | How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0. |
 | `poll_batch` | integer, 0 or more |  | The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0. |
 | `read_buffer_size` | integer, 0 to 67108864 |  | The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0. |
-| `write_watermark` | integer, 0 or more |  | The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. fib's default, 64 KiB, when left out or 0. |
+| `write_watermark` | integer, 0 or more |  | The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. When left out or 0, fib sizes it from read_buffer_size and the machine: four read buffers, at least 64 KiB and at most 256 KiB, so 256 KiB at the default 64 KiB read buffer on a machine with enough memory. |
 | `backlog` | integer, 0 or more |  | The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0. |
 
 <a id="admin-api"></a>

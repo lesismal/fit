@@ -145,6 +145,8 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	for _, a := range s.Addrs() {
 		printListener(stdout, a)
 	}
+	printConfig(stdout, c, s)
+	fmt.Fprintf(stdout, "fit: upstream engine{%s}\n", env.Engine.Settings().String())
 	var keep int
 	if c.Admin != nil {
 		keep = c.Admin.HistoryLen()
@@ -279,6 +281,16 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 
 func printListener(w io.Writer, a listener.Addr) {
 	fmt.Fprintf(w, "fit: listener %q on %s (%s)\n", a.Name, a.Addr, strings.Join(a.Protocols, ", "))
+}
+
+// printConfig prints every basic value the listeners' engine runs with: the
+// limits that bound what clients may make fit hold, and fib's effective
+// sizing after the config's values and the machine's have been applied. The
+// upstream engine's line follows, since it is sized separately.
+func printConfig(w io.Writer, c *config.Config, s *listener.Server) {
+	l := c.Limits
+	fmt.Fprintf(w, "fit: config listeners=%d limits{max_pending_bytes=%d max_conns=%d max_header_bytes=%d max_body_bytes=%d max_write_queue_bytes=%d write_stall_timeout=%s} engine{%s}\n",
+		len(s.Addrs()), l.PendingBytes(), l.Conns(), l.HeaderBytes(), l.BodyBytes(), l.QueueBytes(), l.WriteStall(), s.Settings().String())
 }
 
 // reloadConfig loads the config paths name and applies it. On any failure

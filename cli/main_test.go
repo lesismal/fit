@@ -137,9 +137,19 @@ func TestRun(t *testing.T) {
 	stopped := false
 	code := serve(ctx, func() { stopped = true }, nil, []string{"-c", cfg}, &out, &errOut)
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], `fit: listener "web" on 127.0.0.1:`) ||
-		!strings.HasSuffix(lines[0], "(http/1.1, h2c)") || lines[1] != "fit: shutting down" || lines[2] != "fit: stopped" || !stopped {
+	if code != 0 || len(lines) != 5 || !strings.HasPrefix(lines[0], `fit: listener "web" on 127.0.0.1:`) ||
+		!strings.HasSuffix(lines[0], "(http/1.1, h2c)") ||
+		!strings.HasPrefix(lines[1], "fit: config listeners=1 limits{") ||
+		!strings.HasPrefix(lines[2], "fit: upstream engine{") ||
+		lines[3] != "fit: shutting down" || lines[4] != "fit: stopped" || !stopped {
 		t.Fatalf("run: %d %q %q", code, out.String(), errOut.String())
+	}
+	for _, line := range lines[1:3] {
+		for _, want := range []string{"writeWatermark=", "maxPendingBytes=", "maxWriteQueueBytes=", "readBuffer="} {
+			if !strings.Contains(line, want) {
+				t.Errorf("startup line %.200q is missing %q", line, want)
+			}
+		}
 	}
 
 	if code, _, stderr := runFit("run", "-c", filepath.Join(dir, "missing.json")); code != 1 || !strings.HasPrefix(stderr, "fit run: stat ") {

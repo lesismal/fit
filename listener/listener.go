@@ -143,6 +143,16 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 	// Connections past max_conns are closed as they are accepted, and
 	// counted in Stats.ConnsRefused.
 	cfg.MaxConns = g.MaxConns
+	cfg.MaxWriteQueueBytes = g.MaxWriteQueueBytes
+	// fib sizes the per-connection watermark from the read buffer and the
+	// machine. An explicit write_watermark still wins.
+	sizing := fib.DefaultSizing(cfg.ReadBufferSize, cfg.MaxPendingBytes, cfg.MaxConns)
+	if g.Engine == nil || g.Engine.WriteWatermark <= 0 {
+		cfg.WriteBufferHighWatermark = sizing.WriteWatermark
+	}
+	if cfg.MaxWriteQueueBytes <= 0 {
+		cfg.MaxWriteQueueBytes = sizing.MaxWriteQueueBytes
+	}
 	engine, err := fib.New(cfg)
 	if err != nil {
 		return nil, err
@@ -165,6 +175,11 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 // max_conns refused, bytes queued for clients, and the pauses the write
 // watermark and max_pending_bytes caused.
 func (s *Server) Stats() fib.Stats { return s.engine.Stats() }
+
+// Settings returns the listeners' engine's effective configuration: the
+// values it runs with after fib has filled in and sized what the config left
+// out. It is what the startup log prints.
+func (s *Server) Settings() fib.Settings { return s.engine.Settings() }
 
 // SetDrainTimeout sets how long a listener a reload removed may take to
 // finish the requests it has before its connections are closed, and, in the
