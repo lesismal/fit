@@ -131,25 +131,25 @@ func TestDerivePlan(t *testing.T) {
 		conns, idle, backlog    int
 		warning                 string
 	}{
-		{"the benchmark host", benchHost, "0-1,8-9", "2-4,10-12", "5-7,13-15", 10000,
-			"100:10:10 500:20:25 2000:80:25 5000:200:25 10000:400:25", 40000, 100, 16384, 4096, 2048, ""},
+		{"the benchmark host", benchHost, "0-2,8-10", "3-4,11-12", "5-7,13-15", 10000,
+			"100:10:10 500:20:25 2000:80:25 5000:200:25 10000:400:25", 40000, 100, 16384, 2731, 2048, ""},
 		{"64 threads on 2 nodes", fakeMachine{cores: 32, threads: 2, nodes: 2, mhz: 3000, memGiB: 256, somaxconn: 4096,
 			nrOpen: 1 << 20, ports: [2]int{32768, 60999}, rmemMax: 7500000, tcpMem: 1 << 20},
-			"0-7,32-39", "8-19,40-51", "20-31,52-63", 20000,
-			"100:24:4 500:24:20 4000:160:25 10000:400:25 20000:800:25", 80000, 100, 32768, 2048, 4096, "span 2 NUMA nodes"},
+			"0-22,32-54", "23-25,55-57", "26-31,58-63", 20000,
+			"100:12:8 500:20:25 4000:160:25 10000:400:25 20000:800:25", 80000, 100, 32768, 713, 4096, "span 2 NUMA nodes"},
 		{"8 threads, 16 GiB", fakeMachine{cores: 4, threads: 2, nodes: 1, mhz: 4000, memGiB: 16, somaxconn: 4096,
 			nrOpen: 1 << 20, ports: [2]int{32768, 60999}, rmemMax: 212992, tcpMem: 196608},
-			"0,4", "1-2,5-6", "3,7", 5000, "100:10:10 500:20:25 1000:40:25 2500:100:25 5000:200:25", 20000, 50, 8192, 4096, 4096, "rmem_max"},
+			"0,4", "1,5", "2-3,6-7", 5000, "100:10:10 500:20:25 1000:40:25 2500:100:25 5000:200:25", 20000, 50, 8192, 4096, 4096, "rmem_max"},
 		{"4 threads without SMT", fakeMachine{cores: 4, threads: 1, nodes: 1, memGiB: 8, somaxconn: 4096, nrOpen: 1 << 20},
-			"0", "1-2", "3", 2000, "100:10:10 500:20:25 1000:40:25 2000:80:25", 8000, 100, 4096, 4096, 4096, ""},
+			"0", "1", "2-3", 2000, "100:10:10 500:20:25 1000:40:25 2000:80:25", 8000, 100, 4096, 4096, 4096, ""},
 		{"4 threads on 2 cores", fakeMachine{cores: 2, threads: 2, nodes: 1, memGiB: 4, somaxconn: 128, nrOpen: 1 << 20},
-			"0", "1-2", "3", 500, "100:10:10 500:20:25", 2000, 100, 1024, 1024, 128, "split by thread"},
+			"0", "2", "1,3", 500, "100:10:10 500:20:25", 2000, 100, 1024, 1024, 128, "split by thread"},
 		{"6 cores without SMT, little memory", fakeMachine{cores: 6, threads: 1, nodes: 1, memGiB: 1, somaxconn: 4096, nrOpen: 1 << 20},
-			"0-1", "2-3", "4-5", 500, "100:10:10 500:20:25", 96, 100, 1024, 512, 4096, "W5 can hold only"},
+			"0-2", "3", "4-5", 500, "100:10:10 500:20:25", 96, 100, 1024, 342, 4096, "W5 can hold only"},
 		{"3 cores", fakeMachine{cores: 3, threads: 1, nodes: 1, memGiB: 2, nrOpen: 1 << 20},
 			"0", "1", "2", 1000, "100:10:10 500:20:25 1000:40:25", 4000, 100, 2048, 2048, 4096, ""},
 		{"5 cores, the odd one to the backends", fakeMachine{cores: 5, threads: 1, nodes: 1, memGiB: 32, nrOpen: 1 << 20},
-			"0", "1-2", "3-4", 2000, "100:10:10 500:20:25 1000:40:25 2000:80:25", 8000, 100, 4096, 4096, 4096, ""},
+			"0-1", "2", "3-4", 2000, "100:10:10 500:20:25 1000:40:25 2000:80:25", 8000, 100, 4096, 2048, 4096, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			p, err := derivePlan(machineOf(t, tt.m), Overrides{})
@@ -159,8 +159,8 @@ func TestDerivePlan(t *testing.T) {
 			if p.ServerCPUs != tt.server || p.BackendCPUs != tt.backend || p.ClientCPUs != tt.client {
 				t.Errorf("split %s / %s / %s", p.ServerCPUs, p.BackendCPUs, p.ClientCPUs)
 			}
-			if p.BackendWorkers < p.ClientThreads {
-				t.Errorf("backends %d smaller than the load generators %d", p.BackendWorkers, p.ClientThreads)
+			if p.TopBounds["client"] < p.Top || p.TopBounds["backend"] < p.Top {
+				t.Errorf("client %d or backends %d hold less than the top level %d", p.TopBounds["client"], p.TopBounds["backend"], p.Top)
 			}
 			if p.Top != tt.top || levels(p) != tt.levels {
 				t.Errorf("top %d %v, levels %s", p.Top, p.TopBounds, levels(p))
@@ -183,16 +183,20 @@ func TestDerivePlan(t *testing.T) {
 	}
 }
 
-// On the benchmark host the derived plan is the one hand-tuned before it:
-// the same split, levels, workloads and aligned settings, and its 232 runs.
+// On the benchmark host the derived plan keeps the hand-tuned levels,
+// workloads and runs, with the server 3 cores (6 CPUs) to the backends' 2
+// and the load generators' 3.
 func TestDerivePlanBenchHost(t *testing.T) {
 	p, err := derivePlan(machineOf(t, benchHost), Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Mid.arg() != "500:20:25" || len(p.W2) != 2 || p.W2[1].InFlight != 2000 || fmt.Sprint(p.W3) != "[100 500]" ||
-		p.W4.arg() != "100:10:10" || fmt.Sprint(p.W6Rates) != "[20000 100000]" || p.Runs != 232 || p.Workers != 4 ||
-		p.Aligned.WorkerConnections != 65536 || p.TopBounds["cpu"] != 10000 || p.TopBounds["somaxconn"] != 10240 {
+	if p.ServerCPUs != "0-2,8-10" || p.BackendCPUs != "3-4,11-12" || p.ClientCPUs != "5-7,13-15" ||
+		p.Mid.arg() != "500:20:25" || len(p.W2) != 2 || p.W2[1].InFlight != 2000 || fmt.Sprint(p.W3) != "[100 500]" ||
+		p.W4.arg() != "100:10:10" || fmt.Sprint(p.W6Rates) != "[30000 200000]" || p.Runs != 232 || p.Workers != 6 ||
+		p.BackendWorkers != 4 || p.ClientThreads != 6 || p.Aligned.IdlePerWorker != 2731 ||
+		p.Aligned.WorkerConnections != 65536 || p.TopBounds["cpu"] != 15000 || p.TopBounds["client"] != 10002 ||
+		p.TopBounds["backend"] != 16000 || p.TopBounds["somaxconn"] != 10240 {
 		t.Errorf("%+v", p)
 	}
 	if p.Estimated != "1h33m0s" {
@@ -202,18 +206,18 @@ func TestDerivePlanBenchHost(t *testing.T) {
 
 func TestDerivePlanOverrides(t *testing.T) {
 	m := machineOf(t, benchHost)
-	p, err := derivePlan(m, Overrides{ServerCPUs: "0-3", Levels: []int{500, 100, 500}, W5Idle: 1000, W6Rates: []int{1, 2, 3},
+	p, err := derivePlan(m, Overrides{ServerCPUs: "0-6", Levels: []int{500, 100, 500}, W5Idle: 1000, W6Rates: []int{1, 2, 3},
 		BackendConns: 400, Backlog: 4096, Duration: 3 * time.Second, Warmup: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.ServerCPUs != "0-3" || p.BackendCPUs != "2-4,10-12" || p.Top != 500 || len(p.Levels) != 2 || p.W5Idle != 1000 ||
-		fmt.Sprint(p.W6Rates) != "[1 2 3]" || p.W6From != "set" || p.Aligned.BackendConns != 400 || p.Aligned.IdlePerWorker != 100 ||
+	if p.ServerCPUs != "0-6" || p.BackendCPUs != "6,14" || p.ClientCPUs != "7,15" || p.Top != 500 || len(p.Levels) != 2 || p.W5Idle != 1000 ||
+		fmt.Sprint(p.W6Rates) != "[1 2 3]" || p.W6From != "set" || p.Aligned.BackendConns != 400 || p.Aligned.IdlePerWorker != 58 ||
 		p.Aligned.Backlog != 4096 || p.Duration != "3s" || p.Warmup != "1s" || p.Runs != 16*2+10*2+15+8*2+26+10+30 {
 		t.Errorf("%+v", p)
 	}
 	warnings := strings.Join(p.Warnings, "; ")
-	for _, want := range []string{"CPU 2 is given to both", "does not exceed the top level", "past somaxconn"} {
+	for _, want := range []string{"CPU 6 is given to both", "does not exceed the top level", "past somaxconn"} {
 		if !strings.Contains(warnings, want) {
 			t.Errorf("no %q in %q", want, warnings)
 		}
@@ -353,9 +357,9 @@ func TestRunPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"split       server 0-1,8-9 (4 workers), backends 2-4,10-12 (6), load generators 5-7,13-15 (6 threads)",
+	for _, want := range []string{"split       server 0-2,8-10 (6 workers), backends 3-4,11-12 (4), load generators 5-7,13-15 (6 threads)",
 		"top level   10000 in flight", "10000 (wrk 10000, h2load 400×25)", "40000 idle TLS connections",
-		"backend connections and waiting requests 16384, nginx idle 4096 a worker, backlog 2048", "runs        232"} {
+		"backend connections and waiting requests 16384, nginx idle 2731 a worker, backlog 2048", "runs        232"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
@@ -365,7 +369,7 @@ func TestRunPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"PLAN_DURATION=3s\n", "PLAN_LEVELS='100:10:10 500:20:25'\n", "PLAN_W3_CONNS='100 500'\n",
-		"PLAN_CPUS='-server-cpus 0-1,8-9 -backend-cpus 2-4,10-12 -client-cpus 5-7,13-15'\n", "PLAN_W6_SET=false\n",
+		"PLAN_CPUS='-server-cpus 0-5,8-13 -backend-cpus 6,14 -client-cpus 7,15'\n", "PLAN_W6_SET=false\n",
 		"PLAN_ALIGNED='-backend-conns 1024 -backlog 2048'\n", "PLAN_MID_LEVEL='500:20:25'\n", "PLAN_W5_IDLE=2000\n"} {
 		if !strings.Contains(sh, want) {
 			t.Errorf("no %q in\n%s", want, sh)

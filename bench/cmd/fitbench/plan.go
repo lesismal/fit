@@ -242,9 +242,18 @@ func formatCPUList(cpus []int) string {
 // the plan").
 const (
 	// inFlightPerServerCPU is how many requests in flight the top level
-	// keeps for each of the server's CPUs: 10,000 for its 4 on the host,
-	// past every server's ceiling.
+	// keeps for each of the server's CPUs: 2,500, which on the host's 4
+	// was past every server's ceiling and on its 6 allows 15,000, past the
+	// 10,000 somaxconn allows.
 	inFlightPerServerCPU = 2500
+	// inFlightPerClientThread is how many requests in flight a load
+	// generator thread drives: the host's 10,000 over the 6 threads that
+	// drove it before.
+	inFlightPerClientThread = 1667
+	// inFlightPerBackendCPU is how many requests in flight the proxy
+	// backends answer for each CPU: they used 2.18 of 6 at 10,000 (4,587
+	// a CPU); 4,000 a CPU leaves them room.
+	inFlightPerBackendCPU = 4000
 	// memPerInFlight is the most a server held for each request in flight
 	// (Envoy over HTTP/3 at 10,000, 4.9 GiB), rounded up, and memPerIdle for
 	// each idle TLS connection (Traefik, 2.4 GiB for 40,000).
@@ -408,6 +417,14 @@ func nextPow2(n int) int {
 	return p
 }
 
+// ceilDiv divides a by b, rounding up.
+func ceilDiv(a, b int) int {
+	if a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
+}
+
 // floor125 rounds n down to 1, 2 or 5 times a power of ten.
 func floor125(n int) int {
 	if n < 1 {
@@ -445,11 +462,17 @@ func floorSig(n, sig int) int {
 
 // splitCores divides the machine's CPUs between the server under test, the
 // backends and the load generators by physical core, so that no role shares
-// a core with another: the server a quarter of the cores, the rest halved,
-// the backends taking the odd one so they are never smaller than the load
-// generators. With fewer than 3 cores it splits threads instead, with a
-// warning; with fewer than 3 CPUs it cannot.
-func splitCores(m Machine) (server, backend, client []int, warnings []string, err error) {
+// a core with another. The load generators get the cores that hold the
+// threads they need to drive inFlight requests, the backends the cores that
+// hold the CPUs they need to answer them, and the server every core left:
+// on the benchmark host 3 cores (6 CPUs) to the server, 2 (4 CPUs) to the
+// backends and 3 (6 threads) to the load generators, the server up from 2
+// cores while the load generators keep what drove 10,000 in flight before.
+// A role's reservation is capped at half the cores for the load generators
+// and a quarter for the backends, so the server keeps at least one core.
+// With fewer than 3 cores it splits threads instead, with a warning; with
+// fewer than 3 CPUs it cannot.
+func splitCores(m Machine, inFlight int) (server, backend, client []int, warnings []string, err error) {
 	units := m.Cores
 	if len(units) < 3 {
 		if m.CPUs < 3 {
@@ -464,8 +487,32 @@ func splitCores(m Machine) (server, backend, client []int, warnings []string, er
 		warnings = append(warnings, fmt.Sprintf("only %d physical cores: the CPUs are split by thread, and the roles share cores, which costs each of them", len(m.Cores)))
 	}
 	n := len(units)
-	s := max(1, (n+2)/4)
-	b := (n - s + 1) / 2
+	// unitsFor is how many units hold threads threads, a whole core (both
+	// its threads) coming with it.
+	unitsFor := func(threads int) int {
+		count := 0
+		for i, u := range units {
+			count += len(u)
+			if count >= threads {
+				return i + 1
+			}
+		}
+		return n
+	}
+	clientN := min(unitsFor(max(2, ceilDiv(inFlight, inFlightPerClientThread))), max(1, n/2))
+	backendN := min(unitsFor(max(2, ceilDiv(inFlight, inFlightPerBackendCPU))), max(1, n/4))
+	// The server keeps at least one unit, taken from the larger of the two
+	// reservations.
+	for n-clientN-backendN < 1 {
+		if clientN >= backendN && clientN > 1 {
+			clientN--
+		} else if backendN > 1 {
+			backendN--
+		} else {
+			break
+		}
+	}
+	s := n - clientN - backendN
 	take := func(from, count int) []int {
 		var cpus []int
 		for _, u := range units[from : from+count] {
@@ -473,7 +520,7 @@ func splitCores(m Machine) (server, backend, client []int, warnings []string, er
 		}
 		return cpus
 	}
-	server, backend, client = take(0, s), take(s, b), take(s+b, n-s-b)
+	server, backend, client = take(0, s), take(s, backendN), take(s+backendN, clientN)
 	for name, cpus := range map[string][]int{"the server": server, "the backends": backend, "the load generators": client} {
 		nodes := map[int]bool{}
 		for _, c := range cpus {
@@ -490,7 +537,45 @@ func splitCores(m Machine) (server, backend, client []int, warnings []string, er
 // what would be derived.
 func derivePlan(m Machine, o Overrides) (Plan, error) {
 	p := Plan{Machine: m, TopBounds: map[string]int{}, W5Bounds: map[string]int{}}
-	server, backend, client, warnings, err := splitCores(m)
+	nofile := int64(containerNofile)
+	if m.NrOpen > 0 && m.NrOpen < containerNofile {
+		return p, fmt.Errorf("fs.nr_open is %d: the containers' nofile of %d cannot be set; raise it (sysctl fs.nr_open=%d)", m.NrOpen, containerNofile, containerNofile)
+	}
+	// The top level's bounds that do not depend on the split.
+	base := map[string]int{}
+	if m.MemBytes > 0 {
+		base["memory"] = int(m.MemBytes / 4 / memPerInFlight)
+	}
+	if ports := m.ports(); ports > 0 {
+		base["ports"] = ports * 8 / 10
+	}
+	if m.Somaxconn > 0 {
+		base["somaxconn"] = burstPerBacklog * m.Somaxconn
+	}
+	if m.TCPMemPressure > 0 {
+		base["tcp_mem"] = int(m.TCPMemPressure / 2 / tcpPerInFlight)
+	}
+	base["nofile"] = int(nofile / 4)
+	if m.FileMax > 0 && m.FileMax < math.MaxInt32 {
+		base["file_max"] = int(m.FileMax / 8)
+	}
+	least := math.MaxInt
+	for _, v := range base {
+		least = min(least, v)
+	}
+
+	// The split and the top level size each other: the split reserves what
+	// the top level needs of the load generators and the backends, and the
+	// top level is bounded by what the split allows. Start from the
+	// machine's own bounds and settle the two in a few rounds, unless the
+	// CPUs or the levels are given.
+	inFlight := floor125(least)
+	if len(o.Levels) > 0 {
+		inFlight = slices.Max(o.Levels)
+	} else if o.Top > 0 {
+		inFlight = o.Top
+	}
+	server, backend, client, warnings, err := splitCores(m, inFlight)
 	if err != nil && (o.ServerCPUs == "" || o.BackendCPUs == "" || o.ClientCPUs == "") {
 		return p, err
 	}
@@ -508,7 +593,8 @@ func derivePlan(m Machine, o Overrides) (Plan, error) {
 			*set.to, p.Set = set.from, append(p.Set, set.name)
 		}
 	}
-	if len(p.Set) > 0 {
+	cpusSet := len(p.Set) > 0
+	if cpusSet {
 		p.Warnings = nil // the split warned of is not the one used
 		seen := map[int]string{}
 		for _, role := range []struct{ name, set string }{{"server", p.ServerCPUs}, {"backends", p.BackendCPUs}, {"load generators", p.ClientCPUs}} {
@@ -522,37 +608,42 @@ func derivePlan(m Machine, o Overrides) (Plan, error) {
 		}
 	}
 	p.Workers, p.BackendWorkers, p.ClientThreads = cpusetCount(p.ServerCPUs), cpusetCount(p.BackendCPUs), cpusetCount(p.ClientCPUs)
-	if p.BackendWorkers < p.ClientThreads {
-		p.Warnings = append(p.Warnings, "the backends have fewer CPUs than the load generators, and may set the pace of the proxy runs")
+	// bounds are the top level's bounds for the split as it stands.
+	bounds := func() map[string]int {
+		b := make(map[string]int, len(base)+3)
+		for k, v := range base {
+			b[k] = v
+		}
+		// Each request in flight is a client connection, a backend
+		// connection at the server, and one at each end: at most 4
+		// descriptors.
+		b["cpu"] = inFlightPerServerCPU * p.Workers
+		b["client"] = inFlightPerClientThread * p.ClientThreads
+		b["backend"] = inFlightPerBackendCPU * p.BackendWorkers
+		return b
 	}
-	if p.ClientThreads < p.Workers {
-		p.Warnings = append(p.Warnings, "the load generators have fewer CPUs than the server, and may set the pace of the fastest servers")
+	if !cpusSet && len(o.Levels) == 0 && o.Top == 0 {
+		for range 3 {
+			least = math.MaxInt
+			for _, v := range bounds() {
+				least = min(least, v)
+			}
+			next := floor125(least)
+			if next == inFlight {
+				break
+			}
+			inFlight = next
+			server, backend, client, warnings, err = splitCores(m, inFlight)
+			if err != nil {
+				return p, err
+			}
+			p.ServerCPUs, p.BackendCPUs, p.ClientCPUs = formatCPUList(server), formatCPUList(backend), formatCPUList(client)
+			p.Workers, p.BackendWorkers, p.ClientThreads = cpusetCount(p.ServerCPUs), cpusetCount(p.BackendCPUs), cpusetCount(p.ClientCPUs)
+			p.Warnings = warnings
+		}
 	}
-
-	nofile := int64(containerNofile)
-	if m.NrOpen > 0 && m.NrOpen < containerNofile {
-		return p, fmt.Errorf("fs.nr_open is %d: the containers' nofile of %d cannot be set; raise it (sysctl fs.nr_open=%d)", m.NrOpen, containerNofile, containerNofile)
-	}
-	// Each request in flight is a client connection, a backend connection
-	// at the server, and one at each end: at most 4 descriptors.
-	p.TopBounds["cpu"] = inFlightPerServerCPU * p.Workers
-	if m.MemBytes > 0 {
-		p.TopBounds["memory"] = int(m.MemBytes / 4 / memPerInFlight)
-	}
-	if ports := m.ports(); ports > 0 {
-		p.TopBounds["ports"] = ports * 8 / 10
-	}
-	if m.Somaxconn > 0 {
-		p.TopBounds["somaxconn"] = burstPerBacklog * m.Somaxconn
-	}
-	if m.TCPMemPressure > 0 {
-		p.TopBounds["tcp_mem"] = int(m.TCPMemPressure / 2 / tcpPerInFlight)
-	}
-	p.TopBounds["nofile"] = int(nofile / 4)
-	if m.FileMax > 0 && m.FileMax < math.MaxInt32 {
-		p.TopBounds["file_max"] = int(m.FileMax / 8)
-	}
-	least := math.MaxInt
+	p.TopBounds = bounds()
+	least = math.MaxInt
 	for _, v := range p.TopBounds {
 		least = min(least, v)
 	}
@@ -583,6 +674,16 @@ func derivePlan(m Machine, o Overrides) (Plan, error) {
 	}
 	if p.Top > least {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("the top level set, %d, is past what the machine was found to hold, %d", p.Top, least))
+	}
+	// The load generators and the backends must hold the top level, or they
+	// set the pace instead of the server.
+	for _, role := range []struct{ name, bound string }{
+		{"the load generators", "client"},
+		{"the backends", "backend"},
+	} {
+		if p.TopBounds[role.bound] < p.Top {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%s hold at most %d requests in flight, below the top level %d, and may set the pace", role.name, p.TopBounds[role.bound], p.Top))
+		}
 	}
 	for _, n := range levels {
 		p.Levels = append(p.Levels, shape(n, p.ClientThreads))
