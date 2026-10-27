@@ -10,7 +10,7 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// A config file may name other files, in a format that lets it (.konf):
+// A config file may name other files, in a format that lets it (.conf):
 // those it imports, config files of their own, in any format, merged after
 // it as the files given with -c are; and those it includes, fragments of
 // its own format read in its place. Each is named by a path, relative to

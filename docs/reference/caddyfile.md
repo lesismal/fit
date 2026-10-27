@@ -3,12 +3,12 @@
 [English](caddyfile.md) | [简体中文](caddyfile.zh-CN.md)
 
 To help move a site from Caddy, `fit adapt` converts a common subset of Caddy's Caddyfile to fit's
-config, best written out as a [.konf file](fit.md) to keep and edit from then on. What is not
+config, best written out as a [.conf file](fit.md) to keep and edit from then on. What is not
 converted is never dropped silently: each directive, option or subdirective left out is listed
 with its line:
 
 ```bash
-fit adapt -from caddyfile -c Caddyfile -to fit -o fit.konf
+fit adapt -from caddyfile -c Caddyfile -to fit -o fit.conf
 ```
 
 `-from caddyfile` names the format, whatever the file is called. `fit run` and `fit validate` load
@@ -286,4 +286,4 @@ Each of these is listed by line when it appears:
 - `rewrite` and `uri` act after fit has picked the route: a rewritten path does not choose another
   route, as it can in Caddy.
 - Layer 4, caching, rate limits, JWT and WASM have no Caddyfile directive here: add them to the
-  .konf file `fit adapt` writes.
+  .conf file `fit adapt` writes.

@@ -45,7 +45,7 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 
 - `bench/ab.sh [选项] A B` 对比 fit 的两个 git ref（或 `work`，即工作区）：只跑 fit，只跑给定的场景和协议
   （`-scenarios`、`-protocols`），预热 2 秒后每次跑 10 秒，A、B 交替 3 轮；`-extra` 追加到 fit 的配置
-  `bench/configs/fit/fit.konf`（访问日志、指标等）。它在压测机上启动后返回一个 id；`bench/ab.sh -report ID` 取回已完成的结果，汇总每秒请求数和每请求
+  `bench/configs/fit/fit.conf`（访问日志、指标等）。它在压测机上启动后返回一个 id；`bench/ab.sh -report ID` 取回已完成的结果，汇总每秒请求数和每请求
   CPU，变化超过 1%（`AB_NOISE`）且超出各轮波动才标出；`-wait ID` 等到结束。一个场景一个协议约一分半，默认组合约
   八分钟。
 - `bench/microbench.sh [-C 仓库] -pkg 包 -bench 正则 A B` 在压测机上对两个 ref 交替各跑 10 次某个包的微基准，
@@ -75,7 +75,7 @@ fit 的结果只来自压测机，即使用 `-network host` 的 Linux 机器（[
 [`configs`](configs) 里每个服务器的配置都在五个端口上提供同样的路由：8080 是 HTTP/1.1，由 wrk 压；8443 是 TLS 1.3
 上的 HTTP/1.1（`https/1.1`），由 wrk 压；8081 是 h2c（预先知道的明文 HTTP/2），由 h2load 压；8445 是 h2（走 TLS
 1.3、经 ALPN 协商的 HTTP/2），由 h2load 压；UDP 8444 是 HTTP/3，走 TLS 1.3，由支持 HTTP/3 的 h2load 压。fit 的配置
-用它自己的 `.konf` 格式。h2 和 HTTP/3 用工具自带的一次性证书，连接数和
+用它自己的 `.conf` 格式。h2 和 HTTP/3 用工具自带的一次性证书，连接数和
 并发流数与 h2c 相同。
 
 自己设置 UDP socket 缓冲区的 QUIC 服务器（Caddy 和 Traefik 通过 quic-go 申请约 7 MB）最多只能拿到主机的

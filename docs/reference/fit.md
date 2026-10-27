@@ -1,11 +1,11 @@
-# .konf reference
+# .conf reference
 
 [English](fit.md) | [简体中文](fit.zh-CN.md)
 
-A `.konf` file is fit's own config format: blocks of directives, as nginx's and Caddy's configs
+A `.conf` file is fit's own config format: blocks of directives, as nginx's and Caddy's configs
 are written, saying what fit's native JSON says, field for field. Every field the
 [config reference](config.md) lists, and every module's params, can be written in it; a `site`
-block writes the routes of a set of host names together. A file ending in `.konf` is read as one
+block writes the routes of a set of host names together. A file ending in `.conf` is read as one
 by `fit run`, `fit validate` and `fit adapt`, and a config may be split across several files and
 directories ([below](#several-files-and-directories)).
 
@@ -266,10 +266,10 @@ site * {
 `-c` may be given more than once, and may name a directory; the config is all the files merged:
 
 ```bash
-fit run -c /etc/fit/base.konf -c /etc/fit/sites
+fit run -c /etc/fit/base.conf -c /etc/fit/sites
 ```
 
-- **A directory** stands for its files ending in `.konf`, `.yaml`, `.yml` or `.json`, in its
+- **A directory** stands for its files ending in `.conf`, `.yaml`, `.yml` or `.json`, in its
   subdirectories too, in lexical order; files and directories whose names begin with a `.` are
   left out. A file named with `-c` is read whatever its name, in the format its extension says (JSON when
   none does), and a file named twice is read once. An nginx config or a Caddyfile is not loaded:
@@ -279,20 +279,20 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
   `admin` or `acme` say, is given in one file only; `schema_version` may be given in several, if
   they agree. Each file may be in any of the formats.
 - **Errors** name the file and the place in it, and the path within that file, as
-  `sites/api.konf:12:3: routes[0].handler.params.status: ...`.
+  `sites/api.conf:12:3: routes[0].handler.params.status: ...`.
 - **Reloading.** SIGHUP reads every file again. With `-watch`, a file changed, added to a
   directory or taken out of one applies the config again. Every file is read again each time;
   bounds: 10,000 files, and 64 MiB in all.
 
 ## Import and include
 
-A `.konf` file may name other files itself, with two directives:
+A `.conf` file may name other files itself, with two directives:
 
 - **`import <paths...>`**, at the top of a config file only, imports whole config files, as more
   `-c` would: each path a file in any of fit's formats, a directory standing for its config
   files, or a glob. They are merged after the file importing them, in the order named, by the
   rules [above](#several-files-and-directories).
-- **`include <paths...>`**, anywhere, at the top or in any block, reads the `.konf` directives
+- **`include <paths...>`**, anywhere, at the top or in any block, reads the `.conf` directives
   of the files named in its place, as nginx's `include` does: listeners, upstreams or sites at
   the top, what a site's routes share in a site, middleware or a handler in a route. Each path is a file,
   whatever its name, or a glob, whose files are read in lexical order. A file included may
@@ -320,13 +320,13 @@ defs, but not itself; a path it includes is relative to the file that defined it
 no `/`, `\`, `*`, `?` or `[`, and is defined once.
 
 ```text
-# fit.konf
+# fit.conf
 import upstreams.yaml sites
-include listeners.konf
+include listeners.conf
 
-# sites/api.konf
+# sites/api.conf
 site api.example.com {
-	include ../shared/site-common.konf
+	include ../shared/site-common.conf
 	route /v1/* {
 		include ../shared/secure.inc
 		handler proxy { upstream api }
@@ -347,30 +347,30 @@ bytes count them too.
 
 ## Errors
 
-A `.konf` file is read strictly. A syntax error, a directive in the wrong form (a value for a
+A `.conf` file is read strictly. A syntax error, a directive in the wrong form (a value for a
 block, two values for one), or a field given twice is an error at its line and column; so is
 everything the config's own check finds, an unknown field, a value out of range or a missing
 one, reported where it was written:
 
 ```text
-fit.konf:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
+fit.conf:7:10: routes[0].handler.params.status: 99 is less than the minimum 100
 ```
 
 ## Converting
 
-`fit adapt` writes a config in any of fit's formats as a `.konf` file, and back:
+`fit adapt` writes a config in any of fit's formats as a `.conf` file, and back:
 
 ```bash
-fit adapt -c fit.json -to fit -o fit.konf
+fit adapt -c fit.json -to fit -o fit.conf
 ```
 
 ```bash
-fit adapt -c fit.konf -o fit.json
+fit adapt -c fit.conf -o fit.json
 ```
 
 Routes are written one by one, not gathered into sites. The file is written with the
 [shorthands](#shorthands), and a block that fits in 80 columns on one line, as in
 `match { path /api/* }`. An nginx config or a Caddyfile converts
-to a `.konf` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
-[from Caddy](../migrating-from-caddy.md). [templates/konf/fit.konf](../../templates/konf/fit.konf)
+to a `.conf` file the same way; see [migrating from nginx](../migrating-from-nginx.md) and
+[from Caddy](../migrating-from-caddy.md). [templates/conf/fit.conf](../../templates/conf/fit.conf)
 holds every field, with its description and choices in comments.

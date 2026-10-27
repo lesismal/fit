@@ -40,7 +40,7 @@ func Adapt(data []byte) (*adapter.Result, error) {
 		if errors.Is(err, io.EOF) {
 			// Nothing, or comments alone, as a file of a directory whose
 			// fields are all commented out: an empty config, as an empty
-			// .konf file is.
+			// .conf file is.
 			return &adapter.Result{JSON: []byte("{}"), Position: func(string) (int, int, bool) { return 0, 0, false }}, nil
 		}
 		return nil, err

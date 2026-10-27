@@ -13,7 +13,7 @@ import (
 	"github.com/lesismal/fit/module"
 )
 
-var templateDirs = map[string]string{"json": "../templates/json/conf.d", "yaml": "../templates/yaml/conf.d", "fit": "../templates/konf/conf.d"}
+var templateDirs = map[string]string{"json": "../templates/json/conf.d", "yaml": "../templates/yaml/conf.d", "fit": "../templates/conf/conf.d"}
 
 // TestTemplateDirUpToDate fails when the directory templates fall behind
 // the code, as TestTemplatesUpToDate does for the one-file ones.

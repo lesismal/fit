@@ -28,7 +28,7 @@ const routeConfig = `{
 
 // TestChapterExamples loads every example of the reference's chapters:
 // each JSON config, each module's route with its params decoded by the
-// module, and each .konf example, which must say the same as the JSON.
+// module, and each .conf example, which must say the same as the JSON.
 func TestChapterExamples(t *testing.T) {
 	err := fs.WalkDir(doc, "doc", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -74,7 +74,7 @@ func TestChapterExamples(t *testing.T) {
 			}
 		}
 		if c.json != "" {
-			// The .konf example, the chapter's own or made from its JSON,
+			// The .conf example, the chapter's own or made from its JSON,
 			// is the same config as the JSON.
 			f, err := c.fitExample()
 			if err != nil {
@@ -83,7 +83,7 @@ func TestChapterExamples(t *testing.T) {
 			}
 			r, err := fitconf.Adapt([]byte(f))
 			if err != nil {
-				t.Errorf("%s: its .konf example: %v\n%s", name, err, f)
+				t.Errorf("%s: its .conf example: %v\n%s", name, err, f)
 				return nil
 			}
 			want := c.json
@@ -91,7 +91,7 @@ func TestChapterExamples(t *testing.T) {
 				want = `{"routes": [` + c.json + `]}`
 			}
 			if !sameJSON(t, r.JSON, []byte(want)) {
-				t.Errorf("%s: its .konf example is not its JSON:\n%s\nis\n%s", name, f, r.JSON)
+				t.Errorf("%s: its .conf example is not its JSON:\n%s\nis\n%s", name, f, r.JSON)
 			}
 		}
 		return nil

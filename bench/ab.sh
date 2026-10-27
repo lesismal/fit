@@ -16,7 +16,7 @@
 #   -rounds N         rounds of A then B                  (default: 3)
 #   -duration D       each measured run                   (default: 10s)
 #   -warmup D         unmeasured load before each run     (default: 2s)
-#   -extra KONF       appended to bench/configs/fit/fit.konf for both builds,
+#   -extra CONF       appended to bench/configs/fit/fit.conf for both builds,
 #                     as 'access_log { output /dev/null }'
 #   -args FLAGS       more fitbench flags for every run, as the load test
 #                     plan's W1 at 500 in flight: '-connections 500
@@ -119,7 +119,7 @@ cp "$stage/$id/a/idleconn" "$stage/$id/b/idleconn"
 mkdir -p "$stage/$id/root"
 (cd "$root" && COPYFILE_DISABLE=1 tar cf - --exclude bench/.work --exclude bench/results bench) | tar xf - -C "$stage/$id/root"
 if [ -n "$extra" ]; then
-	printf '\n%s\n' "$extra" >> "$stage/$id/root/bench/configs/fit/fit.konf"
+	printf '\n%s\n' "$extra" >> "$stage/$id/root/bench/configs/fit/fit.conf"
 fi
 
 cat > "$stage/$id/run.sh" <<EOF

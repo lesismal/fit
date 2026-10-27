@@ -84,7 +84,7 @@ func TemplateDir(format string) (map[string][]byte, error) {
 	if err := checkFormat(format); err != nil {
 		return nil, err
 	}
-	ext := map[string]string{"fit": ".konf", "yaml": ".yaml", "json": ".json"}[format]
+	ext := map[string]string{"fit": ".conf", "yaml": ".yaml", "json": ".json"}[format]
 	out := map[string][]byte{}
 	for _, f := range dirFiles {
 		root := f.t.object(reflect.TypeFor[config.Config](), "", nil)

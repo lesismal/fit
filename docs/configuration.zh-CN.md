@@ -2,13 +2,13 @@
 
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
-fit 从一个或多个文件读取配置，可以是三种格式之一：**.konf** 文件、**YAML** 或 **JSON**。三者逐字段表达相同的内容：fit
+fit 从一个或多个文件读取配置，可以是三种格式之一：**.conf** 文件、**YAML** 或 **JSON**。三者逐字段表达相同的内容：fit
 监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，以及日志、限制、证书和 Admin API 的设置。Admin API
 收发的是 JSON；三种格式的字段完全相同，彼此之间都可以转换。
 
 | 格式 | 适合 | 参考 |
 | --- | --- | --- |
-| .konf | 手写的配置：像 nginx 和 Caddy 那样的指令块，支持站点 | [.konf 参考](reference/fit.zh-CN.md) |
+| .conf | 手写的配置：像 nginx 和 Caddy 那样的指令块，支持站点 | [.conf 参考](reference/fit.zh-CN.md) |
 | YAML | 手写或工具生成的配置，可用锚点复用重复内容 | [YAML 参考](reference/yaml.zh-CN.md) |
 | JSON | Admin API 收发的格式，工具生成的格式 | [JSON 参考](reference/json.zh-CN.md) |
 
@@ -17,9 +17,9 @@ fit 从一个或多个文件读取配置，可以是三种格式之一：**.konf
 
 ## 三种格式
 
-### .konf
+### .conf
 
-fit 自己的格式：每个字段一条指令，每个对象一个块，用 `site` 把一组域名的路由写在一起。以 `.konf` 结尾的文件。
+fit 自己的格式：每个字段一条指令，每个对象一个块，用 `site` 把一组域名的路由写在一起。以 `.conf` 结尾的文件。
 
 ```fit
 upstream api {
@@ -38,7 +38,7 @@ site example.com {
 }
 ```
 
-语法、各类字段的写法、站点和多个文件，见 [.konf 参考](reference/fit.zh-CN.md)。
+语法、各类字段的写法、站点和多个文件，见 [.conf 参考](reference/fit.zh-CN.md)。
 
 ### YAML
 
@@ -103,12 +103,12 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 一份配置可以分散在多个文件（任一种格式）和目录中，每个用一个 `-c` 给出：
 
 ```bash
-fit run -c /etc/fit/base.konf -c /etc/fit/sites
+fit run -c /etc/fit/base.conf -c /etc/fit/sites
 ```
 
-目录代表其中（包括子目录中）的 `.konf`、`.yaml`、`.yml` 和 `.json` 文件，按字典序，名字以 `.` 开头的除外。配置顶层的列表
+目录代表其中（包括子目录中）的 `.conf`、`.yaml`、`.yml` 和 `.json` 文件，按字典序，名字以 `.` 开头的除外。配置顶层的列表
 `listeners`、`routes`、`upstreams`、`services` 和 `providers` 按文件顺序拼接；其他字段只能在一个文件中给出。错误会指出
-所在的文件。详见 [多个文件和目录](reference/fit.zh-CN.md#多个文件和目录)。`.konf` 文件自己也可以引用文件：`import` 像 `-c`
+所在的文件。详见 [多个文件和目录](reference/fit.zh-CN.md#多个文件和目录)。`.conf` 文件自己也可以引用文件：`import` 像 `-c`
 一样合并完整的 config 文件，`include` 在任意块中原地读入一个文件的指令（[import 与 include](reference/fit.zh-CN.md#import-与-include)）。按种类分文件（运行规格、listener、证书、
 可观测性、四层服务、provider，每个站点一个文件）的完整目录模板见 [配置模板](../templates/README.zh-CN.md#目录形式)，
 也可用 `fit schema -template fit -dir <目录>` 生成。
@@ -118,7 +118,7 @@ fit run -c /etc/fit/base.konf -c /etc/fit/sites
 格式由每个文件的名字判断；三种格式的命令相同：
 
 ```bash
-fit run -c fit.konf
+fit run -c fit.conf
 ```
 
 ```bash
@@ -130,13 +130,13 @@ fit validate -c fit.yaml -c conf.d
 
 | 从 | 到 | 命令 |
 | --- | --- | --- |
-| JSON 或 YAML | .konf | `fit adapt -c fit.json -to fit -o fit.konf` |
-| .konf 或 YAML | JSON | `fit adapt -c fit.konf -o fit.json` |
-| .konf 或 JSON | YAML | `fit adapt -c fit.konf -to yaml -o fit.yaml` |
-| 一个目录 | 一个文件 | `fit adapt -c conf.d -to fit -o fit.konf` |
+| JSON 或 YAML | .conf | `fit adapt -c fit.json -to fit -o fit.conf` |
+| .conf 或 YAML | JSON | `fit adapt -c fit.conf -o fit.json` |
+| .conf 或 JSON | YAML | `fit adapt -c fit.conf -to yaml -o fit.yaml` |
+| 一个目录 | 一个文件 | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` 打印配置的 JSON Schema，编辑器可以用它在编写 JSON 和 YAML 时补全和检查；`fit schema -template fit` 打印
-.konf 模板。
+.conf 模板。
 
 ## 修改运行中的配置
 
@@ -147,5 +147,5 @@ fit validate -c fit.yaml -c conf.d
 ## 从其他服务器迁移
 
 `fit adapt` 可以把 nginx 配置或 Caddyfile 转换为 fit 的配置，作为起点，并列出未转换的部分：
-`fit adapt -from nginx -c nginx.conf -to fit -o fit.konf`。[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)
+`fit adapt -from nginx -c nginx.conf -to fit -o fit.conf`。[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)
 和 [Traefik](migrating-from-traefik.zh-CN.md) 的迁移指南给出同一套配置在各服务器和 fit 中的写法，以及各部分如何对应到 fit。

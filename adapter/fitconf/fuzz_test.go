@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// FuzzAdapt checks that no .konf file makes the adapter panic, that what it
-// makes is JSON, and that the JSON, when it can be written back as a .konf
+// FuzzAdapt checks that no .conf file makes the adapter panic, that what it
+// makes is JSON, and that the JSON, when it can be written back as a .conf
 // file, adapts to the same.
 func FuzzAdapt(f *testing.F) {
 	f.Add("listener web {\n\taddress :8080\n}\nroute { handler respond { body \"hi\\n\" } }\n")
@@ -24,7 +24,7 @@ func FuzzAdapt(f *testing.F) {
 		}
 		out, err := FromJSON(r.JSON)
 		if err != nil {
-			return // a field of no known type that a .konf file cannot hold as it is
+			return // a field of no known type that a .conf file cannot hold as it is
 		}
 		again, err := Adapt(out)
 		if err != nil {

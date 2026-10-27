@@ -415,7 +415,7 @@ func scalarExample(f config.Field, path string, typ reflect.Type) string {
 }
 
 // tmplWriter writes the template's nodes as JSON with comments, YAML, or
-// a .konf file.
+// a .conf file.
 type tmplWriter struct {
 	buf  *bytes.Buffer
 	yaml bool
@@ -551,13 +551,13 @@ func (w *tmplWriter) element(e *tnode, indent int, parentOn bool) {
 	}
 }
 
-// fitMembers writes members as directives of a .konf file; root says they
+// fitMembers writes members as directives of a .conf file; root says they
 // are the config's own, whose lists of objects take their names in the
 // singular.
 func (w *tmplWriter) fitMembers(ms []*tnode, indent int, on, root bool) {
 	for i, m := range ms {
 		if m.scalar == "null" {
-			continue // an old name, which a .konf file need not show
+			continue // an old name, which a .conf file need not show
 		}
 		if i > 0 && (root || len(m.doc) > 0) {
 			w.buf.WriteString("\n")
@@ -613,14 +613,14 @@ func (w *tmplWriter) fitModule(name string, ref []*tnode, indent int, on bool) {
 	w.line(indent, on, "}")
 }
 
-// fitSingular are the names of the config's lists of objects in a .konf
+// fitSingular are the names of the config's lists of objects in a .conf
 // file, as fitconf takes them.
 var fitSingular = map[string]string{
 	"listeners": "listener", "routes": "route", "upstreams": "upstream", "services": "service", "providers": "provider",
 }
 
 // fitScalar writes a field whose value is v, as JSON, as the lines of a
-// .konf file: a scalar or a list as arguments, an object as a block of its
+// .conf file: a scalar or a list as arguments, an object as a block of its
 // keys.
 func fitScalar(name, v string) []string {
 	var x any

@@ -4,8 +4,8 @@
 
 | 示例 | 内容 |
 | --- | --- |
-| [hello.konf](hello.konf)、[hello.yaml](hello.yaml)、[hello.json](hello.json) | 在 8080 端口返回固定响应，三种格式各一份：`fit run -c examples/hello.konf`。 |
-| [proxy.konf](proxy.konf)、[proxy.yaml](proxy.yaml)、[proxy.json](proxy.json) | 反向代理到两个上游，带限制、超时和健康检查。 |
+| [hello.conf](hello.conf)、[hello.yaml](hello.yaml)、[hello.json](hello.json) | 在 8080 端口返回固定响应，三种格式各一份：`fit run -c examples/hello.conf`。 |
+| [proxy.conf](proxy.conf)、[proxy.yaml](proxy.yaml)、[proxy.json](proxy.json) | 反向代理到两个上游，带限制、超时和健康检查。 |
 | [docker-compose](docker-compose/README.zh-CN.md) | fit 的镜像位于一个应用的容器前面，按容器的 label 路由。 |
 | [kubernetes](kubernetes/README.zh-CN.md) | 在 kind 集群里用 fit 的 Helm chart 服务一个 Gateway 和一个 Ingress。 |
 

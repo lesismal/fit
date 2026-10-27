@@ -45,25 +45,25 @@ func loadTree(t *testing.T, dir string, paths ...string) (*adapter.Set, error) {
 // the file including it, and nested.
 func TestInclude(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf": `include listeners.konf
+		"fit.conf": `include listeners.conf
 site a.example {
-	include shared/site-*.konf
+	include shared/site-*.conf
 	route /api/* {
 		include shared/proxy.inc
 	}
 }
-include routes/*.konf
-include none/*.konf
+include routes/*.conf
+include none/*.conf
 `,
-		"listeners.konf":         "listener web { address :8080 }\n",
-		"shared/site-a.konf":     "listeners web\n",
-		"shared/site-b.konf":     "middleware compress\n",
+		"listeners.conf":         "listener web { address :8080 }\n",
+		"shared/site-a.conf":     "listeners web\n",
+		"shared/site-b.conf":     "middleware compress\n",
 		"shared/proxy.inc":       "include headers.inc\nhandler proxy { upstream app }\n",
 		"shared/headers.inc":     "middleware headers { response { delete Server } }\n",
-		"routes/1-hello.konf":    "route hello { handler respond { body hi } }\n",
-		"routes/2-notfound.konf": "route not-found {\n\tpriority -1\n\thandler respond { status 404 }\n}\n",
+		"routes/1-hello.conf":    "route hello { handler respond { body hi } }\n",
+		"routes/2-notfound.conf": "route not-found {\n\tpriority -1\n\thandler respond { status 404 }\n}\n",
 	})
-	set, err := loadTree(t, dir, "fit.konf")
+	set, err := loadTree(t, dir, "fit.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,16 +94,16 @@ include none/*.konf
 // read only where it is included, also when a directory imported holds it.
 func TestImport(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf":          "import listeners.yaml sites\nroute last { priority -1; handler respond }\n",
+		"fit.conf":          "import listeners.yaml sites\nroute last { priority -1; handler respond }\n",
 		"listeners.yaml":    "listeners:\n  - name: web\n    address: :8080\n",
-		"sites/a.konf":      "site a.example {\n\troute { include ../shared/ok.konf }\n}\n",
+		"sites/a.conf":      "site a.example {\n\troute { include ../shared/ok.conf }\n}\n",
 		"sites/b.json":      `{"routes": [{"name": "b", "handler": {"module": "respond"}}]}`,
-		"sites/shared.konf": "handler respond { body shared }\n",
-		"sites/c.konf":      "site c.example {\n\troute { include shared.konf }\n}\n",
-		"shared/ok.konf":    "handler respond { body ok }\n",
-		"shared/other.konf": "this is never read\n",
+		"sites/shared.conf": "handler respond { body shared }\n",
+		"sites/c.conf":      "site c.example {\n\troute { include shared.conf }\n}\n",
+		"shared/ok.conf":    "handler respond { body ok }\n",
+		"shared/other.conf": "this is never read\n",
 	})
-	files, err := adapter.Files([]string{filepath.Join(dir, "fit.konf")})
+	files, err := adapter.Files([]string{filepath.Join(dir, "fit.conf")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,10 +114,10 @@ func TestImport(t *testing.T) {
 	}
 	// The files watched: those imported and those included, each after
 	// the file naming it.
-	if want := []string{"fit.konf", "listeners.yaml", "sites/a.konf", "shared/ok.konf", "sites/b.json", "sites/c.konf", "sites/shared.konf"}; !slices.Equal(rel, want) {
+	if want := []string{"fit.conf", "listeners.yaml", "sites/a.conf", "shared/ok.conf", "sites/b.json", "sites/c.conf", "sites/shared.conf"}; !slices.Equal(rel, want) {
 		t.Errorf("files %v, want %v", rel, want)
 	}
-	set, err := loadTree(t, dir, "fit.konf")
+	set, err := loadTree(t, dir, "fit.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,26 +146,26 @@ func TestIncludeErrors(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		{"missing", map[string]string{"fit.konf": "include nope.konf\n"}, "fit.konf:1:9: include nope.konf: {dir}/nope.konf is not among the config's files read"},
-		{"a def is not a file", map[string]string{"fit.konf": "def a { }\ninclude a\n"}, "fit.konf:2:9: include a: {dir}/a is not among the config's files read"},
-		{"use of a file", map[string]string{"fit.konf": "use a.inc\n", "a.inc": ""}, "fit.konf:1:5: use a.inc: there is no def a.inc defined before it"},
-		{"use before the def", map[string]string{"fit.konf": "use a\ndef a { }\n"}, "fit.konf:1:5: use a: there is no def a defined before it"},
-		{"import missing", map[string]string{"fit.konf": "import nope.konf\n"}, "fit.konf: import nope.konf: "},
-		{"itself", map[string]string{"fit.konf": "include fit.konf\n"}, "includes itself"},
-		{"each other", map[string]string{"fit.konf": "include a.konf\n", "a.konf": "include b.konf\n", "b.konf": "include a.konf\n"},
-			"includes itself: " + "{dir}/a.konf includes {dir}/b.konf includes {dir}/a.konf"},
-		{"import in a block", map[string]string{"fit.konf": "route { import a.konf }\n", "a.konf": ""}, "fit.konf:1:9: import is given at the top of a config file only"},
-		{"import in a file included", map[string]string{"fit.konf": "include a.inc\n", "a.inc": "import b.konf\n", "b.konf": ""}, "a.inc:1:1: import is given at the top of a config file only"},
-		{"no files", map[string]string{"fit.konf": "include\n"}, "fit.konf:1:1: include takes the files to include"},
-		{"a block", map[string]string{"fit.konf": "include a.konf { }\n", "a.konf": ""}, "fit.konf:1:1: include takes the files to include"},
-		{"bad glob", map[string]string{"fit.konf": "include [\n"}, "include ["},
-		{"in the file included", map[string]string{"fit.konf": "route a {\n\tinclude a.inc\n}\n", "a.inc": "handler respond\nhandler respond\n"},
+		{"missing", map[string]string{"fit.conf": "include nope.conf\n"}, "fit.conf:1:9: include nope.conf: {dir}/nope.conf is not among the config's files read"},
+		{"a def is not a file", map[string]string{"fit.conf": "def a { }\ninclude a\n"}, "fit.conf:2:9: include a: {dir}/a is not among the config's files read"},
+		{"use of a file", map[string]string{"fit.conf": "use a.inc\n", "a.inc": ""}, "fit.conf:1:5: use a.inc: there is no def a.inc defined before it"},
+		{"use before the def", map[string]string{"fit.conf": "use a\ndef a { }\n"}, "fit.conf:1:5: use a: there is no def a defined before it"},
+		{"import missing", map[string]string{"fit.conf": "import nope.conf\n"}, "fit.conf: import nope.conf: "},
+		{"itself", map[string]string{"fit.conf": "include fit.conf\n"}, "includes itself"},
+		{"each other", map[string]string{"fit.conf": "include a.conf\n", "a.conf": "include b.conf\n", "b.conf": "include a.conf\n"},
+			"includes itself: " + "{dir}/a.conf includes {dir}/b.conf includes {dir}/a.conf"},
+		{"import in a block", map[string]string{"fit.conf": "route { import a.conf }\n", "a.conf": ""}, "fit.conf:1:9: import is given at the top of a config file only"},
+		{"import in a file included", map[string]string{"fit.conf": "include a.inc\n", "a.inc": "import b.conf\n", "b.conf": ""}, "a.inc:1:1: import is given at the top of a config file only"},
+		{"no files", map[string]string{"fit.conf": "include\n"}, "fit.conf:1:1: include takes the files to include"},
+		{"a block", map[string]string{"fit.conf": "include a.conf { }\n", "a.conf": ""}, "fit.conf:1:1: include takes the files to include"},
+		{"bad glob", map[string]string{"fit.conf": "include [\n"}, "include ["},
+		{"in the file included", map[string]string{"fit.conf": "route a {\n\tinclude a.inc\n}\n", "a.inc": "handler respond\nhandler respond\n"},
 			"a.inc:2:1: handler is given twice"},
-		{"lexed in the file included", map[string]string{"fit.konf": "include a.inc\n", "a.inc": "\n\"open\n"}, "a.inc:2:1: a quote is not closed"},
+		{"lexed in the file included", map[string]string{"fit.conf": "include a.inc\n", "a.inc": "\n\"open\n"}, "a.inc:2:1: a quote is not closed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := writeTree(t, c.files)
-			_, err := loadTree(t, dir, "fit.konf")
+			_, err := loadTree(t, dir, "fit.conf")
 			want := strings.ReplaceAll(c.want, "{dir}", dir)
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("%v, want %q", err, want)
@@ -178,14 +178,14 @@ func TestIncludeErrors(t *testing.T) {
 // written in a file included point at that file.
 func TestIncludePositions(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf":  "schema_version 1\nlistener web { address :8080 }\nroute a {\n\tinclude m.inc\n\thandler respond\n}\n",
+		"fit.conf":  "schema_version 1\nlistener web { address :8080 }\nroute a {\n\tinclude m.inc\n\thandler respond\n}\n",
 		"m.inc":     "\nmatch { bogus 1 }\n",
-		"b.konf":    "include v.inc\n",
+		"b.conf":    "include v.inc\n",
 		"v.inc":     "\nschema_version 2\n",
-		"more.konf": "include ok.inc\n",
+		"more.conf": "include ok.inc\n",
 		"ok.inc":    "route c { handler respond }\n",
 	})
-	set, err := loadTree(t, dir, "fit.konf", "more.konf")
+	set, err := loadTree(t, dir, "fit.conf", "more.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestIncludePositions(t *testing.T) {
 		t.Errorf("no %q in\n%s", want, got)
 	}
 	// A field two files give, one in a file it includes.
-	_, err = loadTree(t, dir, "fit.konf", "b.konf")
+	_, err = loadTree(t, dir, "fit.conf", "b.conf")
 	if want := filepath.Join(dir, "v.inc") + ":2:16: schema_version: differs from the one in"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("%v, want %q", err, want)
 	}
@@ -203,15 +203,15 @@ func TestIncludePositions(t *testing.T) {
 // TestIncludeNeedsAFile checks that a config read without its path cannot
 // include, and that the words its includes add are bounded.
 func TestIncludeNeedsAFile(t *testing.T) {
-	if _, err := Adapt([]byte("include a.konf\n")); err == nil || !strings.Contains(err.Error(), "include reads other files") {
+	if _, err := Adapt([]byte("include a.conf\n")); err == nil || !strings.Contains(err.Error(), "include reads other files") {
 		t.Errorf("%v", err)
 	}
-	if _, err := Adapt([]byte("import a.konf\n")); err == nil || !strings.Contains(err.Error(), "import reads other files") {
+	if _, err := Adapt([]byte("import a.conf\n")); err == nil || !strings.Contains(err.Error(), "import reads other files") {
 		t.Errorf("%v", err)
 	}
 	// Each file includes the next twice: 2^15 copies of the last, past
 	// the bound on words.
-	files := map[string]string{"fit.konf": "include f00.inc\n"}
+	files := map[string]string{"fit.conf": "include f00.inc\n"}
 	for i := range 16 {
 		next := strings.Repeat("x ", 100) + "\n"
 		if i < 15 {
@@ -221,7 +221,7 @@ func TestIncludeNeedsAFile(t *testing.T) {
 		files[incName(i)] = next
 	}
 	dir := writeTree(t, files)
-	_, err := loadTree(t, dir, "fit.konf")
+	_, err := loadTree(t, dir, "fit.conf")
 	if err == nil || !strings.Contains(err.Error(), "more than") {
 		t.Errorf("%v, want the bound", err)
 	}
@@ -236,11 +236,11 @@ func incName(i int) string {
 // that defined it.
 func TestDefFiles(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"fit.konf":        "include lib/defs.konf\nupstream app { addresses 10.0.0.1:80; use pool }\nroute a { use secure; handler respond }\n",
-		"lib/defs.konf":   "def pool { max_conns 8 }\ndef secure { include headers.inc }\n",
+		"fit.conf":        "include lib/defs.conf\nupstream app { addresses 10.0.0.1:80; use pool }\nroute a { use secure; handler respond }\n",
+		"lib/defs.conf":   "def pool { max_conns 8 }\ndef secure { include headers.inc }\n",
 		"lib/headers.inc": "middleware headers { response { delete Server } }\n",
 	})
-	set, err := loadTree(t, dir, "fit.konf")
+	set, err := loadTree(t, dir, "fit.conf")
 	if err != nil {
 		t.Fatal(err)
 	}

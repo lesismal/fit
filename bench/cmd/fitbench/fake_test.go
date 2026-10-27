@@ -219,7 +219,7 @@ func fakeRoot(t *testing.T) (root, bin string) {
 	t.Helper()
 	root, bin = t.TempDir(), t.TempDir()
 	for name, data := range map[string]string{
-		"bench/configs/fit/fit.konf":     `backend {{BACKEND}} workers {{WORKERS}}`,
+		"bench/configs/fit/fit.conf":     `backend {{BACKEND}} workers {{WORKERS}}`,
 		"bench/www/static/small.html":    smallHTML,
 		"bench/loadgen/Dockerfile.h3":    "FROM scratch\n",
 		"bench/configs/nginx/nginx.conf": "{{BACKEND_HOST}}:{{BACKEND_PORT}} {{BACKEND_CONNS}} {{BACKEND_IDLE_PER_WORKER}} {{WORKER_CONNECTIONS}}\n",

@@ -143,7 +143,7 @@ func TestSchemaFlags(t *testing.T) {
 	if code, _, stderr := runFit("schema", "-template", "fit", "-dir", dir); code != 0 {
 		t.Errorf("template dir: %d %q", code, stderr)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "sites", "example.com.konf")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "sites", "example.com.conf")); err != nil {
 		t.Errorf("template dir: %v", err)
 	}
 	if code, _, stderr := runFit("schema", "-template", "fit", "-dir", dir); code != 1 || !strings.Contains(stderr, "there already") {

@@ -140,7 +140,7 @@ func TestRunQuick(t *testing.T) {
 	}
 	work := filepath.Join(root, "bench", ".work")
 	for name, want := range map[string]string{
-		"configs/fit/fit.konf":     `backend 127.0.0.1:9000 workers 7`,
+		"configs/fit/fit.conf":     `backend 127.0.0.1:9000 workers 7`,
 		"configs/nginx/nginx.conf": "127.0.0.1:9000 16384 2341 65536\n",
 		"fit":                      "binary",
 		"idleconn":                 "binary",

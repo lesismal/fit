@@ -1,4 +1,4 @@
-// Package fitconf reads and writes fit's own config format, .konf files: the
+// Package fitconf reads and writes fit's own config format, .conf files: the
 // native config written as blocks of directives, as nginx and Caddy write
 // theirs, which says what the JSON would, field for field (decision 021).
 //
@@ -12,7 +12,7 @@
 // { upstream app }. A site, site <hosts...> { route <paths...> { ... } },
 // writes the routes of its hosts together. Which fields there are, and
 // their types, are the config's Go types and each module's params, so
-// that every field JSON and YAML can set, a .konf file can too.
+// that every field JSON and YAML can set, a .conf file can too.
 package fitconf
 
 import (
@@ -31,7 +31,7 @@ import (
 )
 
 func init() {
-	adapter.Register("fit", Adapt, ".konf")
+	adapter.Register("fit", Adapt, ".conf")
 }
 
 var (
@@ -42,7 +42,7 @@ var (
 )
 
 // singular are the names the config's top-level lists of objects take in a
-// .konf file, one directive for each element.
+// .conf file, one directive for each element.
 var singular = map[string]string{
 	"listener": "listeners", "route": "routes", "upstream": "upstreams", "service": "services", "provider": "providers",
 }
@@ -56,14 +56,14 @@ var shorthands = map[reflect.Type][]string{
 	reflect.TypeFor[config.Upstream](): {"addresses"},
 }
 
-// Adapt turns a .konf config into native JSON. It cannot include other
+// Adapt turns a .conf config into native JSON. It cannot include other
 // files, nor import them, as it has no file to find them from: AdaptFile
 // can.
 func Adapt(data []byte) (*adapter.Result, error) {
 	return AdaptFile("", data, nil)
 }
 
-// AdaptFile turns the .konf config file at path into native JSON, the
+// AdaptFile turns the .conf config file at path into native JSON, the
 // files it includes read with include. The files it imports are not read:
 // adapter.Files finds them, and adapter.AdaptSet merges them after it.
 func AdaptFile(path string, data []byte, include adapter.Includer) (*adapter.Result, error) {

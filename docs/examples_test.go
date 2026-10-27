@@ -18,7 +18,7 @@ var configBlock = regexp.MustCompile("(?s)```(fit|caddyfile|yaml|json)\n(.*?)\n`
 
 // TestConfigExamples loads every config in the pages on config formats, in
 // the getting started guide and in the README, in either language: each
-// .konf, YAML and JSON config loads, and each Caddyfile, on the page on
+// .conf, YAML and JSON config loads, and each Caddyfile, on the page on
 // converting them, converts without a warning and loads.
 func TestConfigExamples(t *testing.T) {
 	files, _ := filepath.Glob("configuration*.md")

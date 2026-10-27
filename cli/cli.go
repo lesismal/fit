@@ -19,7 +19,7 @@ Commands:
 
 	run        serve a config, from files or directories, until SIGINT or SIGTERM
 	validate   check a config without running it
-	adapt      convert a config between .konf, YAML and native JSON, or from
+	adapt      convert a config between .conf, YAML and native JSON, or from
 	           nginx or a Caddyfile into one of them
 	schema     print the JSON Schema of the native config
 	build      build a fit with more modules, or fewer, as fit build -h says

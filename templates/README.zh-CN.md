@@ -7,12 +7,12 @@ fit 三种配置格式各有一份完整的配置模板，可复制后修改。�
 
 | 模板 | 格式 |
 | --- | --- |
-| [konf/fit.konf](konf/fit.konf) | fit 自己的 [.konf 格式](../docs/reference/fit.zh-CN.md) |
+| [conf/fit.conf](conf/fit.conf) | fit 自己的 [.conf 格式](../docs/reference/fit.zh-CN.md) |
 | [yaml/fit.yaml](yaml/fit.yaml) | YAML |
 | [json/fit.json](json/fit.json) | 带注释和末尾逗号的 JSON，fit 可以直接读取 |
 
 每份模板中，一个小配置是启用的，其余内容都被注释掉，并写好默认值或示例值，按需取消注释即可。每份都可以直接运行
-（`fit run -c templates/konf/fit.konf`）：一个监听 :8080 的 listener、一个 upstream 和一条应答 "hello from fit" 的路由。在被
+（`fit run -c templates/conf/fit.conf`）：一个监听 :8080 的 listener、一个 upstream 和一条应答 "hello from fit" 的路由。在被
 注释掉的块中，字段说明是注释中的注释（`# #` 或 `// //`），取消注释整个块后它仍是注释。路由部分为每个处理器各列一条路由，
 并在一条路由中列出所有中间件模块，各带全部参数。
 
@@ -22,7 +22,7 @@ fit 三种配置格式各有一份完整的配置模板，可复制后修改。�
 ## 目录形式
 
 同一份模板也有目录形式，按种类分成多个文件，供以目录维护的配置使用，`fit run -c <目录>` 即可读取
-（[多个文件和目录](../docs/reference/fit.zh-CN.md#多个文件和目录)）：[konf/conf.d](konf/conf.d)、[yaml/conf.d](yaml/conf.d)
+（[多个文件和目录](../docs/reference/fit.zh-CN.md#多个文件和目录)）：[conf/conf.d](conf/conf.d)、[yaml/conf.d](yaml/conf.d)
 和 [json/conf.d](json/conf.d)。
 
 | 文件 | 内容 |

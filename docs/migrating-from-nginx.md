@@ -4,7 +4,7 @@
 
 fit keeps what nginx is good at, event loops and a small footprint per connection, and changes how
 it is configured: one structured config, checked before it runs, and changed in place through the
-Admin API without a reload. Its own format, the [.konf file](reference/fit.md), is written in
+Admin API without a reload. Its own format, the [.conf file](reference/fit.md), is written in
 blocks of directives as nginx's is, but its directives are fit's own fields, and a config may be
 split across files and directories as `include` splits nginx's. This guide maps nginx's directives to fit's config; the
 [config reference](reference/config.md) has every field.
@@ -15,8 +15,8 @@ split across files and directories as `include` splits nginx's. This guide maps 
 directives it left out:
 
 ```bash
-fit adapt -from nginx -c nginx.conf -to fit -o fit.konf
-fit validate -c fit.konf
+fit adapt -from nginx -c nginx.conf -to fit -o fit.conf
+fit validate -c fit.conf
 ```
 
 It converts the `http` block's servers (`listen`, `server_name`, `ssl_certificate`), their

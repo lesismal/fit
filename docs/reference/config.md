@@ -8,7 +8,7 @@ schema/doc; do not edit. Regenerate with: go test ./schema -update -->
 Every field of fit's native config, schema version 1, and of the params of the modules in
 `modules/standard`: what each part of a config is for, an example of it, and a table of
 its fields, with each field's type, default and description. A config may be written as a
-[.konf file](fit.md), in [YAML](yaml.md) or in [JSON](json.md), each with exactly the fields
+[.conf file](fit.md), in [YAML](yaml.md) or in [JSON](json.md), each with exactly the fields
 below, and may be split across several files. [Configuration](../configuration.md) says how a
 config is loaded, checked and changed.
 
@@ -64,7 +64,7 @@ Nothing else is required: a config of a route alone, whose match names a host, i
 HTTPS with a certificate obtained for that host. Names are matched exactly, an unknown field or a
 value of the wrong type is an error, and so is a key written twice.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route { match { host example.com }; handler respond { body hello } }
@@ -130,7 +130,7 @@ by `name`; a route that names none serves every listener.
 - **Behind a proxy.** `proxy_protocol` takes the PROXY protocol header from the proxies it trusts,
   and serves each connection as from the client the header names.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :8080 http/1.1 h2c
@@ -284,11 +284,11 @@ takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
-[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.konf` file,
+[Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.conf` file,
 a `site` writes the routes of its host names together: each `route` in it takes the site's hosts
 and its own paths, and the site's middleware before its own.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 upstream api {
@@ -445,7 +445,7 @@ An upstream is a named set of servers, which the [proxy](#http-handlers-proxy) h
 - **Protocol**: `http/1.1`, `h2c`, or `h2` over TLS, with `tls_server_name`, `tls_ca_file` and a
   client certificate (`tls_cert_file`, `tls_key_file`).
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :8080
@@ -572,7 +572,7 @@ of `udp` listeners, a session per client, to an upstream's addresses, picked by 
 and health. TLS connections can be told apart by the name they ask for (`server_names`) and passed
 through without being terminated; `proxy_protocol` tells the upstream who the client was.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener postgres :5432 tcp
@@ -712,7 +712,7 @@ for each request.
 
 nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 log {
@@ -813,7 +813,7 @@ A request's level is its response's status: info below 400, warn for 4xx and err
 
 nginx's `access_log` and Caddy's `log` in a site convert to it (`fit adapt`).
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 access_log {
@@ -872,7 +872,7 @@ In JSON:
 OpenTelemetry over OTLP/HTTP: a span for each request sampled, with W3C trace context sent on to
 upstreams, and fit's metrics exported on a schedule, to a collector. Read when fit starts.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :8080
@@ -968,7 +968,7 @@ capped at 32 MiB by default, above what the response paths queue, so a peer that
 closed rather than holding a share of the budget forever. The
 [`body_limit`](#http-middleware-body_limit) middleware limits a route's bodies further.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :8080
@@ -1050,7 +1050,7 @@ memory by default; `write_watermark` is the same backpressure on one connection,
 read buffer and the machine when it is left out. At startup fit prints the effective limits and
 the settings of both engines, so what it actually runs with can be read from its log.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :8080
@@ -1122,7 +1122,7 @@ effective config with providers merged, and a read-only dashboard. It listens on
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
 off when `admin` is left out. Read when fit starts.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 admin { address 127.0.0.1:2019; history 20 }
@@ -1179,7 +1179,7 @@ gets the certificates of the routes it serves. `auto_https` turns it off, turns 
 or moves the ports. Names that no public CA certifies (`localhost`, IP addresses, `*.internal`,
 wildcards) get none.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 auto_https { disable_redirects true; https_port 8443 }
@@ -1231,7 +1231,7 @@ Counts and times requests by listener and route, for the Admin API's `/metrics` 
 text format, which serves the rest of fit's metrics without it. It costs every request a little,
 so it is off unless written, and needs `admin`.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 admin {}
@@ -1284,7 +1284,7 @@ instances on several hosts, `shared_storage`), the challenges answered (HTTP-01 
 and `on_demand`, which says whom to ask before a certificate is obtained during a handshake. Read
 when fit starts.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 acme {
@@ -1429,7 +1429,7 @@ etcd, and a Kubernetes cluster's Gateway API resources and Ingresses. What the c
 over every provider, and a provider over those after it; the Admin API's `/config/effective`
 shows the result and where each part came from. Read when fit starts.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 listener web :80
@@ -1596,7 +1596,7 @@ Answers requests from a FastCGI application, as PHP-FPM is, over a bounded pool 
 For PHP applications behind PHP-FPM, or any FastCGI application. `try_files` sends paths that are
 no script of their own to a front controller, as most PHP frameworks want.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -1666,7 +1666,7 @@ A forward proxy for HTTP CONNECT, with access rules for clients and destinations
 An HTTP CONNECT proxy for the clients `clients` lists, to the destinations `allow` and `deny`
 permit; a listener's `socks` does the same for SOCKS5.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -1726,7 +1726,7 @@ the first's addresses is in rotation, `mirror` copies a share of the requests el
 `retry` sends a failed request again, within a budget. WebSockets and gRPC are proxied too,
 streamed both ways.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -1832,7 +1832,7 @@ Answers with a fixed status, header fields and body.
 
 A fixed answer: a health check, a maintenance page, a 404 for what no other route takes.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -1880,7 +1880,7 @@ Serves files from a directory, with directory listings, precompressed variants a
 Serves files from `root`, small ones from memory, with listings (`browse`), precompressed twins,
 and `try_files` for single-page apps.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -1972,7 +1972,7 @@ Asks for a user name and password (Basic authentication), checked against bcrypt
 Asks for a user name and password. Hashes are bcrypt, as `fit hash-password` or `htpasswd -B`
 makes them.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2049,7 +2049,7 @@ Limits the size of request bodies, answering 413 past it.
 
 A route's own limit on request bodies, below the listeners' `limits.max_body_bytes`.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2099,7 +2099,7 @@ Keeps responses by RFC 9111's rules, in memory and, with `disk`, on disk, in a z
 may share; answers stale while refreshing, or when the upstream fails, if told to. Purged through
 the Admin API.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2187,7 +2187,7 @@ Stops sending a route's requests on while too many fail or are slow, then lets a
 Answers 503 at once while too many of a route's requests fail or are slow, then lets a few
 through to try again.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2248,7 +2248,7 @@ Asks for a client certificate, verified by the listener's TLS (mTLS), and passes
 Requires a client certificate on a route of a listener whose `tls.client_auth` mode is
 `verify_if_given`, and passes its subject on.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2297,7 +2297,7 @@ Compresses responses with zstd, brotli or gzip as they are written.
 
 Compresses responses as they are written, with the encoding the client prefers.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2348,7 +2348,7 @@ Limits how many of a route's requests are under way at once.
 
 Bounds how many of a route's requests are under way at once, as nginx's `limit_conn` does.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2394,7 +2394,7 @@ Asks an auth service whether a request may go on, and passes fields of its answe
 Sends each request's fields to an auth service, as Authelia or oauth2-proxy are: a 2xx lets it
 through with fields copied from the answer, anything else is the client's answer.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2452,7 +2452,7 @@ Sets, adds and deletes request and response header fields.
 Changes request fields before the handler sees them, and response fields just before they are
 sent.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2525,7 +2525,7 @@ Verifies JSON Web Tokens with keys from files, a secret or a JWK set, and passes
 Verifies a JSON Web Token, from the Authorization field, another field, a cookie or the query,
 with keys from a JWK set, files or a secret, and passes claims on as fields.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2598,7 +2598,7 @@ Limits the rate of requests, by client address, header field or route, allowing 
 
 Limits the rate of requests, by client address, a header, or the whole route, with a burst.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2660,7 +2660,7 @@ Redirects requests whose path a regular expression matches to a URL made from it
 
 Redirects requests, every one or those whose path matches `regexp`, to a URL with placeholders.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2708,7 +2708,7 @@ Rewrites the request's path: strips or adds a prefix, or replaces what a regular
 Rewrites the path the handler sees, after the route is picked: strips or adds a prefix, or
 replaces what a regular expression matches.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {
@@ -2765,7 +2765,7 @@ header, body and trailer too, its callbacks running on the same pool while the r
 for them ([decision 023](../decisions/023-proxy-wasm-response.md)); `response` narrows or turns
 them off.
 
-In a .konf file:
+In a .conf file:
 
 ```fit
 route {

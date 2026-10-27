@@ -9,7 +9,7 @@ import (
 // indentation counted as four columns a tab.
 const compactWidth = 80
 
-// compact writes a .konf file again with each block that fits within
+// compact writes a .conf file again with each block that fits within
 // compactWidth on one line, its directives parted with ;, as in
 // match { path /api/* }. At the top, a blank line goes between directives
 // but those of one line of the same name, as listeners written each on one.

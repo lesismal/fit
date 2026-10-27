@@ -204,7 +204,7 @@ Status: `todo`, `doing` or `done`.
 | I77 | Config and Admin API v1 freeze | I69, I74 | done |
 | I78 | Reference docs and migration guides | I77 | done |
 | I79 | Caddyfile converter, JSON with comments | I74 | done |
-| I80 | fit's own .konf format; configs in several files | I79 | done |
+| I80 | fit's own .conf format; configs in several files | I79 | done |
 | I81 | WASM III: Proxy-Wasm's response callbacks | I72 | done |
 | I82 | fit's own log: loggers and levels; nginx's and Caddy's logs converted | I21, I79 | done |
 | I83 | fit's log in fib's formats; loggers of their own; the access log's formats | I82 | done |
@@ -1037,17 +1037,17 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
   served end to end; JSON with comments loads from a file and through the Admin API.
 - **Touches**: `adapter/caddyfile`, `adapter`, `config`, `admin`, `cli`.
 
-### I80 fit's own .konf format; configs in several files
+### I80 fit's own .conf format; configs in several files
 
-- **Do**: a block format of fit's own, `.konf`, read field for field from the config's types and
+- **Do**: a block format of fit's own, `.conf`, read field for field from the config's types and
   each module's params, so that it says everything JSON and YAML do, with `site` to write the
   routes of a set of host names together, and written back from JSON; configs read from several
   files and directories, merged, with errors at their files; the Caddyfile and nginx converters
   kept as migration tools, out of the config docs
   ([decision 021](decisions/021-fit-format-and-config-files.md)).
-- **Done when**: every template, example and reference example has a `.konf` form that loads as its
+- **Done when**: every template, example and reference example has a `.conf` form that loads as its
   JSON does; a directory of files in the three formats runs, and is reloaded when a file is added,
-  changed or taken out; the docs and templates speak of `.konf`, YAML and JSON.
+  changed or taken out; the docs and templates speak of `.conf`, YAML and JSON.
 - **Touches**: `adapter/fitconf`, `adapter`, `config`, `provider/file`, `cli`, `schema`, `docs`,
   `templates`, `examples`.
 

@@ -1,4 +1,4 @@
-# 021：fit 自己的 .konf 格式，以及分散在多个文件中的配置
+# 021：fit 自己的 .conf 格式，以及分散在多个文件中的配置
 
 [English](021-fit-format-and-config-files.md) | [简体中文](021-fit-format-and-config-files.zh-CN.md)
 
@@ -15,9 +15,9 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
 
 ## 决定
 
-- **fit 自己的格式 `.konf`，由配置的类型推导。** `adapter/fitconf` 读取由指令组成的块，每条指令是一个字段：标量取一个参数，
+- **fit 自己的格式 `.conf`，由配置的类型推导。** `adapter/fitconf` 读取由指令组成的块，每条指令是一个字段：标量取一个参数，
   列表取各个参数，对象或 map 取一个块，对象列表重复写块，模块写名字再跟参数块。有哪些字段、各是什么类型，来自配置解码器
-  读取的 Go 类型和每个模块的参数，因此 fit 新增的字段或模块无需修改适配器就能用 `.konf` 书写，格式也不会与 JSON 和 YAML
+  读取的 Go 类型和每个模块的参数，因此 fit 新增的字段或模块无需修改适配器就能用 `.conf` 书写，格式也不会与 JSON 和 YAML
   脱节。值按字段的类型读取，类型不对的值保留下来交给配置检查，在它所写的位置报错。
 - **站点，以及几种简写。** `site <hosts...> { route <paths...> { ... } }` 把一组域名的路由及其共有的内容（listener、优先级、
   match、中间件）写在一起。它在转换前展开为普通路由，不带任何自己的语义；路由总可以逐条写出。顶层列表用单数书写，参数是
@@ -25,12 +25,12 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
   简短，又加了几种同样在转换前展开、不带自己语义的简写：listener 的地址和协议、upstream 的地址作为名字之后的参数，
   `tls <cert> <key>`，表示任意域名的 `site *`，带单位的字节数（`1GiB`），以及用 `def <名字> { ... }` 定义、由
   `use <名字>` 原地读入的块，与 `include`、`import` 文件并列。`FromJSON` 写出这些简写，并把能放在一行的块写成一行。
-- **写回。** `fitconf.FromJSON` 把原生 JSON 写成 `.konf` 文件，转换回来得到同样的配置，用于 `fit adapt -to fit`、`.konf`
+- **写回。** `fitconf.FromJSON` 把原生 JSON 写成 `.conf` 文件，转换回来得到同样的配置，用于 `fit adapt -to fit`、`.conf`
   模板，以及配置参考中由 JSON 生成的示例，使它们不会不一致。
 - **Caddy 和 nginx 的配置是被转换的，不按 fit 的配置读取。** `adapter/caddyfile` 和 `adapter/nginx` 保留，作为迁移工具：
-  `fit adapt` 转换它们，最好转换成 `.konf` 文件；`fit run` 仍接受用 `-c` 指定的这类文件。配置文档和模板只讲 fit 的三种
+  `fit adapt` 转换它们，最好转换成 `.conf` 文件；`fit run` 仍接受用 `-c` 指定的这类文件。配置文档和模板只讲 fit 的三种
   格式；Caddy 和 nginx 出现在迁移指南和转换 Caddyfile 的页面中。
-- **多个文件和目录。** `-c` 可以重复，也可以指定目录；目录代表其中（递归）的 `.konf`、`.yaml`、`.yml` 和 `.json` 文件，按
+- **多个文件和目录。** `-c` 可以重复，也可以指定目录；目录代表其中（递归）的 `.conf`、`.yaml`、`.yml` 和 `.json` 文件，按
   字典序，隐藏文件除外。每个文件单独转换，结果按 JSON 合并：顶层列表按顺序拼接，其他字段只能由一个文件给出（`schema_version`
   可以由多个文件给出，但必须一致），合并因此无需决定两个值中哪个胜出。合并后配置中的错误映射回文件、该文件内的路径和位置。
   文件监视器监视整组文件，包括加入和移除的文件，每次变化都重新读取全部文件，并有上限（10,000 个文件，64 MiB）。
@@ -38,10 +38,10 @@ Caddy 的语义（一串处理器）转换成 fit 的路由，并列出存疑之
 
 ## 影响
 
-- `fit run`、`fit validate` 和 `fit adapt` 按扩展名接受 `.konf` 文件，并接受多个 `-c`；`fit adapt -to fit` 写出 `.konf`
+- `fit run`、`fit validate` 和 `fit adapt` 按扩展名接受 `.conf` 文件，并接受多个 `-c`；`fit adapt -to fit` 写出 `.conf`
   文件；`fit schema -template fit` 打印模板。
-- `templates/caddyfile` 已删除；`templates/konf/fit.konf` 与 YAML、JSON 模板一起生成。`examples/*.caddyfile` 改为
-  `examples/*.konf`。
+- `templates/caddyfile` 已删除；`templates/conf/fit.conf` 与 YAML、JSON 模板一起生成。`examples/*.caddyfile` 改为
+  `examples/*.conf`。
 - 配置错误通过 `config.Error` 的 `File` 指出所在文件。
 - Admin API 仍收发一份 JSON 配置；`-c` 读取的内容先合并，再交给它。
 
@@ -58,3 +58,9 @@ fit 格式，`-to fit` 仍写出它，包仍是 `adapter/fitconf`。上面各节
 2026-10-26，定义一次、按名字读入的一组指令，其关键字由 `snippet` 和读入它的 `include <名字>` 改为
 `def <名字> { ... }` 和 `use <名字>`；`include` 现在只引用文件，让每个词只表示一件事，不是文件的引用就在所写位置报错。
 项目尚未发布，旧名字不再读取。
+
+## 后续：扩展名改回 .conf
+
+2026-10-27，该格式的扩展名改回 `.conf`，这是多数配置文件所用的名字；`templates/konf` 随之改为 `templates/conf`。项目尚未发布，
+`.konf` 不再读取。其他不变：nginx 和 Caddyfile 适配器仍不认扩展名和文件名，因此交给 `fit run` 或 `fit validate` 的、或在配置目录中
+找到的 `.conf` 文件都按 fit 的格式读取，nginx 配置仍用 `fit adapt -from nginx` 转换。上面各节都已使用 `.conf`；前面那一节保留当时的名字。

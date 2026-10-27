@@ -8,12 +8,12 @@ default in a comment above it:
 
 | Template | Format |
 | --- | --- |
-| [konf/fit.konf](konf/fit.konf) | fit's own [.konf format](../docs/reference/fit.md) |
+| [conf/fit.conf](conf/fit.conf) | fit's own [.conf format](../docs/reference/fit.md) |
 | [yaml/fit.yaml](yaml/fit.yaml) | YAML |
 | [json/fit.json](json/fit.json) | JSON with comments and trailing commas, which fit reads |
 
 In each, a small config is written out and the rest is commented out, with its default or an
-example value, to be uncommented as needed. Each runs as it is (`fit run -c templates/konf/fit.konf`):
+example value, to be uncommented as needed. Each runs as it is (`fit run -c templates/conf/fit.conf`):
 a listener on :8080, an upstream and a route answering "hello from fit". In a commented-out
 block, a field's comment is a comment within the comment (`# #` or `// //`), so that uncommenting
 the block leaves it a comment. The routes show every handler, one route each, and every
@@ -28,7 +28,7 @@ formats are compared in [Configuration](../docs/configuration.md).
 
 The same template is also a directory of files by kind, for a config kept as one, as
 `fit run -c <directory>` reads it ([several files and directories](../docs/reference/fit.md#several-files-and-directories)):
-[konf/conf.d](konf/conf.d), [yaml/conf.d](yaml/conf.d) and [json/conf.d](json/conf.d).
+[conf/conf.d](conf/conf.d), [yaml/conf.d](yaml/conf.d) and [json/conf.d](json/conf.d).
 
 | File | What it holds |
 | --- | --- |

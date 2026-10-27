@@ -25,8 +25,8 @@ fit version
 
 ## A first config
 
-A config may be a .konf file, YAML or JSON ([Configuration](configuration.md) compares them); this
-guide uses the .konf format, fit's own, written in blocks of directives. Save this as `fit.konf`:
+A config may be a .conf file, YAML or JSON ([Configuration](configuration.md) compares them); this
+guide uses the .conf format, fit's own, written in blocks of directives. Save this as `fit.conf`:
 
 ```fit
 listener web {
@@ -49,8 +49,8 @@ A listener says where fit listens, and what it speaks there. A route says which 
 with its params in a block. Check the config, then run it:
 
 ```bash
-fit validate -c fit.konf
-fit run -c fit.konf
+fit validate -c fit.conf
+fit run -c fit.conf
 ```
 
 ```bash
@@ -208,16 +208,16 @@ cache, WASM plugins.
 
 ## Several files
 
-As a config grows, split it: `-c` takes a directory, and every `.konf`, `.yaml`, `.yml` and `.json`
+As a config grows, split it: `-c` takes a directory, and every `.conf`, `.yaml`, `.yml` and `.json`
 file in it, in its subdirectories too, is read, the routes and upstreams of each joined:
 
 ```bash
 fit run -c /etc/fit
 ```
 
-with, say, `/etc/fit/base.konf` holding the listeners and `acme`, and a file in `/etc/fit/sites/`
+with, say, `/etc/fit/base.conf` holding the listeners and `acme`, and a file in `/etc/fit/sites/`
 for each site. A field other than the lists, as `admin` or `acme`, is given in one file only. The
-[.konf reference](reference/fit.md#several-files-and-directories) has the details.
+[.conf reference](reference/fit.md#several-files-and-directories) has the details.
 
 ## Change it while it runs
 
@@ -228,14 +228,14 @@ under way finish on the config they started with.
 
 With `admin {}` in the config, the Admin API, on 127.0.0.1:2019 by default, reads and changes
 the running config, in fit's native JSON: here, the whole of it, then the first route's params, by
-their JSON pointer, then a whole new config, converted from the .konf file by `fit adapt`, and back
+their JSON pointer, then a whole new config, converted from the .conf file by `fit adapt`, and back
 to the first:
 
 ```bash
 curl localhost:2019/config
 curl -X PATCH -H 'Content-Type: application/merge-patch+json' \
   -d '{"body": "hello again\n"}' localhost:2019/config/routes/0/handler/params
-fit adapt -c fit.konf -o fit.json
+fit adapt -c fit.conf -o fit.json
 curl -X POST -H 'Content-Type: application/json' -d @fit.json localhost:2019/load
 curl -X POST localhost:2019/rollback/1
 ```
@@ -245,7 +245,7 @@ and a dashboard at `/dashboard/`.
 
 ## Next
 
-- [Configuration](configuration.md): the same config as a [.konf file](reference/fit.md), in
+- [Configuration](configuration.md): the same config as a [.conf file](reference/fit.md), in
   [YAML](reference/yaml.md) or in [JSON](reference/json.md).
 - The [config reference](reference/config.md): every field, its type and default, with examples.
 - Coming from another server: [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md),

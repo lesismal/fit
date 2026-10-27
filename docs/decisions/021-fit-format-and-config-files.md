@@ -1,4 +1,4 @@
-# 021: fit's own .konf format, and configs in several files
+# 021: fit's own .conf format, and configs in several files
 
 [English](021-fit-format-and-config-files.md) | [简体中文](021-fit-format-and-config-files.zh-CN.md)
 
@@ -18,11 +18,11 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
 
 ## Decision
 
-- **A format of fit's own, `.konf`, derived from the config's types.** `adapter/fitconf` reads
+- **A format of fit's own, `.conf`, derived from the config's types.** `adapter/fitconf` reads
   blocks of directives, each a field: a scalar takes one argument, a list its arguments, an object
   or a map a block, a list of objects a repeated block, and a module its name and a block of its
   params. Which fields there are and their types come from the Go types the config decoder reads
-  and from each module's params, so a field or module added to fit is written in `.konf` with no
+  and from each module's params, so a field or module added to fit is written in `.conf` with no
   change to the adapter, and the format cannot drift from JSON and YAML. Values are typed by their
   field, and one of the wrong type is kept for the config's check, which reports it where it was
   written.
@@ -37,15 +37,15 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
   <key>`, `site *` for any host, numbers of bytes in units (`1GiB`), and defs,
   `def <name> { ... }` read in place by `use <name>`, beside `include` and `import` of
   files. `FromJSON` writes the shorthands, and blocks that fit on a line on one.
-- **Writing back.** `fitconf.FromJSON` writes native JSON as a `.konf` file that adapts back to the
-  same config, for `fit adapt -to fit`, for the `.konf` template and for the config reference's
+- **Writing back.** `fitconf.FromJSON` writes native JSON as a `.conf` file that adapts back to the
+  same config, for `fit adapt -to fit`, for the `.conf` template and for the config reference's
   examples, which are made from their JSON, so that they cannot disagree.
 - **Caddy and nginx configs are converted, not read as fit's.** `adapter/caddyfile` and
-  `adapter/nginx` stay, as migration tools: `fit adapt` converts them, best to a `.konf` file, and
+  `adapter/nginx` stay, as migration tools: `fit adapt` converts them, best to a `.conf` file, and
   `fit run` still takes one named with `-c`. The config docs and templates are about fit's three
   formats; Caddy and nginx appear in the migration guides and the page on converting a Caddyfile.
 - **Several files and directories.** `-c` is repeated and may name a directory, which stands for
-  its `.konf`, `.yaml`, `.yml` and `.json` files, recursively, in lexical order, hidden ones left
+  its `.conf`, `.yaml`, `.yml` and `.json` files, recursively, in lexical order, hidden ones left
   out. Each file is adapted on its own and the results merged as JSON: the top-level lists are
   joined in order, and any other field is given by one file only (`schema_version` by several if
   they agree), so that a merge never has to decide which of two values wins. Errors in the merged
@@ -56,10 +56,10 @@ directories, as nginx's `include` and Caddy's `import` split theirs.
 
 ## Consequences
 
-- `fit run`, `fit validate` and `fit adapt` take `.konf` files by their extension, and several
+- `fit run`, `fit validate` and `fit adapt` take `.conf` files by their extension, and several
   `-c`; `fit adapt -to fit` writes one; `fit schema -template fit` prints the template.
-- `templates/caddyfile` is gone; `templates/konf/fit.konf` is generated with the YAML and JSON
-  templates. `examples/*.caddyfile` became `examples/*.konf`.
+- `templates/caddyfile` is gone; `templates/conf/fit.conf` is generated with the YAML and JSON
+  templates. `examples/*.caddyfile` became `examples/*.conf`.
 - A config's error names its file, through `config.Error`'s `File`.
 - The Admin API still takes and returns one JSON config; what `-c` read is merged before it.
 
@@ -81,3 +81,13 @@ On 2026-10-26 the keywords for a block of directives defined once and read by na
 `def <name> { ... }` and `use <name>`, in place of `snippet` and the `include <name>` that read
 it; `include` now names files only, so that each word says one thing and a name that is not a
 file is an error at its place. The project not having been released, the old names are not read.
+
+## Later: the extension .conf again
+
+On 2026-10-27 the format's extension became `.conf` again, the name most config files go by,
+and `templates/konf` became `templates/conf`. `.konf` is no longer read, the project not having
+been released. Nothing else changes: the nginx and Caddyfile adapters still take no extension or
+file name, so a `.conf` file given to `fit run` or `fit validate`, or found in a config
+directory, is read as fit's format, and an nginx config is still converted with
+`fit adapt -from nginx`. The sections above use `.conf` throughout; the one before keeps the
+names of its day.

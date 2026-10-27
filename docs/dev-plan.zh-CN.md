@@ -194,7 +194,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I77 | 配置与 Admin API v1 冻结 | I69、I74 | done |
 | I78 | 参考文档与迁移指南 | I77 | done |
 | I79 | Caddyfile 转换器、带注释的 JSON | I74 | done |
-| I80 | fit 自己的 .konf 格式；多文件配置 | I79 | done |
+| I80 | fit 自己的 .conf 格式；多文件配置 | I79 | done |
 | I81 | WASM III：Proxy-Wasm 的响应回调 | I72 | done |
 | I82 | fit 自身的日志：logger 与级别；转换 nginx 和 Caddy 的日志配置 | I21、I79 | done |
 | I83 | fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式 | I82 | done |
@@ -921,13 +921,13 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   Admin API 加载。
 - **涉及**：`adapter/caddyfile`、`adapter`、`config`、`admin`、`cli`。
 
-### I80 fit 自己的 .konf 格式；多文件配置
+### I80 fit 自己的 .conf 格式；多文件配置
 
-- **做什么**：fit 自己的块格式 `.konf`，按配置的类型和每个模块的参数逐字段读取，使它能表达 JSON 和 YAML 能表达的一切，
+- **做什么**：fit 自己的块格式 `.conf`，按配置的类型和每个模块的参数逐字段读取，使它能表达 JSON 和 YAML 能表达的一切，
   用 `site` 把一组域名的路由写在一起，并能由 JSON 写回；配置可以从多个文件和目录读取并合并，错误指向所在文件；Caddyfile
   和 nginx 转换器保留为迁移工具，不再出现在配置文档中（[决定 021](decisions/021-fit-format-and-config-files.zh-CN.md)）。
-- **完成标准**：每个模板、示例和参考示例都有能与其 JSON 一样加载的 `.konf` 写法；由三种格式的文件组成的目录能运行，加入、
-  修改或移除文件时会重新加载；文档和模板讲的是 `.konf`、YAML 和 JSON。
+- **完成标准**：每个模板、示例和参考示例都有能与其 JSON 一样加载的 `.conf` 写法；由三种格式的文件组成的目录能运行，加入、
+  修改或移除文件时会重新加载；文档和模板讲的是 `.conf`、YAML 和 JSON。
 - **涉及**：`adapter/fitconf`、`adapter`、`config`、`provider/file`、`cli`、`schema`、`docs`、`templates`、`examples`。
 
 ### I81 WASM III：Proxy-Wasm 的响应回调

@@ -50,7 +50,7 @@ master.
 
 - `bench/ab.sh [options] A B` compares two git refs of fit (or `work`, the working tree): fit
   alone, only the scenarios and protocols given (`-scenarios`, `-protocols`), 10s runs after a 2s
-  warm-up, 3 rounds alternating A and B, with `-extra` appended to fit's config, `bench/configs/fit/fit.konf`
+  warm-up, 3 rounds alternating A and B, with `-extra` appended to fit's config, `bench/configs/fit/fit.conf`
   (an access log, metrics). It starts on the host and returns an id; `bench/ab.sh -report ID` fetches what has
   finished and summarizes requests a second and CPU per request, marking a change only past 1%
   (`AB_NOISE`) and the spread of the rounds; `-wait ID` waits for the end. One scenario over one
@@ -90,7 +90,7 @@ Every server's config, in [`configs`](configs), serves the same routes on five p
 HTTP/1.1, driven by wrk; 8443 for HTTP/1.1 over TLS 1.3 (`https/1.1`), driven by wrk; 8081 for
 h2c (HTTP/2 with prior knowledge), driven by h2load; 8445 for h2 (HTTP/2 over TLS 1.3, by ALPN),
 driven by h2load; and UDP 8444 for HTTP/3, over TLS 1.3, driven by the HTTP/3 h2load. fit's
-configs are in its own format, `.konf`. h2 and HTTP/3 use the harness's throwaway certificate, and the same
+configs are in its own format, `.conf`. h2 and HTTP/3 use the harness's throwaway certificate, and the same
 connections and streams as h2c.
 
 QUIC servers that size their own UDP socket buffers (Caddy and Traefik, through quic-go, ask for

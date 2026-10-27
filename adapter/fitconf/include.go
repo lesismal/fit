@@ -15,7 +15,7 @@ func init() {
 	adapter.RegisterFiles("fit", refs, AdaptFile)
 }
 
-// refs returns the files a .konf file names, as written: those import, at
+// refs returns the files a .conf file names, as written: those import, at
 // the top, imports, and those include, anywhere, includes. use reads a def,
 // which is no file, so it names none.
 func refs(data []byte) (imports, includes []string, err error) {
@@ -59,7 +59,7 @@ type frame struct {
 	file string // the file, or the one the def was defined in
 }
 
-// reader reads a .konf file with the files it includes and the defs it uses.
+// reader reads a .conf file with the files it includes and the defs it uses.
 type reader struct {
 	include adapter.Includer
 	// stack are the files and defs being read, the config's own file
@@ -113,7 +113,7 @@ func (r *reader) splice(ds []*directive, top bool) ([]*directive, error) {
 				return nil, errTok(d.name, "import is given at the top of a config file only, not in a block or a file included: it imports whole config files")
 			}
 			if len(d.args) == 0 || d.hasBlock {
-				return nil, errTok(d.name, "import takes the config files to import, as in import sites/*.konf")
+				return nil, errTok(d.name, "import takes the config files to import, as in import sites/*.conf")
 			}
 			if r.include == nil {
 				return nil, errTok(d.name, "import reads other files: read the config from its file, as fit run -c does")
@@ -136,7 +136,7 @@ func (r *reader) splice(ds []*directive, top bool) ([]*directive, error) {
 			continue
 		case d.name.text == "include":
 			if len(d.args) == 0 || d.hasBlock {
-				return nil, errTok(d.name, "include takes the files to include, as in include routes/*.konf")
+				return nil, errTok(d.name, "include takes the files to include, as in include routes/*.conf")
 			}
 			inner, err := r.includeAll(d, top)
 			if err != nil {

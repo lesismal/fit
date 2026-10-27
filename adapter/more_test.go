@@ -81,7 +81,7 @@ func TestFilesAndSources(t *testing.T) {
 	if _, err := Files(nil); err == nil || err.Error() != "no config files" {
 		t.Errorf("no paths: %v", err)
 	}
-	if _, err := ReadSources([]string{filepath.Join(t.TempDir(), "missing.konf")}); !os.IsNotExist(err) {
+	if _, err := ReadSources([]string{filepath.Join(t.TempDir(), "missing.conf")}); !os.IsNotExist(err) {
 		t.Errorf("a missing file: %v", err)
 	}
 	// A file past MaxBytes; sparse where the file system can be.

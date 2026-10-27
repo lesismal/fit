@@ -3,7 +3,7 @@
 [English](020-caddyfile-and-jsonc.md) | [简体中文](020-caddyfile-and-jsonc.zh-CN.md)
 
 Status: accepted, in I79 (2026-10-23). Its first point, the Caddyfile as fit's block syntax, is
-replaced by [decision 021](021-fit-format-and-config-files.md): fit's own `.konf` format, with the
+replaced by [decision 021](021-fit-format-and-config-files.md): fit's own `.conf` format, with the
 Caddyfile converted as a migration tool.
 
 ## Context
