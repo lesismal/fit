@@ -212,7 +212,7 @@ fixed h3 +10.9%、site h3 +17.7%，但 site 的 CPU/请求从 76.8 升到 92.5 �
 
 这把 W0 h3 10k 对 nginx 的份额从约 62% 提到约 74%，且 CPU 没有增加。fib 的测试（`TestRequestBodyRecyclesBodylessRequests`、
 `TestStreamedBodiesKeepRequestsOutOfThePool`）和 fit 的整套 race 测试都通过；fit 的 `go.mod` 移到
-`d4319879`（rule 19）。
+`f0378649`（`d4319879` 加上只改测试的 `f0378649`，rule 19）。
 
 ### 否决：读缓冲 16 KiB start / 64 KiB max（fib `ReadBufferStartSize`）
 
@@ -234,5 +234,5 @@ host profile（`BenchmarkProxyAPI`，6 CPU）显示 fit 自己的用户态代码
 `ResponseHeaderTimeout` 每请求 `AfterFunc`/`Reset`/`Stop`）。安全的做法是 fib 的 deadline/timer API，
 不是 fit 的局部改写；本轮不合并。
 
-因此，本轮最终只把 fit 移到 fib `d4319879`，保留 h3 这一项实测有效的优化；其余候选的代码和测量留在 /tmp
+因此，本轮最终只把 fit 移到 fib `f0378649`（h3 修复 `d4319879` 与其测试修复），保留 h3 这一项实测有效的优化；其余候选的代码和测量留在 /tmp
 （未提交），分析、A/B 数据和结论在本文与 `report.md`/`report.zh-CN.md` 中。
