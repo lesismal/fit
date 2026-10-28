@@ -186,3 +186,53 @@ fixed h3 +10.9%、site h3 +17.7%，但 site 的 CPU/请求从 76.8 升到 92.5 �
 - 64 KiB 读缓冲是 W1 内存回归的**最可能主因**（增量与 64 KiB × 在途数吻合，且 `d124509` 明确改了默认值），
   但必须用 16 KiB/自适应 build 实测确认后再改默认。
 - W3 的上限在客户端/内核还是 fit，尚未确认；不要在确认前投入。
+
+## 五、优化结果（2026-10-29）
+
+分析之后，只保留了一项经过 A/B 验证、收益明确的优化；其余候选在实测后否决，避免把“看起来能省”的改动带进默认路径。
+
+### 保留：fib `d4319879`，HTTP/3 无 body 请求的 requestStream 回收
+
+**改动**：fib 的 HTTP/3 `requestStream` 池此前在 `Config.StreamRequestBody` 开启时对所有请求关闭；fit 为了规则 5-8
+（流式 body、慢 peer）总是开启 streaming，于是每个 h3 请求——包括无 body 的 GET——都新建一个 896 B 的
+`requestStream`（含 `*http.Request`、Header、URL、Context）和一个 `streamedBody`。修复后每个请求仍从池中取，
+只有 body 真正开始流式（`startStream`）时才把 `pooled` 置回 false，交给收集器；无 body 请求和 body 未流式的请求
+照常回收。语义不变，h1/h2 不受影响。
+
+**A/B**（A = fib `a7b8b456`/fit main，B = fib `d4319879`；3 轮，10 s，6 CPU，同一台压测机）：
+
+| 工作负载 | A | B | 变化 | 每请求 CPU |
+| --- | ---: | ---: | ---: | ---: |
+| W0 fixed h3 500 (20×25) | 1.462M | 1.720M | **+17.6%** | 4.02 → 3.44 µs |
+| W0 fixed h3 5,000 (200×25) | 1.193M | 1.422M | **+19.1%** | 4.95 → 4.16 µs |
+| W0 fixed h3 10,000 (400×25) | 1.146M | 1.375M | **+20.0%** | 5.14 → 4.30 µs（-16.3%） |
+| W2 `site` h3 500 | 63.2k | 63.5k | +0.4%（byte-bound，符合预期） | 92.33 → 91.69 µs |
+| W0 fixed h1 500 | 675.9k | 677.7k | +0.3%（噪声） | 8.74 → 8.74 µs |
+| W0 fixed h2c 500 | 2.618M | 2.625M | +0.3%（噪声） | 2.28 → 2.27 µs |
+
+这把 W0 h3 10k 对 nginx 的份额从约 62% 提到约 74%，且 CPU 没有增加。fib 的测试（`TestRequestBodyRecyclesBodylessRequests`、
+`TestStreamedBodiesKeepRequestsOutOfThePool`）和 fit 的整套 race 测试都通过；fit 的 `go.mod` 移到
+`d4319879`（rule 19）。
+
+### 否决：读缓冲 16 KiB start / 64 KiB max（fib `ReadBufferStartSize`）
+
+W1 10k 内存确实从 1,201 MiB 降到 575 MiB（-52%），W1 10k 吞吐 -0.7%；但每个 1 MiB 代理下载的 round 多一次
+16 KiB 读和一次 16 KiB 写，W4 proxy-download h1/h2 为 **-4.9%/-4.2%**，超过 2% 的界限。要同时满足，需要 fib
+按连接记住“这一连接上一轮已增长”，下一轮直接用 64 KiB；本轮不做。实验分支保留在 /tmp，不合并。
+
+### 否决：W4 1 MiB 下载改走 sendfile
+
+W4 的 1 MiB 文件正好等于 `DefaultMaxFileBytes`，所以一直走内存缓存和一次用户态拷贝；改成 sendfile 后 CPU
+从 2.62 降到 1.93 cores（-26%），但吞吐 **-13.9%**（19.1k → 16.6k），p99 5.40 → 5.75 ms。瓶颈是 fib 的
+sendfile 按 256 KiB 分段排队（每段一次 `OnWritable` 和写 deadline），不是缺少 sendfile 路径；本轮不合并。
+
+### 否决：HTTP/1.1 代理的 fit-only 优化
+
+host profile（`BenchmarkProxyAPI`，6 CPU）显示 fit 自己的用户态代码只有 0.45 µs/请求（约 1.7% 的 26.5 µs），
+加上它驱动的 header 工作约 0.85 µs（3.2%）；即便全删也到不了 -5%。诊断版本（去掉 fib 的每请求 timer 和必需的
+`Forwarded`/`X-Forwarded-*`）能到 +8.6%，但它破坏语义，且收益主要来自 fib 的 per-request timer（`Timeout`、
+`ResponseHeaderTimeout` 每请求 `AfterFunc`/`Reset`/`Stop`）。安全的做法是 fib 的 deadline/timer API，
+不是 fit 的局部改写；本轮不合并。
+
+因此，本轮最终只把 fit 移到 fib `d4319879`，保留 h3 这一项实测有效的优化；其余候选的代码和测量留在 /tmp
+（未提交），分析、A/B 数据和结论在本文与 `report.md`/`report.zh-CN.md` 中。
