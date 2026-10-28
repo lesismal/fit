@@ -8,7 +8,8 @@ nginx、Caddy、Traefik、Envoy 和 fit 在[压测方案](../../README.zh-CN.md#
 02:51 至 04:23）跑完：没有一轮失败或卡住，也没有一轮出现任何错误；实际用时 1 小时 32 分钟，预计 1 小时 33 分钟。
 全部表格在 [tables.md](tables.md)，由 benchreport
 从同目录下各轮的 JSON 生成；推导出的方案在 [plan.txt](plan.txt)（以及 `plan-derived.json`，每轮的 `params.derived`
-也有一份）。
+也有一份）。对 fit 的落后项、相对退步和优化空间的分析在
+[analysis.md](analysis.md)。
 
 ## 概要
 

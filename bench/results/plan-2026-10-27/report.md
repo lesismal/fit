@@ -11,7 +11,8 @@ host's Asia/Hong_Kong): none failed, none hung, and no run had a single error. T
 1 h 32 min against the 1 h 33 min estimated. Every table is in
 [tables.md](tables.md), rendered from the runs' JSON in this folder, one file for each workload and
 level; the plan derived is [plan.txt](plan.txt) (and `plan-derived.json`, which every run's
-`params.derived` holds too).
+`params.derived` holds too). An analysis of fit's remaining gaps, relative regressions and
+optimization space is in [analysis.md](analysis.md).
 
 ## In short
 
