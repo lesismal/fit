@@ -251,3 +251,80 @@ host profile（`BenchmarkProxyAPI`，6 CPU）显示 fit 自己的用户态代码
 读缓冲按连接记住“上一轮已增长”：一轮从 16 KiB 开始，读满就换成 `ReadBufferSize`，此后该连接的轮次从大缓冲开始，
 直到连续四轮读到的都少于 16 KiB。fit 不需要改动（它把 `ReadBufferSize` 设为 64 KiB，`ReadBufferStartSize` 取默认）。
 fit 的 `go.mod` 移到 fib `56f08db3`（上面三项加上一处注释修正）。
+
+## 七、与 Caddy、Traefik 对比：内存与吞吐
+
+数据来自 2026-10-27 方案的[表格](tables.md)；W1 另按第六节读缓冲优化后的 A/B。“每 MiB 吞吐”即 MEM EER（每秒成功响应 / 峰值匿名内存）。
+
+### 结论
+
+- **吞吐上，只有 W4 `proxy-upload` HTTP/1.1 落后**：fit 8.8k，Traefik 9.9k、Caddy 9.7k（88.7%），CPU EER 也只有它们的约 89%。
+  W3 `churn-1`（100 连接）fit 19,254 对 Caddy 19,313，在噪声内，且所有服务器都停在同一握手上限。其余场景 fit 都领先，多数为 2-4 倍；
+  W6 的 p99 也优于两者。
+- **内存是 fit 相对 Caddy 的主要弱项**，集中在 W2 静态网站和 W4 大文件，为 Caddy 的 2-6 倍。W1 在读缓冲优化后已低于两者
+  （10k 在途 h1 约 639 MiB，Caddy 985 MiB，Traefik 2,160 MiB）。W2 `edge` 的 1.0-1.4 GiB 来自 1 GiB 内存缓存的配置，
+  该场景未测 Caddy，不算差距。
+- 把吞吐和内存放在一起看，内存落后的项分三类：
+
+| 类别 | 场景 | 吞吐 fit / Caddy | 倍数 | 内存 fit / Caddy | 每 MiB 吞吐（fit 相对 Caddy） |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1. 内存换来了吞吐 | W2 `site` h2 @500 | 100.8k / 28.5k | 3.53× | 268 / 83 MiB | 110% |
+| | W2 `site` h2 @2000 | 101.8k / 27.9k | 3.64× | 553 / 192 MiB | 126% |
+| | W2 `site` h3 @500 | 62.8k / 27.9k | 2.25× | 263 / 152 MiB | 130% |
+| | W6 h2 200k | 199.7k / 57.9k | 3.45× | 114 / 70 MiB | 212% |
+| | W4 `proxy-download` h2（对 Traefik） | 8.8k / 3.6k | 2.45× | 151 / 74 MiB | 121% |
+| 2. 吞吐领先，内存效率偏低 | W2 `site` h1 @500 | 92.1k / 42.2k | 2.19× | 304 / 53 MiB | 38% |
+| | W2 `site` h1 @2000 | 88.5k / 40.1k | 2.21× | 358 / 153 MiB | 94% |
+| | W4 `download` h2 | 11.6k / 4.1k | 2.83× | 121 / 35 MiB | 83% |
+| | W4 `proxy-download` h1 | 12.8k / 10.3k（Traefik 11.7k） | 1.24×（1.10×） | 72 / 33 MiB（Traefik 62） | 57%（对 Traefik 95%） |
+| | W4 `proxy-download` h2（对 Caddy） | 8.8k / 3.5k | 2.52× | 151 / 38 MiB | 63% |
+| | W6 h2 30k（固定速率） | 30k / 30k | 1.00× | 58 / 46 MiB | 79%（fit 1.08 CPU、p99 1.92 ms，Caddy 3.03 CPU、5.63 ms） |
+| 3. 内存多、吞吐也无优势 | **W4 `proxy-upload` h1** | 8.8k / 9.7k（Traefik 9.9k） | **0.90×**（0.89×） | 114 / 32 MiB（Traefik 65） | **26%**（对 Traefik 50%） |
+| | **W4 `proxy-upload` h2** | 6.8k / 5.1k（Traefik 5.3k） | 1.32×（1.29×） | **335** / 58 MiB（Traefik 98） | **22%**（对 Traefik 37%） |
+
+第 1 类不需要处理。第 2、3 类列入下面的优化计划；第 3 类是真正的短板，优先。
+
+### 优化计划（继第三节之后）
+
+第三节的 P0 读缓冲已完成；HTTP/3 只拿到 +2.3%，P1 的尾延迟与 HTTP/1.1 代理 CPU 已试过、未达标（第六节），仍保留在第三节。
+下面是相对 Caddy、Traefik 新增的项：
+
+| 优先级 | 方向 | 类别 | 证据 | 建议目标 | 风险 |
+| --- | --- | --- | --- | --- | --- |
+| **P0** | 代理上传 h2 的内存 | 3 | W4 `proxy-upload` h2 每在途 3.3 MiB（335 MiB / 100），Caddy 0.5 MiB、Traefik 0.8 MiB；每 MiB 吞吐 22% | 每在途 ≤1 MiB（≤120 MiB），吞吐不降 | 中 |
+| **P0** | 代理上传 h1 的吞吐与内存 | 3 | W4 `proxy-upload` h1 为 Traefik 的 88.7%、CPU EER 89%；内存 114 MiB，Caddy 32 MiB；backend CPU 2.94 对 2.20，可能多了往返或写碎了 | 吞吐 ≥ Traefik，内存 ≤65 MiB | 中 |
+| **P1** | 静态文件 h1 over TLS 的每在途内存 | 2 | W2 `site` h1 @500 每在途 615 KiB（Caddy 88 KiB），内存 5.7×；@2000 已降到 181 KiB，说明是固定或按连接的开销 | @500 ≤150 MiB，吞吐不降 | 低-中 |
+| **P1** | 大文件下载的内存 | 2 | W4 `download` h2 每在途 1.2 MiB（Caddy 251 KiB）；`proxy-download` h1/h2 每在途 0.7/1.5 MiB（Caddy 0.2/0.3 MiB） | 每 MiB 吞吐 ≥ Caddy，吞吐退化 <2% | 中 |
+| **P2** | 低负载 h2 的常驻内存 | 2 | W6 h2 30k 为 58 MiB，Caddy 46 MiB、Envoy 40 MiB（每在途 109 KiB） | ≤46 MiB | 低 |
+
+#### P0-A：代理上传 h2 的内存
+
+**线索**：fit 用 fib 的默认 h2 窗口（每流 1 MiB、每连接 16 MiB），Caddy 和 Traefik 用 Go 的 1 MiB 连接窗口
+（[bench/README](../../README.zh-CN.md) 的“对齐的设置”）。1 MiB 的上传在窗口内一次就能整份到达，后端写得慢时它全在 fit 的内存里，
+另外读缓冲、h2 帧和代理转发可能各有一份拷贝。**做法**：先在压测机上抓 W4 `proxy-upload` h2 的 heap profile，确认内存在 h2 接收缓冲、
+请求体管道还是上游写队列；再看能否按上游的写进度归还窗口（背压到客户端），而不是先收下整份 body。不改对齐的窗口设置。
+**验证**：`bench/ab.sh` 的 W4 `proxy-upload` h2 与 `proxy-download` h2，读峰值内存和吞吐。
+
+#### P0-B：代理上传 h1 的吞吐与内存
+
+**线索**：吞吐和 CPU EER 都只有 Traefik 的约 89%，后端 CPU 却更高（2.94 对 2.20），可能转发时写得太碎、每个小块一次系统调用，
+或请求体在 fit 里多拷贝了一次。**做法**：抓 CPU profile 和后端收到的写大小分布（`strace -c` 或后端统计）；对比 64 KiB 读缓冲下
+转发的块大小；必要时让请求体的转发攒到一个合适的块再写上游。**验证**：W4 `proxy-upload` h1/h2、`proxy-download` h1，W1 不退化。
+
+#### P1-A：静态文件 h1 over TLS 的每在途内存
+
+**线索**：500 在途 304 MiB，2,000 在途 358 MiB，增量只有 54 MiB，因此大部分不是按在途请求算的，而是固定开销（静态文件的 64 MiB 内存缓存、
+TLS 记录缓冲、每个事件循环的池）或按连接的缓冲。**做法**：heap profile 区分文件缓存、TLS 和读写缓冲；文件缓存若是主因，它是设计取舍，
+只在报告中注明；TLS 记录缓冲若按连接常驻，参考读缓冲的做法改为按轮次。**验证**：W2 `site` h1/h2 @500/@2000。
+
+#### P1-B：大文件下载的内存
+
+**线索**：每在途 0.7-1.5 MiB，接近整份 1 MiB 文件：可能是写队列在背压前先收下整份响应。第五节的 sendfile 尝试吞吐 -13.9%（瓶颈在
+fib 按 256 KiB 分段排队），因此这里不走 sendfile，而是看写水位（`WriteBufferHighWatermark`）和代理响应体的转发块大小。
+**验证**：W4 `download` h2、`proxy-download` h1/h2，吞吐退化 <2%。
+
+#### P2：低负载 h2 的常驻内存
+
+**做法**：只有在 P0/P1 完成后，并且 heap profile 显示有可回收的池或预分配时才做；差距只有 12 MiB，不单独投入。
+
+所有项都在压测机上做 A/B，只保留达到目标的；每项完成后在本节记录结果。
