@@ -255,8 +255,13 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 			h = fibhttp.NewHandlerWithConfig(httpConfig(l), tcpDispatcher)
 			if tlsConfig != nil {
 				// fib's TLS hands the HTTP handler plaintext, which serves
-				// HTTP/2 or HTTP/1.1 as ALPN chose.
-				h = fibtls.NewServer(tlsConfig, h)
+				// HTTP/2 or HTTP/1.1 as ALPN chose. It seals every record
+				// itself: the kernel's TLS, which fib otherwise takes up
+				// for a connection once it sends a file, made the static
+				// website's HTTP/1.1 over TLS a quarter slower on the
+				// benchmark host, every later response of the connection
+				// included.
+				h = &fibtls.Handler{Config: tlsConfig, Handler: h, NoKernelTLS: true}
 			}
 		}
 		switch {
