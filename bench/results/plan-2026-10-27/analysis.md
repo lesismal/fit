@@ -355,3 +355,53 @@ fit 归还窗口前发完整份 1 MiB，平均每流约 0.7 MiB 在等上游；�
 后端 nginx 的 socket 拷贝占它 45% 的 CPU（Traefik 时为 25%）。数据在拷贝时更“冷”，尚未找到能改变它的设置。否决的尝试：
 64512 B / 128 KiB 读（无收益）、32 KiB 读（`proxy-download` h1 -21%）、上游 socket 的 `TCP_NOTSENT_LOWAT` 64K/256K（无收益）、
 请求体被持有时立即停读（会漏掉中途关闭的客户端，`TestHoldBody/failure` 能发现，最多省约 5% CPU，未压测）。
+
+### P1-B 的结果（2026-10-29）
+
+**诊断**（压测机上 W4 的 heap profile，fib `4ad4ebef`；进程匿名内存约为存活堆的两倍，GOGC 默认）：
+
+- `download` h2：存活堆 84% 是 h2 帧被拷进连接发送队列。h2load 不设 `-w/-W`，用默认的 1 GiB 窗口，于是整份 1 MiB 的缓存文件
+  在 `WriteResponse` 时就被全部分帧、拷贝、TLS 加密进队列，每在途约 1.2 MiB。
+- `proxy-download` h2：存活约 65 MB，其中 TLS 加密后的发送队列 21 MB——64 KiB 读加上帧头和记录开销是 65.7 KB，落在 bufferpool
+  的 128 KiB 档，一半是空的；上游 `ResponseStream` 缓冲约 21 MB；读缓冲 9 MB；固定的 taskpool 环 11 MB。
+- `proxy-download` h1：存活约 20-27 MB，其中客户端响应解析器把每次读到的流式响应体先拷进自己的缓冲（6 MB，且每字节多一次拷贝），
+  固定的 taskpool 环 5 MB。
+
+**保留（fib，三个提交）**：
+
+- `1335532e` 整份发送的 h2 响应按 socket 的进度分帧：连接队列里超过 1 MiB 就不再分帧，剩下的以 handler 给的数组留在流里（零成本），
+  队列降到四分之一时继续。流式响应和隧道不受限，与原来一样。
+- `e83d20d5` 流式的 Content-Length 响应体直接从读缓冲交给回调，不再经过解析器的缓冲（少一次拷贝）。
+- `626c02d0` TLS 加密时，刚超过某档的记录改用低一档的缓冲，余下的单独一块。
+
+A/B（`bench/ab.sh`，3 轮、10 s；A = fit `7f6cdce` + fib `4ad4ebef`，B = 同一 fit + 上面三个提交；W4 为 100 在途）：
+
+| 场景 | A req/s | B req/s | 变化 | 峰值内存（均值）A → B | 每 MiB 吞吐 B（Caddy） |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `download` h2 | 10,953 | 12,164 | **+11.1%**（3/3） | **152 → 76 MiB** | **161**（117）达标 |
+| `download` h1 | 17,634 | 17,784 | +0.9%（噪声） | 16 → 16 MiB | — |
+| `proxy-download` h2 | 8,432 | 8,912 | **+5.7%**（3/3） | 151 → 133 MiB | 67（92）未达标 |
+| `proxy-download` h1 | 12,333 | 13,493 | **+9.4%**（3/3） | 68 → 65 MiB（波动大） | 206（312）未达标 |
+| `proxy-upload` h2 | 6,635 | 6,640 | +0.1%（噪声） | 325 → 319 MiB | — |
+| `proxy-upload` h1 | 9,129 | 8,831 | -3.3%（ab 判为噪声） | 145 → 104 MiB（波动大） | — |
+| W1 `api` h1 @500 | 216.5k | 214.7k | -0.8%（噪声） | 79 → 67 MiB（波动大） | — |
+
+`proxy-upload` h1 的 -3.3% 不在这三个改动的路径上（h1、无 TLS、上游响应很小，不流式）；单独对比解析器改动时它是 +1.0%，
+P0 的记录也说明 h1 上传的轮次是双峰的。
+
+分项（同一 build 去掉一项对比）：解析器直通 `proxy-download` h1 **+8.3%**、h2 **+3.6%**（均 3/3，h1 每请求 CPU 478 → 440 µs）；
+TLS 分档 `proxy-download` h2 峰值 **159 → 129 MiB**（3/3），吞吐 -1.1%（噪声）；h2 分帧限额单独为 `download` h2 +12.4%、155 → 76 MiB。
+
+**否决**（数字均为对 A）：
+
+- 流式响应也受连接队列限额（256 KiB / 1 MiB）：`proxy-download` h2 **-45% / -27%**，峰值涨到 400-490 MiB——流的写者一停，
+  上游 `ResponseStream` 和流内 pending 各多一次拷贝和扩容。
+- 流式响应不受限、但连接队列超额时让写者等（hold）：1 MiB 时 `proxy-download` h2 **-31%**、258 MiB——一个连接 25 个流共用一个队列，
+  超额时全部同时 hold、同时恢复，队列在 256 KiB 和约 6 MiB 之间摆动。
+- 限额 512 KiB：`download` h2 +5.5%、52 MiB（每 MiB 吞吐更高，但吞吐收益只有 1 MiB 的一半）；256 KiB：-3%、41 MiB。保留 1 MiB。
+- fit 把上游 `StreamResponseBodyBuffer` 从 256 KiB 降到 64 KiB：`proxy-download` h1/h2 吞吐与内存都在噪声内。
+- TLS 只在超出八分之一档时拆分：`download` h2 无差别，`proxy-download` h2 反而多 8 MiB。
+
+**未达标的原因**：`proxy-download` 的剩余内存大部分不在每个在途请求上：固定的 taskpool 环（h1 5 MB、h2 11 MB 存活，即约 10-22 MiB
+匿名内存）、上游 `ResponseStream` 在流式阈值（64 KiB）前和交付中的 `append` 缓冲，以及 GC 让匿名内存约为存活堆的两倍。
+taskpool 环按队列长度预分配，属于 P2（低负载常驻内存）的范围；`ResponseStream` 的缓冲改用池化块是下一步。
