@@ -29,7 +29,7 @@
 # the host until no other fitbench, go build or test binary runs there.
 set -eu
 
-BENCH_SSH=${BENCH_SSH:-"ssh -S $HOME/.ssh/fitbench.sock -p 10013 root@127.0.0.1"}
+BENCH_SSH=${BENCH_SSH:-"ssh -S $HOME/.ssh/fitbench.sock root@192.168.100.51"}
 BENCH_DIR=${BENCH_DIR:-/root/fitbench/ab}
 root=$(git rev-parse --show-toplevel)
 here=$(cd "$(dirname "$0")" && pwd)

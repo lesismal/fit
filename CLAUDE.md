@@ -16,7 +16,7 @@ its hash (rule 19), with no tag needed; it is never worked around in fit in brea
 reference: no load tests or benchmarks on Windows, macOS, or Docker on Windows or macOS. Benchmarks (`go test -bench`), A/B
 comparisons, perf profiles, and stress or flake reproduction (high `-count`, `-cpu`, GOMAXPROCS
 limits, parallel packages under load) run on the benchmark host,
-`ssh -S ~/.ssh/fitbench.sock -p 10013 root@127.0.0.1` (Linux, no Go: cross-build with
+`ssh -S ~/.ssh/fitbench.sock root@192.168.100.51` (Linux, no Go: cross-build with
 `GOOS=linux GOARCH=amd64 go build` or `go test -c`, copy over, run there). Locally run only
 ordinary tests: `go test -race ./...`, vet, staticcheck. A brief for another session that
 involves any of this says so explicitly. A user-level hook refuses such commands locally.
