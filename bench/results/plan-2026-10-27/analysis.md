@@ -565,3 +565,73 @@ W0 20261030-031626，W1 @500 20261030-031629，W1 @10000 20261030-023510；W0、
 - 未采用：调小默认的 `MaxEvents`（10,000-100,000）。上限决定的是突发时能排多少，W1 @10000 时 1 万个连接可以同时就绪；
   按需增长后上限在低负载下不占内存，不需要再动它。
 - 未处理：`ModeAdaptiveChan` 的队列是按上限创建的 channel，elastic 模式也一样；两者都不是默认模式。
+
+### 内核 TLS 默认值的结果（2026-10-30）
+
+**问题**：fib 在连接第一次 `SendFile` 时把加密交给内核 TLS（kTLS），此后连接发出的一切都由内核加密。fit `2019bc5` 因此给 TLS 监听设了
+`NoKernelTLS`。
+
+**测量**（`bench/ab.sh`，3 轮、10 s；A = kTLS 关，B = 去掉 `NoKernelTLS` 的 fit `ec94008` + fib `c794cf89`）：
+
+| 场景 | kTLS 关 | kTLS 开 | 变化 |
+| --- | ---: | ---: | ---: |
+| W2 `site` https/1.1 @500 | 99k | 74k | **-25.3%**（57.6 → 77.0 µs/请求） |
+| W2 `site` h2 @500 | 113k | 113k | -0.6%（噪声；fib 的 h2 不走排队的 sendfile） |
+| `download` https/1.1 @100，1 MiB 经 `SendFile`\* | 9.4k | 10.3k | **+9.7%**（两次独立 A/B 一致），p99 49 → 33 ms |
+
+\* 标准 W4 的 1 MiB 等于 `DefaultMaxFileBytes`，走内存缓存，不经 `SendFile`；这里用一个不提交的构建把它降到 256 KiB。
+
+**诊断**（压测机 perf 与 bpftrace，`site` https/1.1 @500）：
+
+- 内核加密本身不贵：内核用 `generic-gcm-vaes-avx512`，kTLS 开后 AES 只占 12%（关时 Go 的 `gcmAesEnc` 占 31%）。
+- 贵的是 TCP 发送：Linux 的 tls_sw 每封好一个 16 KiB 的记录就立即交给 TCP 推送，除非这次 `sendmsg` 带 `MSG_MORE`。每请求的
+  `__tcp_transmit_skb` 从 2.3 次变成 6.9 次，`tcp_sendmsg_locked` 从 1.4 次变成 7.5 次，skb 从多为 32-64 KiB 变成多为 4-32 KiB；
+  `tcp_write_xmit` 占 CPU 17% → 35%，软中断（收 ACK）10% → 19%。
+- 切换之后连接的**所有**发送都受影响，不只是文件：60% 的 CPU 在内存缓存命中的 `sendto` 上，`sendfile` 只占 15%。
+- sendfile 不能带标志；内核只给最后一批之前的管道批次加 `MSG_MORE`，所以 64 KiB 以下的文件每个记录仍单独推送。
+- 不是 `setsockopt` 的切换开销（每连接一次，wrk 长连接）。
+
+**保留（fib，两个提交）**：
+
+- `24beda14` 内核 TLS 加密的连接按记录写：超过一个记录的写分两次，整记录部分带 `MSG_MORE`，余下的不带（收尾并推送）；后面排着文件的写带
+  `MSG_MORE`，与文件的头几个字节共用记录；sendfile 前后 `TCP_CORK` 开、关。由 tls 层切换成功后调 `Connection.SetKernelTLS()` 打开。
+- `881ff97a` 只有大文件才切换：连接第一次发送 ≥ `Handler.KernelTLSMinFile`（默认 `DefaultKernelTLSMinFile` = 512 KiB）的文件时
+  才交给内核；判断看本次范围，或 `*os.File` 报告的整个文件大小（fib/http 的 `SendFileStall` 按 256 KiB 一段排队，单看一段永远不够大）。
+  更小的文件照旧在用户态边读边加密。
+
+逐步的 A/B（均对 kTLS 关）：
+
+| 构建 | `site` https/1.1 @500 | `download` https/1.1 @100（1 MiB 经 `SendFile`） |
+| --- | ---: | ---: |
+| kTLS 开（原样） | -25.3% | +9.7% |
+| + 超过一个记录的写分两次 | -8.9% | +10.6% |
+| + 文件前的写带 `MSG_MORE`、sendfile 时 `TCP_CORK` | -5.7% | **+30.5%**（p99 49 → 13 ms） |
+| + 512 KiB 阈值（最终） | -0.5%（噪声，不切换） | **+29.1%**（p99 50 → 11 ms） |
+
+阈值来自同一构建下只发一种大小的文件（经 `SendFile`，kTLS 开对关）：64 KiB +0.3%（噪声），256 KiB **+22%**，1 MiB **+30%**。
+剩下的 -5.7% 是切换后内存回复的代价：perf 里分散在内核每个记录的固定开销上（`kernel_fpu_begin/end`、`restore_fpregs_from_fpstate`、
+sk_msg 的分配与 memcg 计费、用户页的 pin），fib 这一侧没有再能合并的发送。切换不可撤销，所以只在文件大到能赚回来时切换；
+`site` 的文件最大 300 KiB，连接不会切换。
+
+**fit**：去掉 `NoKernelTLS`（本分支）。最终 A/B（20261030-041147、20261030-040936；A = fit `ec94008` + fib `c794cf89`，B = 去掉
+`NoKernelTLS` 的 fit + 上面两个 fib 提交）：
+
+| 场景 | A req/s | B req/s | 变化 |
+| --- | ---: | ---: | ---: |
+| W2 `site` https/1.1 @500 | 99k | 99k | -0.5%（噪声） |
+| W2 `site` h2 @500 | 114k | 114k | -0.3%（噪声） |
+| W1 `api` https/1.1 @500 | 206k | 206k | +0.0%（噪声） |
+| W1 `api` h2 @500 | 206k | 206k | -0.2%（噪声） |
+| `download` https/1.1 @100，1 MiB 经 `SendFile`\*（A 设 `NoKernelTLS`） | 9.3k | 12.0k | **+29.1%**，p99 50 → 11 ms |
+
+fit 的默认配置下只有超过 `max_file_bytes`（1 MiB）的文件经 `SendFile`，都在阈值之上，所以这类下载会切换、受益；其余与原来相同。
+
+**否决**：
+
+- fib 对 `SendFile` 默认关掉 kTLS：放弃大文件 +22-30%。
+- 只修发送方式、不设阈值：`site` 仍 -5.7%。
+- 阈值只看单次 `SendFile` 的长度：fib/http 按 256 KiB 分段排队，1 MiB 的下载永远不切换（实测 +0.7%，噪声）。
+- 按同一文件连续分段累计字节再切换：切换要求连接发送队列为空，而后续分段是在队列降到水位以下时排入的，几乎碰不到空的时刻。
+- 阈值 256 KiB：`site` 有 256-300 KiB 的文件，连接很快都会切换，回到 -5.7%。
+
+注：W4 标准的 `download`（1 MiB 走内存缓存）、h2 与 HTTP/3 都不经排队的 sendfile，不受影响。
