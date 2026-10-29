@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -100,6 +101,27 @@ func TestCacheEdges(t *testing.T) {
 }
 
 // TestGatheredWrite checks a body written without a status first.
+// TestLookupKeepsOwnName checks that the cache keeps a copy of a request
+// path, not the request's string, which points into fib's buffer of request
+// heads and would keep the whole buffer.
+func TestLookupKeepsOwnName(t *testing.T) {
+	root := tree(t, map[string]string{"a.txt": "a"})
+	s := mustLoad(t, root, "")
+	head := []byte("GET /a.txt HTTP/1.1")
+	name := unsafe.String(&head[5], 5)
+	if l := s.find(name, true); l == nil || l.status != 0 {
+		t.Fatalf("find: %+v", l)
+	}
+	for key, l := range s.cache.lookups {
+		for _, kept := range []string{key, l.name} {
+			if p := unsafe.StringData(kept); uintptr(unsafe.Pointer(p)) >= uintptr(unsafe.Pointer(&head[0])) &&
+				uintptr(unsafe.Pointer(p)) < uintptr(unsafe.Pointer(&head[0]))+uintptr(len(head)) {
+				t.Fatalf("the cache keeps %q in the request's head", kept)
+			}
+		}
+	}
+}
+
 func TestGatheredWrite(t *testing.T) {
 	g := &gathered{header: stdhttp.Header{}}
 	if _, err := g.Write([]byte("x")); err != nil || g.status != 200 {

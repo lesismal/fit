@@ -218,6 +218,9 @@ func (s *Static) find(name string, disk bool) *lookup {
 	if !disk {
 		return nil
 	}
+	// name may point into the request's head, which the cache would keep
+	// whole for as long as it keeps the name.
+	name = strings.Clone(name)
 	l := s.resolve(name)
 	s.cache.keep(name, l)
 	return l
