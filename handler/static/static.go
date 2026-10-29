@@ -237,7 +237,7 @@ func (s *Static) answer(c *fibhttp.Context, l *lookup, listPath string, q *queue
 	}
 	v, full, info := s.variant(c.Request, l)
 	e := s.cache.current(full, info)
-	if e == nil && q != nil && info.Size() <= s.cache.maxFile {
+	if e == nil && q != nil && s.cache.fits(full, info.Size()) {
 		e = s.cache.load(full, info, v)
 	}
 	switch {

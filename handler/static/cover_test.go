@@ -101,6 +101,28 @@ func TestCacheEdges(t *testing.T) {
 }
 
 // TestGatheredWrite checks a body written without a status first.
+// TestCacheFits checks that only a file the cache would keep is read into
+// memory: one no larger than max_file_bytes that fits in what is left,
+// counting what the file's own entry gives back.
+func TestCacheFits(t *testing.T) {
+	c := cache{entries: map[string]*entry{"/a": {size: 4}}, bytes: 4, maxBytes: 6, maxFile: 5}
+	tests := []struct {
+		full string
+		size int64
+		want bool
+	}{
+		{"/b", 2, true},
+		{"/b", 3, false}, // past what is left
+		{"/a", 5, true},  // the file's own 4 bytes come back
+		{"/a", 6, false}, // past max_file_bytes
+	}
+	for _, tt := range tests {
+		if got := c.fits(tt.full, tt.size); got != tt.want {
+			t.Errorf("fits(%s, %d) = %v, want %v", tt.full, tt.size, got, tt.want)
+		}
+	}
+}
+
 // TestLookupKeepsOwnName checks that the cache keeps a copy of a request
 // path, not the request's string, which points into fib's buffer of request
 // heads and would keep the whole buffer.

@@ -108,6 +108,22 @@ func (c *cache) current(full string, info fs.FileInfo) *entry {
 	return nil
 }
 
+// fits reports whether a file of size bytes at full would be kept: no
+// larger than maxFile, and within what is left of maxBytes. One that would
+// not is sent from disk rather than read whole into memory to go once.
+func (c *cache) fits(full string, size int64) bool {
+	if size > c.maxFile {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var freed int64
+	if old := c.entries[full]; old != nil {
+		freed = old.size
+	}
+	return c.bytes-freed+size <= c.maxBytes
+}
+
 // load reads the file at full, which info describes, and keeps its contents
 // if they fit. It returns nil for a file it cannot read, or one that changed
 // while it was read; and the contents, kept or not, otherwise. It runs on the
