@@ -327,3 +327,28 @@ func TestReadReply(t *testing.T) {
 		}
 	}
 }
+
+// A socket timed out at the caller's deadline is the caller's deadline,
+// even before its context's timer has fired; any other error is kept.
+func TestCallerErr(t *testing.T) {
+	timeout := fmt.Errorf("write: %w", os.ErrDeadlineExceeded)
+	past, cancel := context.WithDeadline(context.WithoutCancel(context.Background()), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := callerErr(past, timeout); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("past the deadline: %v", err)
+	}
+	later, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	if err := callerErr(later, timeout); err != timeout {
+		t.Errorf("before the deadline: %v", err)
+	}
+	other := errors.New("refused")
+	if err := callerErr(context.Background(), other); err != other {
+		t.Errorf("no deadline: %v", err)
+	}
+	done, stop := context.WithCancel(context.Background())
+	stop()
+	if err := callerErr(done, other); !errors.Is(err, context.Canceled) {
+		t.Errorf("canceled: %v", err)
+	}
+}

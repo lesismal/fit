@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -143,6 +144,20 @@ func (s *Store) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, s.timeout)
 }
 
+// callerErr is err as the caller's ctx explains it: a backend whose socket
+// deadline is ctx's reports an i/o timeout when ctx runs out mid-command,
+// which may be before ctx's own timer has fired, and the caller is owed
+// ctx's error then.
+func callerErr(ctx context.Context, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	if dl, ok := ctx.Deadline(); ok && !time.Now().Before(dl) && errors.Is(err, os.ErrDeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return err
+}
+
 func (s *Store) Load(ctx context.Context, key string) ([]byte, error) {
 	if err := checkKey(key); err != nil {
 		return nil, err
@@ -234,7 +249,7 @@ func (s *Store) Lock(ctx context.Context, name string) error {
 			l, ok, err := s.b.tryLock(tctx, s.lockKey(name), s.ttl)
 			cancel()
 			if err != nil {
-				return fmt.Errorf("%s: taking lock %s: %w", s.kind, name, err)
+				return fmt.Errorf("%s: taking lock %s: %w", s.kind, name, callerErr(ctx, err))
 			}
 			if ok {
 				s.mu.Lock()
