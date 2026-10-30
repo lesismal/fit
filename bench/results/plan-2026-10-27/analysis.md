@@ -654,3 +654,29 @@ A = fit `ec94008` + fib `c794cf89`；B = fit 加上 `NoKernelTLS` 的移除 + fi
 
 三项在合并后都保留了各自的收益，没有退化的场景；去掉 `NoKernelTLS` 后 `site` 与带着它时持平。
 `proxy-download` 每 MiB 吞吐：h1 约 460（Caddy 312），h2 约 97（Caddy 92），两者都已达标。
+
+### Go 侧加密的 SendFile（2026-10-30）
+
+内核 TLS 一节顺带记下：1 MiB 文件不用内核 TLS、在 Go 里加密走 SendFile 时约 9.3k req/s，而“内存路径”是 17.6k。17.6k 其实是明文
+http/1.1 的数字；同为 https/1.1 时，内存路径是 12k（398 µs/请求），内核 TLS 的 SendFile 也是 12k（411 µs），Go 加密的 SendFile
+是 9k（639 µs）。这条路径仍然常用：Linux 上 512 KiB 以下的文件（`site` 缓存未命中的文件都是）、没有内核 TLS 的系统和 ChaCha20 都走它。
+
+**诊断**（压测机上 perf，fit 设 `NoKernelTLS`、`site` 路由的 `max_cache_bytes 1`，让文件都走 SendFile）：两条路径的 AES-GCM 一样，
+每请求约 270 µs；差别全在内核：内存路径 141 µs，Go 加密 328 µs，每请求的 TCP 事件 15 对 37。文件按 64 KiB 一块读出、加密、写出，
+每块的 write 都像是要发的最后一段，TCP 在每块末尾推出一个没填满的段。pread 的拷贝本身每请求约 30 µs，是读文件省不掉的。
+
+**保留：fib `a4ae3a0c`**。文件除最后一块外都带 `MSG_MORE` 写出（系统支持时），让 TCP 跨块填满段；最后一块照旧推送。
+
+| 场景（3 轮、10 s） | 吞吐变化 | 峰值内存 A → B |
+| --- | ---: | --- |
+| Go 加密的 1 MiB `download` https/1.1 @100 | **+6.4%**（3/3） | 16-17 → 19-20 MiB |
+| Go 加密的 `site` https/1.1 @100（缓存关闭） | **+3.8%**（3/3） | 30-33 → 32-33 MiB |
+| fit 默认配置：W2 `site` https/1.1 @500 | **+1.7%**（3/3） | 188-189 → 187-193 MiB |
+| fit 默认配置：W2 `site` h2、W1 `api` https/1.1 与 h2 @500 | 噪声内 | 持平 |
+| fit 默认配置：W4 `download`、`proxy-download` https/1.1 与 h2 | 噪声内 | 持平 |
+
+`bench/ab.sh` 20261030-130251、-130931、-131537；A 为 fib `881ff97a`，B 为 `a4ae3a0c`，fit 相同。
+
+**否决**：每块读、加密 128 KiB（`download` +10.6%、`site` @500 +5.6%，但峰值内存多 9 MiB 和 6 MiB）与 256 KiB（`download` +10.6%、
+`site` @500 +7.6%，多 21 MiB 和 13 MiB）。更大的块省掉的是系统调用和 TCP 事件，但每个在发送的文件都要多占一块加密缓冲，正好压在 P1-A
+要降的 `site` h1 内存上。剩下与内存路径的差距约 130 µs/请求，其中约 35 µs 是读文件的拷贝。
