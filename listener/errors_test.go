@@ -190,10 +190,7 @@ func TestReloadSharedAddressFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	udp := udpBesideFreeTCP(t)
 	defer udp.Close()
 	addr := udp.LocalAddr().String()
 	doc := func(protocols, other string) string {
@@ -213,6 +210,26 @@ func TestReloadSharedAddressFails(t *testing.T) {
 	if g.Version != 1 {
 		t.Fatalf("version %d", g.Version)
 	}
+}
+
+// udpBesideFreeTCP holds a UDP port whose TCP side nothing holds, for a
+// listener to bind there: the system picks the UDP port alone, and a test
+// running beside may have the TCP one.
+func udpBesideFreeTCP(t *testing.T) net.PacketConn {
+	t.Helper()
+	for range 20 {
+		udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ln, err := net.Listen("tcp", udp.LocalAddr().String()); err == nil {
+			_ = ln.Close()
+			return udp
+		}
+		_ = udp.Close()
+	}
+	t.Fatal("no UDP port with its TCP side free")
+	return nil
 }
 
 // TestReloadWithoutDrain removes a listener with no drain timeout: it stops
