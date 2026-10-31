@@ -46,3 +46,26 @@ func TestVerifierBound(t *testing.T) {
 		t.Fatalf("kept %d nonces", len(v.seen))
 	}
 }
+
+func TestNodeListOlder(t *testing.T) {
+	cur := &NodeList{Epoch: 7, Version: 5}
+	for _, c := range []struct {
+		l     NodeList
+		older bool
+	}{
+		{NodeList{Epoch: 7, Version: 4}, true},
+		{NodeList{Epoch: 7, Version: 5}, false},
+		{NodeList{Epoch: 7, Version: 6}, false},
+		// A restarted server counts again from 1.
+		{NodeList{Epoch: 8, Version: 1}, false},
+		// fibhub's server does not count.
+		{NodeList{}, false},
+	} {
+		if got := c.l.Older(cur); got != c.older {
+			t.Errorf("%+v: %v", c.l, got)
+		}
+	}
+	if (&NodeList{Epoch: 7, Version: 1}).Older(nil) || (&NodeList{Epoch: 7, Version: 1}).Older(&NodeList{}) {
+		t.Error("older than no list, or than an uncounted one")
+	}
+}

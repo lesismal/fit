@@ -244,6 +244,18 @@ type PingRsp struct {
 type NodeList struct {
 	Server string     `json:"server"`
 	Nodes  []NodeView `json:"pods"`
+	// Epoch is the server's, picked when it starts, and Version counts the
+	// changes of its nodes, so that a client keeps the newest of the lists
+	// it is sent: the answer to a call may arrive after a notify of a later
+	// change. Zero from a server that does not count them, as fibhub's.
+	Epoch   uint64 `json:"epoch,omitempty"`
+	Version uint64 `json:"version,omitempty"`
+}
+
+// Older reports whether l is older than cur, a list from the same server:
+// both counted, in the same epoch, l with the lower version.
+func (l *NodeList) Older(cur *NodeList) bool {
+	return cur != nil && l.Version != 0 && cur.Version != 0 && l.Epoch == cur.Epoch && l.Version < cur.Version
 }
 
 // SetServicesReq sets the services of the node named Node.

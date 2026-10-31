@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"slices"
 	"sort"
 	"sync"
@@ -198,12 +199,17 @@ type Server struct {
 	routes   map[uint64]*Route
 	since    time.Time
 	closing  bool
+
+	// epoch and nodesVersion number the node lists the server sends: see
+	// proto.NodeList.
+	epoch        uint64
+	nodesVersion atomic.Uint64
 }
 
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Server {
 	s := &Server{h: h, log: h.Log, links: map[*link.Link]struct{}{}, peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
-		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now()}
+		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
 	s.router = s.newRouter()
 	s.console = common.NewConsole(h.Engine, "fit_tunnel_server", pages, h.Log, s.api)
 	return s
@@ -508,7 +514,7 @@ func (s *Server) newRouter() *link.Router {
 	r.HandleCall(proto.MethodRegister, s.register, false)
 	r.HandleCall(proto.MethodUpdate, s.update, false)
 	r.HandleCall(proto.MethodPing, s.ping, true)
-	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return s.nodeList(), nil }, false)
+	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return s.nodeList(s.nodesVersion.Load()), nil }, false)
 	r.HandleCall(proto.MethodSetNodeServices, func(_ *link.Link, body []byte) (any, error) {
 		var req proto.SetServicesReq
 		if err := link.Decode(body, &req); err != nil {
@@ -804,8 +810,11 @@ func (s *Server) Routes() []*Route {
 	return routes
 }
 
-func (s *Server) nodeList() *proto.NodeList {
-	list := &proto.NodeList{Server: s.settings().name, Nodes: []proto.NodeView{}}
+// nodeList returns the nodes as they are, as version: a list taken after a
+// change is counted holds it, so that no list holds less than one of a
+// lower version.
+func (s *Server) nodeList(version uint64) *proto.NodeList {
+	list := &proto.NodeList{Server: s.settings().name, Nodes: []proto.NodeView{}, Epoch: s.epoch, Version: version}
 	for _, p := range s.Peers() {
 		if info := p.Info(); info.Type == proto.TypeNode {
 			list.Nodes = append(list.Nodes, proto.NodeView{Info: info, Addr: p.Addr, Since: p.Since, NodeLatency: p.Latency()})
@@ -815,10 +824,10 @@ func (s *Server) nodeList() *proto.NodeList {
 	return list
 }
 
-// broadcastNodes sends every client the nodes. Notifies are queued, not
-// waited for.
+// broadcastNodes sends every client the nodes, after a change of them.
+// Notifies are queued, not waited for.
 func (s *Server) broadcastNodes() {
-	list := s.nodeList()
+	list := s.nodeList(s.nodesVersion.Add(1))
 	for _, p := range s.Peers() {
 		if p.Info().Type == proto.TypeClient {
 			if links := s.peerLinks(p); len(links) > 0 {

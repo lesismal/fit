@@ -255,7 +255,9 @@ func (c *Client) newUplink(sc *config.TunnelUplink) *uplink.Uplink {
 
 func (c *Client) setNodes(u *uplink.Uplink, list *proto.NodeList) {
 	c.mu.Lock()
-	if slices.Contains(c.uplinks, u) {
+	// The answer to RefreshNodes may arrive after the notify of a later
+	// change.
+	if slices.Contains(c.uplinks, u) && !list.Older(c.nodes[u]) {
 		c.nodes[u] = list
 	}
 	c.mu.Unlock()
@@ -271,7 +273,7 @@ func (c *Client) setNodeLatency(u *uplink.Uplink, nodes map[string]proto.NodeLat
 		return
 	}
 	// The pages may be reading the old list.
-	list := &proto.NodeList{Server: old.Server, Nodes: slices.Clone(old.Nodes)}
+	list := &proto.NodeList{Server: old.Server, Nodes: slices.Clone(old.Nodes), Epoch: old.Epoch, Version: old.Version}
 	for i := range list.Nodes {
 		if l, ok := nodes[list.Nodes[i].Info.Name]; ok {
 			list.Nodes[i].NodeLatency = l
