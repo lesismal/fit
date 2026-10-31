@@ -58,7 +58,7 @@
 | A45 | 读取中途停下的一轮收到对端的结束时，不再当作数据已读完 | 已完成，`9f99ea5` | 5, 13 | — |
 | A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
 | A47 | 流式请求体转交时不必要的拷贝 | 已完成，fib `309a6cd4`（`main`） | 1, 5, 8 | W4 |
-| A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`（`main`） | 1, 5, 8 | W1 |
+| A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`，HTTP/2 `d3707ca7`（`main`） | 1, 5, 8 | W1 |
 
 ## 证据
 
@@ -1081,7 +1081,7 @@ trailer 回调（I81，[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)�
 
 ## A48：整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝
 
-**状态。** 2026-10-31 由 fit 的会话实现，已在 fib 的 `main`（`46827ea7`）。
+**状态。** 2026-10-31 由 fit 的会话实现，已在 fib 的 `main`（`46827ea7`）；HTTP/2 还回缓冲在 `d3707ca7`。
 
 **问题。** fib `861689c9` 让连接的读轮次从 16 KiB 开始，fit 的 W1 内存因此减半，垃圾回收据以定步调的堆也随之减小：
 分配速度同为每秒 1.06 GB，回收次数却多了 56%，W1 的 HTTP/1.1 慢了 3%。一个代理请求最大的几处分配中有两处是 fib
@@ -1094,8 +1094,14 @@ trailer 回调（I81，[决策 023](decisions/023-proxy-wasm-response.zh-CN.md)�
 
 **实现。** 整份到达、body 不超过 4 KiB 的响应把 body 拷进 `bufferpool` 的缓冲。`ClientResponse.TakeBody` 连同所有权交出
 body，并说明它是否是这样的缓冲；`Context.WriteResponseOwned` 发送来自缓冲池的 body，发送路径用完后还回池里，发送路径
-按引用持有 body 时（HTTP/2，以及超过 4 KiB 的 HTTP/1）则交给垃圾回收。`BodyBytes` 仍保证交出的字节永不复用。`Body` 为
+按引用持有 body 时（超过 4 KiB 的 HTTP/1，以及 HTTP/2 被窗口挡住的尾部）则交给垃圾回收。`BodyBytes` 仍保证交出的字节永不复用。`Body` 为
 `NewBufferedBody` 的请求直接取用其字节：HTTP/1 当即把它们拷进请求的帧里，HTTP/2 在发送前拷贝一份。
 
 **fit 如何使用。** `handler/proxy` 把客户端整份到达的请求体作为 `Context.Body` 的 `NewBufferedBody` 发往上游，这些字节在
 交换结束前保持不变；整份到达的上游响应用 `TakeBody` 取出，body 来自缓冲池时用 `WriteResponseOwned` 转发。
+
+**HTTP/2，`d3707ca7`。** `46827ea7` 把 HTTP/2 响应的池化 body 交给垃圾回收，因为 stream 按引用持有 body。每一块都是从池里取出
+却不还回的缓冲，1 KiB 那一档因此被取空，下一次取这个大小的 `Get` 只能新分配：W1 走 h2 时每个请求一次分配，剖析把它记在 fib
+给请求组帧的地方。HTTP/2 分帧时会拷贝 body，所以 stream 在 `respond` 返回前就把缓冲还回池里；只有被窗口挡住的尾部仍交给垃圾
+回收（stream 正好 1024 字节，没有地方记住这块缓冲）。W1 在 500 在途、走 h2，对照 `6bd106d9`：+1.3%（每请求 29.00 降到
+28.63 µs），分配从每秒 850 降到 677 MB，回收次数少 25%，回收占用的 CPU 从 1.65% 降到 1.36%；HTTP/1.1 在噪声内。
