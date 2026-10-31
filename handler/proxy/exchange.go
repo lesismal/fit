@@ -444,6 +444,15 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	if e := observe.EntryOf(x.c); e != nil {
 		e.Upstream, e.UpstreamDuration = x.backend.Address, took
 	}
+	if errors.Is(x.causeErr(), errClientGone) {
+		// The client went before the response came, which can be before
+		// send's Cancel reached the request: there is no one to answer.
+		if resp != nil {
+			resp.Close()
+		}
+		x.release()
+		return
+	}
 	if x.policy != nil && x.retry(resp, err) {
 		return
 	}
