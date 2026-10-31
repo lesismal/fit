@@ -80,9 +80,11 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		p.busy(c)
 		return
 	}
-	x := &exchange{c: c}
+	x := exchanges.Get().(*exchange)
+	x.c = c
 	if !p.outgoing(c, x) {
 		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequest)
+		x.recycleUnused()
 		return
 	}
 	timeout, why := p.timeout, errRouteTimeout
@@ -110,18 +112,20 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	if x.policy = p.retry; x.policy != nil {
 		x.policy.budget.deposit()
 	}
+	gen := x.gen.Load()
 	if timeout > 0 {
-		x.deadline = time.AfterFunc(timeout, func() { x.cancel(why) })
+		x.deadline = time.AfterFunc(timeout, func() { x.cancel(gen, why) })
 	}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
 	c.Retain()
-	c.OnCancel(func(error) { x.cancel(errClientGone) })
+	c.OnCancel(func(error) { x.cancel(gen, errClientGone) })
 
 	r := c.Request
 	announced := trailerNames(r)
 	switch {
 	case c.RequestBody() == nil && len(announced) == 0:
+		x.recyclable = p.mirror == nil && !x.grpc
 		x.send(out)
 		return
 	case c.RequestBody() == nil:
@@ -228,26 +232,61 @@ var badRequest = []byte("400 Bad Request\n")
 
 // exchange is one proxied request, seen from the upstream's callbacks, which
 // come one at a time.
+//
+// An exchange that ends the ordinary way, its request and response both whole,
+// goes back to a pool for the next request (recycle), since it is the largest
+// thing a proxied request allocates. Its state is in exchangeState, which
+// recycle clears in one assignment; callMu and mu stay, as a callback that
+// comes late may hold one, and gen counts the requests the exchange has
+// served, so that such a callback can tell it is too late.
 type exchange struct {
+	exchangeState
+
+	// gen is changed under callMu, as recycle hands the exchange on; a
+	// callback that may come after its request ended carries the gen it was
+	// made for, and cancel does nothing for another.
+	gen atomic.Uint32
+
+	// callMu orders call and cause, and recycle after them.
+	callMu sync.Mutex
+
+	// mu orders what the upstream body's callbacks and OnWritable's do to
+	// the client's response, since a resumed body and OnWritable's function
+	// run on goroutines of fib's.
+	mu sync.Mutex
+}
+
+// headerFields are the values of the fields outgoing sets in the client's
+// header, one allocation for all of them.
+type headerFields struct {
+	// forwarded are the forwarding fields' values.
+	forwarded [4]string
+	// element holds the Forwarded element's bytes, when they fit.
+	element [96]byte
+	// traceparent is the value of the field naming the request's span, when
+	// it is traced.
+	traceparent [1]string
+}
+
+// exchangeState is what an exchange holds for the request it serves.
+type exchangeState struct {
 	c *fibhttp.Context
 	// own says the upstream's header is a map of its own rather than the
 	// client's edited in place: an upgrade's, whose fields fib reads again
 	// as it switches the client's side.
 	own bool
-	// base is the request outgoing made, which out is with ctx; url and
-	// forwarded are its URL and its forwarding fields' values, kept here so
-	// that the exchange is one allocation rather than several.
-	base      stdhttp.Request
-	url       url.URL
-	forwarded [4]string
-	// element holds the Forwarded element's bytes, when they fit.
-	element [96]byte
-	// traceparent is the value of the field naming the request's span,
-	// when it is traced.
-	traceparent [1]string
-	out         *stdhttp.Request
-	start       time.Time
-	timeouts    upstream.Timeouts
+	// base is the request outgoing made, which out is with ctx, and url its
+	// URL, kept here so that they cost no allocations of their own.
+	base stdhttp.Request
+	url  url.URL
+	// fields holds the values outgoing puts in the client's header, which
+	// outlives the exchange: the header is read once more as the client's
+	// request finishes, which can be after a recycled exchange serves the
+	// next request.
+	fields   *headerFields
+	out      *stdhttp.Request
+	start    time.Time
+	timeouts upstream.Timeouts
 	// stall bounds each wait for the client to take what was written.
 	stall   time.Duration
 	pool    *upstream.Pool
@@ -275,14 +314,15 @@ type exchange struct {
 
 	// call abandons the upstream request, once Send has returned it, and
 	// cause is why it was abandoned, or nil; callMu orders the two.
-	callMu sync.Mutex
-	call   fibhttp.Call
-	cause  atomic.Pointer[error]
+	call  fibhttp.Call
+	cause atomic.Pointer[error]
 
-	// mu orders what the upstream body's callbacks and OnWritable's do to
-	// the client's response, since a resumed body and OnWritable's function
-	// run on goroutines of fib's.
-	mu      sync.Mutex
+	// recyclable says the exchange may go back to the pool once it ends the
+	// ordinary way: its request arrived whole, with nothing that sends it
+	// again elsewhere (a mirror) or answers it as gRPC.
+	recyclable bool
+
+	// resp and started are guarded by mu.
 	resp    *fibhttp.ClientResponse
 	started bool
 	// failed says the upstream failed the request, which counts against the
@@ -323,20 +363,61 @@ func (x *exchange) settle() bool {
 func (x *exchange) send(out *stdhttp.Request) {
 	x.callMu.Lock()
 	x.call = x.pool.Send(x.backend, out, x.onResponse)
+	call, cause := x.call, x.cause.Load()
 	x.callMu.Unlock()
-	if cause := x.cause.Load(); cause != nil {
-		x.call.Cancel(*cause)
+	if cause != nil {
+		call.Cancel(*cause)
 	}
 }
 
 // cancel abandons the upstream request for cause, the first cause given,
-// which statusOf and broken tell the outcome by.
-func (x *exchange) cancel(cause error) {
-	x.cause.CompareAndSwap(nil, &cause)
+// which statusOf and broken tell the outcome by. gen is the request the
+// caller was made for: a timer, OnCancel's callback or a drain that comes
+// once the exchange serves another does nothing.
+func (x *exchange) cancel(gen uint32, cause error) {
 	x.callMu.Lock()
+	if x.gen.Load() != gen {
+		x.callMu.Unlock()
+		return
+	}
+	x.cause.CompareAndSwap(nil, &cause)
 	call := x.call
 	x.callMu.Unlock()
 	call.Cancel(cause)
+}
+
+// exchanges are the exchanges recycle gives back, for requests to come.
+var exchanges = sync.Pool{New: func() any { return new(exchange) }}
+
+// recycle gives the exchange back to the pool once its request has ended the
+// ordinary way: release has run, the response went whole, and nothing of
+// fib's or of the proxy's will use it again but the callbacks that may come
+// late, which gen turns away. A send still storing its Call holds callMu, as
+// does a callback of the request's that came while Send was returning, and
+// then the exchange is left to the collector rather than waited for.
+func (x *exchange) recycle() {
+	if x.reset() {
+		exchanges.Put(x)
+	}
+}
+
+// reset clears the exchange for a request to come and moves gen on, and
+// reports whether it did, as recycle describes.
+func (x *exchange) reset() bool {
+	if !x.recyclable || !x.callMu.TryLock() {
+		return false
+	}
+	x.gen.Add(1)
+	x.callMu.Unlock()
+	x.exchangeState = exchangeState{}
+	return true
+}
+
+// recycleUnused gives back an exchange no request was sent with, which
+// nothing can have kept.
+func (x *exchange) recycleUnused() {
+	x.exchangeState = exchangeState{}
+	exchanges.Put(x)
 }
 
 // timedOut reports whether the request was cut short by the route's timeout
@@ -390,11 +471,13 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 			_ = x.c.WriteResponse(out)
 		}
 		x.release()
+		x.recycle()
 		return
 	}
 	x.resp = resp
 	if t := x.timeouts.ResponseIdle; t > 0 {
-		x.timer.Store(time.AfterFunc(t, func() { x.cancel(errIdleTimeout) }))
+		gen := x.gen.Load()
+		x.timer.Store(time.AfterFunc(t, func() { x.cancel(gen, errIdleTimeout) }))
 	}
 	resp.OnBody(x.onBody)
 }

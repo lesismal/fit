@@ -342,7 +342,7 @@ func TestStatusOf(t *testing.T) {
 			t.Errorf("%v: %d, want %d", tt.err, got, tt.want)
 		}
 	}
-	x.cancel(errIdleTimeout)
+	x.cancel(x.gen.Load(), errIdleTimeout)
 	if got := x.statusOf(errors.New("context canceled")); got != 504 {
 		t.Errorf("idle timeout: %d", got)
 	}

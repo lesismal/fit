@@ -121,17 +121,23 @@ func (s *openSet) remove(x *exchange) {
 // 503, and one under way is cut short as an upstream that broke off would
 // be, without counting against the backend.
 func (p *Proxy) Drain() {
-	var open []*exchange
+	// Each with the request it serves, read while it is surely open: one that
+	// ends meanwhile may serve another by the time it is cut off.
+	type openExchange struct {
+		x   *exchange
+		gen uint32
+	}
+	var open []openExchange
 	for i := range p.open {
 		s := &p.open[i]
 		s.mu.Lock()
 		for x := s.head; x != nil; x = x.next {
-			open = append(open, x)
+			open = append(open, openExchange{x, x.gen.Load()})
 		}
 		s.mu.Unlock()
 	}
-	for _, x := range open {
-		x.cancel(errDrained)
+	for _, o := range open {
+		o.x.cancel(o.gen, errDrained)
 	}
 	p.drainRelays()
 }
@@ -199,6 +205,10 @@ func parsePrefix(s string) (netip.Prefix, error) {
 // ends; and an upgrade, by fib as it switches the client's side.
 func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
+	// The values set in the client's header are the request's, apart from
+	// the exchange, which may serve the next request while the client's
+	// header is still read.
+	x.fields = new(headerFields)
 	connection := r.Header["Connection"]
 	header := r.Header
 	_, expect := r.Header["Expect"]
@@ -232,8 +242,8 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	if e := observe.EntryOf(c); e != nil && e.Trace() != nil {
 		// The upstream's parent is fit's span; tracestate goes on as it
 		// came, with the rest of the fields.
-		x.traceparent[0] = e.Trace().Traceparent()
-		header["Traceparent"] = x.traceparent[:]
+		x.fields.traceparent[0] = e.Trace().Traceparent()
+		header["Traceparent"] = x.fields.traceparent[:]
 	}
 
 	host := r.Host
@@ -262,8 +272,9 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 }
 
 // setForwarded sets the fields that tell the upstream about the client. The
-// fields' values go in x.forwarded, and the Forwarded element is written in
-// x.element when it fits, so that x keeps them for as long as the header.
+// fields' values go in x.fields.forwarded, and the Forwarded element is
+// written in x.fields.element when it fits, so that they last as long as the
+// header.
 func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *exchange) {
 	r := c.Request
 	clientIP, ip := clientAddr(r.RemoteAddr)
@@ -272,7 +283,7 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *excha
 	if r.TLS != nil {
 		proto = "https"
 	}
-	values := &x.forwarded
+	values := &x.fields.forwarded
 	field := func(i int, v string) []string {
 		values[i] = v
 		return values[i : i+1 : i+1]
@@ -294,7 +305,7 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *excha
 
 	// The bytes are x's and are not written again, so the string may be
 	// made of them without a copy.
-	b := appendForwardedElement(x.element[:0], clientIP, ip, r.Host, proto)
+	b := appendForwardedElement(x.fields.element[:0], clientIP, ip, r.Host, proto)
 	element := unsafe.String(unsafe.SliceData(b), len(b))
 	if prior := header["Forwarded"]; trusted && len(prior) > 0 {
 		header["Forwarded"] = field(3, strings.Join(prior, ", ")+", "+element)

@@ -517,7 +517,7 @@ func TestCallFailures(t *testing.T) {
 	}
 	// A call cut short by its deadline after its response began.
 	x := &exchange{c: fibhttp.NewStreamContext(nil, httptest.NewRequest(stdhttp.MethodPost, "/", nil), nil)}
-	x.cancel(errRouteTimeout)
+	x.cancel(x.gen.Load(), errRouteTimeout)
 	x.grpcBroken()
 	if got := x.c.Header().Get(stdhttp.TrailerPrefix + "Grpc-Status"); got != "4" {
 		t.Errorf("grpc-status %q, want 4", got)
