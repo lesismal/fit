@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fake ollama for the docker test: no models are downloaded. "pull slow-*" keeps printing progress for 60s so a
+# test can follow and cancel it.
+case "$1" in
+  list) printf 'NAME\tID\tSIZE\tMODIFIED\nfake:latest\t0123456789ab\t1.0 GB\t1 day ago\n' ;;
+  ps) printf 'NAME\tID\tSIZE\tPROCESSOR\tUNTIL\n' ;;
+  pull)
+    case "$2" in
+      slow-*) i=0; while [ $i -lt 600 ]; do echo "pulling $2 $i"; i=$((i+1)); sleep 0.1; done ;;
+      *) echo "pulling manifest"; echo "pulling $2: 100%"; echo "success" ;;
+    esac ;;
+  show) echo "  Model"; echo "    name  $2" ;;
+  rm) echo "deleted '$2'" ;;
+  *) echo "fake ollama: unknown command $*" >&2; exit 1 ;;
+esac

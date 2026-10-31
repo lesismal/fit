@@ -64,6 +64,9 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A49 | A UDP peer opened toward an address on a listener's socket | made, fib `4febcdf5` (local, not pushed) | 1, 9 | I85 (P2P) |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 | A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
+| A52 | A WebSocket connection's transport: a forced close, and its address | requested | 10, 13 | agent (028) |
+| A53 | Backpressure on a WebSocket connection's sends | requested | 8, 9, 11 | agent, tunnel (028) |
+| A54 | A raw QUIC endpoint on an engine's UDP binding | requested | 15 | tunnel (028) |
 
 ## Evidence
 
@@ -1580,3 +1583,88 @@ Wintun and is not needed.
 
 **How fit would use it.** `vpn/tun` opens the device, sets it up, and attaches it; the node's
 handler routes each packet `OnData` hands it and sends the peers' packets with `Send`.
+
+## A52: A WebSocket connection's transport: a forced close, and its address
+
+**Status.** Requested on 2026-11-01, for the agent's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+
+**Problem.** The agent's mesh links are WebSockets of fib's. A link whose peer is dead, or so far
+behind that a ping has waited 30 seconds for its pong, must be dropped at once. `Connection.Close`
+sends a close frame, which queues behind everything still unsent, so the socket of a peer that
+reads nothing stays open until the engine's write queue limit or the kernel gives up.
+`websocket.Connection` does not expose the `fib.Connection` under it, nor a close that skips the
+handshake, nor its remote address on the dialing side.
+
+**Evidence.** `agent/internal/wire/conn.go`: the listener keeps a map of its binding's
+`fib.Connection`s by remote address, filled by a wrapper around the WebSocket handler, and looks a
+link's up by its upgrade request's `RemoteAddr`; the dialer catches its `fib.Connection` through
+`DialerConfig.Dial`. Both are stopgaps, within the rules, that this request replaces.
+
+**Suggested API.**
+
+```go
+// Abort closes the connection at once, without the close handshake, dropping
+// what is still queued; OnClose follows with err.
+func (c *Connection) Abort(err error)
+
+// RemoteAddr returns the peer's address, on either side.
+func (c *Connection) RemoteAddr() net.Addr
+```
+
+**How fit would use it.** `wire.Conn.forceClose` calls `Abort` on both sides, and the listener's
+map and the dialer's hook go.
+
+## A53: Backpressure on a WebSocket connection's sends
+
+**Status.** Requested on 2026-11-01, for the agent's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+
+**Problem.** `websocket.Connection.WriteMessage` queues whatever it is given and never says how
+much waits, and the handler cannot hold a connection's reads. The agent's wire protocol bounds
+each stream with a credit window (256 KiB), so a link's queue is bounded by its streams' windows
+and its replies, but nothing ties a link's own queue to the producers that fill it: a peer that
+reads slowly is found only by the ping that waits behind its queue (30 seconds by default), and
+until then the queue grows to the engine's `MaxWriteQueueBytes`.
+
+**Evidence.** `agent/internal/wire/conn.go` and `session.go`: `ConnConfig.SlowTimeout` closes a link
+whose ping waited too long; streams pace themselves with credits (`Stream.TrySend`, `OnCredit`,
+`Release`), but calls' replies and pushes do not wait for anything.
+
+**Suggested API.** As `fibhttp.Context` has for responses (A2):
+
+```go
+// WriteMessageNoWait queues a message as WriteMessage does, and reports above
+// when more than the connection's limit is now queued.
+func (c *Connection) WriteMessageNoWait(op Opcode, payload []byte) (above bool, err error)
+// OnWritable runs fn once, when the queue falls to half the limit, or with an
+// error when the connection ends; it reports false when it is below already.
+func (c *Connection) OnWritable(fn func(error)) bool
+// HoldReads stops, and resumes, reading the connection.
+func (c *Connection) HoldReads(hold bool)
+```
+
+**How fit would use it.** A link above its limit stops granting credit to the streams that feed it
+and holds its reads, until `OnWritable`; the slow timeout stays as the last resort. The tunnel's web proxies and console socket, which frame WebSocket themselves over a
+`fib.Connection` (`tunnel/internal/transport/ws`) to have `HoldReads` and `NotifyOutput`, move to
+fib's `websocket.Connection`.
+
+## A54: A raw QUIC endpoint on an engine's UDP binding
+
+**Status.** Requested on 2026-11-01, for the tunnel's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+
+**Problem.** The tunnel's links may run over QUIC, one bidirectional stream a link, with an ALPN of
+their own: not HTTP/3. fib's `http3.ServerHandler` puts QUIC on a UDP binding for HTTP/3 only; for
+any other protocol, a caller of `http3/quic` must itself route each datagram to its connection by
+connection ID, bound the handshakes under way, retire connections and their IDs, and drive the
+connections' timers.
+
+**Evidence.** `tunnel/internal/transport/quic/listen.go` and `conn.go` do all of that on the
+engine's UDP binding, duplicating part of `http3.ServerHandler`. They follow the rules, as a
+stopgap this request replaces; a client that migrates is not followed (its connection idles out).
+
+**Suggested API.** A `quic.Endpoint` that is a `fib.Handler` for a UDP binding, taking a
+`*tls.Config` and a `quic.Config`, with `OnConn(func(*quic.Conn))` for each connection accepted, and
+`Dial(engine, addr, tlsConfig, config, done)` for the client side; the demultiplexing, handshake
+bounds, migration and timers inside it, shared with `http3.ServerHandler`.
+
+**How fit would use it.** The tunnel's QUIC listener and dialer become a few lines over it, and
+follow migrating clients.

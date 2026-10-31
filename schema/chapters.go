@@ -34,6 +34,8 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"auto_https", "HTTPS by default", "https-by-default", "auto_https.md"},
 	{"metrics", "Metrics", "metrics", "metrics.md"},
 	{"acme", "ACME", "acme", "acme.md"},
+	{"agent", "Agent", "agent", "agent.md"},
+	{"tunnel", "Tunnel", "tunnel", "tunnel.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 

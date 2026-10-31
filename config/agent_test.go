@@ -1,0 +1,48 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestAgentMembers(t *testing.T) {
+	const hash = `"$2a$10$abcdefghijklmnopqrstuuK3o5D2wC6Qn7oW7v3yTzR3z0e6Gm9Ka"`
+	good := `{"agent": {
+		"hub": {"listen": {"address": ":9200", "password": "p"}, "max_nodes": 10},
+		"node": {"id": "node-1", "name": "gpu", "peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub"}],
+			"models": [{"name": "m", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "max_inflight": 4},
+				{"name": "m", "api": "anthropic", "base_url": "https://api.example.com/v1"}],
+			"settings": {"allow_hub_manage": true, "gpu_sudo": false, "refresh_interval": "10s", "job_timeout": "2h"},
+			"proxy": {"timeout": "10m", "max_inflight": 8}},
+		"client": {"api": {"address": "127.0.0.1:9300"}, "console": {"address": "127.0.0.1:9301", "users": [{"username": "a", "password_hash": ` + hash + `}]},
+			"api_keys": [{"id": "0123456789abcdef", "name": "k", "prefix": "ah-xxxxxxx", "hash": "` + strings.Repeat("a", 64) + `"}]}}}`
+	c, err := Load([]byte(good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Agent.Node.Settings.Sudo() || c.Agent.Node.Settings.Job().String() != "2h0m0s" || c.Agent.Node.Proxy.Inflight() != 8 ||
+		c.Agent.Node.Proxy.Idle() != DefaultAgentIdleTimeout.Std() || c.Agent.Hub.Nodes() != 10 || c.Agent.Client.API.Body() != DefaultAgentMaxBodyBytes {
+		t.Fatalf("%+v", c.Agent)
+	}
+	for _, bad := range []struct{ doc, want string }{
+		{`{"agent": {"hub": {"peers": [{"address": "h:1", "password": "p", "role": "hub"}]}}}`, "links with node and client"},
+		{`{"agent": {"hub": {"peers": [{"address": ":1", "password": "p", "role": "node"}]}}}`, "not a host and port"},
+		{`{"agent": {"hub": {"peers": [{"address": "h:1", "password": "p", "role": "node"}, {"address": "h:1", "password": "q", "role": "node"}]}}}`, "listed twice"},
+		{`{"agent": {"node": {"models": [{"name": "a b", "api": "openai", "base_url": "http://h"}]}}}`, "without spaces"},
+		{`{"agent": {"node": {"models": [{"name": "a", "api": "gemini", "base_url": "http://h"}]}}}`, "gemini"},
+		{`{"agent": {"node": {"models": [{"name": "a", "api": "openai", "base_url": "ftp://h"}]}}}`, "base_url"},
+		{`{"agent": {"node": {"models": [{"name": "a", "api": "openai", "base_url": "http://h/"}]}}}`, "trailing slash"},
+		{`{"agent": {"node": {"models": [{"name": "a", "api": "openai", "base_url": "http://h"}, {"name": "a", "api": "openai", "base_url": "http://i"}]}}}`, "listed twice"},
+		{`{"agent": {"node": {"settings": {"refresh_interval": "1s"}}}}`, "refresh_interval is 5s to 1h"},
+		{`{"agent": {"node": {"listen": {"address": "nope", "password": "p"}}}}`, "not a host and port"},
+		{`{"agent": {"client": {"api": {"address": "0.0.0.0:9300"}}}}`, "not a loopback address"},
+		{`{"agent": {"client": {"api_keys": [{"id": "x", "name": "k", "hash": "y"}]}}}`, "16 hex digits"},
+		{`{"agent": {"client": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "hash": "y"}]}}}`, "64 hex digits"},
+		{`{"agent": {"node": {"name": " x"}}}`, "spaces around it"},
+	} {
+		_, err := Load([]byte(bad.doc))
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)
+		}
+	}
+}

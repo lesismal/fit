@@ -1,0 +1,15 @@
+# What building the tunnel's test image needs: fit's own, and this
+# directory's scripts, which the root .dockerignore leaves out with test/.
+# BuildKit reads it in place of the root's for this Dockerfile.
+.git
+.github
+.claude
+bin
+bench
+docs
+examples
+deploy
+test
+!test/docker/tunnel/device.sh
+!test/docker/tunnel/tests/run.sh
+*.md

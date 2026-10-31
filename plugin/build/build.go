@@ -28,6 +28,7 @@ const FitModule = "github.com/lesismal/fit"
 var Standard = []string{
 	FitModule + "/modules/standard",
 	FitModule + "/provider/standard",
+	FitModule + "/app/standard",
 }
 
 // NoVersion is the version a module replaced by a directory is required at.

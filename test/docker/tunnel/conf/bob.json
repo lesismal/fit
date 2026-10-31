@@ -1,0 +1,71 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/bob.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "client": {
+      "name": "bob",
+      "servers": [
+        {
+          "name": "hub-2",
+          "endpoints": [
+            {
+              "address": "quic://hub-2:7443"
+            }
+          ],
+          "password": "reg-pass-1234",
+          "body_password": "body-pass-1234",
+          "quic_insecure": true
+        },
+        {
+          "name": "hub-1",
+          "endpoints": [
+            {
+              "address": "hub-1:7000"
+            }
+          ],
+          "password": "reg-pass-1234",
+          "body_password": "body-pass-1234"
+        }
+      ],
+      "forwards": [
+        {
+          "listen": "0.0.0.0:7301",
+          "node": "office",
+          "service": "echo"
+        },
+        {
+          "listen": "0.0.0.0:7302",
+          "node": "lab",
+          "service": "http"
+        }
+      ],
+      "web_proxies": [
+        {
+          "name": "hub-2",
+          "listen": "0.0.0.0:7381",
+          "url": "ws://hub-2:7081/",
+          "password": "ws-pass-1234"
+        }
+      ],
+      "meta": {
+        "owner": "bob"
+      },
+      "console": {
+        "address": "0.0.0.0:7280",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$p7P0qMP7FV4K4Nec.j8o4ua9h1LsslNfeJ9/d8hf7E5clVzN09EYy"
+          }
+        ]
+      }
+    }
+  }
+}

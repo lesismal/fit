@@ -26,6 +26,8 @@ external security review is still to come; see [progress](docs/progress.md) for 
   chapter, with examples in all three formats; generated from the code.
 - Migrating from [nginx](docs/migrating-from-nginx.md), [Caddy](docs/migrating-from-caddy.md) and
   [Traefik](docs/migrating-from-traefik.md).
+- [The tunnel](docs/tunnel.md) and [the agent](docs/agent.md): roles run beside the gateway on its
+  engine, reaching services behind NAT and sharing AI models among machines.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
 - [nginx, Caddy and Traefik compared](docs/comparison.md): what fit takes from each.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.

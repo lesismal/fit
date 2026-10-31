@@ -37,7 +37,7 @@ func TestParseModule(t *testing.T) {
 
 func TestImports(t *testing.T) {
 	got, err := Imports([]Module{{Path: "example.com/a"}, {Path: "example.com/a"}}, []string{FitModule + "/provider/standard"})
-	if err != nil || !slices.Equal(got, []string{FitModule + "/modules/standard", "example.com/a"}) {
+	if err != nil || !slices.Equal(got, []string{FitModule + "/modules/standard", FitModule + "/app/standard", "example.com/a"}) {
 		t.Errorf("%v %v", got, err)
 	}
 	if _, err := Imports(nil, []string{"example.com/x"}); err == nil {

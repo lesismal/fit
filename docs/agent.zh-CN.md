@@ -1,0 +1,662 @@
+# agent
+
+[English](agent.md) | [简体中文](agent.zh-CN.md)
+
+agent 在多台机器之间共享 AI 模型。它是 fit 的三个角色，各由配置中的一个成员开启：
+
+- **`agent.node`** 提供模型。模型是 OpenAI 或 Anthropic 兼容接口的一个上游端点：本机的服务（如 Ollama、vLLM），
+  或带 Key 的托管接口。node 还上报本机硬件，并执行一组固定的管理操作。
+- **`agent.hub`** 是 node 与 client 汇合之处。它维护节点表及其模型，把每次调用转给提供该模型、负载最小的节点。
+- **`agent.client`** 运行在 agent（Claude Code、Codex、SDK）所在的机器上。它提供一个接口：`/v1/chat/completions`、
+  `/v1/messages` 等，调用它连到的 hub 与 node 上的模型。
+
+请求与响应按字节原样转发：agent 从不把一种接口转换成另一种，所以工具调用、思考与图片等能力取决于上游本身。
+
+一个进程运行配置中设置了成员的每个角色，任意组合，可以与网关的监听和路由并存，也可以没有它们；只有角色、没有路由的配置
+不需要监听。每个角色把自己的绑定（页面、互联监听、client 的接口）加到监听所用的 fib 引擎上，也在这个引擎上拨号连接对端。
+node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨号。这些角色是 agenthub 移植进 fit 的结果，原因与做法见
+[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)。
+
+## 配置
+
+成员为 `agent.hub`、`agent.node` 与 `agent.client`。它们与配置的其余部分一样严格解码：未知字段是错误，`fit validate`
+检查下文的每个上限。示例用 JSON；同样的字段也可以写在 .conf 或 YAML 配置中。
+
+### 每个角色都有的字段
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `id` | string | 首次启动时生成 | 角色的稳定 ID，对端以它识别角色：最长 128 个字符，不含空白。省略时生成一个（`<role>-<16 位十六进制>`）并写回成员。 |
+| `name` | string | 主机名 | 角色向对端显示的名称：最长 64 个字符，不含控制字符，首尾无空白。 |
+| `console` | object | 无 | 角色的 Web 页面。见[页面](#页面)。 |
+| `listen` | object | 无 | 角色接受对端连接的地方。 |
+| `peers` | array | 无 | 角色拨号并保持连接的对端；最多 64 个。 |
+| `limits` | object | 默认值 | 角色连接的上限。 |
+
+`listen`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `address` | string | 必填 | 角色接受连接的主机与端口，作为监听引擎上一个独立的绑定。WebSocket 路径为 `/ws`。主机为空表示监听所有地址。 |
+| `password` | string | 必填 | 对端需证明自己知道的密码。它从不在网络上传输。 |
+
+`peers[]`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `address` | string | 必填 | 对端的主机与端口，即对端的 `listen.address`。端口是数字。每个地址只出现一次。 |
+| `password` | string | 必填 | 对端的 `listen.password`。 |
+| `role` | string | 必填 | 对端必须声明的角色：`hub`、`node` 或 `client`，不能是拨号方自己的角色。hub 拨 node 与 client，node 拨 hub 与 client，client 拨 hub 与 node。 |
+
+`limits`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `max_conns` | int | 1024 | 角色同时接受的对端连接数上限。超出的连接被拒绝，拨号方退避。 |
+| `max_inflight` | int | 1024 | 一个对端在一条连接上可以同时在本方运行的调用与流的上限。超出的立即失败。 |
+| `ping_interval` | duration | `15s` | 连接多久没收到任何东西就发 ping。三个周期没收到任何东西的连接被关闭。至少 100ms。 |
+| `slow_timeout` | duration | `30s` | ping 等待 pong 多久之后，连接被视为过慢而关闭。 |
+| `retry_interval` | duration | `5s` | 连不上的对端两次拨号之间的最长等待。至少 100ms。 |
+| `stream_idle` | duration | `2m` | 流在两个方向都没有数据多久之后结束。至少 1s。 |
+
+### `agent.hub`
+
+每个角色都有的字段，以及：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `max_nodes` | int | 1024 | hub 节点表中保留的节点数上限，含离线节点。超出时忘掉最久未见的离线节点。 |
+
+### `agent.node`
+
+每个角色都有的字段，以及：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `description` | string | 无 | 对端显示的节点说明；最长 1024 字节。 |
+| `models` | array | 无 | 节点提供的模型；最多 256 个。 |
+| `settings` | object | 默认值 | 节点自己的设置。 |
+| `proxy` | object | 默认值 | 节点转发给上游的调用的上限。 |
+
+`models[]`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `name` | string | 必填 | agent 请求时使用的名称：1 到 128 个字符，不含空白。名称与 `api` 在节点的模型中唯一，因此同一名称可以各有一个 OpenAI 与 Anthropic 模型。 |
+| `api` | string | 必填 | `openai` 或 `anthropic`：上游使用的接口，也决定模型经哪些 agent 路径访问。 |
+| `base_url` | string | 必填 | 上游的基础 URL，http 或 https，不带查询串与末尾斜杠，如 `http://127.0.0.1:11434/v1`。调用发往它加上调用路径，如 `base_url/chat/completions`。 |
+| `upstream` | string | `name` | 发给上游的模型 ID，替代 `name`；最长 256 个字符。 |
+| `api_key` | string | 无 | 发给上游的 Key：`openai` 用 `Authorization: Bearer`，`anthropic` 用 `x-api-key`。最长 4096 个字符。页面从不完整显示它。 |
+| `disabled` | bool | false | 保留模型但不提供服务。 |
+| `description` | string | 无 | 模型说明；最长 1024 字节。 |
+| `max_inflight` | int | 0 | 节点同时转发给该模型的调用数上限，0 到 100000。超出的调用转到其他节点。0 表示只受 `proxy.max_inflight` 限制。 |
+
+`settings`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `allow_hub_manage` | bool | false | 允许已连接的 hub 代管节点：模型、名称与说明、显卡设置、固定操作及其作业。从不包括节点设置，也从不包括 hub 自己提供的命令。 |
+| `gpu_sudo` | bool | true | fit 不以 root 运行时，用 `sudo -n` 执行显卡设置、工具安装以及需要 root 的操作。sudo 不能要求输入密码。 |
+| `refresh_interval` | duration | `30s` | 节点重新读取硬件信息的间隔：5s 到 1h。 |
+| `job_timeout` | duration | `1h` | 作业被杀掉前最多可以运行多久：10s 到 168h。 |
+| `gpu_data_dir` | string | 工作目录 | 驱动需手动下载的厂商，其安装脚本在此目录下按厂商名查找安装包。脚本以 `FIT_AGENT_GPU_DATA_DIR` 读到它。 |
+
+`proxy`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `connect_timeout` | duration | `10s` | 连接上游最多用多久。 |
+| `first_byte_timeout` | duration | `5m` | 从调用开始（含连接）到上游开始应答最多多久。 |
+| `idle_timeout` | duration | `5m` | 上游在应答中途最多可以沉默多久。 |
+| `timeout` | duration | `30m` | 一次调用到应答结束最多多久。 |
+| `max_inflight` | int | 256 | 节点在所有模型上同时转发的调用数上限。超出的调用转到其他节点。 |
+| `max_body_bytes` | int | 33554432（32 MiB） | 一次调用的请求体上限。 |
+
+### `agent.client`
+
+每个角色都有的字段，以及：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `api` | object | 无 | agent 调用的接口。没有它时 client 仍连接对端，但不提供接口。 |
+| `api_keys` | array | 无 | agent 调用接口所用的 Key；最多 256 个。由页面创建与删除。 |
+
+`api`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `address` | string | 必填 | 接口监听的主机与端口。不是回环地址的主机需要 `cert_file` 与 `key_file`，Key 才不会以明文经过网络。 |
+| `cert_file` | string | 无 | 接口证书的 PEM 文件，后接中间证书。与 `key_file` 一起设置时，接口经 TLS 提供。 |
+| `key_file` | string | 无 | 证书私钥的 PEM 文件。 |
+| `max_body_bytes` | int | 33554432（32 MiB） | 请求体上限。请求体被完整读入以取得其中的模型；超出的得到 413。 |
+| `max_conns` | int | 256 | 接口同时保持的连接数上限；超出的连接在接受后立即关闭。 |
+| `max_inflight` | int | 256 | 接口同时转发的调用数上限；超出的得到 429。 |
+| `first_byte_timeout` | duration | `5m` | 调用等待应答开始最多多久。 |
+| `timeout` | duration | `30m` | 一次调用到应答结束最多多久。 |
+
+`api_keys[]`：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `id` | string | 必填 | Key 的 ID：16 位十六进制，唯一。 |
+| `name` | string | 必填 | Key 的用途：1 到 64 个字符。 |
+| `prefix` | string | 无 | Key 的开头几个字符，在页面上显示；最长 16。 |
+| `hash` | string | 必填 | Key 的 SHA-256，64 位十六进制。Key 本身不保存。 |
+| `created_at` | int | 无 | Key 的创建时间，自 1970 年起的秒数。 |
+
+### 一个 hub
+
+```json
+{
+  "agent": {
+    "hub": {
+      "name": "hub-1",
+      "console": {
+        "address": "127.0.0.1:9200",
+        "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
+      },
+      "listen": {"address": ":9210", "password": "mesh-secret"},
+      "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
+                 "retry_interval": "5s", "stream_idle": "2m"},
+      "max_nodes": 1024
+    }
+  }
+}
+```
+
+### 一个 node
+
+```json
+{
+  "agent": {
+    "node": {
+      "name": "gpu-1",
+      "description": "Two RTX 4090s",
+      "console": {
+        "address": "127.0.0.1:9100",
+        "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
+      },
+      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "models": [
+        {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b",
+         "max_inflight": 4},
+        {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
+         "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-..."}
+      ],
+      "settings": {"allow_hub_manage": false, "gpu_sudo": true, "refresh_interval": "30s", "job_timeout": "1h",
+                   "gpu_data_dir": "/var/lib/fit/gpu"},
+      "proxy": {"connect_timeout": "10s", "first_byte_timeout": "5m", "idle_timeout": "5m", "timeout": "30m",
+                "max_inflight": 256, "max_body_bytes": 33554432}
+    }
+  }
+}
+```
+
+### 一个 client
+
+```json
+{
+  "agent": {
+    "client": {
+      "name": "laptop",
+      "console": {
+        "address": "127.0.0.1:9300",
+        "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
+      },
+      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
+              "first_byte_timeout": "5m", "timeout": "30m"},
+      "api_keys": [
+        {"id": "3f2a9c1d7e5b4a60", "name": "claude-code", "prefix": "ah-Xq3v9Lk",
+         "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "created_at": 1761955200}
+      ]
+    }
+  }
+}
+```
+
+`password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 client 的页面上创建，不要手写。
+
+### 三台机器
+
+一台服务器（10.0.0.1）上的 hub、一台 GPU 机器上的 node、一台笔记本上的 client。node 与 client 都拨号连接 hub，
+它们自己都不需要监听。
+
+服务器：
+
+```json
+{"agent": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
+```
+
+GPU 机器：
+
+```json
+{"agent": {"node": {
+  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
+  "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"}]
+}}}
+```
+
+笔记本：
+
+```json
+{"agent": {"client": {
+  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
+  "api": {"address": "127.0.0.1:9301"}
+}}}
+```
+
+每台机器加上 `console` 即可在浏览器中管理其角色。client 也可以直接拨号连接 node，一个进程也可以同时运行 hub 与 node。
+
+### 配置是唯一的来源
+
+角色不在自己的文件中保存任何东西。页面所做的修改写回其成员：监听、对端、名称与说明、node 的模型与设置、client 的
+API Key，以及首次启动时生成的 ID。修改经 `admin.Configs` 作为该角色的一次配置编辑生效：把成员替换后的运行中配置像
+任何配置一样应用，先经检查，记入历史，可以回滚。角色随后切换到新成员，不断开未改变的连接。
+
+- 使用 `admin.store` 时，修改加密写入存储，重启后仍在。
+- 没有存储时，修改只持续到 fit 重启或重新读取配置文件，并有一条警告说明这一点。依赖页面之前，先把配置放进存储。
+
+在页面上踢掉连接是唯一不写入配置的修改：它关闭连接，拨号方随后重新连接。
+
+成员中有机密：互联密码与模型的 API Key，以明文保存。普通配置文件的安全性等同于该文件本身；`admin.store` 把它们加密保存。
+client 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以直接使用的 Key。
+
+## 互联
+
+角色之间通过 WebSocket 连接组成的互联网络通信。协议沿用 agenthub，未作改动，所以 fit 的角色与 agenthub 的程序可以互联。
+
+### 传输与认证
+
+设置了 `listen` 的角色在监听引擎上 `listen.address` 处加一个绑定。它只升级 `/ws`；其他路径一律以 403 拒绝。拨号方
+连接 `ws://<address>/ws`；整个拨号（含认证）限时 10 秒。
+
+升级完成后、任何帧之前：
+
+1. 监听方发送 32 字节随机挑战。
+2. 拨号方以密码为密钥，对挑战计算 HMAC-SHA256 并发回。
+3. 监听方校验通过后回确认，否则以关闭码 4001 关闭。
+
+握手最多 5 秒。密码从不在网络上传输，录下的证明也无法重放。密码错误表现为拨号失败，拨号方随之退避。互联是明文
+`ws://`：握手之后经过它的内容（包括提示词与应答）不加密，所以机器之间的连接应走内网或隧道。
+
+### 帧、会话与流
+
+每条 WebSocket 消息是一个帧：类型（request、response、stream-open、stream-data、stream-end、stream-cancel、push、
+ping、pong、credit、stream-keepalive、drain）、标志（gzip、error、binary）、32 位流 ID、请求 / 打开流 / 推送的方法名，
+以及载荷。1 KiB 及以上的载荷在压缩后更小时用 gzip 压缩。压缩前后的帧都不超过 16 MiB。
+
+每条连接上运行一个会话。拨号方的流 ID 为奇数，监听方为偶数；请求也占用一个流 ID。请求得到一个应答；推送没有应答，
+按到达顺序逐个执行。对端在一条连接上最多同时运行 `limits.max_inflight` 个请求与流；再多一个立即以限流错误失败。
+等待处理的推送超过 1024 个的连接被关闭。
+
+流在两个方向上传输数据。每个方向有 256 KiB 的接收窗口：发送方在有额度时发送，接收方消费后归还额度。慢读者只阻塞
+自己的流。只有响应方能结束流，同时给出结果。两个方向在 `stream_idle` 内都没有数据的流结束；仍在工作的一方（例如等待
+上游第一个 token 的 node）发送 stream-keepalive 帧，重置空闲计时。
+
+### 心跳、慢连接与下线
+
+每条连接一个定时器。`ping_interval` 内没收到任何东西的连接发 ping；三个周期都没收到的连接被关闭（关闭码 4002）。
+pong 排在其 ping 之前发送的所有内容之后，所以 ping 等待 pong 达到 `slow_timeout` 说明连接积压到了这个程度，连接被关闭
+（关闭码 4004）。超过 `max_conns` 的监听方以关闭码 4003 拒绝连接。
+
+角色停止时在每条连接上发送 drain：对端不再在其上发起新调用，进行中的调用最多再运行 10 秒结束，然后连接关闭。拨号方
+随后按退避重新连接。
+
+### hello 与角色
+
+拨号方的第一个调用是 `/mesh/hello`，带上自己的身份：角色、ID、名称、主机名、版本、互联地址。监听方回复自己的身份。
+15 秒内没有完成 hello 的连接被关闭。以下对端被拒绝：
+
+- 角色与本方相同（hub 不与 hub 互联，node 不与 node，client 不与 client）；
+- 角色不是本方互联的角色：hub 连 node 与 client，node 连 hub 与 client，client 连 hub 与 node；
+- 拨出的连接上，角色不是 `peers[].role` 所声明的；
+- ID 与本方相同。
+
+被拒绝的拨号方至少等待 30 秒（`retry_interval` 更长时等它）再试。对端可以调用什么只取决于它在 hello 中声明的角色。
+
+### 连接池与退避
+
+与同一对端（按 ID）的所有连接，无论哪一方拨出，组成一个池。调用在池中轮流使用连接，跳过正在下线的连接；只剩下线中
+连接的对端视为离线，对它的调用立即失败，以便调用方换一个对端。
+
+拨号方对 `peers` 中的对端从不放弃。连续第 n 次失败后，它等待 `min(retry_interval, 1s × 2ⁿ)` 以内的随机时长，至少
+100ms。存活 10 秒及以上的连接断开后，步长从 1 秒重新开始。
+
+### 超过 1 MiB 的请求体
+
+agenthub 把请求体放在转发流的打开请求中（`ProxyReq.body`）。fit 在 `ProxyReq` 中加了两个字段：`body_stream` 与
+`body_size`。client 把 1 MiB 以内的请求体照旧内联发送，更大的则以 `body_stream: true` 加上长度发送，随后在流的额度内
+以 64 KiB 的帧发送请求体。hub 随到随转这些帧；node 随到随发给上游。
+
+agenthub 的 node 与 hub 只认内联请求体。fit 的角色与 agenthub 的程序可以互联，并能处理 1 MiB 以内的请求体；更大的请求体
+需要途经的每个角色都是 fit。
+
+## node
+
+### 模型
+
+每个模型是 `models[]` 中的一项。其状态为 `disabled`、`error`（最近一次检查或调用发现上游不可用）或 `ready`；只有就绪
+且未达 `max_inflight` 的模型提供服务。
+
+页面，以及 `allow_hub_manage` 开启时的 hub，可以列出、保存、删除与检查模型。模型的 Key 从不完整显示：列表只显示其前
+4 位与后 4 位，短 Key 显示为 `****`。保存时 Key 为空或为打码值，表示保留成员中已有的 Key。
+
+### 检查
+
+检查是带调用认证头的 `GET <base_url>/models`，限时 15 秒。连接失败、401、403 或 5xx 应答使模型进入 `error`；其他应答
+（包括 404 与 405）表示上游可用。已启用的模型每 60 秒检查一次，处于 `error` 时每 15 秒一次，恢复的上游很快就能重新
+提供服务。调用时连不上上游同样使模型进入 `error`；状态码低于 500 的应答清除错误。
+
+### 转发
+
+`/node/proxy` 处理一次 agent 调用，使用 fib 的异步 HTTP 客户端：
+
+1. 路径必须属于模型的接口：`openai` 为 `chat/completions`、`responses`、`completions` 或 `embeddings`；`anthropic` 为
+   `messages` 或 `messages/count_tokens`。
+2. 模型（名称与接口）必须就绪且未达其 `max_inflight`，节点未达 `proxy.max_inflight`。否则调用以不可用失败，hub 或
+   client 换一个节点。
+3. 请求体随到随发给上游。只有当模型的 `upstream` 与 agent 请求的名称不同时，才完整读入请求体以改写顶层的 `model`；
+   其他成员保留原始字节。超过 `proxy.max_body_bytes` 的请求体失败。
+4. 上游收到 `Content-Type: application/json` 与模型的 Key；透传 `anthropic-version`（agent 未提供时为 2023-06-01）、
+   `anthropic-beta` 与 `openai-beta`。agent 的其他请求头一律不转发，包括它自己的 Key。
+5. 在收到上游第一个字节之前，node 保持流存活。返回的第一帧是头帧：上游状态码、内容类型与节点 ID。之后应答体的每一段
+   随到随作为一帧发送，所以 SSE 事件不会被攒批。
+6. 两个方向的背压相连。请求体在上游连接的写队列中等待，队列排空之前流的额度不归还。调用方不给额度时应答体暂停，
+   给出额度后继续。
+7. `connect_timeout`、`first_byte_timeout`、`idle_timeout` 与 `timeout` 约束每次调用。调用方取消或离开时，上游请求
+   随之取消。
+
+每次调用记录一行日志：模型、接口、路径、状态码、字节数、耗时与调用方。
+
+页面上的“测试调用”打开的流与 agent 的调用相同。
+
+### 操作与作业
+
+node 从不执行调用方提供的脚本或命令。它的管理操作是代码中定义的固定列表：安装 Ollama；列出、拉取、查看与删除 Ollama
+模型；Ollama 服务的状态、重启与日志；`nvidia-smi`；安装 NVIDIA Container Toolkit。每个操作只接受声明过的参数，按正则
+校验，每个参数作为独立的 argv 元素传入，从不经过 shell。显卡设置（按厂商的功耗上限、频率、风扇等）按类型与范围校验，
+同样执行；厂商管理软件的安装运行代码中的常量脚本。
+
+操作、显卡设置与安装都以作业运行，有自己的池：最多同时运行 8 个，第 9 个被拒绝；保留 200 个作业，先清理最早结束的；
+每个作业保留最后 1 MiB 输出。超过 `job_timeout` 的作业连同其进程组被杀掉。页面随输出写入跟随作业。
+
+### hub 代管
+
+`allow_hub_manage` 开启时，已连接的 hub 可以调用节点的管理方法：模型、名称与说明、显卡状态与设置、操作与作业。节点在
+每次调用时检查该设置，因此关闭后立即生效。hub 不能修改节点设置，读不到模型的 Key，也和页面一样只能运行固定操作。
+
+### 推送
+
+节点信息（身份、说明、硬件、模型及其状态与负载、进行中的调用与作业）变化时，节点把它推送给所有已连接的 hub 与 client，
+最多每 200ms 一次；对端连上时也单独推送一次。每次推送带一个从节点启动时间开始计数的序号，接收方据此丢弃旧信息，重启后也是如此。
+
+## hub
+
+### 节点表
+
+node 连上时，hub 取得其信息，之后跟随它的推送。有未下线连接的节点为在线。节点表最多保留 `max_nodes` 个节点；超出时
+忘掉最久未见的离线节点。节点表只在内存中：hub 重启后，只知道重新连上的节点。
+
+### 模型
+
+hub 按名称与接口列出在线节点的模型：每个模型由哪些节点提供，其中多少个就绪。停用的模型不列出。列表变化时 hub 把它推送
+给所有已连接的 client，最多每 200ms 一次；client 连上时也单独推送一次。
+
+### 选节点
+
+`/hub/proxy` 的请求与 `/node/proxy` 相同。hub 在提供该模型且就绪、未被 client 排除的在线节点中，选负载最小的：节点上报的
+该模型调用数，加上 hub 当前转给它的调用数。并列时轮询。之后在各个流的额度内双向随到随转帧。
+
+收到节点的头帧之前，不能提供该模型、离线或连接断开的节点被跳过，换下一个，最多 3 个节点；流式请求体只在尚未从 client
+取走任何部分时重试。收到头帧之后，字节已到达 client，任何失败都结束调用。其他错误（如请求有误）立即结束调用。
+
+### 代管调用
+
+hub 的页面通过两个只对页面开放的方法代管节点：`/hub/node/call` 调用管理方法（限时 90 秒），`/hub/node/stream` 跟随
+作业。允许什么由节点决定。
+
+## client
+
+### 接口
+
+| 方法与路径 | 接口 | 转发路径 |
+| --- | --- | --- |
+| `POST /v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings` | openai | `/v1/` 之后的部分 |
+| `POST /v1/messages`、`/v1/messages/count_tokens` | anthropic | `/v1/` 之后的部分 |
+| `GET /v1/models`、`GET /v1/models/{id}` | 两者 | 由 client 应答 |
+
+接口是 `api.address` 上一个独立的绑定，与页面分开。其他路径得到 404。`GET /v1/models` 列出 client 能访问到的每个模型
+名称，同时带 OpenAI 与 Anthropic 模型列表的字段，两种 SDK 都能读取。
+
+应答带上游的状态码与内容类型、`Cache-Control: no-cache`、`X-Accel-Buffering: no`，以及指明提供服务节点的
+`X-Agenthub-Node`；应答体随帧到达写出。
+
+### API Key
+
+Key 为 `ah-` 加上 32 字节随机数的无填充 base64url，共 46 个字符。页面只在创建时显示一次；成员保存它的 ID、名称、前 10
+个字符、SHA-256 与创建时间。agent 以 `Authorization: Bearer <key>` 或 `x-api-key: <key>` 发送；其 SHA-256 与每个已存
+哈希做常量时间比较。
+
+Key 的使用情况（调用数与最近使用时间）与按模型的计数（调用数、失败数、字节数、进行中的调用）只在内存中统计，自角色启动起，
+不写入任何地方。
+
+### 路由
+
+client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的 `model`。然后按顺序尝试路由：
+
+1. 直接连接、提供该模型且就绪的节点，负载小的优先：节点上报的负载加上本 client 在其上进行中的调用数。
+2. 列出该模型且有就绪节点的 hub，轮询。
+
+在头帧之前因当前无法提供该模型、离线或连接断开而失败的路由，让给下一条，最多 4 条。尝试 hub 时排除已失败的节点。头帧
+之后不再重试。
+
+### 错误
+
+错误采用 agent 所调用接口的格式：OpenAI 为 `{"error": {"message", "type", "code"}}`，Anthropic 为
+`{"type": "error", "error": {"type", "message"}}`。`GET /v1/models` 上，发送 `anthropic-version` 或 `x-api-key` 的
+agent 得到 Anthropic 格式。
+
+| 情况 | 状态码 |
+| --- | --- |
+| 缺少 Key 或 Key 错误 | 401 |
+| 请求体不是 JSON，或没有 `model` | 400 |
+| 请求体超过 `max_body_bytes` | 413 |
+| 没有对端提供该模型，或只以另一种接口提供 | 404 |
+| 调用数超过 `max_inflight` | 429 |
+| 模型没有就绪路由、所有路由都不可用，或 `first_byte_timeout` 内应答没有开始 | 503 |
+| node 或 hub 应答请求有误、未找到或限流 | 400、404、429 |
+| 应答开始之前超过 `timeout` | 504 |
+| 头帧之前的其他失败 | 502 |
+
+上游自己的错误在头帧到达后原样转发。头帧之后的失败使应答被截断。
+
+### 接入
+
+以下示例中，`127.0.0.1:9301` 是 client 的 `api.address`，`<key>` 是在其页面上创建的 API Key。
+
+OpenAI SDK（Python）：
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:9301/v1", api_key="<key>")
+client.chat.completions.create(model="qwen3-32b", messages=[{"role": "user", "content": "Hello"}])
+```
+
+Claude Code，使用以 Anthropic 接口提供的模型。`ANTHROPIC_BASE_URL` 不带 `/v1`：SDK 自己拼上 `/v1/messages`。
+
+```sh
+export ANTHROPIC_BASE_URL=http://127.0.0.1:9301
+export ANTHROPIC_AUTH_TOKEN=<key>      # 或 ANTHROPIC_API_KEY=<key>，以 x-api-key 发送
+export ANTHROPIC_MODEL=claude-sonnet
+claude
+```
+
+Codex，`~/.codex/config.toml`，使用以 OpenAI 接口提供的模型：
+
+```toml
+model = "qwen3-32b"
+model_provider = "fit_agent"
+
+[model_providers.fit_agent]
+name = "fit agent"
+base_url = "http://127.0.0.1:9301/v1"
+env_key = "FIT_AGENT_API_KEY"
+wire_api = "chat"   # 上游支持 /responses 时可改为 "responses"
+```
+
+然后 `export FIT_AGENT_API_KEY=<key>` 并运行 `codex`。
+
+curl：
+
+```sh
+curl http://127.0.0.1:9301/v1/chat/completions -H "Authorization: Bearer <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-32b", "stream": true, "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+client 的概览页用它自己的地址与模型显示这些示例。
+
+## 页面
+
+角色的 `console` 成员提供其 Web 页面，作为监听引擎上一个独立的绑定：
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `address` | string | 必填 | 主机与端口。不是回环地址的主机需要 `cert_file` 与 `key_file`。 |
+| `cert_file`、`key_file` | string | 无 | PEM 文件；两者都设置时页面经 TLS 提供。 |
+| `users` | array | 必填 | 可以登录的用户：`username` 与 `password_hash`（`fit hash-password` 生成的 bcrypt 哈希）。至少一个。 |
+| `session_timeout` | duration | `30m` | 登录在没有请求时持续多久。 |
+| `session_lifetime` | duration | `12h` | 登录最长持续多久。 |
+| `max_sessions` | int | 64 | 同时保留的登录数上限；再多一个结束最早的。 |
+| `max_conns` | int | 32 | 页面同时保持的连接数上限。 |
+
+登录与 `admin.console` 相同，用的是同一份代码。密码在控制台自己的池上以 bcrypt 校验。同一地址 15 分钟内登录失败 5 次后，
+该地址被拒绝 15 分钟（429，带 `Retry-After`）。会话是一个 cookie（`fit_agent_hub`、`fit_agent_node` 或
+`fit_agent_client`；HttpOnly、SameSite=Strict，TLS 下带 Secure）。除 GET 与 HEAD 外，每个请求都在 `X-Fit-Csrf` 中带上
+会话的 CSRF 令牌，来自其他源的请求被拒绝。
+
+`/api/` 下的接口：
+
+| 接口 | 应答 |
+| --- | --- |
+| `POST /api/login`、`POST /api/logout` | 开始或结束会话；登录应答 `{user, csrf}`。 |
+| `GET /api/session` | 用户与 CSRF 令牌。 |
+| `GET /api/me` | 用户与角色的身份；client 另加其接口的 URL。 |
+| `POST /api/rpc<method>` | 执行一个方法，如 `/api/rpc/mesh/peers`，以 JSON 应答其结果，或以错误码对应的 HTTP 状态应答 `{"error", "code"}`。 |
+| `POST /api/stream<method>` | 打开一个流方法，以 SSE 应答：每帧一个数据事件，`end` 带结果，`error` 带 `{code, message}`。关闭请求即取消流。 |
+
+页面以拥有全部权限的本地调用方身份，调用与对端相同的方法，以及只有页面能调用的方法：互联的（`/mesh/peers`、
+`/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`）、node 的设置、client 的 Key 与模型、hub 的代管调用。
+
+方法在角色的池（16 个 goroutine，256 个等待）上运行，从不在 fib worker 上运行；超出队列的方法得到 503。流的事件以
+不等待的方式写出，其帧只在浏览器取走后才归还给流，所以慢的浏览器只阻塞它自己的流；一个角色的页面上最多同时打开
+16 个流，30 秒内什么都没取走的浏览器使其流结束。
+
+## 上限与规则
+
+每个上限都有默认值；什么都不设置的配置也有界。
+
+| 上限 | 默认 | 位置 |
+| --- | --- | --- |
+| 接受的互联连接 | 1024 | `limits.max_conns` |
+| 每条连接上的调用与流 | 1024 | `limits.max_inflight` |
+| 心跳周期、慢连接超时 | 15s、30s | `limits` |
+| 拨号退避上限 | 5s | `limits.retry_interval` |
+| 流空闲 | 2m | `limits.stream_idle` |
+| 流窗口 | 每个方向 256 KiB | 固定 |
+| 帧 | 16 MiB | 固定 |
+| 每条连接等待的推送 | 1024，超出则关闭连接 | 固定 |
+| 拨号、握手、hello | 10s、5s、15s | 固定 |
+| 方法时限 | 10s（hub 的代管调用 90s） | 固定 |
+| 对端、模型、API Key | 64、256、256 | 固定 |
+| hub 节点表中的节点 | 1024 | `max_nodes` |
+| node 同时转发的调用 | 256，另有每个模型的 `max_inflight` | `proxy.max_inflight` |
+| node 请求体 | 32 MiB | `proxy.max_body_bytes` |
+| node 连接、首字节、空闲、总时限 | 10s、5m、5m、30m | `proxy` |
+| 每个上游主机的连接 | 64，另有 256 个等待 | 固定 |
+| 模型检查 | 每次 15s；每 60s，`error` 时每 15s | 固定 |
+| 作业 | 运行 8 个，保留 200 个，每个输出 1 MiB | 固定 |
+| 作业运行时长 | 1h | `settings.job_timeout` |
+| client 接口请求体 | 32 MiB，完整读入 | `api.max_body_bytes` |
+| client 接口连接、调用 | 256、256 | `api.max_conns`、`api.max_inflight` |
+| client 首字节、总时限 | 5m、30m | `api` |
+| client 接口请求头大小、读请求头、读取、空闲 | 64 KiB、10s、2m、2m | 固定 |
+| client 等待慢 agent | 每次写入 60s | 固定 |
+| 每次调用的路由：client、hub | 4、3 | 固定 |
+| 角色的池 | 运行 16 个，等待 256 个 | 固定 |
+| 等待的配置编辑 | 所有角色共 64 个；每个 30s | 固定 |
+| 页面上的流 | 16 个；停滞的浏览器 30s | 固定 |
+| 页面会话、连接 | 64、32 | `console` |
+| 登录失败 | 15 分钟内 5 次，之后锁定 15 分钟 | 固定 |
+| 停止时的下线 | 10s | 固定 |
+
+[开发规则](rules.zh-CN.md) 如何成立：
+
+- **不阻塞 fib worker。** 页面与接口的请求在回调中应答；需要等待的工作在别处运行：bcrypt 在控制台的池上，方法在角色
+  的池上，硬件与显卡查询在 node 的工作池上，命令在作业的池上，配置编辑在管理器的 goroutine 上。互联的请求与流运行在
+  会话的 goroutine 上，每条连接的数量受 `limits.max_inflight` 限制。
+- **请求体流式传输。** node 用 fib 的异步客户端转发调用，请求体与应答体随到随转，通过流的额度实现双向背压。只有 client
+  接口为读取模型而完整读入请求体（在 `api.max_body_bytes` 之内），node 也只在改写模型时完整读入（在
+  `proxy.max_body_bytes` 之内）。
+- **每个 map、队列与池都有上限**，见上表；在线节点与模型目录的条目受连接数约束。
+- **每次对外交互都有超时**：拨号、握手、hello、方法、流、上游调用以及 agent 的连接。
+
+fib 暂时还缺的两项能力写在 [fib API 需求](fib-api-requests.zh-CN.md) 中：
+
+- **A52**，WebSocket 连接的底层传输：跳过关闭握手的关闭，以及拨号一侧的对端地址。在此之前，监听方通过包在 WebSocket
+  处理器外的一层按对端地址找到连接的 `fib.Connection`，拨号方通过拨号钩子拿到自己的，从而能立即关闭死掉或过慢的连接。
+- **A53**，WebSocket 连接发送的背压。在此之前，连接的队列由其各个流的窗口与慢连接超时约束：读得慢的对端在 ping 等待达到
+  `slow_timeout` 时被发现，连接随之关闭。
+
+## 从 agenthub 迁移
+
+没有 agenthub 加密状态文件的导入。打开每个程序的页面，或解密其状态，逐项手写成员：
+
+| agenthub | fit |
+| --- | --- |
+| `id` | `id`：保留它，对端才能照旧识别该角色 |
+| `name` | `name` |
+| `listen` `{addr, password}` | `listen` `{address, password}`；`addr` 为空时省略 |
+| `peers[]` `{addr, password, role}` | `peers[]` `{address, password, role}` |
+| `console_hash` | `console.users` 中的一个用户，如 `{"username": "admin", "password_hash": "<该哈希>"}`，或用 `fit hash-password` 生成新的哈希 |
+| node 的 `role_data.models` | `agent.node.models`，字段一一对应 |
+| node 的 `role_data.description` | `agent.node.description` |
+| node 的 `role_data.settings` | `agent.node.settings`：`refresh_interval_seconds` 改为 `refresh_interval`（`"30s"`），`job_timeout_seconds` 改为 `job_timeout`（`"1h"`） |
+| client 的 Key `{id, name, prefix, hash, created_at, last_used_at, calls}` | `agent.client.api_keys[]`，`id`、`name`、`prefix`、`hash` 与 `created_at` 原样复制；去掉成员不接受的 `last_used_at` 与 `calls`。旧 Key 继续有效。 |
+| hub 的 `role_data.nodes`（记住的节点） | 丢弃：hub 在节点连上时重新得知 |
+
+参数与环境变量：
+
+| agenthub | fit |
+| --- | --- |
+| `-addr` | `console.address`；client 还有 `api.address`，因为接口有自己的地址 |
+| `-data` 与状态文件 | `admin.store` |
+| `-log` | fit 的 `log` |
+| `AGENTHUB_PASSWORD` | 去掉；存储的密码在 `admin.store` 中设置 |
+| `AGENTHUB_CONSOLE_PASSWORD` | 去掉；改用控制台用户 |
+| `AGENTHUB_NODE_DATA_DIR` | `settings.gpu_data_dir`；脚本读到的是 `FIT_AGENT_GPU_DATA_DIR` |
+
+迁移期间，fit 的角色与 agenthub 的程序可以互联：线上协议、`/ws` 路径与认证都相同。超过 1 MiB 的请求体需要途经的每个
+角色都是 fit。
+
+配置写好后，用 `fit validate` 检查，再用 `fit store import -c <引导文件> <配置>` 把它封入存储，此后页面所做的修改都会保存。
+
+## 与 agenthub 的不同
+
+- 三个角色是一个程序、一份配置；任意组合在一个进程中运行，可与网关并存。
+- 加密状态文件及其启动密码去掉了；配置（保存在 `admin.store` 中）承载一切。
+- 控制台密码去掉了；页面使用控制台用户，带 bcrypt 哈希、会话、CSRF 令牌与锁定，与 `admin.console` 相同。
+- 互联监听是 fit 引擎上的一个绑定；`/ws` 以外的路径以 403 拒绝。
+- client 的接口有自己的地址，与页面分开，非回环地址需要 TLS。
+- hub 重启后忘掉离线节点。
+- API Key 的使用情况不跨重启保留。
+- 节点设置是时长（`"30s"`、`"1h"`），不再是秒数。
+- 上游调用用 fib 的客户端，不再用 `net/http`：模型上游不再遵循 `HTTP_PROXY` 与 `HTTPS_PROXY`。
+- 新增转发时限（连接、首字节、空闲、总时限）与节点级上限（`proxy.max_inflight`、`proxy.max_body_bytes`）。
+- 同时最多运行 8 个作业。
+- `limits.max_conns` 默认 1024（agenthub 为 10000）。
+- 地址中的端口必须是数字；`:http` 这样的服务名被拒绝。
+- 推送堆积超过 1024 个的连接被关闭。
+- 一个角色的页面上最多同时打开 16 个流。
+- 超过 1 MiB 的请求体在 fit 的角色之间以 `body_stream` 流式传输。

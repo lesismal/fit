@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/provider"
@@ -78,6 +79,9 @@ type Configs struct {
 	admin []byte
 	save  func([]byte) error
 	saved [sha256.Size]byte
+
+	// apps runs the agent's and the tunnel's roles, or is nil; under mu.
+	apps *app.Manager
 }
 
 // Version is a config that was applied.
@@ -305,11 +309,19 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	if l := cs.env.AccessLog; l != nil {
 		l.SetLevel(c.AccessLog)
 	}
+	var warnings []string
+	if cs.apps != nil {
+		if err := cs.apps.Apply(c); err != nil {
+			for _, line := range strings.Split(err.Error(), "\n") {
+				warnings = append(warnings, line)
+			}
+		}
+	}
 	var deprecated config.Errors
 	if ws := c.Warnings(); len(ws) > 0 {
 		deprecated = config.AsErrors(m.Errors(ws))
 	}
-	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Deprecated: deprecated}, c, m, nil
+	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Warnings: warnings, Deprecated: deprecated}, c, m, nil
 }
 
 // Reloads returns how many configs were tried, from loading on, since fit

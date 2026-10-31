@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/login"
 )
 
 // consoleFixture is a console in front of a fixture's Configs, with a
@@ -49,11 +50,11 @@ func startConsole(t *testing.T, c *config.Console) *consoleFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.console.now = func() time.Time {
+	f.console.logins.SetClock(func() time.Time {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		return f.now
-	}
+	})
 	t.Cleanup(func() { _ = f.console.Shutdown(context.Background()) })
 	f.url = strings.TrimSuffix(f.console.URL(), "/")
 	return f
@@ -213,7 +214,7 @@ func TestConsoleLoginRefused(t *testing.T) {
 	}
 	// Five failures lock the address out, the right password too, until
 	// the lockout ends.
-	for range maxLoginFailures {
+	for range login.MaxFailures {
 		if code := b.login("ada", "wrong"); code != http.StatusUnauthorized {
 			t.Fatalf("failure: %d", code)
 		}
@@ -221,7 +222,7 @@ func TestConsoleLoginRefused(t *testing.T) {
 	if code := b.login("ada", "pw"); code != http.StatusTooManyRequests {
 		t.Errorf("locked out: %d", code)
 	}
-	f.advance(loginLockout + time.Second)
+	f.advance(login.Lockout + time.Second)
 	if code := b.login("ada", "pw"); code != http.StatusOK {
 		t.Errorf("after the lockout: %d", code)
 	}
@@ -275,10 +276,10 @@ func TestConsoleSessions(t *testing.T) {
 
 func TestConsoleFailureTableBounded(t *testing.T) {
 	f := startConsole(t, &config.Console{})
-	for i := range maxLoginAddresses + 10 {
-		f.console.failed(fmtSprintf("10.0.%d.%d", i/256, i%256))
+	for i := range login.MaxAddresses + 10 {
+		f.console.logins.Failed(fmtSprintf("10.0.%d.%d", i/256, i%256))
 	}
-	if n := len(f.console.fails); n > maxLoginAddresses {
+	if n := f.console.logins.Addresses(); n > login.MaxAddresses {
 		t.Errorf("%d addresses kept", n)
 	}
 }

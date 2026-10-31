@@ -240,6 +240,10 @@ Status: `todo`, `doing` or `done`.
 | I103 | VPN end-to-end and exit tests | I97, I102 | todo |
 | **Console** | | | |
 | I104 | The config kept encrypted (`admin.store`); the console, with logins and an editor made from the schema | I77 | done |
+| **Agent and tunnel** | | | |
+| I105 | Roles in fit's config: `app`, `app/console`, `login`, write-back through `EditMember` | I104 | done |
+| I106 | The tunnel's roles, from fibhub: `tunnel/server`, `tunnel/node`, `tunnel/client` | I105 | done |
+| I107 | The agent's roles, from agenthub, on fib throughout: `agent/hub`, `agent/node`, `agent/client` | I105 | done |
 
 ## M0, foundations
 
@@ -1367,3 +1371,41 @@ password in the config file fit starts with. The design is
   wrong password or a changed byte stops fit from starting; logins, lockouts, sessions, CSRF and
   other origins are tested; every page works in a browser.
 - **Touches**: `admin`, `admin/store`, `config`, `cli`, `schema`, `templates`, `docs`.
+
+## Agent and tunnel
+
+agenthub and fibhub, two programs on fib, brought into fit as roles of its config, on its engine,
+their settings kept in its store ([decision 028](decisions/028-agent-and-tunnel.md)).
+
+### I105 Roles in fit's config
+
+- **Do**: `agent` and `tunnel` in the config, a member per role, with `RoleConsole`; `app`: a
+  registry of roles, a `Manager` moved to every config applied after the listeners, `app.Check`
+  when a config is compiled, and `Host.Edit`, which applies a role's member changed, through
+  `admin.Configs.EditMember`, on a goroutine of its own; `login`, the console's logins made a
+  package of their own; `app/console`, a role's pages on the listeners' engine; `fit run`, `fit
+  build` and `cmd/fit` running the roles.
+- **Done when**: a config starts, moves and stops roles; a role's failure is a warning; an edit
+  is applied, kept in the store, and refused when it does not load; the console's logins pass
+  their tests on both servers.
+- **Touches**: `app`, `login`, `admin`, `config`, `cli`, `listener`, `runtime`, `plugin/build`.
+
+### I106 The tunnel
+
+- **Do**: fibhub's server, pod and client as `tunnel.server`, `tunnel.node` and `tunnel.client`:
+  links over TCP, WebSocket and QUIC (on a UDP binding of the engine), tunnels with backpressure,
+  forwards and web proxies, pages on `app/console`, every change written back; fibhub's store and
+  CLI dropped.
+- **Done when**: the e2e tests pass on fib engines, with a restart from the store; the Docker
+  environment's checks pass.
+- **Touches**: `tunnel`, `config`, `test/docker/tunnel`, `docs`.
+
+### I107 The agent
+
+- **Do**: agenthub's hub, node and client as `agent.hub`, `agent.node` and `agent.client`, ported
+  to today's fib: the mesh on fib's WebSocket with credits on its streams, the node's proxy on
+  fib's asynchronous client, streaming both ways, blocking work on bounded pools, pages on
+  `app/console`, every change written back; agenthub's state file, lock and passwords dropped.
+- **Done when**: the e2e tests, with slow, large and cut bodies, pass on fib engines, with a
+  restart from the store; the Docker environment's checks pass.
+- **Touches**: `agent`, `config`, `test/docker/agent`, `docs`.

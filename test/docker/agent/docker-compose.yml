@@ -1,0 +1,133 @@
+# Docker end-to-end test topology of fit's agent. Start / stop / test with
+# test/docker/agent/e2e.sh. Every role is one fit, `fit run -c` with its own
+# config file from configs/, which sets its pages (console), the client's API
+# and the store its config is kept in from then on; the store lives on the
+# role's volume, so a restart keeps what the pages changed.
+#
+# Every directed pair of roles is covered once (who listens, who dials):
+#   node1   -> hub     node1 dials the hub           hub   -> node2    the hub dials node2
+#   client1 -> hub     client1 dials the hub         hub   -> client2  the hub dials client2
+#   client1 -> node2   client1 dials node2 directly  node3 -> client2  node3 dials client2 directly
+# The links are configured by the test through the pages (/mesh/listen,
+# /mesh/dial), so every container starts without any.
+#
+# The pages and the client's API listen on 0.0.0.0, which is not loopback, so
+# they are served over TLS with the self-signed certificate certgen writes on
+# the certs volume (e2e.sh runs the certs service first); the tester does not
+# verify it.
+name: fit-agent-e2e
+
+x-role: &role
+  image: fit-agent-e2e:latest
+  init: true
+  restart: "no"
+  environment:
+    FIT_STORE_PASSWORD: ${FIT_E2E_STORE_PASSWORD:-fit-e2e-store-pass}
+  depends_on:
+    upstream:
+      condition: service_healthy
+
+services:
+  upstream:
+    image: fit-agent-e2e:latest
+    build:
+      context: ../../..
+      dockerfile: test/docker/agent/Dockerfile
+      target: fit
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GO_IMAGE: ${GO_IMAGE:-golang:1.27-bookworm}
+        BASE_IMAGE: ${BASE_IMAGE:-debian:bookworm-slim}
+    command: ["mockllm", "-addr", ":8000"]
+    ports: ["127.0.0.1:18000:8000"]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8000"]
+      interval: 1s
+      retries: 30
+
+  # certs writes the self-signed certificate once (kept while the volume is).
+  certs:
+    image: fit-agent-e2e:latest
+    profiles: ["setup"]
+    command: ["certgen", "-dir", "/certs", "-hosts", "hub,node1,node2,node3,client1,client2,localhost,127.0.0.1"]
+    volumes: ["certs:/certs"]
+
+  hub:
+    <<: *role
+    hostname: hub
+    command: ["fit", "run", "-c", "/etc/fit/hub.json"]
+    ports: ["127.0.0.1:19200:9200"]
+    volumes: ["hub-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: &health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9200"]
+      interval: 1s
+      retries: 60
+
+  node1:
+    <<: *role
+    hostname: node1
+    command: ["fit", "run", "-c", "/etc/fit/node1.json"]
+    ports: ["127.0.0.1:19101:9100"]
+    volumes: ["node1-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: &node-health
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9100"]
+
+  node2:
+    <<: *role
+    hostname: node2
+    command: ["fit", "run", "-c", "/etc/fit/node2.json"]
+    ports: ["127.0.0.1:19102:9100"]
+    volumes: ["node2-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: *node-health
+
+  node3:
+    <<: *role
+    hostname: node3
+    command: ["fit", "run", "-c", "/etc/fit/node3.json"]
+    ports: ["127.0.0.1:19103:9100"]
+    volumes: ["node3-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: *node-health
+
+  client1:
+    <<: *role
+    hostname: client1
+    command: ["fit", "run", "-c", "/etc/fit/client1.json"]
+    ports: ["127.0.0.1:19301:9300", "127.0.0.1:19401:9400"]
+    volumes: ["client1-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: &client-health
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9300 && exec 4<>/dev/tcp/127.0.0.1/9400"]
+
+  client2:
+    <<: *role
+    hostname: client2
+    command: ["fit", "run", "-c", "/etc/fit/client2.json"]
+    ports: ["127.0.0.1:19302:9300", "127.0.0.1:19402:9400"]
+    volumes: ["client2-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: *client-health
+
+  tester:
+    image: fit-agent-e2e-tester:latest
+    build:
+      context: ../../..
+      dockerfile: test/docker/agent/Dockerfile
+      target: tester
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GO_IMAGE: ${GO_IMAGE:-golang:1.27-bookworm}
+        BASE_IMAGE: ${BASE_IMAGE:-debian:bookworm-slim}
+    profiles: ["test"]
+    environment:
+      FIT_E2E_SHARED: /shared
+    volumes: ["tester-shared:/shared"]
+
+volumes:
+  certs:
+  hub-data:
+  node1-data:
+  node2-data:
+  node3-data:
+  client1-data:
+  client2-data:
+  tester-shared:

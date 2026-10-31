@@ -1,0 +1,23 @@
+{
+  "admin": {
+    "store": {
+      "path": "/data/node1.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "agent": {
+    "node": {
+      "console": {
+        "address": "0.0.0.0:9100",
+        "cert_file": "/certs/cert.pem",
+        "key_file": "/certs/key.pem",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$10$rNMZ9rKLyetVG5t2KWVOK.Y0FLZ9bysTzDoM9VmyqcZT27gmPkD7q"
+          }
+        ]
+      }
+    }
+  }
+}

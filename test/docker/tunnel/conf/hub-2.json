@@ -1,0 +1,45 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/hub-2.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "server": {
+      "name": "hub-2",
+      "password": "reg-pass-1234",
+      "body_password": "body-pass-1234",
+      "listeners": [
+        {
+          "protocol": "tcp",
+          "address": ":7000"
+        },
+        {
+          "protocol": "ws",
+          "address": ":7001"
+        },
+        {
+          "protocol": "quic",
+          "address": ":7443"
+        }
+      ],
+      "console_socket": {
+        "address": ":7081",
+        "password": "ws-pass-1234"
+      },
+      "console": {
+        "address": "0.0.0.0:7080",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$BHN6LnuSkFeoZoVbVJ5ZGO6zJ8Y56FwR1T2t1WS8Nmqgun9KIF3b2"
+          }
+        ]
+      }
+    }
+  }
+}

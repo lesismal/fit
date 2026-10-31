@@ -230,6 +230,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I103 | VPN 端到端与收尾测试 | I97, I102 | todo |
 | **控制台** | | | |
 | I104 | 加密保存的配置（`admin.store`）；带登录、由 schema 生成编辑器的控制台 | I77 | done |
+| **Agent 与 tunnel** | | | |
+| I105 | fit 配置中的角色：`app`、`app/console`、`login`，经 `EditMember` 写回 | I104 | done |
+| I106 | tunnel 的角色，来自 fibhub：`tunnel/server`、`tunnel/node`、`tunnel/client` | I105 | done |
+| I107 | agent 的角色，来自 agenthub，全部基于 fib：`agent/hub`、`agent/node`、`agent/client` | I105 | done |
 
 ## M0 基础
 
@@ -1180,3 +1184,34 @@ fit 在配置开启时提供一个用户名密码登录的控制台，在上面�
 - **完成标准**：在控制台修改的配置开始运行、写入 store、重启后依然有效；密码错误或字节被改动时 fit 无法启动；登录、锁定、
   会话、CSRF 和其他来源都有测试；每个页面在浏览器里可用。
 - **涉及**：`admin`、`admin/store`、`config`、`cli`、`schema`、`templates`、`docs`。
+
+## Agent 与 tunnel
+
+agenthub 和 fibhub 这两个基于 fib 的程序并入 fit，成为其配置中的角色，运行在它的引擎上，设置保存在它的 store
+中（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+
+### I105 fit 配置中的角色
+
+- **做什么**：配置中的 `agent` 和 `tunnel`，每个角色一个成员，带 `RoleConsole`；`app`：角色注册表，在 listener
+  之后随每个配置推进的 `Manager`，编译配置时的 `app.Check`，以及 `Host.Edit`，它在自己的 goroutine 上经
+  `admin.Configs.EditMember` 应用修改后的角色成员；`login`，把控制台的登录拆成独立的包；`app/console`，listener
+  引擎上的角色网页；`fit run`、`fit build` 和 `cmd/fit` 运行角色。
+- **完成标准**：配置能启动、迁移和停止角色；角色失败作为警告；修改被应用、保存进 store，无法加载时被拒绝；控制台的
+  登录在两种服务器上都通过测试。
+- **涉及**：`app`、`login`、`admin`、`config`、`cli`、`listener`、`runtime`、`plugin/build`。
+
+### I106 tunnel
+
+- **做什么**：fibhub 的 server、pod 和 client 成为 `tunnel.server`、`tunnel.node` 和 `tunnel.client`：经 TCP、
+  WebSocket 和 QUIC（在引擎的 UDP binding 上）的链路，带背压的隧道，端口转发和 Web 代理，基于 `app/console` 的
+  网页，每次修改都写回；去掉 fibhub 的 store 和命令行。
+- **完成标准**：e2e 测试在 fib 引擎上通过，含从 store 重启；Docker 环境的检查通过。
+- **涉及**：`tunnel`、`config`、`test/docker/tunnel`、`docs`。
+
+### I107 agent
+
+- **做什么**：agenthub 的 hub、node 和 client 成为 `agent.hub`、`agent.node` 和 `agent.client`，移植到当前的 fib：
+  基于 fib WebSocket、流上带信用额度的 mesh，基于 fib 异步客户端、双向流式的 node 代理，阻塞工作放在有界池中，
+  基于 `app/console` 的网页，每次修改都写回；去掉 agenthub 的状态文件、锁和密码。
+- **完成标准**：含慢速、大体积和中途断开请求体的 e2e 测试在 fib 引擎上通过，含从 store 重启；Docker 环境的检查通过。
+- **涉及**：`agent`、`config`、`test/docker/agent`、`docs`。

@@ -1,0 +1,45 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/alice.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "client": {
+      "name": "alice",
+      "web_proxies": [
+        {
+          "name": "hub-1",
+          "listen": "0.0.0.0:7381",
+          "url": "ws://hub-1:7081/",
+          "password": "ws-pass-1234"
+        },
+        {
+          "name": "hub-2",
+          "listen": "0.0.0.0:7382",
+          "url": "ws://hub-2:7081/",
+          "password": "ws-pass-1234"
+        },
+        {
+          "name": "hub-1-bad",
+          "listen": "0.0.0.0:7389",
+          "url": "ws://hub-1:7081/",
+          "password": "not-the-ws-pass"
+        }
+      ],
+      "console": {
+        "address": "0.0.0.0:7280",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$.cXVOfB1FIHt2BxRjK2guulqgTlJ/SoHfCGYlSDJWJzHX1ItUgiKm"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/node-office.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "node": {
+      "name": "office",
+      "servers": [
+        {
+          "name": "hub-2",
+          "endpoints": [
+            {
+              "address": "quic://hub-2:7443"
+            }
+          ],
+          "password": "reg-pass-1234",
+          "body_password": "body-pass-1234",
+          "pool_size": 2,
+          "quic_insecure": true
+        },
+        {
+          "name": "hub-1",
+          "endpoints": [
+            {
+              "address": "hub-1:7000"
+            }
+          ],
+          "password": "reg-pass-1234",
+          "body_password": "body-pass-1234",
+          "pool_size": 2
+        }
+      ],
+      "services": [
+        {
+          "name": "echo",
+          "address": "dev-office:7",
+          "description": "echo service of dev-office"
+        },
+        {
+          "name": "http",
+          "address": "dev-office:80",
+          "description": "web server of dev-office"
+        }
+      ],
+      "meta": {
+        "site": "office"
+      },
+      "console": {
+        "address": "0.0.0.0:7180",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$DLXnyhB0faI8HA6UZ2IyTuxrJuGFEcxZPo/ior80uMwokJSUWI4XO"
+          }
+        ]
+      }
+    }
+  }
+}

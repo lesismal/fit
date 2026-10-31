@@ -1,0 +1,136 @@
+# The docker test environment of fit's tunnel roles; fit-tunnel-docker.sh
+# starts, stops and tests it.
+#
+#                 wan (hub-1, hub-2, nodes, clients, tester)
+#   dev-lab ── lan-lab ── node lab                    client alice ── tester
+#   dev-office ── lan-office ── node office           client bob
+#
+# Each instance is one fit running one role, tunnel.server, tunnel.node or
+# tunnel.client, from conf/NAME.json: a bootstrap config whose admin.store
+# keeps the config, encrypted, on a volume of the instance's own. The
+# devices are on internal networks only their node is on too: the clients
+# and the tester reach them through tunnels or not at all. hub-1, node lab
+# and client alice start with nothing but their console and are set up
+# through its pages' API, which writes into their config in the store;
+# hub-2, node office and client bob start from a full config.
+#
+# fit 隧道角色的 docker 测试环境；由 fit-tunnel-docker.sh 启动、停止和测试。
+# 每个实例是一个只运行一个角色（tunnel.server、tunnel.node 或 tunnel.client）
+# 的 fit，配置来自 conf/NAME.json：其 admin.store 把配置加密保存在实例自己的
+# 卷上。设备只在内部网络上，只有它们的节点也在那里。hub-1、节点 lab 和客户端
+# alice 启动时只有控制台，通过页面 API 配置，配置写回存储中的配置；hub-2、
+# 节点 office 和客户端 bob 从完整配置启动。
+
+name: ${FIT_TUNNEL_DOCKER_PROJECT:-fit-tunnel-test}
+
+x-fit: &fit
+  image: ${FIT_TUNNEL_DOCKER_IMAGE:-fit-tunnel-test:latest}
+  environment:
+    FIT_STORE_PASSWORD: store-pass-1234
+  volumes:
+    - ./conf:/conf:ro
+  networks: [wan]
+  init: true
+  stop_grace_period: 5s
+
+services:
+  hub-1:
+    <<: *fit
+    hostname: hub-1
+    command: ["run", "-c", "/conf/hub-1.json"]
+    volumes: [./conf:/conf:ro, hub-1:/data]
+    ports:
+      - "127.0.0.1:${HUB1_WEB_PORT:-27080}:7080"
+
+  hub-2:
+    <<: *fit
+    hostname: hub-2
+    command: ["run", "-c", "/conf/hub-2.json"]
+    volumes: [./conf:/conf:ro, hub-2:/data]
+    ports:
+      - "127.0.0.1:${HUB2_WEB_PORT:-27090}:7080"
+
+  node-lab:
+    <<: *fit
+    hostname: node-lab
+    command: ["run", "-c", "/conf/node-lab.json"]
+    volumes: [./conf:/conf:ro, node-lab:/data]
+    networks: [wan, lan-lab]
+    ports:
+      - "127.0.0.1:${NODE_LAB_WEB_PORT:-27180}:7180"
+
+  node-office:
+    <<: *fit
+    hostname: node-office
+    command: ["run", "-c", "/conf/node-office.json"]
+    volumes: [./conf:/conf:ro, node-office:/data]
+    networks: [wan, lan-office]
+    ports:
+      - "127.0.0.1:${NODE_OFFICE_WEB_PORT:-27190}:7180"
+
+  alice:
+    <<: *fit
+    hostname: alice
+    command: ["run", "-c", "/conf/alice.json"]
+    volumes: [./conf:/conf:ro, alice:/data]
+    ports:
+      - "127.0.0.1:${ALICE_WEB_PORT:-27280}:7280"
+      - "127.0.0.1:${ALICE_FORWARD_PORTS:-27301-27309}:7301-7309"
+      - "127.0.0.1:${ALICE_PROXY_PORTS:-27381-27382}:7381-7382"
+
+  bob:
+    <<: *fit
+    hostname: bob
+    command: ["run", "-c", "/conf/bob.json"]
+    volumes: [./conf:/conf:ro, bob:/data]
+    ports:
+      - "127.0.0.1:${BOB_WEB_PORT:-27290}:7280"
+
+  dev-lab:
+    <<: *fit
+    hostname: dev-lab
+    entrypoint: ["device.sh"]
+    command: []
+    environment: {DEVICE_NAME: dev-lab}
+    volumes: []
+    networks: [lan-lab]
+
+  dev-office:
+    <<: *fit
+    hostname: dev-office
+    entrypoint: ["device.sh"]
+    command: []
+    environment: {DEVICE_NAME: dev-office}
+    volumes: []
+    networks: [lan-office]
+
+  # The tester runs only when asked: docker compose run --rm tester run.sh.
+  # 测试容器只在需要时运行：docker compose run --rm tester run.sh。
+  tester:
+    <<: *fit
+    hostname: tester
+    profiles: [test]
+    entrypoint: ["run.sh"]
+    command: ["all"]
+    environment:
+      HUB_PASSWORD: reg-pass-1234
+      BODY_PASSWORD: body-pass-1234
+      WS_PASSWORD: ws-pass-1234
+      FIT_STORE_PASSWORD: store-pass-1234
+    volumes: [./conf:/conf:ro, tester:/state]
+
+networks:
+  wan: {}
+  lan-lab:
+    internal: true
+  lan-office:
+    internal: true
+
+volumes:
+  hub-1: {}
+  hub-2: {}
+  node-lab: {}
+  node-office: {}
+  alice: {}
+  bob: {}
+  tester: {}

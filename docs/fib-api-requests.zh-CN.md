@@ -62,6 +62,9 @@
 | A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已实现，fib `4febcdf5`（本地，未推送） | 1, 9 | I85（P2P） |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 | A51 | 包设备的描述符在 poller 上读写 | 已提出 | 1, 8, 11 | I95（VPN） |
+| A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已提出 | 10, 13 | agent（028） |
+| A53 | WebSocket 连接发送的背压 | 已提出 | 8, 9, 11 | agent、tunnel（028） |
+| A54 | 引擎 UDP binding 上的原始 QUIC 端点 | 已提出 | 15 | tunnel（028） |
 
 ## 证据
 
@@ -1183,3 +1186,69 @@ func (e *Engine) AttachPacketFD(fd int, maxPacket int, handler Handler) (*Connec
 Wintun 没有这样的描述符，不需要。
 
 **fit 的用法。** `vpn/tun` 打开设备、完成设置后挂上去；节点的 handler 路由 `OnData` 交给它的每个包，并用 `Send` 发送对端的包。
+
+## A52：WebSocket 连接的底层传输：强制关闭与其地址
+
+**状态。** 2026-11-01 为 agent 的角色提出（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+
+**问题。** agent 的互联链路是 fib 的 WebSocket。对端已死，或积压到 ping 等了 30 秒仍没有 pong 的链路，必须立即断开。
+`Connection.Close` 发送关闭帧，它排在所有未发送内容之后，所以一个什么也不读的对端，其套接字要等到引擎的写队列上限或内核放弃才关闭。
+`websocket.Connection` 没有暴露其下的 `fib.Connection`，没有跳过关闭握手的关闭，拨号方也拿不到对端地址。
+
+**证据。** `agent/internal/wire/conn.go`：监听方用包装 WebSocket 处理器的方式，按对端地址记录其绑定的 `fib.Connection`，
+再按升级请求的 `RemoteAddr` 找到链路的连接；拨号方经 `DialerConfig.Dial` 拿到自己的 `fib.Connection`。两者都是符合规则的临时做法，
+由本请求取代。
+
+**建议的 API。**
+
+```go
+// Abort 立即关闭连接，不做关闭握手，丢弃仍在排队的内容；随后以 err 调用 OnClose。
+func (c *Connection) Abort(err error)
+
+// RemoteAddr 返回对端地址，两侧都可用。
+func (c *Connection) RemoteAddr() net.Addr
+```
+
+**fit 的用法。** `wire.Conn.forceClose` 在两侧都调用 `Abort`，监听方的映射与拨号方的钩子随之去掉。
+
+## A53：WebSocket 连接发送的背压
+
+**状态。** 2026-11-01 为 agent 的角色提出（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+
+**问题。** `websocket.Connection.WriteMessage` 把给它的内容全部排队，从不告诉调用方积压了多少，处理器也无法暂停连接的读取。
+agent 的 wire 协议用额度窗口（256 KiB）约束每个流，所以链路的队列以其各流的窗口与应答为界，但链路自身的队列与填充它的生产者之间没有联系：
+读得慢的对端只能由排在其队列之后的 ping 发现（默认 30 秒），在此之前队列会增长到引擎的 `MaxWriteQueueBytes`。
+
+**证据。** `agent/internal/wire/conn.go` 与 `session.go`：`ConnConfig.SlowTimeout` 关闭 ping 等待过久的链路；
+流以额度控制自己的节奏（`Stream.TrySend`、`OnCredit`、`Release`），而调用的应答与推送不等待任何东西。
+
+**建议的 API。** 与 `fibhttp.Context` 对响应提供的相同（A2）：
+
+```go
+// WriteMessageNoWait 与 WriteMessage 一样排队一条消息，并报告排队的内容是否已超过连接的上限。
+func (c *Connection) WriteMessageNoWait(op Opcode, payload []byte) (above bool, err error)
+// OnWritable 在队列降到上限的一半时运行一次 fn，连接结束时以错误运行；已低于时返回 false。
+func (c *Connection) OnWritable(fn func(error)) bool
+// HoldReads 暂停、恢复读取该连接。
+func (c *Connection) HoldReads(hold bool)
+```
+
+**fit 的用法。** 超过上限的链路停止向为其供数据的流归还额度，并暂停读取，直到 `OnWritable`；慢连接超时仍作为最后的手段。tunnel 的 Web 代理和控制台 socket 为了能用 `HoldReads` 和 `NotifyOutput`，在 `fib.Connection` 上自己做 WebSocket
+分帧（`tunnel/internal/transport/ws`），届时改用 fib 的 `websocket.Connection`。
+
+## A54：引擎 UDP binding 上的原始 QUIC 端点
+
+**状态。** 2026-11-01 为 tunnel 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+
+**问题。** tunnel 的链路可以走 QUIC，每条链路一个双向流，使用自己的 ALPN，而不是 HTTP/3。fib 的
+`http3.ServerHandler` 只为 HTTP/3 把 QUIC 放到 UDP binding 上；其他协议使用 `http3/quic` 时，调用者必须自己按
+connection ID 把每个数据报路由到连接、限制进行中的握手、回收连接及其 ID，并驱动连接的定时器。
+
+**依据。** `tunnel/internal/transport/quic/listen.go` 和 `conn.go` 在引擎的 UDP binding 上做了这些，重复了
+`http3.ServerHandler` 的一部分。它们遵守规则，是本请求将取代的临时方案；迁移地址的客户端不会被跟随（其连接空闲超时）。
+
+**建议的 API。** 一个作为 UDP binding 的 `fib.Handler` 的 `quic.Endpoint`，接受 `*tls.Config` 和 `quic.Config`，
+用 `OnConn(func(*quic.Conn))` 接收每个连接，客户端用 `Dial(engine, addr, tlsConfig, config, done)`；分流、握手限制、
+迁移和定时器都在其中，与 `http3.ServerHandler` 共用。
+
+**fit 如何使用。** tunnel 的 QUIC 监听和拨号只需在其上写几行，并能跟随迁移的客户端。

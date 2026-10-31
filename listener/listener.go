@@ -170,6 +170,11 @@ func Start(rt *runtime.Runtime) (*Server, error) {
 // watermark and max_pending_bytes caused.
 func (s *Server) Stats() fib.Stats { return s.engine.Stats() }
 
+// Engine returns the listeners' engine, which the agent's and the tunnel's
+// roles add their own bindings to and dial on. Their bindings are theirs to
+// remove; the server's Shutdown ends their connections with the rest.
+func (s *Server) Engine() *fib.Engine { return s.engine }
+
 // Settings returns the listeners' engine's effective configuration: the
 // values it runs with after fib has filled in and sized what the config left
 // out. It is what the startup log prints.

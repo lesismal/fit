@@ -59,12 +59,14 @@ const (
 	LoggerPlugin    = "plugin"
 	LoggerFastCGI   = "fastcgi"
 	LoggerEngine    = "engine"
+	LoggerAgent     = "agent"
+	LoggerTunnel    = "tunnel"
 )
 
 // Loggers are the names of fit's loggers, which Log.Levels and Log.Loggers
 // may name.
 var Loggers = []string{LoggerServer, LoggerAdmin, LoggerTLS, LoggerProvider, LoggerTelemetry, LoggerAccessLog,
-	LoggerPlugin, LoggerFastCGI, LoggerEngine}
+	LoggerPlugin, LoggerFastCGI, LoggerEngine, LoggerAgent, LoggerTunnel}
 
 // LevelOf returns the least level written of logger: the one Loggers or
 // Levels gives it, or Level, or info.

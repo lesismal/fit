@@ -28,8 +28,9 @@ Flags:
 	              root package is imported, and registers its modules.
 	-without pkg  leave out a package fit's build imports, repeated for each:
 	              github.com/lesismal/fit/modules/standard (every handler and
-	              middleware) or github.com/lesismal/fit/provider/standard
-	              (every provider)
+	              middleware), github.com/lesismal/fit/provider/standard
+	              (every provider) or github.com/lesismal/fit/app/standard
+	              (the agent's and the tunnel's roles)
 	-fit v        the fit to build on: a version of github.com/lesismal/fit,
 	              or a directory holding its source; this fit's own version
 	              when left out

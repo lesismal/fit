@@ -1,0 +1,25 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/hub-1.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "server": {
+      "name": "hub-1",
+      "console": {
+        "address": "0.0.0.0:7080",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$4eNF3Pf0e/vdM5MNUiD29.I9xeU4qjasUFrLIOjXDsbVZEQNGJV6u"
+          }
+        ]
+      }
+    }
+  }
+}

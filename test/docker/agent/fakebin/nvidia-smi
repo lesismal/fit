@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fake nvidia-smi for the docker test: one GPU for queries; setting commands print what they were asked to do.
+case "$1" in
+  --query-gpu=*)
+    echo "0, Fake GPU, GPU-00000000-0000-0000-0000-000000000000, 550.00, 24576, 1024, 5, 40, 50.00, 300.00, 100.00, 350.00, 300.00, 1500, 9000, 2100, 10000, 30, P0, Enabled, Default" ;;
+  "") echo "Fake NVIDIA-SMI 550.00   Driver Version: 550.00"; echo "|   0  Fake GPU   |" ;;
+  *) echo "fake nvidia-smi: $*" ;;
+esac

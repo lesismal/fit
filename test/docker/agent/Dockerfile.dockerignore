@@ -1,0 +1,17 @@
+# The build context is the repository root; this file replaces its
+# .dockerignore (which leaves test/ out) for this Dockerfile. Keep VCS data,
+# local state, docs and build output out of it.
+.git
+.github
+.claude
+bin
+dist
+bench
+docs
+examples
+deploy
+*.log
+*.test
+*.md
+test
+!test/docker/agent

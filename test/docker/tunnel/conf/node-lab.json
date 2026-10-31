@@ -1,0 +1,25 @@
+{
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "store": {
+      "path": "/data/node-lab.store",
+      "password_env": "FIT_STORE_PASSWORD"
+    }
+  },
+  "tunnel": {
+    "node": {
+      "name": "lab",
+      "console": {
+        "address": "0.0.0.0:7180",
+        "cert_file": "/certs/console.crt",
+        "key_file": "/certs/console.key",
+        "users": [
+          {
+            "username": "admin",
+            "password_hash": "$2a$08$wWEdr1Qz4eEFwoTgjN.aeuVkts64dq5qU71OBQ0eWAd.EQadheVOC"
+          }
+        ]
+      }
+    }
+  }
+}

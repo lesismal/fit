@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 
+	_ "github.com/lesismal/fit/app/standard"
 	"github.com/lesismal/fit/cli"
 	_ "github.com/lesismal/fit/modules/standard"
 	_ "github.com/lesismal/fit/provider/standard"

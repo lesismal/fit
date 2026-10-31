@@ -22,6 +22,7 @@ import (
 
 	fib "github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/logs"
@@ -213,6 +214,9 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	}
 	g.refs.Store(1)
 	var errs config.Errors
+	if err := app.Check(c); err != nil {
+		errs = append(errs, config.AsErrors(err)...)
+	}
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
 		key, files, keyed := upstreamKey(u)

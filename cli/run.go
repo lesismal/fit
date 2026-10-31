@@ -16,6 +16,7 @@ import (
 
 	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/admin"
+	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/logs"
@@ -211,6 +212,20 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	if boot != nil {
 		configs.UseStore(boot.admin, boot.st.Write)
 	}
+	// The agent's and the tunnel's roles run on the listeners' engine, and
+	// write what their pages change back into the config through configs.
+	apps := app.NewManager(s.Engine(), env.Engine, root, configs.EditMember)
+	defer apps.Stop(context.Background()) // stopped already, unless serve fails before shutdown
+	if err := apps.Apply(c); err != nil {
+		fmt.Fprintf(stderr, "fit run: %v\n", err)
+		apps.Stop(context.Background())
+		_ = s.Close()
+		return 1
+	}
+	configs.UseApps(apps)
+	for _, id := range apps.Running() {
+		fmt.Fprintf(stdout, "fit: running %s\n", id)
+	}
 	var as *admin.Server
 	if c.Admin != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
@@ -354,6 +369,8 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	if as != nil {
 		_ = as.Shutdown(sctx)
 	}
+	// Then the roles, whose bindings are on the listeners' engine.
+	apps.Stop(sctx)
 	if err := s.Shutdown(sctx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			fmt.Fprintf(stderr, "fit run: shutdown took longer than %s; connections still open were closed\n", *grace)
