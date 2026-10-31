@@ -61,6 +61,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A46 | A body filter whose work is done elsewhere | done, fib `dbe5c274` (`main`) | 1, 4, 5, 8 | I81 |
 | A47 | A streamed request body passed on without needless copies | done, fib `309a6cd4` (`main`) | 1, 5, 8 | W4 |
 | A48 | A whole response's body taken from the pool, and a buffered request body not copied | done, fib `46827ea7`, HTTP/2 `d3707ca7` (`main`) | 1, 5, 8 | W1 |
+| A49 | A UDP peer opened toward an address on a listener's socket | requested | 1, 9 | I85 (P2P) |
+| A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 
 ## Evidence
 
@@ -1481,3 +1483,55 @@ back, which still goes to the collector (the stream, at 1024 bytes, has no room 
 buffer). W1 at 500 over h2 against `6bd106d9`: +1.3% (28.63 against 29.00 µs a request),
 allocation 677 from 850 MB/s, collections 25% fewer, the collector's CPU 1.36% from 1.65%;
 HTTP/1.1 within noise.
+
+## A49: A UDP peer opened toward an address on a listener's socket
+
+**Status.** Requested on 2026-11-01, for fit's P2P milestone ([decision 025](decisions/025-p2p.md)).
+
+**Problem.** A UDP listener's peer becomes a connection only once it has sent a datagram, and a
+dialed UDP connection has a socket, and so a local port, of its own. Hole punching needs the
+opposite: a socket bound once, whose port the NAT has mapped and a STUN server has seen, sending
+first to an address that has sent nothing yet, then hearing from it on the same port. A TURN
+server needs the same from each allocation's relayed address, which sends to the peers its client
+permits, whether or not they have written first. Neither can be done with fib's API: a second
+socket is a second mapping, and the hole it punches is not the one the peer was told about.
+
+**Evidence.** ICE (RFC 8445, section 7.2) sends its connectivity checks from the base of each
+candidate, the very socket the candidate was gathered on, and TURN (RFC 8656, section 11) relays
+a Send indication's data from the allocation's relayed transport address.
+
+**Suggested API.** Open a peer on one of a binding's UDP sockets toward an address:
+
+```go
+// OpenUDPPeer returns the connection for addr on binding i's UDP socket (the
+// one bound to local, or the binding's only one when local is not valid),
+// opening it with handler if the address has not sent yet. Its datagrams then
+// go to it as any peer's do, and its Send sends from the listener's socket.
+func (e *Engine) OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler) (*Connection, error)
+```
+
+The peer is the listener's like any other: the binding's idle timeout, `SetUDPIdleTimeout`,
+`NotifyWritable` and `OnClose` apply, and a peer already open for the address is returned as it
+is. Opening it does not block and sends nothing.
+
+**How fit would use it.** `p2p/ice` gathers its host candidates on one binding and opens a peer
+for each remote candidate it checks; `p2p/turn` binds each allocation's relayed address as a
+binding on port 0 and opens a peer for each permission's address as data comes to be sent to it.
+
+## A50: QUIC DATAGRAM frames
+
+**Status.** Requested on 2026-11-01, for fit's P2P milestone ([decision 025](decisions/025-p2p.md)).
+
+**Problem.** A UDP flow carried over QUIC must stay unreliable and unordered: on a stream, one
+lost packet holds up every datagram behind it, and a game or a voice call's late datagram is worse
+than a lost one. fib's `quic` has no DATAGRAM frame (RFC 9221).
+
+**Suggested API.** `Config.MaxDatagramFrameSize` advertises the `max_datagram_frame_size`
+transport parameter; `Conn.SendDatagram(b []byte) error` queues one DATAGRAM frame, which is
+never retransmitted, and is dropped (with an error) when it does not fit the peer's limit or the
+connection's window; a `DatagramHandler` with `OnDatagram(c *Conn, data []byte)` receives them.
+HTTP/3 datagrams (RFC 9297) and CONNECT-UDP (RFC 9298) can build on it later.
+
+**How fit would use it.** `p2p` sends each UDP flow's datagrams as DATAGRAM frames with a varint
+flow ID in front.
+

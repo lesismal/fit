@@ -82,6 +82,10 @@ should touch as few of these as it can.
 | `middleware/...` | rewrite, headers, limits, auth, compression, cache, retry, breaker |
 | `upstream` | upstream pools, load balancing, passive and active health |
 | `l4` | TCP and UDP proxying, SNI routing, PROXY protocol |
+| `p2p/stun` | STUN messages (RFC 8489), the STUN server and client |
+| `p2p/turn` | the TURN server and client (RFC 8656) |
+| `p2p/ice` | the ICE agent (RFC 8445) |
+| `p2p` | tunnels over a connected pair, signaling, the config's P2P apps |
 | `tlsmgr` | the certificate manager, storage, ACME, OCSP |
 | `admin` | the Admin API and config versions |
 | `provider/...` | file, docker, kubernetes, consul, etcd |
@@ -208,6 +212,17 @@ Status: `todo`, `doing` or `done`.
 | I81 | WASM III: Proxy-Wasm's response callbacks | I72 | done |
 | I82 | fit's own log: loggers and levels; nginx's and Caddy's logs converted | I21, I79 | done |
 | I83 | fit's log in fib's formats; loggers of their own; the access log's formats | I82 | done |
+| **P2P** | | | |
+| I84 | STUN messages and the STUN server | I51 | done |
+| I85 | A UDP peer opened toward an address (A49, in fib) | — | todo |
+| I86 | The STUN client and NAT behaviour | I84, I85 | todo |
+| I87 | The TURN server | I84, I85 | todo |
+| I88 | The TURN client | I86, I87 | todo |
+| I89 | The ICE agent | I86, I88 | todo |
+| I90 | QUIC DATAGRAM frames (A50, in fib) | — | todo |
+| I91 | Tunnels over a connected pair | I89, I90 | todo |
+| I92 | Signaling and the config's P2P apps | I87, I91 | todo |
+| I93 | P2P interop and exit tests | I92 | todo |
 
 ## M0, foundations
 
@@ -1093,3 +1108,108 @@ Left by I31, which keeps every name taken on demand until a restart; found when 
 
 The external security review in the roadmap's 1.0 section is not an iteration: it is arranged
 outside the code once I77 is done.
+
+## P2P, NAT traversal
+
+Two hosts behind NAT connect directly through holes punched with ICE, or through a TURN relay where
+no hole can be punched, and carry TCP and UDP services between them. The design is
+[decision 025](decisions/025-p2p.md): STUN, TURN and ICE built in fit on fib, interoperable with
+other agents, and QUIC over the selected pair.
+
+### I84 STUN messages and the STUN server
+
+- **Do**: package `p2p/stun`: STUN messages (RFC 8489) parsed without allocating and built by
+  appending; the attributes ICE and TURN need, with (XOR-)MAPPED-ADDRESS, USERNAME, REALM, NONCE,
+  ERROR-CODE, SOFTWARE, MESSAGE-INTEGRITY and MESSAGE-INTEGRITY-SHA256 (short- and long-term keys),
+  FINGERPRINT and UNKNOWN-ATTRIBUTES; RFC 7983's test for a STUN datagram; a STUN server as a fib
+  handler that answers Binding requests over UDP and TCP.
+- **Done when**: RFC 5769's test vectors parse and check, messages round-trip, malformed ones are
+  refused (fuzzed), a Binding request over UDP and TCP is answered with the address it came from,
+  and an unknown comprehension-required attribute gets a 420.
+- **Touches**: `p2p/stun`, `docs`.
+
+### I85 A UDP peer opened toward an address (A49, in fib)
+
+- **Do**: [A49](fib-api-requests.md#a49-a-udp-peer-opened-toward-an-address-on-a-listeners-socket)
+  in fib, by fib's standards; fit moves to that commit.
+- **Done when**: a peer opened toward an address sends first from the listener's port and hears the
+  answer; it times out, closes and is counted as other peers are, on every backend.
+- **Touches**: fib's engine; `go.mod`.
+
+### I86 The STUN client and NAT behaviour
+
+- **Do**: Binding transactions on a fib UDP peer, retransmitted as RFC 8489 section 6.2.1 says (RTO
+  doubling, Rc and Rm), over UDP and TCP; the server-reflexive address; RFC 5780's mapping and
+  filtering tests, for the logs and for ICE's choice of candidates; the server answers
+  OTHER-ADDRESS and CHANGE-REQUEST when it has a second address.
+- **Done when**: transactions time out and retransmit on schedule with a fake clock, a lost answer
+  is retried, and the NAT tests tell endpoint-independent from address-dependent mapping in tests.
+- **Touches**: `p2p/stun`.
+
+### I87 The TURN server
+
+- **Do**: package `p2p/turn`: allocations over UDP and TCP to the server, relayed over UDP (RFC
+  8656); long-term credentials and coturn's time-limited ones; Refresh, CreatePermission,
+  ChannelBind, Send and Data indications, ChannelData; lifetimes and expiry; quotas of allocations
+  in all and per user, permissions and channels per allocation, and relayed bytes per second;
+  addresses that may not be relayed to (loopback, private ranges unless allowed).
+- **Done when**: each method's success and error answers match the RFC, data goes both ways
+  through indications and channels, expired allocations, permissions and channels stop relaying,
+  quotas refuse with 486 and 508, and a client cut midway frees its allocation.
+- **Touches**: `p2p/turn`, `p2p/stun`.
+
+### I88 The TURN client
+
+- **Do**: allocate, refresh, create permissions and bind channels from a fib UDP peer or TCP
+  connection, with the 401/438 nonce dance; data to and from peers through the allocation, by
+  channel once bound.
+- **Done when**: the client works against fit's server and keeps an allocation alive past its
+  lifetime; a stale nonce is retried.
+- **Touches**: `p2p/turn`.
+
+### I89 The ICE agent
+
+- **Do**: package `p2p/ice`: host, server-reflexive and relayed candidates on one socket per
+  component; priorities, pairs and the checklist (RFC 8445), with the controlling and controlled
+  roles and their conflicts; regular nomination; trickle (RFC 8838); consent freshness (RFC 7675);
+  candidates in RFC 8839's syntax; a pair's path as a `quic.PacketConn`. Limits on candidates and
+  pairs; timers on fib's.
+- **Done when**: two agents connect over loopback, through a simulated NAT of each kind and through
+  a TURN relay when the NATs are symmetric; a lost consent fails the pair; nothing blocks a worker.
+- **Touches**: `p2p/ice`.
+
+### I90 QUIC DATAGRAM frames (A50, in fib)
+
+- **Do**: [A50](fib-api-requests.md#a50-quic-datagram-frames) in fib; fit moves to that commit.
+- **Done when**: datagrams go both ways, are never retransmitted, and are refused past the peer's
+  limit.
+- **Touches**: fib's `http3/quic`; `go.mod`.
+
+### I91 Tunnels over a connected pair
+
+- **Do**: QUIC over an ICE pair, both peers authenticated by certificate fingerprints; a TCP
+  connection to a service as a bidirectional stream, a UDP flow as DATAGRAM frames with a flow ID;
+  backpressure both ways (rule 8); limits on streams and flows; a path change from relayed to
+  direct carried by QUIC's migration.
+- **Done when**: TCP and UDP services are reached through the tunnel with slow peers, large
+  transfers and cuts midway (rule 13), direct and relayed.
+- **Touches**: `p2p`.
+
+### I92 Signaling and the config's P2P apps
+
+- **Do**: a signaling endpoint on the rendezvous fit that pairs peers by name and trades their
+  credentials, fingerprints and candidates (trickled), with each peer authenticated; the config's
+  `stun` and `turn` servers on listeners, and `p2p` peers that expose or reach services; schema,
+  Admin API, metrics; the friendly formats' forms.
+- **Done when**: two fit processes behind simulated NATs reach each other's services through a
+  third, set up from config alone, and reload without dropping open tunnels.
+- **Touches**: `p2p`, `config`, `schema`, `listener`, `runtime`, `admin`, `observe`, `test/e2e`,
+  `docs`.
+
+### I93 P2P interop and exit tests
+
+- **Do**: fit's STUN and TURN servers against coturn's and pion's clients, fit's agent against
+  pion and libjuice; throughput and latency through a direct and a relayed tunnel on the benchmark
+  host.
+- **Done when**: the interop runs pass in CI or a recorded run, and the measurements are committed.
+- **Touches**: `test/e2e`, `bench`, `docs`.

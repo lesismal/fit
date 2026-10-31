@@ -327,4 +327,5 @@ jobs:
           ./adapter/fitconf FuzzAdapt
           ./adapter/yaml FuzzAdapt
           ./middleware/cache FuzzDirectives
+          ./p2p/stun FuzzParse
           TARGETS

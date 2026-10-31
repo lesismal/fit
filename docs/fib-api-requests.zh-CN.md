@@ -59,6 +59,8 @@
 | A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
 | A47 | 流式请求体转交时不必要的拷贝 | 已完成，fib `309a6cd4`（`main`） | 1, 5, 8 | W4 |
 | A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`，HTTP/2 `d3707ca7`（`main`） | 1, 5, 8 | W1 |
+| A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已提出 | 1, 9 | I85（P2P） |
+| A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 
 ## 证据
 
@@ -1105,3 +1107,44 @@ body，并说明它是否是这样的缓冲；`Context.WriteResponseOwned` 发�
 给请求组帧的地方。HTTP/2 分帧时会拷贝 body，所以 stream 在 `respond` 返回前就把缓冲还回池里；只有被窗口挡住的尾部仍交给垃圾
 回收（stream 正好 1024 字节，没有地方记住这块缓冲）。W1 在 500 在途、走 h2，对照 `6bd106d9`：+1.3%（每请求 29.00 降到
 28.63 µs），分配从每秒 850 降到 677 MB，回收次数少 25%，回收占用的 CPU 从 1.65% 降到 1.36%；HTTP/1.1 在噪声内。
+
+## A49：在监听 socket 上朝某地址打开 UDP 对端
+
+**状态。** 2026-11-01 提出，用于 fit 的 P2P 里程碑（[决定 025](decisions/025-p2p.zh-CN.md)）。
+
+**问题。** UDP 监听的对端要先发来一个数据报才成为连接，而拨出的 UDP 连接有自己的 socket，也就有自己的本地端口。打洞需要
+的正相反：一个只绑定一次的 socket，它的端口已被 NAT 映射、也被 STUN 服务器看到过，先向一个还没发过任何东西的地址发送，
+再在同一端口上收到对方的数据。TURN 服务器对每个 allocation 的中继地址也有同样的需要：它要向客户端许可的对端发送，不论
+对端是否先发过。fib 的 API 做不到这两点：第二个 socket 就是第二个映射，它打出的洞不是告诉对端的那个。
+
+**依据。** ICE（RFC 8445 第 7.2 节）从每个候选的 base，也就是收集该候选的那个 socket，发出连通性检查；TURN（RFC 8656
+第 11 节）从 allocation 的中继传输地址转发 Send indication 的数据。
+
+**建议的 API。** 在 binding 的某个 UDP socket 上朝一个地址打开对端：
+
+```go
+// OpenUDPPeer 返回 binding i 的 UDP socket（绑定在 local 上的那个；local 无效时为该 binding 唯一的那个）上
+// addr 的连接；若该地址还没发来过数据，就用 handler 打开它。之后它的数据报像其他对端一样交给它，它的
+// Send 从监听 socket 发出。
+func (e *Engine) OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler) (*Connection, error)
+```
+
+这个对端与监听的其他对端一样：binding 的空闲超时、`SetUDPIdleTimeout`、`NotifyWritable` 和 `OnClose` 都适用；该地址已有
+对端时原样返回。打开时不阻塞，也不发送任何东西。
+
+**fit 的用法。** `p2p/ice` 在一个 binding 上收集主机候选，为它检查的每个远端候选打开一个对端；`p2p/turn` 把每个
+allocation 的中继地址绑定为端口 0 的 binding，在有数据要发给某个 permission 的地址时为它打开对端。
+
+## A50：QUIC DATAGRAM 帧
+
+**状态。** 2026-11-01 提出，用于 fit 的 P2P 里程碑（[决定 025](decisions/025-p2p.zh-CN.md)）。
+
+**问题。** 经 QUIC 承载的 UDP 流必须保持不可靠、无序：放在 stream 上时，丢一个包会卡住其后所有数据报，而对游戏或语音
+通话来说，迟到的数据报比丢掉的更糟。fib 的 `quic` 没有 DATAGRAM 帧（RFC 9221）。
+
+**建议的 API。** `Config.MaxDatagramFrameSize` 通告 `max_datagram_frame_size` 传输参数；`Conn.SendDatagram(b []byte) error`
+排入一个 DATAGRAM 帧，它从不重传，超出对端上限或连接窗口时丢弃（并返回错误）；带 `OnDatagram(c *Conn, data []byte)` 的
+`DatagramHandler` 接收它们。HTTP/3 datagram（RFC 9297）和 CONNECT-UDP（RFC 9298）以后可以建立在它之上。
+
+**fit 的用法。** `p2p` 把每个 UDP 流的数据报作为带 varint 流 ID 前缀的 DATAGRAM 帧发送。
+

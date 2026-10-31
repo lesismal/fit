@@ -72,6 +72,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `middleware/...` | 重写、头处理、限制、认证、压缩、缓存、重试、熔断 |
 | `upstream` | 上游连接池、负载均衡、被动和主动健康检查 |
 | `l4` | TCP 和 UDP 代理、SNI 分流、PROXY protocol |
+| `p2p/stun` | STUN 消息（RFC 8489）、STUN 服务端和客户端 |
+| `p2p/turn` | TURN 服务端和客户端（RFC 8656） |
+| `p2p/ice` | ICE agent（RFC 8445） |
+| `p2p` | 连通候选对上的隧道、信令、配置里的 P2P 应用 |
 | `tlsmgr` | 证书管理、存储、ACME、OCSP |
 | `admin` | Admin API 和配置版本 |
 | `provider/...` | file、docker、kubernetes、consul、etcd |
@@ -198,6 +202,17 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I81 | WASM III：Proxy-Wasm 的响应回调 | I72 | done |
 | I82 | fit 自身的日志：logger 与级别；转换 nginx 和 Caddy 的日志配置 | I21、I79 | done |
 | I83 | fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式 | I82 | done |
+| **P2P** | | | |
+| I84 | STUN 消息与 STUN 服务器 | I51 | done |
+| I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | todo |
+| I86 | STUN 客户端与 NAT 行为 | I84, I85 | todo |
+| I87 | TURN 服务器 | I84, I85 | todo |
+| I88 | TURN 客户端 | I86, I87 | todo |
+| I89 | ICE agent | I86, I88 | todo |
+| I90 | QUIC DATAGRAM 帧（A50，在 fib 中） | — | todo |
+| I91 | 连通候选对上的隧道 | I89, I90 | todo |
+| I92 | 信令与配置里的 P2P 应用 | I87, I91 | todo |
+| I93 | P2P 互通与收尾测试 | I92 | todo |
 
 ## M0 基础
 
@@ -963,3 +978,85 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   `docs`；fib 的 `log`（fib `185658f1`、`33a039f1`）。
 
 路线图 1.0 中的外部安全审计不是一个迭代：它在 I77 完成后于代码之外安排。
+
+## P2P 与 NAT 穿透
+
+两台在 NAT 后面的主机通过 ICE 打出的洞直接相连，打不出洞时经由 TURN 中继，在它们之间承载 TCP 和 UDP 服务。设计见
+[决定 025](decisions/025-p2p.zh-CN.md)：STUN、TURN 和 ICE 由 fit 在 fib 上实现，可与其他实现互通，选中的候选对上跑 QUIC。
+
+### I84 STUN 消息与 STUN 服务器
+
+- **做**：`p2p/stun` 包：STUN 消息（RFC 8489）解析不分配内存、构造采用追加；ICE 和 TURN 需要的属性，包括
+  (XOR-)MAPPED-ADDRESS、USERNAME、REALM、NONCE、ERROR-CODE、SOFTWARE、MESSAGE-INTEGRITY 和 MESSAGE-INTEGRITY-SHA256
+  （短期和长期密钥）、FINGERPRINT 和 UNKNOWN-ATTRIBUTES；RFC 7983 判断 STUN 数据报的方法；作为 fib handler 的 STUN 服务器，
+  在 UDP 和 TCP 上应答 Binding 请求。
+- **完成标准**：RFC 5769 的测试向量能解析并校验通过，消息能往返，畸形消息被拒绝（有模糊测试），UDP 和 TCP 上的 Binding
+  请求得到其来源地址的应答，未知的必须理解属性得到 420。
+- **涉及**：`p2p/stun`、`docs`。
+
+### I85 朝某地址打开 UDP 对端（A49，在 fib 中）
+
+- **做**：在 fib 中按 fib 的标准实现 [A49](fib-api-requests.zh-CN.md#a49在监听-socket-上朝某地址打开-udp-对端)；fit 升级到
+  那个提交。
+- **完成标准**：朝某地址打开的对端从监听端口先发出数据并收到应答；它与其他对端一样超时、关闭和计数，在所有后端上都是如此。
+- **涉及**：fib 的 engine；`go.mod`。
+
+### I86 STUN 客户端与 NAT 行为
+
+- **做**：在 fib UDP 对端上的 Binding 事务，按 RFC 8489 第 6.2.1 节重传（RTO 翻倍、Rc 和 Rm），UDP 和 TCP 都支持；
+  服务器反射地址；RFC 5780 的映射和过滤测试，用于日志和 ICE 选择候选；服务器有第二个地址时应答 OTHER-ADDRESS 和
+  CHANGE-REQUEST。
+- **完成标准**：用假时钟验证事务按计划超时和重传，丢失的应答会重试，NAT 测试在测试中能区分与端点无关和与地址相关的映射。
+- **涉及**：`p2p/stun`。
+
+### I87 TURN 服务器
+
+- **做**：`p2p/turn` 包：客户端经 UDP 和 TCP 到服务器的 allocation，经 UDP 中继（RFC 8656）；长期凭据和 coturn 的限时凭据；
+  Refresh、CreatePermission、ChannelBind、Send 和 Data indication、ChannelData；生存期与过期；allocation 总数和每用户数、
+  每个 allocation 的 permission 和 channel 数、每秒中继字节数的配额；禁止中继到的地址（回环，私有地址段除非允许）。
+- **完成标准**：每个方法的成功和错误应答符合 RFC，数据经 indication 和 channel 双向传输，过期的 allocation、permission 和
+  channel 停止中继，配额以 486 和 508 拒绝，中途断开的客户端会释放其 allocation。
+- **涉及**：`p2p/turn`、`p2p/stun`。
+
+### I88 TURN 客户端
+
+- **做**：从 fib UDP 对端或 TCP 连接上分配、刷新、创建 permission 和绑定 channel，处理 401/438 的 nonce 往返；经
+  allocation 与对端互发数据，绑定后走 channel。
+- **完成标准**：客户端与 fit 的服务器配合工作，使 allocation 存活超过其生存期；过期的 nonce 会重试。
+- **涉及**：`p2p/turn`。
+
+### I89 ICE agent
+
+- **做**：`p2p/ice` 包：每个组件一个 socket 上的主机、服务器反射和中继候选；优先级、候选对和检查表（RFC 8445），包括
+  controlling 和 controlled 角色及其冲突；常规提名；trickle（RFC 8838）；同意保鲜（RFC 7675）；RFC 8839 语法的候选；把候选对
+  的路径作为 `quic.PacketConn`。候选和候选对有上限；定时器用 fib 的。
+- **完成标准**：两个 agent 经回环、经每种模拟 NAT 相连，两端都是对称 NAT 时经 TURN 中继相连；失去同意会让候选对失败；
+  不阻塞任何 worker。
+- **涉及**：`p2p/ice`。
+
+### I90 QUIC DATAGRAM 帧（A50，在 fib 中）
+
+- **做**：在 fib 中实现 [A50](fib-api-requests.zh-CN.md#a50quic-datagram-帧)；fit 升级到那个提交。
+- **完成标准**：datagram 双向传输，从不重传，超出对端上限时被拒绝。
+- **涉及**：fib 的 `http3/quic`；`go.mod`。
+
+### I91 连通候选对上的隧道
+
+- **做**：ICE 候选对上的 QUIC，双方用证书指纹认证；到服务的 TCP 连接作为双向 stream，UDP 流作为带流 ID 的 DATAGRAM 帧；
+  双向背压（规则 8）；stream 和流的上限；从中继到直连的路径变化由 QUIC 的迁移承接。
+- **完成标准**：TCP 和 UDP 服务经隧道可达，覆盖慢对端、大传输和中途断开（规则 13），直连和中继都是如此。
+- **涉及**：`p2p`。
+
+### I92 信令与配置里的 P2P 应用
+
+- **做**：汇合点 fit 上的信令端点，按名字配对对端，交换它们的凭据、指纹和候选（trickle），每个对端都经过认证；配置里
+  监听上的 `stun` 和 `turn` 服务器，以及暴露或访问服务的 `p2p` 对端；schema、Admin API、指标；各友好格式中的写法。
+- **完成标准**：两个在模拟 NAT 后面的 fit 进程经第三个 fit 访问彼此的服务，只靠配置建立，重载时不中断已打开的隧道。
+- **涉及**：`p2p`、`config`、`schema`、`listener`、`runtime`、`admin`、`observe`、`test/e2e`、`docs`。
+
+### I93 P2P 互通与收尾测试
+
+- **做**：fit 的 STUN 和 TURN 服务器对 coturn 和 pion 的客户端，fit 的 agent 对 pion 和 libjuice；在压测机上测量直连和中继
+  隧道的吞吐和延迟。
+- **完成标准**：互通测试在 CI 或一次有记录的运行中通过，测量结果已提交。
+- **涉及**：`test/e2e`、`bench`、`docs`。
