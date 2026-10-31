@@ -39,6 +39,7 @@ jobs:
           - {pkg: ./adapter/yaml, target: FuzzAdapt}
           - {pkg: ./middleware/cache, target: FuzzDirectives}
           - {pkg: ./p2p/stun, target: FuzzParse}
+          - {pkg: ./vpn/packet, target: FuzzParse}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

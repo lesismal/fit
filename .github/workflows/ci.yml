@@ -328,4 +328,5 @@ jobs:
           ./adapter/yaml FuzzAdapt
           ./middleware/cache FuzzDirectives
           ./p2p/stun FuzzParse
+          ./vpn/packet FuzzParse
           TARGETS

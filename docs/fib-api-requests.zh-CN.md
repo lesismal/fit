@@ -61,6 +61,7 @@
 | A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`，HTTP/2 `d3707ca7`（`main`） | 1, 5, 8 | W1 |
 | A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已实现，fib `4febcdf5`（本地，未推送） | 1, 9 | I85（P2P） |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
+| A51 | 包设备的描述符在 poller 上读写 | 已提出 | 1, 8, 11 | I95（VPN） |
 
 ## 证据
 
@@ -1156,3 +1157,29 @@ allocation 的中继地址绑定为端口 0 的 binding，在有数据要发给�
 
 **fit 的用法。** `p2p` 把每个 UDP 流的数据报作为带 varint 流 ID 前缀的 DATAGRAM 帧发送。
 
+
+## A51：包设备的描述符在 poller 上读写
+
+**状态。** 2026-11-01 提出，用于 fit 的 VPN 里程碑（[决定 026](decisions/026-vpn.zh-CN.md)）。
+
+**问题。** TUN 设备是一个既不是 fib 接受的、也不是它拨出的 socket 的描述符：Linux 上是 `/dev/net/tun`，macOS 上是
+`PF_SYSTEM` socket，FreeBSD 上是 `/dev/tun`。每次读返回一个 IP 包，每次写接收一个，都可以设为非阻塞。fib 没有办法把这样的
+描述符放到它的 poller 上，fit 只能在自己的 goroutine 上阻塞在 `read` 里读它，违反规则 1，每个包还要付一次 goroutine 切换。
+
+**依据。** VPN 节点的 overlay 上每个包都要经过设备；wireguard-go 和 Tailscale 在专门的 goroutine 上读设备，并把这次切换列为
+它们要用 `IFF_VNET_HDR` offload 批量摊薄的成本。
+
+**建议的 API。** 把调用者打开并设为非阻塞的描述符挂到 engine 上：
+
+```go
+// AttachPacketFD 把 fd 放到 engine 的某个 poller 上，作为一个读写保持包边界
+// 的连接：每次 OnData 得到一个包，Send 把 data 作为一个包写出。设备拒绝的写
+// （EAGAIN 或 ENOBUFS）丢弃该包并计数，而不是排队。此后 fd 归该连接所有，
+// Close 时关闭。
+func (e *Engine) AttachPacketFD(fd int, maxPacket int, handler Handler) (*Connection, error)
+```
+
+它和其他连接一样：`OnClose`、`HoldReads`、统计、engine 的 `Close` 都适用。它没有远端地址。先做 epoll 和 kqueue；Windows 上
+Wintun 没有这样的描述符，不需要。
+
+**fit 的用法。** `vpn/tun` 打开设备、完成设置后挂上去；节点的 handler 路由 `OnData` 交给它的每个包，并用 `Send` 发送对端的包。

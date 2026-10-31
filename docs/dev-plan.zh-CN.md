@@ -76,6 +76,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `p2p/turn` | TURN 服务端和客户端（RFC 8656） |
 | `p2p/ice` | ICE agent（RFC 8445） |
 | `p2p` | 连通候选对上的隧道、信令、配置里的 P2P 应用 |
+| `vpn/packet` | IP 头与 overlay 路由表 |
+| `vpn/tun` | Linux、macOS、FreeBSD 和 Windows 上的 TUN 设备 |
+| `vpn/relay` | 中转协议、服务端，以及挑选传输的客户端 |
+| `vpn` | 节点、协调者、配置里的 VPN 应用 |
 | `tlsmgr` | 证书管理、存储、ACME、OCSP |
 | `admin` | Admin API 和配置版本 |
 | `provider/...` | file、docker、kubernetes、consul、etcd |
@@ -213,6 +217,17 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I91 | 连通候选对上的隧道 | I89, I90 | todo |
 | I92 | 信令与配置里的 P2P 应用 | I87, I91 | todo |
 | I93 | P2P 互通与收尾测试 | I92 | todo |
+| **VPN** | | | |
+| I94 | IP 包与 overlay 路由表 | — | done |
+| I95 | 包设备描述符挂到 poller（A51，在 fib 中） | — | todo |
+| I96 | Linux、macOS 和 FreeBSD 上的 TUN 设备 | I94, I95 | todo |
+| I97 | Windows 上基于 Wintun 的 TUN 设备 | I94 | todo |
+| I98 | 中转帧与中转服务端（WebSocket） | I94 | todo |
+| I99 | QUIC 和 HTTP/2 上的中转；按顺序选择传输并回退 | I90, I98, S04 | todo |
+| I100 | 协调者与 netmap | I92, I98 | todo |
+| I101 | 节点：TUN 与对端之间，直连或中转 | I91, I96, I99, I100 | todo |
+| I102 | VPN 配置、Admin API 与 dashboard 页面 | I101 | todo |
+| I103 | VPN 端到端与收尾测试 | I97, I102 | todo |
 
 ## M0 基础
 
@@ -1059,4 +1074,91 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 - **做**：fit 的 STUN 和 TURN 服务器对 coturn 和 pion 的客户端，fit 的 agent 对 pion 和 libjuice；在压测机上测量直连和中继
   隧道的吞吐和延迟。
 - **完成标准**：互通测试在 CI 或一次有记录的运行中通过，测量结果已提交。
+- **涉及**：`test/e2e`、`bench`、`docs`。
+
+## VPN：fit 节点组成的网络
+
+节点加入同一张 overlay 网络，各有一个地址和一块 TUN 网卡；IP 包在它们之间经 ICE 打出的洞直连，或经 server 节点中转，
+中转按配置的顺序经 QUIC、WebSocket 或 HTTP/2 到达并失败回退，也可以在 web 页面上把节点固定为某一种传输。设计见
+[决定 026](decisions/026-vpn.zh-CN.md)：建在 P2P 里程碑之上，IP 包作为端到端连接上的 QUIC DATAGRAM 帧，中转是这条连接的
+又一条路径。
+
+### I94 IP 包与 overlay 路由表
+
+- **做**：`vpn/packet` 包：不分配内存地读取 IPv4 和 IPv6 头（版本、长度、协议、源和目的地址），拒绝 TUN 不该交出的包；
+  overlay 路由表，由前缀及其所属节点一次建成，最长前缀查找既不分配也不加锁，并能检查对端的包是否来自它的前缀。
+- **完成标准**：两种版本的合法与畸形包能区分（有模糊测试），最长前缀优先，建表时拒绝重复和无效的路由，查找不分配内存。
+- **涉及**：`vpn/packet`、`docs`。
+
+### I95 包设备描述符挂到 poller（A51，在 fib 中）
+
+- **做**：在 fib 中按 fib 的标准实现 [A51](fib-api-requests.zh-CN.md#a51包设备的描述符在-poller-上读写)，覆盖 epoll 和 kqueue；fit 升级到那个提交。
+- **完成标准**：挂到 engine 上的描述符每次 `OnData` 交付一个包、每次 `Send` 发送一个包，设备满时丢弃并计数而不是无界排队，
+  随 engine 关闭；在每个 Unix 后端上用类似包设备的描述符（`SOCK_DGRAM` socketpair）测试。
+- **涉及**：fib 的 engine；`go.mod`。
+
+### I96 Linux、macOS 和 FreeBSD 上的 TUN 设备
+
+- **做**：`vpn/tun` 包：打开设备（`/dev/net/tun`、`utun`、`/dev/tun`），设置名称、MTU、IPv4 和 IPv6 地址及路由，关闭时撤销；
+  包经 A51 收发，macOS 和 FreeBSD 的 4 字节地址族头在收发时去掉和加上；设置工作放在控制面的有界池上。
+- **完成标准**：在每个系统上以 root 运行，设备带地址启动，ping 其前缀内的地址能从设备读到，写回的应答能到达 ping；没有权限
+  时打开失败并给出清楚的错误。CI 以 root 运行 Linux 测试；macOS 和 FreeBSD 手动运行并记录。
+- **涉及**：`vpn/tun`。
+
+### I97 Windows 上基于 Wintun 的 TUN 设备
+
+- **做**：Windows 上的 `vpn/tun`：运行时加载 `wintun.dll`，创建 adapter 和 session，每个设备一个 goroutine 等待接收环并把包
+  交给 fib worker，发送由 worker 直接完成；地址和路由用 IP Helper API；Windows 发布包附带该 DLL。
+- **完成标准**：以管理员运行，通过与 I96 相同的 ping 测试；缺少 DLL 时给出清楚的错误；关闭设备会结束其 goroutine。
+- **涉及**：`vpn/tun`、发布打包。
+
+### I98 中转帧与中转服务端（WebSocket）
+
+- **做**：`vpn/relay` 包：帧（`DATA`、`GONE`、`PING`、`PONG`）的编解码不分配内存；服务端是一个 WebSocket handler，用票据认证
+  会话，按节点 ID 转发 `DATA` 并由会话填写源 ID，对没有会话的节点回 `GONE`，会话队列满时丢弃；WebSocket 客户端；决定 026
+  中的限制和超时。
+- **完成标准**：两个客户端经服务端交换帧，无法伪造源 ID，慢会话丢弃并计数而不是排队，断开的会话释放其节点，过期或错误的
+  票据被拒绝。
+- **涉及**：`vpn/relay`。
+
+### I99 QUIC 和 HTTP/2 上的中转；按顺序选择传输并回退
+
+- **做**：QUIC 上（`DATA` 作为 DATAGRAM 帧，其余在一条流上）和 HTTP/2 扩展 CONNECT 流上的中转服务端与客户端；客户端按
+  `relay.transports` 的顺序带连接超时拨号、失败回退、带退避从头开始，探测排在当前传输之前的传输并切到第一个应答的，先建
+  后断；固定的 `relay.transport`；供 dashboard 显示的状态（传输、尝试次数、最近错误）。
+- **完成标准**：轮流封掉每种传输，客户端落到下一种；更好的传输恢复后切回，且不丢失会话中正在传输的帧；固定的传输从不回退；
+  三种传输承载相同的帧；定时器用假时钟测试。
+- **涉及**：`vpn/relay`。
+
+### I100 协调者与 netmap
+
+- **做**：在 server 节点上：用 token 加入，从配置的网段分配节点 ID 和 overlay 地址（IPv4 和 IPv6）并跨重启保持；netmap（对端、
+  地址、路由、指纹、按节点的 `p2p` 和 `relay.transport`）有变化时经 I92 的信令端点推送；签发并续期中转票据；批准的子网路由；
+  节点数和路由数的限制。
+- **完成标准**：节点加入并得到稳定的地址，能看到彼此出现和离开，节点设置的修改能送达该节点，token 错误或超过限制的节点被
+  拒绝。
+- **涉及**：`vpn`、`p2p`。
+
+### I101 节点：TUN 与对端之间，直连或中转
+
+- **做**：节点：从 TUN 读到的包由 `vpn/packet` 路由到对端的端到端 QUIC 连接，作为 DATAGRAM 帧发送；收到的包按对端的前缀检查
+  后写入 TUN；每个对端的连接先经中转打开，再经路径迁移切到 ICE 的直连地址对，consent 失效时切回；任一端关闭 `p2p` 时跳过
+  ICE；连接建立期间等待的包有界；超大包回 ICMP too-big。
+- **完成标准**：在模拟 NAT 后面的网络命名空间里，两个节点能直连 ping 并承载 TCP 和 UDP；NAT 是对称型或 `p2p` 关闭时经中转；
+  从中转切到直连时 TCP 连接保持不断（规则 13：慢对端、大传输、中途断开）。
+- **涉及**：`vpn`、`test/e2e`。
+
+### I102 VPN 配置、Admin API 与 dashboard 页面
+
+- **做**：配置里的 `vpn` 应用（server 和节点）、schema 和友好格式的写法；Admin API 的节点列表和按节点设置；dashboard 页面：
+  节点上显示它的对端、每条路径（直连或中转、经哪种传输）、往返时延和字节数，以及它自己的 `relay.transport` 和 `p2p`；server
+  上显示所有节点及同样的设置，随 netmap 下发，并显示哪一处设置生效；指标。
+- **完成标准**：仅凭配置就能组建 VPN；在任一页面上修改节点的传输，会切换它的中转会话而不断开对端的连接；重载保持隧道不断。
+- **涉及**：`vpn`、`config`、`schema`、`admin`、`observe`、`runtime`、`docs`。
+
+### I103 VPN 端到端与收尾测试
+
+- **做**：在 CI 的 Linux 上做端到端运行（命名空间、NAT、轮流封掉每种中转传输），macOS、FreeBSD 和 Windows 节点手动加入并
+  记录；在基准测试机上测量直连和经每种中转传输的吞吐与时延。
+- **完成标准**：运行通过，测量结果已提交。
 - **涉及**：`test/e2e`、`bench`、`docs`。

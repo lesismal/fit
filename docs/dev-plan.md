@@ -86,6 +86,10 @@ should touch as few of these as it can.
 | `p2p/turn` | the TURN server and client (RFC 8656) |
 | `p2p/ice` | the ICE agent (RFC 8445) |
 | `p2p` | tunnels over a connected pair, signaling, the config's P2P apps |
+| `vpn/packet` | IP headers and the overlay route table |
+| `vpn/tun` | TUN devices on Linux, macOS, FreeBSD and Windows |
+| `vpn/relay` | the relay protocol, server, and the client that picks a transport |
+| `vpn` | the node, the coordinator, the config's VPN apps |
 | `tlsmgr` | the certificate manager, storage, ACME, OCSP |
 | `admin` | the Admin API and config versions |
 | `provider/...` | file, docker, kubernetes, consul, etcd |
@@ -223,6 +227,17 @@ Status: `todo`, `doing` or `done`.
 | I91 | Tunnels over a connected pair | I89, I90 | todo |
 | I92 | Signaling and the config's P2P apps | I87, I91 | todo |
 | I93 | P2P interop and exit tests | I92 | todo |
+| **VPN** | | | |
+| I94 | IP packets and the overlay route table | — | done |
+| I95 | A packet device's descriptor on the poller (A51, in fib) | — | todo |
+| I96 | TUN devices on Linux, macOS and FreeBSD | I94, I95 | todo |
+| I97 | TUN devices on Windows with Wintun | I94 | todo |
+| I98 | Relay frames and the relay server, over WebSocket | I94 | todo |
+| I99 | Relay over QUIC and HTTP/2; transports in order, with fallback | I90, I98, S04 | todo |
+| I100 | The coordinator and the netmap | I92, I98 | todo |
+| I101 | The node: TUN to peers, direct or relayed | I91, I96, I99, I100 | todo |
+| I102 | VPN config, Admin API and the dashboard's pages | I101 | todo |
+| I103 | VPN end-to-end and exit tests | I97, I102 | todo |
 
 ## M0, foundations
 
@@ -1212,4 +1227,120 @@ other agents, and QUIC over the selected pair.
   pion and libjuice; throughput and latency through a direct and a relayed tunnel on the benchmark
   host.
 - **Done when**: the interop runs pass in CI or a recorded run, and the measurements are committed.
+- **Touches**: `test/e2e`, `bench`, `docs`.
+
+## VPN, a network of fit nodes
+
+Nodes join one overlay network, each with an address and a TUN interface; IP packets go between
+them directly through holes ICE punched, or through the server node's relay, reached over QUIC,
+WebSocket or HTTP/2 in a configured order with fallback, or over the one transport a node is set
+to on the web page. The design is [decision 026](decisions/026-vpn.md): built on the P2P milestone,
+IP packets as QUIC DATAGRAM frames on an end-to-end connection, and the relay as one more path of
+that connection.
+
+### I94 IP packets and the overlay route table
+
+- **Do**: package `vpn/packet`: IPv4 and IPv6 headers read without allocating (version, length,
+  protocol, source and destination), refusing what a TUN should not hand over; the overlay route
+  table, built once from prefixes and the node each belongs to, with a longest-prefix lookup that
+  neither allocates nor locks, and the check that a peer's packet comes from one of its prefixes.
+- **Done when**: well-formed and malformed packets of both versions are told apart (fuzzed), the
+  longest prefix wins, duplicate and invalid routes are refused when the table is built, and
+  lookups allocate nothing.
+- **Touches**: `vpn/packet`, `docs`.
+
+### I95 A packet device's descriptor on the poller (A51, in fib)
+
+- **Do**: [A51](fib-api-requests.md#a51-a-packet-devices-descriptor-on-the-poller) in fib, by fib's
+  standards, on epoll and kqueue; fit moves to that commit.
+- **Done when**: a descriptor attached to an engine delivers one packet per `OnData` and sends one
+  per `Send`, a full device drops and counts rather than queueing without bound, and it closes with
+  the engine; tested with a pipe-like packet descriptor (a `SOCK_DGRAM` socketpair) on every Unix
+  backend.
+- **Touches**: fib's engine; `go.mod`.
+
+### I96 TUN devices on Linux, macOS and FreeBSD
+
+- **Do**: package `vpn/tun`: open a device (`/dev/net/tun`, `utun`, `/dev/tun`), with its name,
+  MTU, IPv4 and IPv6 addresses and routes set, and removed on close; packets in and out through
+  A51, the 4-byte family header of macOS and FreeBSD taken off and put on; setup on the control
+  plane's bounded pool.
+- **Done when**: on each system, as root, a device comes up with its address, a ping to an address
+  in its prefix is read from it and an answer written to it reaches the pinger; without the
+  privilege, opening fails with a clear error. CI runs the Linux test as root; macOS and FreeBSD
+  are run by hand and recorded.
+- **Touches**: `vpn/tun`.
+
+### I97 TUN devices on Windows with Wintun
+
+- **Do**: `vpn/tun` on Windows: `wintun.dll` loaded at run time, an adapter and session, the
+  receive ring waited on by one goroutine per device that hands packets to a fib worker, sends from
+  the worker; addresses and routes by the IP Helper API; the DLL in the Windows release archives.
+- **Done when**: as Administrator, the same ping test as I96 passes, a missing DLL fails with a
+  clear error, and closing the device ends its goroutine.
+- **Touches**: `vpn/tun`, the release packaging.
+
+### I98 Relay frames and the relay server, over WebSocket
+
+- **Do**: package `vpn/relay`: the frames (`DATA`, `GONE`, `PING`, `PONG`) encoded and decoded
+  without allocating; the server, a WebSocket handler that authenticates a session by its ticket,
+  forwards `DATA` by node ID with the source set from the session, answers `GONE` for a node with no
+  session and drops past a session's queue; the WebSocket client; limits and timeouts of decision
+  026.
+- **Done when**: two clients exchange frames through the server, a forged source is impossible, a
+  slow session drops and counts instead of queueing, a cut session frees its node, and expired or
+  bad tickets are refused.
+- **Touches**: `vpn/relay`.
+
+### I99 Relay over QUIC and HTTP/2; transports in order, with fallback
+
+- **Do**: the relay server and client over QUIC (`DATA` as DATAGRAM frames, the rest on a stream)
+  and over an HTTP/2 extended CONNECT stream; the client that dials `relay.transports` in order
+  with a connect timeout, falls back, starts again from the top with backoff, probes the
+  transports ahead of the current one and moves to the first that answers, make before break; a
+  fixed `relay.transport`; its state (transport, tries, last error) for the dashboard.
+- **Done when**: with each transport blocked in turn the client lands on the next, moves back when
+  the better one returns without losing the session's frames in flight, a fixed transport never
+  falls back, and all three carry the same frames; timers on a fake clock.
+- **Touches**: `vpn/relay`.
+
+### I100 The coordinator and the netmap
+
+- **Do**: on the server node, joining with a token, node IDs and overlay addresses (IPv4 and IPv6)
+  from the configured network, kept across restarts; the netmap (peers, addresses, routes,
+  fingerprints, per-node `p2p` and `relay.transport`) pushed over I92's signaling endpoint when it
+  changes; relay tickets signed and renewed; approved subnet routes; limits on nodes and routes.
+- **Done when**: nodes join, get stable addresses, see each other appear and leave, a change of a
+  node's settings reaches it, and a node with a bad token or past the limit is refused.
+- **Touches**: `vpn`, `p2p`.
+
+### I101 The node: TUN to peers, direct or relayed
+
+- **Do**: the node: packets read from the TUN routed by `vpn/packet` to a peer's end-to-end QUIC
+  connection as DATAGRAM frames, received ones checked against the peer's prefixes and written to
+  the TUN; each peer's connection opened over the relay and moved to ICE's direct pair by path
+  migration, and back when consent fails; ICE skipped when `p2p` is off for either side; packets
+  waiting while a connection opens bounded; ICMP too-big for oversized packets.
+- **Done when**: in network namespaces behind simulated NATs, two nodes ping and carry TCP and UDP
+  directly, through the relay when the NATs are symmetric or `p2p` is off, and keep a TCP
+  connection open across a move from relay to direct (rule 13: slow peers, large transfers, cuts).
+- **Touches**: `vpn`, `test/e2e`.
+
+### I102 VPN config, Admin API and the dashboard's pages
+
+- **Do**: the config's `vpn` apps (server and node), schema and the friendly formats' forms; the
+  Admin API's node list and per-node settings; dashboard pages: on a node, its peers, each path
+  (direct or relayed, and over which transport), round trip and bytes, and its own
+  `relay.transport` and `p2p`; on the server, every node with the same settings, delivered in the
+  netmap, showing which setting is in force; metrics.
+- **Done when**: a VPN is set up from config alone, changing a node's transport on either page
+  moves its relay session without dropping its peers' connections, and a reload keeps tunnels open.
+- **Touches**: `vpn`, `config`, `schema`, `admin`, `observe`, `runtime`, `docs`.
+
+### I103 VPN end-to-end and exit tests
+
+- **Do**: end-to-end runs on Linux in CI (namespaces, NATs, each relay transport blocked in turn),
+  macOS, FreeBSD and Windows nodes joined by hand and recorded; throughput and latency direct and
+  through each relay transport on the benchmark host.
+- **Done when**: the runs pass, and the measurements are committed.
 - **Touches**: `test/e2e`, `bench`, `docs`.

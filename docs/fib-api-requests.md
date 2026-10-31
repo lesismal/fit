@@ -63,6 +63,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A48 | A whole response's body taken from the pool, and a buffered request body not copied | done, fib `46827ea7`, HTTP/2 `d3707ca7` (`main`) | 1, 5, 8 | W1 |
 | A49 | A UDP peer opened toward an address on a listener's socket | made, fib `4febcdf5` (local, not pushed) | 1, 9 | I85 (P2P) |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
+| A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
 
 ## Evidence
 
@@ -1547,3 +1548,35 @@ HTTP/3 datagrams (RFC 9297) and CONNECT-UDP (RFC 9298) can build on it later.
 **How fit would use it.** `p2p` sends each UDP flow's datagrams as DATAGRAM frames with a varint
 flow ID in front.
 
+
+## A51: A packet device's descriptor on the poller
+
+**Status.** Requested on 2026-11-01, for fit's VPN milestone ([decision 026](decisions/026-vpn.md)).
+
+**Problem.** A TUN device is a descriptor that is neither a socket fib accepted nor one it dialed:
+`/dev/net/tun` on Linux, a `PF_SYSTEM` socket on macOS, `/dev/tun` on FreeBSD. Each read returns
+one IP packet and each write takes one, and both can be made non-blocking. fib has no way to put
+such a descriptor on its poller, so fit would have to read it on a goroutine of its own, blocking
+in `read`, against rule 1, and pay a goroutine switch for every packet.
+
+**Evidence.** A VPN node moves every packet of its overlay through the device; wireguard-go and
+Tailscale read theirs on dedicated goroutines, and cite the switch as a cost they batch around
+with `IFF_VNET_HDR` offloads.
+
+**Suggested API.** Attach a descriptor the caller opened, set non-blocking, to the engine:
+
+```go
+// AttachPacketFD puts fd on one of the engine's pollers as a connection whose
+// reads and writes keep packet boundaries: OnData gets one packet a call, and
+// Send writes data as one packet. A write the device refuses (EAGAIN or
+// ENOBUFS) drops the packet and counts it, rather than queueing it. The
+// connection owns fd from then on and closes it on Close.
+func (e *Engine) AttachPacketFD(fd int, maxPacket int, handler Handler) (*Connection, error)
+```
+
+The connection is a connection like any other: `OnClose`, `HoldReads`, statistics, the engine's
+`Close`. It has no remote address. epoll and kqueue first; Windows has no such descriptor for
+Wintun and is not needed.
+
+**How fit would use it.** `vpn/tun` opens the device, sets it up, and attaches it; the node's
+handler routes each packet `OnData` hands it and sends the peers' packets with `Send`.
