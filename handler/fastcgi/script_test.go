@@ -708,6 +708,10 @@ func TestDrainAndCleanup(t *testing.T) {
 	if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", "/lf.php", nil)); rec.Response.StatusCode != 503 {
 		t.Errorf("after drain: %d", rec.Response.StatusCode)
 	}
+	// The drained request's application waits on release until it sees its
+	// connection closed; gone first, it cannot take the release meant for
+	// the request below.
+	a.waitClosedScript(t, "/hang.php")
 
 	h, err = loadHandler(t, params, &module.Env{Engine: engine})
 	if err != nil {
