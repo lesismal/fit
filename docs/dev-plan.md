@@ -219,7 +219,7 @@ Status: `todo`, `doing` or `done`.
 | I84 | STUN messages and the STUN server | I51 | done |
 | I85 | A UDP peer opened toward an address (A49, in fib) | — | done |
 | I86 | The STUN client and NAT behaviour, on fib's `webrtc/stun` | I84, I85, I108 | todo |
-| I87 | The TURN server, `webrtc.turn`, on fib's `turnserver` | I85, I108 | todo |
+| I87 | The TURN server, `webrtc.turn`, on fib's `turnserver` | I85, I108 | done |
 | I88 | The TURN client, fib's `turn.Client` | I86, I87 | todo |
 | I89 | The ICE agent, fib's `webrtc/ice` | I86, I88 | todo |
 | I90 | QUIC DATAGRAM frames (A50, in fib) | — | todo |
@@ -1185,7 +1185,7 @@ use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of 
 - **Done when**: fib's TURN client allocates through fit, relays both ways to a peer, by indication
   and channel; a wrong password and an expired ephemeral credential are refused; quotas refuse with
   486 and 508; bandwidth past its rate drops; a private peer is refused unless allowed; a reload of
-  users keeps the allocation, one of the address moves it; a client cut midway frees its allocation
+  users keeps the allocation, and one of the address moves the server; a client cut midway frees its allocation
   at its lifetime's end; under the race detector.
 - **Touches**: `webrtc/turn`, `config`, `app`, `admin`, `schema`, `docs`.
 

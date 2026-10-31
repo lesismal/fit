@@ -10,6 +10,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/observe"
 )
 
 // fakeRole records the members it is moved to.
@@ -35,6 +36,13 @@ func (r *fakeRole) Stop(context.Context) {
 	r.mu.Lock()
 	r.stopped = true
 	r.mu.Unlock()
+}
+
+// WriteMetrics makes fakeRole an app.Metered, whose metrics /metrics
+// carries while it runs.
+func (r *fakeRole) WriteMetrics(w observe.MetricWriter) {
+	w.Family("fake_role_up", "gauge", "A fake role runs.")
+	w.Sample("fake_role_up", 1)
 }
 
 var (
@@ -81,6 +89,9 @@ func TestAppsFollowConfigs(t *testing.T) {
 	if got := m.Running(); len(got) != 1 || got[0] != "tunnel.node" || r == nil || len(r.applied) != 1 {
 		t.Fatalf("running %v, role %+v", got, r)
 	}
+	if !strings.Contains(string(f.configs.WriteMetrics(nil)), "fake_role_up 1") {
+		t.Error("the role's metrics are not in /metrics")
+	}
 	// ...moved to the next...
 	if _, err := f.configs.Apply([]byte(with), SourceAdmin); err != nil {
 		t.Fatal(err)
@@ -94,6 +105,9 @@ func TestAppsFollowConfigs(t *testing.T) {
 	}
 	if !r.stopped || len(m.Running()) != 0 {
 		t.Errorf("stopped %v, running %v", r.stopped, m.Running())
+	}
+	if strings.Contains(string(f.configs.WriteMetrics(nil)), "fake_role_up") {
+		t.Error("a stopped role's metrics are still in /metrics")
 	}
 }
 

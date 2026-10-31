@@ -27,11 +27,13 @@ type Tunnel struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// HasApps reports whether c runs any role of the agent or the tunnel.
+// HasApps reports whether c runs any role: the agent's, the tunnel's or
+// WebRTC's.
 func (c *Config) HasApps() bool {
-	a, t := c.Agent, c.Tunnel
+	a, t, w := c.Agent, c.Tunnel, c.WebRTC
 	return a != nil && (a.Hub != nil || a.Node != nil || a.Client != nil) ||
-		t != nil && (t.Server != nil || t.Node != nil || t.Client != nil)
+		t != nil && (t.Server != nil || t.Node != nil || t.Client != nil) ||
+		w != nil && w.TURN != nil
 }
 
 // RoleConsole is a role's web pages, behind logins as admin.console's are,

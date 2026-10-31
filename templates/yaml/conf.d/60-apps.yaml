@@ -10,8 +10,9 @@
 # uncomment what you need. docs/reference/config.md describes them all.
 #
 # This file:
-# The agent's and the tunnel's roles, run beside the gateway on its engine: AI models
-# shared among machines, and services behind NAT reached through a server.
+# The roles run beside the gateway on its engine: the agent's and the tunnel's, AI
+# models shared among machines and services behind NAT reached through a server, and
+# WebRTC's TURN server.
 
 # The agent's roles to run beside the gateway, on its engine: a hub, a node and a client,
 # which share AI models among machines. None when left out. What their web pages change is
@@ -1066,3 +1067,111 @@
       # # accepted. 32 when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
+
+# What fit runs for WebRTC beside the gateway, on its engine: a TURN server. None when left
+# out.
+# object.
+# webrtc:
+  # # Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that
+  # # cannot reach each other directly. None when left out.
+  # # object.
+  # turn:
+    # # The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs
+    # # default to. TURN over TCP and TLS is not served yet.
+    # # list of string; required.
+    # listen: []
+
+    # # The realm of the credentials, sent in every challenge: clients derive their key from their
+    # # name, the realm and their password. A change starts the server again, ending its
+    # # allocations.
+    # # string; required.
+    # realm: "fit"
+
+    # # The users with fixed credentials. With secret, or alone; at least one of the two.
+    # # list of object.
+    # users:
+      # -
+        # # The username.
+        # # string; required.
+        # name: ""
+
+        # # The password; or key.
+        # # string.
+        # password: ""
+
+        # # Instead of the password, the long-term key it derives, as coturn's turnadmin -k prints it:
+        # # MD5(name ":" realm ":" password) in hex, optionally after 0x, so that the password is not
+        # # kept.
+        # # string.
+        # key: ""
+
+    # # The shared secret of time-limited credentials, as coturn's static-auth-secret
+    # # (use-auth-secret) has it: a username "<expiry in Unix seconds>:<anything>" whose password is
+    # # the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows
+    # # the secret hands them out.
+    # # string.
+    # secret: ""
+
+    # # The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told
+    # # it, unless public_ip is set. Its family is every allocation's.
+    # # string; required.
+    # relay_ip: ""
+
+    # # The address clients are told for their relayed sockets instead of relay_ip, for a server
+    # # behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family.
+    # # string.
+    # public_ip: ""
+
+    # # The lowest port of the relayed sockets, as a firewall that opens a range expects; with
+    # # port_max. Ports the kernel picks when both are left out.
+    # # integer, 0 to 65535.
+    # port_min: 0
+
+    # # The highest port of the relayed sockets; with port_min.
+    # # integer, 0 to 65535.
+    # port_max: 0
+
+    # # The most allocations held at once; one more is refused with 508. Each holds a relayed socket
+    # # on every event loop. 1024 when left out or 0. A change starts the server again.
+    # # integer, 0 or more; default 1024.
+    # max_allocations: 1024
+
+    # # The most allocations of one username; one more is refused with 486. 16 when left out or 0. A
+    # # change starts the server again.
+    # # integer, 0 or more; default 16.
+    # max_allocations_per_user: 16
+
+    # # The most bytes a second relayed for one username each way, to peers and from them, with a
+    # # second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0.
+    # # integer, 0 or more; default 2097152.
+    # user_bandwidth: 2097152
+
+    # # The lifetime of an allocation whose client asks for less, or for none; clients refresh it
+    # # before it ends. 10m when left out. A change starts the server again.
+    # # duration, as "1.5s" or "2m"; default "10m".
+    # default_lifetime: "10m"
+
+    # # The longest lifetime a client may ask for. 1h when left out. A change starts the server
+    # # again.
+    # # duration, as "1.5s" or "2m"; default "1h".
+    # max_lifetime: "1h"
+
+    # # How long a nonce is good for; a request with an older one is answered 438 with a fresh one.
+    # # 10m when left out. A change starts the server again.
+    # # duration, as "1.5s" or "2m"; default "10m".
+    # nonce_lifetime: "10m"
+
+    # # The key nonces are made with; a random one when left out. Servers behind one load balancer,
+    # # which may each see a client's requests, share one. A change starts the server again.
+    # # string.
+    # nonce_secret: ""
+
+    # # The addresses and prefixes, as in "10.1.0.0/16", peers may be at even when denied_peers or
+    # # the default denial cover them: loopback, private, link-local and other internal ranges are
+    # # denied unless listed here, so that the relay cannot reach into the network it runs in.
+    # # list of string.
+    # allowed_peers: []
+
+    # # Addresses and prefixes peers may not be at, beyond the internal ranges denied by default.
+    # # list of string.
+    # denied_peers: []

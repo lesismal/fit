@@ -38,6 +38,7 @@ a config against it and more.
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [Agent](#agent): [`agent`](#config-agent), [`agent.hub`](#config-agenthub), [`agent.hub.console`](#config-roleconsole), [`agent.hub.listen`](#config-agentlisten), [`agent.hub.peers[]`](#config-agentpeer), [`agent.hub.limits`](#config-agentlimits), [`agent.node`](#config-agentnode), [`agent.node.models[]`](#config-agentmodel), [`agent.node.settings`](#config-agentnodesettings), [`agent.node.proxy`](#config-agentnodeproxy), [`agent.client`](#config-agentclient), [`agent.client.api`](#config-agentclientapi), [`agent.client.api_keys[]`](#config-agentclientkey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.server`](#config-tunnelserver), [`tunnel.server.listeners[]`](#config-tunnellistener), [`tunnel.server.console_socket`](#config-tunnelconsolesocket), [`tunnel.server.quic`](#config-tunnelserverquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.servers[]`](#config-tunneluplink), [`tunnel.node.servers[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.client`](#config-tunnelclient), [`tunnel.client.forwards[]`](#config-tunnelforward), [`tunnel.client.web_proxies[]`](#config-tunnelwebproxy)
+- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.users[]`](#config-turnuser)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -113,6 +114,7 @@ In JSON:
 | `acme` | [object](#config-acme) |  | How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload. |
 | `agent` | [object](#config-agent) |  | The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here. |
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here. |
+| `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server. None when left out. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -775,7 +777,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
 | `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json. |
@@ -2000,6 +2002,116 @@ Also at `tunnel.client.servers[]`.
 | `url` | string |  | Required. The server's console_socket, as ws://host:port/. |
 | `password` | string |  | Required. The console_socket's password. |
 | `max_conns` | integer, 0 or more | `32` | The most connections open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
+
+<a id="webrtc"></a>
+
+## WebRTC
+
+What fit runs for WebRTC beside the gateway, on its engine. `turn` is a TURN server (RFC 8656),
+fib's, which relays UDP for browsers and other ICE agents that cannot reach each other directly:
+over UDP on the `listen` addresses, with fixed `users`, coturn's time-limited credentials from
+`secret`, or both. Each allocation's relayed socket binds to `relay_ip`, told to clients as
+`public_ip` behind a 1:1 NAT, in `port_min`-`port_max` when set. Peers on loopback, private and
+other internal addresses are refused unless `allowed_peers` lists them. Users, the secret, the
+peer lists and `user_bandwidth` change on reload with the allocations kept; a change of the rest
+starts the server again. See [WebRTC](../webrtc.md) and
+[decision 029](../decisions/029-webrtc.md).
+
+In a .conf file:
+
+```fit
+webrtc {
+	turn {
+		listen :3478
+		realm example.com
+		secret a-secret-shared-with-the-web-service
+		users alice { password a-password }
+		relay_ip 10.0.0.5
+		public_ip 203.0.113.5
+		port_min 49152
+		port_max 49999
+	}
+}
+```
+
+In YAML:
+
+```yaml
+webrtc:
+  turn:
+    listen:
+      - :3478
+    realm: example.com
+    secret: a-secret-shared-with-the-web-service
+    users:
+      - name: alice
+        password: a-password
+    relay_ip: 10.0.0.5
+    public_ip: 203.0.113.5
+    port_min: 49152
+    port_max: 49999
+```
+
+In JSON:
+
+```json
+{
+  "webrtc": {
+    "turn": {
+      "listen": [":3478"],
+      "realm": "example.com",
+      "secret": "a-secret-shared-with-the-web-service",
+      "users": [{"name": "alice", "password": "a-password"}],
+      "relay_ip": "10.0.0.5",
+      "public_ip": "203.0.113.5",
+      "port_min": 49152,
+      "port_max": 49999
+    }
+  }
+}
+```
+
+<a id="config-webrtc"></a>
+
+### `webrtc`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `turn` | [object](#config-turnserver) |  | Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out. |
+
+<a id="config-turnserver"></a>
+
+### `webrtc.turn`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | list of string |  | Required. The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs default to. TURN over TCP and TLS is not served yet. |
+| `realm` | string |  | Required. The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts the server again, ending its allocations. |
+| `users` | list of [object](#config-turnuser) |  | The users with fixed credentials. With secret, or alone; at least one of the two. |
+| `secret` | string |  | The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username "<expiry in Unix seconds>:<anything>" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out. |
+| `relay_ip` | string |  | Required. The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. |
+| `public_ip` | string |  | The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. |
+| `port_min` | integer, 0 to 65535 |  | The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. |
+| `port_max` | integer, 0 to 65535 |  | The highest port of the relayed sockets; with port_min. |
+| `max_allocations` | integer, 0 or more | `1024` | The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change starts the server again. |
+| `max_allocations_per_user` | integer, 0 or more | `16` | The most allocations of one username; one more is refused with 486. 16 when left out or 0. A change starts the server again. |
+| `user_bandwidth` | integer, 0 or more | `2097152` | The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0. |
+| `default_lifetime` | duration | `"10m"` | The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. A change starts the server again. |
+| `max_lifetime` | duration | `"1h"` | The longest lifetime a client may ask for. 1h when left out. A change starts the server again. |
+| `nonce_lifetime` | duration | `"10m"` | How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. A change starts the server again. |
+| `nonce_secret` | string |  | The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts the server again. |
+| `allowed_peers` | list of string |  | The addresses and prefixes, as in "10.1.0.0/16", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. |
+| `denied_peers` | list of string |  | Addresses and prefixes peers may not be at, beyond the internal ranges denied by default. |
+
+<a id="config-turnuser"></a>
+
+### `webrtc.turn.users[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The username. |
+| `password` | string |  | The password; or key. |
+| `key` | string |  | Instead of the password, the long-term key it derives, as coturn's turnadmin -k prints it: MD5(name ":" realm ":" password) in hex, optionally after 0x, so that the password is not kept. |
 
 <a id="providers"></a>
 

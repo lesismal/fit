@@ -30,8 +30,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 
 // WriteMetrics appends fit's metrics, in Prometheus's text format, to b:
 // requests by listener and route; upstreams and their backends; the
-// listeners' connections; config reloads; certificates; the access log; and
-// a few of the Go runtime's.
+// listeners' connections; config reloads; certificates; the access log; the
+// roles' own, as the TURN server's; and a few of the Go runtime's.
 func (cs *Configs) WriteMetrics(b []byte) []byte {
 	w := &observe.TextWriter{B: b}
 	cs.WriteMetricsTo(w)
@@ -143,6 +143,13 @@ func (cs *Configs) WriteMetricsTo(w observe.MetricWriter) {
 	if log := cs.env.AccessLog; log != nil {
 		w.Family("fit_access_log_dropped_total", "counter", "Access log lines dropped because the log's buffer was full.")
 		w.Sample("fit_access_log_dropped_total", float64(log.Dropped()))
+	}
+
+	cs.mu.Lock()
+	apps := cs.apps
+	cs.mu.Unlock()
+	if apps != nil {
+		apps.WriteMetrics(w)
 	}
 
 	samples := make([]metrics.Sample, len(goMetrics))

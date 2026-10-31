@@ -1445,7 +1445,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
           "type": "object"
         },
         "loggers": {
@@ -1957,6 +1957,134 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "config.TURNServer": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_peers": {
+          "description": "The addresses and prefixes, as in \"10.1.0.0/16\", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default_lifetime": {
+          "default": "10m",
+          "description": "The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. A change starts the server again.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "denied_peers": {
+          "description": "Addresses and prefixes peers may not be at, beyond the internal ranges denied by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen": {
+          "description": "The UDP addresses clients reach the server at, as in \":3478\", the port TURN's turn: URIs default to. TURN over TCP and TLS is not served yet.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_allocations": {
+          "default": 1024,
+          "description": "The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change starts the server again.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_allocations_per_user": {
+          "default": 16,
+          "description": "The most allocations of one username; one more is refused with 486. 16 when left out or 0. A change starts the server again.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_lifetime": {
+          "default": "1h",
+          "description": "The longest lifetime a client may ask for. 1h when left out. A change starts the server again.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "nonce_lifetime": {
+          "default": "10m",
+          "description": "How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. A change starts the server again.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "nonce_secret": {
+          "description": "The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts the server again.",
+          "type": "string"
+        },
+        "port_max": {
+          "description": "The highest port of the relayed sockets; with port_min.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "port_min": {
+          "description": "The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ip": {
+          "description": "The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family.",
+          "type": "string"
+        },
+        "realm": {
+          "description": "The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts the server again, ending its allocations.",
+          "type": "string"
+        },
+        "relay_ip": {
+          "description": "The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's.",
+          "type": "string"
+        },
+        "secret": {
+          "description": "The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username \"<expiry in Unix seconds>:<anything>\" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out.",
+          "type": "string"
+        },
+        "user_bandwidth": {
+          "default": 2097152,
+          "description": "The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "users": {
+          "description": "The users with fixed credentials. With secret, or alone; at least one of the two.",
+          "items": {
+            "$ref": "#/$defs/config.TURNUser"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "listen",
+        "realm",
+        "relay_ip"
+      ],
+      "type": "object"
+    },
+    "config.TURNUser": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Instead of the password, the long-term key it derives, as coturn's turnadmin -k prints it: MD5(name \":\" realm \":\" password) in hex, optionally after 0x, so that the password is not kept.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The username.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The password; or key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "config.Telemetry": {
@@ -2636,6 +2764,16 @@
         "name",
         "addresses"
       ],
+      "type": "object"
+    },
+    "config.WebRTC": {
+      "additionalProperties": false,
+      "properties": {
+        "turn": {
+          "$ref": "#/$defs/config.TURNServer",
+          "description": "Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."
+        }
+      },
       "type": "object"
     },
     "headers.Ops": {
@@ -4081,6 +4219,10 @@
         "$ref": "#/$defs/config.Upstream"
       },
       "type": "array"
+    },
+    "webrtc": {
+      "$ref": "#/$defs/config.WebRTC",
+      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server. None when left out."
     }
   },
   "title": "fit config, schema version 1",

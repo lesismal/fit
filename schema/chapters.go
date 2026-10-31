@@ -36,6 +36,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"acme", "ACME", "acme", "acme.md"},
 	{"agent", "Agent", "agent", "agent.md"},
 	{"tunnel", "Tunnel", "tunnel", "tunnel.md"},
+	{"webrtc", "WebRTC", "webrtc", "webrtc.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 

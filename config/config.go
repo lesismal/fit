@@ -39,6 +39,7 @@ type Config struct {
 	ACME          *ACME      `json:"acme,omitempty" doc:"How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload."`
 	Agent         *Agent     `json:"agent,omitempty" doc:"The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here."`
 	Tunnel        *Tunnel    `json:"tunnel,omitempty" doc:"The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here."`
+	WebRTC        *WebRTC    `json:"webrtc,omitempty" doc:"What fit runs for WebRTC beside the gateway, on its engine: a TURN server. None when left out."`
 	Providers     []Provider `json:"providers,omitempty" doc:"Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts."`
 
 	// src is the document the config was loaded from, which keeps what

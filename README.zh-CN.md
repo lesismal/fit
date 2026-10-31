@@ -24,6 +24,7 @@ Kubernetes。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要�
   [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。
 - [tunnel](docs/tunnel.zh-CN.md) 与 [agent](docs/agent.zh-CN.md)：与网关一起运行在其引擎上的角色，用于访问 NAT 后的
   服务，以及在多台机器间共享 AI 模型。
+- [WebRTC](docs/webrtc.zh-CN.md)：基于 fib WebRTC 的 TURN 服务器，与网关一起运行；WHIP 和 WHEP 随后提供。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
 - [nginx、Caddy、Traefik 对比](docs/comparison.zh-CN.md)：fit 从三者各借鉴什么。
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。

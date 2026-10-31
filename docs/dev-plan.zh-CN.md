@@ -209,7 +209,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I84 | STUN 消息与 STUN 服务器 | I51 | done |
 | I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | done |
 | I86 | STUN 客户端与 NAT 行为，基于 fib 的 `webrtc/stun` | I84, I85, I108 | todo |
-| I87 | TURN 服务器 `webrtc.turn`，基于 fib 的 `turnserver` | I85, I108 | todo |
+| I87 | TURN 服务器 `webrtc.turn`，基于 fib 的 `turnserver` | I85, I108 | done |
 | I88 | TURN 客户端，fib 的 `turn.Client` | I86, I87 | todo |
 | I89 | ICE agent，fib 的 `webrtc/ice` | I86, I88 | todo |
 | I90 | QUIC DATAGRAM 帧（A50，在 fib 中） | — | todo |
@@ -1044,7 +1044,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   permission 和 channel 上限、事件和排空由 fib 提供（A55–A58）。
 - **完成标准**：fib 的 TURN 客户端经 fit 分配，经 indication 和 channel 与对端双向中继；错误的密码和过期的限时凭据被拒绝；
   配额以 486 和 508 拒绝；超出速率的带宽被丢弃；私有地址的对端除非允许否则被拒绝；重载用户时 allocation 保留，重载地址时
-  它被迁移；中途断开的客户端在生存期结束时释放 allocation；在竞态检测下通过。
+  服务器随之迁移；中途断开的客户端在生存期结束时释放 allocation；在竞态检测下通过。
 - **涉及**：`webrtc/turn`、`config`、`app`、`admin`、`schema`、`docs`。
 
 ### I88 TURN 客户端
