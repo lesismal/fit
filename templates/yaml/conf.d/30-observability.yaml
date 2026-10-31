@@ -183,6 +183,78 @@
   # # boolean.
   # disable_dashboard: true
 
+  # # Keep the config encrypted in a file of its own, the store, which is the base config fit runs
+  # # from then on: every config applied is written to it, and what this file sets beside admin is
+  # # only the store's first content, used when the store does not exist yet. Left out, the config
+  # # lives in this file.
+  # # object.
+  # store:
+    # # The store's file, made 0600 when it is written. fit stops at start if it exists and does not
+    # # open with the password.
+    # # string; required.
+    # path: "/var/lib/fit/fit.store"
+
+    # # The password the store is encrypted with. Written here, it protects a store copied away from
+    # # this file, not one read beside it; password_file or password_env keep it out of the file.
+    # # string.
+    # password: ""
+
+    # # A file holding the password, its surrounding spaces trimmed.
+    # # string.
+    # password_file: "/etc/fit/store-password"
+
+    # # An environment variable holding the password.
+    # # string.
+    # password_env: "FIT_STORE_PASSWORD"
+
+  # # Serve the console, web pages behind a user name and password from which the whole config,
+  # # admin aside, is read and changed; off when left out.
+  # # object.
+  # console:
+    # # The host and port the console listens on. A host that is not a loopback address needs
+    # # cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020
+    # # when left out.
+    # # string; default "127.0.0.1:2020".
+    # address: "127.0.0.1:2020"
+
+    # # A PEM file with the console's certificate, followed by any intermediates; with key_file, the
+    # # console is served over TLS.
+    # # string.
+    # cert_file: "/etc/fit/example.com.pem"
+
+    # # A PEM file with the certificate's private key.
+    # # string.
+    # key_file: "/etc/fit/example.com.key"
+
+    # # Who may log in: at least one user.
+    # # list of object; required.
+    # users:
+      # -
+        # # The user's name.
+        # # string; required.
+        # username: "admin"
+
+        # # The bcrypt hash of the user's password, as fit hash-password makes it.
+        # # string; required.
+        # password_hash: "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG"
+
+    # # How long a login lasts without a request. 30m when left out.
+    # # duration, as "1.5s" or "2m"; default "30m".
+    # session_timeout: "30m"
+
+    # # How long a login lasts at most, however busy. 12h when left out.
+    # # duration, as "1.5s" or "2m"; default "12h".
+    # session_lifetime: "12h"
+
+    # # The most logins kept at once; one more ends the oldest. 64 when left out or 0.
+    # # integer, 0 or more; default 64.
+    # max_sessions: 64
+
+    # # The most connections the console keeps open at once; one past it is closed as soon as it is
+    # # accepted. 32 when left out or 0.
+    # # integer, 0 or more; default 32.
+    # max_conns: 32
+
 # Count and time requests by listener and route, for the Admin API's /metrics, which serves
 # the rest of fit's metrics without it; off when left out, since it costs every request a
 # little. Needs admin.

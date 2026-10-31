@@ -407,6 +407,33 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:73: admin.address: "unix/" has no path after "unix/"`},
 		},
 		{
+			name: "admin store without a password",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"store": {"path": "s"}}}`,
+			want: []string{`1:71: admin.store: set exactly one of password, password_file and password_env`},
+		},
+		{
+			name: "admin store with two passwords",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"store": {"path": "", "password": "p", "password_env": "E"}}}`,
+			want: []string{`1:80: admin.store.path: the path is empty`, `1:71: admin.store: set exactly one of password, password_file and password_env`},
+		},
+		{
+			name: "admin console",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"console": {"address": ":2020", "key_file": "k",
+  "users": [{"username": "a", "password_hash": "$2a$10$x"}, {"username": "a", "password_hash": "plain"}, {"username": "", "password_hash": "$2b$x"}]}}}`,
+			want: []string{
+				`1:85: admin.console.address: ":2020" is not a loopback address: set cert_file and key_file, so that passwords are not sent in the clear`,
+				`1:73: admin.console: cert_file and key_file go together`,
+				`2:74: admin.console.users[1].username: "a" is listed twice`,
+				`2:96: admin.console.users[1].password_hash: not a bcrypt hash: make one with fit hash-password`,
+				`2:119: admin.console.users[2].username: the user name is empty`,
+			},
+		},
+		{
+			name: "admin console without users",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"console": {"users": []}}}`,
+			want: []string{`1:83: admin.console.users: list at least one user`},
+		},
+		{
 			name: "admin address without a port",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "localhost"}}`,
 			want: []string{`1:73: admin.address: "localhost" is not a host and port, as in ":8080" or "127.0.0.1:8080"`},

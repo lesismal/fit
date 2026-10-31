@@ -32,7 +32,7 @@ a config against it and more.
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
 - [Engine](#engine): [`engine`](#config-engine)
-- [Admin API](#admin-api): [`admin`](#config-admin)
+- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
@@ -1122,10 +1122,29 @@ effective config with providers merged, and a read-only dashboard. It listens on
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
 off when `admin` is left out. Read when fit starts.
 
+`admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
+with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
+When the store does not exist yet, the rest of the file is its first content. `fit store export`
+and `fit store import` read and write it. `admin.console` serves the console, web pages behind a
+user name and password from which every part of the config but `admin` is changed, with a form
+made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
+`key_file`. See [decision 027](../decisions/027-console-and-store.md).
+
 In a .conf file:
 
 ```fit
-admin { address 127.0.0.1:2019; history 20 }
+admin {
+	address 127.0.0.1:2019
+	history 20
+	store { path /var/lib/fit/fit.store; password_env FIT_STORE_PASSWORD }
+	console {
+		address 127.0.0.1:2020
+		users {
+			username admin
+			password_hash $2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm
+		}
+	}
+}
 
 route { match { host example.com }; handler respond { body hello } }
 ```
@@ -1136,6 +1155,14 @@ In YAML:
 admin:
   address: 127.0.0.1:2019
   history: 20
+  store:
+    path: /var/lib/fit/fit.store
+    password_env: FIT_STORE_PASSWORD
+  console:
+    address: 127.0.0.1:2020
+    users:
+      - username: admin
+        password_hash: $2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm
 routes:
   - match:
       host:
@@ -1150,7 +1177,15 @@ In JSON:
 
 ```json
 {
-  "admin": {"address": "127.0.0.1:2019", "history": 20},
+  "admin": {
+    "address": "127.0.0.1:2019",
+    "history": 20,
+    "store": {"path": "/var/lib/fit/fit.store", "password_env": "FIT_STORE_PASSWORD"},
+    "console": {
+      "address": "127.0.0.1:2020",
+      "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
+    }
+  },
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
 ```
@@ -1167,6 +1202,43 @@ In JSON:
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0. |
 | `disable_dashboard` | boolean |  | Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false. |
+| `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
+| `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
+
+<a id="config-store"></a>
+
+### `admin.store`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string |  | Required. The store's file, made 0600 when it is written. fit stops at start if it exists and does not open with the password. |
+| `password` | string |  | The password the store is encrypted with. Written here, it protects a store copied away from this file, not one read beside it; password_file or password_env keep it out of the file. |
+| `password_file` | string |  | A file holding the password, its surrounding spaces trimmed. |
+| `password_env` | string |  | An environment variable holding the password. |
+
+<a id="config-console"></a>
+
+### `admin.console`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `address` | string | `"127.0.0.1:2020"` | The host and port the console listens on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020 when left out. |
+| `cert_file` | string |  | A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS. |
+| `key_file` | string |  | A PEM file with the certificate's private key. |
+| `users` | list of [object](#config-consoleuser) |  | Required. Who may log in: at least one user. |
+| `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
+| `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
+| `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
+
+<a id="config-consoleuser"></a>
+
+### `admin.console.users[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `username` | string |  | Required. The user's name. |
+| `password_hash` | string |  | Required. The bcrypt hash of the user's password, as fit hash-password makes it. |
 
 <a id="https-by-default"></a>
 

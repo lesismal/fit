@@ -225,10 +225,27 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		}
 		adminLog.Infof("admin API on %s", as.Addr())
 	}
+	var console *admin.Console
+	if c.Admin != nil && c.Admin.Console != nil {
+		adminLog := root.Logger(config.LoggerAdmin)
+		console, err = admin.StartConsole(c.Admin.Console, c.Admin, configs, func(r admin.Result) {
+			printApplied(stdout, stderr, r)
+		}, adminLog.Infof)
+		if err != nil {
+			fmt.Fprintf(stderr, "fit run: %v\n", err)
+			_ = as.Shutdown(context.Background())
+			_ = s.Close()
+			return 1
+		}
+		adminLog.Infof("console on %s", console.URL())
+	}
 	if telemetry != nil && telemetry.Metrics != nil {
 		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, telemetryLog)
 		if err != nil {
 			printConfigError(stderr, "fit run", cfgName, mapErrors(telemetry.At.Errorf("%v", err)))
+			if console != nil {
+				_ = console.Shutdown(context.Background())
+			}
 			if as != nil {
 				_ = as.Shutdown(context.Background())
 			}
@@ -243,6 +260,9 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	stopProviders, err := startProviders(c, configs, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "fit run: %v\n", err)
+		if console != nil {
+			_ = console.Shutdown(context.Background())
+		}
 		if as != nil {
 			_ = as.Shutdown(context.Background())
 		}
@@ -327,8 +347,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	fmt.Fprintln(stdout, "fit: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), *grace)
 	defer cancel()
+	// First, so that no config is applied while the listeners shut down.
+	if console != nil {
+		_ = console.Shutdown(sctx)
+	}
 	if as != nil {
-		// First, so that no config is applied while the listeners shut down.
 		_ = as.Shutdown(sctx)
 	}
 	if err := s.Shutdown(sctx); err != nil {

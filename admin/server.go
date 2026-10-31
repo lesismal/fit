@@ -74,6 +74,7 @@ type Server struct {
 	token    []byte // nil when no token is asked for
 	loopback bool   // a TCP address without a token: the Host field must name a loopback host
 	maxBody  int64
+	source   string // what the configs this server applies are from
 
 	ln   net.Listener
 	srv  *http.Server
@@ -83,7 +84,7 @@ type Server struct {
 // Start listens where a says and serves the Admin API for configs. report,
 // when not nil, is called after each config the API applies.
 func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, error) {
-	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), done: make(chan struct{})}
+	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceAdmin, done: make(chan struct{})}
 	if a.TokenFile != "" {
 		data, err := os.ReadFile(a.TokenFile)
 		if err != nil {
@@ -113,22 +114,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	s.loopback = network == "tcp" && s.token == nil
 	s.ln = newLimitListener(ln, a.Conns())
 
-	mux := http.NewServeMux()
-	for _, p := range []string{"/config", "/config/{path...}"} {
-		mux.HandleFunc("GET "+p, s.getConfig)
-		mux.HandleFunc("PUT "+p, s.putConfig)
-		mux.HandleFunc("PATCH "+p, s.patchConfig)
-		mux.HandleFunc("DELETE "+p, s.deleteConfig)
-	}
-	mux.HandleFunc("GET /config/effective", s.effective)
-	mux.HandleFunc("POST /load", s.load)
-	mux.HandleFunc("POST /rollback/{n}", s.rollback)
-	mux.HandleFunc("GET /versions", s.versions)
-	mux.HandleFunc("GET /versions/{n}", s.version)
-	mux.HandleFunc("GET /metrics", s.metrics)
-	mux.HandleFunc("GET /status", s.status)
-	mux.HandleFunc("GET /cache", s.cacheZones)
-	mux.HandleFunc("POST /cache/purge", s.purge)
+	mux := s.routes()
 	if !a.DisableDashboard {
 		mux.Handle("GET /dashboard/", dashboardHandler())
 		mux.Handle("GET /dashboard", http.RedirectHandler("/dashboard/", http.StatusMovedPermanently))
@@ -147,6 +133,27 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		_ = s.srv.Serve(s.ln)
 	}()
 	return s, nil
+}
+
+// routes returns the API's endpoints, with nothing in front of them.
+func (s *Server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, p := range []string{"/config", "/config/{path...}"} {
+		mux.HandleFunc("GET "+p, s.getConfig)
+		mux.HandleFunc("PUT "+p, s.putConfig)
+		mux.HandleFunc("PATCH "+p, s.patchConfig)
+		mux.HandleFunc("DELETE "+p, s.deleteConfig)
+	}
+	mux.HandleFunc("GET /config/effective", s.effective)
+	mux.HandleFunc("POST /load", s.load)
+	mux.HandleFunc("POST /rollback/{n}", s.rollback)
+	mux.HandleFunc("GET /versions", s.versions)
+	mux.HandleFunc("GET /versions/{n}", s.version)
+	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /cache", s.cacheZones)
+	mux.HandleFunc("POST /cache/purge", s.purge)
+	return mux
 }
 
 // removeStaleSocket removes a socket left at path by a process that is gone,
@@ -301,7 +308,7 @@ func (s *Server) load(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	res, err := s.configs.Update(SourceAdmin, r.Header.Get("If-Match"), func(*Version) ([]byte, error) { return data, nil })
+	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(*Version) ([]byte, error) { return data, nil })
 	s.applied(w, res, err)
 }
 
@@ -332,7 +339,7 @@ func (s *Server) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		writeUpdateError(w, err)
 		return
 	}
-	res, err := s.configs.Update(SourceAdmin, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
+	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
 		root, err := decodeJSON(cur.data)
 		if err == nil {
 			root, err = remove(root, tokens)
@@ -362,7 +369,7 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, types []string, ch
 		writeUpdateError(w, err)
 		return
 	}
-	res, err := s.configs.Update(SourceAdmin, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
+	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
 		if tokens == nil && r.Method == http.MethodPut {
 			return data, nil // a whole config, kept as written
 		}

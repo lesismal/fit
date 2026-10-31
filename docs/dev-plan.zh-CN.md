@@ -228,6 +228,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I101 | 节点：TUN 与对端之间，直连或中转 | I91, I96, I99, I100 | todo |
 | I102 | VPN 配置、Admin API 与 dashboard 页面 | I101 | todo |
 | I103 | VPN 端到端与收尾测试 | I97, I102 | todo |
+| **控制台** | | | |
+| I104 | 加密保存的配置（`admin.store`）；带登录、由 schema 生成编辑器的控制台 | I77 | done |
 
 ## M0 基础
 
@@ -1162,3 +1164,19 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   记录；在基准测试机上测量直连和经每种中转传输的吞吐与时延。
 - **完成标准**：运行通过，测量结果已提交。
 - **涉及**：`test/e2e`、`bench`、`docs`。
+
+## 控制台：登录与加密的 store
+
+fit 在配置开启时提供一个用户名密码登录的控制台，在上面可以修改配置的每个部分；配置以 fit 自己的格式加密保存在单独的文件里，
+密码写在 fit 启动时用的配置文件中。设计见 [决定 027](decisions/027-console-and-store.zh-CN.md)。
+
+### I104 加密保存的配置；控制台
+
+- **做**：`admin.store`：fitstore 格式（Argon2id、XChaCha20-Poly1305）；store 作为 fit 运行所用的基础配置，由引导文件
+  提供种子，每次修改都写入，SIGHUP 时重新读取；`admin` 来自引导文件，从不保存也从不展示；`fit store export` 和
+  `fit store import`。`admin.console`：独立的服务，支持 TLS；bcrypt 登录并按地址限制失败次数；会话放在 cookie 里，有空闲
+  和绝对过期；CSRF token 和 Origin 检查；在进程内调用 Admin API 的处理函数；页面上 schema 的每个对象、列表和模块都有表单，
+  另有 JSON 编辑器，以及版本列表和回滚。
+- **完成标准**：在控制台修改的配置开始运行、写入 store、重启后依然有效；密码错误或字节被改动时 fit 无法启动；登录、锁定、
+  会话、CSRF 和其他来源都有测试；每个页面在浏览器里可用。
+- **涉及**：`admin`、`admin/store`、`config`、`cli`、`schema`、`templates`、`docs`。

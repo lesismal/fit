@@ -238,6 +238,8 @@ Status: `todo`, `doing` or `done`.
 | I101 | The node: TUN to peers, direct or relayed | I91, I96, I99, I100 | todo |
 | I102 | VPN config, Admin API and the dashboard's pages | I101 | todo |
 | I103 | VPN end-to-end and exit tests | I97, I102 | todo |
+| **Console** | | | |
+| I104 | The config kept encrypted (`admin.store`); the console, with logins and an editor made from the schema | I77 | done |
 
 ## M0, foundations
 
@@ -1344,3 +1346,24 @@ that connection.
   through each relay transport on the benchmark host.
 - **Done when**: the runs pass, and the measurements are committed.
 - **Touches**: `test/e2e`, `bench`, `docs`.
+
+## Console, logins and an encrypted store
+
+fit serves, when configured, a console behind a user name and password from which every part of
+the config is changed, and keeps the config encrypted in a file of its own format, with its
+password in the config file fit starts with. The design is
+[decision 027](decisions/027-console-and-store.md).
+
+### I104 The config kept encrypted; the console
+
+- **Do**: `admin.store`: the fitstore format (Argon2id, XChaCha20-Poly1305), the store as the base
+  config fit runs from, seeded from the bootstrap file, written on every change, read again on
+  SIGHUP, and `admin` put in from the bootstrap file, never kept or shown; `fit store export` and
+  `fit store import`. `admin.console`: a server of its own with TLS, bcrypt logins limited per
+  address, sessions in cookies with idle and absolute ends, CSRF tokens and origin checks, the
+  Admin API's endpoints called in process; pages with a form for every object, list and module of
+  the schema, a JSON editor, and the versions with rollback.
+- **Done when**: a config changed in the console runs, is in the store and survives a restart; a
+  wrong password or a changed byte stops fit from starting; logins, lockouts, sessions, CSRF and
+  other origins are tested; every page works in a browser.
+- **Touches**: `admin`, `admin/store`, `config`, `cli`, `schema`, `templates`, `docs`.
