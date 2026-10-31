@@ -72,9 +72,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `middleware/...` | 重写、头处理、限制、认证、压缩、缓存、重试、熔断 |
 | `upstream` | 上游连接池、负载均衡、被动和主动健康检查 |
 | `l4` | TCP 和 UDP 代理、SNI 分流、PROXY protocol |
-| `p2p/stun` | STUN 消息（RFC 8489）、STUN 服务端和客户端 |
-| `p2p/turn` | TURN 服务端和客户端（RFC 8656） |
-| `p2p/ice` | ICE agent（RFC 8445） |
+| `p2p/stun` | listener 上的 STUN 服务器，走 UDP 和 TCP；I86 时其消息改用 fib 的 `webrtc/stun`（决定 029） |
+| `webrtc/turn` | TURN 服务器角色 `webrtc.turn`，基于 fib 的 `webrtc/turn/turnserver`（决定 029） |
 | `p2p` | 连通候选对上的隧道、信令、配置里的 P2P 应用 |
 | `vpn/packet` | IP 头与 overlay 路由表 |
 | `vpn/tun` | Linux、macOS、FreeBSD 和 Windows 上的 TUN 设备 |
@@ -208,11 +207,11 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I83 | fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式 | I82 | done |
 | **P2P** | | | |
 | I84 | STUN 消息与 STUN 服务器 | I51 | done |
-| I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | doing |
-| I86 | STUN 客户端与 NAT 行为 | I84, I85 | todo |
-| I87 | TURN 服务器 | I84, I85 | todo |
-| I88 | TURN 客户端 | I86, I87 | todo |
-| I89 | ICE agent | I86, I88 | todo |
+| I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | done |
+| I86 | STUN 客户端与 NAT 行为，基于 fib 的 `webrtc/stun` | I84, I85, I108 | todo |
+| I87 | TURN 服务器 `webrtc.turn`，基于 fib 的 `turnserver` | I85, I108 | todo |
+| I88 | TURN 客户端，fib 的 `turn.Client` | I86, I87 | todo |
+| I89 | ICE agent，fib 的 `webrtc/ice` | I86, I88 | todo |
 | I90 | QUIC DATAGRAM 帧（A50，在 fib 中） | — | todo |
 | I91 | 连通候选对上的隧道 | I89, I90 | todo |
 | I92 | 信令与配置里的 P2P 应用 | I87, I91 | todo |
@@ -234,6 +233,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I105 | fit 配置中的角色：`app`、`app/console`、`login`，经 `EditMember` 写回 | I104 | done |
 | I106 | tunnel 的角色，来自 fibhub：`tunnel/server`、`tunnel/node`、`tunnel/client` | I105 | done |
 | I107 | agent 的角色，来自 agenthub，全部基于 fib：`agent/hub`、`agent/node`、`agent/client` | I105 | done |
+| **WebRTC** | | | |
+| I108 | 决定 029：fit 的 WebRTC 基于 fib；fib `80c7f76`；按实际实现修正 A49；A55–A58 | I85 | done |
+| I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | todo |
+| I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | todo |
 
 ## M0 基础
 
@@ -1003,7 +1006,9 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 ## P2P 与 NAT 穿透
 
 两台在 NAT 后面的主机通过 ICE 打出的洞直接相连，打不出洞时经由 TURN 中继，在它们之间承载 TCP 和 UDP 服务。设计见
-[决定 025](decisions/025-p2p.zh-CN.md)：STUN、TURN 和 ICE 由 fit 在 fib 上实现，可与其他实现互通，选中的候选对上跑 QUIC。
+[决定 025](decisions/025-p2p.zh-CN.md)：STUN、TURN 和 ICE 基于 fib，可与其他实现互通，选中的候选对上跑 QUIC；
+[决定 029](decisions/029-webrtc.zh-CN.md) 修订了它，I86–I89 改用 fib 的 `webrtc/stun`、`webrtc/turn` 和 `webrtc/ice`，
+不再写 fit 自己的包。
 
 ### I84 STUN 消息与 STUN 服务器
 
@@ -1024,36 +1029,39 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 
 ### I86 STUN 客户端与 NAT 行为
 
-- **做**：在 fib UDP 对端上的 Binding 事务，按 RFC 8489 第 6.2.1 节重传（RTO 翻倍、Rc 和 Rm），UDP 和 TCP 都支持；
-  服务器反射地址；RFC 5780 的映射和过滤测试，用于日志和 ICE 选择候选；服务器有第二个地址时应答 OTHER-ADDRESS 和
+- **做**：在 fib UDP 对端上用 `webrtc/stun` 的事务做 Binding 事务（RFC 8489 第 6.2.1 节的 RTO 翻倍、Rc 和 Rm），UDP 和
+  TCP 都支持；`p2p/stun` 的消息换成 `webrtc/stun` 的，保留其服务器；服务器反射地址；RFC 5780 的映射和过滤测试，用于日志和 ICE 选择候选；服务器有第二个地址时应答 OTHER-ADDRESS 和
   CHANGE-REQUEST。
 - **完成标准**：用假时钟验证事务按计划超时和重传，丢失的应答会重试，NAT 测试在测试中能区分与端点无关和与地址相关的映射。
 - **涉及**：`p2p/stun`。
 
 ### I87 TURN 服务器
 
-- **做**：`p2p/turn` 包：客户端经 UDP 和 TCP 到服务器的 allocation，经 UDP 中继（RFC 8656）；长期凭据和 coturn 的限时凭据；
-  Refresh、CreatePermission、ChannelBind、Send 和 Data indication、ChannelData；生存期与过期；allocation 总数和每用户数、
-  每个 allocation 的 permission 和 channel 数、每秒中继字节数的配额；禁止中继到的地址（回环，私有地址段除非允许）。
-- **完成标准**：每个方法的成功和错误应答符合 RFC，数据经 indication 和 channel 双向传输，过期的 allocation、permission 和
-  channel 停止中继，配额以 486 和 508 拒绝，中途断开的客户端会释放其 allocation。
-- **涉及**：`p2p/turn`、`p2p/stun`。
+- **做**：基于 fib 的 `webrtc/turn/turnserver`、运行在 listener 引擎上的角色 `webrtc.turn`（[决定 029](decisions/029-webrtc.zh-CN.md)）：
+  UDP 地址、realm、静态用户（密码或长期密钥）和 coturn 的 `use-auth-secret`；中继地址、公网地址和端口范围；allocation
+  总数和每用户数、每个用户每个方向每秒中继的字节数、生存期；在 fib 对内部地址的拒绝之上允许和拒绝的对端；重载时修改用户、
+  secret、对端和带宽无需重启；经 `app` 在 `/metrics` 中的指标；`webrtc` 日志；schema 中的一章。经 TCP 和 TLS 连到服务器、
+  permission 和 channel 上限、事件和排空由 fib 提供（A55–A58）。
+- **完成标准**：fib 的 TURN 客户端经 fit 分配，经 indication 和 channel 与对端双向中继；错误的密码和过期的限时凭据被拒绝；
+  配额以 486 和 508 拒绝；超出速率的带宽被丢弃；私有地址的对端除非允许否则被拒绝；重载用户时 allocation 保留，重载地址时
+  它被迁移；中途断开的客户端在生存期结束时释放 allocation；在竞态检测下通过。
+- **涉及**：`webrtc/turn`、`config`、`app`、`admin`、`schema`、`docs`。
 
 ### I88 TURN 客户端
 
-- **做**：从 fib UDP 对端或 TCP 连接上分配、刷新、创建 permission 和绑定 channel，处理 401/438 的 nonce 往返；经
-  allocation 与对端互发数据，绑定后走 channel。
+- **做**：从 fib UDP 对端驱动 fib 的 `turn.Client`（分配、刷新、permission 和 channel、401/438 的 nonce 往返），A55 进入
+  fib 后也从 TCP 连接驱动；经 allocation 与对端互发数据，绑定后走 channel。
 - **完成标准**：客户端与 fit 的服务器配合工作，使 allocation 存活超过其生存期；过期的 nonce 会重试。
-- **涉及**：`p2p/turn`。
+- **涉及**：`p2p`。
 
 ### I89 ICE agent
 
-- **做**：`p2p/ice` 包：每个组件一个 socket 上的主机、服务器反射和中继候选；优先级、候选对和检查表（RFC 8445），包括
+- **做**：在 `p2p` 中使用 fib 的 `webrtc/ice` agent：每个组件一个 socket 上的主机、服务器反射和中继候选；优先级、候选对和检查表（RFC 8445），包括
   controlling 和 controlled 角色及其冲突；常规提名；trickle（RFC 8838）；同意保鲜（RFC 7675）；RFC 8839 语法的候选；把候选对
   的路径作为 `quic.PacketConn`。候选和候选对有上限；定时器用 fib 的。
 - **完成标准**：两个 agent 经回环、经每种模拟 NAT 相连，两端都是对称 NAT 时经 TURN 中继相连；失去同意会让候选对失败；
   不阻塞任何 worker。
-- **涉及**：`p2p/ice`。
+- **涉及**：`p2p`。
 
 ### I90 QUIC DATAGRAM 帧（A50，在 fib 中）
 
@@ -1215,3 +1223,34 @@ agenthub 和 fibhub 这两个基于 fib 的程序并入 fit，成为其配置中
   基于 `app/console` 的网页，每次修改都写回；去掉 agenthub 的状态文件、锁和密码。
 - **完成标准**：含慢速、大体积和中途断开请求体的 e2e 测试在 fib 引擎上通过，含从 store 重启；Docker 环境的检查通过。
 - **涉及**：`agent`、`config`、`test/docker/agent`、`docs`。
+
+## WebRTC
+
+fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fit 为媒体服务器的 WHIP 和 WHEP，以及 fit 作为其他媒体
+服务器前面的代理，代理它们的信令和媒体（[决定 029](decisions/029-webrtc.zh-CN.md)）。TURN 服务器是 P2P 里程碑中的 I87。
+
+### I108 基于 fib 各包的 WebRTC
+
+- **做**：决定 029，修订 025；本文件和进度文件中的行；fit 升级到 fib `80c7f76`，第一个带 `webrtc` 的提交；按 fib 实际实现
+  （`96a2331`）修正 A49 条目；为 TURN 服务器缺少的东西向 fib 提出请求（A55–A58）。
+- **完成标准**：完整测试套件在 fib `80c7f76` 上通过，文档链接都能解析。
+- **涉及**：`go.mod`、`docs`。
+
+### I109 WHIP 和 WHEP：共享 Mux 上的 SFU
+
+- **做**：角色 `webrtc.media`，listener 引擎 UDP binding 上的一个 `webrtc.Mux`，带公网地址和 ICE 服务器；handler 模块
+  `whip` 和 `whep`：按路由给出的名字区分流，推流者的 RTP 转发给观看者并转发关键帧请求，用路由的中间件认证，限制流数、
+  每个流的观看者数、PeerConnection 总数和码率；按 RFC 9725 和 WHEP 草案支持 DELETE 和 PATCH（trickle），在 `Link` 头中
+  给出 ICE 服务器（`webrtc.turn` 有 secret 时由它生成 TURN 凭据）；重载和停止时关闭一切。
+- **完成标准**：fib 的 `PeerConnection` 经 fit 推流和播放；推流者离开时其观看者结束；慢速和断开的观看者不拖住推流者；
+  各项限制生效；在竞态检测下通过。
+- **涉及**：`webrtc`、`modules`、`config`、`schema`、`docs`。
+
+### I110 代理的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP
+
+- **做**：经 fit 的上游连接池把 WHIP 和 WHEP 信令代理到上游媒体服务器，把应答中的候选改写为 fit 的公网 UDP 端口，并记住
+  其 ufrag 对应的后端媒体地址；一种 L4 UDP 服务，按新对端第一个数据报中的 STUN USERNAME 选路，之后粘性地中继它的五元组，
+  带上限和空闲超时。
+- **完成标准**：一个 fit 端口后面的两个媒体服务器各自得到自己的对端；对端在 Binding 请求之前的数据报被丢弃；后端消失时
+  释放其路由；在竞态检测下通过。
+- **涉及**：`webrtc`、`l4`、`handler/proxy`、`config`、`schema`、`docs`。

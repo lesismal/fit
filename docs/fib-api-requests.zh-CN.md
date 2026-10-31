@@ -59,12 +59,16 @@
 | A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
 | A47 | 流式请求体转交时不必要的拷贝 | 已完成，fib `309a6cd4`（`main`） | 1, 5, 8 | W4 |
 | A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`，HTTP/2 `d3707ca7`（`main`） | 1, 5, 8 | W1 |
-| A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已实现，fib `4febcdf5`（本地，未推送） | 1, 9 | I85（P2P） |
+| A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已完成，`96a2331`（在 `80c7f76` 中） | 1, 9 | I85（P2P）、I87 |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 | A51 | 包设备的描述符在 poller 上读写 | 已提出 | 1, 8, 11 | I95（VPN） |
 | A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已提出 | 10, 13 | agent（028） |
 | A53 | WebSocket 连接发送的背压 | 已提出 | 8, 9, 11 | agent、tunnel（028） |
 | A54 | 引擎 UDP binding 上的原始 QUIC 端点 | 已提出 | 15 | tunnel（028） |
+| A55 | 经 TCP 和 TLS 的 TURN | 已提出 | — | I87（029） |
+| A56 | 从不让 worker 等待的 TURN 服务器 | 已提出 | 1 | I87（029） |
+| A57 | TURN 服务器的限制与钩子 | 已提出 | 11 | I87（029） |
+| A58 | 原地修改和排空 TURN 服务器 | 已提出 | 10, 11 | I87（029） |
 
 ## 证据
 
@@ -1114,7 +1118,7 @@ body，并说明它是否是这样的缓冲；`Context.WriteResponseOwned` 发�
 
 ## A49：在监听 socket 上朝某地址打开 UDP 对端
 
-**状态。** 2026-11-01 由 fit 的会话实现，fib `4febcdf5`，在 fib 本地的 `main` 上；尚未推送，所以 fit 还没有依赖它。
+**状态。** 已完成，fib `96a2331`，自 `80c7f76` 起在 fib 的 `main` 上，fit 已使用（I108）。本条目的早先版本写的是 fib 本地 `main` 上的提交 `4febcdf5` 和下面建议的异步 API；那个提交从未推送，实际实现的是“实现”一段中的同步 API。
 
 **问题。** UDP 监听的对端要先发来一个数据报才成为连接，而拨出的 UDP 连接有自己的 socket，也就有自己的本地端口。打洞需要
 的正相反：一个只绑定一次的 socket，它的端口已被 NAT 映射、也被 STUN 服务器看到过，先向一个还没发过任何东西的地址发送，
@@ -1136,16 +1140,16 @@ func (e *Engine) OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler)
 这个对端与监听的其他对端一样：binding 的空闲超时、`SetUDPIdleTimeout`、`NotifyWritable` 和 `OnClose` 都适用；该地址已有
 对端时原样返回。打开时不阻塞，也不发送任何东西。
 
-**实现。** `Engine.OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler, done
-func(*Connection, error)) error`：与 `Dial` 一样是异步的，因为对端表属于 socket 的事件循环，worker 不能等它。对用不了的
-socket 立即返回错误（`ErrNoUDPSocket`；多个 socket 匹配而没有指明时为 `ErrUDPSocketAmbiguous`；`ErrUDPSocketSpread`、
-`EINVAL`、`EAFNOSUPPORT`），否则在事件循环上、对端的 `OnOpen` 之后调用一次 `done`，传入连接或 `net.ErrClosed`。被
-`ReusePort` 分散到各 poller 上的地址会被拒绝：应答落到哪个 socket 由内核决定，对端可能收不到。所以 fit 在不分散 UDP socket
-的 engine 或 binding 上打开对端（`ReusePort: false` 或 `EngineLoop: true`）。测试：`udp_open_test.go`（IPv4、双栈 socket 上的
-IPv4、IPv6；应答到达打开的对端而不是 binding 的 handler，且不早于其 `OnOpen`；空闲超时；各种拒绝；分散的情况）。
+**实现。** `Engine.OpenUDPPeer(binding int, addr netip.AddrPort) (*Connection, error)`（fib `96a2331`，
+`udp_peer.go`）：这个对端得到 binding 的 handler 和它的 `OnOpen`，就像它先发过数据一样，开在该 binding 地址的第一个 socket
+上；开启 `ReusePort` 时，它的应答可能落到另一个 socket 上，那个 socket 会为同一地址再开一个连接，所以打开对端的协议按地址
+而不是按连接记录对端，fib 的 `webrtc` 和 `turnserver` 都是这样做的。它会等待 socket 的事件循环，所以不能在该循环运行的
+回调里调用（UDP 对端的 `OnOpen`、`OnHangup`）；引擎停止或 binding 排空后返回 `net.ErrClosed`，索引不是 UDP binding 或地址
+族不对时返回错误。像 `turnserver` 那样在 worker 上的 `OnData` 中调用时，这个等待违反了 fit 的规则 1；
+[A56](#a56从不让-worker-等待的-turn-服务器) 要求 TURN 服务器不再等待。
 
-**fit 的用法。** `p2p/ice` 在一个 binding 上收集主机候选，为它检查的每个远端候选打开一个对端；`p2p/turn` 把每个
-allocation 的中继地址绑定为端口 0 的 binding，在有数据要发给某个 permission 的地址时为它打开对端。
+**fit 的用法。** 通过 fib 的 `webrtc` 各包：`webrtc/turn/turnserver` 用它从每个 allocation 的中继地址向被许可的对端发送
+（I87，[决定 029](decisions/029-webrtc.zh-CN.md)），`webrtc/ice` 从收集候选的 socket 发出检查。
 
 ## A50：QUIC DATAGRAM 帧
 
@@ -1252,3 +1256,79 @@ connection ID 把每个数据报路由到连接、限制进行中的握手、回
 迁移和定时器都在其中，与 `http3.ServerHandler` 共用。
 
 **fit 如何使用。** tunnel 的 QUIC 监听和拨号只需在其上写几行，并能跟随迁移的客户端。
+
+## A55：经 TCP 和 TLS 的 TURN
+
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+
+**问题。** fib 的 `webrtc/turn` 只在 UDP 上讲 TURN：它的 `FiveTuple` 不含传输协议，`turnserver` 监听一个 UDP binding。
+所在网络只放行 TCP、或只放行 443 端口上 TLS 的客户端连不到服务器，而 WebRTC 服务运行 TURN 正是为了这些客户端。决定 025
+计划了经 UDP 和 TCP 到服务器的 allocation。
+
+**依据。** RFC 8656 第 3.1 节允许客户端经 UDP、TCP 或 (D)TLS 连到服务器，中继始终是 UDP；浏览器会列出
+`turn:host?transport=tcp` 和 `turns:host:443` 服务器，coturn 和 pion 两者都支持。
+
+**建议的 API。** 核心在 `FiveTuple` 中带上传输协议（UDP 或字节流），并从字节流中切分 STUN 和 ChannelData（字节流上的
+ChannelData 补齐到四字节，RFC 8656 第 12.5 节）；`turnserver` 用同一个 handler 服务 TCP binding，以及经 `fib/tls` 的 TLS
+binding：一条连接就是一个客户端，连接关闭时释放其 allocation。字节流缓冲的字节数有上限，第一个 Allocate 之前有空闲超时。
+
+**fit 的用法。** `webrtc.turn.listen` 接受 `tcp` 和带证书的 `tls` 地址，与 listener 相同。
+
+## A56：从不让 worker 等待的 TURN 服务器
+
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+
+**问题。** `turnserver` 在发来请求的数据报的 `OnData` 中、在 fib worker 上运行核心，并在那里用会等待的调用绑定中继地址和
+打开对端：Allocate 调用 `AllocateRelay`，后者调用 `Engine.AddBinding`（fib 的 binding 锁，正在移除的 binding 等待其事件循环
+时持有它；然后是一次 bind，以及等待事件循环接手新 socket），端口范围中的端口被占用时还会重试；发给尚未先发过数据的对端的
+数据报调用 `Engine.OpenUDPPeer`，它等待 socket 的事件循环。忙碌的事件循环或别处正在移除的 binding 会卡住这个 worker，
+以及排在所有 allocation 共用的那一把核心互斥锁后面的其他数据报。
+
+**依据。** `80c7f76` 的 `webrtc/turn/turnserver/turnserver.go`：`allocateRelay`（在 `s.mu` 下 `AddBinding`）、`conn`（由
+`OnData` 调用的 `flush` 中的 `OpenUDPPeer`）；`relay.Close` 已经因为同样的原因把 `RemoveBinding` 放到了 goroutine 上。
+
+**建议的 API。** 核心异步地请求中继，`AllocateRelay(t, user, ipv6, done func(Relay, error))`，在 `done` 运行时应答
+Allocate（期间的重传丢弃）；`turnserver` 在自己的有界池上绑定，或预先绑定几个中继。`OpenUDPPeer` 增加像 `Dial` 那样的
+异步形式，或者 `turnserver` 在中继的 socket 上用 `sendto` 发出对端的第一个数据报，由应答打开对端。核心的互斥锁按
+allocation 拆分，让一个 allocation 的中继不必等另一个。
+
+**fit 的用法。** 与现在相同，无需改动：为 I87 记录的对规则 1 的违反随之消除。
+
+## A57：TURN 服务器的限制与钩子
+
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+
+**问题。** 规则 11 要求每种资源都有上限，核心限制了 allocation，但一个 allocation 的 permission 是一个随每次
+CreatePermission 增长的 map（每个存活五分钟），channel 随每次 ChannelBind 增长到 4096 个：持有凭据的客户端能让服务器
+无上限地占用内存。`PeerAllowed` 只看到地址而看不到端口，所以服务器无法只允许本机地址上的中继端口，而同一服务器的两个
+客户端之间的中继需要这样，同时本机的其他端口仍对中继关闭。宿主也只能看到 `OnRelay` 报告的字节数：allocation 建立或
+释放时、请求被拒绝时及其原因都没有事件，而指标和日志需要它们。
+
+**依据。** `80c7f76` 的 `webrtc/turn/server.go`：`createPermission` 和 `channelBind` 不计数地加入 `a.perms` 和
+`a.chans`；`ServerConfig.PeerAllowed func(netip.Addr) bool`；`OnRelay` 是唯一的钩子。
+
+**建议的 API。** 每个 allocation 的 `ServerConfig.MaxPermissions` 和 `MaxChannels`（以 508 拒绝，RFC 8656 第 9 节允许）；
+`SendAllowed func(peer netip.AddrPort) bool`，在向对端中继数据时检查；`OnEvent func(Event)`，带 allocation 的用户和五元组，
+用于建立、刷新、释放（及原因：删除、过期、关闭）和拒绝（带错误码），以及认证失败；`Server.Stats()` 给出持有的
+allocation、permission 和 channel 数。
+
+**fit 的用法。** `webrtc.turn` 增加 `max_permissions` 和 `max_channels`，默认只允许服务器本机地址上的中继端口，并为每种
+事件在 `/metrics` 中计数、在 `webrtc` 日志中记录。
+
+## A58：原地修改和排空 TURN 服务器
+
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+
+**问题。** 配置重载不能丢掉没有改变的东西（决定 028），被移除的服务器应让它的 allocation 自然结束而不是切断。核心的
+生存期、nonce 生存期和 allocation 配额在创建时就固定了，`turnserver.Close` 一次释放所有 allocation。fit 通过函数
+（`Auth`、`PeerAllowed`、`OnRelay`）替换核心读取的内容而无需重启，但生存期或配额的改变会创建新的服务器，已有的
+allocation 随之丢失：浏览器只好重启 ICE。
+
+**依据。** `NewServer` 把 `turn.ServerConfig` 复制进 `Server`；`turnserver` 只有 `Close`，在它和运行之间没有别的状态。
+
+**建议的 API。** `Server.SetLimits(Limits)` 修改生存期和配额，从下一个请求起生效（超过调低后配额的 allocation 保留到结束）；
+`Server.Drain()` 以 508 拒绝新的 allocation，让已有的继续刷新直到 `Close`；`turnserver.Shutdown(ctx)` 先排空，等到没有
+allocation 或 ctx 结束，再关闭。
+
+**fit 的用法。** 重载时原地修改生存期和配额；地址或 realm 改变时，在旧服务器旁启动新服务器，旧服务器像重载移除的
+listener 一样，在 listener 的排空超时内排空。

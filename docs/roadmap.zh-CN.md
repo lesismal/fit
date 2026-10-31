@@ -302,6 +302,8 @@ fit 可以作为反向代理和静态文件服务器使用。
 | 结构化日志 | M1 | — |
 | 扩展：Go 模块、WASM | M5 | — |
 | nginx 配置转换器 | M5 | — |
+| TURN 服务器 | P2P，I87（[决定 029](decisions/029-webrtc.zh-CN.md)） | `webrtc/turn/turnserver` |
+| WebRTC：WHIP 和 WHEP，作为媒体服务器和代理 | WebRTC，I109–I110 | `webrtc`（`PeerConnection`、`Mux`） |
 
 ## 性能目标
 

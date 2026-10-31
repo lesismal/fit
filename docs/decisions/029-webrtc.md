@@ -1,0 +1,82 @@
+# 029: WebRTC in fit, on fib's WebRTC packages
+
+[English](029-webrtc.md) | [简体中文](029-webrtc.zh-CN.md)
+
+Status: accepted (2026-11-01). Amends [decision 025](025-p2p.md).
+
+## Context
+
+fib now has WebRTC (`fib` `80c7f76`): a `PeerConnection` and a `Mux` that shares one UDP port among
+any number of them, and the sans-IO protocols under them, `webrtc/stun`, `webrtc/ice`,
+`webrtc/turn` (a client and a server core), `webrtc/sdp`, `webrtc/sctp`, `webrtc/srtp` and
+`webrtc/rtp`, with DTLS in fib's `tls`. `webrtc/turn/turnserver` runs the TURN server core on a fib
+engine: its listening address is a UDP binding, and each allocation's relayed address a binding of
+its own, opened with `Engine.AddBinding` and spoken from with `Engine.OpenUDPPeer`
+([A49](../fib-api-requests.md#a49-a-udp-peer-opened-toward-an-address-on-a-listeners-socket)).
+
+Users asked for fit to serve WebRTC: a TURN server for browsers and other agents, WHIP and WHEP
+ingest and playback with fit as the media server, and fit in front of other media servers as a
+proxy of their signaling and their media.
+
+Decision 025 planned STUN, TURN and ICE as packages of fit's own, `p2p/stun`, `p2p/turn` and
+`p2p/ice`, because pion reads its sockets and runs its timers on goroutines of its own. fib's
+packages are what 025 asked for, sans-IO and on fib's engine, and rule 15 prefers fib for what
+fib can hold.
+
+## Decision
+
+- **fit's WebRTC is fib's.** fit uses fib's `webrtc` packages and adds no dependency; pion stays
+  out, for 025's reasons.
+- **025 is amended.** Its relay and its ICE come from fib: I86 (the STUN client) uses
+  `webrtc/stun`'s transactions, I87 (the TURN server) `webrtc/turn/turnserver`, I88 (the TURN
+  client) `turn.Client`, I89 (the ICE agent) `webrtc/ice`. `p2p/turn` and `p2p/ice` are not written.
+  `p2p/stun` stays, for now, as fit's STUN server on any listener, over UDP and TCP, which fib does
+  not have (fib's TURN server answers Binding requests only on its own UDP port). When I86 runs,
+  its messages move to `webrtc/stun`'s and it keeps only the server, so that one STUN codec serves
+  the process and fixes reach both. 025's other decisions hold: QUIC over the selected pair,
+  signaling on the rendezvous fit, everything bounded.
+- **The config's `webrtc`.** A top-level member holds what fit runs for WebRTC beside the gateway,
+  as `agent` and `tunnel` do ([decision 028](028-agent-and-tunnel.md)): `webrtc.turn`, the TURN
+  server, is a role of package `app`, on the listeners' engine, applied, moved and stopped with
+  every config. WHIP and WHEP (I109) are handler modules on routes, and the UDP port their peers
+  share is a role beside it, `webrtc.media`.
+- **The TURN server** (`webrtc/turn`, I87): UDP addresses to listen on, one binding; a realm; users
+  with a password or coturn's long-term key, and coturn's `use-auth-secret` for time-limited
+  credentials, either or both; the relay address, the public address behind a 1:1 NAT, and a port
+  range; allocations in all and per user, relayed bytes a second per user and direction, lifetimes;
+  peers allowed and denied, fib's denial of internal addresses being the default. Users, the
+  secret, the peer lists and the bandwidth apply to the next request after a reload, without
+  touching the allocations held; a change of the addresses, the realm, the lifetimes or the
+  allocation quotas starts the server again, freeing its allocations, until fib can change them in
+  place (A58). Its metrics are in the Admin API's `/metrics`, through `app`.
+- **WHIP and WHEP** (I109): modules `whip` and `whep` terminate WebRTC in fit on the shared
+  `webrtc.Mux` of `webrtc.media`: a stream by name from the route, one publisher forwarded to many
+  viewers as RTP with key frame requests relayed, the route's middleware for auth, limits on
+  streams, viewers, PeerConnections and bitrate, DELETE and PATCH (trickle) per RFC 9725 and the
+  WHEP draft, ICE servers in `Link` headers, everything closed on reload and stop.
+- **Proxying media servers** (I110): WHIP and WHEP signaling proxied to upstream media servers
+  through fit's upstream pools, the answer's candidates rewritten to fit's public UDP port and its
+  ufrag remembered against the backend; an L4 UDP service that routes a new peer by the STUN
+  USERNAME of its first datagram and then relays its 5-tuple, sticky, so that many media servers
+  sit behind one fit port.
+
+## What fib needs
+
+- [A55](../fib-api-requests.md#a55-turn-over-tcp-and-tls): TURN over TCP and TLS to the server,
+  which 025 required and browsers behind UDP-blocking firewalls use.
+- [A56](../fib-api-requests.md#a56-a-turn-server-that-never-waits-on-a-worker): the TURN server
+  binds relayed addresses and opens peers without its worker waiting: today `AddBinding` and
+  `OpenUDPPeer` wait on locks and on event loops inside a datagram's `OnData`.
+- [A57](../fib-api-requests.md#a57-a-turn-servers-limits-and-hooks): per-allocation caps on
+  permissions and channels, a peer check that sees the port, and events for metrics.
+- [A58](../fib-api-requests.md#a58-a-turn-server-changed-in-place-and-drained): lifetimes and quotas
+  changed in place, and a drain that takes no new allocation while the held ones end.
+
+## Consequences
+
+- fit has one WebRTC stack, fib's, which fib's tests and fuzzing cover; fixes go to fib (rule 15).
+- Until A56, the TURN server's worker waits briefly on fib's binding lock and event loop when it
+  binds a relayed address or opens a peer: a known breach of rule 1, recorded in the progress files,
+  bounded by the allocation quotas. Until A57, an allocation's permissions are bounded only by its
+  requests (each permission lasts five minutes) and its channels by the 4096 numbers RFC 8656 has.
+- Until A55, clients that cannot use UDP cannot reach the TURN server.
