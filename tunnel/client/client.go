@@ -234,8 +234,7 @@ func (c *Client) Info() proto.Info {
 }
 
 func (c *Client) newUplink(sc *config.TunnelUplink) *uplink.Uplink {
-	var u *uplink.Uplink
-	u = uplink.New(c.h.Engine, sc, c.limit, c.log, c.Info, func(u *uplink.Uplink, r *link.Router) {
+	u := uplink.New(c.h.Engine, sc, c.limit, c.log, c.Info, func(u *uplink.Uplink, r *link.Router) {
 		// The server sends the nodes whenever they change.
 		r.HandleNotify(proto.MethodNodes, func(_ *link.Link, body []byte) {
 			var list proto.NodeList

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -16,16 +15,6 @@ import (
 
 	"github.com/lesismal/fib/websocket"
 )
-
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().String()
-}
 
 // echoHandlers answer requests with their payload and echo stream frames back.
 // echoHandlers 用载荷应答请求，并把流中的帧原样发回。

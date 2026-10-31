@@ -312,9 +312,7 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	var warnings []string
 	if cs.apps != nil {
 		if err := cs.apps.Apply(c); err != nil {
-			for _, line := range strings.Split(err.Error(), "\n") {
-				warnings = append(warnings, line)
-			}
+			warnings = append(warnings, strings.Split(err.Error(), "\n")...)
 		}
 	}
 	var deprecated config.Errors

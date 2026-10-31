@@ -285,7 +285,6 @@ type hub struct {
 	echo, stall, banner         string
 	stalled                     <-chan net.Conn
 	echoListen, stallListen     string
-	link                        string
 	serverCon, nodeCon, cliCon  string
 	bodyPassword, protocol, url string
 }

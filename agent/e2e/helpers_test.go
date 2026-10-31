@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -119,10 +118,3 @@ func events(t *testing.T, r io.Reader) []string {
 	}
 	return out
 }
-
-func mustJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
-func errf(format string, args ...any) error { return fmt.Errorf(format, args...) }

@@ -26,7 +26,6 @@ type pump struct {
 	queue   [][]byte
 	frames  int
 	srcEnd  error // src ended with this, once the queue has gone
-	armed   bool
 	ended   bool
 	sending bool
 }

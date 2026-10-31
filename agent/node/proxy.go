@@ -296,7 +296,6 @@ type exchange struct {
 	err     error
 	once    sync.Once
 	done    chan struct{}
-	keeping bool
 }
 
 // upload forwards the stream's body frames into bw as they arrive.
