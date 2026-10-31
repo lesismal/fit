@@ -65,11 +65,11 @@
 | A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已提出 | 10, 13 | agent（028） |
 | A53 | WebSocket 连接发送的背压 | 已提出 | 8, 9, 11 | agent、tunnel（028） |
 | A54 | 引擎 UDP binding 上的原始 QUIC 端点 | 已提出 | 15 | tunnel（028） |
-| A55 | 经 TCP 和 TLS 的 TURN | 已提出 | — | I87（029） |
-| A56 | 从不让 worker 等待的 TURN 服务器 | 已提出 | 1 | I87（029） |
-| A57 | TURN 服务器的限制与钩子 | 已提出 | 11 | I87（029） |
-| A58 | 原地修改和排空 TURN 服务器 | 已提出 | 10, 11 | I87（029） |
-| A59 | 从指定的本地地址和端口范围发起拨号 | 已提出 | — | I110（029） |
+| A55 | 经 TCP 和 TLS 的 TURN | 已完成，`97201b6`（在 `84a67f7` 中） | — | I111（029） |
+| A56 | 从不让 worker 等待的 TURN 服务器 | 已完成，`74100b2`（在 `84a67f7` 中） | 1 | I87、I111（029） |
+| A57 | TURN 服务器的限制与钩子 | 已完成，`bf669ce`（在 `84a67f7` 中） | 11 | I111（029） |
+| A58 | 原地修改和排空 TURN 服务器 | 已完成，`496301d`（在 `84a67f7` 中） | 10, 11 | I111（029） |
+| A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中） | — | I111（029） |
 
 ## 证据
 
@@ -1260,7 +1260,7 @@ connection ID 把每个数据报路由到连接、限制进行中的握手、回
 
 ## A55：经 TCP 和 TLS 的 TURN
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `97201b6`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
 
 **问题。** fib 的 `webrtc/turn` 只在 UDP 上讲 TURN：它的 `FiveTuple` 不含传输协议，`turnserver` 监听一个 UDP binding。
 所在网络只放行 TCP、或只放行 443 端口上 TLS 的客户端连不到服务器，而 WebRTC 服务运行 TURN 正是为了这些客户端。决定 025
@@ -1275,9 +1275,14 @@ binding：一条连接就是一个客户端，连接关闭时释放其 allocatio
 
 **fit 的用法。** `webrtc.turn.listen` 接受 `tcp` 和带证书的 `tls` 地址，与 listener 相同。
 
+**实际实现。** `FiveTuple.Transport`（UDP 或 TCP，TLS 对核心而言就是 TCP），`FrameLen` 切分字节流上的 STUN 和补齐的 ChannelData，客户端用 `ClientConfig.Stream`；`turnserver.Server.StreamHandler()` 可挂在 `fib.Binding{Network: "tcp"}` 上，或包在 `fibtls.NewServer(cfg, ...)` 里，另有 `ListenTCP`/`ListenTLS`；`Config.MaxStreamMessage`（8 KiB）和 `Config.StreamIdleTimeout`（30s，每次清扫时检查）。一条连接就是一个客户端，连接关闭时释放其 allocation；监听 binding 由调用方移除。
+
+**fit 的使用方式。** `webrtc.turn.listen_tcp` 和 `listen_tls`，各是 listener 引擎上的一个 TCP binding，服务 `StreamHandler()`；TLS 的经 `fibtls.NewServer`，证书来自 `webrtc.turn.tls.certificates`，由 `tlsmgr` 加载，并像 listener 的证书一样被监视；`max_stream_message` 和 `stream_idle_timeout`（I111）。
+
+
 ## A56：从不让 worker 等待的 TURN 服务器
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `74100b2`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
 
 **问题。** `turnserver` 在发来请求的数据报的 `OnData` 中、在 fib worker 上运行核心，并在那里用会等待的调用绑定中继地址和
 打开对端：Allocate 调用 `AllocateRelay`，后者调用 `Engine.AddBinding`（fib 的 binding 锁，正在移除的 binding 等待其事件循环
@@ -1295,9 +1300,14 @@ allocation 拆分，让一个 allocation 的中继不必等另一个。
 
 **fit 的用法。** 与现在相同，无需改动：为 I87 记录的对规则 1 的违反随之消除。
 
+**实际实现。** `ServerConfig.AllocateRelay(t, user, ipv6, done)` 是异步的；核心可并发使用，每个 allocation 一把锁，表分成 64 个分片；`turnserver` 在自己的 goroutine 上绑定中继地址、打开对端，由有界队列喂给它们（`Config.SetupWorkers`，4，和 `SetupQueue`，1024），队列满时以 508 拒绝 allocation 或丢弃数据报，由 `Server.Unsent()` 计数。
+
+**fit 的使用方式。** 与之前相同，无需改动：I87 记录的对规则 1 的违反已消除。`Unsent()` 即 `fit_turn_dropped_total{reason="unsent"}`（I111）。
+
+
 ## A57：TURN 服务器的限制与钩子
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `bf669ce`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
 
 **问题。** 规则 11 要求每种资源都有上限，核心限制了 allocation，但一个 allocation 的 permission 是一个随每次
 CreatePermission 增长的 map（每个存活五分钟），channel 随每次 ChannelBind 增长到 4096 个：持有凭据的客户端能让服务器
@@ -1316,9 +1326,14 @@ allocation、permission 和 channel 数。
 **fit 的用法。** `webrtc.turn` 增加 `max_permissions` 和 `max_channels`，默认只允许服务器本机地址上的中继端口，并为每种
 事件在 `/metrics` 中计数、在 `webrtc` 日志中记录。
 
+**实际实现。** 每个 allocation 的 `Limits.MaxPermissions` 和 `MaxChannels`，以 508 拒绝；`PeerAllowed func(netip.AddrPort) bool`，CreatePermission 时以端口 0 询问，ChannelBind 和双向中继的每个数据报带对端端口询问，取代了建议的 `SendAllowed`；`Server.HoldsRelay(addr)`；`ServerConfig.OnEvent`（建立、刷新、释放及原因和流量、拒绝及错误码、认证失败）；`Server.Stats()`。
+
+**fit 的使用方式。** `max_permissions` 和 `max_channels`（各 64）；对端检查只在各服务器持有中继的端口（`HoldsRelay`）以及 `allowed_peers` 带端口列出的端口上允许 `relay_ip` 和 `public_ip`，绝不允许 fit 的其他端口；`OnEvent` 计入 `/metrics`，并由 `webrtc` 日志以 debug 级别记录；`Stats()` 作为 gauge（I111）。
+
+
 ## A58：原地修改和排空 TURN 服务器
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `496301d`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
 
 **问题。** 配置重载不能丢掉没有改变的东西（决定 028），被移除的服务器应让它的 allocation 自然结束而不是切断。核心的
 生存期、nonce 生存期和 allocation 配额在创建时就固定了，`turnserver.Close` 一次释放所有 allocation。fit 通过函数
@@ -1334,9 +1349,14 @@ allocation 或 ctx 结束，再关闭。
 **fit 的用法。** 重载时原地修改生存期和配额；地址或 realm 改变时，在旧服务器旁启动新服务器，旧服务器像重载移除的
 listener 一样，在 listener 的排空超时内排空。
 
+**实际实现。** `turn.Limits` 嵌入 `ServerConfig`；`Server.SetLimits`、`Limits` 和 `SetAuth`，从下一个请求起生效；`Server.Drain()`，以及 `turnserver.Server.Shutdown(ctx)`：排空，等到没有 allocation 或 ctx 结束，再关闭。
+
+**fit 的使用方式。** 重载时用 `Core().SetLimits` 修改配额、上限和生存期，用 `SetAuth` 修改用户和 secret；地址改变时在旧服务器旁启动新服务器，旧服务器由 `Shutdown` 在 fit run 的 `-shutdown-timeout`（`app.Host.DrainTimeout`）内排空；同一地址上 realm、中继地址、nonce secret 或字节流上限的改变仍先关闭旧服务器，因为两者不能共用一个地址（I111）。
+
+
 ## A59：从指定的本地地址和端口范围发起拨号
 
-**状态。** 2026-11-01 为 fit 的 WebRTC 代理提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+**状态。** 2026-11-01 为 fit 的 WebRTC 代理提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `3655193`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
 
 **问题。** `webrtc.proxy` 为每个对端地址用一个自己的 UDP socket 中继到它的媒体服务器，这个 socket 由
 `Engine.DialWithHandler` 打开。内核按路由选本地地址，从整个临时端口范围里选端口。私有网络上的媒体服务器常在
@@ -1351,3 +1371,7 @@ PortMax uint16, Timeout, Handler}, done)`：socket 在 connect 前绑定到 `Loc
 
 **fit 的用法。** `webrtc.proxy` 增加 `relay_ip`、`port_min` 和 `port_max`，用于它通向媒体服务器的 socket，
 就像 `webrtc.turn` 为它的中继地址所做的那样。
+
+**实际实现。** `fib.DialOptions{Network, Addr, Timeout, Handler, LocalAddr netip.AddrPort, PortMin, PortMax uint16}` 和 `Engine.DialWith(opts, done)`：socket 不带 SO_REUSEADDR 绑定，从随机端口开始搜索范围，没有空闲端口时拨号失败，错误匹配 `fib.ErrNoLocalPort`；本地地址决定地址族。
+
+**fit 的使用方式。** `webrtc.proxy.relay_ip`、`port_min` 和 `port_max`，加载配置时检查；每个中继用 `DialWith` 拨向它的媒体服务器，范围内没有空闲端口时丢弃该对端地址，计为 `fit_webrtc_proxy_dropped_total{reason="no_port"}`（I111）。

@@ -237,6 +237,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I108 | 决定 029：fit 的 WebRTC 基于 fib；fib `80c7f76`；按实际实现修正 A49；A55–A58 | I85 | done |
 | I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | done |
 | I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | done |
+| I111 | 基于 fib A55–A59 的 WebRTC：经 TCP 和 TLS 的 TURN、上限、事件、原地修改与排空；代理的源地址和端口 | I87, I110 | done |
 
 ## M0 基础
 
@@ -1041,7 +1042,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   UDP 地址、realm、静态用户（密码或长期密钥）和 coturn 的 `use-auth-secret`；中继地址、公网地址和端口范围；allocation
   总数和每用户数、每个用户每个方向每秒中继的字节数、生存期；在 fib 对内部地址的拒绝之上允许和拒绝的对端；重载时修改用户、
   secret、对端和带宽无需重启；经 `app` 在 `/metrics` 中的指标；`webrtc` 日志；schema 中的一章。经 TCP 和 TLS 连到服务器、
-  permission 和 channel 上限、事件和排空由 fib 提供（A55–A58）。
+  permission 和 channel 上限、事件和排空由 fib 提供（A55–A58），在 I111 中接入。
 - **完成标准**：fib 的 TURN 客户端经 fit 分配，经 indication 和 channel 与对端双向中继；错误的密码和过期的限时凭据被拒绝；
   配额以 486 和 508 拒绝；超出速率的带宽被丢弃；私有地址的对端除非允许否则被拒绝；重载用户时 allocation 保留，重载地址时
   服务器随之迁移；中途断开的客户端在生存期结束时释放 allocation；在竞态检测下通过。
@@ -1255,3 +1256,16 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
 - **完成标准**：一个 fit 端口后面的两个媒体服务器各自得到自己的对端；对端在 Binding 请求之前的数据报被丢弃；后端消失时
   释放其路由；在竞态检测下通过。
 - **涉及**：`webrtc`、`upstream`、`config`、`schema`、`docs`。
+
+### I111 基于 fib A55–A59 的 WebRTC
+
+- **做**：fit 升级到 fib `84a67f7`，带 A55–A59。`webrtc.turn`：消除 I87 记录的对规则 1 的违反（A56）；`max_permissions`
+  和 `max_channels`（A57）；能看到端口的对端检查，`relay_ip` 只在中继端口和 `allowed_peers` 带端口列出的端口上可达，绝不
+  到达 fit 的其他端口（A57）；`OnEvent` 进入 `webrtc` 日志和 `/metrics`，`Stats()` 成为 gauge（A57）；重载原地修改配额、
+  上限、生存期和凭据，地址改变时旧服务器在 listener 的排空超时内排空（A58）；`listen_tcp` 和 `listen_tls`，证书像 listener
+  一样来自文件，`max_stream_message` 和 `stream_idle_timeout`，空闲地址探测也覆盖 TCP（A55）。`webrtc.proxy`：`relay_ip`、
+  `port_min` 和 `port_max`，加载时检查，中继用 `DialWith` 拨号，端口范围耗尽计为丢弃（A59）。fib 请求 A55–A59 标为完成。
+- **完成标准**：经 fit、用 fib 客户端的 TCP 和 TLS allocation 双向中继；上限以 508 拒绝；带端口的检查拒绝 fit 的其他端口，
+  并让两个客户端互相中继；事件和指标计数；重载在修改限制时保留 allocation；地址改变时排空；中继从配置的端口范围发出，
+  范围满时丢弃并计数；在竞态检测下通过。
+- **涉及**：`webrtc`、`config`、`app`、`runtime`、`tlsmgr`、`cli`、`schema`、`docs`、`go.mod`。

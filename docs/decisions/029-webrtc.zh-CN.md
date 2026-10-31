@@ -32,11 +32,14 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
   （[决定 028](028-agent-and-tunnel.zh-CN.md)）：`webrtc.turn`，即 TURN 服务器，是 `app` 包的一个角色，运行在 listener
   的引擎上，随每个配置应用、迁移和停止。WHIP 和 WHEP（I109）是路由上的 handler 模块，它们的对端共用的 UDP 端口是旁边的
   另一个角色 `webrtc.media`。
-- **TURN 服务器**（`webrtc/turn`，I87）：监听的 UDP 地址，同一个 binding；realm；带密码或 coturn 长期密钥的用户，以及
+- **TURN 服务器**（`webrtc/turn`，I87、I111）：监听的 UDP 地址，同一个 binding，以及 TCP 和 TLS 地址（I111，A55），
+  TLS 证书像 listener 一样来自文件；realm；带密码或 coturn 长期密钥的用户，以及
   coturn 用于限时凭据的 `use-auth-secret`，二者可选其一或同时使用；中继地址、1:1 NAT 后的公网地址和端口范围；allocation
-  的总数和每用户数、每个用户每个方向每秒中继的字节数、生存期；允许和拒绝的对端，默认采用 fib 对内部地址的拒绝。重载后，
-  用户、secret、对端列表和带宽从下一个请求起生效，不影响已有的 allocation；地址、realm、生存期或 allocation 配额改变时，
-  服务器重新启动，释放它的 allocation，直到 fib 能原地修改它们（A58）。它的指标经 `app` 出现在 Admin API 的 `/metrics` 中。
+  的总数和每用户数、每个用户每个方向每秒中继的字节数、生存期；每个 allocation 的 permission 和 channel 上限（A57）；允许
+  和拒绝的对端，默认采用 fib 对内部地址的拒绝，服务器自己的地址只在其中继端口上可达（A57）。重载后，用户、secret、对端
+  列表、带宽、生存期和配额从下一个请求起生效，不影响已有的 allocation（A58）；地址改变时在旧服务器旁启动新服务器，旧的
+  在 listener 的排空超时内排空；同一地址上 realm 或中继地址改变时服务器重新启动，释放它的 allocation。它的指标来自 fib 的
+  事件和统计，经 `app` 出现在 Admin API 的 `/metrics` 中。
 - **WHIP 和 WHEP**（I109）：`whip` 和 `whep` 模块在 fit 中终结 WebRTC，使用 `webrtc.media` 共享的 `webrtc.Mux`：按路由给出
   的名字区分流，一个推流者的 RTP 转发给多个观看者并转发关键帧请求，用路由的中间件做认证，限制流数、观看者数、
   PeerConnection 数和码率，按 RFC 9725 和 WHEP 草案支持 DELETE 和 PATCH（trickle），在 `Link` 头中给出 ICE 服务器，重载和
@@ -50,6 +53,8 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
   answer 中给出的地址，不是上游的地址。每个对端地址一个 socket 而不是共用一个，因为单端口的媒体服务器按地址区分对端。
 
 ## fib 需要提供的
+
+五项都已完成，在 fib `84a67f7` 中，fit 自 I111 起使用。
 
 - [A55](../fib-api-requests.zh-CN.md#a55经-tcp-和-tls-的-turn)：经 TCP 和 TLS 连接 TURN 服务器，这是 025 要求的，UDP
   被防火墙封住的浏览器会用到。
@@ -66,6 +71,7 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
 
 - fit 只有一套 WebRTC 协议栈，即 fib 的，由 fib 的测试和模糊测试覆盖；修复进入 fib（规则 15）。
 - 在 A56 之前，TURN 服务器绑定中继地址或打开对端时，worker 会短暂等待 fib 的 binding 锁和事件循环：这是对规则 1 的
-  已知违反，记录在进度文件中，受 allocation 配额约束。在 A57 之前，一个 allocation 的 permission 只受它的请求约束（每个
-  permission 存活五分钟），channel 只受 RFC 8656 的 4096 个编号约束。
-- 在 A55 之前，不能使用 UDP 的客户端无法连到 TURN 服务器。
+  已知违反，受 allocation 配额约束，自 I111 起已消除。在 A57 之前，一个 allocation 的 permission 只受它的请求约束，channel
+  只受 RFC 8656 的 4096 个编号约束；自 I111 起受 `max_permissions` 和 `max_channels` 约束。
+- 在 A55 之前，不能使用 UDP 的客户端无法连到 TURN 服务器；自 I111 起它们经 TCP 和 TLS 连接。
+- 自 A59（I111）起，代理通向媒体服务器的 socket 从 `relay_ip` 和一段端口范围发出，以适应它们前面的防火墙。

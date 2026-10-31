@@ -26,6 +26,13 @@ const (
 	DefaultTURNMaxAllocationsPerUser = 16
 	DefaultTURNUserBandwidth         = 2 << 20
 	DefaultTURNLifetime              = 10 * time.Minute
+	DefaultTURNMaxPermissions        = 64
+	DefaultTURNMaxChannels           = 64
+	DefaultTURNMaxStreamMessage      = 8 << 10
+	DefaultTURNStreamIdleTimeout     = 30 * time.Second
+	// MinTURNStreamMessage is the least max_stream_message may be: a
+	// ChannelData message carrying a datagram of a common MTU.
+	MinTURNStreamMessage = 2048
 )
 
 // The defaults of WebRTCMedia.
@@ -84,6 +91,9 @@ type WebRTCProxy struct {
 	MaxRelays      int      `json:"max_relays,omitempty" min:"0" default:"4096" doc:"The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0."`
 	SessionTimeout Duration `json:"session_timeout,omitempty" default:"\"30s\"" doc:"How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out."`
 	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"30s\"" doc:"How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out."`
+	RelayIP        string   `json:"relay_ip,omitempty" doc:"The address the sockets toward the media servers leave from, one of the host's, for a firewall in front of them that admits one source address, or a host with several interfaces. Of the media servers' family: a media address of the other family is not relayed. The route's pick when left out. Applies to the next relay."`
+	PortMin        int      `json:"port_min,omitempty" min:"0" max:"65535" doc:"The lowest local port of the sockets toward the media servers, for a firewall in front of them that admits a range; with port_max. A port in use is skipped, and a peer address that finds the range full is dropped. Ports the kernel picks when both are left out. Applies to the next relay."`
+	PortMax        int      `json:"port_max,omitempty" min:"0" max:"65535" doc:"The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -101,6 +111,16 @@ func (p *WebRTCProxy) Relays() int {
 // SessionIdle returns session_timeout, or its default.
 func (p *WebRTCProxy) SessionIdle() time.Duration {
 	return durationOr(p.SessionTimeout, DefaultProxySessionTimeout)
+}
+
+// RelayAddr returns relay_ip with the port range as the local end of a
+// dial, the zero AddrPort and 0, 0 for the kernel's pick. The member must
+// have been checked.
+func (p *WebRTCProxy) RelayAddr() (local netip.AddrPort, portMin, portMax uint16) {
+	if a, err := netip.ParseAddr(p.RelayIP); err == nil {
+		local = netip.AddrPortFrom(a.Unmap(), 0)
+	}
+	return local, uint16(p.PortMin), uint16(p.PortMax)
 }
 
 // Idle returns idle_timeout, or its default.
@@ -167,26 +187,44 @@ func (m *WebRTCMedia) CredentialTTL() time.Duration {
 // TURNServer is a TURN server: where it listens, whom it lets in, where it
 // relays from, and its limits.
 type TURNServer struct {
-	Listen                []string   `json:"listen" fit:"required" doc:"The UDP addresses clients reach the server at, as in \":3478\", the port TURN's turn: URIs default to. TURN over TCP and TLS is not served yet."`
-	Realm                 string     `json:"realm" fit:"required" doc:"The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts the server again, ending its allocations."`
+	Listen                []string   `json:"listen" fit:"required" doc:"The UDP addresses clients reach the server at, as in \":3478\", the port TURN's turn: URIs default to. A change of listen, listen_tcp or listen_tls starts a new server and drains the old one."`
+	ListenTCP             []string   `json:"listen_tcp,omitempty" doc:"TCP addresses clients reach the server at, as in \":3478\", for clients on networks that block UDP: turn:host:3478?transport=tcp. Their allocations relay UDP, and end when their connection closes."`
+	ListenTLS             []string   `json:"listen_tls,omitempty" doc:"TLS addresses clients reach the server at, as in \":5349\" or \":443\", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise."`
+	TLS                   *TURNTLS   `json:"tls,omitempty" doc:"The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake."`
+	Realm                 string     `json:"realm" fit:"required" doc:"The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise."`
 	Users                 []TURNUser `json:"users,omitempty" doc:"The users with fixed credentials. With secret, or alone; at least one of the two."`
 	Secret                string     `json:"secret,omitempty" doc:"The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username \"<expiry in Unix seconds>:<anything>\" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out."`
-	RelayIP               string     `json:"relay_ip" fit:"required" doc:"The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's."`
-	PublicIP              string     `json:"public_ip,omitempty" doc:"The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family."`
-	PortMin               int        `json:"port_min,omitempty" min:"0" max:"65535" doc:"The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out."`
+	RelayIP               string     `json:"relay_ip" fit:"required" doc:"The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. Peers on it, and on public_ip, are relayed to on the ports of the server's own relayed addresses alone, and on those allowed_peers lists with their port. A change starts a new server."`
+	PublicIP              string     `json:"public_ip,omitempty" doc:"The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. A change starts a new server."`
+	PortMin               int        `json:"port_min,omitempty" min:"0" max:"65535" doc:"The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. A change starts a new server."`
 	PortMax               int        `json:"port_max,omitempty" min:"0" max:"65535" doc:"The highest port of the relayed sockets; with port_min."`
-	MaxAllocations        int        `json:"max_allocations,omitempty" min:"0" default:"1024" doc:"The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change starts the server again."`
-	MaxAllocationsPerUser int        `json:"max_allocations_per_user,omitempty" min:"0" default:"16" doc:"The most allocations of one username; one more is refused with 486. 16 when left out or 0. A change starts the server again."`
+	MaxAllocations        int        `json:"max_allocations,omitempty" min:"0" default:"1024" doc:"The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change applies to the next allocation; those held past a lowered one are kept until they end."`
+	MaxAllocationsPerUser int        `json:"max_allocations_per_user,omitempty" min:"0" default:"16" doc:"The most allocations of one username; one more is refused with 486. 16 when left out or 0. Applies to the next allocation."`
+	MaxPermissions        int        `json:"max_permissions,omitempty" min:"0" default:"64" doc:"The most permissions, peer addresses, one allocation holds; one more is refused with 508. A channel's peer counts. 64 when left out or 0. Applies to the next request."`
+	MaxChannels           int        `json:"max_channels,omitempty" min:"0" default:"64" doc:"The most channels one allocation binds; one more is refused with 508. 64 when left out or 0. Applies to the next request."`
+	MaxStreamMessage      int        `json:"max_stream_message,omitempty" min:"0" default:"8192" doc:"The largest message a TCP or TLS client may send, and so what its connection buffers of one not yet whole; a connection whose next message claims more is closed. At least 2048. 8 KiB when left out or 0. A change starts a new server."`
+	StreamIdleTimeout     Duration   `json:"stream_idle_timeout,omitempty" default:"\"30s\"" doc:"How long a TCP or TLS client's connection may stay open without an allocation, before its first Allocate or after its allocation ended, before it is closed. 30s when left out. A change starts a new server."`
 	UserBandwidth         int64      `json:"user_bandwidth,omitempty" min:"0" default:"2097152" doc:"The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0."`
-	DefaultLifetime       Duration   `json:"default_lifetime,omitempty" default:"\"10m\"" doc:"The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. A change starts the server again."`
-	MaxLifetime           Duration   `json:"max_lifetime,omitempty" default:"\"1h\"" doc:"The longest lifetime a client may ask for. 1h when left out. A change starts the server again."`
-	NonceLifetime         Duration   `json:"nonce_lifetime,omitempty" default:"\"10m\"" doc:"How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. A change starts the server again."`
-	NonceSecret           string     `json:"nonce_secret,omitempty" doc:"The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts the server again."`
-	AllowedPeers          []string   `json:"allowed_peers,omitempty" doc:"The addresses and prefixes, as in \"10.1.0.0/16\", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in."`
-	DeniedPeers           []string   `json:"denied_peers,omitempty" doc:"Addresses and prefixes peers may not be at, beyond the internal ranges denied by default."`
+	DefaultLifetime       Duration   `json:"default_lifetime,omitempty" default:"\"10m\"" doc:"The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. Applies to the next allocation or refresh."`
+	MaxLifetime           Duration   `json:"max_lifetime,omitempty" default:"\"1h\"" doc:"The longest lifetime a client may ask for. 1h when left out. Applies to the next allocation or refresh."`
+	NonceLifetime         Duration   `json:"nonce_lifetime,omitempty" default:"\"10m\"" doc:"How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. Applies to the next nonce."`
+	NonceSecret           string     `json:"nonce_secret,omitempty" doc:"The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts a new server."`
+	AllowedPeers          []string   `json:"allowed_peers,omitempty" doc:"The addresses and prefixes, as in \"10.1.0.0/16\", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. An address with a port, as in \"10.0.0.5:8189\", allows that port alone, which is how a peer on relay_ip itself, such as webrtc.media, is reached."`
+	DeniedPeers           []string   `json:"denied_peers,omitempty" doc:"Addresses and prefixes peers may not be at, beyond the internal ranges denied by default; an address with a port denies that port alone."`
 
 	At Value `json:"-" fit:"self"`
 }
+
+// TURNTLS is the TLS of a TURN server's listen_tls: certificates from files.
+type TURNTLS struct {
+	Certificates []Certificate `json:"certificates" fit:"required" doc:"Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Config returns t as a listener's TLS, with its certificates alone, for
+// package tlsmgr to load.
+func (t *TURNTLS) Config() *TLS { return &TLS{Certificates: t.Certificates, At: t.At} }
 
 // TURNUser is a user of a TURN server, with a password or the key it
 // derives.
@@ -208,6 +246,26 @@ func (t *TURNServer) MaxAllocsPerUser() int {
 	return int(orDefault(int64(t.MaxAllocationsPerUser), DefaultTURNMaxAllocationsPerUser))
 }
 
+// MaxPerms returns max_permissions, or its default.
+func (t *TURNServer) MaxPerms() int {
+	return int(orDefault(int64(t.MaxPermissions), DefaultTURNMaxPermissions))
+}
+
+// MaxChans returns max_channels, or its default.
+func (t *TURNServer) MaxChans() int {
+	return int(orDefault(int64(t.MaxChannels), DefaultTURNMaxChannels))
+}
+
+// StreamMessage returns max_stream_message, or its default.
+func (t *TURNServer) StreamMessage() int {
+	return int(orDefault(int64(t.MaxStreamMessage), DefaultTURNMaxStreamMessage))
+}
+
+// StreamIdle returns stream_idle_timeout, or its default.
+func (t *TURNServer) StreamIdle() time.Duration {
+	return durationOr(t.StreamIdleTimeout, DefaultTURNStreamIdleTimeout)
+}
+
 // Bandwidth returns user_bandwidth, or its default.
 func (t *TURNServer) Bandwidth() int64 { return orDefault(t.UserBandwidth, DefaultTURNUserBandwidth) }
 
@@ -221,16 +279,28 @@ func (u TURNUser) KeyBytes() []byte {
 	return k
 }
 
-// ParsePeerPrefix parses one of allowed_peers or denied_peers: a prefix, or
-// an address, which is a prefix of its whole length.
-func ParsePeerPrefix(s string) (netip.Prefix, bool) {
+// PeerRule is one of allowed_peers or denied_peers: a prefix, and a port
+// when the entry names one.
+type PeerRule struct {
+	Prefix netip.Prefix
+	// Port is the entry's port, 0 for every port.
+	Port uint16
+}
+
+// ParsePeerRule parses one of allowed_peers or denied_peers: a prefix, an
+// address, which is a prefix of its whole length, or an address and a port.
+func ParsePeerRule(s string) (PeerRule, bool) {
 	if p, err := netip.ParsePrefix(s); err == nil {
-		return p.Masked(), true
+		return PeerRule{Prefix: p.Masked()}, true
 	}
 	if a, err := netip.ParseAddr(s); err == nil && a.Zone() == "" {
-		return netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()), true
+		return PeerRule{Prefix: netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())}, true
 	}
-	return netip.Prefix{}, false
+	if ap, err := netip.ParseAddrPort(s); err == nil && ap.Addr().Zone() == "" && ap.Port() != 0 {
+		a := ap.Addr().Unmap()
+		return PeerRule{Prefix: netip.PrefixFrom(a, a.BitLen()), Port: ap.Port()}, true
+	}
+	return PeerRule{}, false
 }
 
 func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
@@ -252,6 +322,28 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 		} else if _, port, _ := net.SplitHostPort(a); port != "0" && slices.Index(t.Listen, a) < i {
 			add(t.At.Field("listen").Index(i), "%s is listed already", a)
 		}
+	}
+	// TCP and TLS share the port space: an address is one or the other.
+	stream := slices.Concat(t.ListenTCP, t.ListenTLS)
+	for i, a := range stream {
+		at := t.At.Field("listen_tcp").Index(i)
+		if i >= len(t.ListenTCP) {
+			at = t.At.Field("listen_tls").Index(i - len(t.ListenTCP))
+		}
+		if _, msg := checkAddress(a); msg != "" {
+			add(at, "%s", msg)
+		} else if _, port, _ := net.SplitHostPort(a); port != "0" && slices.Index(stream, a) < i {
+			add(at, "%s is listed already in listen_tcp or listen_tls", a)
+		}
+	}
+	switch {
+	case len(t.ListenTLS) > 0 && (t.TLS == nil || len(t.TLS.Certificates) == 0):
+		add(t.At.Field("tls"), "listen_tls needs certificates: set tls.certificates")
+	case len(t.ListenTLS) == 0 && t.TLS != nil:
+		add(t.At.Field("tls"), "tls is for listen_tls, which is empty")
+	}
+	if t.MaxStreamMessage != 0 && t.MaxStreamMessage < MinTURNStreamMessage {
+		add(t.At.Field("max_stream_message"), "max_stream_message %d is below %d, too small for a datagram", t.MaxStreamMessage, MinTURNStreamMessage)
 	}
 	if strings.TrimSpace(t.Realm) == "" {
 		add(t.At.Field("realm"), "the realm is empty")
@@ -310,8 +402,8 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 		list []string
 	}{{"allowed_peers", t.AllowedPeers}, {"denied_peers", t.DeniedPeers}} {
 		for i, p := range f.list {
-			if _, ok := ParsePeerPrefix(p); !ok {
-				add(t.At.Field(f.name).Index(i), "%q is not an address or a prefix, as in \"10.1.0.0/16\"", p)
+			if _, ok := ParsePeerRule(p); !ok {
+				add(t.At.Field(f.name).Index(i), "%q is not an address, an address and port, or a prefix, as in \"10.1.0.0/16\"", p)
 			}
 		}
 	}
@@ -328,6 +420,21 @@ func (c *Config) checkProxy(add func(Value, string, ...any)) {
 		add(p.At.Field("listen"), "webrtc.media listens on %s already", p.Listen)
 	}
 	checkPublicIPs(p.At.Field("public_ips"), p.PublicIPs, add)
+	if p.RelayIP != "" {
+		a, err := netip.ParseAddr(p.RelayIP)
+		switch {
+		case err != nil || a.Zone() != "":
+			add(p.At.Field("relay_ip"), "%q is not an IP address", p.RelayIP)
+		case a.IsUnspecified():
+			add(p.At.Field("relay_ip"), "%q is a wildcard: leave relay_ip out for the route's pick", p.RelayIP)
+		}
+	}
+	switch {
+	case (p.PortMin == 0) != (p.PortMax == 0):
+		add(p.At, "set port_min and port_max together")
+	case p.PortMin > p.PortMax:
+		add(p.At.Field("port_min"), "port_min %d is above port_max %d", p.PortMin, p.PortMax)
+	}
 }
 
 // checkPublicIPs checks public_ips: addresses, none a wildcard.

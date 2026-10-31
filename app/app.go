@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/lesismal/fib"
 
@@ -234,6 +235,23 @@ type Host struct {
 	m *Manager
 }
 
+// DefaultDrainTimeout is how long a role may let what a server it replaced
+// holds run out, unless the Manager's SetDrainTimeout says otherwise: the
+// listeners' default.
+const DefaultDrainTimeout = 30 * time.Second
+
+// DrainTimeout is how long a role may let what a server it replaced holds
+// run out, as a listener a reload removed finishes its requests: fit run's
+// -shutdown-timeout.
+func (h *Host) DrainTimeout() time.Duration {
+	if h.m != nil {
+		if d := time.Duration(h.m.drain.Load()); d > 0 {
+			return d
+		}
+	}
+	return DefaultDrainTimeout
+}
+
 // ErrBusy is an Edit refused because too many are waiting already.
 var ErrBusy = errors.New("app: too many config changes are waiting; try again")
 
@@ -276,6 +294,9 @@ type Manager struct {
 	// must not wait for an Apply.
 	metered atomic.Pointer[[]Metered]
 
+	// drain is the roles' drain timeout, in nanoseconds; 0 for the default.
+	drain atomic.Int64
+
 	edits   chan editReq
 	stop    chan struct{}
 	stopped sync.WaitGroup
@@ -292,6 +313,10 @@ func NewManager(engine, upstream *fib.Engine, root *logs.Root, editor Editor) *M
 	go m.runEdits()
 	return m
 }
+
+// SetDrainTimeout sets how long a role may let what a server it replaced
+// holds run out, as the listeners' drain timeout does for their requests.
+func (m *Manager) SetDrainTimeout(d time.Duration) { m.drain.Store(int64(d)) }
 
 func (m *Manager) edit(id string, edit func([]byte) ([]byte, error), done func([]string, error)) {
 	select {

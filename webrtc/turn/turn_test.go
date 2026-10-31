@@ -2,9 +2,22 @@ package turn
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,12 +87,13 @@ func serverAddr(t *testing.T, s *Server) netip.AddrPort {
 	return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
 }
 
-// client drives fib's turn.Client over a UDP socket of its own: a goroutine
-// reads it, another fires the client's timers, and a mutex serializes them.
+// client drives fib's turn.Client over a UDP socket of its own, or a TCP
+// or TLS connection: a goroutine reads it, another fires the client's
+// timers, and a mutex serializes them.
 type client struct {
 	mu        sync.Mutex
 	c         *fibturn.Client
-	conn      *net.UDPConn
+	conn      net.Conn
 	got       chan string
 	allocated chan struct{}
 	failed    chan error
@@ -93,10 +107,61 @@ func newClient(t *testing.T, server netip.AddrPort, user, pass string, bind bool
 	if err != nil {
 		t.Fatal(err)
 	}
+	u := startClient(t, conn, server, user, pass, bind, func(to netip.AddrPort, b []byte) { _, _ = conn.WriteToUDPAddrPort(b, to) })
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, from, err := conn.ReadFromUDPAddrPort(buf)
+			if err != nil {
+				return
+			}
+			u.handle(from, buf[:n])
+		}
+	}()
+	return u
+}
+
+// newStreamClient is newClient over conn, a TCP or TLS connection to
+// server, whose messages it frames with fib's FrameLen.
+func newStreamClient(t *testing.T, conn net.Conn, server netip.AddrPort, user, pass string, bind bool) *client {
+	t.Helper()
+	u := startClient(t, conn, server, user, pass, bind, nil)
+	go func() {
+		var buf []byte
+		chunk := make([]byte, 4096)
+		for {
+			n, err := conn.Read(chunk)
+			if err != nil {
+				return
+			}
+			buf = append(buf, chunk[:n]...)
+			for {
+				n, err := fibturn.FrameLen(buf)
+				if err != nil {
+					_ = conn.Close()
+					return
+				}
+				if n == 0 || n > len(buf) {
+					break
+				}
+				u.handle(server, buf[:n])
+				buf = buf[n:]
+			}
+		}
+	}()
+	return u
+}
+
+func startClient(t *testing.T, conn net.Conn, server netip.AddrPort, user, pass string, bind bool, send func(netip.AddrPort, []byte)) *client {
+	t.Helper()
 	u := &client{conn: conn, got: make(chan string, 1024), allocated: make(chan struct{}), failed: make(chan error, 1), done: make(chan struct{})}
+	stream := send == nil
+	if stream {
+		send = func(_ netip.AddrPort, b []byte) { _, _ = conn.Write(b) }
+	}
 	c, err := fibturn.NewClient(fibturn.ClientConfig{
-		Server: server, Username: user, Password: pass, BindChannels: bind,
-		Send:        func(to netip.AddrPort, b []byte) { _, _ = conn.WriteToUDPAddrPort(b, to) },
+		Server: server, Username: user, Password: pass, BindChannels: bind, Stream: stream,
+		Send:        send,
 		OnAllocated: func(_, _ netip.AddrPort) { close(u.allocated) },
 		OnFailed: func(err error) {
 			select {
@@ -109,24 +174,6 @@ func newClient(t *testing.T, server netip.AddrPort, user, pass string, bind bool
 		t.Fatal(err)
 	}
 	u.c = c
-	go func() {
-		buf := make([]byte, 2048)
-		for {
-			n, from, err := conn.ReadFromUDPAddrPort(buf)
-			if err != nil {
-				return
-			}
-			u.mu.Lock()
-			_, data, _ := c.HandlePacket(from, buf[:n], time.Now())
-			if data != nil {
-				select {
-				case u.got <- string(data):
-				default:
-				}
-			}
-			u.mu.Unlock()
-		}
-	}()
 	go func() {
 		tick := time.NewTicker(10 * time.Millisecond)
 		defer tick.Stop()
@@ -145,6 +192,19 @@ func newClient(t *testing.T, server netip.AddrPort, user, pass string, bind bool
 	}()
 	t.Cleanup(u.cut)
 	return u
+}
+
+// handle passes a message from the server to the client.
+func (u *client) handle(from netip.AddrPort, b []byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	_, data, _ := u.c.HandlePacket(from, b, time.Now())
+	if data != nil {
+		select {
+		case u.got <- string(data):
+		default:
+		}
+	}
 }
 
 // cut closes the client's socket without deallocating, as a client that
@@ -258,6 +318,40 @@ func code(err error) int {
 	return 0
 }
 
+// allow lets peers on the role's own address, relay_ip, be reached on
+// their ports, as allowed_peers lists them with their port: the port-aware
+// check allows it on its relayed ports alone otherwise.
+func allow(t *testing.T, s *Server, peers ...*peer) {
+	t.Helper()
+	s.mu.Lock()
+	m := *s.cur.cfg
+	s.mu.Unlock()
+	m.AllowedPeers = slices.Clone(m.AllowedPeers)
+	for _, p := range peers {
+		m.AllowedPeers = append(m.AllowedPeers, p.addr.String())
+	}
+	if err := s.Apply(&m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func metrics(s *Server) string {
+	var b observe.TextWriter
+	s.WriteMetrics(&b)
+	return string(b.B)
+}
+
+// metric returns the value of the sample named, labels and all, as in
+// fit_turn_freed_total{reason="deleted"}, or -1 without one.
+func metric(s *Server, sample string) float64 {
+	m := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(sample) + ` (\S+)$`).FindStringSubmatch(metrics(s))
+	if m == nil {
+		return -1
+	}
+	v, _ := strconv.ParseFloat(m[1], 64)
+	return v
+}
+
 func TestRelay(t *testing.T) {
 	e := startEngine(t)
 	keyed := member()
@@ -281,6 +375,7 @@ func TestRelay(t *testing.T) {
 				t.Fatalf("relayed %v", relayed)
 			}
 			p := newPeer(t)
+			allow(t, s, p)
 			for _, msg := range []string{"one", "two", strings.Repeat("x", 1200)} {
 				exchange(t, u, p, relayed, msg)
 			}
@@ -288,11 +383,11 @@ func TestRelay(t *testing.T) {
 			eventually(t, "the allocation's end", func() bool { return s.Allocations() == 0 })
 		})
 	}
-	var b observe.TextWriter
-	s.WriteMetrics(&b)
-	for _, want := range []string{"fit_turn_allocations 0", `fit_turn_relayed_bytes_total{direction="to_peer"}`, "fit_turn_restarts_total 0"} {
-		if !strings.Contains(string(b.B), want) {
-			t.Errorf("metrics lack %s:\n%s", want, b.B)
+	m := metrics(s)
+	for _, want := range []string{"fit_turn_allocations 0", `fit_turn_relayed_bytes_total{direction="to_peer"}`, "fit_turn_restarts_total 0",
+		"fit_turn_allocated_total 4", `fit_turn_freed_total{reason="deleted"} 4`, "fit_turn_permissions 0", "fit_turn_draining_servers 0"} {
+		if !strings.Contains(m, want) {
+			t.Errorf("metrics lack %s:\n%s", want, m)
 		}
 	}
 	if s.toPeer.Load() == 0 || s.fromPeer.Load() == 0 {
@@ -332,6 +427,9 @@ func TestRefusedCredentials(t *testing.T) {
 	if s.Allocations() != 0 {
 		t.Fatalf("%d allocations", s.Allocations())
 	}
+	if n := metric(s, "fit_turn_auth_failures_total"); n < 4 {
+		t.Fatalf("%v auth failures counted", n)
+	}
 }
 
 func TestQuotas(t *testing.T) {
@@ -351,6 +449,65 @@ func TestQuotas(t *testing.T) {
 	if _, err := newClient(t, addr, user, pass, false).allocate(t); code(err) != 508 {
 		t.Fatalf("a third allocation: %v, want 508", err)
 	}
+	if metric(s, `fit_turn_refused_total{code="486"}`) != 1 || metric(s, `fit_turn_refused_total{code="508"}`) != 1 {
+		t.Fatalf("refusals:\n%s", metrics(s))
+	}
+}
+
+// permErr sends to peer until its permission's refusal shows, and returns
+// it, or nil if none shows within a second.
+func permErr(u *client, peer netip.AddrPort) error {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		u.do(func(c *fibturn.Client) { err = c.SendTo(peer, []byte("x")) })
+		if err != nil {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return nil
+}
+
+// TestCaps checks max_permissions and max_channels: one more of either is
+// refused with 508, and counted.
+func TestCaps(t *testing.T) {
+	e := startEngine(t)
+	m := member()
+	m.MaxPermissions = 2
+	m.MaxChannels = 1
+	s := startRole(t, e, m)
+	addr := serverAddr(t, s)
+	u := newClient(t, addr, "alice", "pw", false)
+	u.mustAllocate(t)
+	for _, ip := range []string{"127.0.0.2", "127.0.0.3"} {
+		u.do(func(c *fibturn.Client) { _ = c.CreatePermission(netip.MustParseAddr(ip), time.Now()) })
+	}
+	eventually(t, "two permissions", func() bool { return metric(s, "fit_turn_permissions") == 2 })
+	if err := permErr(u, netip.MustParseAddrPort("127.0.0.4:9")); code(err) != 508 {
+		t.Fatalf("a third permission: %v, want 508", err)
+	}
+
+	v := newClient(t, addr, "alice", "pw", true)
+	v.mustAllocate(t)
+	for _, peer := range []string{"127.0.0.2:9", "127.0.0.3:9"} {
+		v.do(func(c *fibturn.Client) { _ = c.SendTo(netip.MustParseAddrPort(peer), []byte("x")) })
+	}
+	eventually(t, "the second channel refused", func() bool {
+		return metric(s, `fit_turn_refused_total{code="508"}`) == 2 && metric(s, "fit_turn_channels") == 1
+	})
+
+	// A cap raised in place lets the next request through.
+	m2 := *m
+	m2.MaxPermissions = 3
+	if err := s.Apply(&m2); err != nil {
+		t.Fatal(err)
+	}
+	u.do(func(c *fibturn.Client) { _ = c.CreatePermission(netip.MustParseAddr("127.0.0.5"), time.Now()) })
+	eventually(t, "a third permission after the reload", func() bool { return metric(s, "fit_turn_permissions") == 5 })
+	if s.restarts.Load() != 0 {
+		t.Fatal("the cap's change restarted the server")
+	}
 }
 
 func TestBandwidth(t *testing.T) {
@@ -361,6 +518,7 @@ func TestBandwidth(t *testing.T) {
 	u := newClient(t, serverAddr(t, s), "alice", "pw", true)
 	relayed := u.mustAllocate(t)
 	p := newPeer(t)
+	allow(t, s, p)
 	exchange(t, u, p, relayed, "warm")
 	// The burst is a second's worth: 4000 bytes. Send 40 KB at once.
 	chunk := strings.Repeat("y", 1000)
@@ -394,38 +552,122 @@ func TestPrivatePeers(t *testing.T) {
 	addr := serverAddr(t, s)
 	u := newClient(t, addr, "alice", "pw", false)
 	u.mustAllocate(t)
-	p := newPeer(t)
-	refused := func(u *client, to netip.AddrPort) bool {
-		u.do(func(c *fibturn.Client) { _ = c.CreatePermission(to.Addr(), time.Now()) })
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			var err error
-			u.do(func(c *fibturn.Client) { err = c.SendTo(to, []byte("x")) })
-			if err != nil {
-				return true
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		return false
+	if err := permErr(u, netip.MustParseAddrPort("127.0.0.2:9")); code(err) != 403 {
+		t.Fatalf("a permission for a loopback peer: %v, want 403", err)
 	}
-	if !refused(u, p.addr) {
-		t.Fatal("a permission for a loopback peer was not refused")
-	}
-	if s.peersRefused.Load() == 0 {
-		t.Fatal("no refusal counted")
+	if metric(s, "fit_turn_peers_refused_total") != 1 {
+		t.Fatalf("refusals:\n%s", metrics(s))
 	}
 
 	// denied_peers refuses what allowed_peers does not list first.
 	m = member()
-	m.AllowedPeers = []string{"127.0.0.1"}
+	m.AllowedPeers = []string{"127.0.0.3"}
 	m.DeniedPeers = []string{"127.0.0.0/8"}
 	if err := s.Apply(m); err != nil {
 		t.Fatal(err)
 	}
 	u = newClient(t, addr, "alice", "pw", false)
-	exchange(t, u, p, u.mustAllocate(t), "allowed")
-	if !refused(u, netip.MustParseAddrPort("127.0.0.2:9")) {
-		t.Fatal("a permission for a denied peer was not refused")
+	u.mustAllocate(t)
+	if err := permErr(u, netip.MustParseAddrPort("127.0.0.3:9")); err != nil {
+		t.Fatalf("an allowed peer: %v", err)
+	}
+	if err := permErr(u, netip.MustParseAddrPort("127.0.0.2:9")); code(err) != 403 {
+		t.Fatalf("a denied peer: %v, want 403", err)
+	}
+}
+
+// TestOwnAddress checks the port-aware peer check: relay_ip, though
+// allowed_peers covers it, is relayed to on the server's relayed ports
+// alone, which two of its clients use to reach each other, and on a port
+// allowed_peers lists with it; never on its other ports, where fit's own
+// listeners are.
+func TestOwnAddress(t *testing.T) {
+	e := startEngine(t)
+	s := startRole(t, e, member())
+	addr := serverAddr(t, s)
+	u := newClient(t, addr, "alice", "pw", true)
+	relayed := u.mustAllocate(t)
+	p := newPeer(t)
+	buf := make([]byte, 2048)
+	for range 20 {
+		u.do(func(c *fibturn.Client) { _ = c.SendTo(p.addr, []byte("in")) })
+		_ = p.conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		if n, _, err := p.conn.ReadFromUDPAddrPort(buf); err == nil {
+			t.Fatalf("a port of relay_ip that is not a relay got %q", buf[:n])
+		}
+	}
+	if metric(s, "fit_turn_unrelayed_total") <= 0 {
+		t.Fatalf("nothing counted:\n%s", metrics(s))
+	}
+	allow(t, s, p)
+	exchange(t, u, p, relayed, "listed")
+
+	// Two clients relay to each other's relayed addresses.
+	v := newClient(t, addr, "alice", "pw", false)
+	vRelayed := v.mustAllocate(t)
+	v.do(func(c *fibturn.Client) { _ = c.CreatePermission(relayed.Addr(), time.Now()) })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		u.do(func(c *fibturn.Client) { _ = c.SendTo(vRelayed, []byte("hello v")) })
+		select {
+		case got := <-v.got:
+			if got != "hello v" {
+				t.Fatalf("v got %q", got)
+			}
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("one client's relay did not reach the other's")
+		}
+	}
+}
+
+// TestPeerAllowed checks the peer rules' order and ports without a
+// network.
+func TestPeerAllowed(t *testing.T) {
+	core, err := fibturn.NewServer(fibturn.ServerConfig{Realm: realm,
+		Auth: func(string, string) ([]byte, bool) { return nil, false },
+		Send: func(fibturn.FiveTuple, []byte) {},
+		AllocateRelay: func(_ fibturn.FiveTuple, _ string, _ bool, done func(fibturn.Relay, error)) {
+			done(nil, errors.New("no"))
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&app.Host{ID: ID})
+	s.live.Store(&[]*running{{core: core, relayIP: netip.MustParseAddr("10.0.0.5"), publicIP: netip.MustParseAddr("203.0.113.5")}})
+	m := member()
+	m.AllowedPeers = []string{"10.0.0.0/8", "10.0.0.5:8189", "192.168.1.1:5000"}
+	m.DeniedPeers = []string{"8.8.8.8:53", "9.9.9.0/24"}
+	r, err := newRules(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rules.Store(r)
+	for _, tc := range []struct {
+		peer string
+		want bool
+	}{
+		{"10.0.0.5:0", true},        // a permission on the own address
+		{"10.0.0.5:8080", false},    // not a relayed port, whatever 10/8 says
+		{"203.0.113.5:8080", false}, // the public address alike
+		{"10.0.0.5:8189", true},     // listed with its port
+		{"[::ffff:10.0.0.5]:8189", true},
+		{"10.1.2.3:80", true},   // by the prefix
+		{"192.168.1.1:0", true}, // a port of it is allowed
+		{"192.168.1.1:5000", true},
+		{"192.168.1.1:5001", false}, // denied by default
+		{"192.168.1.2:0", false},
+		{"8.8.8.8:53", false},
+		{"8.8.8.8:54", true},
+		{"8.8.8.8:0", true},
+		{"9.9.9.9:0", false},
+	} {
+		if got := s.peerAllowed(netip.MustParseAddrPort(tc.peer)); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.peer, got, tc.want)
+		}
 	}
 }
 
@@ -433,65 +675,139 @@ func TestReload(t *testing.T) {
 	e := startEngine(t)
 	m := member()
 	s := startRole(t, e, m)
+	s.drainTimeout = 10 * time.Second
 	addr := serverAddr(t, s)
 	u := newClient(t, addr, "alice", "pw", true)
 	relayed := u.mustAllocate(t)
 	p := newPeer(t)
+	allow(t, s, p)
 	exchange(t, u, p, relayed, "before")
 
-	// Users, the secret, the peers and the bandwidth change in place.
+	// Users, the secret, the peers, the bandwidth, the lifetimes and the
+	// quotas change in place.
 	m2 := member()
-	m2.Users = []config.TURNUser{{Name: "dave", Password: "pw2"}}
+	m2.Users = []config.TURNUser{{Name: "dave", Password: "pw2"}, {Name: "erin", Password: "pw3"}}
 	m2.Secret = ""
+	m2.AllowedPeers = append(m2.AllowedPeers, p.addr.String())
 	m2.UserBandwidth = 1 << 20
+	m2.MaxAllocations = 10
+	m2.MaxAllocationsPerUser = 1
+	m2.DefaultLifetime = config.Duration(5 * time.Minute)
 	if err := s.Apply(m2); err != nil {
 		t.Fatal(err)
 	}
 	if s.restarts.Load() != 0 || s.Allocations() != 1 {
 		t.Fatalf("%d restarts, %d allocations", s.restarts.Load(), s.Allocations())
 	}
+	s.mu.Lock()
+	lim := s.cur.core.Limits()
+	s.mu.Unlock()
+	if lim.MaxAllocations != 10 || lim.MaxAllocationsPerUser != 1 || lim.DefaultLifetime != 5*time.Minute {
+		t.Fatalf("limits %+v", lim)
+	}
 	exchange(t, u, p, relayed, "after")
 	if _, err := newClient(t, addr, "alice", "pw", false).allocate(t); err == nil {
 		t.Fatal("a user taken out still allocates")
 	}
 	newClient(t, addr, "dave", "pw2", false).mustAllocate(t)
+	if _, err := newClient(t, addr, "dave", "pw2", false).allocate(t); code(err) != 486 {
+		t.Fatalf("dave's second allocation: %v, want 486", err)
+	}
 
-	// A quota starts the server again on the same address.
+	// A realm on the same address starts the server again: the two cannot
+	// share it, and the allocations end.
 	m3 := *m2
 	m3.Listen = []string{addr.String()}
-	m3.MaxAllocations = 10
+	m3.Realm = "other.test"
 	if err := s.Apply(&m3); err != nil {
 		t.Fatal(err)
 	}
 	if s.restarts.Load() != 1 || s.Allocations() != 0 || serverAddr(t, s) != addr {
 		t.Fatalf("%d restarts, %d allocations, at %v", s.restarts.Load(), s.Allocations(), serverAddr(t, s))
 	}
-	newClient(t, addr, "dave", "pw2", false).mustAllocate(t)
+	c := newClient(t, addr, "dave", "pw2", true)
+	cRelayed := c.mustAllocate(t)
+	exchange(t, c, p, cRelayed, "restarted")
 
-	// Another address: the new one listens, the old one is gone.
+	// Another address: the new server listens there, and the old one
+	// drains, relaying and refreshing for the allocation it holds and
+	// refusing new ones, until that one ends.
 	m4 := m3
 	m4.Listen = []string{"127.0.0.1:0"}
 	if err := s.Apply(&m4); err != nil {
 		t.Fatal(err)
 	}
 	moved := serverAddr(t, s)
-	if moved == addr {
-		t.Fatal("the server did not move")
+	if moved == addr || s.restarts.Load() != 2 {
+		t.Fatalf("at %v, %d restarts", moved, s.restarts.Load())
 	}
-	c := newClient(t, moved, "dave", "pw2", true)
-	exchange(t, c, p, c.mustAllocate(t), "moved")
-	free, err := net.ListenPacket("udp", addr.String())
-	if err != nil {
-		t.Fatalf("the old address is still bound: %v", err)
+	if metric(s, "fit_turn_draining_servers") != 1 || metric(s, "fit_turn_allocations") != 1 {
+		t.Fatalf("metrics:\n%s", metrics(s))
 	}
-	_ = free.Close()
+	exchange(t, c, p, cRelayed, "draining")
+	if _, err := newClient(t, addr, "erin", "pw3", false).allocate(t); code(err) != 508 {
+		t.Fatalf("an allocation on the server draining: %v, want 508", err)
+	}
+	n := newClient(t, moved, "dave", "pw2", true)
+	exchange(t, n, p, n.mustAllocate(t), "moved")
+	if free, err := net.ListenPacket("udp", addr.String()); err == nil {
+		_ = free.Close()
+		t.Fatal("the old address is free while it drains")
+	}
+	c.do(func(c *fibturn.Client) { c.Close(time.Now()) })
+	eventually(t, "the drain's end", func() bool {
+		free, err := net.ListenPacket("udp", addr.String())
+		if err != nil {
+			return false
+		}
+		_ = free.Close()
+		return metric(s, "fit_turn_draining_servers") == 0
+	})
+}
+
+// TestDrainTimeout checks that a server draining closes at the drain
+// timeout, ending the allocations it holds, and that a reload back onto
+// its address ends it at once.
+func TestDrainTimeout(t *testing.T) {
+	e := startEngine(t)
+	s := startRole(t, e, member())
+	s.drainTimeout = 300 * time.Millisecond
+	addr := serverAddr(t, s)
+	newClient(t, addr, "alice", "pw", false).mustAllocate(t)
+	moved := member()
+	moved.NonceSecret = "another server"
+	if err := s.Apply(moved); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the drain timed out", func() bool {
+		return metric(s, `fit_turn_freed_total{reason="closed"}`) == 1 && metric(s, "fit_turn_draining_servers") == 0
+	})
+
+	s.drainTimeout = time.Hour
+	at := serverAddr(t, s)
+	newClient(t, at, "alice", "pw", false).mustAllocate(t)
+	back := member()
+	back.Listen = []string{addr.String()}
+	if err := s.Apply(back); err != nil {
+		t.Fatal(err)
+	}
+	// And back onto the address that drains.
+	there := member()
+	there.Listen = []string{at.String()}
+	if err := s.Apply(there); err != nil {
+		t.Fatalf("a reload onto the address of a server draining: %v", err)
+	}
+	if serverAddr(t, s) != at || metric(s, `fit_turn_freed_total{reason="closed"}`) != 2 {
+		t.Fatalf("at %v:\n%s", serverAddr(t, s), metrics(s))
+	}
+	newClient(t, at, "alice", "pw", false).mustAllocate(t)
 }
 
 func TestReloadRefused(t *testing.T) {
 	e := startEngine(t)
 	s := startRole(t, e, member())
 	addr := serverAddr(t, s)
-	// An address another socket holds.
+	// An address another socket holds, over UDP and over TCP.
 	taken, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -501,6 +817,16 @@ func TestReloadRefused(t *testing.T) {
 	m.Listen = []string{taken.LocalAddr().String()}
 	if err := s.Apply(m); err == nil {
 		t.Fatal("listened on a taken address")
+	}
+	takenTCP, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer takenTCP.Close()
+	m = member()
+	m.ListenTCP = []string{takenTCP.Addr().String()}
+	if err := s.Apply(m); err == nil || !strings.Contains(err.Error(), "tcp") {
+		t.Fatalf("listened on a taken TCP address: %v", err)
 	}
 	if serverAddr(t, s) != addr {
 		t.Fatal("the server moved")
@@ -524,7 +850,8 @@ func TestCutClient(t *testing.T) {
 	addr := serverAddr(t, s)
 	u := newClient(t, addr, "alice", "pw", true)
 	relayed := u.mustAllocate(t)
-	p := newPeer(t)
+	p, q := newPeer(t), newPeer(t)
+	allow(t, s, p, q)
 	exchange(t, u, p, relayed, "hello")
 	u.cut()
 	stop := make(chan struct{})
@@ -541,11 +868,146 @@ func TestCutClient(t *testing.T) {
 		}
 	})
 	other := newClient(t, addr, "alice", "pw", true)
-	q := newPeer(t)
 	exchange(t, other, q, other.mustAllocate(t), "meanwhile")
 	eventually(t, "the cut client's allocation to expire", func() bool { return s.Allocations() == 1 })
 	close(stop)
 	wg.Wait()
+	eventually(t, "the other client's refresh", func() bool { return metric(s, "fit_turn_refreshed_total") >= 1 })
+	if metric(s, `fit_turn_freed_total{reason="expired"}`) != 1 {
+		t.Fatalf("metrics:\n%s", metrics(s))
+	}
+}
+
+// certFiles writes a self-signed certificate for turn.test and 127.0.0.1
+// to PEM files in dir, and returns their paths and a pool that trusts it.
+func certFiles(t *testing.T, dir string) (certFile, keyFile string, pool *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	tmpl := &x509.Certificate{
+		SerialNumber: serial, Subject: pkix.Name{CommonName: "turn.test"},
+		DNSNames: []string{"turn.test"}, IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certFile, keyFile = filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cert, _ := x509.ParseCertificate(der)
+	pool = x509.NewCertPool()
+	pool.AddCert(cert)
+	return certFile, keyFile, pool
+}
+
+func addrPort(t *testing.T, a net.Addr) netip.AddrPort {
+	t.Helper()
+	ap, err := netip.ParseAddrPort(a.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
+}
+
+// TestStream checks TURN over TCP and TLS through fit, with fib's client
+// framing its messages: allocations relay UDP to a peer both ways, end
+// when their connection closes, a connection idle without one is closed,
+// and a certificate changed on reload is the next handshake's.
+func TestStream(t *testing.T) {
+	e := startEngine(t)
+	dir := t.TempDir()
+	certFile, keyFile, pool := certFiles(t, dir)
+	m := member()
+	m.ListenTCP = []string{"127.0.0.1:0"}
+	m.ListenTLS = []string{"127.0.0.1:0"}
+	m.TLS = &config.TURNTLS{Certificates: []config.Certificate{{CertFile: certFile, KeyFile: keyFile}}}
+	m.StreamIdleTimeout = config.Duration(300 * time.Millisecond)
+	s := startRole(t, e, m)
+	tcpAddrs, tlsAddrs := s.StreamAddrs()
+	if len(tcpAddrs) != 1 || len(tlsAddrs) != 1 {
+		t.Fatalf("tcp %v, tls %v", tcpAddrs, tlsAddrs)
+	}
+	tcpAddr, tlsAddr := addrPort(t, tcpAddrs[0]), addrPort(t, tlsAddrs[0])
+	p := newPeer(t)
+	allow(t, s, p)
+
+	tcpConn, err := net.Dial("tcp", tcpAddr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	overTCP := newStreamClient(t, tcpConn, tcpAddr, "alice", "pw", true)
+	exchange(t, overTCP, p, overTCP.mustAllocate(t), "over tcp")
+
+	dialTLS := func(pool *x509.CertPool) (*tls.Conn, error) {
+		return tls.Dial("tcp", tlsAddr.String(), &tls.Config{RootCAs: pool, ServerName: "turn.test"})
+	}
+	tlsConn, err := dialTLS(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overTLS := newStreamClient(t, tlsConn, tlsAddr, "alice", "pw", false)
+	exchange(t, overTLS, p, overTLS.mustAllocate(t), "over tls")
+	if s.Allocations() != 2 {
+		t.Fatalf("%d allocations", s.Allocations())
+	}
+
+	// A connection closed ends its allocation.
+	overTCP.cut()
+	eventually(t, "the TCP client's allocation freed", func() bool {
+		return s.Allocations() == 1 && metric(s, `fit_turn_freed_total{reason="closed"}`) == 1
+	})
+	exchange(t, overTLS, p, func() netip.AddrPort {
+		var r netip.AddrPort
+		overTLS.do(func(c *fibturn.Client) { r, _, _ = c.Relayed() })
+		return r
+	}(), "still over tls")
+
+	// A connection that asks for nothing is closed at stream_idle_timeout.
+	idle, err := net.Dial("tcp", tcpAddr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idle.Close()
+	_ = idle.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := idle.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("an idle connection was not closed: %v", err)
+	}
+
+	// Another certificate in the same files, applied on reload, without
+	// a restart.
+	_, _, pool2 := certFiles(t, dir)
+	m2 := *m
+	m2.AllowedPeers = append(slices.Clone(m.AllowedPeers), p.addr.String())
+	if err := s.Apply(&m2); err != nil {
+		t.Fatal(err)
+	}
+	if s.restarts.Load() != 0 || s.Allocations() != 1 {
+		t.Fatalf("%d restarts, %d allocations", s.restarts.Load(), s.Allocations())
+	}
+	if c, err := dialTLS(pool); err == nil {
+		_ = c.Close()
+		t.Fatal("the old certificate is still served")
+	}
+	c, err := dialTLS(pool2)
+	if err != nil {
+		t.Fatalf("the new certificate: %v", err)
+	}
+	again := newStreamClient(t, c, tlsAddr, "alice", "pw", true)
+	exchange(t, again, p, again.mustAllocate(t), "new certificate")
 }
 
 func TestLimiter(t *testing.T) {

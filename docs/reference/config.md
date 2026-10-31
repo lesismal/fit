@@ -38,7 +38,7 @@ a config against it and more.
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [Agent](#agent): [`agent`](#config-agent), [`agent.hub`](#config-agenthub), [`agent.hub.console`](#config-roleconsole), [`agent.hub.listen`](#config-agentlisten), [`agent.hub.peers[]`](#config-agentpeer), [`agent.hub.limits`](#config-agentlimits), [`agent.node`](#config-agentnode), [`agent.node.models[]`](#config-agentmodel), [`agent.node.settings`](#config-agentnodesettings), [`agent.node.proxy`](#config-agentnodeproxy), [`agent.client`](#config-agentclient), [`agent.client.api`](#config-agentclientapi), [`agent.client.api_keys[]`](#config-agentclientkey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.server`](#config-tunnelserver), [`tunnel.server.listeners[]`](#config-tunnellistener), [`tunnel.server.console_socket`](#config-tunnelconsolesocket), [`tunnel.server.quic`](#config-tunnelserverquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.servers[]`](#config-tunneluplink), [`tunnel.node.servers[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.client`](#config-tunnelclient), [`tunnel.client.forwards[]`](#config-tunnelforward), [`tunnel.client.web_proxies[]`](#config-tunnelwebproxy)
-- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
+- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -235,6 +235,8 @@ In JSON:
 <a id="config-certificate"></a>
 
 ### `listeners[].tls.certificates[]`
+
+Also at `webrtc.turn.tls.certificates[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -2009,11 +2011,15 @@ Also at `tunnel.client.servers[]`.
 
 What fit runs for WebRTC beside the gateway, on its engine. `turn` is a TURN server (RFC 8656),
 fib's, which relays UDP for browsers and other ICE agents that cannot reach each other directly:
-over UDP on the `listen` addresses, with fixed `users`, coturn's time-limited credentials from
-`secret`, or both. Each allocation's relayed socket binds to `relay_ip`, told to clients as
-`public_ip` behind a 1:1 NAT, in `port_min`-`port_max` when set. Peers on loopback, private and
-other internal addresses are refused unless `allowed_peers` lists them. Users, the secret, the
-peer lists and `user_bandwidth` change on reload with the allocations kept; a change of the rest
+over UDP on the `listen` addresses, over TCP on `listen_tcp` and over TLS on `listen_tls` with
+`tls`'s certificates, with fixed `users`, coturn's time-limited credentials from `secret`, or
+both. Each allocation's relayed socket binds to `relay_ip`, told to clients as `public_ip` behind
+a 1:1 NAT, in `port_min`-`port_max` when set; it holds at most `max_permissions` peers and
+`max_channels` channels. Peers on loopback, private and other internal addresses are refused
+unless `allowed_peers` lists them, and `relay_ip` itself is reached on the relayed ports alone,
+or on a port `allowed_peers` names with it. Users, the secret, the peer lists, the quotas, the
+lifetimes, `user_bandwidth` and the certificates change on reload with the allocations kept; a
+change of the addresses starts a new server and drains the old one, and a change of the rest
 starts the server again.
 
 `media` makes fit a media server, an SFU, for the [`whip`](#whip) and [`whep`](#whep) handlers:
@@ -2025,7 +2031,8 @@ changes `listen` or `public_ips`.
 
 `proxy` puts other media servers behind fit, for the [`webrtc_proxy`](#webrtc_proxy) handler: one
 UDP port, `listen`, told to peers as `public_ips`, where each peer's first STUN request names the
-session, by its ufrag, whose media server it is relayed to from a socket of its own; the limits on
+session, by its ufrag, whose media server it is relayed to from a socket of its own, leaving
+from `relay_ip` and a port of `port_min`-`port_max` when set; the limits on
 sessions and relays, and how long an idle relay and a session with none are kept. A reload keeps
 the sessions unless it changes `listen`. See [WebRTC](../webrtc.md) and
 [decision 029](../decisions/029-webrtc.md).
@@ -2036,6 +2043,14 @@ In a .conf file:
 webrtc {
 	turn {
 		listen :3478
+		listen_tcp :3478
+		listen_tls :5349
+		tls {
+			certificates {
+				cert_file /etc/fit/turn.example.com.pem
+				key_file /etc/fit/turn.example.com.key
+			}
+		}
 		realm example.com
 		secret a-secret-shared-with-the-web-service
 		users alice { password a-password }
@@ -2058,6 +2073,9 @@ webrtc {
 		public_ips 203.0.113.5
 		max_sessions 4096
 		idle_timeout 30s
+		relay_ip 10.0.0.5
+		port_min 40000
+		port_max 40999
 	}
 }
 ```
@@ -2069,6 +2087,14 @@ webrtc:
   turn:
     listen:
       - :3478
+    listen_tcp:
+      - :3478
+    listen_tls:
+      - :5349
+    tls:
+      certificates:
+        - cert_file: /etc/fit/turn.example.com.pem
+          key_file: /etc/fit/turn.example.com.key
     realm: example.com
     secret: a-secret-shared-with-the-web-service
     users:
@@ -2096,6 +2122,9 @@ webrtc:
       - 203.0.113.5
     max_sessions: 4096
     idle_timeout: 30s
+    relay_ip: 10.0.0.5
+    port_min: 40000
+    port_max: 40999
 ```
 
 In JSON:
@@ -2105,6 +2134,9 @@ In JSON:
   "webrtc": {
     "turn": {
       "listen": [":3478"],
+      "listen_tcp": [":3478"],
+      "listen_tls": [":5349"],
+      "tls": {"certificates": [{"cert_file": "/etc/fit/turn.example.com.pem", "key_file": "/etc/fit/turn.example.com.key"}]},
       "realm": "example.com",
       "secret": "a-secret-shared-with-the-web-service",
       "users": [{"name": "alice", "password": "a-password"}],
@@ -2126,7 +2158,10 @@ In JSON:
       "listen": ":8190",
       "public_ips": ["203.0.113.5"],
       "max_sessions": 4096,
-      "idle_timeout": "30s"
+      "idle_timeout": "30s",
+      "relay_ip": "10.0.0.5",
+      "port_min": 40000,
+      "port_max": 40999
     }
   }
 }
@@ -2148,23 +2183,38 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `listen` | list of string |  | Required. The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs default to. TURN over TCP and TLS is not served yet. |
-| `realm` | string |  | Required. The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts the server again, ending its allocations. |
+| `listen` | list of string |  | Required. The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs default to. A change of listen, listen_tcp or listen_tls starts a new server and drains the old one. |
+| `listen_tcp` | list of string |  | TCP addresses clients reach the server at, as in ":3478", for clients on networks that block UDP: turn:host:3478?transport=tcp. Their allocations relay UDP, and end when their connection closes. |
+| `listen_tls` | list of string |  | TLS addresses clients reach the server at, as in ":5349" or ":443", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise. |
+| `tls` | [object](#config-turntls) |  | The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake. |
+| `realm` | string |  | Required. The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise. |
 | `users` | list of [object](#config-turnuser) |  | The users with fixed credentials. With secret, or alone; at least one of the two. |
 | `secret` | string |  | The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username "<expiry in Unix seconds>:<anything>" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out. |
-| `relay_ip` | string |  | Required. The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. |
-| `public_ip` | string |  | The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. |
-| `port_min` | integer, 0 to 65535 |  | The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. |
+| `relay_ip` | string |  | Required. The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. Peers on it, and on public_ip, are relayed to on the ports of the server's own relayed addresses alone, and on those allowed_peers lists with their port. A change starts a new server. |
+| `public_ip` | string |  | The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. A change starts a new server. |
+| `port_min` | integer, 0 to 65535 |  | The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. A change starts a new server. |
 | `port_max` | integer, 0 to 65535 |  | The highest port of the relayed sockets; with port_min. |
-| `max_allocations` | integer, 0 or more | `1024` | The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change starts the server again. |
-| `max_allocations_per_user` | integer, 0 or more | `16` | The most allocations of one username; one more is refused with 486. 16 when left out or 0. A change starts the server again. |
+| `max_allocations` | integer, 0 or more | `1024` | The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change applies to the next allocation; those held past a lowered one are kept until they end. |
+| `max_allocations_per_user` | integer, 0 or more | `16` | The most allocations of one username; one more is refused with 486. 16 when left out or 0. Applies to the next allocation. |
+| `max_permissions` | integer, 0 or more | `64` | The most permissions, peer addresses, one allocation holds; one more is refused with 508. A channel's peer counts. 64 when left out or 0. Applies to the next request. |
+| `max_channels` | integer, 0 or more | `64` | The most channels one allocation binds; one more is refused with 508. 64 when left out or 0. Applies to the next request. |
+| `max_stream_message` | integer, 0 or more | `8192` | The largest message a TCP or TLS client may send, and so what its connection buffers of one not yet whole; a connection whose next message claims more is closed. At least 2048. 8 KiB when left out or 0. A change starts a new server. |
+| `stream_idle_timeout` | duration | `"30s"` | How long a TCP or TLS client's connection may stay open without an allocation, before its first Allocate or after its allocation ended, before it is closed. 30s when left out. A change starts a new server. |
 | `user_bandwidth` | integer, 0 or more | `2097152` | The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0. |
-| `default_lifetime` | duration | `"10m"` | The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. A change starts the server again. |
-| `max_lifetime` | duration | `"1h"` | The longest lifetime a client may ask for. 1h when left out. A change starts the server again. |
-| `nonce_lifetime` | duration | `"10m"` | How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. A change starts the server again. |
-| `nonce_secret` | string |  | The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts the server again. |
-| `allowed_peers` | list of string |  | The addresses and prefixes, as in "10.1.0.0/16", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. |
-| `denied_peers` | list of string |  | Addresses and prefixes peers may not be at, beyond the internal ranges denied by default. |
+| `default_lifetime` | duration | `"10m"` | The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. Applies to the next allocation or refresh. |
+| `max_lifetime` | duration | `"1h"` | The longest lifetime a client may ask for. 1h when left out. Applies to the next allocation or refresh. |
+| `nonce_lifetime` | duration | `"10m"` | How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. Applies to the next nonce. |
+| `nonce_secret` | string |  | The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts a new server. |
+| `allowed_peers` | list of string |  | The addresses and prefixes, as in "10.1.0.0/16", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. An address with a port, as in "10.0.0.5:8189", allows that port alone, which is how a peer on relay_ip itself, such as webrtc.media, is reached. |
+| `denied_peers` | list of string |  | Addresses and prefixes peers may not be at, beyond the internal ranges denied by default; an address with a port denies that port alone. |
+
+<a id="config-turntls"></a>
+
+### `webrtc.turn.tls`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `certificates` | list of [object](#config-certificate) |  | Required. Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none. |
 
 <a id="config-turnuser"></a>
 
@@ -2219,6 +2269,9 @@ In JSON:
 | `max_relays` | integer, 0 or more | `4096` | The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0. |
 | `session_timeout` | duration | `"30s"` | How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out. |
 | `idle_timeout` | duration | `"30s"` | How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out. |
+| `relay_ip` | string |  | The address the sockets toward the media servers leave from, one of the host's, for a firewall in front of them that admits one source address, or a host with several interfaces. Of the media servers' family: a media address of the other family is not relayed. The route's pick when left out. Applies to the next relay. |
+| `port_min` | integer, 0 to 65535 |  | The lowest local port of the sockets toward the media servers, for a firewall in front of them that admits a range; with port_max. A port in use is skipped, and a peer address that finds the range full is dropped. Ports the kernel picks when both are left out. Applies to the next relay. |
+| `port_max` | integer, 0 to 65535 |  | The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays. |
 
 <a id="providers"></a>
 

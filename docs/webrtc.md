@@ -19,6 +19,14 @@ the listeners' engine, beside the gateway's routes or without any:
 webrtc {
 	turn {
 		listen :3478
+		listen_tcp :3478
+		listen_tls :5349
+		tls {
+			certificates {
+				cert_file /etc/fit/turn.example.com.pem
+				key_file /etc/fit/turn.example.com.key
+			}
+		}
 		realm example.com
 		secret a-secret-shared-with-the-web-service
 		users alice { password a-password }
@@ -37,6 +45,9 @@ The same in JSON:
   "webrtc": {
     "turn": {
       "listen": [":3478"],
+      "listen_tcp": [":3478"],
+      "listen_tls": [":5349"],
+      "tls": {"certificates": [{"cert_file": "/etc/fit/turn.example.com.pem", "key_file": "/etc/fit/turn.example.com.key"}]},
       "realm": "example.com",
       "secret": "a-secret-shared-with-the-web-service",
       "users": [{"name": "alice", "password": "a-password"}],
@@ -49,9 +60,10 @@ The same in JSON:
 }
 ```
 
-A browser is given it as an ICE server, `{urls: "turn:turn.example.com:3478", username,
-credential}`. The server also answers STUN Binding requests on its port, without credentials, so
-the same address serves as a `stun:` server. Every field is in the
+A browser is given it as an ICE server, `{urls: ["turn:turn.example.com:3478",
+"turn:turn.example.com:3478?transport=tcp", "turns:turn.example.com:5349?transport=tcp"], username,
+credential}`. The server also answers STUN Binding requests on its UDP port, without credentials,
+so the same address serves as a `stun:` server. Every field is in the
 [config reference](reference/config.md#webrtc).
 
 ### Credentials
@@ -73,13 +85,26 @@ the same address serves as a `stun:` server. Every field is in the
 Both may be set; a name in `users` is looked up first. Passwords are taken as bytes: one that is
 not ASCII must be given already in the form RFC 8265's OpaqueString makes.
 
+### TCP and TLS
+
+Networks that block UDP, and those that let only TLS on port 443 through, are why WebRTC services
+run TURN at all. `listen_tcp` serves TURN over TCP (`turn:host:port?transport=tcp`) and
+`listen_tls` over TLS (`turns:host:port?transport=tcp`, often on 5349 or 443), with the
+certificates of `tls.certificates`, from files, which are watched as a listener's are: a renewed
+file is the next handshake's, with nothing restarted. The relay to peers is UDP whatever the
+client's transport. A connection is one client: its allocation ends when it closes, a connection
+with no allocation is closed after `stream_idle_timeout`, and one whose next message claims more
+than `max_stream_message` is closed at once. A TCP and a TLS address may not be the same; a UDP
+and a TCP one may, as `:3478` above.
+
 ### Addresses and firewalls
 
 Each allocation's relayed socket binds to `relay_ip`, which must be one of the host's addresses.
 Behind a 1:1 NAT, as on most clouds, set `public_ip` to the address that maps to it: clients are
 told that one. `port_min` and `port_max` keep the relayed ports in a range, for a firewall that
 opens one; the kernel picks them when both are left out. Each allocation holds a socket on every
-event loop of fit's engine (`engine.event_loops`).
+event loop of fit's engine (`engine.event_loops`). The sockets are opened on goroutines of fib's
+server, never on a worker that serves requests.
 
 ### Peers fit will not relay to
 
@@ -87,11 +112,16 @@ A relay that sends wherever a client asks is a way into the network it runs in. 
 channels for peers on loopback, private (RFC 1918 and unique local), link-local, multicast, shared
 (RFC 6598), and other internal or reserved ranges are refused, as fib's `DeniedByDefault` lists
 them. `allowed_peers` lets some of them through, for peers on a private network, and
-`denied_peers` refuses more. Two clients of the same server relay to each other's relayed
-addresses, on the server's own address: when `relay_ip` is private, list it in `allowed_peers`.
-The relay then reaches every port of that address, fit's own listeners included: keep only the
-relay range open on it to the clients' peers, or listen on another address. fib cannot yet allow
-an address's relay ports alone ([A57](fib-api-requests.md#a57-a-turn-servers-limits-and-hooks)).
+`denied_peers` refuses more; either takes an address with a port, as `10.0.0.9:8189`, for that
+port alone.
+
+The server's own addresses, `relay_ip` and `public_ip`, are a case of their own. Two clients of the
+same server relay to each other's relayed addresses, which are on them, so the server relays to
+its own addresses on the ports of the relayed addresses it holds, whether or not `allowed_peers`
+covers them, and on a port `allowed_peers` names with them, as `10.0.0.5:8189` for
+`webrtc.media` on the same address. It never relays to their other ports, fit's own listeners
+among them, whatever the prefixes in `allowed_peers` say. The check sees each datagram's port: a
+permission is for an address alone, and the datagrams it lets through are checked port by port.
 
 ### Limits
 
@@ -99,40 +129,53 @@ an address's relay ports alone ([A57](fib-api-requests.md#a57-a-turn-servers-lim
 | --- | --- | --- |
 | `max_allocations` | 1024 | allocations held; one more is refused with 508 |
 | `max_allocations_per_user` | 16 | allocations of one username; one more is refused with 486 |
+| `max_permissions` | 64 | peer addresses one allocation permits, a channel's peer counting; one more is refused with 508 |
+| `max_channels` | 64 | channels one allocation binds; one more is refused with 508 |
 | `user_bandwidth` | 2 MiB | bytes a second relayed for one username each way, with a second's burst; past it, datagrams are dropped |
 | `default_lifetime`, `max_lifetime` | 10m, 1h | an allocation's lifetime, which its client refreshes |
 | `nonce_lifetime` | 10m | how long a nonce is good for before a 438 |
+| `max_stream_message` | 8 KiB | a TCP or TLS client's largest message, and what its connection buffers |
+| `stream_idle_timeout` | 30s | a TCP or TLS connection without an allocation |
 
-An allocation's permissions last five minutes unless refreshed, and its channels ten; fib does not
-yet cap how many one allocation holds (A57). fit's `limits.max_conns` counts the clients' and peers'
-UDP addresses with every other connection.
+An allocation's permissions last five minutes unless refreshed, and its channels ten. fit's
+`limits.max_conns` counts the clients' and peers' UDP addresses, and the TCP and TLS connections,
+with every other connection.
 
 ### Reloading
 
-A reload that changes `users`, `secret`, `allowed_peers`, `denied_peers` or `user_bandwidth`
-applies them to the next request; the allocations held go on. A change of any other field starts
-the server again: its allocations end, and browsers restart ICE. A change of `listen` binds the new
-addresses before the old ones close, unless they share one.
+A reload changes `users`, `secret`, `allowed_peers`, `denied_peers`, `user_bandwidth`, the quotas
+(`max_allocations`, `max_allocations_per_user`, `max_permissions`, `max_channels`), the lifetimes
+and the certificates in place, from the next request or handshake on: the allocations held go on,
+and one held past a lowered quota is kept until it ends.
+
+A change of `listen`, `listen_tcp` or `listen_tls` starts a new server on the new addresses, and
+the old one drains: it takes no new allocation (508) while those it holds go on relaying and
+refreshing, until they end or fit's drain timeout (`fit run -shutdown-timeout`, 30s) is up, when it
+closes. A change of `realm`, `relay_ip`, `public_ip`, the port range, `nonce_secret` or the stream
+bounds starts a new server too: beside the old one, draining, when the addresses change with it,
+and in its place, its allocations ended, when they do not, since two servers cannot share an
+address; browsers then restart ICE. Leaving `webrtc.turn` out, or stopping fit, closes it at once.
 
 ### Metrics and logs
 
-The Admin API's `/metrics`, and OpenTelemetry's export, carry `fit_turn_allocations`,
-`fit_turn_relayed_bytes_total{direction="to_peer"|"from_peer"}`,
-`fit_turn_dropped_total{reason="bandwidth"}`, `fit_turn_peers_refused_total` and
-`fit_turn_restarts_total`. The server's messages go to the `webrtc` logger.
+The Admin API's `/metrics`, and OpenTelemetry's export, carry:
 
-### Not yet
+- gauges: `fit_turn_allocations`, `fit_turn_pending_allocations` (waiting for their relayed
+  socket), `fit_turn_permissions`, `fit_turn_channels` and `fit_turn_draining_servers`;
+- `fit_turn_relayed_bytes_total{direction="to_peer"|"from_peer"}`;
+- `fit_turn_allocated_total`, `fit_turn_refreshed_total` and
+  `fit_turn_freed_total{reason="deleted"|"expired"|"closed"}`;
+- `fit_turn_refused_total{code}`, requests refused after their credentials passed, by error code
+  (403 a peer refused, 486 and 508 the quotas, caps and drains), and
+  `fit_turn_peers_refused_total`, the 403s; `fit_turn_auth_failures_total`, credentials that failed;
+- `fit_turn_dropped_total{reason="bandwidth"|"unsent"}`, datagrams past `user_bandwidth` and
+  those with no connection to send them on, and `fit_turn_unrelayed_total`, every datagram the
+  server did nothing with: malformed, without a permission or channel, or to a port the peer rules
+  refuse;
+- `fit_turn_restarts_total`, the new servers reloads started.
 
-These wait on fib ([fib API requests](fib-api-requests.md)):
-
-- TURN over TCP and TLS, for clients on networks that block UDP
-  ([A55](fib-api-requests.md#a55-turn-over-tcp-and-tls)).
-- Binding a relayed address and opening a peer without a fib worker waiting
-  ([A56](fib-api-requests.md#a56-a-turn-server-that-never-waits-on-a-worker)).
-- Caps on an allocation's permissions and channels, a peer rule with ports, and events for logs
-  and metrics ([A57](fib-api-requests.md#a57-a-turn-servers-limits-and-hooks)).
-- Lifetimes and quotas changed without a restart, and a restart that drains its allocations
-  ([A58](fib-api-requests.md#a58-a-turn-server-changed-in-place-and-drained)).
+The server's messages go to the `webrtc` logger; each allocation made, refreshed and freed, each
+refusal and each failed credential, at `debug`.
 
 ## WHIP and WHEP
 
@@ -257,8 +300,8 @@ Link: <stun:stun.example.com:3478>; rel="ice-server"
 Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5f1c..."; credential="..."; credential-type="password"
 ```
 
-fit's TURN server relays to the media port only when `allowed_peers` lets it reach that address,
-as a private `relay_ip` needs.
+fit's TURN server relays to the media port as to any peer: when the port is on its own `relay_ip`,
+`allowed_peers` lists it with its port, as `10.0.0.5:8189`.
 
 ### Limits
 
@@ -326,6 +369,9 @@ webrtc {
 	proxy {
 		listen :8190
 		public_ips 203.0.113.5
+		relay_ip 10.0.0.1
+		port_min 40000
+		port_max 40999
 	}
 }
 ```
@@ -341,7 +387,8 @@ The same in JSON:
      "handler": {"module": "webrtc_proxy",
                  "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.3:8080": "10.0.0.3:8189"}}}}
   ],
-  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"]}}
+  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"],
+                       "relay_ip": "10.0.0.1", "port_min": 40000, "port_max": 40999}}
 }
 ```
 
@@ -403,6 +450,14 @@ client, and the answer is written from the client's callback; a client that leav
 | `webrtc_proxy`'s `max_sdp_bytes` | 32 KiB | a request and an answer |
 | `webrtc_proxy`'s `timeout` | 10s | from a request's last byte to its answer read whole |
 
+The sockets toward the media servers leave from `relay_ip`, one of the host's addresses, and from
+a port of `port_min` to `port_max`, for a firewall in front of the media servers that admits one
+source address and a range, or a host whose media servers are on another interface; the route
+and the kernel pick them when left out. A port in use is skipped, and a peer address that finds
+every port of the range in use is dropped (`no_port`), its next request trying again: the range
+bounds the relays at once beside `max_relays`. `relay_ip` is of the media servers' family: a media
+address of the other family is not relayed. Both apply to the next relay after a reload.
+
 A session relays at most 8 of its peer's addresses: one for each candidate a peer checks from,
 and more after it moves. A session keeps at most 4 ufrags, its ICE restarts' among them. A relay
 holds up to 8 datagrams while its socket opens.
@@ -423,9 +478,6 @@ What fit cannot do:
   media server reached only through TURN, are not relayed.
 - A URL below the session's is proxied with its body and answer whole, up to `max_sdp_bytes`:
   extensions that stream, such as WHEP's server-sent events, do not work through fit.
-- The sockets toward the media servers take the kernel's address and ports, which a firewall
-  between fit and them must allow; fib cannot yet bind them to an address and a port range
-  ([A59](fib-api-requests.md#a59-a-dial-from-a-chosen-local-address-and-port-range)).
 - The media server sees fit's address, not the peer's.
 
 ### Reloading
@@ -441,6 +493,6 @@ answered `502`.
 `fit_webrtc_proxy_sessions`, `fit_webrtc_proxy_relays`, `fit_webrtc_proxy_sessions_total`,
 `fit_webrtc_proxy_refused_total`, `fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`,
 `fit_webrtc_proxy_relays_total`,
-`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"}`,
+`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"|"no_port"}`,
 `fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` and
 `fit_webrtc_proxy_restarts_total`. The upstream's own metrics count the signaling requests.

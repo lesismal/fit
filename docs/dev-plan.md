@@ -247,6 +247,7 @@ Status: `todo`, `doing` or `done`.
 | I108 | Decision 029: fit's WebRTC on fib's; fib `80c7f76`; A49 as built; A55–A58 | I85 | done |
 | I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | done |
 | I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | done |
+| I111 | WebRTC on fib's A55–A59: TURN over TCP and TLS, caps, events, changes in place and drains; the proxy's source address and ports | I87, I110 | done |
 
 ## M0, foundations
 
@@ -1181,7 +1182,7 @@ use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of 
   lifetimes; peers allowed and denied over fib's denial of internal addresses; users, secret, peers
   and bandwidth changed on reload without a restart; metrics in `/metrics` through `app`; the
   `webrtc` logger; the schema's chapter. TCP and TLS to the server, permission and channel caps,
-  events and drains are fib's (A55–A58).
+  events and drains are fib's (A55–A58), taken up in I111.
 - **Done when**: fib's TURN client allocates through fit, relays both ways to a peer, by indication
   and channel; a wrong password and an expired ephemeral credential are refused; quotas refuse with
   486 and 508; bandwidth past its rate drops; a private peer is refused unless allowed; a reload of
@@ -1461,3 +1462,22 @@ server, and fit in front of other media servers, for their signaling and their m
   datagrams before its Binding request are dropped; a backend gone frees its routes; under the race
   detector.
 - **Touches**: `webrtc`, `upstream`, `config`, `schema`, `docs`.
+
+### I111 WebRTC on fib's A55–A59
+
+- **Do**: fit on fib `84a67f7`, with A55–A59. `webrtc.turn`: the rule-1 breach I87 recorded goes
+  (A56); `max_permissions` and `max_channels` (A57); a peer check that sees the port, so that
+  `relay_ip` is reached on the relayed ports alone and on ports `allowed_peers` names, never on
+  fit's other ports (A57); `OnEvent` into the `webrtc` logger and `/metrics`, `Stats()` into gauges
+  (A57); a reload that changes the quotas, caps, lifetimes and credentials in place, and a change
+  of the addresses that drains the old server for the listeners' drain timeout (A58);
+  `listen_tcp` and `listen_tls`, with certificates from files as listeners have them,
+  `max_stream_message` and `stream_idle_timeout`, the free-address probe over TCP too (A55).
+  `webrtc.proxy`: `relay_ip`, `port_min` and `port_max`, checked when loaded, its relays dialed
+  with `DialWith`, an exhausted range counted as a drop (A59). fib requests A55–A59 marked done.
+- **Done when**: TCP and TLS allocations through fit with fib's client relay both ways; caps
+  refuse with 508; the port-aware check refuses fit's other ports and lets two clients relay to
+  each other; events and metrics count; a reload keeps allocations with changed limits; an address
+  change drains; the relay leaves from the configured port range, and a full range is dropped and
+  counted; under the race detector.
+- **Touches**: `webrtc`, `config`, `app`, `runtime`, `tlsmgr`, `cli`, `schema`, `docs`, `go.mod`.

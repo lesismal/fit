@@ -73,7 +73,8 @@ func LookupProxy(engine *fib.Engine) *Proxy {
 // answered; a peer's first datagram from a new address must then be a STUN
 // Binding request whose USERNAME starts with one of the session's ufrags
 // and whose MESSAGE-INTEGRITY its ice-pwd signs, and the relay it opens
-// dials the media server's address from a UDP socket of its own, so that
+// dials the media server's address from a UDP socket of its own, bound to
+// relay_ip and a port of port_min to port_max when they are set, so that
 // the media server sees each peer address as a peer of its own, a
 // peer-reflexive candidate, and its replies come back to the relay that
 // sent for them. Everything else that comes first is dropped.
@@ -102,6 +103,10 @@ type proxySettings struct {
 	maxSessions, maxRelays int
 	sessionIdle, idle      time.Duration
 	public                 []netip.Addr
+	// local, portMin and portMax are where the relays' sockets toward the
+	// media servers leave from: relay_ip and the port range.
+	local            netip.AddrPort
+	portMin, portMax uint16
 }
 
 // proxyPort is the binding the relays' peers reach.
@@ -151,6 +156,7 @@ func (p *Proxy) Apply(member any) error {
 	}
 	st := &proxySettings{maxSessions: cfg.Sessions(), maxRelays: cfg.Relays(),
 		sessionIdle: cfg.SessionIdle(), idle: cfg.Idle()}
+	st.local, st.portMin, st.portMax = cfg.RelayAddr()
 	for _, s := range cfg.PublicIPs {
 		a, err := netip.ParseAddr(s)
 		if err != nil {
@@ -460,10 +466,11 @@ const (
 	dropUnknown
 	dropIntegrity
 	dropLimit
+	dropNoPort
 	numDrops
 )
 
-var dropNames = [numDrops]string{"not_stun", "unknown_ufrag", "integrity", "limit"}
+var dropNames = [numDrops]string{"not_stun", "unknown_ufrag", "integrity", "limit", "no_port"}
 
 // Why a proxied session was forgotten.
 const (
@@ -492,7 +499,7 @@ func (p *Proxy) WriteMetrics(w observe.MetricWriter) {
 	}
 	w.Family("fit_webrtc_proxy_relays_total", "counter", "Relays opened for peers' STUN requests.")
 	w.Sample("fit_webrtc_proxy_relays_total", float64(m.opened.Load()))
-	w.Family("fit_webrtc_proxy_dropped_total", "counter", "First datagrams of new peer addresses dropped, by reason: not a STUN Binding request, a ufrag no session has, a MESSAGE-INTEGRITY its ice-pwd does not sign, or past max_relays or a session's 8.")
+	w.Family("fit_webrtc_proxy_dropped_total", "counter", "First datagrams of new peer addresses dropped, by reason: not a STUN Binding request, a ufrag no session has, a MESSAGE-INTEGRITY its ice-pwd does not sign, past max_relays or a session's 8, or no local port free in port_min to port_max for its socket.")
 	for i, name := range dropNames {
 		w.Sample("fit_webrtc_proxy_dropped_total", float64(m.dropped[i].Load()), "reason", name)
 	}

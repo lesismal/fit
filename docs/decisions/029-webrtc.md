@@ -40,15 +40,19 @@ fib can hold.
   server, is a role of package `app`, on the listeners' engine, applied, moved and stopped with
   every config. WHIP and WHEP (I109) are handler modules on routes, and the UDP port their peers
   share is a role beside it, `webrtc.media`.
-- **The TURN server** (`webrtc/turn`, I87): UDP addresses to listen on, one binding; a realm; users
+- **The TURN server** (`webrtc/turn`, I87, I111): UDP addresses to listen on, one binding, and
+  TCP and TLS ones (I111, A55), the TLS certificates from files as a listener's; a realm; users
   with a password or coturn's long-term key, and coturn's `use-auth-secret` for time-limited
   credentials, either or both; the relay address, the public address behind a 1:1 NAT, and a port
   range; allocations in all and per user, relayed bytes a second per user and direction, lifetimes;
-  peers allowed and denied, fib's denial of internal addresses being the default. Users, the
-  secret, the peer lists and the bandwidth apply to the next request after a reload, without
-  touching the allocations held; a change of the addresses, the realm, the lifetimes or the
-  allocation quotas starts the server again, freeing its allocations, until fib can change them in
-  place (A58). Its metrics are in the Admin API's `/metrics`, through `app`.
+  permissions and channels per allocation (A57); peers allowed and denied, fib's denial of
+  internal addresses being the default, and the server's own address reached on its relayed ports
+  alone (A57). Users, the secret, the peer lists, the bandwidth, the lifetimes and the quotas apply
+  to the next request after a reload, without touching the allocations held (A58); a change of the
+  addresses starts the new server beside the old one, which drains for the listeners' drain
+  timeout; a change of the realm or the relay addresses on the same addresses starts the server
+  again, freeing its allocations. Its metrics, from fib's events and stats, are in the Admin API's
+  `/metrics`, through `app`.
 - **WHIP and WHEP** (I109): modules `whip` and `whep` terminate WebRTC in fit on the shared
   `webrtc.Mux` of `webrtc.media`: a stream by name from the route, one publisher forwarded to many
   viewers as RTP with key frame requests relayed, the route's middleware for auth, limits on
@@ -69,6 +73,8 @@ fib can hold.
 
 ## What fib needs
 
+All five are done, in fib `84a67f7`, and fit uses them since I111.
+
 - [A55](../fib-api-requests.md#a55-turn-over-tcp-and-tls): TURN over TCP and TLS to the server,
   which 025 required and browsers behind UDP-blocking firewalls use.
 - [A56](../fib-api-requests.md#a56-a-turn-server-that-never-waits-on-a-worker): the TURN server
@@ -85,8 +91,12 @@ fib can hold.
 ## Consequences
 
 - fit has one WebRTC stack, fib's, which fib's tests and fuzzing cover; fixes go to fib (rule 15).
-- Until A56, the TURN server's worker waits briefly on fib's binding lock and event loop when it
-  binds a relayed address or opens a peer: a known breach of rule 1, recorded in the progress files,
-  bounded by the allocation quotas. Until A57, an allocation's permissions are bounded only by its
-  requests (each permission lasts five minutes) and its channels by the 4096 numbers RFC 8656 has.
-- Until A55, clients that cannot use UDP cannot reach the TURN server.
+- Until A56, the TURN server's worker waited briefly on fib's binding lock and event loop when it
+  bound a relayed address or opened a peer: a known breach of rule 1, bounded by the allocation
+  quotas, gone since I111. Until A57, an allocation's permissions were bounded only by its requests
+  and its channels by the 4096 numbers RFC 8656 has; since I111, by `max_permissions` and
+  `max_channels`.
+- Until A55, clients that could not use UDP could not reach the TURN server; since I111 they reach
+  it over TCP and TLS.
+- Since A59 (I111), the proxy's sockets toward media servers leave from `relay_ip` and a port
+  range, for a firewall in front of them.

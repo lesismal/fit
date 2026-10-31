@@ -16,6 +16,14 @@ TURN 服务器；以 fit 为媒体服务器的 WHIP 和 WHEP；以及 fit 作为
 webrtc {
 	turn {
 		listen :3478
+		listen_tcp :3478
+		listen_tls :5349
+		tls {
+			certificates {
+				cert_file /etc/fit/turn.example.com.pem
+				key_file /etc/fit/turn.example.com.key
+			}
+		}
 		realm example.com
 		secret a-secret-shared-with-the-web-service
 		users alice { password a-password }
@@ -34,6 +42,9 @@ webrtc {
   "webrtc": {
     "turn": {
       "listen": [":3478"],
+      "listen_tcp": [":3478"],
+      "listen_tls": [":5349"],
+      "tls": {"certificates": [{"cert_file": "/etc/fit/turn.example.com.pem", "key_file": "/etc/fit/turn.example.com.key"}]},
       "realm": "example.com",
       "secret": "a-secret-shared-with-the-web-service",
       "users": [{"name": "alice", "password": "a-password"}],
@@ -46,8 +57,9 @@ webrtc {
 }
 ```
 
-浏览器把它作为 ICE 服务器使用：`{urls: "turn:turn.example.com:3478", username, credential}`。服务器还在同一端口上
-不需凭据地应答 STUN Binding 请求，所以同一地址也可作为 `stun:` 服务器。每个字段见
+浏览器把它作为 ICE 服务器使用：`{urls: ["turn:turn.example.com:3478",
+"turn:turn.example.com:3478?transport=tcp", "turns:turn.example.com:5349?transport=tcp"], username, credential}`。
+服务器还在其 UDP 端口上不需凭据地应答 STUN Binding 请求，所以同一地址也可作为 `stun:` 服务器。每个字段见
 [配置参考](reference/config.md#webrtc)。
 
 ### 凭据
@@ -66,20 +78,33 @@ webrtc {
 两者可以同时设置；先在 `users` 中查找用户名。密码按字节处理：非 ASCII 的密码必须先转换成 RFC 8265 OpaqueString
 规定的形式再填写。
 
+### TCP 和 TLS
+
+WebRTC 服务之所以运行 TURN，正是为了封锁 UDP 的网络，以及只放行 443 端口上 TLS 的网络。`listen_tcp` 经 TCP 提供 TURN
+（`turn:host:port?transport=tcp`），`listen_tls` 经 TLS 提供（`turns:host:port?transport=tcp`，常用 5349 或 443），证书取自
+`tls.certificates` 中的文件，并像 listener 的证书一样被监视：续期后的文件用于下一次握手，什么都不必重启。无论客户端用哪种
+传输，到对端的中继都是 UDP。一条连接就是一个客户端：连接关闭时它的 allocation 结束，没有 allocation 的连接在
+`stream_idle_timeout` 后关闭，下一条消息声称超过 `max_stream_message` 的连接立即关闭。TCP 地址和 TLS 地址不能相同；UDP
+地址和 TCP 地址可以相同，如上面的 `:3478`。
+
 ### 地址与防火墙
 
 每个 allocation 的中继 socket 绑定在 `relay_ip` 上，它必须是本机的地址之一。在 1:1 NAT 后面（大多数云主机如此），把
 `public_ip` 设为映射到它的地址：告诉客户端的是这个地址。`port_min` 和 `port_max` 把中继端口限制在一个范围内，便于防火墙
 开放；两者都不设时由内核选择端口。每个 allocation 在 fit 引擎的每个事件循环（`engine.event_loops`）上各占一个 socket。
+这些 socket 在 fib 服务器自己的 goroutine 上打开，绝不在服务请求的 worker 上。
 
 ### fit 不会中继到的对端
 
 客户端要求发到哪里就发到哪里的中继，是进入其所在网络的通道。对回环、私有（RFC 1918 和唯一本地地址）、链路本地、组播、
 共享（RFC 6598）以及其他内部或保留地址段上的对端，permission 和 channel 都会被拒绝，范围与 fib 的 `DeniedByDefault`
-相同。`allowed_peers` 可放行其中一部分，用于私有网络上的对端；`denied_peers` 可拒绝更多地址。同一服务器的两个客户端
-会中继到对方的中继地址，也就是服务器自己的地址：`relay_ip` 是私有地址时，要把它列入 `allowed_peers`。这样中继就能到达
-该地址的每个端口，包括 fit 自己的 listener：在这个地址上只对客户端的对端开放中继端口范围，或者让 listener 监听在别的
-地址上。fib 目前还不能只放行某个地址的中继端口（[A57](fib-api-requests.zh-CN.md#a57turn-服务器的限制与钩子)）。
+相同。`allowed_peers` 可放行其中一部分，用于私有网络上的对端；`denied_peers` 可拒绝更多地址；两者都接受带端口的地址，
+如 `10.0.0.9:8189`，只针对该端口。
+
+服务器自己的地址 `relay_ip` 和 `public_ip` 另作处理。同一服务器的两个客户端会中继到对方的中继地址，它们就在这些地址上，
+所以服务器会中继到自己地址上它持有的中继地址的端口，不论 `allowed_peers` 是否覆盖它们，也会中继到 `allowed_peers` 带端口
+列出的端口，如同一地址上的 `webrtc.media` 写作 `10.0.0.5:8189`。它绝不中继到这些地址的其他端口，包括 fit 自己的 listener，
+不论 `allowed_peers` 中的前缀怎么写。检查能看到每个数据报的端口：permission 只针对地址，它放行的数据报逐个按端口检查。
 
 ### 上限
 
@@ -87,34 +112,44 @@ webrtc {
 | --- | --- | --- |
 | `max_allocations` | 1024 | 同时持有的 allocation 数；再多一个以 508 拒绝 |
 | `max_allocations_per_user` | 16 | 一个用户名的 allocation 数；再多一个以 486 拒绝 |
+| `max_permissions` | 64 | 一个 allocation 许可的对端地址数，channel 的对端也计入；再多一个以 508 拒绝 |
+| `max_channels` | 64 | 一个 allocation 绑定的 channel 数；再多一个以 508 拒绝 |
 | `user_bandwidth` | 2 MiB | 一个用户名每个方向每秒中继的字节数，允许一秒的突发；超出的数据报被丢弃 |
 | `default_lifetime`、`max_lifetime` | 10m、1h | allocation 的生存期，由客户端刷新 |
 | `nonce_lifetime` | 10m | nonce 的有效期，过期后回 438 |
+| `max_stream_message` | 8 KiB | TCP 或 TLS 客户端最大的消息，也是其连接缓冲的上限 |
+| `stream_idle_timeout` | 30s | 没有 allocation 的 TCP 或 TLS 连接 |
 
-allocation 的 permission 不刷新时存活五分钟，channel 存活十分钟；fib 目前还不限制一个 allocation 持有的数量（A57）。
-fit 的 `limits.max_conns` 把客户端和对端的 UDP 地址与其他连接一起计数。
+allocation 的 permission 不刷新时存活五分钟，channel 存活十分钟。fit 的 `limits.max_conns` 把客户端和对端的 UDP 地址，
+以及 TCP 和 TLS 连接，与其他连接一起计数。
 
 ### 重载
 
-重载修改 `users`、`secret`、`allowed_peers`、`denied_peers` 或 `user_bandwidth` 时，从下一个请求起生效，已有的
-allocation 继续存在。修改其他字段会让服务器重新启动：它的 allocation 结束，浏览器会重启 ICE。修改 `listen` 时，先绑定
-新地址再关闭旧地址，除非两者有相同的地址。
+重载原地修改 `users`、`secret`、`allowed_peers`、`denied_peers`、`user_bandwidth`、配额（`max_allocations`、
+`max_allocations_per_user`、`max_permissions`、`max_channels`）、生存期和证书，从下一个请求或握手起生效：已有的
+allocation 继续存在，超过调低后配额的保留到结束。
+
+修改 `listen`、`listen_tcp` 或 `listen_tls` 时，在新地址上启动新服务器，旧服务器排空：不再接受新的 allocation（508），
+已有的继续中继和刷新，直到它们结束或 fit 的排空超时（`fit run -shutdown-timeout`，30s）到期，然后关闭。修改 `realm`、
+`relay_ip`、`public_ip`、端口范围、`nonce_secret` 或字节流上限也会启动新服务器：地址同时改变时在旧服务器旁启动、旧的排空；
+地址不变时取而代之、旧的 allocation 结束，因为两个服务器不能共用一个地址；浏览器随后重启 ICE。去掉 `webrtc.turn` 或停止
+fit 会立即关闭它。
 
 ### 指标与日志
 
-Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_turn_allocations`、
-`fit_turn_relayed_bytes_total{direction="to_peer"|"from_peer"}`、`fit_turn_dropped_total{reason="bandwidth"}`、
-`fit_turn_peers_refused_total` 和 `fit_turn_restarts_total`。服务器的消息写入 `webrtc` 日志。
+Admin API 的 `/metrics` 和 OpenTelemetry 导出中有：
 
-### 尚未支持
+- gauge：`fit_turn_allocations`、`fit_turn_pending_allocations`（等待中继 socket 的）、`fit_turn_permissions`、
+  `fit_turn_channels` 和 `fit_turn_draining_servers`；
+- `fit_turn_relayed_bytes_total{direction="to_peer"|"from_peer"}`；
+- `fit_turn_allocated_total`、`fit_turn_refreshed_total` 和 `fit_turn_freed_total{reason="deleted"|"expired"|"closed"}`；
+- `fit_turn_refused_total{code}`，凭据通过后被拒绝的请求，按错误码（403 对端被拒，486 和 508 配额、上限和排空），以及
+  `fit_turn_peers_refused_total`，即其中的 403；`fit_turn_auth_failures_total`，未通过的凭据；
+- `fit_turn_dropped_total{reason="bandwidth"|"unsent"}`，超过 `user_bandwidth` 的数据报和没有连接可发的数据报，以及
+  `fit_turn_unrelayed_total`，服务器没有处理的所有数据报：格式错误、没有 permission 或 channel、或发往对端规则拒绝的端口；
+- `fit_turn_restarts_total`，重载启动的新服务器数。
 
-以下有待 fib 提供（[fib API 请求](fib-api-requests.zh-CN.md)）：
-
-- 经 TCP 和 TLS 的 TURN，用于封锁 UDP 的网络中的客户端（[A55](fib-api-requests.zh-CN.md#a55经-tcp-和-tls-的-turn)）。
-- 绑定中继地址和打开对端时不让 fib worker 等待（[A56](fib-api-requests.zh-CN.md#a56从不让-worker-等待的-turn-服务器)）。
-- allocation 的 permission 和 channel 上限、带端口的对端规则，以及用于日志和指标的事件
-  （[A57](fib-api-requests.zh-CN.md#a57turn-服务器的限制与钩子)）。
-- 不重启就修改生存期和配额，以及排空 allocation 的重启（[A58](fib-api-requests.zh-CN.md#a58原地修改和排空-turn-服务器)）。
+服务器的消息写入 `webrtc` 日志；每次 allocation 的建立、刷新和释放、每次拒绝和每次凭据失败，以 `debug` 级别记录。
 
 ## WHIP 和 WHEP
 
@@ -223,7 +258,7 @@ Link: <stun:stun.example.com:3478>; rel="ice-server"
 Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5f1c..."; credential="..."; credential-type="password"
 ```
 
-只有 `allowed_peers` 允许它到达媒体端口的地址时（`relay_ip` 是私有地址时需要），fit 的 TURN 服务器才会中继到那里。
+fit 的 TURN 服务器像对待任何对端一样中继到媒体端口：端口在它自己的 `relay_ip` 上时，`allowed_peers` 要带端口列出它，如 `10.0.0.5:8189`。
 
 ### 上限
 
@@ -285,6 +320,9 @@ webrtc {
 	proxy {
 		listen :8190
 		public_ips 203.0.113.5
+		relay_ip 10.0.0.1
+		port_min 40000
+		port_max 40999
 	}
 }
 ```
@@ -300,7 +338,8 @@ JSON 写法相同：
      "handler": {"module": "webrtc_proxy",
                  "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.3:8080": "10.0.0.3:8189"}}}}
   ],
-  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"]}}
+  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"],
+                       "relay_ip": "10.0.0.1", "port_min": 40000, "port_max": 40999}}
 }
 ```
 
@@ -350,6 +389,11 @@ JSON 写法相同：
 | `webrtc_proxy` 的 `max_sdp_bytes` | 32 KiB | 请求和 answer 的大小 |
 | `webrtc_proxy` 的 `timeout` | 10s | 从请求的最后一个字节到完整读完 answer |
 
+通往媒体服务器的 socket 从本机地址之一 `relay_ip`、从 `port_min` 到 `port_max` 中的一个端口发出，以适应媒体服务器前面
+只放行一个源地址和一段端口的防火墙，或媒体服务器在另一块网卡所连网络上的主机；不设时由路由和内核选择。被占用的端口会
+跳过，范围内所有端口都被占用时丢弃该对端地址（`no_port`），它的下一个请求再试：除 `max_relays` 外，范围也限制同时存在的
+中继数。`relay_ip` 与媒体服务器同一地址族：另一地址族的媒体地址不被中继。两者在重载后对下一个中继生效。
+
 一个会话最多中继对端的 8 个地址：对端每个发起检查的候选一个，迁移后还会更多。一个会话最多保留 4 个 ufrag，含 ICE
 重启产生的。中继在其 socket 打开期间最多暂存 8 个数据报。
 
@@ -365,8 +409,6 @@ fit 做不到的：
 - answer 中的候选分布在多个地址时，只中继到其中一个；TCP 上的 ICE、以及只能经 TURN 到达的媒体服务器不被中继。
 - 会话 URL 之下的 URL 按整个 body 和整个应答代理，不超过 `max_sdp_bytes`：流式扩展，如 WHEP 的 server-sent
   events，经过 fit 无法工作。
-- 通往媒体服务器的 socket 使用内核选的地址和端口，fit 与它们之间的防火墙必须放行；fib 目前还不能把它们绑定到
-  指定地址和端口范围（[A59](fib-api-requests.zh-CN.md#a59从指定的本地地址和端口范围发起拨号)）。
 - 媒体服务器看到的是 fit 的地址，而不是对端的。
 
 ### 重载
@@ -380,6 +422,6 @@ fit 做不到的：
 `fit_webrtc_proxy_sessions`、`fit_webrtc_proxy_relays`、`fit_webrtc_proxy_sessions_total`、
 `fit_webrtc_proxy_refused_total`、`fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`、
 `fit_webrtc_proxy_relays_total`、
-`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"}`、
+`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"|"no_port"}`、
 `fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` 和
 `fit_webrtc_proxy_restarts_total`。信令请求计入上游自己的指标。

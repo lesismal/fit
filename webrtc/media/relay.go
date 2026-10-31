@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/binary"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,7 +75,8 @@ func (p *Proxy) open(c *fib.Connection, b []byte) {
 	p.m.opened.Add(1)
 	c.SetUDPIdleTimeout(-1)
 	c.SetAttachment(r)
-	if err := p.key.DialWithHandler("udp", rt.media.String(), dialTimeout, (*relayUp)(r), r.dialed); err != nil {
+	if err := p.key.DialWith(fib.DialOptions{Network: "udp", Addr: rt.media.String(), Timeout: dialTimeout, Handler: (*relayUp)(r),
+		LocalAddr: st.local, PortMin: st.portMin, PortMax: st.portMax}, r.dialed); err != nil {
 		r.close()
 	}
 }
@@ -128,9 +130,13 @@ func (r *relay) fromClient(b []byte) {
 }
 
 // dialed hears how the socket's opening went, after its OnOpen when it
-// opened.
+// opened. A port range with no port free drops the peer address, which
+// its next datagram tries again.
 func (r *relay) dialed(_ *fib.Connection, err error) {
 	if err != nil {
+		if errors.Is(err, fib.ErrNoLocalPort) {
+			r.p.m.dropped[dropNoPort].Add(1)
+		}
 		r.close()
 	}
 }
