@@ -203,7 +203,7 @@ func TestUnreadableBody(t *testing.T) {
 	}
 	// One that reads is read whole.
 	resp := &fibhttp.ClientResponse{Response: &stdhttp.Response{Body: io.NopCloser(strings.NewReader("whole"))}}
-	if body, err := readBody(resp); err != nil || string(body) != "whole" {
+	if body, pooled, err := takeBody(resp); err != nil || pooled || string(body) != "whole" {
 		t.Errorf("%q, %v", body, err)
 	}
 }

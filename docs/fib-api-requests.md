@@ -60,6 +60,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A45 | A peer's end that comes with a read the round stops short is not taken for the end of its data | done, `9f99ea5` | 5, 13 | — |
 | A46 | A body filter whose work is done elsewhere | done, fib `dbe5c274` (`main`) | 1, 4, 5, 8 | I81 |
 | A47 | A streamed request body passed on without needless copies | done, fib `309a6cd4` (`main`) | 1, 5, 8 | W4 |
+| A48 | A whole response's body taken from the pool, and a buffered request body not copied | done, fib `46827ea7` (`main`) | 1, 5, 8 | W1 |
 
 ## Evidence
 
@@ -1442,3 +1443,31 @@ only when it has to wait.
 
 **How fit uses it.** As it is: `handler/proxy`'s upload path, which passes a streamed body on
 without gathering it.
+
+## A48: A whole response's body taken from the pool, and a buffered request body not copied
+
+**Status.** Made on 2026-10-31 by fit's session, on fib's `main` (`46827ea7`).
+
+**Problem.** fib `861689c9` started a connection's read round at 16 KiB, which halved fit's W1
+memory and with it the heap the collector paces itself by: over the same 1.06 GB/s of allocation
+the collector ran 56% more often, and W1 over HTTP/1.1 lost 3%. Two of the largest allocations of
+a proxied request were copies fib's client made for a moment: a response that arrived whole had
+its body copied out of the parser's buffer into one of its own size, 18% of the bytes allocated,
+and a request body that was bytes already was read into a copy before it was framed, 9%.
+
+**Evidence.** W1 at 500 over HTTP/1.1 on the benchmark host, before and after, with fit's
+runtime counters: allocation 1,064 to 776 MB/s, collections 29% fewer, the collector's CPU 2.63% to
+1.84%, throughput +3.0% (27.25 to 26.53 µs a request), peak memory 57-65 to 55-60 MiB.
+
+**As built.** A response that arrived whole with a body of up to 4 KiB has it copied into a
+buffer from `bufferpool`. `ClientResponse.TakeBody` hands the body over with its ownership and
+says whether it is such a buffer; `Context.WriteResponseOwned` sends a body from the pool and gives
+it back once the send path has done with it, or leaves it to the collector where the send path
+keeps a body by reference (HTTP/2, and HTTP/1 past 4 KiB). `BodyBytes` keeps its promise of bytes
+that are never reused. A request whose `Body` is a `NewBufferedBody` is taken as its bytes: HTTP/1
+copies them into the request's framing at once, and HTTP/2 copies them before sending.
+
+**How fit uses it.** `handler/proxy` sends the client's whole request body upstream as a
+`NewBufferedBody` of `Context.Body`, which stays put until the exchange is over, and passes a
+whole upstream response on with `TakeBody`, then `WriteResponseOwned` when the body is from the
+pool.

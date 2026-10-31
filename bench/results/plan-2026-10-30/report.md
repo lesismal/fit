@@ -28,7 +28,8 @@ folder, one file for each workload and level; the plan derived is [plan.txt](pla
 - **One regression: fit's API gateway over HTTP/1.1 (W1) is 3% slower** at 500, 5,000 and 10,000 in
   flight and 7% at 100, at 3-7% more CPU a request; over h2 it is 0.5-4% slower. nginx's own W1 over
   HTTP/1.1 is within 1.3% of before, so this is fit's, not the host's. A/B runs of each change measured W1 over
-  HTTPS/1.1 and h2 within noise but not over plain HTTP/1.1, where the small costs added up.
+  HTTPS/1.1 and h2 within noise but not over plain HTTP/1.1, where the small costs added up. Since
+  found and fixed: see [The W1 regression, found and fixed](#the-w1-regression-found-and-fixed-2026-10-31).
 - **The other servers measure as before.** Their 178 runs against the 2026-10-27 plan's have a median
   change of -0.3% (Caddy -0.4%, Envoy +0.2%, nginx -0.4%, Traefik -0.5%), so the host's different
   kernel settings did not move the results that can be compared; nginx's few outliers are at its
@@ -272,6 +273,26 @@ other changes in the analysis. The website, proxied downloads and HTTP/3 gained 
 A/B runs did. W1 over HTTP/1.1 is the exception, 3% slower at 3% more CPU a request, which the A/B runs
 of each change, measuring W1 over HTTPS/1.1 and h2, did not see; finding which change costs it is
 the next step.
+
+## The W1 regression, found and fixed (2026-10-31)
+
+Bisected on the benchmark host with `bench/ab.sh` (W1 at 500 over HTTP/1.1, 3 rounds each), the 3%
+is fib `861689c9` alone, the read round that starts at 16 KiB: 9604ca2 to cc55d70 (fib to
+f0378649) -0.4%, cc55d70 to abb9fcc (fib to 56f08db3) -2.7%, every later step within noise, and
+fit's main with the start set to the full buffer 3.2% faster than without. Its cost is the
+collector's, not the reads': with the 64 KiB buffers gone from the live heap (60 to 26 MB), the
+collector ran 56% more often (36 to 56 a second) over the same 1.06 GB/s of allocation, from 1.55%
+to 2.56% of fit's CPU.
+
+The cure was to allocate less rather than to give the memory back. Of the 4.9 KB a proxied request
+allocated, fib's client copied a whole response's body for a moment (18%) and read a request body
+that was bytes already into a copy (9%). fib `46827ea7` takes a small whole body from the pool and
+lets fit hand it back once sent (`ClientResponse.TakeBody`, `Context.WriteResponseOwned`), and takes
+a `NewBufferedBody` request body as it is ([A48](../../../docs/fib-api-requests.md)). Against fit's
+main: W1 over HTTP/1.1 +3.0% (26.53 against 27.25 µs a request, back to before `861689c9`), peak
+memory 55-60 from 57-65 MiB, allocation 776 from 1,064 MB/s, collections 29% fewer; W1 over h2 and
+W4's proxied transfers within noise. fit's `exchange`, 21% of the bytes, is not yet reused: the
+callbacks that may come after it ends would need a generation to tell it from the next one.
 
 ## Notes and limits
 

@@ -240,10 +240,8 @@ type exchange struct {
 	base      stdhttp.Request
 	url       url.URL
 	forwarded [4]string
-	// element holds the Forwarded element's bytes, when they fit, and body
-	// reads a request body that arrived whole.
+	// element holds the Forwarded element's bytes, when they fit.
 	element [96]byte
-	body    wholeBody
 	// traceparent is the value of the field naming the request's span,
 	// when it is traced.
 	traceparent [1]string
@@ -374,7 +372,7 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 	}
 	if resp.BodyComplete() {
 		// The whole of it is here: one write, as small responses go.
-		body, err := readBody(resp)
+		body, pooled, err := takeBody(resp)
 		if err != nil {
 			x.fail(err)
 			return
@@ -382,7 +380,15 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		header := resp.Header
 		removeHopByHop(header)
 		x.addCookie(header)
-		_ = x.c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body, Trailer: resp.Trailer()})
+		out := fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body, Trailer: resp.Trailer()}
+		if pooled {
+			// fib's client copied the body into a buffer from its pool,
+			// which the response gives back once it has gone, rather than
+			// every response's body being garbage.
+			_ = x.c.WriteResponseOwned(out)
+		} else {
+			_ = x.c.WriteResponse(out)
+		}
 		x.release()
 		return
 	}
@@ -620,15 +626,17 @@ func (x *exchange) broken(err error) {
 	x.release()
 }
 
-// readBody returns a response body that arrived whole: the bytes fib's
-// client holds, with no copy, or, for a body that is not fib's own buffer,
-// what reading it gives.
-func readBody(resp *fibhttp.ClientResponse) ([]byte, error) {
-	if body, ok := resp.BodyBytes(); ok {
-		return body, nil
+// takeBody returns a response body that arrived whole: the bytes fib's
+// client holds, taken over with no copy, and whether they are a buffer from
+// fib's pool; or, for a body that is not fib's own buffer, what reading it
+// gives.
+func takeBody(resp *fibhttp.ClientResponse) ([]byte, bool, error) {
+	if body, pooled, ok := resp.TakeBody(); ok {
+		return body, pooled, nil
 	}
 	if resp.Body == nil || resp.Body == stdhttp.NoBody {
-		return nil, nil
+		return nil, false, nil
 	}
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	return body, false, err
 }

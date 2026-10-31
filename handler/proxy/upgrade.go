@@ -186,7 +186,7 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	delete(header, "Content-Length")
 	if up == nil {
 		// Refused: the answer is the client's.
-		body, _ := readBody(resp)
+		body, _, _ := takeBody(resp)
 		r.finish(false)
 		_ = c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body})
 		return

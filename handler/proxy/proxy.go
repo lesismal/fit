@@ -251,18 +251,15 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		Host:       host,
 	}
 	if body := c.Body(); len(body) > 0 {
-		x.body.Reset(body)
-		x.base.Body = &x.body
+		// fib's client takes a buffered body's bytes as they are, rather
+		// than reading them into a copy; they stay put until the exchange
+		// is over, past the upstream's callback.
+		x.base.Body = fibhttp.NewBufferedBody(body)
 		x.base.ContentLength = int64(len(body))
 		x.base.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	}
 	return true
 }
-
-// wholeBody is a request body that arrived whole, read where it is.
-type wholeBody struct{ bytes.Reader }
-
-func (*wholeBody) Close() error { return nil }
 
 // setForwarded sets the fields that tell the upstream about the client. The
 // fields' values go in x.forwarded, and the Forwarded element is written in
