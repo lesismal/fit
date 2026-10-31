@@ -256,7 +256,9 @@ func TestSlowCA(t *testing.T) {
 		t.Errorf("%d requests to the CA at once, past max_concurrent 2", m)
 	}
 	for _, line := range l.lines {
-		if !strings.Contains(line, "context deadline exceeded") {
+		// A loaded runner can see the timeout cut a TLS handshake to the CA
+		// short, which the client reports as EOF rather than the deadline.
+		if !strings.Contains(line, "context deadline exceeded") && !strings.HasSuffix(strings.SplitN(line, "; trying again", 2)[0], ": EOF") {
 			t.Errorf("not the timeout: %s", line)
 			break
 		}
