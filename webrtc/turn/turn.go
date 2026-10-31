@@ -355,9 +355,10 @@ func (s *Server) auth(username, realm string) ([]byte, bool) {
 }
 
 // peerAllowed is the server's PeerAllowed: allowed_peers first, then
-// denied_peers and fib's default denial of internal addresses.
-func (s *Server) peerAllowed(ip netip.Addr) bool {
-	ip = ip.Unmap()
+// denied_peers and fib's default denial of internal addresses, whatever the
+// port.
+func (s *Server) peerAllowed(peer netip.AddrPort) bool {
+	ip := peer.Addr().Unmap()
 	if r := s.rules.Load(); r != nil {
 		for _, p := range r.allowed {
 			if p.Contains(ip) {
