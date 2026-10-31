@@ -204,7 +204,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I83 | fit 的日志采用 fib 的格式；logger 可单独设置；访问日志的格式 | I82 | done |
 | **P2P** | | | |
 | I84 | STUN 消息与 STUN 服务器 | I51 | done |
-| I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | todo |
+| I85 | 朝某地址打开 UDP 对端（A49，在 fib 中） | — | doing |
 | I86 | STUN 客户端与 NAT 行为 | I84, I85 | todo |
 | I87 | TURN 服务器 | I84, I85 | todo |
 | I88 | TURN 客户端 | I86, I87 | todo |

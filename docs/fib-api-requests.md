@@ -61,7 +61,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A46 | A body filter whose work is done elsewhere | done, fib `dbe5c274` (`main`) | 1, 4, 5, 8 | I81 |
 | A47 | A streamed request body passed on without needless copies | done, fib `309a6cd4` (`main`) | 1, 5, 8 | W4 |
 | A48 | A whole response's body taken from the pool, and a buffered request body not copied | done, fib `46827ea7`, HTTP/2 `d3707ca7` (`main`) | 1, 5, 8 | W1 |
-| A49 | A UDP peer opened toward an address on a listener's socket | requested | 1, 9 | I85 (P2P) |
+| A49 | A UDP peer opened toward an address on a listener's socket | made, fib `4febcdf5` (local, not pushed) | 1, 9 | I85 (P2P) |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 
 ## Evidence
@@ -1486,7 +1486,7 @@ HTTP/1.1 within noise.
 
 ## A49: A UDP peer opened toward an address on a listener's socket
 
-**Status.** Requested on 2026-11-01, for fit's P2P milestone ([decision 025](decisions/025-p2p.md)).
+**Status.** Made on 2026-11-01 by fit's session, fib `4febcdf5`, on fib's local `main`; not pushed yet, so fit does not depend on it yet.
 
 **Problem.** A UDP listener's peer becomes a connection only once it has sent a datagram, and a
 dialed UDP connection has a socket, and so a local port, of its own. Hole punching needs the
@@ -1513,6 +1513,18 @@ func (e *Engine) OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler)
 The peer is the listener's like any other: the binding's idle timeout, `SetUDPIdleTimeout`,
 `NotifyWritable` and `OnClose` apply, and a peer already open for the address is returned as it
 is. Opening it does not block and sends nothing.
+
+**As built.** `Engine.OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler, done
+func(*Connection, error)) error`: asynchronous, as `Dial` is, since the peer table belongs to the
+socket's event loop and a worker must not wait on it. It returns an error at once for a socket it
+cannot use (`ErrNoUDPSocket`, `ErrUDPSocketAmbiguous` when several sockets match and none is named,
+`ErrUDPSocketSpread`, `EINVAL`, `EAFNOSUPPORT`), and otherwise calls `done` once, on the loop after
+the peer's `OnOpen`, with the connection or `net.ErrClosed`. An address `ReusePort` spread over the
+pollers is refused: the kernel picks which socket a reply arrives on, so the peer could miss it. fit
+therefore opens peers on an engine, or a binding, that does not spread its UDP sockets
+(`ReusePort: false` or `EngineLoop: true`). Tests: `udp_open_test.go` (IPv4, IPv4 on a dual-stack
+socket, IPv6; the reply reaches the opened peer and not the binding's handler, and never before its
+`OnOpen`; idle timeout; every refusal; the spread case).
 
 **How fit would use it.** `p2p/ice` gathers its host candidates on one binding and opens a peer
 for each remote candidate it checks; `p2p/turn` binds each allocation's relayed address as a

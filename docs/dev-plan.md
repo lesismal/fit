@@ -214,7 +214,7 @@ Status: `todo`, `doing` or `done`.
 | I83 | fit's log in fib's formats; loggers of their own; the access log's formats | I82 | done |
 | **P2P** | | | |
 | I84 | STUN messages and the STUN server | I51 | done |
-| I85 | A UDP peer opened toward an address (A49, in fib) | — | todo |
+| I85 | A UDP peer opened toward an address (A49, in fib) | — | doing |
 | I86 | The STUN client and NAT behaviour | I84, I85 | todo |
 | I87 | The TURN server | I84, I85 | todo |
 | I88 | The TURN client | I86, I87 | todo |

@@ -59,7 +59,7 @@
 | A46 | 在别处完成工作的响应体过滤器 | 已完成，fib `dbe5c274`（`main`） | 1, 4, 5, 8 | I81 |
 | A47 | 流式请求体转交时不必要的拷贝 | 已完成，fib `309a6cd4`（`main`） | 1, 5, 8 | W4 |
 | A48 | 整份响应的 body 取自缓冲池，已是字节的请求体不再拷贝 | 已完成，fib `46827ea7`，HTTP/2 `d3707ca7`（`main`） | 1, 5, 8 | W1 |
-| A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已提出 | 1, 9 | I85（P2P） |
+| A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已实现，fib `4febcdf5`（本地，未推送） | 1, 9 | I85（P2P） |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 
 ## 证据
@@ -1110,7 +1110,7 @@ body，并说明它是否是这样的缓冲；`Context.WriteResponseOwned` 发�
 
 ## A49：在监听 socket 上朝某地址打开 UDP 对端
 
-**状态。** 2026-11-01 提出，用于 fit 的 P2P 里程碑（[决定 025](decisions/025-p2p.zh-CN.md)）。
+**状态。** 2026-11-01 由 fit 的会话实现，fib `4febcdf5`，在 fib 本地的 `main` 上；尚未推送，所以 fit 还没有依赖它。
 
 **问题。** UDP 监听的对端要先发来一个数据报才成为连接，而拨出的 UDP 连接有自己的 socket，也就有自己的本地端口。打洞需要
 的正相反：一个只绑定一次的 socket，它的端口已被 NAT 映射、也被 STUN 服务器看到过，先向一个还没发过任何东西的地址发送，
@@ -1131,6 +1131,14 @@ func (e *Engine) OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler)
 
 这个对端与监听的其他对端一样：binding 的空闲超时、`SetUDPIdleTimeout`、`NotifyWritable` 和 `OnClose` 都适用；该地址已有
 对端时原样返回。打开时不阻塞，也不发送任何东西。
+
+**实现。** `Engine.OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler, done
+func(*Connection, error)) error`：与 `Dial` 一样是异步的，因为对端表属于 socket 的事件循环，worker 不能等它。对用不了的
+socket 立即返回错误（`ErrNoUDPSocket`；多个 socket 匹配而没有指明时为 `ErrUDPSocketAmbiguous`；`ErrUDPSocketSpread`、
+`EINVAL`、`EAFNOSUPPORT`），否则在事件循环上、对端的 `OnOpen` 之后调用一次 `done`，传入连接或 `net.ErrClosed`。被
+`ReusePort` 分散到各 poller 上的地址会被拒绝：应答落到哪个 socket 由内核决定，对端可能收不到。所以 fit 在不分散 UDP socket
+的 engine 或 binding 上打开对端（`ReusePort: false` 或 `EngineLoop: true`）。测试：`udp_open_test.go`（IPv4、双栈 socket 上的
+IPv4、IPv6；应答到达打开的对端而不是 binding 的 handler，且不早于其 `OnOpen`；空闲超时；各种拒绝；分散的情况）。
 
 **fit 的用法。** `p2p/ice` 在一个 binding 上收集主机候选，为它检查的每个远端候选打开一个对端；`p2p/turn` 把每个
 allocation 的中继地址绑定为端口 0 的 binding，在有数据要发给某个 permission 的地址时为它打开对端。
