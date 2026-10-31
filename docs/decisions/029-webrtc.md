@@ -54,11 +54,18 @@ fib can hold.
   viewers as RTP with key frame requests relayed, the route's middleware for auth, limits on
   streams, viewers, PeerConnections and bitrate, DELETE and PATCH (trickle) per RFC 9725 and the
   WHEP draft, ICE servers in `Link` headers, everything closed on reload and stop.
-- **Proxying media servers** (I110): WHIP and WHEP signaling proxied to upstream media servers
-  through fit's upstream pools, the answer's candidates rewritten to fit's public UDP port and its
-  ufrag remembered against the backend; an L4 UDP service that routes a new peer by the STUN
-  USERNAME of its first datagram and then relays its 5-tuple, sticky, so that many media servers
-  sit behind one fit port.
+- **Proxying media servers** (I110): the handler module `webrtc_proxy` proxies WHIP and WHEP
+  signaling to an upstream of media servers through fit's upstream pools, the offer without its
+  candidates, the answer's candidates rewritten to fit's UDP port and its ufrag and ice-pwd
+  remembered against the media server's address; the role `webrtc.proxy` holds that port, routes a
+  new peer address by the STUN USERNAME of its first datagram, checked with the session's ice-pwd,
+  and then relays it from a socket of its own toward the media server, so that many media servers
+  sit behind one fit port. It is a role beside `webrtc.media`, not an L4 `service` mode: its
+  sessions are long-lived and must outlast reloads, which drain an L4 service's connections with
+  their graph; its routes are written by a handler at request time, which only a process-wide
+  role both sides find (by engine, as `whip` finds `webrtc.media`) can share; and its destinations
+  are the addresses answers name, not an upstream's. A socket per peer address, not one shared,
+  because a media server on one port tells its peers apart by their address.
 
 ## What fib needs
 
@@ -71,6 +78,9 @@ fib can hold.
   permissions and channels, a peer check that sees the port, and events for metrics.
 - [A58](../fib-api-requests.md#a58-a-turn-server-changed-in-place-and-drained): lifetimes and quotas
   changed in place, and a drain that takes no new allocation while the held ones end.
+- [A59](../fib-api-requests.md#a59-a-dial-from-a-chosen-local-address-and-port-range): a dial
+  from a chosen local address and port range, for the proxy's sockets toward media servers behind
+  a firewall.
 
 ## Consequences
 

@@ -15,6 +15,7 @@ import (
 type WebRTC struct {
 	TURN  *TURNServer  `json:"turn,omitempty" doc:"Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."`
 	Media *WebRTCMedia `json:"media,omitempty" doc:"Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out."`
+	Proxy *WebRTCProxy `json:"proxy,omitempty" doc:"Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which relays each peer to the media server that answered it, found by the ICE ufrag of the peer's first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -65,6 +66,45 @@ type WebRTCMedia struct {
 
 	At Value `json:"-" fit:"self"`
 }
+
+// The defaults of WebRTCProxy.
+const (
+	DefaultProxyMaxSessions    = 4096
+	DefaultProxyMaxRelays      = 4096
+	DefaultProxySessionTimeout = 30 * time.Second
+	DefaultProxyIdleTimeout    = 30 * time.Second
+)
+
+// WebRTCProxy is the media side of the webrtc_proxy handler: one UDP port
+// that peers of every media server behind fit reach, and its limits.
+type WebRTCProxy struct {
+	Listen         string   `json:"listen" fit:"required" doc:"The UDP address peers reach the media servers behind fit at, one port for them all, as in \":8190\": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session."`
+	PublicIPs      []string `json:"public_ips,omitempty" doc:"The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer."`
+	MaxSessions    int      `json:"max_sessions,omitempty" min:"0" default:"4096" doc:"The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0."`
+	MaxRelays      int      `json:"max_relays,omitempty" min:"0" default:"4096" doc:"The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0."`
+	SessionTimeout Duration `json:"session_timeout,omitempty" default:"\"30s\"" doc:"How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out."`
+	IdleTimeout    Duration `json:"idle_timeout,omitempty" default:"\"30s\"" doc:"How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Sessions returns max_sessions, or its default.
+func (p *WebRTCProxy) Sessions() int {
+	return int(orDefault(int64(p.MaxSessions), DefaultProxyMaxSessions))
+}
+
+// Relays returns max_relays, or its default.
+func (p *WebRTCProxy) Relays() int {
+	return int(orDefault(int64(p.MaxRelays), DefaultProxyMaxRelays))
+}
+
+// SessionIdle returns session_timeout, or its default.
+func (p *WebRTCProxy) SessionIdle() time.Duration {
+	return durationOr(p.SessionTimeout, DefaultProxySessionTimeout)
+}
+
+// Idle returns idle_timeout, or its default.
+func (p *WebRTCProxy) Idle() time.Duration { return durationOr(p.IdleTimeout, DefaultProxyIdleTimeout) }
 
 // ICEServer is a STUN or TURN server, as RTCIceServer has it.
 type ICEServer struct {
@@ -198,6 +238,7 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 		return
 	}
 	c.checkMedia(add)
+	c.checkProxy(add)
 	if c.WebRTC.TURN == nil {
 		return
 	}
@@ -276,6 +317,32 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 	}
 }
 
+func (c *Config) checkProxy(add func(Value, string, ...any)) {
+	p := c.WebRTC.Proxy
+	if p == nil {
+		return
+	}
+	if _, msg := checkAddress(p.Listen); msg != "" {
+		add(p.At.Field("listen"), "%s", msg)
+	} else if m := c.WebRTC.Media; m != nil && m.Listen == p.Listen && !strings.HasSuffix(p.Listen, ":0") {
+		add(p.At.Field("listen"), "webrtc.media listens on %s already", p.Listen)
+	}
+	checkPublicIPs(p.At.Field("public_ips"), p.PublicIPs, add)
+}
+
+// checkPublicIPs checks public_ips: addresses, none a wildcard.
+func checkPublicIPs(at Value, ips []string, add func(Value, string, ...any)) {
+	for i, p := range ips {
+		a, err := netip.ParseAddr(p)
+		switch {
+		case err != nil || a.Zone() != "":
+			add(at.Index(i), "%q is not an IP address", p)
+		case a.IsUnspecified():
+			add(at.Index(i), "%q is a wildcard", p)
+		}
+	}
+}
+
 func (c *Config) checkMedia(add func(Value, string, ...any)) {
 	m := c.WebRTC.Media
 	if m == nil {
@@ -284,15 +351,7 @@ func (c *Config) checkMedia(add func(Value, string, ...any)) {
 	if _, msg := checkAddress(m.Listen); msg != "" {
 		add(m.At.Field("listen"), "%s", msg)
 	}
-	for i, p := range m.PublicIPs {
-		a, err := netip.ParseAddr(p)
-		switch {
-		case err != nil || a.Zone() != "":
-			add(m.At.Field("public_ips").Index(i), "%q is not an IP address", p)
-		case a.IsUnspecified():
-			add(m.At.Field("public_ips").Index(i), "%q is a wildcard", p)
-		}
-	}
+	checkPublicIPs(m.At.Field("public_ips"), m.PublicIPs, add)
 	for i, s := range m.ICEServers {
 		at := m.At.Field("ice_servers").Index(i)
 		if len(s.URLs) == 0 {

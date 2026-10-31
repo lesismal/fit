@@ -1020,6 +1020,38 @@
       // },
     // },
     // {
+      // // A route whose handler is webrtc_proxy, with every one of its params.
+      // "name": "webrtc_proxy-example",
+      // "handler": {
+        // // Proxies WHIP and WHEP to the media servers of an upstream, and their peers' media through
+        // // webrtc.proxy's one UDP port.
+        // "module": "webrtc_proxy",
+        // "params": {
+          // // The upstream of the media servers, picked by its load balancing for each offer: fit's own
+          // // whip and whep, or any WHIP or WHEP server. Its health checks and timeouts apply.
+          // // string; required.
+          // "upstream": "app",
+
+          // // The address fit relays a media server's peers to, by the media server's address in the
+          // // upstream, as {"10.0.0.2:8080": "10.0.0.2:8189"}, or an IP alone, which takes the port of its
+          // // answer's candidate. When left out, the answer's first host candidate, or server-reflexive
+          // // one, IPv4 first.
+          // // object of string.
+          // "media_addrs": {},
+
+          // // The most a request may take, from its last byte to the media server's answer read whole;
+          // // past it, it is answered 504. 10s when left out.
+          // // duration, as "1.5s" or "2m"; default "10s".
+          // "timeout": "10s",
+
+          // // The largest request and answer passed on, an offer and an answer among them; a larger
+          // // request is answered 413, and a larger answer 502. 32 KiB when left out or 0.
+          // // integer, 0 or more; default 32768.
+          // "max_sdp_bytes": 32768,
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is whep, with every one of its params.
       // "name": "whep-example",
       // "handler": {
@@ -2995,8 +3027,8 @@
     // },
   // },
 
-  // What fit runs for WebRTC beside the gateway, on its engine: a TURN server, and the media
-  // port of the whip and whep handlers. None when left out.
+  // What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of
+  // the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out.
   // object.
   // "webrtc": {
     // // Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that
@@ -3197,6 +3229,48 @@
       // // that join or lose packets: the rest are dropped. 500ms when left out.
       // // duration, as "1.5s" or "2m"; default "500ms".
       // "key_frame_interval": "500ms",
+    // },
+
+    // // Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which
+    // // relays each peer to the media server that answered it, found by the ICE ufrag of the peer's
+    // // first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left
+    // // out.
+    // // object.
+    // "proxy": {
+      // // The UDP address peers reach the media servers behind fit at, one port for them all, as in
+      // // ":8190": the proxied answers name it as their only candidate. A wildcard host advertises the
+      // // address of every interface that is up, unless public_ips is set. A change ends every relay
+      // // and session.
+      // // string; required.
+      // "listen": "",
+
+      // // The addresses peers are told to reach the port at, with its port, instead of the interfaces'
+      // // own: a server behind a 1:1 NAT. Applies to the next answer.
+      // // list of string.
+      // "public_ips": [],
+
+      // // The most sessions proxied at once; one more offer is answered 503 before it reaches a media
+      // // server. 4096 when left out or 0.
+      // // integer, 0 or more; default 4096.
+      // "max_sessions": 4096,
+
+      // // The most peer addresses relayed at once, each with a UDP socket of its own toward its media
+      // // server; past it, a new address's STUN request is dropped. A session relays at most 8 of its
+      // // peer's addresses. 4096 when left out or 0.
+      // // integer, 0 or more; default 4096.
+      // "max_relays": 4096,
+
+      // // How long a session is kept with nothing relayed for it: from its answer until its peer's
+      // // first request, and after its last relay ends. Its ufrags are forgotten then, and its URL
+      // // answers 404. 30s when left out.
+      // // duration, as "1.5s" or "2m"; default "30s".
+      // "session_timeout": "30s",
+
+      // // How long a relayed peer address may send nothing before its relay is closed, whatever its
+      // // media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open.
+      // // 30s when left out.
+      // // duration, as "1.5s" or "2m"; default "30s".
+      // "idle_timeout": "30s",
     // },
   // },
 

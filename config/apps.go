@@ -33,7 +33,7 @@ func (c *Config) HasApps() bool {
 	a, t, w := c.Agent, c.Tunnel, c.WebRTC
 	return a != nil && (a.Hub != nil || a.Node != nil || a.Client != nil) ||
 		t != nil && (t.Server != nil || t.Node != nil || t.Client != nil) ||
-		w != nil && (w.TURN != nil || w.Media != nil)
+		w != nil && (w.TURN != nil || w.Media != nil || w.Proxy != nil)
 }
 
 // RoleConsole is a role's web pages, behind logins as admin.console's are,

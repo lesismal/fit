@@ -236,7 +236,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | **WebRTC** | | | |
 | I108 | 决定 029：fit 的 WebRTC 基于 fib；fib `80c7f76`；按实际实现修正 A49；A55–A58 | I85 | done |
 | I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | done |
-| I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | todo |
+| I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | done |
 
 ## M0 基础
 
@@ -1250,7 +1250,8 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
 
 - **做**：经 fit 的上游连接池把 WHIP 和 WHEP 信令代理到上游媒体服务器，把应答中的候选改写为 fit 的公网 UDP 端口，并记住
   其 ufrag 对应的后端媒体地址；一种 L4 UDP 服务，按新对端第一个数据报中的 STUN USERNAME 选路，之后粘性地中继它的五元组，
-  带上限和空闲超时。
+  带上限和空闲超时。实现为处理器 `webrtc_proxy` 和 `webrtc.media` 旁边的角色 `webrtc.proxy`，而不是 `l4` 服务的一种
+  模式：会话要挺过重载，而 L4 服务会随其所属的图被排空；处理器和中继通过角色共享路由（[决定 029](decisions/029-webrtc.zh-CN.md)）。
 - **完成标准**：一个 fit 端口后面的两个媒体服务器各自得到自己的对端；对端在 Binding 请求之前的数据报被丢弃；后端消失时
   释放其路由；在竞态检测下通过。
-- **涉及**：`webrtc`、`l4`、`handler/proxy`、`config`、`schema`、`docs`。
+- **涉及**：`webrtc`、`upstream`、`config`、`schema`、`docs`。

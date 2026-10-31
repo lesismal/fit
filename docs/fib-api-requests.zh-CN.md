@@ -69,6 +69,7 @@
 | A56 | 从不让 worker 等待的 TURN 服务器 | 已提出 | 1 | I87（029） |
 | A57 | TURN 服务器的限制与钩子 | 已提出 | 11 | I87（029） |
 | A58 | 原地修改和排空 TURN 服务器 | 已提出 | 10, 11 | I87（029） |
+| A59 | 从指定的本地地址和端口范围发起拨号 | 已提出 | — | I110（029） |
 
 ## 证据
 
@@ -1332,3 +1333,21 @@ allocation 或 ctx 结束，再关闭。
 
 **fit 的用法。** 重载时原地修改生存期和配额；地址或 realm 改变时，在旧服务器旁启动新服务器，旧服务器像重载移除的
 listener 一样，在 listener 的排空超时内排空。
+
+## A59：从指定的本地地址和端口范围发起拨号
+
+**状态。** 2026-11-01 为 fit 的 WebRTC 代理提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。
+
+**问题。** `webrtc.proxy` 为每个对端地址用一个自己的 UDP socket 中继到它的媒体服务器，这个 socket 由
+`Engine.DialWithHandler` 打开。内核按路由选本地地址，从整个临时端口范围里选端口。私有网络上的媒体服务器常在
+防火墙后，只放行一个源地址和一段端口；多网卡的主机也可能需要中继从媒体服务器所在网络的网卡发出。TURN 服务器
+用 `AddBinding` 自己绑定端口范围，但 fit 不能为每个对端的 socket 各开一个 binding。
+
+**依据。** `dialRequest` 只有网络、地址、超时和 handler，没有本地地址；socket 只在 `connect` 时才被绑定。
+
+**建议的 API。** `Engine.DialWith(DialOptions{Network, Addr, LocalAddr netip.AddrPort, PortMin,
+PortMax uint16, Timeout, Handler}, done)`：socket 在 connect 前绑定到 `LocalAddr`，端口为 0 且设了范围时从随机起点
+依次尝试 `PortMin`-`PortMax`，都像现在的拨号一样在事件循环上完成；所有端口都 `EADDRINUSE` 则拨号失败。
+
+**fit 的用法。** `webrtc.proxy` 增加 `relay_ip`、`port_min` 和 `port_max`，用于它通向媒体服务器的 socket，
+就像 `webrtc.turn` 为它的中继地址所做的那样。

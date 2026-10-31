@@ -246,7 +246,7 @@ Status: `todo`, `doing` or `done`.
 | **WebRTC** | | | |
 | I108 | Decision 029: fit's WebRTC on fib's; fib `80c7f76`; A49 as built; A55–A58 | I85 | done |
 | I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | done |
-| I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | todo |
+| I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | done |
 
 ## M0, foundations
 
@@ -1453,8 +1453,11 @@ server, and fit in front of other media servers, for their signaling and their m
 - **Do**: WHIP and WHEP signaling proxied to upstream media servers through fit's upstream pools,
   the answer's candidates rewritten to fit's public UDP port and its ufrag remembered against the
   backend's media address; an L4 UDP service that routes a new peer by the STUN USERNAME of its
-  first datagram, then relays its 5-tuple, sticky, with limits and idle timeouts.
+  first datagram, then relays its 5-tuple, sticky, with limits and idle timeouts. Built as the
+  handler `webrtc_proxy` and the role `webrtc.proxy` beside `webrtc.media`, not an `l4` service
+  mode: the sessions outlast reloads, which drain an L4 service with its graph, and the handler
+  and the relay share their routes through the role ([decision 029](decisions/029-webrtc.md)).
 - **Done when**: two media servers behind one fit port each get their own peers; a peer's
   datagrams before its Binding request are dropped; a backend gone frees its routes; under the race
   detector.
-- **Touches**: `webrtc`, `l4`, `handler/proxy`, `config`, `schema`, `docs`.
+- **Touches**: `webrtc`, `upstream`, `config`, `schema`, `docs`.

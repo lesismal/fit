@@ -18,6 +18,12 @@
 // role's listen and public_ips keeps them, and applies the rest of its
 // settings to what comes next; one that changes those, or leaves the role
 // out, ends them.
+//
+// The package also puts other media servers behind fit: the handler
+// webrtc_proxy passes WHIP and WHEP to an upstream of media servers, and
+// the role webrtc.proxy relays their peers through one UDP port, routing a
+// new peer address by the ICE ufrag of its first STUN request (proxy.go,
+// relay.go and proxyhttp.go).
 package media
 
 import (

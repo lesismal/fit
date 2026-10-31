@@ -12,7 +12,13 @@ one UDP port, `listen`, that every PeerConnection shares, told to peers as `publ
 1:1 NAT; the STUN and TURN servers peers are told of, `ice_servers`, and fit's own `turn` as
 `turn_urls`, with credentials made from its `secret`; and the limits: PeerConnections, streams,
 viewers a stream, a publisher's bitrate, and timeouts. A reload keeps the sessions unless it
-changes `listen` or `public_ips`. See [WebRTC](../webrtc.md) and
+changes `listen` or `public_ips`.
+
+`proxy` puts other media servers behind fit, for the [`webrtc_proxy`](#webrtc_proxy) handler: one
+UDP port, `listen`, told to peers as `public_ips`, where each peer's first STUN request names the
+session, by its ufrag, whose media server it is relayed to from a socket of its own; the limits on
+sessions and relays, and how long an idle relay and a session with none are kept. A reload keeps
+the sessions unless it changes `listen`. See [WebRTC](../webrtc.md) and
 [decision 029](../decisions/029-webrtc.md).
 
 ```json
@@ -36,6 +42,12 @@ changes `listen` or `public_ips`. See [WebRTC](../webrtc.md) and
       "max_streams": 16,
       "max_viewers": 100,
       "max_bitrate": 4000000
+    },
+    "proxy": {
+      "listen": ":8190",
+      "public_ips": ["203.0.113.5"],
+      "max_sessions": 4096,
+      "idle_timeout": "30s"
     }
   }
 }

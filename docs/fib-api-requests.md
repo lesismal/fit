@@ -71,6 +71,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A56 | A TURN server that never waits on a worker | requested | 1 | I87 (029) |
 | A57 | A TURN server's limits and hooks | requested | 11 | I87 (029) |
 | A58 | A TURN server changed in place, and drained | requested | 10, 11 | I87 (029) |
+| A59 | A dial from a chosen local address and port range | requested | — | I110 (029) |
 
 ## Evidence
 
@@ -1770,3 +1771,25 @@ which drains, waits until none is left or ctx ends, then closes.
 **How fit would use it.** A reload changes lifetimes and quotas in place; a changed address or
 realm starts the new server beside the old one, which drains for the listeners' drain timeout,
 as a listener a reload removed does.
+
+## A59: A dial from a chosen local address and port range
+
+**Status.** Requested on 2026-11-01, for fit's WebRTC proxy ([decision 029](decisions/029-webrtc.md)).
+
+**Problem.** `webrtc.proxy` relays each peer address to its media server from a UDP socket of its
+own, which `Engine.DialWithHandler` opens. The kernel picks its local address by the route and its
+port from the whole ephemeral range. Media servers on a private network often sit behind a
+firewall that admits one source address and a port range, and a multi-homed host may need the
+relays to leave from the interface on the media servers' network. The TURN server binds a range
+itself with `AddBinding`, which fit cannot use for a socket per peer without a binding each.
+
+**Evidence.** `dialRequest` has a network, an address, a timeout and a handler; nothing names a
+local address, and the socket is bound only by `connect`.
+
+**Suggested API.** `Engine.DialWith(DialOptions{Network, Addr, LocalAddr netip.AddrPort, PortMin,
+PortMax uint16, Timeout, Handler}, done)`: the socket is bound to `LocalAddr`, trying ports
+`PortMin`-`PortMax` from a random start when the port is 0 and a range is set, before it
+connects, all on the loop as the dial is now; `EADDRINUSE` on every port fails the dial.
+
+**How fit would use it.** `webrtc.proxy` gets `relay_ip`, `port_min` and `port_max` for its
+sockets toward the media servers, as `webrtc.turn` has for its relayed addresses.

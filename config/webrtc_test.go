@@ -94,3 +94,26 @@ func TestWebRTCMedia(t *testing.T) {
 		}
 	}
 }
+
+func TestWebRTCProxy(t *testing.T) {
+	c, err := Load([]byte(`{"webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"], "idle_timeout": "10s"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.WebRTC.Proxy
+	if !c.HasApps() || p.Sessions() != DefaultProxyMaxSessions || p.Relays() != DefaultProxyMaxRelays ||
+		p.SessionIdle() != DefaultProxySessionTimeout || p.Idle() != 10*time.Second {
+		t.Fatalf("%+v", p)
+	}
+	for _, bad := range []struct{ doc, want string }{
+		{`{"webrtc": {"proxy": {"listen": "nope"}}}`, "not a host and port"},
+		{`{"webrtc": {"proxy": {"listen": ":8190", "public_ips": ["0.0.0.0"]}}}`, "wildcard"},
+		{`{"webrtc": {"media": {"listen": ":8189"}, "proxy": {"listen": ":8189"}}}`, "webrtc.media listens on :8189"},
+		{`{"webrtc": {"proxy": {"listen": ":8190", "max_relays": -1}}}`, "less than the minimum"},
+	} {
+		_, err := Load([]byte(bad.doc))
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)
+		}
+	}
+}

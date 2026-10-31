@@ -10,7 +10,7 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-11-01 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）和 I109（以 fit 为媒体服务器的 WHIP 和 WHEP）已完成；I110 待做 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）和 I110（经一个 UDP 端口代理媒体服务器）已完成 |
 | fib | fib `main` 的 `80c7f76`（`v1.6.1-0.20261031191422-80c7f7662ab4`），第一个带 WebRTC 的提交（`webrtc` 及其各包，A49 的 `Engine.OpenUDPPeer`），用于 I108；此前为 fib `main` 的 `47948dd6`（`v1.6.1-0.20261031164450-47948dd66351`）：`47948dd6` 让 QPACK 解码器按字符串在字段段中的位置记住它，浏览器每次请求都发送的字面量因此只解码一次（W2 经 h3：site +4.0%，edge +2.8%）；此前为 fib `main` 的 `c20ab7a1`（`v1.6.1-0.20261031151458-c20ab7a1705e`）：`c20ab7a1` 让 HTTP/3 请求流在其 OnWritable 回调运行完之前不被回收，修复了 fit 的 CI 在 `TestStuckClientsPastMaxConns/h3` 中遇到的数据竞争，`e66f4cf6` 修复一个偶发失败的 arpc 测试；此前为 fib `main` 的 `d7e117c1`（`v1.6.1-0.20261031142854-d7e117c1f901`）：`d7e117c1` 让对端每次都不加索引重复发送的长头部字面量只解码一次，nghttp2 客户端发送 bearer token 正是如此（W1 h2 +6.7%，每请求 28.60 降到 26.86 us），基于修复和补全测试的 `2ea8ddb7` 与 `da0ac655`；此前为 fib `main` 的 `a6131b0c`（`v1.6.1-0.20261031112846-a6131b0c0af3`），其还回缓冲的测试改为在处理函数取缓冲时查找池化 body，基于 `d3707ca7`：HTTP/2 的 stream 把来自缓冲池的 body 分帧后即还回池里，此前交给垃圾回收，缓冲池的那一档因此被取空（A48；W1 h2 +1.3%，分配从每秒 850 降到 677 MB）；此前为 fib `main` 的 `6bd106d9`（`v1.6.1-0.20261031020358-6bd106d9d44b`），为 Windows CI 放宽了两个计时测试的余量，基于 `46827ea7`：不超过 4 KiB 的整份响应 body 取自缓冲池，经 `ClientResponse.TakeBody` 和 `Context.WriteResponseOwned` 还回池里，`NewBufferedBody` 请求体不再拷贝（A48；W1 HTTP/1.1 +3.0%，即 `861689c9` 让堆变小后多出的回收所耗的 3%）；此前为 fib `main` 的 `7dcb41da`（`v1.6.1-0.20261030055545-7dcb41da8e7c`）：`4f870993` 在推送的 stream 归连接之前就绑定它的 Context，修复了 fib 的 CI 遇到的数据竞争，`7dcb41da` 修复一个 early data 测试在 Windows 上的预热；`a4ae3a0c`：在 Go 里边发送边加密的文件，除最后一块外都告诉内核后面还有数据，让 TCP 填满段（不用内核 TLS 时 1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +6.4%，W2 site HTTPS/1.1 +1.7%）；此前为 fib `main` 的 `881ff97a`（`v1.6.1-0.20261029202329-881ff97a25f2`）：`6c61693d` 让流式响应体放在 64 KiB 的池化块里（W4 proxy-download h1 +11%，约 55 降到 32 MiB；h2 +8%，约 137 降到 100 MiB），`8895a6aa` 让任务池的队列随积压增长，而不是按上限分配（W6 h2 50 降到 32 MiB），`24beda14` 和 `881ff97a` 让内核 TLS 加密的连接用 MSG_MORE 按整记录写，并且只为 512 KiB 及以上的文件切换到内核 TLS（1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +29%，fit 因此去掉 NoKernelTLS）；此前为 fib `main` 的 `c794cf89`（`v1.6.1-0.20261029134914-c794cf8960fe`）：`d5b8d477` 让整份发送的 HTTP/2 响应按 socket 的进度分帧，`0eb21d67` 让流式的 Content-Length 响应体直接从读缓冲交给回调，`08faed60` 让加密后的 TLS 记录贴合缓冲池的档位（W4 download h2 +11.5%，约 167 降到 77 MiB；proxy-download h1 +6.6%、h2 +2.7%），`c794cf89` 让流式的 HTTP/2 请求体在被消费前占住连接窗口（W4 proxy-upload h2 约 312 降到 252 MiB）；此前为 fib `main` 的 `4ad4ebef`（`v1.6.1-0.20261029100241-4ad4ebefac94`）：流式的 HTTP/2、HTTP/3 请求体按 64 KiB 的池化块等待（W4 proxy-upload h2 +12.7%，553 降到 322 MiB）；此前为 fib `main` 的 `56f08db3`（`v1.6.1-0.20261029003614-56f08db38f88`）：`861689c9` 让连接的读轮次从 16 KiB 开始并记住是否增长过（W1 在 10,000 在途 1,076 降到 639 MiB，W4 在 2% 以内），`b926ebf5` 和 `c6c2e10b` 减少 HTTP/3 每个包的工作（W2 site h3 +2.3%）；此前为 fib `main` 的 `f0378649`（`v1.6.1-0.20261028184321-f037864957c0`）：`d4319879` 回收 body 未流式的 HTTP/3 请求（W0 h3 在 500 到 10,000 在途 +17.6% 到 +20.0%），`f0378649` 去掉其测试对 body 大小的假设；此前为 fib `main` 的 `a7b8b456`（`v1.6.1-0.20261028010536-a7b8b456e081`）：`7f1fac3a` 让 Close 在并发的 ShutdownBinding 修改监听器列表时所持的锁下取用该列表，修复了 fit 的 CI 在 macOS 上遇到的数据竞争；`8696ef40` 让应答了早期数据并关闭连接的 TLS 服务端等握手结束后再关闭，以免 Windows 客户端因连接重置丢失应答；`a7b8b456` 修复了一个 HTTP/3 测试中的数据竞争；此前为 fib `main` 的 `33a039f1`（`v1.6.1-0.20261026175603-33a039f1382f`），带有为 I83 而加的 fib `log` 包（`185658f1`，以及处理 `ServeDuplex` panic 的 `33a039f1`）；此前为 fib `main` 的 `a88c75d2`（`v1.6.1-0.20261025180753-a88c75d2f19b`）：在 `b0809b4` 之上加了 A46（在别处完成工作的响应体过滤器，为 I81 而加）以及自 `b0809b4` 起的 HTTP/2、HTTP/3 和 TLS 改进；`b0809b4` 本身是 v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON、logfmt 或行格式的访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；配置加密保存在 store 中（`admin.store`、`fit store export` 和 `import`），以及登录后可修改全部配置的控制台（`admin.console`）；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 1.0 的外部安全审计，在代码之外安排 |
@@ -71,7 +71,7 @@ worker 上无时间上限地等待（已复现：一个不读取的客户端会�
 | `runtime` | `Compile(config, Env)` 把配置编译成不可变的 `Graph`，每个 listener 一个路由器、每个上游一个连接池，未变的上游共享前一个图的连接池；带原子替换、图引用计数和旧图排空超时的 `Runtime` |
 | `listener` | 在一个 fib engine 上绑定图中的所有 listener（TCP，以及 HTTP/3 的 UDP）；把服务 HTTP、tcp、socks 中多种协议的监听器放在 fib 的 `mux` 之后；把每个请求分发到当前图的路由；`Reload` 到新图，保留未变的 listener，排空被移除的；优雅退出 |
 | `l4` | 四层代理：`Service` 把 tcp 监听器的连接代理到其上游的一个地址，经 fib 引擎拨号，每一侧的数据在其回调中发往另一侧，另一侧未发送超过 64 KB 时暂停这一侧的读取；空闲超时、`max_conns`，随所属 graph 一起 drain；`Clients`：服务接手连接后监听器处理器的回调；`Entry`：监听器按 SNI 选择的服务，没有服务认领的 TLS 连接在监听器有 tls 时交给它自己的 TLS（`HandOff`）；`Rules`：谁可以使用正向代理、可以连到哪里，主机名在连上后按解析出的地址判断；`NewSOCKS`：按这些规则配置的 fib SOCKS 服务器 |
-| `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
+| `upstream` | `Pool`：按上游的粘性 cookie 和策略（轮询、平滑加权轮询、最少连接、随机、P2C、按客户端 IP、URI、请求头或 cookie 的一致性哈希）选择后端，或选会话所在的后端（`PickBackend`），通过 fib 的异步客户端以 HTTP/1.1、h2c 或 h2 发送请求，关闭前先排空；被动健康检查（`max_fails`）和主动健康检查：HTTP、TCP 探测由定时器发起，经 fib 的异步客户端和拨号器发出；`StartEngine` 启动连接池拨号用的 engine |
 | `provider` | `Provider`：发送片段的配置来源；`RegisterKind` 和 `LookupKind`：二进制文件拥有的 provider 种类，由 `provider/standard` 导入；`Run`：运行 provider，并一次一个地应用它们最新的片段；`Parse` 和 `Merge`：按决策 009 的规则把片段合并进基础配置，记录每个元素的来源和被遮蔽的内容，并把错误映射回写下它的地方 |
 | `provider/docker` | Docker provider：用普通 HTTP 访问 Engine API（事件，然后列出容器），把容器标签转换为上游、路由和服务，副本共享上游 |
 | `provider/labels` | 从前缀下的标签读取路由、服务和上游设置（Docker 的标签和 Consul 的 tag 都这样读），并生成片段 |
@@ -3368,6 +3368,46 @@ WHIP（RFC 9725）推入，观看者用 WHEP（draft-ietf-wish-whep）播放，�
   检查。在 Chrome（浏览器面板）中，canvas 的 `captureStream` 用 WHIP 推给 fit、用 WHEP 播放：VP8，320x240，解码 65 帧，
   DELETE 依次为 200、200、404。
 - **基准**：无；HTTP 热路径之外的新数据面（规则 21）。转发的开销是每包每观看者一次 fib 的 SRTP 保护和一次发送。
+
+### I110 代理的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP — 已完成
+
+把媒体服务器放在 fit 后面（[决定 029](decisions/029-webrtc.zh-CN.md)、[WebRTC](webrtc.zh-CN.md#代理媒体服务器)）：
+其他主机上 fit 自己的 `whip`/`whep`，或任何 WHIP、WHEP 服务器，共用一个 HTTP 端点和一个 UDP 端口。
+
+- **设计**：处理器 `webrtc_proxy` 和 `webrtc.media` 旁边的角色 `webrtc.proxy`，而不是计划中的 `l4` 服务模式：重载会随
+  图排空 L4 服务的中继，而媒体会话必须挺过重载；处理器写入的路由要让 UDP 一侧找到，按上游 engine 索引的进程级角色
+  正好提供（就像 `whip` 找到 `webrtc.media`）；中继的目的地是 answer 给出的地址，而不是上游的地址。
+- **配置**：`webrtc.proxy`：`listen`、`public_ips`、`max_sessions`（4096）、`max_relays`（4096）、`session_timeout`（30s）、
+  `idle_timeout`（30s）；加载时检查，与 `webrtc.media` 同端口时拒绝。处理器参数：`upstream`、`media_addrs`（上游地址到
+  IP，或 IP 和端口）、`timeout`（10s）、`max_sdp_bytes`（32 KiB）。
+- **信令**（`webrtc/media/proxyhttp.go`）：用 `OnBody` 收取请求（不超过 `max_sdp_bytes`），在最后一次回调里用
+  `Pool.Pick` 和 `Send` 发出，用 `ClientResponse.OnBody` 收取应答（同样的上限），客户端的 `OnCancel` 和 `timeout` 定时器
+  会取消 `Call`。offer 的候选被去掉，媒体服务器只会看到 fit；answer 的 ufrag 和 ice-pwd 与媒体地址一起记下（`media_addrs`，
+  否则第一个 UDP host 候选，其次 srflx，IPv4 优先），其候选和 `c=` 换成角色的地址。`Location` 变为 POST 的路径加 fit
+  的 128 位 ID；ICE 服务器的 `Link` 原样传递，会话 URL 之下的改写，其余丢弃。会话的请求经 `upstream` 新增的
+  `Pool.PickBackend` 发往其媒体服务器；只 trickle 的 PATCH 应答 204，重启则转发并加入新 ufrag。offer 发往上游前先预留
+  `max_sessions`；fit 无法路由的 201 会到媒体服务器上 DELETE 掉。
+- **中继**（`webrtc/media/relay.go`）：监听器 engine 上的一个 UDP binding；新对端地址的第一个数据报必须是 Binding 请求，
+  USERNAME 的第一部分是已知 ufrag，MESSAGE-INTEGRITY 由其 ice-pwd 签名（fib 的 `stun`），否则丢弃、计数，并关闭其 fib
+  连接。每个中继经上游 engine 异步拨号到媒体地址，使用自己的 socket：单端口的媒体服务器（如 fib 的 Mux）按地址区分对端。
+  拨号期间最多暂存 8 个数据报；空闲计时只看对端发送的数据；每个会话最多 8 个中继、4 个 ufrag。
+- **指标**：会话、中继、应答的会话、拒绝、按原因结束的会话、打开的中继、按原因丢弃、双向字节、重启。
+- **fib**：[A59](fib-api-requests.zh-CN.md#a59从指定的本地地址和端口范围发起拨号)，从指定的本地地址和端口范围发起拨号，
+  用于 fit 与媒体服务器之间的防火墙；在此之前由内核选择。
+- **测试**（`webrtc/media`，三个运行 I109 角色的 fit 作为媒体服务器，fib 的 PeerConnection 作为客户端，竞态检测下）：
+  三个推流者在三个媒体服务器上各一个，每个观看者找到自己流所在的服务器，媒体经中继完好到达，应答中的候选都是 fit 的
+  端口，DELETE 到达正确的媒体服务器并释放所有 ufrag 和中继，之后 404；先到的 DTLS 数据报、未知 ufrag、错误的
+  MESSAGE-INTEGRITY 被丢弃且无应答；停掉一个媒体服务器：其对端的中继结束，其会话的 DELETE 为 502 并释放会话，它退出轮转前
+  最多一个 offer 失败；被切断的观看者在 `idle_timeout` 后失去中继，`session_timeout` 后失去会话；对一个假的媒体服务器
+  （`httptest`）：候选、`c=`、`Location` 和 `Link` 被改写，offer 到达时不带候选，trickle 由 fit 应答 204，重启的 ufrag 被
+  路由，413、415，过大的 answer 和无候选的 answer 为 502（后者在上游被 DELETE），慢的媒体服务器在 `timeout` 内 504，期间
+  客户端离开，所有预留都归还；`max_sessions` 503；重载保留会话和媒体，改 `public_ips` 保留，改 `listen` 结束，去掉成员
+  后应答 503。在 Chrome（浏览器面板）中，canvas 的 `captureStream` 经 fit 推到两个 fit 媒体服务器之一，再经 fit 播放：
+  VP8，320x240，两端都已连接，4 秒解码 53 帧，DELETE 依次为 200、200、404；观看者第一次落到另一台媒体服务器（404），
+  重试后落到正确的那台。
+- **基准**：无；HTTP 热路径之外的数据面（规则 21）。每个中继的数据报在两侧各一次发送。
+- **限制**：只在 answer 之后 trickle 的候选、多个媒体地址、TCP 上的 ICE、会话 URL 之下的流式扩展（WHEP 的 SSE）、
+  媒体服务器看到对端真实地址，都不支持；见文档。
 
 ## 给后续迭代的说明
 

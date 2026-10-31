@@ -2797,6 +2797,10 @@
           "$ref": "#/$defs/config.WebRTCMedia",
           "description": "Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out."
         },
+        "proxy": {
+          "$ref": "#/$defs/config.WebRTCProxy",
+          "description": "Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which relays each peer to the media server that answered it, found by the ICE ufrag of the peer's first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left out."
+        },
         "turn": {
           "$ref": "#/$defs/config.TURNServer",
           "description": "Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."
@@ -2892,6 +2896,50 @@
             "type": "string"
           },
           "type": "array"
+        }
+      },
+      "required": [
+        "listen"
+      ],
+      "type": "object"
+    },
+    "config.WebRTCProxy": {
+      "additionalProperties": false,
+      "properties": {
+        "idle_timeout": {
+          "default": "30s",
+          "description": "How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The UDP address peers reach the media servers behind fit at, one port for them all, as in \":8190\": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session.",
+          "type": "string"
+        },
+        "max_relays": {
+          "default": 4096,
+          "description": "The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sessions": {
+          "default": 4096,
+          "description": "The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ips": {
+          "description": "The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session_timeout": {
+          "default": "30s",
+          "description": "How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
         }
       },
       "required": [
@@ -3016,6 +3064,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "webrtc_proxy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.webrtc_proxy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "whep"
               }
             }
@@ -3054,6 +3118,7 @@
             "proxy",
             "respond",
             "static",
+            "webrtc_proxy",
             "whep",
             "whip"
           ],
@@ -3364,6 +3429,38 @@
       },
       "required": [
         "root"
+      ],
+      "type": "object"
+    },
+    "http.handlers.webrtc_proxy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_sdp_bytes": {
+          "default": 32768,
+          "description": "The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_addrs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The address fit relays a media server's peers to, by the media server's address in the upstream, as {\"10.0.0.2:8080\": \"10.0.0.2:8189\"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first.",
+          "type": "object"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "The upstream of the media servers, picked by its load balancing for each offer: fit's own whip and whep, or any WHIP or WHEP server. Its health checks and timeouts apply.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upstream"
       ],
       "type": "object"
     },
@@ -4399,7 +4496,7 @@
     },
     "webrtc": {
       "$ref": "#/$defs/config.WebRTC",
-      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server, and the media port of the whip and whep handlers. None when left out."
+      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out."
     }
   },
   "title": "fit config, schema version 1",

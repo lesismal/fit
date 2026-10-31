@@ -28,8 +28,8 @@ external security review is still to come; see [progress](docs/progress.md) for 
   [Traefik](docs/migrating-from-traefik.md).
 - [The tunnel](docs/tunnel.md) and [the agent](docs/agent.md): roles run beside the gateway on its
   engine, reaching services behind NAT and sharing AI models among machines.
-- [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, and WHIP and WHEP
-  with fit as the media server.
+- [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, WHIP and WHEP
+  with fit as the media server, and other media servers behind fit's one HTTP endpoint and UDP port.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
 - [nginx, Caddy and Traefik compared](docs/comparison.md): what fit takes from each.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.

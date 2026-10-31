@@ -4,8 +4,8 @@
 
 fit serves WebRTC with fib's WebRTC packages, beside the gateway on its engine
 ([decision 029](decisions/029-webrtc.md)): a TURN server, and WHIP and WHEP with fit as the media
-server. fit in front of other media servers is planned (I110 in the
-[development plan](dev-plan.md#webrtc)).
+server; and fit in front of other media servers, proxying their WHIP and WHEP and relaying their
+media through one UDP port.
 
 ## The TURN server
 
@@ -294,3 +294,153 @@ The Admin API's `/metrics` carries `fit_webrtc_media_peer_connections{role}`,
 `fit_webrtc_media_dropped_total{reason="bitrate"}`,
 `fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` and
 `fit_webrtc_media_restarts_total`. The media server's messages go to the `webrtc` logger.
+
+## Proxying media servers
+
+Many media servers can sit behind one fit: fit's own `whip` and `whep` on other hosts, or any WHIP
+or WHEP server, such as MediaMTX, Janus or LiveKit's WHIP ingress. Publishers and viewers know one
+HTTP endpoint and one UDP port, fit's. The handler `webrtc_proxy` passes their signaling to an
+upstream of media servers, and `webrtc.proxy` relays each peer's media to the media server that
+answered it:
+
+```fit
+upstream {
+	name media-servers
+	addresses 10.0.0.2:8080 10.0.0.3:8080
+	health_check {
+		path /healthz
+	}
+}
+
+route {
+	match { path /whip/* /whep/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs {
+			10.0.0.3:8080 10.0.0.3:8189
+		}
+	}
+}
+
+webrtc {
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+	}
+}
+```
+
+The same in JSON:
+
+```json
+{
+  "upstreams": [{"name": "media-servers", "addresses": ["10.0.0.2:8080", "10.0.0.3:8080"],
+                 "health_check": {"path": "/healthz"}}],
+  "routes": [
+    {"match": {"path": ["/whip/*", "/whep/*"]},
+     "handler": {"module": "webrtc_proxy",
+                 "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.3:8080": "10.0.0.3:8189"}}}}
+  ],
+  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"]}}
+}
+```
+
+### How a session goes
+
+1. A publisher posts its offer to fit. fit takes it whole, up to `max_sdp_bytes`, removes its
+   candidates, and sends it to the media server the upstream picks: its load balancing, its
+   health checks, and the request's own fields, `Authorization` among them, apply.
+2. The media server answers `201`. fit reads its `a=ice-ufrag` and `a=ice-pwd`, and the address
+   its peers are to be relayed to: `media_addrs`' entry for the media server, or the answer's
+   first UDP host candidate, or else server-reflexive one, IPv4 first. It replaces the answer's
+   candidates, and its `c=` lines, with `webrtc.proxy`'s addresses, keeps the session under an ID
+   of its own, and answers with its `Location` a URL of fit's: the POST's path followed by that ID.
+3. The publisher's ICE checks reach fit's port. A new peer address must start with a STUN Binding
+   request whose USERNAME begins with a session's ufrag (`<ufrag>:<peer's ufrag>`) and whose
+   MESSAGE-INTEGRITY that session's ice-pwd signs; fit then opens a UDP socket of the address's
+   own toward the media server and relays every datagram both ways, STUN, DTLS and SRTP alike.
+   Anything else that comes first is dropped.
+4. The media server sees fit's socket as its peer, a peer-reflexive candidate, as ICE allows. It
+   was given no candidate of the peer's, so it never sends past fit.
+5. The DELETE of fit's URL goes to the media server that answered, and frees the session at fit
+   whatever the media server says.
+
+Each peer address has a socket of its own toward the media server because a media server on one
+port, as fit's `webrtc.media` is, tells its peers apart by their address: one socket shared by
+every relay would make them one peer to it. A socket's datagrams from the media server go back to
+the one peer address it was opened for.
+
+### Signaling
+
+- **Location and Link.** The media server's `Location`, relative or absolute, is kept as the
+  session's path there; an absolute one's host is not used, since requests go to the media server
+  that answered. `Link` fields for ICE servers (`rel="ice-server"`) are passed on as they are;
+  one to a URL below the session's is rewritten below fit's URL for it, and the rest are dropped.
+- **The session's URL.** DELETE, PATCH, OPTIONS and any request to a URL below the session's go
+  to the media server that answered, sticky by fit's ID, not by a cookie. A session the media
+  server's upstream no longer lists is answered `502`; its DELETE still frees it.
+- **PATCH.** A PATCH that only trickles candidates is answered `204` by fit: the media server
+  reaches the peer through fit whatever the peer's candidates are. An ICE restart, a PATCH with an
+  `a=ice-ufrag`, goes to the media server without its candidates, and the ufrag of its answer is
+  routed as the first one was, its candidates replaced too.
+- **Statuses.** `415` for an offer that is not `application/sdp`, `413` for a request past
+  `max_sdp_bytes`, `503` past `max_sessions` or while `webrtc.proxy` does not run, `502` for a
+  media server that cannot be reached, an answer past `max_sdp_bytes` or one with no ufrag or no
+  candidate fit can relay to (whose session fit then DELETEs at the media server), and `504` for
+  one that does not answer within `timeout`. Every other answer is passed on as it is.
+
+Nothing waits: the offer goes upstream from its last body callback through fib's asynchronous
+client, and the answer is written from the client's callback; a client that leaves cancels it.
+
+### Limits
+
+| Field | Default | Bounds |
+| --- | --- | --- |
+| `max_sessions` | 4096 | sessions at once, counted from the offer; one more is answered `503` |
+| `max_relays` | 4096 | peer addresses relayed at once, each a socket; past it, a new address is dropped |
+| `session_timeout` | 30s | a session with nothing relayed, from its answer or its last relay's end, is forgotten |
+| `idle_timeout` | 30s | a peer address that sends nothing loses its relay, whatever the media server sends |
+| `webrtc_proxy`'s `max_sdp_bytes` | 32 KiB | a request and an answer |
+| `webrtc_proxy`'s `timeout` | 10s | from a request's last byte to its answer read whole |
+
+A session relays at most 8 of its peer's addresses: one for each candidate a peer checks from,
+and more after it moves. A session keeps at most 4 ufrags, its ICE restarts' among them. A relay
+holds up to 8 datagrams while its socket opens.
+
+### ICE restarts, consent and a peer that moves
+
+ICE's consent checks, every 5 seconds or so, are relayed as any datagram and keep the relay open.
+A peer that moves, to another network or another NAT binding, checks again from its new address,
+which opens a relay of its own to the same media server; the old one ends at `idle_timeout`. An
+ICE restart through PATCH keeps its session; one made as a new session, as fit's own whip does, is
+a new POST.
+
+What fit cannot do:
+
+- A media server whose candidates arrive only by trickle, after its answer, is answered `502`,
+  unless `media_addrs` gives its address with the port.
+- An answer with candidates on several addresses is relayed to one of them; ICE over TCP, and a
+  media server reached only through TURN, are not relayed.
+- A URL below the session's is proxied with its body and answer whole, up to `max_sdp_bytes`:
+  extensions that stream, such as WHEP's server-sent events, do not work through fit.
+- The sockets toward the media servers take the kernel's address and ports, which a firewall
+  between fit and them must allow; fib cannot yet bind them to an address and a port range
+  ([A59](fib-api-requests.md#a59-a-dial-from-a-chosen-local-address-and-port-range)).
+- The media server sees fit's address, not the peer's.
+
+### Reloading
+
+The sessions belong to `webrtc.proxy`, not to the routes: a reload that keeps `listen` keeps them
+and their relays, and applies its other fields to what comes next, `public_ips` to the next
+answer. A change of `listen` ends every relay and session, and peers post new offers. A media
+server a reload takes out of the upstream keeps its relays, while its sessions' requests are
+answered `502`.
+
+### Metrics
+
+`fit_webrtc_proxy_sessions`, `fit_webrtc_proxy_relays`, `fit_webrtc_proxy_sessions_total`,
+`fit_webrtc_proxy_refused_total`, `fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`,
+`fit_webrtc_proxy_relays_total`,
+`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"}`,
+`fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` and
+`fit_webrtc_proxy_restarts_total`. The upstream's own metrics count the signaling requests.

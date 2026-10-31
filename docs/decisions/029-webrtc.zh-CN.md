@@ -41,9 +41,13 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
   的名字区分流，一个推流者的 RTP 转发给多个观看者并转发关键帧请求，用路由的中间件做认证，限制流数、观看者数、
   PeerConnection 数和码率，按 RFC 9725 和 WHEP 草案支持 DELETE 和 PATCH（trickle），在 `Link` 头中给出 ICE 服务器，重载和
   停止时关闭一切。
-- **代理媒体服务器**（I110）：经 fit 的上游连接池把 WHIP 和 WHEP 信令代理到上游媒体服务器，把应答中的候选改写为 fit 的
-  公网 UDP 端口并记住其 ufrag 对应的后端；一种 L4 UDP 服务，按新对端第一个数据报中 STUN USERNAME 选路，之后粘性地中继它的
-  五元组，让多个媒体服务器共用 fit 的一个端口。
+- **代理媒体服务器**（I110）：处理器模块 `webrtc_proxy` 经 fit 的上游连接池把 WHIP 和 WHEP 信令代理到由媒体服务器
+  组成的上游，offer 去掉候选，answer 的候选改写为 fit 的 UDP 端口，并记住其 ufrag 和 ice-pwd 对应的媒体服务器地址；
+  角色 `webrtc.proxy` 持有这个端口，按新对端地址第一个数据报中的 STUN USERNAME 选路（用会话的 ice-pwd 校验），之后
+  从它自己的一个 socket 中继到媒体服务器，让多个媒体服务器共用 fit 的一个端口。它是 `webrtc.media` 旁边的角色，而不是
+  L4 `service` 的一种模式：它的会话长期存在，必须挺过重载，而 L4 服务的连接会随其所属的图被排空；它的路由由处理器在
+  请求时写入，只有双方都能找到的进程级角色（按 engine 查找，就像 `whip` 找到 `webrtc.media`）才能共享；它的目的地是
+  answer 中给出的地址，不是上游的地址。每个对端地址一个 socket 而不是共用一个，因为单端口的媒体服务器按地址区分对端。
 
 ## fib 需要提供的
 
@@ -55,6 +59,8 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
   的对端检查，以及用于指标的事件。
 - [A58](../fib-api-requests.zh-CN.md#a58原地修改和排空-turn-服务器)：原地修改生存期和配额，以及不再接受新 allocation、
   让已有的自然结束的排空。
+- [A59](../fib-api-requests.zh-CN.md#a59从指定的本地地址和端口范围发起拨号)：从指定的本地地址和端口范围发起拨号，
+  用于代理通向防火墙后媒体服务器的 socket。
 
 ## 影响
 

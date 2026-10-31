@@ -3,8 +3,8 @@
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
 fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）：
-TURN 服务器，以及以 fit 为媒体服务器的 WHIP 和 WHEP。fit 作为其他媒体服务器的前端已列入计划
-（[开发计划](dev-plan.zh-CN.md#webrtc) 中的 I110）。
+TURN 服务器；以 fit 为媒体服务器的 WHIP 和 WHEP；以及 fit 作为其他媒体服务器的前端，代理它们的 WHIP 和 WHEP，
+经一个 UDP 端口中继它们的媒体。
 
 ## TURN 服务器
 
@@ -255,3 +255,131 @@ Admin API 的 `/metrics` 中有 `fit_webrtc_media_peer_connections{role}`、`fit
 `fit_webrtc_media_received_bytes_total`、`fit_webrtc_media_dropped_total{reason="bitrate"}`、
 `fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` 和 `fit_webrtc_media_restarts_total`。
 媒体服务器的消息写入 `webrtc` 日志。
+
+## 代理媒体服务器
+
+许多媒体服务器可以放在一个 fit 后面：其他主机上 fit 自己的 `whip` 和 `whep`，或任何 WHIP、WHEP 服务器，如 MediaMTX、
+Janus、LiveKit 的 WHIP ingress。推流端和观看端只知道 fit 的一个 HTTP 端点和一个 UDP 端口。处理器 `webrtc_proxy`
+把它们的信令转给由媒体服务器组成的上游，`webrtc.proxy` 把每个对端的媒体中继到应答它的那台媒体服务器：
+
+```fit
+upstream {
+	name media-servers
+	addresses 10.0.0.2:8080 10.0.0.3:8080
+	health_check {
+		path /healthz
+	}
+}
+
+route {
+	match { path /whip/* /whep/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs {
+			10.0.0.3:8080 10.0.0.3:8189
+		}
+	}
+}
+
+webrtc {
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+	}
+}
+```
+
+JSON 写法相同：
+
+```json
+{
+  "upstreams": [{"name": "media-servers", "addresses": ["10.0.0.2:8080", "10.0.0.3:8080"],
+                 "health_check": {"path": "/healthz"}}],
+  "routes": [
+    {"match": {"path": ["/whip/*", "/whep/*"]},
+     "handler": {"module": "webrtc_proxy",
+                 "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.3:8080": "10.0.0.3:8189"}}}}
+  ],
+  "webrtc": {"proxy": {"listen": ":8190", "public_ips": ["203.0.113.5"]}}
+}
+```
+
+### 一个会话的经过
+
+1. 推流端把 offer POST 给 fit。fit 收下整个 offer（不超过 `max_sdp_bytes`），去掉其中的候选地址，发给上游选中的
+   媒体服务器：上游的负载均衡、健康检查，以及请求自带的字段（包括 `Authorization`）都照常生效。
+2. 媒体服务器应答 `201`。fit 读出其中的 `a=ice-ufrag`、`a=ice-pwd`，以及要把对端中继到的地址：`media_addrs`
+   中该媒体服务器的条目，否则是 answer 中第一个 UDP host 候选，再否则是 server-reflexive 候选，IPv4 优先。fit 把
+   answer 的候选地址和 `c=` 行换成 `webrtc.proxy` 的地址，以自己的 ID 记下会话，应答的 `Location` 是 fit 的 URL：
+   POST 的路径后接这个 ID。
+3. 推流端的 ICE 检查到达 fit 的端口。一个新的对端地址必须先发 STUN Binding 请求，其 USERNAME 以某个会话的 ufrag
+   开头（`<ufrag>:<对端的 ufrag>`），MESSAGE-INTEGRITY 由该会话的 ice-pwd 签名；fit 随即为这个地址单独打开一个
+   通往媒体服务器的 UDP socket，双向中继每个数据报，STUN、DTLS、SRTP 一视同仁。先到的其他数据一律丢弃。
+4. 媒体服务器把 fit 的 socket 看作它的对端，即 peer-reflexive 候选，这是 ICE 允许的。它没有拿到对端的任何候选，
+   所以从不绕过 fit 直接发送。
+5. 对 fit URL 的 DELETE 转给应答的媒体服务器，无论媒体服务器如何回应，fit 都释放该会话。
+
+每个对端地址都有自己通往媒体服务器的 socket，因为单端口的媒体服务器（如 fit 的 `webrtc.media`）按地址区分对端：
+所有中继共用一个 socket，对它来说就成了同一个对端。从媒体服务器发回某个 socket 的数据报，只回到打开它的那个对端地址。
+
+### 信令
+
+- **Location 和 Link。** 媒体服务器的 `Location`（相对或绝对）记为会话在那边的路径；绝对地址中的主机不使用，
+  因为请求总是发往应答的媒体服务器。ICE 服务器的 `Link`（`rel="ice-server"`）原样传递；指向会话 URL 之下的 Link
+  改写到 fit 中对应 URL 之下，其余的丢弃。
+- **会话的 URL。** DELETE、PATCH、OPTIONS 以及发往会话 URL 之下的请求，都转给应答的媒体服务器，靠 fit 的 ID
+  而非 cookie 保持粘滞。上游已不再列出其媒体服务器的会话应答 `502`；它的 DELETE 仍会释放会话。
+- **PATCH。** 只 trickle 候选的 PATCH 由 fit 直接应答 `204`：无论对端的候选是什么，媒体服务器都经由 fit 到达对端。
+  ICE 重启（带 `a=ice-ufrag` 的 PATCH）去掉候选后转给媒体服务器，其应答中的新 ufrag 与第一个 ufrag 一样被路由，
+  候选同样被替换。
+- **状态码。** offer 不是 `application/sdp` 时 `415`；请求超过 `max_sdp_bytes` 时 `413`；超过 `max_sessions`，或
+  `webrtc.proxy` 未运行时 `503`；媒体服务器无法连接、answer 超过 `max_sdp_bytes`、answer 没有 ufrag 或没有 fit
+  能中继到的候选时 `502`（这种会话 fit 会到媒体服务器上 DELETE 掉）；在 `timeout` 内没有应答时 `504`。其他应答原样传递。
+
+整个过程不等待：offer 在最后一次 body 回调里经 fib 的异步客户端发往上游，answer 在客户端的回调里写回；客户端离开
+会取消请求。
+
+### 上限
+
+| 字段 | 默认值 | 限制 |
+| --- | --- | --- |
+| `max_sessions` | 4096 | 同时存在的会话，从 offer 起计；再多一个应答 `503` |
+| `max_relays` | 4096 | 同时中继的对端地址，各占一个 socket；超过时新地址被丢弃 |
+| `session_timeout` | 30s | 没有任何中继的会话，从应答或最后一个中继结束起，超时后被遗忘 |
+| `idle_timeout` | 30s | 不发送任何数据的对端地址失去其中继，不论媒体服务器是否还在发送 |
+| `webrtc_proxy` 的 `max_sdp_bytes` | 32 KiB | 请求和 answer 的大小 |
+| `webrtc_proxy` 的 `timeout` | 10s | 从请求的最后一个字节到完整读完 answer |
+
+一个会话最多中继对端的 8 个地址：对端每个发起检查的候选一个，迁移后还会更多。一个会话最多保留 4 个 ufrag，含 ICE
+重启产生的。中继在其 socket 打开期间最多暂存 8 个数据报。
+
+### ICE 重启、consent 与迁移的对端
+
+ICE 的 consent 检查大约每 5 秒一次，像其他数据报一样被中继，使中继保持打开。对端迁移到别的网络或别的 NAT 映射后，
+会从新地址再次检查，从而打开一个通往同一媒体服务器的新中继；旧的在 `idle_timeout` 后结束。经 PATCH 的 ICE 重启
+保留原会话；像 fit 自己的 whip 那样以新会话方式重启，则是一次新的 POST。
+
+fit 做不到的：
+
+- 只在 answer 之后用 trickle 给出候选的媒体服务器应答 `502`，除非 `media_addrs` 给出它带端口的地址。
+- answer 中的候选分布在多个地址时，只中继到其中一个；TCP 上的 ICE、以及只能经 TURN 到达的媒体服务器不被中继。
+- 会话 URL 之下的 URL 按整个 body 和整个应答代理，不超过 `max_sdp_bytes`：流式扩展，如 WHEP 的 server-sent
+  events，经过 fit 无法工作。
+- 通往媒体服务器的 socket 使用内核选的地址和端口，fit 与它们之间的防火墙必须放行；fib 目前还不能把它们绑定到
+  指定地址和端口范围（[A59](fib-api-requests.zh-CN.md#a59从指定的本地地址和端口范围发起拨号)）。
+- 媒体服务器看到的是 fit 的地址，而不是对端的。
+
+### 重载
+
+会话属于 `webrtc.proxy` 而不是路由：保留 `listen` 的重载保留会话及其中继，其他字段从下一次起生效，`public_ips`
+从下一个 answer 起生效。`listen` 改变会结束所有中继和会话，对端需重新 POST offer。被重载移出上游的媒体服务器，
+其中继保留，而其会话的请求应答 `502`。
+
+### 指标
+
+`fit_webrtc_proxy_sessions`、`fit_webrtc_proxy_relays`、`fit_webrtc_proxy_sessions_total`、
+`fit_webrtc_proxy_refused_total`、`fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`、
+`fit_webrtc_proxy_relays_total`、
+`fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"}`、
+`fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` 和
+`fit_webrtc_proxy_restarts_total`。信令请求计入上游自己的指标。

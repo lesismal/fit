@@ -186,6 +186,11 @@ var notCovered = map[string]string{
 	// rather than waits for, and its tests drive.
 	"whep": "webrtc/media's TestPublishAndView",
 	"whip": "webrtc/media's TestPublishAndView",
+	// It needs webrtc.proxy, a role, and a media server: its offer goes
+	// upstream through fib's client from the last body callback, answered
+	// in the client's, which webrtc/media's proxy tests drive against slow
+	// and gone media servers.
+	"webrtc_proxy": "webrtc/media's TestProxySignaling",
 }
 
 // handlerOf compiles a config of c's route and returns its handler.

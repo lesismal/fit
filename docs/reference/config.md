@@ -38,9 +38,9 @@ a config against it and more.
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [Agent](#agent): [`agent`](#config-agent), [`agent.hub`](#config-agenthub), [`agent.hub.console`](#config-roleconsole), [`agent.hub.listen`](#config-agentlisten), [`agent.hub.peers[]`](#config-agentpeer), [`agent.hub.limits`](#config-agentlimits), [`agent.node`](#config-agentnode), [`agent.node.models[]`](#config-agentmodel), [`agent.node.settings`](#config-agentnodesettings), [`agent.node.proxy`](#config-agentnodeproxy), [`agent.client`](#config-agentclient), [`agent.client.api`](#config-agentclientapi), [`agent.client.api_keys[]`](#config-agentclientkey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.server`](#config-tunnelserver), [`tunnel.server.listeners[]`](#config-tunnellistener), [`tunnel.server.console_socket`](#config-tunnelconsolesocket), [`tunnel.server.quic`](#config-tunnelserverquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.servers[]`](#config-tunneluplink), [`tunnel.node.servers[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.client`](#config-tunnelclient), [`tunnel.client.forwards[]`](#config-tunnelforward), [`tunnel.client.web_proxies[]`](#config-tunnelwebproxy)
-- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver)
+- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -114,7 +114,7 @@ In JSON:
 | `acme` | [object](#config-acme) |  | How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload. |
 | `agent` | [object](#config-agent) |  | The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here. |
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here. |
-| `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, and the media port of the whip and whep handlers. None when left out. |
+| `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -2021,7 +2021,13 @@ one UDP port, `listen`, that every PeerConnection shares, told to peers as `publ
 1:1 NAT; the STUN and TURN servers peers are told of, `ice_servers`, and fit's own `turn` as
 `turn_urls`, with credentials made from its `secret`; and the limits: PeerConnections, streams,
 viewers a stream, a publisher's bitrate, and timeouts. A reload keeps the sessions unless it
-changes `listen` or `public_ips`. See [WebRTC](../webrtc.md) and
+changes `listen` or `public_ips`.
+
+`proxy` puts other media servers behind fit, for the [`webrtc_proxy`](#webrtc_proxy) handler: one
+UDP port, `listen`, told to peers as `public_ips`, where each peer's first STUN request names the
+session, by its ufrag, whose media server it is relayed to from a socket of its own; the limits on
+sessions and relays, and how long an idle relay and a session with none are kept. A reload keeps
+the sessions unless it changes `listen`. See [WebRTC](../webrtc.md) and
 [decision 029](../decisions/029-webrtc.md).
 
 In a .conf file:
@@ -2046,6 +2052,12 @@ webrtc {
 		max_streams 16
 		max_viewers 100
 		max_bitrate 4000000
+	}
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+		max_sessions 4096
+		idle_timeout 30s
 	}
 }
 ```
@@ -2078,6 +2090,12 @@ webrtc:
     max_streams: 16
     max_viewers: 100
     max_bitrate: 4000000
+  proxy:
+    listen: :8190
+    public_ips:
+      - 203.0.113.5
+    max_sessions: 4096
+    idle_timeout: 30s
 ```
 
 In JSON:
@@ -2103,6 +2121,12 @@ In JSON:
       "max_streams": 16,
       "max_viewers": 100,
       "max_bitrate": 4000000
+    },
+    "proxy": {
+      "listen": ":8190",
+      "public_ips": ["203.0.113.5"],
+      "max_sessions": 4096,
+      "idle_timeout": "30s"
     }
   }
 }
@@ -2116,6 +2140,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `turn` | [object](#config-turnserver) |  | Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out. |
 | `media` | [object](#config-webrtcmedia) |  | Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out. |
+| `proxy` | [object](#config-webrtcproxy) |  | Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which relays each peer to the media server that answered it, found by the ICE ufrag of the peer's first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left out. |
 
 <a id="config-turnserver"></a>
 
@@ -2181,6 +2206,19 @@ In JSON:
 | `urls` | list of string |  | Required. The server's stun:, stuns:, turn: or turns: URLs. |
 | `username` | string |  | A TURN server's username. |
 | `credential` | string |  | A TURN server's password. |
+
+<a id="config-webrtcproxy"></a>
+
+### `webrtc.proxy`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The UDP address peers reach the media servers behind fit at, one port for them all, as in ":8190": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session. |
+| `public_ips` | list of string |  | The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer. |
+| `max_sessions` | integer, 0 or more | `4096` | The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0. |
+| `max_relays` | integer, 0 or more | `4096` | The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0. |
+| `session_timeout` | duration | `"30s"` | How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out. |
+| `idle_timeout` | duration | `"30s"` | How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out. |
 
 <a id="providers"></a>
 
@@ -2700,6 +2738,66 @@ In JSON:
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
 | `check_interval` | duration | `"1s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out. |
+
+<a id="http-handlers-webrtc_proxy"></a>
+
+### `webrtc_proxy`
+
+Proxies WHIP and WHEP to the media servers of an upstream, and their peers' media through webrtc.proxy's one UDP port.
+
+Proxies WHIP (RFC 9725) and WHEP (draft-ietf-wish-whep) to the media servers of `upstream`, fit's
+own [`whip`](#whip) and [`whep`](#whep) or any other, with their peers' media through one UDP port,
+[`webrtc.proxy`](#webrtc). A POST of an offer goes, without its candidates, to the media server the
+upstream picks; its `201` answer comes back with fit's port as its only candidate, its `Location`
+a URL of fit's, and fit relays each peer to that media server by the ICE ufrag of its first STUN
+request. DELETE, PATCH and the rest of a session's requests go to the media server that answered
+it; a PATCH that only trickles candidates is answered `204` by fit. A request or answer past
+`max_sdp_bytes` is refused, and a media server that does not answer within `timeout` is answered
+`504`. `media_addrs` names the address fit relays to, for a media server whose answer's
+candidates fit cannot reach. See [WebRTC](../webrtc.md#proxying-media-servers).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /whip/* /whep/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs { 10.0.0.2:8080 10.0.0.2 }
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whip/*
+    - /whep/*
+handler:
+  module: webrtc_proxy
+  params:
+    upstream: media-servers
+    media_addrs:
+      10.0.0.2:8080: 10.0.0.2
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whip/*", "/whep/*"]},
+  "handler": {"module": "webrtc_proxy", "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.2:8080": "10.0.0.2"}}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upstream` | string |  | Required. The upstream of the media servers, picked by its load balancing for each offer: fit's own whip and whep, or any WHIP or WHEP server. Its health checks and timeouts apply. |
+| `media_addrs` | object of string |  | The address fit relays a media server's peers to, by the media server's address in the upstream, as {"10.0.0.2:8080": "10.0.0.2:8189"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first. |
+| `timeout` | duration | `"10s"` | The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out. |
+| `max_sdp_bytes` | integer, 0 or more | `32768` | The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0. |
 
 <a id="http-handlers-whep"></a>
 
