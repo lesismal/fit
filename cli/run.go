@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -67,10 +68,28 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	paths := cfgPaths.orDefault()
 	cfgName := strings.Join(paths, ", ")
 	set, srcs, err := loadSet(paths)
+	// With admin.store, the config runs from the store, and the files
+	// give admin, and the store's first content when it has none.
+	var boot *storeBoot
+	if err == nil {
+		var std []byte
+		if std, err = config.Standardize(set.JSON); err == nil {
+			boot, err = openStore(std)
+		}
+	}
+	mapErrors := set.MapErrors
 	var c *config.Config
 	if err == nil {
-		c, err = config.Load(set.JSON)
-		err = set.MapErrors(err)
+		if boot != nil && !boot.seeded {
+			cfgName, mapErrors = boot.st.Path(), func(err error) error { return err }
+			c, err = config.Load(boot.full())
+		} else {
+			c, err = config.Load(set.JSON)
+			err = mapErrors(err)
+		}
+	}
+	if err == nil && boot != nil && *watch {
+		err = errors.New("-watch watches config files, but with admin.store the config is in the store; send SIGHUP to read the store again")
 	}
 	if err != nil {
 		printConfigError(stderr, "fit run", cfgName, err)
@@ -91,6 +110,19 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	stdout, stderr = logWriter{server, logs.LevelInfo}, logWriter{server, logs.LevelError}
 	printWarnings(warnWriter(stderr), set)
 	data := set.JSON
+	if boot != nil {
+		data = boot.base
+		if boot.seeded {
+			if err := boot.st.Write(boot.base); err != nil {
+				fmt.Fprintf(stderr, "fit run: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "fit: the config of %s is kept in the store %s from now on\n", strings.Join(paths, ", "), boot.st.Path())
+		} else if len(boot.ignored) > 0 {
+			slices.Sort(boot.ignored)
+			fmt.Fprintf(warnWriter(stderr), "fit: %s sets %s beside admin; left out, since the config runs from the store %s\n", strings.Join(paths, ", "), strings.Join(boot.ignored, ", "), boot.st.Path())
+		}
+	}
 	// Upstream connections are dialed through an engine of their own, so
 	// that a proxied response waiting for a slow client waits on that
 	// engine's pool, not the listeners'. It stops after the graph is
@@ -122,7 +154,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	observe.Version, _ = versions()
 	if telemetry != nil && telemetry.Traces != nil {
 		if env.Tracer, err = observe.NewTracer(telemetry, telemetryLog); err != nil {
-			printConfigError(stderr, "fit run", cfgName, set.MapErrors(telemetry.At.Errorf("%v", err)))
+			printConfigError(stderr, "fit run", cfgName, mapErrors(telemetry.At.Errorf("%v", err)))
 			return 1
 		}
 		// Closed after the graph, so that every span finished is exported.
@@ -135,17 +167,23 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	// The certificate manager is there whether or not the config lists
 	// names for it, so that a reload may add some; with none it only waits.
 	if env.ACME, err = tlsmgr.NewACME(c.ACME, nil, tlsLog); err != nil {
-		printConfigError(stderr, "fit run", cfgName, set.MapErrors(err))
+		printConfigError(stderr, "fit run", cfgName, mapErrors(err))
 		return 1
 	}
 	defer env.ACME.Close()
 	env.ACME.UseOCSP(env.OCSP)
 	g, err := fitruntime.Compile(c, env)
 	if err != nil {
-		printConfigError(stderr, "fit run", cfgName, set.MapErrors(err))
+		printConfigError(stderr, "fit run", cfgName, mapErrors(err))
 		return 1
 	}
-	printDeprecated(warnWriter(stderr), set, c.Warnings())
+	if boot != nil && !boot.seeded {
+		if ws := c.Warnings(); len(ws) > 0 {
+			printConfigError(warnWriter(stderr), "fit", cfgName, ws)
+		}
+	} else {
+		printDeprecated(warnWriter(stderr), set, c.Warnings())
+	}
 	rt := new(fitruntime.Runtime)
 	rt.Swap(g)
 	defer rt.Close()
@@ -165,7 +203,14 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	if c.Admin != nil {
 		keep = c.Admin.HistoryLen()
 	}
-	configs := admin.NewConfigs(rt, s, env, c, data, admin.SourceFile, keep)
+	source := admin.SourceFile
+	if boot != nil {
+		source = admin.SourceStore
+	}
+	configs := admin.NewConfigs(rt, s, env, c, data, source, keep)
+	if boot != nil {
+		configs.UseStore(boot.admin, boot.st.Write)
+	}
 	var as *admin.Server
 	if c.Admin != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
@@ -183,7 +228,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	if telemetry != nil && telemetry.Metrics != nil {
 		exporter, err := observe.NewMetricsExporter(telemetry, configs.WriteMetricsTo, telemetryLog)
 		if err != nil {
-			printConfigError(stderr, "fit run", cfgName, set.MapErrors(telemetry.At.Errorf("%v", err)))
+			printConfigError(stderr, "fit run", cfgName, mapErrors(telemetry.At.Errorf("%v", err)))
 			if as != nil {
 				_ = as.Shutdown(context.Background())
 			}
@@ -267,7 +312,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		case <-ctx.Done():
 			running = false
 		case <-reload:
-			reloadConfig(paths, configs, watcher, stdout, stderr)
+			if boot != nil {
+				reloadStore(boot, configs, stdout, stderr)
+			} else {
+				reloadConfig(paths, configs, watcher, stdout, stderr)
+			}
 		}
 	}
 	stopSignals()
@@ -325,6 +374,24 @@ func reloadConfig(paths []string, configs *admin.Configs, watcher *file.Watcher,
 		watcher.Applied(watchedFiles(srcs))
 	}
 	applyFiles(name, srcs, configs, stdout, stderr)
+}
+
+// reloadStore reads the store again and applies what it holds. On any
+// failure the running config stays, and the error goes to stderr.
+func reloadStore(b *storeBoot, configs *admin.Configs, stdout, stderr io.Writer) {
+	fmt.Fprintf(stdout, "fit: reloading the store %s\n", b.st.Path())
+	data, err := b.st.Read()
+	var r admin.Result
+	if err == nil {
+		r, err = configs.Apply(data, admin.SourceStore)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "fit: reload failed; the running config stays")
+		printConfigError(stderr, "fit run", b.st.Path(), err)
+		return
+	}
+	printApplied(stdout, stderr, r)
+	fmt.Fprintf(stdout, "fit: reloaded the store %s (config version %d)\n", b.st.Path(), r.Version)
 }
 
 // applyFiles applies the config srcs hold, each file adapted by its

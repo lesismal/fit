@@ -26,7 +26,8 @@ Commands:
 	version    print the versions of fit, fib and Go
 	hash-password
 	           print the bcrypt hash of the password read from standard input,
-	           for basic_auth
+	           for basic_auth and the console's users
+	store      export or import the config kept encrypted in admin.store
 	help       print this help
 `
 
@@ -57,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVersion(args[1:], stdout, stderr)
 	case "hash-password":
 		return runHashPassword(args[1:], stdout, stderr)
+	case "store":
+		return runStore(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

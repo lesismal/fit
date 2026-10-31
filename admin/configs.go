@@ -71,6 +71,13 @@ type Configs struct {
 	// reloads and failures count the configs Update tried to apply, from
 	// loading on, and those that failed.
 	reloads, failures atomic.Uint64
+
+	// With a store, admin is the bootstrap file's, put into every config
+	// as it loads, save writes a base config to the store, and saved is
+	// the hash of what was written last; all under mu.
+	admin []byte
+	save  func([]byte) error
+	saved [sha256.Size]byte
 }
 
 // Version is a config that was applied.
@@ -139,6 +146,18 @@ func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, f
 	return cs
 }
 
+// UseStore keeps the base configs applied from here on with save, which
+// writes one to the store, and puts admin, the bootstrap file's admin as
+// JSON, into every config as it loads. The base configs are then without
+// admin, and one that sets it is refused. The running config is taken to be
+// saved already.
+func (cs *Configs) UseStore(admin []byte, save func(data []byte) error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.admin, cs.save = admin, save
+	cs.saved = sha256.Sum256(cs.history[len(cs.history)-1].data)
+}
+
 func (cs *Configs) record(version uint64, data []byte, source, baseSource string, m *provider.Merged) {
 	sum := sha256.Sum256(data)
 	cs.history = append(cs.history, &Version{Number: version, Applied: time.Now(), Source: source, Bytes: len(data),
@@ -191,6 +210,10 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 		cs.failures.Add(1)
 		return Result{}, config.Errors{err.(*config.Error)}
 	}
+	if cs.admin != nil && hasAdmin(data) {
+		cs.failures.Add(1)
+		return Result{}, errAdminInStore
+	}
 	cs.reloads.Add(1)
 	r, c, m, err := cs.apply(data, baseSource, cs.parts, source)
 	if err != nil {
@@ -199,6 +222,13 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	}
 	cs.record(r.Version, data, source, baseSource, m)
 	r.ETag = cs.history[len(cs.history)-1].ETag
+	if sum := sha256.Sum256(data); cs.save != nil && sum != cs.saved {
+		if err := cs.save(data); err != nil {
+			r.Warnings = append(r.Warnings, fmt.Sprintf("the config runs, but was not saved to the store: %v", err))
+		} else {
+			cs.saved = sum
+		}
+	}
 	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
 		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
 	}
@@ -246,7 +276,11 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 		// With nothing to merge, a base config that cannot take parts
 		// is loaded as it is, for its own errors.
 	}
-	c, err := config.Load(m.Data)
+	loaded := m.Data
+	if cs.admin != nil {
+		loaded = WithAdmin(m.Data, cs.admin)
+	}
+	c, err := config.Load(loaded)
 	if err != nil {
 		return Result{}, nil, nil, m.Errors(err)
 	}

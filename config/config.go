@@ -208,12 +208,14 @@ const AdminUnixPrefix = "unix/"
 
 // Admin is where the Admin API listens, and who may use it.
 type Admin struct {
-	Address          string `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
-	TokenFile        string `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
-	History          int    `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
-	MaxConfigBytes   int64  `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
-	MaxConns         int    `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
-	DisableDashboard bool   `json:"disable_dashboard,omitempty" doc:"Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false."`
+	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	TokenFile        string   `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
+	History          int      `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
+	MaxConfigBytes   int64    `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
+	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
+	DisableDashboard bool     `json:"disable_dashboard,omitempty" doc:"Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false."`
+	Store            *Store   `json:"store,omitempty" doc:"Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file."`
+	Console          *Console `json:"console,omitempty" doc:"Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -235,6 +237,69 @@ func (a *Admin) Network() (network, address string) {
 	}
 	return "tcp", addr
 }
+
+// Store is where the config is kept encrypted, and the password it is
+// encrypted with: exactly one of Password, PasswordFile and PasswordEnv.
+type Store struct {
+	Path         string `json:"path" fit:"required" doc:"The store's file, made 0600 when it is written. fit stops at start if it exists and does not open with the password."`
+	Password     string `json:"password,omitempty" doc:"The password the store is encrypted with. Written here, it protects a store copied away from this file, not one read beside it; password_file or password_env keep it out of the file."`
+	PasswordFile string `json:"password_file,omitempty" doc:"A file holding the password, its surrounding spaces trimmed."`
+	PasswordEnv  string `json:"password_env,omitempty" doc:"An environment variable holding the password."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// The defaults of Console.
+const (
+	DefaultConsoleAddress         = "127.0.0.1:2020"
+	DefaultConsoleSessionTimeout  = Duration(30 * time.Minute)
+	DefaultConsoleSessionLifetime = Duration(12 * time.Hour)
+	DefaultConsoleMaxSessions     = 64
+	DefaultConsoleMaxConns        = 32
+)
+
+// Console is where the console listens, and who may log in to it.
+type Console struct {
+	Address         string        `json:"address,omitempty" default:"\"127.0.0.1:2020\"" doc:"The host and port the console listens on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020 when left out."`
+	CertFile        string        `json:"cert_file,omitempty" doc:"A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS."`
+	KeyFile         string        `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
+	Users           []ConsoleUser `json:"users" fit:"required" doc:"Who may log in: at least one user."`
+	SessionTimeout  Duration      `json:"session_timeout,omitempty" default:"\"30m\"" doc:"How long a login lasts without a request. 30m when left out."`
+	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`
+	MaxSessions     int           `json:"max_sessions,omitempty" min:"0" default:"64" doc:"The most logins kept at once; one more ends the oldest. 64 when left out or 0."`
+	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the console keeps open at once; one past it is closed as soon as it is accepted. 32 when left out or 0."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// ConsoleUser is a user of the console.
+type ConsoleUser struct {
+	Username     string `json:"username" fit:"required" doc:"The user's name."`
+	PasswordHash string `json:"password_hash" fit:"required" doc:"The bcrypt hash of the user's password, as fit hash-password makes it."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// Addr returns the address, its default when left out.
+func (c *Console) Addr() string {
+	if c.Address == "" {
+		return DefaultConsoleAddress
+	}
+	return c.Address
+}
+
+// Idle, Lifetime, Sessions and Conns return the limits, their defaults when
+// left out.
+func (c *Console) Idle() time.Duration {
+	return time.Duration(orDefault(int64(c.SessionTimeout), int64(DefaultConsoleSessionTimeout)))
+}
+func (c *Console) Lifetime() time.Duration {
+	return time.Duration(orDefault(int64(c.SessionLifetime), int64(DefaultConsoleSessionLifetime)))
+}
+func (c *Console) Sessions() int {
+	return int(orDefault(int64(c.MaxSessions), DefaultConsoleMaxSessions))
+}
+func (c *Console) Conns() int { return int(orDefault(int64(c.MaxConns), DefaultConsoleMaxConns)) }
 
 // HistoryLen, ConfigBytes and Conns return the limits, their defaults when
 // left out.

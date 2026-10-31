@@ -250,6 +250,8 @@ func (c *Config) Validate() Errors {
 		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && a.TokenFile == "" {
 			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file", address)
 		}
+		checkStore(a.Store, add)
+		checkConsole(a.Console, add)
 	}
 
 	if a := c.ACME; a != nil {
@@ -577,4 +579,55 @@ func checkHost(host string) string {
 		}
 	}
 	return ""
+}
+
+// checkStore checks admin.store: one way to the password, and only one.
+func checkStore(st *Store, add func(Value, string, ...any)) {
+	if st == nil {
+		return
+	}
+	if st.Path == "" {
+		add(st.At.Field("path"), "the path is empty")
+	}
+	n := 0
+	for _, set := range []bool{st.Password != "", st.PasswordFile != "", st.PasswordEnv != ""} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		add(st.At, "set exactly one of password, password_file and password_env")
+	}
+}
+
+// checkConsole checks admin.console: its address, TLS off a loopback
+// address, and its users.
+func checkConsole(c *Console, add func(Value, string, ...any)) {
+	if c == nil {
+		return
+	}
+	address := c.Addr()
+	if _, msg := checkAddress(address); msg != "" {
+		add(c.At.Field("address"), "%s", msg)
+	} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && (c.CertFile == "" || c.KeyFile == "") {
+		add(c.At.Field("address"), "%q is not a loopback address: set cert_file and key_file, so that passwords are not sent in the clear", address)
+	}
+	if (c.CertFile == "") != (c.KeyFile == "") {
+		add(c.At, "cert_file and key_file go together")
+	}
+	if len(c.Users) == 0 {
+		add(c.At.Field("users"), "list at least one user")
+	}
+	for i, u := range c.Users {
+		at := c.At.Field("users").Index(i)
+		switch {
+		case u.Username == "":
+			add(at.Field("username"), "the user name is empty")
+		case slices.IndexFunc(c.Users, func(o ConsoleUser) bool { return o.Username == u.Username }) < i:
+			add(at.Field("username"), "%q is listed twice", u.Username)
+		}
+		if !strings.HasPrefix(u.PasswordHash, "$2") {
+			add(at.Field("password_hash"), "not a bcrypt hash: make one with fit hash-password")
+		}
+	}
 }
