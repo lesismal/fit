@@ -235,7 +235,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I107 | agent 的角色，来自 agenthub，全部基于 fib：`agent/hub`、`agent/node`、`agent/client` | I105 | done |
 | **WebRTC** | | | |
 | I108 | 决定 029：fit 的 WebRTC 基于 fib；fib `80c7f76`；按实际实现修正 A49；A55–A58 | I85 | done |
-| I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | todo |
+| I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | done |
 | I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | todo |
 
 ## M0 基础

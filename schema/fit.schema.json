@@ -1239,6 +1239,30 @@
       },
       "type": "object"
     },
+    "config.ICEServer": {
+      "additionalProperties": false,
+      "properties": {
+        "credential": {
+          "description": "A TURN server's password.",
+          "type": "string"
+        },
+        "urls": {
+          "description": "The server's stun:, stuns:, turn: or turns: URLs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "A TURN server's username.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
     "config.KubernetesIngress": {
       "additionalProperties": false,
       "properties": {
@@ -2769,11 +2793,110 @@
     "config.WebRTC": {
       "additionalProperties": false,
       "properties": {
+        "media": {
+          "$ref": "#/$defs/config.WebRTCMedia",
+          "description": "Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out."
+        },
         "turn": {
           "$ref": "#/$defs/config.TURNServer",
           "description": "Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."
         }
       },
+      "type": "object"
+    },
+    "config.WebRTCMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "codecs": {
+          "description": "The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "connect_timeout": {
+          "default": "30s",
+          "description": "How long a session may take from its answer to a connected PeerConnection before it is ended. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "ice_servers": {
+          "description": "STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address.",
+          "items": {
+            "$ref": "#/$defs/config.ICEServer"
+          },
+          "type": "array"
+        },
+        "ice_timeout": {
+          "default": "30s",
+          "description": "How long a connected peer may be silent, its media and ICE consent checks alike, before its session is ended: a publisher's ends its stream and its viewers. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_frame_interval": {
+          "default": "500ms",
+          "description": "The least time between two key frame requests (PLI) passed to a publisher, for the viewers that join or lose packets: the rest are dropped. 500ms when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in \":8189\". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions.",
+          "type": "string"
+        },
+        "max_bitrate": {
+          "default": 8000000,
+          "description": "The most bits a second a publisher may send: told to it as REMB feedback, which browsers keep under, and enforced with two seconds of burst, past which its packets are dropped. 8000000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peer_connections": {
+          "default": 1024,
+          "description": "The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sdp_bytes": {
+          "default": 32768,
+          "description": "The largest offer taken; a larger one is answered 413. 32 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_streams": {
+          "default": 64,
+          "description": "The most streams published at once; one more publisher is answered 503. 64 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_viewers": {
+          "default": 256,
+          "description": "The most viewers of one stream; one more is answered 503. Each packet a publisher sends is sent again to every viewer, on the worker that received it. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ips": {
+          "description": "The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "turn_credential_ttl": {
+          "default": "1h",
+          "description": "How long the TURN credentials an answer carries are good for. 1h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "turn_urls": {
+          "description": "URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in \"turn:turn.example.com:3478\": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "listen"
+      ],
       "type": "object"
     },
     "headers.Ops": {
@@ -2888,6 +3011,38 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "whep"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.whep"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "whip"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.whip"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -2898,7 +3053,9 @@
             "forward_proxy",
             "proxy",
             "respond",
-            "static"
+            "static",
+            "whep",
+            "whip"
           ],
           "type": "string"
         },
@@ -3208,6 +3365,26 @@
       "required": [
         "root"
       ],
+      "type": "object"
+    },
+    "http.handlers.whep": {
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.whip": {
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "http.middleware": {
@@ -4222,7 +4399,7 @@
     },
     "webrtc": {
       "$ref": "#/$defs/config.WebRTC",
-      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server. None when left out."
+      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server, and the media port of the whip and whep handlers. None when left out."
     }
   },
   "title": "fit config, schema version 1",

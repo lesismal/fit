@@ -245,7 +245,7 @@ Status: `todo`, `doing` or `done`.
 | I107 | The agent's roles, from agenthub, on fib throughout: `agent/hub`, `agent/node`, `agent/client` | I105 | done |
 | **WebRTC** | | | |
 | I108 | Decision 029: fit's WebRTC on fib's; fib `80c7f76`; A49 as built; A55–A58 | I85 | done |
-| I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | todo |
+| I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | done |
 | I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | todo |
 
 ## M0, foundations

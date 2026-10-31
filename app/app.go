@@ -1,6 +1,6 @@
 // Package app runs the roles of the apps fit carries beside its gateway: the
 // agent's hub, node and client, the tunnel's server, node and client, and
-// WebRTC's TURN server.
+// WebRTC's TURN server and media server.
 // Each role is a member of fit's config, agent.hub or tunnel.server, and runs
 // while the config sets it, on the listeners' fib engine, which every role
 // in the process shares with the gateway.
@@ -125,6 +125,8 @@ func set(member any) bool {
 		return m != nil
 	case *config.TURNServer:
 		return m != nil
+	case *config.WebRTC:
+		return m != nil
 	}
 	return true
 }
@@ -196,6 +198,9 @@ func members(c *config.Config) []memberAt {
 	}
 	if w := c.WebRTC; w != nil && w.TURN != nil {
 		ms = append(ms, memberAt{"webrtc.turn", w.TURN.At})
+	}
+	if w := c.WebRTC; w != nil && w.Media != nil {
+		ms = append(ms, memberAt{"webrtc.media", w.Media.At})
 	}
 	return ms
 }

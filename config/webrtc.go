@@ -10,9 +10,11 @@ import (
 )
 
 // WebRTC is what fit runs for WebRTC beside the gateway, on its engine: the
-// TURN server, a role of package app. See docs/decisions/029-webrtc.md.
+// TURN server and the media port of WHIP and WHEP, roles of package app.
+// See docs/decisions/029-webrtc.md.
 type WebRTC struct {
-	TURN *TURNServer `json:"turn,omitempty" doc:"Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."`
+	TURN  *TURNServer  `json:"turn,omitempty" doc:"Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."`
+	Media *WebRTCMedia `json:"media,omitempty" doc:"Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -24,6 +26,103 @@ const (
 	DefaultTURNUserBandwidth         = 2 << 20
 	DefaultTURNLifetime              = 10 * time.Minute
 )
+
+// The defaults of WebRTCMedia.
+const (
+	DefaultMediaMaxPeerConnections = 1024
+	DefaultMediaMaxStreams         = 64
+	DefaultMediaMaxViewers         = 256
+	DefaultMediaMaxBitrate         = 8_000_000
+	DefaultMediaMaxSDPBytes        = 32 << 10
+	DefaultMediaConnectTimeout     = 30 * time.Second
+	DefaultMediaICETimeout         = 30 * time.Second
+	DefaultMediaKeyFrameInterval   = 500 * time.Millisecond
+	DefaultMediaTURNCredentialTTL  = time.Hour
+)
+
+// MediaCodecs are the codecs webrtc.media's codecs may name: fib's default
+// codecs, by encoding name.
+var MediaCodecs = []string{"opus", "VP8", "VP9", "H264", "AV1"}
+
+// WebRTCMedia is the media side of fit's WHIP and WHEP: one UDP port that
+// every PeerConnection shares, an ICE lite agent's host candidates on it,
+// the ICE servers peers are told of, and the limits.
+type WebRTCMedia struct {
+	Listen             string      `json:"listen" fit:"required" doc:"The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in \":8189\". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions."`
+	PublicIPs          []string    `json:"public_ips,omitempty" doc:"The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again."`
+	ICEServers         []ICEServer `json:"ice_servers,omitempty" doc:"STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address."`
+	TURNURLs           []string    `json:"turn_urls,omitempty" doc:"URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in \"turn:turn.example.com:3478\": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set."`
+	TURNCredentialTTL  Duration    `json:"turn_credential_ttl,omitempty" default:"\"1h\"" doc:"How long the TURN credentials an answer carries are good for. 1h when left out."`
+	Codecs             []string    `json:"codecs,omitempty" doc:"The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept."`
+	MaxPeerConnections int         `json:"max_peer_connections,omitempty" min:"0" default:"1024" doc:"The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503. 1024 when left out or 0."`
+	MaxStreams         int         `json:"max_streams,omitempty" min:"0" default:"64" doc:"The most streams published at once; one more publisher is answered 503. 64 when left out or 0."`
+	MaxViewers         int         `json:"max_viewers,omitempty" min:"0" default:"256" doc:"The most viewers of one stream; one more is answered 503. Each packet a publisher sends is sent again to every viewer, on the worker that received it. 256 when left out or 0."`
+	MaxBitrate         int64       `json:"max_bitrate,omitempty" min:"0" default:"8000000" doc:"The most bits a second a publisher may send: told to it as REMB feedback, which browsers keep under, and enforced with two seconds of burst, past which its packets are dropped. 8000000 when left out or 0."`
+	MaxSDPBytes        int         `json:"max_sdp_bytes,omitempty" min:"0" default:"32768" doc:"The largest offer taken; a larger one is answered 413. 32 KiB when left out or 0."`
+	ConnectTimeout     Duration    `json:"connect_timeout,omitempty" default:"\"30s\"" doc:"How long a session may take from its answer to a connected PeerConnection before it is ended. 30s when left out."`
+	ICETimeout         Duration    `json:"ice_timeout,omitempty" default:"\"30s\"" doc:"How long a connected peer may be silent, its media and ICE consent checks alike, before its session is ended: a publisher's ends its stream and its viewers. 30s when left out."`
+	KeyFrameInterval   Duration    `json:"key_frame_interval,omitempty" default:"\"500ms\"" doc:"The least time between two key frame requests (PLI) passed to a publisher, for the viewers that join or lose packets: the rest are dropped. 500ms when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// ICEServer is a STUN or TURN server, as RTCIceServer has it.
+type ICEServer struct {
+	URLs       []string `json:"urls" fit:"required" doc:"The server's stun:, stuns:, turn: or turns: URLs."`
+	Username   string   `json:"username,omitempty" doc:"A TURN server's username."`
+	Credential string   `json:"credential,omitempty" doc:"A TURN server's password."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// MaxPCs returns max_peer_connections, or its default.
+func (m *WebRTCMedia) MaxPCs() int {
+	return int(orDefault(int64(m.MaxPeerConnections), DefaultMediaMaxPeerConnections))
+}
+
+// MaxStreamCount returns max_streams, or its default.
+func (m *WebRTCMedia) MaxStreamCount() int {
+	return int(orDefault(int64(m.MaxStreams), DefaultMediaMaxStreams))
+}
+
+// MaxViewerCount returns max_viewers, or its default.
+func (m *WebRTCMedia) MaxViewerCount() int {
+	return int(orDefault(int64(m.MaxViewers), DefaultMediaMaxViewers))
+}
+
+// Bitrate returns max_bitrate, or its default.
+func (m *WebRTCMedia) Bitrate() int64 { return orDefault(m.MaxBitrate, DefaultMediaMaxBitrate) }
+
+// SDPBytes returns max_sdp_bytes, or its default.
+func (m *WebRTCMedia) SDPBytes() int {
+	return int(orDefault(int64(m.MaxSDPBytes), DefaultMediaMaxSDPBytes))
+}
+
+// durationOr returns d, or def when d is not positive.
+func durationOr(d Duration, def time.Duration) time.Duration {
+	if d.Std() <= 0 {
+		return def
+	}
+	return d.Std()
+}
+
+// Connect returns connect_timeout, or its default.
+func (m *WebRTCMedia) Connect() time.Duration {
+	return durationOr(m.ConnectTimeout, DefaultMediaConnectTimeout)
+}
+
+// ICE returns ice_timeout, or its default.
+func (m *WebRTCMedia) ICE() time.Duration { return durationOr(m.ICETimeout, DefaultMediaICETimeout) }
+
+// KeyFrames returns key_frame_interval, or its default.
+func (m *WebRTCMedia) KeyFrames() time.Duration {
+	return durationOr(m.KeyFrameInterval, DefaultMediaKeyFrameInterval)
+}
+
+// CredentialTTL returns turn_credential_ttl, or its default.
+func (m *WebRTCMedia) CredentialTTL() time.Duration {
+	return durationOr(m.TURNCredentialTTL, DefaultMediaTURNCredentialTTL)
+}
 
 // TURNServer is a TURN server: where it listens, whom it lets in, where it
 // relays from, and its limits.
@@ -95,7 +194,11 @@ func ParsePeerPrefix(s string) (netip.Prefix, bool) {
 }
 
 func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
-	if c.WebRTC == nil || c.WebRTC.TURN == nil {
+	if c.WebRTC == nil {
+		return
+	}
+	c.checkMedia(add)
+	if c.WebRTC.TURN == nil {
 		return
 	}
 	t := c.WebRTC.TURN
@@ -171,4 +274,67 @@ func (c *Config) checkWebRTC(add func(Value, string, ...any)) {
 			}
 		}
 	}
+}
+
+func (c *Config) checkMedia(add func(Value, string, ...any)) {
+	m := c.WebRTC.Media
+	if m == nil {
+		return
+	}
+	if _, msg := checkAddress(m.Listen); msg != "" {
+		add(m.At.Field("listen"), "%s", msg)
+	}
+	for i, p := range m.PublicIPs {
+		a, err := netip.ParseAddr(p)
+		switch {
+		case err != nil || a.Zone() != "":
+			add(m.At.Field("public_ips").Index(i), "%q is not an IP address", p)
+		case a.IsUnspecified():
+			add(m.At.Field("public_ips").Index(i), "%q is a wildcard", p)
+		}
+	}
+	for i, s := range m.ICEServers {
+		at := m.At.Field("ice_servers").Index(i)
+		if len(s.URLs) == 0 {
+			add(at.Field("urls"), "at least one URL is needed")
+		}
+		for j, u := range s.URLs {
+			if !iceURL(u) {
+				add(at.Field("urls").Index(j), "%q is not a stun:, stuns:, turn: or turns: URL", u)
+			}
+		}
+		if !linkSafe(s.Username) || !linkSafe(s.Credential) {
+			add(at, "the username and credential may not hold a double quote, a backslash or a control character")
+		}
+	}
+	for i, u := range m.TURNURLs {
+		if !iceURL(u) || !strings.HasPrefix(strings.ToLower(u), "turn") {
+			add(m.At.Field("turn_urls").Index(i), "%q is not a turn: or turns: URL", u)
+		}
+	}
+	if len(m.TURNURLs) > 0 && (c.WebRTC.TURN == nil || c.WebRTC.TURN.Secret == "") {
+		add(m.At.Field("turn_urls"), "fit makes their credentials from webrtc.turn's secret: set webrtc.turn with a secret")
+	}
+	for i, name := range m.Codecs {
+		if !slices.ContainsFunc(MediaCodecs, func(c string) bool { return strings.EqualFold(c, name) }) {
+			add(m.At.Field("codecs").Index(i), "%q is not one of %s", name, strings.Join(MediaCodecs, ", "))
+		}
+	}
+}
+
+// iceURL reports whether u is a stun:, stuns:, turn: or turns: URL with a
+// host, as RFC 7064 and RFC 7065 write them, which a Link header can carry.
+func iceURL(u string) bool {
+	scheme, rest, ok := strings.Cut(u, ":")
+	switch strings.ToLower(scheme) {
+	case "stun", "stuns", "turn", "turns":
+	default:
+		return false
+	}
+	return ok && rest != "" && !strings.HasPrefix(rest, "/") && !strings.ContainsAny(rest, "<> \t\r\n\"")
+}
+
+// linkSafe reports whether s can be a quoted parameter of a Link header.
+func linkSafe(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 || r == 0x7f })
 }

@@ -5,7 +5,14 @@ over UDP on the `listen` addresses, with fixed `users`, coturn's time-limited cr
 `public_ip` behind a 1:1 NAT, in `port_min`-`port_max` when set. Peers on loopback, private and
 other internal addresses are refused unless `allowed_peers` lists them. Users, the secret, the
 peer lists and `user_bandwidth` change on reload with the allocations kept; a change of the rest
-starts the server again. See [WebRTC](../webrtc.md) and
+starts the server again.
+
+`media` makes fit a media server, an SFU, for the [`whip`](#whip) and [`whep`](#whep) handlers:
+one UDP port, `listen`, that every PeerConnection shares, told to peers as `public_ips` behind a
+1:1 NAT; the STUN and TURN servers peers are told of, `ice_servers`, and fit's own `turn` as
+`turn_urls`, with credentials made from its `secret`; and the limits: PeerConnections, streams,
+viewers a stream, a publisher's bitrate, and timeouts. A reload keeps the sessions unless it
+changes `listen` or `public_ips`. See [WebRTC](../webrtc.md) and
 [decision 029](../decisions/029-webrtc.md).
 
 ```json
@@ -20,6 +27,15 @@ starts the server again. See [WebRTC](../webrtc.md) and
       "public_ip": "203.0.113.5",
       "port_min": 49152,
       "port_max": 49999
+    },
+    "media": {
+      "listen": ":8189",
+      "public_ips": ["203.0.113.5"],
+      "ice_servers": [{"urls": ["stun:stun.example.com:3478"]}],
+      "turn_urls": ["turn:203.0.113.5:3478"],
+      "max_streams": 16,
+      "max_viewers": 100,
+      "max_bitrate": 4000000
     }
   }
 }

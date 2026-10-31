@@ -1,6 +1,6 @@
 // Package standard imports every role of the apps fit ships with, the
-// agent's, the tunnel's and WebRTC's TURN server, so that importing it
-// registers them all.
+// agent's, the tunnel's and WebRTC's TURN and media servers, so that
+// importing it registers them all.
 package standard
 
 import (
@@ -13,5 +13,6 @@ import (
 	_ "github.com/lesismal/fit/tunnel/client"
 	_ "github.com/lesismal/fit/tunnel/node"
 	_ "github.com/lesismal/fit/tunnel/server"
+	_ "github.com/lesismal/fit/webrtc/media"
 	_ "github.com/lesismal/fit/webrtc/turn"
 )

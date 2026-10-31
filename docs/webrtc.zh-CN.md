@@ -2,9 +2,9 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
-fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）。
-目前运行的是 TURN 服务器；以 fit 为媒体服务器、以及作为其他媒体服务器前端的 WHIP 和 WHEP 已列入计划
-（[开发计划](dev-plan.zh-CN.md#webrtc) 中的 I109 和 I110）。
+fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）：
+TURN 服务器，以及以 fit 为媒体服务器的 WHIP 和 WHEP。fit 作为其他媒体服务器的前端已列入计划
+（[开发计划](dev-plan.zh-CN.md#webrtc) 中的 I110）。
 
 ## TURN 服务器
 
@@ -115,3 +115,143 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_turn_allocations`�
 - allocation 的 permission 和 channel 上限、带端口的对端规则，以及用于日志和指标的事件
   （[A57](fib-api-requests.zh-CN.md#a57turn-服务器的限制与钩子)）。
 - 不重启就修改生存期和配额，以及排空 allocation 的重启（[A58](fib-api-requests.zh-CN.md#a58原地修改和排空-turn-服务器)）。
+
+## WHIP 和 WHEP
+
+fit 是一个小型媒体服务器（SFU）：推流者用 WHIP（RFC 9725）发送一路流，如 OBS、浏览器或 GStreamer，观看者用 WHEP
+（draft-ietf-wish-whep）播放；fit 把推流者发来的每个 RTP 包转发给每个观看者，不做解码。`webrtc.media` 是所有
+PeerConnection 共用的 UDP 端口，handler 模块 `whip` 和 `whep` 在任意路由上提供 HTTP 一侧：
+
+```fit
+route {
+	match { path /whip/* }
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		audience whip
+	}
+	handler whip
+}
+
+route {
+	match { path /whep/* }
+	handler whep
+}
+
+webrtc {
+	media {
+		listen :8189
+		public_ips 203.0.113.5
+		ice_servers { urls stun:stun.example.com:3478 }
+		max_streams 16
+		max_viewers 100
+		max_bitrate 4000000
+	}
+}
+```
+
+JSON 写法：
+
+```json
+{
+  "routes": [
+    {"match": {"path": ["/whip/*"]},
+     "middleware": [{"module": "jwt", "params": {"jwks_url": "https://auth.example.com/.well-known/jwks.json", "audience": ["whip"]}}],
+     "handler": {"module": "whip"}},
+    {"match": {"path": ["/whep/*"]}, "handler": {"module": "whep"}}
+  ],
+  "webrtc": {
+    "media": {
+      "listen": ":8189",
+      "public_ips": ["203.0.113.5"],
+      "ice_servers": [{"urls": ["stun:stun.example.com:3478"]}],
+      "max_streams": 16,
+      "max_viewers": 100,
+      "max_bitrate": 4000000
+    }
+  }
+}
+```
+
+推流者把 offer POST 到 `https://example.com/whip/cam1`，观看者把自己的 offer POST 到 `https://example.com/whep/cam1`：
+流的名字是路径的最后一段，或者 handler 的 `stream` 参数（固定名字）。会话的 URL 是其 POST 的路径加上会话 ID，所以路由也必须
+匹配它：`/whip/*` 可以，只有 `/live` 的路由则需要在旁边加上 `/live/*`。所有字段见[配置参考](reference/config.md#webrtc)。
+
+### HTTP API
+
+| 请求 | 应答 |
+| --- | --- |
+| 向端点 `POST` 一个 `application/sdp` 的 offer | `201 Created`，fit 的 answer（`application/sdp`），`Location` 为会话的 URL（端点路径加会话 ID），每个 ICE 服务器一个 `Link` 头 |
+| `DELETE` 会话的 URL | `200`；推流者的流结束，其观看者的会话随之结束；已结束的会话为 `404` |
+| `OPTIONS` | `204`，带 `Allow` 和 `Accept-Post: application/sdp` |
+| `PATCH` 会话的 URL | `405`：见下文 |
+
+拒绝：offer 不是 `application/sdp` 时 `415`；超过 `max_sdp_bytes` 时 `413`；无法解析或无法应答时 `400`；没有 fit
+转发的编解码器的音视频，或观看者的 offer 收不了流的任何轨道时 `422`；流已有推流者时 `409`；观看未推送的流时 `404`；
+超过 `max_peer_connections`、`max_streams` 或 `max_viewers`，以及 `webrtc.media` 未运行时 `503` 并带 `Retry-After`。
+
+认证由路由的中间件完成：RFC 9725 的 bearer token 就是 `Authorization` 字段，由 `jwt` 校验，也可用 `basic_auth`、
+`forward_auth` 等。DELETE 走同一条路由，会话 ID 是 128 位随机数，只有创建会话的一方知道。
+
+fit 不用 trickle ICE 应答，也不支持 PATCH：fit 在 Mux 上是 ICE lite agent（RFC 8445 第 2.5 节），它的候选就是端口自己
+的地址，全部在 answer 中；它从对端的连通性检查得知对端地址，所以对端 trickle 的候选没有用处。ICE 重启就是一个新会话：
+客户端 DELETE 旧会话，再 POST 新的 offer。按 RFC 9725，收到 405 的客户端不再 trickle。
+
+### 媒体
+
+每个推流者的 offer 按每种媒体只应答一个编解码器：它自己列出的、`codecs` 中也有的第一个（未设置时为 opus、VP8、VP9、
+H264 和 AV1）；观看者也以同一个应答，它的 offer 必须接受。观看者在其 offer 的各段上收到流的音视频，来源是对应推流者每段
+的一个 TrackLocal：包在观看者自己的 SSRC 和密钥下重新保护，序号和时间戳保持推流者发出时的样子。
+
+- **关键帧。** 新加入或丢包的观看者会请求关键帧（PLI 或 FIR）；无论观看者多少，fit 每个 `key_frame_interval`
+  （500ms）至多向推流者发一次 PLI，观看者连上时也发一次。
+- **码率。** fit 每秒用 REMB 告诉每个推流者 `max_bitrate`（8 Mbit/s），浏览器会遵守；超过的包被丢弃，允许两秒的突发。
+- **离开。** 推流者 DELETE、它的 PeerConnection 失败，或它沉默超过 `ice_timeout`（30s），流和观看者的会话都结束；
+  观看者离开只结束它自己的会话。应答后 `connect_timeout`（30s）内未连上的会话也会结束。断开或缓慢的观看者不会拖住
+  推流者和其他观看者：fit 发的是 UDP，从不等待。
+- **不转发的。** 数据通道、第一层之后的 simulcast 层（转发 simulcast 推流者最先到达的那一层）、RTX 和 FEC，以及
+  fib 的 PeerConnection 不支持的 transport-wide 拥塞控制。每个观看者都按到达顺序收到推流者的包：没有按观看者的带宽
+  估计或分层选择。
+
+### ICE 服务器
+
+fit 自己不需要 STUN 或 TURN 服务器：它的端口在自己的地址上可达，1:1 NAT 后则是 `public_ips`。防火墙封锁到它的 UDP
+的对端需要在自己一侧使用 TURN 服务器；answer 的 `Link` 头告诉它 `ice_servers`，以及作为 `turn_urls` 的 fit 自己的
+`webrtc.turn`，凭据由其 `secret` 生成，有效期 `turn_credential_ttl`（1h）：
+
+```
+Link: <stun:stun.example.com:3478>; rel="ice-server"
+Link: <turn:turn.example.com:3478>; rel="ice-server"; username="1767225600:fit-5f1c..."; credential="..."; credential-type="password"
+```
+
+只有 `allowed_peers` 允许它到达媒体端口的地址时（`relay_ip` 是私有地址时需要），fit 的 TURN 服务器才会中继到那里。
+
+### 上限
+
+| 字段 | 默认值 | 限制 |
+| --- | --- | --- |
+| `max_peer_connections` | 1024 | 推流者和观看者的 PeerConnection 总数；再多一个 offer 应答 503 |
+| `max_streams` | 64 | 推送中的流；再多一个推流者应答 503 |
+| `max_viewers` | 256 | 一路流的观看者；再多一个应答 503 |
+| `max_bitrate` | 8000000 | 推流者每秒可发送的比特数，用 REMB 告知并强制执行 |
+| `max_sdp_bytes` | 32 KiB | offer 的大小；更大的应答 413 |
+| `connect_timeout` | 30s | 从应答到 PeerConnection 连上 |
+| `ice_timeout` | 30s | 已连上的对端可以沉默多久 |
+| `key_frame_interval` | 500ms | 转给推流者的两次关键帧请求之间的间隔 |
+
+推流者的包在它到达的 fib worker 上发给每个观看者，所以 `max_viewers` 也限制了这部分工作。fit 的 `limits.max_conns`
+把每个对端的 UDP 地址和其他连接一起计数。
+
+### 重载
+
+会话属于 `webrtc.media`，不属于路由：保持 `listen` 和 `public_ips` 不变的重载会保留所有会话，其他字段对下一个 offer
+生效（`max_bitrate` 和 `key_frame_interval` 立即生效）。修改 `listen` 或 `public_ips` 会让媒体服务器重新启动：会话
+结束，每个对端都收到 DTLS close，推流者和观看者重新 POST offer。去掉 `webrtc.media` 会结束所有会话，路由应答 503。
+
+### 指标与日志
+
+Admin API 的 `/metrics` 中有 `fit_webrtc_media_peer_connections{role}`、`fit_webrtc_media_streams`、
+`fit_webrtc_media_sessions_total{role}`、`fit_webrtc_media_sessions_ended_total{reason}`、
+`fit_webrtc_media_refused_total{reason}`、`fit_webrtc_media_received_packets_total`、
+`fit_webrtc_media_received_bytes_total`、`fit_webrtc_media_dropped_total{reason="bitrate"}`、
+`fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` 和 `fit_webrtc_media_restarts_total`。
+媒体服务器的消息写入 `webrtc` 日志。

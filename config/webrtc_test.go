@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWebRTCMembers(t *testing.T) {
@@ -47,6 +48,45 @@ func TestWebRTCMembers(t *testing.T) {
 		{turn(`"secret": "s", "max_lifetime": "1m"`), "below default_lifetime"},
 		{turn(`"secret": "s", "allowed_peers": ["10.0.0.0/33"]`), "not an address or a prefix"},
 		{turn(`"secret": "s", "denied_peers": ["x"]`), "not an address or a prefix"},
+	} {
+		_, err := Load([]byte(bad.doc))
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)
+		}
+	}
+}
+
+func TestWebRTCMedia(t *testing.T) {
+	good := `{"webrtc": {"turn": {"listen": [":3478"], "realm": "r", "relay_ip": "10.0.0.5", "secret": "s"},
+		"media": {"listen": ":8189", "public_ips": ["203.0.113.5"], "codecs": ["opus", "vp8", "H264"],
+		"ice_servers": [{"urls": ["stun:stun.example.com:3478"]}, {"urls": ["turn:t.example.com?transport=udp"], "username": "u", "credential": "p"}],
+		"turn_urls": ["turn:turn.example.com:3478"], "connect_timeout": "10s"}}}`
+	c, err := Load([]byte(good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := c.WebRTC.Media
+	if !c.HasApps() || m.MaxPCs() != DefaultMediaMaxPeerConnections || m.MaxStreamCount() != DefaultMediaMaxStreams ||
+		m.MaxViewerCount() != DefaultMediaMaxViewers || m.Bitrate() != DefaultMediaMaxBitrate || m.SDPBytes() != DefaultMediaMaxSDPBytes ||
+		m.Connect() != 10*time.Second || m.ICE() != DefaultMediaICETimeout || m.KeyFrames() != DefaultMediaKeyFrameInterval ||
+		m.CredentialTTL() != DefaultMediaTURNCredentialTTL {
+		t.Fatalf("%+v", m)
+	}
+	if _, err := Load([]byte(`{"webrtc": {"media": {"listen": "127.0.0.1:0"}}}`)); err != nil {
+		t.Fatalf("media alone: %v", err)
+	}
+	media := func(fields string) string { return `{"webrtc": {"media": {"listen": ":8189", ` + fields + `}}}` }
+	for _, bad := range []struct{ doc, want string }{
+		{`{"webrtc": {"media": {"listen": "nope"}}}`, "not a host and port"},
+		{media(`"public_ips": ["x"]`), "not an IP address"},
+		{media(`"public_ips": ["::"]`), "wildcard"},
+		{media(`"ice_servers": [{"urls": []}]`), "at least one URL"},
+		{media(`"ice_servers": [{"urls": ["http://x"]}]`), "not a stun:"},
+		{media(`"ice_servers": [{"urls": ["stun:x"], "username": "a\"b"}]`), "double quote"},
+		{media(`"turn_urls": ["stun:x"]`), "not a turn: or turns: URL"},
+		{media(`"turn_urls": ["turn:x"]`), "webrtc.turn's secret"},
+		{media(`"codecs": ["h265"]`), "not one of"},
+		{media(`"max_viewers": -1`), "less than the minimum"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {

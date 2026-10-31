@@ -894,5 +894,39 @@
         // },
       // },
     // },
+    // {
+      // // A route whose handler is whep, with every one of its params.
+      // "name": "whep-example",
+      // "handler": {
+        // // Plays the streams of fit's media server, webrtc.media, to viewers with WHEP
+        // // (draft-ietf-wish-whep), by name.
+        // "module": "whep",
+        // "params": {
+          // // The stream's name. When left out, the name is the last segment of the path a POST is sent
+          // // to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's
+          // // URL is the path of its POST followed by its ID, which the route must match too, as /watch/*
+          // // beside /watch.
+          // // string.
+          // "stream": "",
+        // },
+      // },
+    // },
+    // {
+      // // A route whose handler is whip, with every one of its params.
+      // "name": "whip-example",
+      // "handler": {
+        // // Takes WebRTC streams published with WHIP (RFC 9725) into fit's media server, webrtc.media,
+        // // by name.
+        // "module": "whip",
+        // "params": {
+          // // The stream's name. When left out, the name is the last segment of the path a POST is sent
+          // // to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's
+          // // URL is the path of its POST followed by its ID, which the route must match too, as /live/*
+          // // beside /live.
+          // // string.
+          // "stream": "",
+        // },
+      // },
+    // },
   ],
 }
