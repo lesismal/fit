@@ -38,8 +38,9 @@ a config against it and more.
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [Agent](#agent): [`agent`](#config-agent), [`agent.hub`](#config-agenthub), [`agent.hub.console`](#config-roleconsole), [`agent.hub.listen`](#config-agentlisten), [`agent.hub.peers[]`](#config-agentpeer), [`agent.hub.limits`](#config-agentlimits), [`agent.node`](#config-agentnode), [`agent.node.models[]`](#config-agentmodel), [`agent.node.settings`](#config-agentnodesettings), [`agent.node.proxy`](#config-agentnodeproxy), [`agent.client`](#config-agentclient), [`agent.client.api`](#config-agentclientapi), [`agent.client.api_keys[]`](#config-agentclientkey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.server`](#config-tunnelserver), [`tunnel.server.listeners[]`](#config-tunnellistener), [`tunnel.server.console_socket`](#config-tunnelconsolesocket), [`tunnel.server.quic`](#config-tunnelserverquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.servers[]`](#config-tunneluplink), [`tunnel.node.servers[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.client`](#config-tunnelclient), [`tunnel.client.forwards[]`](#config-tunnelforward), [`tunnel.client.web_proxies[]`](#config-tunnelwebproxy)
+- [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -113,6 +114,7 @@ In JSON:
 | `acme` | [object](#config-acme) |  | How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload. |
 | `agent` | [object](#config-agent) |  | The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here. |
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here. |
+| `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -233,6 +235,8 @@ In JSON:
 <a id="config-certificate"></a>
 
 ### `listeners[].tls.certificates[]`
+
+Also at `webrtc.turn.tls.certificates[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -775,7 +779,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
 | `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json. |
@@ -2001,6 +2005,274 @@ Also at `tunnel.client.servers[]`.
 | `password` | string |  | Required. The console_socket's password. |
 | `max_conns` | integer, 0 or more | `32` | The most connections open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
 
+<a id="webrtc"></a>
+
+## WebRTC
+
+What fit runs for WebRTC beside the gateway, on its engine. `turn` is a TURN server (RFC 8656),
+fib's, which relays UDP for browsers and other ICE agents that cannot reach each other directly:
+over UDP on the `listen` addresses, over TCP on `listen_tcp` and over TLS on `listen_tls` with
+`tls`'s certificates, with fixed `users`, coturn's time-limited credentials from `secret`, or
+both. Each allocation's relayed socket binds to `relay_ip`, told to clients as `public_ip` behind
+a 1:1 NAT, in `port_min`-`port_max` when set; it holds at most `max_permissions` peers and
+`max_channels` channels. Peers on loopback, private and other internal addresses are refused
+unless `allowed_peers` lists them, and `relay_ip` itself is reached on the relayed ports alone,
+or on a port `allowed_peers` names with it. Users, the secret, the peer lists, the quotas, the
+lifetimes, `user_bandwidth` and the certificates change on reload with the allocations kept; a
+change of the addresses starts a new server and drains the old one, and a change of the rest
+starts the server again.
+
+`media` makes fit a media server, an SFU, for the [`whip`](#whip) and [`whep`](#whep) handlers:
+one UDP port, `listen`, that every PeerConnection shares, told to peers as `public_ips` behind a
+1:1 NAT; the STUN and TURN servers peers are told of, `ice_servers`, and fit's own `turn` as
+`turn_urls`, with credentials made from its `secret`; and the limits: PeerConnections, streams,
+viewers a stream, a publisher's bitrate, and timeouts. A reload keeps the sessions unless it
+changes `listen` or `public_ips`.
+
+`proxy` puts other media servers behind fit, for the [`webrtc_proxy`](#webrtc_proxy) handler: one
+UDP port, `listen`, told to peers as `public_ips`, where each peer's first STUN request names the
+session, by its ufrag, whose media server it is relayed to from a socket of its own, leaving
+from `relay_ip` and a port of `port_min`-`port_max` when set; the limits on
+sessions and relays, and how long an idle relay and a session with none are kept. A reload keeps
+the sessions unless it changes `listen`. See [WebRTC](../webrtc.md) and
+[decision 029](../decisions/029-webrtc.md).
+
+In a .conf file:
+
+```fit
+webrtc {
+	turn {
+		listen :3478
+		listen_tcp :3478
+		listen_tls :5349
+		tls {
+			certificates {
+				cert_file /etc/fit/turn.example.com.pem
+				key_file /etc/fit/turn.example.com.key
+			}
+		}
+		realm example.com
+		secret a-secret-shared-with-the-web-service
+		users alice { password a-password }
+		relay_ip 10.0.0.5
+		public_ip 203.0.113.5
+		port_min 49152
+		port_max 49999
+	}
+	media {
+		listen :8189
+		public_ips 203.0.113.5
+		ice_servers { urls stun:stun.example.com:3478 }
+		turn_urls turn:203.0.113.5:3478
+		max_streams 16
+		max_viewers 100
+		max_bitrate 4000000
+	}
+	proxy {
+		listen :8190
+		public_ips 203.0.113.5
+		max_sessions 4096
+		idle_timeout 30s
+		relay_ip 10.0.0.5
+		port_min 40000
+		port_max 40999
+	}
+}
+```
+
+In YAML:
+
+```yaml
+webrtc:
+  turn:
+    listen:
+      - :3478
+    listen_tcp:
+      - :3478
+    listen_tls:
+      - :5349
+    tls:
+      certificates:
+        - cert_file: /etc/fit/turn.example.com.pem
+          key_file: /etc/fit/turn.example.com.key
+    realm: example.com
+    secret: a-secret-shared-with-the-web-service
+    users:
+      - name: alice
+        password: a-password
+    relay_ip: 10.0.0.5
+    public_ip: 203.0.113.5
+    port_min: 49152
+    port_max: 49999
+  media:
+    listen: :8189
+    public_ips:
+      - 203.0.113.5
+    ice_servers:
+      - urls:
+          - stun:stun.example.com:3478
+    turn_urls:
+      - turn:203.0.113.5:3478
+    max_streams: 16
+    max_viewers: 100
+    max_bitrate: 4000000
+  proxy:
+    listen: :8190
+    public_ips:
+      - 203.0.113.5
+    max_sessions: 4096
+    idle_timeout: 30s
+    relay_ip: 10.0.0.5
+    port_min: 40000
+    port_max: 40999
+```
+
+In JSON:
+
+```json
+{
+  "webrtc": {
+    "turn": {
+      "listen": [":3478"],
+      "listen_tcp": [":3478"],
+      "listen_tls": [":5349"],
+      "tls": {"certificates": [{"cert_file": "/etc/fit/turn.example.com.pem", "key_file": "/etc/fit/turn.example.com.key"}]},
+      "realm": "example.com",
+      "secret": "a-secret-shared-with-the-web-service",
+      "users": [{"name": "alice", "password": "a-password"}],
+      "relay_ip": "10.0.0.5",
+      "public_ip": "203.0.113.5",
+      "port_min": 49152,
+      "port_max": 49999
+    },
+    "media": {
+      "listen": ":8189",
+      "public_ips": ["203.0.113.5"],
+      "ice_servers": [{"urls": ["stun:stun.example.com:3478"]}],
+      "turn_urls": ["turn:203.0.113.5:3478"],
+      "max_streams": 16,
+      "max_viewers": 100,
+      "max_bitrate": 4000000
+    },
+    "proxy": {
+      "listen": ":8190",
+      "public_ips": ["203.0.113.5"],
+      "max_sessions": 4096,
+      "idle_timeout": "30s",
+      "relay_ip": "10.0.0.5",
+      "port_min": 40000,
+      "port_max": 40999
+    }
+  }
+}
+```
+
+<a id="config-webrtc"></a>
+
+### `webrtc`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `turn` | [object](#config-turnserver) |  | Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out. |
+| `media` | [object](#config-webrtcmedia) |  | Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out. |
+| `proxy` | [object](#config-webrtcproxy) |  | Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which relays each peer to the media server that answered it, found by the ICE ufrag of the peer's first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left out. |
+
+<a id="config-turnserver"></a>
+
+### `webrtc.turn`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | list of string |  | Required. The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs default to. A change of listen, listen_tcp or listen_tls starts a new server and drains the old one. |
+| `listen_tcp` | list of string |  | TCP addresses clients reach the server at, as in ":3478", for clients on networks that block UDP: turn:host:3478?transport=tcp. Their allocations relay UDP, and end when their connection closes. |
+| `listen_tls` | list of string |  | TLS addresses clients reach the server at, as in ":5349" or ":443", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise. |
+| `tls` | [object](#config-turntls) |  | The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake. |
+| `realm` | string |  | Required. The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise. |
+| `users` | list of [object](#config-turnuser) |  | The users with fixed credentials. With secret, or alone; at least one of the two. |
+| `secret` | string |  | The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username "<expiry in Unix seconds>:<anything>" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out. |
+| `relay_ip` | string |  | Required. The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. Peers on it, and on public_ip, are relayed to on the ports of the server's own relayed addresses alone, and on those allowed_peers lists with their port. A change starts a new server. |
+| `public_ip` | string |  | The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. A change starts a new server. |
+| `port_min` | integer, 0 to 65535 |  | The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. A change starts a new server. |
+| `port_max` | integer, 0 to 65535 |  | The highest port of the relayed sockets; with port_min. |
+| `max_allocations` | integer, 0 or more | `1024` | The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change applies to the next allocation; those held past a lowered one are kept until they end. |
+| `max_allocations_per_user` | integer, 0 or more | `16` | The most allocations of one username; one more is refused with 486. 16 when left out or 0. Applies to the next allocation. |
+| `max_permissions` | integer, 0 or more | `64` | The most permissions, peer addresses, one allocation holds; one more is refused with 508. A channel's peer counts. 64 when left out or 0. Applies to the next request. |
+| `max_channels` | integer, 0 or more | `64` | The most channels one allocation binds; one more is refused with 508. 64 when left out or 0. Applies to the next request. |
+| `max_stream_message` | integer, 0 or more | `8192` | The largest message a TCP or TLS client may send, and so what its connection buffers of one not yet whole; a connection whose next message claims more is closed. At least 2048. 8 KiB when left out or 0. A change starts a new server. |
+| `stream_idle_timeout` | duration | `"30s"` | How long a TCP or TLS client's connection may stay open without an allocation, before its first Allocate or after its allocation ended, before it is closed. 30s when left out. A change starts a new server. |
+| `user_bandwidth` | integer, 0 or more | `2097152` | The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0. |
+| `default_lifetime` | duration | `"10m"` | The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. Applies to the next allocation or refresh. |
+| `max_lifetime` | duration | `"1h"` | The longest lifetime a client may ask for. 1h when left out. Applies to the next allocation or refresh. |
+| `nonce_lifetime` | duration | `"10m"` | How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. Applies to the next nonce. |
+| `nonce_secret` | string |  | The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts a new server. |
+| `allowed_peers` | list of string |  | The addresses and prefixes, as in "10.1.0.0/16", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. An address with a port, as in "10.0.0.5:8189", allows that port alone, which is how a peer on relay_ip itself, such as webrtc.media, is reached. |
+| `denied_peers` | list of string |  | Addresses and prefixes peers may not be at, beyond the internal ranges denied by default; an address with a port denies that port alone. |
+
+<a id="config-turntls"></a>
+
+### `webrtc.turn.tls`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `certificates` | list of [object](#config-certificate) |  | Required. Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none. |
+
+<a id="config-turnuser"></a>
+
+### `webrtc.turn.users[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The username. |
+| `password` | string |  | The password; or key. |
+| `key` | string |  | Instead of the password, the long-term key it derives, as coturn's turnadmin -k prints it: MD5(name ":" realm ":" password) in hex, optionally after 0x, so that the password is not kept. |
+
+<a id="config-webrtcmedia"></a>
+
+### `webrtc.media`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in ":8189". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions. |
+| `public_ips` | list of string |  | The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again. |
+| `ice_servers` | list of [object](#config-iceserver) |  | STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address. |
+| `turn_urls` | list of string |  | URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in "turn:turn.example.com:3478": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set. |
+| `turn_credential_ttl` | duration | `"1h"` | How long the TURN credentials an answer carries are good for. 1h when left out. |
+| `codecs` | list of string |  | The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept. |
+| `max_peer_connections` | integer, 0 or more | `1024` | The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503. 1024 when left out or 0. |
+| `max_streams` | integer, 0 or more | `64` | The most streams published at once; one more publisher is answered 503. 64 when left out or 0. |
+| `max_viewers` | integer, 0 or more | `256` | The most viewers of one stream; one more is answered 503. Each packet a publisher sends is sent again to every viewer, on the worker that received it. 256 when left out or 0. |
+| `max_bitrate` | integer, 0 or more | `8000000` | The most bits a second a publisher may send: told to it as REMB feedback, which browsers keep under, and enforced with two seconds of burst, past which its packets are dropped. 8000000 when left out or 0. |
+| `max_sdp_bytes` | integer, 0 or more | `32768` | The largest offer taken; a larger one is answered 413. 32 KiB when left out or 0. |
+| `connect_timeout` | duration | `"30s"` | How long a session may take from its answer to a connected PeerConnection before it is ended. 30s when left out. |
+| `ice_timeout` | duration | `"30s"` | How long a connected peer may be silent, its media and ICE consent checks alike, before its session is ended: a publisher's ends its stream and its viewers. 30s when left out. |
+| `key_frame_interval` | duration | `"500ms"` | The least time between two key frame requests (PLI) passed to a publisher, for the viewers that join or lose packets: the rest are dropped. 500ms when left out. |
+
+<a id="config-iceserver"></a>
+
+### `webrtc.media.ice_servers[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urls` | list of string |  | Required. The server's stun:, stuns:, turn: or turns: URLs. |
+| `username` | string |  | A TURN server's username. |
+| `credential` | string |  | A TURN server's password. |
+
+<a id="config-webrtcproxy"></a>
+
+### `webrtc.proxy`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The UDP address peers reach the media servers behind fit at, one port for them all, as in ":8190": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session. |
+| `public_ips` | list of string |  | The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer. |
+| `max_sessions` | integer, 0 or more | `4096` | The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0. |
+| `max_relays` | integer, 0 or more | `4096` | The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0. |
+| `session_timeout` | duration | `"30s"` | How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out. |
+| `idle_timeout` | duration | `"30s"` | How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out. |
+| `relay_ip` | string |  | The address the sockets toward the media servers leave from, one of the host's, for a firewall in front of them that admits one source address, or a host with several interfaces. Of the media servers' family: a media address of the other family is not relayed. The route's pick when left out. Applies to the next relay. |
+| `port_min` | integer, 0 to 65535 |  | The lowest local port of the sockets toward the media servers, for a firewall in front of them that admits a range; with port_max. A port in use is skipped, and a peer address that finds the range full is dropped. Ports the kernel picks when both are left out. Applies to the next relay. |
+| `port_max` | integer, 0 to 65535 |  | The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays. |
+
 <a id="providers"></a>
 
 ## Providers
@@ -2519,6 +2791,167 @@ In JSON:
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
 | `check_interval` | duration | `"1s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out. |
+
+<a id="http-handlers-webrtc_proxy"></a>
+
+### `webrtc_proxy`
+
+Proxies WHIP and WHEP to the media servers of an upstream, and their peers' media through webrtc.proxy's one UDP port.
+
+Proxies WHIP (RFC 9725) and WHEP (draft-ietf-wish-whep) to the media servers of `upstream`, fit's
+own [`whip`](#whip) and [`whep`](#whep) or any other, with their peers' media through one UDP port,
+[`webrtc.proxy`](#webrtc). A POST of an offer goes, without its candidates, to the media server the
+upstream picks; its `201` answer comes back with fit's port as its only candidate, its `Location`
+a URL of fit's, and fit relays each peer to that media server by the ICE ufrag of its first STUN
+request. DELETE, PATCH and the rest of a session's requests go to the media server that answered
+it; a PATCH that only trickles candidates is answered `204` by fit. A request or answer past
+`max_sdp_bytes` is refused, and a media server that does not answer within `timeout` is answered
+`504`. `media_addrs` names the address fit relays to, for a media server whose answer's
+candidates fit cannot reach. See [WebRTC](../webrtc.md#proxying-media-servers).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /whip/* /whep/* }
+	handler webrtc_proxy {
+		upstream media-servers
+		media_addrs { 10.0.0.2:8080 10.0.0.2 }
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whip/*
+    - /whep/*
+handler:
+  module: webrtc_proxy
+  params:
+    upstream: media-servers
+    media_addrs:
+      10.0.0.2:8080: 10.0.0.2
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whip/*", "/whep/*"]},
+  "handler": {"module": "webrtc_proxy", "params": {"upstream": "media-servers", "media_addrs": {"10.0.0.2:8080": "10.0.0.2"}}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upstream` | string |  | Required. The upstream of the media servers, picked by its load balancing for each offer: fit's own whip and whep, or any WHIP or WHEP server. Its health checks and timeouts apply. |
+| `media_addrs` | object of string |  | The address fit relays a media server's peers to, by the media server's address in the upstream, as {"10.0.0.2:8080": "10.0.0.2:8189"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first. |
+| `timeout` | duration | `"10s"` | The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out. |
+| `max_sdp_bytes` | integer, 0 or more | `32768` | The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0. |
+
+<a id="http-handlers-whep"></a>
+
+### `whep`
+
+Plays the streams of fit's media server, webrtc.media, to viewers with WHEP (draft-ietf-wish-whep), by name.
+
+Plays the streams of fit's media server, [`webrtc.media`](#webrtc), with WHEP
+(draft-ietf-wish-whep): a POST of a viewer's `application/sdp` offer is answered `201` with fit's
+answer, which sends the stream's audio and video, its `Location` the session's URL; a DELETE of
+that URL ends the viewer's session. The stream's name is `stream`, or the last segment of the
+path, as `cam1` in `/whep/cam1`. A stream not published is answered `404`, one with `max_viewers`
+already `503`. Viewers' key frame requests reach the publisher at most once a
+`key_frame_interval`. See [WebRTC](../webrtc.md#whip-and-whep).
+
+In a .conf file:
+
+```fit
+route { match { path /whep/* }; handler whep }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whep/*
+handler:
+  module: whep
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whep/*"]},
+  "handler": {"module": "whep"}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stream` | string |  | The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch. |
+
+<a id="http-handlers-whip"></a>
+
+### `whip`
+
+Takes WebRTC streams published with WHIP (RFC 9725) into fit's media server, webrtc.media, by name.
+
+Takes WebRTC streams published with WHIP (RFC 9725) into fit's media server,
+[`webrtc.media`](#webrtc): a POST of an `application/sdp` offer is answered `201` with fit's answer,
+its `Location` the session's URL and its ICE servers in `Link` headers; a DELETE of that URL ends
+the stream and its viewers. The stream's name is `stream`, or the last segment of the path, as
+`cam1` in `/whip/cam1`. A name published already is refused with `409`, the limits with `503`, an
+offer with no codec fit forwards with `422`. PATCH (trickle ICE) is answered `405`: fit is an ICE
+lite agent whose answer holds all of its candidates. Auth is the route's middleware, as a bearer
+token checked by `jwt`. See [WebRTC](../webrtc.md#whip-and-whep).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /whip/* }
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		audience whip
+	}
+	handler whip
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whip/*
+middleware:
+  - module: jwt
+    params:
+      jwks_url: https://auth.example.com/.well-known/jwks.json
+      audience:
+        - whip
+handler:
+  module: whip
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whip/*"]},
+  "middleware": [{"module": "jwt", "params": {"jwks_url": "https://auth.example.com/.well-known/jwks.json", "audience": ["whip"]}}],
+  "handler": {"module": "whip"}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stream` | string |  | The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live. |
 
 <a id="middleware"></a>
 

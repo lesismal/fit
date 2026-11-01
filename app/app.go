@@ -1,5 +1,6 @@
 // Package app runs the roles of the apps fit carries beside its gateway: the
-// agent's hub, node and client, and the tunnel's server, node and client.
+// agent's hub, node and client, the tunnel's server, node and client, and
+// WebRTC's TURN server, media server and media proxy.
 // Each role is a member of fit's config, agent.hub or tunnel.server, and runs
 // while the config sets it, on the listeners' fib engine, which every role
 // in the process shares with the gateway.
@@ -20,14 +21,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
+	"github.com/lesismal/fit/observe"
 )
 
 // Role is a running role.
@@ -44,6 +49,15 @@ type Role interface {
 	// Stop ends the role: its bindings are removed and its connections
 	// closed, waiting for what is under way until ctx ends at most.
 	Stop(ctx context.Context)
+}
+
+// Metered is a role with metrics of its own, which the Admin API's
+// /metrics and OpenTelemetry's export carry with fit's.
+type Metered interface {
+	// WriteMetrics writes the role's metrics to w. It is called from a
+	// scrape's goroutine, beside the role's work, and must not wait for an
+	// Apply.
+	WriteMetrics(w observe.MetricWriter)
 }
 
 // Info describes a role.
@@ -109,6 +123,12 @@ func set(member any) bool {
 	case *config.TunnelNode:
 		return m != nil
 	case *config.TunnelClient:
+		return m != nil
+	case *config.TURNServer:
+		return m != nil
+	case *config.WebRTC:
+		return m != nil
+	case *config.WebRTCProxy:
 		return m != nil
 	}
 	return true
@@ -179,6 +199,15 @@ func members(c *config.Config) []memberAt {
 			ms = append(ms, memberAt{"tunnel.client", t.Client.At})
 		}
 	}
+	if w := c.WebRTC; w != nil && w.TURN != nil {
+		ms = append(ms, memberAt{"webrtc.turn", w.TURN.At})
+	}
+	if w := c.WebRTC; w != nil && w.Media != nil {
+		ms = append(ms, memberAt{"webrtc.media", w.Media.At})
+	}
+	if w := c.WebRTC; w != nil && w.Proxy != nil {
+		ms = append(ms, memberAt{"webrtc.proxy", w.Proxy.At})
+	}
 	return ms
 }
 
@@ -199,11 +228,28 @@ type Host struct {
 	// Upstream is the engine fit's upstream pools dial through, for an
 	// HTTP client of fib's to dial on.
 	Upstream *fib.Engine
-	// Log is the role's logger: agent or tunnel, its messages prefixed
-	// with its ID.
+	// Log is the role's logger: agent, tunnel or webrtc, its messages
+	// prefixed with its ID.
 	Log *logs.Logger
 
 	m *Manager
+}
+
+// DefaultDrainTimeout is how long a role may let what a server it replaced
+// holds run out, unless the Manager's SetDrainTimeout says otherwise: the
+// listeners' default.
+const DefaultDrainTimeout = 30 * time.Second
+
+// DrainTimeout is how long a role may let what a server it replaced holds
+// run out, as a listener a reload removed finishes its requests: fit run's
+// -shutdown-timeout.
+func (h *Host) DrainTimeout() time.Duration {
+	if h.m != nil {
+		if d := time.Duration(h.m.drain.Load()); d > 0 {
+			return d
+		}
+	}
+	return DefaultDrainTimeout
 }
 
 // ErrBusy is an Edit refused because too many are waiting already.
@@ -244,6 +290,12 @@ type Manager struct {
 
 	mu      sync.Mutex // held for a whole Apply
 	running map[string]Role
+	// metered is the running roles that have metrics, for scrapes that
+	// must not wait for an Apply.
+	metered atomic.Pointer[[]Metered]
+
+	// drain is the roles' drain timeout, in nanoseconds; 0 for the default.
+	drain atomic.Int64
 
 	edits   chan editReq
 	stop    chan struct{}
@@ -261,6 +313,10 @@ func NewManager(engine, upstream *fib.Engine, root *logs.Root, editor Editor) *M
 	go m.runEdits()
 	return m
 }
+
+// SetDrainTimeout sets how long a role may let what a server it replaced
+// holds run out, as the listeners' drain timeout does for their requests.
+func (m *Manager) SetDrainTimeout(d time.Duration) { m.drain.Store(int64(d)) }
 
 func (m *Manager) edit(id string, edit func([]byte) ([]byte, error), done func([]string, error)) {
 	select {
@@ -337,15 +393,40 @@ func (m *Manager) Apply(c *config.Config) error {
 			errs = append(errs, fmt.Errorf("%s: %w; it runs as it did", info.ID, err))
 		}
 	}
+	m.noteMetered()
 	return errors.Join(errs...)
+}
+
+// noteMetered records the running roles that have metrics. m.mu is held.
+func (m *Manager) noteMetered() {
+	var ms []Metered
+	for _, id := range slices.Sorted(maps.Keys(m.running)) {
+		if mt, ok := m.running[id].(Metered); ok {
+			ms = append(ms, mt)
+		}
+	}
+	m.metered.Store(&ms)
+}
+
+// WriteMetrics writes the metrics of the running roles that have them, in
+// the order of their IDs.
+func (m *Manager) WriteMetrics(w observe.MetricWriter) {
+	if ms := m.metered.Load(); ms != nil {
+		for _, mt := range *ms {
+			mt.WriteMetrics(w)
+		}
+	}
 }
 
 func (m *Manager) host(id string) *Host {
 	h := &Host{ID: id, Engine: m.engine, Upstream: m.upstream, m: m}
 	if m.root != nil {
 		name := config.LoggerAgent
-		if strings.HasPrefix(id, "tunnel.") {
+		switch {
+		case strings.HasPrefix(id, "tunnel."):
 			name = config.LoggerTunnel
+		case strings.HasPrefix(id, "webrtc."):
+			name = config.LoggerWebRTC
 		}
 		h.Log = m.root.Logger(name).Prefixed(id + ": ")
 	}
@@ -377,4 +458,5 @@ func (m *Manager) Stop(ctx context.Context) {
 		delete(m.running, id)
 	}
 	wg.Wait()
+	m.noteMetered()
 }

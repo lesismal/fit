@@ -263,6 +263,20 @@ func (p *Pool) Pick(r *stdhttp.Request) *Backend {
 	return b
 }
 
+// PickBackend is Pick for a request that must go to the backend at
+// address, as one to a session that backend holds does, or nil when the
+// upstream has no such backend. Its Done is the same.
+func (p *Pool) PickBackend(address string) *Backend {
+	for _, b := range p.backends {
+		if b.Address == address {
+			p.inFlight.Add(1)
+			b.active.Add(1)
+			return b
+		}
+	}
+	return nil
+}
+
 // Available reports whether any of the upstream's backends is in rotation:
 // not taken out for its failures or its probes. A pool none of whose
 // backends is still picks one, as a last resort; a proxy with a failover

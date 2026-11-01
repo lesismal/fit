@@ -1239,6 +1239,30 @@
       },
       "type": "object"
     },
+    "config.ICEServer": {
+      "additionalProperties": false,
+      "properties": {
+        "credential": {
+          "description": "A TURN server's password.",
+          "type": "string"
+        },
+        "urls": {
+          "description": "The server's stun:, stuns:, turn: or turns: URLs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "A TURN server's username.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
     "config.KubernetesIngress": {
       "additionalProperties": false,
       "properties": {
@@ -1445,7 +1469,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
           "type": "object"
         },
         "loggers": {
@@ -1957,6 +1981,192 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "config.TURNServer": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_peers": {
+          "description": "The addresses and prefixes, as in \"10.1.0.0/16\", peers may be at even when denied_peers or the default denial cover them: loopback, private, link-local and other internal ranges are denied unless listed here, so that the relay cannot reach into the network it runs in. An address with a port, as in \"10.0.0.5:8189\", allows that port alone, which is how a peer on relay_ip itself, such as webrtc.media, is reached.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default_lifetime": {
+          "default": "10m",
+          "description": "The lifetime of an allocation whose client asks for less, or for none; clients refresh it before it ends. 10m when left out. Applies to the next allocation or refresh.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "denied_peers": {
+          "description": "Addresses and prefixes peers may not be at, beyond the internal ranges denied by default; an address with a port denies that port alone.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen": {
+          "description": "The UDP addresses clients reach the server at, as in \":3478\", the port TURN's turn: URIs default to. A change of listen, listen_tcp or listen_tls starts a new server and drains the old one.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen_tcp": {
+          "description": "TCP addresses clients reach the server at, as in \":3478\", for clients on networks that block UDP: turn:host:3478?transport=tcp. Their allocations relay UDP, and end when their connection closes.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen_tls": {
+          "description": "TLS addresses clients reach the server at, as in \":5349\" or \":443\", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_allocations": {
+          "default": 1024,
+          "description": "The most allocations held at once; one more is refused with 508. Each holds a relayed socket on every event loop. 1024 when left out or 0. A change applies to the next allocation; those held past a lowered one are kept until they end.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_allocations_per_user": {
+          "default": 16,
+          "description": "The most allocations of one username; one more is refused with 486. 16 when left out or 0. Applies to the next allocation.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_channels": {
+          "default": 64,
+          "description": "The most channels one allocation binds; one more is refused with 508. 64 when left out or 0. Applies to the next request.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_lifetime": {
+          "default": "1h",
+          "description": "The longest lifetime a client may ask for. 1h when left out. Applies to the next allocation or refresh.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_permissions": {
+          "default": 64,
+          "description": "The most permissions, peer addresses, one allocation holds; one more is refused with 508. A channel's peer counts. 64 when left out or 0. Applies to the next request.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_stream_message": {
+          "default": 8192,
+          "description": "The largest message a TCP or TLS client may send, and so what its connection buffers of one not yet whole; a connection whose next message claims more is closed. At least 2048. 8 KiB when left out or 0. A change starts a new server.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nonce_lifetime": {
+          "default": "10m",
+          "description": "How long a nonce is good for; a request with an older one is answered 438 with a fresh one. 10m when left out. Applies to the next nonce.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "nonce_secret": {
+          "description": "The key nonces are made with; a random one when left out. Servers behind one load balancer, which may each see a client's requests, share one. A change starts a new server.",
+          "type": "string"
+        },
+        "port_max": {
+          "description": "The highest port of the relayed sockets; with port_min.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "port_min": {
+          "description": "The lowest port of the relayed sockets, as a firewall that opens a range expects; with port_max. Ports the kernel picks when both are left out. A change starts a new server.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ip": {
+          "description": "The address clients are told for their relayed sockets instead of relay_ip, for a server behind a 1:1 NAT that maps it to relay_ip. Of relay_ip's family. A change starts a new server.",
+          "type": "string"
+        },
+        "realm": {
+          "description": "The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise.",
+          "type": "string"
+        },
+        "relay_ip": {
+          "description": "The address the relayed sockets bind to, one of the host's, not a wildcard; clients are told it, unless public_ip is set. Its family is every allocation's. Peers on it, and on public_ip, are relayed to on the ports of the server's own relayed addresses alone, and on those allowed_peers lists with their port. A change starts a new server.",
+          "type": "string"
+        },
+        "secret": {
+          "description": "The shared secret of time-limited credentials, as coturn's static-auth-secret (use-auth-secret) has it: a username \"<expiry in Unix seconds>:<anything>\" whose password is the base64 of HMAC-SHA1(secret, username), valid until the expiry. A web service that knows the secret hands them out.",
+          "type": "string"
+        },
+        "stream_idle_timeout": {
+          "default": "30s",
+          "description": "How long a TCP or TLS client's connection may stay open without an allocation, before its first Allocate or after its allocation ended, before it is closed. 30s when left out. A change starts a new server.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tls": {
+          "$ref": "#/$defs/config.TURNTLS",
+          "description": "The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake."
+        },
+        "user_bandwidth": {
+          "default": 2097152,
+          "description": "The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "users": {
+          "description": "The users with fixed credentials. With secret, or alone; at least one of the two.",
+          "items": {
+            "$ref": "#/$defs/config.TURNUser"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "listen",
+        "realm",
+        "relay_ip"
+      ],
+      "type": "object"
+    },
+    "config.TURNTLS": {
+      "additionalProperties": false,
+      "properties": {
+        "certificates": {
+          "description": "Certificates from files. A client is given the first whose names match the one it asks for, or the first of all when none does or it asks for none.",
+          "items": {
+            "$ref": "#/$defs/config.Certificate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "certificates"
+      ],
+      "type": "object"
+    },
+    "config.TURNUser": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Instead of the password, the long-term key it derives, as coturn's turnadmin -k prints it: MD5(name \":\" realm \":\" password) in hex, optionally after 0x, so that the password is not kept.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The username.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The password; or key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "config.Telemetry": {
@@ -2638,6 +2848,179 @@
       ],
       "type": "object"
     },
+    "config.WebRTC": {
+      "additionalProperties": false,
+      "properties": {
+        "media": {
+          "$ref": "#/$defs/config.WebRTCMedia",
+          "description": "Run fit as a WebRTC media server: the UDP port the PeerConnections of the whip and whep handlers share, the ICE servers told to their peers, and their limits. Routes with whip or whep handlers answer 503 without it. None when left out."
+        },
+        "proxy": {
+          "$ref": "#/$defs/config.WebRTCProxy",
+          "description": "Put media servers behind fit: the UDP port the webrtc_proxy handler's answers name, which relays each peer to the media server that answered it, found by the ICE ufrag of the peer's first STUN request. Routes with webrtc_proxy handlers answer 503 without it. None when left out."
+        },
+        "turn": {
+          "$ref": "#/$defs/config.TURNServer",
+          "description": "Run a TURN server (RFC 8656), which relays UDP for WebRTC peers and other ICE agents that cannot reach each other directly. None when left out."
+        }
+      },
+      "type": "object"
+    },
+    "config.WebRTCMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "codecs": {
+          "description": "The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "connect_timeout": {
+          "default": "30s",
+          "description": "How long a session may take from its answer to a connected PeerConnection before it is ended. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "ice_servers": {
+          "description": "STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address.",
+          "items": {
+            "$ref": "#/$defs/config.ICEServer"
+          },
+          "type": "array"
+        },
+        "ice_timeout": {
+          "default": "30s",
+          "description": "How long a connected peer may be silent, its media and ICE consent checks alike, before its session is ended: a publisher's ends its stream and its viewers. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_frame_interval": {
+          "default": "500ms",
+          "description": "The least time between two key frame requests (PLI) passed to a publisher, for the viewers that join or lose packets: the rest are dropped. 500ms when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The UDP address every peer's media reaches fit at, one port all PeerConnections share, as in \":8189\". A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change starts the media server again, ending its sessions.",
+          "type": "string"
+        },
+        "max_bitrate": {
+          "default": 8000000,
+          "description": "The most bits a second a publisher may send: told to it as REMB feedback, which browsers keep under, and enforced with two seconds of burst, past which its packets are dropped. 8000000 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peer_connections": {
+          "default": 1024,
+          "description": "The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sdp_bytes": {
+          "default": 32768,
+          "description": "The largest offer taken; a larger one is answered 413. 32 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_streams": {
+          "default": 64,
+          "description": "The most streams published at once; one more publisher is answered 503. 64 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_viewers": {
+          "default": 256,
+          "description": "The most viewers of one stream; one more is answered 503. Each packet a publisher sends is sent again to every viewer, on the worker that received it. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ips": {
+          "description": "The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT, or a load balancer that forwards the port unchanged. A change starts the media server again.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "turn_credential_ttl": {
+          "default": "1h",
+          "description": "How long the TURN credentials an answer carries are good for. 1h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "turn_urls": {
+          "description": "URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in \"turn:turn.example.com:3478\": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "listen"
+      ],
+      "type": "object"
+    },
+    "config.WebRTCProxy": {
+      "additionalProperties": false,
+      "properties": {
+        "idle_timeout": {
+          "default": "30s",
+          "description": "How long a relayed peer address may send nothing before its relay is closed, whatever its media server sends it; ICE's consent checks, every 5 seconds or so, keep a live one open. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "listen": {
+          "description": "The UDP address peers reach the media servers behind fit at, one port for them all, as in \":8190\": the proxied answers name it as their only candidate. A wildcard host advertises the address of every interface that is up, unless public_ips is set. A change ends every relay and session.",
+          "type": "string"
+        },
+        "max_relays": {
+          "default": 4096,
+          "description": "The most peer addresses relayed at once, each with a UDP socket of its own toward its media server; past it, a new address's STUN request is dropped. A session relays at most 8 of its peer's addresses. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sessions": {
+          "default": 4096,
+          "description": "The most sessions proxied at once; one more offer is answered 503 before it reaches a media server. 4096 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "port_max": {
+          "description": "The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "port_min": {
+          "description": "The lowest local port of the sockets toward the media servers, for a firewall in front of them that admits a range; with port_max. A port in use is skipped, and a peer address that finds the range full is dropped. Ports the kernel picks when both are left out. Applies to the next relay.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "public_ips": {
+          "description": "The addresses peers are told to reach the port at, with its port, instead of the interfaces' own: a server behind a 1:1 NAT. Applies to the next answer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "relay_ip": {
+          "description": "The address the sockets toward the media servers leave from, one of the host's, for a firewall in front of them that admits one source address, or a host with several interfaces. Of the media servers' family: a media address of the other family is not relayed. The route's pick when left out. Applies to the next relay.",
+          "type": "string"
+        },
+        "session_timeout": {
+          "default": "30s",
+          "description": "How long a session is kept with nothing relayed for it: from its answer until its peer's first request, and after its last relay ends. Its ufrags are forgotten then, and its URL answers 404. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listen"
+      ],
+      "type": "object"
+    },
     "headers.Ops": {
       "additionalProperties": false,
       "properties": {
@@ -2750,6 +3133,54 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "webrtc_proxy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.webrtc_proxy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "whep"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.whep"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
+                "const": "whip"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.whip"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -2760,7 +3191,10 @@
             "forward_proxy",
             "proxy",
             "respond",
-            "static"
+            "static",
+            "webrtc_proxy",
+            "whep",
+            "whip"
           ],
           "type": "string"
         },
@@ -3070,6 +3504,58 @@
       "required": [
         "root"
       ],
+      "type": "object"
+    },
+    "http.handlers.webrtc_proxy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_sdp_bytes": {
+          "default": 32768,
+          "description": "The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_addrs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The address fit relays a media server's peers to, by the media server's address in the upstream, as {\"10.0.0.2:8080\": \"10.0.0.2:8189\"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first.",
+          "type": "object"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "The upstream of the media servers, picked by its load balancing for each offer: fit's own whip and whep, or any WHIP or WHEP server. Its health checks and timeouts apply.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upstream"
+      ],
+      "type": "object"
+    },
+    "http.handlers.whep": {
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.whip": {
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "http.middleware": {
@@ -4081,6 +4567,10 @@
         "$ref": "#/$defs/config.Upstream"
       },
       "type": "array"
+    },
+    "webrtc": {
+      "$ref": "#/$defs/config.WebRTC",
+      "description": "What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out."
     }
   },
   "title": "fit config, schema version 1",

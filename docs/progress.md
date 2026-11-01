@@ -11,8 +11,8 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-11-01 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .conf format and configs in several files, I81, Proxy-Wasm's response callbacks, I82, fit's own log by logger and level, and I83, fit's log in fib's formats with loggers of their own, and the access log's formats. P2P, NAT traversal: I84, STUN messages and the STUN server, done; I85–I93 to come. VPN, a network of fit nodes: I94, IP packets and the overlay route table, done; I95–I103 to come. Console: I104, the config kept encrypted and the console, done. Agent and tunnel: I105, roles in fit's config, I106, the tunnel, and I107, the agent, done |
-| fib | fib's `main` at `47948dd6` (`v1.6.1-0.20261031164450-47948dd66351`): `47948dd6` has QPACK's decoder remember each string by its place in the section, so that a browser's literals, sent on every request, are decoded once (W2 over h3: site +4.0%, edge +2.8%); before it, fib's `main` at `c20ab7a1` (`v1.6.1-0.20261031151458-c20ab7a1705e`): `c20ab7a1` holds an HTTP/3 request stream until its OnWritable callback has run, a data race fit's CI met in `TestStuckClientsPastMaxConns/h3`, and `e66f4cf6` fixes an intermittent arpc test; before it, fib's `main` at `d7e117c1` (`v1.6.1-0.20261031142854-d7e117c1f901`): `d7e117c1` decodes a long header literal a peer repeats unindexed once, as nghttp2 clients send a bearer token (W1 h2 +6.7%, 28.60 to 26.86 us a request), on `2ea8ddb7` and `da0ac655`, which fix and cover tests; before it, fib's `main` at `a6131b0c` (`v1.6.1-0.20261031112846-a6131b0c0af3`), whose give-back test looks for a pooled body at the handler's Get, on `d3707ca7`: an HTTP/2 stream gives a body from the pool back once it has framed it, where it had left it to the collector and so emptied the pool's size class (A48; W1 h2 +1.3%, allocation 850 to 677 MB/s); before it, fib's `main` at `6bd106d9` (`v1.6.1-0.20261031020358-6bd106d9d44b`), which widens two timing tests' margins for Windows CI, on `46827ea7`: a whole response's body of up to 4 KiB comes from the pool and goes back with `ClientResponse.TakeBody` and `Context.WriteResponseOwned`, and a `NewBufferedBody` request body is not copied (A48; W1 HTTP/1.1 +3.0%, the 3% that `861689c9`'s smaller heap had cost in collections); before it, fib's `main` at `7dcb41da` (`v1.6.1-0.20261030055545-7dcb41da8e7c`): `4f870993` binds a pushed stream's Context before the stream is the connection's, a data race fib's CI met, and `7dcb41da` fixes an early data test's warm-up on Windows; `a4ae3a0c`: a file sealed in Go as it is sent tells the kernel more follows each chunk but its last, so TCP fills its segments (a 1 MiB SendFile download over HTTPS/1.1 without the kernel's TLS +6.4%, W2 site HTTPS/1.1 +1.7%); before it, fib's `main` at `881ff97a` (`v1.6.1-0.20261029202329-881ff97a25f2`): `6c61693d` keeps a streamed response body in pooled 64 KiB chunks (W4 proxy-download h1 +11%, about 55 to 32 MiB; h2 +8%, about 137 to 100 MiB), `8895a6aa` grows a task pool's queue with its backlog instead of allocating it at its limit (W6 h2 50 to 32 MiB), `24beda14` and `881ff97a` make a connection the kernel's TLS seals write whole records with MSG_MORE and switch to the kernel's TLS only for files of 512 KiB or more (a 1 MiB SendFile download over HTTPS/1.1 +29%, which lets fit drop NoKernelTLS); before it, fib's `main` at `c794cf89` (`v1.6.1-0.20261029134914-c794cf8960fe`): `d5b8d477` frames an HTTP/2 response sent whole as the socket takes it, `0eb21d67` hands a streamed Content-Length response body to its sink from the read, `08faed60` fits sealed TLS records to the pool's size classes (W4 download h2 +11.5%, about 167 to 77 MiB; proxy-download h1 +6.6%, h2 +2.7%), and `c794cf89` makes a streamed HTTP/2 body hold the connection's window until it is consumed (W4 proxy-upload h2 about 312 to 252 MiB); before it, fib's `main` at `4ad4ebef` (`v1.6.1-0.20261029100241-4ad4ebefac94`): a streamed HTTP/2 or HTTP/3 request body waits in 64 KiB pooled chunks (W4 proxy-upload h2 +12.7%, 553 to 322 MiB); before it, fib's `main` at `56f08db3` (`v1.6.1-0.20261029003614-56f08db38f88`): `861689c9` starts a connection's read round at 16 KiB and remembers when it grew (W1 at 10,000 in flight 1,076 to 639 MiB, W4 within 2%), `b926ebf5` and `c6c2e10b` cut HTTP/3's per-packet work (W2 site h3 +2.3%); before it, fib's `main` at `f0378649` (`v1.6.1-0.20261028184321-f037864957c0`): `d4319879` recycles HTTP/3 request streams whose body did not stream (W0 h3 +17.6% to +20.0% at 500 to 10,000 in flight), and `f0378649` removes its test's body-size assumption; before it, fib's `main` at `a7b8b456` (`v1.6.1-0.20261028010536-a7b8b456e081`): `7f1fac3a`, whose Close takes the listeners under the lock a concurrent ShutdownBinding changes them under, a data race fit's CI met on macOS, and `8696ef40`, whose TLS server that answers early data and closes waits for the end of its handshake, so that a Windows client does not lose the answer to a reset, and `a7b8b456`, a fix of an HTTP/3 test's race; before it, fib's `main` at `33a039f1` (`v1.6.1-0.20261026175603-33a039f1382f`), with fib's package `log`, made for I83 (`185658f1`, and `33a039f1` for `ServeDuplex`'s panics); before it, fib's `main` at `a88c75d2` (`v1.6.1-0.20261025180753-a88c75d2f19b`): `b0809b4` with A46, a body filter whose work is done elsewhere, made for I81, and the HTTP/2, HTTP/3 and TLS work since; `b0809b4` itself: v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .conf format and configs in several files, I81, Proxy-Wasm's response callbacks, I82, fit's own log by logger and level, and I83, fit's log in fib's formats with loggers of their own, and the access log's formats. P2P, NAT traversal: I84, STUN messages and the STUN server, I85, A49 in fib, and I87, the TURN server, done; I86 and I88–I93 to come, on fib's WebRTC packages since decision 029. VPN, a network of fit nodes: I94, IP packets and the overlay route table, done; I95–I103 to come. Console: I104, the config kept encrypted and the console, done. Agent and tunnel: I105, roles in fit's config, I106, the tunnel, and I107, the agent, done. WebRTC: I108, decision 029 and fib `80c7f76`, I109, WHIP and WHEP with fit as the media server, I110, media servers proxied behind one UDP port, and I111, fib's A55–A59 taken up (TURN over TCP and TLS, per-allocation caps, a port-aware peer check, events, changes in place and drains; the proxy's source address and ports), done |
+| fib | fib's `main` at `9824c68` (`v1.6.1-0.20261031223653-9824c6852e7d`): `63b38d4` has a Windows dial from a local port skip one held on another address (A59, which fit's WebRTC proxy relay dials with), `749189e` keeps A59's tests off ports in TIME_WAIT, and `9824c68` has a connection the HTTP client closes stop counting against MaxConnsPerHost before the request it failed hears why; before it, fib's `main` at `84a67f7` (`v1.6.1-0.20261031213322-84a67f76ecfc`), with A56 (`74100b2`, a TURN server that never makes a worker wait), A57 (`bf669ce`, caps, a port-aware peer check, events and stats), A58 (`496301d`, limits and credentials in place, a drain), A55 (`97201b6`, TURN over TCP and TLS) and A59 (`3655193`, a dial from a chosen local address and port range), for I111; before it, fib's `main` at `80c7f76` (`v1.6.1-0.20261031191422-80c7f7662ab4`), the first with WebRTC (`webrtc` and its packages, `Engine.OpenUDPPeer` for A49), for I108; before it, fib's `main` at `47948dd6` (`v1.6.1-0.20261031164450-47948dd66351`): `47948dd6` has QPACK's decoder remember each string by its place in the section, so that a browser's literals, sent on every request, are decoded once (W2 over h3: site +4.0%, edge +2.8%); before it, fib's `main` at `c20ab7a1` (`v1.6.1-0.20261031151458-c20ab7a1705e`): `c20ab7a1` holds an HTTP/3 request stream until its OnWritable callback has run, a data race fit's CI met in `TestStuckClientsPastMaxConns/h3`, and `e66f4cf6` fixes an intermittent arpc test; before it, fib's `main` at `d7e117c1` (`v1.6.1-0.20261031142854-d7e117c1f901`): `d7e117c1` decodes a long header literal a peer repeats unindexed once, as nghttp2 clients send a bearer token (W1 h2 +6.7%, 28.60 to 26.86 us a request), on `2ea8ddb7` and `da0ac655`, which fix and cover tests; before it, fib's `main` at `a6131b0c` (`v1.6.1-0.20261031112846-a6131b0c0af3`), whose give-back test looks for a pooled body at the handler's Get, on `d3707ca7`: an HTTP/2 stream gives a body from the pool back once it has framed it, where it had left it to the collector and so emptied the pool's size class (A48; W1 h2 +1.3%, allocation 850 to 677 MB/s); before it, fib's `main` at `6bd106d9` (`v1.6.1-0.20261031020358-6bd106d9d44b`), which widens two timing tests' margins for Windows CI, on `46827ea7`: a whole response's body of up to 4 KiB comes from the pool and goes back with `ClientResponse.TakeBody` and `Context.WriteResponseOwned`, and a `NewBufferedBody` request body is not copied (A48; W1 HTTP/1.1 +3.0%, the 3% that `861689c9`'s smaller heap had cost in collections); before it, fib's `main` at `7dcb41da` (`v1.6.1-0.20261030055545-7dcb41da8e7c`): `4f870993` binds a pushed stream's Context before the stream is the connection's, a data race fib's CI met, and `7dcb41da` fixes an early data test's warm-up on Windows; `a4ae3a0c`: a file sealed in Go as it is sent tells the kernel more follows each chunk but its last, so TCP fills its segments (a 1 MiB SendFile download over HTTPS/1.1 without the kernel's TLS +6.4%, W2 site HTTPS/1.1 +1.7%); before it, fib's `main` at `881ff97a` (`v1.6.1-0.20261029202329-881ff97a25f2`): `6c61693d` keeps a streamed response body in pooled 64 KiB chunks (W4 proxy-download h1 +11%, about 55 to 32 MiB; h2 +8%, about 137 to 100 MiB), `8895a6aa` grows a task pool's queue with its backlog instead of allocating it at its limit (W6 h2 50 to 32 MiB), `24beda14` and `881ff97a` make a connection the kernel's TLS seals write whole records with MSG_MORE and switch to the kernel's TLS only for files of 512 KiB or more (a 1 MiB SendFile download over HTTPS/1.1 +29%, which lets fit drop NoKernelTLS); before it, fib's `main` at `c794cf89` (`v1.6.1-0.20261029134914-c794cf8960fe`): `d5b8d477` frames an HTTP/2 response sent whole as the socket takes it, `0eb21d67` hands a streamed Content-Length response body to its sink from the read, `08faed60` fits sealed TLS records to the pool's size classes (W4 download h2 +11.5%, about 167 to 77 MiB; proxy-download h1 +6.6%, h2 +2.7%), and `c794cf89` makes a streamed HTTP/2 body hold the connection's window until it is consumed (W4 proxy-upload h2 about 312 to 252 MiB); before it, fib's `main` at `4ad4ebef` (`v1.6.1-0.20261029100241-4ad4ebefac94`): a streamed HTTP/2 or HTTP/3 request body waits in 64 KiB pooled chunks (W4 proxy-upload h2 +12.7%, 553 to 322 MiB); before it, fib's `main` at `56f08db3` (`v1.6.1-0.20261029003614-56f08db38f88`): `861689c9` starts a connection's read round at 16 KiB and remembers when it grew (W1 at 10,000 in flight 1,076 to 639 MiB, W4 within 2%), `b926ebf5` and `c6c2e10b` cut HTTP/3's per-packet work (W2 site h3 +2.3%); before it, fib's `main` at `f0378649` (`v1.6.1-0.20261028184321-f037864957c0`): `d4319879` recycles HTTP/3 request streams whose body did not stream (W0 h3 +17.6% to +20.0% at 500 to 10,000 in flight), and `f0378649` removes its test's body-size assumption; before it, fib's `main` at `a7b8b456` (`v1.6.1-0.20261028010536-a7b8b456e081`): `7f1fac3a`, whose Close takes the listeners under the lock a concurrent ShutdownBinding changes them under, a data race fit's CI met on macOS, and `8696ef40`, whose TLS server that answers early data and closes waits for the end of its handshake, so that a Windows client does not lose the answer to a reset, and `a7b8b456`, a fix of an HTTP/3 test's race; before it, fib's `main` at `33a039f1` (`v1.6.1-0.20261026175603-33a039f1382f`), with fib's package `log`, made for I83 (`185658f1`, and `33a039f1` for `ServeDuplex`'s panics); before it, fib's `main` at `a88c75d2` (`v1.6.1-0.20261025180753-a88c75d2f19b`): `b0809b4` with A46, a body filter whose work is done elsewhere, made for I81, and the HTTP/2, HTTP/3 and TLS work since; `b0809b4` itself: v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes access logs as JSON, logfmt or lines, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the config kept encrypted in a store (`admin.store`, `fit store export` and `import`) and a console behind logins from which all of it is changed (`admin.console`); fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | 1.0's external security review, which is arranged outside the code |
 **The 2026-10-27 benchmark pass.** [The plan and its analysis](../bench/results/plan-2026-10-27/analysis.md) ran 232 runs on the benchmark host and kept one optimization: fib `d4319879` recycles HTTP/3 request streams whose body did not stream, measured at +17.6%, +19.2% and +20.0% at 500, 5,000 and 10,000 in flight, with CPU a request down 14-16% and h1/h2 unchanged. The read-buffer start (W4 proxy-download -4.9%), the sendfile download (-13.9%) and the fit-only HTTP/1.1 change were measured and rejected; their numbers are in the analysis.
@@ -92,7 +92,7 @@ To continue, start a session with:
 | `runtime` | `Compile(config, Env)` to an immutable `Graph` with a router per listener and a pool per upstream, sharing the previous graph's pools for unchanged upstreams; `Runtime` with atomic swaps, graph reference counts, and a drain timeout for graphs swapped out |
 | `listener` | binds a graph's listeners on one fib engine, TCP and, for HTTP/3, UDP; a listener of more than one of HTTP, tcp and socks behind fib's `mux`; dispatches each request to a route of the current graph; `Reload` to a new graph, keeping unchanged listeners and draining removed ones; graceful shutdown |
 | `l4` | layer 4: `Service`, which proxies a tcp listener's connections to an address of its upstream, dialed through fib's engine, each side's data sent on from its callback, its reads held while the other side has 64 KB unsent; idle timeout, `max_conns`, drained with its graph; `Clients`, the listener handler's callbacks once a service has a connection; `Entry`, a listener's services by SNI, handing a TLS connection no service names to the listener's own TLS when it has one (`HandOff`); `Rules`, who may use a forward proxy and where to, a host name decided by the address it resolves to once connected; `NewSOCKS`, fib's SOCKS server with them |
-| `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie) and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
+| `upstream` | `Pool`, which picks a backend by the upstream's sticky cookie and policy (round robin, smooth weighted round robin, least connections, random, P2C, consistent hashing on the client's IP, the URI, a header or a cookie), or the backend a session is kept on (`PickBackend`), and sends requests to it over HTTP/1.1, h2c or h2 through fib's asynchronous client, and drains before it closes; passive health (`max_fails`) and active health checks, HTTP and TCP probes on timers, sent through fib's asynchronous client and dialer; `StartEngine` for the engine pools dial through |
 | `provider` | `Provider`, a source of config that sends parts; `RegisterKind` and `LookupKind`, the kinds a binary has, which `provider/standard` imports; `Run`, which runs providers and applies their latest parts one at a time; `Parse` and `Merge`, which merge parts into the base config by decision 009's rules, recording each element's source and what was shadowed, and map errors back to where they were written |
 | `provider/docker` | the Docker provider: the Engine API over plain HTTP (events, then the containers listed), container labels turned into upstreams, routes and services, replicas sharing an upstream |
 | `provider/labels` | routes, services and an upstream's settings read from labels under a prefix, as Docker's labels and Consul's tags are, and the part they make |
@@ -4577,6 +4577,243 @@ agenthub as `agent/hub`, `agent/node` and `agent/client`, on today's fib; [the a
   slow agent, a slow upstream, first-byte timeout, cut connections both ways, relays with failover,
   managed nodes, write-back and a restart from the store, pages and SSE; Docker: `test/docker/agent`.
 - **Benchmark**: none yet; the agent's proxy has no harness scenario.
+
+### I108 WebRTC on fib's packages — done
+
+The WebRTC track's first iteration ([decision 029](decisions/029-webrtc.md)), which amends the P2P
+milestone's plan (decision 025): fib now has `webrtc`, with `webrtc/stun`, `webrtc/ice` and
+`webrtc/turn` (a client, a sans-IO server core and `turnserver` on a fib engine), and fit uses them
+rather than writing `p2p/turn` and `p2p/ice`.
+
+- **Decision 029**: fit's WebRTC is fib's; I86–I89 use fib's packages; `p2p/stun` stays as the STUN
+  server on listeners until I86 moves its messages to `webrtc/stun`; the config's `webrtc`, with
+  the TURN server as the role `webrtc.turn` (I87), and `webrtc.media` with the modules `whip` and
+  `whep` (I109); media servers proxied and UDP routed by ICE ufrag (I110). The plan's rows: I87
+  amended, I108–I110 added; the next free iteration is I111.
+- **fib**: `80c7f76` (`v1.6.1-0.20261031191422-80c7f7662ab4`), the first commit on fib's `main`
+  with `webrtc`. The full test suite passes on it under the race detector, with vet; no change in
+  fit was needed.
+- **A49 corrected**: its entry named fib `4febcdf5`, never pushed, with an asynchronous
+  `OpenUDPPeer(i, local, addr, handler, done)`. What fib built and pushed is `96a2331`, in
+  `80c7f76`: `OpenUDPPeer(binding, addr) (*Connection, error)`, which waits for the socket's loop.
+  The entry says so, and I85 is done.
+- **fib requests**: A55 (TURN over TCP and TLS), A56 (a TURN server that never waits on a worker:
+  `turnserver` calls `AddBinding` and `OpenUDPPeer` from `OnData`), A57 (per-allocation permission
+  and channel caps, a peer check with the port, events for metrics), A58 (lifetimes and quotas
+  changed in place, and a drain). The next free request is A59.
+- **Benchmark**: none; a dependency move with no change on fit's request path (rule 21).
+
+### I87 The TURN server — done
+
+fib's TURN server as the role `webrtc.turn` ([decision 029](decisions/029-webrtc.md),
+[WebRTC](webrtc.md)), in place of the `p2p/turn` decision 025 planned.
+
+- **Config**: `webrtc.turn`: `listen` (UDP addresses, one binding), `realm`, `users` (a password,
+  or coturn's hex long-term key), `secret` (coturn's `use-auth-secret`), `relay_ip`, `public_ip`,
+  `port_min`/`port_max`, `max_allocations` (1024), `max_allocations_per_user` (16),
+  `user_bandwidth` (2 MiB a second each way), the lifetimes, `nonce_secret`, `allowed_peers` and
+  `denied_peers` over fib's `DeniedByDefault`; checked when loaded. The `webrtc` logger.
+- **Role** (`webrtc/turn`): `turnserver.New` and `Start` on a binding of the listeners' engine,
+  after a plain bind of each new address (fib binds with SO_REUSEPORT). Users, the secret, the
+  peer lists and the bandwidth are read through an atomic pointer from fib's `Auth`, `PeerAllowed`
+  and `OnRelay`, so a reload changes them with the allocations kept; another change starts a new
+  server, after the old one when they share an address (the old one started again if the new one
+  fails), before it otherwise. Bandwidth: a token bucket a username and direction, a second's
+  burst, buckets that refilled dropped every 10 s, at most 65,536.
+- **Metrics**: `app.Metered`, which the Manager collects from the running roles and the Admin
+  API's `/metrics` (and OTLP) writes: allocations, bytes relayed each way, datagrams dropped for
+  bandwidth, peers refused, restarts.
+- **Stopgaps and gaps**: fib's server binds relayed addresses and opens peers with calls that wait
+  on fib's binding lock and loops, from `OnData` on a worker: a breach of rule 1 until
+  [A56](fib-api-requests.md#a56-a-turn-server-that-never-waits-on-a-worker), bounded by the
+  allocation quotas. Not yet: TCP and TLS to the server (A55), per-allocation permission and channel
+  caps, a peer rule with ports, events (A57), lifetimes and quotas changed in place and a drain (A58).
+  All of them, the breach included, are gone since I111, on fib `84a67f7`.
+- **Tests**: fib's `turn.Client` against the role over loopback (no pion): passwords, a key and
+  ephemeral credentials, indications and channels both ways; wrong, unknown, expired and foreign
+  credentials refused; 486 and 508; bandwidth dropping; loopback peers refused by default, allowed
+  and denied lists; reloads keeping allocations, restarting on a quota on the same address, moving
+  to another; a taken address refused with the server kept; a client cut midway freed at its
+  lifetime while a peer floods its relayed address and another client relays; the limiter; the
+  config's checks; a role's metrics in `/metrics`. Race detector on `webrtc/...`, `config`,
+  `admin`, `app/...`, `schema`, `docs`.
+- **Benchmark**: none; off the request path (rule 21). A relayed datagram costs fit an atomic load,
+  a mutex and a bucket update in `OnRelay`, beside fib's own mutex.
+
+### I109 WHIP and WHEP: an SFU on a shared Mux — done
+
+fit as a small media server ([decision 029](decisions/029-webrtc.md),
+[WebRTC](webrtc.md#whip-and-whep)): publishers in with WHIP (RFC 9725), viewers out with WHEP
+(draft-ietf-wish-whep), on fib's `webrtc` PeerConnection and `Mux`.
+
+- **Config**: `webrtc.media`, a role beside `webrtc.turn` whose member the Manager hands over
+  whole (`*config.WebRTC`), for the TURN secret: `listen` (one UDP port), `public_ips`,
+  `ice_servers`, `turn_urls` with `turn_credential_ttl` (1h), `codecs`, `max_peer_connections`
+  (1024), `max_streams` (64), `max_viewers` (256), `max_bitrate` (8 Mbit/s), `max_sdp_bytes`
+  (32 KiB), `connect_timeout` (30s), `ice_timeout` (30s), `key_frame_interval` (500ms); checked
+  when loaded, `turn_urls` only with `webrtc.turn`'s secret.
+- **Role** (`webrtc/media`): a `webrtc.Mux` on the listeners' engine, after a plain bind (SO_REUSEPORT),
+  one DTLS certificate for its PeerConnections, settings swapped through an atomic pointer; a change
+  of `listen` or `public_ips` ends the sessions (DTLS close through the old Mux, then it closes)
+  and starts a new one. The roles' modules find it by the upstream engine they are given, which
+  is the role's `Host.Upstream`.
+- **Handlers** `whip` and `whep`: the stream from `stream` or the path's last segment; the offer
+  taken with `OnBody` up to `max_sdp_bytes` and answered in its last callback, on the worker:
+  fit is an ICE lite agent with the Mux's host candidates, so `GatheringComplete` is closed once
+  the answer is set, and checked so, without a wait. 201 with `Location` and `Link` (RFC 9725 4.6,
+  fit's TURN with coturn-style credentials); DELETE 200/404; OPTIONS 204; PATCH 405, as an ICE
+  lite answer holds every candidate; 409, 404, 413, 415, 422, 503 with `Retry-After`.
+- **Media**: one codec a kind, the publisher's first that `codecs` lists, so that viewers are
+  offered what it sends; a `TrackLocal` a publisher section, `SetHeaderExtensions` from its
+  `TrackRemote`, written from `OnRTP` on the worker the packet arrived on; a token bucket of
+  `max_bitrate` with two seconds' burst and REMB once a second; viewers' PLI and FIR passed on as
+  PLI at most once a `key_frame_interval` (CAS), and once when a viewer connects. Ending: DELETE,
+  failed or closed PeerConnections (ICE lite silence past `ice_timeout`), `connect_timeout`; a
+  publisher's end closes its viewers. PeerConnections are never called under the role's mutex.
+- **Metrics**: PeerConnections and streams, sessions answered and ended by reason, refusals by
+  reason, packets and bytes received, drops past the bitrate, key frame requests sent and held,
+  restarts.
+- **Gaps**: simulcast past the first layer, RTX, FEC and transport-wide congestion control are not
+  forwarded, and there is no per-viewer bandwidth estimate, which fib's PeerConnection does not
+  do; data channels are answered by fib but unused. No fib API request was needed.
+- **Tests** (`webrtc/media`, fib's PeerConnections as clients over loopback, under the race
+  detector): a publisher's packets reach three viewers intact; a viewer's PLI reaches the
+  publisher, and a flood of them passes at most one a `key_frame_interval`; DELETE of a viewer and
+  of the publisher, which ends its viewers; the limits (503 and `Retry-After`), 409, 404, 413
+  (chunked), 415, 422 (no codec, a viewer without the publisher's codec), 400, 405; a publisher cut
+  (its engine closed) ends at `ice_timeout` with its viewers; a viewer cut does not hold the others;
+  `connect_timeout`; `Link` headers and a TURN credential checked against the secret; REMB and
+  drops past `max_bitrate`; reloads keeping sessions, restarting on `public_ips`, and stopping
+  without the member; the config's checks. In Chrome (the browser pane), a canvas
+  `captureStream` published with WHIP to fit and played back with WHEP: VP8, 320x240, 65 frames
+  decoded, DELETEs 200, 200 and 404.
+- **Benchmark**: none; a new data plane off the HTTP hot path (rule 21). Forwarding costs, per
+  packet and viewer, fib's SRTP protection and a send.
+
+### I110 WHIP and WHEP proxied; UDP routed by ICE ufrag — done
+
+Media servers behind fit ([decision 029](decisions/029-webrtc.md),
+[WebRTC](webrtc.md#proxying-media-servers)): one HTTP endpoint and one UDP port for fit's own
+`whip`/`whep` on other hosts or any WHIP or WHEP server.
+
+- **Design**: the handler `webrtc_proxy` and the role `webrtc.proxy`, beside `webrtc.media`, rather
+  than an `l4` service mode as the plan said: a reload drains an L4 service's relays with its
+  graph, while media sessions must outlast reloads; the routes the handler writes must be found by
+  the UDP side, which a process-wide role keyed by the upstream engine gives (as `whip` finds
+  `webrtc.media`); and the relays go to addresses answers name, not to an upstream's.
+- **Config**: `webrtc.proxy`: `listen`, `public_ips`, `max_sessions` (4096), `max_relays` (4096),
+  `session_timeout` (30s), `idle_timeout` (30s); checked when loaded, and refused on
+  `webrtc.media`'s port. The handler's params: `upstream`, `media_addrs` (an upstream address to
+  an IP, or IP and port), `timeout` (10s), `max_sdp_bytes` (32 KiB).
+- **Signaling** (`webrtc/media/proxyhttp.go`): the request taken with `OnBody` up to
+  `max_sdp_bytes`, sent from its last callback with `Pool.Pick` and `Send`, the answer gathered
+  with `ClientResponse.OnBody` up to the same, the client's `OnCancel` and a `timeout` timer
+  cancelling the `Call`. An offer's candidates are removed, so the media server only ever sees
+  fit; the answer's ufrag and ice-pwd are kept with the media address (`media_addrs`, or the first
+  UDP host candidate, then srflx, IPv4 first), and its candidates and `c=` replaced with the
+  role's addresses. `Location` becomes the POST's path and a 128-bit ID of fit's; `Link`s to ICE
+  servers pass, those below the session's URL are rewritten, the rest dropped. A session's
+  requests go to its media server with `Pool.PickBackend`, new in `upstream`; a trickle-only PATCH
+  is answered 204, a restart forwarded and its ufrag added. `max_sessions` is reserved before the
+  offer goes upstream; a 201 fit cannot route is DELETEd at the media server.
+- **Relay** (`webrtc/media/relay.go`): a UDP binding of the listeners' engine; a new peer
+  address's first datagram must be a Binding request whose USERNAME's first part is a known ufrag
+  and whose MESSAGE-INTEGRITY its ice-pwd signs (fib's `stun`), else it is dropped and counted and
+  its fib connection closed. Each relay dials the media address through the upstream engine,
+  async, from a socket of its own: a media server on one port, like fib's Mux, tells peers apart
+  by address. Up to 8 datagrams wait for the dial; the idle timer counts what the peer sends;
+  8 relays a session, 4 ufrags a session.
+- **Metrics**: sessions, relays, sessions answered, refusals, sessions ended by reason, relays
+  opened, drops by reason, bytes each way, restarts.
+- **fib**: [A59](fib-api-requests.md#a59-a-dial-from-a-chosen-local-address-and-port-range), a
+  dial from a chosen local address and port range, for a firewall between fit and the media
+  servers; until then the kernel picks them.
+- **Tests** (`webrtc/media`, I109's role on three fits as media servers, fib PeerConnections as
+  clients, under the race detector): three publishers spread one on each media server, a viewer
+  each finding its stream's, media intact through the relay, every answered candidate fit's port,
+  DELETEs reaching the right media server and freeing every ufrag and relay, 404 after; a DTLS
+  datagram first, an unknown ufrag and a bad MESSAGE-INTEGRITY dropped and unanswered; a media
+  server stopped: its peer's relay ends, its session's DELETE is 502 and frees it, and at most one
+  offer fails before it is out of rotation; a cut viewer's relay ends at `idle_timeout` and its
+  session at `session_timeout`; against a fake media server (`httptest`): candidates, `c=`,
+  `Location` and `Link` rewritten, the offer reaching it without candidates, a trickle answered
+  204 here and a restart's ufrag routed, 413, 415, a large answer and one without candidates 502
+  (the latter DELETEd upstream), a slow media server 504 within `timeout`, a client gone during
+  it, every reservation given back; `max_sessions` 503; reloads keeping sessions and media, a
+  `public_ips` change keeping them, a `listen` change ending them, and no member answering 503.
+  In Chrome (the browser pane), a canvas `captureStream` published through fit to one of two fit
+  media servers and played back through fit: VP8, 320x240, both connected, 53 frames decoded in
+  4s, DELETEs 200, 200, 404; the viewer's first try reached the other media server (404) and its
+  retry the right one.
+- **Benchmark**: none; a data plane off the HTTP hot path (rule 21). A relayed datagram costs a
+  send on each side.
+- **Limits**: candidates only by trickle after the answer, several media addresses, TCP ICE,
+  streaming extensions (WHEP's SSE) under a session's URL, and the peer's own address at the
+  media server are not supported; see the docs.
+
+### I111 WebRTC on fib's A55–A59 — done
+
+fib's A55–A59, built for fit's WebRTC ([decision 029](decisions/029-webrtc.md)), taken up in
+`webrtc.turn` and `webrtc.proxy` ([WebRTC](webrtc.md)).
+
+- **fib**: `84a67f7` (`v1.6.1-0.20261031213322-84a67f76ecfc`), with A56 (`74100b2`), A57
+  (`bf669ce`), A58 (`496301d`), A55 (`97201b6`) and A59 (`3655193`). The bump changed
+  `PeerAllowed` to take the port (`deps:` commit, the check reading the address alone until this
+  iteration's).
+- **Rule 1**: fib's TURN server binds relayed addresses and opens peers on goroutines of its own,
+  from a bounded queue, and its core takes a lock per allocation: the breach I87 recorded is gone.
+  What the queue drops is `fit_turn_dropped_total{reason="unsent"}`.
+- **Config** (`webrtc.turn`): `listen_tcp`, `listen_tls` and `tls.certificates` (a type of its
+  own, `TURNTLS`, so that a listener's `acme` and `client_auth` are not offered), `max_permissions`
+  (64), `max_channels` (64), `max_stream_message` (8 KiB, at least 2048), `stream_idle_timeout`
+  (30s); `allowed_peers` and `denied_peers` take an address with a port. (`webrtc.proxy`):
+  `relay_ip`, `port_min`, `port_max`, checked when loaded. The certificates are loaded when the
+  config compiles, which fails on one that does not load, and watched as a listener's are
+  (`runtime`).
+- **Peer check**: `relay_ip` and `public_ip` (of every server running, a draining one's too) are
+  allowed with port 0 (a permission, by address alone), on a port one of the servers holds a relay
+  on (`HoldsRelay`), and on a port `allowed_peers` names with them; never otherwise, whatever the
+  prefixes say, so a private `relay_ip` no longer opens fit's other ports to the relay. Other
+  peers go by `allowed_peers`, `denied_peers` (a port entry denies that port alone) and fib's
+  `DeniedByDefault`.
+- **Reload**: one server's member changed in place: `Core().SetLimits` for the quotas, caps and
+  lifetimes, `SetAuth` for the users and secret (the AuthFunc now made per config), the peer rules
+  and bandwidth through the atomic pointer, the certificates through another, read by each
+  handshake. A change of the addresses starts the new server beside the old one, which
+  `Shutdown` drains for `fit run -shutdown-timeout` (`app.Host.DrainTimeout`, the Manager's
+  `SetDrainTimeout`), its listening bindings removed when it ends; a reload onto a draining
+  server's address ends that drain first. A change of the realm, relay or public address, port
+  range, nonce secret or stream bounds on the same addresses closes the old server first, as
+  before, since the two cannot share an address. A port-0 address never counts as shared.
+- **Metrics**: from `OnEvent`, `fit_turn_allocated_total`, `fit_turn_refreshed_total`,
+  `fit_turn_freed_total{reason}`, `fit_turn_refused_total{code}`, `fit_turn_auth_failures_total`,
+  and `fit_turn_peers_refused_total` (403s, no longer counted in the check itself, which every
+  datagram now asks); from `Stats()` over the servers running, `fit_turn_allocations`,
+  `fit_turn_pending_allocations`, `fit_turn_permissions`, `fit_turn_channels`,
+  `fit_turn_unrelayed_total`; `fit_turn_draining_servers`. Events go to the `webrtc` logger at
+  debug: it writes on the goroutine that logs, a fib worker here, so not at info. The proxy's
+  `fit_webrtc_proxy_dropped_total{reason="no_port"}`.
+- **Proxy**: each relay dials its media server with `Engine.DialWith`, from `relay_ip` and the
+  range; `fib.ErrNoLocalPort` drops the peer address and counts it, its next request trying again.
+- **Tests** (race detector): TCP and TLS allocations with fib's client (`ClientConfig.Stream`,
+  `FrameLen`) relaying both ways, a closed connection freeing its allocation, an idle one closed at
+  `stream_idle_timeout`, a new certificate in the same files served on reload without a restart;
+  a third permission and a second channel refused with 508, and a cap raised in place; a port of
+  `relay_ip` that is not a relay refused though `127.0.0.0/8` is allowed, the same listed with its
+  port relayed to, two clients relaying to each other's relayed addresses, and the rules' order
+  without a network; 403 counted as a refused peer; events and gauges in `/metrics`; a reload of
+  users, quotas and lifetimes keeping the allocation (and 486 at the lowered per-user quota), a
+  realm on the same address restarting, an address change draining (the old allocation relaying,
+  508 for a new one there, the old address freed once it ends), the drain timeout, a reload back
+  onto a draining address; a taken TCP address refused; the proxy's relay leaving from the one
+  port of its range, a second peer dropped as `no_port` and let through once the port is free;
+  `app`'s drain timeout; the compile-time certificate check; the config's checks.
+- **Benchmark**: none; off the HTTP request path (rule 21). A relayed datagram now costs a peer
+  check with its port (an atomic load and, on fit's own address, a sharded map lookup per server
+  running) beside fib's per-allocation lock.
+- **Gaps**: `webrtc.turn.tls` takes certificates from files, not ACME, which roles do not reach;
+  a change of the realm or relay addresses on the same addresses still ends the allocations;
+  ICE over TCP to media servers is still not relayed by `webrtc.proxy`.
 
 ## Notes for later iterations
 

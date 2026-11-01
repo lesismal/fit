@@ -346,6 +346,8 @@ The rows follow the [feature table](comparison.md#features) in the comparison.
 | Structured logs | M1 | — |
 | Extensions: Go modules, WASM | M5 | — |
 | nginx config converter | M5 | — |
+| TURN server | P2P, I87 ([decision 029](decisions/029-webrtc.md)) | `webrtc/turn/turnserver` |
+| WebRTC: WHIP and WHEP, as a media server and as a proxy | WebRTC, I109–I110 | `webrtc` (`PeerConnection`, `Mux`) |
 
 ## Performance targets
 

@@ -82,9 +82,8 @@ should touch as few of these as it can.
 | `middleware/...` | rewrite, headers, limits, auth, compression, cache, retry, breaker |
 | `upstream` | upstream pools, load balancing, passive and active health |
 | `l4` | TCP and UDP proxying, SNI routing, PROXY protocol |
-| `p2p/stun` | STUN messages (RFC 8489), the STUN server and client |
-| `p2p/turn` | the TURN server and client (RFC 8656) |
-| `p2p/ice` | the ICE agent (RFC 8445) |
+| `p2p/stun` | the STUN server on listeners, over UDP and TCP; its messages move to fib's `webrtc/stun` with I86 (decision 029) |
+| `webrtc/turn` | the TURN server role, `webrtc.turn`, on fib's `webrtc/turn/turnserver` (decision 029) |
 | `p2p` | tunnels over a connected pair, signaling, the config's P2P apps |
 | `vpn/packet` | IP headers and the overlay route table |
 | `vpn/tun` | TUN devices on Linux, macOS, FreeBSD and Windows |
@@ -218,11 +217,11 @@ Status: `todo`, `doing` or `done`.
 | I83 | fit's log in fib's formats; loggers of their own; the access log's formats | I82 | done |
 | **P2P** | | | |
 | I84 | STUN messages and the STUN server | I51 | done |
-| I85 | A UDP peer opened toward an address (A49, in fib) | — | doing |
-| I86 | The STUN client and NAT behaviour | I84, I85 | todo |
-| I87 | The TURN server | I84, I85 | todo |
-| I88 | The TURN client | I86, I87 | todo |
-| I89 | The ICE agent | I86, I88 | todo |
+| I85 | A UDP peer opened toward an address (A49, in fib) | — | done |
+| I86 | The STUN client and NAT behaviour, on fib's `webrtc/stun` | I84, I85, I108 | todo |
+| I87 | The TURN server, `webrtc.turn`, on fib's `turnserver` | I85, I108 | done |
+| I88 | The TURN client, fib's `turn.Client` | I86, I87 | todo |
+| I89 | The ICE agent, fib's `webrtc/ice` | I86, I88 | todo |
 | I90 | QUIC DATAGRAM frames (A50, in fib) | — | todo |
 | I91 | Tunnels over a connected pair | I89, I90 | todo |
 | I92 | Signaling and the config's P2P apps | I87, I91 | todo |
@@ -244,6 +243,11 @@ Status: `todo`, `doing` or `done`.
 | I105 | Roles in fit's config: `app`, `app/console`, `login`, write-back through `EditMember` | I104 | done |
 | I106 | The tunnel's roles, from fibhub: `tunnel/server`, `tunnel/node`, `tunnel/client` | I105 | done |
 | I107 | The agent's roles, from agenthub, on fib throughout: `agent/hub`, `agent/node`, `agent/client` | I105 | done |
+| **WebRTC** | | | |
+| I108 | Decision 029: fit's WebRTC on fib's; fib `80c7f76`; A49 as built; A55–A58 | I85 | done |
+| I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | done |
+| I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | done |
+| I111 | WebRTC on fib's A55–A59: TURN over TCP and TLS, caps, events, changes in place and drains; the proxy's source address and ports | I87, I110 | done |
 
 ## M0, foundations
 
@@ -1134,8 +1138,9 @@ outside the code once I77 is done.
 
 Two hosts behind NAT connect directly through holes punched with ICE, or through a TURN relay where
 no hole can be punched, and carry TCP and UDP services between them. The design is
-[decision 025](decisions/025-p2p.md): STUN, TURN and ICE built in fit on fib, interoperable with
-other agents, and QUIC over the selected pair.
+[decision 025](decisions/025-p2p.md): STUN, TURN and ICE on fib, interoperable with other agents,
+and QUIC over the selected pair; [decision 029](decisions/029-webrtc.md) amends it, so that I86–I89
+use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of fit's own.
 
 ### I84 STUN messages and the STUN server
 
@@ -1159,8 +1164,9 @@ other agents, and QUIC over the selected pair.
 
 ### I86 The STUN client and NAT behaviour
 
-- **Do**: Binding transactions on a fib UDP peer, retransmitted as RFC 8489 section 6.2.1 says (RTO
-  doubling, Rc and Rm), over UDP and TCP; the server-reflexive address; RFC 5780's mapping and
+- **Do**: Binding transactions on a fib UDP peer with `webrtc/stun`'s transactions (RFC 8489 section
+  6.2.1's RTO doubling, Rc and Rm), over UDP and TCP; `p2p/stun`'s messages replaced by
+  `webrtc/stun`'s, its server kept; the server-reflexive address; RFC 5780's mapping and
   filtering tests, for the logs and for ICE's choice of candidates; the server answers
   OTHER-ADDRESS and CHANGE-REQUEST when it has a second address.
 - **Done when**: transactions time out and retransmit on schedule with a fake clock, a lost answer
@@ -1169,35 +1175,40 @@ other agents, and QUIC over the selected pair.
 
 ### I87 The TURN server
 
-- **Do**: package `p2p/turn`: allocations over UDP and TCP to the server, relayed over UDP (RFC
-  8656); long-term credentials and coturn's time-limited ones; Refresh, CreatePermission,
-  ChannelBind, Send and Data indications, ChannelData; lifetimes and expiry; quotas of allocations
-  in all and per user, permissions and channels per allocation, and relayed bytes per second;
-  addresses that may not be relayed to (loopback, private ranges unless allowed).
-- **Done when**: each method's success and error answers match the RFC, data goes both ways
-  through indications and channels, expired allocations, permissions and channels stop relaying,
-  quotas refuse with 486 and 508, and a client cut midway frees its allocation.
-- **Touches**: `p2p/turn`, `p2p/stun`.
+- **Do**: the role `webrtc.turn` ([decision 029](decisions/029-webrtc.md)) on fib's
+  `webrtc/turn/turnserver`, on the listeners' engine: UDP addresses, the realm, static users (a
+  password or a long-term key) and coturn's `use-auth-secret`; the relay and public addresses and a
+  port range; allocations in all and per user, relayed bytes a second per user and direction,
+  lifetimes; peers allowed and denied over fib's denial of internal addresses; users, secret, peers
+  and bandwidth changed on reload without a restart; metrics in `/metrics` through `app`; the
+  `webrtc` logger; the schema's chapter. TCP and TLS to the server, permission and channel caps,
+  events and drains are fib's (A55–A58), taken up in I111.
+- **Done when**: fib's TURN client allocates through fit, relays both ways to a peer, by indication
+  and channel; a wrong password and an expired ephemeral credential are refused; quotas refuse with
+  486 and 508; bandwidth past its rate drops; a private peer is refused unless allowed; a reload of
+  users keeps the allocation, and one of the address moves the server; a client cut midway frees its allocation
+  at its lifetime's end; under the race detector.
+- **Touches**: `webrtc/turn`, `config`, `app`, `admin`, `schema`, `docs`.
 
 ### I88 The TURN client
 
-- **Do**: allocate, refresh, create permissions and bind channels from a fib UDP peer or TCP
-  connection, with the 401/438 nonce dance; data to and from peers through the allocation, by
-  channel once bound.
+- **Do**: fib's `turn.Client` (allocate, refresh, permissions and channels, the 401/438 nonce
+  dance) driven from a fib UDP peer, and from a TCP connection once A55 is in fib; data to and from
+  peers through the allocation, by channel once bound.
 - **Done when**: the client works against fit's server and keeps an allocation alive past its
   lifetime; a stale nonce is retried.
-- **Touches**: `p2p/turn`.
+- **Touches**: `p2p`.
 
 ### I89 The ICE agent
 
-- **Do**: package `p2p/ice`: host, server-reflexive and relayed candidates on one socket per
-  component; priorities, pairs and the checklist (RFC 8445), with the controlling and controlled
+- **Do**: fib's `webrtc/ice` agent in `p2p`: host, server-reflexive and relayed candidates on one
+  socket per component; priorities, pairs and the checklist (RFC 8445), with the controlling and controlled
   roles and their conflicts; regular nomination; trickle (RFC 8838); consent freshness (RFC 7675);
   candidates in RFC 8839's syntax; a pair's path as a `quic.PacketConn`. Limits on candidates and
   pairs; timers on fib's.
 - **Done when**: two agents connect over loopback, through a simulated NAT of each kind and through
   a TURN relay when the NATs are symmetric; a lost consent fails the pair; nothing blocks a worker.
-- **Touches**: `p2p/ice`.
+- **Touches**: `p2p`.
 
 ### I90 QUIC DATAGRAM frames (A50, in fib)
 
@@ -1409,3 +1420,64 @@ their settings kept in its store ([decision 028](decisions/028-agent-and-tunnel.
 - **Done when**: the e2e tests, with slow, large and cut bodies, pass on fib engines, with a
   restart from the store; the Docker environment's checks pass.
 - **Touches**: `agent`, `config`, `test/docker/agent`, `docs`.
+
+## WebRTC
+
+fit serves WebRTC on fib's `webrtc` packages: a TURN server, WHIP and WHEP with fit as the media
+server, and fit in front of other media servers, for their signaling and their media
+([decision 029](decisions/029-webrtc.md)). The TURN server is I87, in the P2P milestone.
+
+### I108 WebRTC on fib's packages
+
+- **Do**: decision 029, amending 025; this file's and progress's rows; fit on fib `80c7f76`, the
+  first with `webrtc`; A49's entry made to say what fib built (`96a2331`); fib requests for what
+  the TURN server lacks (A55–A58).
+- **Done when**: the full test suite passes on fib `80c7f76`, and the docs' links resolve.
+- **Touches**: `go.mod`, `docs`.
+
+### I109 WHIP and WHEP: an SFU on a shared Mux
+
+- **Do**: the role `webrtc.media`, a `webrtc.Mux` on a UDP binding of the listeners' engine, with
+  its public address and ICE servers; handler modules `whip` and `whep`: streams by name from the
+  route, a publisher's RTP forwarded to its viewers with key frame requests relayed, the route's
+  middleware for auth, limits on streams, viewers a stream, PeerConnections in all and bitrate;
+  DELETE and PATCH (trickle) per RFC 9725 and the WHEP draft, ICE servers in `Link` headers (TURN
+  credentials made from `webrtc.turn`'s secret when it has one); everything closed on reload and
+  stop.
+- **Done when**: fib's `PeerConnection` publishes and plays through fit; a publisher gone ends its
+  viewers; slow and cut viewers do not hold the publisher; the limits refuse; under the race
+  detector.
+- **Touches**: `webrtc`, `modules`, `config`, `schema`, `docs`.
+
+### I110 WHIP and WHEP proxied; UDP routed by ICE ufrag
+
+- **Do**: WHIP and WHEP signaling proxied to upstream media servers through fit's upstream pools,
+  the answer's candidates rewritten to fit's public UDP port and its ufrag remembered against the
+  backend's media address; an L4 UDP service that routes a new peer by the STUN USERNAME of its
+  first datagram, then relays its 5-tuple, sticky, with limits and idle timeouts. Built as the
+  handler `webrtc_proxy` and the role `webrtc.proxy` beside `webrtc.media`, not an `l4` service
+  mode: the sessions outlast reloads, which drain an L4 service with its graph, and the handler
+  and the relay share their routes through the role ([decision 029](decisions/029-webrtc.md)).
+- **Done when**: two media servers behind one fit port each get their own peers; a peer's
+  datagrams before its Binding request are dropped; a backend gone frees its routes; under the race
+  detector.
+- **Touches**: `webrtc`, `upstream`, `config`, `schema`, `docs`.
+
+### I111 WebRTC on fib's A55–A59
+
+- **Do**: fit on fib `84a67f7`, with A55–A59. `webrtc.turn`: the rule-1 breach I87 recorded goes
+  (A56); `max_permissions` and `max_channels` (A57); a peer check that sees the port, so that
+  `relay_ip` is reached on the relayed ports alone and on ports `allowed_peers` names, never on
+  fit's other ports (A57); `OnEvent` into the `webrtc` logger and `/metrics`, `Stats()` into gauges
+  (A57); a reload that changes the quotas, caps, lifetimes and credentials in place, and a change
+  of the addresses that drains the old server for the listeners' drain timeout (A58);
+  `listen_tcp` and `listen_tls`, with certificates from files as listeners have them,
+  `max_stream_message` and `stream_idle_timeout`, the free-address probe over TCP too (A55).
+  `webrtc.proxy`: `relay_ip`, `port_min` and `port_max`, checked when loaded, its relays dialed
+  with `DialWith`, an exhausted range counted as a drop (A59). fib requests A55–A59 marked done.
+- **Done when**: TCP and TLS allocations through fit with fib's client relay both ways; caps
+  refuse with 508; the port-aware check refuses fit's other ports and lets two clients relay to
+  each other; events and metrics count; a reload keeps allocations with changed limits; an address
+  change drains; the relay leaves from the configured port range, and a full range is dropped and
+  counted; under the race detector.
+- **Touches**: `webrtc`, `config`, `app`, `runtime`, `tlsmgr`, `cli`, `schema`, `docs`, `go.mod`.

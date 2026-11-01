@@ -217,6 +217,15 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	if err := app.Check(c); err != nil {
 		errs = append(errs, config.AsErrors(err)...)
 	}
+	if w := c.WebRTC; w != nil && w.TURN != nil && w.TURN.TLS != nil {
+		// webrtc.turn's certificates, loaded here to be checked and watched
+		// as a listener's are; the role loads them again when it applies.
+		if certs, err := tlsmgr.LoadStatic(w.TURN.TLS.Config()); err != nil {
+			errs = append(errs, config.AsErrors(err)...)
+		} else {
+			g.watchFiles(certs.Files())
+		}
+	}
 	for i := range c.Upstreams {
 		u := &c.Upstreams[i]
 		key, files, keyed := upstreamKey(u)

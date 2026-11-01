@@ -61,12 +61,17 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A46 | A body filter whose work is done elsewhere | done, fib `dbe5c274` (`main`) | 1, 4, 5, 8 | I81 |
 | A47 | A streamed request body passed on without needless copies | done, fib `309a6cd4` (`main`) | 1, 5, 8 | W4 |
 | A48 | A whole response's body taken from the pool, and a buffered request body not copied | done, fib `46827ea7`, HTTP/2 `d3707ca7` (`main`) | 1, 5, 8 | W1 |
-| A49 | A UDP peer opened toward an address on a listener's socket | made, fib `4febcdf5` (local, not pushed) | 1, 9 | I85 (P2P) |
+| A49 | A UDP peer opened toward an address on a listener's socket | done, `96a2331` (in `80c7f76`) | 1, 9 | I85 (P2P), I87 |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 | A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
 | A52 | A WebSocket connection's transport: a forced close, and its address | requested | 10, 13 | agent (028) |
 | A53 | Backpressure on a WebSocket connection's sends | requested | 8, 9, 11 | agent, tunnel (028) |
 | A54 | A raw QUIC endpoint on an engine's UDP binding | requested | 15 | tunnel (028) |
+| A55 | TURN over TCP and TLS | done, `97201b6` (in `84a67f7`) | — | I111 (029) |
+| A56 | A TURN server that never waits on a worker | done, `74100b2` (in `84a67f7`) | 1 | I87, I111 (029) |
+| A57 | A TURN server's limits and hooks | done, `bf669ce` (in `84a67f7`) | 11 | I111 (029) |
+| A58 | A TURN server changed in place, and drained | done, `496301d` (in `84a67f7`) | 10, 11 | I111 (029) |
+| A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`) | — | I111 (029) |
 
 ## Evidence
 
@@ -1490,7 +1495,7 @@ HTTP/1.1 within noise.
 
 ## A49: A UDP peer opened toward an address on a listener's socket
 
-**Status.** Made on 2026-11-01 by fit's session, fib `4febcdf5`, on fib's local `main`; not pushed yet, so fit does not depend on it yet.
+**Status.** Done, fib `96a2331`, on fib's `main` since `80c7f76`, which fit uses (I108). An earlier version of this entry named a commit `4febcdf5` on fib's local `main`, with the asynchronous API below; no such commit was pushed, and what was built is the synchronous one under "As built".
 
 **Problem.** A UDP listener's peer becomes a connection only once it has sent a datagram, and a
 dialed UDP connection has a socket, and so a local port, of its own. Hole punching needs the
@@ -1518,21 +1523,20 @@ The peer is the listener's like any other: the binding's idle timeout, `SetUDPId
 `NotifyWritable` and `OnClose` apply, and a peer already open for the address is returned as it
 is. Opening it does not block and sends nothing.
 
-**As built.** `Engine.OpenUDPPeer(i int, local, addr netip.AddrPort, handler Handler, done
-func(*Connection, error)) error`: asynchronous, as `Dial` is, since the peer table belongs to the
-socket's event loop and a worker must not wait on it. It returns an error at once for a socket it
-cannot use (`ErrNoUDPSocket`, `ErrUDPSocketAmbiguous` when several sockets match and none is named,
-`ErrUDPSocketSpread`, `EINVAL`, `EAFNOSUPPORT`), and otherwise calls `done` once, on the loop after
-the peer's `OnOpen`, with the connection or `net.ErrClosed`. An address `ReusePort` spread over the
-pollers is refused: the kernel picks which socket a reply arrives on, so the peer could miss it. fit
-therefore opens peers on an engine, or a binding, that does not spread its UDP sockets
-(`ReusePort: false` or `EngineLoop: true`). Tests: `udp_open_test.go` (IPv4, IPv4 on a dual-stack
-socket, IPv6; the reply reaches the opened peer and not the binding's handler, and never before its
-`OnOpen`; idle timeout; every refusal; the spread case).
+**As built.** `Engine.OpenUDPPeer(binding int, addr netip.AddrPort) (*Connection, error)` (fib
+`96a2331`, `udp_peer.go`): the peer gets the binding's handler and its `OnOpen`, as if it had sent
+first, and is opened on the first socket of the binding's address; with `ReusePort` its replies may
+arrive on another socket, which opens a connection of its own for the same address, so a protocol
+that opens peers keys them by address, as fib's `webrtc` and `turnserver` do. It waits for the
+socket's event loop, so it must not be called from a callback that loop runs (a UDP peer's
+`OnOpen`, `OnHangup`); it reports `net.ErrClosed` once the engine stops or the binding drains, and
+an error for an index that names no UDP binding or an address of the other family. Called from
+`OnData` on a worker, as `turnserver` does, the wait breaches fit's rule 1;
+[A56](#a56-a-turn-server-that-never-waits-on-a-worker) asks for the TURN server not to wait.
 
-**How fit would use it.** `p2p/ice` gathers its host candidates on one binding and opens a peer
-for each remote candidate it checks; `p2p/turn` binds each allocation's relayed address as a
-binding on port 0 and opens a peer for each permission's address as data comes to be sent to it.
+**How fit uses it.** Through fib's `webrtc` packages: `webrtc/turn/turnserver` speaks from each
+allocation's relayed address to its permitted peers with it (I87, [decision 029](decisions/029-webrtc.md)),
+and `webrtc/ice` sends its checks from the socket it gathered on.
 
 ## A50: QUIC DATAGRAM frames
 
@@ -1668,3 +1672,148 @@ bounds, migration and timers inside it, shared with `http3.ServerHandler`.
 
 **How fit would use it.** The tunnel's QUIC listener and dialer become a few lines over it, and
 follow migrating clients.
+
+## A55: TURN over TCP and TLS
+
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `97201b6`, on fib's `main` in `84a67f7`, which fit uses (I111).
+
+**Problem.** fib's `webrtc/turn` speaks TURN over UDP only: its `FiveTuple` has no transport, and
+`turnserver` listens on a UDP binding. A client on a network that lets only TCP, or only TLS on
+port 443, through cannot reach the server, and those clients are why WebRTC services run TURN at
+all. Decision 025 planned allocations over UDP and TCP to the server.
+
+**Evidence.** RFC 8656 section 3.1 has a client reach its server over UDP, TCP or (D)TLS, with UDP
+relayed in every case; browsers list `turn:host?transport=tcp` and `turns:host:443` servers, and
+coturn and pion serve both.
+
+**Suggested API.** The core takes a transport in `FiveTuple` (UDP or a stream) and frames STUN
+and ChannelData out of a stream (ChannelData padded to four bytes over a stream, RFC 8656 section
+12.5); `turnserver` serves a TCP binding, and a TLS one through `fib/tls`, with the same handler:
+a connection is one client, its allocation freed when it closes. A bound on a stream's buffered
+bytes, and an idle timeout before the first Allocate.
+
+**How fit would use it.** `webrtc.turn.listen` takes `tcp` and `tls` addresses with a certificate,
+as listeners do.
+
+**As built.** `FiveTuple.Transport` (UDP or TCP, TLS being TCP to the core), `FrameLen` for a stream's STUN and padded ChannelData, `ClientConfig.Stream` for the client; `turnserver.Server.StreamHandler()`, served on a `fib.Binding{Network: "tcp"}` or wrapped in `fibtls.NewServer(cfg, ...)`, and `ListenTCP`/`ListenTLS`; `Config.MaxStreamMessage` (8 KiB) and `Config.StreamIdleTimeout` (30s, checked every sweep). A connection is one client, its allocation freed when it closes; the listening bindings are the caller's to remove.
+
+**How fit uses it.** `webrtc.turn.listen_tcp` and `listen_tls`, each one TCP binding of the listeners' engine serving `StreamHandler()`, the TLS one through `fibtls.NewServer` with certificates from `webrtc.turn.tls.certificates`, loaded by `tlsmgr` and watched as a listener's; `max_stream_message` and `stream_idle_timeout` (I111).
+
+
+## A56: A TURN server that never waits on a worker
+
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `74100b2`, on fib's `main` in `84a67f7`, which fit uses (I111).
+
+**Problem.** `turnserver` runs the core in the `OnData` of the datagram that asks, on a fib
+worker, and from there binds relayed addresses and opens peers with calls that wait: an Allocate
+calls `AllocateRelay`, which calls `Engine.AddBinding` (fib's binding lock, which a binding being
+removed holds while it waits for its loops, then a bind and a wait for the loops to take the new
+socket), up to once a port in a range that is taken; a datagram to a peer that has not spoken
+first calls `Engine.OpenUDPPeer`, which waits for the socket's event loop. A busy loop or a binding
+being removed elsewhere stalls the worker, and every other datagram behind the core's one mutex,
+which every allocation shares.
+
+**Evidence.** `webrtc/turn/turnserver/turnserver.go` at `80c7f76`: `allocateRelay` (`AddBinding`
+under `s.mu`), `conn` (`OpenUDPPeer` from `flush`, called by `OnData`); `relay.Close` already moves
+`RemoveBinding` to a goroutine for this reason.
+
+**Suggested API.** The core asks for a relay asynchronously, `AllocateRelay(t, user, ipv6,
+done func(Relay, error))`, answering the Allocate when `done` runs (its retransmissions meanwhile
+dropped); `turnserver` binds on a bounded pool of its own, or keeps a few relays bound ahead.
+`OpenUDPPeer` gets an asynchronous form, as `Dial` has, or `turnserver` sends a peer's first
+datagram with a `sendto` on the relay's socket and lets the reply open the peer. The core's
+mutex split by allocation, so that relaying for one does not wait for another.
+
+**How fit would use it.** As it does now, with no change: the breach of rule 1 recorded for I87
+goes.
+
+**As built.** `ServerConfig.AllocateRelay(t, user, ipv6, done)` is asynchronous; the core is safe for concurrent use, a lock per allocation and its tables in 64 shards; `turnserver` binds relayed addresses and opens peers on goroutines of its own fed by a bounded queue (`Config.SetupWorkers`, 4, and `SetupQueue`, 1024), a full one refusing the allocation with 508 or dropping the datagram, which `Server.Unsent()` counts.
+
+**How fit uses it.** As before, with nothing to change: the breach of rule 1 recorded for I87 is gone. `Unsent()` is `fit_turn_dropped_total{reason="unsent"}` (I111).
+
+
+## A57: A TURN server's limits and hooks
+
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `bf669ce`, on fib's `main` in `84a67f7`, which fit uses (I111).
+
+**Problem.** Rule 11 bounds every resource, and the core bounds allocations, but an allocation's
+permissions are a map that grows with every CreatePermission (each lasting five minutes) and its
+channels with every ChannelBind up to 4096: a client with credentials can make the server keep
+memory without bound. `PeerAllowed` sees an address and not its port, so a server cannot allow
+peers on its own address only on its relay ports, which relaying between two clients of the same
+server needs while its other ports stay closed to the relay. And a host sees only the bytes
+`OnRelay` reports: no event when an allocation is made or freed, nor when a request is refused
+and why, which metrics and logs need.
+
+**Evidence.** `webrtc/turn/server.go` at `80c7f76`: `createPermission` and `channelBind` add to
+`a.perms` and `a.chans` with no count; `ServerConfig.PeerAllowed func(netip.Addr) bool`;
+`OnRelay` is the only hook.
+
+**Suggested API.** `ServerConfig.MaxPermissions` and `MaxChannels` per allocation (refused with
+508, as RFC 8656 section 9 allows); `SendAllowed func(peer netip.AddrPort) bool`, checked when
+data is relayed to a peer; `OnEvent func(Event)` with the allocation's user and 5-tuple for
+allocated, refreshed, freed (and why: deleted, expired, closed) and refused (with the error code),
+and auth failures; `Server.Stats()` with allocations, permissions and channels held.
+
+**How fit would use it.** `webrtc.turn` gets `max_permissions` and `max_channels`, a default that
+allows the server's own address on its relay ports alone, and counters in `/metrics` and lines in
+the `webrtc` logger for each event.
+
+**As built.** `Limits.MaxPermissions` and `MaxChannels` per allocation, refused with 508; `PeerAllowed func(netip.AddrPort) bool`, asked with port 0 on CreatePermission and with the peer's port on ChannelBind and every datagram relayed either way, in place of the suggested `SendAllowed`; `Server.HoldsRelay(addr)`; `ServerConfig.OnEvent` (allocated, refreshed, freed with its reason and traffic, refused with its code, auth failed); `Server.Stats()`.
+
+**How fit uses it.** `max_permissions` and `max_channels` (64 each); a peer check that allows `relay_ip` and `public_ip` on the ports the servers hold relays on (`HoldsRelay`) and on ports `allowed_peers` names with them, never on fit's other ports; `OnEvent` counted in `/metrics` and logged by the `webrtc` logger at debug; `Stats()` as gauges (I111).
+
+
+## A58: A TURN server changed in place, and drained
+
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `496301d`, on fib's `main` in `84a67f7`, which fit uses (I111).
+
+**Problem.** A config reload must not drop what is unchanged (decision 028), and a server being
+removed should let its allocations end rather than cut them. The core's lifetimes, nonce lifetime
+and allocation quotas are fixed when it is made, and `turnserver.Close` frees every allocation at
+once. fit swaps what the core reads through functions (`Auth`, `PeerAllowed`, `OnRelay`) without
+a restart, but a change of a lifetime or a quota makes a new server, and the allocations held are
+lost: browsers then restart ICE.
+
+**Evidence.** `turn.ServerConfig` is copied into the `Server` by `NewServer`; `turnserver` has
+`Close` and nothing between it and running.
+
+**Suggested API.** `Server.SetLimits(Limits)` for the lifetimes and quotas, applied to the next
+request (an allocation past a lowered quota kept until it ends); `Server.Drain()`, which refuses
+new allocations with 508 and lets the held ones refresh until `Close`, and `turnserver.Shutdown(ctx)`,
+which drains, waits until none is left or ctx ends, then closes.
+
+**How fit would use it.** A reload changes lifetimes and quotas in place; a changed address or
+realm starts the new server beside the old one, which drains for the listeners' drain timeout,
+as a listener a reload removed does.
+
+**As built.** `turn.Limits`, embedded in `ServerConfig`; `Server.SetLimits`, `Limits` and `SetAuth`, from the next request on; `Server.Drain()`, and `turnserver.Server.Shutdown(ctx)`, which drains, waits until no allocation is left or ctx ends, and closes.
+
+**How fit uses it.** A reload changes the quotas, caps and lifetimes with `Core().SetLimits` and the users and secret with `SetAuth`; a change of the addresses starts the new server beside the old one, which `Shutdown` drains for fit run's `-shutdown-timeout` (`app.Host.DrainTimeout`); a change of the realm, relay addresses, nonce secret or stream bounds on the same addresses still closes the old server first, since the two cannot share an address (I111).
+
+
+## A59: A dial from a chosen local address and port range
+
+**Status.** Requested on 2026-11-01, for fit's WebRTC proxy ([decision 029](decisions/029-webrtc.md)). Done, fib `3655193`, on fib's `main` in `84a67f7`, which fit uses (I111).
+
+**Problem.** `webrtc.proxy` relays each peer address to its media server from a UDP socket of its
+own, which `Engine.DialWithHandler` opens. The kernel picks its local address by the route and its
+port from the whole ephemeral range. Media servers on a private network often sit behind a
+firewall that admits one source address and a port range, and a multi-homed host may need the
+relays to leave from the interface on the media servers' network. The TURN server binds a range
+itself with `AddBinding`, which fit cannot use for a socket per peer without a binding each.
+
+**Evidence.** `dialRequest` has a network, an address, a timeout and a handler; nothing names a
+local address, and the socket is bound only by `connect`.
+
+**Suggested API.** `Engine.DialWith(DialOptions{Network, Addr, LocalAddr netip.AddrPort, PortMin,
+PortMax uint16, Timeout, Handler}, done)`: the socket is bound to `LocalAddr`, trying ports
+`PortMin`-`PortMax` from a random start when the port is 0 and a range is set, before it
+connects, all on the loop as the dial is now; `EADDRINUSE` on every port fails the dial.
+
+**How fit would use it.** `webrtc.proxy` gets `relay_ip`, `port_min` and `port_max` for its
+sockets toward the media servers, as `webrtc.turn` has for its relayed addresses.
+
+**As built.** `fib.DialOptions{Network, Addr, Timeout, Handler, LocalAddr netip.AddrPort, PortMin, PortMax uint16}` and `Engine.DialWith(opts, done)`: the socket is bound without SO_REUSEADDR, a range searched from a random port, and a range with no port free fails the dial with an error matching `fib.ErrNoLocalPort`; the local address fixes the family.
+
+**How fit uses it.** `webrtc.proxy.relay_ip`, `port_min` and `port_max`, checked when the config loads; each relay dials its media server with `DialWith`, and a range with no port free drops the peer address, counted as `fit_webrtc_proxy_dropped_total{reason="no_port"}` (I111).

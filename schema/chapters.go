@@ -36,6 +36,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"acme", "ACME", "acme", "acme.md"},
 	{"agent", "Agent", "agent", "agent.md"},
 	{"tunnel", "Tunnel", "tunnel", "tunnel.md"},
+	{"webrtc", "WebRTC", "webrtc", "webrtc.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 
@@ -45,7 +46,7 @@ var standardModules = map[string]struct{}{
 	"fastcgi": {}, "forward_proxy": {}, "proxy": {}, "respond": {}, "static": {},
 	"basic_auth": {}, "body_limit": {}, "cache": {}, "circuit_breaker": {}, "client_cert": {}, "compress": {},
 	"concurrency_limit": {}, "forward_auth": {}, "headers": {}, "jwt": {}, "rate_limit": {}, "redirect": {},
-	"rewrite": {}, "wasm": {},
+	"rewrite": {}, "wasm": {}, "webrtc_proxy": {}, "whep": {}, "whip": {},
 }
 
 // chapter is a chapter's text, and its examples: in JSON, from which the

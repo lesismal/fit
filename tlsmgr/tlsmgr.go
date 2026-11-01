@@ -36,6 +36,13 @@ var cipherSuites = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
+// StreamConfig returns the TLS configuration of a server of a protocol that
+// is not HTTP and names none in ALPN, as TURN over TLS: the listeners'
+// versions and suites, its certificates from get, as ServerConfig has them.
+func StreamConfig(get func(*tls.ClientHelloInfo) (*tls.Certificate, error)) *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: cipherSuites, GetCertificate: get}
+}
+
 // ServerConfig returns the TLS configuration of a listener serving
 // protocols, whose certificates get picks. get is called for every full
 // handshake, so the listener may change what it answers, on a reload or when

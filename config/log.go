@@ -11,7 +11,7 @@ import (
 // in the format and to the output of that logger, or of the log.
 type Log struct {
 	Level   string             `json:"level,omitempty" enum:"debug,info,warn,error" default:"\"info\"" doc:"The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload."`
-	Levels  map[string]string  `json:"levels,omitempty" doc:"The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload."`
+	Levels  map[string]string  `json:"levels,omitempty" doc:"The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload."`
 	Output  string             `json:"output,omitempty" doc:"\"stdout\", \"stderr\", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart."`
 	Format  string             `json:"format,omitempty" enum:"line,text,json" default:"\"line\"" doc:"How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart."`
 	Loggers map[string]*Logger `json:"loggers,omitempty" doc:"Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json."`
@@ -61,12 +61,13 @@ const (
 	LoggerEngine    = "engine"
 	LoggerAgent     = "agent"
 	LoggerTunnel    = "tunnel"
+	LoggerWebRTC    = "webrtc"
 )
 
 // Loggers are the names of fit's loggers, which Log.Levels and Log.Loggers
 // may name.
 var Loggers = []string{LoggerServer, LoggerAdmin, LoggerTLS, LoggerProvider, LoggerTelemetry, LoggerAccessLog,
-	LoggerPlugin, LoggerFastCGI, LoggerEngine, LoggerAgent, LoggerTunnel}
+	LoggerPlugin, LoggerFastCGI, LoggerEngine, LoggerAgent, LoggerTunnel, LoggerWebRTC}
 
 // LevelOf returns the least level written of logger: the one Loggers or
 // Levels gives it, or Level, or info.

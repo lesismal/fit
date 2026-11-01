@@ -28,8 +28,8 @@ func (c *Config) Validate() Errors {
 	switch {
 	case len(c.Listeners) > 0:
 	case len(c.Routes) == 0 && c.HasApps():
-		// Only the agent's or the tunnel's roles, which listen where
-		// their own members say.
+		// Only roles, the agent's, the tunnel's or WebRTC's, which
+		// listen where their own members say.
 	case !auto.on():
 		errs = append(errs, &Error{Path: "listeners", Msg: "at least one listener is needed"})
 	case len(c.autoNames("")) == 0:
@@ -258,6 +258,7 @@ func (c *Config) Validate() Errors {
 	}
 	c.checkAgent(add)
 	c.checkTunnel(add)
+	c.checkWebRTC(add)
 
 	if a := c.ACME; a != nil {
 		if a.Directory != "" {
