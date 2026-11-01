@@ -1,0 +1,39 @@
+# Forward authentication: each request is first asked about at an auth
+# service (Authelia, oauth2-proxy, Authentik and the like); a 2xx answer lets
+# it through with the user's fields, any other answer goes back to the client.
+# Run one file, from the repository's root: fit run -c examples/forward-auth/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+listeners:
+  - name: web
+    address: :8080
+    protocols:
+      - http/1.1
+      - h2c
+upstreams:
+  - name: auth
+    addresses:
+      - 127.0.0.1:9091
+  - name: app
+    addresses:
+      - 127.0.0.1:9000
+routes:
+  - name: app
+    middleware:
+      - module: forward_auth
+        params:
+          upstream: auth
+          uri: /api/verify
+          # Only what the auth service needs to decide.
+          request_headers:
+            - Cookie
+            - Authorization
+          # Copied from its answer onto the request the app gets.
+          copy_headers:
+            - Remote-User
+            - Remote-Groups
+            - Remote-Email
+          timeout: 5s
+    handler:
+      module: proxy
+      params:
+        upstream: app

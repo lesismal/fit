@@ -1,0 +1,37 @@
+// A static file server: files from examples/static/www, directory listings,
+// precompressed twins (index.html.br, .zst or .gz, when they are there) and
+// small files kept in memory.
+// Run one file, from the repository's root: fit run -c examples/static/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "routes": [
+    {
+      "name": "files",
+      "middleware": [
+        // Compress what has no precompressed twin.
+        {"module": "compress"}
+      ],
+      "handler": {
+        "module": "static",
+        "params": {
+          // Relative to the directory fit runs in.
+          "root": "examples/static/www",
+          "index": ["index.html"],
+          // Serve index.html.br or index.html.gz in place of index.html when
+          // the client takes it.
+          "precompressed": ["br", "zstd", "gzip"],
+          // List a directory without an index file, as /docs/.
+          "browse": true,
+          // Keep files up to 256 KiB in memory, 32 MiB of them in all.
+          "max_file_bytes": 262144,
+          "max_cache_bytes": 33554432,
+          // A change on disk shows within this.
+          "check_interval": "2s"
+        }
+      }
+    }
+  ]
+}

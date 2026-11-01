@@ -1,0 +1,20 @@
+// Listeners, routes, upstreams and services from Consul's KV store: each key
+// under fit/ holds a JSON object of them, as a config does, e.g.
+//   consul kv put fit/app '{"routes": [{"handler": {"module": "respond"}}]}'
+// Run one file, from the repository's root: fit run -c examples/provider-consul-kv/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "providers": [
+    {
+      "name": "consul-kv",
+      "consul_kv": {
+        "endpoint": "http://127.0.0.1:8500",
+        "prefix": "fit/",
+        "max_keys": 1000
+      }
+    }
+  ]
+}

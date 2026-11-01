@@ -1,0 +1,28 @@
+// fit's own log and the access log: JSON lines, debug for the TLS logger
+// alone, the engine's messages to a file of their own, and one access log
+// line per request, buffered and flushed every second.
+// Run one file, from the repository's root: fit run -c examples/logging/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "routes": [
+    {"name": "hello", "handler": {"module": "respond", "params": {"body": "hello\n"}}}
+  ],
+  "log": {
+    "level": "info",
+    // A logger's own level.
+    "levels": {"tls": "debug"},
+    "format": "json",
+    // A logger's own output and format.
+    "loggers": {"engine": {"output": "/var/log/fit/engine.log", "format": "line"}}
+  },
+  "access_log": {
+    // A file path, or stdout or stderr.
+    "output": "stdout",
+    "format": "json",
+    "flush_interval": "1s",
+    "buffer_bytes": 1048576
+  }
+}

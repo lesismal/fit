@@ -1,0 +1,33 @@
+// Path rewrites before the upstream sees the request: a prefix taken off, a
+// prefix put on, and a regular expression's matches replaced.
+// Run one file, from the repository's root: fit run -c examples/rewrite/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "upstreams": [
+    {"name": "users", "addresses": ["127.0.0.1:9001"]},
+    {"name": "legacy", "addresses": ["127.0.0.1:9002"]}
+  ],
+  "routes": [
+    {
+      // /api/users/7 reaches the users service as /v2/users/7.
+      "name": "users",
+      "match": {"path": ["/api/users/*"]},
+      "middleware": [
+        {"module": "rewrite", "params": {"strip_prefix": ["/api"], "add_prefix": "/v2"}}
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "users"}}
+    },
+    {
+      // /shop/item/42 reaches the legacy app as /item.php/42.
+      "name": "legacy",
+      "match": {"path": ["/shop/*"]},
+      "middleware": [
+        {"module": "rewrite", "params": {"regexp": "^/shop/item/([0-9]+)$", "replacement": "/item.php/$1"}}
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "legacy"}}
+    }
+  ]
+}

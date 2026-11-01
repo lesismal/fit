@@ -1,0 +1,50 @@
+# Client certificates on some routes only: the listener verifies a
+# certificate a client sends but does not insist on one, and the client_cert
+# middleware asks for it where a route needs it. clients-ca.pem is a throwaway
+# CA's certificate (no key kept): use your own.
+# Run one file, from the repository's root: fit run -c examples/client-cert/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+listeners:
+  - name: https
+    address: :443
+    protocols:
+      - http/1.1
+      - h2
+    tls:
+      acme:
+        - example.com
+      client_auth:
+        ca_files:
+          - examples/client-cert/clients-ca.pem
+        mode: verify_if_given
+upstreams:
+  - name: app
+    addresses:
+      - 127.0.0.1:9000
+routes:
+  # A request without a certificate is refused with 403.
+  - name: admin
+    match:
+      path:
+        - /admin/*
+    middleware:
+      - module: client_cert
+        params:
+          subject_header: X-Client-Subject
+    handler:
+      module: proxy
+      params:
+        upstream: app
+  # With or without one; the subject is passed on when there is one.
+  - name: public
+    middleware:
+      - module: client_cert
+        params:
+          optional: true
+          subject_header: X-Client-Subject
+    handler:
+      module: proxy
+      params:
+        upstream: app
+acme:
+  email: ops@example.com

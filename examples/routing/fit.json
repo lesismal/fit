@@ -1,0 +1,47 @@
+// How routes match: by path, method, header, query, client address, regular
+// expression or an expression of them; priority breaks ties.
+// Run one file, from the repository's root: fit run -c examples/routing/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "routes": [
+    {
+      // A path prefix and methods.
+      "name": "api-write",
+      "match": {"path": ["/api/*"], "method": ["POST", "PUT", "DELETE"]},
+      "handler": {"module": "respond", "params": {"body": "api write\n"}}
+    },
+    {
+      // A header with one of its values, and a query parameter with any value.
+      "name": "beta",
+      "match": {"path": ["/api/*"], "header": {"X-Channel": ["beta", "canary"]}, "query": {"preview": []}},
+      "handler": {"module": "respond", "params": {"body": "beta\n"}}
+    },
+    {
+      // The client's address, as the connection has it.
+      "name": "internal",
+      "match": {"path": ["/internal/*"], "remote_ip": ["127.0.0.0/8", "10.0.0.0/8"]},
+      "handler": {"module": "respond", "params": {"body": "internal\n"}}
+    },
+    {
+      // A regular expression on the path.
+      "name": "versioned",
+      "match": {"path_regexp": ["^/v[0-9]+/"]},
+      "handler": {"module": "respond", "params": {"body": "versioned\n"}}
+    },
+    {
+      // Matchers combined; an expression needs a priority to win over hosts and paths.
+      "name": "expr",
+      "priority": 10,
+      "match": {"expr": "PathPrefix(\"/admin/\") && !RemoteIP(\"10.0.0.0/8\")"},
+      "handler": {"module": "respond", "params": {"status": 403, "body": "admin is internal only\n"}}
+    },
+    {
+      "name": "not-found",
+      "priority": -1,
+      "handler": {"module": "respond", "params": {"status": 404, "body": "not found\n"}}
+    }
+  ]
+}

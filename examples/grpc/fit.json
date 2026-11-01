@@ -1,0 +1,29 @@
+// gRPC: calls taken over HTTP/2 (h2c here, h2 with tls) and proxied to a gRPC
+// server over HTTP/2 in the clear, streams and trailers passed through.
+// Run one file, from the repository's root: fit run -c examples/grpc/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "grpc", "address": ":8080", "protocols": ["h2c"]}
+  ],
+  "upstreams": [
+    {
+      "name": "greeter",
+      "addresses": ["127.0.0.1:50051"],
+      // gRPC servers speak HTTP/2; h2 for one over TLS.
+      "protocol": "h2c",
+      // Streaming calls may stay quiet a long time.
+      "response_idle_timeout": "10m",
+      "response_timeout": "1h",
+      "health_check": {"type": "tcp", "interval": "5s"}
+    }
+  ],
+  "routes": [
+    {
+      // A service's methods are paths: /package.Service/Method.
+      "name": "greeter",
+      "match": {"path": ["/helloworld.Greeter/*"]},
+      "handler": {"module": "proxy", "params": {"upstream": "greeter"}}
+    }
+  ]
+}

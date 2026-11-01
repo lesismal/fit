@@ -33,7 +33,8 @@ func same(t *testing.T, a, b []byte) bool {
 // TestRoundTrip writes every config the repository has in JSON as YAML and
 // adapts it back: the same JSON comes out, and fit loads it as it loads the
 // JSON. The bench's config is in fit's own format, fit.conf, and the
-// template's JSON has comments, so neither is here.
+// template's JSON has its fields in comments, so neither is here; the
+// examples' comments are taken out first.
 func TestRoundTrip(t *testing.T) {
 	var files []string
 	for _, glob := range []string{"../../examples/*.json", "../../examples/*/fit.json", "../../deploy/*/fit.json"} {
@@ -47,6 +48,10 @@ func TestRoundTrip(t *testing.T) {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// The examples' JSON has comments.
+		if data, err = config.Standardize(data); err != nil {
+			t.Fatalf("%s: %v", f, err)
 		}
 		y, err := FromJSON(data)
 		if err != nil {
@@ -66,23 +71,31 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// TestExamples checks that the YAML examples say what their JSON twins do.
+// TestExamples checks that the YAML examples say what their JSON twins do:
+// every example directory with a fit.yaml has a fit.json.
 func TestExamples(t *testing.T) {
-	for _, name := range []string{"hello", "proxy"} {
-		j, err := os.ReadFile("../../examples/" + name + "/fit.json")
+	ys, _ := filepath.Glob("../../examples/*/fit.yaml")
+	if len(ys) < 40 {
+		t.Fatalf("only %d YAML examples", len(ys))
+	}
+	for _, f := range ys {
+		j, err := os.ReadFile(filepath.Join(filepath.Dir(f), "fit.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		y, err := os.ReadFile("../../examples/" + name + "/fit.yaml")
+		if j, err = config.Standardize(j); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		y, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		r, err := Adapt(y)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", f, err)
 		}
 		if !same(t, j, r.JSON) {
-			t.Errorf("%s.yaml says something else than %s.json:\n%s", name, name, r.JSON)
+			t.Errorf("%s says something else than its fit.json:\n%s", f, r.JSON)
 		}
 	}
 }

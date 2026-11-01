@@ -1,4 +1,7 @@
-# examples/hello/fit.json, written in YAML: fit run, fit validate and fit adapt take either.
+# A fixed response on port 8080, and 404 for any other path.
+# Run one file, from the repository's root: fit run -c examples/hello/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+# Try it: curl http://127.0.0.1:8080/hello
 listeners:
   - name: web
     address: :8080

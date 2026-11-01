@@ -1,0 +1,29 @@
+// OpenTelemetry: traces of a tenth of the requests, W3C trace context passed
+// on to upstreams, and metrics every 30s, exported over OTLP/HTTP to a
+// collector.
+// Run one file, from the repository's root: fit run -c examples/telemetry/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "upstreams": [
+    {"name": "app", "addresses": ["127.0.0.1:9000"]}
+  ],
+  "routes": [
+    {"name": "app", "handler": {"module": "proxy", "params": {"upstream": "app"}}}
+  ],
+  "telemetry": {
+    // The collector's OTLP/HTTP endpoint.
+    "endpoint": "http://127.0.0.1:4318",
+    "service_name": "edge-gateway",
+    "timeout": "10s",
+    "traces": {
+      "sample_ratio": 0.1,
+      // Spans waiting to be sent; past it, new ones are dropped.
+      "max_queue_bytes": 4194304,
+      "interval": "5s"
+    },
+    "metrics": {"interval": "30s"}
+  }
+}

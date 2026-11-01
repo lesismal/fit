@@ -1,4 +1,6 @@
-# examples/proxy/fit.json, written in YAML: fit run, fit validate and fit adapt take either.
+# A reverse proxy to two upstreams, with limits, timeouts and health checks.
+# Run one file, from the repository's root: fit run -c examples/proxy/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
 listeners:
   - name: web
     address: :8080

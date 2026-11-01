@@ -88,18 +88,65 @@ func TestJSONWithComments(t *testing.T) {
 	}
 }
 
-// TestExampleFitFiles checks that the examples' .conf files are valid and
-// say what their JSON twins do.
+// exampleTwinsExempt names the example directories whose fit.json has no
+// .conf and YAML twins: it is a part of a larger example.
+var exampleTwinsExempt = map[string]string{
+	"docker-compose": "the config of compose.yaml's fit container",
+}
+
+// exampleNoValidate names the examples that fit validate cannot check here,
+// because they name files a user supplies, which validate opens.
+var exampleNoValidate = map[string]string{
+	"https": "its certificate and key files are the user's own",
+}
+
+// TestExampleFitFiles checks every example directory with a fit.json: it
+// has fit.conf and fit.yaml beside it, each of the three is valid, and the
+// .conf and the YAML say what the JSON does. The examples name their files
+// relative to the repository's root, where they are run from.
 func TestExampleFitFiles(t *testing.T) {
-	for _, name := range []string{"hello", "proxy"} {
-		f := "../examples/" + name + "/fit.conf"
-		if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || !strings.Contains(stdout, "valid") || stderr != "" {
-			t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
+	t.Chdir("..")
+	jsons, _ := filepath.Glob("examples/*/fit.json")
+	n := 0
+	for _, j := range jsons {
+		dir := filepath.Dir(j)
+		name := filepath.Base(dir)
+		files := []string{j}
+		if _, ok := exampleTwinsExempt[name]; !ok {
+			n++
+			files = append(files, filepath.Join(dir, "fit.conf"), filepath.Join(dir, "fit.yaml"))
 		}
-		_, fromFit, _ := runFit("adapt", "-c", f)
-		_, fromJSON, _ := runFit("adapt", "-c", "../examples/"+name+"/fit.json")
-		if !sameJSON(fromFit, fromJSON) {
-			t.Errorf("%s is not its JSON twin:\n%s\n%s", f, fromFit, fromJSON)
+		_, fromJSON, _ := runFit("adapt", "-c", j)
+		for _, f := range files {
+			if _, err := os.Stat(f); err != nil {
+				t.Errorf("%s: %v", dir, err)
+				continue
+			}
+			if _, ok := exampleNoValidate[name]; !ok {
+				if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || stdout != f+": valid\n" || stderr != "" {
+					t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
+				}
+			}
+			if f == j {
+				continue
+			}
+			code, out, stderr := runFit("adapt", "-c", f)
+			if code != 0 || !sameJSON(out, fromJSON) {
+				t.Errorf("%s is not the twin of %s: %d %q\n%s\n%s", f, j, code, stderr, out, fromJSON)
+			}
+		}
+	}
+	if n < 40 {
+		t.Errorf("only %d examples with twins", n)
+	}
+	for name := range exampleTwinsExempt {
+		if _, err := os.Stat(filepath.Join("examples", name, "fit.json")); err != nil {
+			t.Errorf("exempt example %s: %v", name, err)
+		}
+	}
+	for name := range exampleNoValidate {
+		if _, err := os.Stat(filepath.Join("examples", name, "fit.json")); err != nil {
+			t.Errorf("unvalidated example %s: %v", name, err)
 		}
 	}
 }

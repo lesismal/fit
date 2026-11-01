@@ -1,0 +1,39 @@
+// Request body limits: 100 MiB for uploads, 64 KiB for the JSON API, and
+// 16 MiB for everything else from limits.max_body_bytes; past a limit, 413.
+// Run one file, from the repository's root: fit run -c examples/body-limit/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "limits": {
+    // Every listener's limit; a route's body_limit may set its own, higher or lower.
+    "max_body_bytes": 16777216
+  },
+  "upstreams": [
+    {"name": "app", "addresses": ["127.0.0.1:9000"]}
+  ],
+  "routes": [
+    {
+      "name": "uploads",
+      "match": {"path": ["/upload/*"], "method": ["POST", "PUT"]},
+      "middleware": [
+        {"module": "body_limit", "params": {"max_bytes": 104857600}}
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "app"}}
+    },
+    {
+      "name": "api",
+      "match": {"path": ["/api/*"]},
+      "middleware": [
+        {"module": "body_limit", "params": {"max_bytes": 65536}}
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "app"}}
+    },
+    {
+      "name": "rest",
+      "priority": -1,
+      "handler": {"module": "proxy", "params": {"upstream": "app"}}
+    }
+  ]
+}

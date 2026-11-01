@@ -1,0 +1,53 @@
+// Rate limits: 10 requests a second per client address with bursts of 20 on
+// the API, and a stricter limit per API key on the login endpoint, behind a
+// load balancer whose X-Forwarded-For is trusted.
+// Run one file, from the repository's root: fit run -c examples/rate-limit/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "upstreams": [
+    {"name": "api", "addresses": ["127.0.0.1:9000"]}
+  ],
+  "routes": [
+    {
+      "name": "login",
+      "match": {"path": ["/api/login"]},
+      "middleware": [
+        {
+          "module": "rate_limit",
+          "params": {
+            // One request every 2 seconds per X-Api-Key, by address without one.
+            "rate": 0.5,
+            "burst": 5,
+            "key": "header:X-Api-Key",
+            "trusted_proxies": ["10.0.0.0/8"]
+          }
+        }
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "api"}}
+    },
+    {
+      "name": "api",
+      "match": {"path": ["/api/*"]},
+      "middleware": [
+        {
+          "module": "rate_limit",
+          "params": {
+            "rate": 10,
+            "burst": 20,
+            "key": "ip",
+            // The client is the last address in X-Forwarded-For that is not one
+            // of these.
+            "trusted_proxies": ["10.0.0.0/8"],
+            // Bounds the memory the counters take.
+            "max_keys": 100000,
+            "status": 429
+          }
+        }
+      ],
+      "handler": {"module": "proxy", "params": {"upstream": "api"}}
+    }
+  ]
+}

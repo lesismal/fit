@@ -1,0 +1,50 @@
+# HTTPS with certificates of your own: HTTP/1.1 and HTTP/2 on 443, two
+# certificates picked by the name the client asks for, and port 80
+# redirecting to HTTPS. The certificate and key files are not in this
+# directory: put yours at the paths below (fit validate opens them).
+# Run one file, from the repository's root: fit run -c examples/https/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+listeners:
+  - name: https
+    address: :443
+    protocols:
+      - http/1.1
+      - h2
+    tls:
+      # The first whose names match the client's SNI; the first of all otherwise.
+      certificates:
+        - cert_file: /etc/fit/certs/example.com.pem
+          key_file: /etc/fit/certs/example.com.key
+        - cert_file: /etc/fit/certs/example.org.pem
+          key_file: /etc/fit/certs/example.org.key
+  - name: http
+    address: :80
+    protocols:
+      - http/1.1
+routes:
+  - name: to-https
+    listeners:
+      - http
+    middleware:
+      - module: redirect
+        params:
+          to: https://{host}{uri}
+          status: 308
+    handler:
+      module: respond
+      params:
+        status: 404
+  - name: site
+    listeners:
+      - https
+    middleware:
+      - module: headers
+        params:
+          response:
+            set:
+              Strict-Transport-Security: max-age=31536000
+    handler:
+      module: respond
+      params:
+        body: |
+          hello over HTTPS

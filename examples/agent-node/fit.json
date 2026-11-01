@@ -1,0 +1,33 @@
+// An agent node: serves the models of a local Ollama to the hub it links to
+// (examples/agent-hub), and through it to clients. Its console is on
+// 127.0.0.1:9100, user admin, password example-password. The id is written
+// out, as fit would otherwise write a new one back into this file.
+// Run one file, from the repository's root: fit run -c examples/agent-node/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "agent": {
+    "node": {
+      "id": "node-0d9e4b7a61c2f835",
+      "name": "gpu-1",
+      "description": "Two RTX 4090s",
+      "console": {
+        "address": "127.0.0.1:9100",
+        "users": [{"username": "admin", "password_hash": "$2a$10$gkDJyGagxp1q7R24F0rSjulsgZOFL55Zm6JK2RcxTCLDk23szhZA2"}]
+      },
+      // The node dials the hub; it needs no listen of its own.
+      "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
+      "models": [
+        {
+          // Asked for as qwen3-32b, sent upstream as qwen3:32b.
+          "name": "qwen3-32b",
+          "api": "openai",
+          "base_url": "http://127.0.0.1:11434/v1",
+          "upstream": "qwen3:32b",
+          "max_inflight": 4
+        }
+      ],
+      "settings": {"allow_hub_manage": false, "refresh_interval": "30s"},
+      "proxy": {"first_byte_timeout": "5m", "timeout": "30m", "max_inflight": 64}
+    }
+  }
+}

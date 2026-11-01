@@ -1,0 +1,32 @@
+// Routes and upstreams from the labels of running Docker containers, as
+// fit.routes.web.host=app.example.com; a container must be labelled
+// fit.enable=true to be taken. examples/docker-compose runs this in Compose.
+// Run one file, from the repository's root: fit run -c examples/provider-docker/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "routes": [
+    {
+      // What this file writes wins over the provider's: here, only a fallback.
+      "name": "not-found",
+      "priority": -1,
+      "handler": {"module": "respond", "params": {"status": 404, "body": "no container serves this\n"}}
+    }
+  ],
+  "providers": [
+    {
+      "name": "docker",
+      "docker": {
+        "endpoint": "unix:///var/run/docker.sock",
+        // The network whose container addresses fit sends to.
+        "network": "web",
+        // Labels read start with this, as fit.routes.<name>.host.
+        "label_prefix": "fit",
+        "max_containers": 1000,
+        "refresh_interval": "30s"
+      }
+    }
+  ]
+}

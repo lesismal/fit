@@ -1,0 +1,43 @@
+// WebRTC media servers behind fit: WHIP and WHEP offers are load balanced
+// over the media servers, and every peer's media relayed to the one that
+// answered it through fit's single UDP port, 8190.
+// Run one file, from the repository's root: fit run -c examples/webrtc-proxy/fit.json
+// fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+{
+  "listeners": [
+    {"name": "web", "address": ":8080", "protocols": ["http/1.1", "h2c"]}
+  ],
+  "upstreams": [
+    {
+      "name": "media-servers",
+      "addresses": ["10.0.0.2:8080", "10.0.0.3:8080"],
+      "health_check": {"path": "/healthz"}
+    }
+  ],
+  "routes": [
+    {
+      "name": "webrtc",
+      "match": {"path": ["/whip/*", "/whep/*"]},
+      "handler": {
+        "module": "webrtc_proxy",
+        "params": {
+          "upstream": "media-servers",
+          // Where a media server's peers are relayed to, when its answer's
+          // candidates do not say it well.
+          "media_addrs": {"10.0.0.3:8080": "10.0.0.3:8189"},
+          "timeout": "10s"
+        }
+      }
+    }
+  ],
+  "webrtc": {
+    "proxy": {
+      "listen": ":8190",
+      "public_ips": ["203.0.113.5"],
+      "max_sessions": 4096,
+      // A firewall in front of the media servers admits these ports.
+      "port_min": 40000,
+      "port_max": 40999
+    }
+  }
+}

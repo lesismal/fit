@@ -1,0 +1,40 @@
+# A circuit breaker: when half the requests of the last 10 seconds fail, or
+# take over 2s, the route stops sending to the upstream for 30s and answers
+# 503 at once, then lets 5 requests through to see whether it is back.
+# Run one file, from the repository's root: fit run -c examples/circuit-breaker/fit.yaml
+# fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
+listeners:
+  - name: web
+    address: :8080
+    protocols:
+      - http/1.1
+      - h2c
+upstreams:
+  - name: payments
+    addresses:
+      - 127.0.0.1:9000
+routes:
+  - name: payments
+    match:
+      path:
+        - /payments/*
+    middleware:
+      - module: circuit_breaker
+        params:
+          window: 10s
+          # Too few requests to judge by: stay closed.
+          min_requests: 20
+          error_ratio: 0.5
+          statuses:
+            - 500
+            - 502
+            - 503
+            - 504
+          slow_threshold: 2s
+          slow_ratio: 0.5
+          open_duration: 30s
+          half_open_requests: 5
+    handler:
+      module: proxy
+      params:
+        upstream: payments
