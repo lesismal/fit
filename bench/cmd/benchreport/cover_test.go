@@ -209,3 +209,52 @@ func TestRenderSweepEdges(t *testing.T) {
 		t.Errorf("got:\n%s", text)
 	}
 }
+
+// A run at a fixed rate ranks by p99, and shows the idle connections held
+// beside it and the backend's CPU.
+func TestRenderRated(t *testing.T) {
+	type lat = struct {
+		P50  float64 `json:"p50"`
+		P99  float64 `json:"p99"`
+		P999 float64 `json:"p99.9"`
+		Mean float64 `json:"mean"`
+		Max  float64 `json:"max"`
+	}
+	cur := &run{Results: []result{
+		{Server: "slow", Scenario: "rated", Protocol: "h2", Rate: 5000, RequestsPerSec: 5000, CPUCores: 1,
+			Latency: &lat{P50: 1, P99: 9, P999: 20}, IdleHeld: 10000, IdleClosed: 3, BackendCPUCores: 0.5},
+		{Server: "fast", Scenario: "rated", Protocol: "h2", Rate: 5000, RequestsPerSec: 5000, CPUCores: 1,
+			Latency: &lat{P50: 1, P99: 2, P999: 4}},
+	}}
+	var out strings.Builder
+	render(&out, cur, nil, "", 3, false, "")
+	text := out.String()
+	for _, want := range []string{
+		"### rated, h2, 5,000 requests a second", "p50 / p99 / p99.9 [↓1]", "Idle held / closed", "Backend CPU",
+		"1.00 / 9.00 / 20.00 ms", "10,000 / 3", "0.50",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "TPS [↓1]") {
+		t.Errorf("TPS ranked first at a fixed rate:\n%s", text)
+	}
+	if f, s := strings.Index(text, "| fast "), strings.Index(text, "| slow "); f < 0 || s < 0 || f > s {
+		t.Errorf("not ranked by p99, the lowest first:\n%s", text)
+	}
+}
+
+// Servers tied at every count are listed in the order they were first seen.
+func TestRenderSweepTie(t *testing.T) {
+	r := &run{Results: []result{
+		{Server: "a", Scenario: "fixed", Protocol: "h2", RequestsPerSec: 10, CPUCores: 1},
+		{Server: "b", Scenario: "fixed", Protocol: "h2", RequestsPerSec: 10, CPUCores: 1},
+	}}
+	var out strings.Builder
+	renderSweep(&out, []*run{r}, 3)
+	text := out.String()
+	if a, b := strings.Index(text, "| a "), strings.Index(text, "| b "); a < 0 || b < 0 || a > b {
+		t.Errorf("a tie not in the servers' order:\n%s", text)
+	}
+}

@@ -532,6 +532,10 @@ func TestKeysMethods(t *testing.T) {
 	if b, _ := json.Marshal(keys); strings.Contains(string(b), "hash") {
 		t.Fatal("hash listed")
 	}
+	// No peers: an empty list, not null. / 没有对端：空列表而不是 null。
+	if resp := f.do(t, context.Background(), "GET", "/v1/models", "", f.bearer()); !strings.Contains(readAll(t, resp), `"data":[]`) {
+		t.Fatalf("empty models: %d", resp.StatusCode)
+	}
 	if _, err := f.r.Invoke(context.Background(), local, MethodClientKeysDelete, json.RawMessage(`{"id":"`+keys[0].ID+`"}`)); err != nil {
 		t.Fatal(err)
 	}

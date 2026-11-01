@@ -99,6 +99,8 @@ func Start(t testing.TB, base, storePath string) *Fit {
 	if f.Upstream, f.stopEngine, err = upstream.StartEngine(); err != nil {
 		t.Fatal(err)
 	}
+	// Registered now, so a failure below stops what has started.
+	t.Cleanup(f.Stop)
 	env := runtime.Env{Metrics: observe.NewMetrics(), Engine: f.Upstream}
 	g, err := runtime.Compile(c, env)
 	if err != nil {
@@ -119,25 +121,30 @@ func Start(t testing.TB, base, storePath string) *Fit {
 	}
 	f.Apps = app.NewManager(f.Server.Engine(), f.Upstream, nil, f.Configs.EditMember)
 	if err := f.Apps.Apply(c); err != nil {
-		f.Stop()
 		t.Fatal(err)
 	}
 	f.Configs.UseApps(f.Apps)
-	t.Cleanup(f.Stop)
 	return f
 }
 
-// Stop stops the roles and the server, as fit does when it stops.
+// Stop stops the roles and the server, as fit does when it stops; it
+// stops only what Start got to.
 func (f *Fit) Stop() {
 	if f.stopped {
 		return
 	}
 	f.stopped = true
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	f.Apps.Stop(ctx)
-	_ = f.Server.Close()
-	f.rt.Close()
+	if f.Apps != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		f.Apps.Stop(ctx)
+	}
+	if f.Server != nil {
+		_ = f.Server.Close()
+	}
+	if f.rt != nil {
+		f.rt.Close()
+	}
 	f.stopEngine()
 }
 

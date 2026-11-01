@@ -134,6 +134,9 @@ func startNode(t *testing.T, id, hubAddr string, models ...model.ModelView) *fak
 				return nil, err
 			}
 		}
+		if req.ID == 0 {
+			return nil, mesh.Errorf(model.CodeNotFound, "no job 0")
+		}
 		return model.Job{ID: req.ID, Status: model.JobDone}, nil
 	})
 	n.m = newMesh(t, model.RoleNode, id, time.Now().UnixNano(), []string{model.RoleHub}, r)

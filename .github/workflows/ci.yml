@@ -133,7 +133,7 @@ jobs:
         env:
           TOTAL: ${{ steps.cover.outputs.total }}
         run: |
-          color=$(awk -v t="$TOTAL" 'BEGIN{ if (t>=80) print "brightgreen"; else if (t>=70) print "green"; else if (t>=60) print "yellowgreen"; else if (t>=50) print "yellow"; else if (t>=40) print "orange"; else print "red" }')
+          color=$(awk -v t="$TOTAL" 'BEGIN{ if (t>=97) print "brightgreen"; else if (t>=95) print "green"; else if (t>=90) print "yellowgreen"; else if (t>=85) print "yellow"; else if (t>=80) print "orange"; else print "red" }')
           mkdir "$RUNNER_TEMP/badges"
           cd "$RUNNER_TEMP/badges"
           printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$TOTAL" "$color" > coverage.json
@@ -143,6 +143,17 @@ jobs:
           git add coverage.json
           git commit -q -m "coverage: ${TOTAL}%"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" badges
+      # The floor the total may not fall below. Raise it as coverage rises;
+      # never lower it to let a change in: add the tests instead.
+      - name: Check the floor
+        env:
+          TOTAL: ${{ steps.cover.outputs.total }}
+          FLOOR: "98.0"
+        run: |
+          if awk -v t="$TOTAL" -v f="$FLOOR" 'BEGIN{ exit !(t < f) }'; then
+            echo "::error title=Coverage below the floor::${TOTAL}% < ${FLOOR}%"
+            exit 1
+          fi
 
   # M2's exit criteria, run on their own so that they show as a check of
   # their own; go test -race ./... above runs them too. With Pebble set

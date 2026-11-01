@@ -32,3 +32,13 @@ func TestSession(t *testing.T) {
 		t.Fatal("a message of another password opened")
 	}
 }
+
+func TestNewSessionBadHello(t *testing.T) {
+	secret, _ := NewSecret("pw")
+	if _, err := NewSession(secret, Hello()[:HelloLen-1], Hello(), true); err == nil {
+		t.Fatal("a short server hello made a session")
+	}
+	if _, err := NewSession(secret, Hello(), nil, false); err == nil {
+		t.Fatal("a missing client hello made a session")
+	}
+}

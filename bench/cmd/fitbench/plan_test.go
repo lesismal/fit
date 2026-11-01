@@ -413,3 +413,42 @@ func TestRunPlan(t *testing.T) {
 		t.Error("a machine without /sys")
 	}
 }
+
+// The NUMA nodes and topology files detectMachine passes over, and the one
+// it falls back on.
+func TestDetectMachineEdges(t *testing.T) {
+	fsys := fakeSys(fakeMachine{cores: 4, threads: 1, nodes: 1})
+	put := func(name, data string) { fsys[name] = &fstest.MapFile{Data: []byte(data)} }
+	put("sys/devices/system/node/nodex/cpulist", "0-3\n")       // not a node's number
+	put("sys/devices/system/node/node1/cpulist/stray", "")      // a directory
+	put("sys/devices/system/node/node2/cpulist", "bad\n")       // not a CPU list
+	put("proc/sys/net/ipv4/ip_local_port_range", "1024 high\n") // not numbers
+	delete(fsys, "sys/devices/system/cpu/cpu3/topology/thread_siblings_list")
+	put("sys/devices/system/cpu/cpu3/topology/core_cpus_list", "3\n")
+	m, err := detectMachine(fsys, 4096)
+	if err != nil || m.Nodes != 1 || m.CoreCount != 4 || m.ports() != 0 {
+		t.Errorf("%+v %v", m, err)
+	}
+}
+
+// A host whose file-max bounds the descriptors, and a plan that says what
+// was set.
+func TestDerivePlanFileMax(t *testing.T) {
+	m := machineOf(t, benchHost)
+	m.FileMax = 1 << 20
+	p, err := derivePlan(m, Overrides{Backlog: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TopBounds["file_max"] != 1<<17 || p.W5Bounds["file_max"] != 1<<18 {
+		t.Errorf("top %v, W5 %v", p.TopBounds, p.W5Bounds)
+	}
+	var b bytes.Buffer
+	printPlan(&b, p)
+	if !strings.Contains(b.String(), "set         backlog\n") {
+		t.Errorf("%s", b.String())
+	}
+	if ceilDiv(0, 7) != 0 || ceilDiv(8, 7) != 2 {
+		t.Error("ceilDiv")
+	}
+}

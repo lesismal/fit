@@ -52,6 +52,8 @@ Every change to fit follows these rules. They are what the
 13. **Every data plane feature has tests** for slow clients, slow upstreams, large bodies and
     connections cut midway, all passing under the race detector. A change that affects throughput
     or memory is compared before and after on the benchmark host, as rule 21 sizes it.
+    New code comes with its tests in the same change: CI fails when the module's statement
+    coverage falls below the floor set in `.github/workflows/ci.yml`, and the floor is only raised.
 14. **A new dependency comes with a short decision note in `docs/decisions/`.**
 
 ## 7. When fib falls short

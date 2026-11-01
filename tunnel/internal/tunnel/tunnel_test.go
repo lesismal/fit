@@ -65,3 +65,35 @@ func TestCloseIdle(t *testing.T) {
 		t.Fatalf("frames %v", l.frames)
 	}
 }
+
+// brokenLink fails every send.
+type brokenLink struct{}
+
+func (brokenLink) SendTunnel(proto.Method, uint64, []byte) error { return errors.New("gone") }
+
+// A tunnel whose link fails as it sends is closed.
+func TestLocalLinkFails(t *testing.T) {
+	tb := NewTable(nil)
+	e := New(tb, brokenLink{}, 1, true)
+	_ = tb.Add(e)
+	e.local([]byte("data"))
+	if tb.Get(1) != nil {
+		t.Fatal("the tunnel is open")
+	}
+	(&Handler{}).OnPriorityData(nil, nil)
+}
+
+func TestCloseLink(t *testing.T) {
+	tb := NewTable(nil)
+	a, b := &fakeLink{}, &fakeLink{}
+	for id, l := range map[uint64]*fakeLink{3: a, 1: a, 2: b} {
+		_ = tb.Add(New(tb, l, id, true))
+	}
+	if list := tb.List(); len(list) != 3 || list[0].ID != 1 || list[1].ID != 2 || list[2].ID != 3 {
+		t.Fatalf("list %v", list)
+	}
+	tb.CloseLink(a, "link lost")
+	if tb.Len() != 1 || tb.Get(2) == nil {
+		t.Fatalf("left %v", tb.List())
+	}
+}
