@@ -379,3 +379,24 @@ func TestProxySlowUpstreamReader(t *testing.T) {
 	}
 	idle(t, n)
 }
+
+// A caller that leaves while the node holds the upstream body for want of
+// credit, with nothing of it pending, ends the exchange: the stream's end
+// runs the credit callback, which no credit will ever follow.
+func TestProxyCallerLeavesWhileHeld(t *testing.T) {
+	u := newUpstream(t)
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{{Name: "big", API: model.APIOpenAI, BaseURL: u.URL + "/big"}}}, nil)
+	for range 3 {
+		ctx, cancel := context.WithCancel(context.Background())
+		st, err := openProxy(ctx, n, model.ProxyReq{API: model.APIOpenAI, Path: "chat/completions", Model: "big", Body: []byte("{}")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Recv(ctx); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(300 * time.Millisecond) // the window fills, and the node holds
+		cancel()
+		idle(t, n)
+	}
+}

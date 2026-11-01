@@ -654,10 +654,16 @@ func (x *exchange) resume(resp *fibhttp.ClientResponse) {
 		return
 	}
 	if !x.st.Credit() {
-		if !x.st.OnCredit(func() { x.resume(resp) }) {
-			x.resume(resp)
+		if x.st.OnCredit(func() { x.resume(resp) }) {
+			return
 		}
-		return
+		// OnCredit refuses with credit granted since, or with the stream
+		// ended, which no credit will ever follow.
+		if !x.st.Credit() {
+			resp.Close()
+			x.finish(nil, wire.ErrStreamEnded)
+			return
+		}
 	}
 	resp.HoldBody(false)
 }
