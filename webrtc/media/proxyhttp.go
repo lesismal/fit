@@ -555,7 +555,8 @@ func stripCandidates(sdp []byte) ([]byte, error) {
 // fragment, with fit's addrs as host candidates, and returns its ICE
 // credentials, each with the media server's address fit relays to: over,
 // or with a port of 0 over's IP and its best candidate's port, or its best
-// candidate, a host one before a server-reflexive one and IPv4 first.
+// candidate, a host one before a server-reflexive one and IPv4 first,
+// among the UDP candidates of the RTP component.
 func rewriteSDP(sdp []byte, addrs []netip.AddrPort, over netip.AddrPort) ([]byte, []Cred, error) {
 	if len(addrs) == 0 {
 		return nil, nil, errors.New("webrtc.proxy has no address")
@@ -582,7 +583,9 @@ func rewriteSDP(sdp []byte, addrs []netip.AddrPort, over netip.AddrPort) ([]byte
 			pwd = l[len("a=ice-pwd:"):]
 		case strings.HasPrefix(l, "a=candidate:"):
 			c, err := ice.ParseCandidate(l)
-			if err != nil || !c.Address.IsValid() || c.Address.IsLinkLocalUnicast() {
+			// The relay sends UDP to the RTP component: a TCP candidate's
+			// port, or RTCP's, is not where the media server reads it.
+			if err != nil || c.Transport != "udp" || c.Component != 1 || !c.Address.IsValid() || c.Address.IsLinkLocalUnicast() {
 				continue
 			}
 			r := 0

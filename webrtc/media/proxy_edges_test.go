@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -286,5 +287,21 @@ func TestProxyReload(t *testing.T) {
 	f.reload(t, strings.Replace(proxyDoc(loopbackProxy, backend), `"webrtc": {"proxy": `+loopbackProxy+`}`, `"webrtc": {}`, 1))
 	if resp, _ := newPublisher(t, clients).signal(t, f.base+"/whip/again"); resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("without webrtc.proxy: %d", resp.StatusCode)
+	}
+}
+
+// rewriteSDP relays to a UDP candidate of the RTP component, though a TCP
+// candidate or an RTCP one would rank above it.
+func TestRewriteSDPOnlyUDPRTP(t *testing.T) {
+	answer := "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=ice-ufrag:uf\r\na=ice-pwd:pw\r\n" +
+		"a=candidate:1 1 tcp 1518280447 127.0.0.1 5003 typ host tcptype passive\r\n" +
+		"a=candidate:2 2 udp 2130706430 127.0.0.1 5004 typ host\r\n" +
+		"a=candidate:3 1 udp 1694498815 203.0.113.9 5002 typ srflx raddr 0.0.0.0 rport 0\r\n"
+	_, creds, err := rewriteSDP([]byte(answer), []netip.AddrPort{netip.MustParseAddrPort("192.0.2.1:8189")}, netip.AddrPort{})
+	if err != nil || len(creds) != 1 {
+		t.Fatal(creds, err)
+	}
+	if want := netip.MustParseAddrPort("203.0.113.9:5002"); creds[0].Media != want {
+		t.Fatalf("relayed to %v, want %v", creds[0].Media, want)
 	}
 }
