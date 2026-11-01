@@ -1,7 +1,8 @@
-// The hub console: overview, nodes (with management of the nodes that allow it), models, proxies, connections and
-// settings. Needs ui.js, peers.js and jobs.js.
+// The hub console: overview, nodes (with management of the nodes that allow it), models, proxies, traffic (the link
+// map), connections and settings. Needs ui.js, peers.js, jobs.js, flow.js and forms.js.
 //
-// hub 控制台：概览、节点（含对允许代管的节点的管理）、模型、代理、连接与设置。依赖 ui.js、peers.js 与 jobs.js。
+// hub 控制台：概览、节点（含对允许代管的节点的管理）、模型、代理、流量（链路图）、连接与设置。依赖 ui.js、peers.js、
+// jobs.js、flow.js 与 forms.js。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -45,7 +46,12 @@
     ['a.run', 'Run', '运行'], ['a.none', 'No actions on this node.', '该节点没有可用操作。'],
     ['p.name', 'Display name', '显示名称'], ['p.save', 'Save', '保存'], ['p.desc', 'Description', '描述'],
     ['set.profile', 'Hub', 'Hub'], ['set.saved', 'Name saved; peers see it at their next connection.', '名称已保存；对端在下次连接时看到新名称。'],
-    ['yes', 'Yes', '是'], ['no', 'No', '否']
+    ['yes', 'Yes', '是'], ['no', 'No', '否'],
+    ['nav.traffic', 'Traffic', '流量'], ['lm.proxies', 'Proxies', '代理'], ['lm.hub', 'This hub', '本 hub'],
+    ['lm.nodes', 'Nodes', '节点'], ['lm.models', 'Models', '模型'], ['calls.n', '{n} calls', '{n} 次调用'],
+    ['set.hub', 'Node table', '节点表'], ['set.max_nodes', 'Max nodes', '节点数上限'],
+    ['set.max_nodes_hint', 'Nodes kept in the table, offline ones included; past it the offline node seen longest ago is forgotten. 1024 by default.',
+      '节点表保存的节点数（含离线节点）；超出时遗忘最久未见的离线节点。默认 1024。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });
@@ -432,6 +438,48 @@
     UI.every(5000, load);
   }
 
+
+  // ---- Traffic / 流量 ----
+  // The hub's link map: its proxies → this hub → its nodes → their models, each line with its bytes, latency and the
+  // calls the hub relayed on it. / hub 的链路图：代理 → 本 hub → 节点 → 模型，每条线带字节数、延迟与 hub 在其上转发的调用。
+  function hubGraph(st, nodes) {
+    var g = LinkMap.graph([t('lm.proxies'), t('lm.hub'), t('lm.nodes'), t('lm.models')]);
+    g.at = st.at;
+    var self = st.self || {}, peers = LinkMap.peers(st.links);
+    var byFrom = LinkMap.sum(st.routes, function (r) { return r.from; }), byTo = LinkMap.sum(st.routes, function (r) { return r.to; });
+    var byModel = LinkMap.sum(st.routes, function (r) { return r.to + '\n' + r.model; });
+    var total = LinkMap.sum(st.routes, function () { return 'all'; }).all || {};
+    g.node('me', 1, { kind: 'hub', label: self.name || self.id, sub: t('calls.n', { n: total.calls || 0 }), self: true, state: 'ok',
+      facts: [['ID', self.id], [t('host'), self.hostname]] });
+    Object.keys(peers).forEach(function (id) {
+      var p = peers[id];
+      if (p.role !== 'proxy') return;
+      var tr = byFrom[id] || {};
+      g.node('p:' + id, 0, { kind: 'proxy', label: p.name, sub: LinkMap.rttText(p.rtt), state: 'ok', facts: [['ID', id]] });
+      g.link('p:' + id, 'me', { fwd: p.in, back: p.out, rtt: p.rtt, calls: tr.calls || 0, errors: tr.errors || 0, inflight: tr.inflight || 0 });
+    });
+    (nodes || []).forEach(function (n) {
+      var id = n.info.id, nid = 'n:' + id, p = peers[id] || { in: 0, out: 0 }, tr = byTo[id] || {}, hw = n.info.hw || {};
+      nodeNames[id] = n.info.name || id;
+      g.node(nid, 2, { kind: 'node', label: n.info.name || id, sub: [hw.os, gpuSummary(hw)].filter(Boolean).join(' · '),
+        state: n.online ? 'ok' : 'bad', facts: [['ID', id], [t('host'), hw.hostname], [t('inflight'), String(n.info.inflight || 0)]] });
+      g.link('me', nid, { fwd: p.out, back: p.in, rtt: p.rtt, calls: tr.calls || 0, errors: tr.errors || 0, inflight: tr.inflight || 0 });
+      (n.info.models || []).forEach(function (m) {
+        var mid = 'm:' + m.api + '/' + m.name, mt = byModel[id + '\n' + m.name] || {};
+        g.node(mid, 3, { kind: 'model', label: m.name, sub: m.api, state: m.state === 'ready' ? 'ok' : m.state === 'error' ? 'bad' : 'wait' });
+        g.link(nid, mid, { fwd: mt.req || 0, back: mt.resp || 0, calls: mt.calls || 0, errors: mt.errors || 0, inflight: m.inflight || 0 });
+      });
+    });
+    return g;
+  }
+  function trafficPage(el) {
+    LinkMap.mount(el, {
+      load: function () {
+        return Promise.all([UI.rpc('/mesh/status'), UI.rpc('/hub/nodes')]).then(function (r) { return hubGraph(r[0], r[1]); });
+      }
+    });
+  }
+
   // ---- Settings / 设置 ----
   function settingsPage(el, me) {
     var name = h('input.input', { value: (me.identity && me.identity.name) || '' });
@@ -447,7 +495,10 @@
               me.identity = self; UI.toast(t('set.saved'));
             }).catch(UI.fail);
           }
-        }, UI.field(t('p.name'), name), UI.kv([[t('id'), id.id], [t('version'), id.version], [t('host'), id.hostname]]), h('div.btn-row', b))))));
+        }, UI.field(t('p.name'), name), UI.kv([[t('id'), id.id], [t('version'), id.version], [t('host'), id.hostname]]), h('div.btn-row', b))),
+        Settings.card({ title: t('set.hub'), get: '/hub/settings/get', set: '/hub/settings/set',
+          fields: [{ key: 'max_nodes', kind: 'int', label: t('set.max_nodes'), hint: t('set.max_nodes_hint') }] })),
+      Settings.limits()));
   }
 
   var app = document.getElementById('app');
@@ -462,6 +513,7 @@
           { id: 'nodes', icon: 'server', label: t('nav.nodes') },
           { id: 'models', icon: 'cube', label: t('nav.models') },
           { id: 'proxies', icon: 'users', label: t('nav.proxies') },
+          { id: 'traffic', icon: 'activity', label: t('nav.traffic') },
           { id: 'peers', icon: 'link', label: t('nav.peers') },
           { id: 'settings', icon: 'settings', label: t('nav.settings') }
         ]
@@ -473,6 +525,7 @@
         'nodes/:id': function (p) { nodePage(sh, p.id); },
         'models': function () { modelsPage(sh.page('models', t('nav.models'))); },
         'proxies': function () { proxiesPage(sh.page('proxies', t('nav.proxies'))); },
+        'traffic': function () { trafficPage(sh.page('traffic', t('nav.traffic'))); },
         'peers': function () { PeersPanel.mount(sh.page('peers', t('nav.peers'))); },
         'settings': function () { settingsPage(sh.page('settings', t('nav.settings')), me); }
       }, 'overview');

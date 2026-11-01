@@ -20,7 +20,7 @@ func TestPages(t *testing.T) {
 		"models": [{"name": "m", "api": "openai", "base_url": "`+mock.BaseURL("a")+`", "api_key": "sk-a"}]}`), "")
 	n := nodeOf(t, nf)
 	base := strings.TrimSuffix(n.Console().URL(), "/")
-	for _, path := range []string{"/", "/app.js", "/static/ui.js", "/static/ui.css", "/static/peers.js", "/static/jobs.js"} {
+	for _, path := range []string{"/", "/app.js", "/static/ui.js", "/static/ui.css", "/static/peers.js", "/static/jobs.js", "/static/flow.js", "/static/forms.js"} {
 		resp, err := http.Get(base + path)
 		if err != nil {
 			t.Fatal(err)

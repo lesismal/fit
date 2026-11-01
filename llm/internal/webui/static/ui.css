@@ -323,3 +323,38 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .login__brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; justify-content: center; }
 .login__brand .brand__name { color: var(--text); font-size: 18px; }
 .login__prefs { position: fixed; top: 16px; right: 16px; }
+
+/* ---- Link map (flow.js) / 链路图 ---- */
+.lm-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.lm-canvas { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.lm-side { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: var(--surface); min-height: 120px; }
+.lm-svg { display: block; font-family: var(--font); }
+.lm-colh { fill: var(--muted); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.lm-tile { fill: var(--surface); stroke: var(--border-2); stroke-width: 1.2; }
+.lm-nd { cursor: pointer; }
+.lm-nd:hover .lm-tile { stroke: var(--primary); }
+.lm-nd.self .lm-tile { stroke: var(--primary); stroke-width: 2; }
+.lm-nd.sel .lm-tile { stroke: var(--primary); stroke-width: 2.4; fill: var(--primary-soft); }
+.lm-ico { color: var(--primary); }
+.lm-nd.k-model .lm-ico { color: var(--info); }
+.lm-nd.k-upstream .lm-ico { color: var(--warn); }
+.lm-lb { fill: var(--text); font-size: 12.5px; font-weight: 650; }
+.lm-sb { fill: var(--muted); font-size: 11px; }
+.lm-tag { fill: var(--primary); font-size: 10.5px; font-weight: 600; }
+.lm-st { stroke: var(--surface); stroke-width: 1.5; }
+.lm-st.ok { fill: var(--ok); } .lm-st.bad { fill: var(--danger); } .lm-st.wait { fill: var(--warn); }
+.lm-lk { cursor: pointer; }
+.lm-hit { fill: none; stroke: transparent; stroke-width: 14; }
+.lm-base { fill: none; stroke: var(--border-2); }
+.lm-lk.idle .lm-base { stroke-dasharray: 5 5; }
+.lm-lk.h1 .lm-base { stroke: color-mix(in srgb, var(--primary) 45%, var(--border-2)); }
+.lm-lk.h2 .lm-base { stroke: color-mix(in srgb, var(--primary) 75%, var(--border-2)); }
+.lm-lk.h3 .lm-base { stroke: var(--primary); }
+.lm-lk.sel .lm-base, .lm-lk:hover .lm-base { stroke: var(--info); }
+.lm-flow { fill: none; stroke: var(--on-primary); stroke-opacity: .55; stroke-dasharray: 2 14; stroke-linecap: round; animation: lm-flow 1.4s linear infinite; }
+@keyframes lm-flow { to { stroke-dashoffset: -32; } }
+@media (prefers-reduced-motion: reduce) { .lm-flow { animation: none; } }
+.lm-rate { fill: var(--text-2); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.lm-rtt { font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rtt-good { color: var(--ok); fill: var(--ok); } .rtt-fair { color: var(--warn); fill: var(--warn); } .rtt-poor { color: var(--danger); fill: var(--danger); }
+.lm-legend { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }

@@ -9,7 +9,12 @@
   UI.addI18n({
     'en': {
       'app.sub': 'GPU node', 'nav.overview': 'Overview', 'nav.models': 'Models', 'nav.gpus': 'GPUs', 'nav.actions': 'Actions',
-      'nav.jobs': 'Jobs', 'nav.peers': 'Connections', 'nav.settings': 'Settings',
+      'nav.jobs': 'Jobs', 'nav.peers': 'Connections', 'nav.settings': 'Settings', 'nav.traffic': 'Traffic',
+      'lm.callers': 'Hubs and proxies', 'lm.node': 'This node', 'lm.models': 'Models', 'lm.upstreams': 'Upstreams', 'lm.calls_n': '{n} calls',
+      'u.title': 'Upstream calls', 'u.note': 'Bounds on the calls this node forwards to its models\' upstreams (proxy). Calls in flight keep the bounds they started with.',
+      'u.connect': 'Connect timeout', 'u.connect_hint': '10s by default', 'u.first': 'First byte timeout', 'u.first_hint': 'From the call\'s start; 5m by default',
+      'u.idle': 'Idle timeout', 'u.idle_hint': 'Silence in the middle of an answer; 5m by default', 'u.total': 'Call timeout', 'u.total_hint': '30m by default',
+      'u.inflight': 'Max calls at once', 'u.inflight_hint': 'Across the models; 256 by default', 'u.body': 'Max body bytes', 'u.body_hint': '32 MiB by default',
       'ov.gpus': 'GPUs', 'ov.models': 'Ready models', 'ov.inflight': 'Calls in flight', 'ov.jobs': 'Running jobs',
       'ov.profile': 'Profile', 'ov.system': 'System', 'ov.res': 'Memory & disks', 'ov.name': 'Name', 'ov.desc': 'Description',
       'ov.id': 'ID', 'ov.version': 'Version', 'ov.web': 'Web console', 'ov.rpc': 'RPC address', 'ov.started': 'Started',
@@ -44,7 +49,12 @@
     },
     'zh-CN': {
       'app.sub': 'GPU 节点', 'nav.overview': '概览', 'nav.models': '模型', 'nav.gpus': '显卡', 'nav.actions': '操作',
-      'nav.jobs': '作业', 'nav.peers': '连接', 'nav.settings': '设置',
+      'nav.jobs': '作业', 'nav.peers': '连接', 'nav.settings': '设置', 'nav.traffic': '流量',
+      'lm.callers': 'Hub 与代理', 'lm.node': '本节点', 'lm.models': '模型', 'lm.upstreams': '上游', 'lm.calls_n': '{n} 次调用',
+      'u.title': '上游调用', 'u.note': '本节点向其模型上游转发调用的上限（proxy）。进行中的调用保持开始时的上限。',
+      'u.connect': '连接超时', 'u.connect_hint': '默认 10s', 'u.first': '首字节超时', 'u.first_hint': '从调用开始计时；默认 5m',
+      'u.idle': '空闲超时', 'u.idle_hint': '回答中途的静默；默认 5m', 'u.total': '调用超时', 'u.total_hint': '默认 30m',
+      'u.inflight': '并发调用上限', 'u.inflight_hint': '跨所有模型；默认 256', 'u.body': '请求体上限（字节）', 'u.body_hint': '默认 32 MiB',
       'ov.gpus': '显卡', 'ov.models': '就绪模型', 'ov.inflight': '进行中的调用', 'ov.jobs': '运行中作业',
       'ov.profile': '资料', 'ov.system': '系统', 'ov.res': '内存与磁盘', 'ov.name': '名称', 'ov.desc': '描述',
       'ov.id': 'ID', 'ov.version': '版本', 'ov.web': 'Web 控制台', 'ov.rpc': 'RPC 地址', 'ov.started': '启动时间',
@@ -408,6 +418,45 @@
     }).catch(UI.fail);
   }
 
+
+  // ---- Traffic / 流量 ----
+  // The node's link map: the hubs and proxies that call it → this node → its models → their upstreams, each line with
+  // its bytes, latency and calls. / 节点的链路图：调用它的 hub 与代理 → 本节点 → 模型 → 上游，每条线带字节数、延迟与调用。
+  function hostOf(u) { try { return new URL(u).host; } catch (e) { return u || '?'; } }
+  function nodeGraph(st, info, models) {
+    var g = LinkMap.graph([t('lm.callers'), t('lm.node'), t('lm.models'), t('lm.upstreams')]);
+    g.at = st.at;
+    var self = st.self || {}, peers = LinkMap.peers(st.links);
+    var byFrom = LinkMap.sum(st.routes, function (r) { return r.from; }), byModel = LinkMap.sum(st.routes, function (r) { return r.model; });
+    var total = LinkMap.sum(st.routes, function () { return 'all'; }).all || {};
+    g.node('me', 1, { kind: 'node', label: self.name || self.id, sub: t('lm.calls_n', { n: total.calls || 0 }), self: true, state: 'ok',
+      facts: [['ID', self.id], [t('ov.hostname'), self.hostname]] });
+    Object.keys(peers).forEach(function (id) {
+      var p = peers[id], tr = byFrom[id] || {};
+      g.node('c:' + id, 0, { kind: p.role === 'hub' ? 'hub' : 'proxy', label: p.name, sub: LinkMap.rttText(p.rtt), state: 'ok', facts: [['ID', id]] });
+      g.link('c:' + id, 'me', { fwd: p.in, back: p.out, rtt: p.rtt, calls: tr.calls || 0, errors: tr.errors || 0, inflight: tr.inflight || 0 });
+    });
+    var urls = {};
+    (models || []).forEach(function (m) { urls[m.api + '/' + m.name] = m.base_url; });
+    (info.models || []).forEach(function (m) {
+      var mid = 'm:' + m.api + '/' + m.name, mt = byModel[m.name] || {}, host = hostOf(urls[m.api + '/' + m.name]);
+      g.node(mid, 2, { kind: 'model', label: m.name, sub: m.api, state: m.state === 'ready' ? 'ok' : m.state === 'error' ? 'bad' : 'wait',
+        facts: [[t('m.state'), m.state], [t('m.base_url'), urls[m.api + '/' + m.name]]] });
+      g.link('me', mid, { fwd: mt.req || 0, back: mt.resp || 0, calls: mt.calls || 0, errors: mt.errors || 0, inflight: m.inflight || 0 });
+      g.node('u:' + host, 3, { kind: 'upstream', label: host, sub: '' });
+      var ul = g.link(mid, 'u:' + host, {});
+      ul.fwd += mt.req || 0; ul.back += mt.resp || 0;
+    });
+    return g;
+  }
+  function traffic(el) {
+    LinkMap.mount(el, {
+      load: function () {
+        return Promise.all([call('/mesh/status'), call('/node/info'), call('/node/model/list')]).then(function (r) { return nodeGraph(r[0], r[1], r[2]); });
+      }
+    });
+  }
+
   // ---- 设置 / Settings ----
   function settings(el) {
     Promise.all([call('/node/info'), call('/node/settings/get')]).then(function (r) {
@@ -441,8 +490,20 @@
         h('div.form-row', UI.field(t('s.refresh'), refresh, t('s.refresh_hint')), UI.field(t('s.job_timeout'), timeout, t('s.job_timeout_hint'))),
         UI.field(t('s.gpu_data_dir'), dataDir, t('s.gpu_data_dir_hint')),
         h('div.btn-row', saveSettings));
+      var upstream = Settings.card({
+        title: t('u.title'), get: '/node/upstream/get', set: '/node/upstream/set', note: t('u.note'),
+        fields: [
+          { key: 'connect_timeout', kind: 'dur', label: t('u.connect'), hint: t('u.connect_hint'), placeholder: '10s' },
+          { key: 'first_byte_timeout', kind: 'dur', label: t('u.first'), hint: t('u.first_hint'), placeholder: '5m' },
+          { key: 'idle_timeout', kind: 'dur', label: t('u.idle'), hint: t('u.idle_hint'), placeholder: '5m' },
+          { key: 'timeout', kind: 'dur', label: t('u.total'), hint: t('u.total_hint'), placeholder: '30m' },
+          { key: 'max_inflight', kind: 'int', label: t('u.inflight'), hint: t('u.inflight_hint') },
+          { key: 'max_body_bytes', kind: 'int', label: t('u.body'), hint: t('u.body_hint') }
+        ]
+      });
       UI.mount(el, h('div.stack', UI.configNote('node'),
-        h('div.grid.grid--2', UI.card(t('s.profile'), profile), UI.card(t('s.node'), form))));
+        h('div.grid.grid--2', UI.card(t('s.profile'), profile), UI.card(t('s.node'), form)),
+        h('div.grid.grid--2', upstream, Settings.limits())));
     }).catch(UI.fail);
   }
 
@@ -451,7 +512,7 @@
     brand: 'fit llm node', sub: t('app.sub'),
     start: function (m) {
       me = m;
-      var nav = [['overview', 'dashboard'], ['models', 'cube'], ['gpus', 'gpu'], ['actions', 'terminal'], ['jobs', 'log'], ['peers', 'link'], ['settings', 'settings']];
+      var nav = [['overview', 'dashboard'], ['models', 'cube'], ['gpus', 'gpu'], ['actions', 'terminal'], ['jobs', 'log'], ['traffic', 'activity'], ['peers', 'link'], ['settings', 'settings']];
       var sh = UI.shell({
         brand: 'fit llm node', sub: (m.identity && m.identity.name) || t('app.sub'), user: m.user, onLogout: function () { session.logout(); },
         nav: nav.map(function (n) { return { id: n[0], icon: n[1], label: t('nav.' + n[0]) }; })
@@ -464,6 +525,7 @@
         gpus: function () { gpus(page('gpus')); },
         actions: function () { actions(page('actions')); },
         jobs: function () { Jobs.mount(page('jobs')); },
+        traffic: function () { traffic(page('traffic')); },
         peers: function () { PeersPanel.mount(page('peers')); },
         settings: function () { settings(page('settings')); }
       }, 'overview');
