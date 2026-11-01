@@ -105,6 +105,10 @@ func (n *Node) register() {
 		return n.getSettings(), nil
 	})
 	mesh.Handle(r, model.MethodNodeSettingsSet, nil, role.EditTimeout, n.setSettings)
+	mesh.Handle(r, model.MethodNodeUpstreamGet, nil, 0, func(context.Context, model.Identity, *empty) (any, error) {
+		return n.getUpstream(), nil
+	})
+	mesh.Handle(r, model.MethodNodeUpstreamSet, nil, role.EditTimeout, n.setUpstream)
 }
 
 func (n *Node) runAction(_ context.Context, _ model.Identity, req *model.ActionRunReq) (any, error) {

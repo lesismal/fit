@@ -52,12 +52,22 @@ type Hub struct {
 	rr       int
 	timer    *time.Timer // pending coalesced flush / 待执行的合并刷新
 	closed   bool
+
+	// The node list pushed to the proxies (nodelist.go): the last one, its
+	// encoding and when it went out, the pending push, and the timer that
+	// refreshes its traffic.
+	list      model.HubNodeList
+	listEnc   []byte
+	listAt    time.Time
+	listTimer *time.Timer
+	tick      *time.Timer
 }
 
 // newHub creates a Hub on m; call register before the mesh links.
 func newHub(m *mesh.Mesh, self func() model.Identity, log *logs.Logger) *Hub {
 	h := &Hub{m: m, self: self, log: log, maxNodes: config.DefaultLLMMaxNodes, nodes: map[string]*node{}, inflight: map[string]int{}}
 	h.models = model.HubModels{Models: []model.HubModel{}, Seq: time.Now().UnixMilli()}
+	h.list = model.HubNodeList{Nodes: []model.NodeSummary{}, Seq: time.Now().UnixMilli()}
 	return h
 }
 
@@ -96,6 +106,9 @@ func (h *Hub) register(r *mesh.Router) {
 		return h.Models(), nil
 	})
 	mesh.HandleStream(r, model.MethodHubProxy, clients, h.proxy)
+	mesh.Handle(r, model.MethodHubNodeList, clients, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+		return h.NodeList(), nil
+	})
 	mesh.Handle(r, model.MethodHubNodes, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return h.Nodes(), nil
 	})
@@ -112,6 +125,9 @@ func (h *Hub) register(r *mesh.Router) {
 	})
 	h.m.OnPeerUp(h.peerUp)
 	h.m.OnPeerDown(h.peerDown)
+	h.mu.Lock()
+	h.tick = time.AfterFunc(listRefresh, h.refresh)
+	h.mu.Unlock()
 }
 
 // Close stops the pending flush.
@@ -119,8 +135,10 @@ func (h *Hub) register(r *mesh.Router) {
 func (h *Hub) close() {
 	h.mu.Lock()
 	h.closed = true
-	if h.timer != nil {
-		h.timer.Stop()
+	for _, t := range []*time.Timer{h.timer, h.listTimer, h.tick} {
+		if t != nil {
+			t.Stop()
+		}
 	}
 	h.mu.Unlock()
 }
@@ -143,6 +161,9 @@ func (h *Hub) peerUp(pc model.PeerConn) {
 	case model.RoleProxy:
 		if err := h.m.Push(pc.ID, model.MethodHubModelsUpdate, h.Models()); err != nil {
 			h.log.Debugf("models push to %s failed: %v", pc.ID, err)
+		}
+		if err := h.m.Push(pc.ID, model.MethodHubNodeListUpdate, h.NodeList()); err != nil {
+			h.log.Debugf("node list push to %s failed: %v", pc.ID, err)
 		}
 	}
 }
@@ -232,9 +253,11 @@ func (h *Hub) Nodes() []model.HubNode {
 // ---- Model aggregation ----
 // ---- 模型汇总 ----
 
-// changed schedules a coalesced recompute (and push) of the models.
-// changed 安排一次合并的模型重新计算（及推送）。
+// changed schedules a coalesced recompute (and push) of the models, and of
+// the node list.
+// changed 安排一次合并的模型（及节点列表）重新计算与推送。
 func (h *Hub) changed() {
+	h.listChanged()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed || h.timer != nil {

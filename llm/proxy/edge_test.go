@@ -428,6 +428,26 @@ func TestProxyRoleEdges(t *testing.T) {
 	}
 	waitFor(t, "hub update", func() bool { _, known, _ := f.c.cat.routes("h", model.APIOpenAI); return !known })
 
+	// The hub's node list: a malformed one dropped, an older one too; the
+	// proxy's nodes show it beside the node linked directly.
+	if err := hub.m.Push(proxyID, model.MethodHubNodeListUpdate, "bad"); err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []int64{9, 3} {
+		l := model.HubNodeList{Hub: "hub-a", Seq: seq, Total: int(seq), Nodes: []model.NodeSummary{{ID: "x", Name: fmt.Sprint("x", seq)}}}
+		if err := hub.m.Push(proxyID, model.MethodHubNodeListUpdate, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, "the hub's node list", func() bool {
+		r := f.c.nodes()
+		return len(r.Hubs) == 1 && r.Hubs[0].Online && r.Hubs[0].Total == 9 && len(r.Hubs[0].Nodes) == 1 && r.Hubs[0].Nodes[0].Name == "x9" &&
+			len(r.Direct) == 1 && r.Direct[0].ID == "node-a" && r.Direct[0].Online && len(r.Direct[0].Links) == 1
+	})
+	if out, err := f.r.Invoke(ctx, local, MethodProxyNodes, nil); err != nil || len(out.(NodesResp).Hubs) != 1 {
+		t.Fatalf("nodes: %v %v", out, err)
+	}
+
 	out, err := f.r.Invoke(ctx, local, MethodProxyStats, nil)
 	if err != nil {
 		t.Fatal(err)

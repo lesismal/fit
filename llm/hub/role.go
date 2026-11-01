@@ -50,6 +50,10 @@ func New(h *app.Host) *Role {
 	r.hub = newHub(b.Mesh, b.Self, b.Log)
 	b.Register(r)
 	r.hub.register(b.Router)
+	mesh.Handle(b.Router, model.MethodHubSettingsGet, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+		return r.hub.settings(), nil
+	})
+	mesh.Handle(b.Router, model.MethodHubSettingsSet, nil, role.EditTimeout, r.setSettings)
 	mesh.Handle(b.Router, model.MethodHubProfileSet, nil, 0, func(ctx context.Context, _ model.Identity, req *model.ProfileReq) (any, error) {
 		name := strings.TrimSpace(req.Name)
 		if name == "" || len([]rune(name)) > 64 {

@@ -51,6 +51,28 @@ const (
 	MethodNodeSettingsSet = "/node/settings/set" // NodeSettings
 )
 
+// The bounds on the calls a node forwards upstream (the member's proxy),
+// its own pages only.
+// 节点向上游转发调用的上限（成员的 proxy），仅自身页面可调用。
+const (
+	MethodNodeUpstreamGet = "/node/upstream/get" // -> NodeUpstream
+	MethodNodeUpstreamSet = "/node/upstream/set" // NodeUpstream -> NodeUpstream
+)
+
+// NodeUpstream are the bounds on the calls a node forwards to its models'
+// upstreams, as its pages read and set them: durations as Go writes them,
+// "10s"; a zero or empty field is the default.
+// NodeUpstream 节点向其模型上游转发调用的上限，供其页面读取与设置：时长按 Go 的格式书写，如 "10s"；零值或空字段表示
+// 默认值。
+type NodeUpstream struct {
+	ConnectTimeout   string `json:"connect_timeout"`
+	FirstByteTimeout string `json:"first_byte_timeout"`
+	IdleTimeout      string `json:"idle_timeout"`
+	Timeout          string `json:"timeout"`
+	MaxInflight      int    `json:"max_inflight"`
+	MaxBodyBytes     int64  `json:"max_body_bytes"`
+}
+
 // MethodNodeUpdate is the push of a node to its hub / proxy peers whenever its NodeInfo changes.
 // MethodNodeUpdate 节点信息变化时节点推送给其 hub / proxy 对端。
 const MethodNodeUpdate = "/node/update"

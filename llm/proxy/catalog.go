@@ -46,6 +46,11 @@ type hubEntry struct {
 	models model.HubModels
 }
 
+type listEntry struct {
+	peer model.Identity
+	list model.HubNodeList
+}
+
 type nodeEntry struct {
 	peer model.Identity
 	info model.NodeInfo
@@ -57,12 +62,13 @@ type catalog struct {
 	mu       sync.Mutex
 	hubs     map[string]*hubEntry
 	nodes    map[string]*nodeEntry
-	inflight map[string]int // calls this proxy runs on a direct node, per node id / 本 proxy 在直连节点上的调用数，按节点 ID
+	lists    map[string]*listEntry // the hubs' node lists, by hub id / 各 hub 的节点列表，按 hub ID
+	inflight map[string]int        // calls this proxy runs on a direct node, per node id / 本 proxy 在直连节点上的调用数，按节点 ID
 	rr       atomic.Uint64
 }
 
 func newCatalog() *catalog {
-	return &catalog{hubs: map[string]*hubEntry{}, nodes: map[string]*nodeEntry{}, inflight: map[string]int{}}
+	return &catalog{hubs: map[string]*hubEntry{}, nodes: map[string]*nodeEntry{}, lists: map[string]*listEntry{}, inflight: map[string]int{}}
 }
 
 // newer reports whether a message (peer, seq) replaces the stored one: always after a restart of the peer, otherwise
@@ -92,10 +98,24 @@ func (c *catalog) setNode(peer model.Identity, info model.NodeInfo) bool {
 	return true
 }
 
+// setList keeps the node list of hub peer, unless it is older than the one
+// kept.
+// setList 保存 hub peer 的节点列表，除非它比已保存的旧。
+func (c *catalog) setList(peer model.Identity, l model.HubNodeList) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e := c.lists[peer.ID]; e != nil && !newer(e.peer, e.list.Seq, peer, l.Seq) {
+		return false
+	}
+	c.lists[peer.ID] = &listEntry{peer: peer, list: l}
+	return true
+}
+
 func (c *catalog) drop(id string) {
 	c.mu.Lock()
 	delete(c.hubs, id)
 	delete(c.nodes, id)
+	delete(c.lists, id)
 	c.mu.Unlock()
 }
 

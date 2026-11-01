@@ -344,3 +344,49 @@ func (n *Node) setSettings(ctx context.Context, _ model.Identity, req *model.Nod
 	}
 	return n.getSettings(), nil
 }
+
+// getUpstream returns the bounds on the calls the node forwards, their
+// defaults filled in.
+func (n *Node) getUpstream() model.NodeUpstream {
+	n.mu.Lock()
+	l := n.lim
+	n.mu.Unlock()
+	return model.NodeUpstream{ConnectTimeout: l.connect.String(), FirstByteTimeout: l.firstByte.String(),
+		IdleTimeout: l.idle.String(), Timeout: l.total.String(), MaxInflight: l.inflight, MaxBodyBytes: l.body}
+}
+
+// setUpstream writes the bounds on the calls the node forwards into its
+// member's proxy, and answers them as applied. Calls in flight keep the
+// bounds they started with.
+func (n *Node) setUpstream(ctx context.Context, _ model.Identity, req *model.NodeUpstream) (any, error) {
+	connect, err := role.Duration("connect_timeout", req.ConnectTimeout, 0, config.DefaultLLMConnectTimeout.Std())
+	if err != nil {
+		return nil, err
+	}
+	first, err := role.Duration("first_byte_timeout", req.FirstByteTimeout, 0, config.DefaultLLMFirstByteTimeout.Std())
+	if err != nil {
+		return nil, err
+	}
+	idle, err := role.Duration("idle_timeout", req.IdleTimeout, 0, config.DefaultLLMIdleTimeout.Std())
+	if err != nil {
+		return nil, err
+	}
+	total, err := role.Duration("timeout", req.Timeout, 0, config.DefaultLLMCallTimeout.Std())
+	if err != nil {
+		return nil, err
+	}
+	inflight, err := role.Count("max_inflight", req.MaxInflight, config.DefaultLLMNodeMaxInflight)
+	if err != nil {
+		return nil, err
+	}
+	body, err := role.Count("max_body_bytes", req.MaxBodyBytes, config.DefaultLLMMaxBodyBytes)
+	if err != nil {
+		return nil, err
+	}
+	p := role.Object("connect_timeout", connect, "first_byte_timeout", first, "idle_timeout", idle, "timeout", total,
+		"max_inflight", inflight, "max_body_bytes", body)
+	if err := n.Edit(ctx, func(m map[string]json.RawMessage) error { return role.Set(m, "proxy", p) }); err != nil {
+		return nil, err
+	}
+	return n.getUpstream(), nil
+}

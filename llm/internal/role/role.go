@@ -76,6 +76,7 @@ type Base struct {
 	id, name   string
 	console    *console.Console
 	consoleKey []byte
+	lim        *config.LLMLimits
 	applied    bool
 	stopped    bool
 }
@@ -95,6 +96,7 @@ func New(h *app.Host, spec Spec) *Base {
 		started: time.Now().Unix(), hostname: host}
 	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
 	mesh.RegisterAdmin(b.Router, b.Mesh, b.EditMesh)
+	b.registerSettings()
 	return b
 }
 
@@ -166,6 +168,7 @@ func (b *Base) Apply(c Common) error {
 	writeID := c.ID == "" && first
 	id := b.id
 	b.name = c.Name
+	b.lim = c.Limits
 	b.mu.Unlock()
 	if oldID != "" && oldID != id {
 		// Peers know the role by its ID: they say hello again.

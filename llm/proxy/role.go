@@ -63,6 +63,7 @@ type Proxy struct {
 	mu     sync.Mutex
 	api    *apiServer
 	apiKey []byte
+	apiCfg *config.LLMProxyAPI
 }
 
 // New returns a proxy on h, started by its first Apply.
@@ -85,6 +86,14 @@ func New(h *app.Host) *Proxy {
 			return
 		}
 		c.cat.setHub(caller, hm)
+	})
+	m.OnPush(model.MethodHubNodeListUpdate, []string{model.RoleHub}, func(caller model.Identity, msg json.RawMessage) {
+		var l model.HubNodeList
+		if err := json.Unmarshal(msg, &l); err != nil {
+			c.Log.Warnf("bad hub node list push from %s: %v", caller.ID, err)
+			return
+		}
+		c.cat.setList(caller, l)
 	})
 	m.OnPush(model.MethodNodeUpdate, []string{model.RoleNode}, func(caller model.Identity, msg json.RawMessage) {
 		var info model.NodeInfo
@@ -112,6 +121,7 @@ func New(h *app.Host) *Proxy {
 		}
 		return struct{}{}, c.SetName(ctx, name)
 	})
+	c.registerNodes()
 	return c
 }
 
@@ -150,6 +160,9 @@ func (c *Proxy) Apply(member any) error {
 
 // applyAPI starts, changes or stops the agent API.
 func (c *Proxy) applyAPI(cfg *config.LLMProxyAPI) error {
+	c.mu.Lock()
+	c.apiCfg = cfg
+	c.mu.Unlock()
 	var k []byte
 	if cfg != nil {
 		k, _ = json.Marshal(cfg)
@@ -208,6 +221,14 @@ func (c *Proxy) peerUp(p model.PeerConn) {
 		}
 		if c.Mesh.Online(p.ID) {
 			c.cat.setHub(p.Identity, hm)
+		}
+		l, err := mesh.Call[model.HubNodeList](ctx, c.Mesh, p.ID, model.MethodHubNodeList, struct{}{})
+		if err != nil {
+			c.Log.Warnf("fetching the node list of hub %s failed: %v", p.ID, err)
+			return
+		}
+		if c.Mesh.Online(p.ID) {
+			c.cat.setList(p.Identity, l)
 		}
 	case model.RoleNode:
 		info, err := mesh.Call[model.NodeInfo](ctx, c.Mesh, p.ID, model.MethodNodeInfo, struct{}{})
