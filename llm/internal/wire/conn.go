@@ -189,8 +189,9 @@ func (c *Conn) start() {
 	c.hb = time.AfterFunc(d, func() { c.beat(d) })
 }
 
-// beat runs every ping interval. A ping goes out when nothing arrived for an interval (is the peer alive?) or when
-// something was sent since the last beat (is the peer keeping up?), unless one is still unanswered. No frame for
+// beat runs every ping interval. A ping goes out when nothing arrived for an interval (is the peer alive?), when
+// something was sent since the last beat (is the peer keeping up?) or when the latency is two intervals old, unless
+// one is still unanswered. No frame for
 // three intervals, or a ping unanswered for SlowTimeout, drops the connection.
 //
 // beat 每个心跳周期执行一次。一个周期内没有收到任何帧（对端是否存活？）或上次以来发送过数据（对端是否跟得上？）时发送 ping，
@@ -212,7 +213,10 @@ func (c *Conn) beat(d time.Duration) {
 		c.forceClose(closeSlow, "too slow", ErrSlow)
 		return
 	}
-	if waited == 0 && (idle >= d || c.LastSend().After(c.lastBeat)) {
+	// A ping also goes out when the last round trip is two intervals old,
+	// so that both ends of a link that only one of them keeps busy know its
+	// latency.
+	if waited == 0 && (idle >= d || c.LastSend().After(c.lastBeat) || now.Sub(c.rtt.last()) >= 2*d) {
 		_ = c.Ping()
 	}
 	c.lastBeat = now

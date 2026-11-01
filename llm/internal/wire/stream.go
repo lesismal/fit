@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -57,6 +58,9 @@ type Stream struct {
 	delivering bool // a goroutine is in deliver's loop
 	again      bool // more came while it was
 	creditFn   func()
+
+	// rx and tx count the bytes of the data frames received and sent.
+	rx, tx atomic.Int64
 }
 
 func newStream(s *Session, id uint32, head Head, payload []byte, opener bool) *Stream {
@@ -98,6 +102,11 @@ func (st *Stream) Context() context.Context { return st.ctx }
 // Done is closed when the stream ends.
 // Done 在流结束时关闭。
 func (st *Stream) Done() <-chan struct{} { return st.done }
+
+// Bytes returns the bytes of the data frames received and sent on the
+// stream so far, its opening payload and its result left out.
+// Bytes 返回流上目前收到与发出的数据帧字节数，不含打开时的载荷与结果。
+func (st *Stream) Bytes() (in, out int64) { return st.rx.Load(), st.tx.Load() }
 
 // Result returns the payload of the responder's stream-end, once Recv has returned io.EOF.
 // Result 返回响应方 stream-end 的载荷，在 Recv 返回 io.EOF 之后有效。
@@ -148,6 +157,7 @@ func (st *Stream) Send(ctx context.Context, data []byte) error {
 				st.mu.Unlock()
 				return err
 			}
+			st.tx.Add(int64(len(data)))
 			st.touch()
 			return nil
 		}
@@ -360,6 +370,7 @@ func (st *Stream) onData(p []byte) {
 		return
 	}
 	st.buffered += cost(p)
+	st.rx.Add(int64(len(p)))
 	// The sender may overshoot the window by at most one frame.
 	// 发送方最多超出窗口一个帧。
 	over := st.buffered > st.s.opts.Window+st.s.opts.MaxFrame
@@ -539,6 +550,7 @@ func (st *Stream) TrySend(data []byte) (bool, error) {
 	if err := st.s.write(&Frame{Type: TypeStreamData, ID: st.id, Payload: data}); err != nil {
 		return false, err
 	}
+	st.tx.Add(int64(len(data)))
 	st.touch()
 	return true, nil
 }

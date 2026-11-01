@@ -268,7 +268,7 @@ func sendJSON(ctx context.Context, st *wire.Stream, v any) error {
 // handler's goroutine only waits for the end; nothing waits on a fib worker.
 // Every failure before the head frame that another node might not have is
 // CodeUnavailable.
-func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
+func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.ProxyReq, st *wire.Stream) (_ any, err error) {
 	start := time.Now()
 	req.API = model.Protocol(req.API)
 	if !slices.Contains(model.ProxyPaths[req.API], req.Path) {
@@ -284,6 +284,11 @@ func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.Prox
 	}
 	n.changed()
 	defer n.release(m, r)
+	rc := n.Mesh.Routes().Begin(caller.ID, "", m.Name)
+	rc.AddReq(len(req.Body))
+	rc.Attach(st, true)
+	var refused bool // the upstream answered an error status
+	defer func() { rc.End(err != nil || refused) }()
 	if !model.Serves(m.API, req.Path) {
 		return nil, mesh.Errorf(model.CodeNotFound, "model %s is served by %s, which has no %s", m.Name, m.API, req.Path)
 	}
@@ -384,6 +389,7 @@ func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.Prox
 	if xerr != nil {
 		return nil, xerr
 	}
+	refused = res.Status >= 400
 	return res, nil
 }
 

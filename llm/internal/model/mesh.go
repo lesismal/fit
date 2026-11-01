@@ -62,6 +62,9 @@ type PeerConn struct {
 	// Draining: either side sent drain (wire), no new calls go here.
 	// Draining：任一方已发送 drain（wire），新调用不再发往这里。
 	Draining bool `json:"draining,omitempty"`
+	// Link is the link's traffic and latency.
+	// Link 连接的流量与延迟。
+	Link LinkStats `json:"link"`
 }
 
 // DialReq adds a dial target.

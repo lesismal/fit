@@ -103,6 +103,11 @@ type Session struct {
 	pingAt    atomic.Int64 // when the unanswered ping was sent, 0 if none / 未应答的 ping 的发送时间，没有则为 0
 	drainSent atomic.Bool
 	peerDrain atomic.Bool
+
+	// The bytes of every frame received and sent, and the round trips of
+	// the pings: what a link's traffic and latency are shown from.
+	rx, tx atomic.Int64
+	rtt    rttMeter
 }
 
 type result struct {
@@ -179,6 +184,17 @@ func (s *Session) Unanswered() time.Duration {
 	}
 	return 0
 }
+
+// Traffic returns the bytes of the frames received and sent, compressed
+// as they crossed, pings and pongs included.
+// Traffic 返回收到与发出的帧的字节数（按传输时的压缩大小，含 ping 与 pong）。
+func (s *Session) Traffic() (in, out int64) { return s.rx.Load(), s.tx.Load() }
+
+// RTT returns the round trips of the pings answered: a ping's pong waits
+// behind everything sent before it, so a busy link's round trip includes
+// its queue.
+// RTT 返回已应答 ping 的往返时间：pong 排在 ping 之前发送的所有内容之后，所以繁忙连接的往返时间包含其排队时间。
+func (s *Session) RTT() model.RTT { return s.rtt.stats() }
 
 // Inflight counts the calls and streams not finished yet, in both directions.
 // Inflight 统计两个方向上尚未结束的调用与流。
@@ -271,6 +287,7 @@ func (s *Session) write(f *Frame) error {
 		s.Close(fmt.Errorf("wire: send: %w", err))
 		return ErrClosed
 	}
+	s.tx.Add(int64(len(b)))
 	if f.Type != TypePing && f.Type != TypePong {
 		s.lastSend.Store(time.Now().UnixNano())
 	}
@@ -378,6 +395,7 @@ func (s *Session) OpenStream(ctx context.Context, head Head, payload []byte) (*S
 //
 // Receive 处理一条收到的消息，不会阻塞在处理函数上。返回错误表示对端违反协议，此时会话已关闭，传输层应断开连接。
 func (s *Session) Receive(msg []byte) error {
+	s.rx.Add(int64(len(msg)))
 	f, err := Unmarshal(msg, s.opts.MaxFrame)
 	if err == nil {
 		err = s.dispatch(f)
@@ -395,7 +413,10 @@ func (s *Session) dispatch(f *Frame) error {
 		_ = s.write(&Frame{Type: TypePong, Payload: f.Payload})
 	case TypePong:
 		if len(f.Payload) == 8 && binary.BigEndian.Uint64(f.Payload) == s.pingSeq.Load() {
-			s.pingAt.Store(0)
+			if at := s.pingAt.Swap(0); at != 0 {
+				now := time.Now()
+				s.rtt.add(now.Sub(time.Unix(0, at)), now)
+			}
 		}
 	case TypeDrain:
 		if s.peerDrain.CompareAndSwap(false, true) && s.opts.Handlers.Drain != nil {

@@ -553,7 +553,8 @@ type call struct {
 	done      bool  // the call is over
 	cause     error // why it was cancelled
 	lastErr   error
-	sent      int // bytes of a streamed body sent
+	rc        *mesh.RouteCall // the route the call is on, counted
+	sent      int             // bytes of a streamed body sent
 	bytes     int64
 	held      int
 	waiting   bool
@@ -607,8 +608,12 @@ func (x *call) next() {
 		x.retry(rt, err)
 		return
 	}
+	rc := x.s.c.Mesh.Routes().Begin("", rt.ID, x.req.Model)
+	rc.AddReq(len(req.Body))
+	rc.Attach(st, false)
 	x.mu.Lock()
 	x.st = st
+	x.rc = rc
 	cause := x.cause
 	x.mu.Unlock()
 	if cause != nil {
@@ -624,6 +629,7 @@ func (x *call) next() {
 // may, or fails the call.
 func (x *call) retry(rt Route, err error) {
 	x.mu.Lock()
+	x.endRouteLocked(true)
 	x.unholdLocked()
 	if rt.Kind == RouteNode {
 		x.exclude = append(x.exclude, rt.ID)
@@ -792,7 +798,14 @@ func (x *call) finish(st *wire.Stream, err error) {
 	x.done = true
 	n, failed := x.bytes, x.lastErr != nil
 	x.stop()
+	rc := x.rc
+	x.rc = nil
 	x.mu.Unlock()
+	defer func() {
+		if rc != nil {
+			rc.End(failed)
+		}
+	}()
 	if errors.Is(err, io.EOF) {
 		_ = x.c.SetWriteDeadline(time.Now().Add(stallTimeout))
 		_ = x.c.Finish()
@@ -823,6 +836,7 @@ func (x *call) fail(err error) {
 	}
 	x.done = true
 	x.stop()
+	x.endRouteLocked(true)
 	x.mu.Unlock()
 	if !errors.Is(err, errAgentGone) {
 		code, msg := mesh.ErrCode(err)
@@ -835,6 +849,15 @@ func (x *call) fail(err error) {
 	x.end(0, true)
 	x.s.inflight.Add(-1)
 	x.c.Release()
+}
+
+// endRouteLocked ends the count of the call on its route, once. x.mu is
+// held.
+func (x *call) endRouteLocked(failed bool) {
+	if x.rc != nil {
+		x.rc.End(failed)
+		x.rc = nil
+	}
 }
 
 // unholdLocked lowers the count of calls on the direct node the call is

@@ -200,7 +200,7 @@ func rpc(r *console.Request, o Options, method string) {
 			Fail(c, err)
 			return
 		}
-		if method != model.MethodPeers && !strings.HasSuffix(method, "/list") && !strings.HasSuffix(method, "/get") {
+		if method != model.MethodPeers && method != model.MethodStatus && !strings.HasSuffix(method, "/list") && !strings.HasSuffix(method, "/get") {
 			r.Logf("%s", method)
 		}
 		_ = console.WriteJSON(c, stdhttp.StatusOK, data)

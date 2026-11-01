@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/lesismal/fit/llm/internal/model"
 )
@@ -10,6 +11,11 @@ import (
 // PeersResp builds the reply of model.MethodPeers.
 func (m *Mesh) PeersResp() model.PeersResp {
 	return model.PeersResp{Self: m.Self(), Listen: m.Listen(), Conns: m.Peers(), Targets: m.Targets()}
+}
+
+// Status builds the reply of model.MethodStatus.
+func (m *Mesh) Status() model.MeshStatus {
+	return model.MeshStatus{Self: m.Self(), Links: m.Peers(), Routes: m.routes.Snapshot(), At: time.Now().UnixMilli()}
 }
 
 // Settings are what of the mesh a role's config holds: the listener and the
@@ -26,14 +32,17 @@ type Settings struct {
 // of the settings, and the mesh follows it.
 type Editor func(ctx context.Context, fn func(s *Settings) error) error
 
-// RegisterAdmin adds the mesh management methods (MethodPeers, MethodDial,
-// MethodUndial, MethodKick, MethodListen) to r, for model.RoleLocal only (the
+// RegisterAdmin adds the mesh management methods (MethodPeers, MethodStatus,
+// MethodDial, MethodUndial, MethodKick, MethodListen) to r, for model.RoleLocal only (the
 // role's own pages). Every change goes through edit, into the config; Kick,
 // which drops links without changing anything, is the one that acts at once.
 // A request that is not valid changes nothing.
 func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 	Handle(r, model.MethodPeers, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return m.PeersResp(), nil
+	})
+	Handle(r, model.MethodStatus, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+		return m.Status(), nil
 	})
 	Handle(r, model.MethodDial, nil, 0, func(ctx context.Context, _ model.Identity, req *model.DialReq) (any, error) {
 		addr, err := ValidateAddr(req.Addr, true)

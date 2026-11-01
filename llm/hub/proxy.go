@@ -26,7 +26,7 @@ const maxTries = 3
 // error (or the node going offline) moves the call to the next node, as
 // long as none of a streamed body has been taken from the proxy; after it,
 // bytes have reached the proxy, so any failure ends the call.
-func (h *Hub) proxy(ctx context.Context, _ model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
+func (h *Hub) proxy(ctx context.Context, caller model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
 	req.API = model.Protocol(req.API)
 	if req.Model == "" || !slices.Contains(model.Protocols, req.API) {
 		return nil, mesh.BadRequest("model and a known api are required")
@@ -46,7 +46,7 @@ func (h *Hub) proxy(ctx context.Context, _ model.Identity, req *model.ProxyReq, 
 			break
 		}
 		exclude[id] = true
-		res, retry, err := h.relay(ctx, id, req, st, stopKA)
+		res, retry, err := h.relay(ctx, caller.ID, id, req, st, stopKA)
 		if !retry {
 			return res, err
 		}
@@ -64,9 +64,9 @@ type relayEnd struct {
 	retry bool
 }
 
-// relay runs the call on node id; retry reports that nothing was relayed
-// and another node may be tried.
-func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wire.Stream, headSent func()) (res any, retry bool, err error) {
+// relay runs the call of proxy from on node id; retry reports that nothing
+// was relayed and another node may be tried.
+func (h *Hub) relay(ctx context.Context, from, id string, req *model.ProxyReq, st *wire.Stream, headSent func()) (res any, retry bool, err error) {
 	h.mu.Lock()
 	h.inflight[id]++
 	h.mu.Unlock()
@@ -86,6 +86,12 @@ func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wir
 	if err != nil {
 		return nil, ctx.Err() == nil, err
 	}
+	// The call is counted on its route from the proxy to the node, its
+	// bytes as they cross the node's stream.
+	rc := h.m.Routes().Begin(from, id, req.Model)
+	rc.AddReq(len(req.Body))
+	rc.Attach(ns, false)
+	defer func() { rc.End(err != nil) }()
 	done := make(chan relayEnd, 1)
 	var bodyTaken func() int
 	if req.BodyStream {

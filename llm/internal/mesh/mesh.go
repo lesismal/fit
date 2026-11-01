@@ -219,6 +219,8 @@ type Mesh struct {
 	stopOnce sync.Once
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+
+	routes *Routes
 }
 
 // New creates a Mesh serving the methods of router. Routes may still be added to router until Start.
@@ -234,8 +236,13 @@ func New(opts Options, router *Router) *Mesh {
 		targets: map[string]*target{},
 		pushes:  map[string]pushRoute{},
 		stopCh:  make(chan struct{}),
+		routes:  newRoutes(),
 	}
 }
+
+// Routes returns the counts of the model calls the role relays, per route.
+// Routes 返回角色按路由统计的模型调用计数。
+func (m *Mesh) Routes() *Routes { return m.routes }
 
 func withDefaults(opts Options) Options {
 	if opts.PingInterval <= 0 {
@@ -886,6 +893,8 @@ func (m *Mesh) Peers() []model.PeerConn {
 		p := c.peer
 		c.mu.Unlock()
 		p.Draining = c.wc.Draining()
+		p.Link.BytesIn, p.Link.BytesOut = c.wc.Traffic()
+		p.Link.RTT = c.wc.RTT()
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool {
