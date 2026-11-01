@@ -315,8 +315,10 @@ func (x *exchange) upload(bw *fibhttp.BodyWriter) {
 		}
 		total += int64(len(data))
 		if total > x.lim.body {
-			bw.CloseWithError(fmt.Errorf("the request body is larger than %d bytes", x.lim.body))
+			// Cancelled first, so the call ends as the caller's bad request
+			// and not as the upstream's failure to read the cut body.
 			x.cancel(mesh.Errorf(model.CodeBadRequest, "the request body is larger than the node's %d bytes", x.lim.body))
+			bw.CloseWithError(fmt.Errorf("the request body is larger than %d bytes", x.lim.body))
 			return
 		}
 		if _, werr := bw.Write(data); werr != nil {
@@ -409,6 +411,11 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		case errors.Is(err, errIdle):
 			x.finish(nil, unavailable("model %s: the upstream did not answer in time", x.model.Name))
 		default:
+			select {
+			case <-x.done:
+				return // ended already, as by cancel: not the upstream's fault
+			default:
+			}
 			msg := "upstream unreachable: " + unwrapURLErr(err).Error()
 			x.n.setModelErr(x.model, msg, false)
 			x.finish(nil, unavailable("model %s: %s", x.model.Name, msg))
