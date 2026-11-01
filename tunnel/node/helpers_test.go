@@ -71,15 +71,6 @@ func newEnv(t *testing.T) *env {
 	return v
 }
 
-func newNode(t *testing.T, member string) *env {
-	t.Helper()
-	v := newEnv(t)
-	if err := v.apply(member); err != nil {
-		t.Fatal(err)
-	}
-	return v
-}
-
 func load(member string) (*config.TunnelNode, error) {
 	c, err := config.Load([]byte(`{"tunnel": {"node": ` + member + `}}`))
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/wscrypt"
 )
 
-// The console socket, fibhub's encrypted web page WebSocket: each WebSocket,
+// The console socket, the console pages' encrypted WebSocket: each WebSocket,
 // once the hellos are exchanged, gets a TCP connection of its own to the
 // console, and the two pass on what they receive, the WebSocket's messages
 // opened, the console's bytes sealed, one message per piece of at most

@@ -6,24 +6,20 @@
 
 ## 背景
 
-有两个基于 fib 的程序原本各在自己的仓库中，各自有自己的引擎、配置格式和加密文件：
+用户要求 fit 在网关之外提供两项功能，每项都由运行在多台机器上、彼此互联的角色组成：
 
-- **agenthub** 在多台机器间共享 AI 模型。*node* 用本地或远端上游（OpenAI、Anthropic 兼容 API）提供
-  模型，*hub* 是 node 与 client 汇合的地方，*client* 提供一个 API，调用它能到达的 node 上的模型。它们
-  通过 WebSocket mesh 互联，以共享密码做挑战-应答认证。所有设置都在一个加密的状态文件（scrypt、
-  AES-GCM）中，由网页编辑，没有配置文件。它基于旧版 fib（`fib/go`）编写，在 fib 上跑 `net/http` 的
-  ServeMux，node 用阻塞的 `net/http.Client` 代理上游。
-- **fibhub** 用来访问 NAT 后面的服务。服务旁边的 *pod* 通过 TCP、WebSocket 或 QUIC 连到 *server*，
-  *client* 把本地端口和 Web 代理经 server 转发到某个 pod 的服务。它的配置是驼峰命名的 JSON，用 `mode`
-  指定角色；网页上改的内容存在它自己的 store 中（`FIBSTORE`，Argon2id，XChaCha20-Poly1305）。
+- **agent** 在多台机器间共享 AI 模型。*node* 用本地或远端上游（OpenAI、Anthropic 兼容 API）提供
+  模型，*hub* 是 node 与 client 汇合的地方，*client* 提供一个 API，调用它能到达的 node 上的模型。
+- **tunnel** 用来访问 NAT 后面的 TCP 服务。服务旁边的 *node* 通过 TCP、WebSocket 或 QUIC 连到
+  *server*，*client* 把本地端口和 Web 代理经 server 转发到某个 node 的服务。
 
-用户要求两者都成为 fit 的一部分：共用 fit 的 fib 引擎，使用 fit 的配置格式，进程运行哪些角色由 fit 的
-配置决定，存储的内容放进 fit 的 store。并要求完全遵守 fit 的开发规则，不留到以后。
+用户要求两者都共用 fit 的 fib 引擎，使用 fit 的配置格式，进程运行哪些角色由 fit 的配置决定，存储的
+内容放进 fit 的 store；并要求完全遵守 fit 的开发规则，不留到以后。
 
 ## 决定
 
-- **包。** agenthub 的角色是 `agent/hub`、`agent/node`、`agent/client`；fibhub 的角色是
-  `tunnel/server`、`tunnel/node`（即 fibhub 的 pod）和 `tunnel/client`。同一家族角色共用的代码在
+- **包。** agent 的角色是 `agent/hub`、`agent/node`、`agent/client`；tunnel 的角色是
+  `tunnel/server`、`tunnel/node` 和 `tunnel/client`。同一家族角色共用的代码在
   `agent/internal` 和 `tunnel/internal` 下；两个家族共用的放在 fit 自己的包中：`login`（用户、会话、
   CSRF 令牌与锁定，与 admin.console 共用）、`app`（角色的注册表与管理器）以及 `app/console`（角色在
   fib 上的网页）。`app/standard` 导入所有角色，`cmd/fit` 与 `fit build` 导入它。
@@ -49,22 +45,20 @@
   重新读取文件为止，并以警告说明。角色生成且必须保留的东西，如 QUIC 证书、ID 或 API key 的哈希，也同样
   写入它的成员。Edit 在管理器自己的 goroutine 上逐个执行，从不在 fib worker 上，至多 `app.MaxEdits` 个
   等待。
-- **存储合并。** agenthub 的状态文件和 fibhub 的 store 都去掉了：它们保存的内容在角色成员中，因而在
-  fit 的 store 中。已有的部署用 `fit store import` 导入以新成员写成的配置。
+- **一个 store。** 角色没有自己的状态文件或 store：角色要保存的内容在它的成员中，因而在 fit 的 store
+  中。`fit store import` 导入以这些成员写成的配置。
 - **登录用 fit 的。** 角色的网页受 `console`（一个 `RoleConsole`：地址、TLS 文件、用户及
-  `fit hash-password` 生成的 bcrypt 哈希、会话限制）保护，通过 `login` 包，与 admin.console 一样检查。
-  agenthub 的 console 密码和 fibhub 的 `webAuth` 都去掉了。
+  `fit hash-password` 生成的 bcrypt 哈希、会话限制）保护，通过 `login` 包，与 admin.console 一样检查；
+  角色没有自己的密码或登录方式。
 - **规则完全适用。** 角色做的任何事都不阻塞 fib worker：bcrypt、命令执行、读文件和配置修改在各自有界的
   池上执行，带超时；agent node 到上游的请求体与响应体用 fib 的异步客户端和 `OnBody` 流式转发，双向背压；
-  每个 map、队列和缓冲都有带安全默认值的上限；与外部的每次交互都有超时。agenthub 的 `net/http` handler
-  与客户端以及它自己的引擎，都在 fib 上重写。
+  每个 map、队列和缓冲都有带安全默认值的上限；与外部的每次交互都有超时。没有角色用 `net/http`
+  handler 提供服务、用 `net/http.Client` 代理，或运行自己的引擎。
 
 ## 后果
 
 - 一个二进制和一份配置就能以任意组合运行网关、tunnel 和 agent；一个 store 保存它们的设置；一份日志、
   一个 Admin API 和一个 console 展示它们。
-- 线上协议保持不变，使 fit 的角色在迁移期间能与它所替代的程序互联；线上可见的名字（WebSocket 路径、
-  ALPN）保留旧值。
 - 角色成员中有密码和密钥。存在明文文件中时，安全程度与文件相同；`admin.store` 把它们加密保存，这也是
   网页的改动应保存在那里的原因。
 - 角色与 listener 共用限制。繁忙的 tunnel 可能用尽 `limits.max_conns`。

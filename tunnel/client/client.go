@@ -1,5 +1,5 @@
 // Package client is the tunnel's client role, tunnel.client in fit's
-// config: fibhub's client. A client links to one or more tunnel servers and
+// config. A client links to one or more tunnel servers and
 // learns the nodes they have and the services those nodes reach. For each
 // forward it listens on a local address, and every connection it accepts
 // there becomes a tunnel, which the server routes to the node and the node

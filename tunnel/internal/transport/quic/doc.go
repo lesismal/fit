@@ -9,7 +9,7 @@
 // before its data, which makes the stream known to the peer before the
 // opener has anything else to say; the acceptor strips it. Nothing else is
 // added: what one side writes is what the other reads. The TLS ALPN is
-// "fibhub" (ALPN), so that fit's roles and fibhub's link to each other.
+// "fit-tunnel" (ALPN).
 //
 // A dialer says how it checks the server's certificate in the address's
 // query: pin=SHA-256 of the certificate (see Fingerprint), or insecure=1 to
@@ -30,5 +30,5 @@ package quic
 // Scheme is the URL scheme of QUIC addresses.
 const Scheme = "quic"
 
-// ALPN is the TLS application protocol of the links, fibhub's.
-const ALPN = "fibhub"
+// ALPN is the TLS application protocol of the links.
+const ALPN = "fit-tunnel"

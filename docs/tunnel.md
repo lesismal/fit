@@ -5,8 +5,8 @@
 Config examples, each in .conf, YAML and JSON: [tunnel-server](../examples/tunnel-server/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-client](../examples/tunnel-client/fit.conf).
 
 fit's tunnel reaches TCP services on machines that only a host beside them can reach, through a
-server anyone can reach. It was a program of its own, fibhub; it is now three roles of fit's config,
-which run on the listeners' fib engine beside the gateway's routes, or without any
+server anyone can reach. It is three roles of fit's config, which run on the listeners' fib engine
+beside the gateway's routes, or without any
 ([decision 028](decisions/028-agent-and-tunnel.md)).
 
 ```text
@@ -21,8 +21,7 @@ which run on the listeners' fib engine beside the gateway's routes, or without a
 | node | `tunnel.node` | a host on the services' network | links to one or more servers, registers with the services it reaches, and connects to a service for each tunnel routed to it, to no other address |
 | client | `tunnel.client` | the user's machine | links to servers, learns their nodes and services, and listens on a local address per forward, each connection there a tunnel |
 
-fibhub called a node a *pod*, and a service a *node*. Nodes and clients link **out** to servers, so
-neither needs an open port. A process may run any of the roles, all three included, with the
+Nodes and clients link **out** to servers, so neither needs an open port. A process may run any of the roles, all three included, with the
 gateway or alone.
 
 The tunnel relays every byte through a server, and works today wherever nodes and clients can
@@ -64,7 +63,7 @@ A role runs while its member is set. A config with roles and no routes needs no 
         "name": "hub",
         "endpoints": [
           {"address": "quic://hub.example.com:7443"},
-          {"address": "ws://hub.example.com:7001/fibhub"},
+          {"address": "ws://hub.example.com:7001/tunnel"},
           {"address": "hub.example.com:7000"}
         ],
         "password": "a-registration-password",
@@ -108,7 +107,7 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `name` | the host's name | the name nodes and clients are told |
 | `password` | none: no registration is taken | what nodes and clients register with, proven with an HMAC, never sent |
 | `body_password` | none | AES-256-GCM on every frame's body; nodes and clients need the same |
-| `listeners` | none: the pages add them | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/fibhub` by default, and only a ws listener has one |
+| `listeners` | none: the pages add them | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/tunnel` by default, and only a ws listener has one |
 | `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for clients' `web_proxies`, answering on any path; it needs `console`, its password is the server's when left out, and `max_conns` is 32 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; the server makes a self-signed certificate and writes it here when a quic listener needs one; `cert` and `key` go together |
 | `register_timeout` | 10s | how long a link may take to register |
@@ -169,15 +168,12 @@ a peer that needs more opens a larger pool.
   that let only HTTP through, as through nginx's `proxy_pass` with `Upgrade`; there is no `wss://`,
   so set `body_password`.
 - **QUIC** links run on a UDP binding of the same engine, with fib's QUIC, TLS 1.3 and the ALPN
-  `fibhub`. A server makes a self-signed certificate when a quic listener needs one and keeps it in
+  `fit-tunnel`. A server makes a self-signed certificate when a quic listener needs one and keeps it in
   its member, so its fingerprint, which nodes and clients pin, outlives a restart.
 - **Registration** is an HMAC-SHA256 of the password over the peer's type, name, a time and a
   nonce; the time must be within 5 minutes of the server's clock, and a nonce is taken once.
 - **Body encryption**, with `body_password` on every side, seals each frame's body with AES-256-GCM,
   its header authenticated too; a frame that is not sealed, or does not open, closes the link.
-
-The wire protocol is fibhub's, names included: a node registers as a `pod`, and its services are
-its `nodes`, so that fit's roles and fibhub's can link to each other while a setup moves over.
 
 ### Flow, limits and timeouts
 
@@ -224,42 +220,18 @@ the server's `console_socket`, and a client's `web_proxies` entry with its URL a
 the console on a local address. The WebSocket's messages are AES-256-GCM sealed with keys from the
 password; the console's own login still applies.
 
-## Moving from fibhub
+## Reloads and bounds
 
-| fibhub | fit |
-|--------|-----|
-| `fibhub -mode=server\|pod\|client` | the member `tunnel.server`, `tunnel.node` or `tunnel.client`, in any combination |
-| a pod, its nodes | a node, its services |
-| a config file of the web page's settings, the rest in the `FIBSTORE` store | every setting in the member, and in fit's store with `admin.store` |
-| `webAddr`, `webAuth`, `/login` | `console`, fit's logins; a forward's or web proxy's `webAuth` is gone |
-| `listeners[].proto`, `addr`, `path`; `addr`, `linkWsAddr`, `listen` | `listeners[].protocol`, `address`, `path` |
-| `wsAddr`, `wsPassword` | `console_socket.address`, `password` |
-| `quicCert`, `quicKey` | `quic.cert`, `quic.key` |
-| a server's `endpoints[].proto`, `addr`, `enabled`; `addr` | `endpoints[].address` with its scheme, `disabled` |
-| `quicPin`, `quicInsecure`, `bodyPassword`, `poolSize` | `quic_pin`, `quic_insecure`, `body_password`, `pool_size` |
-| `forwards[].pod`, `node` | `forwards[].node`, `service` |
-| `webProxies` | `web_proxies` |
-| `-print-config`, flags, `FIBHUB_*` | none: the config is written as any of fit's is |
-
-To move a setup over, write each role's member from its fibhub settings, as above, and load it, or
-put it in a store with `fit store import`. A server's `quicCert` and `quicKey` copied into `quic`
-keep its fingerprint, so nodes and clients pinned to it link on. Since the wire protocol is
-fibhub's, a fit server can serve fibhub's pods and clients, and a fit node or client link to
-fibhub's server, while the rest move; fit's tests run fit's roles against each other only.
-
-What behaves differently:
-
-- Everything runs on fit's engine: no engine, socket or goroutine of the tunnel's own for QUIC, and
-  the gateway's `limits` apply to the roles' connections too.
+- Everything runs on fit's engine: no engine, socket or goroutine of the tunnel's own, QUIC
+  included, and the gateway's `limits` apply to the roles' connections too.
 - A role moves to a new member without dropping what is unchanged: a server's links, a node's or
   client's links to a server whose settings are the same, a forward on the same address.
-- The pages write into the config; a listener or forward that cannot listen is kept in the config,
-  shown with its error, and tried again with the next config.
-- New bounds and timeouts: the server's `max_links`, `max_links_per_peer`, `max_peers` and
+- A listener or forward that cannot listen is kept in the config, shown on the pages with its
+  error, and tried again with the next config.
+- Every resource is bounded: the server's `max_links`, `max_links_per_peer`, `max_peers` and
   `max_tunnels`, 64 tunnels a link, the roles' `max_tunnels` and `idle_timeout`, TCP keep-alive on
-  links and tunnels, a QUIC connection that carries no link closed after its handshake timeout.
-- The pages are behind fit's logins and its Content-Security-Policy, and no longer show or keep the
-  logins of other pages.
+  links and tunnels, and a QUIC connection that carries no link closed after its handshake timeout.
+- The pages are behind fit's logins and its Content-Security-Policy.
 
 ## Testing
 

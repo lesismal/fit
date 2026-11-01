@@ -1,7 +1,7 @@
 //go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || windows
 
 // Package link is the protocol the tunnel's server, nodes and clients speak
-// over a transport connection, fibhub's: framed calls, replies and
+// over a transport connection: framed calls, replies and
 // notifies, and the tunnel frames among them.
 //
 // # Wire format

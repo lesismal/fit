@@ -15,7 +15,7 @@
       "listeners": [
         {"protocol": "tcp", "address": ":7000"},
         // For networks that let only HTTP through.
-        {"protocol": "ws", "address": ":7001", "path": "/fibhub"}
+        {"protocol": "ws", "address": ":7001", "path": "/tunnel"}
       ],
       "console": {
         "address": "127.0.0.1:7080",

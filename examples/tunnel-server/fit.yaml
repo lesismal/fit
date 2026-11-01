@@ -17,7 +17,7 @@ tunnel:
       # For networks that let only HTTP through.
       - protocol: ws
         address: :7001
-        path: /fibhub
+        path: /tunnel
     console:
       address: 127.0.0.1:7080
       users:

@@ -404,7 +404,7 @@ func TestAdvertise(t *testing.T) {
 			t.Errorf("advertise(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
-	if NewID("node") == NewID("node") || !strings.HasPrefix(NewID("node"), "node-") {
+	if a, b := NewID("node"), NewID("node"); a == b || !strings.HasPrefix(a, "node-") {
 		t.Fatal("NewID")
 	}
 }

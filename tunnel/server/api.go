@@ -44,7 +44,7 @@ type ServiceView struct {
 
 // ViewInfo is info as the pages show it.
 func ViewInfo(info proto.Info) InfoView {
-	v := InfoView{Name: info.Name, Type: typeName(info.Type), Version: info.Version, Hostname: info.Hostname, OS: info.OS, Meta: info.Meta, Services: []ServiceView{}}
+	v := InfoView{Name: info.Name, Type: info.Type, Version: info.Version, Hostname: info.Hostname, OS: info.OS, Meta: info.Meta, Services: []ServiceView{}}
 	for _, s := range info.Services {
 		v.Services = append(v.Services, ServiceView{Name: s.Name, Address: s.Addr, Description: s.Desc})
 	}
@@ -312,7 +312,7 @@ func (s *Server) api(api *console.API) {
 			common.Fail(r, stdhttp.StatusNotFound, "no such peer")
 			return
 		}
-		r.Logf("kicks %s %q", typeName(peer.Info().Type), peer.Info().Name)
+		r.Logf("kicks %s %q", peer.Info().Type, peer.Info().Name)
 		s.kick(peer, "kicked from the server's console")
 		common.OK(r)
 	})

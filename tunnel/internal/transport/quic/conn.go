@@ -15,8 +15,7 @@ import (
 // package doc).
 const streamVersion byte = 1
 
-// Application error codes streams are reset, and connections closed, with,
-// fibhub's.
+// Application error codes streams are reset, and connections closed, with.
 const (
 	codeNoError  = 0
 	codeRefused  = 1

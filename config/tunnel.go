@@ -12,9 +12,7 @@ import (
 
 // The tunnel's roles: a server that nodes and clients link to, a node beside
 // the services it exposes, and a client that forwards local ports and web
-// proxies through a server to them. Their links speak fibhub's protocol, so
-// that the roles link to fibhub's server, pod and client while a setup moves
-// over; see docs/tunnel.md.
+// proxies through a server to them; see docs/tunnel.md.
 
 // The protocols a tunnel listener or endpoint may take.
 const (
@@ -25,8 +23,8 @@ const (
 
 // The defaults of the tunnel's roles.
 const (
-	// DefaultTunnelWSPath is the path of a ws listener, fibhub's.
-	DefaultTunnelWSPath          = "/fibhub"
+	// DefaultTunnelWSPath is the path of a ws listener.
+	DefaultTunnelWSPath          = "/tunnel"
 	DefaultTunnelPoolSize        = 10
 	DefaultTunnelMaxLinks        = 1024
 	DefaultTunnelMaxLinksPerPeer = 128
@@ -76,7 +74,7 @@ type TunnelServer struct {
 type TunnelListener struct {
 	Protocol string `json:"protocol" fit:"required" enum:"tcp,ws,quic" doc:"The protocol: tcp, a WebSocket (ws), for networks that let only HTTP through, or quic, over UDP."`
 	Address  string `json:"address" fit:"required" doc:"The host and port it listens on, as in \":7000\"; an empty host is every address."`
-	Path     string `json:"path,omitempty" default:"\"/fibhub\"" doc:"A ws listener's path. /fibhub when left out."`
+	Path     string `json:"path,omitempty" default:"\"/tunnel\"" doc:"A ws listener's path. /tunnel when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -103,12 +101,12 @@ type TunnelServerQUIC struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// TunnelNode is the tunnel's node role, fibhub's pod.
+// TunnelNode is the tunnel's node role, beside the services it exposes.
 type TunnelNode struct {
 	Name        string            `json:"name,omitempty" doc:"The node's name, which clients name to reach its services. The host's name when left out."`
 	Meta        map[string]string `json:"meta,omitempty" doc:"Anything else the node tells the servers, which their pages show."`
 	Servers     []TunnelUplink    `json:"servers,omitempty" doc:"The servers the node links to and registers with. None when left out: the console's pages add them."`
-	Services    []TunnelService   `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to. fibhub called them nodes."`
+	Services    []TunnelService   `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to."`
 	DialTimeout Duration          `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a connect to a service may take; shorter than a server's call_timeout, so that the server hears either way. 5s when left out."`
 	IdleTimeout Duration          `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
 	MaxTunnels  int               `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every server; a server's request for one more is refused. 4096 when left out or 0."`

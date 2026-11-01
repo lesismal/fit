@@ -6,29 +6,24 @@ Status: accepted (2026-11-01).
 
 ## Context
 
-Two programs built on fib lived in repositories of their own, each with its own engine, config
-format and encrypted file:
+Users asked fit for two features beyond the gateway, each made of roles that run on several
+machines and link to each other:
 
-- **agenthub** shares AI models among machines. A *node* serves models from local or remote
+- **The agent** shares AI models among machines. A *node* serves models from local or remote
   upstreams (OpenAI- and Anthropic-compatible APIs), a *hub* is where nodes and clients meet, and a
-  *client* offers one API that calls the models of the nodes it reaches. They link over a WebSocket
-  mesh with a challenge-response on a shared password. Every setting lived in an encrypted state
-  file (scrypt, AES-GCM) edited from web pages; it had no config file. It was written against an
-  old fib (`fib/go`), served a `net/http` ServeMux on fib, and its node proxied with a blocking
-  `net/http.Client`.
-- **fibhub** reaches services behind NAT. A *pod* beside the services links to *servers* over TCP,
-  WebSocket or QUIC, and a *client* forwards local ports and web proxies through a server to a
-  pod's service. Its config was JSON in camelCase with a `mode` naming the role; what its pages
-  changed was kept in a store of its own (`FIBSTORE`, Argon2id, XChaCha20-Poly1305).
+  *client* offers one API that calls the models of the nodes it reaches.
+- **The tunnel** reaches TCP services behind NAT. A *node* beside the services links to *servers*
+  over TCP, WebSocket or QUIC, and a *client* forwards local ports and web proxies through a server
+  to a node's service.
 
-Users asked for both to become part of fit: to share fit's fib engine, to use fit's config format,
-with the roles a process runs chosen by fit's config, and to keep what they store in fit's store.
-They also asked for fit's development rules to hold in full, with nothing left for later.
+They asked for both to share fit's fib engine, to use fit's config format, with the roles a
+process runs chosen by fit's config, and to keep what they store in fit's store; and for fit's
+development rules to hold in full, with nothing left for later.
 
 ## Decision
 
-- **Packages.** agenthub's roles are `agent/hub`, `agent/node` and `agent/client`; fibhub's are
-  `tunnel/server`, `tunnel/node` (fibhub's pod) and `tunnel/client`. What a family's roles share is
+- **Packages.** The agent's roles are `agent/hub`, `agent/node` and `agent/client`; the tunnel's
+  are `tunnel/server`, `tunnel/node` and `tunnel/client`. What a family's roles share is
   under `agent/internal` and `tunnel/internal`; what both families share is in packages of fit's
   own: `login` (users, sessions, CSRF tokens and lockouts, shared with admin.console),
   `app` (the roles' registry and manager) and `app/console` (a role's web pages on fib). `app/standard`
@@ -63,25 +58,22 @@ They also asked for fit's development rules to hold in full, with nothing left f
   warning. What a role generates and must keep, as a QUIC certificate, an ID or an API key's hash,
   is written into its member the same way. Edits run one at a time on the manager's goroutine,
   never on a fib worker, and at most `app.MaxEdits` wait.
-- **The stores are merged.** agenthub's state file and fibhub's store are gone: what they held is
-  in the roles' members, and so in fit's store. `fit store import` moves an existing setup in, from
-  a config written in the new members.
+- **One store.** No role keeps a state file or store of its own: what a role keeps is in its
+  member, and so in fit's store. `fit store import` loads a setup written in the members.
 - **Logins are fit's.** A role's pages are behind `console` (a `RoleConsole`: address, TLS files,
   users with bcrypt hashes from `fit hash-password`, session limits), checked as admin.console's
-  are, through package `login`. agenthub's console password and fibhub's `webAuth` are gone.
+  are, through package `login`; a role has no password or login scheme of its own.
 - **The rules hold in full.** Nothing a role does blocks a fib worker: bcrypt, command execution,
   file reads and config edits run on bounded pools of their own, with timeouts; bodies to and from
   the agent node's upstreams stream with fib's asynchronous client and `OnBody`, with backpressure
   both ways; every map, queue and buffer has a bound with a safe default; every exchange with the
-  outside has timeouts. agenthub's `net/http` handlers and client, and its own engines, are
-  rewritten on fib.
+  outside has timeouts. No role serves with `net/http` handlers, proxies with
+  `net/http.Client`, or runs an engine of its own.
 
 ## Consequences
 
 - One binary and one config run the gateway, the tunnel and the agent, in any combination; one
   store keeps their settings; one log, one Admin API and one console show them.
-- The wire protocols are kept, so that a role of fit links to the programs it replaces while a
-  setup moves over; names on the wire (a WebSocket path, an ALPN) keep their old values.
 - The roles' members carry passwords and keys. Kept in a plain file, they are as safe as the file;
   `admin.store` keeps them encrypted, which is why the pages' changes are meant to be kept there.
 - Roles share the listeners' limits. A busy tunnel can use up `limits.max_conns`.

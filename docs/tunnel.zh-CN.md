@@ -4,9 +4,8 @@
 
 配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[tunnel-server](../examples/tunnel-server/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-client](../examples/tunnel-client/fit.conf)。
 
-fit 的隧道让人经由一台谁都能连上的服务端，访问只有旁边那台主机才连得到的机器上的 TCP 服务。它原本是
-一个独立程序 fibhub，现在是 fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和网关的路由并存，
-也可以单独运行（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+fit 的隧道让人经由一台谁都能连上的服务端，访问只有旁边那台主机才连得到的机器上的 TCP 服务。它是
+fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和网关的路由并存，也可以单独运行（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
 
 ```text
  本地应用 ──TCP──▶ tunnel.client ══链路══▶ tunnel.server ══链路══▶ tunnel.node ──TCP──▶ 服务
@@ -19,8 +18,7 @@ fit 的隧道让人经由一台谁都能连上的服务端，访问只有旁边�
 | 节点 | `tunnel.node` | 服务所在网络里的主机 | 连接一台或多台服务端，带着它能访问的服务注册，并为路由给它的每条隧道连接对应的服务，不连接其他地址 |
 | 客户端 | `tunnel.client` | 用户的机器 | 连接服务端，得知它们的节点和服务，为每个转发监听一个本地地址，那里的每个连接都是一条隧道 |
 
-fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是**主动向外**连接服务端，所以都不需要开放
-端口。一个进程可以运行其中任意几个角色，三个都运行也可以，有网关或没有都行。
+节点和客户端都是**主动向外**连接服务端，所以都不需要开放端口。一个进程可以运行其中任意几个角色，三个都运行也可以，有网关或没有都行。
 
 隧道的每个字节都经服务端中继，只要节点和客户端能连上一台服务端，现在就能用。计划中的
 [P2P 里程碑](decisions/025-p2p.zh-CN.md)走另一条路：ICE 在两个 NAT 上打洞，让 NAT 后的两台主机直接相连，
@@ -60,7 +58,7 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
         "name": "hub",
         "endpoints": [
           {"address": "quic://hub.example.com:7443"},
-          {"address": "ws://hub.example.com:7001/fibhub"},
+          {"address": "ws://hub.example.com:7001/tunnel"},
           {"address": "hub.example.com:7000"}
         ],
         "password": "a-registration-password",
@@ -104,7 +102,7 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 | `name` | 主机名 | 告知节点和客户端的名字 |
 | `password` | 无：不接受任何注册 | 节点和客户端注册用的密码，以 HMAC 证明知道它，从不发送 |
 | `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密；节点和客户端需要相同的密码 |
-| `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/fibhub`，只有 ws 监听有路径 |
+| `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/tunnel`，只有 ws 监听有路径 |
 | `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供客户端的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用服务端的密码，`max_conns` 默认 32 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；有 quic 监听而没有证书时，服务端生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
 | `register_timeout` | 10s | 一条链路注册的时限 |
@@ -161,15 +159,12 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 
 - **TCP** 和 **WebSocket** 链路是引擎上的连接。WebSocket 链路用于只放行 HTTP 的网络，例如经 nginx 的
   `proxy_pass` 加 `Upgrade`；没有 `wss://`，所以请设置 `body_password`。
-- **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fibhub`。有 quic 监听
+- **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。有 quic 监听
   需要证书时，服务端生成自签名证书并保存在它的成员里，所以节点和客户端固定的指纹在重启后不变。
 - **注册**是以密码为密钥、对对端类型、名字、时间和随机数做的 HMAC-SHA256；时间与服务端时钟相差不得超过
   5 分钟，同一个随机数只接受一次。
 - **消息体加密**：各方都设置 `body_password` 时，每个帧的消息体用 AES-256-GCM 加密，帧头也参与认证；
   未加密或解不开的帧会关闭链路。
-
-线上协议是 fibhub 的，名字也一样：节点以 `pod` 注册，它的服务是它的 `nodes`，这样迁移期间 fit 的角色
-和 fibhub 的程序可以互相连接。
 
 ### 流控、上限与超时
 
@@ -206,39 +201,17 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 `web_proxies` 条目填上它的 URL 和密码，就在本地地址上提供这个控制台。WebSocket 的消息用由密码派生的密钥
 做 AES-256-GCM 加密；控制台自己的登录照样需要。
 
-## 从 fibhub 迁移
+## 重载与上限
 
-| fibhub | fit |
-|--------|-----|
-| `fibhub -mode=server\|pod\|client` | 成员 `tunnel.server`、`tunnel.node` 或 `tunnel.client`，可任意组合 |
-| pod，它的 nodes | 节点，它的服务 |
-| 只含 web 页面设置的配置文件，其余在 `FIBSTORE` 存储中 | 所有设置都在成员里；配置 `admin.store` 时在 fit 的存储中 |
-| `webAddr`、`webAuth`、`/login` | `console`，fit 的登录；转发和 Web 代理的 `webAuth` 不再存在 |
-| `listeners[].proto`、`addr`、`path`；`addr`、`linkWsAddr`、`listen` | `listeners[].protocol`、`address`、`path` |
-| `wsAddr`、`wsPassword` | `console_socket.address`、`password` |
-| `quicCert`、`quicKey` | `quic.cert`、`quic.key` |
-| 服务端的 `endpoints[].proto`、`addr`、`enabled`；`addr` | 带协议前缀的 `endpoints[].address`，`disabled` |
-| `quicPin`、`quicInsecure`、`bodyPassword`、`poolSize` | `quic_pin`、`quic_insecure`、`body_password`、`pool_size` |
-| `forwards[].pod`、`node` | `forwards[].node`、`service` |
-| `webProxies` | `web_proxies` |
-| `-print-config`、命令行参数、`FIBHUB_*` | 无：配置和 fit 的其他配置一样书写 |
-
-迁移时，按上表由 fibhub 的设置写出每个角色的成员并加载，或用 `fit store import` 放进存储。把服务端的
-`quicCert` 和 `quicKey` 复制到 `quic` 中，指纹不变，固定了它的节点和客户端可以继续连接。由于线上协议
-是 fibhub 的，迁移期间 fit 的服务端可以服务 fibhub 的 pod 和客户端，fit 的节点或客户端也可以连接 fibhub
-的服务端；fit 的测试只覆盖 fit 角色之间的互连。
-
-行为上的不同：
-
-- 一切都运行在 fit 的引擎上：QUIC 不再有自己的引擎、套接字或 goroutine，网关的 `limits` 也作用于角色的
-  连接。
+- 一切都运行在 fit 的引擎上：隧道没有自己的引擎、套接字或 goroutine，QUIC 也一样，网关的 `limits` 也作用于
+  角色的连接。
 - 角色切换到新成员时保留没有变化的部分：服务端的链路，设置未变的服务端对应的节点或客户端链路，同一地址上
   的转发。
-- 页面写入配置；无法监听的监听器或转发仍保留在配置中，显示错误，并在下一份配置时重试。
-- 新增的上限和超时：服务端的 `max_links`、`max_links_per_peer`、`max_peers` 和 `max_tunnels`，每条链路
+- 无法监听的监听器或转发仍保留在配置中，在页面上显示错误，并在下一份配置时重试。
+- 每种资源都有上限：服务端的 `max_links`、`max_links_per_peer`、`max_peers` 和 `max_tunnels`，每条链路
   64 条隧道，各角色的 `max_tunnels` 和 `idle_timeout`，链路和隧道上的 TCP keep-alive，握手完成后在握手
   时限内没有承载链路的 QUIC 连接会被关闭。
-- 页面在 fit 的登录和 Content-Security-Policy 之后，不再显示或保存其他页面的登录信息。
+- 页面在 fit 的登录和 Content-Security-Policy 之后。
 
 ## 测试
 

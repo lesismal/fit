@@ -15,7 +15,7 @@ function linkProtos(s){const e=Object.entries(s.protos||{});if(!e.length)return 
 // The server editor: a dialog, made once, for a new server or for the one
 // named editingServer.
 let editingServer=null;
-const EP_HINT={tcp:'host:7000',ws:'ws://host:7001/fibhub',quic:'quic://host:7443'};
+const EP_HINT={tcp:'host:7000',ws:'ws://host:7001/tunnel',quic:'quic://host:7443'};
 function serverEditor(){let d=$('srvEd');if(d)return d;d=document.createElement('dialog');d.id='srvEd';
  d.innerHTML=`<form method="dialog" data-submit="saveServer"><h3 id="srvTitle">Server</h3>
  <div class="grid2"><label><span>Name</span><input name="name" placeholder="name (optional)"></label>

@@ -1,5 +1,5 @@
 // Package wscrypt is the encryption of the WebSocket a tunnel server's
-// console pages can be reached through, fibhub's: every binary message is sealed with
+// console pages can be reached through: every binary message is sealed with
 // AES-256-GCM under a key both sides derive from the password they share.
 //
 // The server opens the session with a message of 16 random bytes, and the
@@ -26,7 +26,7 @@ import (
 const HelloLen = 16
 
 const (
-	pbkdf2Salt = "fibhub-ws"
+	pbkdf2Salt = "fit-tunnel-ws"
 	pbkdf2Iter = 10000
 )
 
@@ -67,11 +67,11 @@ func NewSession(secret Secret, serverHello, clientHello []byte, server bool) (*S
 		return nil, errors.New("wscrypt: bad hello")
 	}
 	salt := append(append([]byte(nil), serverHello...), clientHello...)
-	c2s, err := aead(secret, salt, "fibhub-ws c2s")
+	c2s, err := aead(secret, salt, "fit-tunnel-ws c2s")
 	if err != nil {
 		return nil, err
 	}
-	s2c, err := aead(secret, salt, "fibhub-ws s2c")
+	s2c, err := aead(secret, salt, "fit-tunnel-ws s2c")
 	if err != nil {
 		return nil, err
 	}

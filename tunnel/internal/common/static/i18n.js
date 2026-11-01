@@ -7,18 +7,17 @@
 (()=>{
 const zh={
  // pages and sections
- 'fibhub server':'fibhub 服务器','fibhub pod':'fibhub Pod','fibhub client':'fibhub 客户端',
- 'Servers':'服务器','Pods':'Pod','Clients':'客户端','Tunnels':'隧道','Nodes':'节点','This web page':'本页面','Pods and nodes':'Pod 与节点',
- 'Forwards':'转发','Web proxies':'Web 代理','Client info':'客户端信息','Nodes this pod can reach':'本 Pod 可访问的节点','Login':'登录',
+ 'Servers':'服务器','Clients':'客户端','Tunnels':'隧道','Nodes':'节点','This web page':'本页面',
+ 'Forwards':'转发','Web proxies':'Web 代理','Client info':'客户端信息','Login':'登录',
  // table heads
  'Name':'名称','Address':'地址','Address (host:port)':'地址 (host:port)','Description':'描述','User':'用户名','Password':'密码',
- 'Host':'主机','Since':'已连接','Info':'信息','Client':'客户端','Pod':'Pod','Node':'节点','Up':'上行','Down':'下行','Age':'时长',
+ 'Host':'主机','Since':'已连接','Info':'信息','Client':'客户端','Node':'节点','Up':'上行','Down':'下行','Age':'时长',
  'State':'状态','Server':'服务器','Web page':'Web 页面','Listen':'监听','Web user':'Web 用户名','Web password':'Web 密码',
  'Server page over WebSocket':'经 WebSocket 的服务器页面','Local client':'本地客户端','Sent':'发送','Received':'接收','Local':'本地','In':'入','Out':'出',
  // buttons
- 'Query':'查询','Edit nodes':'编辑节点','Kick':'踢出','Close':'关闭','Add node':'添加节点','Cancel':'取消','Save to pod':'保存到 Pod',
+ 'Query':'查询','Edit nodes':'编辑节点','Kick':'踢出','Close':'关闭','Add node':'添加节点','Cancel':'取消',
  'Connect':'连接','Forward':'转发','Forward…':'转发…','Update servers':'更新到服务器','Save':'保存','Open':'打开','Show':'显示','Hide':'隐藏',
- 'Set login':'设置登录','Query pods':'查询 Pod','Remove':'移除','Revert':'还原','Save and tell servers':'保存并通知服务器',
+ 'Set login':'设置登录','Remove':'移除','Revert':'还原','Save and tell servers':'保存并通知服务器',
  // states and notes
  'None':'无','none':'无','no login':'无登录','no web proxy':'无 Web 代理','web proxy only':'仅 Web 代理','Management page':'管理页面','Via':'经由','bodies encrypted':'消息体已加密','listening':'监听中','any':'任意',
  'registered':'已注册','connecting':'连接中','failed':'失败','stopped':'已停止',
@@ -26,16 +25,16 @@ const zh={
  // the theme and language pickers
  'Theme':'主题','Language':'语言','System':'跟随系统','Light':'浅色','Dark':'深色','Ghibli':'吉卜力','Mecha':'机甲'};
 // Placeholders, some of which are too plain a word to translate as text.
-const zhPh={'name (optional)':'名称（可选）','host:7000 or ws://host:7001/fibhub':'host:7000 或 ws://host:7001/fibhub','password':'密码',
- 'body AES password (optional)':'消息体 AES 密码（可选）','local address, 127.0.0.1:2222':'本地地址，如 127.0.0.1:2222','pod':'Pod','node':'节点',
+const zhPh={'name (optional)':'名称（可选）','password':'密码',
+ 'body AES password (optional)':'消息体 AES 密码（可选）','local address, 127.0.0.1:2222':'本地地址，如 127.0.0.1:2222','node':'节点',
  'server (optional: any)':'服务器（可选，默认任意）','web page user:password (optional)':'Web 页面的 用户名:密码（可选）',
  'key=value, key2=value2 — told to servers':'key=value, key2=value2 —— 告知服务器','user':'用户名','name':'名称','optional':'可选',
  '•••••••• leave blank to keep':'•••••••• 留空则保持不变','not set: peers cannot register':'未设置：对端无法注册','default: the registration password':'默认：注册密码',
  'empty: none, such as :7002':'留空则不启用，如 :7002',"from the server's page":'取自服务器页面'};
 Object.assign(zh,{
  // messages
- 'Pod queried':'已查询 Pod','Pods queried':'已查询 Pod','Kicked':'已踢出','Tunnel closed':'隧道已关闭','Nodes saved':'节点已保存',
- 'Nodes saved on the pod':'节点已保存到 Pod','Server added':'服务器已添加','Removed':'已移除','Forward added':'转发已添加',
+ 'Kicked':'已踢出','Tunnel closed':'隧道已关闭','Nodes saved':'节点已保存',
+ 'Server added':'服务器已添加','Removed':'已移除','Forward added':'转发已添加',
  // tunnel diagrams
  'Details':'详情','← All tunnels':'← 全部隧道','Tunnel map':'隧道全景','Tunnel path':'隧道链路','Tunnel':'隧道','Control link':'控制连接',
  'Traffic':'流量热度','low → high':'低 → 高','Tunnel ID':'隧道 ID','Local app':'本地应用','this page':'本页','not visible here':'此处不可见',
@@ -59,13 +58,11 @@ Object.assign(zh,{
  'Web page over WebSocket, address':'经 WebSocket 的 Web 页面地址',
  'Changes apply at once, without a restart. Removing a QUIC listener closes the connections it carries; other listeners\' connections stay open until they close.':'修改立即生效，无需重启。移除 QUIC 监听会关闭其上的连接；其他监听上的连接保持到自行关闭。',
  'Applied at once, without a restart. Registered peers stay connected; a new body password applies to the connections opened from now on.':'立即生效，无需重启。已注册的对端保持连接；新的消息体密码只用于此后新建的连接。',
- "Pods and clients pin this fingerprint for the server's QUIC listeners.":'Pod 和客户端用此指纹固定本服务器 QUIC 监听的证书。',
  'No settings store: changes are not saved.':'没有设置存储：修改不会被保存。',
  'The settings are saved encrypted in':'设置加密保存在',', unlocked with this password at every start.':'，每次启动时用此密码解锁。',
  'Store password changed':'存储密码已修改','Server saved':'服务器已保存','Listener saved':'监听已保存','Listener removed':'监听已移除','Settings saved':'设置已保存',
  'Remove this listener?':'移除该监听？','link':'链路'});
-// fit's tunnel: fibhub's pod is a node, its nodes are services, and the
-// pages are behind the console's logins.
+// The tunnel's nodes and services, and the console's logins.
 Object.assign(zh,{
  'tunnel server':'隧道服务器','tunnel node':'隧道节点','tunnel client':'隧道客户端',
  'Services':'服务','Service':'服务','Nodes and services':'节点与服务','Services this node reaches':'本节点可访问的服务',
@@ -99,7 +96,7 @@ let pref=saved(),lang=pref==='auto'?system():pref;
 function tr(s,el,ph){const k=s.trim(),d=ph?zhPh:zh;if(!k)return null;
  if(Object.hasOwn(d,k)&&!(el&&(el.tagName==='TD'||el.id==='name'||el.classList.contains('raw'))&&!cellOK.has(k)))return s.replace(k,d[k]);
  for(const[re,r]of zhRe)if(re.test(k))return s.replace(k,k.replace(re,r));
- // A diagram's columns, "Clients → Server → Pods".
+ // A diagram's columns, "Clients → Server → Nodes".
  const parts=k.split(' → ');if(parts.length>1&&parts.every(p=>Object.hasOwn(zh,p)))return s.replace(k,parts.map(p=>zh[p]).join(' → '));
  if(el&&el.id==='meta'){let o=s;for(const[a,b]of zhMeta)o=o.split(a).join(b);if(o!==s)return o}
  return null}

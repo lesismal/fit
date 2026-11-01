@@ -11,7 +11,7 @@ tunnel:
         # Tried in turn: the WebSocket when TCP is blocked.
         endpoints:
           - address: 127.0.0.1:7000
-          - address: ws://127.0.0.1:7001/fibhub
+          - address: ws://127.0.0.1:7001/tunnel
         password: a-registration-password
         body_password: a-body-password
         pool_size: 4

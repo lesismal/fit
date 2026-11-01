@@ -1,5 +1,5 @@
 // Package server is the tunnel's server role, tunnel.server in fit's
-// config: fibhub's server. Nodes and clients link to its listeners, over
+// config. Nodes and clients link to its listeners, over
 // TCP, WebSocket or QUIC, and register with its password, every link of
 // each one's pool; the links of one type and name, from however many
 // processes, are one peer, numbered as Unix file descriptors are. The
@@ -553,7 +553,7 @@ func (s *Server) register(c *link.Link, body []byte) (any, error) {
 		return nil, errors.New("tunnel: the server has no registration password set yet")
 	}
 	if err := set.verifier.Verify(&req); err != nil {
-		s.log.Warnf("refused the registration of %s %q from %s: %v", typeName(req.Info.Type), req.Info.Name, c.RemoteAddr(), err)
+		s.log.Warnf("refused the registration of %s %q from %s: %v", req.Info.Type, req.Info.Name, c.RemoteAddr(), err)
 		return nil, err
 	}
 	key := req.Info.Type + "/" + req.Info.Name
@@ -601,20 +601,12 @@ func (s *Server) register(c *link.Link, body []byte) (any, error) {
 	s.mu.Unlock()
 	c.SetMaxFrame(link.MaxFrame)
 	if created {
-		s.log.Infof("%s %q registered from %s as peer %d", typeName(req.Info.Type), req.Info.Name, c.RemoteAddr(), peer.ID)
+		s.log.Infof("%s %q registered from %s as peer %d", req.Info.Type, req.Info.Name, c.RemoteAddr(), peer.ID)
 	}
 	if created && req.Info.Type == proto.TypeNode {
 		defer s.broadcastNodes()
 	}
 	return &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Server: set.name}, nil
-}
-
-// typeName is a peer type as fit names it: a node for fibhub's pod.
-func typeName(t string) string {
-	if t == proto.TypeNode {
-		return "node"
-	}
-	return t
 }
 
 func (s *Server) update(c *link.Link, body []byte) (any, error) {
@@ -683,11 +675,11 @@ func (s *Server) disconnected(c *link.Link) {
 	s.mu.Unlock()
 	info := peer.Info()
 	if !gone {
-		closeRoutes(routes, peer, "a link of "+typeName(info.Type)+" "+info.Name+" closed")
+		closeRoutes(routes, peer, "a link of "+info.Type+" "+info.Name+" closed")
 		return
 	}
-	s.log.Infof("%s %q disconnected, closing %d tunnels", typeName(info.Type), info.Name, len(routes))
-	closeRoutes(routes, peer, typeName(info.Type)+" "+info.Name+" disconnected")
+	s.log.Infof("%s %q disconnected, closing %d tunnels", info.Type, info.Name, len(routes))
+	closeRoutes(routes, peer, info.Type+" "+info.Name+" disconnected")
 	if info.Type == proto.TypeNode {
 		s.broadcastNodes()
 	}

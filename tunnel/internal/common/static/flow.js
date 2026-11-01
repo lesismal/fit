@@ -21,8 +21,8 @@ const FLOW_ICONS={
  web:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z"/>',
  ssh:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/>',
  lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'};
-// A tunnel node has the kind pod, fibhub's name and icon, and a service
-// the kind node.
+// The flow kinds: a tunnel node has the kind pod, and a service the kind
+// node.
 const FLOW_KINDS={app:'Local app',client:'Client',forward:'Forward',server:'Server',pod:'Node',node:'Service'};
 // flowNodeIcon picks a service's icon by its name.
 const flowNodeIcon=name=>/ssh|shell|term/i.test(name)?'ssh':/web|http|page|ui/i.test(name)?'web':'node';

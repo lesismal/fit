@@ -1,9 +1,7 @@
 // Package proto is what the tunnel's server, nodes and clients say to each
 // other over their links (package link, which documents the wire format):
 // the methods, the messages they carry, the password check of a
-// registration and the frames of a tunnel. It is fibhub's protocol, names
-// and all, so that fit's roles link to fibhub's server, pods and clients:
-// on the wire a node is a "pod", and its services are its "nodes".
+// registration and the frames of a tunnel.
 //
 // A tunnel is a TCP connection a client accepted, carried to a node through
 // the server, and the TCP connection the node opened to a service for it.
@@ -48,10 +46,9 @@ func version() string {
 	return "fit"
 }
 
-// The types of peer a server serves. A node registers as fibhub's pod did,
-// with the type "pod" on the wire.
+// The types of peer a server serves.
 const (
-	TypeNode   = "pod"
+	TypeNode   = "node"
 	TypeClient = "client"
 )
 
@@ -144,7 +141,7 @@ const (
 	LinkQueue = MaxTunnelsPerLink*Window + 4<<20
 )
 
-// Service is a service a node reaches: fibhub's node.
+// Service is a TCP service a node reaches and opens tunnels to.
 type Service struct {
 	// Name identifies the service among its node's.
 	Name string `json:"name"`
@@ -161,7 +158,7 @@ type Info struct {
 	Hostname string `json:"hostname,omitempty"`
 	OS       string `json:"os,omitempty"`
 	// Services are the services a node reaches.
-	Services []Service `json:"nodes,omitempty"`
+	Services []Service `json:"services,omitempty"`
 	// Meta is anything else the peer was configured to tell.
 	Meta map[string]string `json:"meta,omitempty"`
 }
@@ -223,31 +220,31 @@ type NodeLatency struct {
 	RTT latency.Stats `json:"rtt"`
 	// ServiceRTT is, by service name, how long the node's connects to the
 	// service took.
-	ServiceRTT map[string]latency.Stats `json:"nodeRtt,omitempty"`
+	ServiceRTT map[string]latency.Stats `json:"serviceRtt,omitempty"`
 }
 
 // PingReq is what a peer measured: its round trips to the server and, for
 // a node, its connects to its services.
 type PingReq struct {
 	RTT        latency.Stats            `json:"rtt"`
-	ServiceRTT map[string]latency.Stats `json:"nodeRtt,omitempty"`
+	ServiceRTT map[string]latency.Stats `json:"serviceRtt,omitempty"`
 }
 
 // PingRsp answers a ping. A client is told how fast each node's links are,
 // by node name, which it weighs, with its own round trip to the server, to
 // pick the server a tunnel goes through.
 type PingRsp struct {
-	Nodes map[string]NodeLatency `json:"pods,omitempty"`
+	Nodes map[string]NodeLatency `json:"nodes,omitempty"`
 }
 
 // NodeList is the nodes of a server.
 type NodeList struct {
 	Server string     `json:"server"`
-	Nodes  []NodeView `json:"pods"`
+	Nodes  []NodeView `json:"nodes"`
 	// Epoch is the server's, picked when it starts, and Version counts the
 	// changes of its nodes, so that a client keeps the newest of the lists
 	// it is sent: the answer to a call may arrive after a notify of a later
-	// change. Zero from a server that does not count them, as fibhub's.
+	// change. Zero when they are not counted.
 	Epoch   uint64 `json:"epoch,omitempty"`
 	Version uint64 `json:"version,omitempty"`
 }
@@ -260,15 +257,15 @@ func (l *NodeList) Older(cur *NodeList) bool {
 
 // SetServicesReq sets the services of the node named Node.
 type SetServicesReq struct {
-	Node     string    `json:"pod"`
-	Services []Service `json:"nodes"`
+	Node     string    `json:"node"`
+	Services []Service `json:"services"`
 }
 
 // TunnelOpenReq opens tunnel ID to service Service of node Node.
 type TunnelOpenReq struct {
 	ID      uint64 `json:"id"`
-	Node    string `json:"pod"`
-	Service string `json:"node"`
+	Node    string `json:"node"`
+	Service string `json:"service"`
 	// Client is the name of the client that opens it, which the server
 	// fills in for the node.
 	Client string `json:"client,omitempty"`

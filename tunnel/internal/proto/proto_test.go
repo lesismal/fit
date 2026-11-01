@@ -60,7 +60,7 @@ func TestNodeListOlder(t *testing.T) {
 		{NodeList{Epoch: 7, Version: 6}, false},
 		// A restarted server counts again from 1.
 		{NodeList{Epoch: 8, Version: 1}, false},
-		// fibhub's server does not count.
+		// A server that does not count.
 		{NodeList{}, false},
 	} {
 		if got := c.l.Older(cur); got != c.older {

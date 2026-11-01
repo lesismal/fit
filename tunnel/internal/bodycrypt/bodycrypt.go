@@ -1,6 +1,5 @@
 // Package bodycrypt encrypts the bodies of link frames with AES-256-GCM
-// under a key derived from a password both sides are configured with, as
-// fibhub does.
+// under a key derived from a password both sides are configured with.
 //
 // A sealed body is a random 12-byte nonce followed by the body sealed, its
 // 16-byte tag last. The frame's header is the sealing's additional data, so
@@ -19,7 +18,7 @@ import (
 )
 
 const (
-	salt      = "fibhub-link-body"
+	salt      = "fit-tunnel-link-body"
 	iter      = 10000
 	nonceSize = 12
 	tagSize   = 16

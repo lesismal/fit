@@ -1,7 +1,7 @@
 //go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || windows
 
 // Package ws is the WebSocket transport of the tunnel's links, for networks
-// that let only HTTP through, as fibhub's is. Importing it registers the scheme ws:
+// that let only HTTP through. Importing it registers the scheme ws:
 // ws://host:port/path, both to dial and to listen on.
 //
 // It is a fib.Layer below the link rather than a WebSocket handler beside

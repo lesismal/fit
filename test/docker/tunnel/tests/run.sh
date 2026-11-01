@@ -196,7 +196,7 @@ server_json() { # NAME HOST FINGERPRINT
 		name: $n, password: $pw, body_password: $body, pool_size: 2, quic_pin: $fp,
 		endpoints: [
 			{protocol: "quic", address: "\($h):7443", enabled: true},
-			{protocol: "ws", address: "ws://\($h):7001/fibhub", enabled: true},
+			{protocol: "ws", address: "ws://\($h):7001/tunnel", enabled: true},
 			{protocol: "tcp", address: "\($h):7000", enabled: true}]}'
 }
 
@@ -237,7 +237,7 @@ setup() {
 		post "$HUB1" hub1 /api/settings "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" --arg w "$WS_PASSWORD" \
 			'{password: $p, body_password: $b, socket_password: $w, socket_address: ":7081"}')"
 	check "add hub-1 TCP listener :7000" post "$HUB1" hub1 /api/listeners '{"protocol":"tcp","address":":7000"}'
-	check "add hub-1 WebSocket listener :7001/fibhub" post "$HUB1" hub1 /api/listeners '{"protocol":"ws","address":":7001","path":"/fibhub"}'
+	check "add hub-1 WebSocket listener :7001/tunnel" post "$HUB1" hub1 /api/listeners '{"protocol":"ws","address":":7001","path":"/tunnel"}'
 	check "add hub-1 QUIC listener :7443" post "$HUB1" hub1 /api/listeners '{"protocol":"quic","address":":7443"}'
 	check "a listener added twice is refused" refused "$HUB1" hub1 /api/listeners '{"protocol":"tcp","address":":7000"}'
 	check "a listener of an unknown protocol is refused" refused "$HUB1" hub1 /api/listeners '{"protocol":"udp","address":":7999"}'
@@ -501,7 +501,7 @@ t_fallback() {
 	check "  … lab falls back to WebSocket" eventually 40 protos_are "$LAB" lab hub-1 "ws:2"
 	check "  … alice falls back to WebSocket" eventually 40 protos_are "$ALICE" alice hub-1 "ws:2"
 	check "  … tunnels through hub-1 work" eventually 20 echo_once alice 7305
-	check "hub-1 removes its WebSocket listener" post "$HUB1" hub1 /api/listeners/delete '{"protocol":"ws","address":":7001","path":"/fibhub"}'
+	check "hub-1 removes its WebSocket listener" post "$HUB1" hub1 /api/listeners/delete '{"protocol":"ws","address":":7001","path":"/tunnel"}'
 	# Only a QUIC listener's removal closes its links; kick the others.
 	check "  … and kicks lab and alice off it" t "kick '$HUB1' hub1 lab node && kick '$HUB1' hub1 alice client"
 	check "  … lab falls back to TCP" eventually 40 protos_are "$LAB" lab hub-1 "tcp:2"
@@ -514,7 +514,7 @@ t_fallback() {
 	check "  … office (TCP :7000 only) cannot get back to hub-1" t "sleep 8; ! registered '$OFFICE' office hub-1"
 	check "hub-1 puts everything back" t "
 		post '$HUB1' hub1 /api/listeners/update '{\"old\":{\"protocol\":\"tcp\",\"address\":\":7010\"},\"new\":{\"protocol\":\"tcp\",\"address\":\":7000\"}}' &&
-		post '$HUB1' hub1 /api/listeners '{\"protocol\":\"ws\",\"address\":\":7001\",\"path\":\"/fibhub\"}' &&
+		post '$HUB1' hub1 /api/listeners '{\"protocol\":\"ws\",\"address\":\":7001\",\"path\":\"/tunnel\"}' &&
 		post '$HUB1' hub1 /api/listeners '{\"protocol\":\"quic\",\"address\":\":7443\"}'"
 	check "  … office registers with hub-1 again" eventually 60 registered "$OFFICE" office hub-1
 	check "  … the QUIC fingerprint is unchanged (kept in the config)" js "$HUB1" hub1 ".quic_fingerprint == \"$(cat "$STATE/fp-hub-1")\""
@@ -532,7 +532,7 @@ t_uplink_edit() {
 	section "servers edited on nodes and clients / 在节点和客户端上编辑服务端"
 	check "alice edits hub-2: QUIC off, passwords left empty are kept" post "$ALICE" alice /api/servers/update \
 		"$(jq -n -c --arg fp "$(cat "$STATE/fp-hub-2")" '{name: "hub-2", server: {name: "hub-2", password: "", pool_size: 3, quic_pin: $fp, endpoints: [
-			{protocol: "quic", address: "hub-2:7443", enabled: false}, {protocol: "ws", address: "ws://hub-2:7001/fibhub", enabled: true}, {protocol: "tcp", address: "hub-2:7000", enabled: true}]}}')"
+			{protocol: "quic", address: "hub-2:7443", enabled: false}, {protocol: "ws", address: "ws://hub-2:7001/tunnel", enabled: true}, {protocol: "tcp", address: "hub-2:7000", enabled: true}]}}')"
 	check "  … alice → hub-2 over WebSocket, pool of 3" eventually 40 protos_are "$ALICE" alice hub-2 "ws:3"
 	check "  … tunnels through hub-2 work" eventually 20 http_has alice 7307 "device dev-lab"
 	check "alice puts hub-2 back" post "$ALICE" alice /api/servers/update \
@@ -585,9 +585,9 @@ t_peers() {
 	socat TCP-LISTEN:7777,fork,reuseaddr EXEC:cat &
 	local echo_pid=$!
 	# Left without a name, the server is named by its address.
-	run_peer tnode "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{endpoints: [{address: "ws://hub-2:7001/fibhub"}], password: $p, body_password: $b, pool_size: 1}')" \
+	run_peer tnode "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{endpoints: [{address: "ws://hub-2:7001/tunnel"}], password: $p, body_password: $b, pool_size: 1}')" \
 		'[{"name":"echo","address":"127.0.0.1:7777"}]'
-	check "a node over a WebSocket URL registers" eventually 20 t "registered '$con' tester ws://hub-2:7001/fibhub"
+	check "a node over a WebSocket URL registers" eventually 20 t "registered '$con' tester ws://hub-2:7001/tunnel"
 	check "  … hub-2 has it" eventually 10 peer "$HUB2" hub2 tnode node
 	check "  … alice reaches its service" forward_round alice 7308 tnode echo
 	stop_peer

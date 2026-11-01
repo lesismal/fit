@@ -321,7 +321,7 @@ func startHub(t *testing.T, o hubOpts) *hub {
 		h.url = "quic://" + listen
 	case "ws":
 		listen = freeAddr(t)
-		h.url = "ws://" + listen + "/fibhub"
+		h.url = "ws://" + listen + "/tunnel"
 	default:
 		listen = freeAddr(t)
 		h.url = listen

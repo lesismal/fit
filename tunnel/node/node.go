@@ -1,5 +1,5 @@
-// Package node is the tunnel's node role, tunnel.node in fit's config:
-// fibhub's pod. A node links to one or more tunnel servers, registers with
+// Package node is the tunnel's node role, tunnel.node in fit's config.
+// A node links to one or more tunnel servers, registers with
 // the services it reaches, and opens the TCP connections to those services
 // that the tunnels the servers route to it ask for, and to no other
 // address. Its console pages show its servers and tunnels and change which
