@@ -351,8 +351,9 @@ GPU 机器：
 
 ### 配置是唯一的来源
 
-角色不在自己的文件中保存任何东西。页面所做的修改写回其成员：监听、对端、名称与说明、node 的模型与设置、proxy 的
-API Key，以及首次启动时生成的 ID。修改经 `admin.Configs` 作为一次配置编辑生效，其来源是该成员，如 `llm.node`：
+角色不在自己的文件中保存任何东西。页面所做的修改写回其成员：监听、对端、名称与说明、连接的上限（`limits`）、node 的
+模型、设置与上游上限（`proxy`）、hub 的 `max_nodes`、proxy 的接口（`api`）与 API Key，以及首次启动时生成的 ID。取默认值的
+设置不写入成员。修改经 `admin.Configs` 作为一次配置编辑生效，其来源是该成员，如 `llm.node`：
 把成员替换后的运行中配置像任何配置一样应用，先经检查，记入历史，可以回滚。检查不通过的修改不改变任何东西，页面得到
 400 与原因。角色随后切换到新成员，不断开未改变的连接。
 
@@ -400,12 +401,29 @@ ping、pong、credit、stream-keepalive、drain）、标志（gzip、error、bin
 
 ### 心跳、慢连接与下线
 
-每条连接一个定时器。`ping_interval` 内没收到任何东西的连接发 ping；三个周期都没收到的连接被关闭（关闭码 4002）。
+每条连接一个定时器。`ping_interval` 内没收到任何东西的连接发 ping，最近一次往返时间已是两个周期之前测得的连接也发 ping，
+使连接两端都知道其延迟；三个周期都没收到的连接被关闭（关闭码 4002）。
 pong 排在其 ping 之前发送的所有内容之后，所以 ping 等待 pong 达到 `slow_timeout` 说明连接积压到了这个程度，连接被关闭
 （关闭码 4004）。超过 `max_conns` 的监听方以关闭码 4003 拒绝连接。
 
 角色停止时在每条连接上发送 drain：对端不再在其上发起新调用，进行中的调用最多再运行 10 秒结束，然后连接关闭。拨号方
 随后按退避重新连接。
+
+### 流量与延迟
+
+每条连接统计其双向传输的帧字节数（按传输时的压缩大小，含 ping），以及其 ping 的往返时间：最近一次、近期权重最大的移动
+平均（每个新值按 0.3 的比例调整它）与最短的一次。pong 排在其 ping 之前发送的所有内容之后，所以繁忙连接的往返时间包含其
+排队时间。
+
+每个角色还按路由统计自启动以来转发的模型调用：proxy 按其调用的 hub 或 node 与模型，hub 按 proxy、node 与模型，node 按
+调用方与模型。路由的调用数、失败数（中断的调用；在 node 与 proxy 上，上游 400 及以上的应答也计入）、进行中的调用、
+请求字节（请求体，内联或流式）与应答字节（头帧与应答体）随调用的流传输读取，所以长回答在流式传输时即计入。最多单独
+统计 1024 条路由；其余路由的调用合并统计为 `other`。这些都不写入任何地方。
+
+`/mesh/status` 只对角色自己的页面开放，应答 `{self, links, routes, at}`：角色的身份；每条连接（与 `/mesh/peers` 所列相同）
+及其 `link`，即 `{bytes_in, bytes_out, rtt: {last, avg, min, samples}}`（毫秒）；路由，即 `{from, to, model, calls, errors,
+inflight, req_bytes, resp_bytes, last_at}`（proxy 的 agent 的 `from` 为空，node 上游的 `to` 为空）；以及取得的时间 `at`
+（毫秒），页面据两次应答计算速率。
 
 ### hello 与角色
 
@@ -511,6 +529,17 @@ node 连上时，hub 取得其信息，之后跟随它的推送。有未下线�
 hub 按名称与接口列出在线节点的模型：每个模型由哪些节点提供，其中多少个就绪。停用的模型不列出。列表变化时 hub 把它推送
 给所有已连接的 proxy，最多每 200ms 一次；proxy 连上时也单独推送一次。
 
+### 节点列表
+
+hub 让其 proxy 及时得知它的节点：proxy 连上时读取 `/hub/node/list`，列表变化时 hub 推送 `/hub/node/list/update`。每个节点
+列出其 ID、名称、说明、是否在线与最后在线时间、不含磁盘与地址且至多 16 块显卡的硬件、模型及其状态与进行中的调用（至多
+64 个，另有 `models_total`）、进行中的调用与作业、与 hub 的连接（方向、字节数、延迟），以及 hub 转发给它的调用
+（`traffic`）。在线节点在前。列表就是 hub 的节点表，因此受 `max_nodes` 约束，编码后最多 4 MiB：超出时省略列表末尾的节点，
+`total` 仍计入它们。变化在 200ms 后推送，且距上次推送不少于一秒；一直在变的流量与延迟，在有 proxy 连接时至多每 5 秒推送
+一次。每份列表带一个序号，proxy 据此丢弃旧列表。
+
+proxy 只展示列表。管理节点仍在节点自己的页面与其 hub 的页面上进行。
+
 ### 选节点
 
 `/hub/proxy` 的请求与 `/node/proxy` 相同。hub 在提供该模型且就绪、未被 proxy 排除的在线节点中，选负载最小的：节点上报的
@@ -567,6 +596,12 @@ proxy 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的模�
 
 在头帧之前因当前无法提供该模型、离线或连接断开而失败的路由，让给下一条，最多 4 条。尝试 hub 时排除已失败的节点。头帧
 之后不再重试。
+
+### 节点
+
+proxy 的节点页面显示其连接的每个 hub 列表中的节点，以及它直连的节点，并带上它自己与每个节点的连接与调用：
+`/proxy/node/list` 应答 `{hubs: [{hub, online, nodes, total, seq}], direct: [...]}`。它只供查看：页面上没有任何操作会改变
+其他机器。
 
 ### 错误
 
@@ -682,12 +717,23 @@ proxy 的概览页用它自己的地址与模型显示这些示例。
 
 每个角色的页面（英文或中文）显示：
 
-- **hub**：概览；它的节点，允许 hub 代管的节点还有其模型、显卡、操作、作业与名称；节点的模型；连到它的 proxy；它的
-  连接；它的名称。
-- **node**：概览，含名称与说明；它的模型，每个可以检查与测试调用；显卡及其设置；操作；作业；它的连接；它的设置。
-- **proxy**：概览，含以它自己的地址与模型填好的[接入](#接入)示例；它能访问的模型及其路由；API Key；它的连接；它的名称。
+- **hub**：概览；它的节点，允许 hub 代管的节点还有其模型、显卡、操作、作业与名称；节点的模型；连到它的 proxy；它的流量；
+  它的连接；它的设置：名称、`max_nodes` 与 `limits`。
+- **node**：概览，含名称与说明；它的模型，每个可以检查与测试调用；显卡及其设置；操作；作业；它的流量；它的连接；它的
+  设置：名称与说明、`settings`、上游上限（`proxy`）与 `limits`。
+- **proxy**：概览，含以它自己的地址与模型填好的[接入](#接入)示例；它能访问的模型及其路由；hub 背后的节点，仅供查看
+  （[节点](#节点)）；它的流量；API Key；它的连接；它的设置：名称、接口（`api`：地址、证书与私钥文件、上限，或不提供）与
+  `limits`。
 
 连接页设置监听与对端，也可以踢掉一条连接。
+
+流量页像 tunnel 的页面那样，把角色的连接画成分列的链路图：proxy 的 agent、proxy、它的 hub、hub 的节点与节点的模型；hub 的
+proxy、hub、它的节点与节点的模型；node 的 hub 与 proxy、node、它的模型与模型的上游。每条线带双向字节数与速率（由间隔
+三秒的两次 `/mesh/status` 计算），线宽随流量变化，空闲时为虚线，延迟按好（50ms 以下）、中（200ms 以下）、差着色；下方的
+表格列出同样的线及其调用。点击方框或连线显示其详情。
+
+设置卡片读取其设置，并按配置的规则写入：配置会拒绝的值，如低于 100ms 的 `ping_interval`、负数的上限、没有证书的非回环
+接口地址，得到 400 与原因，不改变任何东西。
 
 `/api/` 下的接口：
 
@@ -701,10 +747,12 @@ proxy 的概览页用它自己的地址与模型显示这些示例。
 | `POST /api/stream<method>` | 打开一个流方法，以 SSE 应答：每帧一个数据事件，`end` 带结果，`error` 带 `{code, message}`。关闭请求即取消流。 |
 
 页面以拥有全部权限的本地调用方身份，调用与对端相同的方法，以及只有页面能调用的方法：互联的（`/mesh/peers`、
-`/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`）；hub 的节点表（`/hub/nodes`）、代管调用（`/hub/node/call`、
-`/hub/node/stream`）与名称（`/hub/profile/set`）；node 的设置（`/node/settings/get`、`/node/settings/set`）；proxy 的
-模型、计数、Key 与名称（`/proxy/models`、`/proxy/stats`、`/proxy/keys/list`、`/proxy/keys/create`、
-`/proxy/keys/delete`、`/proxy/profile/set`）。
+`/mesh/status`、`/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`、`/mesh/limits/get`、`/mesh/limits/set`）；
+hub 的节点表（`/hub/nodes`）、代管调用（`/hub/node/call`、`/hub/node/stream`）、名称（`/hub/profile/set`）与设置
+（`/hub/settings/get`、`/hub/settings/set`）；node 的设置（`/node/settings/get`、`/node/settings/set`）与上游上限
+（`/node/upstream/get`、`/node/upstream/set`）；proxy 的模型、节点、计数、Key、名称与接口（`/proxy/models`、
+`/proxy/node/list`、`/proxy/stats`、`/proxy/keys/list`、`/proxy/keys/create`、`/proxy/keys/delete`、`/proxy/profile/set`、
+`/proxy/api/get`、`/proxy/api/set`）。
 
 方法限时 10 秒，互联的方法也是；node 或 proxy 修改配置的方法限时 30 秒，模型检查 20 秒，node 的显卡状态与设置 30 秒，
 hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个等待）上运行，从不在 fib worker 上运行；超出队列的方法
@@ -729,6 +777,8 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
 | 方法时限 | 10s；node 或 proxy 修改配置 30s，模型检查 20s，显卡状态与设置 30s，hub 的代管调用 90s | 固定 |
 | 对端、模型、API Key | 64、256、256 | 固定 |
 | hub 节点表中的节点 | 1024 | `max_nodes` |
+| hub 的节点列表 | `max_nodes` 个节点，每个 64 个模型、16 块显卡，4 MiB；200ms 后推送，间隔一秒，流量每 5s | 固定 |
+| 统计的路由 | 每个角色 1024 条，其余记为 `other` | 固定 |
 | node 同时转发的调用 | 256，另有每个模型的 `max_inflight` | `proxy.max_inflight` |
 | node 请求体 | 32 MiB | `proxy.max_body_bytes` |
 | node 连接、首字节、空闲、总时限 | 10s、5m、5m、30m | `proxy` |

@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I113.
+Status: `todo`, `doing` or `done`. The next free iteration number is I114.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -260,6 +260,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I113.
 | I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | done |
 | I111 | WebRTC on fib's A55–A59: TURN over TCP and TLS, caps, events, changes in place and drains; the proxy's source address and ports | I87, I110 | done |
 | I112 | The agent's model APIs: every stateless inference endpoint of OpenAI and its compatibles, Anthropic, Gemini, Azure OpenAI, Ollama and Cohere | I107 | done |
+| I113 | The LLM roles' node list, links and traffic: a hub's nodes synced to its proxies, every link's bytes and latency, every route's calls, a link map on each role's pages, and the roles' remaining settings set there | I112 | done |
 
 ## M0, foundations
 
@@ -1512,3 +1513,19 @@ server, and fit in front of other media servers, for their signaling and their m
   `max_body_bytes` only to set the model; binary, SSE and NDJSON answers pass through; slow agents,
   slow upstreams, large bodies and cut connections hold; under the race detector.
 - **Touches**: `agent`, `config`, `schema`, `docs`, `examples`, `test/docker/agent`.
+
+### I113 The LLM roles' node list, links and traffic
+
+- **Do**: a hub's list of its nodes (details, hardware, models, load, its links with them and their
+  traffic) pulled by its proxies as they link and pushed when it changes, coalesced and bounded;
+  the proxy's read-only nodes page. Every mesh link's bytes each way and the round trips of its
+  pings; every role's model calls counted per route, their bytes read from the streams as they
+  cross; `/mesh/status`; a link map and a table of the links and their traffic on each role's
+  pages, after the tunnel's. The pages set what they could not: every role's `limits`, a node's
+  upstream bounds, a hub's `max_nodes`, a proxy's `api`, through the write-back, checked as the
+  config is.
+- **Done when**: a node that joins, changes or leaves shows on the proxy, within the list's bounds;
+  the bytes of a known call agree across proxy, hub and node, for an inline and a streamed body; a
+  link has a latency on both ends; a call cut midway is a failure on every role that saw it; the
+  settings' edits are written back and a bad value is refused with 400; under the race detector.
+- **Touches**: `llm`, `docs`.

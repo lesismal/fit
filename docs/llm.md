@@ -376,8 +376,9 @@ A node serving one model of each:
 ### The config is the one source
 
 A role keeps nothing in a file of its own. What its pages change is written back into its member:
-the listener, the peers, the name and description, a node's models and settings, a proxy's API
-keys, and the ID made at first start. The change goes through `admin.Configs` as a config edit
+the listener, the peers, the name and description, the bounds on its links (`limits`), a node's
+models, settings and upstream bounds (`proxy`), a hub's `max_nodes`, a proxy's API (`api`) and API
+keys, and the ID made at first start. A setting left at its default is left out of the member. The change goes through `admin.Configs` as a config edit
 whose source is the member, as `llm.node`: the running config with the member replaced is applied
 as any config is, checked first, recorded in the history and open to rollback. A change the check
 refuses changes nothing, and the pages get 400 with the reason. The role then moves to the new
@@ -440,13 +441,36 @@ upstream's first token, sends stream-keepalive frames, which reset the idle time
 
 ### Heartbeat, slow links and drain
 
-Each link has a timer. A link that hears nothing for `ping_interval` is pinged; one that hears
+Each link has a timer. A link that hears nothing for `ping_interval` is pinged, and so is one whose
+last round trip was measured two intervals ago, so that both ends know its latency; one that hears
 nothing for three intervals is closed (code 4002). A pong is sent behind everything sent before
 its ping, so a ping waiting `slow_timeout` for its pong means the link is that far behind; it is
 closed (code 4004). A listener past `max_conns` refuses a link with code 4003.
 
 A role that stops sends drain on every link: its peers start no new call on it, the calls running
 finish, for up to 10 seconds, and then the links close. Dialers link again with backoff.
+
+### Traffic and latency
+
+Every link counts the bytes of the frames it carries each way, compressed as they cross, pings
+included, and the round trips of its pings: the last, a moving average weighing recent ones most
+(each new one moves it by 0.3), and the shortest. A pong waits behind everything sent before its
+ping, so a busy link's round trip includes its queue.
+
+Each role also counts the model calls it relays, per route, since it started: a proxy per hub or
+node it calls and model, a hub per proxy, node and model, a node per caller and model. A route's
+calls, failures (a call that broke; on a node and a proxy, an upstream's answer of 400 or more too),
+calls running, request bytes (the body, inline or streamed) and response bytes (the head frame and
+the body) are read from the call's stream as it crosses, so a long answer counts as it streams. At
+most 1024
+routes are counted apart; the calls of the rest are counted together, as `other`. None of it is
+written anywhere.
+
+`/mesh/status`, for the role's pages only, answers `{self, links, routes, at}`: the role's identity,
+each link (as `/mesh/peers` lists them) with its `link`, `{bytes_in, bytes_out, rtt: {last, avg,
+min, samples}}` in milliseconds, the routes, `{from, to, model, calls, errors, inflight, req_bytes,
+resp_bytes, last_at}` (`from` empty for a proxy's agents, `to` empty for a node's upstream), and
+`at`, when it was taken, in milliseconds, so that the pages work out rates between two answers.
 
 ### Hello and roles
 
@@ -583,6 +607,21 @@ The hub lists, per name and API, the models of its online nodes: which nodes ser
 many are ready. Disabled models are left out. On a change it pushes the list to every linked
 proxy, at most once per 200ms, and once to each proxy as it links.
 
+### The node list
+
+The hub keeps its proxies up to date with its nodes: `/hub/node/list`, which a proxy reads as it
+links, and the push `/hub/node/list/update` when it changes. Each node is listed with its ID, name,
+description, whether it is online and when it was last seen, its hardware without its disks and
+addresses and with at most 16 GPUs, its models with their state and calls running (at most 64, with
+`models_total`), its calls and jobs running, its links with the hub (direction, bytes, latency), and
+the calls the hub relayed to it (`traffic`). Online nodes come first. The list holds the hub's
+table, so `max_nodes` bounds it, and at most 4 MiB encoded: past it, the nodes at its end are left
+out and `total` still counts them. A change goes out after 200ms, no sooner than a second after the
+last push; the traffic and latency, which change all the time, at most every 5 seconds while
+proxies are linked. Each list carries a sequence, so a proxy drops an older one.
+
+Proxies only show the list. Managing a node stays with the node's own pages and its hubs'.
+
 ### Picking a node
 
 `/hub/proxy` takes the same request as `/node/proxy`. The hub picks, among the online nodes serving
@@ -652,6 +691,12 @@ is in its path). It then tries routes in order:
 A route that fails before the head because it cannot serve the model now, is offline, or loses its
 link, gives way to the next, up to 4 routes. The nodes that failed are excluded when a hub is tried.
 After the head there is no retry.
+
+### Nodes
+
+The proxy's nodes page shows, for each hub it links to, the nodes in the hub's list, and the nodes
+it links to directly, with its own link and calls to each: `/proxy/node/list` answers `{hubs: [{hub,
+online, nodes, total, seq}], direct: [...]}`. It is a view: nothing on it changes another machine.
 
 ### Errors
 
@@ -776,13 +821,29 @@ request but a GET or HEAD carries the session's CSRF token in `X-Fit-Csrf`, and 
 What each role's pages show, in English or Chinese:
 
 - **A hub**: an overview; its nodes, and for each one that allows hub management, its models, GPUs,
-  actions, jobs and name; the models of its nodes; the proxies linked to it; its links; its name.
+  actions, jobs and name; the models of its nodes; the proxies linked to it; its traffic; its links;
+  its settings: its name, `max_nodes` and `limits`.
 - **A node**: an overview, with its name and description; its models, with a check and a test call
-  each; its GPUs and their settings; its actions; its jobs; its links; its settings.
+  each; its GPUs and their settings; its actions; its jobs; its traffic; its links; its settings:
+  its name and description, `settings`, the upstream bounds (`proxy`) and `limits`.
 - **A proxy**: an overview, with the setups of [Using it](#using-it) filled in with its own address
-  and models; the models it reaches and their routes; its API keys; its links; its name.
+  and models; the models it reaches and their routes; the nodes behind its hubs, to see only
+  ([Nodes](#nodes)); its traffic; its API keys; its links; its settings: its name, its API (`api`:
+  address, certificate and key files, bounds, or none) and `limits`.
 
 The links page sets the listener and the peers, and kicks a link.
+
+The traffic page draws the role's links as a map of columns, as the tunnel's pages do: a proxy's
+agents, the proxy, its hubs, their nodes and their models; a hub's proxies, the hub, its nodes and
+their models; a node's hubs and proxies, the node, its models and their upstreams. Each line has its
+bytes each way and its rate, worked out between two reads of `/mesh/status` three seconds apart, its
+width by traffic, dashed while idle, and its latency coloured good (under 50ms), fair (under 200ms)
+or poor; a table below lists the same lines with their calls. Clicking a box or a line shows its
+details.
+
+A settings card reads its settings and writes them as the config: a value the config would refuse,
+as a `ping_interval` under 100ms, a negative bound or a non-loopback API address without a
+certificate, gets 400 with the reason, and changes nothing.
 
 The API under `/api/`:
 
@@ -796,12 +857,14 @@ The API under `/api/`:
 | `POST /api/stream<method>` | Opens a stream method and answers Server-Sent Events: a data event per frame, `end` with the result, `error` with `{code, message}`. Closing the request cancels the stream. |
 
 The pages call the same methods peers call, as a local caller allowed everything, and the methods
-only the pages may call: the mesh's (`/mesh/peers`, `/mesh/dial`, `/mesh/undial`, `/mesh/kick`,
-`/mesh/listen`); a hub's node table (`/hub/nodes`), managed calls (`/hub/node/call`,
-`/hub/node/stream`) and name (`/hub/profile/set`); a node's settings (`/node/settings/get`,
-`/node/settings/set`); a proxy's models, counters, keys and name (`/proxy/models`,
-`/proxy/stats`, `/proxy/keys/list`, `/proxy/keys/create`, `/proxy/keys/delete`,
-`/proxy/profile/set`).
+only the pages may call: the mesh's (`/mesh/peers`, `/mesh/status`, `/mesh/dial`, `/mesh/undial`,
+`/mesh/kick`, `/mesh/listen`, `/mesh/limits/get`, `/mesh/limits/set`); a hub's node table
+(`/hub/nodes`), managed calls (`/hub/node/call`, `/hub/node/stream`), name (`/hub/profile/set`) and
+settings (`/hub/settings/get`, `/hub/settings/set`); a node's settings (`/node/settings/get`,
+`/node/settings/set`) and upstream bounds (`/node/upstream/get`, `/node/upstream/set`); a proxy's
+models, nodes, counters, keys, name and API (`/proxy/models`, `/proxy/node/list`, `/proxy/stats`,
+`/proxy/keys/list`, `/proxy/keys/create`, `/proxy/keys/delete`, `/proxy/profile/set`,
+`/proxy/api/get`, `/proxy/api/set`).
 
 A method has 10 seconds, the mesh's included; a node's or a proxy's method that changes the
 config has 30, a model check 20, a node's GPU status and settings 30, and a hub's managed call 90. Methods run on the role's pool (16 goroutines, 256
@@ -828,6 +891,8 @@ Every bound has a default; a config that sets none is bounded.
 | Method timeout | 10s; 30s for a node's or proxy's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
 | Peers, models, API keys | 64, 256, 256 | fixed |
 | Nodes in a hub's table | 1024 | `max_nodes` |
+| A hub's node list | `max_nodes` nodes, 64 models and 16 GPUs each, 4 MiB; pushed after 200ms, a second apart, its traffic every 5s | fixed |
+| Routes counted | 1024 per role, the rest as `other` | fixed |
 | Node calls at once | 256, and per model `max_inflight` | `proxy.max_inflight` |
 | Node request body | 32 MiB | `proxy.max_body_bytes` |
 | Node connect, first byte, idle, total | 10s, 5m, 5m, 30m | `proxy` |
