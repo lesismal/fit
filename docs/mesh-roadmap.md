@@ -165,7 +165,7 @@ the fib capabilities are numbered in [What fib needs to provide](#what-fib-needs
 
 - Decision notes: ambient first, the range of Istio versions supported, the protobuf and gRPC
   dependencies (rule 14), the waypoint through GAMMA rather than Envoy's xDS.
-- A `mesh/` package skeleton that builds on Linux only; a `fit node` subcommand in `cmd/fit`.
+- A `mesh/` package skeleton that builds on Linux only; a `fit node` subcommand in `cli`, where fit's commands are.
 - Test environments: kind with Istio ambient in CI; on the benchmark host, several simulated pods in
   network namespaces (`ip netns`), with no Kubernetes.
 - A baseline: throughput, latency and memory per connection of ztunnel (in its local config mode)
@@ -300,9 +300,9 @@ Candidate requests, written into fib-api-requests and numbered there in S0, as
 
 | ID | Request | Used for |
 | --- | --- | --- |
-| F1 | HTTP/2 clients that open CONNECT and extended CONNECT streams, each a `Tunnel` with flow control and backpressure; many tunnels on one connection | The HBONE client, the waypoint's outbound side |
+| F1 | HTTP/2 clients that open CONNECT and extended CONNECT streams, each a `Tunnel` with flow control and backpressure; many tunnels on one connection | The HBONE client, the waypoint's outbound side; the VPN relay's HTTP/2 transport (I99 in the [gateway plan](dev-plan.md#i99-relay-over-quic-and-http2-transports-in-order-with-fallback)) |
 | F2 | Adding an existing listening descriptor to the engine as a binding, removable and drainable | Listening in pods' namespaces; upgrades without interruption |
-| F3 | Dialing with a socket the caller created, and setting socket options before the connect (`SO_MARK`, `IP_TRANSPARENT`, binding a source address) | Outbound from pods' namespaces; keeping the original source address |
+| F3 | Dialing with a socket the caller created, and setting socket options before the connect (`SO_MARK`, `IP_TRANSPARENT`, binding a source address; a source address and port range alone is in fib since A59, `Engine.DialWith`) | Outbound from pods' namespaces; keeping the original source address |
 | F4 | The original destination of an accepted connection (`SO_ORIGINAL_DST`, `IP6T_SO_ORIGINAL_DST`) | Outbound on 15001 |
 | F5 | A client certificate chosen per connection; peer verification callbacks that see URI SANs | mTLS by identity |
 

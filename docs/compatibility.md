@@ -12,15 +12,16 @@ for a new version of the config schema or of the Admin API, and comes with a way
 | --- | --- | --- |
 | The native config | schema version 1 | Every field in [`schema/fit.schema.json`](../schema/fit.schema.json), the fields of the modules in `modules/standard` included: its name, its type, what it means, and its default. Configs in YAML (`.yaml`, `.yml`) are the same config written another way. |
 | The Admin API | v1 | Its paths and methods, the bodies they take and give, their status codes, and the fields `ETag`, `If-Match` and `Fit-Config-Version` (below). |
-| The command line | 1 | The commands `run`, `validate`, `adapt`, `schema`, `version`, `hash-password` and `build`, their flags, and their exit codes. |
+| The command line | 1 | The commands `run`, `validate`, `adapt`, `schema`, `version`, `hash-password`, `store` (`export` and `import`) and `build`, their flags, and their exit codes. |
 | Metrics | 1 | The names, types and labels of the metrics `/metrics` serves and OTLP exports, all starting `fit_`. |
 | The access log | 1 | The fields of its JSON lines. |
 | Modules in Go | Go's semantic import versioning | The `module` and `plugin/build` packages' exported API, which modules built with `fit build` use. fit's other packages may change in any release. |
 
 Not covered:
 
-- What fit writes for people rather than programs: messages, warnings, the dashboard, `fit adapt`'s
-  output beyond its being a valid config, and the text of errors (their JSON shape is covered).
+- What fit writes for people rather than programs: messages, warnings, the dashboard, the pages of
+  the console and of the agent's and the tunnel's roles, `fit adapt`'s output beyond its being a
+  valid config, and the text of errors (their JSON shape is covered).
 - The host functions of WASM plugins (the `fit` import module) and fit's subset of Proxy-Wasm
   (I71, I72, I81), which are experimental in 1.0; the `wasm` module's config is covered.
 - The nginx converter's coverage of nginx's directives, which only grows.

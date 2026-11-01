@@ -80,14 +80,14 @@ zone 就是这样做的。
 fit build -with github.com/you/fit-hello@v1.0.0
 ```
 
-会构建 `./fit`，包含 fit 自带的所有模块和 provider，以及 `github.com/you/fit-hello`：生成一个 main 包，导入 fit
-的命令行（`cli` 包）、`modules/standard`、`provider/standard` 和该模块的根包，并用 `PATH` 上的 go 命令构建。
+会构建 `./fit`，包含 fit 自带的所有模块、provider 和角色，以及 `github.com/you/fit-hello`：生成一个 main 包，导入 fit
+的命令行（`cli` 包）、`modules/standard`、`provider/standard`、`app/standard` 和该模块的根包，并用 `PATH` 上的 go 命令构建。
 参数：
 
 | 参数 | |
 | --- | --- |
 | `-with path[@version]`、`-with path=dir` | 要编译进来的模块，按版本（省略时为 `latest`）或按 `dir` 中的源码；每个模块一次 |
-| `-without pkg` | 去掉 `github.com/lesismal/fit/modules/standard`（所有处理器和中间件）或 `github.com/lesismal/fit/provider/standard`（所有 provider）；引用了被去掉部分的配置会被拒绝 |
+| `-without pkg` | 去掉 `github.com/lesismal/fit/modules/standard`（所有处理器和中间件）、`github.com/lesismal/fit/provider/standard`（所有 provider）或 `github.com/lesismal/fit/app/standard`（agent、tunnel 和 TURN 服务器的角色；`webrtc.media` 和 `webrtc.proxy` 随 `modules/standard` 的 `whip`、`whep` 和 `webrtc_proxy` 一起编入）；每个一次；引用了被去掉部分的配置会被拒绝 |
 | `-fit v`、`-fit dir` | 基于哪个 fit 构建：一个版本，或 fit 源码所在的目录；省略时为正在运行的 fit 自己的版本 |
 | `-o file` | 输出的二进制文件；省略时为 `fit` |
 | `-keep dir` | 把生成的 main 模块保留在 `dir` 中，以便查看或再次构建 |

@@ -18,6 +18,11 @@ of room.
 - [M4, platform integration](#m4-platform-integration)
 - [M5, caching and extensions](#m5-caching-and-extensions)
 - [1.0](#10)
+- [P2P, NAT traversal](#p2p-nat-traversal)
+- [VPN, a network of fit nodes](#vpn-a-network-of-fit-nodes)
+- [Console, logins and an encrypted store](#console-logins-and-an-encrypted-store)
+- [Agent and tunnel](#agent-and-tunnel)
+- [WebRTC](#webrtc)
 
 ## How to work an iteration
 
@@ -70,7 +75,7 @@ should touch as few of these as it can.
 
 | Package | Contents |
 | --- | --- |
-| `cmd/fit` | the CLI: `run`, `validate`, `adapt`, `build`, `version` |
+| `cmd/fit` | the binary; its commands are in `cli`: `run`, `validate`, `adapt`, `schema`, `build`, `version`, `hash-password`, `store` |
 | `config` | native config types, strict JSON loading |
 | `schema` | the JSON Schema, generated from the config types and the registered modules |
 | `module` | the module registry and the core interfaces |
@@ -83,14 +88,20 @@ should touch as few of these as it can.
 | `upstream` | upstream pools, load balancing, passive and active health |
 | `l4` | TCP and UDP proxying, SNI routing, PROXY protocol |
 | `p2p/stun` | the STUN server on listeners, over UDP and TCP; its messages move to fib's `webrtc/stun` with I86 (decision 029) |
-| `webrtc/turn` | the TURN server role, `webrtc.turn`, on fib's `webrtc/turn/turnserver` (decision 029) |
+| `webrtc/turn` | the TURN server role, `webrtc.turn`, on fib's `webrtc/turn/turnserver` (decision 029); P2P's relay |
+| `webrtc/media` | the roles `webrtc.media` and `webrtc.proxy`, and the handlers `whip`, `whep` and `webrtc_proxy` (decision 029) |
 | `p2p` | tunnels over a connected pair, signaling, the config's P2P apps |
 | `vpn/packet` | IP headers and the overlay route table |
 | `vpn/tun` | TUN devices on Linux, macOS, FreeBSD and Windows |
 | `vpn/relay` | the relay protocol, server, and the client that picks a transport |
 | `vpn` | the node, the coordinator, the config's VPN apps |
 | `tlsmgr` | the certificate manager, storage, ACME, OCSP |
-| `admin` | the Admin API and config versions |
+| `admin` | the Admin API and config versions; the console (decision 027) |
+| `admin/store` | the encrypted store, fitstore (decision 027) |
+| `login` | logins, sessions, CSRF tokens and lockouts, for the console and the roles' pages |
+| `app`, `app/console` | roles in the config: their registry and manager, write-back through `Host.Edit`, and their pages (decision 028) |
+| `agent/...` | the agent's roles: `hub`, `node`, `client` |
+| `tunnel/...` | the tunnel's roles: `server`, `node`, `client` |
 | `provider/...` | file, docker, kubernetes, consul, etcd |
 | `observe` | access logs, metrics, tracing |
 | `plugin/...` | compile-time modules and WASM |
@@ -102,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`.
+Status: `todo`, `doing` or `done`. The next free iteration number is I112.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -1161,6 +1172,7 @@ use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of 
 - **Done when**: a peer opened toward an address sends first from the listener's port and hears the
   answer; it times out, closes and is counted as other peers are, on every backend.
 - **Touches**: fib's engine; `go.mod`.
+- **Done by I108**: fib had built A49 as `96a2331`, synchronous, and fit took it with fib `80c7f76`.
 
 ### I86 The STUN client and NAT behaviour
 
@@ -1193,7 +1205,7 @@ use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of 
 ### I88 The TURN client
 
 - **Do**: fib's `turn.Client` (allocate, refresh, permissions and channels, the 401/438 nonce
-  dance) driven from a fib UDP peer, and from a TCP connection once A55 is in fib; data to and from
+  dance) driven from a fib UDP peer, and over TCP and TLS (A55, in fib since `84a67f7`); data to and from
   peers through the allocation, by channel once bound.
 - **Done when**: the client works against fit's server and keeps an allocation alive past its
   lifetime; a stale nonce is retried.
@@ -1231,7 +1243,8 @@ use fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice` rather than packages of 
 
 - **Do**: a signaling endpoint on the rendezvous fit that pairs peers by name and trades their
   credentials, fingerprints and candidates (trickled), with each peer authenticated; the config's
-  `stun` and `turn` servers on listeners, and `p2p` peers that expose or reach services; schema,
+  `stun` server on listeners, and `p2p` peers that expose or reach services, relayed by
+  `webrtc.turn` (I87) or another TURN server; schema,
   Admin API, metrics; the friendly formats' forms.
 - **Done when**: two fit processes behind simulated NATs reach each other's services through a
   third, set up from config alone, and reload without dropping open tunnels.

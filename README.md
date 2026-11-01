@@ -10,7 +10,11 @@ fit is a reverse proxy, load balancer, TLS terminator, static file server and AP
 It serves HTTP/1.1, HTTP/2 and HTTP/3, with HTTPS by default; proxies HTTP, WebSockets, gRPC, TCP
 and UDP, with health checks and load balancing; serves static files; caches responses; and takes
 its routes from a strict config, written in fit's own .conf format, in YAML or in JSON and changed in
-place through an Admin API, or from Docker, Consul, etcd and Kubernetes. Every milestone's iterations are done, 1.0's included, and 1.0's
+place through an Admin API, or from Docker, Consul, etcd and Kubernetes. Its config may be kept
+encrypted in a file of its own and changed from a web console behind logins. Beside the gateway, on
+the same engine, it runs a TURN server and serves WebRTC's WHIP and WHEP, as a media server or in
+front of other media servers; the tunnel, which reaches services behind NAT; and the agent, which
+shares AI models among machines. Every milestone's iterations are done, 1.0's included, and 1.0's
 external security review is still to come; see [progress](docs/progress.md) for what works, and
 [bench](bench/README.md) for how it is measured against nginx, Caddy and Traefik.
 
@@ -26,6 +30,8 @@ external security review is still to come; see [progress](docs/progress.md) for 
   chapter, with examples in all three formats; generated from the code.
 - Migrating from [nginx](docs/migrating-from-nginx.md), [Caddy](docs/migrating-from-caddy.md) and
   [Traefik](docs/migrating-from-traefik.md).
+- [The console](docs/console.md): the config kept encrypted in a store, `admin.store`, and changed
+  from web pages behind logins, `admin.console`; `fit store export` and `import`.
 - [The tunnel](docs/tunnel.md) and [the agent](docs/agent.md): roles run beside the gateway on its
   engine, reaching services behind NAT and sharing AI models among machines.
 - [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, WHIP and WHEP
@@ -36,8 +42,9 @@ external security review is still to come; see [progress](docs/progress.md) for 
 - [Development plan](docs/dev-plan.md): the milestones broken into small iterations.
 - [Progress](docs/progress.md): what is done, and where to pick up.
 - [Compatibility](docs/compatibility.md): what stays stable from 1.0, and how renamed fields are handled.
-- [Deploying](deploy/README.md): the container image, the Helm chart and systemd units; and the
-  [examples](examples/README.md), with Docker Compose and Kubernetes.
+- [Examples](examples/README.md): a config for each feature, in all three formats, and fit run
+  with Docker Compose and in Kubernetes.
+- [Deploying](deploy/README.md): the container image, the Helm chart and systemd units.
 
 ## Installing
 
@@ -116,8 +123,9 @@ commas allowed), each with the same fields, and may be split across several file
 (`fit run -c base.conf -c conf.d`). `fit adapt` converts between the formats, and from nginx configs
 and Caddyfiles, listing what it left out. [Configuration](docs/configuration.md) has the details.
 
-`fit run` reloads its config files on SIGHUP, keeping the listeners that did not change and the
-running config if the new one is broken, and shuts down gracefully on SIGINT or SIGTERM.
+`fit run` reloads its config files on SIGHUP (the store, with `admin.store`), keeping the listeners
+that did not change and the running config if the new one is broken, and shuts down gracefully on
+SIGINT or SIGTERM.
 
 `make check` runs gofmt, go vet, staticcheck and the tests with the race detector.
 

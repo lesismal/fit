@@ -25,6 +25,16 @@ docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:
 - **State** such as ACME's certificates goes in a volume, named in the config's storage directory.
 - **The Admin API** listens on 127.0.0.1:2019 by default, inside the container. To reach it from
   outside, give it an address of every interface and a `token_file`, which fit then requires.
+- **The store**, with `admin.store`, is written on every change of the config, to a new file in
+  its directory renamed over it: put that directory in a volume, and the password in an
+  environment variable (`password_env`) or a mounted file (`password_file`) rather than the config.
+- **The console**, with `admin.console`, listens on 127.0.0.1:2020 by default, inside the
+  container. To reach it from outside, give it an address of every interface, with `cert_file` and
+  `key_file`, which fit then requires.
+- **WebRTC** takes UDP: publish `webrtc.turn`'s `listen` ports and its relayed ports
+  (`port_min`-`port_max`), and the `listen` port of `webrtc.media` or `webrtc.proxy`, with `/udp`,
+  as in `-p 3478:3478/udp`. Behind Docker's NAT, peers are told the host's address through
+  `public_ip` (`webrtc.turn`) and `public_ips` (`webrtc.media`, `webrtc.proxy`).
 - **The Docker provider** reads `/var/run/docker.sock`, which is root's: mount it read-only and run
   fit as root, as the Compose example does, or point the provider's `endpoint` at a socket proxy.
 - **Several platforms**: `docker buildx build --platform linux/amd64,linux/arm64 .` compiles each on
@@ -108,11 +118,13 @@ sudo systemctl enable --now fit
 
 - fit runs as the system user `fit`, with `CAP_NET_BIND_SERVICE` alone, so it may bind ports 80
   and 443, and with the file system read-only but for `/var/lib/fit` (`StateDirectory`; point ACME's
-  storage there) and `/run/fit` (`RuntimeDirectory`; for the Admin API's Unix socket,
-  `unix//run/fit/admin.sock`). `fit@<name>` has `/var/lib/fit/<name>` and `/run/fit/<name>`.
+  storage and `admin.store`'s `path` there) and `/run/fit` (`RuntimeDirectory`; for the Admin
+  API's Unix socket, `unix//run/fit/admin.sock`). `fit@<name>` has `/var/lib/fit/<name>` and
+  `/run/fit/<name>`.
 - The config is checked with `fit validate` before fit starts. `systemctl reload fit` checks the
   new one and sends fit SIGHUP: a config that does not validate fails the reload, and fit keeps the
-  one it runs.
+  one it runs. With `admin.store`, the file holds `admin` and the config is in the store, which
+  SIGHUP reads again, after `fit store import` as the user `fit`, say.
 - `systemctl stop fit` sends SIGTERM; fit waits up to 30s (`-shutdown-timeout`) for requests in
   flight, and systemd up to 40s for fit.
 - The Docker provider needs the socket's group: `systemctl edit fit`, with

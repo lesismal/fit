@@ -2,9 +2,10 @@
 
 [English](comparison.md) | [简体中文](comparison.zh-CN.md)
 
-fit 计划基于 [fib](https://github.com/lesismal/fib) 开发，定位与 nginx、Caddy、Traefik 相同：
+fit 基于 [fib](https://github.com/lesismal/fib) 开发，定位与 nginx、Caddy、Traefik 相同：
 反向代理、负载均衡、TLS 终结、静态文件服务和 API 网关。本文对比这三个软件的架构、功能和优缺点，
-最后一节说明哪些设计 fit 应该借鉴、fib 已经提供了什么、还缺什么。
+最后一节说明 fit 借鉴哪些设计、fib 提供了什么、fit 需要自己构建什么；本文写于 fit 之前，用于规划它，
+结果见 [路线图](roadmap.zh-CN.md) 和 [开发进度](progress.zh-CN.md)。
 
 本文依据截至 2026 年的公开资料，对应 nginx 1.2x（开源版）、Caddy 2.x 和 Traefik 3.x。
 各项目更新很快，具体版本的细节请以官方文档为准。
@@ -170,6 +171,7 @@ flowchart LR
 | 管理界面 | ◐ Plus 仪表盘 | — | ✓ 仪表盘 |
 | 结构化日志 | ◐ 自定义 `log_format` 拼 JSON | ✓ JSON（zap） | ✓ JSON |
 | 脚本 / 插件 | C 模块、njs、Lua（OpenResty） | Go 模块（重新编译） | Yaegi Go 插件、WASM |
+| WebRTC：TURN 服务器、WHIP 和 WHEP | — | — | — |
 
 ## 优缺点
 
@@ -258,6 +260,7 @@ fib 的并发模型与 nginx 相近，开发体验与 Caddy、Traefik 相近：
 | 静态文件 | `http.FileCache`（内存缓存、预压缩、inotify）、sendfile | 接近 nginx 的静态文件能力，Traefik 没有 |
 | 路由与中间件 | chi 风格 Router，compress、cors、limiter、logger 等中间件 | 路由匹配和常用中间件 |
 | 多进程 | `prefork` | 可选的 nginx 式部署 |
+| WebRTC | `webrtc`（`PeerConnection`、`Mux`）、`webrtc/turn/turnserver`、`webrtc/stun`、`webrtc/ice` | TURN 服务器，以及 WHIP 和 WHEP（fit 作为媒体服务器，或放在其他媒体服务器前面）；三者都没有 |
 
 ### fit 需要自己构建的部分
 
@@ -308,4 +311,6 @@ fib 的并发模型与 nginx 相近，开发体验与 Caddy、Traefik 相近：
 4. **M4 平台集成**：Docker 与 Kubernetes Gateway API provider、仪表盘、OpenTelemetry 追踪。
 5. **M5 缓存与扩展**：两级响应缓存、WASM 插件、nginx 配置转换器。
 
-[路线图](roadmap.zh-CN.md) 在这些里程碑的基础上展开了范围、退出标准和性能目标。
+[路线图](roadmap.zh-CN.md) 在这些里程碑的基础上展开了范围、退出标准和性能目标。1.0 之后，它又加入了三者都没有的、
+在网关旁边运行于其引擎上的部分：加密保存、在需要登录的控制台中修改的配置，WebRTC，用于访问 NAT 后服务的 tunnel，以及在
+多台机器间共享 AI 模型的 agent（[1.0 之后](roadmap.zh-CN.md#10-之后)）。

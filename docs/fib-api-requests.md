@@ -71,7 +71,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A56 | A TURN server that never waits on a worker | done, `74100b2` (in `84a67f7`) | 1 | I87, I111 (029) |
 | A57 | A TURN server's limits and hooks | done, `bf669ce` (in `84a67f7`) | 11 | I111 (029) |
 | A58 | A TURN server changed in place, and drained | done, `496301d` (in `84a67f7`) | 10, 11 | I111 (029) |
-| A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`) | — | I111 (029) |
+| A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`); Windows fix `63b38d4` (in `9824c68`) | — | I111 (029) |
 
 ## Evidence
 
@@ -1495,7 +1495,7 @@ HTTP/1.1 within noise.
 
 ## A49: A UDP peer opened toward an address on a listener's socket
 
-**Status.** Done, fib `96a2331`, on fib's `main` since `80c7f76`, which fit uses (I108). An earlier version of this entry named a commit `4febcdf5` on fib's local `main`, with the asynchronous API below; no such commit was pushed, and what was built is the synchronous one under "As built".
+**Status.** Done, fib `96a2331`, on fib's `main` since `80c7f76`, which fit moved to in I108. An earlier version of this entry named a commit `4febcdf5` on fib's local `main`, with the asynchronous API below; no such commit was pushed, and what was built is the synchronous one under "As built".
 
 **Problem.** A UDP listener's peer becomes a connection only once it has sent a datagram, and a
 dialed UDP connection has a socket, and so a local port, of its own. Hole punching needs the
@@ -1675,7 +1675,7 @@ follow migrating clients.
 
 ## A55: TURN over TCP and TLS
 
-**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `97201b6`, on fib's `main` in `84a67f7`, which fit uses (I111).
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `97201b6`, on fib's `main` in `84a67f7`, which fit moved to in I111.
 
 **Problem.** fib's `webrtc/turn` speaks TURN over UDP only: its `FiveTuple` has no transport, and
 `turnserver` listens on a UDP binding. A client on a network that lets only TCP, or only TLS on
@@ -1702,7 +1702,7 @@ as listeners do.
 
 ## A56: A TURN server that never waits on a worker
 
-**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `74100b2`, on fib's `main` in `84a67f7`, which fit uses (I111).
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `74100b2`, on fib's `main` in `84a67f7`, which fit moved to in I111.
 
 **Problem.** `turnserver` runs the core in the `OnData` of the datagram that asks, on a fib
 worker, and from there binds relayed addresses and opens peers with calls that wait: an Allocate
@@ -1734,7 +1734,7 @@ goes.
 
 ## A57: A TURN server's limits and hooks
 
-**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `bf669ce`, on fib's `main` in `84a67f7`, which fit uses (I111).
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `bf669ce`, on fib's `main` in `84a67f7`, which fit moved to in I111.
 
 **Problem.** Rule 11 bounds every resource, and the core bounds allocations, but an allocation's
 permissions are a map that grows with every CreatePermission (each lasting five minutes) and its
@@ -1766,7 +1766,7 @@ the `webrtc` logger for each event.
 
 ## A58: A TURN server changed in place, and drained
 
-**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `496301d`, on fib's `main` in `84a67f7`, which fit uses (I111).
+**Status.** Requested on 2026-11-01, for fit's TURN server ([decision 029](decisions/029-webrtc.md)). Done, fib `496301d`, on fib's `main` in `84a67f7`, which fit moved to in I111.
 
 **Problem.** A config reload must not drop what is unchanged (decision 028), and a server being
 removed should let its allocations end rather than cut them. The core's lifetimes, nonce lifetime
@@ -1794,7 +1794,7 @@ as a listener a reload removed does.
 
 ## A59: A dial from a chosen local address and port range
 
-**Status.** Requested on 2026-11-01, for fit's WebRTC proxy ([decision 029](decisions/029-webrtc.md)). Done, fib `3655193`, on fib's `main` in `84a67f7`, which fit uses (I111).
+**Status.** Requested on 2026-11-01, for fit's WebRTC proxy ([decision 029](decisions/029-webrtc.md)). Done, fib `3655193`, on fib's `main` in `84a67f7`, which fit moved to in I111; a fix for Windows, `63b38d4` (a dial from a local port skips one held on another address), with its test `749189e`, is in `9824c68`, which fit uses.
 
 **Problem.** `webrtc.proxy` relays each peer address to its media server from a UDP socket of its
 own, which `Engine.DialWithHandler` opens. The kernel picks its local address by the route and its

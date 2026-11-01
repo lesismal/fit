@@ -6,7 +6,8 @@ fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均
 API 网关。本路线图把 [nginx、Caddy、Traefik 对比](comparison.zh-CN.md) 的结论落成里程碑：
 每个里程碑交付什么、怎样算完成、建立在 fib 的哪些能力之上。
 
-fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [开发进度](progress.zh-CN.md)。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
+fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [开发进度](progress.zh-CN.md)。1.0 之后又加入了边缘代理之外的
+几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、agent 与 tunnel、WebRTC 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
 每个迭代的大小适合一次工作会话。里程碑的先后顺序是确定的，具体内容会随开发中的认识调整。
 文中刻意不写日期：里程碑在满足退出标准时结束，而不是按日历结束。
 
@@ -22,6 +23,7 @@ fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [�
   - [M4 平台集成](#m4-平台集成)
   - [M5 缓存与扩展](#m5-缓存与扩展)
   - [1.0](#10)
+  - [1.0 之后](#10-之后)
 - [功能对照](#功能对照)
 - [性能目标](#性能目标)
 - [风险与待定问题](#风险与待定问题)
@@ -266,9 +268,22 @@ fit 可以作为反向代理和静态文件服务器使用。
 - 对 TLS 处理、Admin API 和插件沙箱进行外部安全审计。
 - 文档：快速上手、完整的配置参考，以及从 nginx、Caddy、Traefik 迁移的指南。
 
+### 1.0 之后
+
+1.0 之后，fit 承担起边缘代理之外的工作，每项在 [开发计划](dev-plan.zh-CN.md) 中是一条单独的路线。这些路线运行的东西都在
+网关旁边、在它的引擎上运行，写在同一份配置中，并随配置一起修改。
+
+| 路线 | 交付什么 | 状态 | fib 能力 |
+| --- | --- | --- | --- |
+| [控制台：登录与加密的 store](dev-plan.zh-CN.md#控制台登录与加密的-store) | `admin.store`，配置加密保存在一个文件中，fit 从它运行；`admin.console`，需要登录的网页，带根据 schema 生成的编辑器；`fit store export` 和 `import`（[决定 027](decisions/027-console-and-store.zh-CN.md)、[控制台](console.zh-CN.md)） | 已完成（I104） | — |
+| [Agent 与 tunnel](dev-plan.zh-CN.md#agent-与-tunnel) | 配置中的角色：tunnel 的 server、node 和 client，用于访问 NAT 后的服务；agent 的 hub、node 和 client，在多台机器间共享 AI 模型（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)） | 已完成（I105–I107） | `websocket`、QUIC、异步 HTTP 客户端 |
+| [WebRTC](dev-plan.zh-CN.md#webrtc) | `webrtc.turn`，基于 UDP、TCP 和 TLS 的 TURN 服务器；`whip` 和 `whep` 处理器，fit 作为 SFU；`webrtc_proxy` 处理器，把 WHIP 和 WHEP 代理到媒体服务器，UDP 按 ICE ufrag 路由（[决定 029](decisions/029-webrtc.zh-CN.md)、[WebRTC](webrtc.zh-CN.md)） | 已完成（I87、I108–I111） | `webrtc`、`webrtc/turn/turnserver` |
+| [P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透) | NAT 后的两台主机通过 ICE 直接相连，或经 TURN 中继相连，承载 TCP 和 UDP 服务（[决定 025](decisions/025-p2p.zh-CN.md)） | 进行中：STUN 消息和 STUN 服务器（`p2p/stun`，I84，尚未进入配置的库）和 fib 中的 A49（I85）已完成；STUN 和 TURN 客户端、ICE、隧道和配置待做（I86、I88–I93） | `webrtc/stun`、`webrtc/turn`、`webrtc/ice` |
+| [VPN](dev-plan.zh-CN.md#vpnfit-节点组成的网络) | 节点组成一个覆盖网络，各有一个 TUN 接口，IP 包直接或经中继发送（[决定 026](decisions/026-vpn.zh-CN.md)） | 进行中：IP 包和覆盖网络路由表（`vpn/packet`，I94，尚未进入配置的库）已完成；TUN 设备、中继、协调器和节点待做（I95–I103） | — |
+
 ## 功能对照
 
-各行与对比文档中的 [功能对比](comparison.zh-CN.md#功能对比) 表对应。
+各行与对比文档中的 [功能对比](comparison.zh-CN.md#功能对比) 表对应，之后是 [1.0 之后](#10-之后) 的路线。
 
 | 功能 | 里程碑 | 依赖的 fib 能力 |
 | --- | --- | --- |
@@ -304,6 +319,11 @@ fit 可以作为反向代理和静态文件服务器使用。
 | nginx 配置转换器 | M5 | — |
 | TURN 服务器 | P2P，I87（[决定 029](decisions/029-webrtc.zh-CN.md)） | `webrtc/turn/turnserver` |
 | WebRTC：WHIP 和 WHEP，作为媒体服务器和代理 | WebRTC，I109–I110 | `webrtc`（`PeerConnection`、`Mux`） |
+| 配置加密保存；带登录的 Web 控制台 | 控制台，I104 | — |
+| tunnel：经 server 访问 NAT 后的服务 | Agent 与 tunnel，I106 | `websocket`、QUIC |
+| agent：在多台机器间共享 AI 模型 | Agent 与 tunnel，I107 | `websocket`、异步 HTTP 客户端 |
+| STUN 服务器 | P2P，I84（库，尚未进入配置） | — |
+| VPN：IP 包和覆盖网络路由表 | VPN，I94（库，尚未进入配置） | — |
 
 ## 性能目标
 
@@ -324,16 +344,20 @@ fit 可以作为反向代理和静态文件服务器使用。
 ## 风险与待定问题
 
 - **ACME 库。** CertMagic 最完整，但带着 Caddy 的设计假设；lego 只是客户端；自研能保持依赖精简，但要做对
-  工作量很大。在 M2 决定，并放在 fit 自己的证书管理接口之后，以便日后更换。
+  工作量很大。在 M2 决定，并放在 fit 自己的证书管理接口之后，以便日后更换。已在 M2 定下：证书由 fit 自己管理，协议用
+  `golang.org/x/crypto/acme`（[决定 007](decisions/007-acme-client.zh-CN.md)）。
 - **配置格式。** 原生格式是 JSON；人类友好格式是 YAML、类似 Caddyfile 的语法还是别的，到 M5 之前都待定。
-  但 schema 必须早于那时稳定，因为 provider 和 Admin API 都依赖它。
+  但 schema 必须早于那时稳定，因为 provider 和 Admin API 都依赖它。已定下：YAML（[决定 019](decisions/019-yaml-config.zh-CN.md)）
+  和 fit 自己的 .conf 格式（[决定 021](decisions/021-fit-format-and-config-files.zh-CN.md)），都读成原生 JSON。
 - **fib 的缺口。** fib 不支持 `http.Hijacker`，`Request.Context()` 也不会在客户端断开时取消，所以标准库的代理
   和部分中间件无法直接复用。fit 用 fib 自己的 API 绕开这些限制；fib 缺少的能力在 fib 中补，而不是在 fit 里
   打补丁。
 - **会阻塞的扩展点。** ForwardAuth、JWKS、WASM 和磁盘缓存都需要阻塞。每一个都需要独立的池和超时，池之间需要
   固定的等待顺序。做错了会在高负载下损失吞吐甚至死锁，所以每一个都配一个把它压满的负载测试。
 - **Gateway API 一致性。** 测试集很大，并随 Gateway API 每个版本变化；M4 先声明一个较窄的 profile，再逐步扩大。
+  M4 声明的是 `GATEWAY-HTTP` profile（[决定 012](decisions/012-gateway-conformance.zh-CN.md)）。
 - **WASM 的开销。** 跨越 WASM 边界的调用和内存拷贝可能让插件在热路径上太慢。M5 先测量，再决定是否采用
-  Proxy-Wasm ABI。
+  Proxy-Wasm ABI。已在 M5 定下：wazero，加上 fit 自己的 ABI 和 Proxy-Wasm 的一个子集
+  （[决定 017](decisions/017-wasm-runtime.zh-CN.md)、[决定 018](decisions/018-proxy-wasm-subset.zh-CN.md)）。
 - **分布式状态。** 本路线图中限流和缓存都是单实例本地的。跨集群共享（Redis 或 gossip 协议）放到 1.0 之后，
   除非用户更早需要。

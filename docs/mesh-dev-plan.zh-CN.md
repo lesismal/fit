@@ -113,7 +113,7 @@ S01 建立、后续迭代逐步填充的结构。名字可以调整。
   waypoint 走 GAMMA 而不是 Envoy xDS，以及第三方 waypoint 在 istiod 中的支持情况（对照 Istio 源码确认）；
   只在 Linux 上构建的 `mesh/` 包骨架；`fit node` 子命令读取节点代理配置并在非 Linux 上报错。
 - **完成标准**：决定说明已提交；`fit node --help` 可用；非 Linux 构建不包含 `mesh/`。
-- **涉及**：`docs/decisions`、`mesh`、`cmd/fit`。
+- **涉及**：`docs/decisions`、`mesh`、`cli`（fit 的命令所在）、`cmd/fit`。
 
 ### S02 网格测试环境
 
@@ -136,6 +136,7 @@ S01 建立、后续迭代逐步填充的结构。名字可以调整。
 - **完成标准**：fib 的测试、race、vet、staticcheck 通过，fib CI 通过；fit 按提交哈希升级。
 - **涉及**：fib `http`；fit `docs/fib-api-requests*.md`、`go.mod`。
 - **参考**：fib `http/h2_tunnel.go`、`http/h2_client.go`。
+- **同样依赖它的**：网关计划的 I99，即 VPN 中转的 HTTP/2 传输。
 
 ### S05 fib：描述符、socket 选项与原始目标地址（F2–F4）
 
@@ -144,6 +145,7 @@ S01 建立、后续迭代逐步填充的结构。名字可以调整。
 - **完成标准**：fib 在 linux、darwin、windows、freebsd 上的测试和静态检查通过（非 Linux 上相应能力返回明确的不支持
   错误）；fit 按提交哈希升级。
 - **涉及**：fib 引擎、`binding.go`、`dial.go`；fit `docs/fib-api-requests*.md`、`go.mod`。
+- **参考**：fib 的 `DialWith`（A59），它已能把拨号绑定到本地地址和端口范围；设置 socket 选项的钩子应放在它旁边。
 
 ## S1 身份与 HBONE
 

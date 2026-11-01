@@ -11,15 +11,15 @@
 | --- | --- | --- |
 | 原生配置 | schema 版本 1 | [`schema/fit.schema.json`](../schema/fit.schema.json) 中的每个字段，包括 `modules/standard` 中各模块的字段：名字、类型、含义和默认值。YAML 配置（`.yaml`、`.yml`）是同一份配置的另一种写法。 |
 | Admin API | v1 | 路径和方法、接收和返回的 body、状态码，以及 `ETag`、`If-Match` 和 `Fit-Config-Version` 字段（见下文）。 |
-| 命令行 | 1 | 命令 `run`、`validate`、`adapt`、`schema`、`version`、`hash-password` 和 `build`，它们的参数和退出码。 |
+| 命令行 | 1 | 命令 `run`、`validate`、`adapt`、`schema`、`version`、`hash-password`、`store`（`export` 和 `import`）和 `build`，它们的参数和退出码。 |
 | 指标 | 1 | `/metrics` 提供、OTLP 导出的指标的名字、类型和标签，都以 `fit_` 开头。 |
 | 访问日志 | 1 | 其 JSON 行的字段。 |
 | Go 模块 | Go 的语义化导入版本 | `module` 和 `plugin/build` 包导出的 API，供 `fit build` 构建的模块使用。fit 的其他包可能在任何版本中改变。 |
 
 不覆盖：
 
-- fit 写给人看而不是给程序的内容：消息、警告、仪表盘、`fit adapt` 的输出（除了它是有效配置这一点），以及错误的文本（错误的
-  JSON 结构是覆盖的）。
+- fit 写给人看而不是给程序的内容：消息、警告、仪表盘、控制台以及 agent 和 tunnel 各角色的页面、`fit adapt` 的输出
+  （除了它是有效配置这一点），以及错误的文本（错误的 JSON 结构是覆盖的）。
 - WASM 插件的宿主函数（`fit` 导入模块）以及 fit 支持的 Proxy-Wasm 子集（I71、I72、I81），它们在 1.0 中是实验性的；`wasm`
   模块的配置是覆盖的。
 - nginx 转换器对 nginx 指令的覆盖面，它只会增加。

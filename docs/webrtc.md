@@ -2,6 +2,8 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
+Config examples, each in .conf, YAML and JSON: [webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf).
+
 fit serves WebRTC with fib's WebRTC packages, beside the gateway on its engine
 ([decision 029](decisions/029-webrtc.md)): a TURN server, and WHIP and WHEP with fit as the media
 server; and fit in front of other media servers, proxying their WHIP and WHEP and relaying their
@@ -138,8 +140,9 @@ permission is for an address alone, and the datagrams it lets through are checke
 | `stream_idle_timeout` | 30s | a TCP or TLS connection without an allocation |
 
 An allocation's permissions last five minutes unless refreshed, and its channels ten. fit's
-`limits.max_conns` counts the clients' and peers' UDP addresses, and the TCP and TLS connections,
-with every other connection.
+`limits.max_conns` counts the TCP and TLS connections with every other connection the listeners
+accept; the clients' and peers' UDP addresses are not counted there, and are bounded by the
+allocations and their permissions above.
 
 ### Reloading
 
@@ -166,16 +169,30 @@ The Admin API's `/metrics`, and OpenTelemetry's export, carry:
 - `fit_turn_allocated_total`, `fit_turn_refreshed_total` and
   `fit_turn_freed_total{reason="deleted"|"expired"|"closed"}`;
 - `fit_turn_refused_total{code}`, requests refused after their credentials passed, by error code
-  (403 a peer refused, 486 and 508 the quotas, caps and drains), and
-  `fit_turn_peers_refused_total`, the 403s; `fit_turn_auth_failures_total`, credentials that failed;
+  (403 a peer refused, 486 and 508 the quotas, caps and drains; 400, 420, 437, 441, 442 and 443,
+  and `other`, malformed or misplaced requests), and `fit_turn_peers_refused_total`, the 403s;
+  `fit_turn_auth_failures_total`, credentials that failed;
 - `fit_turn_dropped_total{reason="bandwidth"|"unsent"}`, datagrams past `user_bandwidth` and
   those with no connection to send them on, and `fit_turn_unrelayed_total`, every datagram the
-  server did nothing with: malformed, without a permission or channel, or to a port the peer rules
-  refuse;
+  server did nothing with: malformed, without an allocation, a permission or a channel, to a port
+  the peer rules refuse, or past `user_bandwidth`, which the first counts too;
 - `fit_turn_restarts_total`, the new servers reloads started.
 
-The server's messages go to the `webrtc` logger; each allocation made, refreshed and freed, each
-refusal and each failed credential, at `debug`.
+The server's messages go to the `webrtc` logger, after `webrtc.turn: `: the addresses it listens
+on and relays from at `info`, a restart that ends its allocations at `warn`, and each allocation
+made, refreshed and freed, each refusal and each failed credential, at `debug`.
+
+### TURN, P2P and the tunnel
+
+`webrtc.turn` is the one TURN server fit has: the TURN server of
+[decision 025](decisions/025-p2p.md) is this one. The planned P2P tunnels
+([P2P, NAT traversal](dev-plan.md#p2p-nat-traversal)), whose STUN client, TURN client and ICE agent
+are fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice`, will use it as their relay where no hole
+can be punched between two hosts behind NAT, as any other ICE agent does. The [tunnel](tunnel.md)
+is another thing: its roles forward TCP services through a `tunnel.server` that nodes and clients
+link out to, every byte relayed over fit's own links; a TURN server relays the UDP datagrams of
+standard ICE agents, browsers among them, only where they find no direct path, and knows nothing of
+the services behind them.
 
 ## WHIP and WHEP
 
@@ -237,9 +254,10 @@ The same in JSON:
 
 A publisher posts its offer to `https://example.com/whip/cam1`, and viewers theirs to
 `https://example.com/whep/cam1`: the stream's name is the path's last segment, or the handler's
-`stream` param, which fixes it. A session's URL is the path of its POST followed by the session's
-ID, so the route must match it too: `/whip/*` does, and a route of `/live` alone needs `/live/*`
-beside it. Every field is in the [config reference](reference/config.md#webrtc).
+`stream` param, which fixes it; a name is 1 to 128 letters, digits, `.`, `_`, `~` and `-`, and a
+path whose last segment is not one is answered `404`. A session's URL is the path of its POST
+followed by the session's ID, so the route must match it too: `/whip/*` does, and a route of
+`/live` alone needs `/live/*` beside it. Every field is in the [config reference](reference/config.md#webrtc).
 
 ### The HTTP API
 
@@ -247,14 +265,16 @@ beside it. Every field is in the [config reference](reference/config.md#webrtc).
 | --- | --- |
 | `POST` an `application/sdp` offer to the endpoint | `201 Created`, fit's answer as `application/sdp`, `Location` the session's URL (the endpoint's path and the session's ID), and a `Link` header for each ICE server |
 | `DELETE` the session's URL | `200`; a publisher's stream ends, and its viewers' sessions with it; `404` for a session that has ended |
-| `OPTIONS` | `204`, with `Allow` and `Accept-Post: application/sdp` |
+| `OPTIONS` the endpoint | `204`, with `Allow: POST, OPTIONS` and `Accept-Post: application/sdp` |
+| `OPTIONS` the session's URL | `204`, with `Allow: DELETE, OPTIONS` |
 | `PATCH` the session's URL | `405`: see below |
 
 Refusals: `415` for an offer that is not `application/sdp`; `413` past `max_sdp_bytes`; `400` for
 one that does not parse or cannot be answered; `422` for one with no audio or video in a codec fit
 forwards, or a viewer's that receives none of the stream's tracks; `409` for a stream published
-already; `404` for a viewer of a stream not published; `503` with `Retry-After` past
-`max_peer_connections`, `max_streams` or `max_viewers`, and while `webrtc.media` does not run.
+already; `404` for a viewer of a stream not published, or one that ended while it was answered;
+`503` with `Retry-After: 5` past `max_peer_connections`, `max_streams` or `max_viewers`, and `503`
+while `webrtc.media` does not run. The endpoint answers other methods `405`.
 
 Auth is the route's middleware: RFC 9725's bearer token is an `Authorization` field, which `jwt`
 verifies, or `basic_auth`, `forward_auth` and the rest. A DELETE goes through the same route, and
@@ -276,7 +296,8 @@ the viewer's own SSRC and keys, their sequence numbers and timestamps as the pub
 
 - **Key frames.** A viewer that joins, or loses packets, asks for a key frame (PLI or FIR); fit
   asks the publisher with a PLI, at most once a `key_frame_interval` (500ms) whatever the number of
-  viewers, and once more when a viewer connects.
+  viewers. It asks on its own too when a viewer connects and when a publisher's video first
+  arrives, within the same interval.
 - **Bitrate.** fit tells each publisher `max_bitrate` (8 Mbit/s) once a second with REMB, which
   browsers keep under, and drops its packets past it, with two seconds of burst.
 - **Leaving.** A publisher's DELETE, its PeerConnection failing, or its peer silent for
@@ -286,14 +307,16 @@ the viewer's own SSRC and keys, their sequence numbers and timestamps as the pub
 - **Not forwarded.** Data channels, simulcast layers past the first (a simulcast publisher's first
   layer to arrive is forwarded), RTX and FEC, and transport-wide congestion control, which fib's
   PeerConnection does not do. Each viewer is sent the publisher's packets as they come: there is no
-  per-viewer bandwidth estimate or layer selection.
+  per-viewer bandwidth estimate or layer selection. A publisher's first 8 audio and video sections
+  are forwarded, and it may send 16 RTP streams at most, simulcast layers counted.
 
 ### ICE servers
 
 fit needs no STUN or TURN server of its own: its port is reached at its addresses, or at
 `public_ips` behind a 1:1 NAT. A peer behind a firewall that blocks UDP to it needs a TURN server
 on its side; the answer's `Link` headers tell it of `ice_servers` and, as `turn_urls`, of fit's own
-`webrtc.turn`, with credentials made from its `secret` for `turn_credential_ttl` (1h):
+`webrtc.turn`, with credentials made from its `secret`, which must then be set, for
+`turn_credential_ttl` (1h):
 
 ```
 Link: <stun:stun.example.com:3478>; rel="ice-server"
@@ -317,8 +340,8 @@ fit's TURN server relays to the media port as to any peer: when the port is on i
 | `key_frame_interval` | 500ms | between two key frame requests passed to a publisher |
 
 A publisher's packet is sent to each of its viewers on the fib worker it arrived on, so
-`max_viewers` bounds that work too. fit's `limits.max_conns` counts each peer's UDP address with
-every other connection.
+`max_viewers` bounds that work too. fit's `limits.max_conns` does not count the peers' UDP
+addresses: `max_peer_connections` bounds them.
 
 ### Reloading
 
@@ -330,13 +353,16 @@ Leaving `webrtc.media` out ends them all, and the routes answer 503.
 
 ### Metrics and logs
 
-The Admin API's `/metrics` carries `fit_webrtc_media_peer_connections{role}`,
-`fit_webrtc_media_streams`, `fit_webrtc_media_sessions_total{role}`,
-`fit_webrtc_media_sessions_ended_total{reason}`, `fit_webrtc_media_refused_total{reason}`,
+The Admin API's `/metrics`, and OpenTelemetry's export, carry
+`fit_webrtc_media_peer_connections{role="publisher"|"viewer"}`, `fit_webrtc_media_streams`,
+`fit_webrtc_media_sessions_total{role}`,
+`fit_webrtc_media_sessions_ended_total{reason="delete"|"publisher_left"|"failed"|"connect_timeout"|"reload"}`,
+`fit_webrtc_media_refused_total{reason="peer_connections"|"streams"|"viewers"|"conflict"|"no_stream"|"offer"}`,
 `fit_webrtc_media_received_packets_total`, `fit_webrtc_media_received_bytes_total`,
 `fit_webrtc_media_dropped_total{reason="bitrate"}`,
 `fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` and
-`fit_webrtc_media_restarts_total`. The media server's messages go to the `webrtc` logger.
+`fit_webrtc_media_restarts_total`. The media server's messages go to the `webrtc` logger, after
+`webrtc.media: `: its addresses at `info`, and a restart that ends its sessions at `warn`.
 
 ## Proxying media servers
 
@@ -395,11 +421,14 @@ The same in JSON:
 ### How a session goes
 
 1. A publisher posts its offer to fit. fit takes it whole, up to `max_sdp_bytes`, removes its
-   candidates, and sends it to the media server the upstream picks: its load balancing, its
-   health checks, and the request's own fields, `Authorization` among them, apply.
-2. The media server answers `201`. fit reads its `a=ice-ufrag` and `a=ice-pwd`, and the address
-   its peers are to be relayed to: `media_addrs`' entry for the media server, or the answer's
-   first UDP host candidate, or else server-reflexive one, IPv4 first. It replaces the answer's
+   candidates, and sends it to the media server the upstream picks: its load balancing and its
+   health checks apply, and the request's own fields, `Authorization` among them, are passed on,
+   with `X-Forwarded-For` set to the client's address.
+2. The media server answers `201`, with a `Location`. fit reads its `a=ice-ufrag` and
+   `a=ice-pwd`, and the address its peers are to be relayed to: `media_addrs`' entry for the media
+   server, an IP and a port, or an IP alone, which takes the port of the answer's candidate; or
+   else the answer's first host candidate, or else server-reflexive one, IPv4 first and
+   link-local ones skipped. It replaces the answer's
    candidates, and its `c=` lines, with `webrtc.proxy`'s addresses, keeps the session under an ID
    of its own, and answers with its `Location` a URL of fit's: the POST's path followed by that ID.
 3. The publisher's ICE checks reach fit's port. A new peer address must start with a STUN Binding
@@ -423,18 +452,22 @@ the one peer address it was opened for.
   session's path there; an absolute one's host is not used, since requests go to the media server
   that answered. `Link` fields for ICE servers (`rel="ice-server"`) are passed on as they are;
   one to a URL below the session's is rewritten below fit's URL for it, and the rest are dropped.
-- **The session's URL.** DELETE, PATCH, OPTIONS and any request to a URL below the session's go
-  to the media server that answered, sticky by fit's ID, not by a cookie. A session the media
-  server's upstream no longer lists is answered `502`; its DELETE still frees it.
+- **The session's URL.** DELETE, PATCH, OPTIONS and any request to a URL up to three segments
+  below the session's go to the media server that answered, sticky by fit's ID, not by a cookie. A
+  session the media server's upstream no longer lists is answered `502`; its DELETE still frees
+  it. The endpoint's own OPTIONS goes to a media server the upstream picks.
 - **PATCH.** A PATCH that only trickles candidates is answered `204` by fit: the media server
   reaches the peer through fit whatever the peer's candidates are. An ICE restart, a PATCH with an
   `a=ice-ufrag`, goes to the media server without its candidates, and the ufrag of its answer is
   routed as the first one was, its candidates replaced too.
 - **Statuses.** `415` for an offer that is not `application/sdp`, `413` for a request past
-  `max_sdp_bytes`, `503` past `max_sessions` or while `webrtc.proxy` does not run, `502` for a
-  media server that cannot be reached, an answer past `max_sdp_bytes` or one with no ufrag or no
-  candidate fit can relay to (whose session fit then DELETEs at the media server), and `504` for
-  one that does not answer within `timeout`. Every other answer is passed on as it is.
+  `max_sdp_bytes`, `503` with `Retry-After: 1` past `max_sessions`, and `503` while `webrtc.proxy`
+  does not run; `502` for a media server that cannot be reached, an answer past `max_sdp_bytes`, a
+  `201` with no `Location`, or one with no ufrag or no candidate fit can relay to (whose session
+  fit then DELETEs at the media server), and `504` for one that does not answer within `timeout`;
+  `404` for the URL of a session fit no longer has, and `405` for a method other than POST and
+  OPTIONS at the endpoint. Every other answer, a media server's refusal of an offer among them, is
+  passed on as it is, without its hop-by-hop fields.
 
 Nothing waits: the offer goes upstream from its last body callback through fib's asynchronous
 client, and the answer is written from the client's callback; a client that leaves cancels it.
@@ -445,7 +478,7 @@ client, and the answer is written from the client's callback; a client that leav
 | --- | --- | --- |
 | `max_sessions` | 4096 | sessions at once, counted from the offer; one more is answered `503` |
 | `max_relays` | 4096 | peer addresses relayed at once, each a socket; past it, a new address is dropped |
-| `session_timeout` | 30s | a session with nothing relayed, from its answer or its last relay's end, is forgotten |
+| `session_timeout` | 30s | a session with nothing relayed, from its answer or its last relay's end, is forgotten, and its URL answers `404` |
 | `idle_timeout` | 30s | a peer address that sends nothing loses its relay, whatever the media server sends |
 | `webrtc_proxy`'s `max_sdp_bytes` | 32 KiB | a request and an answer |
 | `webrtc_proxy`'s `timeout` | 10s | from a request's last byte to its answer read whole |
@@ -460,7 +493,9 @@ address of the other family is not relayed. Both apply to the next relay after a
 
 A session relays at most 8 of its peer's addresses: one for each candidate a peer checks from,
 and more after it moves. A session keeps at most 4 ufrags, its ICE restarts' among them. A relay
-holds up to 8 datagrams while its socket opens.
+holds up to 8 datagrams while its socket opens, which may take 5 seconds before the relay is
+closed. fit's `limits.max_conns` counts neither the peers' UDP addresses nor the sockets toward the
+media servers: `max_relays` bounds both.
 
 ### ICE restarts, consent and a peer that moves
 
@@ -488,11 +523,14 @@ answer. A change of `listen` ends every relay and session, and peers post new of
 server a reload takes out of the upstream keeps its relays, while its sessions' requests are
 answered `502`.
 
-### Metrics
+### Metrics and logs
 
-`fit_webrtc_proxy_sessions`, `fit_webrtc_proxy_relays`, `fit_webrtc_proxy_sessions_total`,
+The Admin API's `/metrics`, and OpenTelemetry's export, carry `fit_webrtc_proxy_sessions`,
+`fit_webrtc_proxy_relays`, `fit_webrtc_proxy_sessions_total`,
 `fit_webrtc_proxy_refused_total`, `fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`,
 `fit_webrtc_proxy_relays_total`,
 `fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"|"no_port"}`,
 `fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` and
-`fit_webrtc_proxy_restarts_total`. The upstream's own metrics count the signaling requests.
+`fit_webrtc_proxy_restarts_total`. The upstream's own metrics count the signaling requests. The
+proxy's messages go to the `webrtc` logger, after `webrtc.proxy: `: its port at `info`, and a
+change of `listen` that ends its sessions at `warn`.

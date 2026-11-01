@@ -2,6 +2,8 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
+配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf)。
+
 fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）：
 TURN 服务器；以 fit 为媒体服务器的 WHIP 和 WHEP；以及 fit 作为其他媒体服务器的前端，代理它们的 WHIP 和 WHEP，
 经一个 UDP 端口中继它们的媒体。
@@ -120,8 +122,8 @@ WebRTC 服务之所以运行 TURN，正是为了封锁 UDP 的网络，以及只
 | `max_stream_message` | 8 KiB | TCP 或 TLS 客户端最大的消息，也是其连接缓冲的上限 |
 | `stream_idle_timeout` | 30s | 没有 allocation 的 TCP 或 TLS 连接 |
 
-allocation 的 permission 不刷新时存活五分钟，channel 存活十分钟。fit 的 `limits.max_conns` 把客户端和对端的 UDP 地址，
-以及 TCP 和 TLS 连接，与其他连接一起计数。
+allocation 的 permission 不刷新时存活五分钟，channel 存活十分钟。fit 的 `limits.max_conns` 把 TCP 和 TLS 连接与
+listener 接受的其他连接一起计数；客户端和对端的 UDP 地址不计入其中，由上面的 allocation 及其 permission 限制。
 
 ### 重载
 
@@ -143,13 +145,25 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有：
   `fit_turn_channels` 和 `fit_turn_draining_servers`；
 - `fit_turn_relayed_bytes_total{direction="to_peer"|"from_peer"}`；
 - `fit_turn_allocated_total`、`fit_turn_refreshed_total` 和 `fit_turn_freed_total{reason="deleted"|"expired"|"closed"}`；
-- `fit_turn_refused_total{code}`，凭据通过后被拒绝的请求，按错误码（403 对端被拒，486 和 508 配额、上限和排空），以及
-  `fit_turn_peers_refused_total`，即其中的 403；`fit_turn_auth_failures_total`，未通过的凭据；
+- `fit_turn_refused_total{code}`，凭据通过后被拒绝的请求，按错误码（403 对端被拒，486 和 508 配额、上限和排空；
+  400、420、437、441、442、443 以及 `other`，格式错误或不合时宜的请求），以及 `fit_turn_peers_refused_total`，即其中的
+  403；`fit_turn_auth_failures_total`，未通过的凭据；
 - `fit_turn_dropped_total{reason="bandwidth"|"unsent"}`，超过 `user_bandwidth` 的数据报和没有连接可发的数据报，以及
-  `fit_turn_unrelayed_total`，服务器没有处理的所有数据报：格式错误、没有 permission 或 channel、或发往对端规则拒绝的端口；
+  `fit_turn_unrelayed_total`，服务器没有处理的所有数据报：格式错误、没有 allocation、permission 或 channel、发往对端
+  规则拒绝的端口，或超过 `user_bandwidth`（前者也计入这些）；
 - `fit_turn_restarts_total`，重载启动的新服务器数。
 
-服务器的消息写入 `webrtc` 日志；每次 allocation 的建立、刷新和释放、每次拒绝和每次凭据失败，以 `debug` 级别记录。
+服务器的消息写入 `webrtc` 日志，前缀 `webrtc.turn: `：监听和中继的地址以 `info` 级别记录，结束其 allocation 的重启以
+`warn` 级别记录，每次 allocation 的建立、刷新和释放、每次拒绝和每次凭据失败以 `debug` 级别记录。
+
+### TURN、P2P 与 tunnel
+
+`webrtc.turn` 是 fit 唯一的 TURN 服务器：[决定 025](decisions/025-p2p.zh-CN.md) 中的 TURN 服务器就是它。计划中的 P2P
+隧道（[P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透)）以 fib 的 `webrtc/stun`、`webrtc/turn` 和 `webrtc/ice`
+作为 STUN 客户端、TURN 客户端和 ICE agent，在 NAT 后的两台主机之间打不通洞时，会像其他 ICE agent 一样用它中继。
+[tunnel](tunnel.zh-CN.md) 则是另一回事：它的角色经由节点和客户端主动连出的 `tunnel.server` 转发 TCP 服务，每个字节都经
+fit 自己的链路中继；TURN 服务器中继的是标准 ICE agent（包括浏览器）的 UDP 数据报，只在它们找不到直连路径时使用，也不
+知道它们背后有什么服务。
 
 ## WHIP 和 WHEP
 
@@ -208,7 +222,8 @@ JSON 写法：
 ```
 
 推流者把 offer POST 到 `https://example.com/whip/cam1`，观看者把自己的 offer POST 到 `https://example.com/whep/cam1`：
-流的名字是路径的最后一段，或者 handler 的 `stream` 参数（固定名字）。会话的 URL 是其 POST 的路径加上会话 ID，所以路由也必须
+流的名字是路径的最后一段，或者 handler 的 `stream` 参数（固定名字）；名字由 1 到 128 个字母、数字、`.`、`_`、`~`
+和 `-` 组成，最后一段不是合法名字的路径应答 `404`。会话的 URL 是其 POST 的路径加上会话 ID，所以路由也必须
 匹配它：`/whip/*` 可以，只有 `/live` 的路由则需要在旁边加上 `/live/*`。所有字段见[配置参考](reference/config.md#webrtc)。
 
 ### HTTP API
@@ -217,12 +232,14 @@ JSON 写法：
 | --- | --- |
 | 向端点 `POST` 一个 `application/sdp` 的 offer | `201 Created`，fit 的 answer（`application/sdp`），`Location` 为会话的 URL（端点路径加会话 ID），每个 ICE 服务器一个 `Link` 头 |
 | `DELETE` 会话的 URL | `200`；推流者的流结束，其观看者的会话随之结束；已结束的会话为 `404` |
-| `OPTIONS` | `204`，带 `Allow` 和 `Accept-Post: application/sdp` |
+| `OPTIONS` 端点 | `204`，带 `Allow: POST, OPTIONS` 和 `Accept-Post: application/sdp` |
+| `OPTIONS` 会话的 URL | `204`，带 `Allow: DELETE, OPTIONS` |
 | `PATCH` 会话的 URL | `405`：见下文 |
 
 拒绝：offer 不是 `application/sdp` 时 `415`；超过 `max_sdp_bytes` 时 `413`；无法解析或无法应答时 `400`；没有 fit
-转发的编解码器的音视频，或观看者的 offer 收不了流的任何轨道时 `422`；流已有推流者时 `409`；观看未推送的流时 `404`；
-超过 `max_peer_connections`、`max_streams` 或 `max_viewers`，以及 `webrtc.media` 未运行时 `503` 并带 `Retry-After`。
+转发的编解码器的音视频，或观看者的 offer 收不了流的任何轨道时 `422`；流已有推流者时 `409`；观看未推送的流，或应答期间
+流已结束时 `404`；超过 `max_peer_connections`、`max_streams` 或 `max_viewers` 时 `503` 并带 `Retry-After: 5`，
+`webrtc.media` 未运行时 `503`。端点对其他方法应答 `405`。
 
 认证由路由的中间件完成：RFC 9725 的 bearer token 就是 `Authorization` 字段，由 `jwt` 校验，也可用 `basic_auth`、
 `forward_auth` 等。DELETE 走同一条路由，会话 ID 是 128 位随机数，只有创建会话的一方知道。
@@ -238,20 +255,20 @@ H264 和 AV1）；观看者也以同一个应答，它的 offer 必须接受。�
 的一个 TrackLocal：包在观看者自己的 SSRC 和密钥下重新保护，序号和时间戳保持推流者发出时的样子。
 
 - **关键帧。** 新加入或丢包的观看者会请求关键帧（PLI 或 FIR）；无论观看者多少，fit 每个 `key_frame_interval`
-  （500ms）至多向推流者发一次 PLI，观看者连上时也发一次。
+  （500ms）至多向推流者发一次 PLI。观看者连上时、推流者的视频刚到达时，fit 也会主动请求，同样受这个间隔限制。
 - **码率。** fit 每秒用 REMB 告诉每个推流者 `max_bitrate`（8 Mbit/s），浏览器会遵守；超过的包被丢弃，允许两秒的突发。
 - **离开。** 推流者 DELETE、它的 PeerConnection 失败，或它沉默超过 `ice_timeout`（30s），流和观看者的会话都结束；
   观看者离开只结束它自己的会话。应答后 `connect_timeout`（30s）内未连上的会话也会结束。断开或缓慢的观看者不会拖住
   推流者和其他观看者：fit 发的是 UDP，从不等待。
 - **不转发的。** 数据通道、第一层之后的 simulcast 层（转发 simulcast 推流者最先到达的那一层）、RTX 和 FEC，以及
   fib 的 PeerConnection 不支持的 transport-wide 拥塞控制。每个观看者都按到达顺序收到推流者的包：没有按观看者的带宽
-  估计或分层选择。
+  估计或分层选择。推流者的前 8 个音视频段被转发，它最多可发 16 路 RTP 流，simulcast 层也计入。
 
 ### ICE 服务器
 
 fit 自己不需要 STUN 或 TURN 服务器：它的端口在自己的地址上可达，1:1 NAT 后则是 `public_ips`。防火墙封锁到它的 UDP
 的对端需要在自己一侧使用 TURN 服务器；answer 的 `Link` 头告诉它 `ice_servers`，以及作为 `turn_urls` 的 fit 自己的
-`webrtc.turn`，凭据由其 `secret` 生成，有效期 `turn_credential_ttl`（1h）：
+`webrtc.turn`，凭据由其 `secret` 生成（此时必须设置 `secret`），有效期 `turn_credential_ttl`（1h）：
 
 ```
 Link: <stun:stun.example.com:3478>; rel="ice-server"
@@ -274,7 +291,7 @@ fit 的 TURN 服务器像对待任何对端一样中继到媒体端口：端口�
 | `key_frame_interval` | 500ms | 转给推流者的两次关键帧请求之间的间隔 |
 
 推流者的包在它到达的 fib worker 上发给每个观看者，所以 `max_viewers` 也限制了这部分工作。fit 的 `limits.max_conns`
-把每个对端的 UDP 地址和其他连接一起计数。
+不计对端的 UDP 地址：它们由 `max_peer_connections` 限制。
 
 ### 重载
 
@@ -284,12 +301,14 @@ fit 的 TURN 服务器像对待任何对端一样中继到媒体端口：端口�
 
 ### 指标与日志
 
-Admin API 的 `/metrics` 中有 `fit_webrtc_media_peer_connections{role}`、`fit_webrtc_media_streams`、
-`fit_webrtc_media_sessions_total{role}`、`fit_webrtc_media_sessions_ended_total{reason}`、
-`fit_webrtc_media_refused_total{reason}`、`fit_webrtc_media_received_packets_total`、
-`fit_webrtc_media_received_bytes_total`、`fit_webrtc_media_dropped_total{reason="bitrate"}`、
+Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_webrtc_media_peer_connections{role="publisher"|"viewer"}`、
+`fit_webrtc_media_streams`、`fit_webrtc_media_sessions_total{role}`、
+`fit_webrtc_media_sessions_ended_total{reason="delete"|"publisher_left"|"failed"|"connect_timeout"|"reload"}`、
+`fit_webrtc_media_refused_total{reason="peer_connections"|"streams"|"viewers"|"conflict"|"no_stream"|"offer"}`、
+`fit_webrtc_media_received_packets_total`、`fit_webrtc_media_received_bytes_total`、
+`fit_webrtc_media_dropped_total{reason="bitrate"}`、
 `fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` 和 `fit_webrtc_media_restarts_total`。
-媒体服务器的消息写入 `webrtc` 日志。
+媒体服务器的消息写入 `webrtc` 日志，前缀 `webrtc.media: `：其地址以 `info` 级别记录，结束会话的重启以 `warn` 级别记录。
 
 ## 代理媒体服务器
 
@@ -346,9 +365,11 @@ JSON 写法相同：
 ### 一个会话的经过
 
 1. 推流端把 offer POST 给 fit。fit 收下整个 offer（不超过 `max_sdp_bytes`），去掉其中的候选地址，发给上游选中的
-   媒体服务器：上游的负载均衡、健康检查，以及请求自带的字段（包括 `Authorization`）都照常生效。
-2. 媒体服务器应答 `201`。fit 读出其中的 `a=ice-ufrag`、`a=ice-pwd`，以及要把对端中继到的地址：`media_addrs`
-   中该媒体服务器的条目，否则是 answer 中第一个 UDP host 候选，再否则是 server-reflexive 候选，IPv4 优先。fit 把
+   媒体服务器：上游的负载均衡、健康检查照常生效，请求自带的字段（包括 `Authorization`）照传，`X-Forwarded-For`
+   设为客户端的地址。
+2. 媒体服务器应答 `201` 并带 `Location`。fit 读出其中的 `a=ice-ufrag`、`a=ice-pwd`，以及要把对端中继到的地址：
+   `media_addrs` 中该媒体服务器的条目（IP 加端口，或只有 IP，此时取 answer 中候选的端口）；否则是 answer 中第一个 host
+   候选，再否则是 server-reflexive 候选，IPv4 优先，跳过链路本地地址。fit 把
    answer 的候选地址和 `c=` 行换成 `webrtc.proxy` 的地址，以自己的 ID 记下会话，应答的 `Location` 是 fit 的 URL：
    POST 的路径后接这个 ID。
 3. 推流端的 ICE 检查到达 fit 的端口。一个新的对端地址必须先发 STUN Binding 请求，其 USERNAME 以某个会话的 ufrag
@@ -366,14 +387,17 @@ JSON 写法相同：
 - **Location 和 Link。** 媒体服务器的 `Location`（相对或绝对）记为会话在那边的路径；绝对地址中的主机不使用，
   因为请求总是发往应答的媒体服务器。ICE 服务器的 `Link`（`rel="ice-server"`）原样传递；指向会话 URL 之下的 Link
   改写到 fit 中对应 URL 之下，其余的丢弃。
-- **会话的 URL。** DELETE、PATCH、OPTIONS 以及发往会话 URL 之下的请求，都转给应答的媒体服务器，靠 fit 的 ID
-  而非 cookie 保持粘滞。上游已不再列出其媒体服务器的会话应答 `502`；它的 DELETE 仍会释放会话。
+- **会话的 URL。** DELETE、PATCH、OPTIONS 以及发往会话 URL 之下至多三段的请求，都转给应答的媒体服务器，靠 fit
+  的 ID 而非 cookie 保持粘滞。上游已不再列出其媒体服务器的会话应答 `502`；它的 DELETE 仍会释放会话。端点自己的
+  OPTIONS 转给上游选中的媒体服务器。
 - **PATCH。** 只 trickle 候选的 PATCH 由 fit 直接应答 `204`：无论对端的候选是什么，媒体服务器都经由 fit 到达对端。
   ICE 重启（带 `a=ice-ufrag` 的 PATCH）去掉候选后转给媒体服务器，其应答中的新 ufrag 与第一个 ufrag 一样被路由，
   候选同样被替换。
-- **状态码。** offer 不是 `application/sdp` 时 `415`；请求超过 `max_sdp_bytes` 时 `413`；超过 `max_sessions`，或
-  `webrtc.proxy` 未运行时 `503`；媒体服务器无法连接、answer 超过 `max_sdp_bytes`、answer 没有 ufrag 或没有 fit
-  能中继到的候选时 `502`（这种会话 fit 会到媒体服务器上 DELETE 掉）；在 `timeout` 内没有应答时 `504`。其他应答原样传递。
+- **状态码。** offer 不是 `application/sdp` 时 `415`；请求超过 `max_sdp_bytes` 时 `413`；超过 `max_sessions` 时
+  `503` 并带 `Retry-After: 1`，`webrtc.proxy` 未运行时 `503`；媒体服务器无法连接、answer 超过 `max_sdp_bytes`、
+  `201` 没有 `Location`、answer 没有 ufrag 或没有 fit 能中继到的候选时 `502`（这种会话 fit 会到媒体服务器上 DELETE
+  掉）；在 `timeout` 内没有应答时 `504`；fit 已没有的会话的 URL 为 `404`；端点上 POST 和 OPTIONS 以外的方法为 `405`。
+  其他应答，包括媒体服务器对 offer 的拒绝，去掉逐跳字段后原样传递。
 
 整个过程不等待：offer 在最后一次 body 回调里经 fib 的异步客户端发往上游，answer 在客户端的回调里写回；客户端离开
 会取消请求。
@@ -384,7 +408,7 @@ JSON 写法相同：
 | --- | --- | --- |
 | `max_sessions` | 4096 | 同时存在的会话，从 offer 起计；再多一个应答 `503` |
 | `max_relays` | 4096 | 同时中继的对端地址，各占一个 socket；超过时新地址被丢弃 |
-| `session_timeout` | 30s | 没有任何中继的会话，从应答或最后一个中继结束起，超时后被遗忘 |
+| `session_timeout` | 30s | 没有任何中继的会话，从应答或最后一个中继结束起，超时后被遗忘，其 URL 应答 `404` |
 | `idle_timeout` | 30s | 不发送任何数据的对端地址失去其中继，不论媒体服务器是否还在发送 |
 | `webrtc_proxy` 的 `max_sdp_bytes` | 32 KiB | 请求和 answer 的大小 |
 | `webrtc_proxy` 的 `timeout` | 10s | 从请求的最后一个字节到完整读完 answer |
@@ -395,7 +419,8 @@ JSON 写法相同：
 中继数。`relay_ip` 与媒体服务器同一地址族：另一地址族的媒体地址不被中继。两者在重载后对下一个中继生效。
 
 一个会话最多中继对端的 8 个地址：对端每个发起检查的候选一个，迁移后还会更多。一个会话最多保留 4 个 ufrag，含 ICE
-重启产生的。中继在其 socket 打开期间最多暂存 8 个数据报。
+重启产生的。中继在其 socket 打开期间最多暂存 8 个数据报，打开最多等 5 秒，否则关闭中继。fit 的 `limits.max_conns`
+既不计对端的 UDP 地址，也不计通往媒体服务器的 socket：两者都由 `max_relays` 限制。
 
 ### ICE 重启、consent 与迁移的对端
 
@@ -417,11 +442,12 @@ fit 做不到的：
 从下一个 answer 起生效。`listen` 改变会结束所有中继和会话，对端需重新 POST offer。被重载移出上游的媒体服务器，
 其中继保留，而其会话的请求应答 `502`。
 
-### 指标
+### 指标与日志
 
-`fit_webrtc_proxy_sessions`、`fit_webrtc_proxy_relays`、`fit_webrtc_proxy_sessions_total`、
+Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_webrtc_proxy_sessions`、`fit_webrtc_proxy_relays`、`fit_webrtc_proxy_sessions_total`、
 `fit_webrtc_proxy_refused_total`、`fit_webrtc_proxy_sessions_ended_total{reason="delete"|"expired"|"reload"}`、
 `fit_webrtc_proxy_relays_total`、
 `fit_webrtc_proxy_dropped_total{reason="not_stun"|"unknown_ufrag"|"integrity"|"limit"|"no_port"}`、
 `fit_webrtc_proxy_relayed_bytes_total{direction="to_backend"|"to_client"}` 和
-`fit_webrtc_proxy_restarts_total`。信令请求计入上游自己的指标。
+`fit_webrtc_proxy_restarts_total`。信令请求计入上游自己的指标。代理的消息写入 `webrtc` 日志，前缀
+`webrtc.proxy: `：其端口以 `info` 级别记录，结束会话的 `listen` 修改以 `warn` 级别记录。

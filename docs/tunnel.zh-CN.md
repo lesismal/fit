@@ -2,6 +2,8 @@
 
 [English](tunnel.md) | [简体中文](tunnel.zh-CN.md)
 
+配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[tunnel-server](../examples/tunnel-server/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-client](../examples/tunnel-client/fit.conf)。
+
 fit 的隧道让人经由一台谁都能连上的服务端，访问只有旁边那台主机才连得到的机器上的 TCP 服务。它原本是
 一个独立程序 fibhub，现在是 fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和网关的路由并存，
 也可以单独运行（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
@@ -19,6 +21,10 @@ fit 的隧道让人经由一台谁都能连上的服务端，访问只有旁边�
 
 fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是**主动向外**连接服务端，所以都不需要开放
 端口。一个进程可以运行其中任意几个角色，三个都运行也可以，有网关或没有都行。
+
+隧道的每个字节都经服务端中继，只要节点和客户端能连上一台服务端，现在就能用。计划中的
+[P2P 里程碑](decisions/025-p2p.zh-CN.md)走另一条路：ICE 在两个 NAT 上打洞，让 NAT 后的两台主机直接相连，
+承载 TCP 和 UDP 服务，只在打不通时才回退到 TURN 中继。
 
 ## 运行角色
 
@@ -98,13 +104,13 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 | `name` | 主机名 | 告知节点和客户端的名字 |
 | `password` | 无：不接受任何注册 | 节点和客户端注册用的密码，以 HMAC 证明知道它，从不发送 |
 | `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密；节点和客户端需要相同的密码 |
-| `listeners` | 无 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/fibhub` |
-| `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供客户端的 `web_proxies` 使用；不设密码时用服务端的密码 |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`；有 quic 监听而没有证书时，服务端生成自签名证书并写入这里 |
+| `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/fibhub`，只有 ws 监听有路径 |
+| `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供客户端的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用服务端的密码，`max_conns` 默认 32 |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；有 quic 监听而没有证书时，服务端生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
 | `register_timeout` | 10s | 一条链路注册的时限 |
 | `call_timeout` | 15s | 节点应答的时限：打开隧道、列出或设置服务 |
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | 服务端保有资源的上限 |
-| `console` | 无 | 服务端的页面 |
+| `console` | 无 | 服务端的页面（见[控制台](#控制台)） |
 
 ### tunnel.node
 
@@ -124,8 +130,8 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 | 字段 | 默认 | 含义 |
 |------|------|------|
 | `name`、`meta`、`servers` | | 同节点 |
-| `forwards` | 无 | `{listen, node, service, server}`：不指定 `server` 时，隧道分散到所有有这个节点的服务端 |
-| `web_proxies` | 无 | `{name, listen, url, password, max_conns}`：经服务端的 `console_socket` 在本地提供它的控制台 |
+| `forwards` | 无 | `{listen, node, service, server}`：不指定 `server` 时，隧道分散到所有有这个节点的服务端，到节点路径更快的服务端分得更多 |
+| `web_proxies` | 无 | `{name, listen, url, password, max_conns}`：经服务端的 `console_socket` 在本地提供它的控制台，`url` 是它的 `ws://host:port/`；`max_conns` 默认 32 |
 | `open_timeout` | 20s | 打开一条隧道（经服务端到服务）的时限 |
 | `idle_timeout` | 2h | 同节点 |
 | `max_tunnels` | 4096 | 同时打开的隧道数；超出时新接受的连接立即关闭 |
@@ -137,15 +143,19 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 |------|------|------|
 | `name` | 第一个端点的地址 | 转发和页面用来指称它的名字 |
 | `endpoints` | 必填 | `{address, disabled}`，按顺序尝试：`host:port` 或 `tcp://` 为 TCP，`ws://host:port/path`，`quic://host:port` |
-| `password`、`body_password` | | 服务端的密码 |
-| `quic_pin`、`quic_insecure` | | quic 端点如何检查服务端证书：按 SHA-256 指纹，或不检查（仅用于测试）；两者都不设时用系统根证书 |
+| `password` | 必填 | 服务端的密码 |
+| `body_password` | 无 | 服务端的消息体密码（如果有） |
+| `quic_pin`、`quic_insecure` | | quic 端点如何检查服务端证书：按服务端页面上显示的 SHA-256 指纹，或不检查（仅用于测试）；两者都不设时用系统根证书 |
 | `pool_size` | 10，最多 100 | 承载隧道的链路数 |
-| `dial_timeout`、`call_timeout`、`retry_interval`、`ping_interval`、`ping_timeout` | 5s、10s、3s、5s、5s | |
+| `dial_timeout` | 5s | 链路拨号的时限 |
+| `call_timeout` | 10s | 服务端应答注册或调用的时限 |
+| `retry_interval` | 3s | 拨号失败或失去服务端后，链路再次拨号前等待的时间 |
+| `ping_interval`、`ping_timeout` | 5s、5s | 多久测一次到服务端的往返时间，以及 ping 多久没有应答算作丢失 |
 
 ## 链路
 
 节点或客户端与每台服务端保持 `pool_size` 条链路。每条链路拨号第一个未禁用的端点，失败时回退到下一个，
-随后注册；失去服务端后隔 `retry_interval` 再拨号。同名同类型的链路，无论来自多少个进程，在服务端看来
+随后注册；拨号失败或失去服务端后隔 `retry_interval` 再拨号。同名同类型的链路，无论来自多少个进程，在服务端看来
 都是同一个对端。每条隧道始终走一条链路，使它的帧保持顺序；新隧道走承载隧道最少的链路，每条链路最多
 承载 64 条，需要更多隧道的对端用更大的连接池。
 
@@ -153,7 +163,8 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
   `proxy_pass` 加 `Upgrade`；没有 `wss://`，所以请设置 `body_password`。
 - **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fibhub`。有 quic 监听
   需要证书时，服务端生成自签名证书并保存在它的成员里，所以节点和客户端固定的指纹在重启后不变。
-- **注册**是以密码为密钥、对对端类型、名字、时间和随机数做的 HMAC-SHA256；同一个随机数只接受一次。
+- **注册**是以密码为密钥、对对端类型、名字、时间和随机数做的 HMAC-SHA256；时间与服务端时钟相差不得超过
+  5 分钟，同一个随机数只接受一次。
 - **消息体加密**：各方都设置 `body_password` 时，每个帧的消息体用 AES-256-GCM 加密，帧头也参与认证；
   未加密或解不开的帧会关闭链路。
 
@@ -173,17 +184,22 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 
 ## 控制台
 
-每个角色的 `console` 提供它的页面，登录方式与 `admin.console` 相同：用户的 bcrypt 哈希由
-`fit hash-password` 生成，会话 cookie 加 CSRF token；除非设置 `cert_file` 和 `key_file`，只能监听回环地址。
+每个角色的 `console` 提供它的页面，登录方式与 `admin.console` 相同（见[控制台](console.zh-CN.md)）：
+`{address, cert_file, key_file, users, session_timeout, session_lifetime, max_sessions, max_conns}`，
+用户的 bcrypt 哈希由 `fit hash-password` 生成，会话 cookie 加 CSRF token；除非设置 `cert_file` 和
+`key_file`，只能监听回环地址。
 
 - **服务端**：节点（含服务和延迟）与客户端；隧道（含两个方向的字节数和整条路径的延迟）。查询节点、设置
-  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制 QUIC 证书指纹。
-- **节点**：它的服务端，以及每条链路使用的协议，可编辑；它的服务，保存后通知所有服务端；它的隧道。
+  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制 QUIC 证书指纹。在这里设置
+  的服务会写入节点自己的成员。
+- **节点**：它的服务端，以及每条链路使用的协议，可增删改；它的服务，保存后通知所有服务端；它的隧道，
+  可关闭。
 - **客户端**：它的服务端（编辑方式同节点）、它们的节点和服务，以及每台服务端分担某个节点隧道的比例；
-  经服务端设置节点的服务；增删转发；它的隧道；告知服务端的 meta；以及经 Web 代理访问每台服务端的控制台。
+  查询节点，经服务端设置节点的服务；增删转发；它的隧道，可关闭；告知服务端的 meta；以及经 Web 代理访问
+  每台服务端的控制台。
 
 页面所做的修改通过 `app.Host.Edit` 写入角色在配置中的成员，再像其他配置一样从那里生效：它进入配置历史；
-配置了 `admin.store` 时会加密保存到存储中，下次启动时读回。没有存储时，修改只在 fit 重启或重新读取配置
+配置了 `admin.store` 时会加密保存到存储中，下次启动时读回（存储见[控制台](console.zh-CN.md)）。没有存储时，修改只在 fit 重启或重新读取配置
 文件之前有效，页面会提示这一点。每个页面都有隧道全景图（**详情**）以及主题和语言选择。
 
 服务端的控制台在无法直接访问的地方，可以经加密 WebSocket 访问：设置服务端的 `console_socket`，客户端的
@@ -229,4 +245,5 @@ fibhub 把节点叫作 *pod*，把服务叫作 *node*。节点和客户端都是
 `go test -race ./tunnel/...` 像 `fit run` 那样通过 fit 的配置、在真实引擎上运行这些角色：经 TCP、
 WebSocket 和 QUIC 的隧道（加密与不加密消息体）、大数据量传输、慢服务和慢客户端、中途断开的连接、页面修改
 写回配置，以及从存储读回设置的重启。`test/docker/tunnel/fit-tunnel-docker.sh test` 让服务端、节点和
-客户端各自运行在独立容器中，设备位于只有其节点可达的网络上，通过控制台和隧道测试全部功能。
+客户端各自运行在独立容器中，设备位于只有其节点可达的网络上，通过控制台和隧道测试全部功能，然后重启
+每个实例，检查它们从各自的存储中恢复。

@@ -24,6 +24,13 @@ docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:
 - **状态**（如 ACME 的证书）放在 volume 里，在配置的存储目录中指定。
 - **Admin API** 默认在容器内的 127.0.0.1:2019 监听。要从外部访问，给它所有网卡的地址和 `token_file`，
   fit 随后会要求带上 token。
+- **store**：设置 `admin.store` 后，配置每次修改都会写入 store，方式是在其所在目录写一个新文件再改名覆盖：把这个目录放在
+  volume 里，密码放在环境变量（`password_env`）或挂载的文件（`password_file`）中，而不是写在配置里。
+- **控制台**：设置 `admin.console` 后，默认在容器内的 127.0.0.1:2020 监听。要从外部访问，给它所有网卡的地址，以及
+  `cert_file` 和 `key_file`，此时 fit 要求这两项。
+- **WebRTC** 使用 UDP：用 `/udp` 发布 `webrtc.turn` 的 `listen` 端口及其中继端口（`port_min`-`port_max`），以及
+  `webrtc.media` 或 `webrtc.proxy` 的 `listen` 端口，如 `-p 3478:3478/udp`。在 Docker 的 NAT 后面，通过 `public_ip`
+  （`webrtc.turn`）和 `public_ips`（`webrtc.media`、`webrtc.proxy`）告诉对端主机的地址。
 - **Docker provider** 读取属于 root 的 `/var/run/docker.sock`：以只读方式挂载并以 root 运行 fit（Compose
   示例的做法），或把 provider 的 `endpoint` 指向一个 socket 代理。
 - **多平台**：`docker buildx build --platform linux/amd64,linux/arm64 .` 在构建机自己的平台上交叉编译每个目标，
@@ -100,10 +107,11 @@ sudo systemctl enable --now fit
 ```
 
 - fit 以系统用户 `fit` 运行，只带 `CAP_NET_BIND_SERVICE`，因此可以绑定 80 和 443 端口；文件系统只读，只有
-  `/var/lib/fit`（`StateDirectory`，ACME 的存储放这里）和 `/run/fit`（`RuntimeDirectory`，用于 Admin API 的
+  `/var/lib/fit`（`StateDirectory`，ACME 的存储和 `admin.store` 的 `path` 放这里）和 `/run/fit`（`RuntimeDirectory`，用于 Admin API 的
   Unix socket，`unix//run/fit/admin.sock`）可写。`fit@<name>` 对应 `/var/lib/fit/<name>` 和 `/run/fit/<name>`。
 - fit 启动前先用 `fit validate` 检查配置。`systemctl reload fit` 检查新配置后给 fit 发 SIGHUP：配置校验不通过时
-  reload 失败，fit 继续使用正在运行的配置。
+  reload 失败，fit 继续使用正在运行的配置。设置 `admin.store` 后，该文件只给出 `admin`，配置在 store 中，SIGHUP 会重新读取
+  store，例如在以用户 `fit` 执行 `fit store import` 之后。
 - `systemctl stop fit` 发送 SIGTERM；fit 最多等 30s（`-shutdown-timeout`）让进行中的请求完成，systemd 最多等
   fit 40s。
 - Docker provider 需要 socket 所属的组：`systemctl edit fit`，写入 `[Service]` 和 `SupplementaryGroups=docker`。

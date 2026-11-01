@@ -30,7 +30,8 @@ Flags:
 	              github.com/lesismal/fit/modules/standard (every handler and
 	              middleware), github.com/lesismal/fit/provider/standard
 	              (every provider) or github.com/lesismal/fit/app/standard
-	              (the agent's and the tunnel's roles)
+	              (the agent's and the tunnel's roles, and WebRTC's TURN and
+	              media servers)
 	-fit v        the fit to build on: a version of github.com/lesismal/fit,
 	              or a directory holding its source; this fit's own version
 	              when left out

@@ -16,6 +16,11 @@
 - [M4 平台集成](#m4-平台集成)
 - [M5 缓存与扩展](#m5-缓存与扩展)
 - [1.0](#10)
+- [P2P 与 NAT 穿透](#p2p-与-nat-穿透)
+- [VPN：fit 节点组成的网络](#vpnfit-节点组成的网络)
+- [控制台：登录与加密的 store](#控制台登录与加密的-store)
+- [Agent 与 tunnel](#agent-与-tunnel)
+- [WebRTC](#webrtc)
 
 ## 如何进行一次迭代
 
@@ -60,7 +65,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 | 包 | 内容 |
 | --- | --- |
-| `cmd/fit` | 命令行：`run`、`validate`、`adapt`、`build`、`version` |
+| `cmd/fit` | 可执行文件；命令在 `cli` 中：`run`、`validate`、`adapt`、`schema`、`build`、`version`、`hash-password`、`store` |
 | `config` | 原生配置类型、严格的 JSON 加载 |
 | `schema` | 由配置类型和已注册模块生成的 JSON Schema |
 | `module` | 模块注册表和核心接口 |
@@ -73,14 +78,20 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `upstream` | 上游连接池、负载均衡、被动和主动健康检查 |
 | `l4` | TCP 和 UDP 代理、SNI 分流、PROXY protocol |
 | `p2p/stun` | listener 上的 STUN 服务器，走 UDP 和 TCP；I86 时其消息改用 fib 的 `webrtc/stun`（决定 029） |
-| `webrtc/turn` | TURN 服务器角色 `webrtc.turn`，基于 fib 的 `webrtc/turn/turnserver`（决定 029） |
+| `webrtc/turn` | TURN 服务器角色 `webrtc.turn`，基于 fib 的 `webrtc/turn/turnserver`（决定 029）；P2P 的中继 |
+| `webrtc/media` | 角色 `webrtc.media` 和 `webrtc.proxy`，以及 handler `whip`、`whep` 和 `webrtc_proxy`（决定 029） |
 | `p2p` | 连通候选对上的隧道、信令、配置里的 P2P 应用 |
 | `vpn/packet` | IP 头与 overlay 路由表 |
 | `vpn/tun` | Linux、macOS、FreeBSD 和 Windows 上的 TUN 设备 |
 | `vpn/relay` | 中转协议、服务端，以及挑选传输的客户端 |
 | `vpn` | 节点、协调者、配置里的 VPN 应用 |
 | `tlsmgr` | 证书管理、存储、ACME、OCSP |
-| `admin` | Admin API 和配置版本 |
+| `admin` | Admin API 和配置版本；控制台（决定 027） |
+| `admin/store` | 加密的 store，fitstore 格式（决定 027） |
+| `login` | 登录、会话、CSRF 令牌和锁定，供控制台和角色的页面使用 |
+| `app`、`app/console` | 配置中的角色：注册表与管理器、经 `Host.Edit` 写回，以及角色的页面（决定 028） |
+| `agent/...` | agent 的角色：`hub`、`node`、`client` |
+| `tunnel/...` | tunnel 的角色：`server`、`node`、`client` |
 | `provider/...` | file、docker、kubernetes、consul、etcd |
 | `observe` | 访问日志、指标、追踪 |
 | `plugin/...` | 编译期模块和 WASM |
@@ -92,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I112。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -1027,6 +1038,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
   那个提交。
 - **完成标准**：朝某地址打开的对端从监听端口先发出数据并收到应答；它与其他对端一样超时、关闭和计数，在所有后端上都是如此。
 - **涉及**：fib 的 engine；`go.mod`。
+- **由 I108 完成**：fib 已把 A49 实现为同步的 `96a2331`，fit 随 fib `80c7f76` 采用。
 
 ### I86 STUN 客户端与 NAT 行为
 
@@ -1050,8 +1062,8 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 
 ### I88 TURN 客户端
 
-- **做**：从 fib UDP 对端驱动 fib 的 `turn.Client`（分配、刷新、permission 和 channel、401/438 的 nonce 往返），A55 进入
-  fib 后也从 TCP 连接驱动；经 allocation 与对端互发数据，绑定后走 channel。
+- **做**：从 fib UDP 对端驱动 fib 的 `turn.Client`（分配、刷新、permission 和 channel、401/438 的 nonce 往返），也经 TCP 和
+  TLS 驱动（A55，自 `84a67f7` 起在 fib 中）；经 allocation 与对端互发数据，绑定后走 channel。
 - **完成标准**：客户端与 fit 的服务器配合工作，使 allocation 存活超过其生存期；过期的 nonce 会重试。
 - **涉及**：`p2p`。
 
@@ -1080,7 +1092,7 @@ I31 留下的问题：按需加入的名字一直保留到重启；在复查 M2 
 ### I92 信令与配置里的 P2P 应用
 
 - **做**：汇合点 fit 上的信令端点，按名字配对对端，交换它们的凭据、指纹和候选（trickle），每个对端都经过认证；配置里
-  监听上的 `stun` 和 `turn` 服务器，以及暴露或访问服务的 `p2p` 对端；schema、Admin API、指标；各友好格式中的写法。
+  监听上的 `stun` 服务器，以及暴露或访问服务、经 `webrtc.turn`（I87）或其他 TURN 服务器中继的 `p2p` 对端；schema、Admin API、指标；各友好格式中的写法。
 - **完成标准**：两个在模拟 NAT 后面的 fit 进程经第三个 fit 访问彼此的服务，只靠配置建立，重载时不中断已打开的隧道。
 - **涉及**：`p2p`、`config`、`schema`、`listener`、`runtime`、`admin`、`observe`、`test/e2e`、`docs`。
 

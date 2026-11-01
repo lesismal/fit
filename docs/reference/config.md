@@ -1136,7 +1136,8 @@ When the store does not exist yet, the rest of the file is its first content. `f
 and `fit store import` read and write it. `admin.console` serves the console, web pages behind a
 user name and password from which every part of the config but `admin` is changed, with a form
 made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
-`key_file`. See [decision 027](../decisions/027-console-and-store.md).
+`key_file`. See [the console and the store](../console.md) and
+[decision 027](../decisions/027-console-and-store.md).
 
 In a .conf file:
 

@@ -2,11 +2,12 @@
 
 [English](comparison.md) | [简体中文](comparison.zh-CN.md)
 
-fit is planned as a server built on [fib](https://github.com/lesismal/fib), in the same space as
-nginx, Caddy and Traefik: reverse proxy, load balancer, TLS terminator, static file server and API
-gateway. This document compares the architecture, features, strengths and weaknesses of the three,
-and the last section says which of their designs fit should take, what fib already provides, and
-what is still missing.
+fit is a server built on [fib](https://github.com/lesismal/fib), in the same space as nginx, Caddy
+and Traefik: reverse proxy, load balancer, TLS terminator, static file server and API gateway. This
+document compares the architecture, features, strengths and weaknesses of the three, and the last
+section says which of their designs fit takes, what fib provides, and what fit had to build; it was
+written before fit, to plan it, and the [roadmap](roadmap.md) and [progress](progress.md) say what
+came of it.
 
 It draws on public material as of 2026, covering nginx 1.2x (open source), Caddy 2.x and
 Traefik 3.x. All three move quickly; check the official documentation for any given version.
@@ -189,6 +190,7 @@ flowchart LR
 | Management UI | ◐ Plus dashboard | — | ✓ dashboard |
 | Structured logs | ◐ JSON assembled with `log_format` | ✓ JSON (zap) | ✓ JSON |
 | Scripting and plugins | C modules, njs, Lua (OpenResty) | Go modules (rebuild) | Yaegi Go plugins, WASM |
+| WebRTC: a TURN server, WHIP and WHEP | — | — | — |
 
 ## Strengths and weaknesses
 
@@ -301,6 +303,7 @@ Traefik's:
 | Static files | `http.FileCache` (in memory, precompressed twins, inotify), sendfile | static serving close to nginx's, which Traefik lacks |
 | Routing and middleware | a chi-style Router; compress, cors, limiter, logger and other middleware | route matching and the common middleware |
 | Several processes | `prefork` | an optional nginx-style deployment |
+| WebRTC | `webrtc` (`PeerConnection`, `Mux`), `webrtc/turn/turnserver`, `webrtc/stun`, `webrtc/ice` | a TURN server, WHIP and WHEP with fit as the media server or in front of others; none of the three has them |
 
 ### What fit has to build
 
@@ -371,4 +374,7 @@ Traefik's:
    converter.
 
 The [roadmap](roadmap.md) expands these milestones with scope, exit criteria and performance
-targets.
+targets. Since 1.0, it adds what none of the three does, run beside the gateway on its engine: the
+config kept encrypted and changed from a console behind logins, WebRTC, the tunnel, which reaches
+services behind NAT, and the agent, which shares AI models among machines
+([after 1.0](roadmap.md#after-10)).

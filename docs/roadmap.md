@@ -8,7 +8,9 @@ fit is a reverse proxy, load balancer, TLS terminator, static file server and AP
 know it is done, and which part of fib it builds on.
 
 fit has done the iterations of every milestone, 1.0's included; [progress](progress.md) says what
-is built. The [development plan](dev-plan.md) breaks these milestones into small iterations, each
+is built. Since 1.0, tracks beyond the edge proxy have been added ([after 1.0](#after-10)): the
+console and the encrypted store, the agent and the tunnel, and WebRTC are done; P2P and a VPN are
+under way. The [development plan](dev-plan.md) breaks these milestones into small iterations, each
 sized for one working session. The order of the milestones is firm; their contents will move as the work teaches
 us things. Dates are left out on purpose, because a milestone ends when its exit criteria are met,
 not when a calendar says so.
@@ -25,6 +27,7 @@ not when a calendar says so.
   - [M4, platform integration](#m4-platform-integration)
   - [M5, caching and extensions](#m5-caching-and-extensions)
   - [1.0](#10)
+  - [After 1.0](#after-10)
 - [Feature map](#feature-map)
 - [Performance targets](#performance-targets)
 - [Risks and open questions](#risks-and-open-questions)
@@ -310,9 +313,24 @@ model for the memory tier.
 - Documentation: a getting started guide, a full config reference, and migration guides from
   nginx, Caddy and Traefik.
 
+### After 1.0
+
+Since 1.0, fit takes on work beyond the edge proxy, each a track of its own in the
+[development plan](dev-plan.md). What these tracks run, they run beside the gateway, on its engine,
+set in the same config and changed with it.
+
+| Track | What it delivers | Status | fib parts |
+| --- | --- | --- | --- |
+| [Console, logins and an encrypted store](dev-plan.md#console-logins-and-an-encrypted-store) | `admin.store`, the config kept encrypted in a file fit runs from; `admin.console`, web pages behind logins with an editor made from the schema; `fit store export` and `import` ([decision 027](decisions/027-console-and-store.md), [the console](console.md)) | done (I104) | — |
+| [Agent and tunnel](dev-plan.md#agent-and-tunnel) | roles in the config: the tunnel's server, node and client, which reach services behind NAT, and the agent's hub, node and client, which share AI models among machines ([decision 028](decisions/028-agent-and-tunnel.md)) | done (I105–I107) | `websocket`, QUIC, the asynchronous HTTP client |
+| [WebRTC](dev-plan.md#webrtc) | `webrtc.turn`, a TURN server over UDP, TCP and TLS; the `whip` and `whep` handlers, fit as an SFU; the `webrtc_proxy` handler, WHIP and WHEP proxied to media servers, their UDP routed by ICE ufrag ([decision 029](decisions/029-webrtc.md), [WebRTC](webrtc.md)) | done (I87, I108–I111) | `webrtc`, `webrtc/turn/turnserver` |
+| [P2P, NAT traversal](dev-plan.md#p2p-nat-traversal) | two hosts behind NAT connected directly through ICE, or through a TURN relay, carrying TCP and UDP services ([decision 025](decisions/025-p2p.md)) | under way: STUN messages and a STUN server (`p2p/stun`, I84), a library not yet in the config, and A49 in fib (I85) done; the STUN and TURN clients, ICE, tunnels and the config to come (I86, I88–I93) | `webrtc/stun`, `webrtc/turn`, `webrtc/ice` |
+| [VPN](dev-plan.md#vpn-a-network-of-fit-nodes) | nodes in one overlay network, each with a TUN interface, IP packets sent directly or through a relay ([decision 026](decisions/026-vpn.md)) | under way: IP packets and the overlay route table (`vpn/packet`, I94), a library not yet in the config, done; TUN devices, the relay, the coordinator and the node to come (I95–I103) | — |
+
 ## Feature map
 
-The rows follow the [feature table](comparison.md#features) in the comparison.
+The rows follow the [feature table](comparison.md#features) in the comparison, then the tracks
+[after 1.0](#after-10).
 
 | Feature | Milestone | Built on in fib |
 | --- | --- | --- |
@@ -348,6 +366,11 @@ The rows follow the [feature table](comparison.md#features) in the comparison.
 | nginx config converter | M5 | — |
 | TURN server | P2P, I87 ([decision 029](decisions/029-webrtc.md)) | `webrtc/turn/turnserver` |
 | WebRTC: WHIP and WHEP, as a media server and as a proxy | WebRTC, I109–I110 | `webrtc` (`PeerConnection`, `Mux`) |
+| Config kept encrypted; a web console with logins | Console, I104 | — |
+| Tunnel: services behind NAT reached through a server | Agent and tunnel, I106 | `websocket`, QUIC |
+| Agent: AI models shared among machines | Agent and tunnel, I107 | `websocket`, the asynchronous HTTP client |
+| STUN server | P2P, I84 (a library, not yet in the config) | — |
+| VPN: IP packets and the overlay route table | VPN, I94 (a library, not yet in the config) | — |
 
 ## Performance targets
 
@@ -371,10 +394,14 @@ published in the repository with the hardware and configs used.
 
 - **ACME library.** CertMagic is the most complete but brings Caddy's assumptions; lego is a client
   only; writing our own keeps dependencies lean but is a lot of work to get right. Decide in M2,
-  behind fit's own certificate manager interface so the choice can change.
+  behind fit's own certificate manager interface so the choice can change. Settled in M2:
+  fit manages certificates itself, with `golang.org/x/crypto/acme` for the protocol
+  ([decision 007](decisions/007-acme-client.md)).
 - **Config formats.** JSON is the native format; whether the human-friendly format is YAML, a
   Caddyfile-like syntax or something else is open until M5. The schema must be stable well before
-  that, because providers and the Admin API depend on it.
+  that, because providers and the Admin API depend on it. Settled: YAML
+  ([decision 019](decisions/019-yaml-config.md)) and fit's own .conf format
+  ([decision 021](decisions/021-fit-format-and-config-files.md)), both read into the native JSON.
 - **Gaps in fib.** fib has no `http.Hijacker`, and `Request.Context()` is not cancelled when the
   client leaves, so standard-library proxies and some middleware cannot be reused as they are. fit
   works around this with fib's own APIs; anything missing from fib is raised there rather than
@@ -383,9 +410,12 @@ published in the repository with the hardware and configs used.
   needs its own pool and a timeout, and the pools need a fixed waiting order. Getting this wrong
   costs throughput or deadlocks under load, so each one comes with a load test that saturates it.
 - **Gateway API conformance.** The suite is large and changes with each Gateway API release; M4
-  should claim a narrow profile first and grow it.
+  should claim a narrow profile first and grow it. M4 claims the `GATEWAY-HTTP` profile
+  ([decision 012](decisions/012-gateway-conformance.md)).
 - **WASM cost.** Calls across the WASM boundary and memory copies may make plugins too slow for
-  hot paths. M5 measures this before committing to the Proxy-Wasm ABI.
+  hot paths. M5 measures this before committing to the Proxy-Wasm ABI. Settled in M5: wazero,
+  with an ABI of fit's own and a subset of Proxy-Wasm
+  ([decision 017](decisions/017-wasm-runtime.md), [decision 018](decisions/018-proxy-wasm-subset.md)).
 - **Distributed state.** Rate limits and caches are local to one instance in this roadmap. Sharing
   them across a cluster (Redis or a gossip protocol) is left for after 1.0 unless users need it
   sooner.

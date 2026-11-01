@@ -4,8 +4,9 @@
 
 fit reads its config from one file or several, in any of three formats: a **.conf** file, **YAML**
 or **JSON**. Each says the same things, field for field: the addresses fit listens on, the routes
-that pick what answers each request, the upstreams requests are proxied to, and settings for logs,
-limits, certificates and the Admin API. JSON is what the Admin API takes and returns; the three
+that pick what answers each request, the upstreams requests are proxied to, settings for logs,
+limits, certificates and the Admin API, and the roles fit runs beside the gateway: the agent, the
+tunnel and WebRTC's. JSON is what the Admin API takes and returns; the three
 formats have exactly the same fields, and any of them can be converted to the others.
 
 | Format | Best for | Reference |
@@ -98,13 +99,18 @@ More: the [JSON reference](reference/json.md).
 | `routes` | A match, middleware and a handler for each kind of request | [Routes](reference/config.md#routes) |
 | `upstreams` | Servers to proxy to, balanced and health checked | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP and UDP proxying | [Services](reference/config.md#services) |
-| handlers | `proxy`, `static`, `respond`, `fastcgi`, `forward_proxy` | [Handlers](reference/config.md#handlers) |
+| handlers | `proxy`, `static`, `respond`, `fastcgi`, `forward_proxy`; `whip`, `whep` and `webrtc_proxy` for WebRTC | [Handlers](reference/config.md#handlers) |
 | middleware | authentication, rate limits, caching, compression, headers, rewrites and more | [Middleware](reference/config.md#middleware) |
 | `log`, `access_log`, `telemetry`, `metrics` | Logs, traces and metrics | [Log](reference/config.md#log), [Access log](reference/config.md#access-log), [Telemetry](reference/config.md#telemetry), [Metrics](reference/config.md#metrics) |
 | `limits` | Bounds on connections, headers, bodies and memory | [Limits](reference/config.md#limits) |
 | `auto_https`, `acme` | HTTPS by default and certificates | [HTTPS by default](reference/config.md#https-by-default), [ACME](reference/config.md#acme) |
-| `admin` | The Admin API | [Admin API](reference/config.md#admin-api) |
+| `engine` | fib's event loops, workers and buffers | [Engine](reference/config.md#engine) |
+| `admin` | The Admin API; the config kept encrypted in a store (`store`); the console (`console`) | [Admin API](reference/config.md#admin-api), [the console](console.md) |
+| `agent` | The agent's hub, node and client, which share AI models among machines | [Agent](reference/config.md#agent), [the agent](agent.md) |
+| `tunnel` | The tunnel's server, node and client, which reach services behind NAT | [Tunnel](reference/config.md#tunnel), [the tunnel](tunnel.md) |
+| `webrtc` | A TURN server (`turn`), the media port of `whip` and `whep` (`media`), and the relay of `webrtc_proxy` (`proxy`) | [WebRTC](reference/config.md#webrtc), [WebRTC](webrtc.md) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
+| `schema_version` | The version of the config, 1; optional | [Compatibility](compatibility.md#the-schemas-version) |
 
 ## Several files and directories
 
@@ -152,7 +158,9 @@ converts between the formats, merging several files into one:
 | a directory | one file | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` prints the config's JSON Schema, for editors to complete and check JSON and YAML as
-they are written; `fit schema -template fit` prints the .conf template.
+they are written; `fit schema -template fit` prints the .conf template. `fit hash-password` reads a
+password from standard input and prints its bcrypt hash, for `basic_auth`'s users and the
+console's.
 
 ## Changing a running config
 
@@ -161,6 +169,15 @@ directory's files are added or taken out, whatever their format. A config that f
 compile is refused, and the running one stays. The [Admin API](reference/config.md#admin-api)
 reads and replaces the running config as JSON, by whole config or by JSON pointer, with versions
 to roll back to.
+
+With `admin.store`, the config is kept encrypted in a file of its own, the store, and fit runs from
+it: the files fit is started with give `admin`, and the rest of what they hold is only the store's
+first content, used when the store does not exist yet. Every config applied, through the Admin API,
+the console or a role's pages, is written to the store; SIGHUP reads the store again, and `-watch`
+is refused. `fit store export -c fit.conf` prints what the store holds, as JSON, and
+`fit store import -c fit.conf new.json` checks a config and seals it as the store, replacing it.
+`admin.console` serves web pages behind logins from which every part of the config but `admin` is
+changed. [The console](console.md) has the details.
 
 ## Coming from another server
 

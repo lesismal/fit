@@ -2,6 +2,8 @@
 
 [English](agent.md) | [简体中文](agent.zh-CN.md)
 
+Config examples, each in .conf, YAML and JSON: [agent-hub](../examples/agent-hub/fit.conf), [agent-node](../examples/agent-node/fit.conf), [agent-client](../examples/agent-client/fit.conf).
+
 The agent shares AI models among machines. It is three roles of fit, each set by a member of the
 config:
 
@@ -22,13 +24,18 @@ listeners and routes or without any; a config with roles and no routes needs no 
 role adds its bindings (its pages, its mesh listener, a client's API) to the listeners' fib engine,
 and dials its peers on it. The node's HTTP client dials its upstreams on the upstream engine that
 fit's own upstream pools use. The roles are the port of agenthub into fit; why and how is in
-[decision 028](decisions/028-agent-and-tunnel.md).
+[decision 028](decisions/028-agent-and-tunnel.md). The [tunnel](tunnel.md) and [WebRTC](webrtc.md)
+roles run the same way, beside these.
+
+Each role logs to fit's `agent` logger, whose level `log.levels` sets, its lines prefixed with the
+role's member, as `agent.node: `.
 
 ## Configuration
 
 The members are `agent.hub`, `agent.node` and `agent.client`. They are decoded as strictly as the
 rest of the config: an unknown field is an error, and `fit validate` checks every bound below. The
-examples are JSON; the same fields work in a .conf or YAML config.
+examples are JSON; the same fields work in a .conf or YAML config. The
+[config reference](reference/config.md#agent) lists the same fields.
 
 ### What every role has
 
@@ -52,7 +59,7 @@ examples are JSON; the same fields work in a .conf or YAML config.
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `address` | string | required | The peer's host and port, as its `listen.address` says. The port is a number. Each address appears once. |
+| `address` | string | required | The peer's host and port, as its `listen.address` says. The host is required and the port is a number. Each address appears once. |
 | `password` | string | required | The peer's `listen.password`. |
 | `role` | string | required | The role the peer must announce: `hub`, `node` or `client`, never the dialing role's own. A hub dials nodes and clients, a node dials hubs and clients, a client dials hubs and nodes. |
 
@@ -92,11 +99,11 @@ The fields every role has, and:
 | --- | --- | --- | --- |
 | `name` | string | required | The name agents ask for: 1 to 128 characters, no spaces. A name and `api` are unique among the node's models, so one name may have an OpenAI and an Anthropic model. |
 | `api` | string | required | `openai` or `anthropic`: the API the upstream speaks, and the agent paths the model is reached through. |
-| `base_url` | string | required | The upstream's base URL, http or https, without a query or a trailing slash, as `http://127.0.0.1:11434/v1`. A call goes to it with its path appended, as `base_url/chat/completions`. |
-| `upstream` | string | `name` | The model ID sent upstream in place of `name`; up to 256 characters. |
-| `api_key` | string | none | The key sent upstream: as `Authorization: Bearer` for `openai`, as `x-api-key` for `anthropic`. Up to 4096 characters. The pages never show it whole. |
+| `base_url` | string | required | The upstream's base URL, http or https, without a query, a fragment or a trailing slash, as `http://127.0.0.1:11434/v1`. A call goes to it with its path appended, as `base_url/chat/completions`. |
+| `upstream` | string | `name` | The model ID sent upstream in place of `name`; up to 256 characters, no spaces. |
+| `api_key` | string | none | The key sent upstream: as `Authorization: Bearer` for `openai`, as `x-api-key` for `anthropic`. Up to 4096 characters, no spaces. The pages never show it whole. |
 | `disabled` | bool | false | Keep the model without serving it. |
-| `description` | string | none | A note about the model; up to 1024 bytes. |
+| `description` | string | none | A note about the model its peers show; up to 1024 bytes. |
 | `max_inflight` | int | 0 | The most calls to the model the node forwards at once, 0 to 100000. A call past it goes to another node. 0 leaves only `proxy.max_inflight`. |
 
 `settings`:
@@ -262,14 +269,18 @@ directly, and one process may run a hub and a node together.
 
 A role keeps nothing in a file of its own. What its pages change is written back into its member:
 the listener, the peers, the name and description, a node's models and settings, a client's API
-keys, and the ID made at first start. The change goes through `admin.Configs` as a config edit by
-the role: the running config with the member replaced is applied as any config is, checked first,
-recorded in the history and open to rollback. The role then moves to the new member without
-dropping links that did not change.
+keys, and the ID made at first start. The change goes through `admin.Configs` as a config edit
+whose source is the member, as `agent.node`: the running config with the member replaced is applied
+as any config is, checked first, recorded in the history and open to rollback. A change the check
+refuses changes nothing, and the pages get 400 with the reason. The role then moves to the new
+member without dropping links that did not change.
 
 - With `admin.store`, the change is written to the store, encrypted, and survives restarts.
 - Without a store, the change runs until fit restarts or reads its files again, and a warning says
   so. Put the config in a store before relying on the pages.
+
+[The console guide](console.md) covers the versions these edits make, rolling one back, and how
+`admin.store` keeps the config.
 
 Kicking a link from the pages is the one change that is not written: it closes the link, and the
 dialer links again.
@@ -315,7 +326,8 @@ with a rate-limited error. A link whose pushes wait past 1024 is closed.
 
 A stream carries data both ways. Each direction has a receive window of 256 KiB: a sender sends
 while it has credit, and the receiver grants credit back as it consumes. A slow reader holds back
-its own stream and no other. Only the responder ends a stream, with its result. A stream that
+its own stream and no other. Only the responder ends a stream, with its result; the opener may
+close its side of it, as a streamed request body does at its end, or cancel it. A stream that
 carries nothing either way for `stream_idle` ends; a side still working, as a node waiting for an
 upstream's first token, sends stream-keepalive frames, which reset the idle timer.
 
@@ -332,7 +344,8 @@ finish, for up to 10 seconds, and then the links close. Dialers link again with 
 ### Hello and roles
 
 The dialer's first call is `/mesh/hello`, with its identity: role, ID, name, host name, version,
-mesh address. The listener answers with its own. A link that has not said hello in 15 seconds is
+process ID, start time, its mesh address and its pages' URL when it has them. The listener answers
+with its own. A link that has not said hello in 15 seconds is
 closed. A peer is refused when:
 
 - its role is the role's own (hubs never link to hubs, nodes to nodes, clients to clients);
@@ -374,7 +387,7 @@ the upstream down) or `ready`; only a ready model below its `max_inflight` serve
 
 The pages, and a hub when `allow_hub_manage` is on, list, save, delete and check models. A model's
 key is never shown whole: the list shows its first four and last four characters, or `****` for a
-short key. A save whose key is empty or masked keeps the key the member has.
+key of 12 characters or fewer. A save whose key is empty or masked keeps the key the member has.
 
 ### Checks
 
@@ -396,9 +409,9 @@ upstream also puts the model in `error`; an answer below 500 clears it.
 3. The body goes upstream as it arrives. It is held whole only when the model's `upstream` differs
    from the name the agent asked for, to set the body's top-level `model`; the other members keep
    their bytes. A body past `proxy.max_body_bytes` fails.
-4. The upstream gets `Content-Type: application/json` and the model's key; `anthropic-version`
-   (2023-06-01 when the agent sends none), `anthropic-beta` and `openai-beta` are passed on. No
-   other header of the agent's is, its own key included.
+4. The upstream gets `Content-Type: application/json` and the model's key. For `anthropic`,
+   `anthropic-version` (2023-06-01 when the agent sends none) and `anthropic-beta` are passed on;
+   for `openai`, `OpenAI-Beta`. No other header of the agent's is, its own key included.
 5. While no byte has come back, the node keeps the stream alive. The first frame back is the head:
    the upstream's status, content type and the node's ID. Then each piece of the response body is
    a frame, sent as it arrives, so server-sent events are not batched.
@@ -415,8 +428,10 @@ The pages' "test call" opens the same stream as an agent's call.
 ### Actions and jobs
 
 A node never runs a script or command its caller supplies. Its management is a fixed list of
-actions defined in code: install Ollama, list, pull, show and remove Ollama models, the Ollama
-service's status, restart and logs, `nvidia-smi`, install the NVIDIA Container Toolkit. Each takes
+actions defined in code: install Ollama, list, pull, show and remove Ollama models, show the models
+Ollama has loaded, the Ollama service's status, restart and logs, `nvidia-smi`, install the NVIDIA
+Container Toolkit, each on the systems it applies to (the Ollama service's on Linux; Ollama's
+install on Linux, and on macOS with Homebrew). Each takes
 only declared parameters, checked against a pattern, each passed as its own argument, never through
 a shell. GPU settings (power limits, clocks, fans and the like, per vendor) are checked by type and
 range and run the same way; a vendor's tool install runs a script that is a constant of the code.
@@ -425,6 +440,11 @@ Actions, GPU settings and installs run as jobs, on a pool of their own: at most 
 ninth is refused; 200 jobs are kept, the oldest finished ones dropped first; each keeps the last
 1 MiB of its output. A job past `job_timeout` is killed with its process group. The pages follow a
 job's output as it is written.
+
+The hardware, every `refresh_interval`, and the GPUs' status, when the pages or a hub ask, are read
+on a small pool of the node's (2 running, 16 waiting). The GPUs' status is read with the vendors'
+tools, one read at a time and within 25 seconds, and kept for 5 seconds unless a fresh one is asked
+for.
 
 ### Hub management
 
@@ -483,9 +503,9 @@ decides what is allowed.
 | `POST /v1/messages`, `/v1/messages/count_tokens` | anthropic | the path after `/v1/` |
 | `GET /v1/models`, `GET /v1/models/{id}` | both | answered by the client |
 
-The API is a binding of its own at `api.address`, apart from the pages. Any other path gets 404.
-`GET /v1/models` lists every model name the client can reach, with the fields of both OpenAI's and
-Anthropic's model lists, so either SDK reads it.
+The API is a binding of its own at `api.address`, apart from the pages. Any other path or method
+gets 404. `GET /v1/models` needs a key too; it lists every model name the client's hubs and nodes
+list, with the fields of both OpenAI's and Anthropic's model lists, so either SDK reads it.
 
 A response has the upstream's status and content type, `Cache-Control: no-cache`,
 `X-Accel-Buffering: no` and `X-Agenthub-Node` naming the node that served it; its body is written as
@@ -499,7 +519,8 @@ time. An agent sends it as `Authorization: Bearer <key>` or `x-api-key: <key>`; 
 compared with every hash kept, in constant time.
 
 The keys' use (calls and last use) and the per-model counters (calls, failures, bytes, calls
-running) are kept in memory since the role started; they are not written anywhere.
+running) are kept in memory since the role started; they are not written anywhere. At most 1024
+models are counted apart; calls to more are counted together, as `other`.
 
 ### Routing
 
@@ -518,17 +539,19 @@ After the head there is no retry.
 
 Errors take the shape of the API the agent called: OpenAI's `{"error": {"message", "type", "code"}}`
 or Anthropic's `{"type": "error", "error": {"type", "message"}}`. On `GET /v1/models`, an agent that
-sends `anthropic-version` or `x-api-key` gets Anthropic's shape.
+sends `anthropic-version` or `x-api-key` gets Anthropic's shape. A body past `max_body_bytes` is
+the exception: the HTTP server refuses it with a plain-text 413 before the API reads it.
 
 | Case | Status |
 | --- | --- |
+| An unknown path or method | 404 |
 | A missing or wrong key | 401 |
 | A body that is not JSON, or has no `model` | 400 |
 | A body past `max_body_bytes` | 413 |
 | A model no peer serves, or served only with the other API | 404 |
 | More than `max_inflight` calls | 429 |
 | The model has no ready route, every route was unavailable, or no response began within `first_byte_timeout` | 503 |
-| A node or hub answered a bad request, not found or rate limited | 400, 404, 429 |
+| A node or hub answered a bad request (as a body past the node's `proxy.max_body_bytes`), not found or rate limited | 400, 404, 429 |
 | `timeout` passed before the response began | 504 |
 | Any other failure before the head | 502 |
 
@@ -595,33 +618,53 @@ A role's `console` member serves its web pages, as a binding of its own on the l
 | `session_timeout` | duration | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | duration | `12h` | How long a login lasts at most. |
 | `max_sessions` | int | 64 | The most logins kept; one more ends the oldest. |
-| `max_conns` | int | 32 | The most connections the pages keep open. |
+| `max_conns` | int | 32 | The most connections the pages keep open; one past it is closed as soon as it is accepted. |
 
-Logins work as `admin.console`'s, through the same code. Passwords are checked with bcrypt on the
-console's own pool. After 5 failed logins from an address within 15 minutes, the address is refused
-for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_agent_hub`, `fit_agent_node`
-or `fit_agent_client`; HttpOnly, SameSite=Strict, Secure over TLS). Every request but a GET or HEAD
-carries the session's CSRF token in `X-Fit-Csrf`, and requests from other origins are refused.
+Logins work as `admin.console`'s, through the same code; [the console guide](console.md) describes
+users, sessions and lockouts. Passwords are checked with bcrypt on the console's own pool (4
+running, 64 waiting, at most 2 checks at once); a task that waits past 30 seconds gets 504, and
+one past the queue 503. After 5 failed logins from an address within 15 minutes, the address is
+refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_agent_hub`,
+`fit_agent_node` or `fit_agent_client`; HttpOnly, SameSite=Strict, Secure over TLS). Every API
+request but a GET or HEAD carries the session's CSRF token in `X-Fit-Csrf`, and a request whose
+`Origin` is another site is refused with 403. A request body is at most 1 MiB and its header 16 KiB.
+
+What each role's pages show, in English or Chinese:
+
+- **A hub**: an overview; its nodes, and for each one that allows hub management, its models, GPUs,
+  actions, jobs and name; the models of its nodes; the clients linked to it; its links; its name.
+- **A node**: an overview, with its name and description; its models, with a check and a test call
+  each; its GPUs and their settings; its actions; its jobs; its links; its settings.
+- **A client**: an overview, with the setups of [Using it](#using-it) filled in with its own address
+  and models; the models it reaches and their routes; its API keys; its links; its name.
+
+The links page sets the listener and the peers, and kicks a link.
 
 The API under `/api/`:
 
 | Endpoint | Answer |
 | --- | --- |
-| `POST /api/login`, `POST /api/logout` | Start or end a session; login answers `{user, csrf}`. |
+| `POST /api/login` | Starts a session from `{username, password}`; answers `{user, csrf}`. |
+| `POST /api/logout` | Ends the session; answers 204. |
 | `GET /api/session` | The user and the CSRF token. |
-| `GET /api/me` | The user and the role's identity; a client adds its API's URL. |
-| `POST /api/rpc<method>` | Runs a method, as `/api/rpc/mesh/peers`, and answers its result as JSON, or `{"error", "code"}` with the code's HTTP status. |
+| `GET /api/me` | `{user, identity}`, the role's identity; a client adds `api_url`, its API's URL. |
+| `POST /api/rpc<method>` | Runs a method, as `/api/rpc/mesh/peers`, and answers its result as JSON, or `{"error", "code"}` with the code's HTTP status; 504 when the method's time ran out. |
 | `POST /api/stream<method>` | Opens a stream method and answers Server-Sent Events: a data event per frame, `end` with the result, `error` with `{code, message}`. Closing the request cancels the stream. |
 
 The pages call the same methods peers call, as a local caller allowed everything, and the methods
 only the pages may call: the mesh's (`/mesh/peers`, `/mesh/dial`, `/mesh/undial`, `/mesh/kick`,
-`/mesh/listen`), a node's settings, a client's keys and models, a hub's managed calls.
+`/mesh/listen`); a hub's node table (`/hub/nodes`), managed calls (`/hub/node/call`,
+`/hub/node/stream`) and name (`/hub/profile/set`); a node's settings (`/node/settings/get`,
+`/node/settings/set`); a client's models, counters, keys and name (`/client/models`,
+`/client/stats`, `/client/keys/list`, `/client/keys/create`, `/client/keys/delete`,
+`/client/profile/set`).
 
-Methods run on the role's pool (16 goroutines, 256 waiting), never on a fib worker; a method past
-the queue gets 503. A stream's events are written without waiting, and its frames are released to
-the stream only as the browser takes them, so a slow browser holds back its own stream; at most 16
-streams are open on a role's pages at once, and a browser that takes nothing for 30 seconds ends
-its stream.
+A method has 10 seconds, the mesh's included; a node's or a client's method that changes the
+config has 30, a model check 20, a node's GPU status and settings 30, and a hub's managed call 90. Methods run on the role's pool (16 goroutines, 256
+waiting), never on a fib worker; a method past the queue gets 503. A stream's events are written
+without waiting, and its frames are released to the stream only as the browser takes them, so a
+slow browser holds back its own stream; at most 16 streams are open on a role's pages at once, a
+seventeenth gets 429, and a browser that takes nothing for 30 seconds ends its stream.
 
 ## Limits and rules
 
@@ -638,26 +681,31 @@ Every bound has a default; a config that sets none is bounded.
 | Frame | 16 MiB | fixed |
 | Pushes waiting per link | 1024, then the link closes | fixed |
 | Dial, handshake, hello | 10s, 5s, 15s | fixed |
-| Method timeout | 10s (a hub's managed call 90s) | fixed |
+| Method timeout | 10s; 30s for a node's or client's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
 | Peers, models, API keys | 64, 256, 256 | fixed |
 | Nodes in a hub's table | 1024 | `max_nodes` |
 | Node calls at once | 256, and per model `max_inflight` | `proxy.max_inflight` |
 | Node request body | 32 MiB | `proxy.max_body_bytes` |
 | Node connect, first byte, idle, total | 10s, 5m, 5m, 30m | `proxy` |
 | Upstream connections per host | 64, with 256 waiting | fixed |
-| Model checks | 15s each; every 60s, 15s in error | fixed |
+| Upstream response body | 1 GiB | fixed |
+| Model checks | 15s each; every 60s, 15s in error; 4 connections per host, 16 waiting | fixed |
 | Jobs | 8 running, 200 kept, 1 MiB output each | fixed |
 | Job run time | 1h | `settings.job_timeout` |
+| Node's hardware and GPU reads | 2 running, 16 waiting; GPU status 25s, kept 5s | fixed |
 | Client API body | 32 MiB, held whole | `api.max_body_bytes` |
 | Client API connections, calls | 256, 256 | `api.max_conns`, `api.max_inflight` |
 | Client first byte, total | 5m, 30m | `api` |
 | Client API header size, header read, read, idle | 64 KiB, 10s, 2m, 2m | fixed |
 | Client wait for a slow agent | 60s per write | fixed |
 | Routes per call: client, hub | 4, 3 | fixed |
+| Client counters | 1024 models, the rest as `other` | fixed |
 | Role pool | 16 running, 256 waiting | fixed |
-| Config edits waiting | 64, across the roles; 30s each | fixed |
+| Config edits waiting | 64, across every role of fit's; each as long as its method's timeout | fixed |
 | Page streams | 16; 30s for a stalled browser | fixed |
 | Page sessions, connections | 64, 32 | `console` |
+| Page request body, header | 1 MiB, 16 KiB | fixed |
+| Console pool | 4 running, 64 waiting, 2 password checks at once; 30s a task | fixed |
 | Failed logins | 5 in 15 minutes, then 15 minutes out | fixed |
 | Draining at stop | 10s | fixed |
 
@@ -701,8 +749,8 @@ state, and write the members by hand, part by part:
 | `console_hash` | a user in `console.users`, as `{"username": "admin", "password_hash": "<the hash>"}`, or a new hash from `fit hash-password` |
 | node `role_data.models` | `agent.node.models`, field for field |
 | node `role_data.description` | `agent.node.description` |
-| node `role_data.settings` | `agent.node.settings`: `refresh_interval_seconds` becomes `refresh_interval` (`"30s"`), `job_timeout_seconds` becomes `job_timeout` (`"1h"`) |
-| client keys `{id, name, prefix, hash, created_at, last_used_at, calls}` | `agent.client.api_keys[]` with `id`, `name`, `prefix`, `hash` and `created_at` as they are; drop `last_used_at` and `calls`, which the member does not take. Old keys keep working. |
+| node `role_data.settings` | `agent.node.settings`: `refresh_interval_seconds` becomes `refresh_interval` (`"30s"`), `job_timeout_seconds` becomes `job_timeout` (`"1h"`); write `"gpu_sudo": false` when it was false, since fit's default is true |
+| client `role_data.keys[]` `{id, name, prefix, hash, created_at, last_used_at, calls}` | `agent.client.api_keys[]` with `id`, `name`, `prefix`, `hash` and `created_at` as they are; drop `last_used_at` and `calls`, which the member does not take. Old keys keep working. |
 | hub `role_data.nodes` (the remembered nodes) | dropped: the hub learns its nodes as they link |
 
 The flags and variables:
@@ -711,7 +759,7 @@ The flags and variables:
 | --- | --- |
 | `-addr` | `console.address`; for a client, also `api.address`, since the API has its own address |
 | `-data` and the state file | `admin.store` |
-| `-log` | fit's `log` |
+| `-log` | fit's `log`; the roles write to its `agent` logger |
 | `AGENTHUB_PASSWORD` | gone; the store's password is `admin.store`'s |
 | `AGENTHUB_CONSOLE_PASSWORD` | gone; console users |
 | `AGENTHUB_NODE_DATA_DIR` | `settings.gpu_data_dir`; scripts see `FIT_AGENT_GPU_DATA_DIR` |
@@ -721,7 +769,9 @@ path `/ws` and the authentication are the same. A body over 1 MiB needs fit at e
 way.
 
 Once the config is written, `fit validate` checks it, and `fit store import -c <bootstrap file>
-<config>` seals it into the store, so that what the pages change from then on is kept.
+<config>` seals it into the store, replacing what the store held, so that what the pages change
+from then on is kept. `admin` stays in the bootstrap file and is left out of what is imported; [the
+console guide](console.md) has the rest.
 
 ## Changes from agenthub
 

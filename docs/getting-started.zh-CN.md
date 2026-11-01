@@ -227,6 +227,10 @@ curl -X POST localhost:2019/rollback/1
 
 它保留已应用的配置，供读取和回滚，并在 `/metrics` 提供指标、在 `/dashboard/` 提供仪表盘。
 
+如果想在浏览器里修改配置，`admin.console` 提供需要用户名和密码登录的网页，其中有根据 schema 生成的、覆盖配置各部分的表单，
+以及 JSON 编辑器；每个用户密码的哈希由 `fit hash-password` 生成。设置 `admin.store` 后，配置加密保存在单独的文件中，每次修改
+都写入该文件，重启后 fit 从它运行。两者的设置方法见 [控制台](console.zh-CN.md)。
+
 ## 接下来
 
 - [配置](configuration.zh-CN.md)：同一个配置写成 [.conf 文件](reference/fit.zh-CN.md)、[YAML](reference/yaml.zh-CN.md)
@@ -234,5 +238,8 @@ curl -X POST localhost:2019/rollback/1
 - [配置参考](reference/config.zh-CN.md)：每个字段及其类型和默认值，附示例。
 - 从其他服务器迁移：[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)、
   [Traefik](migrating-from-traefik.zh-CN.md)。
+- [示例](../examples/README.zh-CN.md)：每个功能一份配置，三种格式各一份。
+- 网关之外：[WebRTC](webrtc.zh-CN.md)，TURN 服务器以及 WHIP 和 WHEP；[tunnel](tunnel.zh-CN.md)，访问 NAT 后的服务；
+  [agent](agent.zh-CN.md)，在多台机器间共享 AI 模型。
 - [兼容性](compatibility.zh-CN.md)：在各 1.x 版本间保持稳定的内容。
 - [部署](../deploy/README.zh-CN.md)：容器镜像、Kubernetes 和 systemd。

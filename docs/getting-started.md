@@ -243,6 +243,12 @@ curl -X POST localhost:2019/rollback/1
 It keeps the configs it applied, to read again and roll back to, and serves metrics at `/metrics`
 and a dashboard at `/dashboard/`.
 
+To change the config from a browser instead, `admin.console` serves web pages behind a user name
+and password, with a form for every part of the config made from its schema and a JSON editor;
+`fit hash-password` makes the hash of each user's password. With `admin.store`, the config is kept
+encrypted in a file of its own, which every change is written to and fit runs from after a restart.
+[The console](console.md) shows how to set both up.
+
 ## Next
 
 - [Configuration](configuration.md): the same config as a [.conf file](reference/fit.md), in
@@ -250,5 +256,8 @@ and a dashboard at `/dashboard/`.
 - The [config reference](reference/config.md): every field, its type and default, with examples.
 - Coming from another server: [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md),
   [Traefik](migrating-from-traefik.md).
+- [Examples](../examples/README.md): a config for each feature, in all three formats.
+- Beside the gateway: [WebRTC](webrtc.md), a TURN server and WHIP and WHEP; [the tunnel](tunnel.md),
+  to reach services behind NAT; [the agent](agent.md), to share AI models among machines.
 - [Compatibility](compatibility.md): what stays stable across 1.x releases.
 - [Deploy](../deploy/README.md): the container image, Kubernetes and systemd.

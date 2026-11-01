@@ -2,6 +2,8 @@
 
 [English](tunnel.md) | [简体中文](tunnel.zh-CN.md)
 
+Config examples, each in .conf, YAML and JSON: [tunnel-server](../examples/tunnel-server/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-client](../examples/tunnel-client/fit.conf).
+
 fit's tunnel reaches TCP services on machines that only a host beside them can reach, through a
 server anyone can reach. It was a program of its own, fibhub; it is now three roles of fit's config,
 which run on the listeners' fib engine beside the gateway's routes, or without any
@@ -22,6 +24,11 @@ which run on the listeners' fib engine beside the gateway's routes, or without a
 fibhub called a node a *pod*, and a service a *node*. Nodes and clients link **out** to servers, so
 neither needs an open port. A process may run any of the roles, all three included, with the
 gateway or alone.
+
+The tunnel relays every byte through a server, and works today wherever nodes and clients can
+reach one. The planned [P2P milestone](decisions/025-p2p.md) is the other way: ICE connects two
+hosts behind NAT directly, through holes punched in both NATs, carries TCP and UDP services, and
+falls back to a TURN relay only where no hole can be punched.
 
 ## Running a role
 
@@ -101,13 +108,13 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `name` | the host's name | the name nodes and clients are told |
 | `password` | none: no registration is taken | what nodes and clients register with, proven with an HMAC, never sent |
 | `body_password` | none | AES-256-GCM on every frame's body; nodes and clients need the same |
-| `listeners` | none | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/fibhub` by default |
-| `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for clients' `web_proxies`; its password is the server's when left out |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`; the server makes a self-signed certificate and writes it here when a quic listener needs one |
+| `listeners` | none: the pages add them | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/fibhub` by default, and only a ws listener has one |
+| `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for clients' `web_proxies`, answering on any path; it needs `console`, its password is the server's when left out, and `max_conns` is 32 |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; the server makes a self-signed certificate and writes it here when a quic listener needs one; `cert` and `key` go together |
 | `register_timeout` | 10s | how long a link may take to register |
 | `call_timeout` | 15s | how long a node may take to answer: to open a tunnel, list or set its services |
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | the bounds of what the server keeps |
-| `console` | none | the server's pages |
+| `console` | none | the server's pages (see [Consoles](#consoles)) |
 
 ### tunnel.node
 
@@ -127,8 +134,8 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | Field | Default | What it is |
 |-------|---------|------------|
 | `name`, `meta`, `servers` | | as a node's |
-| `forwards` | none | `{listen, node, service, server}`: without `server`, the tunnels spread over every server that has the node |
-| `web_proxies` | none | `{name, listen, url, password, max_conns}`: a server's console served locally through its `console_socket` |
+| `forwards` | none | `{listen, node, service, server}`: without `server`, the tunnels spread over every server that has the node, more of them through the servers whose path to the node is faster |
+| `web_proxies` | none | `{name, listen, url, password, max_conns}`: a server's console served locally through its `console_socket`, whose `ws://host:port/` is `url`; `max_conns` is 32 |
 | `open_timeout` | 20s | the opening of a tunnel, through the server to the service |
 | `idle_timeout` | 2h | as a node's |
 | `max_tunnels` | 4096 | the tunnels open at once; a connection past it is closed as it is accepted |
@@ -140,16 +147,20 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 |-------|---------|------------|
 | `name` | the first endpoint's address | what forwards and the pages name it by |
 | `endpoints` | required | `{address, disabled}`, tried in order: `host:port` or `tcp://` for TCP, `ws://host:port/path`, `quic://host:port` |
-| `password`, `body_password` | | the server's |
-| `quic_pin`, `quic_insecure` | | how a quic endpoint checks the server's certificate: its SHA-256, or not at all, for tests; the system's roots without either |
+| `password` | required | the server's |
+| `body_password` | none | the server's, when it has one |
+| `quic_pin`, `quic_insecure` | | how a quic endpoint checks the server's certificate: its SHA-256, as the server's page shows it, or not at all, for tests; the system's roots without either |
 | `pool_size` | 10, at most 100 | how many links to the server carry tunnels |
-| `dial_timeout`, `call_timeout`, `retry_interval`, `ping_interval`, `ping_timeout` | 5s, 10s, 3s, 5s, 5s | |
+| `dial_timeout` | 5s | a link's dial |
+| `call_timeout` | 10s | the server's answer to a registration or a call |
+| `retry_interval` | 3s | the wait after a failed dial, or a lost server, before a link dials again |
+| `ping_interval`, `ping_timeout` | 5s, 5s | how often the round trip to the server is measured, and how long a ping may go unanswered before it counts as lost |
 
 ## Links
 
 A node or client keeps `pool_size` links to each server. Each dials the server's first endpoint
 not disabled, falls back to the next when that fails, registers, and dials again `retry_interval`
-after it loses the server. The links of one name and type, from however many processes, are one
+after a failed dial or after it loses the server. The links of one name and type, from however many processes, are one
 peer to the server. Each tunnel goes over one link throughout, so that its frames keep their
 order; a new tunnel takes the link that carries the fewest, and a link carries at most 64, so that
 a peer that needs more opens a larger pool.
@@ -161,7 +172,7 @@ a peer that needs more opens a larger pool.
   `fibhub`. A server makes a self-signed certificate when a quic listener needs one and keeps it in
   its member, so its fingerprint, which nodes and clients pin, outlives a restart.
 - **Registration** is an HMAC-SHA256 of the password over the peer's type, name, a time and a
-  nonce; a nonce is taken once.
+  nonce; the time must be within 5 minutes of the server's clock, and a nonce is taken once.
 - **Body encryption**, with `body_password` on every side, seals each frame's body with AES-256-GCM,
   its header authenticated too; a frame that is not sealed, or does not open, closes the link.
 
@@ -185,24 +196,27 @@ not registered, to 64 KiB.
 
 ## Consoles
 
-Each role's `console` serves its pages, behind logins as `admin.console`'s are: users with bcrypt
-hashes from `fit hash-password`, a session cookie and a CSRF token, and a loopback address unless
-`cert_file` and `key_file` are set.
+Each role's `console` serves its pages, behind logins as `admin.console`'s are
+([the console](console.md)): `{address, cert_file, key_file, users, session_timeout,
+session_lifetime, max_sessions, max_conns}`, users with bcrypt hashes from `fit hash-password`, a
+session cookie and a CSRF token, and a loopback address unless `cert_file` and `key_file` are set.
 
 - **server**: the nodes, with their services and latency, and the clients; the tunnels, with their
   bytes each way and their paths' latency. Query a node, set its services, kick a peer, close a
   tunnel. Add, change and remove listeners; set the passwords and the console socket; copy the
-  QUIC certificate's fingerprint.
-- **node**: its servers, with the protocols each link took, and edit them; its services, and save
-  them, every server told; its tunnels.
+  QUIC certificate's fingerprint. Services set here are written into the node's own member.
+- **node**: its servers, with the protocols each link took, and add, edit and remove them; its
+  services, and save them, every server told; its tunnels, and close one.
 - **client**: its servers, edited as a node's, their nodes and services, with each server's share of
-  a node's tunnels; set a node's services through a server; add and remove forwards; its tunnels;
-  the meta it tells the servers; and each server's console through its web proxy.
+  a node's tunnels; query a node, and set its services through a server; add and remove forwards;
+  its tunnels, and close one; the meta it tells the servers; and each server's console through its
+  web proxy.
 
 What a page changes is written into the role's member of the config, with `app.Host.Edit`, and
 applied from there as any config is: it is in the config's history, and with `admin.store` it is
-kept, encrypted, in the store, and read back at the next start. Without a store, the change runs
-until fit restarts or reads its files again, and the page says so. Every page has a tunnel map,
+kept, encrypted, in the store, and read back at the next start ([the console](console.md)
+describes the store). Without a store, the change runs until fit restarts or reads its files
+again, and the page says so. Every page has a tunnel map,
 **Details**, and the theme and language pickers.
 
 A server's console can be reached where it cannot be directly, through an encrypted WebSocket: set
@@ -254,4 +268,5 @@ engine: tunnels over TCP, WebSocket and QUIC, with and without body encryption, 
 slow services and clients, cut connections, the pages' changes written back into the config, and a
 restart that reads them back from a store. `test/docker/tunnel/fit-tunnel-docker.sh test` runs
 servers, nodes and clients in containers of their own, with devices on networks only their node
-reaches, and tests every feature through the consoles and the tunnels.
+reaches, tests every feature through the consoles and the tunnels, then restarts every instance
+and checks that it comes back from its store.

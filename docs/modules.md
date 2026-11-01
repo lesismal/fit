@@ -90,14 +90,15 @@ the test's own recording the response; or a config using it is served by `runtim
 fit build -with github.com/you/fit-hello@v1.0.0
 ```
 
-builds `./fit` with every module and provider fit ships with and `github.com/you/fit-hello`: a main
-package that imports fit's command line (package `cli`), `modules/standard`, `provider/standard`
-and the module's root package, built with the go command on `PATH`. The flags:
+builds `./fit` with every module, provider and role fit ships with and `github.com/you/fit-hello`:
+a main package that imports fit's command line (package `cli`), `modules/standard`,
+`provider/standard`, `app/standard` and the module's root package, built with the go command on
+`PATH`. The flags:
 
 | Flag | |
 | --- | --- |
 | `-with path[@version]`, `-with path=dir` | a module to build in, by version (`latest` when left out) or from its source in `dir`; repeated for each |
-| `-without pkg` | leave out `github.com/lesismal/fit/modules/standard` (every handler and middleware) or `github.com/lesismal/fit/provider/standard` (every provider); a config that names one left out is refused |
+| `-without pkg` | leave out `github.com/lesismal/fit/modules/standard` (every handler and middleware), `github.com/lesismal/fit/provider/standard` (every provider) or `github.com/lesismal/fit/app/standard` (the roles of the agent, the tunnel and the TURN server; `webrtc.media` and `webrtc.proxy` come with `modules/standard`'s `whip`, `whep` and `webrtc_proxy`); repeated for each; a config that names one left out is refused |
 | `-fit v`, `-fit dir` | the fit to build on: a version, or a directory of fit's source; the running fit's own version when left out |
 | `-o file` | the binary; `fit` when left out |
 | `-keep dir` | keep the generated main module in `dir`, to read or build again |

@@ -144,7 +144,7 @@ Kubernetes provider 之后。
 
 - 决定说明：ambient 优先、对接的 Istio 版本范围、protobuf 和 gRPC 相关依赖（规则 14）、waypoint 走 GAMMA
   而不是 Envoy xDS。
-- `mesh/` 包骨架，只在 Linux 上构建；`cmd/fit` 增加 `fit node` 子命令。
+- `mesh/` 包骨架，只在 Linux 上构建；在 fit 命令所在的 `cli` 中增加 `fit node` 子命令。
 - 测试环境：CI 中的 kind 加 Istio ambient；基准主机上基于网络命名空间（`ip netns`）的多 pod 模拟环境，
   不需要 Kubernetes。
 - 基线：在基准主机上测 ztunnel（本地配置模式）和直连的吞吐、延迟、每连接内存。
@@ -257,9 +257,9 @@ Kubernetes provider 之后。
 
 | 编号 | 需求 | 用途 |
 | --- | --- | --- |
-| F1 | HTTP/2 客户端发起 CONNECT 和扩展 CONNECT，每个流作为一个 `Tunnel`，带流控和背压；一个连接上多个隧道 | HBONE 客户端、waypoint 出站 |
+| F1 | HTTP/2 客户端发起 CONNECT 和扩展 CONNECT，每个流作为一个 `Tunnel`，带流控和背压；一个连接上多个隧道 | HBONE 客户端、waypoint 出站；VPN 中转的 HTTP/2 传输（[网关计划](dev-plan.zh-CN.md)的 I99） |
 | F2 | 把已有的监听描述符作为 binding 加入引擎，并能移除和排空 | 在 pod 命名空间中监听；无中断升级 |
-| F3 | 用调用方预先创建的 socket 拨号，以及拨号前设置 socket 选项（`SO_MARK`、`IP_TRANSPARENT`、绑定源地址） | 在 pod 命名空间中出站；保留原始源地址 |
+| F3 | 用调用方预先创建的 socket 拨号，以及拨号前设置 socket 选项（`SO_MARK`、`IP_TRANSPARENT`、绑定源地址；仅绑定源地址和端口范围已由 A59 的 `Engine.DialWith` 加入 fib） | 在 pod 命名空间中出站；保留原始源地址 |
 | F4 | 在接受的连接上取得原始目标地址（`SO_ORIGINAL_DST`、`IP6T_SO_ORIGINAL_DST`） | 出站 15001 |
 | F5 | 客户端按连接选择证书；对端证书校验的回调能拿到 URI SAN | 按身份建立 mTLS |
 

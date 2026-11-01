@@ -69,7 +69,7 @@
 | A56 | 从不让 worker 等待的 TURN 服务器 | 已完成，`74100b2`（在 `84a67f7` 中） | 1 | I87、I111（029） |
 | A57 | TURN 服务器的限制与钩子 | 已完成，`bf669ce`（在 `84a67f7` 中） | 11 | I111（029） |
 | A58 | 原地修改和排空 TURN 服务器 | 已完成，`496301d`（在 `84a67f7` 中） | 10, 11 | I111（029） |
-| A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中） | — | I111（029） |
+| A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中）；Windows 修复 `63b38d4`（在 `9824c68` 中） | — | I111（029） |
 
 ## 证据
 
@@ -1119,7 +1119,7 @@ body，并说明它是否是这样的缓冲；`Context.WriteResponseOwned` 发�
 
 ## A49：在监听 socket 上朝某地址打开 UDP 对端
 
-**状态。** 已完成，fib `96a2331`，自 `80c7f76` 起在 fib 的 `main` 上，fit 已使用（I108）。本条目的早先版本写的是 fib 本地 `main` 上的提交 `4febcdf5` 和下面建议的异步 API；那个提交从未推送，实际实现的是“实现”一段中的同步 API。
+**状态。** 已完成，fib `96a2331`，自 `80c7f76` 起在 fib 的 `main` 上，fit 在 I108 中升级到该版本。本条目的早先版本写的是 fib 本地 `main` 上的提交 `4febcdf5` 和下面建议的异步 API；那个提交从未推送，实际实现的是“实现”一段中的同步 API。
 
 **问题。** UDP 监听的对端要先发来一个数据报才成为连接，而拨出的 UDP 连接有自己的 socket，也就有自己的本地端口。打洞需要
 的正相反：一个只绑定一次的 socket，它的端口已被 NAT 映射、也被 STUN 服务器看到过，先向一个还没发过任何东西的地址发送，
@@ -1194,7 +1194,7 @@ Wintun 没有这样的描述符，不需要。
 
 ## A52：WebSocket 连接的底层传输：强制关闭与其地址
 
-**状态。** 2026-11-01 为 agent 的角色提出（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+**状态。** 2026-11-01 为 agent 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
 
 **问题。** agent 的互联链路是 fib 的 WebSocket。对端已死，或积压到 ping 等了 30 秒仍没有 pong 的链路，必须立即断开。
 `Connection.Close` 发送关闭帧，它排在所有未发送内容之后，所以一个什么也不读的对端，其套接字要等到引擎的写队列上限或内核放弃才关闭。
@@ -1218,7 +1218,7 @@ func (c *Connection) RemoteAddr() net.Addr
 
 ## A53：WebSocket 连接发送的背压
 
-**状态。** 2026-11-01 为 agent 的角色提出（[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+**状态。** 2026-11-01 为 agent 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
 
 **问题。** `websocket.Connection.WriteMessage` 把给它的内容全部排队，从不告诉调用方积压了多少，处理器也无法暂停连接的读取。
 agent 的 wire 协议用额度窗口（256 KiB）约束每个流，所以链路的队列以其各流的窗口与应答为界，但链路自身的队列与填充它的生产者之间没有联系：
@@ -1260,7 +1260,7 @@ connection ID 把每个数据报路由到连接、限制进行中的握手、回
 
 ## A55：经 TCP 和 TLS 的 TURN
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `97201b6`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `97201b6`，在 fib `main` 的 `84a67f7` 中，fit 在 I111 中升级到该版本。
 
 **问题。** fib 的 `webrtc/turn` 只在 UDP 上讲 TURN：它的 `FiveTuple` 不含传输协议，`turnserver` 监听一个 UDP binding。
 所在网络只放行 TCP、或只放行 443 端口上 TLS 的客户端连不到服务器，而 WebRTC 服务运行 TURN 正是为了这些客户端。决定 025
@@ -1282,7 +1282,7 @@ binding：一条连接就是一个客户端，连接关闭时释放其 allocatio
 
 ## A56：从不让 worker 等待的 TURN 服务器
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `74100b2`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `74100b2`，在 fib `main` 的 `84a67f7` 中，fit 在 I111 中升级到该版本。
 
 **问题。** `turnserver` 在发来请求的数据报的 `OnData` 中、在 fib worker 上运行核心，并在那里用会等待的调用绑定中继地址和
 打开对端：Allocate 调用 `AllocateRelay`，后者调用 `Engine.AddBinding`（fib 的 binding 锁，正在移除的 binding 等待其事件循环
@@ -1307,7 +1307,7 @@ allocation 拆分，让一个 allocation 的中继不必等另一个。
 
 ## A57：TURN 服务器的限制与钩子
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `bf669ce`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `bf669ce`，在 fib `main` 的 `84a67f7` 中，fit 在 I111 中升级到该版本。
 
 **问题。** 规则 11 要求每种资源都有上限，核心限制了 allocation，但一个 allocation 的 permission 是一个随每次
 CreatePermission 增长的 map（每个存活五分钟），channel 随每次 ChannelBind 增长到 4096 个：持有凭据的客户端能让服务器
@@ -1333,7 +1333,7 @@ allocation、permission 和 channel 数。
 
 ## A58：原地修改和排空 TURN 服务器
 
-**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `496301d`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
+**状态。** 2026-11-01 为 fit 的 TURN 服务器提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `496301d`，在 fib `main` 的 `84a67f7` 中，fit 在 I111 中升级到该版本。
 
 **问题。** 配置重载不能丢掉没有改变的东西（决定 028），被移除的服务器应让它的 allocation 自然结束而不是切断。核心的
 生存期、nonce 生存期和 allocation 配额在创建时就固定了，`turnserver.Close` 一次释放所有 allocation。fit 通过函数
@@ -1356,7 +1356,7 @@ listener 一样，在 listener 的排空超时内排空。
 
 ## A59：从指定的本地地址和端口范围发起拨号
 
-**状态。** 2026-11-01 为 fit 的 WebRTC 代理提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `3655193`，在 fib `main` 的 `84a67f7` 中，fit 已使用（I111）。
+**状态。** 2026-11-01 为 fit 的 WebRTC 代理提出（[决定 029](decisions/029-webrtc.zh-CN.md)）。已完成：fib `3655193`，在 fib `main` 的 `84a67f7` 中，fit 在 I111 中升级到该版本；Windows 上的修复 `63b38d4`（从本地端口拨号时跳过在另一地址上被占用的端口）及其测试 `749189e` 在 `9824c68` 中，fit 当前使用该版本。
 
 **问题。** `webrtc.proxy` 为每个对端地址用一个自己的 UDP socket 中继到它的媒体服务器，这个 socket 由
 `Engine.DialWithHandler` 打开。内核按路由选本地地址，从整个临时端口范围里选端口。私有网络上的媒体服务器常在

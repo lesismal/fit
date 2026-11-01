@@ -123,7 +123,7 @@ Status: `todo`, `doing` or `done`.
   config and refuses to run off Linux.
 - **Done when**: the decision notes are committed; `fit node --help` works; builds for other systems
   leave `mesh/` out.
-- **Touches**: `docs/decisions`, `mesh`, `cmd/fit`.
+- **Touches**: `docs/decisions`, `mesh`, `cli` (where fit's commands are), `cmd/fit`.
 
 ### S02 Mesh test environments
 
@@ -153,6 +153,7 @@ Status: `todo`, `doing` or `done`.
   moves to the commit by its hash.
 - **Touches**: fib `http`; fit `docs/fib-api-requests*.md`, `go.mod`.
 - **Read**: fib `http/h2_tunnel.go`, `http/h2_client.go`.
+- **Also waiting on it**: the gateway plan's I99, the VPN relay's HTTP/2 transport.
 
 ### S05 fib: descriptors, socket options and original destinations (F2–F4)
 
@@ -163,6 +164,8 @@ Status: `todo`, `doing` or `done`.
 - **Done when**: fib's tests and static checks pass on linux, darwin, windows and freebsd (with a
   clear unsupported error off Linux where it applies); fit moves to the commit by its hash.
 - **Touches**: fib's engine, `binding.go`, `dial.go`; fit `docs/fib-api-requests*.md`, `go.mod`.
+- **Read**: fib's `DialWith` (A59), which already binds a dial to a local address and port range;
+  the socket-option hook belongs beside it.
 
 ## S1 Identity and HBONE
 

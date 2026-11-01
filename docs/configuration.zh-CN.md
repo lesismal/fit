@@ -3,7 +3,7 @@
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
 fit 从一个或多个文件读取配置，可以是三种格式之一：**.conf** 文件、**YAML** 或 **JSON**。三者逐字段表达相同的内容：fit
-监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，以及日志、限制、证书和 Admin API 的设置。Admin API
+监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，日志、限制、证书和 Admin API 的设置，以及 fit 在网关旁边运行的角色：agent、tunnel 和 WebRTC。Admin API
 收发的是 JSON；三种格式的字段完全相同，彼此之间都可以转换。
 
 | 格式 | 适合 | 参考 |
@@ -90,13 +90,18 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `routes` | 每类请求的匹配条件、中间件和处理器 | [Routes](reference/config.md#routes) |
 | `upstreams` | 被代理的服务器，带负载均衡和健康检查 | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP 和 UDP 代理 | [Services](reference/config.md#services) |
-| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy` | [Handlers](reference/config.md#handlers) |
+| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy`；WebRTC 用的 `whip`、`whep` 和 `webrtc_proxy` | [Handlers](reference/config.md#handlers) |
 | 中间件 | 认证、限流、缓存、压缩、头部、改写等 | [Middleware](reference/config.md#middleware) |
 | `log`、`access_log`、`telemetry`、`metrics` | 日志、链路追踪和指标 | [Log](reference/config.md#log)、[Access log](reference/config.md#access-log)、[Telemetry](reference/config.md#telemetry)、[Metrics](reference/config.md#metrics) |
 | `limits` | 连接、头部、请求体和内存的上限 | [Limits](reference/config.md#limits) |
 | `auto_https`、`acme` | 默认 HTTPS 和证书 | [HTTPS by default](reference/config.md#https-by-default)、[ACME](reference/config.md#acme) |
-| `admin` | Admin API | [Admin API](reference/config.md#admin-api) |
+| `engine` | fib 的事件循环、worker 和缓冲区 | [Engine](reference/config.md#engine) |
+| `admin` | Admin API；加密保存配置的 store（`store`）；控制台（`console`） | [Admin API](reference/config.md#admin-api)、[控制台](console.zh-CN.md) |
+| `agent` | agent 的 hub、node 和 client，在多台机器间共享 AI 模型 | [Agent](reference/config.md#agent)、[agent](agent.zh-CN.md) |
+| `tunnel` | tunnel 的 server、node 和 client，用于访问 NAT 后的服务 | [Tunnel](reference/config.md#tunnel)、[tunnel](tunnel.zh-CN.md) |
+| `webrtc` | TURN 服务器（`turn`）、`whip` 和 `whep` 的媒体端口（`media`）、`webrtc_proxy` 的转发（`proxy`） | [WebRTC](reference/config.md#webrtc)、[WebRTC](webrtc.zh-CN.md) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
+| `schema_version` | 配置的版本，1；可不写 | [兼容性](compatibility.zh-CN.md#schema-的版本) |
 
 ## 多个文件和目录
 
@@ -136,13 +141,19 @@ fit validate -c fit.yaml -c conf.d
 | 一个目录 | 一个文件 | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` 打印配置的 JSON Schema，编辑器可以用它在编写 JSON 和 YAML 时补全和检查；`fit schema -template fit` 打印
-.conf 模板。
+.conf 模板。`fit hash-password` 从标准输入读取密码并打印其 bcrypt 哈希，用于 `basic_auth` 的用户和控制台的用户。
 
 ## 修改运行中的配置
 
 无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当某个文件变化、目录中加入或移除文件，都会重新应用配置。
 加载或编译失败的配置会被拒绝，运行中的配置保持不变。[Admin API](reference/config.md#admin-api) 以 JSON 读取和替换运行中的
 配置，可以整体替换，也可以按 JSON pointer 修改，并保留版本以便回滚。
+
+设置 `admin.store` 后，配置加密保存在单独的文件 store 中，fit 从它运行：启动 fit 的文件给出 `admin`，其中其余的内容只是
+store 的初始内容，仅在 store 还不存在时使用。每个被应用的配置，无论来自 Admin API、控制台还是某个角色的页面，都会写入
+store；SIGHUP 重新读取 store，`-watch` 会被拒绝。`fit store export -c fit.conf` 以 JSON 打印 store 中的配置，
+`fit store import -c fit.conf new.json` 检查一份配置并把它封存为 store，替换原有内容。`admin.console` 提供需要登录的网页，
+可以修改配置中 `admin` 以外的所有部分。详见 [控制台](console.zh-CN.md)。
 
 ## 从其他服务器迁移
 
