@@ -17,7 +17,7 @@ import (
 )
 
 // KeyPrefix starts every client API key: "ah-" + 32 random bytes,
-// base64url, as agenthub made them, so that its keys go on working.
+// unpadded base64url.
 const KeyPrefix = "ah-"
 
 // shownPrefix is how many leading characters of a key the pages keep
@@ -119,8 +119,8 @@ func newKey(name string) (config.AgentClientKey, string, error) {
 		CreatedAt: time.Now().Unix()}, secret, nil
 }
 
-// auth checks the key of an agent request (Authorization: Bearer, or
-// x-api-key) against every hash kept, in constant time, and counts the use.
+// auth checks the key of an agent request (Authorization: Bearer,
+// x-api-key or x-goog-api-key) against every hash kept, in constant time, and counts the use.
 func (s *keyStore) auth(h stdhttp.Header) bool {
 	key := requestKey(h)
 	if key == "" {
@@ -150,5 +150,8 @@ func requestKey(h stdhttp.Header) string {
 	if a := strings.TrimSpace(h.Get("Authorization")); len(a) > 7 && strings.EqualFold(a[:7], "bearer ") {
 		return strings.TrimSpace(a[7:])
 	}
-	return strings.TrimSpace(h.Get("x-api-key"))
+	if k := strings.TrimSpace(h.Get("x-api-key")); k != "" {
+		return k
+	}
+	return strings.TrimSpace(h.Get("x-goog-api-key"))
 }

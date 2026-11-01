@@ -65,8 +65,17 @@ func TestAgentChecksUndecoded(t *testing.T) {
 	if f, msg := CheckAgentModel(&AgentModel{Name: "a", API: "openai", BaseURL: "http://h", MaxInflight: -1}); f != "max_inflight" || msg == "" {
 		t.Errorf("max_inflight -1: %q %q", f, msg)
 	}
-	if f, _ := CheckAgentModel(&AgentModel{Name: "a", API: "gemini", BaseURL: "http://h"}); f != "api" {
-		t.Errorf("api gemini: %q", f)
+	if f, _ := CheckAgentModel(&AgentModel{Name: "a", API: "palm", BaseURL: "http://h"}); f != "api" {
+		t.Errorf("api palm: %q", f)
+	}
+	for _, api := range AgentAPIs {
+		m := AgentModel{Name: "a", API: api, BaseURL: "http://h"}
+		if api == "azure_openai" {
+			m.APIVersion = "2024-10-21"
+		}
+		if f, msg := CheckAgentModel(&m); msg != "" {
+			t.Errorf("api %s: %s %s", api, f, msg)
+		}
 	}
 	var got []string
 	add := func(_ Value, format string, args ...any) { got = append(got, format) }

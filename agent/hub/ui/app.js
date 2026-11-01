@@ -38,6 +38,7 @@
     ['gpu.errors', 'Errors', '错误'],
     ['m.add', 'Add model', '添加模型'], ['m.edit', 'Edit model', '编辑模型'], ['m.base', 'Base URL', 'Base URL'],
     ['m.upstream', 'Upstream model id', '上游模型 ID'], ['m.key', 'API key', 'API Key'], ['m.key.hint', 'Empty keeps the stored key.', '留空保留已保存的 Key。'],
+    ['m.ver', 'API version', 'API 版本'], ['m.ver.hint', 'Azure OpenAI only: the api-version of its calls.', '仅 Azure OpenAI：调用携带的 api-version。'],
     ['m.max', 'Max in flight (0 = no limit)', '并发上限（0 = 不限）'], ['m.desc', 'Description', '描述'], ['m.disabled', 'Disabled', '停用'],
     ['m.check', 'Check', '检查'], ['m.delete', 'Delete', '删除'], ['m.delete.q', 'Delete model {name}?', '删除模型 {name}？'],
     ['m.saved', 'Saved', '已保存'], ['m.checked', '{name}: {state}', '{name}：{state}'],
@@ -252,8 +253,9 @@
       x = x || { api: 'openai' };
       var f = {
         name: h('input.input', { value: x.name || '', disabled: !!x.name }),
-        api: h('select.select', ['openai', 'anthropic'].map(function (a) { return h('option', { value: a, selected: a === x.api }, a); })),
-        base: h('input.input', { value: x.base_url || '', placeholder: 'http://127.0.0.1:11434/v1' }),
+        api: h('select.select', ['openai', 'anthropic', 'gemini', 'azure_openai', 'ollama', 'cohere'].map(function (a) { return h('option', { value: a, selected: a === x.api }, a); })),
+        base: h('input.input', { value: x.base_url || '', placeholder: 'http://127.0.0.1:8000/v1' }),
+        ver: h('input.input', { value: x.api_version || '', placeholder: '2024-10-21' }),
         upstream: h('input.input', { value: x.upstream || '' }),
         key: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: x.api_key || '' }),
         max: h('input.input', { type: 'number', min: 0, value: x.max_inflight || 0 }),
@@ -264,7 +266,7 @@
         title: x.name ? t('m.edit') : t('m.add'), wide: true,
         body: h('div.form',
           h('div.form-row', UI.field(t('name'), f.name), UI.field(t('api'), f.api)),
-          UI.field(t('m.base'), f.base), UI.field(t('m.upstream'), f.upstream),
+          UI.field(t('m.base'), f.base), UI.field(t('m.upstream'), f.upstream), UI.field(t('m.ver'), f.ver, t('m.ver.hint')),
           UI.field(t('m.key'), f.key, x.name ? t('m.key.hint') : null),
           h('div.form-row', UI.field(t('m.max'), f.max), UI.field(t('m.desc'), f.desc)),
           h('label.check', f.disabled, ' ', t('m.disabled'))),
@@ -272,7 +274,7 @@
           label: t('p.save'), kind: 'primary', onclick: function () {
             return m.call('/node/model/save', {
               name: f.name.value.trim(), api: f.api.value, base_url: f.base.value.trim(), upstream: f.upstream.value.trim(),
-              api_key: f.key.value, max_inflight: +f.max.value || 0, description: f.desc.value, disabled: f.disabled.checked
+              api_version: f.api.value === 'azure_openai' ? f.ver.value.trim() : '', api_key: f.key.value, max_inflight: +f.max.value || 0, description: f.desc.value, disabled: f.disabled.checked
             }).then(function () { UI.toast(t('m.saved')); load(); }).catch(function (e) { UI.fail(e); return false; });
           }
         }]

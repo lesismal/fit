@@ -1,5 +1,7 @@
-// An agent node: serves the models of a local Ollama to the hub it links to
-// (examples/agent-hub), and through it to clients. Its console is on
+// An agent node: serves models of several kinds (a local Ollama, through its
+// OpenAI-compatible API and its own, and hosted Anthropic, Gemini, Azure
+// OpenAI and Cohere models, whose keys are placeholders to replace) to the
+// hub it links to (examples/agent-hub), and through it to clients. Its console is on
 // 127.0.0.1:9100, user admin, password example-password. The id is written
 // out, as fit would otherwise write a new one back into this file.
 // Run one file, from the repository's root: fit run -c examples/agent-node/fit.json
@@ -24,7 +26,18 @@
           "base_url": "http://127.0.0.1:11434/v1",
           "upstream": "qwen3:32b",
           "max_inflight": 4
-        }
+        },
+        // Ollama's own API (/api/chat, /api/generate, /api/embed).
+        {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"},
+        {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
+         "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-replace-me"},
+        // Agents call it at /v1beta/models/gemini-flash:generateContent.
+        {"name": "gemini-flash", "api": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta",
+         "upstream": "gemini-2.5-flash", "api_key": "replace-me"},
+        // Agents call it as OpenAI; upstream is the Azure deployment.
+        {"name": "gpt-4o", "api": "azure_openai", "base_url": "https://example.openai.azure.com",
+         "upstream": "gpt-4o-prod", "api_version": "2024-10-21", "api_key": "replace-me"},
+        {"name": "rerank", "api": "cohere", "base_url": "https://api.cohere.com/v2", "upstream": "rerank-v3.5", "api_key": "replace-me"}
       ],
       "settings": {"allow_hub_manage": false, "refresh_interval": "30s"},
       "proxy": {"first_byte_timeout": "5m", "timeout": "30m", "max_inflight": 64}

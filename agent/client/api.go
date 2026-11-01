@@ -9,10 +9,13 @@ import (
 	"io"
 	"net"
 	stdhttp "net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
@@ -27,25 +30,59 @@ import (
 // The bounds of the agent API's requests.
 const (
 	maxHeader = 64 << 10
-	// inlineMax is the largest body sent in the stream's request itself,
-	// as agenthub's nodes and hubs expect; a larger one streams after it,
-	// in frames of frameSize, which needs fit's on the far side.
+	// inlineMax is the largest body sent in the stream's request itself;
+	// a larger one streams after it, in frames of frameSize.
 	inlineMax = 1 << 20
 	frameSize = 64 << 10
 	// stallTimeout bounds each wait for an agent to take what was written.
 	stallTimeout = 60 * time.Second
 )
 
-// pathAPI maps an agent path (after /v1/) to its API format.
-var pathAPI = func() map[string]string {
-	out := map[string]string{}
-	for api, paths := range model.ProxyPaths {
-		for _, p := range paths {
-			out[p] = api
+// endpoint is the call an agent's request makes: the protocol it speaks,
+// the call (model.ProxyPaths) and, for Gemini, the model its path names.
+type endpoint struct {
+	api, path, model string
+}
+
+// agentPaths maps the paths agents POST to, but Gemini's, to their calls:
+// /v1/... for OpenAI and Anthropic, /api/... for Ollama, /v2/... for
+// Cohere, each where the vendor's SDKs call them once their base URL is the
+// client's.
+var agentPaths = func() map[string]endpoint {
+	out := map[string]endpoint{}
+	for api, prefix := range map[string]string{model.APIOpenAI: "/v1/", model.APIAnthropic: "/v1/", model.APIOllama: "/", model.APICohere: "/v2/"} {
+		for _, p := range model.ProxyPaths[api] {
+			out[prefix+p] = endpoint{api: api, path: p}
 		}
 	}
 	return out
 }()
+
+// geminiPrefixes are where Gemini's SDKs call a model,
+// {prefix}{model}:{method}: under /v1beta by default, /v1 when set so.
+var geminiPrefixes = []string{"/v1beta/models/", "/v1/models/"}
+
+// agentEndpoint returns the call of a POST to path; ok is false for a path
+// that is none, whose endpoint may still name the protocol, for the shape
+// of the error.
+func agentEndpoint(path string) (e endpoint, ok bool) {
+	if e, ok := agentPaths[path]; ok {
+		return e, true
+	}
+	for _, pre := range geminiPrefixes {
+		rest, found := strings.CutPrefix(path, pre)
+		if !found {
+			continue
+		}
+		// The method follows the last colon: a model's name may hold one.
+		i := strings.LastIndexByte(rest, ':')
+		if i <= 0 || !slices.Contains(model.ProxyPaths[model.APIGemini], rest[i+1:]) {
+			return endpoint{api: model.APIGemini}, false
+		}
+		return endpoint{api: model.APIGemini, path: rest[i+1:], model: rest[:i]}, true
+	}
+	return endpoint{}, false
+}
 
 // apiServer is the agent API, a binding of its own on the listeners'
 // engine.
@@ -108,13 +145,21 @@ func (s *apiServer) stop() {
 
 // ---- Errors in the API's own shape ----
 
-// errorAPI picks the error shape of a request: Anthropic for its paths or
-// when the agent speaks Anthropic.
+// errorAPI picks the error shape of a request: its protocol's, or for a
+// path that is none, the one its prefix or headers suggest.
 func errorAPI(r *stdhttp.Request, api string) string {
 	if api != "" {
 		return api
 	}
-	if r.Header.Get("anthropic-version") != "" || r.Header.Get("x-api-key") != "" {
+	p := r.URL.Path
+	switch {
+	case strings.HasPrefix(p, "/v1beta/") || r.Header.Get("x-goog-api-key") != "":
+		return model.APIGemini
+	case strings.HasPrefix(p, "/api/"):
+		return model.APIOllama
+	case strings.HasPrefix(p, "/v2/"):
+		return model.APICohere
+	case r.Header.Get("anthropic-version") != "" || r.Header.Get("x-api-key") != "":
 		return model.APIAnthropic
 	}
 	return model.APIOpenAI
@@ -124,11 +169,13 @@ func writeError(c *fibhttp.Context, api string, status int, msg string) {
 	writeErrorCode(c, api, status, "", msg)
 }
 
-// writeErrorCode writes an error the agent's SDK understands, with an
-// explicit OpenAI error code (empty: derived from status).
+// writeErrorCode writes an error the agent's SDK understands, in the shape
+// of api: OpenAI's with an explicit error code (empty: derived from status),
+// Anthropic's, Gemini's (Google's RPC status), Ollama's or Cohere's.
 func writeErrorCode(c *fibhttp.Context, api string, status int, oaCode, msg string) {
 	var body any
-	if api == model.APIAnthropic {
+	switch api {
+	case model.APIAnthropic:
 		typ := map[int]string{
 			stdhttp.StatusBadRequest: "invalid_request_error", stdhttp.StatusUnauthorized: "authentication_error",
 			stdhttp.StatusForbidden: "permission_error", stdhttp.StatusNotFound: "not_found_error",
@@ -139,7 +186,23 @@ func writeErrorCode(c *fibhttp.Context, api string, status int, oaCode, msg stri
 			typ = "api_error"
 		}
 		body = map[string]any{"type": "error", "error": map[string]string{"type": typ, "message": msg}}
-	} else {
+	case model.APIGemini:
+		st := map[int]string{
+			stdhttp.StatusBadRequest: "INVALID_ARGUMENT", stdhttp.StatusUnauthorized: "UNAUTHENTICATED",
+			stdhttp.StatusForbidden: "PERMISSION_DENIED", stdhttp.StatusNotFound: "NOT_FOUND",
+			stdhttp.StatusRequestEntityTooLarge: "INVALID_ARGUMENT", stdhttp.StatusTooManyRequests: "RESOURCE_EXHAUSTED",
+			stdhttp.StatusServiceUnavailable: "UNAVAILABLE", stdhttp.StatusGatewayTimeout: "DEADLINE_EXCEEDED",
+			stdhttp.StatusBadGateway: "UNAVAILABLE",
+		}[status]
+		if st == "" {
+			st = "INTERNAL"
+		}
+		body = map[string]any{"error": map[string]any{"code": status, "message": msg, "status": st}}
+	case model.APIOllama:
+		body = map[string]string{"error": msg}
+	case model.APICohere:
+		body = map[string]string{"message": msg}
+	default:
 		typ, code := "server_error", ""
 		switch status {
 		case stdhttp.StatusBadRequest, stdhttp.StatusRequestEntityTooLarge:
@@ -180,7 +243,7 @@ func statusFor(code int) int {
 	}
 }
 
-// ---- Models list ----
+// ---- Models lists ----
 
 // modelObject is one entry of GET /v1/models, carrying the fields of both
 // OpenAI's and Anthropic's model lists.
@@ -194,18 +257,50 @@ type modelObject struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func (s *apiServer) modelObjects() []modelObject {
-	var out []modelObject
-	seen := map[string]bool{}
+// modelNames returns the names of the models the client reaches, once
+// each, sorted; only those called with protocol api, unless it is "".
+func (s *apiServer) modelNames(api string) []string {
+	var out []string
 	for _, m := range s.c.cat.list() {
-		if seen[m.Name] {
+		if api != "" && model.Protocol(m.API) != api || slices.Contains(out, m.Name) {
 			continue
 		}
-		seen[m.Name] = true
-		out = append(out, modelObject{ID: m.Name, Object: "model", OwnedBy: "agenthub", Type: "model", DisplayName: m.Name,
+		out = append(out, m.Name)
+	}
+	return out
+}
+
+func (s *apiServer) modelObjects() []modelObject {
+	var out []modelObject
+	for _, name := range s.modelNames("") {
+		out = append(out, modelObject{ID: name, Object: "model", OwnedBy: "fit", Type: "model", DisplayName: name,
 			CreatedAt: "1970-01-01T00:00:00Z"})
 	}
 	return out
+}
+
+// geminiModel is a model as Gemini's models.list and models.get give it.
+type geminiModel struct {
+	Name                       string   `json:"name"`
+	BaseModelID                string   `json:"baseModelId"`
+	Version                    string   `json:"version"`
+	DisplayName                string   `json:"displayName"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+}
+
+func newGeminiModel(name string) geminiModel {
+	return geminiModel{Name: "models/" + name, BaseModelID: name, Version: "001", DisplayName: name,
+		SupportedGenerationMethods: model.ProxyPaths[model.APIGemini]}
+}
+
+// ollamaModel is a model as Ollama's /api/tags gives it.
+type ollamaModel struct {
+	Name       string   `json:"name"`
+	Model      string   `json:"model"`
+	ModifiedAt string   `json:"modified_at"`
+	Size       int64    `json:"size"`
+	Digest     string   `json:"digest"`
+	Details    struct{} `json:"details"`
 }
 
 // serve answers every request, on a fib worker, without waiting.
@@ -222,31 +317,84 @@ func (s *apiServer) serve(c *fibhttp.Context) {
 	}
 }
 
+// authorized checks an agent's key: Authorization: Bearer, x-api-key or
+// x-goog-api-key, or for Gemini's paths also the key query parameter, as
+// Google's REST examples send it.
+func (s *apiServer) authorized(r *stdhttp.Request, api string) bool {
+	h := r.Header
+	if api == model.APIGemini && requestKey(h) == "" {
+		if k := r.URL.Query().Get("key"); k != "" {
+			h = stdhttp.Header{"X-Api-Key": {k}}
+		}
+	}
+	return s.c.keys.auth(h)
+}
+
+// serveGet answers the model lists: GET /v1/models and /v1/models/{id}
+// (OpenAI's and Anthropic's, every model), /v1beta/models and
+// /v1beta/models/{model} (Gemini's, its models), /api/tags (Ollama's, its
+// models).
 func (s *apiServer) serveGet(c *fibhttp.Context) {
 	r := c.Request
-	eapi := errorAPI(r, "")
-	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/")
-	if !ok || rest != "models" && !strings.HasPrefix(rest, "models/") {
-		writeErrorCode(c, eapi, stdhttp.StatusNotFound, "unknown_url", "unknown endpoint GET "+r.URL.Path)
+	p := r.URL.Path
+	var api string
+	switch {
+	case p == "/v1/models" || strings.HasPrefix(p, "/v1/models/"):
+		api = model.APIOpenAI
+	case p == "/v1beta/models" || strings.HasPrefix(p, "/v1beta/models/"):
+		api = model.APIGemini
+	case p == "/api/tags":
+		api = model.APIOllama
+	default:
+		writeErrorCode(c, errorAPI(r, ""), stdhttp.StatusNotFound, "unknown_url", "unknown endpoint GET "+p)
 		return
 	}
-	if !s.c.keys.auth(r.Header) {
+	eapi := errorAPI(r, "")
+	if api != model.APIOpenAI {
+		eapi = api
+	}
+	if !s.authorized(r, api) {
 		writeError(c, eapi, stdhttp.StatusUnauthorized, "invalid or missing api key")
 		return
 	}
-	list := s.modelObjects()
 	var body any
-	if id := strings.TrimPrefix(rest, "models/"); id != rest {
-		for _, m := range list {
-			if m.ID == id {
-				body = m
+	switch api {
+	case model.APIGemini:
+		names := s.modelNames(model.APIGemini)
+		if id, ok := strings.CutPrefix(p, "/v1beta/models/"); ok {
+			if !slices.Contains(names, id) {
+				writeError(c, eapi, stdhttp.StatusNotFound, fmt.Sprintf("model %q not found", id))
+				return
 			}
+			body = newGeminiModel(id)
+			break
 		}
-		if body == nil {
-			writeError(c, eapi, stdhttp.StatusNotFound, fmt.Sprintf("model %q not found", id))
-			return
+		list := make([]geminiModel, 0, len(names))
+		for _, n := range names {
+			list = append(list, newGeminiModel(n))
 		}
-	} else {
+		body = map[string]any{"models": list}
+	case model.APIOllama:
+		names := s.modelNames(model.APIOllama)
+		list := make([]ollamaModel, 0, len(names))
+		for _, n := range names {
+			list = append(list, ollamaModel{Name: n, Model: n, ModifiedAt: "1970-01-01T00:00:00Z"})
+		}
+		body = map[string]any{"models": list}
+	default:
+		list := s.modelObjects()
+		if id, ok := strings.CutPrefix(p, "/v1/models/"); ok {
+			for _, m := range list {
+				if m.ID == id {
+					body = m
+				}
+			}
+			if body == nil {
+				writeError(c, eapi, stdhttp.StatusNotFound, fmt.Sprintf("model %q not found", id))
+				return
+			}
+			break
+		}
 		if list == nil {
 			list = []modelObject{}
 		}
@@ -260,34 +408,68 @@ func (s *apiServer) serveGet(c *fibhttp.Context) {
 	_ = c.Respond(stdhttp.StatusOK, "application/json", b)
 }
 
-// serveProxy forwards a call. The body is held whole, within max_body_bytes:
-// the route depends on the model it names.
-func (s *apiServer) serveProxy(c *fibhttp.Context) {
-	r := c.Request
-	path, _ := strings.CutPrefix(r.URL.Path, "/v1/")
-	api, ok := pathAPI[path]
-	eapi := errorAPI(r, api)
-	if !ok || !strings.HasPrefix(r.URL.Path, "/v1/") {
-		writeErrorCode(c, eapi, stdhttp.StatusNotFound, "unknown_url", "unknown endpoint POST "+r.URL.Path)
-		return
+// maxModelName bounds the model name a call gives.
+const maxModelName = 256
+
+// callModel reads the model a call names, and the body's media type to
+// pass on: Gemini's in the path; a multipart/form-data body's (OpenAI's
+// uploads) in its model field; any other body's in its JSON's model.
+func callModel(r *stdhttp.Request, e endpoint, body []byte) (name, ctype, msg string) {
+	if e.api == model.APIGemini {
+		return e.model, "", ""
 	}
-	if !s.c.keys.auth(r.Header) {
-		writeError(c, eapi, stdhttp.StatusUnauthorized, "invalid or missing api key")
-		return
+	ct := r.Header.Get("Content-Type")
+	if b := model.FormBoundary(ct); b != "" {
+		if e.api != model.APIOpenAI {
+			return "", "", "a multipart body is taken only by OpenAI's endpoints"
+		}
+		start, end, err := model.FormField(body, b, "model")
+		if err != nil {
+			return "", "", "a bad multipart body: " + err.Error()
+		}
+		if start == end {
+			return "", "", "missing \"model\" in the form"
+		}
+		return string(body[start:end]), ct, ""
 	}
-	body := c.Body()
 	var probe struct {
 		Model string `json:"model"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
-		writeError(c, eapi, stdhttp.StatusBadRequest, "request body is not valid json: "+err.Error())
-		return
+		return "", "", "request body is not valid json: " + err.Error()
 	}
 	if probe.Model == "" {
-		writeError(c, eapi, stdhttp.StatusBadRequest, "missing \"model\" in request body")
+		return "", "", "missing \"model\" in request body"
+	}
+	return probe.Model, "", ""
+}
+
+// serveProxy forwards a call. The body is held whole, within max_body_bytes:
+// the route depends on the model it names, and a route that cannot serve
+// it gets the body again.
+func (s *apiServer) serveProxy(c *fibhttp.Context) {
+	r := c.Request
+	e, ok := agentEndpoint(r.URL.Path)
+	eapi := errorAPI(r, e.api)
+	if !ok {
+		writeErrorCode(c, eapi, stdhttp.StatusNotFound, "unknown_url", "unknown endpoint POST "+r.URL.Path)
 		return
 	}
-	req := model.ProxyReq{API: api, Path: path, Model: probe.Model}
+	api := e.api
+	if !s.authorized(r, api) {
+		writeError(c, api, stdhttp.StatusUnauthorized, "invalid or missing api key")
+		return
+	}
+	body := c.Body()
+	name, ctype, msg := callModel(r, e, body)
+	if msg == "" && (len(name) > maxModelName || strings.IndexFunc(name, unicode.IsSpace) >= 0) {
+		msg = "the model name is up to 256 characters without spaces"
+	}
+	if msg != "" {
+		writeError(c, api, stdhttp.StatusBadRequest, msg)
+		return
+	}
+	req := model.ProxyReq{API: api, Path: e.path, Model: name, ContentType: ctype}
 	for _, k := range model.ProxyHeaders {
 		if v := r.Header.Get(k); v != "" {
 			if req.Header == nil {
@@ -295,6 +477,15 @@ func (s *apiServer) serveProxy(c *fibhttp.Context) {
 			}
 			req.Header[k] = v
 		}
+	}
+	if keys := model.ProxyQuery[api]; len(keys) > 0 {
+		in, out := r.URL.Query(), url.Values{}
+		for _, k := range keys {
+			if v, ok := in[k]; ok {
+				out[k] = v
+			}
+		}
+		req.Query = out.Encode()
 	}
 	routes, known, other := s.c.cat.routes(req.Model, req.API)
 	if len(routes) == 0 {
@@ -531,7 +722,7 @@ func (x *call) begin(head model.ProxyHead) {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no")
 	if head.Node != "" {
-		h.Set("X-Agenthub-Node", head.Node)
+		h.Set("X-Fit-Node", head.Node)
 	}
 	x.c.WriteHeader(head.Status)
 	_ = x.c.FlushError()

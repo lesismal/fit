@@ -27,7 +27,8 @@ const maxTries = 3
 // long as none of a streamed body has been taken from the client; after it,
 // bytes have reached the client, so any failure ends the call.
 func (h *Hub) proxy(ctx context.Context, _ model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
-	if req.Model == "" || !slices.Contains(model.APIs, req.API) {
+	req.API = model.Protocol(req.API)
+	if req.Model == "" || !slices.Contains(model.Protocols, req.API) {
 		return nil, mesh.BadRequest("model and a known api are required")
 	}
 	exclude := map[string]bool{}
@@ -138,9 +139,10 @@ func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wir
 	return e.res, false, nil
 }
 
-// pick returns the online node serving (api, name) ready and not excluded
-// with the least calls in flight: the model's inflight the node reported
-// plus the streams this hub relays to it now; ties go round robin.
+// pick returns the online node serving name ready to agents' protocol api,
+// and not excluded, with the least calls in flight: the model's inflight
+// the node reported plus the streams this hub relays to it now; ties go
+// round robin.
 func (h *Hub) pick(api, name string, exclude map[string]bool) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -150,7 +152,7 @@ func (h *Hub) pick(api, name string, exclude map[string]bool) string {
 			continue
 		}
 		i := slices.IndexFunc(n.info.Models, func(mv model.ModelView) bool {
-			return mv.Name == name && mv.API == api && mv.Ready()
+			return mv.Name == name && model.Protocol(mv.API) == api && mv.Ready()
 		})
 		if i < 0 {
 			continue

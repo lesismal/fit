@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I112。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I113。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -249,6 +249,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I109 | WHIP 和 WHEP：共享 `webrtc.Mux`（`webrtc.media`）上的 SFU | I108 | done |
 | I110 | 代理到媒体服务器的 WHIP 和 WHEP；按 ICE ufrag 路由 UDP | I109 | done |
 | I111 | 基于 fib A55–A59 的 WebRTC：经 TCP 和 TLS 的 TURN、上限、事件、原地修改与排空；代理的源地址和端口 | I87, I110 | done |
+| I112 | agent 的模型接口：OpenAI 及其兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama 与 Cohere 的全部无状态推理端点 | I107 | done |
 
 ## M0 基础
 
@@ -1281,3 +1282,17 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
   并让两个客户端互相中继；事件和指标计数；重载在修改限制时保留 allocation；地址改变时排空；中继从配置的端口范围发出，
   范围满时丢弃并计数；在竞态检测下通过。
 - **涉及**：`webrtc`、`config`、`app`、`runtime`、`tlsmgr`、`cli`、`schema`、`docs`、`go.mod`。
+
+### I112 agent 的模型接口
+
+- **做**：在 `openai` 与 `anthropic` 之外增加模型种类 `gemini`、`azure_openai`、`ollama` 与 `cohere`，Azure 带
+  `api_version`；每种的每个无状态推理调用都是表中的一项：OpenAI 在 chat、responses、completions、embeddings 之外的
+  moderations、images、audio 与 rerank，Gemini 的生成、流式、计数与嵌入方法，Ollama 的 chat、generate 与 embed，Cohere
+  v2 的 chat、embed 与 rerank。模型从 JSON 请求体、multipart 表单字段或 Gemini 的路径读取，`upstream` 设在读取的位置；
+  node 上每种的 URL、Key 请求头与检查；client 上各厂商 SDK 的路径、Key 请求头、错误格式与模型列表；
+  `ProxyReq.content_type` 与 `query`。把 agent.client 描述为从本机或局域网经公网 hub 到其他机器上 node 的链路；agent 的
+  文档与代码不再提及更早的程序。
+- **完成标准**：每种都经 client 端到端调用，直连与经 hub 都可，上游看到各自的 URL、Key 请求头与模型；上传流式转发，只有
+  为设置模型才在 `max_body_bytes` 之内完整读入；二进制、SSE 与 NDJSON 应答原样转发；慢 agent、慢上游、大请求体与连接中断
+  均正常；在竞态检测下通过。
+- **涉及**：`agent`、`config`、`schema`、`docs`、`examples`、`test/docker/agent`。

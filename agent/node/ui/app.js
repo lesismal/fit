@@ -18,11 +18,12 @@
       'ov.load': 'Load (1m)', 'ov.uptime': 'Uptime', 'ov.ips': 'IP addresses', 'ov.memory': 'Memory', 'ov.used_of': '{a} / {b}',
       'ov.util': 'Utilization', 'ov.vram': 'Memory',
       'm.title': 'Models', 'm.add': 'Add model', 'm.edit': 'Edit model', 'm.name': 'Name', 'm.name_hint': 'What agents ask for (no spaces)',
-      'm.api': 'API format', 'm.base_url': 'Base URL', 'm.upstream': 'Upstream model id', 'm.upstream_hint': 'Sent upstream in place of the name; empty = the name',
+      'm.api': 'API', 'm.base_url': 'Base URL', 'm.upstream': 'Upstream model id', 'm.upstream_hint': 'Sent upstream in place of the name (an Azure deployment); empty = the name',
+      'm.api_version': 'API version', 'm.api_version_hint': 'The api-version every Azure OpenAI call carries',
       'm.key': 'API key', 'm.key_keep': 'Leave as is to keep the current key', 'm.max': 'Max concurrent calls', 'm.max_hint': '0 = no limit',
       'm.desc': 'Description', 'm.disabled': 'Disabled', 'm.state': 'State', 'm.inflight': 'In flight', 'm.checked': 'Checked',
       'm.check': 'Check', 'm.enable': 'Enable', 'm.disable': 'Disable', 'm.delete_confirm': 'Delete model {m} ({a})?',
-      'm.none': 'No models yet. A model is an upstream API endpoint (e.g. Ollama at http://127.0.0.1:11434/v1).',
+      'm.none': 'No models yet. A model is an upstream API endpoint (e.g. vLLM at http://127.0.0.1:8000/v1, or Ollama at http://127.0.0.1:11434).',
       'm.s.ready': 'Ready', 'm.s.disabled': 'Disabled', 'm.s.error': 'Error', 'm.checked_ok': 'Upstream reachable',
       'm.try': 'Test call', 'm.prompt': 'Prompt', 'm.send': 'Send', 'm.stop': 'Stop', 'm.raw': 'Raw response', 'm.no_ready': 'No model is ready',
       'g.os': 'OS family', 'g.run_as': 'Runs as', 'g.root': 'root', 'g.sudo': 'sudo -n', 'g.user': 'current user (settings may fail without root)',
@@ -52,11 +53,12 @@
       'ov.load': '负载（1 分钟）', 'ov.uptime': '运行时长', 'ov.ips': 'IP 地址', 'ov.memory': '内存', 'ov.used_of': '{a} / {b}',
       'ov.util': '利用率', 'ov.vram': '显存',
       'm.title': '模型', 'm.add': '添加模型', 'm.edit': '编辑模型', 'm.name': '名称', 'm.name_hint': 'agent 请求时使用的名称（不含空格）',
-      'm.api': '接口格式', 'm.base_url': '接口地址', 'm.upstream': '上游模型 ID', 'm.upstream_hint': '发往上游时替换名称；留空则使用名称',
+      'm.api': '接口', 'm.base_url': '接口地址', 'm.upstream': '上游模型 ID', 'm.upstream_hint': '发往上游时替换名称（Azure 为部署名）；留空则使用名称',
+      'm.api_version': 'API 版本', 'm.api_version_hint': '每次 Azure OpenAI 调用携带的 api-version',
       'm.key': 'API Key', 'm.key_keep': '保持不变则保留当前 Key', 'm.max': '最大并发调用', 'm.max_hint': '0 表示不限',
       'm.desc': '描述', 'm.disabled': '停用', 'm.state': '状态', 'm.inflight': '在途', 'm.checked': '检查时间',
       'm.check': '检查', 'm.enable': '启用', 'm.disable': '停用', 'm.delete_confirm': '删除模型 {m}（{a}）？',
-      'm.none': '还没有模型。模型即一个上游 API 端点（例如 Ollama：http://127.0.0.1:11434/v1）。',
+      'm.none': '还没有模型。模型即一个上游 API 端点（例如 vLLM：http://127.0.0.1:8000/v1，或 Ollama：http://127.0.0.1:11434）。',
       'm.s.ready': '就绪', 'm.s.disabled': '已停用', 'm.s.error': '错误', 'm.checked_ok': '上游可达',
       'm.try': '测试调用', 'm.prompt': '提示词', 'm.send': '发送', 'm.stop': '停止', 'm.raw': '原始应答', 'm.no_ready': '没有就绪的模型',
       'g.os': '系统类别', 'g.run_as': '执行身份', 'g.root': 'root', 'g.sudo': 'sudo -n', 'g.user': '当前用户（非 root 时设置可能失败）',
@@ -133,12 +135,20 @@
   }
 
   // ---- 模型 / Models ----
+  // The kinds of upstream a model may be, and a base URL of each. / 模型可选的上游种类，及各自的 base URL 示例。
+  var KINDS = ['openai', 'anthropic', 'gemini', 'azure_openai', 'ollama', 'cohere'];
+  var BASES = {
+    openai: 'http://127.0.0.1:8000/v1', anthropic: 'https://api.anthropic.com/v1',
+    gemini: 'https://generativelanguage.googleapis.com/v1beta', azure_openai: 'https://<resource>.openai.azure.com',
+    ollama: 'http://127.0.0.1:11434', cohere: 'https://api.cohere.com/v2'
+  };
   function modelForm(m) {
     var isNew = !m;
     m = m || { api: 'openai' };
     var f = {
       name: h('input.input', { value: m.name || '', placeholder: 'qwen3-8b', disabled: !isNew }),
-      api: h('select.select', { disabled: !isNew }, ['openai', 'anthropic'].map(function (a) { return h('option', { value: a, selected: m.api === a }, a); })),
+      api: h('select.select', { disabled: !isNew }, KINDS.map(function (a) { return h('option', { value: a, selected: m.api === a }, a); })),
+      api_version: h('input.input', { value: m.api_version || '', placeholder: '2024-10-21' }),
       base_url: h('input.input', { value: m.base_url || '', placeholder: 'http://127.0.0.1:11434/v1' }),
       upstream: h('input.input', { value: m.upstream || '', placeholder: 'qwen3:8b' }),
       api_key: h('input.input', { type: 'password', autocomplete: 'new-password', value: m.api_key || '' }),
@@ -146,13 +156,17 @@
       description: h('input.input', { value: m.description || '' }),
       disabled: h('input', { type: 'checkbox', checked: !!m.disabled })
     };
-    f.api.addEventListener('change', function () {
-      if (!f.base_url.value) f.base_url.placeholder = f.api.value === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://127.0.0.1:11434/v1';
-    });
+    var verRow = UI.field(t('m.api_version'), f.api_version, t('m.api_version_hint'));
+    function kindChanged() {
+      f.base_url.placeholder = BASES[f.api.value] || BASES.openai;
+      verRow.style.display = f.api.value === 'azure_openai' ? '' : 'none';
+    }
+    f.api.addEventListener('change', kindChanged);
+    kindChanged();
     return {
       el: h('div.form',
         h('div.form-row', UI.field(t('m.name'), f.name, t('m.name_hint')), UI.field(t('m.api'), f.api)),
-        UI.field(t('m.base_url'), f.base_url),
+        UI.field(t('m.base_url'), f.base_url), verRow,
         h('div.form-row', UI.field(t('m.upstream'), f.upstream, t('m.upstream_hint')), UI.field(t('m.max'), f.max_inflight, t('m.max_hint'))),
         UI.field(t('m.key'), f.api_key, m.api_key ? t('m.key_keep') : null),
         UI.field(t('m.desc'), f.description),
@@ -160,7 +174,7 @@
       value: function () {
         return {
           name: f.name.value.trim(), api: f.api.value, base_url: f.base_url.value.trim(), upstream: f.upstream.value.trim(),
-          api_key: f.api_key.value, max_inflight: +f.max_inflight.value || 0, description: f.description.value, disabled: f.disabled.checked
+          api_version: f.api.value === 'azure_openai' ? f.api_version.value.trim() : '', api_key: f.api_key.value, max_inflight: +f.max_inflight.value || 0, description: f.description.value, disabled: f.disabled.checked
         };
       }
     };
@@ -239,9 +253,14 @@
     var btn = UI.btn(t('m.send'), 'send', function () {
       if (ctrl) { ctrl.abort(); return; }
       var v = ready[+sel.value];
-      var body = { model: v.name, stream: true, messages: [{ role: 'user', content: prompt.value }] };
-      if (v.api === 'anthropic') body.max_tokens = 512;
-      var req = { api: v.api, path: v.api === 'anthropic' ? 'messages' : 'chat/completions', model: v.name, body: b64(JSON.stringify(body)) };
+      var msgs = [{ role: 'user', content: prompt.value }];
+      var body = { model: v.name, stream: true, messages: msgs }, path = 'chat/completions', api = v.api, query = '';
+      if (api === 'azure_openai') api = 'openai';
+      if (api === 'anthropic') { body.max_tokens = 512; path = 'messages'; }
+      if (api === 'ollama') path = 'api/chat';
+      if (api === 'cohere') path = 'chat';
+      if (api === 'gemini') { body = { contents: [{ role: 'user', parts: [{ text: prompt.value }] }] }; path = 'streamGenerateContent'; query = 'alt=sse'; }
+      var req = { api: api, path: path, model: v.name, query: query, body: b64(JSON.stringify(body)) };
       out.textContent = ''; raw.textContent = ''; meta.textContent = '';
       var buf = '', first = true;
       ctrl = new AbortController();
@@ -250,10 +269,17 @@
         buf += chunk;
         for (var i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
           var line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-          if (line.indexOf('data:') !== 0) continue;
-          var d; try { d = JSON.parse(line.slice(5)); } catch (e) { continue; }
+          if (line.indexOf('data:') === 0) line = line.slice(5);
+          else if (line.charAt(0) !== '{') continue; // Ollama's NDJSON lines / Ollama 的 NDJSON 行
+          var d; try { d = JSON.parse(line); } catch (e) { continue; }
           var c = d.choices && d.choices[0] && d.choices[0].delta && d.choices[0].delta.content;
           if (!c && d.type === 'content_block_delta' && d.delta) c = d.delta.text;
+          if (!c && d.candidates && d.candidates[0] && d.candidates[0].content) {
+            c = (d.candidates[0].content.parts || []).map(function (p) { return p.text || ''; }).join('');
+          }
+          if (!c && d.message && typeof d.message.content === 'string') c = d.message.content;
+          if (!c && typeof d.response === 'string') c = d.response;
+          if (!c && d.type === 'content-delta' && d.delta && d.delta.message) c = (d.delta.message.content || {}).text;
           if (c) out.textContent += c;
         }
       }

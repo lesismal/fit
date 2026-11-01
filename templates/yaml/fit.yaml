@@ -2071,29 +2071,43 @@ upstreams:
     # # list of object.
     # models:
       # -
-        # # The name agents ask for the model by: 1 to 128 characters, no spaces. A name and api are
-        # # unique among a node's models.
+        # # The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among
+        # # a node's models of one agent API: an azure_openai model shares openai's.
         # # string; required.
         # name: ""
 
-        # # The API the upstream speaks, and the agent endpoints the model is reached through: openai or
-        # # anthropic.
-        # # one of: openai, anthropic; required.
+        # # The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek,
+        # # Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini
+        # # API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's
+        # # own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached
+        # # through, the upstream URL and the auth header.
+        # # one of: openai, anthropic, gemini, azure_openai, ollama, cohere; required.
         # api: "openai"
 
-        # # The upstream's base URL, http or https, without a query, as in http://127.0.0.1:11434/v1;
-        # # calls go to it with their path appended, as base_url/chat/completions.
+        # # The upstream's base URL, http or https, without a query or a trailing slash. openai,
+        # # anthropic and cohere calls go to it with their path appended, as base_url/chat/completions
+        # # with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with
+        # # https://generativelanguage.googleapis.com/v1beta; azure_openai's to
+        # # base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com;
+        # # ollama's to base_url/api/chat, with http://127.0.0.1:11434.
         # # string; required.
         # base_url: ""
 
-        # # The model ID sent upstream in place of name; name when left out.
+        # # The model ID sent upstream in place of name: in the body's model, a form's model field,
+        # # Gemini's path, or as an azure_openai model's deployment. name when left out.
         # # string.
         # upstream: "app"
 
-        # # The key sent upstream: as Authorization: Bearer for openai, as x-api-key for anthropic. None
-        # # when left out. The pages never show it whole.
+        # # The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key
+        # # for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The
+        # # pages never show it whole.
         # # string.
         # api_key: ""
+
+        # # The api-version query every call of an azure_openai model carries, as 2024-10-21: required
+        # # for azure_openai, and only taken there.
+        # # string.
+        # api_version: ""
 
         # # Keep the model without serving it.
         # # boolean.
@@ -2163,8 +2177,8 @@ upstreams:
       # max_inflight: 256
 
       # # The largest request body a call may carry; one past it fails. A body is held whole only when
-      # # the model's upstream differs from its name, to set the model it names. 32 MiB when left out
-      # # or 0.
+      # # the model's upstream differs from the name the call gives and the model is named in the body
+      # # (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0.
       # # integer, 0 or more; default 33554432.
       # max_body_bytes: 33554432
 
@@ -2289,11 +2303,14 @@ upstreams:
       # # duration, as "1.5s" or "2m"; default "2m".
       # stream_idle: "2m"
 
-    # # The API agents call, /v1/chat/completions, /v1/messages and the rest; none when left out.
+    # # The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages,
+    # # /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left
+    # # out.
     # # object.
     # api:
-      # # The host and port the API listens on. A host that is not a loopback address needs cert_file
-      # # and key_file, so that keys never cross a network in the clear.
+      # # The host and port the API listens on: a loopback address serves agents on this machine; a
+      # # LAN address, or an empty host, serves agents on other machines too, and needs cert_file and
+      # # key_file, so that keys never cross a network in the clear.
       # # string; required.
       # address: "127.0.0.1:9000"
 
@@ -2307,7 +2324,8 @@ upstreams:
       # key_file: "/etc/fit/example.com.key"
 
       # # The largest request body a call may carry; one past it gets 413. It is held whole, to read
-      # # the model it names. 32 MiB when left out or 0.
+      # # the model it names and to send it again when a route cannot serve it. 32 MiB when left out
+      # # or 0.
       # # integer, 0 or more; default 33554432.
       # max_body_bytes: 33554432
 
@@ -2391,9 +2409,9 @@ upstreams:
         # # string; required.
         # address: "127.0.0.1:9000"
 
-        # # A ws listener's path. /fibhub when left out.
-        # # string; default "/fibhub".
-        # path: "/fibhub"
+        # # A ws listener's path. /tunnel when left out.
+        # # string; default "/tunnel".
+        # path: "/tunnel"
 
     # # An encrypted WebSocket that carries the server's console pages to the web_proxies of clients
     # # that cannot reach them otherwise. Needs console. None when left out.
@@ -2601,8 +2619,7 @@ upstreams:
         # # duration, as "1.5s" or "2m"; default "5s".
         # ping_timeout: "5s"
 
-    # # The services the node reaches, and the only addresses it opens tunnels to. fibhub called
-    # # them nodes.
+    # # The services the node reaches, and the only addresses it opens tunnels to.
     # # list of object.
     # services:
       # -

@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I112.
+Status: `todo`, `doing` or `done`. The next free iteration number is I113.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -259,6 +259,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I112.
 | I109 | WHIP and WHEP: an SFU on a shared `webrtc.Mux` (`webrtc.media`) | I108 | done |
 | I110 | WHIP and WHEP proxied to media servers; UDP routed by ICE ufrag | I109 | done |
 | I111 | WebRTC on fib's A55–A59: TURN over TCP and TLS, caps, events, changes in place and drains; the proxy's source address and ports | I87, I110 | done |
+| I112 | The agent's model APIs: every stateless inference endpoint of OpenAI and its compatibles, Anthropic, Gemini, Azure OpenAI, Ollama and Cohere | I107 | done |
 
 ## M0, foundations
 
@@ -1494,3 +1495,20 @@ server, and fit in front of other media servers, for their signaling and their m
   change drains; the relay leaves from the configured port range, and a full range is dropped and
   counted; under the race detector.
 - **Touches**: `webrtc`, `config`, `app`, `runtime`, `tlsmgr`, `cli`, `schema`, `docs`, `go.mod`.
+
+### I112 The agent's model APIs
+
+- **Do**: model kinds `gemini`, `azure_openai`, `ollama` and `cohere` beside `openai` and
+  `anthropic`, with `api_version` for Azure; every stateless inference call of each as a table
+  entry: OpenAI's moderations, images, audio and rerank beside chat, responses, completions and
+  embeddings, Gemini's generate, stream, count and embed methods, Ollama's chat, generate and embed,
+  Cohere's v2 chat, embed and rerank. The model read from a JSON body, a multipart form's field or
+  Gemini's path, and `upstream` set where it was read; each kind's URL, key header and check on the
+  node; the vendors' SDK paths, key headers, error shapes and model lists on the client;
+  `ProxyReq.content_type` and `query`. agent.client described as the path from a machine or LAN
+  through a public hub to other machines' nodes; the agent's docs and code name no earlier program.
+- **Done when**: each kind is called end to end through a client, directly and through a hub, its
+  upstream seeing its own URL, key header and model; uploads stream, or are held within
+  `max_body_bytes` only to set the model; binary, SSE and NDJSON answers pass through; slow agents,
+  slow upstreams, large bodies and cut connections hold; under the race detector.
+- **Touches**: `agent`, `config`, `schema`, `docs`, `examples`, `test/docker/agent`.

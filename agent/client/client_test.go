@@ -364,7 +364,7 @@ func TestRoutingPreferenceAndRetry(t *testing.T) {
 		if resp.StatusCode != 200 {
 			t.Fatalf("call: %d %s", resp.StatusCode, body)
 		}
-		return body, resp.Header.Get("X-Agenthub-Node")
+		return body, resp.Header.Get("X-Fit-Node")
 	}
 	// The direct node wins. / 直连节点优先。
 	for i := 0; i < 3; i++ {
@@ -452,7 +452,7 @@ func TestStreamFlushAndCancel(t *testing.T) {
 
 	resp := f.do(t, context.Background(), "POST", "/v1/chat/completions", `{"model":"m","stream":true}`, f.bearer())
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/event-stream" || resp.Header.Get("Cache-Control") != "no-cache" ||
-		resp.Header.Get("X-Agenthub-Node") != "node-a" {
+		resp.Header.Get("X-Fit-Node") != "node-a" {
 		t.Fatalf("head: %d %v", resp.StatusCode, resp.Header)
 	}
 	br := bufio.NewReader(resp.Body)

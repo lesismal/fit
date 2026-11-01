@@ -150,7 +150,7 @@ func (n *Node) Apply(member any) error {
 	models := make([]model.Model, 0, len(m.Models))
 	for _, c := range m.Models {
 		models = append(models, model.Model{Name: c.Name, API: c.API, BaseURL: c.BaseURL, Upstream: c.Upstream, APIKey: c.APIKey,
-			Disabled: c.Disabled, Description: c.Description, MaxInflight: c.MaxInflight})
+			APIVersion: c.APIVersion, Disabled: c.Disabled, Description: c.Description, MaxInflight: c.MaxInflight})
 	}
 	n.mu.Lock()
 	old := n.models
@@ -161,7 +161,8 @@ func (n *Node) Apply(member any) error {
 		switch {
 		case r == nil:
 			n.rt[k] = &modelRT{}
-		case i >= 0 && (old[i].BaseURL != nm.BaseURL || old[i].APIKey != nm.APIKey || old[i].Upstream != nm.Upstream):
+		case i >= 0 && (old[i].BaseURL != nm.BaseURL || old[i].APIKey != nm.APIKey || old[i].Upstream != nm.Upstream ||
+			old[i].APIVersion != nm.APIVersion):
 			r.err, r.checkedAt = "", 0
 		}
 	}

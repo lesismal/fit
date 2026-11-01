@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	stdhttp "net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// Model checks: a check probes GET <base_url>/models; enabled models are
+// Model checks: a check probes the upstream's model list; enabled models are
 // checked every checkEvery, and those in error every checkErrorEvery, so a
 // model that came back is served again soon.
 var (
@@ -109,9 +110,9 @@ func (n *Node) listModels() []model.Model {
 // validModel checks and normalizes a model as the config will.
 func validModel(m *model.Model) error {
 	m.Name, m.Upstream, m.BaseURL = strings.TrimSpace(m.Name), strings.TrimSpace(m.Upstream), strings.TrimRight(strings.TrimSpace(m.BaseURL), "/")
-	m.APIKey, m.Description = strings.TrimSpace(m.APIKey), strings.TrimSpace(m.Description)
+	m.APIKey, m.Description, m.APIVersion = strings.TrimSpace(m.APIKey), strings.TrimSpace(m.Description), strings.TrimSpace(m.APIVersion)
 	c := config.AgentModel{Name: m.Name, API: m.API, BaseURL: m.BaseURL, Upstream: m.Upstream, APIKey: m.APIKey,
-		Description: m.Description, MaxInflight: m.MaxInflight}
+		APIVersion: m.APIVersion, Description: m.Description, MaxInflight: m.MaxInflight}
 	if isMasked(c.APIKey) {
 		c.APIKey = ""
 	}
@@ -248,12 +249,14 @@ func (n *Node) setModelErr(m model.Model, msg string, checked bool) {
 	}
 }
 
-// probeModel calls GET <base_url>/models with the model's credentials, and
-// done with the outcome. The upstream counts as reachable unless the request
-// fails, or the answer is 401 / 403 (bad key) or 5xx: a server without the
-// models endpoint (404, 405) still serves calls.
+// probeModel calls the upstream's model list with the model's credentials,
+// and done with the outcome: GET <base_url>/models (openai, anthropic,
+// gemini, cohere), <base_url>/openai/models?api-version= (azure_openai) or
+// <base_url>/api/tags (ollama). The upstream counts as reachable unless the
+// request fails, or the answer is 401 / 403 (bad key) or 5xx: a server
+// without the list (404, 405) still serves calls.
 func (n *Node) probeModel(m model.Model, done func(error)) {
-	req, err := stdhttp.NewRequest(stdhttp.MethodGet, m.BaseURL+"/models", nil)
+	req, err := stdhttp.NewRequest(stdhttp.MethodGet, probeURL(m), nil)
 	if err != nil {
 		done(err)
 		return
@@ -276,8 +279,20 @@ func (n *Node) probeModel(m model.Model, done func(error)) {
 	})
 }
 
-// setAuth sets the upstream auth and behaviour headers of m's API format.
-// hdr are the caller's pass-through headers (model.ProxyHeaders).
+// probeURL is the URL of m's upstream model list.
+func probeURL(m model.Model) string {
+	switch m.API {
+	case model.APIAzureOpenAI:
+		return m.BaseURL + "/openai/models?api-version=" + url.QueryEscape(m.APIVersion)
+	case model.APIOllama:
+		return m.BaseURL + "/api/tags"
+	}
+	return m.BaseURL + "/models"
+}
+
+// setAuth sets the upstream auth and behaviour headers of m's kind. hdr
+// are the caller's pass-through headers (model.ProxyHeaders); no header of
+// the caller's goes upstream otherwise, its own key included.
 func setAuth(h stdhttp.Header, m model.Model, hdr map[string]string) {
 	pass := func(k string) string {
 		for hk, v := range hdr {
@@ -287,10 +302,11 @@ func setAuth(h stdhttp.Header, m model.Model, hdr map[string]string) {
 		}
 		return ""
 	}
+	key := m.APIKey
 	switch m.API {
 	case model.APIAnthropic:
-		if m.APIKey != "" {
-			h.Set("x-api-key", m.APIKey)
+		if key != "" {
+			h.Set("x-api-key", key)
 		}
 		v := pass("anthropic-version")
 		if v == "" {
@@ -300,11 +316,19 @@ func setAuth(h stdhttp.Header, m model.Model, hdr map[string]string) {
 		if v := pass("anthropic-beta"); v != "" {
 			h.Set("anthropic-beta", v)
 		}
-	default:
-		if m.APIKey != "" {
-			h.Set("Authorization", "Bearer "+m.APIKey)
+	case model.APIGemini:
+		if key != "" {
+			h.Set("x-goog-api-key", key)
 		}
-		if v := pass("openai-beta"); v != "" {
+	case model.APIAzureOpenAI:
+		if key != "" {
+			h.Set("api-key", key)
+		}
+	default: // openai, ollama, cohere
+		if key != "" {
+			h.Set("Authorization", "Bearer "+key)
+		}
+		if v := pass("openai-beta"); v != "" && m.API == model.APIOpenAI {
 			h.Set("OpenAI-Beta", v)
 		}
 	}

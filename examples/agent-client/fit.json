@@ -1,6 +1,9 @@
-// An agent client: an OpenAI- and Anthropic-compatible API on
-// 127.0.0.1:9301 (/v1/chat/completions, /v1/messages) that calls the models of
-// the nodes the hub (examples/agent-hub) reaches. API keys are made on its
+// An agent client: it links to the hub (examples/agent-hub), which may be
+// across the internet, and serves the model APIs (OpenAI's /v1/chat/completions
+// and the rest, Anthropic's /v1/messages, Gemini's /v1beta/models/..., Ollama's
+// /api/chat, Cohere's /v2/chat) on 127.0.0.1:9301 to the agents of this
+// machine, calling the models of the nodes the hub reaches. To serve agents on
+// other machines of the LAN, listen on a LAN address with cert_file and key_file. API keys are made on its
 // console, 127.0.0.1:9300, user admin, password example-password. The id is
 // written out, as fit would otherwise write a new one back into this file.
 // Run one file, from the repository's root: fit run -c examples/agent-client/fit.json

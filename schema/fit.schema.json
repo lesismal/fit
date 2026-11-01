@@ -225,7 +225,7 @@
       "properties": {
         "api": {
           "$ref": "#/$defs/config.AgentClientAPI",
-          "description": "The API agents call, /v1/chat/completions, /v1/messages and the rest; none when left out."
+          "description": "The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."
         },
         "api_keys": {
           "description": "The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them.",
@@ -268,7 +268,7 @@
       "additionalProperties": false,
       "properties": {
         "address": {
-          "description": "The host and port the API listens on. A host that is not a loopback address needs cert_file and key_file, so that keys never cross a network in the clear.",
+          "description": "The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear.",
           "type": "string"
         },
         "cert_file": {
@@ -287,7 +287,7 @@
         },
         "max_body_bytes": {
           "default": 33554432,
-          "description": "The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names. 32 MiB when left out or 0.",
+          "description": "The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names and to send it again when a route cannot serve it. 32 MiB when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -450,19 +450,27 @@
       "additionalProperties": false,
       "properties": {
         "api": {
-          "description": "The API the upstream speaks, and the agent endpoints the model is reached through: openai or anthropic.",
+          "description": "The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header.",
           "enum": [
             "openai",
-            "anthropic"
+            "anthropic",
+            "gemini",
+            "azure_openai",
+            "ollama",
+            "cohere"
           ],
           "type": "string"
         },
         "api_key": {
-          "description": "The key sent upstream: as Authorization: Bearer for openai, as x-api-key for anthropic. None when left out. The pages never show it whole.",
+          "description": "The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The pages never show it whole.",
+          "type": "string"
+        },
+        "api_version": {
+          "description": "The api-version query every call of an azure_openai model carries, as 2024-10-21: required for azure_openai, and only taken there.",
           "type": "string"
         },
         "base_url": {
-          "description": "The upstream's base URL, http or https, without a query, as in http://127.0.0.1:11434/v1; calls go to it with their path appended, as base_url/chat/completions.",
+          "description": "The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434.",
           "type": "string"
         },
         "description": {
@@ -480,11 +488,11 @@
           "type": "integer"
         },
         "name": {
-          "description": "The name agents ask for the model by: 1 to 128 characters, no spaces. A name and api are unique among a node's models.",
+          "description": "The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's.",
           "type": "string"
         },
         "upstream": {
-          "description": "The model ID sent upstream in place of name; name when left out.",
+          "description": "The model ID sent upstream in place of name: in the body's model, a form's model field, Gemini's path, or as an azure_openai model's deployment. name when left out.",
           "type": "string"
         }
       },
@@ -570,7 +578,7 @@
         },
         "max_body_bytes": {
           "default": 33554432,
-          "description": "The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from its name, to set the model it names. 32 MiB when left out or 0.",
+          "description": "The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2392,8 +2400,8 @@
           "type": "string"
         },
         "path": {
-          "default": "/fibhub",
-          "description": "A ws listener's path. /fibhub when left out.",
+          "default": "/tunnel",
+          "description": "A ws listener's path. /tunnel when left out.",
           "type": "string"
         },
         "protocol": {
@@ -2456,7 +2464,7 @@
           "type": "array"
         },
         "services": {
-          "description": "The services the node reaches, and the only addresses it opens tunnels to. fibhub called them nodes.",
+          "description": "The services the node reaches, and the only addresses it opens tunnels to.",
           "items": {
             "$ref": "#/$defs/config.TunnelService"
           },

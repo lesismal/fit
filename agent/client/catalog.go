@@ -159,11 +159,11 @@ func (c *catalog) list() []CatalogModel {
 	return out
 }
 
-// routes returns the ready routes to (name, api) in the order to try them: direct nodes by least inflight, then
-// hubs round robin. known reports whether the name exists at all (any format, ready or not); other is a format the
-// name exists in when it does not exist in api.
+// routes returns the ready routes to name, called with protocol api (a model whose kind speaks it), in the order to
+// try them: direct nodes by least inflight, then hubs round robin. known reports whether the name exists at all (any
+// API, ready or not); other is an API the name is called with when it is not called with api.
 //
-// routes 按尝试顺序返回到 (name, api) 的就绪路由：先是按在途数最少排序的直连节点，再是轮询的 hub。known 表示该名称是否存在
+// routes 按尝试顺序返回以接口 api 调用 name（其种类讲该接口的模型）的就绪路由：先是按在途数最少排序的直连节点，再是轮询的 hub。known 表示该名称是否存在
 // （任意格式、无论是否就绪）；该名称在 api 下不存在但在其他格式下存在时，other 为那个格式。
 func (c *catalog) routes(name, api string) (out []Route, known bool, other string) {
 	c.mu.Lock()
@@ -180,8 +180,8 @@ func (c *catalog) routes(name, api string) (out []Route, known bool, other strin
 			if m.Name != name {
 				continue
 			}
-			note(m.API)
-			if m.API != api {
+			note(model.Protocol(m.API))
+			if model.Protocol(m.API) != api {
 				continue
 			}
 			sameAPI = true
@@ -202,8 +202,8 @@ func (c *catalog) routes(name, api string) (out []Route, known bool, other strin
 			if m.Name != name {
 				continue
 			}
-			note(m.API)
-			if m.API != api {
+			note(model.Protocol(m.API))
+			if model.Protocol(m.API) != api {
 				continue
 			}
 			sameAPI = true

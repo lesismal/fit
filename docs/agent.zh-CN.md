@@ -6,17 +6,21 @@
 
 agent 在多台机器之间共享 AI 模型。它是 fit 的三个角色，各由配置中的一个成员开启：
 
-- **`agent.node`** 提供模型。模型是 OpenAI 或 Anthropic 兼容接口的一个上游端点：本机的服务（如 Ollama、vLLM），
-  或带 Key 的托管接口。node 还上报本机硬件，并执行一组固定的管理操作。
-- **`agent.hub`** 是 node 与 client 汇合之处。它维护节点表及其模型，把每次调用转给提供该模型、负载最小的节点。
-- **`agent.client`** 运行在 agent（Claude Code、Codex、SDK）所在的机器上。它提供一个接口：`/v1/chat/completions`、
-  `/v1/messages` 等，调用它连到的 hub 与 node 上的模型。
+- **`agent.node`** 提供模型。模型是某个主流模型接口的一个上游端点：OpenAI 及所有 OpenAI 兼容接口、Anthropic、
+  Google Gemini、Azure OpenAI、Ollama 原生接口与 Cohere（见[模型与接口](#模型与接口)）。它可以是本机的服务（如
+  Ollama、vLLM、llama.cpp），也可以是带 Key 的托管接口。node 还上报本机硬件，并执行一组固定的管理操作。
+- **`agent.hub`** 是 node 与 client 汇合之处，通常部署在各台机器都能访问的公网服务器上。它维护节点表及其模型，把每次
+  调用转给提供该模型、负载最小的节点。
+- **`agent.client`** 为 agent（Claude Code、Codex、SDK、自己的应用）提供模型接口：`/v1/chat/completions`、
+  `/v1/messages`、`/v1beta/models/{model}:generateContent`、`/api/chat`、`/v2/chat` 等。它打通本机或局域网——公网
+  hub——其他算力设备上的 node 这条链路，向本机（监听回环地址）或局域网（监听局域网地址，启用 TLS 与 API Key）内的
+  agent 提供接口。它不必运行在 agent 所在的机器上：局域网中一台机器上的 client 就能服务整个局域网的 agent。
 
-请求与响应按字节原样转发：agent 从不把一种接口转换成另一种，所以工具调用、思考与图片等能力取决于上游本身。
+请求与响应按字节原样转发：agent 从不把一种接口转换成另一种，所以工具调用、思考、图片、音频与流式输出等能力取决于上游本身。
 
 一个进程运行配置中设置了成员的每个角色，任意组合，可以与网关的监听和路由并存，也可以没有它们；只有角色、没有路由的配置
 不需要监听。每个角色把自己的绑定（页面、互联监听、client 的接口）加到监听所用的 fib 引擎上，也在这个引擎上拨号连接对端。
-node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨号。这些角色是 agenthub 移植进 fit 的结果，原因与做法见
+node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨号。这些角色为何属于 fit 见
 [决策 028](decisions/028-agent-and-tunnel.zh-CN.md)。[隧道](tunnel.zh-CN.md)与 [WebRTC](webrtc.zh-CN.md) 的角色
 以同样的方式与之并存。
 
@@ -88,11 +92,12 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
-| `name` | string | 必填 | agent 请求时使用的名称：1 到 128 个字符，不含空白。名称与 `api` 在节点的模型中唯一，因此同一名称可以各有一个 OpenAI 与 Anthropic 模型。 |
-| `api` | string | 必填 | `openai` 或 `anthropic`：上游使用的接口，也决定模型经哪些 agent 路径访问。 |
-| `base_url` | string | 必填 | 上游的基础 URL，http 或 https，不带查询串、片段与末尾斜杠，如 `http://127.0.0.1:11434/v1`。调用发往它加上调用路径，如 `base_url/chat/completions`。 |
-| `upstream` | string | `name` | 发给上游的模型 ID，替代 `name`；最长 256 个字符，不含空白。 |
-| `api_key` | string | 无 | 发给上游的 Key：`openai` 用 `Authorization: Bearer`，`anthropic` 用 `x-api-key`。最长 4096 个字符，不含空白。页面从不完整显示它。 |
+| `name` | string | 必填 | agent 请求时使用的名称：1 到 128 个字符，不含空白。名称在节点同一 agent 接口的模型中唯一，因此同一名称可以各有一个 OpenAI、Anthropic 与 Gemini 模型；`azure_openai` 模型算作 OpenAI。 |
+| `api` | string | 必填 | 上游使用的接口：`openai`、`anthropic`、`gemini`、`azure_openai`、`ollama` 或 `cohere`。它决定模型经哪些 agent 路径访问、上游 URL 与 Key 所在的请求头；见[模型与接口](#模型与接口)。 |
+| `base_url` | string | 必填 | 上游的基础 URL，http 或 https，不带查询串、片段与末尾斜杠，如 `http://127.0.0.1:8000/v1`。调用发往它加上调用路径，各种类方式不同：`base_url/chat/completions`、`base_url/models/{upstream}:generateContent`、`base_url/openai/deployments/{upstream}/chat/completions`、`base_url/api/chat`。 |
+| `upstream` | string | `name` | 发给上游的模型 ID，在该种类指明模型的地方替代 `name`：请求体、表单字段、Gemini 的路径、Azure 的部署名。最长 256 个字符，不含空白。 |
+| `api_key` | string | 无 | 发给上游的 Key：`openai`、`ollama`、`cohere` 用 `Authorization: Bearer`，`anthropic` 用 `x-api-key`，`gemini` 用 `x-goog-api-key`，`azure_openai` 用 `api-key`。最长 4096 个字符，不含空白。页面从不完整显示它。 |
+| `api_version` | string | 无 | `azure_openai` 模型每次调用携带的 `api-version`，如 `2024-10-21`：该种类必填，其他种类不接受。最长 64 个字母、数字、点、短横线与下划线。 |
 | `disabled` | bool | false | 保留模型但不提供服务。 |
 | `description` | string | 无 | 对端显示的模型说明；最长 1024 字节。 |
 | `max_inflight` | int | 0 | 节点同时转发给该模型的调用数上限，0 到 100000。超出的调用转到其他节点。0 表示只受 `proxy.max_inflight` 限制。 |
@@ -116,7 +121,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `idle_timeout` | duration | `5m` | 上游在应答中途最多可以沉默多久。 |
 | `timeout` | duration | `30m` | 一次调用到应答结束最多多久。 |
 | `max_inflight` | int | 256 | 节点在所有模型上同时转发的调用数上限。超出的调用转到其他节点。 |
-| `max_body_bytes` | int | 33554432（32 MiB） | 一次调用的请求体上限。 |
+| `max_body_bytes` | int | 33554432（32 MiB） | 一次调用的请求体上限。只有请求体中指明了模型、需要把它改为 `upstream` 时，请求体才被完整读入。 |
 
 ### `agent.client`
 
@@ -124,17 +129,17 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
-| `api` | object | 无 | agent 调用的接口。没有它时 client 仍连接对端，但不提供接口。 |
+| `api` | object | 无 | client 所在机器或局域网中的 agent 调用的接口。没有它时 client 仍连接对端，但不提供接口。 |
 | `api_keys` | array | 无 | agent 调用接口所用的 Key；最多 256 个。由页面创建与删除。 |
 
 `api`：
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
-| `address` | string | 必填 | 接口监听的主机与端口。不是回环地址的主机需要 `cert_file` 与 `key_file`，Key 才不会以明文经过网络。 |
+| `address` | string | 必填 | 接口监听的主机与端口。回环地址（如 `127.0.0.1:9301`）服务 client 所在机器上的 agent；局域网地址（如 `192.168.1.10:9301`）或空主机也服务其他机器上的 agent，此时需要 `cert_file` 与 `key_file`，Key 才不会以明文经过网络。 |
 | `cert_file` | string | 无 | 接口证书的 PEM 文件，后接中间证书。与 `key_file` 一起设置时，接口经 TLS 提供。 |
 | `key_file` | string | 无 | 证书私钥的 PEM 文件。 |
-| `max_body_bytes` | int | 33554432（32 MiB） | 请求体上限。请求体被完整读入以取得其中的模型；超出的得到 413。 |
+| `max_body_bytes` | int | 33554432（32 MiB） | 请求体上限。请求体被完整读入，以取得其中的模型，并在某条路由无法提供服务时再次发送；超出的得到 413。 |
 | `max_conns` | int | 256 | 接口同时保持的连接数上限；超出的连接在接受后立即关闭。 |
 | `max_inflight` | int | 256 | 接口同时转发的调用数上限；超出的得到 429。 |
 | `first_byte_timeout` | duration | `5m` | 调用等待应答开始最多多久。 |
@@ -184,8 +189,9 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
       },
       "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
       "models": [
-        {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b",
+        {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
+        {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"},
         {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
          "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-..."}
       ],
@@ -223,10 +229,11 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 
 `password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 client 的页面上创建，不要手写。
 
-### 三台机器
+### 三个地方
 
-一台服务器（10.0.0.1）上的 hub、一台 GPU 机器上的 node、一台笔记本上的 client。node 与 client 都拨号连接 hub，
-它们自己都不需要监听。
+公网服务器 hub.example.net 上的 hub、实验室里一台 GPU 机器上的 node、办公室局域网中一台机器（192.168.1.10）上的
+client。node 与 client 都拨号连接 hub，它们自己都不需要监听，因此也都不需要公网地址。client 经 TLS、以其 API Key
+服务局域网中每台机器上的 agent。
 
 服务器：
 
@@ -238,21 +245,109 @@ GPU 机器：
 
 ```json
 {"agent": {"node": {
-  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
-  "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"}]
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
 
-笔记本：
+局域网中的机器：
 
 ```json
 {"agent": {"client": {
-  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
-  "api": {"address": "127.0.0.1:9301"}
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
 
+局域网中的 agent 以 `https://192.168.1.10:9301` 作为 base URL。只服务本机 agent 的 client 监听回环地址，如
+`127.0.0.1:9301`，不需要证书。
+
 每台机器加上 `console` 即可在浏览器中管理其角色。client 也可以直接拨号连接 node，一个进程也可以同时运行 hub 与 node。
+互联是明文 `ws://`：经过它的内容不加密，所以跨公网连接 hub 的链路应走内网或隧道，见[互联](#互联)。
+
+## 模型与接口
+
+模型的 `api` 是其上游所讲的接口。它决定 `agent.client` 的哪些端点能访问该模型、node 调用的 URL、node 发送模型 Key
+所用的请求头，以及模型在哪里被指明——node 就在那里用 `upstream` 替代名称。
+
+| `api` | 上游 | agent 在 agent.client 上调用 | node 调用 | Key 请求头 | 模型位于 |
+| --- | --- | --- | --- | --- | --- |
+| `openai` | OpenAI 及所有 OpenAI 兼容接口：DeepSeek、通义千问（DashScope 兼容模式）、Mistral、Groq、xAI、Moonshot、智谱、OpenRouter、Together、Fireworks；vLLM、SGLang、llama.cpp server、LM Studio、Ollama 的 `/v1` | `POST /v1/{call}` | `base_url/{call}` | `Authorization: Bearer` | JSON 请求体的 `model`，或表单的 `model` 字段 |
+| `azure_openai` | Azure OpenAI 部署 | 与 `openai` 相同：`POST /v1/{call}` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}`；`responses` 发往 `base_url/openai/responses?api-version=…` | `api-key` | URL 中的部署名；`responses` 为请求体的 `model` |
+| `anthropic` | Anthropic，以及讲其 Messages 接口的服务 | `POST /v1/messages`、`/v1/messages/count_tokens` | `base_url/{call}` | `x-api-key` | JSON 请求体的 `model` |
+| `gemini` | Google Gemini API | `POST /v1beta/models/{model}:{method}` 或 `/v1/models/{model}:{method}` | `base_url/models/{upstream}:{method}` | `x-goog-api-key` | 路径 |
+| `ollama` | Ollama 原生接口 | `POST /api/chat`、`/api/generate`、`/api/embed` | `base_url/api/…` | 设置了 `api_key` 时为 `Authorization: Bearer` | JSON 请求体的 `model` |
+| `cohere` | Cohere v2 接口 | `POST /v2/chat`、`/v2/embed`、`/v2/rerank` | `base_url/{call}` | `Authorization: Bearer` | JSON 请求体的 `model` |
+
+各接口接受的调用：
+
+- **openai**：`chat/completions`、`responses`、`completions`、`embeddings`、`moderations`、`images/generations`、
+  `images/edits`、`images/variations`、`audio/speech`、`audio/transcriptions`、`audio/translations`，以及
+  `rerank`（vLLM、Jina 等在 `/v1/rerank` 提供的 Cohere 风格重排接口）。`azure_openai` 模型接受除 `moderations`、
+  `images/variations` 与 `rerank` 外的全部调用，这三个得到 404。
+- **anthropic**：`messages`、`messages/count_tokens`。
+- **gemini**：`generateContent`、`streamGenerateContent`、`countTokens`、`embedContent`、`batchEmbedContents`。
+- **ollama**：`api/chat`、`api/generate`、`api/embed`。
+- **cohere**：`chat`、`embed`、`rerank`。
+
+只转发无状态的调用。在厂商处保存状态的调用，如文件、批处理、存储的 responses、assistants、微调或 Gemini 的缓存内容，
+都不提供，得到 404。
+
+请求体与应答：
+
+- 请求体是 JSON，OpenAI 的上传（`images/edits`、`images/variations`、`audio/transcriptions`、
+  `audio/translations`）除外：它们是 `multipart/form-data`，模型在 `model` 字段中。请求体的内容类型（含 boundary）
+  随它一起发往上游。
+- 应答按上游给出的状态码与内容类型逐段返回：SSE 事件、Ollama 的 NDJSON、Gemini 不带 `alt=sse` 流式输出时的 JSON
+  数组、`audio/speech` 的音频字节。
+- agent 的查询参数中只有 Gemini 的 `alt` 发往上游（`alt=sse` 表示 SSE）；`azure_openai` 模型的 `api-version` 由
+  node 自己设置；其他参数一律不发往上游，包括 agent 的 Key。
+- agent 的请求头中，只有 `anthropic-version`（agent 未提供时为 2023-06-01）与 `anthropic-beta` 发往 `anthropic`
+  上游，`OpenAI-Beta` 发往 `openai` 上游。其他请求头一律不发，包括 agent 的 Key；node 发送模型自己的 Key。
+
+`upstream` 在模型被指明的地方替代名称：
+
+- 在 JSON 请求体顶层的 `model` 中（`openai`、`anthropic`、`ollama`、`cohere`，以及 Azure 的 `responses`）：node 在
+  `proxy.max_body_bytes` 之内完整读入请求体，设置 `model`，其他成员保留原始字节。
+- 在表单的 `model` 字段中：node 在 `proxy.max_body_bytes` 之内完整读入请求体，替换该字段的值；其他字节（包括文件）
+  原样保留。
+- 在 Gemini 的路径中：请求体不变，因此流式转发；`batchEmbedContents` 例外，其 `requests[].model` 也被设为
+  `models/{upstream}`。
+- 作为 Azure 的部署名在 URL 中：请求体原样流式转发。
+
+模型已是上游 ID、或请求体没有指明模型时，请求体随到随发给上游。
+
+各种类的 `base_url`：
+
+| `api` | `base_url` 示例 |
+| --- | --- |
+| `openai` | `https://api.openai.com/v1`、`https://api.deepseek.com/v1`、`https://dashscope.aliyuncs.com/compatible-mode/v1`、`https://api.mistral.ai/v1`、`https://api.groq.com/openai/v1`、`https://api.x.ai/v1`、`https://api.moonshot.cn/v1`、`https://open.bigmodel.cn/api/paas/v4`、`https://openrouter.ai/api/v1`、`http://127.0.0.1:8000/v1`（vLLM、SGLang）、`http://127.0.0.1:8080/v1`（llama.cpp）、`http://127.0.0.1:1234/v1`（LM Studio）、`http://127.0.0.1:11434/v1`（Ollama） |
+| `azure_openai` | `https://{resource}.openai.azure.com` |
+| `anthropic` | `https://api.anthropic.com/v1` |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta` |
+| `ollama` | `http://127.0.0.1:11434` |
+| `cohere` | `https://api.cohere.com/v2` |
+
+每种各提供一个模型的 node：
+
+```json
+{"agent": {"node": {
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "models": [
+    {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
+    {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
+    {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
+     "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-..."},
+    {"name": "gemini-flash", "api": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta",
+     "upstream": "gemini-2.5-flash", "api_key": "AIza..."},
+    {"name": "gpt-4o", "api": "azure_openai", "base_url": "https://contoso.openai.azure.com",
+     "upstream": "gpt-4o-prod", "api_version": "2024-10-21", "api_key": "..."},
+    {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"},
+    {"name": "command-a", "api": "cohere", "base_url": "https://api.cohere.com/v2",
+     "upstream": "command-a-03-2025", "api_key": "..."}
+  ]
+}}}
+```
 
 ### 配置是唯一的来源
 
@@ -273,7 +368,7 @@ client 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可�
 
 ## 互联
 
-角色之间通过 WebSocket 连接组成的互联网络通信。协议沿用 agenthub，未作改动，所以 fit 的角色与 agenthub 的程序可以互联。
+角色之间通过 WebSocket 连接组成的互联网络通信。
 
 ### 传输与认证
 
@@ -333,14 +428,11 @@ pong 排在其 ping 之前发送的所有内容之后，所以 ping 等待 pong 
 拨号方对 `peers` 中的对端从不放弃。连续第 n 次失败后，它等待 `min(retry_interval, 1s × 2ⁿ)` 以内的随机时长，至少
 100ms。存活 10 秒及以上的连接断开后，步长从 1 秒重新开始。
 
-### 超过 1 MiB 的请求体
+### 请求体
 
-agenthub 把请求体放在转发流的打开请求中（`ProxyReq.body`）。fit 在 `ProxyReq` 中加了两个字段：`body_stream` 与
-`body_size`。client 把 1 MiB 以内的请求体照旧内联发送，更大的则以 `body_stream: true` 加上长度发送，随后在流的额度内
-以 64 KiB 的帧发送请求体。hub 随到随转这些帧；node 随到随发给上游。
-
-agenthub 的 node 与 hub 只认内联请求体。fit 的角色与 agenthub 的程序可以互联，并能处理 1 MiB 以内的请求体；更大的请求体
-需要途经的每个角色都是 fit。
+client 把 1 MiB 以内的请求体放在转发流的打开请求中（`ProxyReq.body`），更大的则以 `body_stream: true` 加上长度
+（`body_size`）发送，随后在流的额度内以 64 KiB 的帧发送请求体。hub 随到随转这些帧；node 随到随发给上游。打开请求还
+携带调用的接口、路径与模型，请求体不是 JSON 时其内容类型（`content_type`），以及发往上游的查询参数（`query`）。
 
 ## node
 
@@ -354,7 +446,8 @@ agenthub 的 node 与 hub 只认内联请求体。fit 的角色与 agenthub 的�
 
 ### 检查
 
-检查是带调用认证头的 `GET <base_url>/models`，限时 15 秒。连接失败、401、403 或 5xx 应答使模型进入 `error`；其他应答
+检查是带调用认证头、对上游模型列表的 `GET`，限时 15 秒：`base_url/models`（`openai`、`anthropic`、`gemini`、
+`cohere`）、`base_url/openai/models?api-version=…`（`azure_openai`）或 `base_url/api/tags`（`ollama`）。连接失败、401、403 或 5xx 应答使模型进入 `error`；其他应答
 （包括 404 与 405）表示上游可用。已启用的模型每 60 秒检查一次，处于 `error` 时每 15 秒一次，恢复的上游很快就能重新
 提供服务。调用时连不上上游同样使模型进入 `error`；状态码低于 500 的应答清除错误。
 
@@ -362,14 +455,14 @@ agenthub 的 node 与 hub 只认内联请求体。fit 的角色与 agenthub 的�
 
 `/node/proxy` 处理一次 agent 调用，使用 fib 的异步 HTTP 客户端：
 
-1. 路径必须属于模型的接口：`openai` 为 `chat/completions`、`responses`、`completions` 或 `embeddings`；`anthropic` 为
-   `messages` 或 `messages/count_tokens`。
-2. 模型（名称与接口）必须就绪且未达其 `max_inflight`，节点未达 `proxy.max_inflight`。否则调用以不可用失败，hub 或
-   client 换一个节点。
-3. 请求体随到随发给上游。只有当模型的 `upstream` 与 agent 请求的名称不同时，才完整读入请求体以改写顶层的 `model`；
-   其他成员保留原始字节。超过 `proxy.max_body_bytes` 的请求体失败。
-4. 上游收到 `Content-Type: application/json` 与模型的 Key。`anthropic` 透传 `anthropic-version`（agent 未提供时为
-   2023-06-01）与 `anthropic-beta`；`openai` 透传 `OpenAI-Beta`。agent 的其他请求头一律不转发，包括它自己的 Key。
+1. 调用必须属于其接口（见[模型与接口](#模型与接口)），请求体是 JSON 或带 boundary 的 `multipart/form-data`。
+2. 模型（名称，且种类讲该调用的接口）必须就绪且未达其 `max_inflight`，节点未达 `proxy.max_inflight`。否则调用以
+   不可用失败，hub 或 client 换一个节点。模型种类不提供的调用（如 `azure_openai` 模型的 `images/variations`）以
+   未找到失败。
+3. URL 按种类构造。请求体随到随发给上游。只有当模型的 `upstream` 与 agent 请求的名称不同、且请求体指明了模型时，
+   才完整读入请求体以设置它；其他字节保留。超过 `proxy.max_body_bytes` 的请求体失败。
+4. 上游收到请求体的内容类型、放在该种类请求头中的模型 Key，以及[模型与接口](#模型与接口)列出的请求头与查询参数。
+   agent 的其他请求头一律不转发，包括它自己的 Key。
 5. 在收到上游第一个字节之前，node 保持流存活。返回的第一帧是头帧：上游状态码、内容类型与节点 ID。之后应答体的每一段
    随到随作为一帧发送，所以 SSE 事件不会被攒批。
 6. 两个方向的背压相连。请求体在上游连接的写队列中等待，队列排空之前流的额度不归还。调用方不给额度时应答体暂停，
@@ -435,32 +528,41 @@ hub 的页面通过两个只对页面开放的方法代管节点：`/hub/node/ca
 
 ### 接口
 
-| 方法与路径 | 接口 | 转发路径 |
+| 方法与路径 | 接口 | 转发为 |
 | --- | --- | --- |
-| `POST /v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings` | openai | `/v1/` 之后的部分 |
+| `POST /v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings`、`/v1/moderations`、`/v1/images/generations`、`/v1/images/edits`、`/v1/images/variations`、`/v1/audio/speech`、`/v1/audio/transcriptions`、`/v1/audio/translations`、`/v1/rerank` | openai，对应 `openai` 与 `azure_openai` 模型 | `/v1/` 之后的部分 |
 | `POST /v1/messages`、`/v1/messages/count_tokens` | anthropic | `/v1/` 之后的部分 |
-| `GET /v1/models`、`GET /v1/models/{id}` | 两者 | 由 client 应答 |
+| `POST /v1beta/models/{model}:{method}`、`/v1/models/{model}:{method}` | gemini | 方法名；模型取自路径 |
+| `POST /api/chat`、`/api/generate`、`/api/embed` | ollama | `/` 之后的部分 |
+| `POST /v2/chat`、`/v2/embed`、`/v2/rerank` | cohere | `/v2/` 之后的部分 |
+| `GET /v1/models`、`GET /v1/models/{id}` | 所有模型 | 由 client 应答 |
+| `GET /v1beta/models`、`GET /v1beta/models/{model}` | gemini 模型 | 由 client 应答 |
+| `GET /api/tags` | ollama 模型 | 由 client 应答 |
 
-接口是 `api.address` 上一个独立的绑定，与页面分开。其他路径或方法得到 404。`GET /v1/models` 同样需要 Key；它列出
-client 的 hub 与 node 所列的每个模型名称，同时带 OpenAI 与 Anthropic 模型列表的字段，两种 SDK 都能读取。
+这些路径正是各厂商 SDK 把 base URL 设为 client 后调用的地方，所以 agent 只需要 base URL 与 Key。接口是
+`api.address` 上一个独立的绑定，与页面分开。其他路径或方法得到 404。模型列表同样需要 Key。`GET /v1/models` 列出
+client 的 hub 与 node 所列的每个模型名称，同时带 OpenAI 与 Anthropic 模型列表的字段，两种 SDK 都能读取；
+`GET /v1beta/models` 按 Gemini `models.list` 的格式列出 Gemini 模型，`GET /api/tags` 按 Ollama 的格式列出 Ollama 模型。
 
-应答带上游的状态码与内容类型、`Cache-Control: no-cache`、`X-Accel-Buffering: no`，以及指明提供服务节点的
-`X-Agenthub-Node`；应答体随帧到达写出。
+调用在 JSON 请求体的 `model` 中、在 `multipart/form-data` 请求体的 `model` 字段中（OpenAI 的上传，只有 OpenAI 的
+路径接受），或在 Gemini 的路径中指明模型。应答带上游的状态码与内容类型、`Cache-Control: no-cache`、
+`X-Accel-Buffering: no`，以及指明提供服务节点的 `X-Fit-Node`；应答体随帧到达写出。
 
 ### API Key
 
 Key 为 `ah-` 加上 32 字节随机数的无填充 base64url，共 46 个字符。页面只在创建时显示一次；成员保存它的 ID、名称、前 10
-个字符、SHA-256 与创建时间。agent 以 `Authorization: Bearer <key>` 或 `x-api-key: <key>` 发送；其 SHA-256 与每个已存
-哈希做常量时间比较。
+个字符、SHA-256 与创建时间。agent 以 `Authorization: Bearer <key>`、`x-api-key: <key>` 或 `x-goog-api-key: <key>` 发送，在
+Gemini 的路径上也可以像 Google 的 REST 示例那样以查询参数 `key` 发送；其 SHA-256 与每个已存哈希做常量时间比较。
 
 Key 的使用情况（调用数与最近使用时间）与按模型的计数（调用数、失败数、字节数、进行中的调用）只在内存中统计，自角色启动起，
 不写入任何地方。最多分别统计 1024 个模型；更多模型的调用合在一起，记为 `other`。
 
 ### 路由
 
-client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的 `model`。然后按顺序尝试路由：
+client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的模型（Gemini 调用的模型在路径中）。然后按顺序尝试路由：
 
-1. 直接连接、提供该模型且就绪的节点，负载小的优先：节点上报的负载加上本 client 在其上进行中的调用数。
+1. 直接连接、以讲该调用接口的种类提供该模型且就绪的节点，负载小的优先：节点上报的负载加上本 client 在其上进行中的
+   调用数。
 2. 列出该模型且有就绪节点的 hub，轮询。
 
 在头帧之前因当前无法提供该模型、离线或连接断开而失败的路由，让给下一条，最多 4 条。尝试 hub 时排除已失败的节点。头帧
@@ -469,16 +571,17 @@ client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的 `m
 ### 错误
 
 错误采用 agent 所调用接口的格式：OpenAI 为 `{"error": {"message", "type", "code"}}`，Anthropic 为
-`{"type": "error", "error": {"type", "message"}}`。`GET /v1/models` 上，发送 `anthropic-version` 或 `x-api-key` 的
-agent 得到 Anthropic 格式。超过 `max_body_bytes` 的请求体是例外：HTTP 服务器在接口读取它之前，以纯文本的 413 拒绝。
+`{"type": "error", "error": {"type", "message"}}`，Gemini 为 `{"error": {"code", "message", "status"}}`，Ollama 为
+`{"error": "<消息>"}`，Cohere 为 `{"message"}`。不属于任何接口的路径按其前缀取格式（`/v1beta/` 为 Gemini，`/api/`
+为 Ollama，`/v2/` 为 Cohere）；`/v1/` 上，发送 `anthropic-version` 或 `x-api-key` 的 agent 得到 Anthropic 格式。超过 `max_body_bytes` 的请求体是例外：HTTP 服务器在接口读取它之前，以纯文本的 413 拒绝。
 
 | 情况 | 状态码 |
 | --- | --- |
 | 未知的路径或方法 | 404 |
 | 缺少 Key 或 Key 错误 | 401 |
-| 请求体不是 JSON，或没有 `model` | 400 |
+| 请求体不是 JSON，或没有 `model`；表单没有 `model` 字段，或路径不接受表单 | 400 |
 | 请求体超过 `max_body_bytes` | 413 |
-| 没有对端提供该模型，或只以另一种接口提供 | 404 |
+| 没有对端提供该模型，或只以另一种接口提供；模型种类不提供该调用 | 404 |
 | 调用数超过 `max_inflight` | 429 |
 | 模型没有就绪路由、所有路由都不可用，或 `first_byte_timeout` 内应答没有开始 | 503 |
 | node 或 hub 应答请求有误（如请求体超过 node 的 `proxy.max_body_bytes`）、未找到或限流 | 400、404、429 |
@@ -489,7 +592,8 @@ agent 得到 Anthropic 格式。超过 `max_body_bytes` 的请求体是例外：
 
 ### 接入
 
-以下示例中，`127.0.0.1:9301` 是 client 的 `api.address`，`<key>` 是在其页面上创建的 API Key。
+以下示例中，`127.0.0.1:9301` 是 client 的 `api.address`，`<key>` 是在其页面上创建的 API Key。局域网中其他机器上的
+agent 则经 https 使用 client 的局域网地址。
 
 OpenAI SDK（Python）：
 
@@ -523,12 +627,35 @@ wire_api = "chat"   # 上游支持 /responses 时可改为 "responses"
 
 然后 `export FIT_AGENT_API_KEY=<key>` 并运行 `codex`。
 
-curl：
+Gemini SDK（Python，`google-genai`），使用以 Gemini 接口提供的模型。base URL 不带版本：SDK 自己拼上
+`/v1beta/models/...`。
+
+```python
+from google import genai
+from google.genai import types
+client = genai.Client(api_key="<key>", http_options=types.HttpOptions(base_url="http://127.0.0.1:9301"))
+client.models.generate_content(model="gemini-flash", contents="Hello")
+```
+
+Ollama 的 Python 库，使用以 Ollama 接口提供的模型：
+
+```python
+from ollama import Client
+client = Client(host="http://127.0.0.1:9301", headers={"Authorization": "Bearer <key>"})
+client.chat(model="llama3.2", messages=[{"role": "user", "content": "Hello"}])
+```
+
+Cohere SDK：`cohere.ClientV2(api_key="<key>", base_url="http://127.0.0.1:9301")`。
+
+curl，一次对话与一次转写（音频文件以表单发送）：
 
 ```sh
 curl http://127.0.0.1:9301/v1/chat/completions -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
   -d '{"model": "qwen3-32b", "stream": true, "messages": [{"role": "user", "content": "Hello"}]}'
+
+curl http://127.0.0.1:9301/v1/audio/transcriptions -H "Authorization: Bearer <key>" \
+  -F model=whisper -F file=@meeting.wav
 ```
 
 client 的概览页用它自己的地址与模型显示这些示例。
@@ -633,8 +760,8 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
   的池上，硬件与显卡查询在 node 的工作池上，命令在作业的池上，配置编辑在管理器的 goroutine 上。互联的请求与流运行在
   会话的 goroutine 上，每条连接的数量受 `limits.max_inflight` 限制。
 - **请求体流式传输。** node 用 fib 的异步客户端转发调用，请求体与应答体随到随转，通过流的额度实现双向背压。只有 client
-  接口为读取模型而完整读入请求体（在 `api.max_body_bytes` 之内），node 也只在改写模型时完整读入（在
-  `proxy.max_body_bytes` 之内）。
+  接口为读取模型、并向下一条路由再次发送而完整读入请求体（在 `api.max_body_bytes` 之内），node 也只在把请求体指明的
+  模型设为 `upstream` 时完整读入（在 `proxy.max_body_bytes` 之内）。
 - **每个 map、队列与池都有上限**，见上表；在线节点与模型目录的条目受连接数约束。
 - **每次对外交互都有超时**：拨号、握手、hello、方法、流、上游调用以及 agent 的连接。
 
@@ -644,56 +771,3 @@ fib 暂时还缺的两项能力写在 [fib API 需求](fib-api-requests.zh-CN.md
   处理器外的一层按对端地址找到连接的 `fib.Connection`，拨号方通过拨号钩子拿到自己的，从而能立即关闭死掉或过慢的连接。
 - **A53**，WebSocket 连接发送的背压。在此之前，连接的队列由其各个流的窗口与慢连接超时约束：读得慢的对端在 ping 等待达到
   `slow_timeout` 时被发现，连接随之关闭。
-
-## 从 agenthub 迁移
-
-没有 agenthub 加密状态文件的导入。打开每个程序的页面，或解密其状态，逐项手写成员：
-
-| agenthub | fit |
-| --- | --- |
-| `id` | `id`：保留它，对端才能照旧识别该角色 |
-| `name` | `name` |
-| `listen` `{addr, password}` | `listen` `{address, password}`；`addr` 为空时省略 |
-| `peers[]` `{addr, password, role}` | `peers[]` `{address, password, role}` |
-| `console_hash` | `console.users` 中的一个用户，如 `{"username": "admin", "password_hash": "<该哈希>"}`，或用 `fit hash-password` 生成新的哈希 |
-| node 的 `role_data.models` | `agent.node.models`，字段一一对应 |
-| node 的 `role_data.description` | `agent.node.description` |
-| node 的 `role_data.settings` | `agent.node.settings`：`refresh_interval_seconds` 改为 `refresh_interval`（`"30s"`），`job_timeout_seconds` 改为 `job_timeout`（`"1h"`）；原来 `gpu_sudo` 为 false 时写上 `"gpu_sudo": false`，因为 fit 的默认是 true |
-| client 的 `role_data.keys[]` `{id, name, prefix, hash, created_at, last_used_at, calls}` | `agent.client.api_keys[]`，`id`、`name`、`prefix`、`hash` 与 `created_at` 原样复制；去掉成员不接受的 `last_used_at` 与 `calls`。旧 Key 继续有效。 |
-| hub 的 `role_data.nodes`（记住的节点） | 丢弃：hub 在节点连上时重新得知 |
-
-参数与环境变量：
-
-| agenthub | fit |
-| --- | --- |
-| `-addr` | `console.address`；client 还有 `api.address`，因为接口有自己的地址 |
-| `-data` 与状态文件 | `admin.store` |
-| `-log` | fit 的 `log`；角色写入其中的 `agent` 日志器 |
-| `AGENTHUB_PASSWORD` | 去掉；存储的密码在 `admin.store` 中设置 |
-| `AGENTHUB_CONSOLE_PASSWORD` | 去掉；改用控制台用户 |
-| `AGENTHUB_NODE_DATA_DIR` | `settings.gpu_data_dir`；脚本读到的是 `FIT_AGENT_GPU_DATA_DIR` |
-
-迁移期间，fit 的角色与 agenthub 的程序可以互联：线上协议、`/ws` 路径与认证都相同。超过 1 MiB 的请求体需要途经的每个
-角色都是 fit。
-
-配置写好后，用 `fit validate` 检查，再用 `fit store import -c <引导文件> <配置>` 把它封入存储（替换存储中原有的内容），
-此后页面所做的修改都会保存。`admin` 留在引导文件中，不放进导入的配置；其余见[控制台指南](console.zh-CN.md)。
-
-## 与 agenthub 的不同
-
-- 三个角色是一个程序、一份配置；任意组合在一个进程中运行，可与网关并存。
-- 加密状态文件及其启动密码去掉了；配置（保存在 `admin.store` 中）承载一切。
-- 控制台密码去掉了；页面使用控制台用户，带 bcrypt 哈希、会话、CSRF 令牌与锁定，与 `admin.console` 相同。
-- 互联监听是 fit 引擎上的一个绑定；`/ws` 以外的路径以 403 拒绝。
-- client 的接口有自己的地址，与页面分开，非回环地址需要 TLS。
-- hub 重启后忘掉离线节点。
-- API Key 的使用情况不跨重启保留。
-- 节点设置是时长（`"30s"`、`"1h"`），不再是秒数。
-- 上游调用用 fib 的客户端，不再用 `net/http`：模型上游不再遵循 `HTTP_PROXY` 与 `HTTPS_PROXY`。
-- 新增转发时限（连接、首字节、空闲、总时限）与节点级上限（`proxy.max_inflight`、`proxy.max_body_bytes`）。
-- 同时最多运行 8 个作业。
-- `limits.max_conns` 默认 1024（agenthub 为 10000）。
-- 地址中的端口必须是数字；`:http` 这样的服务名被拒绝。
-- 推送堆积超过 1024 个的连接被关闭。
-- 一个角色的页面上最多同时打开 16 个流。
-- 超过 1 MiB 的请求体在 fit 的角色之间以 `body_stream` 流式传输。

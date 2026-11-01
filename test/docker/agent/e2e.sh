@@ -65,7 +65,7 @@ run_tester() {
 }
 
 # startup_checks: a fit whose store password is wrong, or missing, exits non-zero with an error instead of starting.
-# (agenthub's data dir lock is gone: fit keeps no lock file, so there is nothing to check for a second process.)
+# fit keeps no lock file, so there is no second process to check for.
 startup_checks() {
   log "startup checks: wrong store password, missing store password"
   local out

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	stdhttp "net/http"
 	"net/url"
 	"slices"
@@ -84,13 +85,13 @@ func unavailable(format string, args ...any) error {
 	return mesh.Errorf(model.CodeUnavailable, format, args...)
 }
 
-// acquire takes an inflight slot of the ready model (name, api), within the
-// node's bound on calls.
+// acquire takes an inflight slot of the ready model name that agents call
+// with protocol api, within the node's bound on calls.
 func (n *Node) acquire(name, api string) (model.Model, *modelRT, limits, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	lim := n.lim
-	i := slices.IndexFunc(n.models, func(m model.Model) bool { return m.Name == name && m.API == api })
+	i := slices.IndexFunc(n.models, func(m model.Model) bool { return m.Name == name && model.Protocol(m.API) == api })
 	if i < 0 {
 		return model.Model{}, nil, lim, unavailable("model %s (%s) is not served by this node", name, api)
 	}
@@ -136,13 +137,113 @@ func rewriteModel(body []byte, upstream string) ([]byte, error) {
 	}
 	v, _ := json.Marshal(upstream)
 	obj["model"] = v
+	return marshalRaw(obj)
+}
+
+// rewriteBatchModels sets the "model" of every request of a Gemini
+// batchEmbedContents body to models/upstream, as the API wants it to match
+// the model of the path.
+func rewriteBatchModels(body []byte, upstream string) ([]byte, error) {
+	var obj map[string]json.RawMessage
+	var reqs []map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil || json.Unmarshal(obj["requests"], &reqs) != nil {
+		return nil, errors.New("the request body must be a JSON object with requests")
+	}
+	v, _ := json.Marshal("models/" + upstream)
+	for _, r := range reqs {
+		if r != nil {
+			r["model"] = v
+		}
+	}
+	raw, err := marshalRaw(reqs)
+	if err != nil {
+		return nil, err
+	}
+	obj["requests"] = raw
+	return marshalRaw(obj)
+}
+
+func marshalRaw(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(obj); err != nil {
+	if err := enc.Encode(v); err != nil {
 		return nil, err
 	}
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
+// rewriteForm sets the model field of a multipart/form-data body to
+// upstream; every other byte, the files included, stays as it is.
+func rewriteForm(body []byte, boundary, upstream string) ([]byte, error) {
+	start, end, err := model.FormField(body, boundary, "model")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(body)-(end-start)+len(upstream))
+	out = append(out, body[:start]...)
+	out = append(out, upstream...)
+	return append(out, body[end:]...), nil
+}
+
+// maxQuery bounds the query a call passes upstream.
+const maxQuery = 1024
+
+// upstreamURL returns the URL of a call to m with upstream as its model ID,
+// and whether the model is named in the body rather than in the URL:
+//
+//   - openai, anthropic, cohere, ollama: base_url/path, the model in the body;
+//   - gemini: base_url/models/{upstream}:{method}, with the query
+//     parameters model.ProxyQuery lets through, as alt=sse;
+//   - azure_openai: base_url/openai/deployments/{upstream}/{path}, with the
+//     model's api-version; its responses go to base_url/openai/responses,
+//     the deployment in the body's model.
+func upstreamURL(m model.Model, req *model.ProxyReq, upstream string) (string, bool, error) {
+	switch m.API {
+	case model.APIGemini:
+		u := m.BaseURL + "/models/" + url.PathEscape(upstream) + ":" + req.Path
+		if req.Query != "" {
+			if len(req.Query) > maxQuery {
+				return "", false, mesh.BadRequest("the query is longer than %d bytes", maxQuery)
+			}
+			in, err := url.ParseQuery(req.Query)
+			if err != nil {
+				return "", false, mesh.BadRequest("a bad query: %v", err)
+			}
+			out := url.Values{}
+			for _, k := range model.ProxyQuery[model.APIGemini] {
+				if v, ok := in[k]; ok {
+					out[k] = v
+				}
+			}
+			if q := out.Encode(); q != "" {
+				u += "?" + q
+			}
+		}
+		return u, false, nil
+	case model.APIAzureOpenAI:
+		v := "?api-version=" + url.QueryEscape(m.APIVersion)
+		if req.Path == "responses" {
+			return m.BaseURL + "/openai/responses" + v, true, nil
+		}
+		return m.BaseURL + "/openai/deployments/" + url.PathEscape(upstream) + "/" + req.Path + v, false, nil
+	}
+	return m.BaseURL + "/" + req.Path, true, nil
+}
+
+// bodyType checks the body's media type a call gives: application/json
+// when none, or multipart/form-data with its boundary.
+func bodyType(ct string) (ctype, boundary string, err error) {
+	if ct == "" {
+		return "application/json", "", nil
+	}
+	if b := model.FormBoundary(ct); b != "" {
+		return ct, b, nil
+	}
+	if mt, _, perr := mime.ParseMediaType(ct); perr == nil && mt == "application/json" {
+		return ct, "", nil
+	}
+	return "", "", mesh.BadRequest("the body's content type %q is neither application/json nor multipart/form-data with a boundary", ct)
 }
 
 func sendJSON(ctx context.Context, st *wire.Stream, v any) error {
@@ -155,20 +256,27 @@ func sendJSON(ctx context.Context, st *wire.Stream, v any) error {
 
 // proxy serves model.MethodNodeProxy: it forwards one agent call to the
 // model's upstream on fib's asynchronous client and streams the response
-// back as it arrives. The request body comes in the request, or, with
-// BodyStream, as the opener's frames, which go upstream as they arrive,
+// back as it arrives. The upstream URL and auth header follow the model's
+// kind (upstreamURL, setAuth). The request body comes in the request, or,
+// with BodyStream, as the opener's frames, which go upstream as they arrive,
 // through a BodyWriter, held against the stream's window while the upstream
 // is slow to take them; it is held whole only when the model's upstream ID
-// differs from its name, to set the model it names, within the node's
-// max_body_bytes. The response's head goes first, then its body, a frame
+// differs from the model the call names and the body names it, to set it
+// (a JSON body's model, a form's model field, a Gemini batch's requests),
+// within the node's max_body_bytes. The response's head goes first, then its body, a frame
 // per piece, held with HoldBody while the caller has granted no credit. The
 // handler's goroutine only waits for the end; nothing waits on a fib worker.
 // Every failure before the head frame that another node might not have is
 // CodeUnavailable.
 func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
 	start := time.Now()
+	req.API = model.Protocol(req.API)
 	if !slices.Contains(model.ProxyPaths[req.API], req.Path) {
 		return nil, mesh.BadRequest("path %q is not allowed for api %q", req.Path, req.API)
+	}
+	ctype, boundary, err := bodyType(req.ContentType)
+	if err != nil {
+		return nil, err
 	}
 	m, r, lim, err := n.acquire(req.Model, req.API)
 	if err != nil {
@@ -176,6 +284,9 @@ func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.Prox
 	}
 	n.changed()
 	defer n.release(m, r)
+	if !model.Serves(m.API, req.Path) {
+		return nil, mesh.Errorf(model.CodeNotFound, "model %s is served by %s, which has no %s", m.Name, m.API, req.Path)
+	}
 	if int64(len(req.Body)) > lim.body || req.BodySize > lim.body {
 		return nil, mesh.Errorf(model.CodeBadRequest, "the request body is larger than the node's %d bytes", lim.body)
 	}
@@ -183,35 +294,52 @@ func (n *Node) proxy(ctx context.Context, caller model.Identity, req *model.Prox
 	if upstream == "" {
 		upstream = m.Name
 	}
-	// ProxyReq.Model is the body's model, so an equal upstream ID leaves
-	// the body untouched, and a streamed one streams.
-	rewrite := upstream != req.Model
+	target, inBody, err := upstreamURL(m, req, upstream)
+	if err != nil {
+		return nil, err
+	}
+	// ProxyReq.Model is the model the call names, so an equal upstream ID
+	// leaves the body untouched, and a streamed one streams. A model named
+	// in the URL needs no change to the body, but for Gemini's batches,
+	// whose requests name it too.
+	var rewrite func([]byte) ([]byte, error)
+	if upstream != req.Model {
+		switch {
+		case m.API == model.APIGemini && req.Path == "batchEmbedContents":
+			rewrite = func(b []byte) ([]byte, error) { return rewriteBatchModels(b, upstream) }
+		case !inBody:
+		case boundary != "":
+			rewrite = func(b []byte) ([]byte, error) { return rewriteForm(b, boundary, upstream) }
+		default:
+			rewrite = func(b []byte) ([]byte, error) { return rewriteModel(b, upstream) }
+		}
+	}
 
 	x := &exchange{n: n, st: st, lim: lim, done: make(chan struct{}),
 		res: model.ProxyResult{Node: n.Self().ID, Model: m.Name}}
-	hreq, err := stdhttp.NewRequest(stdhttp.MethodPost, m.BaseURL+"/"+req.Path, nil)
+	hreq, err := stdhttp.NewRequest(stdhttp.MethodPost, target, nil)
 	if err != nil {
 		return nil, unavailable("model %s: %v", m.Name, err)
 	}
-	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Content-Type", ctype)
 	setAuth(hreq.Header, m, req.Header)
 
 	switch {
 	case !req.BodyStream:
 		body := req.Body
-		if rewrite {
-			if body, err = rewriteModel(body, upstream); err != nil {
+		if rewrite != nil {
+			if body, err = rewrite(body); err != nil {
 				return nil, mesh.BadRequest("%v", err)
 			}
 		}
 		hreq.Body, hreq.ContentLength = fibhttp.NewBufferedBody(body), int64(len(body))
-	case rewrite:
+	case rewrite != nil:
 		// The whole body first, within the bound, then the call.
 		body, err := collect(ctx, st, lim.body)
 		if err != nil {
 			return nil, err
 		}
-		if body, err = rewriteModel(body, upstream); err != nil {
+		if body, err = rewrite(body); err != nil {
 			return nil, mesh.BadRequest("%v", err)
 		}
 		hreq.Body, hreq.ContentLength = fibhttp.NewBufferedBody(body), int64(len(body))

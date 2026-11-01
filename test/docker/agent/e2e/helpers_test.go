@@ -299,7 +299,7 @@ func chat(t testing.TB, client, key, mdl string) string {
 	if r.Status != 200 {
 		t.Fatalf("%s chat %s: HTTP %d: %s", client, mdl, r.Status, r.Body)
 	}
-	return r.Header.Get("X-Agenthub-Node")
+	return r.Header.Get("X-Fit-Node")
 }
 
 // ---- mock upstream ----

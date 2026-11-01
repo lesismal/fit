@@ -1507,8 +1507,9 @@ In JSON:
 ## Agent
 
 The agent's roles, run beside the gateway on its engine: a `hub` that nodes and clients meet at, a
-`node` that serves AI models from local or remote upstreams (OpenAI- and Anthropic-compatible
-APIs), and a `client` that offers one API calling the models of the nodes it reaches. The roles
+`node` that serves AI models from local or remote upstreams (OpenAI and every OpenAI-compatible
+API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `client` that serves those APIs to the
+agents of its machine or LAN, calling the models of the nodes it reaches. The roles
 link over a WebSocket mesh, each listening at `listen` and dialing its `peers`. A role runs while
 its member is set; any of them, in any number of processes. What a role's pages, behind
 `console`, change is written back into its member, and kept in `admin.store` when there is one.
@@ -1525,6 +1526,11 @@ agent {
 			api openai
 			base_url http://127.0.0.1:11434/v1
 			upstream qwen3:32b
+		}
+		models llama3.2 {
+			api ollama
+			base_url http://127.0.0.1:11434
+			upstream llama3.2:3b
 		}
 	}
 	client {
@@ -1552,6 +1558,10 @@ agent:
         api: openai
         base_url: http://127.0.0.1:11434/v1
         upstream: qwen3:32b
+      - name: llama3.2
+        api: ollama
+        base_url: http://127.0.0.1:11434
+        upstream: llama3.2:3b
   client:
     peers:
       - address: 127.0.0.1:9210
@@ -1571,7 +1581,8 @@ In JSON:
     },
     "node": {
       "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
-      "models": [{"name": "qwen3", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"}]
+      "models": [{"name": "qwen3", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"},
+        {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"}]
     },
     "client": {
       "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
@@ -1683,11 +1694,12 @@ Also at `agent.node.limits`, `agent.client.limits`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | Required. The name agents ask for the model by: 1 to 128 characters, no spaces. A name and api are unique among a node's models. |
-| `api` | string: `openai`, `anthropic` |  | Required. The API the upstream speaks, and the agent endpoints the model is reached through: openai or anthropic. |
-| `base_url` | string |  | Required. The upstream's base URL, http or https, without a query, as in http://127.0.0.1:11434/v1; calls go to it with their path appended, as base_url/chat/completions. |
-| `upstream` | string |  | The model ID sent upstream in place of name; name when left out. |
-| `api_key` | string |  | The key sent upstream: as Authorization: Bearer for openai, as x-api-key for anthropic. None when left out. The pages never show it whole. |
+| `name` | string |  | Required. The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's. |
+| `api` | string: `openai`, `anthropic`, `gemini`, `azure_openai`, `ollama`, `cohere` |  | Required. The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header. |
+| `base_url` | string |  | Required. The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434. |
+| `upstream` | string |  | The model ID sent upstream in place of name: in the body's model, a form's model field, Gemini's path, or as an azure_openai model's deployment. name when left out. |
+| `api_key` | string |  | The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The pages never show it whole. |
+| `api_version` | string |  | The api-version query every call of an azure_openai model carries, as 2024-10-21: required for azure_openai, and only taken there. |
 | `disabled` | boolean |  | Keep the model without serving it. |
 | `description` | string |  | A note about the model its peers show. |
 | `max_inflight` | integer, 0 to 100000 |  | The most calls to the model the node forwards at once; a call past it goes to another node. No bound but proxy.max_inflight's when left out or 0. |
@@ -1715,7 +1727,7 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `idle_timeout` | duration | `"5m"` | How long an upstream may go silent in the middle of its response before the call is cut short. 5m when left out. |
 | `timeout` | duration | `"30m"` | The most one call may take, from its start to the end of its response. 30m when left out. |
 | `max_inflight` | integer, 0 or more | `256` | The most calls the node forwards at once, across its models; a call past it goes to another node. 256 when left out or 0. |
-| `max_body_bytes` | integer, 0 or more | `33554432` | The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from its name, to set the model it names. 32 MiB when left out or 0. |
+| `max_body_bytes` | integer, 0 or more | `33554432` | The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0. |
 
 <a id="config-agentclient"></a>
 
@@ -1729,7 +1741,7 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `listen` | [object](#config-agentlisten) |  | Where the client takes links from hubs and nodes; none when left out. Its pages change it. |
 | `peers` | list of [object](#config-agentpeer) |  | The hubs and nodes the client dials. Its pages change them. |
 | `limits` | [object](#config-agentlimits) |  | Bounds on the client's links; the defaults when left out. |
-| `api` | [object](#config-agentclientapi) |  | The API agents call, /v1/chat/completions, /v1/messages and the rest; none when left out. |
+| `api` | [object](#config-agentclientapi) |  | The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out. |
 | `api_keys` | list of [object](#config-agentclientkey) |  | The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them. |
 
 <a id="config-agentclientapi"></a>
@@ -1738,10 +1750,10 @@ Also at `agent.node.limits`, `agent.client.limits`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string |  | Required. The host and port the API listens on. A host that is not a loopback address needs cert_file and key_file, so that keys never cross a network in the clear. |
+| `address` | string |  | Required. The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear. |
 | `cert_file` | string |  | A PEM file with the API's certificate, followed by any intermediates; with key_file, the API is served over TLS. |
 | `key_file` | string |  | A PEM file with the certificate's private key. |
-| `max_body_bytes` | integer, 0 or more | `33554432` | The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names. 32 MiB when left out or 0. |
+| `max_body_bytes` | integer, 0 or more | `33554432` | The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names and to send it again when a route cannot serve it. 32 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `256` | The most connections the API keeps open at once; one past it is closed as soon as it is accepted. 256 when left out or 0. |
 | `max_inflight` | integer, 0 or more | `256` | The most calls the API forwards at once; one past it gets 429. 256 when left out or 0. |
 | `first_byte_timeout` | duration | `"5m"` | How long a call may wait for its response to begin. 5m when left out. |
@@ -1887,7 +1899,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `protocol` | string: `tcp`, `ws`, `quic` |  | Required. The protocol: tcp, a WebSocket (ws), for networks that let only HTTP through, or quic, over UDP. |
 | `address` | string |  | Required. The host and port it listens on, as in ":7000"; an empty host is every address. |
-| `path` | string | `"/fibhub"` | A ws listener's path. /fibhub when left out. |
+| `path` | string | `"/tunnel"` | A ws listener's path. /tunnel when left out. |
 
 <a id="config-tunnelconsolesocket"></a>
 
@@ -1921,7 +1933,7 @@ In JSON:
 | `name` | string |  | The node's name, which clients name to reach its services. The host's name when left out. |
 | `meta` | object of string |  | Anything else the node tells the servers, which their pages show. |
 | `servers` | list of [object](#config-tunneluplink) |  | The servers the node links to and registers with. None when left out: the console's pages add them. |
-| `services` | list of [object](#config-tunnelservice) |  | The services the node reaches, and the only addresses it opens tunnels to. fibhub called them nodes. |
+| `services` | list of [object](#config-tunnelservice) |  | The services the node reaches, and the only addresses it opens tunnels to. |
 | `dial_timeout` | duration | `"5s"` | How long a connect to a service may take; shorter than a server's call_timeout, so that the server hears either way. 5s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
 | `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every server; a server's request for one more is refused. 4096 when left out or 0. |

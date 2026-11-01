@@ -7,23 +7,29 @@ Config examples, each in .conf, YAML and JSON: [agent-hub](../examples/agent-hub
 The agent shares AI models among machines. It is three roles of fit, each set by a member of the
 config:
 
-- **`agent.node`** serves models. A model is an upstream endpoint of an OpenAI- or
-  Anthropic-compatible API: a local server such as Ollama or vLLM, or a hosted API with its key.
-  The node also reports its hardware and runs a fixed set of management actions.
-- **`agent.hub`** is where nodes and clients meet. It keeps a table of its nodes and their models,
-  and relays each call to the least loaded node that serves the model.
-- **`agent.client`** runs beside the agents (Claude Code, Codex, an SDK). It serves one API,
-  `/v1/chat/completions`, `/v1/messages` and the rest, and calls the models of the hubs and nodes it
-  reaches.
+- **`agent.node`** serves models. A model is an upstream endpoint of one of the mainstream model
+  APIs: OpenAI's and every OpenAI-compatible one, Anthropic's, Google's Gemini, Azure OpenAI,
+  Ollama's own and Cohere's ([Models and APIs](#models-and-apis)). It may be a local server, as
+  Ollama, vLLM or llama.cpp, or a hosted API with its key. The node also reports its hardware and
+  runs a fixed set of management actions.
+- **`agent.hub`** is where nodes and clients meet, usually on a public server that every machine
+  reaches. It keeps a table of its nodes and their models, and relays each call to the least loaded
+  node that serves the model.
+- **`agent.client`** gives agents (Claude Code, Codex, an SDK, an app of one's own) the
+  models' APIs: `/v1/chat/completions`, `/v1/messages`, `/v1beta/models/{model}:generateContent`,
+  `/api/chat`, `/v2/chat` and the rest. It builds the path from the local machine or LAN, through a
+  public hub, to the nodes of other compute machines, and serves the API to agents on its own
+  machine (on a loopback address) or on its LAN (on a LAN address, with TLS and API keys). It need
+  not run on an agent's machine: one client on a LAN machine serves every agent of the LAN.
 
 Requests and responses are forwarded byte for byte: the agent never converts one API into another,
-so tool calls, thinking and images work as the upstream supports them.
+so tool calls, thinking, images, audio and streaming work as the upstream supports them.
 
 A process runs every role whose member is set, any combination of them, beside the gateway's
 listeners and routes or without any; a config with roles and no routes needs no listener. Every
 role adds its bindings (its pages, its mesh listener, a client's API) to the listeners' fib engine,
 and dials its peers on it. The node's HTTP client dials its upstreams on the upstream engine that
-fit's own upstream pools use. The roles are the port of agenthub into fit; why and how is in
+fit's own upstream pools use. Why the roles are part of fit is in
 [decision 028](decisions/028-agent-and-tunnel.md). The [tunnel](tunnel.md) and [WebRTC](webrtc.md)
 roles run the same way, beside these.
 
@@ -97,11 +103,12 @@ The fields every role has, and:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `name` | string | required | The name agents ask for: 1 to 128 characters, no spaces. A name and `api` are unique among the node's models, so one name may have an OpenAI and an Anthropic model. |
-| `api` | string | required | `openai` or `anthropic`: the API the upstream speaks, and the agent paths the model is reached through. |
-| `base_url` | string | required | The upstream's base URL, http or https, without a query, a fragment or a trailing slash, as `http://127.0.0.1:11434/v1`. A call goes to it with its path appended, as `base_url/chat/completions`. |
-| `upstream` | string | `name` | The model ID sent upstream in place of `name`; up to 256 characters, no spaces. |
-| `api_key` | string | none | The key sent upstream: as `Authorization: Bearer` for `openai`, as `x-api-key` for `anthropic`. Up to 4096 characters, no spaces. The pages never show it whole. |
+| `name` | string | required | The name agents ask for: 1 to 128 characters, no spaces. A name is unique among the node's models of one agent API, so one name may have an OpenAI, an Anthropic and a Gemini model; an `azure_openai` model counts as OpenAI. |
+| `api` | string | required | The API the upstream speaks: `openai`, `anthropic`, `gemini`, `azure_openai`, `ollama` or `cohere`. It sets the agent paths the model is reached through, the upstream URL and the key's header; see [Models and APIs](#models-and-apis). |
+| `base_url` | string | required | The upstream's base URL, http or https, without a query, a fragment or a trailing slash, as `http://127.0.0.1:8000/v1`. A call goes to it with its path appended, each kind its own way: `base_url/chat/completions`, `base_url/models/{upstream}:generateContent`, `base_url/openai/deployments/{upstream}/chat/completions`, `base_url/api/chat`. |
+| `upstream` | string | `name` | The model ID sent upstream in place of `name`, wherever the kind names the model: the body, a form field, Gemini's path, Azure's deployment. Up to 256 characters, no spaces. |
+| `api_key` | string | none | The key sent upstream: as `Authorization: Bearer` for `openai`, `ollama` and `cohere`, as `x-api-key` for `anthropic`, `x-goog-api-key` for `gemini`, `api-key` for `azure_openai`. Up to 4096 characters, no spaces. The pages never show it whole. |
+| `api_version` | string | none | The `api-version` every call of an `azure_openai` model carries, as `2024-10-21`: required there, refused for the other kinds. Up to 64 letters, digits, dots, dashes and underscores. |
 | `disabled` | bool | false | Keep the model without serving it. |
 | `description` | string | none | A note about the model its peers show; up to 1024 bytes. |
 | `max_inflight` | int | 0 | The most calls to the model the node forwards at once, 0 to 100000. A call past it goes to another node. 0 leaves only `proxy.max_inflight`. |
@@ -125,7 +132,7 @@ The fields every role has, and:
 | `idle_timeout` | duration | `5m` | How long an upstream may go silent in the middle of its response. |
 | `timeout` | duration | `30m` | The most one call may take, to the end of its response. |
 | `max_inflight` | int | 256 | The most calls the node forwards at once, across its models. A call past it goes to another node. |
-| `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body a call may carry. |
+| `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body a call may carry. A body is held whole only to set its model to `upstream`, when the body names the model. |
 
 ### `agent.client`
 
@@ -133,17 +140,17 @@ The fields every role has, and:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `api` | object | none | The API agents call. Without it the client links to its peers but serves no API. |
+| `api` | object | none | The API agents on the client's machine or LAN call. Without it the client links to its peers but serves no API. |
 | `api_keys` | array | none | The keys agents call the API with; at most 256. The pages make and delete them. |
 
 `api`:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `address` | string | required | The host and port the API listens on. A host that is not a loopback address needs `cert_file` and `key_file`, so that keys never cross a network in the clear. |
+| `address` | string | required | The host and port the API listens on. A loopback address, as `127.0.0.1:9301`, serves the agents of the client's machine; a LAN address, as `192.168.1.10:9301`, or an empty host, serves the agents of other machines too, and needs `cert_file` and `key_file`, so that keys never cross a network in the clear. |
 | `cert_file` | string | none | A PEM file with the API's certificate and any intermediates. With `key_file`, the API is served over TLS. |
 | `key_file` | string | none | A PEM file with the certificate's private key. |
-| `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body. It is held whole, to read the model it names; one past it gets 413. |
+| `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body. It is held whole, to read the model it names and to send it again when a route cannot serve it; one past it gets 413. |
 | `max_conns` | int | 256 | The most connections the API keeps open; one past it is closed as soon as it is accepted. |
 | `max_inflight` | int | 256 | The most calls the API forwards at once; one past it gets 429. |
 | `first_byte_timeout` | duration | `5m` | How long a call may wait for its response to begin. |
@@ -193,8 +200,9 @@ The fields every role has, and:
       },
       "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
       "models": [
-        {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b",
+        {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
+        {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"},
         {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
          "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-..."}
       ],
@@ -233,10 +241,12 @@ The fields every role has, and:
 The `password_hash` is made with `fit hash-password`; the one above is an example only. API keys
 are made on the client's pages, not written by hand.
 
-### Three machines
+### Three places
 
-A hub on a server at 10.0.0.1, a node on a GPU machine, and a client on a laptop. The node and the
-client dial the hub; neither needs a listener of its own.
+A hub on a public server at hub.example.net, a node on a GPU machine in a lab, and a client on a
+machine of an office LAN, at 192.168.1.10. The node and the client dial the hub; neither needs a
+listener of its own, so neither needs a public address. The client serves the agents of every
+machine of the LAN, over TLS, with its API keys.
 
 The server:
 
@@ -248,22 +258,119 @@ The GPU machine:
 
 ```json
 {"agent": {"node": {
-  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
-  "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"}]
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
 
-The laptop:
+The LAN machine:
 
 ```json
 {"agent": {"client": {
-  "peers": [{"address": "10.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
-  "api": {"address": "127.0.0.1:9301"}
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
 
+Agents on the LAN use `https://192.168.1.10:9301` as their base URL. A client that serves only the
+agents of its own machine listens on loopback, as `127.0.0.1:9301`, and needs no certificate.
+
 Each machine adds a `console` to manage its role from a browser. A client may also dial a node
-directly, and one process may run a hub and a node together.
+directly, and one process may run a hub and a node together. The mesh is plain `ws://`: what
+crosses it is not encrypted, so links to a hub across the internet belong on a private network or
+a tunnel, as [The mesh](#the-mesh) says.
+
+## Models and APIs
+
+A model's `api` is the API its upstream speaks. It sets which endpoints of `agent.client` reach the
+model, the URL the node calls, the header the node sends the model's key in, and where the model is
+named, which is where the node puts `upstream` in place of the name.
+
+| `api` | Upstreams | Agents call, on agent.client | The node calls | Key header | The model is in |
+| --- | --- | --- | --- | --- | --- |
+| `openai` | OpenAI, and every OpenAI-compatible API: DeepSeek, Qwen (DashScope's compatible mode), Mistral, Groq, xAI, Moonshot, Zhipu, OpenRouter, Together, Fireworks; vLLM, SGLang, llama.cpp's server, LM Studio, Ollama's `/v1` | `POST /v1/{call}` | `base_url/{call}` | `Authorization: Bearer` | the JSON body's `model`, or a form's `model` field |
+| `azure_openai` | Azure OpenAI deployments | as `openai`: `POST /v1/{call}` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}`; `responses` goes to `base_url/openai/responses?api-version=…` | `api-key` | the URL's deployment; for `responses`, the body's `model` |
+| `anthropic` | Anthropic, and servers that speak its Messages API | `POST /v1/messages`, `/v1/messages/count_tokens` | `base_url/{call}` | `x-api-key` | the JSON body's `model` |
+| `gemini` | Google's Gemini API | `POST /v1beta/models/{model}:{method}`, or `/v1/models/{model}:{method}` | `base_url/models/{upstream}:{method}` | `x-goog-api-key` | the path |
+| `ollama` | Ollama's own API | `POST /api/chat`, `/api/generate`, `/api/embed` | `base_url/api/…` | `Authorization: Bearer`, when `api_key` is set | the JSON body's `model` |
+| `cohere` | Cohere's v2 API | `POST /v2/chat`, `/v2/embed`, `/v2/rerank` | `base_url/{call}` | `Authorization: Bearer` | the JSON body's `model` |
+
+The calls each API takes:
+
+- **openai**: `chat/completions`, `responses`, `completions`, `embeddings`, `moderations`,
+  `images/generations`, `images/edits`, `images/variations`, `audio/speech`,
+  `audio/transcriptions`, `audio/translations`, and `rerank` (vLLM's, Jina's and the other
+  Cohere-style rerank endpoints at `/v1/rerank`). An `azure_openai` model takes them all but
+  `moderations`, `images/variations` and `rerank`, which get 404.
+- **anthropic**: `messages`, `messages/count_tokens`.
+- **gemini**: `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`,
+  `batchEmbedContents`.
+- **ollama**: `api/chat`, `api/generate`, `api/embed`.
+- **cohere**: `chat`, `embed`, `rerank`.
+
+Only stateless calls go through. Calls that keep state at the vendor, as files, batches, stored
+responses, assistants, fine-tuning or Gemini's cached contents, are not served, and get 404.
+
+Bodies and answers:
+
+- A request body is JSON, except OpenAI's uploads (`images/edits`, `images/variations`,
+  `audio/transcriptions`, `audio/translations`), which are `multipart/form-data` with the model in
+  their `model` field. The body's content type goes upstream with it, its boundary included.
+- An answer goes back with its status and content type as the upstream gives them, a piece at a
+  time: server-sent events, Ollama's NDJSON, Gemini's JSON array when it streams without `alt=sse`,
+  the audio bytes of `audio/speech`.
+- Of an agent's query, only Gemini's `alt` goes upstream (`alt=sse` for server-sent events); an
+  `azure_openai` model's `api-version` is the node's own; nothing else does, an agent's key
+  included.
+- Of an agent's headers, only `anthropic-version` (2023-06-01 when the agent sends none) and
+  `anthropic-beta` go to an `anthropic` upstream, and `OpenAI-Beta` to an `openai` one. No other
+  header goes, the agent's key included; the node sends the model's own.
+
+`upstream` takes the place of the name where the model is named:
+
+- In a JSON body's top-level `model` (`openai`, `anthropic`, `ollama`, `cohere`, and Azure's
+  `responses`): the node holds the body whole, within `proxy.max_body_bytes`, sets `model`, and
+  keeps every other member's bytes.
+- In a form's `model` field: the node holds the body whole, within `proxy.max_body_bytes`, and
+  replaces the field's value; every other byte, the files included, stays.
+- In Gemini's path: nothing in the body changes, so the body streams, but for
+  `batchEmbedContents`, whose `requests[].model` are set to `models/{upstream}` too.
+- As Azure's deployment, in the URL: the body streams unchanged.
+
+A body whose model is the upstream ID already, or that does not name it, streams upstream as it
+arrives.
+
+The `base_url` of each:
+
+| `api` | `base_url`, for instance |
+| --- | --- |
+| `openai` | `https://api.openai.com/v1`, `https://api.deepseek.com/v1`, `https://dashscope.aliyuncs.com/compatible-mode/v1`, `https://api.mistral.ai/v1`, `https://api.groq.com/openai/v1`, `https://api.x.ai/v1`, `https://api.moonshot.cn/v1`, `https://open.bigmodel.cn/api/paas/v4`, `https://openrouter.ai/api/v1`, `http://127.0.0.1:8000/v1` (vLLM, SGLang), `http://127.0.0.1:8080/v1` (llama.cpp), `http://127.0.0.1:1234/v1` (LM Studio), `http://127.0.0.1:11434/v1` (Ollama) |
+| `azure_openai` | `https://{resource}.openai.azure.com` |
+| `anthropic` | `https://api.anthropic.com/v1` |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta` |
+| `ollama` | `http://127.0.0.1:11434` |
+| `cohere` | `https://api.cohere.com/v2` |
+
+A node serving one model of each:
+
+```json
+{"agent": {"node": {
+  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "models": [
+    {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
+    {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
+    {"name": "claude-sonnet", "api": "anthropic", "base_url": "https://api.anthropic.com/v1",
+     "upstream": "claude-sonnet-4-5", "api_key": "sk-ant-..."},
+    {"name": "gemini-flash", "api": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta",
+     "upstream": "gemini-2.5-flash", "api_key": "AIza..."},
+    {"name": "gpt-4o", "api": "azure_openai", "base_url": "https://contoso.openai.azure.com",
+     "upstream": "gpt-4o-prod", "api_version": "2024-10-21", "api_key": "..."},
+    {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"},
+    {"name": "command-a", "api": "cohere", "base_url": "https://api.cohere.com/v2",
+     "upstream": "command-a-03-2025", "api_key": "..."}
+  ]
+}}}
+```
 
 ### The config is the one source
 
@@ -291,8 +398,7 @@ SHA-256 only, so neither the config nor the store holds a key that can be used.
 
 ## The mesh
 
-The roles link over a mesh of WebSocket connections. The protocol is agenthub's, unchanged, so
-fit's roles and agenthub's programs link to each other.
+The roles link over a mesh of WebSocket connections.
 
 ### Transport and authentication
 
@@ -367,16 +473,14 @@ A dialer never gives up on a peer in `peers`. After the nth failure in a row it 
 up to `min(retry_interval, 1s × 2ⁿ)`, at least 100ms. A link that lived 10 seconds or more starts
 the steps again from 1 second.
 
-### Bodies over 1 MiB
+### Request bodies
 
-agenthub put the request body inside the proxy stream's opening request (`ProxyReq.body`). fit adds
-two fields to `ProxyReq`: `body_stream` and `body_size`. A client sends a body of up to 1 MiB
-inline, as before, and a larger one as `body_stream: true` with its size, followed by the body in
-frames of 64 KiB under the stream's credit. A hub relays the frames as they come; a node passes
-them upstream as they arrive.
-
-agenthub's nodes and hubs read inline bodies only. A fit role and an agenthub program link and
-work together for bodies up to 1 MiB; a larger body needs fit at every role on its way.
+A client sends a body of up to 1 MiB inside the proxy stream's opening request (`ProxyReq.body`),
+and a larger one as `body_stream: true` with its size (`body_size`), followed by the body in frames
+of 64 KiB under the stream's credit. A hub relays the frames as they come; a node passes them
+upstream as they arrive. The opening request also carries the call's protocol, path and model, the
+body's content type when it is not JSON (`content_type`) and the query parameters that go upstream
+(`query`).
 
 ## The node
 
@@ -391,7 +495,9 @@ key of 12 characters or fewer. A save whose key is empty or masked keeps the key
 
 ### Checks
 
-A check is `GET <base_url>/models` with the call's authentication headers, bounded by 15 seconds. A
+A check is a `GET` of the upstream's model list with the call's authentication headers, bounded by
+15 seconds: `base_url/models` (`openai`, `anthropic`, `gemini`, `cohere`),
+`base_url/openai/models?api-version=…` (`azure_openai`) or `base_url/api/tags` (`ollama`). A
 failed connection, 401, 403 or a 5xx answer puts the model in `error`; any other answer, 404 and
 405 included, means the upstream serves. Enabled models are checked every 60 seconds, and every 15
 seconds while in `error`, so a recovered upstream comes back soon. A call that cannot reach the
@@ -401,17 +507,18 @@ upstream also puts the model in `error`; an answer below 500 clears it.
 
 `/node/proxy` serves one agent call, on fib's asynchronous HTTP client:
 
-1. The path must be one of the model's API: `chat/completions`, `responses`, `completions` or
-   `embeddings` for `openai`; `messages` or `messages/count_tokens` for `anthropic`.
-2. The model (name and API) must be ready and below its `max_inflight`, and the node below
-   `proxy.max_inflight`. Otherwise the call fails as unavailable, and a hub or client tries another
-   node.
-3. The body goes upstream as it arrives. It is held whole only when the model's `upstream` differs
-   from the name the agent asked for, to set the body's top-level `model`; the other members keep
-   their bytes. A body past `proxy.max_body_bytes` fails.
-4. The upstream gets `Content-Type: application/json` and the model's key. For `anthropic`,
-   `anthropic-version` (2023-06-01 when the agent sends none) and `anthropic-beta` are passed on;
-   for `openai`, `OpenAI-Beta`. No other header of the agent's is, its own key included.
+1. The call must be one of its API's ([Models and APIs](#models-and-apis)), and its body JSON or
+   `multipart/form-data` with a boundary.
+2. The model (its name, of a kind that speaks the call's API) must be ready and below its
+   `max_inflight`, and the node below `proxy.max_inflight`. Otherwise the call fails as
+   unavailable, and a hub or client tries another node. A call the model's kind does not serve,
+   as `images/variations` of an `azure_openai` model, fails as not found.
+3. The URL is the kind's. The body goes upstream as it arrives. It is held whole only when the
+   model's `upstream` differs from the name the agent asked for and the body names the model, to
+   set it; the other bytes stay. A body past `proxy.max_body_bytes` fails.
+4. The upstream gets the body's content type, the model's key in the kind's header, and the
+   headers and query parameters [Models and APIs](#models-and-apis) lists. No other header of the
+   agent's goes, its own key included.
 5. While no byte has come back, the node keeps the stream alive. The first frame back is the head:
    the upstream's status, content type and the node's ID. Then each piece of the response body is
    a frame, sent as it arrives, so server-sent events are not batched.
@@ -499,24 +606,34 @@ decides what is allowed.
 
 | Method and path | API | Forwarded as |
 | --- | --- | --- |
-| `POST /v1/chat/completions`, `/v1/responses`, `/v1/completions`, `/v1/embeddings` | openai | the path after `/v1/` |
+| `POST /v1/chat/completions`, `/v1/responses`, `/v1/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/images/generations`, `/v1/images/edits`, `/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`, `/v1/rerank` | openai, for `openai` and `azure_openai` models | the path after `/v1/` |
 | `POST /v1/messages`, `/v1/messages/count_tokens` | anthropic | the path after `/v1/` |
-| `GET /v1/models`, `GET /v1/models/{id}` | both | answered by the client |
+| `POST /v1beta/models/{model}:{method}`, `/v1/models/{model}:{method}` | gemini | the method; the model is the path's |
+| `POST /api/chat`, `/api/generate`, `/api/embed` | ollama | the path after `/` |
+| `POST /v2/chat`, `/v2/embed`, `/v2/rerank` | cohere | the path after `/v2/` |
+| `GET /v1/models`, `GET /v1/models/{id}` | every model | answered by the client |
+| `GET /v1beta/models`, `GET /v1beta/models/{model}` | gemini models | answered by the client |
+| `GET /api/tags` | ollama models | answered by the client |
 
-The API is a binding of its own at `api.address`, apart from the pages. Any other path or method
-gets 404. `GET /v1/models` needs a key too; it lists every model name the client's hubs and nodes
-list, with the fields of both OpenAI's and Anthropic's model lists, so either SDK reads it.
+The paths are where each vendor's SDKs call once their base URL is the client's, so an agent needs
+nothing but the base URL and a key. The API is a binding of its own at `api.address`, apart from
+the pages. Any other path or method gets 404. The model lists need a key too. `GET /v1/models`
+lists every model name the client's hubs and nodes list, with the fields of both OpenAI's and
+Anthropic's model lists, so either SDK reads it; `GET /v1beta/models` lists the Gemini models as
+Gemini's `models.list` does, and `GET /api/tags` the Ollama models as Ollama's does.
 
-A response has the upstream's status and content type, `Cache-Control: no-cache`,
-`X-Accel-Buffering: no` and `X-Agenthub-Node` naming the node that served it; its body is written as
-the frames come.
+A call names its model in its JSON body's `model`, in a `multipart/form-data` body's `model` field
+(OpenAI's uploads, which only OpenAI's paths take), or, for Gemini, in its path. A response has the
+upstream's status and content type, `Cache-Control: no-cache`, `X-Accel-Buffering: no` and
+`X-Fit-Node` naming the node that served it; its body is written as the frames come.
 
 ### API keys
 
 A key is `ah-` followed by 32 random bytes in unpadded base64url, 46 characters. The pages show it
 once, when they make it; the member keeps its ID, name, first 10 characters, SHA-256 and creation
-time. An agent sends it as `Authorization: Bearer <key>` or `x-api-key: <key>`; its SHA-256 is
-compared with every hash kept, in constant time.
+time. An agent sends it as `Authorization: Bearer <key>`, `x-api-key: <key>` or
+`x-goog-api-key: <key>`, or on Gemini's paths as the query parameter `key`, as Google's REST
+examples do; its SHA-256 is compared with every hash kept, in constant time.
 
 The keys' use (calls and last use) and the per-model counters (calls, failures, bytes, calls
 running) are kept in memory since the role started; they are not written anywhere. At most 1024
@@ -524,11 +641,11 @@ models are counted apart; calls to more are counted together, as `other`.
 
 ### Routing
 
-The client reads the body whole, within `api.max_body_bytes`, to find its `model`. It then tries
-routes in order:
+The client reads the body whole, within `api.max_body_bytes`, to find its model (a Gemini call's
+is in its path). It then tries routes in order:
 
-1. Nodes it links to directly, serving the model ready, the least loaded first: the load the node
-   reported plus the calls this client runs on it.
+1. Nodes it links to directly, serving the model ready with a kind that speaks the call's API, the
+   least loaded first: the load the node reported plus the calls this client runs on it.
 2. Hubs listing the model with a ready node, round robin.
 
 A route that fails before the head because it cannot serve the model now, is offline, or loses its
@@ -537,18 +654,21 @@ After the head there is no retry.
 
 ### Errors
 
-Errors take the shape of the API the agent called: OpenAI's `{"error": {"message", "type", "code"}}`
-or Anthropic's `{"type": "error", "error": {"type", "message"}}`. On `GET /v1/models`, an agent that
-sends `anthropic-version` or `x-api-key` gets Anthropic's shape. A body past `max_body_bytes` is
+Errors take the shape of the API the agent called: OpenAI's `{"error": {"message", "type", "code"}}`,
+Anthropic's `{"type": "error", "error": {"type", "message"}}`, Gemini's
+`{"error": {"code", "message", "status"}}`, Ollama's `{"error": "<message>"}` or Cohere's
+`{"message"}`. A path that is none of them gets the shape its prefix suggests (`/v1beta/` Gemini's,
+`/api/` Ollama's, `/v2/` Cohere's); on `/v1/`, an agent that sends `anthropic-version` or
+`x-api-key` gets Anthropic's shape. A body past `max_body_bytes` is
 the exception: the HTTP server refuses it with a plain-text 413 before the API reads it.
 
 | Case | Status |
 | --- | --- |
 | An unknown path or method | 404 |
 | A missing or wrong key | 401 |
-| A body that is not JSON, or has no `model` | 400 |
+| A body that is not JSON, or has no `model`; a form without its `model` field, or a form on a path that takes none | 400 |
 | A body past `max_body_bytes` | 413 |
-| A model no peer serves, or served only with the other API | 404 |
+| A model no peer serves, or served only with another API; a call the model's kind does not serve | 404 |
 | More than `max_inflight` calls | 429 |
 | The model has no ready route, every route was unavailable, or no response began within `first_byte_timeout` | 503 |
 | A node or hub answered a bad request (as a body past the node's `proxy.max_body_bytes`), not found or rate limited | 400, 404, 429 |
@@ -561,7 +681,7 @@ cuts the response short.
 ### Using it
 
 In these examples, `127.0.0.1:9301` is the client's `api.address` and `<key>` an API key made on
-its pages.
+its pages. An agent on another machine of the LAN uses the client's LAN address over https instead.
 
 The OpenAI SDK (Python):
 
@@ -596,12 +716,35 @@ wire_api = "chat"   # or "responses" when the upstream serves /responses
 
 then `export FIT_AGENT_API_KEY=<key>` and run `codex`.
 
-curl:
+The Gemini SDK (Python, `google-genai`), with a model served with the Gemini API. The base URL has
+no version: the SDK appends `/v1beta/models/...`.
+
+```python
+from google import genai
+from google.genai import types
+client = genai.Client(api_key="<key>", http_options=types.HttpOptions(base_url="http://127.0.0.1:9301"))
+client.models.generate_content(model="gemini-flash", contents="Hello")
+```
+
+Ollama's Python library, with a model served with Ollama's API:
+
+```python
+from ollama import Client
+client = Client(host="http://127.0.0.1:9301", headers={"Authorization": "Bearer <key>"})
+client.chat(model="llama3.2", messages=[{"role": "user", "content": "Hello"}])
+```
+
+Cohere's SDK: `cohere.ClientV2(api_key="<key>", base_url="http://127.0.0.1:9301")`.
+
+curl, a chat and a transcription, whose audio file goes as a form:
 
 ```sh
 curl http://127.0.0.1:9301/v1/chat/completions -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
   -d '{"model": "qwen3-32b", "stream": true, "messages": [{"role": "user", "content": "Hello"}]}'
+
+curl http://127.0.0.1:9301/v1/audio/transcriptions -H "Authorization: Bearer <key>" \
+  -F model=whisper -F file=@meeting.wav
 ```
 
 The client's overview page shows these with its own address and models.
@@ -718,8 +861,9 @@ How [the rules](rules.md) hold:
   `limits.max_inflight` allows per link.
 - **Bodies stream.** The node forwards calls on fib's asynchronous client, request and response
   bodies as they come, with backpressure both ways through the streams' credit. Only the client's
-  API holds a body whole, within `api.max_body_bytes`, to read the model, and a node holds one only
-  to rewrite the model, within `proxy.max_body_bytes`.
+  API holds a body whole, within `api.max_body_bytes`, to read the model and to send it again to the
+  next route, and a node holds one only to set the model the body names to `upstream`, within
+  `proxy.max_body_bytes`.
 - **Every map, queue and pool is bounded**, as the table says; online nodes and catalog entries are
   bounded by the links.
 - **Every exchange has timeouts**: dials, handshakes, hello, methods, streams, upstream calls and
@@ -734,65 +878,3 @@ Two things fib does not offer yet are written up in [fib's API requests](fib-api
 - **A53**, backpressure on a WebSocket connection's sends. Until then a link's queue is bounded by
   its streams' windows and the slow timeout: a peer that reads slowly is found when a ping has
   waited `slow_timeout`, and the link is closed.
-
-## Migrating from agenthub
-
-There is no import of agenthub's encrypted state file. Open each program's pages, or decrypt its
-state, and write the members by hand, part by part:
-
-| agenthub | fit |
-| --- | --- |
-| `id` | `id`: keep it, so that peers know the role as before |
-| `name` | `name` |
-| `listen` `{addr, password}` | `listen` `{address, password}`; leave it out when `addr` was empty |
-| `peers[]` `{addr, password, role}` | `peers[]` `{address, password, role}` |
-| `console_hash` | a user in `console.users`, as `{"username": "admin", "password_hash": "<the hash>"}`, or a new hash from `fit hash-password` |
-| node `role_data.models` | `agent.node.models`, field for field |
-| node `role_data.description` | `agent.node.description` |
-| node `role_data.settings` | `agent.node.settings`: `refresh_interval_seconds` becomes `refresh_interval` (`"30s"`), `job_timeout_seconds` becomes `job_timeout` (`"1h"`); write `"gpu_sudo": false` when it was false, since fit's default is true |
-| client `role_data.keys[]` `{id, name, prefix, hash, created_at, last_used_at, calls}` | `agent.client.api_keys[]` with `id`, `name`, `prefix`, `hash` and `created_at` as they are; drop `last_used_at` and `calls`, which the member does not take. Old keys keep working. |
-| hub `role_data.nodes` (the remembered nodes) | dropped: the hub learns its nodes as they link |
-
-The flags and variables:
-
-| agenthub | fit |
-| --- | --- |
-| `-addr` | `console.address`; for a client, also `api.address`, since the API has its own address |
-| `-data` and the state file | `admin.store` |
-| `-log` | fit's `log`; the roles write to its `agent` logger |
-| `AGENTHUB_PASSWORD` | gone; the store's password is `admin.store`'s |
-| `AGENTHUB_CONSOLE_PASSWORD` | gone; console users |
-| `AGENTHUB_NODE_DATA_DIR` | `settings.gpu_data_dir`; scripts see `FIT_AGENT_GPU_DATA_DIR` |
-
-During the move, fit's roles and agenthub's programs link to each other: the wire protocol, the
-path `/ws` and the authentication are the same. A body over 1 MiB needs fit at every role on its
-way.
-
-Once the config is written, `fit validate` checks it, and `fit store import -c <bootstrap file>
-<config>` seals it into the store, replacing what the store held, so that what the pages change
-from then on is kept. `admin` stays in the bootstrap file and is left out of what is imported; [the
-console guide](console.md) has the rest.
-
-## Changes from agenthub
-
-- The three roles are one binary and one config; any of them run in one process, beside the
-  gateway.
-- The encrypted state file and its start password are gone; the config, kept in `admin.store`, holds
-  everything.
-- The console password is gone; the pages use console users with bcrypt hashes, sessions, CSRF
-  tokens and lockouts, as `admin.console`.
-- The mesh listener is a binding of fit's engine; a path other than `/ws` is refused with 403.
-- The client's API has an address of its own, apart from the pages, and needs TLS off loopback.
-- A hub forgets offline nodes at restart.
-- API key use is not kept across restarts.
-- Node settings are durations (`"30s"`, `"1h"`), not seconds.
-- Upstream calls are made on fib's client, not `net/http`: `HTTP_PROXY` and `HTTPS_PROXY` are not
-  honoured for model upstreams.
-- New proxy timeouts (connect, first byte, idle, total) and node-wide limits (`proxy.max_inflight`,
-  `proxy.max_body_bytes`).
-- At most 8 jobs run at once.
-- `limits.max_conns` defaults to 1024 (agenthub took 10000).
-- Ports in addresses are numbers; a service name, as `:http`, is refused.
-- A link whose pushes pile past 1024 is closed.
-- At most 16 streams are open on a role's pages at once.
-- Request bodies over 1 MiB stream between fit's roles, with `body_stream`.

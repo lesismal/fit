@@ -8,10 +8,10 @@
 
   UI.addI18n({
     'en': {
-      'c.sub': 'Model gateway for local agents', 'c.overview': 'Overview', 'c.models': 'Models', 'c.keys': 'API keys',
+      'c.sub': 'Model gateway for agents on this machine and LAN', 'c.overview': 'Overview', 'c.models': 'Models', 'c.keys': 'API keys',
       'c.peers': 'Connections', 'c.settings': 'Settings',
-      'c.api': 'Agent API', 'c.api_note': 'OpenAI- and Anthropic-compatible endpoints at the address below (separate from this console), authenticated with an API key (Authorization: Bearer or x-api-key).',
-      'c.base_openai': 'OpenAI base URL', 'c.base_anthropic': 'Anthropic base URL',
+      'c.api': 'Agent API', 'c.api_note': 'OpenAI-, Anthropic-, Gemini-, Ollama- and Cohere-compatible endpoints at the address below (separate from this console), for agents on this machine or, on a LAN address with TLS, on the LAN; authenticated with an API key (Authorization: Bearer, x-api-key or x-goog-api-key).',
+      'c.base_openai': 'OpenAI base URL', 'c.base_anthropic': 'Anthropic base URL', 'c.base_other': 'Gemini, Ollama, Cohere base URL',
       'c.st_models': 'Models', 'c.st_ready': '{n} ready', 'c.st_keys': 'API keys', 'c.st_calls': 'Calls', 'c.st_errors': '{n} errors',
       'c.st_inflight': 'In flight', 'c.st_bytes': '{b} relayed', 'c.quick': 'Quick start', 'c.quick_note': 'Replace <API_KEY> with a key from the API keys page.',
       'c.per_model': 'Calls per model', 'c.model': 'Model', 'c.api_fmt': 'API', 'c.state': 'State', 'c.routes': 'Routes',
@@ -27,10 +27,10 @@
       'c.profile': 'Profile', 'c.name': 'Display name', 'c.name_hint': 'How hubs and nodes see this client'
     },
     'zh-CN': {
-      'c.sub': '本机 agent 的模型网关', 'c.overview': '概览', 'c.models': '模型', 'c.keys': 'API Key',
+      'c.sub': '本机与局域网 agent 的模型网关', 'c.overview': '概览', 'c.models': '模型', 'c.keys': 'API Key',
       'c.peers': '连接', 'c.settings': '设置',
-      'c.api': 'Agent 接口', 'c.api_note': '下方地址（与本控制台分开）提供 OpenAI / Anthropic 兼容接口，使用 API Key 认证（Authorization: Bearer 或 x-api-key）。',
-      'c.base_openai': 'OpenAI base URL', 'c.base_anthropic': 'Anthropic base URL',
+      'c.api': 'Agent 接口', 'c.api_note': '下方地址（与本控制台分开）提供 OpenAI / Anthropic / Gemini / Ollama / Cohere 兼容接口，供本机 agent 调用；监听局域网地址并启用 TLS 时，也供局域网内的 agent 调用。使用 API Key 认证（Authorization: Bearer、x-api-key 或 x-goog-api-key）。',
+      'c.base_openai': 'OpenAI base URL', 'c.base_anthropic': 'Anthropic base URL', 'c.base_other': 'Gemini、Ollama、Cohere base URL',
       'c.st_models': '模型', 'c.st_ready': '{n} 个就绪', 'c.st_keys': 'API Key', 'c.st_calls': '调用', 'c.st_errors': '{n} 次失败',
       'c.st_inflight': '进行中', 'c.st_bytes': '已转发 {b}', 'c.quick': '接入示例', 'c.quick_note': '把 <API_KEY> 替换为「API Key」页面创建的 Key。',
       'c.per_model': '各模型调用', 'c.model': '模型', 'c.api_fmt': '格式', 'c.state': '状态', 'c.routes': '路由',
@@ -53,7 +53,7 @@
     if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
     return UI.fmtMB(n / 1048576);
   }
-  function apiBadge(api) { return UI.badge(api, api === 'anthropic' ? 'warn' : 'info'); }
+  function apiBadge(api) { return UI.badge(api, api === 'anthropic' ? 'warn' : api === 'openai' || api === 'azure_openai' ? 'info' : 'ok'); }
   function codeBlock(text) {
     return h('div.stack', { style: { gap: '6px' } },
       h('pre.console', text),
@@ -65,8 +65,8 @@
 
   // ---- Overview / 概览 ----
   function snippets(origin, models) {
-    var oa = (models.filter(function (m) { return m.api === 'openai'; })[0] || {}).name || '<model>';
-    var an = (models.filter(function (m) { return m.api === 'anthropic'; })[0] || {}).name || '<model>';
+    function first(apis) { return (models.filter(function (m) { return apis.indexOf(m.api) >= 0; })[0] || {}).name || '<model>'; }
+    var oa = first(['openai', 'azure_openai']), an = first(['anthropic']), ge = first(['gemini']), ol = first(['ollama']);
     return [
       ['openai', 'OpenAI SDK', 'from openai import OpenAI\n\nclient = OpenAI(base_url="' + origin + '/v1", api_key="<API_KEY>")\n' +
         'resp = client.chat.completions.create(\n    model="' + oa + '",\n    messages=[{"role": "user", "content": "Hello"}],\n)\nprint(resp.choices[0].message.content)'],
@@ -79,7 +79,13 @@
       ['curl', 'curl', 'curl ' + origin + '/v1/chat/completions \\\n  -H "Authorization: Bearer <API_KEY>" \\\n  -H "Content-Type: application/json" \\\n' +
         '  -d \'{"model": "' + oa + '", "stream": true, "messages": [{"role": "user", "content": "Hello"}]}\'\n\n' +
         'curl ' + origin + '/v1/messages \\\n  -H "x-api-key: <API_KEY>" -H "anthropic-version: 2023-06-01" \\\n  -H "Content-Type: application/json" \\\n' +
-        '  -d \'{"model": "' + an + '", "max_tokens": 256, "messages": [{"role": "user", "content": "Hello"}]}\'']
+        '  -d \'{"model": "' + an + '", "max_tokens": 256, "messages": [{"role": "user", "content": "Hello"}]}\''],
+      ['gemini', 'Gemini SDK', 'from google import genai\nfrom google.genai import types\n\n' +
+        'client = genai.Client(api_key="<API_KEY>", http_options=types.HttpOptions(base_url="' + origin + '"))\n' +
+        'resp = client.models.generate_content(model="' + ge + '", contents="Hello")\nprint(resp.text)'],
+      ['ollama', 'Ollama', 'from ollama import Client\n\n' +
+        'client = Client(host="' + origin + '", headers={"Authorization": "Bearer <API_KEY>"})\n' +
+        'resp = client.chat(model="' + ol + '", messages=[{"role": "user", "content": "Hello"}])\nprint(resp.message.content)']
     ];
   }
 
@@ -95,7 +101,7 @@
     }
     UI.mount(el, h('div.stack',
       h('div.hero', h('h1', t('c.api')), h('p', t('c.api_note'))),
-      UI.card(t('c.api'), UI.kv([copyLine(t('c.base_openai'), origin + '/v1'), copyLine(t('c.base_anthropic'), origin)])),
+      UI.card(t('c.api'), UI.kv([copyLine(t('c.base_openai'), origin + '/v1'), copyLine(t('c.base_anthropic'), origin), copyLine(t('c.base_other'), origin)])),
       statsBox,
       UI.card(t('c.quick'), h('div.stack', h('div.muted.small', t('c.quick_note')), quick)),
       UI.card(t('c.per_model'), perModel, null, true)));

@@ -1,8 +1,9 @@
 // Package client is the agent's client role, agent.client in fit's config:
-// it links to hubs, and to nodes directly, keeps a catalog of the models
-// they offer, and serves an OpenAI- and Anthropic-compatible API (/v1/...)
-// on an address of its own for local agents, behind API keys, forwarding
-// each call byte for byte over the mesh. See docs/agent.md.
+// it links to hubs, often a public one, and to nodes directly, keeps a
+// catalog of the models they offer, and serves the model APIs agents speak
+// (OpenAI, Anthropic, Gemini, Ollama, Cohere) on an address of its own, to
+// agents on its machine or, on a LAN address with TLS, its LAN, behind API
+// keys, forwarding each call byte for byte over the mesh. See docs/agent.md.
 package client
 
 import (

@@ -158,20 +158,33 @@ type AgentNode struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentModel is a model a node serves: an upstream endpoint of an OpenAI- or
-// Anthropic-compatible API. Calls are forwarded byte for byte, with the
-// model's key, and the body's model set to upstream.
+// AgentModel is a model a node serves: an upstream endpoint of one of the
+// APIs AgentAPIs lists. Calls are forwarded byte for byte, with the model's
+// key, and the model they name set to upstream.
 type AgentModel struct {
-	Name        string `json:"name" fit:"required" doc:"The name agents ask for the model by: 1 to 128 characters, no spaces. A name and api are unique among a node's models."`
-	API         string `json:"api" fit:"required" enum:"openai,anthropic" doc:"The API the upstream speaks, and the agent endpoints the model is reached through: openai or anthropic."`
-	BaseURL     string `json:"base_url" fit:"required" doc:"The upstream's base URL, http or https, without a query, as in http://127.0.0.1:11434/v1; calls go to it with their path appended, as base_url/chat/completions."`
-	Upstream    string `json:"upstream,omitempty" doc:"The model ID sent upstream in place of name; name when left out."`
-	APIKey      string `json:"api_key,omitempty" doc:"The key sent upstream: as Authorization: Bearer for openai, as x-api-key for anthropic. None when left out. The pages never show it whole."`
+	Name        string `json:"name" fit:"required" doc:"The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's."`
+	API         string `json:"api" fit:"required" enum:"openai,anthropic,gemini,azure_openai,ollama,cohere" doc:"The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header."`
+	BaseURL     string `json:"base_url" fit:"required" doc:"The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434."`
+	Upstream    string `json:"upstream,omitempty" doc:"The model ID sent upstream in place of name: in the body's model, a form's model field, Gemini's path, or as an azure_openai model's deployment. name when left out."`
+	APIKey      string `json:"api_key,omitempty" doc:"The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The pages never show it whole."`
+	APIVersion  string `json:"api_version,omitempty" doc:"The api-version query every call of an azure_openai model carries, as 2024-10-21: required for azure_openai, and only taken there."`
 	Disabled    bool   `json:"disabled,omitempty" doc:"Keep the model without serving it."`
 	Description string `json:"description,omitempty" doc:"A note about the model its peers show."`
 	MaxInflight int    `json:"max_inflight,omitempty" min:"0" max:"100000" doc:"The most calls to the model the node forwards at once; a call past it goes to another node. No bound but proxy.max_inflight's when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
+}
+
+// AgentAPIs lists the APIs a model's upstream may speak.
+var AgentAPIs = []string{"openai", "anthropic", "gemini", "azure_openai", "ollama", "cohere"}
+
+// AgentProtocol returns the API agents call a model of the given api with:
+// azure_openai's is openai's.
+func AgentProtocol(api string) string {
+	if api == "azure_openai" {
+		return "openai"
+	}
+	return api
 }
 
 // AgentNodeSettings are a node's own settings.
@@ -202,7 +215,7 @@ type AgentNodeProxy struct {
 	IdleTimeout      Duration `json:"idle_timeout,omitempty" default:"\"5m\"" doc:"How long an upstream may go silent in the middle of its response before the call is cut short. 5m when left out."`
 	Timeout          Duration `json:"timeout,omitempty" default:"\"30m\"" doc:"The most one call may take, from its start to the end of its response. 30m when left out."`
 	MaxInflight      int      `json:"max_inflight,omitempty" min:"0" default:"256" doc:"The most calls the node forwards at once, across its models; a call past it goes to another node. 256 when left out or 0."`
-	MaxBodyBytes     int64    `json:"max_body_bytes,omitempty" min:"0" default:"33554432" doc:"The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from its name, to set the model it names. 32 MiB when left out or 0."`
+	MaxBodyBytes     int64    `json:"max_body_bytes,omitempty" min:"0" default:"33554432" doc:"The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -234,8 +247,10 @@ func (p *AgentNodeProxy) Body() int64 {
 	return p.MaxBodyBytes
 }
 
-// AgentClient is the agent's client role: it links to hubs and nodes, and
-// serves an OpenAI- and Anthropic-compatible API that calls their models.
+// AgentClient is the agent's client role: it links to hubs and nodes, near
+// or across the internet, and serves the model APIs (OpenAI, Anthropic,
+// Gemini, Ollama, Cohere) to agents on its machine or its LAN, calling the
+// models of those hubs and nodes.
 type AgentClient struct {
 	ID      string           `json:"id,omitempty" doc:"The client's stable ID, which its peers know it by. Made when left out, and written back here."`
 	Name    string           `json:"name,omitempty" doc:"The name the client shows its peers; the host's name when left out. Its pages change it."`
@@ -243,19 +258,21 @@ type AgentClient struct {
 	Listen  *AgentListen     `json:"listen,omitempty" doc:"Where the client takes links from hubs and nodes; none when left out. Its pages change it."`
 	Peers   []AgentPeer      `json:"peers,omitempty" doc:"The hubs and nodes the client dials. Its pages change them."`
 	Limits  *AgentLimits     `json:"limits,omitempty" doc:"Bounds on the client's links; the defaults when left out."`
-	API     *AgentClientAPI  `json:"api,omitempty" doc:"The API agents call, /v1/chat/completions, /v1/messages and the rest; none when left out."`
+	API     *AgentClientAPI  `json:"api,omitempty" doc:"The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."`
 	APIKeys []AgentClientKey `json:"api_keys,omitempty" doc:"The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them."`
 
 	At Value `json:"-" fit:"self"`
 }
 
 // AgentClientAPI is the client's API for agents, served on a binding of its
-// own on the listeners' engine.
+// own on the listeners' engine: on a loopback address for agents on the
+// client's machine, or on a LAN address, with TLS, for agents on other
+// machines of the LAN.
 type AgentClientAPI struct {
-	Address          string   `json:"address" fit:"required" doc:"The host and port the API listens on. A host that is not a loopback address needs cert_file and key_file, so that keys never cross a network in the clear."`
+	Address          string   `json:"address" fit:"required" doc:"The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear."`
 	CertFile         string   `json:"cert_file,omitempty" doc:"A PEM file with the API's certificate, followed by any intermediates; with key_file, the API is served over TLS."`
 	KeyFile          string   `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
-	MaxBodyBytes     int64    `json:"max_body_bytes,omitempty" min:"0" default:"33554432" doc:"The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names. 32 MiB when left out or 0."`
+	MaxBodyBytes     int64    `json:"max_body_bytes,omitempty" min:"0" default:"33554432" doc:"The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names and to send it again when a route cannot serve it. 32 MiB when left out or 0."`
 	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"256" doc:"The most connections the API keeps open at once; one past it is closed as soon as it is accepted. 256 when left out or 0."`
 	MaxInflight      int      `json:"max_inflight,omitempty" min:"0" default:"256" doc:"The most calls the API forwards at once; one past it gets 429. 256 when left out or 0."`
 	FirstByteTimeout Duration `json:"first_byte_timeout,omitempty" default:"\"5m\"" doc:"How long a call may wait for its response to begin. 5m when left out."`
@@ -396,8 +413,8 @@ func CheckAgentModel(m *AgentModel) (field, msg string) {
 	switch {
 	case m.Name == "" || len(m.Name) > 128 || !noSpace(m.Name):
 		return "name", "the name needs 1 to 128 characters without spaces"
-	case m.API != "openai" && m.API != "anthropic":
-		return "api", "api is openai or anthropic"
+	case !slices.Contains(AgentAPIs, m.API):
+		return "api", "api is " + strings.Join(AgentAPIs, ", ")
 	case len(m.Upstream) > 256 || !noSpace(m.Upstream):
 		return "upstream", "the upstream model ID is up to 256 characters without spaces"
 	case len(m.APIKey) > 4096 || !noSpace(m.APIKey):
@@ -406,10 +423,18 @@ func CheckAgentModel(m *AgentModel) (field, msg string) {
 		return "description", "the description is longer than 1024 bytes"
 	case m.MaxInflight < 0 || m.MaxInflight > 100000:
 		return "max_inflight", "max_inflight is 0 to 100000"
+	case m.API == "azure_openai" && m.APIVersion == "":
+		return "api_version", "an azure_openai model needs its api_version, as 2024-10-21"
+	case m.API != "azure_openai" && m.APIVersion != "":
+		return "api_version", "api_version is only for azure_openai models"
+	case len(m.APIVersion) > 64 || strings.IndexFunc(m.APIVersion, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r == '_')
+	}) >= 0:
+		return "api_version", "api_version is up to 64 letters, digits, dots, dashes and underscores"
 	}
 	u, err := url.Parse(m.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.HasSuffix(m.BaseURL, "/") {
-		return "base_url", "base_url is an http or https URL without a query or a trailing slash, as in http://127.0.0.1:11434/v1"
+		return "base_url", "base_url is an http or https URL without a query or a trailing slash, as in http://127.0.0.1:8000/v1"
 	}
 	return "", ""
 }
@@ -425,8 +450,14 @@ func checkAgentNode(n *AgentNode, add func(Value, string, ...any)) {
 		m := &n.Models[i]
 		if f, msg := CheckAgentModel(m); msg != "" {
 			add(m.At.Field(f), "%s", msg)
-		} else if slices.IndexFunc(n.Models, func(o AgentModel) bool { return o.Name == m.Name && o.API == m.API }) < i {
-			add(m.At.Field("name"), "%s (%s) is listed twice", m.Name, m.API)
+		} else if j := slices.IndexFunc(n.Models, func(o AgentModel) bool {
+			return o.Name == m.Name && AgentProtocol(o.API) == AgentProtocol(m.API)
+		}); j < i {
+			if n.Models[j].API == m.API {
+				add(m.At.Field("name"), "%s (%s) is listed twice", m.Name, m.API)
+			} else {
+				add(m.At.Field("name"), "%s is listed twice for agents' %s API, as %s and %s", m.Name, AgentProtocol(m.API), n.Models[j].API, m.API)
+			}
 		}
 	}
 	if s := n.Settings; s != nil {

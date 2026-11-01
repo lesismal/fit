@@ -59,10 +59,13 @@ const MethodNodeUpdate = "/node/update"
 // sent upstream (default Name).
 // Model 节点提供的模型：一个上游 API 端点。Name 是 agent 请求它时用的名称；Upstream 是发往上游的模型 ID（默认 Name）。
 type Model struct {
-	Name        string `json:"name"`
-	API         string `json:"api"`      // APIOpenAI | APIAnthropic
-	BaseURL     string `json:"base_url"` // e.g. http://127.0.0.1:11434/v1, https://api.anthropic.com/v1
-	Upstream    string `json:"upstream,omitempty"`
+	Name     string `json:"name"`
+	API      string `json:"api"`      // one of APIs / APIs 之一
+	BaseURL  string `json:"base_url"` // e.g. http://127.0.0.1:11434/v1, https://api.anthropic.com/v1
+	Upstream string `json:"upstream,omitempty"`
+	// APIVersion is the api-version an azure_openai model's calls carry.
+	// APIVersion azure_openai 模型的调用所带的 api-version。
+	APIVersion  string `json:"api_version,omitempty"`
 	APIKey      string `json:"api_key,omitempty"` // masked when read / 读取时打码
 	Disabled    bool   `json:"disabled,omitempty"`
 	Description string `json:"description,omitempty"`

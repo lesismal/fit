@@ -48,8 +48,8 @@ func TestE2E(t *testing.T) {
 	step(t, "client/stats", testClientStats)
 	step(t, "mesh/undial-kick", testUndialKick)
 	step(t, "profiles", testProfiles)
-	// agenthub's console/password step is gone: fit's role pages have no
-	// password change; their users are the console member's, in the config.
+	// The role pages have no password change: their users are the console
+	// member's, in the config.
 	step(t, "save-shared", func(t *testing.T) {
 		s := shared{Key: keyMain, Key2: key2, IDs: map[string]string{}}
 		for n, c := range consoles {
@@ -825,7 +825,7 @@ func testClientAgentAPI(t *testing.T) {
 	hdr["openai-beta"] = "assistants=v2"
 	hdr["Cookie"] = "secret=1"
 	r = agent(t, "client1", "POST", "/v1/chat/completions", []byte(`{"temperature":0.5,"model":"m-only1","messages":[{"role":"user","content":"<b>&amp;</b>"}]}`), hdr)
-	if r.Status != 200 || r.Header.Get("X-Agenthub-Node") != con("node1").id || r.Header.Get("Cache-Control") != "no-cache" {
+	if r.Status != 200 || r.Header.Get("X-Fit-Node") != con("node1").id || r.Header.Get("Cache-Control") != "no-cache" {
 		t.Fatalf("chat m-only1: HTTP %d %v %s", r.Status, r.Header, r.Body)
 	}
 	if msg := r.json(t)["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)["content"]; msg != "echo from n1" {
@@ -849,7 +849,7 @@ func testClientAgentAPI(t *testing.T) {
 	if len(chunks) != 5 || chunks[4] != "[DONE]" {
 		t.Fatalf("stream chunks: %q", chunks)
 	}
-	tag := tagOf[nodeName(r.Header.Get("X-Agenthub-Node"))]
+	tag := tagOf[nodeName(r.Header.Get("X-Fit-Node"))]
 	if up := upstreamLast(t, tag); up.Model != "up-"+tag {
 		t.Fatalf("m-shared not rewritten to its upstream id: %+v", up)
 	}
@@ -873,7 +873,7 @@ func testClientAgentAPI(t *testing.T) {
 	if len(events) != 4 || events[3] != "message_stop" {
 		t.Fatalf("messages events: %v", events)
 	}
-	tag = tagOf[nodeName(r.Header.Get("X-Agenthub-Node"))]
+	tag = tagOf[nodeName(r.Header.Get("X-Fit-Node"))]
 	up = upstreamLast(t, tag)
 	if up.Path != "messages" || up.Model != "claude-up-"+tag || up.Header["x-api-key"] != "sk-"+tag ||
 		up.Header["anthropic-version"] != "2023-06-01" || up.Header["anthropic-beta"] != "tools-2024-04-04" || up.Header["authorization"] != "" {
@@ -885,7 +885,7 @@ func testClientAgentAPI(t *testing.T) {
 	if r.Status != 200 || r.json(t)["input_tokens"] != float64(7) {
 		t.Fatalf("count_tokens: HTTP %d %s", r.Status, r.Body)
 	}
-	if up := upstreamLast(t, tagOf[nodeName(r.Header.Get("X-Agenthub-Node"))]); up.Header["anthropic-version"] != "2023-06-01" {
+	if up := upstreamLast(t, tagOf[nodeName(r.Header.Get("X-Fit-Node"))]); up.Header["anthropic-version"] != "2023-06-01" {
 		t.Fatalf("default anthropic-version: %+v", up)
 	}
 }
@@ -1326,7 +1326,7 @@ func TestPersist(t *testing.T) {
 		var keys []keyView
 		con("client1").rpc(t, "/client/keys/list", nil, &keys)
 		// fit keeps a key's usage (calls, last_used_at) in memory only, so
-		// the counts start again; agenthub saved them on stop.
+		// the counts start again after a restart.
 		if len(keys) != 1 || keys[0].Name != "e2e-main" || keys[0].Calls < 1 || keys[0].Calls >= 10 {
 			t.Fatalf("keys after restart: %+v", keys)
 		}
