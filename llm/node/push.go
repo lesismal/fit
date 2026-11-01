@@ -5,16 +5,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // pushDelay coalesces the changes of NodeInfo into one push.
 // pushDelay 把 NodeInfo 的多次变化合并为一次推送。
 var pushDelay = 200 * time.Millisecond
 
-// pusher sends MethodNodeUpdate to the connected hubs and clients when NodeInfo changed (ignoring Seq and
+// pusher sends MethodNodeUpdate to the connected hubs and proxies when NodeInfo changed (ignoring Seq and
 // UpdatedAt).
-// pusher 在 NodeInfo 变化（忽略 Seq 与 UpdatedAt）时向已连接的 hub 与 client 发送 MethodNodeUpdate。
+// pusher 在 NodeInfo 变化（忽略 Seq 与 UpdatedAt）时向已连接的 hub 与 proxy 发送 MethodNodeUpdate。
 type pusher struct {
 	n     *Node
 	dirty chan struct{}
@@ -61,8 +61,8 @@ func (p *pusher) loop() {
 	}
 }
 
-// flush pushes the info to every hub and client if it changed since the last push.
-// flush 若信息自上次推送后有变化，则推送给每个 hub 与 client。
+// flush pushes the info to every hub and proxy if it changed since the last push.
+// flush 若信息自上次推送后有变化，则推送给每个 hub 与 proxy。
 func (p *pusher) flush() {
 	snap := p.n.snapshot()
 	b, _ := json.Marshal(snap)
@@ -76,7 +76,7 @@ func (p *pusher) flush() {
 	m := p.n.Mesh
 	info := snap
 	info.Seq, info.UpdatedAt = p.nextSeq(), time.Now().Unix()
-	for _, role := range []string{model.RoleHub, model.RoleClient} {
+	for _, role := range []string{model.RoleHub, model.RoleProxy} {
 		for _, id := range m.PeersOf(role) {
 			_ = m.Push(id.ID, model.MethodNodeUpdate, info)
 		}

@@ -1,8 +1,8 @@
 // Package hub is the hub role: it keeps the table of its nodes (what they push), aggregates their models for its
-// clients, relays the clients' model calls to the least loaded node serving the model (retrying elsewhere while no
+// proxies, relays the proxies' model calls to the least loaded node serving the model (retrying elsewhere while no
 // byte was relayed), and lets its console manage the nodes that allow it.
 //
-// Package hub 是 hub 角色：维护其节点表（节点推送的信息），为其 client 汇总节点的模型，把 client 的模型调用中继给提供该模型、
+// Package hub 是 hub 角色：维护其节点表（节点推送的信息），为其 proxy 汇总节点的模型，把 proxy 的模型调用中继给提供该模型、
 // 负载最低的节点（尚未中继任何字节时换节点重试），并让控制台代管允许代管的节点。
 package hub
 
@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/logs"
 )
 
@@ -56,7 +56,7 @@ type Hub struct {
 
 // newHub creates a Hub on m; call register before the mesh links.
 func newHub(m *mesh.Mesh, self func() model.Identity, log *logs.Logger) *Hub {
-	h := &Hub{m: m, self: self, log: log, maxNodes: config.DefaultAgentMaxNodes, nodes: map[string]*node{}, inflight: map[string]int{}}
+	h := &Hub{m: m, self: self, log: log, maxNodes: config.DefaultLLMMaxNodes, nodes: map[string]*node{}, inflight: map[string]int{}}
 	h.models = model.HubModels{Models: []model.HubModel{}, Seq: time.Now().UnixMilli()}
 	return h
 }
@@ -91,7 +91,7 @@ func (h *Hub) pruneLocked() {
 
 // register adds the hub's methods and pushes to r and wires the mesh peer events.
 func (h *Hub) register(r *mesh.Router) {
-	clients := []string{model.RoleClient}
+	clients := []string{model.RoleProxy}
 	mesh.Handle(r, model.MethodHubModels, clients, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return h.Models(), nil
 	})
@@ -140,7 +140,7 @@ func (h *Hub) peerUp(pc model.PeerConn) {
 			return
 		}
 		h.apply(pc.Identity, info)
-	case model.RoleClient:
+	case model.RoleProxy:
 		if err := h.m.Push(pc.ID, model.MethodHubModelsUpdate, h.Models()); err != nil {
 			h.log.Debugf("models push to %s failed: %v", pc.ID, err)
 		}
@@ -289,8 +289,8 @@ func (h *Hub) aggregate() []model.HubModel {
 	return out
 }
 
-// Models recomputes the model list; when its content changed, Seq increases and every client gets it pushed.
-// Models 重新计算模型列表；内容变化时 Seq 递增，并推送给每个 client。
+// Models recomputes the model list; when its content changed, Seq increases and every proxy gets it pushed.
+// Models 重新计算模型列表；内容变化时 Seq 递增，并推送给每个 proxy。
 func (h *Hub) Models() model.HubModels {
 	h.mu.Lock()
 	list := h.aggregate()
@@ -303,7 +303,7 @@ func (h *Hub) Models() model.HubModels {
 	h.models = model.HubModels{Hub: h.self().ID, Models: list, Seq: max(h.models.Seq+1, time.Now().UnixMilli())}
 	cur := h.models
 	h.mu.Unlock()
-	for _, c := range h.m.PeersOf(model.RoleClient) {
+	for _, c := range h.m.PeersOf(model.RoleProxy) {
 		if err := h.m.Push(c.ID, model.MethodHubModelsUpdate, cur); err != nil {
 			h.log.Debugf("models push to %s failed: %v", c.ID, err)
 		}

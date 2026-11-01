@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // A listener that cannot bind at start is not fatal: it is recorded, and the listener can be set at runtime; changing
@@ -86,7 +86,7 @@ func TestSetListenRuntime(t *testing.T) {
 // RegisterAdmin serves the console only, validates its requests and persists after every change.
 // RegisterAdmin 只为控制台服务，校验请求，并在每次变更后持久化。
 func TestRegisterAdmin(t *testing.T) {
-	node, r := newTestMesh(t, model.RoleNode, "n1", []string{model.RoleHub, model.RoleClient})
+	node, r := newTestMesh(t, model.RoleNode, "n1", []string{model.RoleHub, model.RoleProxy})
 	var mu sync.Mutex
 	var saved struct {
 		listen model.ListenConfig

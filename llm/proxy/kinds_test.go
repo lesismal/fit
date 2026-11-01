@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 func TestAgentEndpoint(t *testing.T) {

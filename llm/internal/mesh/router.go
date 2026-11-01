@@ -9,8 +9,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // DefaultTimeout bounds a method, and a call whose context has no deadline.

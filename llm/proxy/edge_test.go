@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"context"
@@ -24,16 +24,16 @@ import (
 
 	"github.com/lesismal/fib"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
-// extraAPI starts another agent API of f's client with cfg, beside the one of its config.
-// extraAPI 以 cfg 为 f 的 client 另起一个 agent API，与其配置中的并存。
-func extraAPI(t *testing.T, f *fixture, cfg *config.AgentClientAPI) *apiServer {
+// extraAPI starts another agent API of f's proxy with cfg, beside the one of its config.
+// extraAPI 以 cfg 为 f 的 proxy 另起一个 agent API，与其配置中的并存。
+func extraAPI(t *testing.T, f *fixture, cfg *config.LLMProxyAPI) *apiServer {
 	t.Helper()
 	if cfg.Address == "" {
 		cfg.Address = "127.0.0.1:0"
@@ -199,18 +199,18 @@ func TestAPILimits(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})
-	fb := extraAPI(t, f, &config.AgentClientAPI{FirstByteTimeout: config.Duration(100 * time.Millisecond)})
+	fb := extraAPI(t, f, &config.LLMProxyAPI{FirstByteTimeout: config.Duration(100 * time.Millisecond)})
 	if status, body := f.post(t, hc, fb.url(), "/v1/chat/completions", `{"model":"m"}`); status != 503 || !strings.Contains(body, "no response began") {
 		t.Fatalf("first byte: %d %s", status, body)
 	}
 	// Both timers run out together: the first to cancel decides. / 两个计时器同时到期：先取消的那个决定结果。
-	both := extraAPI(t, f, &config.AgentClientAPI{FirstByteTimeout: config.Duration(50 * time.Millisecond), Timeout: config.Duration(50 * time.Millisecond)})
+	both := extraAPI(t, f, &config.LLMProxyAPI{FirstByteTimeout: config.Duration(50 * time.Millisecond), Timeout: config.Duration(50 * time.Millisecond)})
 	if status, body := f.post(t, hc, both.url(), "/v1/chat/completions", `{"model":"m"}`); status != 503 && status != 504 {
 		t.Fatalf("both timers: %d %s", status, body)
 	}
 	// The whole call past timeout: 504 before the head, a cut response after it.
 	// 整个调用超过 timeout：头帧之前为 504，之后为被截断的响应。
-	total := extraAPI(t, f, &config.AgentClientAPI{Timeout: config.Duration(100 * time.Millisecond)})
+	total := extraAPI(t, f, &config.LLMProxyAPI{Timeout: config.Duration(100 * time.Millisecond)})
 	if status, body := f.post(t, hc, total.url(), "/v1/chat/completions", `{"model":"m"}`); status != 504 {
 		t.Fatalf("total before head: %d %s", status, body)
 	}
@@ -242,7 +242,7 @@ func TestAPILimits(t *testing.T) {
 		}
 		return answer("node-a", 200, "ok")(ctx, req, st)
 	})
-	one := extraAPI(t, f, &config.AgentClientAPI{MaxInflight: 1})
+	one := extraAPI(t, f, &config.LLMProxyAPI{MaxInflight: 1})
 	first := make(chan int, 1)
 	go func() {
 		status, _ := f.post(t, hc, one.url(), "/v1/chat/completions", `{"model":"m"}`)
@@ -258,7 +258,7 @@ func TestAPILimits(t *testing.T) {
 	}
 
 	// One connection at most: a second is closed as it opens. / 最多一条连接：第二条一打开即被关闭。
-	conns := extraAPI(t, f, &config.AgentClientAPI{MaxConns: 1})
+	conns := extraAPI(t, f, &config.LLMProxyAPI{MaxConns: 1})
 	addr := strings.TrimPrefix(conns.url(), "http://")
 	held, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -283,7 +283,7 @@ func TestAPITLS(t *testing.T) {
 	node := newNode(t, "node-a", ready("m", model.APIOpenAI))
 	f := newFixture(t, node)
 	cert, key := selfSigned(t)
-	s := extraAPI(t, f, &config.AgentClientAPI{CertFile: cert, KeyFile: key})
+	s := extraAPI(t, f, &config.LLMProxyAPI{CertFile: cert, KeyFile: key})
 	if !strings.HasPrefix(s.url(), "https://") {
 		t.Fatalf("url %q", s.url())
 	}
@@ -310,10 +310,10 @@ func TestAPITLS(t *testing.T) {
 	}
 	waitFor(t, "call counted as failed", func() bool { st := f.c.stats.snapshot(); return st.Total.Errors == 1 && st.Total.Inflight == 0 })
 
-	if _, err := startAPI(f.c, &config.AgentClientAPI{Address: "127.0.0.1:0", CertFile: "/nonexistent", KeyFile: "/nonexistent"}); err == nil {
+	if _, err := startAPI(f.c, &config.LLMProxyAPI{Address: "127.0.0.1:0", CertFile: "/nonexistent", KeyFile: "/nonexistent"}); err == nil {
 		t.Fatal("missing certificate accepted")
 	}
-	if _, err := startAPI(f.c, &config.AgentClientAPI{Address: "not an address"}); err == nil {
+	if _, err := startAPI(f.c, &config.LLMProxyAPI{Address: "not an address"}); err == nil {
 		t.Fatal("bad address accepted")
 	}
 	if (&apiServer{}).url() != "" {
@@ -406,9 +406,9 @@ func TestAPILargeBody(t *testing.T) {
 	}
 }
 
-// The client's methods, pushes and config changes beyond the happy path.
-// client 的方法、推送与配置变更中正常路径之外的情况。
-func TestClientRoleEdges(t *testing.T) {
+// The proxy's methods, pushes and config changes beyond the happy path.
+// proxy 的方法、推送与配置变更中正常路径之外的情况。
+func TestProxyRoleEdges(t *testing.T) {
 	node := newNode(t, "node-a", ready("m", model.APIOpenAI))
 	hub := newHub(t, "hub-a", model.HubModel{Name: "h", API: model.APIOpenAI, Nodes: []string{"x"}, Ready: 1})
 	f := newFixture(t, node, hub)
@@ -417,38 +417,38 @@ func TestClientRoleEdges(t *testing.T) {
 
 	// Malformed pushes are dropped; the next good one still applies.
 	// 畸形推送被丢弃；之后正常的推送照常生效。
-	if err := node.m.Push(clientID, model.MethodNodeUpdate, "bad"); err != nil {
+	if err := node.m.Push(proxyID, model.MethodNodeUpdate, "bad"); err != nil {
 		t.Fatal(err)
 	}
-	if err := hub.m.Push(clientID, model.MethodHubModelsUpdate, "bad"); err != nil {
+	if err := hub.m.Push(proxyID, model.MethodHubModelsUpdate, "bad"); err != nil {
 		t.Fatal(err)
 	}
-	if err := hub.m.Push(clientID, model.MethodHubModelsUpdate, model.HubModels{Hub: "hub-a", Seq: 9}); err != nil {
+	if err := hub.m.Push(proxyID, model.MethodHubModelsUpdate, model.HubModels{Hub: "hub-a", Seq: 9}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "hub update", func() bool { _, known, _ := f.c.cat.routes("h", model.APIOpenAI); return !known })
 
-	out, err := f.r.Invoke(ctx, local, MethodClientStats, nil)
+	out, err := f.r.Invoke(ctx, local, MethodProxyStats, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := out.(StatsResp); !ok {
 		t.Fatalf("stats = %T", out)
 	}
-	if _, err := f.r.Invoke(ctx, local, MethodClientProfileSet, json.RawMessage(`{"name":"  "}`)); err == nil {
+	if _, err := f.r.Invoke(ctx, local, MethodProxyProfileSet, json.RawMessage(`{"name":"  "}`)); err == nil {
 		t.Fatal("empty name accepted")
 	}
-	if _, err := f.r.Invoke(ctx, local, MethodClientProfileSet, json.RawMessage(`{"name":"renamed"}`)); err != nil {
+	if _, err := f.r.Invoke(ctx, local, MethodProxyProfileSet, json.RawMessage(`{"name":"renamed"}`)); err != nil {
 		t.Fatal(err)
 	}
-	// No more than MaxAgentKeys keys. / 密钥不超过 MaxAgentKeys 个。
-	if err := f.c.editKeys(ctx, func([]config.AgentClientKey) ([]config.AgentClientKey, error) {
-		return make([]config.AgentClientKey, config.MaxAgentKeys+1), nil
+	// No more than MaxLLMKeys keys. / 密钥不超过 MaxLLMKeys 个。
+	if err := f.c.editKeys(ctx, func([]config.LLMProxyKey) ([]config.LLMProxyKey, error) {
+		return make([]config.LLMProxyKey, config.MaxLLMKeys+1), nil
 	}); err == nil {
 		t.Fatal("too many keys accepted")
 	}
-	if err := f.c.editKeys(ctx, func(keys []config.AgentClientKey) ([]config.AgentClientKey, error) {
-		for len(keys) < config.MaxAgentKeys {
+	if err := f.c.editKeys(ctx, func(keys []config.LLMProxyKey) ([]config.LLMProxyKey, error) {
+		for len(keys) < config.MaxLLMKeys {
 			k, _, err := newKey(fmt.Sprint("k", len(keys)))
 			if err != nil {
 				return nil, err
@@ -459,13 +459,13 @@ func TestClientRoleEdges(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.r.Invoke(ctx, local, MethodClientKeysCreate, json.RawMessage(`{"name":"one too many"}`)); err == nil {
+	if _, err := f.r.Invoke(ctx, local, MethodProxyKeysCreate, json.RawMessage(`{"name":"one too many"}`)); err == nil {
 		t.Fatal("key past the limit created")
 	}
-	if _, err := f.r.Invoke(ctx, local, MethodClientKeysDelete, json.RawMessage(`{"id":"nope"}`)); err == nil {
+	if _, err := f.r.Invoke(ctx, local, MethodProxyKeysDelete, json.RawMessage(`{"id":"nope"}`)); err == nil {
 		t.Fatal("unknown key deleted")
 	}
-	if _, err := f.r.Invoke(ctx, local, MethodClientKeysCreate, json.RawMessage(`{"name":"`+strings.Repeat("n", 65)+`"}`)); err == nil {
+	if _, err := f.r.Invoke(ctx, local, MethodProxyKeysCreate, json.RawMessage(`{"name":"`+strings.Repeat("n", 65)+`"}`)); err == nil {
 		t.Fatal("long name accepted")
 	}
 
@@ -480,7 +480,7 @@ func TestClientRoleEdges(t *testing.T) {
 		t.Fatal("wrong member applied")
 	}
 	// An API that cannot start leaves none. / 无法启动的 API 不留下任何 API。
-	if err := f.c.Apply(&config.AgentClient{ID: clientID, API: &config.AgentClientAPI{Address: "127.0.0.1:0", CertFile: "/nonexistent", KeyFile: "/nonexistent"}}); err == nil {
+	if err := f.c.Apply(&config.LLMProxy{ID: proxyID, API: &config.LLMProxyAPI{Address: "127.0.0.1:0", CertFile: "/nonexistent", KeyFile: "/nonexistent"}}); err == nil {
 		t.Fatal("API with a missing certificate started")
 	}
 	if f.c.API() != "" || f.c.me() != nil {
@@ -521,11 +521,11 @@ func TestKeyStoreKeepsUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &keyStore{}
-	s.set([]config.AgentClientKey{k})
+	s.set([]config.LLMProxyKey{k})
 	if !s.auth(http.Header{"X-Api-Key": {secret}}) {
 		t.Fatal("key refused")
 	}
-	s.set([]config.AgentClientKey{k})
+	s.set([]config.LLMProxyKey{k})
 	if l := s.list(); len(l) != 1 || l[0].Calls != 1 {
 		t.Fatalf("usage lost: %+v", l)
 	}
@@ -598,17 +598,17 @@ func TestConnLimitHandler(t *testing.T) {
 // 注册的角色只在配置中存在其成员时才找到它。
 func TestRegisteredMember(t *testing.T) {
 	for _, info := range app.Roles() {
-		if info.ID != "agent.client" {
+		if info.ID != "llm.proxy" {
 			continue
 		}
-		if info.Member(&config.Config{}) != nil || info.Member(&config.Config{Agent: &config.Agent{}}) != nil {
-			t.Fatal("member without a client")
+		if info.Member(&config.Config{}) != nil || info.Member(&config.Config{LLM: &config.LLM{}}) != nil {
+			t.Fatal("member without a proxy")
 		}
-		cl := &config.AgentClient{}
-		if info.Member(&config.Config{Agent: &config.Agent{Client: cl}}) != cl {
-			t.Fatal("client member not found")
+		cl := &config.LLMProxy{}
+		if info.Member(&config.Config{LLM: &config.LLM{Proxy: cl}}) != cl {
+			t.Fatal("proxy member not found")
 		}
 		return
 	}
-	t.Fatal("agent.client not registered")
+	t.Fatal("llm.proxy not registered")
 }

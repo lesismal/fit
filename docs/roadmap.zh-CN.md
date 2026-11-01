@@ -7,7 +7,7 @@ API 网关。本路线图把 [nginx、Caddy、Traefik 对比](comparison.zh-CN.m
 每个里程碑交付什么、怎样算完成、建立在 fib 的哪些能力之上。
 
 fit 已完成所有里程碑（包括 1.0）的迭代，已完成的内容见 [开发进度](progress.zh-CN.md)。1.0 之后又加入了边缘代理之外的
-几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、agent 与 tunnel、WebRTC 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
+几条路线（[1.0 之后](#10-之后)）：控制台与加密的 store、llm 与 tunnel、WebRTC 已完成；P2P 和 VPN 正在进行。[开发计划](dev-plan.zh-CN.md) 把这些里程碑拆成了小迭代，
 每个迭代的大小适合一次工作会话。里程碑的先后顺序是确定的，具体内容会随开发中的认识调整。
 文中刻意不写日期：里程碑在满足退出标准时结束，而不是按日历结束。
 
@@ -276,7 +276,7 @@ fit 可以作为反向代理和静态文件服务器使用。
 | 路线 | 交付什么 | 状态 | fib 能力 |
 | --- | --- | --- | --- |
 | [控制台：登录与加密的 store](dev-plan.zh-CN.md#控制台登录与加密的-store) | `admin.store`，配置加密保存在一个文件中，fit 从它运行；`admin.console`，需要登录的网页，带根据 schema 生成的编辑器；`fit store export` 和 `import`（[决定 027](decisions/027-console-and-store.zh-CN.md)、[控制台](console.zh-CN.md)） | 已完成（I104） | — |
-| [Agent 与 tunnel](dev-plan.zh-CN.md#agent-与-tunnel) | 配置中的角色：tunnel 的 server、node 和 client，用于访问 NAT 后的服务；agent 的 hub、node 和 client，在多台机器间共享 AI 模型（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)） | 已完成（I105–I107） | `websocket`、QUIC、异步 HTTP 客户端 |
+| [Agent 与 tunnel](dev-plan.zh-CN.md#agent-与-tunnel) | 配置中的角色：tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务；llm 的 hub、node 和 proxy（最初名为 agent），在多台机器间共享 AI 模型（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)） | 已完成（I105–I107） | `websocket`、QUIC、异步 HTTP 客户端 |
 | [WebRTC](dev-plan.zh-CN.md#webrtc) | `webrtc.turn`，基于 UDP、TCP 和 TLS 的 TURN 服务器；`whip` 和 `whep` 处理器，fit 作为 SFU；`webrtc_proxy` 处理器，把 WHIP 和 WHEP 代理到媒体服务器，UDP 按 ICE ufrag 路由（[决定 029](decisions/029-webrtc.zh-CN.md)、[WebRTC](webrtc.zh-CN.md)） | 已完成（I87、I108–I111） | `webrtc`、`webrtc/turn/turnserver` |
 | [P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透) | NAT 后的两台主机通过 ICE 直接相连，或经 TURN 中继相连，承载 TCP 和 UDP 服务（[决定 025](decisions/025-p2p.zh-CN.md)） | 进行中：STUN 消息和 STUN 服务器（`p2p/stun`，I84，尚未进入配置的库）和 fib 中的 A49（I85）已完成；STUN 和 TURN 客户端、ICE、隧道和配置待做（I86、I88–I93） | `webrtc/stun`、`webrtc/turn`、`webrtc/ice` |
 | [VPN](dev-plan.zh-CN.md#vpnfit-节点组成的网络) | 节点组成一个覆盖网络，各有一个 TUN 接口，IP 包直接或经中继发送（[决定 026](decisions/026-vpn.zh-CN.md)） | 进行中：IP 包和覆盖网络路由表（`vpn/packet`，I94，尚未进入配置的库）已完成；TUN 设备、中继、协调器和节点待做（I95–I103） | — |
@@ -320,8 +320,8 @@ fit 可以作为反向代理和静态文件服务器使用。
 | TURN 服务器 | P2P，I87（[决定 029](decisions/029-webrtc.zh-CN.md)） | `webrtc/turn/turnserver` |
 | WebRTC：WHIP 和 WHEP，作为媒体服务器和代理 | WebRTC，I109–I110 | `webrtc`（`PeerConnection`、`Mux`） |
 | 配置加密保存；带登录的 Web 控制台 | 控制台，I104 | — |
-| tunnel：经 server 访问 NAT 后的服务 | Agent 与 tunnel，I106 | `websocket`、QUIC |
-| agent：在多台机器间共享 AI 模型 | Agent 与 tunnel，I107 | `websocket`、异步 HTTP 客户端 |
+| tunnel：经 hub 访问 NAT 后的服务 | Agent 与 tunnel，I106 | `websocket`、QUIC |
+| llm：在多台机器间共享 AI 模型 | Agent 与 tunnel，I107 | `websocket`、异步 HTTP 客户端 |
 | STUN 服务器 | P2P，I84（库，尚未进入配置） | — |
 | VPN：IP 包和覆盖网络路由表 | VPN，I94（库，尚未进入配置） | — |
 

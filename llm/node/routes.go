@@ -5,24 +5,24 @@ import (
 	"errors"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
-// Caller roles of the read methods (hubs and clients) and of the management methods (hubs, checked at call time
+// Caller roles of the read methods (hubs and proxies) and of the management methods (hubs, checked at call time
 // against NodeSettings.AllowHubManage). The local console (model.RoleLocal) may call everything.
-// 读取方法的调用方角色（hub 与 client）与管理方法的调用方角色（hub，调用时按 NodeSettings.AllowHubManage 检查）。
+// 读取方法的调用方角色（hub 与 proxy）与管理方法的调用方角色（hub，调用时按 NodeSettings.AllowHubManage 检查）。
 // 本地控制台（model.RoleLocal）可以调用全部方法。
 var (
-	readRoles   = []string{model.RoleHub, model.RoleClient}
+	readRoles   = []string{model.RoleHub, model.RoleProxy}
 	manageRoles = []string{model.RoleHub}
 )
 
-// allowManage is the call-time check of a management method: a hub only while the node allows it. Clients never get
+// allowManage is the call-time check of a management method: a hub only while the node allows it. Proxies never get
 // here (the router refuses them), but are refused again in case a route is ever registered more widely.
-// allowManage 管理方法的调用时检查：hub 仅在节点允许时可用。client 不会走到这里（路由已拒绝），但以防路由将来注册得更宽，这里再拒绝一次。
+// allowManage 管理方法的调用时检查：hub 仅在节点允许时可用。proxy 不会走到这里（路由已拒绝），但以防路由将来注册得更宽，这里再拒绝一次。
 func (n *Node) allowManage(caller model.Identity) error {
 	switch caller.Role {
 	case model.RoleLocal:

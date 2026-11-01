@@ -1,36 +1,37 @@
-# 028：agent 与 tunnel 作为 fit 配置中的角色
+# 028：llm 与 tunnel 作为 fit 配置中的角色
 
-[English](028-agent-and-tunnel.md) | [简体中文](028-agent-and-tunnel.zh-CN.md)
+[English](028-llm-and-tunnel.md) | [简体中文](028-llm-and-tunnel.zh-CN.md)
 
-状态：已采纳（2026-11-01）。
+状态：已采纳（2026-11-01）。该功能最初名为 agent，同日改名为 `llm`，其 client 角色改为 `llm.proxy`，
+使“agent”只指调用它的 AI agent。
 
 ## 背景
 
 用户要求 fit 在网关之外提供两项功能，每项都由运行在多台机器上、彼此互联的角色组成：
 
-- **agent** 在多台机器间共享 AI 模型。*node* 用本地或远端上游（OpenAI、Anthropic 兼容 API）提供
-  模型，*hub* 是 node 与 client 汇合的地方，*client* 提供一个 API，调用它能到达的 node 上的模型。
+- **llm** 在多台机器间共享 AI 模型。*node* 用本地或远端上游（OpenAI、Anthropic 兼容 API）提供
+  模型，*hub* 是 node 与 proxy 汇合的地方，*proxy* 为 agent 提供一个 API，调用它能到达的 node 上的模型。
 - **tunnel** 用来访问 NAT 后面的 TCP 服务。服务旁边的 *node* 通过 TCP、WebSocket 或 QUIC 连到
-  *server*，*client* 把本地端口和 Web 代理经 server 转发到某个 node 的服务。
+  *hub*，*proxy* 把本地端口和 Web 代理经 hub 转发到某个 node 的服务。
 
 用户要求两者都共用 fit 的 fib 引擎，使用 fit 的配置格式，进程运行哪些角色由 fit 的配置决定，存储的
 内容放进 fit 的 store；并要求完全遵守 fit 的开发规则，不留到以后。
 
 ## 决定
 
-- **包。** agent 的角色是 `agent/hub`、`agent/node`、`agent/client`；tunnel 的角色是
-  `tunnel/server`、`tunnel/node` 和 `tunnel/client`。同一家族角色共用的代码在
-  `agent/internal` 和 `tunnel/internal` 下；两个家族共用的放在 fit 自己的包中：`login`（用户、会话、
+- **包。** llm 的角色是 `llm/hub`、`llm/node`、`llm/proxy`；tunnel 的角色是
+  `tunnel/hub`、`tunnel/node` 和 `tunnel/proxy`。同一家族角色共用的代码在
+  `llm/internal` 和 `tunnel/internal` 下；两个家族共用的放在 fit 自己的包中：`login`（用户、会话、
   CSRF 令牌与锁定，与 admin.console 共用）、`app`（角色的注册表与管理器）以及 `app/console`（角色在
   fib 上的网页）。`app/standard` 导入所有角色，`cmd/fit` 与 `fit build` 导入它。
-- **配置。** 两个顶层成员 `agent` 和 `tunnel`，每个角色一个成员：`agent.hub`、`agent.node`、
-  `agent.client`、`tunnel.server`、`tunnel.node`、`tunnel.client`。设置了成员，角色就运行；一个进程可
+- **配置。** 两个顶层成员 `llm` 和 `tunnel`，每个角色一个成员：`llm.hub`、`llm.node`、
+  `llm.proxy`、`tunnel.hub`、`tunnel.node`、`tunnel.proxy`。设置了成员，角色就运行；一个进程可
   运行任意多个，可与网关的 listener 和路由并存，也可以都没有。成员与配置其余部分一样严格解码，使用
   snake_case，带 `doc` 标签、默认值和边界，因此 `fit schema`、`fit validate`、console 的表单和参考
   文档都覆盖它们。只有角色而没有路由的配置不需要 listener。
 - **一个引擎。** 每个角色都把自己的 binding（它的网页、链路监听、client 转发的端口）加到 listener 的
   引擎 `listener.Server.Engine()` 上，并在其上用自己的 handler 拨号，与网关自己的连接一样。
-  `limits.max_conns` 和 `max_pending_bytes` 与其余连接一起约束它们。HTTP 客户端（如 agent node 到上游
+  `limits.max_conns` 和 `max_pending_bytes` 与其余连接一起约束它们。HTTP 客户端（如 llm node 到上游
   的客户端）通过 fit 上游池使用的上游引擎拨号。角色的 QUIC 是同一引擎 UDP binding 上的 fib
   `http3/quic`。
 - **应用配置。** 每个配置应用时，在 listener 之后、在控制面上推进 `app.Manager`：配置设置了但未运行的
@@ -51,13 +52,13 @@
   `fit hash-password` 生成的 bcrypt 哈希、会话限制）保护，通过 `login` 包，与 admin.console 一样检查；
   角色没有自己的密码或登录方式。
 - **规则完全适用。** 角色做的任何事都不阻塞 fib worker：bcrypt、命令执行、读文件和配置修改在各自有界的
-  池上执行，带超时；agent node 到上游的请求体与响应体用 fib 的异步客户端和 `OnBody` 流式转发，双向背压；
+  池上执行，带超时；llm node 到上游的请求体与响应体用 fib 的异步客户端和 `OnBody` 流式转发，双向背压；
   每个 map、队列和缓冲都有带安全默认值的上限；与外部的每次交互都有超时。没有角色用 `net/http`
   handler 提供服务、用 `net/http.Client` 代理，或运行自己的引擎。
 
 ## 后果
 
-- 一个二进制和一份配置就能以任意组合运行网关、tunnel 和 agent；一个 store 保存它们的设置；一份日志、
+- 一个二进制和一份配置就能以任意组合运行网关、tunnel 和 llm；一个 store 保存它们的设置；一份日志、
   一个 Admin API 和一个 console 展示它们。
 - 角色成员中有密码和密钥。存在明文文件中时，安全程度与文件相同；`admin.store` 把它们加密保存，这也是
   网页的改动应保存在那里的原因。

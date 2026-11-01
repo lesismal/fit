@@ -8,38 +8,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/client"
-	"github.com/lesismal/fit/agent/internal/agenttest"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/proxy"
 )
 
-// direct runs a node serving models and a client linked to it, and returns
+// direct runs a node serving models and a proxy linked to it, and returns
 // an agent with a key.
 type direct struct {
-	mock   *agenttest.MockLLM
-	nf, cf *agenttest.Fit
+	mock   *llmtest.MockLLM
+	nf, cf *llmtest.Fit
 	a      *agent
-	cl     *client.Client
+	cl     *proxy.Proxy
 }
 
 func startDirect(t *testing.T, models, nodeExtra, apiExtra string) *direct {
 	t.Helper()
-	d := &direct{mock: agenttest.StartMockLLM(t)}
+	d := &direct{mock: llmtest.StartMockLLM(t)}
 	models = strings.ReplaceAll(models, "MOCK", d.mock.URL)
 	nodeAddr := freeAddr(t)
-	d.nf = agenttest.Start(t, member("node", `{"listen": {"address": "`+nodeAddr+`", "password": "`+meshPass+`"}, "models": `+models+nodeExtra+`}`), "")
-	d.cf = agenttest.Start(t, member("client", `{"console": `+agenttest.Console()+`, "api": {"address": "127.0.0.1:0"`+apiExtra+`},
+	d.nf = llmtest.Start(t, member("node", `{"listen": {"address": "`+nodeAddr+`", "password": "`+meshPass+`"}, "models": `+models+nodeExtra+`}`), "")
+	d.cf = llmtest.Start(t, member("proxy", `{"console": `+llmtest.Console()+`, "api": {"address": "127.0.0.1:0"`+apiExtra+`},
 		"peers": [{"address": "`+nodeAddr+`", "password": "`+meshPass+`", "role": "node"}]}`), "")
-	n, c := nodeOf(t, d.nf), clientOf(t, d.cf)
+	n, c := nodeOf(t, d.nf), proxyOf(t, d.cf)
 	d.cl = c
-	agenttest.Eventually(t, "the link", func() bool { return c.Mesh.Online(n.Self().ID) })
+	llmtest.Eventually(t, "the link", func() bool { return c.Mesh.Online(n.Self().ID) })
 	p := pages(t, c.Console().URL())
-	var key client.KeyCreateResp
-	if err := p.RPC(client.MethodClientKeysCreate, client.KeyCreateReq{Name: "test"}, &key); err != nil {
+	var key proxy.KeyCreateResp
+	if err := p.RPC(proxy.MethodProxyKeysCreate, proxy.KeyCreateReq{Name: "test"}, &key); err != nil {
 		t.Fatal(err)
 	}
-	agenttest.Eventually(t, "the catalog", func() bool {
-		var cat []client.CatalogModel
-		return p.RPC(client.MethodClientModels, nil, &cat) == nil && len(cat) > 0
+	llmtest.Eventually(t, "the catalog", func() bool {
+		var cat []proxy.CatalogModel
+		return p.RPC(proxy.MethodProxyModels, nil, &cat) == nil && len(cat) > 0
 	})
 	d.a = newAgent(c.API(), key.Key)
 	return d
@@ -47,7 +47,7 @@ func startDirect(t *testing.T, models, nodeExtra, apiExtra string) *direct {
 
 // Large request bodies: past 1 MiB, a body streams to the node in frames,
 // and on to the upstream as it arrives, or whole when the node must set the
-// model it names; past the node's or the client's bound, the call fails.
+// model it names; past the node's or the proxy's bound, the call fails.
 func TestLargeBodies(t *testing.T) {
 	d := startDirect(t, `[{"name": "same", "api": "openai", "base_url": "MOCK/u/s/v1", "api_key": "sk-s"},
 		{"name": "renamed", "api": "openai", "base_url": "MOCK/u/r/v1", "api_key": "sk-r", "upstream": "up-r"}]`,
@@ -71,12 +71,12 @@ func TestLargeBodies(t *testing.T) {
 	if status, resp := d.a.call(t, "/v1/chat/completions", big, nil); status != 400 {
 		t.Fatalf("past the node's bound: %d %.200s", status, resp)
 	}
-	// Past the client's 8 MiB.
+	// Past the proxy's 8 MiB.
 	huge := `{"model":"same","pad":"` + strings.Repeat("p", 9<<20) + `"}`
 	resp, err := d.a.post("/v1/chat/completions", huge, nil)
 	if err == nil {
 		if resp.StatusCode != 413 {
-			t.Fatalf("past the client's bound: %d", resp.StatusCode)
+			t.Fatalf("past the proxy's bound: %d", resp.StatusCode)
 		}
 		resp.Body.Close()
 	}
@@ -158,7 +158,7 @@ func TestCutConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	agenttest.Eventually(t, "the upstream's request cancelled", func() bool { return d.mock.Stats("a").Canceled == 1 })
+	llmtest.Eventually(t, "the upstream's request cancelled", func() bool { return d.mock.Stats("a").Canceled == 1 })
 
 	resp, err = d.a.post("/v1/chat/completions", map[string]any{"model": "m", "big_bytes": 4 << 20, "cut_after": 1 << 20}, nil)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestCutConnections(t *testing.T) {
 	if err == nil || n >= 4<<20 {
 		t.Fatalf("a broken upstream body came whole: %d bytes, %v", n, err)
 	}
-	// The node and the client go on serving.
+	// The node and the proxy go on serving.
 	if status, _ := d.a.call(t, "/v1/chat/completions", map[string]any{"model": "m"}, nil); status != 200 {
 		t.Fatalf("after the cuts: %d", status)
 	}
@@ -187,7 +187,7 @@ func TestUnavailable(t *testing.T) {
 		status, _ := d.a.call(t, "/v1/chat/completions", map[string]any{"model": "busy", "sleep_ms": 1500}, nil)
 		first <- status
 	}()
-	agenttest.Eventually(t, "the first call upstream", func() bool { return d.mock.Stats("a").Calls == 1 })
+	llmtest.Eventually(t, "the first call upstream", func() bool { return d.mock.Stats("a").Calls == 1 })
 	if status, body := d.a.call(t, "/v1/chat/completions", map[string]any{"model": "busy"}, nil); status != 503 {
 		t.Fatalf("past max_inflight: %d %s", status, body)
 	}

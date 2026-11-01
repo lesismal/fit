@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"bufio"
@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/agenttest"
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 	"github.com/lesismal/fit/upstream"
 
 	"github.com/lesismal/fib"
@@ -107,7 +107,7 @@ func newPeer(t *testing.T, role, id string, setup func(r *mesh.Router, p *peer))
 	p.m = mesh.New(mesh.Options{
 		Engine:      testEngine(),
 		Self:        func() model.Identity { return model.Identity{Role: role, ID: id, Name: id, StartedAt: 1} },
-		AcceptRoles: []string{model.RoleClient, model.RoleHub, model.RoleNode}, PingInterval: time.Second,
+		AcceptRoles: []string{model.RoleProxy, model.RoleHub, model.RoleNode}, PingInterval: time.Second,
 		RetryInterval: 300 * time.Millisecond,
 	}, r)
 	t.Cleanup(p.m.Stop)
@@ -119,35 +119,35 @@ func newPeer(t *testing.T, role, id string, setup func(r *mesh.Router, p *peer))
 
 func newNode(t *testing.T, id string, models ...model.ModelView) *peer {
 	return newPeer(t, model.RoleNode, id, func(r *mesh.Router, p *peer) {
-		mesh.Handle(r, model.MethodNodeInfo, []string{model.RoleClient}, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+		mesh.Handle(r, model.MethodNodeInfo, []string{model.RoleProxy}, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 			return model.NodeInfo{ID: id, Name: id, Models: models, Seq: 1}, nil
 		})
-		mesh.HandleStream(r, model.MethodNodeProxy, []string{model.RoleClient}, p.serve)
+		mesh.HandleStream(r, model.MethodNodeProxy, []string{model.RoleProxy}, p.serve)
 		p.proxy = answer(id, 200, "node:"+id)
 	})
 }
 
 func newHub(t *testing.T, id string, models ...model.HubModel) *peer {
 	return newPeer(t, model.RoleHub, id, func(r *mesh.Router, p *peer) {
-		mesh.Handle(r, model.MethodHubModels, []string{model.RoleClient}, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+		mesh.Handle(r, model.MethodHubModels, []string{model.RoleProxy}, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 			return model.HubModels{Hub: id, Models: models, Seq: 1}, nil
 		})
-		mesh.HandleStream(r, model.MethodHubProxy, []string{model.RoleClient}, p.serve)
+		mesh.HandleStream(r, model.MethodHubProxy, []string{model.RoleProxy}, p.serve)
 		p.proxy = answer(id+"-node", 200, "hub:"+id)
 	})
 }
 
 type fixture struct {
-	c    *Client
+	c    *Proxy
 	r    *mesh.Router
-	fit  *agenttest.Fit
+	fit  *llmtest.Fit
 	base string
 	key  string
 }
 
-var clientID = "client-test"
+var proxyID = "proxy-test"
 
-// newFixture runs a client in fit dialing peers, with one API key made on
+// newFixture runs a proxy in fit dialing peers, with one API key made on
 // its pages, and its agent API on a binding of its own.
 func newFixture(t *testing.T, peers ...*peer) *fixture {
 	t.Helper()
@@ -160,13 +160,13 @@ func newFixture(t *testing.T, peers ...*peer) *fixture {
 		dials = append(dials, `{"address": "`+p.addr+`", "password": "pw", "role": "`+role+`"}`)
 	}
 	f := &fixture{}
-	f.fit = agenttest.Start(t, `{"agent": {"client": {"id": "`+clientID+`", "name": "client", "console": `+agenttest.Console()+`,
+	f.fit = llmtest.Start(t, `{"llm": {"proxy": {"id": "`+proxyID+`", "name": "proxy", "console": `+llmtest.Console()+`,
 		"api": {"address": "127.0.0.1:0"}, "peers": [`+strings.Join(dials, ",")+`]}}}`, "")
-	f.c = f.fit.Role("client").(*Client)
+	f.c = f.fit.Role("proxy").(*Proxy)
 	f.r = f.c.Router
 	f.base = f.c.API()
 	var k KeyCreateResp
-	if err := agenttest.Login(t, f.c.Console().URL()).RPC(MethodClientKeysCreate, KeyCreateReq{Name: "test"}, &k); err != nil {
+	if err := llmtest.Login(t, f.c.Console().URL()).RPC(MethodProxyKeysCreate, KeyCreateReq{Name: "test"}, &k); err != nil {
 		t.Fatal(err)
 	}
 	f.key = k.Key
@@ -337,7 +337,7 @@ func TestModelsAndErrors(t *testing.T) {
 		t.Fatalf("non-retryable error retried: %d", len(node.requests()))
 	}
 
-	out, err := f.r.Invoke(context.Background(), model.Identity{Role: model.RoleLocal}, MethodClientModels, nil)
+	out, err := f.r.Invoke(context.Background(), model.Identity{Role: model.RoleLocal}, MethodProxyModels, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestRoutingPreferenceAndRetry(t *testing.T) {
 	}
 	// The node pushes that the model is no longer ready: hubs round robin, a failing one is skipped.
 	// 节点推送模型不再就绪：hub 之间轮询，失败的被跳过。
-	if err := node.m.Push(clientID, model.MethodNodeUpdate, model.NodeInfo{ID: "node-a", Seq: 2,
+	if err := node.m.Push(proxyID, model.MethodNodeUpdate, model.NodeInfo{ID: "node-a", Seq: 2,
 		Models: []model.ModelView{{Name: "m", API: model.APIOpenAI, State: model.ModelError}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestRoutingPreferenceAndRetry(t *testing.T) {
 		t.Fatalf("all unavailable: %d %s", resp.StatusCode, body)
 	}
 	// A hub push updates the catalog. / hub 推送更新目录。
-	if err := hub1.m.Push(clientID, model.MethodHubModelsUpdate, model.HubModels{Hub: "hub-1", Seq: 5}); err != nil {
+	if err := hub1.m.Push(proxyID, model.MethodHubModelsUpdate, model.HubModels{Hub: "hub-1", Seq: 5}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "hub update", func() bool { r, _, _ := f.c.cat.routes("m", model.APIOpenAI); return len(r) == 1 && r[0].ID == "hub-2" })
@@ -518,10 +518,10 @@ func TestStreamFlushAndCancel(t *testing.T) {
 func TestKeysMethods(t *testing.T) {
 	f := newFixture(t)
 	local := model.Identity{Role: model.RoleLocal}
-	if _, err := f.r.Invoke(context.Background(), local, MethodClientKeysCreate, json.RawMessage(`{"name":" "}`)); err == nil {
+	if _, err := f.r.Invoke(context.Background(), local, MethodProxyKeysCreate, json.RawMessage(`{"name":" "}`)); err == nil {
 		t.Fatal("empty name accepted")
 	}
-	out, err := f.r.Invoke(context.Background(), local, MethodClientKeysList, nil)
+	out, err := f.r.Invoke(context.Background(), local, MethodProxyKeysList, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestKeysMethods(t *testing.T) {
 	if resp := f.do(t, context.Background(), "GET", "/v1/models", "", f.bearer()); !strings.Contains(readAll(t, resp), `"data":[]`) {
 		t.Fatalf("empty models: %d", resp.StatusCode)
 	}
-	if _, err := f.r.Invoke(context.Background(), local, MethodClientKeysDelete, json.RawMessage(`{"id":"`+keys[0].ID+`"}`)); err != nil {
+	if _, err := f.r.Invoke(context.Background(), local, MethodProxyKeysDelete, json.RawMessage(`{"id":"`+keys[0].ID+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(f.fit.Current()), "api_keys") {
@@ -546,7 +546,7 @@ func TestKeysMethods(t *testing.T) {
 	if readAll(t, resp); resp.StatusCode != 401 {
 		t.Fatalf("deleted key still works: %d", resp.StatusCode)
 	}
-	if _, err := f.r.Invoke(context.Background(), model.Identity{Role: model.RoleHub}, MethodClientKeysList, nil); err == nil {
+	if _, err := f.r.Invoke(context.Background(), model.Identity{Role: model.RoleHub}, MethodProxyKeysList, nil); err == nil {
 		t.Fatal("a hub may list keys")
 	}
 }

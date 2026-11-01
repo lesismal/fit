@@ -45,8 +45,8 @@ var dirFiles = []dirFile{
 	{name: "50-providers", fields: []string{"providers"}, about: []string{
 		"Routes, upstreams, services and listeners from Docker, Consul, etcd and Kubernetes.",
 	}},
-	{name: "60-apps", fields: []string{"agent", "tunnel", "webrtc"}, about: []string{
-		"The roles run beside the gateway on its engine: the agent's and the tunnel's, AI",
+	{name: "60-apps", fields: []string{"llm", "tunnel", "webrtc"}, about: []string{
+		"The roles run beside the gateway on its engine: the LLM feature's and the tunnel's, AI",
 		"models shared among machines and services behind NAT reached through a server, and",
 		"WebRTC's TURN server.",
 	}},

@@ -1,4 +1,4 @@
-package agenttest
+package llmtest
 
 import (
 	"bytes"

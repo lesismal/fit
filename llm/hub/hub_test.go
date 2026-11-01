@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 	"github.com/lesismal/fit/upstream"
 
 	"github.com/lesismal/fib"
@@ -108,7 +108,7 @@ func startNode(t *testing.T, id, hubAddr string, models ...model.ModelView) *fak
 		return serve(ctx, st, id, "a", "b", "c")
 	}
 	r := mesh.NewRouter()
-	peers := []string{model.RoleHub, model.RoleClient}
+	peers := []string{model.RoleHub, model.RoleProxy}
 	mesh.Handle(r, model.MethodNodeInfo, peers, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		n.mu.Lock()
 		defer n.mu.Unlock()
@@ -146,8 +146,8 @@ func startNode(t *testing.T, id, hubAddr string, models ...model.ModelView) *fak
 	return n
 }
 
-// env is a hub with two fake nodes and a client.
-// env 带两个假节点与一个 client 的 hub。
+// env is a hub with two fake nodes and a proxy.
+// env 带两个假节点与一个 proxy 的 hub。
 type env struct {
 	hub    *Hub
 	hr     *mesh.Router
@@ -180,7 +180,7 @@ func ready(name string, inflight int) model.ModelView {
 func newEnv(t *testing.T, m1, m2 []model.ModelView) *env {
 	addr := freeAddr(t)
 	e := &env{hr: mesh.NewRouter()}
-	hm := newMesh(t, model.RoleHub, "h1", 1, []string{model.RoleNode, model.RoleClient}, e.hr)
+	hm := newMesh(t, model.RoleHub, "h1", 1, []string{model.RoleNode, model.RoleProxy}, e.hr)
 	e.hub = newHub(hm, hm.Self, nil)
 	e.hub.register(e.hr)
 	t.Cleanup(e.hub.close)
@@ -189,7 +189,7 @@ func newEnv(t *testing.T, m1, m2 []model.ModelView) *env {
 	}
 	e.n1 = startNode(t, "n1", addr, m1...)
 	e.n2 = startNode(t, "n2", addr, m2...)
-	e.client = newMesh(t, model.RoleClient, "c1", 1, []string{model.RoleHub}, mesh.NewRouter())
+	e.client = newMesh(t, model.RoleProxy, "c1", 1, []string{model.RoleHub}, mesh.NewRouter())
 	e.client.OnPush(model.MethodHubModelsUpdate, []string{model.RoleHub}, func(_ model.Identity, msg json.RawMessage) {
 		var hm model.HubModels
 		if err := json.Unmarshal(msg, &hm); err == nil {
@@ -441,7 +441,7 @@ func TestNodeCallForwarding(t *testing.T) {
 	// Peers may not call the console methods.
 	// 对端不能调用控制台方法。
 	if _, err := mesh.Call[json.RawMessage](ctx, e.client, "h1", model.MethodHubNodeCall, model.HubNodeCallReq{ID: "n1", Method: model.MethodNodeModelList}); err == nil {
-		t.Fatal("client called the console method")
+		t.Fatal("proxy called the console method")
 	}
 
 	// Job follow through the hub stream.

@@ -37,15 +37,15 @@ func TestE2E(t *testing.T) {
 	step(t, "node/actions-jobs", testNodeActionsJobs)
 	step(t, "node/console-proxy", testNodeConsoleProxy)
 	step(t, "hub/manage", testHubManage)
-	step(t, "client/keys", testClientKeys)
-	step(t, "client/agent-api", testClientAgentAPI)
-	step(t, "client/errors", testClientErrors)
+	step(t, "proxy/keys", testProxyKeys)
+	step(t, "proxy/agent-api", testProxyAgentAPI)
+	step(t, "proxy/errors", testProxyErrors)
 	step(t, "routing/direct-node", testDirectNode)
 	step(t, "routing/balance", testBalance)
 	step(t, "routing/failover", testFailover)
 	step(t, "routing/max-inflight", testMaxInflight)
 	step(t, "routing/cancel", testCancel)
-	step(t, "client/stats", testClientStats)
+	step(t, "proxy/stats", testProxyStats)
 	step(t, "mesh/undial-kick", testUndialKick)
 	step(t, "profiles", testProfiles)
 	// The role pages have no password change: their users are the console
@@ -62,7 +62,7 @@ func TestE2E(t *testing.T) {
 	step(t, "console/login-lockout", testLoginLockout)
 }
 
-// keyMain: a client1 API key made by testClientKeys; key2 is client2's.
+// keyMain: a proxy1 API key made by testProxyKeys; key2 is proxy2's.
 var keyMain, key2 string
 
 // tagOf maps a node console name to the mock upstream tag its models use.
@@ -81,7 +81,7 @@ func nodeName(id string) string {
 
 func testConsoles(t *testing.T) {
 	plain := httpClient(nil)
-	for _, name := range []string{"hub", "node1", "node2", "node3", "client1", "client2"} {
+	for _, name := range []string{"hub", "node1", "node2", "node3", "proxy1", "proxy2"} {
 		c := con(name)
 		t.Run(name, func(t *testing.T) {
 			// fit has no /healthz: wait for the pages themselves.
@@ -147,8 +147,8 @@ func testConsoles(t *testing.T) {
 			if me.User != "admin" || me.Identity.Role != c.role || !strings.HasPrefix(me.Identity.ID, c.role+"-") {
 				t.Fatalf("/api/me: %s", raw)
 			}
-			if c.role == "client" && !strings.HasPrefix(me.APIURL, "https://") {
-				t.Fatalf("/api/me of a client: no https api_url: %s", raw)
+			if c.role == "proxy" && !strings.HasPrefix(me.APIURL, "https://") {
+				t.Fatalf("/api/me of a proxy: no https api_url: %s", raw)
 			}
 			c.id = me.Identity.ID
 			st, raw, _ = c.do("GET", "/api/session", nil, nil)
@@ -220,8 +220,8 @@ func testMeshSetup(t *testing.T) {
 	hub.rpcFail(t, "/mesh/listen", map[string]string{"addr": "no-port", "password": meshPass}, 400)
 	hub.rpc(t, "/mesh/listen", map[string]string{"addr": hubListen, "password": meshPass}, nil)
 	con("node2").rpc(t, "/mesh/listen", map[string]string{"addr": node2Listen, "password": meshPass}, nil)
-	con("client2").rpc(t, "/mesh/listen", map[string]string{"addr": client2Listen, "password": meshPass}, nil)
-	for _, name := range []string{"hub", "node2", "client2"} {
+	con("proxy2").rpc(t, "/mesh/listen", map[string]string{"addr": client2Listen, "password": meshPass}, nil)
+	for _, name := range []string{"hub", "node2", "proxy2"} {
 		p := con(name).peers(t)
 		if p.Listen.Addr == "" || !p.Listen.HasPassword || p.Listen.Error != "" {
 			t.Fatalf("%s listen: %+v", name, p.Listen)
@@ -238,17 +238,17 @@ func testMeshSetup(t *testing.T) {
 	// Every directed pair of roles.
 	dial(t, "node1", "hub:9201", "hub")
 	dial(t, "hub", "node2:9101", "node")
-	dial(t, "client1", "hub:9201", "hub")
-	dial(t, "client1", "node2:9101", "node")
-	dial(t, "hub", "client2:9301", "client")
-	dial(t, "node3", "client2:9301", "client")
+	dial(t, "proxy1", "hub:9201", "hub")
+	dial(t, "proxy1", "node2:9101", "node")
+	dial(t, "hub", "proxy2:9301", "proxy")
+	dial(t, "node3", "proxy2:9301", "proxy")
 	waitTargets(t, "node1", 1)
 	waitTargets(t, "hub", 2)
-	waitTargets(t, "client1", 2)
+	waitTargets(t, "proxy1", 2)
 	waitTargets(t, "node3", 1)
 
 	eventually(t, 10*time.Second, "hub connections", func() error {
-		want := map[string]string{con("node1").id: "in", con("node2").id: "out", con("client1").id: "in", con("client2").id: "out"}
+		want := map[string]string{con("node1").id: "in", con("node2").id: "out", con("proxy1").id: "in", con("proxy2").id: "out"}
 		got := map[string]string{}
 		for _, c := range hub.peers(t).Conns {
 			got[c.ID] = c.Direction
@@ -261,7 +261,7 @@ func testMeshSetup(t *testing.T) {
 		return nil
 	})
 	// No console reply ever holds a password.
-	for _, name := range []string{"hub", "node1", "node2", "client1", "client2", "node3"} {
+	for _, name := range []string{"hub", "node1", "node2", "proxy1", "proxy2", "node3"} {
 		_, raw := con(name).rpcErr("/mesh/peers", nil)
 		if bytes.Contains(raw, []byte(meshPass)) {
 			t.Fatalf("%s /mesh/peers leaks the mesh password", name)
@@ -273,7 +273,7 @@ func testMeshRejects(t *testing.T) {
 	n3 := con("node3")
 	cases := []struct{ addr, role, pass, why string }{
 		{"hub:9201", "hub", "wrong-password", "wrong password"},
-		{"hub:9201", "client", meshPass, "declared role differs from the peer's"},
+		{"hub:9201", "proxy", meshPass, "declared role differs from the peer's"},
 		{"node2:9101", "hub", meshPass, "same-role peer"},
 	}
 	for _, tc := range cases {
@@ -451,8 +451,8 @@ func testHubAggregate(t *testing.T) {
 	if n, ok := ns[con("node3").id]; ok && n.Online {
 		t.Fatalf("hub lists node3 as online: %+v", n)
 	}
-	eventually(t, 10*time.Second, "client catalogs", func() error {
-		for _, c := range []string{"client1", "client2"} {
+	eventually(t, 10*time.Second, "proxy catalogs", func() error {
+		for _, c := range []string{"proxy1", "proxy2"} {
 			cm := con(c).catalog(t, "m-only1", "openai")
 			if cm == nil || !cm.Ready {
 				return fmt.Errorf("%s m-only1: %+v", c, cm)
@@ -761,20 +761,20 @@ func testHubManage(t *testing.T) {
 	hcall(n1, "/node/model/list", struct{}{}, &list)
 }
 
-// ---- client ----
+// ---- proxy ----
 
-func testClientKeys(t *testing.T) {
-	c1 := con("client1")
+func testProxyKeys(t *testing.T) {
+	c1 := con("proxy1")
 	var k keyView
-	c1.rpc(t, "/client/keys/create", map[string]string{"name": "e2e-main"}, &k)
+	c1.rpc(t, "/proxy/keys/create", map[string]string{"name": "e2e-main"}, &k)
 	if !strings.HasPrefix(k.Key, "ah-") || len(k.Key) != 46 || k.Prefix != k.Key[:10] {
 		t.Fatalf("new key: %+v", k)
 	}
 	keyMain = k.Key
 	var spare keyView
-	c1.rpc(t, "/client/keys/create", map[string]string{"name": "e2e-spare"}, &spare)
+	c1.rpc(t, "/proxy/keys/create", map[string]string{"name": "e2e-spare"}, &spare)
 
-	_, raw := c1.rpcErr("/client/keys/list", nil)
+	_, raw := c1.rpcErr("/proxy/keys/list", nil)
 	if bytes.Contains(raw, []byte(keyMain)) || bytes.Contains(raw, []byte("hash")) {
 		t.Fatalf("key list leaks a key or a hash: %s", raw)
 	}
@@ -784,25 +784,25 @@ func testClientKeys(t *testing.T) {
 		t.Fatalf("key list: %+v", keys)
 	}
 	// A deleted key stops working at once.
-	if r := agent(t, "client1", "GET", "/v1/models", nil, bearer(spare.Key)); r.Status != 200 {
+	if r := agent(t, "proxy1", "GET", "/v1/models", nil, bearer(spare.Key)); r.Status != 200 {
 		t.Fatalf("spare key: HTTP %d", r.Status)
 	}
-	c1.rpc(t, "/client/keys/delete", map[string]string{"id": spare.ID}, nil)
-	if r := agent(t, "client1", "GET", "/v1/models", nil, bearer(spare.Key)); r.Status != 401 {
+	c1.rpc(t, "/proxy/keys/delete", map[string]string{"id": spare.ID}, nil)
+	if r := agent(t, "proxy1", "GET", "/v1/models", nil, bearer(spare.Key)); r.Status != 401 {
 		t.Fatalf("deleted key: HTTP %d, want 401", r.Status)
 	}
-	c1.rpcFail(t, "/client/keys/delete", map[string]string{"id": spare.ID}, 404)
+	c1.rpcFail(t, "/proxy/keys/delete", map[string]string{"id": spare.ID}, 404)
 
 	var k2 keyView
-	con("client2").rpc(t, "/client/keys/create", map[string]string{"name": "e2e"}, &k2)
+	con("proxy2").rpc(t, "/proxy/keys/create", map[string]string{"name": "e2e"}, &k2)
 	key2 = k2.Key
-	if r := agent(t, "client2", "GET", "/v1/models", nil, bearer(keyMain)); r.Status != 401 {
-		t.Fatalf("client1's key on client2: HTTP %d, want 401", r.Status)
+	if r := agent(t, "proxy2", "GET", "/v1/models", nil, bearer(keyMain)); r.Status != 401 {
+		t.Fatalf("proxy1's key on proxy2: HTTP %d, want 401", r.Status)
 	}
 }
 
-func testClientAgentAPI(t *testing.T) {
-	r := agent(t, "client1", "GET", "/v1/models", nil, bearer(keyMain))
+func testProxyAgentAPI(t *testing.T) {
+	r := agent(t, "proxy1", "GET", "/v1/models", nil, bearer(keyMain))
 	m := r.json(t)
 	data, _ := m["data"].([]any)
 	names := map[string]bool{}
@@ -816,7 +816,7 @@ func testClientAgentAPI(t *testing.T) {
 	if m["object"] != "list" || m["has_more"] != false || !names["m-shared"] || !names["m-claude"] || !names["m-only1"] || names["m-off"] {
 		t.Fatalf("/v1/models: %s", r.Body)
 	}
-	if r := agent(t, "client1", "GET", "/v1/models/m-claude", nil, map[string]string{"x-api-key": keyMain}); r.Status != 200 || r.json(t)["id"] != "m-claude" {
+	if r := agent(t, "proxy1", "GET", "/v1/models/m-claude", nil, map[string]string{"x-api-key": keyMain}); r.Status != 200 || r.json(t)["id"] != "m-claude" {
 		t.Fatalf("/v1/models/m-claude: HTTP %d %s", r.Status, r.Body)
 	}
 
@@ -824,7 +824,7 @@ func testClientAgentAPI(t *testing.T) {
 	hdr := bearer(keyMain)
 	hdr["openai-beta"] = "assistants=v2"
 	hdr["Cookie"] = "secret=1"
-	r = agent(t, "client1", "POST", "/v1/chat/completions", []byte(`{"temperature":0.5,"model":"m-only1","messages":[{"role":"user","content":"<b>&amp;</b>"}]}`), hdr)
+	r = agent(t, "proxy1", "POST", "/v1/chat/completions", []byte(`{"temperature":0.5,"model":"m-only1","messages":[{"role":"user","content":"<b>&amp;</b>"}]}`), hdr)
 	if r.Status != 200 || r.Header.Get("X-Fit-Node") != con("node1").id || r.Header.Get("Cache-Control") != "no-cache" {
 		t.Fatalf("chat m-only1: HTTP %d %v %s", r.Status, r.Header, r.Body)
 	}
@@ -839,7 +839,7 @@ func testClientAgentAPI(t *testing.T) {
 	}
 
 	// Streaming chat: SSE relayed event by event.
-	r = agent(t, "client1", "POST", "/v1/chat/completions", map[string]any{"model": "m-shared", "stream": true, "chunks": 4,
+	r = agent(t, "proxy1", "POST", "/v1/chat/completions", map[string]any{"model": "m-shared", "stream": true, "chunks": 4,
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}}}, bearer(keyMain))
 	if r.Status != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("stream chat: HTTP %d %s", r.Status, r.Header.Get("Content-Type"))
@@ -856,13 +856,13 @@ func testClientAgentAPI(t *testing.T) {
 
 	// The other OpenAI paths.
 	for _, p := range []string{"responses", "completions", "embeddings"} {
-		r = agent(t, "client1", "POST", "/v1/"+p, map[string]any{"model": "m-only1", "input": "hi"}, bearer(keyMain))
+		r = agent(t, "proxy1", "POST", "/v1/"+p, map[string]any{"model": "m-only1", "input": "hi"}, bearer(keyMain))
 		if r.Status != 200 || upstreamLast(t, "n1").Path != p {
 			t.Fatalf("/v1/%s: HTTP %d %s", p, r.Status, r.Body)
 		}
 	}
 
-	r = agent(t, "client1", "POST", "/v1/messages", map[string]any{"model": "m-claude", "stream": true, "max_tokens": 16,
+	r = agent(t, "proxy1", "POST", "/v1/messages", map[string]any{"model": "m-claude", "stream": true, "max_tokens": 16,
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}}},
 		map[string]string{"x-api-key": keyMain, "anthropic-version": "2023-06-01", "anthropic-beta": "tools-2024-04-04"})
 	if r.Status != 200 {
@@ -880,7 +880,7 @@ func testClientAgentAPI(t *testing.T) {
 		t.Fatalf("anthropic upstream saw: %+v", up)
 	}
 	// Without anthropic-version the node sends the default; count_tokens.
-	r = agent(t, "client1", "POST", "/v1/messages/count_tokens", map[string]any{"model": "m-claude",
+	r = agent(t, "proxy1", "POST", "/v1/messages/count_tokens", map[string]any{"model": "m-claude",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}}}, bearer(keyMain))
 	if r.Status != 200 || r.json(t)["input_tokens"] != float64(7) {
 		t.Fatalf("count_tokens: HTTP %d %s", r.Status, r.Body)
@@ -890,7 +890,7 @@ func testClientAgentAPI(t *testing.T) {
 	}
 }
 
-func testClientErrors(t *testing.T) {
+func testProxyErrors(t *testing.T) {
 	chatBody := func(model string) map[string]any {
 		return map[string]any{"model": model, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	}
@@ -911,39 +911,39 @@ func testClientErrors(t *testing.T) {
 			t.Fatalf("%s: HTTP %d, want %d %s: %s", what, r.Status, status, typ, r.Body)
 		}
 	}
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", chatBody("m-shared"), nil), 401, "no key")
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", chatBody("m-shared"), bearer("ah-wrong")), 401, "wrong key")
-	openaiErr(agent(t, "client1", "GET", "/v1/models", nil, nil), 401, "models without a key")
-	anthropicErr(agent(t, "client1", "POST", "/v1/messages", chatBody("m-claude"), nil), 401, "authentication_error", "messages without a key")
-	anthropicErr(agent(t, "client1", "GET", "/v1/models", nil, map[string]string{"anthropic-version": "2023-06-01"}), 401, "authentication_error", "anthropic models without a key")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("m-shared"), nil), 401, "no key")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("m-shared"), bearer("ah-wrong")), 401, "wrong key")
+	openaiErr(agent(t, "proxy1", "GET", "/v1/models", nil, nil), 401, "models without a key")
+	anthropicErr(agent(t, "proxy1", "POST", "/v1/messages", chatBody("m-claude"), nil), 401, "authentication_error", "messages without a key")
+	anthropicErr(agent(t, "proxy1", "GET", "/v1/models", nil, map[string]string{"anthropic-version": "2023-06-01"}), 401, "authentication_error", "anthropic models without a key")
 
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", []byte(`{not json`), bearer(keyMain)), 400, "bad JSON")
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", map[string]any{"messages": []any{}}, bearer(keyMain)), 400, "no model")
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", chatBody("no-such-model"), bearer(keyMain)), 404, "unknown model")
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", chatBody("m-claude"), bearer(keyMain)), 404, "anthropic model on the OpenAI endpoint")
-	anthropicErr(agent(t, "client1", "POST", "/v1/messages", chatBody("m-shared"), bearer(keyMain)), 404, "not_found_error", "OpenAI model on /v1/messages")
-	openaiErr(agent(t, "client1", "POST", "/v1/chat/completions", chatBody("m-badkey"), bearer(keyMain)), 503, "no ready route")
-	if r := agent(t, "client1", "POST", "/v1/no/such/path", chatBody("m-shared"), bearer(keyMain)); r.Status != 404 {
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", []byte(`{not json`), bearer(keyMain)), 400, "bad JSON")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", map[string]any{"messages": []any{}}, bearer(keyMain)), 400, "no model")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("no-such-model"), bearer(keyMain)), 404, "unknown model")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("m-claude"), bearer(keyMain)), 404, "anthropic model on the OpenAI endpoint")
+	anthropicErr(agent(t, "proxy1", "POST", "/v1/messages", chatBody("m-shared"), bearer(keyMain)), 404, "not_found_error", "OpenAI model on /v1/messages")
+	openaiErr(agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("m-badkey"), bearer(keyMain)), 503, "no ready route")
+	if r := agent(t, "proxy1", "POST", "/v1/no/such/path", chatBody("m-shared"), bearer(keyMain)); r.Status != 404 {
 		t.Fatalf("unknown /v1 path: HTTP %d", r.Status)
 	}
-	if r := agent(t, "client1", "GET", "/v1/models/no-such-model", nil, bearer(keyMain)); r.Status != 404 {
+	if r := agent(t, "proxy1", "GET", "/v1/models/no-such-model", nil, bearer(keyMain)); r.Status != 404 {
 		t.Fatalf("unknown model id: HTTP %d", r.Status)
 	}
 	big := append([]byte(`{"model":"m-shared","pad":"`), bytes.Repeat([]byte("x"), 33<<20)...)
 	big = append(big, `"}`...)
-	if st := oversized(t, apiHost["client1"], keyMain, big); st != 413 {
+	if st := oversized(t, apiHost["proxy1"], keyMain, big); st != 413 {
 		t.Fatalf("33 MB body: HTTP %d, want 413", st)
 	}
 	// An upstream's own error is relayed as is.
 	upstreamAdmin(t, "POST", "/admin/n1/down", nil)
-	r := agent(t, "client1", "POST", "/v1/chat/completions", chatBody("m-only1"), bearer(keyMain))
+	r := agent(t, "proxy1", "POST", "/v1/chat/completions", chatBody("m-only1"), bearer(keyMain))
 	upstreamAdmin(t, "POST", "/admin/n1/up", nil)
 	if r.Status != 503 || !strings.Contains(string(r.Body), "upstream n1 is down") {
 		t.Fatalf("upstream error relayed: HTTP %d %s", r.Status, r.Body)
 	}
 }
 
-// oversized posts body over a raw TLS connection and reads the answer while still writing: the client answers 413
+// oversized posts body over a raw TLS connection and reads the answer while still writing: the proxy answers 413
 // after 32 MiB (api.max_body_bytes' default) and closes, so a regular HTTP client may only see its write fail.
 func oversized(t *testing.T, host, key string, body []byte) int {
 	t.Helper()
@@ -967,40 +967,40 @@ func oversized(t *testing.T, host, key string, body []byte) int {
 }
 
 func testDirectNode(t *testing.T) {
-	// client1 -> node2 directly: preferred over the hub.
-	cm := con("client1").catalog(t, "m-shared", "openai")
+	// proxy1 -> node2 directly: preferred over the hub.
+	cm := con("proxy1").catalog(t, "m-shared", "openai")
 	kinds := map[string]bool{}
 	for _, r := range cm.Routes {
 		kinds[r.Kind] = true
 	}
 	if !kinds["node"] || !kinds["hub"] {
-		t.Fatalf("client1 routes of m-shared: %+v", cm)
+		t.Fatalf("proxy1 routes of m-shared: %+v", cm)
 	}
 	for i := 0; i < 4; i++ {
-		if n := chat(t, "client1", keyMain, "m-shared"); n != con("node2").id {
+		if n := chat(t, "proxy1", keyMain, "m-shared"); n != con("node2").id {
 			t.Fatalf("call %d served by %s, want node2 (direct)", i, nodeName(n))
 		}
 	}
-	// node3 -> client2: a model only reachable through the direct link.
-	eventually(t, 10*time.Second, "client2 sees m-direct3", func() error {
-		if cm := con("client2").catalog(t, "m-direct3", "openai"); cm == nil || !cm.Ready || cm.Routes[0].Kind != "node" {
+	// node3 -> proxy2: a model only reachable through the direct link.
+	eventually(t, 10*time.Second, "proxy2 sees m-direct3", func() error {
+		if cm := con("proxy2").catalog(t, "m-direct3", "openai"); cm == nil || !cm.Ready || cm.Routes[0].Kind != "node" {
 			return fmt.Errorf("%+v", cm)
 		}
 		return nil
 	})
-	if n := chat(t, "client2", key2, "m-direct3"); n != con("node3").id {
+	if n := chat(t, "proxy2", key2, "m-direct3"); n != con("node3").id {
 		t.Fatalf("m-direct3 served by %s", nodeName(n))
 	}
-	if r := agent(t, "client1", "POST", "/v1/chat/completions", map[string]any{"model": "m-direct3"}, bearer(keyMain)); r.Status != 404 {
-		t.Fatalf("client1 -> m-direct3: HTTP %d, want 404", r.Status)
+	if r := agent(t, "proxy1", "POST", "/v1/chat/completions", map[string]any{"model": "m-direct3"}, bearer(keyMain)); r.Status != 404 {
+		t.Fatalf("proxy1 -> m-direct3: HTTP %d, want 404", r.Status)
 	}
 }
 
 func testBalance(t *testing.T) {
-	// client2 reaches m-shared only through the hub, which spreads the calls.
+	// proxy2 reaches m-shared only through the hub, which spreads the calls.
 	served := map[string]int{}
 	for i := 0; i < 8; i++ {
-		served[nodeName(chat(t, "client2", key2, "m-shared"))]++
+		served[nodeName(chat(t, "proxy2", key2, "m-shared"))]++
 	}
 	if served["node1"] == 0 || served["node2"] == 0 {
 		t.Fatalf("hub balance: %v", served)
@@ -1011,7 +1011,7 @@ func testFailover(t *testing.T) {
 	hub, n2 := con("hub"), con("node2")
 	// An unreachable upstream: the node reports unavailable, the hub tries the other node.
 	for i := 0; i < 6; i++ {
-		if n := chat(t, "client2", key2, "m-fail"); n != n2.id {
+		if n := chat(t, "proxy2", key2, "m-fail"); n != n2.id {
 			t.Fatalf("m-fail served by %s, want node2", nodeName(n))
 		}
 	}
@@ -1025,7 +1025,7 @@ func testFailover(t *testing.T) {
 		return nil
 	})
 
-	// Upstream n2 down: node2's m-shared goes to error, everything goes to node1, also client1's direct route.
+	// Upstream n2 down: node2's m-shared goes to error, everything goes to node1, also proxy1's direct route.
 	upstreamAdmin(t, "POST", "/admin/n2/down", nil)
 	var v modelView
 	n2.rpc(t, "/node/model/check", map[string]string{"name": "m-shared", "api": "openai"}, &v)
@@ -1036,12 +1036,12 @@ func testFailover(t *testing.T) {
 		if m := hub.hubModel(t, "m-shared", "openai"); m == nil || m.Ready != 1 {
 			return fmt.Errorf("hub: %+v", m)
 		}
-		if cm := con("client1").catalog(t, "m-shared", "openai"); cm == nil || !cm.Ready {
-			return fmt.Errorf("client1: %+v", cm)
+		if cm := con("proxy1").catalog(t, "m-shared", "openai"); cm == nil || !cm.Ready {
+			return fmt.Errorf("proxy1: %+v", cm)
 		}
 		return nil
 	})
-	for _, c := range []struct{ client, key string }{{"client1", keyMain}, {"client2", key2}, {"client1", keyMain}, {"client2", key2}} {
+	for _, c := range []struct{ client, key string }{{"proxy1", keyMain}, {"proxy2", key2}, {"proxy1", keyMain}, {"proxy2", key2}} {
 		if n := chat(t, c.client, c.key, "m-shared"); n != con("node1").id {
 			t.Fatalf("%s m-shared with node2 down: served by %s", c.client, nodeName(n))
 		}
@@ -1066,7 +1066,7 @@ func testMaxInflight(t *testing.T) {
 	var first agentResp
 	go func() {
 		defer wg.Done()
-		first = agent(t, "client1", "POST", "/v1/chat/completions", map[string]any{"model": "m-limit", "sleep_ms": 4000}, bearer(keyMain))
+		first = agent(t, "proxy1", "POST", "/v1/chat/completions", map[string]any{"model": "m-limit", "sleep_ms": 4000}, bearer(keyMain))
 	}()
 	eventually(t, 5*time.Second, "m-limit busy", func() error {
 		if m := hub.hubModel(t, "m-limit", "openai"); m == nil || m.Ready != 0 {
@@ -1074,7 +1074,7 @@ func testMaxInflight(t *testing.T) {
 		}
 		return nil
 	})
-	if r := agent(t, "client1", "POST", "/v1/chat/completions", map[string]any{"model": "m-limit"}, bearer(keyMain)); r.Status != 503 {
+	if r := agent(t, "proxy1", "POST", "/v1/chat/completions", map[string]any{"model": "m-limit"}, bearer(keyMain)); r.Status != 503 {
 		t.Fatalf("second call over max_inflight: HTTP %d, want 503: %s", r.Status, r.Body)
 	}
 	wg.Wait()
@@ -1087,14 +1087,14 @@ func testMaxInflight(t *testing.T) {
 		}
 		return nil
 	})
-	chat(t, "client1", keyMain, "m-limit")
+	chat(t, "proxy1", keyMain, "m-limit")
 }
 
 func testCancel(t *testing.T) {
 	// The agent goes away mid-stream: the cancel reaches the upstream request.
 	before := upstreamStatsOf(t, "n1").Canceled + upstreamStatsOf(t, "n2").Canceled
 	body, _ := json.Marshal(map[string]any{"model": "m-shared", "stream": true, "chunks": 100, "chunk_ms": 100})
-	req, _ := http.NewRequest("POST", "https://"+apiHost["client2"]+"/v1/chat/completions", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "https://"+apiHost["proxy2"]+"/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key2)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient(nil).Do(req)
@@ -1126,27 +1126,27 @@ func testCancel(t *testing.T) {
 	})
 }
 
-func testClientStats(t *testing.T) {
+func testProxyStats(t *testing.T) {
 	var s statsResp
-	con("client1").rpc(t, "/client/stats", nil, &s)
+	con("proxy1").rpc(t, "/proxy/stats", nil, &s)
 	byModel := map[string]modelStats{}
 	for _, m := range s.Models {
 		byModel[m.Model] = m
 	}
 	if s.Total.Calls < 10 || byModel["m-shared"].Calls == 0 || byModel["m-shared"].Bytes == 0 || s.Total.Errors == 0 {
-		t.Fatalf("client1 stats: %+v", s)
+		t.Fatalf("proxy1 stats: %+v", s)
 	}
 	var keys []keyView
-	con("client1").rpc(t, "/client/keys/list", nil, &keys)
+	con("proxy1").rpc(t, "/proxy/keys/list", nil, &keys)
 	for _, k := range keys {
 		if k.Name == "e2e-main" && (k.Calls == 0 || k.LastUsedAt == 0) {
 			t.Fatalf("key usage not counted: %+v", k)
 		}
 	}
 	var cms []catalogModel
-	con("client1").rpc(t, "/client/models", nil, &cms)
+	con("proxy1").rpc(t, "/proxy/models", nil, &cms)
 	if len(cms) == 0 {
-		t.Fatal("client1 catalog is empty")
+		t.Fatal("proxy1 catalog is empty")
 	}
 }
 
@@ -1179,7 +1179,7 @@ func testUndialKick(t *testing.T) {
 		}
 		return nil
 	})
-	chat(t, "client2", key2, "m-shared")
+	chat(t, "proxy2", key2, "m-shared")
 }
 
 func testProfiles(t *testing.T) {
@@ -1188,8 +1188,8 @@ func testProfiles(t *testing.T) {
 	if id.Name != "hub-e2e" {
 		t.Fatalf("hub profile: %+v", id)
 	}
-	con("client1").rpc(t, "/client/profile/set", map[string]string{"name": "client-one"}, nil)
-	con("client1").rpcFail(t, "/client/profile/set", map[string]string{"name": ""}, 400)
+	con("proxy1").rpc(t, "/proxy/profile/set", map[string]string{"name": "proxy-one"}, nil)
+	con("proxy1").rpcFail(t, "/proxy/profile/set", map[string]string{"name": ""}, 400)
 	if n := con("hub").hubNodes(t)[con("node1").id]; n.Info.Name != "node-one" {
 		t.Fatalf("hub sees node1 as %q", n.Info.Name)
 	}
@@ -1241,23 +1241,23 @@ func TestPersist(t *testing.T) {
 				t.Fatalf("%s id %q, was %q", name, me.Identity.ID, s.IDs[name])
 			}
 			c.id = me.Identity.ID
-			if name == "hub" && me.Identity.Name != "hub-e2e" || name == "client1" && me.Identity.Name != "client-one" ||
+			if name == "hub" && me.Identity.Name != "hub-e2e" || name == "proxy1" && me.Identity.Name != "proxy-one" ||
 				name == "node1" && me.Identity.Name != "node-one" {
 				t.Fatalf("%s name not kept: %q", name, me.Identity.Name)
 			}
 		}
 	})
 	step(t, "mesh", func(t *testing.T) {
-		for name, addr := range map[string]string{"hub": hubListen, "node2": node2Listen, "client2": client2Listen} {
+		for name, addr := range map[string]string{"hub": hubListen, "node2": node2Listen, "proxy2": client2Listen} {
 			if p := con(name).peers(t); p.Listen.Addr != addr || !p.Listen.HasPassword || p.Listen.Error != "" {
 				t.Fatalf("%s listen: %+v", name, p.Listen)
 			}
 		}
 		waitTargets(t, "node1", 1)
 		waitTargets(t, "hub", 2)
-		waitTargets(t, "client1", 2)
+		waitTargets(t, "proxy1", 2)
 		waitTargets(t, "node3", 1)
-		for _, name := range []string{"hub", "node1", "node2", "node3", "client1", "client2"} {
+		for _, name := range []string{"hub", "node1", "node2", "node3", "proxy1", "proxy2"} {
 			_, raw := con(name).rpcErr("/mesh/peers", nil)
 			if bytes.Contains(raw, []byte(meshPass)) {
 				t.Fatalf("%s /mesh/peers leaks the mesh password", name)
@@ -1315,28 +1315,28 @@ func TestPersist(t *testing.T) {
 			t.Fatalf("hub nodes after restart: %+v", ns)
 		}
 	})
-	step(t, "client", func(t *testing.T) {
-		eventually(t, 30*time.Second, "client1 catalog", func() error {
-			if cm := con("client1").catalog(t, "m-only1", "openai"); cm == nil || !cm.Ready {
+	step(t, "proxy", func(t *testing.T) {
+		eventually(t, 30*time.Second, "proxy1 catalog", func() error {
+			if cm := con("proxy1").catalog(t, "m-only1", "openai"); cm == nil || !cm.Ready {
 				return fmt.Errorf("%+v", cm)
 			}
 			return nil
 		})
-		chat(t, "client1", s.Key, "m-only1")
+		chat(t, "proxy1", s.Key, "m-only1")
 		var keys []keyView
-		con("client1").rpc(t, "/client/keys/list", nil, &keys)
+		con("proxy1").rpc(t, "/proxy/keys/list", nil, &keys)
 		// fit keeps a key's usage (calls, last_used_at) in memory only, so
 		// the counts start again after a restart.
 		if len(keys) != 1 || keys[0].Name != "e2e-main" || keys[0].Calls < 1 || keys[0].Calls >= 10 {
 			t.Fatalf("keys after restart: %+v", keys)
 		}
-		eventually(t, 30*time.Second, "client2 catalog", func() error {
-			if cm := con("client2").catalog(t, "m-direct3", "openai"); cm == nil || !cm.Ready {
+		eventually(t, 30*time.Second, "proxy2 catalog", func() error {
+			if cm := con("proxy2").catalog(t, "m-direct3", "openai"); cm == nil || !cm.Ready {
 				return fmt.Errorf("%+v", cm)
 			}
 			return nil
 		})
-		chat(t, "client2", s.Key2, "m-direct3")
-		chat(t, "client2", s.Key2, "m-shared")
+		chat(t, "proxy2", s.Key2, "m-direct3")
+		chat(t, "proxy2", s.Key2, "m-shared")
 	})
 }

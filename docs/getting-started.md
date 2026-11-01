@@ -258,6 +258,6 @@ encrypted in a file of its own, which every change is written to and fit runs fr
   [Traefik](migrating-from-traefik.md).
 - [Examples](../examples/README.md): a config for each feature, in all three formats.
 - Beside the gateway: [WebRTC](webrtc.md), a TURN server and WHIP and WHEP; [the tunnel](tunnel.md),
-  to reach services behind NAT; [the agent](agent.md), to share AI models among machines.
+  to reach services behind NAT; [the LLM feature](llm.md), to share AI models among machines.
 - [Compatibility](compatibility.md): what stays stable across 1.x releases.
 - [Deploy](../deploy/README.md): the container image, Kubernetes and systemd.

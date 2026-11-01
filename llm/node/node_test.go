@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
 )
 
 func TestBuildActionValidation(t *testing.T) {

@@ -36,7 +36,7 @@ fib can hold.
   the process and fixes reach both. 025's other decisions hold: QUIC over the selected pair,
   signaling on the rendezvous fit, everything bounded.
 - **The config's `webrtc`.** A top-level member holds what fit runs for WebRTC beside the gateway,
-  as `agent` and `tunnel` do ([decision 028](028-agent-and-tunnel.md)): `webrtc.turn`, the TURN
+  as `llm` and `tunnel` do ([decision 028](028-llm-and-tunnel.md)): `webrtc.turn`, the TURN
   server, is a role of package `app`, on the listeners' engine, applied, moved and stopped with
   every config. WHIP and WHEP (I109) are handler modules on routes, and the UDP port their peers
   share is a role beside it, `webrtc.media`.

@@ -14,11 +14,11 @@ import (
 
 	"github.com/lesismal/fib"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
+	"github.com/lesismal/fit/llm/internal/wire"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -34,7 +34,7 @@ var testEngine = sync.OnceValue(func() *fib.Engine {
 var (
 	local  = model.Identity{Role: model.RoleLocal, ID: "console"}
 	asHub  = model.Identity{Role: model.RoleHub, ID: "hub-t"}
-	client = model.Identity{Role: model.RoleClient, ID: "client-t"}
+	client = model.Identity{Role: model.RoleProxy, ID: "proxy-t"}
 )
 
 // editor is the config edits of a node's member: it keeps the member as
@@ -77,7 +77,7 @@ func (e *editor) member(t *testing.T) map[string]json.RawMessage {
 }
 
 // startNode runs member through an app.Manager whose config edits go to ed.
-func startNode(t *testing.T, member *config.AgentNode, ed *editor) *Node {
+func startNode(t *testing.T, member *config.LLMNode, ed *editor) *Node {
 	t.Helper()
 	if ed == nil {
 		ed = &editor{}
@@ -86,7 +86,7 @@ func startNode(t *testing.T, member *config.AgentNode, ed *editor) *Node {
 		member.ID = "node-t"
 	}
 	mgr := app.NewManager(testEngine(), nil, nil, ed.edit)
-	if err := mgr.Apply(&config.Config{Agent: &config.Agent{Node: member}}); err != nil {
+	if err := mgr.Apply(&config.Config{LLM: &config.LLM{Node: member}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -101,9 +101,9 @@ func startNode(t *testing.T, member *config.AgentNode, ed *editor) *Node {
 	return n
 }
 
-func noSudo() *config.AgentNodeSettings {
+func noSudo() *config.LLMNodeSettings {
 	off := false
-	return &config.AgentNodeSettings{GPUSudo: &off}
+	return &config.LLMNodeSettings{GPUSudo: &off}
 }
 
 // call invokes a method of n as caller.

@@ -161,7 +161,7 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有：
 `webrtc.turn` 是 fit 唯一的 TURN 服务器：[决定 025](decisions/025-p2p.zh-CN.md) 中的 TURN 服务器就是它。计划中的 P2P
 隧道（[P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透)）以 fib 的 `webrtc/stun`、`webrtc/turn` 和 `webrtc/ice`
 作为 STUN 客户端、TURN 客户端和 ICE agent，在 NAT 后的两台主机之间打不通洞时，会像其他 ICE agent 一样用它中继。
-[tunnel](tunnel.zh-CN.md) 则是另一回事：它的角色经由节点和客户端主动连出的 `tunnel.server` 转发 TCP 服务，每个字节都经
+[tunnel](tunnel.zh-CN.md) 则是另一回事：它的角色经由 node 和 proxy 主动连出的 `tunnel.hub` 转发 TCP 服务，每个字节都经
 fit 自己的链路中继；TURN 服务器中继的是标准 ICE agent（包括浏览器）的 UDP 数据报，只在它们找不到直连路径时使用，也不
 知道它们背后有什么服务。
 

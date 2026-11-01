@@ -90,8 +90,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `admin/store` | 加密的 store，fitstore 格式（决定 027） |
 | `login` | 登录、会话、CSRF 令牌和锁定，供控制台和角色的页面使用 |
 | `app`、`app/console` | 配置中的角色：注册表与管理器、经 `Host.Edit` 写回，以及角色的页面（决定 028） |
-| `agent/...` | agent 的角色：`hub`、`node`、`client` |
-| `tunnel/...` | tunnel 的角色：`server`、`node`、`client` |
+| `llm/...` | llm 的角色：`hub`、`node`、`proxy` |
+| `tunnel/...` | tunnel 的角色：`hub`、`node`、`proxy` |
 | `provider/...` | file、docker、kubernetes、consul、etcd |
 | `observe` | 访问日志、指标、追踪 |
 | `plugin/...` | 编译期模块和 WASM |
@@ -1210,7 +1210,7 @@ fit 在配置开启时提供一个用户名密码登录的控制台，在上面�
 ## Agent 与 tunnel
 
 agenthub 和 fibhub 这两个基于 fib 的程序并入 fit，成为其配置中的角色，运行在它的引擎上，设置保存在它的 store
-中（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+中（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 
 ### I105 fit 配置中的角色
 

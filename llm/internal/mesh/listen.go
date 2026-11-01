@@ -7,8 +7,8 @@ import (
 
 	"github.com/lesismal/fib"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // WSPath is the WebSocket path of the mesh listener.

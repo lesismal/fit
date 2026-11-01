@@ -1,24 +1,24 @@
-# Docker end-to-end test topology of fit's agent. Start / stop / test with
-# test/docker/agent/e2e.sh. Every role is one fit, `fit run -c` with its own
-# config file from configs/, which sets its pages (console), the client's API
+# Docker end-to-end test topology of fit's LLM feature. Start / stop / test with
+# test/docker/llm/e2e.sh. Every role is one fit, `fit run -c` with its own
+# config file from configs/, which sets its pages (console), the proxy's API
 # and the store its config is kept in from then on; the store lives on the
 # role's volume, so a restart keeps what the pages changed.
 #
 # Every directed pair of roles is covered once (who listens, who dials):
 #   node1   -> hub     node1 dials the hub           hub   -> node2    the hub dials node2
-#   client1 -> hub     client1 dials the hub         hub   -> client2  the hub dials client2
-#   client1 -> node2   client1 dials node2 directly  node3 -> client2  node3 dials client2 directly
+#   proxy1  -> hub     proxy1 dials the hub          hub   -> proxy2   the hub dials proxy2
+#   proxy1  -> node2   proxy1 dials node2 directly   node3 -> proxy2   node3 dials proxy2 directly
 # The links are configured by the test through the pages (/mesh/listen,
 # /mesh/dial), so every container starts without any.
 #
-# The pages and the client's API listen on 0.0.0.0, which is not loopback, so
+# The pages and the proxy's API listen on 0.0.0.0, which is not loopback, so
 # they are served over TLS with the self-signed certificate certgen writes on
 # the certs volume (e2e.sh runs the certs service first); the tester does not
 # verify it.
-name: fit-agent-e2e
+name: fit-llm-e2e
 
 x-role: &role
-  image: fit-agent-e2e:latest
+  image: fit-llm-e2e:latest
   init: true
   restart: "no"
   environment:
@@ -29,10 +29,10 @@ x-role: &role
 
 services:
   upstream:
-    image: fit-agent-e2e:latest
+    image: fit-llm-e2e:latest
     build:
       context: ../../..
-      dockerfile: test/docker/agent/Dockerfile
+      dockerfile: test/docker/llm/Dockerfile
       target: fit
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
@@ -47,9 +47,9 @@ services:
 
   # certs writes the self-signed certificate once (kept while the volume is).
   certs:
-    image: fit-agent-e2e:latest
+    image: fit-llm-e2e:latest
     profiles: ["setup"]
-    command: ["certgen", "-dir", "/certs", "-hosts", "hub,node1,node2,node3,client1,client2,localhost,127.0.0.1"]
+    command: ["certgen", "-dir", "/certs", "-hosts", "hub,node1,node2,node3,proxy1,proxy2,localhost,127.0.0.1"]
     volumes: ["certs:/certs"]
 
   hub:
@@ -89,29 +89,29 @@ services:
     volumes: ["node3-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
     healthcheck: *node-health
 
-  client1:
+  proxy1:
     <<: *role
-    hostname: client1
-    command: ["fit", "run", "-c", "/etc/fit/client1.json"]
+    hostname: proxy1
+    command: ["fit", "run", "-c", "/etc/fit/proxy1.json"]
     ports: ["127.0.0.1:19301:9300", "127.0.0.1:19401:9400"]
-    volumes: ["client1-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
-    healthcheck: &client-health
+    volumes: ["proxy1-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: &proxy-health
       <<: *health
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9300 && exec 4<>/dev/tcp/127.0.0.1/9400"]
 
-  client2:
+  proxy2:
     <<: *role
-    hostname: client2
-    command: ["fit", "run", "-c", "/etc/fit/client2.json"]
+    hostname: proxy2
+    command: ["fit", "run", "-c", "/etc/fit/proxy2.json"]
     ports: ["127.0.0.1:19302:9300", "127.0.0.1:19402:9400"]
-    volumes: ["client2-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
-    healthcheck: *client-health
+    volumes: ["proxy2-data:/data", "certs:/certs:ro", "./configs:/etc/fit:ro"]
+    healthcheck: *proxy-health
 
   tester:
-    image: fit-agent-e2e-tester:latest
+    image: fit-llm-e2e-tester:latest
     build:
       context: ../../..
-      dockerfile: test/docker/agent/Dockerfile
+      dockerfile: test/docker/llm/Dockerfile
       target: tester
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
@@ -128,6 +128,6 @@ volumes:
   node1-data:
   node2-data:
   node3-data:
-  client1-data:
-  client2-data:
+  proxy1-data:
+  proxy2-data:
   tester-shared:

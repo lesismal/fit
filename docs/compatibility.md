@@ -20,7 +20,7 @@ for a new version of the config schema or of the Admin API, and comes with a way
 Not covered:
 
 - What fit writes for people rather than programs: messages, warnings, the dashboard, the pages of
-  the console and of the agent's and the tunnel's roles, `fit adapt`'s output beyond its being a
+  the console and of the LLM feature's and the tunnel's roles, `fit adapt`'s output beyond its being a
   valid config, and the text of errors (their JSON shape is covered).
 - The host functions of WASM plugins (the `fit` import module) and fit's subset of Proxy-Wasm
   (I71, I72, I81), which are experimental in 1.0; the `wasm` module's config is covered.

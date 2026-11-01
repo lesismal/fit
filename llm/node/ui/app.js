@@ -448,12 +448,12 @@
 
   var appEl = document.getElementById('app');
   var session = UI.boot(appEl, {
-    brand: 'fit agent node', sub: t('app.sub'),
+    brand: 'fit llm node', sub: t('app.sub'),
     start: function (m) {
       me = m;
       var nav = [['overview', 'dashboard'], ['models', 'cube'], ['gpus', 'gpu'], ['actions', 'terminal'], ['jobs', 'log'], ['peers', 'link'], ['settings', 'settings']];
       var sh = UI.shell({
-        brand: 'fit agent node', sub: (m.identity && m.identity.name) || t('app.sub'), user: m.user, onLogout: function () { session.logout(); },
+        brand: 'fit llm node', sub: (m.identity && m.identity.name) || t('app.sub'), user: m.user, onLogout: function () { session.logout(); },
         nav: nav.map(function (n) { return { id: n[0], icon: n[1], label: t('nav.' + n[0]) }; })
       });
       UI.mount(appEl, sh.el);

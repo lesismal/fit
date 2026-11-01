@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // A node never runs a script supplied by a caller. Every management operation is one of the actions below: its

@@ -1,19 +1,20 @@
-# 028: The agent and the tunnel, as roles of fit's config
+# 028: The LLM feature and the tunnel, as roles of fit's config
 
-[English](028-agent-and-tunnel.md) | [简体中文](028-agent-and-tunnel.zh-CN.md)
+[English](028-llm-and-tunnel.md) | [简体中文](028-llm-and-tunnel.zh-CN.md)
 
-Status: accepted (2026-11-01).
+Status: accepted (2026-11-01). The feature first named the agent was renamed `llm` the same day,
+its client role `llm.proxy`, so that "agent" means only the AI agents that call it.
 
 ## Context
 
 Users asked fit for two features beyond the gateway, each made of roles that run on several
 machines and link to each other:
 
-- **The agent** shares AI models among machines. A *node* serves models from local or remote
-  upstreams (OpenAI- and Anthropic-compatible APIs), a *hub* is where nodes and clients meet, and a
-  *client* offers one API that calls the models of the nodes it reaches.
-- **The tunnel** reaches TCP services behind NAT. A *node* beside the services links to *servers*
-  over TCP, WebSocket or QUIC, and a *client* forwards local ports and web proxies through a server
+- **The LLM feature** shares AI models among machines. A *node* serves models from local or remote
+  upstreams (OpenAI- and Anthropic-compatible APIs), a *hub* is where nodes and proxies meet, and a
+  *proxy* offers agents one API that calls the models of the nodes it reaches.
+- **The tunnel** reaches TCP services behind NAT. A *node* beside the services links to *hubs*
+  over TCP, WebSocket or QUIC, and a *proxy* forwards local ports and web proxies through a hub
   to a node's service.
 
 They asked for both to share fit's fib engine, to use fit's config format, with the roles a
@@ -22,14 +23,14 @@ development rules to hold in full, with nothing left for later.
 
 ## Decision
 
-- **Packages.** The agent's roles are `agent/hub`, `agent/node` and `agent/client`; the tunnel's
-  are `tunnel/server`, `tunnel/node` and `tunnel/client`. What a family's roles share is
-  under `agent/internal` and `tunnel/internal`; what both families share is in packages of fit's
+- **Packages.** The LLM feature's roles are `llm/hub`, `llm/node` and `llm/proxy`; the tunnel's
+  are `tunnel/hub`, `tunnel/node` and `tunnel/proxy`. What a family's roles share is
+  under `llm/internal` and `tunnel/internal`; what both families share is in packages of fit's
   own: `login` (users, sessions, CSRF tokens and lockouts, shared with admin.console),
   `app` (the roles' registry and manager) and `app/console` (a role's web pages on fib). `app/standard`
   imports every role, and `cmd/fit` and `fit build` import it.
-- **The config.** Two top-level members, `agent` and `tunnel`, each with a member per role:
-  `agent.hub`, `agent.node`, `agent.client`, `tunnel.server`, `tunnel.node`, `tunnel.client`. A role
+- **The config.** Two top-level members, `llm` and `tunnel`, each with a member per role:
+  `llm.hub`, `llm.node`, `llm.proxy`, `tunnel.hub`, `tunnel.node`, `tunnel.proxy`. A role
   runs while its member is set, any number of them in one process, beside the gateway's listeners
   and routes or without any. Members are decoded as strictly as the rest of the config, in
   snake_case, with `doc` tags, defaults and bounds, so that `fit schema`, `fit validate`, the
@@ -38,7 +39,7 @@ development rules to hold in full, with nothing left for later.
 - **One engine.** Every role adds its bindings (its pages, its link listeners, a client's forwarded
   ports) to the listeners' engine, `listener.Server.Engine()`, and dials on it with handlers of its
   own, as the gateway's own connections are served. `limits.max_conns` and `max_pending_bytes`
-  bound them with the rest. HTTP clients, as the agent node's to its upstreams, dial through the
+  bound them with the rest. HTTP clients, as the LLM node's to its upstreams, dial through the
   upstream engine fit's pools use. A role's QUIC is fib's `http3/quic` on a UDP binding of the same
   engine.
 - **Applying a config.** `app.Manager` is moved to every config applied, after the listeners, on
@@ -65,14 +66,14 @@ development rules to hold in full, with nothing left for later.
   are, through package `login`; a role has no password or login scheme of its own.
 - **The rules hold in full.** Nothing a role does blocks a fib worker: bcrypt, command execution,
   file reads and config edits run on bounded pools of their own, with timeouts; bodies to and from
-  the agent node's upstreams stream with fib's asynchronous client and `OnBody`, with backpressure
+  the LLM node's upstreams stream with fib's asynchronous client and `OnBody`, with backpressure
   both ways; every map, queue and buffer has a bound with a safe default; every exchange with the
   outside has timeouts. No role serves with `net/http` handlers, proxies with
   `net/http.Client`, or runs an engine of its own.
 
 ## Consequences
 
-- One binary and one config run the gateway, the tunnel and the agent, in any combination; one
+- One binary and one config run the gateway, the tunnel and the LLM feature, in any combination; one
   store keeps their settings; one log, one Admin API and one console show them.
 - The roles' members carry passwords and keys. Kept in a plain file, they are as safe as the file;
   `admin.store` keeps them encrypted, which is why the pages' changes are meant to be kept there.

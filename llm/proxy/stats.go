@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"sort"
@@ -17,8 +17,8 @@ type ModelStats struct {
 	LastAt   int64  `json:"last_at,omitempty"`
 }
 
-// StatsResp is the reply of MethodClientStats.
-// StatsResp MethodClientStats 的应答。
+// StatsResp is the reply of MethodProxyStats.
+// StatsResp MethodProxyStats 的应答。
 type StatsResp struct {
 	Since  int64        `json:"since"`
 	Total  ModelStats   `json:"total"`

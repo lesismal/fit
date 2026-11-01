@@ -11,7 +11,7 @@ fit 是基于 [fib](https://github.com/lesismal/fib) 的反向代理、负载均
 提供静态文件；缓存响应；路由来自严格的配置，用 fit 自己的 .conf 格式、YAML 或 JSON 编写（可通过 Admin API 原地修改），或来自 Docker、Consul、etcd 和
 Kubernetes。配置可以加密保存在单独的文件中，并在需要登录的 Web 控制台里修改。在网关旁边、同一个引擎上，它还运行
 TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或放在其他媒体服务器前面）；运行 tunnel，用于访问 NAT 后的服务；
-以及 agent，用于在多台机器间共享 AI 模型。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
+以及 llm，用于在多台机器间共享 AI 模型并提供给 agent 调用。所有里程碑的迭代（包括 1.0 的）都已完成，1.0 要求的外部安全审计尚待进行；已完成的内容见 [开发进度](docs/progress.zh-CN.md)，与 nginx、Caddy、Traefik 的
 对比测量方法见 [bench](bench/README.zh-CN.md)。
 
 ## 文档
@@ -26,7 +26,7 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
   [Traefik](docs/migrating-from-traefik.zh-CN.md) 迁移。
 - [控制台](docs/console.zh-CN.md)：配置加密保存在 store 中（`admin.store`），并在需要登录的网页上修改
   （`admin.console`）；`fit store export` 和 `import`。
-- [tunnel](docs/tunnel.zh-CN.md) 与 [agent](docs/agent.zh-CN.md)：与网关一起运行在其引擎上的角色，用于访问 NAT 后的
+- [tunnel](docs/tunnel.zh-CN.md) 与 [llm](docs/llm.zh-CN.md)：与网关一起运行在其引擎上的角色，用于访问 NAT 后的
   服务，以及在多台机器间共享 AI 模型。
 - [WebRTC](docs/webrtc.zh-CN.md)：基于 fib WebRTC 的 TURN 服务器，与网关一起运行；以 fit 为媒体服务器的
   WHIP 和 WHEP；以及放在 fit 一个 HTTP 端点和一个 UDP 端口后面的其他媒体服务器。

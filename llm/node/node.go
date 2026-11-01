@@ -1,8 +1,8 @@
-// Package node is the agent's node role, agent.node in fit's config: it
+// Package node is the LLM feature's node role, llm.node in fit's config: it
 // reports its system and GPUs, runs fixed management actions and GPU
 // settings as jobs, and serves its models, upstream API endpoints, to the
-// hubs and clients it links with, forwarding each call byte for byte on
-// fib's asynchronous HTTP client. See docs/agent.md.
+// hubs and proxies it links with, forwarding each call byte for byte on
+// fib's asynchronous HTTP client. See docs/llm.md.
 //
 // Its models, settings, name and description live in its member of the
 // config: what its pages change, and what a hub changes when the node lets
@@ -22,12 +22,12 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
-	"github.com/lesismal/fit/agent/internal/role"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
+	"github.com/lesismal/fit/llm/internal/role"
 	"github.com/lesismal/fit/logs"
 )
 
@@ -36,12 +36,12 @@ var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
-		ID: "agent.node",
+		ID: "llm.node",
 		Member: func(c *config.Config) any {
-			if c.Agent == nil || c.Agent.Node == nil {
+			if c.LLM == nil || c.LLM.Node == nil {
 				return nil
 			}
-			return c.Agent.Node
+			return c.LLM.Node
 		},
 		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
 	})
@@ -63,7 +63,7 @@ type settings struct {
 	GPUDataDir      string
 }
 
-func settingsOf(s *config.AgentNodeSettings) settings {
+func settingsOf(s *config.LLMNodeSettings) settings {
 	out := settings{AllowHubManage: s != nil && s.AllowHubManage, GPUSudo: s.Sudo(), RefreshInterval: s.Refresh(), JobTimeout: s.Job()}
 	if s != nil {
 		out.GPUDataDir = s.GPUDataDir
@@ -126,7 +126,7 @@ func New(h *app.Host) *Node {
 	}
 	n.register()
 	b.Mesh.OnPeerUp(func(p model.PeerConn) {
-		if p.Role != model.RoleHub && p.Role != model.RoleClient {
+		if p.Role != model.RoleHub && p.Role != model.RoleProxy {
 			return
 		}
 		n.push.sendTo(p.ID)
@@ -134,18 +134,18 @@ func New(h *app.Host) *Node {
 	return n
 }
 
-func limitsOf(p *config.AgentNodeProxy) limits {
+func limitsOf(p *config.LLMNodeProxy) limits {
 	return limits{connect: p.Connect(), firstByte: p.FirstByte(), idle: p.Idle(), total: p.Total(), inflight: p.Inflight(), body: p.Body()}
 }
 
-// Apply moves the node to member, a *config.AgentNode: its models, settings
+// Apply moves the node to member, a *config.LLMNode: its models, settings
 // and profile, and the base's identity, mesh and pages. A model whose
 // endpoint, key or upstream ID changed loses its last check; calls in
 // flight go on with the model they started with.
 func (n *Node) Apply(member any) error {
-	m, ok := member.(*config.AgentNode)
+	m, ok := member.(*config.LLMNode)
 	if !ok || m == nil {
-		return errors.New("agent.node: no member")
+		return errors.New("llm.node: no member")
 	}
 	models := make([]model.Model, 0, len(m.Models))
 	for _, c := range m.Models {
@@ -190,7 +190,7 @@ func (n *Node) Apply(member any) error {
 }
 
 // Stop ends the node: its jobs are cancelled, its links drain until ctx
-// ends, for 10s at most, and its clients are closed.
+// ends, for 10s at most, and its HTTP clients are closed.
 func (n *Node) Stop(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -327,10 +327,10 @@ func (n *Node) setSettings(ctx context.Context, _ model.Identity, req *model.Nod
 	if !req.GPUSudo {
 		s["gpu_sudo"] = false
 	}
-	if refresh != "" && refresh != config.DefaultAgentRefreshInterval.String() {
+	if refresh != "" && refresh != config.DefaultLLMRefreshInterval.String() {
 		s["refresh_interval"] = refresh
 	}
-	if job != "" && job != config.DefaultAgentJobTimeout.String() {
+	if job != "" && job != config.DefaultLLMJobTimeout.String() {
 		s["job_timeout"] = job
 	}
 	if req.GPUDataDir != "" {

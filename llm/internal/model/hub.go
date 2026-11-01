@@ -2,8 +2,8 @@ package model
 
 import "encoding/json"
 
-// Hub methods a client may call.
-// client 可调用的 hub 方法。
+// Hub methods a proxy may call.
+// proxy 可调用的 hub 方法。
 const (
 	MethodHubModels = "/hub/models" // -> HubModels
 	// MethodHubProxy is MethodNodeProxy through the hub: the hub picks a node serving ProxyReq.Model and relays.
@@ -11,8 +11,8 @@ const (
 	MethodHubProxy = "/hub/proxy"
 )
 
-// MethodHubModelsUpdate is the push of a hub to its clients whenever its HubModels changes.
-// MethodHubModelsUpdate hub 的 HubModels 变化时推送给其 client。
+// MethodHubModelsUpdate is the push of a hub to its proxies whenever its HubModels changes.
+// MethodHubModelsUpdate hub 的 HubModels 变化时推送给其 proxy。
 const MethodHubModelsUpdate = "/hub/models/update"
 
 // Hub local-only methods (the hub's own console).

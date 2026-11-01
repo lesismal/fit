@@ -14,11 +14,11 @@ import (
 	"github.com/lesismal/fib"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -45,12 +45,12 @@ func (nopRole) Stop(ctx context.Context) {}
 
 func init() {
 	app.Register(app.Info{
-		ID: "agent.hub",
+		ID: "llm.hub",
 		Member: func(c *config.Config) any {
-			if c.Agent == nil || c.Agent.Hub == nil {
+			if c.LLM == nil || c.LLM.Hub == nil {
 				return nil
 			}
-			return c.Agent.Hub
+			return c.LLM.Hub
 		},
 		New: func(h *app.Host) (app.Role, error) {
 			hostMu.Lock()
@@ -102,7 +102,7 @@ func newBase(t *testing.T, role string, ed *editor) *Base {
 	t.Helper()
 	ed.done = make(chan struct{}, 16)
 	mgr := app.NewManager(testEngine(), nil, nil, ed.edit)
-	if err := mgr.Apply(&config.Config{Agent: &config.Agent{Hub: &config.AgentHub{}}}); err != nil {
+	if err := mgr.Apply(&config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}}}); err != nil {
 		t.Fatal(err)
 	}
 	hostMu.Lock()
@@ -196,7 +196,7 @@ func TestApplyAfterStop(t *testing.T) {
 
 func TestApplyBadPeerOnlyWarns(t *testing.T) {
 	b := newBase(t, model.RoleNode, &editor{})
-	err := b.Apply(Common{ID: "node-1", Peers: []config.AgentPeer{{Address: "not an address", Role: model.RoleHub}}})
+	err := b.Apply(Common{ID: "node-1", Peers: []config.LLMPeer{{Address: "not an address", Role: model.RoleHub}}})
 	if err != nil {
 		t.Fatalf("a peer that cannot be dialed failed Apply: %v", err)
 	}
@@ -205,16 +205,16 @@ func TestApplyBadPeerOnlyWarns(t *testing.T) {
 func TestApplyNewIDKicksPeers(t *testing.T) {
 	addr := freeAddr(t)
 	hub := newBase(t, model.RoleHub, &editor{})
-	if err := hub.Apply(Common{ID: "hub-a", Listen: &config.AgentListen{Address: addr, Password: "pw"}}); err != nil {
+	if err := hub.Apply(Common{ID: "hub-a", Listen: &config.LLMListen{Address: addr, Password: "pw"}}); err != nil {
 		t.Fatal(err)
 	}
 	node := newBase(t, model.RoleNode, &editor{})
-	if err := node.Apply(Common{ID: "node-a", Peers: []config.AgentPeer{{Address: addr, Password: "pw", Role: model.RoleHub}}}); err != nil {
+	if err := node.Apply(Common{ID: "node-a", Peers: []config.LLMPeer{{Address: addr, Password: "pw", Role: model.RoleHub}}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the link", func() bool { return node.Mesh.Online("hub-a") })
 	// The hub's ID changes: its peers are kicked and say hello to the new one.
-	if err := hub.Apply(Common{ID: "hub-b", Listen: &config.AgentListen{Address: addr, Password: "pw"}}); err != nil {
+	if err := hub.Apply(Common{ID: "hub-b", Listen: &config.LLMListen{Address: addr, Password: "pw"}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the link to the new ID", func() bool { return node.Mesh.Online("hub-b") && !node.Mesh.Online("hub-a") })
@@ -322,7 +322,7 @@ func TestEditMesh(t *testing.T) {
 	err := b.EditMesh(context.Background(), func(s *mesh.Settings) error {
 		seen = *s
 		s.Listen = nil
-		s.Peers = append(s.Peers, model.DialReq{Addr: "h:2", Role: model.RoleClient})
+		s.Peers = append(s.Peers, model.DialReq{Addr: "h:2", Role: model.RoleProxy})
 		return nil
 	})
 	if err != nil || seen.Listen == nil || seen.Listen.Addr != "127.0.0.1:1" || len(seen.Peers) != 1 || seen.Peers[0].Password != "q" {

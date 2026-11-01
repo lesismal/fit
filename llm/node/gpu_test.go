@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/gpu"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/gpu"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
 )
 
 // fakeNvidiaSMI answers the GPU queries of gpu.Collect (21 fields) and of
@@ -30,7 +30,7 @@ func TestGPUMethods(t *testing.T) {
 	fakeTools(t, map[string]string{"nvidia-smi": fakeNvidiaSMI})
 	s := noSudo()
 	s.GPUDataDir = t.TempDir()
-	n := startNode(t, &config.AgentNode{Settings: s}, nil)
+	n := startNode(t, &config.LLMNode{Settings: s}, nil)
 
 	res, err := call(n, local, model.MethodNodeGPUStatus, gpuStatusReq{})
 	st, _ := res.(gpu.Status)
@@ -243,7 +243,7 @@ func TestGPUInstall(t *testing.T) {
 	}
 	// sh stands in for the install script's shell: nothing is installed.
 	fakeTools(t, map[string]string{"sh": `echo "would install"`})
-	n := startNode(t, &config.AgentNode{Settings: noSudo()}, nil)
+	n := startNode(t, &config.LLMNode{Settings: noSudo()}, nil)
 	if env := n.gpuEnv(); env != nil {
 		t.Fatalf("gpu env without a data dir = %v", env)
 	}
@@ -262,7 +262,7 @@ func TestHardwareRefresh(t *testing.T) {
 	fakeTools(t, map[string]string{"nvidia-smi": `echo x >> '` + calls + `'`})
 	s := noSudo()
 	s.RefreshInterval = config.Duration(10 * time.Millisecond)
-	startNode(t, &config.AgentNode{Settings: s}, nil)
+	startNode(t, &config.LLMNode{Settings: s}, nil)
 	waitFor(t, "hardware read again", func() bool {
 		b, _ := os.ReadFile(calls)
 		return strings.Count(string(b), "x") >= 3

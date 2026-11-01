@@ -1,4 +1,4 @@
-// Package role is what the agent's three roles share: their identity, their
+// Package role is what the LLM feature's three roles share: their identity, their
 // mesh and its write-back, their pages, and the pool their blocking work
 // runs on. A role embeds a *Base, registers its methods on Router before its
 // first Apply, and moves the base to each member it is applied.
@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
-	"github.com/lesismal/fit/agent/internal/webui"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
+	"github.com/lesismal/fit/llm/internal/webui"
 	"github.com/lesismal/fit/logs"
 )
 
@@ -40,7 +40,7 @@ const (
 
 // Spec says what a role is.
 type Spec struct {
-	// Role is model.RoleHub, model.RoleNode or model.RoleClient.
+	// Role is model.RoleHub, model.RoleNode or model.RoleProxy.
 	Role string
 	// Pages are the role's own files: index.html and app.js.
 	Pages fs.FS
@@ -53,9 +53,9 @@ type Common struct {
 	ID      string
 	Name    string
 	Console *config.RoleConsole
-	Listen  *config.AgentListen
-	Peers   []config.AgentPeer
-	Limits  *config.AgentLimits
+	Listen  *config.LLMListen
+	Peers   []config.LLMPeer
+	Limits  *config.LLMLimits
 }
 
 // Base is the part of a role every role has.
@@ -93,7 +93,7 @@ func New(h *app.Host, spec Spec) *Base {
 	host, _ := os.Hostname()
 	b := &Base{Spec: spec, H: h, Log: h.Log, Router: mesh.NewRouter(), Pool: pool.New(Workers, Queue),
 		started: time.Now().Unix(), hostname: host}
-	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.AgentPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
+	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
 	mesh.RegisterAdmin(b.Router, b.Mesh, b.EditMesh)
 	return b
 }
@@ -226,7 +226,7 @@ func (b *Base) applyConsole(cfg *config.RoleConsole) error {
 	if cfg != nil {
 		var err error
 		c, err = console.Start(b.H.Engine, console.Options{
-			Config: cfg, Cookie: "fit_agent_" + b.Role, Pages: webui.Pages(b.Pages), Log: b.Log,
+			Config: cfg, Cookie: "fit_llm_" + b.Role, Pages: webui.Pages(b.Pages), Log: b.Log,
 			Routes: func(api *console.API) {
 				webui.Register(api, webui.Options{Router: b.Router, Pool: b.Pool, Me: b.me})
 			},
@@ -345,14 +345,14 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 	return b.Edit(ctx, func(m map[string]json.RawMessage) error {
 		var s mesh.Settings
 		if raw, ok := m["listen"]; ok {
-			var l config.AgentListen
+			var l config.LLMListen
 			if err := json.Unmarshal(raw, &l); err != nil {
 				return err
 			}
 			s.Listen = &model.ListenConfig{Addr: l.Address, Password: l.Password}
 		}
 		if raw, ok := m["peers"]; ok {
-			var ps []config.AgentPeer
+			var ps []config.LLMPeer
 			if err := json.Unmarshal(raw, &ps); err != nil {
 				return err
 			}

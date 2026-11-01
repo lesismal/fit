@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 func TestUpstreamURL(t *testing.T) {
@@ -206,7 +206,7 @@ func streamKind(t *testing.T, n *Node, req model.ProxyReq, frames ...[]byte) (mo
 // the upstream sees them, with bodies inline and streamed.
 func TestProxyKinds(t *testing.T) {
 	u := newRecorder(t)
-	n := startNode(t, &config.AgentNode{Proxy: &config.AgentNodeProxy{MaxBodyBytes: 1 << 20}, Models: []config.AgentModel{
+	n := startNode(t, &config.LLMNode{Proxy: &config.LLMNodeProxy{MaxBodyBytes: 1 << 20}, Models: []config.LLMModel{
 		{Name: "gpt", API: model.APIOpenAI, BaseURL: u.URL + "/v1", APIKey: "ko"},
 		{Name: "whisper", API: model.APIOpenAI, BaseURL: u.URL + "/v1", Upstream: "whisper-1"},
 		{Name: "gem", API: model.APIGemini, BaseURL: u.URL + "/v1beta", Upstream: "gemini-2.5-flash", APIKey: "kg"},

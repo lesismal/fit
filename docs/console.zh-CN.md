@@ -183,7 +183,7 @@ $2a$10$...
 
 ## 角色的页面
 
-[agent](agent.zh-CN.md) 和 [tunnel](tunnel.zh-CN.md) 的角色有自己的页面，各由角色的 `console` 设置：字段与
+[llm](llm.zh-CN.md) 和 [tunnel](tunnel.zh-CN.md) 的角色有自己的页面，各由角色的 `console` 设置：字段与
 `admin.console` 相同，但 `address` 必填，并运行在监听器的 fib 引擎上。它们的用户、登录、锁定、会话和 TLS 规则与控制台的
 相同，只是各有各的表。角色页面所做的修改写回配置中该角色的成员，与控制台的修改经同一路径应用，所以会出现在控制台的
 Versions 标签页中，有 store 时也封存进 store。控制台把这些成员作为整体编辑：角色的页面用来操作角色，控制台用来管理配置。

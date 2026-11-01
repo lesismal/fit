@@ -14,4 +14,4 @@ deploy
 *.test
 *.md
 test
-!test/docker/agent
+!test/docker/llm

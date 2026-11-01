@@ -1,10 +1,10 @@
-// Package mesh is the interconnect between node, hub and client, on pkg/wire sessions over WebSocket.
+// Package mesh is the interconnect between node, hub and proxy, on pkg/wire sessions over WebSocket.
 // Every process may run a listener (changeable at runtime) and may dial any number of peers; whichever side dials,
 // the dialer first calls MethodHello and both sides learn each other's identity (role + stable id). From then on both
 // ends serve their methods, streams and pushes on the connection, and each method decides which caller roles it
 // accepts (see Router).
 //
-// Package mesh 是 node、hub、client 之间的互联，基于 WebSocket 上的 pkg/wire 会话。每个进程都可以运行监听（可在运行时
+// Package mesh 是 node、hub、proxy 之间的互联，基于 WebSocket 上的 pkg/wire 会话。每个进程都可以运行监听（可在运行时
 // 修改），也可以主动连接任意多个对端；无论哪一方拨号，拨号方都先调用 MethodHello，双方由此得知对方身份（角色 + 稳定 ID）。
 // 之后两端都在该连接上提供各自的方法、流与推送，每个方法决定接受哪些调用方角色（见 Router）。
 package mesh
@@ -28,8 +28,8 @@ import (
 
 	"github.com/lesismal/fit/logs"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // dialTimeout bounds one dial, authentication included.

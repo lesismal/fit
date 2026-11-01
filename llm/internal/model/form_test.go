@@ -52,11 +52,11 @@ func TestFormField(t *testing.T) {
 }
 
 func TestKinds(t *testing.T) {
-	if !slices.Equal(APIs, config.AgentAPIs) {
-		t.Fatalf("the kinds %v differ from the config's %v", APIs, config.AgentAPIs)
+	if !slices.Equal(APIs, config.LLMAPIs) {
+		t.Fatalf("the kinds %v differ from the config's %v", APIs, config.LLMAPIs)
 	}
 	for _, api := range APIs {
-		if Protocol(api) != config.AgentProtocol(api) || !slices.Contains(Protocols, Protocol(api)) {
+		if Protocol(api) != config.LLMProtocol(api) || !slices.Contains(Protocols, Protocol(api)) {
 			t.Errorf("protocol of %s", api)
 		}
 		for _, p := range ProxyPaths[Protocol(api)] {

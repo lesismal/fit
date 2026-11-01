@@ -212,15 +212,15 @@ func TestServeRoles(t *testing.T) {
 	const rest = `"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond"}}]}`
 	cfg := filepath.Join(dir, "fit.json")
 
-	writeFile(t, cfg, `{"tunnel": {"server": {"password": "pw"}}, `+rest)
+	writeFile(t, cfg, `{"tunnel": {"hub": {"password": "pw"}}, `+rest)
 	s := startServe(t, "-c", cfg, "-watch-certs=false")
-	s.out.waitFor(t, "fit: running tunnel.server", 1)
+	s.out.waitFor(t, "fit: running tunnel.hub", 1)
 	if code := s.stop(t); code != 0 {
 		t.Fatalf("stop: %d %q", code, s.err.String())
 	}
 
-	writeFile(t, cfg, `{"tunnel": {"server": {"password": "pw", "listeners": [{"protocol": "tcp", "address": `+js(occupied.Addr().String())+`}]}}, `+rest)
-	if code, _, stderr := runFit("run", "-c", cfg, "-watch-certs=false"); code != 1 || !strings.Contains(stderr, "tunnel.server") {
+	writeFile(t, cfg, `{"tunnel": {"hub": {"password": "pw", "listeners": [{"protocol": "tcp", "address": `+js(occupied.Addr().String())+`}]}}, `+rest)
+	if code, _, stderr := runFit("run", "-c", cfg, "-watch-certs=false"); code != 1 || !strings.Contains(stderr, "tunnel.hub") {
 		t.Errorf("a role that cannot start: %d %q", code, stderr)
 	}
 }

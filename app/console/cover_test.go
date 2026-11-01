@@ -85,7 +85,7 @@ func discardLog(t *testing.T) *logs.Logger {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = root.Close() })
-	return root.Logger(config.LoggerAgent)
+	return root.Logger(config.LoggerLLM)
 }
 
 func newBrowser(t *testing.T, base string, tr http.RoundTripper) *browser {

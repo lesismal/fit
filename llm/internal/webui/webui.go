@@ -1,9 +1,9 @@
-// Package webui is what the pages of the agent's roles share: the shared
+// Package webui is what the pages of the LLM feature's roles share: the shared
 // frontend (ui.css, ui.js, peers.js, jobs.js), served under /static/ beside
 // each role's own index.html and app.js, and the API that runs the role's
 // mesh methods for its pages, on app/console behind its logins:
 //
-//   - GET /api/me: the user, the role's identity and, for a client, its API's
+//   - GET /api/me: the user, the role's identity and, for a proxy, its API's
 //     URL;
 //   - POST /api/rpc<method>: a method, answered with its result as JSON, or
 //     {"error", "code"} with the HTTP status of the code;
@@ -32,11 +32,11 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 //go:embed static

@@ -1,8 +1,8 @@
-/* fit agent UI — shared design system of the node, hub and client consoles.
+/* fit llm UI — shared design system of the node, hub and proxy consoles.
    Themes: <html data-theme="light|dark|ocean|sunset|graphite">; without data-theme the theme follows the system
    (prefers-color-scheme). Pure CSS, no web fonts or remote assets, so it works offline / on intranets.
 
-   fit agent UI —— node、hub、client 控制台共用的设计系统。
+   fit llm UI —— node、hub、proxy 控制台共用的设计系统。
    主题：<html data-theme="light|dark|ocean|sunset|graphite">；未设置 data-theme 时跟随系统（prefers-color-scheme）。
    纯 CSS，不依赖 Web 字体或远程资源，离线 / 内网可用。 */
 

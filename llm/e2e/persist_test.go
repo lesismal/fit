@@ -6,34 +6,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lesismal/fit/agent/client"
-	"github.com/lesismal/fit/agent/internal/agenttest"
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/proxy"
 )
 
 // What the pages change is written into the roles' members, kept in
 // admin.store, and read back from it when fit starts again: the IDs made
 // at the first start, names, links, models, settings and keys.
 func TestWriteBackAndRestart(t *testing.T) {
-	mock := agenttest.StartMockLLM(t)
+	mock := llmtest.StartMockLLM(t)
 	dir := t.TempDir()
 	hubAddr, nodeAddr := freeAddr(t), freeAddr(t)
-	hubStore, nodeStore, clientStore := filepath.Join(dir, "hub.store"), filepath.Join(dir, "node.store"), filepath.Join(dir, "client.store")
-	hubCfg := member("hub", `{"console": `+agenttest.Console()+`, "listen": {"address": "`+hubAddr+`", "password": "`+meshPass+`"}}`)
-	nodeCfg := member("node", `{"console": `+agenttest.Console()+`}`)
-	clientCfg := member("client", `{"console": `+agenttest.Console()+`, "api": {"address": "127.0.0.1:0"}}`)
+	hubStore, nodeStore, proxyStore := filepath.Join(dir, "hub.store"), filepath.Join(dir, "node.store"), filepath.Join(dir, "proxy.store")
+	hubCfg := member("hub", `{"console": `+llmtest.Console()+`, "listen": {"address": "`+hubAddr+`", "password": "`+meshPass+`"}}`)
+	nodeCfg := member("node", `{"console": `+llmtest.Console()+`}`)
+	proxyCfg := member("proxy", `{"console": `+llmtest.Console()+`, "api": {"address": "127.0.0.1:0"}}`)
 
-	hf := agenttest.Start(t, hubCfg, hubStore)
-	nf := agenttest.Start(t, nodeCfg, nodeStore)
-	cf := agenttest.Start(t, clientCfg, clientStore)
-	h, n, c := hubOf(t, hf), nodeOf(t, nf), clientOf(t, cf)
+	hf := llmtest.Start(t, hubCfg, hubStore)
+	nf := llmtest.Start(t, nodeCfg, nodeStore)
+	cf := llmtest.Start(t, proxyCfg, proxyStore)
+	h, n, c := hubOf(t, hf), nodeOf(t, nf), proxyOf(t, cf)
 	hp, np, cp := pages(t, h.Console().URL()), pages(t, n.Console().URL()), pages(t, c.Console().URL())
-	ids := map[string]string{"hub": h.Self().ID, "node": n.Self().ID, "client": c.Self().ID}
-	for role, f := range map[string]*agenttest.Fit{"hub": hf, "node": nf, "client": cf} {
-		agenttest.Eventually(t, role+"'s ID written", func() bool { return strings.Contains(string(f.Current()), ids[role]) })
+	ids := map[string]string{"hub": h.Self().ID, "node": n.Self().ID, "proxy": c.Self().ID}
+	for role, f := range map[string]*llmtest.Fit{"hub": hf, "node": nf, "proxy": cf} {
+		llmtest.Eventually(t, role+"'s ID written", func() bool { return strings.Contains(string(f.Current()), ids[role]) })
 	}
 
-	rpc := func(p *agenttest.Browser, method string, req, out any) {
+	rpc := func(p *llmtest.Browser, method string, req, out any) {
 		t.Helper()
 		if err := p.RPC(method, req, out); err != nil {
 			t.Fatalf("%s: %v", method, err)
@@ -48,27 +48,27 @@ func TestWriteBackAndRestart(t *testing.T) {
 	rpc(np, model.MethodNodeModelSave, model.Model{Name: "gone", API: "openai", BaseURL: mock.BaseURL("a")}, nil)
 	rpc(np, model.MethodNodeModelDelete, model.NameReq{Name: "gone"}, nil)
 	rpc(np, model.MethodNodeSettingsSet, model.NodeSettings{GPUSudo: false, RefreshInterval: "10s", JobTimeout: "2m"}, nil)
-	if err := np.RPC(model.MethodNodeSettingsSet, model.NodeSettings{RefreshInterval: "1s"}, nil); agenttest.CodeOf(err) != model.CodeBadRequest {
+	if err := np.RPC(model.MethodNodeSettingsSet, model.NodeSettings{RefreshInterval: "1s"}, nil); llmtest.CodeOf(err) != model.CodeBadRequest {
 		t.Fatalf("a refresh too short: %v", err)
 	}
-	if err := np.RPC(model.MethodNodeModelSave, model.Model{Name: "a b", API: "openai", BaseURL: "http://h"}, nil); agenttest.CodeOf(err) != model.CodeBadRequest {
+	if err := np.RPC(model.MethodNodeModelSave, model.Model{Name: "a b", API: "openai", BaseURL: "http://h"}, nil); llmtest.CodeOf(err) != model.CodeBadRequest {
 		t.Fatalf("a bad model: %v", err)
 	}
-	if err := np.RPC(model.MethodDial, model.DialReq{Addr: "127.0.0.1:1", Password: "x", Role: model.RoleNode}, nil); agenttest.CodeOf(err) != model.CodeBadRequest {
+	if err := np.RPC(model.MethodDial, model.DialReq{Addr: "127.0.0.1:1", Password: "x", Role: model.RoleNode}, nil); llmtest.CodeOf(err) != model.CodeBadRequest {
 		t.Fatalf("a peer of the node's own role: %v", err)
 	}
-	// The client: a link, its profile and keys.
+	// The proxy: a link, its profile and keys.
 	rpc(cp, model.MethodDial, model.DialReq{Addr: hubAddr, Password: meshPass, Role: model.RoleHub}, nil)
-	rpc(cp, client.MethodClientProfileSet, model.ProfileReq{Name: "laptop"}, nil)
-	var k1, k2 client.KeyCreateResp
-	rpc(cp, client.MethodClientKeysCreate, client.KeyCreateReq{Name: "one"}, &k1)
-	rpc(cp, client.MethodClientKeysCreate, client.KeyCreateReq{Name: "two"}, &k2)
-	rpc(cp, client.MethodClientKeysDelete, client.KeyIDReq{ID: k2.ID}, nil)
+	rpc(cp, proxy.MethodProxyProfileSet, model.ProfileReq{Name: "laptop"}, nil)
+	var k1, k2 proxy.KeyCreateResp
+	rpc(cp, proxy.MethodProxyKeysCreate, proxy.KeyCreateReq{Name: "one"}, &k1)
+	rpc(cp, proxy.MethodProxyKeysCreate, proxy.KeyCreateReq{Name: "two"}, &k2)
+	rpc(cp, proxy.MethodProxyKeysDelete, proxy.KeyIDReq{ID: k2.ID}, nil)
 	// The hub: its name.
 	rpc(hp, model.MethodHubProfileSet, model.ProfileReq{Name: "the-hub"}, nil)
 
 	a := newAgent(c.API(), k1.Key)
-	agenttest.Eventually(t, "the call through the hub", func() bool {
+	llmtest.Eventually(t, "the call through the hub", func() bool {
 		status, _ := a.call(t, "/v1/chat/completions", map[string]any{"model": "m1"}, nil)
 		return status == 200
 	})
@@ -83,11 +83,11 @@ func TestWriteBackAndRestart(t *testing.T) {
 	hf.Stop()
 	nf.Stop()
 	cf.Stop()
-	hf = agenttest.Start(t, `{}`, hubStore)
-	nf = agenttest.Start(t, `{}`, nodeStore)
-	cf = agenttest.Start(t, `{}`, clientStore)
-	h, n, c = hubOf(t, hf), nodeOf(t, nf), clientOf(t, cf)
-	for role, id := range map[string]string{"hub": h.Self().ID, "node": n.Self().ID, "client": c.Self().ID} {
+	hf = llmtest.Start(t, `{}`, hubStore)
+	nf = llmtest.Start(t, `{}`, nodeStore)
+	cf = llmtest.Start(t, `{}`, proxyStore)
+	h, n, c = hubOf(t, hf), nodeOf(t, nf), proxyOf(t, cf)
+	for role, id := range map[string]string{"hub": h.Self().ID, "node": n.Self().ID, "proxy": c.Self().ID} {
 		if id != ids[role] {
 			t.Fatalf("%s's ID %s, was %s", role, id, ids[role])
 		}
@@ -114,14 +114,14 @@ func TestWriteBackAndRestart(t *testing.T) {
 	if b, _ := json.Marshal(peers); strings.Contains(string(b), "node-pw") || strings.Contains(string(b), meshPass) {
 		t.Fatalf("a password in the pages: %s", b)
 	}
-	var keys []client.KeyView
-	rpc(cp, client.MethodClientKeysList, nil, &keys)
+	var keys []proxy.KeyView
+	rpc(cp, proxy.MethodProxyKeysList, nil, &keys)
 	if len(keys) != 1 || keys[0].ID != k1.ID || keys[0].Name != "one" {
 		t.Fatalf("keys %+v", keys)
 	}
 	// The links come back, and the key still calls.
 	a = newAgent(c.API(), k1.Key)
-	agenttest.Eventually(t, "a call after the restart", func() bool {
+	llmtest.Eventually(t, "a call after the restart", func() bool {
 		status, _ := a.call(t, "/v1/chat/completions", map[string]any{"model": "m1"}, nil)
 		return status == 200
 	})

@@ -3240,7 +3240,7 @@ VPN 里程碑的第一个迭代（[决定 026](decisions/026-vpn.zh-CN.md)）：
 
 ### I105 fit 配置中的角色 — 已完成
 
-agent 与 tunnel 这条线的基础（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+agent 与 tunnel 这条线的基础（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 
 - **配置**：`agent`（`hub`、`node`、`client`）和 `tunnel`（`server`、`node`、`client`），每个角色一个成员；
   `RoleConsole`（admin.console 的字段，地址必填），检查方式与控制台相同；只有角色而没有路由的配置不需要 listener；
@@ -3276,10 +3276,13 @@ fibhub 成为 `tunnel/server`、`tunnel/node`（fibhub 的 pod）和 `tunnel/cli
 - **测试**：在 fib 引擎上的 e2e（TCP、WS、QUIC、请求体加密、Web 代理、错误密码、写回和从 store 重启），慢对端、大传输、
   中途断开；Docker：`test/docker/tunnel`，208 项检查及重启后 17 项。未与 fibhub 的二进制互测。
 - **基准**：暂无；tunnel 的数据路径尚无压测场景。
+- **改名**：角色现为 `tunnel.hub`、`tunnel.node` 与 `tunnel.proxy`（即原 server 和 client 角色），包为 `tunnel/hub`、
+  `tunnel/node` 与 `tunnel/proxy`；node 与 proxy 的 `servers` 改为 `hubs`，转发的 `server` 改为 `hub`，线上协议同样改名
+  （见 [tunnel](tunnel.zh-CN.md)）。
 
 ### I107 agent — 已完成
 
-agenthub 成为 `agent/hub`、`agent/node` 和 `agent/client`，基于当前的 fib；见 [agent](agent.zh-CN.md)。
+agenthub 成为 `agent/hub`、`agent/node` 和 `agent/client`，基于当前的 fib；见 [agent](llm.zh-CN.md)。
 
 - mesh 基于 fib 的 WebSocket，监听是独立的 binding（`listen.address`，`/ws`），流以信用额度控制节奏；落后的链路由
   `slow_timeout` 断开（A52 和 A53 的临时方案）。
@@ -3461,7 +3464,7 @@ WHIP（RFC 9725）推入，观看者用 WHEP（draft-ietf-wish-whep）播放，�
 
 ### I112 agent 的模型接口 — 已完成
 
-agent 提供各主流模型接口的全部无状态推理端点（[模型与接口](agent.zh-CN.md#模型与接口)）。
+agent 提供各主流模型接口的全部无状态推理端点（[模型与接口](llm.zh-CN.md#模型与接口)）。
 
 - **种类**：模型的 `api` 为 `openai`、`anthropic`、`gemini`、`azure_openai`、`ollama` 或 `cohere`；
   `azure_openai` 模型以 `openai` 调用，因此名称在每种 agent 接口中唯一（`config.AgentProtocol`、`model.Protocol`）。
@@ -3492,6 +3495,8 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
 - **基准测试**：无；agent 的转发不在 fit 的 HTTP 请求路径上（规则 21）。
 - **缺口**：client 为读取模型并重试其他路由而完整读入请求体（在 `api.max_body_bytes` 之内），上传也是；Gemini 的
   微调模型（`tunedModels/...`）与 Vertex AI 不提供。
+- **改名**：该功能现名 `llm`，角色为 `llm.hub`、`llm.node` 与 `llm.proxy`（即原 client 角色），包为 `llm/hub`、
+  `llm/node` 与 `llm/proxy`；“agent”只指调用 `llm.proxy` 的 AI agent（见 [llm](llm.zh-CN.md)）。
 
 ## 给后续迭代的说明
 

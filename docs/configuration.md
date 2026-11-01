@@ -5,8 +5,8 @@
 fit reads its config from one file or several, in any of three formats: a **.conf** file, **YAML**
 or **JSON**. Each says the same things, field for field: the addresses fit listens on, the routes
 that pick what answers each request, the upstreams requests are proxied to, settings for logs,
-limits, certificates and the Admin API, and the roles fit runs beside the gateway: the agent, the
-tunnel and WebRTC's. JSON is what the Admin API takes and returns; the three
+limits, certificates and the Admin API, and the roles fit runs beside the gateway: the LLM feature's, the
+tunnel's and WebRTC's. JSON is what the Admin API takes and returns; the three
 formats have exactly the same fields, and any of them can be converted to the others.
 
 | Format | Best for | Reference |
@@ -106,8 +106,8 @@ More: the [JSON reference](reference/json.md).
 | `auto_https`, `acme` | HTTPS by default and certificates | [HTTPS by default](reference/config.md#https-by-default), [ACME](reference/config.md#acme) |
 | `engine` | fib's event loops, workers and buffers | [Engine](reference/config.md#engine) |
 | `admin` | The Admin API; the config kept encrypted in a store (`store`); the console (`console`) | [Admin API](reference/config.md#admin-api), [the console](console.md) |
-| `agent` | The agent's hub, node and client, which share AI models among machines | [Agent](reference/config.md#agent), [the agent](agent.md) |
-| `tunnel` | The tunnel's server, node and client, which reach services behind NAT | [Tunnel](reference/config.md#tunnel), [the tunnel](tunnel.md) |
+| `llm` | The LLM feature's hub, node and proxy, which share AI models among machines and serve them to agents | [LLM](reference/config.md#llm), [the LLM feature](llm.md) |
+| `tunnel` | The tunnel's hub, node and proxy, which reach services behind NAT | [Tunnel](reference/config.md#tunnel), [the tunnel](tunnel.md) |
 | `webrtc` | A TURN server (`turn`), the media port of `whip` and `whep` (`media`), and the relay of `webrtc_proxy` (`proxy`) | [WebRTC](reference/config.md#webrtc), [WebRTC](webrtc.md) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | The version of the config, 1; optional | [Compatibility](compatibility.md#the-schemas-version) |

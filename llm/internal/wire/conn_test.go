@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/wire"
 
 	"github.com/lesismal/fib/websocket"
 )

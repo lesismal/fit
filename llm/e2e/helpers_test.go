@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/client"
-	"github.com/lesismal/fit/agent/hub"
-	"github.com/lesismal/fit/agent/internal/agenttest"
-	"github.com/lesismal/fit/agent/node"
+	"github.com/lesismal/fit/llm/hub"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/node"
+	"github.com/lesismal/fit/llm/proxy"
 )
 
 const meshPass = "e2e-mesh-secret"
@@ -30,9 +30,9 @@ func freeAddr(t *testing.T) string {
 }
 
 // member wraps a role's member in a config.
-func member(role, body string) string { return `{"agent": {"` + role + `": ` + body + `}}` }
+func member(role, body string) string { return `{"llm": {"` + role + `": ` + body + `}}` }
 
-func nodeOf(t *testing.T, f *agenttest.Fit) *node.Node {
+func nodeOf(t *testing.T, f *llmtest.Fit) *node.Node {
 	t.Helper()
 	n, _ := f.Role("node").(*node.Node)
 	if n == nil {
@@ -41,7 +41,7 @@ func nodeOf(t *testing.T, f *agenttest.Fit) *node.Node {
 	return n
 }
 
-func hubOf(t *testing.T, f *agenttest.Fit) *hub.Role {
+func hubOf(t *testing.T, f *llmtest.Fit) *hub.Role {
 	t.Helper()
 	h, _ := f.Role("hub").(*hub.Role)
 	if h == nil {
@@ -50,19 +50,19 @@ func hubOf(t *testing.T, f *agenttest.Fit) *hub.Role {
 	return h
 }
 
-func clientOf(t *testing.T, f *agenttest.Fit) *client.Client {
+func proxyOf(t *testing.T, f *llmtest.Fit) *proxy.Proxy {
 	t.Helper()
-	c, _ := f.Role("client").(*client.Client)
+	c, _ := f.Role("proxy").(*proxy.Proxy)
 	if c == nil {
-		t.Fatal("no client running")
+		t.Fatal("no proxy running")
 	}
 	return c
 }
 
 // pages logs in to the pages of a role.
-func pages(t *testing.T, url string) *agenttest.Browser { return agenttest.Login(t, url) }
+func pages(t *testing.T, url string) *llmtest.Browser { return llmtest.Login(t, url) }
 
-// agent calls the client's API.
+// agent calls the proxy's API.
 type agent struct {
 	base, key string
 	hc        *http.Client

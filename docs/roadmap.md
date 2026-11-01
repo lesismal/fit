@@ -9,7 +9,7 @@ know it is done, and which part of fib it builds on.
 
 fit has done the iterations of every milestone, 1.0's included; [progress](progress.md) says what
 is built. Since 1.0, tracks beyond the edge proxy have been added ([after 1.0](#after-10)): the
-console and the encrypted store, the agent and the tunnel, and WebRTC are done; P2P and a VPN are
+console and the encrypted store, the LLM feature and the tunnel, and WebRTC are done; P2P and a VPN are
 under way. The [development plan](dev-plan.md) breaks these milestones into small iterations, each
 sized for one working session. The order of the milestones is firm; their contents will move as the work teaches
 us things. Dates are left out on purpose, because a milestone ends when its exit criteria are met,
@@ -322,7 +322,7 @@ set in the same config and changed with it.
 | Track | What it delivers | Status | fib parts |
 | --- | --- | --- | --- |
 | [Console, logins and an encrypted store](dev-plan.md#console-logins-and-an-encrypted-store) | `admin.store`, the config kept encrypted in a file fit runs from; `admin.console`, web pages behind logins with an editor made from the schema; `fit store export` and `import` ([decision 027](decisions/027-console-and-store.md), [the console](console.md)) | done (I104) | — |
-| [Agent and tunnel](dev-plan.md#agent-and-tunnel) | roles in the config: the tunnel's server, node and client, which reach services behind NAT, and the agent's hub, node and client, which share AI models among machines ([decision 028](decisions/028-agent-and-tunnel.md)) | done (I105–I107) | `websocket`, QUIC, the asynchronous HTTP client |
+| [Agent and tunnel](dev-plan.md#agent-and-tunnel) | roles in the config: the tunnel's hub, node and proxy, which reach services behind NAT, and the LLM feature's hub, node and proxy (`llm`, first named the agent), which share AI models among machines ([decision 028](decisions/028-llm-and-tunnel.md)) | done (I105–I107) | `websocket`, QUIC, the asynchronous HTTP client |
 | [WebRTC](dev-plan.md#webrtc) | `webrtc.turn`, a TURN server over UDP, TCP and TLS; the `whip` and `whep` handlers, fit as an SFU; the `webrtc_proxy` handler, WHIP and WHEP proxied to media servers, their UDP routed by ICE ufrag ([decision 029](decisions/029-webrtc.md), [WebRTC](webrtc.md)) | done (I87, I108–I111) | `webrtc`, `webrtc/turn/turnserver` |
 | [P2P, NAT traversal](dev-plan.md#p2p-nat-traversal) | two hosts behind NAT connected directly through ICE, or through a TURN relay, carrying TCP and UDP services ([decision 025](decisions/025-p2p.md)) | under way: STUN messages and a STUN server (`p2p/stun`, I84), a library not yet in the config, and A49 in fib (I85) done; the STUN and TURN clients, ICE, tunnels and the config to come (I86, I88–I93) | `webrtc/stun`, `webrtc/turn`, `webrtc/ice` |
 | [VPN](dev-plan.md#vpn-a-network-of-fit-nodes) | nodes in one overlay network, each with a TUN interface, IP packets sent directly or through a relay ([decision 026](decisions/026-vpn.md)) | under way: IP packets and the overlay route table (`vpn/packet`, I94), a library not yet in the config, done; TUN devices, the relay, the coordinator and the node to come (I95–I103) | — |
@@ -367,8 +367,8 @@ The rows follow the [feature table](comparison.md#features) in the comparison, t
 | TURN server | P2P, I87 ([decision 029](decisions/029-webrtc.md)) | `webrtc/turn/turnserver` |
 | WebRTC: WHIP and WHEP, as a media server and as a proxy | WebRTC, I109–I110 | `webrtc` (`PeerConnection`, `Mux`) |
 | Config kept encrypted; a web console with logins | Console, I104 | — |
-| Tunnel: services behind NAT reached through a server | Agent and tunnel, I106 | `websocket`, QUIC |
-| Agent: AI models shared among machines | Agent and tunnel, I107 | `websocket`, the asynchronous HTTP client |
+| Tunnel: services behind NAT reached through a hub | Agent and tunnel, I106 | `websocket`, QUIC |
+| LLM: AI models shared among machines | Agent and tunnel, I107 | `websocket`, the asynchronous HTTP client |
 | STUN server | P2P, I84 (a library, not yet in the config) | — |
 | VPN: IP packets and the overlay route table | VPN, I94 (a library, not yet in the config) | — |
 

@@ -1,4 +1,4 @@
-// Package pool runs the blocking work of the agent's roles on bounded pools
+// Package pool runs the blocking work of the LLM feature's roles on bounded pools
 // of their own, never on a fib worker (docs/rules.md, rule 4): commands a
 // node runs, its hardware and GPU queries, and the methods the pages call,
 // which may wait on a peer or on a config change.

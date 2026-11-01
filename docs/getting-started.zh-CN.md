@@ -240,6 +240,6 @@ curl -X POST localhost:2019/rollback/1
   [Traefik](migrating-from-traefik.zh-CN.md)。
 - [示例](../examples/README.zh-CN.md)：每个功能一份配置，三种格式各一份。
 - 网关之外：[WebRTC](webrtc.zh-CN.md)，TURN 服务器以及 WHIP 和 WHEP；[tunnel](tunnel.zh-CN.md)，访问 NAT 后的服务；
-  [agent](agent.zh-CN.md)，在多台机器间共享 AI 模型。
+  [llm](llm.zh-CN.md)，在多台机器间共享 AI 模型。
 - [兼容性](compatibility.zh-CN.md)：在各 1.x 版本间保持稳定的内容。
 - [部署](../deploy/README.zh-CN.md)：容器镜像、Kubernetes 和 systemd。

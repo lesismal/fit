@@ -1,38 +1,38 @@
 package config
 
-// The apps fit runs beside its gateway: the agent's roles, which share
-// models among machines, and the tunnel's, which reach services behind NAT.
+// The apps fit runs beside its gateway: the LLM feature's roles, which
+// share models among machines, and the tunnel's, which reach services behind NAT.
 // Each role is on when its member is set, any number of them in one process,
 // all on the listeners' fib engine. What a role's web pages change is
 // written back into its member here, and so into admin.store when the
-// config is kept there. See docs/decisions/028-agent-and-tunnel.md.
+// config is kept there. See docs/decisions/028-llm-and-tunnel.md.
 
-// Agent is the agent's roles: a hub that nodes and clients meet at, a node
-// that serves models, and a client that calls them.
-type Agent struct {
-	Hub    *AgentHub    `json:"hub,omitempty" doc:"Run a hub: nodes and clients link to it, and it passes calls between them."`
-	Node   *AgentNode   `json:"node,omitempty" doc:"Run a node: it serves models from local or remote upstreams to the hubs and clients linked to it."`
-	Client *AgentClient `json:"client,omitempty" doc:"Run a client: an OpenAI- and Anthropic-compatible API that calls the models of the nodes it reaches."`
+// LLM is the LLM feature's roles: a hub that nodes and proxies meet at, a
+// node that serves models, and a proxy that calls them for agents.
+type LLM struct {
+	Hub   *LLMHub   `json:"hub,omitempty" doc:"Run a hub: nodes and proxies link to it, and it passes calls between them."`
+	Node  *LLMNode  `json:"node,omitempty" doc:"Run a node: it serves models from local or remote upstreams to the hubs and proxies linked to it."`
+	Proxy *LLMProxy `json:"proxy,omitempty" doc:"Run a proxy: an OpenAI- and Anthropic-compatible API, for agents, that calls the models of the nodes it reaches."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// Tunnel is the tunnel's roles: a server that nodes and clients link to, a
-// node beside the services it exposes, and a client that reaches them.
+// Tunnel is the tunnel's roles: a hub that nodes and proxies link to, a
+// node beside the services it exposes, and a proxy that reaches them.
 type Tunnel struct {
-	Server *TunnelServer `json:"server,omitempty" doc:"Run a server: nodes and clients link to it, and it joins a client's tunnels to a node's."`
-	Node   *TunnelNode   `json:"node,omitempty" doc:"Run a node: it links to servers and opens the tunnels they ask for to the services it exposes."`
-	Client *TunnelClient `json:"client,omitempty" doc:"Run a client: local ports and web proxies forwarded through a server to the services of a node."`
+	Hub   *TunnelHub   `json:"hub,omitempty" doc:"Run a hub: nodes and proxies link to it, and it joins a proxy's tunnels to a node's."`
+	Node  *TunnelNode  `json:"node,omitempty" doc:"Run a node: it links to hubs and opens the tunnels they ask for to the services it exposes."`
+	Proxy *TunnelProxy `json:"proxy,omitempty" doc:"Run a proxy: local ports and web proxies forwarded through a hub to the services of a node."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// HasApps reports whether c runs any role: the agent's, the tunnel's or
+// HasApps reports whether c runs any role: the LLM feature's, the tunnel's or
 // WebRTC's.
 func (c *Config) HasApps() bool {
-	a, t, w := c.Agent, c.Tunnel, c.WebRTC
-	return a != nil && (a.Hub != nil || a.Node != nil || a.Client != nil) ||
-		t != nil && (t.Server != nil || t.Node != nil || t.Client != nil) ||
+	a, t, w := c.LLM, c.Tunnel, c.WebRTC
+	return a != nil && (a.Hub != nil || a.Node != nil || a.Proxy != nil) ||
+		t != nil && (t.Hub != nil || t.Node != nil || t.Proxy != nil) ||
 		w != nil && (w.TURN != nil || w.Media != nil || w.Proxy != nil)
 }
 

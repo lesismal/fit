@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // PeersResp builds the reply of model.MethodPeers.
@@ -123,5 +123,5 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 	})
 }
 
-// MaxTargets bounds the dial targets of a mesh, as config.MaxAgentPeers does.
+// MaxTargets bounds the dial targets of a mesh, as config.MaxLLMPeers does.
 const MaxTargets = 64

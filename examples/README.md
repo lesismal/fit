@@ -20,7 +20,7 @@ with every listener and route given three times.
 
 Addresses such as 10.0.0.11, 127.0.0.1:9000 or auth.example.com stand for your own backends and
 services, and host names for your own domains. Passwords are examples: the users of
-[basic-auth](basic-auth/fit.conf), [console](console/fit.conf), the agent's and the tunnel's
+[basic-auth](basic-auth/fit.conf), [console](console/fit.conf), the LLM feature's and the tunnel's
 consoles log in with `example-password`, whose bcrypt hash was made with `fit hash-password`.
 
 ## Handlers
@@ -109,19 +109,19 @@ consoles log in with `example-password`, whose bcrypt hash was made with `fit ha
 | [admin](admin/fit.conf) | The Admin API on a Unix socket, and the config history it keeps. |
 | [console](console/fit.conf) | The console's web pages behind a login, and the config kept encrypted in admin.store. |
 
-## Agent and tunnel
+## LLM and tunnel
 
 | Example | What it shows |
 | --- | --- |
-| [agent-hub](agent-hub/fit.conf) | The agent's hub, which nodes and clients link to. |
-| [agent-node](agent-node/fit.conf) | A node serving a local Ollama's models through the hub. |
-| [agent-client](agent-client/fit.conf) | A client: an OpenAI- and Anthropic-compatible API calling the nodes' models. |
-| [tunnel-server](tunnel-server/fit.conf) | The tunnel's server, over TCP and WebSocket. |
-| [tunnel-node](tunnel-node/fit.conf) | A node behind NAT exposing its services through the server. |
-| [tunnel-client](tunnel-client/fit.conf) | Local ports forwarded to a node's services. |
+| [llm-hub](llm-hub/fit.conf) | The LLM feature's hub, which nodes and proxies link to. |
+| [llm-node](llm-node/fit.conf) | A node serving a local Ollama's models through the hub. |
+| [llm-proxy](llm-proxy/fit.conf) | A proxy: an OpenAI- and Anthropic-compatible API, for agents, calling the nodes' models. |
+| [tunnel-hub](tunnel-hub/fit.conf) | The tunnel's hub, over TCP and WebSocket. |
+| [tunnel-node](tunnel-node/fit.conf) | A node behind NAT exposing its services through the hub. |
+| [tunnel-proxy](tunnel-proxy/fit.conf) | Local ports forwarded to a node's services. |
 
 The examples of a role pair link to each other on 127.0.0.1, so they run on one machine as they
-are, each with `fit run -c` in a terminal of its own. The agent's examples set their `id`, which
+are, each with `fit run -c` in a terminal of its own. The LLM feature's examples set their `id`, which
 fit would otherwise make and write back into the file.
 
 ## WebRTC

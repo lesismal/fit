@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"context"
@@ -21,10 +21,10 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 	fibtls "github.com/lesismal/fib/tls"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // The bounds of the agent API's requests.
@@ -47,7 +47,7 @@ type endpoint struct {
 // agentPaths maps the paths agents POST to, but Gemini's, to their calls:
 // /v1/... for OpenAI and Anthropic, /api/... for Ollama, /v2/... for
 // Cohere, each where the vendor's SDKs call them once their base URL is the
-// client's.
+// proxy's.
 var agentPaths = func() map[string]endpoint {
 	out := map[string]endpoint{}
 	for api, prefix := range map[string]string{model.APIOpenAI: "/v1/", model.APIAnthropic: "/v1/", model.APIOllama: "/", model.APICohere: "/v2/"} {
@@ -87,8 +87,8 @@ func agentEndpoint(path string) (e endpoint, ok bool) {
 // apiServer is the agent API, a binding of its own on the listeners'
 // engine.
 type apiServer struct {
-	c        *Client
-	cfg      *config.AgentClientAPI
+	c        *Proxy
+	cfg      *config.LLMProxyAPI
 	engine   *fib.Engine
 	index    int
 	addr     net.Addr
@@ -97,7 +97,7 @@ type apiServer struct {
 	inflight atomic.Int64
 }
 
-func startAPI(c *Client, cfg *config.AgentClientAPI) (*apiServer, error) {
+func startAPI(c *Proxy, cfg *config.LLMProxyAPI) (*apiServer, error) {
 	s := &apiServer{c: c, cfg: cfg, engine: c.H.Engine, index: -1}
 	var h fib.Handler = fibhttp.NewHandlerWithConfig(fibhttp.Config{
 		MaxHeaderBytes:    maxHeader,
@@ -257,7 +257,7 @@ type modelObject struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// modelNames returns the names of the models the client reaches, once
+// modelNames returns the names of the models the proxy reaches, once
 // each, sorted; only those called with protocol api, unless it is "".
 func (s *apiServer) modelNames(api string) []string {
 	var out []string

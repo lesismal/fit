@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Start / stop the docker end-to-end test environment of fit's agent and run the full test.
+# Start / stop the docker end-to-end test environment of fit's LLM feature and run the full test.
 #
-#   test/docker/agent/e2e.sh up        build the images and start every role (keeps existing data)
-#   test/docker/agent/e2e.sh test      reset, start, run the whole test; the environment keeps running for inspection
-#   test/docker/agent/e2e.sh all       like test, then remove everything (CI)
-#   test/docker/agent/e2e.sh stop      stop the containers, keep their data
-#   test/docker/agent/e2e.sh down      stop and remove the containers and their data
-#   test/docker/agent/e2e.sh ps | logs [service...] | build
+#   test/docker/llm/e2e.sh up        build the images and start every role (keeps existing data)
+#   test/docker/llm/e2e.sh test      reset, start, run the whole test; the environment keeps running for inspection
+#   test/docker/llm/e2e.sh all       like test, then remove everything (CI)
+#   test/docker/llm/e2e.sh stop      stop the containers, keep their data
+#   test/docker/llm/e2e.sh down      stop and remove the containers and their data
+#   test/docker/llm/e2e.sh ps | logs [service...] | build
 #
 # The pages log in as admin with the password fit-e2e-pass: configs/*.json hold its bcrypt hash, as
 # `echo fit-e2e-pass | fit hash-password` makes it. Environment: FIT_E2E_STORE_PASSWORD (the password every role's
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-ROLES=(hub node1 node2 node3 client1 client2)
+ROLES=(hub node1 node2 node3 proxy1 proxy2)
 export FIT_E2E_STORE_PASSWORD="${FIT_E2E_STORE_PASSWORD:-fit-e2e-store-pass}"
 if [[ -z "${GOPROXY:-}" ]] && command -v go >/dev/null 2>&1; then
   export GOPROXY="$(go env GOPROXY)"
@@ -43,8 +43,8 @@ up() {
 Pages, over TLS with a self-signed certificate (user admin, password fit-e2e-pass):
   hub      https://127.0.0.1:19200
   node1    https://127.0.0.1:19101    node2 https://127.0.0.1:19102    node3 https://127.0.0.1:19103
-  client1  https://127.0.0.1:19301    client2 https://127.0.0.1:19302
-Client APIs (/v1): client1 https://127.0.0.1:19401    client2 https://127.0.0.1:19402
+  proxy1   https://127.0.0.1:19301    proxy2 https://127.0.0.1:19302
+Proxy APIs (/v1):  proxy1 https://127.0.0.1:19401    proxy2 https://127.0.0.1:19402
 Mock upstream:     http://127.0.0.1:18000 (mockllm)
 EOF
 }

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // CollectHW gathers a hardware snapshot of this machine. It uses only the standard library, procfs and

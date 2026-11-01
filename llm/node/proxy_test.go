@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // fakeUpstream is an OpenAI-like upstream: the checks' GET .../models get an
@@ -143,9 +143,9 @@ func idle(t *testing.T, n *Node) {
 
 func TestProxyRefusals(t *testing.T) {
 	u := newUpstream(t)
-	n := startNode(t, &config.AgentNode{
-		Proxy: &config.AgentNodeProxy{MaxBodyBytes: 64},
-		Models: []config.AgentModel{
+	n := startNode(t, &config.LLMNode{
+		Proxy: &config.LLMNodeProxy{MaxBodyBytes: 64},
+		Models: []config.LLMModel{
 			{Name: "m1", API: model.APIOpenAI, BaseURL: u.URL + "/echo"},
 			{Name: "off", API: model.APIOpenAI, BaseURL: u.URL, Disabled: true},
 			{Name: "up", API: model.APIOpenAI, BaseURL: u.URL + "/echo", Upstream: "real-id"},
@@ -224,11 +224,11 @@ func TestProxyRefusals(t *testing.T) {
 
 func TestProxyBusyAndRemoved(t *testing.T) {
 	u := newUpstream(t)
-	member := func(models ...config.AgentModel) *config.AgentNode {
-		return &config.AgentNode{ID: "node-t", Proxy: &config.AgentNodeProxy{MaxInflight: 1}, Models: models}
+	member := func(models ...config.LLMModel) *config.LLMNode {
+		return &config.LLMNode{ID: "node-t", Proxy: &config.LLMNodeProxy{MaxInflight: 1}, Models: models}
 	}
-	hang := config.AgentModel{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}
-	echo := config.AgentModel{Name: "m1", API: model.APIOpenAI, BaseURL: u.URL + "/echo"}
+	hang := config.LLMModel{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}
+	echo := config.LLMModel{Name: "m1", API: model.APIOpenAI, BaseURL: u.URL + "/echo"}
 	n := startNode(t, member(hang, echo), nil)
 	errc := make(chan error, 1)
 	go func() {
@@ -259,9 +259,9 @@ func TestProxyBusyAndRemoved(t *testing.T) {
 
 func TestProxyTimeoutAndCancel(t *testing.T) {
 	u := newUpstream(t)
-	n := startNode(t, &config.AgentNode{
-		Proxy:  &config.AgentNodeProxy{Timeout: config.Duration(200 * time.Millisecond)},
-		Models: []config.AgentModel{{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}},
+	n := startNode(t, &config.LLMNode{
+		Proxy:  &config.LLMNodeProxy{Timeout: config.Duration(200 * time.Millisecond)},
+		Models: []config.LLMModel{{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}},
 	}, nil)
 	// The whole call is bounded.
 	if _, _, err := doProxy(t, n, model.ProxyReq{Model: "hang", Body: []byte("{}")}); err == nil {
@@ -272,8 +272,8 @@ func TestProxyTimeoutAndCancel(t *testing.T) {
 
 	// The caller leaves while its streamed body is on its way and the
 	// upstream has not answered.
-	n = startNode(t, &config.AgentNode{ID: "node-t2",
-		Models: []config.AgentModel{{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}}}, nil)
+	n = startNode(t, &config.LLMNode{ID: "node-t2",
+		Models: []config.LLMModel{{Name: "hang", API: model.APIOpenAI, BaseURL: u.URL + "/hang"}}}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	st, err := openProxy(ctx, n, model.ProxyReq{API: model.APIOpenAI, Path: "chat/completions", Model: "hang", BodyStream: true})
 	if err != nil {
@@ -289,7 +289,7 @@ func TestProxyTimeoutAndCancel(t *testing.T) {
 
 func TestProxyCallerCancelsWhileHeld(t *testing.T) {
 	u := newUpstream(t)
-	n := startNode(t, &config.AgentNode{Models: []config.AgentModel{
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{
 		{Name: "m1", API: model.APIOpenAI, BaseURL: u.URL + "/echo"},
 		{Name: "up", API: model.APIOpenAI, BaseURL: u.URL + "/echo", Upstream: "real-id"},
 	}}, nil)
@@ -315,7 +315,7 @@ func TestProxyCallerCancelsWhileHeld(t *testing.T) {
 // and goes on as it reads.
 func TestProxySlowReader(t *testing.T) {
 	u := newUpstream(t)
-	n := startNode(t, &config.AgentNode{Models: []config.AgentModel{{Name: "big", API: model.APIOpenAI, BaseURL: u.URL + "/big"}}}, nil)
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{{Name: "big", API: model.APIOpenAI, BaseURL: u.URL + "/big"}}}, nil)
 	for _, pause := range []time.Duration{200 * time.Millisecond, 0} {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		st, err := openProxy(ctx, n, model.ProxyReq{API: model.APIOpenAI, Path: "chat/completions", Model: "big", Body: []byte("{}")})
@@ -367,7 +367,7 @@ func TestProxySlowReader(t *testing.T) {
 // caller's window.
 func TestProxySlowUpstreamReader(t *testing.T) {
 	u := newUpstream(t)
-	n := startNode(t, &config.AgentNode{Models: []config.AgentModel{{Name: "slow", API: model.APIOpenAI, BaseURL: u.URL + "/slow"}}}, nil)
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{{Name: "slow", API: model.APIOpenAI, BaseURL: u.URL + "/slow"}}}, nil)
 	frame := bytes.Repeat([]byte("b"), 64<<10)
 	frames := make([][]byte, 128) // 8 MiB
 	for i := range frames {

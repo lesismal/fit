@@ -59,7 +59,7 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 type Options struct {
 	// Config is the role's console member.
 	Config *config.RoleConsole
-	// Cookie names the session's cookie, as fit_tunnel_server.
+	// Cookie names the session's cookie, as fit_tunnel_hub.
 	Cookie string
 	// Pages are the role's files: index.html, and what it loads, served
 	// as they are, from memory.

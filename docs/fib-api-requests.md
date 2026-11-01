@@ -64,8 +64,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A49 | A UDP peer opened toward an address on a listener's socket | done, `96a2331` (in `80c7f76`) | 1, 9 | I85 (P2P), I87 |
 | A50 | QUIC DATAGRAM frames | requested | 9 | I90 (P2P) |
 | A51 | A packet device's descriptor on the poller | requested | 1, 8, 11 | I95 (VPN) |
-| A52 | A WebSocket connection's transport: a forced close, and its address | requested | 10, 13 | agent (028) |
-| A53 | Backpressure on a WebSocket connection's sends | requested | 8, 9, 11 | agent, tunnel (028) |
+| A52 | A WebSocket connection's transport: a forced close, and its address | requested | 10, 13 | llm (028) |
+| A53 | Backpressure on a WebSocket connection's sends | requested | 8, 9, 11 | llm, tunnel (028) |
 | A54 | A raw QUIC endpoint on an engine's UDP binding | requested | 15 | tunnel (028) |
 | A55 | TURN over TCP and TLS | done, `97201b6` (in `84a67f7`) | — | I111 (029) |
 | A56 | A TURN server that never waits on a worker | done, `74100b2` (in `84a67f7`) | 1 | I87, I111 (029) |
@@ -1590,16 +1590,16 @@ handler routes each packet `OnData` hands it and sends the peers' packets with `
 
 ## A52: A WebSocket connection's transport: a forced close, and its address
 
-**Status.** Requested on 2026-11-01, for the agent's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+**Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
 
-**Problem.** The agent's mesh links are WebSockets of fib's. A link whose peer is dead, or so far
+**Problem.** The LLM feature's mesh links are WebSockets of fib's. A link whose peer is dead, or so far
 behind that a ping has waited 30 seconds for its pong, must be dropped at once. `Connection.Close`
 sends a close frame, which queues behind everything still unsent, so the socket of a peer that
 reads nothing stays open until the engine's write queue limit or the kernel gives up.
 `websocket.Connection` does not expose the `fib.Connection` under it, nor a close that skips the
 handshake, nor its remote address on the dialing side.
 
-**Evidence.** `agent/internal/wire/conn.go`: the listener keeps a map of its binding's
+**Evidence.** `llm/internal/wire/conn.go`: the listener keeps a map of its binding's
 `fib.Connection`s by remote address, filled by a wrapper around the WebSocket handler, and looks a
 link's up by its upgrade request's `RemoteAddr`; the dialer catches its `fib.Connection` through
 `DialerConfig.Dial`. Both are stopgaps, within the rules, that this request replaces.
@@ -1620,16 +1620,16 @@ map and the dialer's hook go.
 
 ## A53: Backpressure on a WebSocket connection's sends
 
-**Status.** Requested on 2026-11-01, for the agent's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+**Status.** Requested on 2026-11-01, for the LLM feature's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
 
 **Problem.** `websocket.Connection.WriteMessage` queues whatever it is given and never says how
-much waits, and the handler cannot hold a connection's reads. The agent's wire protocol bounds
+much waits, and the handler cannot hold a connection's reads. The LLM feature's wire protocol bounds
 each stream with a credit window (256 KiB), so a link's queue is bounded by its streams' windows
 and its replies, but nothing ties a link's own queue to the producers that fill it: a peer that
 reads slowly is found only by the ping that waits behind its queue (30 seconds by default), and
 until then the queue grows to the engine's `MaxWriteQueueBytes`.
 
-**Evidence.** `agent/internal/wire/conn.go` and `session.go`: `ConnConfig.SlowTimeout` closes a link
+**Evidence.** `llm/internal/wire/conn.go` and `session.go`: `ConnConfig.SlowTimeout` closes a link
 whose ping waited too long; streams pace themselves with credits (`Stream.TrySend`, `OnCredit`,
 `Release`), but calls' replies and pushes do not wait for anything.
 
@@ -1653,7 +1653,7 @@ fib's `websocket.Connection`.
 
 ## A54: A raw QUIC endpoint on an engine's UDP binding
 
-**Status.** Requested on 2026-11-01, for the tunnel's roles ([decision 028](decisions/028-agent-and-tunnel.md)).
+**Status.** Requested on 2026-11-01, for the tunnel's roles ([decision 028](decisions/028-llm-and-tunnel.md)).
 
 **Problem.** The tunnel's links may run over QUIC, one bidirectional stream a link, with an ALPN of
 their own: not HTTP/3. fib's `http3.ServerHandler` puts QUIC on a UDP binding for HTTP/3 only; for

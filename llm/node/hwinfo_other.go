@@ -2,7 +2,7 @@
 
 package node
 
-import "github.com/lesismal/fit/agent/internal/model"
+import "github.com/lesismal/fit/llm/internal/model"
 
 func collectPlatform(*model.HWInfo)                     {}
 func collectPlatformGPUs(*model.HWInfo) []model.GPUInfo { return nil }

@@ -16,7 +16,7 @@ fit run -c examples/static/fit.conf
 不要运行整个目录：`fit run -c examples/static` 会把三个文件合并成一份配置，每个监听器和路由都出现三次。
 
 10.0.0.11、127.0.0.1:9000、auth.example.com 这类地址代表你自己的后端和服务，主机名代表你自己的域名。密码只是示例：
-[basic-auth](basic-auth/fit.conf)、[console](console/fit.conf) 以及 agent 和 tunnel 控制台的用户都用
+[basic-auth](basic-auth/fit.conf)、[console](console/fit.conf) 以及 llm 和 tunnel 控制台的用户都用
 `example-password` 登录，其 bcrypt 哈希由 `fit hash-password` 生成。
 
 ## 处理器
@@ -105,19 +105,19 @@ fit run -c examples/static/fit.conf
 | [admin](admin/fit.conf) | 在 Unix 套接字上提供 Admin API，以及它保留的配置历史。 |
 | [console](console/fit.conf) | 需要登录的控制台网页，以及加密保存在 admin.store 中的配置。 |
 
-## Agent 与隧道
+## LLM 与隧道
 
 | 示例 | 内容 |
 | --- | --- |
-| [agent-hub](agent-hub/fit.conf) | agent 的 hub，节点和客户端连接到它。 |
-| [agent-node](agent-node/fit.conf) | 通过 hub 提供本地 Ollama 模型的节点。 |
-| [agent-client](agent-client/fit.conf) | 客户端：调用各节点模型的 OpenAI 和 Anthropic 兼容 API。 |
-| [tunnel-server](tunnel-server/fit.conf) | 隧道服务器，支持 TCP 和 WebSocket。 |
-| [tunnel-node](tunnel-node/fit.conf) | NAT 后面的节点，通过服务器暴露它的服务。 |
-| [tunnel-client](tunnel-client/fit.conf) | 把本地端口转发到某个节点的服务。 |
+| [llm-hub](llm-hub/fit.conf) | llm 的 hub，节点和 proxy 连接到它。 |
+| [llm-node](llm-node/fit.conf) | 通过 hub 提供本地 Ollama 模型的节点。 |
+| [llm-proxy](llm-proxy/fit.conf) | proxy：为 agent 提供调用各节点模型的 OpenAI 和 Anthropic 兼容 API。 |
+| [tunnel-hub](tunnel-hub/fit.conf) | 隧道 hub，支持 TCP 和 WebSocket。 |
+| [tunnel-node](tunnel-node/fit.conf) | NAT 后面的节点，通过 hub 暴露它的服务。 |
+| [tunnel-proxy](tunnel-proxy/fit.conf) | 把本地端口转发到某个节点的服务。 |
 
 同一组角色的示例都在 127.0.0.1 上互相连接，所以可以原样在一台机器上运行，每个在单独的终端里 `fit run -c`。
-agent 的示例写明了 `id`，否则 fit 会生成一个并写回文件。
+llm 的示例写明了 `id`，否则 fit 会生成一个并写回文件。
 
 ## WebRTC
 

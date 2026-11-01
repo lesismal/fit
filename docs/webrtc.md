@@ -189,7 +189,7 @@ made, refreshed and freed, each refusal and each failed credential, at `debug`.
 ([P2P, NAT traversal](dev-plan.md#p2p-nat-traversal)), whose STUN client, TURN client and ICE agent
 are fib's `webrtc/stun`, `webrtc/turn` and `webrtc/ice`, will use it as their relay where no hole
 can be punched between two hosts behind NAT, as any other ICE agent does. The [tunnel](tunnel.md)
-is another thing: its roles forward TCP services through a `tunnel.server` that nodes and clients
+is another thing: its roles forward TCP services through a `tunnel.hub` that nodes and proxies
 link out to, every byte relayed over fit's own links; a TURN server relays the UDP datagrams of
 standard ICE agents, browsers among them, only where they find no direct path, and knows nothing of
 the services behind them.

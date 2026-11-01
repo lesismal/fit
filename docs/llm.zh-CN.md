@@ -1,36 +1,36 @@
-# agent
+# LLM 功能
 
-[English](agent.md) | [简体中文](agent.zh-CN.md)
+[English](llm.md) | [简体中文](llm.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[agent-hub](../examples/agent-hub/fit.conf), [agent-node](../examples/agent-node/fit.conf), [agent-client](../examples/agent-client/fit.conf)。
+配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[llm-hub](../examples/llm-hub/fit.conf), [llm-node](../examples/llm-node/fit.conf), [llm-proxy](../examples/llm-proxy/fit.conf)。
 
-agent 在多台机器之间共享 AI 模型。它是 fit 的三个角色，各由配置中的一个成员开启：
+LLM 功能（配置中的 `llm`）在多台机器之间共享 AI 模型，并提供给 agent 调用。它是 fit 的三个角色，各由配置中的一个成员开启：
 
-- **`agent.node`** 提供模型。模型是某个主流模型接口的一个上游端点：OpenAI 及所有 OpenAI 兼容接口、Anthropic、
+- **`llm.node`** 提供模型。模型是某个主流模型接口的一个上游端点：OpenAI 及所有 OpenAI 兼容接口、Anthropic、
   Google Gemini、Azure OpenAI、Ollama 原生接口与 Cohere（见[模型与接口](#模型与接口)）。它可以是本机的服务（如
   Ollama、vLLM、llama.cpp），也可以是带 Key 的托管接口。node 还上报本机硬件，并执行一组固定的管理操作。
-- **`agent.hub`** 是 node 与 client 汇合之处，通常部署在各台机器都能访问的公网服务器上。它维护节点表及其模型，把每次
+- **`llm.hub`** 是 node 与 proxy 汇合之处，通常部署在各台机器都能访问的公网服务器上。它维护节点表及其模型，把每次
   调用转给提供该模型、负载最小的节点。
-- **`agent.client`** 为 agent（Claude Code、Codex、SDK、自己的应用）提供模型接口：`/v1/chat/completions`、
+- **`llm.proxy`** 为 agent（Claude Code、Codex、SDK、自己的应用）提供模型接口：`/v1/chat/completions`、
   `/v1/messages`、`/v1beta/models/{model}:generateContent`、`/api/chat`、`/v2/chat` 等。它打通本机或局域网——公网
   hub——其他算力设备上的 node 这条链路，向本机（监听回环地址）或局域网（监听局域网地址，启用 TLS 与 API Key）内的
-  agent 提供接口。它不必运行在 agent 所在的机器上：局域网中一台机器上的 client 就能服务整个局域网的 agent。
+  agent 提供接口。它不必运行在 agent 所在的机器上：局域网中一台机器上的 proxy 就能服务整个局域网的 agent。
 
-请求与响应按字节原样转发：agent 从不把一种接口转换成另一种，所以工具调用、思考、图片、音频与流式输出等能力取决于上游本身。
+请求与响应按字节原样转发：fit 从不把一种接口转换成另一种，所以工具调用、思考、图片、音频与流式输出等能力取决于上游本身。
 
 一个进程运行配置中设置了成员的每个角色，任意组合，可以与网关的监听和路由并存，也可以没有它们；只有角色、没有路由的配置
-不需要监听。每个角色把自己的绑定（页面、互联监听、client 的接口）加到监听所用的 fib 引擎上，也在这个引擎上拨号连接对端。
+不需要监听。每个角色把自己的绑定（页面、互联监听、proxy 的接口）加到监听所用的 fib 引擎上，也在这个引擎上拨号连接对端。
 node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨号。这些角色为何属于 fit 见
-[决策 028](decisions/028-agent-and-tunnel.zh-CN.md)。[隧道](tunnel.zh-CN.md)与 [WebRTC](webrtc.zh-CN.md) 的角色
+[决策 028](decisions/028-llm-and-tunnel.zh-CN.md)。[隧道](tunnel.zh-CN.md)与 [WebRTC](webrtc.zh-CN.md) 的角色
 以同样的方式与之并存。
 
-每个角色把日志写到 fit 的 `agent` 日志器（级别由 `log.levels` 设置），每行以角色的成员名为前缀，如 `agent.node: `。
+每个角色把日志写到 fit 的 `llm` 日志器（级别由 `log.levels` 设置），每行以角色的成员名为前缀，如 `llm.node: `。
 
 ## 配置
 
-成员为 `agent.hub`、`agent.node` 与 `agent.client`。它们与配置的其余部分一样严格解码：未知字段是错误，`fit validate`
+成员为 `llm.hub`、`llm.node` 与 `llm.proxy`。它们与配置的其余部分一样严格解码：未知字段是错误，`fit validate`
 检查下文的每个上限。示例用 JSON；同样的字段也可以写在 .conf 或 YAML 配置中。
-[配置参考](reference/config.zh-CN.md)的 Agent 一章列出同样的字段。
+[配置参考](reference/config.zh-CN.md)的 LLM 一章列出同样的字段。
 
 ### 每个角色都有的字段
 
@@ -56,7 +56,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | --- | --- | --- | --- |
 | `address` | string | 必填 | 对端的主机与端口，即对端的 `listen.address`。主机必填，端口是数字。每个地址只出现一次。 |
 | `password` | string | 必填 | 对端的 `listen.password`。 |
-| `role` | string | 必填 | 对端必须声明的角色：`hub`、`node` 或 `client`，不能是拨号方自己的角色。hub 拨 node 与 client，node 拨 hub 与 client，client 拨 hub 与 node。 |
+| `role` | string | 必填 | 对端必须声明的角色：`hub`、`node` 或 `proxy`，不能是拨号方自己的角色。hub 拨 node 与 proxy，node 拨 hub 与 proxy，proxy 拨 hub 与 node。 |
 
 `limits`：
 
@@ -69,7 +69,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `retry_interval` | duration | `5s` | 连不上的对端两次拨号之间的最长等待。至少 100ms。 |
 | `stream_idle` | duration | `2m` | 流在两个方向都没有数据多久之后结束。至少 1s。 |
 
-### `agent.hub`
+### `llm.hub`
 
 每个角色都有的字段，以及：
 
@@ -77,7 +77,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | --- | --- | --- | --- |
 | `max_nodes` | int | 1024 | hub 节点表中保留的节点数上限，含离线节点。超出时忘掉最久未见的离线节点。 |
 
-### `agent.node`
+### `llm.node`
 
 每个角色都有的字段，以及：
 
@@ -110,7 +110,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `gpu_sudo` | bool | true | fit 不以 root 运行时，用 `sudo -n` 执行显卡设置、工具安装以及需要 root 的操作。sudo 不能要求输入密码。 |
 | `refresh_interval` | duration | `30s` | 节点重新读取硬件信息的间隔：5s 到 1h。 |
 | `job_timeout` | duration | `1h` | 作业被杀掉前最多可以运行多久：10s 到 168h。 |
-| `gpu_data_dir` | string | 工作目录 | 驱动需手动下载的厂商，其安装脚本在此目录下按厂商名查找安装包。脚本以 `FIT_AGENT_GPU_DATA_DIR` 读到它。 |
+| `gpu_data_dir` | string | 工作目录 | 驱动需手动下载的厂商，其安装脚本在此目录下按厂商名查找安装包。脚本以 `FIT_LLM_GPU_DATA_DIR` 读到它。 |
 
 `proxy`：
 
@@ -123,20 +123,20 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `max_inflight` | int | 256 | 节点在所有模型上同时转发的调用数上限。超出的调用转到其他节点。 |
 | `max_body_bytes` | int | 33554432（32 MiB） | 一次调用的请求体上限。只有请求体中指明了模型、需要把它改为 `upstream` 时，请求体才被完整读入。 |
 
-### `agent.client`
+### `llm.proxy`
 
 每个角色都有的字段，以及：
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
-| `api` | object | 无 | client 所在机器或局域网中的 agent 调用的接口。没有它时 client 仍连接对端，但不提供接口。 |
+| `api` | object | 无 | proxy 所在机器或局域网中的 agent 调用的接口。没有它时 proxy 仍连接对端，但不提供接口。 |
 | `api_keys` | array | 无 | agent 调用接口所用的 Key；最多 256 个。由页面创建与删除。 |
 
 `api`：
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
-| `address` | string | 必填 | 接口监听的主机与端口。回环地址（如 `127.0.0.1:9301`）服务 client 所在机器上的 agent；局域网地址（如 `192.168.1.10:9301`）或空主机也服务其他机器上的 agent，此时需要 `cert_file` 与 `key_file`，Key 才不会以明文经过网络。 |
+| `address` | string | 必填 | 接口监听的主机与端口。回环地址（如 `127.0.0.1:9301`）服务 proxy 所在机器上的 agent；局域网地址（如 `192.168.1.10:9301`）或空主机也服务其他机器上的 agent，此时需要 `cert_file` 与 `key_file`，Key 才不会以明文经过网络。 |
 | `cert_file` | string | 无 | 接口证书的 PEM 文件，后接中间证书。与 `key_file` 一起设置时，接口经 TLS 提供。 |
 | `key_file` | string | 无 | 证书私钥的 PEM 文件。 |
 | `max_body_bytes` | int | 33554432（32 MiB） | 请求体上限。请求体被完整读入，以取得其中的模型，并在某条路由无法提供服务时再次发送；超出的得到 413。 |
@@ -159,7 +159,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 
 ```json
 {
-  "agent": {
+  "llm": {
     "hub": {
       "name": "hub-1",
       "console": {
@@ -179,7 +179,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 
 ```json
 {
-  "agent": {
+  "llm": {
     "node": {
       "name": "gpu-1",
       "description": "Two RTX 4090s",
@@ -204,12 +204,12 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 }
 ```
 
-### 一个 client
+### 一个 proxy
 
 ```json
 {
-  "agent": {
-    "client": {
+  "llm": {
+    "proxy": {
       "name": "laptop",
       "console": {
         "address": "127.0.0.1:9300",
@@ -227,24 +227,24 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 }
 ```
 
-`password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 client 的页面上创建，不要手写。
+`password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 proxy 的页面上创建，不要手写。
 
 ### 三个地方
 
 公网服务器 hub.example.net 上的 hub、实验室里一台 GPU 机器上的 node、办公室局域网中一台机器（192.168.1.10）上的
-client。node 与 client 都拨号连接 hub，它们自己都不需要监听，因此也都不需要公网地址。client 经 TLS、以其 API Key
+proxy。node 与 proxy 都拨号连接 hub，它们自己都不需要监听，因此也都不需要公网地址。proxy 经 TLS、以其 API Key
 服务局域网中每台机器上的 agent。
 
 服务器：
 
 ```json
-{"agent": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
 ```
 
 GPU 机器：
 
 ```json
-{"agent": {"node": {
+{"llm": {"node": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
@@ -253,24 +253,24 @@ GPU 机器：
 局域网中的机器：
 
 ```json
-{"agent": {"client": {
+{"llm": {"proxy": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
 
-局域网中的 agent 以 `https://192.168.1.10:9301` 作为 base URL。只服务本机 agent 的 client 监听回环地址，如
+局域网中的 agent 以 `https://192.168.1.10:9301` 作为 base URL。只服务本机 agent 的 proxy 监听回环地址，如
 `127.0.0.1:9301`，不需要证书。
 
-每台机器加上 `console` 即可在浏览器中管理其角色。client 也可以直接拨号连接 node，一个进程也可以同时运行 hub 与 node。
+每台机器加上 `console` 即可在浏览器中管理其角色。proxy 也可以直接拨号连接 node，一个进程也可以同时运行 hub 与 node。
 互联是明文 `ws://`：经过它的内容不加密，所以跨公网连接 hub 的链路应走内网或隧道，见[互联](#互联)。
 
 ## 模型与接口
 
-模型的 `api` 是其上游所讲的接口。它决定 `agent.client` 的哪些端点能访问该模型、node 调用的 URL、node 发送模型 Key
+模型的 `api` 是其上游所讲的接口。它决定 `llm.proxy` 的哪些端点能访问该模型、node 调用的 URL、node 发送模型 Key
 所用的请求头，以及模型在哪里被指明——node 就在那里用 `upstream` 替代名称。
 
-| `api` | 上游 | agent 在 agent.client 上调用 | node 调用 | Key 请求头 | 模型位于 |
+| `api` | 上游 | agent 在 llm.proxy 上调用 | node 调用 | Key 请求头 | 模型位于 |
 | --- | --- | --- | --- | --- | --- |
 | `openai` | OpenAI 及所有 OpenAI 兼容接口：DeepSeek、通义千问（DashScope 兼容模式）、Mistral、Groq、xAI、Moonshot、智谱、OpenRouter、Together、Fireworks；vLLM、SGLang、llama.cpp server、LM Studio、Ollama 的 `/v1` | `POST /v1/{call}` | `base_url/{call}` | `Authorization: Bearer` | JSON 请求体的 `model`，或表单的 `model` 字段 |
 | `azure_openai` | Azure OpenAI 部署 | 与 `openai` 相同：`POST /v1/{call}` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}`；`responses` 发往 `base_url/openai/responses?api-version=…` | `api-key` | URL 中的部署名；`responses` 为请求体的 `model` |
@@ -331,7 +331,7 @@ GPU 机器：
 每种各提供一个模型的 node：
 
 ```json
-{"agent": {"node": {
+{"llm": {"node": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
@@ -351,8 +351,8 @@ GPU 机器：
 
 ### 配置是唯一的来源
 
-角色不在自己的文件中保存任何东西。页面所做的修改写回其成员：监听、对端、名称与说明、node 的模型与设置、client 的
-API Key，以及首次启动时生成的 ID。修改经 `admin.Configs` 作为一次配置编辑生效，其来源是该成员，如 `agent.node`：
+角色不在自己的文件中保存任何东西。页面所做的修改写回其成员：监听、对端、名称与说明、node 的模型与设置、proxy 的
+API Key，以及首次启动时生成的 ID。修改经 `admin.Configs` 作为一次配置编辑生效，其来源是该成员，如 `llm.node`：
 把成员替换后的运行中配置像任何配置一样应用，先经检查，记入历史，可以回滚。检查不通过的修改不改变任何东西，页面得到
 400 与原因。角色随后切换到新成员，不断开未改变的连接。
 
@@ -364,7 +364,7 @@ API Key，以及首次启动时生成的 ID。修改经 `admin.Configs` 作为�
 在页面上踢掉连接是唯一不写入配置的修改：它关闭连接，拨号方随后重新连接。
 
 成员中有机密：互联密码与模型的 API Key，以明文保存。普通配置文件的安全性等同于该文件本身；`admin.store` 把它们加密保存。
-client 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以直接使用的 Key。
+proxy 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以直接使用的 Key。
 
 ## 互联
 
@@ -413,8 +413,8 @@ pong 排在其 ping 之前发送的所有内容之后，所以 ping 等待 pong 
 其互联地址与页面 URL。监听方回复自己的身份。
 15 秒内没有完成 hello 的连接被关闭。以下对端被拒绝：
 
-- 角色与本方相同（hub 不与 hub 互联，node 不与 node，client 不与 client）；
-- 角色不是本方互联的角色：hub 连 node 与 client，node 连 hub 与 client，client 连 hub 与 node；
+- 角色与本方相同（hub 不与 hub 互联，node 不与 node，proxy 不与 proxy）；
+- 角色不是本方互联的角色：hub 连 node 与 proxy，node 连 hub 与 proxy，proxy 连 hub 与 node；
 - 拨出的连接上，角色不是 `peers[].role` 所声明的；
 - ID 与本方相同。
 
@@ -430,7 +430,7 @@ pong 排在其 ping 之前发送的所有内容之后，所以 ping 等待 pong 
 
 ### 请求体
 
-client 把 1 MiB 以内的请求体放在转发流的打开请求中（`ProxyReq.body`），更大的则以 `body_stream: true` 加上长度
+proxy 把 1 MiB 以内的请求体放在转发流的打开请求中（`ProxyReq.body`），更大的则以 `body_stream: true` 加上长度
 （`body_size`）发送，随后在流的额度内以 64 KiB 的帧发送请求体。hub 随到随转这些帧；node 随到随发给上游。打开请求还
 携带调用的接口、路径与模型，请求体不是 JSON 时其内容类型（`content_type`），以及发往上游的查询参数（`query`）。
 
@@ -457,7 +457,7 @@ client 把 1 MiB 以内的请求体放在转发流的打开请求中（`ProxyReq
 
 1. 调用必须属于其接口（见[模型与接口](#模型与接口)），请求体是 JSON 或带 boundary 的 `multipart/form-data`。
 2. 模型（名称，且种类讲该调用的接口）必须就绪且未达其 `max_inflight`，节点未达 `proxy.max_inflight`。否则调用以
-   不可用失败，hub 或 client 换一个节点。模型种类不提供的调用（如 `azure_openai` 模型的 `images/variations`）以
+   不可用失败，hub 或 proxy 换一个节点。模型种类不提供的调用（如 `azure_openai` 模型的 `images/variations`）以
    未找到失败。
 3. URL 按种类构造。请求体随到随发给上游。只有当模型的 `upstream` 与 agent 请求的名称不同、且请求体指明了模型时，
    才完整读入请求体以设置它；其他字节保留。超过 `proxy.max_body_bytes` 的请求体失败。
@@ -496,7 +496,7 @@ node 从不执行调用方提供的脚本或命令。它的管理操作是代码
 
 ### 推送
 
-节点信息（身份、说明、硬件、模型及其状态与负载、进行中的调用与作业）变化时，节点把它推送给所有已连接的 hub 与 client，
+节点信息（身份、说明、硬件、模型及其状态与负载、进行中的调用与作业）变化时，节点把它推送给所有已连接的 hub 与 proxy，
 最多每 200ms 一次；对端连上时也单独推送一次。每次推送带一个从节点启动时间开始计数的序号，接收方据此丢弃旧信息，重启后也是如此。
 
 ## hub
@@ -509,22 +509,22 @@ node 连上时，hub 取得其信息，之后跟随它的推送。有未下线�
 ### 模型
 
 hub 按名称与接口列出在线节点的模型：每个模型由哪些节点提供，其中多少个就绪。停用的模型不列出。列表变化时 hub 把它推送
-给所有已连接的 client，最多每 200ms 一次；client 连上时也单独推送一次。
+给所有已连接的 proxy，最多每 200ms 一次；proxy 连上时也单独推送一次。
 
 ### 选节点
 
-`/hub/proxy` 的请求与 `/node/proxy` 相同。hub 在提供该模型且就绪、未被 client 排除的在线节点中，选负载最小的：节点上报的
+`/hub/proxy` 的请求与 `/node/proxy` 相同。hub 在提供该模型且就绪、未被 proxy 排除的在线节点中，选负载最小的：节点上报的
 该模型调用数，加上 hub 当前转给它的调用数。并列时轮询。之后在各个流的额度内双向随到随转帧。
 
-收到节点的头帧之前，不能提供该模型、离线或连接断开的节点被跳过，换下一个，最多 3 个节点；流式请求体只在尚未从 client
-取走任何部分时重试。收到头帧之后，字节已到达 client，任何失败都结束调用。其他错误（如请求有误）立即结束调用。
+收到节点的头帧之前，不能提供该模型、离线或连接断开的节点被跳过，换下一个，最多 3 个节点；流式请求体只在尚未从 proxy
+取走任何部分时重试。收到头帧之后，字节已到达 proxy，任何失败都结束调用。其他错误（如请求有误）立即结束调用。
 
 ### 代管调用
 
 hub 的页面通过两个只对页面开放的方法代管节点：`/hub/node/call` 调用管理方法（限时 90 秒），`/hub/node/stream` 跟随
 作业。允许什么由节点决定。
 
-## client
+## proxy
 
 ### 接口
 
@@ -535,13 +535,13 @@ hub 的页面通过两个只对页面开放的方法代管节点：`/hub/node/ca
 | `POST /v1beta/models/{model}:{method}`、`/v1/models/{model}:{method}` | gemini | 方法名；模型取自路径 |
 | `POST /api/chat`、`/api/generate`、`/api/embed` | ollama | `/` 之后的部分 |
 | `POST /v2/chat`、`/v2/embed`、`/v2/rerank` | cohere | `/v2/` 之后的部分 |
-| `GET /v1/models`、`GET /v1/models/{id}` | 所有模型 | 由 client 应答 |
-| `GET /v1beta/models`、`GET /v1beta/models/{model}` | gemini 模型 | 由 client 应答 |
-| `GET /api/tags` | ollama 模型 | 由 client 应答 |
+| `GET /v1/models`、`GET /v1/models/{id}` | 所有模型 | 由 proxy 应答 |
+| `GET /v1beta/models`、`GET /v1beta/models/{model}` | gemini 模型 | 由 proxy 应答 |
+| `GET /api/tags` | ollama 模型 | 由 proxy 应答 |
 
-这些路径正是各厂商 SDK 把 base URL 设为 client 后调用的地方，所以 agent 只需要 base URL 与 Key。接口是
+这些路径正是各厂商 SDK 把 base URL 设为 proxy 后调用的地方，所以 agent 只需要 base URL 与 Key。接口是
 `api.address` 上一个独立的绑定，与页面分开。其他路径或方法得到 404。模型列表同样需要 Key。`GET /v1/models` 列出
-client 的 hub 与 node 所列的每个模型名称，同时带 OpenAI 与 Anthropic 模型列表的字段，两种 SDK 都能读取；
+proxy 的 hub 与 node 所列的每个模型名称，同时带 OpenAI 与 Anthropic 模型列表的字段，两种 SDK 都能读取；
 `GET /v1beta/models` 按 Gemini `models.list` 的格式列出 Gemini 模型，`GET /api/tags` 按 Ollama 的格式列出 Ollama 模型。
 
 调用在 JSON 请求体的 `model` 中、在 `multipart/form-data` 请求体的 `model` 字段中（OpenAI 的上传，只有 OpenAI 的
@@ -559,9 +559,9 @@ Key 的使用情况（调用数与最近使用时间）与按模型的计数（�
 
 ### 路由
 
-client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的模型（Gemini 调用的模型在路径中）。然后按顺序尝试路由：
+proxy 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的模型（Gemini 调用的模型在路径中）。然后按顺序尝试路由：
 
-1. 直接连接、以讲该调用接口的种类提供该模型且就绪的节点，负载小的优先：节点上报的负载加上本 client 在其上进行中的
+1. 直接连接、以讲该调用接口的种类提供该模型且就绪的节点，负载小的优先：节点上报的负载加上本 proxy 在其上进行中的
    调用数。
 2. 列出该模型且有就绪节点的 hub，轮询。
 
@@ -592,8 +592,8 @@ client 在 `api.max_body_bytes` 之内完整读入请求体，取得其中的模
 
 ### 接入
 
-以下示例中，`127.0.0.1:9301` 是 client 的 `api.address`，`<key>` 是在其页面上创建的 API Key。局域网中其他机器上的
-agent 则经 https 使用 client 的局域网地址。
+以下示例中，`127.0.0.1:9301` 是 proxy 的 `api.address`，`<key>` 是在其页面上创建的 API Key。局域网中其他机器上的
+agent 则经 https 使用 proxy 的局域网地址。
 
 OpenAI SDK（Python）：
 
@@ -616,16 +616,16 @@ Codex，`~/.codex/config.toml`，使用以 OpenAI 接口提供的模型：
 
 ```toml
 model = "qwen3-32b"
-model_provider = "fit_agent"
+model_provider = "fit_llm"
 
-[model_providers.fit_agent]
-name = "fit agent"
+[model_providers.fit_llm]
+name = "fit llm"
 base_url = "http://127.0.0.1:9301/v1"
-env_key = "FIT_AGENT_API_KEY"
+env_key = "FIT_LLM_API_KEY"
 wire_api = "chat"   # 上游支持 /responses 时可改为 "responses"
 ```
 
-然后 `export FIT_AGENT_API_KEY=<key>` 并运行 `codex`。
+然后 `export FIT_LLM_API_KEY=<key>` 并运行 `codex`。
 
 Gemini SDK（Python，`google-genai`），使用以 Gemini 接口提供的模型。base URL 不带版本：SDK 自己拼上
 `/v1beta/models/...`。
@@ -658,7 +658,7 @@ curl http://127.0.0.1:9301/v1/audio/transcriptions -H "Authorization: Bearer <ke
   -F model=whisper -F file=@meeting.wav
 ```
 
-client 的概览页用它自己的地址与模型显示这些示例。
+proxy 的概览页用它自己的地址与模型显示这些示例。
 
 ## 页面
 
@@ -676,16 +676,16 @@ client 的概览页用它自己的地址与模型显示这些示例。
 
 登录与 `admin.console` 相同，用的是同一份代码；用户、会话与锁定见[控制台指南](console.zh-CN.md)。密码在控制台自己的池上
 以 bcrypt 校验（运行 4 个，等待 64 个，同时最多校验 2 个）；等待超过 30 秒的任务得到 504，超出队列的得到 503。同一地址
-15 分钟内登录失败 5 次后，该地址被拒绝 15 分钟（429，带 `Retry-After`）。会话是一个 cookie（`fit_agent_hub`、
-`fit_agent_node` 或 `fit_agent_client`；HttpOnly、SameSite=Strict，TLS 下带 Secure）。除 GET 与 HEAD 外，每个接口请求
+15 分钟内登录失败 5 次后，该地址被拒绝 15 分钟（429，带 `Retry-After`）。会话是一个 cookie（`fit_llm_hub`、
+`fit_llm_node` 或 `fit_llm_proxy`；HttpOnly、SameSite=Strict，TLS 下带 Secure）。除 GET 与 HEAD 外，每个接口请求
 都在 `X-Fit-Csrf` 中带上会话的 CSRF 令牌，`Origin` 是其他站点的请求以 403 拒绝。请求体最大 1 MiB，请求头最大 16 KiB。
 
 每个角色的页面（英文或中文）显示：
 
-- **hub**：概览；它的节点，允许 hub 代管的节点还有其模型、显卡、操作、作业与名称；节点的模型；连到它的 client；它的
+- **hub**：概览；它的节点，允许 hub 代管的节点还有其模型、显卡、操作、作业与名称；节点的模型；连到它的 proxy；它的
   连接；它的名称。
 - **node**：概览，含名称与说明；它的模型，每个可以检查与测试调用；显卡及其设置；操作；作业；它的连接；它的设置。
-- **client**：概览，含以它自己的地址与模型填好的[接入](#接入)示例；它能访问的模型及其路由；API Key；它的连接；它的名称。
+- **proxy**：概览，含以它自己的地址与模型填好的[接入](#接入)示例；它能访问的模型及其路由；API Key；它的连接；它的名称。
 
 连接页设置监听与对端，也可以踢掉一条连接。
 
@@ -696,17 +696,17 @@ client 的概览页用它自己的地址与模型显示这些示例。
 | `POST /api/login` | 用 `{username, password}` 开始会话；应答 `{user, csrf}`。 |
 | `POST /api/logout` | 结束会话；应答 204。 |
 | `GET /api/session` | 用户与 CSRF 令牌。 |
-| `GET /api/me` | `{user, identity}`，即角色的身份；client 另加 `api_url`，即其接口的 URL。 |
+| `GET /api/me` | `{user, identity}`，即角色的身份；proxy 另加 `api_url`，即其接口的 URL。 |
 | `POST /api/rpc<method>` | 执行一个方法，如 `/api/rpc/mesh/peers`，以 JSON 应答其结果，或以错误码对应的 HTTP 状态应答 `{"error", "code"}`；方法超时得到 504。 |
 | `POST /api/stream<method>` | 打开一个流方法，以 SSE 应答：每帧一个数据事件，`end` 带结果，`error` 带 `{code, message}`。关闭请求即取消流。 |
 
 页面以拥有全部权限的本地调用方身份，调用与对端相同的方法，以及只有页面能调用的方法：互联的（`/mesh/peers`、
 `/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`）；hub 的节点表（`/hub/nodes`）、代管调用（`/hub/node/call`、
-`/hub/node/stream`）与名称（`/hub/profile/set`）；node 的设置（`/node/settings/get`、`/node/settings/set`）；client 的
-模型、计数、Key 与名称（`/client/models`、`/client/stats`、`/client/keys/list`、`/client/keys/create`、
-`/client/keys/delete`、`/client/profile/set`）。
+`/hub/node/stream`）与名称（`/hub/profile/set`）；node 的设置（`/node/settings/get`、`/node/settings/set`）；proxy 的
+模型、计数、Key 与名称（`/proxy/models`、`/proxy/stats`、`/proxy/keys/list`、`/proxy/keys/create`、
+`/proxy/keys/delete`、`/proxy/profile/set`）。
 
-方法限时 10 秒，互联的方法也是；node 或 client 修改配置的方法限时 30 秒，模型检查 20 秒，node 的显卡状态与设置 30 秒，
+方法限时 10 秒，互联的方法也是；node 或 proxy 修改配置的方法限时 30 秒，模型检查 20 秒，node 的显卡状态与设置 30 秒，
 hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个等待）上运行，从不在 fib worker 上运行；超出队列的方法
 得到 503。流的事件以不等待的方式写出，其帧只在浏览器取走后才归还给流，所以慢的浏览器只阻塞它自己的流；一个角色的页面上
 最多同时打开 16 个流，第 17 个得到 429，30 秒内什么都没取走的浏览器使其流结束。
@@ -726,7 +726,7 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
 | 帧 | 16 MiB | 固定 |
 | 每条连接等待的推送 | 1024，超出则关闭连接 | 固定 |
 | 拨号、握手、hello | 10s、5s、15s | 固定 |
-| 方法时限 | 10s；node 或 client 修改配置 30s，模型检查 20s，显卡状态与设置 30s，hub 的代管调用 90s | 固定 |
+| 方法时限 | 10s；node 或 proxy 修改配置 30s，模型检查 20s，显卡状态与设置 30s，hub 的代管调用 90s | 固定 |
 | 对端、模型、API Key | 64、256、256 | 固定 |
 | hub 节点表中的节点 | 1024 | `max_nodes` |
 | node 同时转发的调用 | 256，另有每个模型的 `max_inflight` | `proxy.max_inflight` |
@@ -738,13 +738,13 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
 | 作业 | 运行 8 个，保留 200 个，每个输出 1 MiB | 固定 |
 | 作业运行时长 | 1h | `settings.job_timeout` |
 | node 的硬件与显卡读取 | 运行 2 个，等待 16 个；显卡状态限时 25s，保留 5s | 固定 |
-| client 接口请求体 | 32 MiB，完整读入 | `api.max_body_bytes` |
-| client 接口连接、调用 | 256、256 | `api.max_conns`、`api.max_inflight` |
-| client 首字节、总时限 | 5m、30m | `api` |
-| client 接口请求头大小、读请求头、读取、空闲 | 64 KiB、10s、2m、2m | 固定 |
-| client 等待慢 agent | 每次写入 60s | 固定 |
-| 每次调用的路由：client、hub | 4、3 | 固定 |
-| client 的计数 | 1024 个模型，其余记为 `other` | 固定 |
+| proxy 接口请求体 | 32 MiB，完整读入 | `api.max_body_bytes` |
+| proxy 接口连接、调用 | 256、256 | `api.max_conns`、`api.max_inflight` |
+| proxy 首字节、总时限 | 5m、30m | `api` |
+| proxy 接口请求头大小、读请求头、读取、空闲 | 64 KiB、10s、2m、2m | 固定 |
+| proxy 等待慢 agent | 每次写入 60s | 固定 |
+| 每次调用的路由：proxy、hub | 4、3 | 固定 |
+| proxy 的计数 | 1024 个模型，其余记为 `other` | 固定 |
 | 角色的池 | 运行 16 个，等待 256 个 | 固定 |
 | 等待的配置编辑 | fit 所有角色共 64 个；每个最多等其方法的时限 | 固定 |
 | 页面上的流 | 16 个；停滞的浏览器 30s | 固定 |
@@ -759,7 +759,7 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
 - **不阻塞 fib worker。** 页面与接口的请求在回调中应答；需要等待的工作在别处运行：bcrypt 在控制台的池上，方法在角色
   的池上，硬件与显卡查询在 node 的工作池上，命令在作业的池上，配置编辑在管理器的 goroutine 上。互联的请求与流运行在
   会话的 goroutine 上，每条连接的数量受 `limits.max_inflight` 限制。
-- **请求体流式传输。** node 用 fib 的异步客户端转发调用，请求体与应答体随到随转，通过流的额度实现双向背压。只有 client
+- **请求体流式传输。** node 用 fib 的异步客户端转发调用，请求体与应答体随到随转，通过流的额度实现双向背压。只有 proxy
   接口为读取模型、并向下一条路由再次发送而完整读入请求体（在 `api.max_body_bytes` 之内），node 也只在把请求体指明的
   模型设为 `upstream` 时完整读入（在 `proxy.max_body_bytes` 之内）。
 - **每个 map、队列与池都有上限**，见上表；在线节点与模型目录的条目受连接数约束。

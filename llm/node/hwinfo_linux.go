@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 func collectPlatform(h *model.HWInfo) {

@@ -1,7 +1,7 @@
-// fit agent client console: overview (agent API + quick start + stats), models (catalog with routes), API keys,
+// fit llm proxy console: overview (agent API + quick start + stats), models (catalog with routes), API keys,
 // connections and settings. Needs ui.js and peers.js.
 //
-// fit agent client 控制台：概览（agent 接口 + 接入示例 + 统计）、模型（目录与路由）、API Key、连接与设置。依赖 ui.js 与 peers.js。
+// fit llm proxy 控制台：概览（agent 接口 + 接入示例 + 统计）、模型（目录与路由）、API Key、连接与设置。依赖 ui.js 与 peers.js。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -24,7 +24,7 @@
       'c.key_none': 'No API keys: create one for your agents.', 'c.key_del': 'Delete API key {n}? Agents using it stop working.',
       'c.key_once': 'Copy the key now: it is shown only this once (only its hash is stored).', 'c.key_created_title': 'API key created',
       'c.key_note': 'Usage (last used, calls) is saved at most once a minute.',
-      'c.profile': 'Profile', 'c.name': 'Display name', 'c.name_hint': 'How hubs and nodes see this client'
+      'c.profile': 'Profile', 'c.name': 'Display name', 'c.name_hint': 'How hubs and nodes see this proxy'
     },
     'zh-CN': {
       'c.sub': '本机与局域网 agent 的模型网关', 'c.overview': '概览', 'c.models': '模型', 'c.keys': 'API Key',
@@ -43,7 +43,7 @@
       'c.key_none': '暂无 API Key：请为 agent 创建一个。', 'c.key_del': '删除 API Key {n}？使用它的 agent 将无法调用。',
       'c.key_once': '请立即复制：Key 只显示这一次（只保存其哈希）。', 'c.key_created_title': 'API Key 已创建',
       'c.key_note': '使用情况（最近使用、调用数）最多每分钟保存一次。',
-      'c.profile': '基本信息', 'c.name': '显示名称', 'c.name_hint': 'hub 与节点看到的本 client 名称'
+      'c.profile': '基本信息', 'c.name': '显示名称', 'c.name_hint': 'hub 与节点看到的本 proxy 名称'
     }
   });
 
@@ -73,9 +73,9 @@
       ['claude', 'Claude Code', '# ANTHROPIC_BASE_URL has no /v1: the SDK appends /v1/messages\n' +
         'export ANTHROPIC_BASE_URL=' + origin + '\nexport ANTHROPIC_AUTH_TOKEN=<API_KEY>   # or ANTHROPIC_API_KEY=<API_KEY>\n' +
         'export ANTHROPIC_MODEL=' + an + '\nexport ANTHROPIC_SMALL_FAST_MODEL=' + an + '\nclaude'],
-      ['codex', 'Codex', '# ~/.codex/config.toml\nmodel = "' + oa + '"\nmodel_provider = "fit_agent"\n\n[model_providers.fit_agent]\n' +
-        'name = "fit agent"\nbase_url = "' + origin + '/v1"\nenv_key = "FIT_AGENT_API_KEY"\nwire_api = "chat"   # or "responses"\n\n' +
-        '# then: export FIT_AGENT_API_KEY=<API_KEY>; codex'],
+      ['codex', 'Codex', '# ~/.codex/config.toml\nmodel = "' + oa + '"\nmodel_provider = "fit_llm"\n\n[model_providers.fit_llm]\n' +
+        'name = "fit llm"\nbase_url = "' + origin + '/v1"\nenv_key = "FIT_LLM_API_KEY"\nwire_api = "chat"   # or "responses"\n\n' +
+        '# then: export FIT_LLM_API_KEY=<API_KEY>; codex'],
       ['curl', 'curl', 'curl ' + origin + '/v1/chat/completions \\\n  -H "Authorization: Bearer <API_KEY>" \\\n  -H "Content-Type: application/json" \\\n' +
         '  -d \'{"model": "' + oa + '", "stream": true, "messages": [{"role": "user", "content": "Hello"}]}\'\n\n' +
         'curl ' + origin + '/v1/messages \\\n  -H "x-api-key: <API_KEY>" -H "anthropic-version: 2023-06-01" \\\n  -H "Content-Type: application/json" \\\n' +
@@ -107,7 +107,7 @@
       UI.card(t('c.per_model'), perModel, null, true)));
     drawQuick();
     function load() {
-      return Promise.all([UI.rpc('/client/stats'), UI.rpc('/client/models'), UI.rpc('/client/keys/list')]).then(function (r) {
+      return Promise.all([UI.rpc('/proxy/stats'), UI.rpc('/proxy/models'), UI.rpc('/proxy/keys/list')]).then(function (r) {
         var st = r[0], ms = r[1] || [], keys = r[2] || [];
         var first = !models.length && ms.length;
         models = ms;
@@ -142,7 +142,7 @@
     UI.mount(sh.tools, UI.btn(t('refresh'), 'refresh', function () { load(); }, 'sm'));
     UI.mount(el, h('div.stack', h('div.callout', UI.icon('info'), ' ', t('c.route_note')), UI.card(t('c.models'), box, null, true)));
     function load() {
-      return UI.rpc('/client/models').then(function (ms) {
+      return UI.rpc('/proxy/models').then(function (ms) {
         UI.mount(box, UI.table([
           { label: t('c.model'), render: function (m) { return h('b', m.name); } },
           { label: t('c.api_fmt'), render: function (m) { return apiBadge(m.api); } },
@@ -164,7 +164,7 @@
         title: t('c.key_new'), body: h('div.form', UI.field(t('c.key_name'), name, t('c.key_name_hint'))),
         actions: [{ label: t('cancel') }, {
           label: t('create'), kind: 'primary', onclick: function () {
-            return UI.rpc('/client/keys/create', { name: name.value.trim() }).then(function (k) { load(); showKey(k); });
+            return UI.rpc('/proxy/keys/create', { name: name.value.trim() }).then(function (k) { load(); showKey(k); });
           }
         }]
       });
@@ -179,13 +179,13 @@
     }
     function del(k) {
       UI.confirm(t('c.key_del', { n: k.name }), t('delete'), true).then(function (ok) {
-        if (ok) UI.rpc('/client/keys/delete', { id: k.id }).then(load).catch(UI.fail);
+        if (ok) UI.rpc('/proxy/keys/delete', { id: k.id }).then(load).catch(UI.fail);
       });
     }
     UI.mount(sh.tools, UI.btn(t('c.key_new'), 'plus', create, 'primary sm'));
     UI.mount(el, h('div.stack', UI.card(t('c.keys'), box, null, true), h('div.muted.small', t('c.key_note'))));
     function load() {
-      return UI.rpc('/client/keys/list').then(function (keys) {
+      return UI.rpc('/proxy/keys/list').then(function (keys) {
         UI.mount(box, UI.table([
           { label: t('c.key_name'), render: function (k) { return h('b', k.name); } },
           { label: t('c.key_prefix'), render: function (k) { return h('code', k.prefix + '…'); } },
@@ -206,17 +206,17 @@
     var form = h('form.form', {
       onsubmit: function (e) {
         e.preventDefault();
-        UI.busy(b, UI.rpc('/client/profile/set', { name: name.value.trim() })).then(function () {
+        UI.busy(b, UI.rpc('/proxy/profile/set', { name: name.value.trim() })).then(function () {
           if (me.identity) me.identity.name = name.value.trim();
           UI.toast(t('saved'));
         }).catch(UI.fail);
       }
     }, UI.field(t('c.name'), name, t('c.name_hint')), h('div.btn-row', b));
-    UI.mount(el, h('div.stack', UI.configNote('client'), UI.card(t('c.profile'), form)));
+    UI.mount(el, h('div.stack', UI.configNote('proxy'), UI.card(t('c.profile'), form)));
   }
 
   var app = document.getElementById('app');
-  var brand = 'fit agent client';
+  var brand = 'fit llm proxy';
   var s = UI.boot(app, {
     brand: brand, sub: t('c.sub'),
     start: function (me) {

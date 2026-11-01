@@ -1,12 +1,12 @@
 {
   "admin": {
     "store": {
-      "path": "/data/client1.store",
+      "path": "/data/proxy1.store",
       "password_env": "FIT_STORE_PASSWORD"
     }
   },
-  "agent": {
-    "client": {
+  "llm": {
+    "proxy": {
       "console": {
         "address": "0.0.0.0:9300",
         "cert_file": "/certs/cert.pem",

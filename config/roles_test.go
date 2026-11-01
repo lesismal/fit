@@ -10,46 +10,46 @@ import (
 	"github.com/lesismal/fit/internal/sysmem"
 )
 
-// TestAgentChecks checks what the agent's roles refuse beyond decoding:
+// TestLLMChecks checks what the LLM feature's roles refuse beyond decoding:
 // every member's own error, each in a config of its own.
-func TestAgentChecks(t *testing.T) {
+func TestLLMChecks(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("a", n) }
 	model := func(m string) string {
-		return `{"agent": {"node": {"models": [` + m + `]}}}`
+		return `{"llm": {"node": {"models": [` + m + `]}}}`
 	}
-	peers := make([]string, MaxAgentPeers+1)
+	peers := make([]string, MaxLLMPeers+1)
 	for i := range peers {
 		peers[i] = `{"address": "h:` + strconv.Itoa(1000+i) + `", "password": "p", "role": "hub"}`
 	}
-	keys := make([]string, MaxAgentKeys+1)
+	keys := make([]string, MaxLLMKeys+1)
 	for i := range keys {
 		keys[i] = `{"id": "x", "name": "k", "hash": "y"}`
 	}
-	models := make([]string, MaxAgentModels+1)
+	models := make([]string, MaxLLMModels+1)
 	for i := range models {
 		models[i] = `{"name": "m` + strconv.Itoa(i) + `", "api": "openai", "base_url": "http://h"}`
 	}
 	for _, bad := range []struct{ doc, want string }{
-		{`{"agent": {"hub": {"id": "a b"}}}`, "the ID is up to 128 characters"},
-		{`{"agent": {"hub": {"listen": {"address": ":9200", "password": ""}}}}`, "a listener needs a password"},
-		{`{"agent": {"node": {"peers": [` + strings.Join(peers, ",") + `]}}}`, "at most 64 peers"},
-		{`{"agent": {"hub": {"peers": [{"address": "h:1", "password": "", "role": "node"}]}}}`, "a peer needs its password"},
-		{`{"agent": {"hub": {"limits": {"ping_interval": "10ms"}}}}`, "ping_interval"},
-		{`{"agent": {"hub": {"limits": {"slow_timeout": "-1s"}}}}`, "slow_timeout"},
-		{`{"agent": {"hub": {"limits": {"stream_idle": "10ms"}}}}`, "stream_idle"},
+		{`{"llm": {"hub": {"id": "a b"}}}`, "the ID is up to 128 characters"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": ""}}}}`, "a listener needs a password"},
+		{`{"llm": {"node": {"peers": [` + strings.Join(peers, ",") + `]}}}`, "at most 64 peers"},
+		{`{"llm": {"hub": {"peers": [{"address": "h:1", "password": "", "role": "node"}]}}}`, "a peer needs its password"},
+		{`{"llm": {"hub": {"limits": {"ping_interval": "10ms"}}}}`, "ping_interval"},
+		{`{"llm": {"hub": {"limits": {"slow_timeout": "-1s"}}}}`, "slow_timeout"},
+		{`{"llm": {"hub": {"limits": {"stream_idle": "10ms"}}}}`, "stream_idle"},
 		{model(`{"name": "a", "api": "openai", "base_url": "http://h", "upstream": "a b"}`), "upstream model ID"},
 		{model(`{"name": "a", "api": "openai", "base_url": "http://h", "api_key": "a b"}`), "API key"},
 		{model(`{"name": "a", "api": "openai", "base_url": "http://h", "description": "` + long(1025) + `"}`), "description is longer"},
-		{`{"agent": {"node": {"description": "` + long(1025) + `"}}}`, "description is longer"},
-		{`{"agent": {"node": {"models": [` + strings.Join(models, ",") + `]}}}`, "at most 256 models"},
-		{`{"agent": {"node": {"settings": {"job_timeout": "1s"}}}}`, "job_timeout is 10s to 168h"},
-		{`{"agent": {"client": {"api": {"address": "nope"}}}}`, "nope"},
-		{`{"agent": {"client": {"api": {"address": "127.0.0.1:9300", "cert_file": "c"}}}}`, "cert_file and key_file go together"},
-		{`{"agent": {"client": {"api_keys": [` + strings.Join(keys, ",") + `]}}}`, "at most 256 keys"},
-		{`{"agent": {"client": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "hash": "` + long(64) + `"},
+		{`{"llm": {"node": {"description": "` + long(1025) + `"}}}`, "description is longer"},
+		{`{"llm": {"node": {"models": [` + strings.Join(models, ",") + `]}}}`, "at most 256 models"},
+		{`{"llm": {"node": {"settings": {"job_timeout": "1s"}}}}`, "job_timeout is 10s to 168h"},
+		{`{"llm": {"proxy": {"api": {"address": "nope"}}}}`, "nope"},
+		{`{"llm": {"proxy": {"api": {"address": "127.0.0.1:9300", "cert_file": "c"}}}}`, "cert_file and key_file go together"},
+		{`{"llm": {"proxy": {"api_keys": [` + strings.Join(keys, ",") + `]}}}`, "at most 256 keys"},
+		{`{"llm": {"proxy": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "hash": "` + long(64) + `"},
 			{"id": "0123456789abcdef", "name": "l", "hash": "` + long(64) + `"}]}}}`, "listed twice"},
-		{`{"agent": {"client": {"api_keys": [{"id": "0123456789abcdef", "name": " ", "hash": "` + long(64) + `"}]}}}`, "the name needs 1 to 64"},
-		{`{"agent": {"client": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "prefix": "` + long(17) + `", "hash": "` + long(64) + `"}]}}}`, "the prefix is up to 16"},
+		{`{"llm": {"proxy": {"api_keys": [{"id": "0123456789abcdef", "name": " ", "hash": "` + long(64) + `"}]}}}`, "the name needs 1 to 64"},
+		{`{"llm": {"proxy": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "prefix": "` + long(17) + `", "hash": "` + long(64) + `"}]}}}`, "the prefix is up to 16"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
@@ -58,76 +58,76 @@ func TestAgentChecks(t *testing.T) {
 	}
 }
 
-// TestAgentChecksUndecoded checks what decoding refuses before the checks
+// TestLLMChecksUndecoded checks what decoding refuses before the checks
 // see it, as the pages may hand it to them: a model's max_inflight out of
 // range, an api of neither kind, and a negative proxy timeout.
-func TestAgentChecksUndecoded(t *testing.T) {
-	if f, msg := CheckAgentModel(&AgentModel{Name: "a", API: "openai", BaseURL: "http://h", MaxInflight: -1}); f != "max_inflight" || msg == "" {
+func TestLLMChecksUndecoded(t *testing.T) {
+	if f, msg := CheckLLMModel(&LLMModel{Name: "a", API: "openai", BaseURL: "http://h", MaxInflight: -1}); f != "max_inflight" || msg == "" {
 		t.Errorf("max_inflight -1: %q %q", f, msg)
 	}
-	if f, _ := CheckAgentModel(&AgentModel{Name: "a", API: "palm", BaseURL: "http://h"}); f != "api" {
+	if f, _ := CheckLLMModel(&LLMModel{Name: "a", API: "palm", BaseURL: "http://h"}); f != "api" {
 		t.Errorf("api palm: %q", f)
 	}
-	for _, api := range AgentAPIs {
-		m := AgentModel{Name: "a", API: api, BaseURL: "http://h"}
+	for _, api := range LLMAPIs {
+		m := LLMModel{Name: "a", API: api, BaseURL: "http://h"}
 		if api == "azure_openai" {
 			m.APIVersion = "2024-10-21"
 		}
-		if f, msg := CheckAgentModel(&m); msg != "" {
+		if f, msg := CheckLLMModel(&m); msg != "" {
 			t.Errorf("api %s: %s %s", api, f, msg)
 		}
 	}
 	var got []string
 	add := func(_ Value, format string, args ...any) { got = append(got, format) }
-	checkAgentNode(&AgentNode{Proxy: &AgentNodeProxy{ConnectTimeout: -1}}, add)
+	checkLLMNode(&LLMNode{Proxy: &LLMNodeProxy{ConnectTimeout: -1}}, add)
 	if len(got) != 1 || !strings.Contains(got[0], "is negative") {
 		t.Errorf("negative connect_timeout: %q", got)
 	}
 }
 
-// TestAgentDefaults checks the agent's settings fall back to their
+// TestLLMDefaults checks the LLM feature's settings fall back to their
 // defaults, on a nil struct as on one left empty, and the peer roles of a
 // role.
-func TestAgentDefaults(t *testing.T) {
-	for _, l := range []*AgentLimits{nil, {}} {
-		if l.Conns() != DefaultAgentMaxConns || l.Inflight() != DefaultAgentMaxInflight ||
-			l.Ping() != DefaultAgentPingInterval.Std() || l.Slow() != DefaultAgentSlowTimeout.Std() ||
-			l.Retry() != DefaultAgentRetryInterval.Std() || l.Idle() != DefaultAgentStreamIdle.Std() {
+func TestLLMDefaults(t *testing.T) {
+	for _, l := range []*LLMLimits{nil, {}} {
+		if l.Conns() != DefaultLLMMaxConns || l.Inflight() != DefaultLLMMaxInflight ||
+			l.Ping() != DefaultLLMPingInterval.Std() || l.Slow() != DefaultLLMSlowTimeout.Std() ||
+			l.Retry() != DefaultLLMRetryInterval.Std() || l.Idle() != DefaultLLMStreamIdle.Std() {
 			t.Errorf("%+v: not the defaults", l)
 		}
 	}
-	l := &AgentLimits{MaxConns: 3, MaxInflight: 4, PingInterval: Duration(time.Second)}
+	l := &LLMLimits{MaxConns: 3, MaxInflight: 4, PingInterval: Duration(time.Second)}
 	if l.Conns() != 3 || l.Inflight() != 4 || l.Ping() != time.Second {
 		t.Errorf("%+v: not its own", l)
 	}
-	a := &AgentClientAPI{}
-	if a.Conns() != DefaultAgentClientMaxConns || a.Inflight() != DefaultAgentClientMaxInflight {
+	a := &LLMProxyAPI{}
+	if a.Conns() != DefaultLLMProxyMaxConns || a.Inflight() != DefaultLLMProxyMaxInflight {
 		t.Errorf("%+v: not the defaults", a)
 	}
-	a = &AgentClientAPI{MaxConns: 5, MaxInflight: 6}
+	a = &LLMProxyAPI{MaxConns: 5, MaxInflight: 6}
 	if a.Conns() != 5 || a.Inflight() != 6 {
 		t.Errorf("%+v: not its own", a)
 	}
-	for role, want := range map[string]string{"hub": "node client", "node": "hub client", "client": "hub node", "x": ""} {
-		if got := strings.Join(AgentPeerRoles(role), " "); got != want {
-			t.Errorf("AgentPeerRoles(%q) = %q, want %q", role, got, want)
+	for role, want := range map[string]string{"hub": "node proxy", "node": "hub proxy", "proxy": "hub node", "x": ""} {
+		if got := strings.Join(LLMPeerRoles(role), " "); got != want {
+			t.Errorf("LLMPeerRoles(%q) = %q, want %q", role, got, want)
 		}
 	}
 }
 
 // TestTunnelChecks checks what the tunnel's roles refuse beyond decoding.
 func TestTunnelChecks(t *testing.T) {
-	up := func(u string) string { return `{"tunnel": {"node": {"servers": [` + u + `]}}}` }
+	up := func(u string) string { return `{"tunnel": {"node": {"hubs": [` + u + `]}}}` }
 	for _, bad := range []struct{ doc, want string }{
-		{`{"tunnel": {"server": {"name": " s"}}}`, "is not a name"},
-		{`{"tunnel": {"server": {"listeners": [{"protocol": "tcp", "address": "nope"}]}}}`, "nope"},
-		{`{"tunnel": {"server": {"listeners": [{"protocol": "ws", "address": ":7000", "path": "x"}]}}}`, "does not start with '/'"},
-		{`{"tunnel": {"server": {"password": "p", "console_socket": {"address": "nope"}}}}`, "nope"},
-		{`{"tunnel": {"server": {"console_socket": {"address": ":7001"}}}}`, "a password is needed"},
+		{`{"tunnel": {"hub": {"name": " s"}}}`, "is not a name"},
+		{`{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": "nope"}]}}}`, "nope"},
+		{`{"tunnel": {"hub": {"listeners": [{"protocol": "ws", "address": ":7000", "path": "x"}]}}}`, "does not start with '/'"},
+		{`{"tunnel": {"hub": {"password": "p", "console_socket": {"address": "nope"}}}}`, "nope"},
+		{`{"tunnel": {"hub": {"console_socket": {"address": ":7001"}}}}`, "a password is needed"},
 		{`{"tunnel": {"node": {"name": "a/b"}}}`, "is not a name"},
 		{`{"tunnel": {"node": {"services": [{"name": "", "address": "h:22"}]}}}`, "the name is empty"},
 		{`{"tunnel": {"node": {"services": [{"name": "a/b", "address": "h:22"}]}}}`, "is not a name"},
-		{`{"tunnel": {"client": {"name": " c"}}}`, "is not a name"},
+		{`{"tunnel": {"proxy": {"name": " c"}}}`, "is not a name"},
 		{up(`{"name": " s", "endpoints": [{"address": "h:1"}], "password": "p"}`), "is not a name"},
 		{up(`{"name": "s", "endpoints": [], "password": "p"}`), "list at least one endpoint"},
 		{up(`{"endpoints": [{"address": "h:1"}, {"address": "h:1"}], "password": "p"}`), "listed twice"},
@@ -136,11 +136,11 @@ func TestTunnelChecks(t *testing.T) {
 		{up(`{"endpoints": [{"address": "ws://:1/x"}], "password": "p"}`), "not a ws:// URL"},
 		{up(`{"endpoints": [{"address": "quic://h"}], "password": "p"}`), "not a quic:// URL"},
 		{up(`{"endpoints": [{"address": "quic://h:1/x"}], "password": "p"}`), "has a path"},
-		{`{"tunnel": {"client": {"forwards": [{"listen": "nope", "node": "n", "service": "s"}]}}}`, "nope"},
-		{`{"tunnel": {"client": {"forwards": [{"listen": "127.0.0.1:0", "node": "", "service": "s"}]}}}`, "the node is empty"},
-		{`{"tunnel": {"client": {"forwards": [{"listen": "127.0.0.1:0", "node": "n", "service": ""}]}}}`, "the service is empty"},
-		{`{"tunnel": {"client": {"web_proxies": [{"listen": "127.0.0.1:0", "url": "ws://h:1/", "password": ""}]}}}`, "the password is empty"},
-		{`{"tunnel": {"server": {"console": {"address": "nope", "users": []}}}}`, "nope"},
+		{`{"tunnel": {"proxy": {"forwards": [{"listen": "nope", "node": "n", "service": "s"}]}}}`, "nope"},
+		{`{"tunnel": {"proxy": {"forwards": [{"listen": "127.0.0.1:0", "node": "", "service": "s"}]}}}`, "the node is empty"},
+		{`{"tunnel": {"proxy": {"forwards": [{"listen": "127.0.0.1:0", "node": "n", "service": ""}]}}}`, "the service is empty"},
+		{`{"tunnel": {"proxy": {"web_proxies": [{"listen": "127.0.0.1:0", "url": "ws://h:1/", "password": ""}]}}}`, "the password is empty"},
+		{`{"tunnel": {"hub": {"console": {"address": "nope", "users": []}}}}`, "nope"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
@@ -148,7 +148,7 @@ func TestTunnelChecks(t *testing.T) {
 		}
 	}
 	// Two forwards on port 0 each pick a free port: not the same listener.
-	good := `{"tunnel": {"client": {"forwards": [{"listen": "127.0.0.1:0", "node": "n", "service": "s"},
+	good := `{"tunnel": {"proxy": {"forwards": [{"listen": "127.0.0.1:0", "node": "n", "service": "s"},
 		{"listen": "127.0.0.1:0", "node": "n", "service": "s"}]}}}`
 	if _, err := Load([]byte(good)); err != nil {
 		t.Fatal(err)
@@ -165,10 +165,10 @@ func TestTunnelNames(t *testing.T) {
 	if got := tunnelHostName(); got != want {
 		t.Errorf("tunnelHostName() = %q, want %q", got, want)
 	}
-	if (&TunnelServer{}).ServerName() != want || (&TunnelNode{}).NodeName() != want || (&TunnelClient{}).ClientName() != want {
+	if (&TunnelHub{}).HubName() != want || (&TunnelNode{}).NodeName() != want || (&TunnelProxy{}).ProxyName() != want {
 		t.Error("an unnamed role does not take the host's name")
 	}
-	if (&TunnelUplink{}).ServerName() != "" {
+	if (&TunnelUplink{}).HubName() != "" {
 		t.Error("an uplink without endpoints has a name")
 	}
 	if (TunnelListener{Protocol: TunnelWS, Path: "/x"}).WSPath() != "/x" {

@@ -62,8 +62,8 @@
 | A49 | 在监听 socket 上朝某地址打开 UDP 对端 | 已完成，`96a2331`（在 `80c7f76` 中） | 1, 9 | I85（P2P）、I87 |
 | A50 | QUIC DATAGRAM 帧 | 已提出 | 9 | I90（P2P） |
 | A51 | 包设备的描述符在 poller 上读写 | 已提出 | 1, 8, 11 | I95（VPN） |
-| A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已提出 | 10, 13 | agent（028） |
-| A53 | WebSocket 连接发送的背压 | 已提出 | 8, 9, 11 | agent、tunnel（028） |
+| A52 | WebSocket 连接的底层传输：强制关闭与其地址 | 已提出 | 10, 13 | llm（028） |
+| A53 | WebSocket 连接发送的背压 | 已提出 | 8, 9, 11 | llm、tunnel（028） |
 | A54 | 引擎 UDP binding 上的原始 QUIC 端点 | 已提出 | 15 | tunnel（028） |
 | A55 | 经 TCP 和 TLS 的 TURN | 已完成，`97201b6`（在 `84a67f7` 中） | — | I111（029） |
 | A56 | 从不让 worker 等待的 TURN 服务器 | 已完成，`74100b2`（在 `84a67f7` 中） | 1 | I87、I111（029） |
@@ -1194,13 +1194,13 @@ Wintun 没有这样的描述符，不需要。
 
 ## A52：WebSocket 连接的底层传输：强制关闭与其地址
 
-**状态。** 2026-11-01 为 agent 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+**状态。** 2026-11-01 为 llm 的角色提出（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 
-**问题。** agent 的互联链路是 fib 的 WebSocket。对端已死，或积压到 ping 等了 30 秒仍没有 pong 的链路，必须立即断开。
+**问题。** llm 的互联链路是 fib 的 WebSocket。对端已死，或积压到 ping 等了 30 秒仍没有 pong 的链路，必须立即断开。
 `Connection.Close` 发送关闭帧，它排在所有未发送内容之后，所以一个什么也不读的对端，其套接字要等到引擎的写队列上限或内核放弃才关闭。
 `websocket.Connection` 没有暴露其下的 `fib.Connection`，没有跳过关闭握手的关闭，拨号方也拿不到对端地址。
 
-**证据。** `agent/internal/wire/conn.go`：监听方用包装 WebSocket 处理器的方式，按对端地址记录其绑定的 `fib.Connection`，
+**证据。** `llm/internal/wire/conn.go`：监听方用包装 WebSocket 处理器的方式，按对端地址记录其绑定的 `fib.Connection`，
 再按升级请求的 `RemoteAddr` 找到链路的连接；拨号方经 `DialerConfig.Dial` 拿到自己的 `fib.Connection`。两者都是符合规则的临时做法，
 由本请求取代。
 
@@ -1218,13 +1218,13 @@ func (c *Connection) RemoteAddr() net.Addr
 
 ## A53：WebSocket 连接发送的背压
 
-**状态。** 2026-11-01 为 agent 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+**状态。** 2026-11-01 为 llm 的角色提出（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 
 **问题。** `websocket.Connection.WriteMessage` 把给它的内容全部排队，从不告诉调用方积压了多少，处理器也无法暂停连接的读取。
-agent 的 wire 协议用额度窗口（256 KiB）约束每个流，所以链路的队列以其各流的窗口与应答为界，但链路自身的队列与填充它的生产者之间没有联系：
+llm 的 wire 协议用额度窗口（256 KiB）约束每个流，所以链路的队列以其各流的窗口与应答为界，但链路自身的队列与填充它的生产者之间没有联系：
 读得慢的对端只能由排在其队列之后的 ping 发现（默认 30 秒），在此之前队列会增长到引擎的 `MaxWriteQueueBytes`。
 
-**证据。** `agent/internal/wire/conn.go` 与 `session.go`：`ConnConfig.SlowTimeout` 关闭 ping 等待过久的链路；
+**证据。** `llm/internal/wire/conn.go` 与 `session.go`：`ConnConfig.SlowTimeout` 关闭 ping 等待过久的链路；
 流以额度控制自己的节奏（`Stream.TrySend`、`OnCredit`、`Release`），而调用的应答与推送不等待任何东西。
 
 **建议的 API。** 与 `fibhttp.Context` 对响应提供的相同（A2）：
@@ -1243,7 +1243,7 @@ func (c *Connection) HoldReads(hold bool)
 
 ## A54：引擎 UDP binding 上的原始 QUIC 端点
 
-**状态。** 2026-11-01 为 tunnel 的角色提出（[决定 028](decisions/028-agent-and-tunnel.zh-CN.md)）。
+**状态。** 2026-11-01 为 tunnel 的角色提出（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)）。
 
 **问题。** tunnel 的链路可以走 QUIC，每条链路一个双向流，使用自己的 ALPN，而不是 HTTP/3。fib 的
 `http3.ServerHandler` 只为 HTTP/3 把 QUIC 放到 UDP binding 上；其他协议使用 `http3/quic` 时，调用者必须自己按

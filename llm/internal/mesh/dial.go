@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // Dial keeps a connection to req.Addr (reconnecting forever) until Undial; the peer must announce req.Role, which

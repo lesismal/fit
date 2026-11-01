@@ -216,7 +216,7 @@ Admin API's endpoints, behind a session instead of the token.
 
 ## Roles' pages
 
-The [agent](agent.md)'s and the [tunnel](tunnel.md)'s roles have pages of their own, each set by the
+The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles have pages of their own, each set by the
 role's `console`: the same fields as `admin.console`, but `address` is required, and served on the
 listeners' fib engine. Their users, logins, lockouts, sessions and the TLS rule work as the
 console's do, with tables of their own. What a role's pages change is written back into its member

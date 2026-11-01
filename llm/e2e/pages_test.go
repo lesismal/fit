@@ -7,16 +7,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lesismal/fit/agent/internal/agenttest"
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // A role's pages: the shared files beside its own, its API behind the
 // login and the CSRF token, /api/me, and a stream method as Server-Sent
 // Events: the node's test call.
 func TestPages(t *testing.T) {
-	mock := agenttest.StartMockLLM(t)
-	nf := agenttest.Start(t, member("node", `{"console": `+agenttest.Console()+`,
+	mock := llmtest.StartMockLLM(t)
+	nf := llmtest.Start(t, member("node", `{"console": `+llmtest.Console()+`,
 		"models": [{"name": "m", "api": "openai", "base_url": "`+mock.BaseURL("a")+`", "api_key": "sk-a"}]}`), "")
 	n := nodeOf(t, nf)
 	base := strings.TrimSuffix(n.Console().URL(), "/")
@@ -76,7 +76,7 @@ func TestPages(t *testing.T) {
 	if status != 200 || !strings.Contains(body, "event: end") || !strings.Contains(body, "$ ollama list") {
 		t.Fatalf("follow: %d %s", status, body)
 	}
-	if err := p.RPC(model.MethodNodeActionRun, model.ActionRunReq{ID: "ollama_pull", Params: map[string]string{"model": "-rf"}}, nil); agenttest.CodeOf(err) != model.CodeBadRequest {
+	if err := p.RPC(model.MethodNodeActionRun, model.ActionRunReq{ID: "ollama_pull", Params: map[string]string{"model": "-rf"}}, nil); llmtest.CodeOf(err) != model.CodeBadRequest {
 		t.Fatalf("a bad parameter: %v", err)
 	}
 	if status, _ := p.Do("POST", "/api/logout", ""); status != 204 {

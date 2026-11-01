@@ -1,10 +1,10 @@
 //go:build e2e
 
-// Package e2e is the docker end-to-end test of fit's agent. It runs in the
-// tester container of test/docker/agent/docker-compose.yml against real fit
-// processes, one per role (hub, node1-3, client1-2), and the mock upstream
-// mockllm, and is driven by test/docker/agent/e2e.sh: TestE2E configures and
-// exercises everything through the roles' pages and the clients' APIs, the
+// Package e2e is the docker end-to-end test of fit's LLM feature. It runs in the
+// tester container of test/docker/llm/docker-compose.yml against real fit
+// processes, one per role (hub, node1-3, proxy1-2), and the mock upstream
+// mockllm, and is driven by test/docker/llm/e2e.sh: TestE2E configures and
+// exercises everything through the roles' pages and the proxies' APIs, the
 // script restarts every role, then TestPersist checks what must survive a
 // restart (the config each role's pages changed, kept in its store).
 package e2e
@@ -39,7 +39,7 @@ const (
 // bcrypt hash.
 const password = "fit-e2e-pass"
 
-// The pages and the client APIs are served over TLS with certgen's
+// The pages and the proxy APIs are served over TLS with certgen's
 // self-signed certificate, which the test does not verify.
 var transport = &http.Transport{
 	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
@@ -71,7 +71,7 @@ func init() {
 	for _, c := range []*console{
 		newConsole("hub", "hub", "hub:9200"),
 		newConsole("node1", "node", "node1:9100"), newConsole("node2", "node", "node2:9100"), newConsole("node3", "node", "node3:9100"),
-		newConsole("client1", "client", "client1:9300"), newConsole("client2", "client", "client2:9300"),
+		newConsole("proxy1", "proxy", "proxy1:9300"), newConsole("proxy2", "proxy", "proxy2:9300"),
 	} {
 		consoles[c.name] = c
 	}
@@ -240,10 +240,10 @@ func (c *console) stream(t testing.TB, method string, req any, fn func(ev sseEve
 	return evs
 }
 
-// ---- the client's agent API ----
+// ---- the proxy's agent API ----
 
-// apiHost is the host and port of a client's agent API.
-var apiHost = map[string]string{"client1": "client1:9400", "client2": "client2:9400"}
+// apiHost is the host and port of a proxy's agent API.
+var apiHost = map[string]string{"proxy1": "proxy1:9400", "proxy2": "proxy2:9400"}
 
 type agentResp struct {
 	Status int
@@ -260,8 +260,8 @@ func (r agentResp) json(t testing.TB) map[string]any {
 	return m
 }
 
-// agent calls a client's agent API (/v1/...) like an SDK would.
-func agent(t testing.TB, client, method, path string, body any, hdr map[string]string) agentResp {
+// agent calls a proxy's agent API (/v1/...) like an SDK would.
+func agent(t testing.TB, proxy, method, path string, body any, hdr map[string]string) agentResp {
 	t.Helper()
 	var rd io.Reader
 	switch b := body.(type) {
@@ -272,7 +272,7 @@ func agent(t testing.TB, client, method, path string, body any, hdr map[string]s
 		raw, _ := json.Marshal(b)
 		rd = bytes.NewReader(raw)
 	}
-	req, _ := http.NewRequest(method, "https://"+apiHost[client]+path, rd)
+	req, _ := http.NewRequest(method, "https://"+apiHost[proxy]+path, rd)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -281,7 +281,7 @@ func agent(t testing.TB, client, method, path string, body any, hdr map[string]s
 	}
 	resp, err := httpClient(nil).Do(req)
 	if err != nil {
-		t.Fatalf("%s %s %s: %v", client, method, path, err)
+		t.Fatalf("%s %s %s: %v", proxy, method, path, err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -292,12 +292,12 @@ func bearer(key string) map[string]string { return map[string]string{"Authorizat
 
 // chat sends a non-streaming chat completion and requires HTTP 200; it
 // returns the serving node.
-func chat(t testing.TB, client, key, mdl string) string {
+func chat(t testing.TB, proxy, key, mdl string) string {
 	t.Helper()
-	r := agent(t, client, "POST", "/v1/chat/completions", map[string]any{"model": mdl,
+	r := agent(t, proxy, "POST", "/v1/chat/completions", map[string]any{"model": mdl,
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}}}, bearer(key))
 	if r.Status != 200 {
-		t.Fatalf("%s chat %s: HTTP %d: %s", client, mdl, r.Status, r.Body)
+		t.Fatalf("%s chat %s: HTTP %d: %s", proxy, mdl, r.Status, r.Body)
 	}
 	return r.Header.Get("X-Fit-Node")
 }
@@ -368,7 +368,7 @@ func eventually(t testing.TB, timeout time.Duration, what string, fn func() erro
 	}
 }
 
-// ---- types used by the test (a subset of fit/agent/internal/model and fit/agent/client) ----
+// ---- types used by the test (a subset of fit/llm/internal/model and fit/llm/proxy) ----
 
 type identity struct {
 	Role      string `json:"role"`
@@ -544,7 +544,7 @@ func (c *console) hubModel(t testing.TB, name, api string) *hubModel {
 func (c *console) catalog(t testing.TB, name, api string) *catalogModel {
 	t.Helper()
 	var cms []catalogModel
-	c.rpc(t, "/client/models", nil, &cms)
+	c.rpc(t, "/proxy/models", nil, &cms)
 	for i := range cms {
 		if cms[i].Name == name && cms[i].API == api {
 			return &cms[i]
@@ -571,8 +571,8 @@ func waitJob(t testing.TB, call func(method string, req, out any), id int64, tim
 // ---- state shared between TestE2E and TestPersist ----
 
 type shared struct {
-	Key  string            `json:"key"`  // a client1 API key
-	Key2 string            `json:"key2"` // a client2 API key
+	Key  string            `json:"key"`  // a proxy1 API key
+	Key2 string            `json:"key2"` // a proxy2 API key
 	IDs  map[string]string `json:"ids"`  // console name -> role id
 }
 

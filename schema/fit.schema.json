@@ -202,460 +202,6 @@
       },
       "type": "object"
     },
-    "config.Agent": {
-      "additionalProperties": false,
-      "properties": {
-        "client": {
-          "$ref": "#/$defs/config.AgentClient",
-          "description": "Run a client: an OpenAI- and Anthropic-compatible API that calls the models of the nodes it reaches."
-        },
-        "hub": {
-          "$ref": "#/$defs/config.AgentHub",
-          "description": "Run a hub: nodes and clients link to it, and it passes calls between them."
-        },
-        "node": {
-          "$ref": "#/$defs/config.AgentNode",
-          "description": "Run a node: it serves models from local or remote upstreams to the hubs and clients linked to it."
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentClient": {
-      "additionalProperties": false,
-      "properties": {
-        "api": {
-          "$ref": "#/$defs/config.AgentClientAPI",
-          "description": "The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."
-        },
-        "api_keys": {
-          "description": "The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them.",
-          "items": {
-            "$ref": "#/$defs/config.AgentClientKey"
-          },
-          "type": "array"
-        },
-        "console": {
-          "$ref": "#/$defs/config.RoleConsole",
-          "description": "The client's web pages; none when left out."
-        },
-        "id": {
-          "description": "The client's stable ID, which its peers know it by. Made when left out, and written back here.",
-          "type": "string"
-        },
-        "limits": {
-          "$ref": "#/$defs/config.AgentLimits",
-          "description": "Bounds on the client's links; the defaults when left out."
-        },
-        "listen": {
-          "$ref": "#/$defs/config.AgentListen",
-          "description": "Where the client takes links from hubs and nodes; none when left out. Its pages change it."
-        },
-        "name": {
-          "description": "The name the client shows its peers; the host's name when left out. Its pages change it.",
-          "type": "string"
-        },
-        "peers": {
-          "description": "The hubs and nodes the client dials. Its pages change them.",
-          "items": {
-            "$ref": "#/$defs/config.AgentPeer"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentClientAPI": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "description": "The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear.",
-          "type": "string"
-        },
-        "cert_file": {
-          "description": "A PEM file with the API's certificate, followed by any intermediates; with key_file, the API is served over TLS.",
-          "type": "string"
-        },
-        "first_byte_timeout": {
-          "default": "5m",
-          "description": "How long a call may wait for its response to begin. 5m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "key_file": {
-          "description": "A PEM file with the certificate's private key.",
-          "type": "string"
-        },
-        "max_body_bytes": {
-          "default": 33554432,
-          "description": "The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names and to send it again when a route cannot serve it. 32 MiB when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_conns": {
-          "default": 256,
-          "description": "The most connections the API keeps open at once; one past it is closed as soon as it is accepted. 256 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_inflight": {
-          "default": 256,
-          "description": "The most calls the API forwards at once; one past it gets 429. 256 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "timeout": {
-          "default": "30m",
-          "description": "The most one call may take, to the end of its response. 30m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        }
-      },
-      "required": [
-        "address"
-      ],
-      "type": "object"
-    },
-    "config.AgentClientKey": {
-      "additionalProperties": false,
-      "properties": {
-        "created_at": {
-          "description": "When the key was made, in seconds since 1970.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "hash": {
-          "description": "The SHA-256 of the key, in hex.",
-          "type": "string"
-        },
-        "id": {
-          "description": "The key's ID, 16 hex digits.",
-          "type": "string"
-        },
-        "name": {
-          "description": "What the key is for: 1 to 64 characters.",
-          "type": "string"
-        },
-        "prefix": {
-          "description": "The key's first characters, to tell it by on the pages.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "hash"
-      ],
-      "type": "object"
-    },
-    "config.AgentHub": {
-      "additionalProperties": false,
-      "properties": {
-        "console": {
-          "$ref": "#/$defs/config.RoleConsole",
-          "description": "The hub's web pages; none when left out."
-        },
-        "id": {
-          "description": "The hub's stable ID, which its peers know it by. Made when left out, and written back here.",
-          "type": "string"
-        },
-        "limits": {
-          "$ref": "#/$defs/config.AgentLimits",
-          "description": "Bounds on the hub's links; the defaults when left out."
-        },
-        "listen": {
-          "$ref": "#/$defs/config.AgentListen",
-          "description": "Where the hub takes links from nodes and clients; none when left out. Its pages change it."
-        },
-        "max_nodes": {
-          "default": 1024,
-          "description": "The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "name": {
-          "description": "The name the hub shows its peers; the host's name when left out. Its pages change it.",
-          "type": "string"
-        },
-        "peers": {
-          "description": "The nodes and clients the hub dials. Its pages change them.",
-          "items": {
-            "$ref": "#/$defs/config.AgentPeer"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentLimits": {
-      "additionalProperties": false,
-      "properties": {
-        "max_conns": {
-          "default": 1024,
-          "description": "The most links the role takes from its peers at once; one past it is refused, and its dialer backs off. 1024 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_inflight": {
-          "default": 1024,
-          "description": "The most calls and streams a peer may have running here on one link at once; one past it fails at once. 1024 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "ping_interval": {
-          "default": "15s",
-          "description": "How long a link may hear nothing before it is pinged; one that hears nothing for three of them is closed. 15s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "retry_interval": {
-          "default": "5s",
-          "description": "The most a dialer waits between attempts at a peer it cannot reach; the waits grow to it, at random within each step. 5s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "slow_timeout": {
-          "default": "30s",
-          "description": "How long a ping may wait for its pong, behind everything sent before it, before the link is taken for too slow and closed. 30s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "stream_idle": {
-          "default": "2m",
-          "description": "How long a stream, as a model call relayed between roles, may carry nothing either way before it ends. 2m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentListen": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "description": "The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address.",
-          "type": "string"
-        },
-        "password": {
-          "description": "The password peers prove they know when they link; it never crosses the network.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "address",
-        "password"
-      ],
-      "type": "object"
-    },
-    "config.AgentModel": {
-      "additionalProperties": false,
-      "properties": {
-        "api": {
-          "description": "The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header.",
-          "enum": [
-            "openai",
-            "anthropic",
-            "gemini",
-            "azure_openai",
-            "ollama",
-            "cohere"
-          ],
-          "type": "string"
-        },
-        "api_key": {
-          "description": "The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The pages never show it whole.",
-          "type": "string"
-        },
-        "api_version": {
-          "description": "The api-version query every call of an azure_openai model carries, as 2024-10-21: required for azure_openai, and only taken there.",
-          "type": "string"
-        },
-        "base_url": {
-          "description": "The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434.",
-          "type": "string"
-        },
-        "description": {
-          "description": "A note about the model its peers show.",
-          "type": "string"
-        },
-        "disabled": {
-          "description": "Keep the model without serving it.",
-          "type": "boolean"
-        },
-        "max_inflight": {
-          "description": "The most calls to the model the node forwards at once; a call past it goes to another node. No bound but proxy.max_inflight's when left out or 0.",
-          "maximum": 100000,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "name": {
-          "description": "The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's.",
-          "type": "string"
-        },
-        "upstream": {
-          "description": "The model ID sent upstream in place of name: in the body's model, a form's model field, Gemini's path, or as an azure_openai model's deployment. name when left out.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "api",
-        "base_url"
-      ],
-      "type": "object"
-    },
-    "config.AgentNode": {
-      "additionalProperties": false,
-      "properties": {
-        "console": {
-          "$ref": "#/$defs/config.RoleConsole",
-          "description": "The node's web pages; none when left out."
-        },
-        "description": {
-          "description": "A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it.",
-          "type": "string"
-        },
-        "id": {
-          "description": "The node's stable ID, which its peers know it by. Made when left out, and written back here.",
-          "type": "string"
-        },
-        "limits": {
-          "$ref": "#/$defs/config.AgentLimits",
-          "description": "Bounds on the node's links; the defaults when left out."
-        },
-        "listen": {
-          "$ref": "#/$defs/config.AgentListen",
-          "description": "Where the node takes links from hubs and clients; none when left out. Its pages change it."
-        },
-        "models": {
-          "description": "The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them.",
-          "items": {
-            "$ref": "#/$defs/config.AgentModel"
-          },
-          "type": "array"
-        },
-        "name": {
-          "description": "The name the node shows its peers; the host's name when left out. Its pages, and a hub that settings.allow_hub_manage lets, change it.",
-          "type": "string"
-        },
-        "peers": {
-          "description": "The hubs and clients the node dials. Its pages change them.",
-          "items": {
-            "$ref": "#/$defs/config.AgentPeer"
-          },
-          "type": "array"
-        },
-        "proxy": {
-          "$ref": "#/$defs/config.AgentNodeProxy",
-          "description": "Bounds on the calls the node forwards to its models' upstreams; the defaults when left out."
-        },
-        "settings": {
-          "$ref": "#/$defs/config.AgentNodeSettings",
-          "description": "The node's own settings; the defaults when left out. Only its own pages change them."
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentNodeProxy": {
-      "additionalProperties": false,
-      "properties": {
-        "connect_timeout": {
-          "default": "10s",
-          "description": "How long a connection to an upstream may take. 10s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "first_byte_timeout": {
-          "default": "5m",
-          "description": "How long an upstream may take to begin its response, from when the call starts, its connect included, as a model reading a long prompt does. 5m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "idle_timeout": {
-          "default": "5m",
-          "description": "How long an upstream may go silent in the middle of its response before the call is cut short. 5m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "max_body_bytes": {
-          "default": 33554432,
-          "description": "The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_inflight": {
-          "default": 256,
-          "description": "The most calls the node forwards at once, across its models; a call past it goes to another node. 256 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "timeout": {
-          "default": "30m",
-          "description": "The most one call may take, from its start to the end of its response. 30m when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentNodeSettings": {
-      "additionalProperties": false,
-      "properties": {
-        "allow_hub_manage": {
-          "description": "Let linked hubs manage the node: edit its models, change GPU settings, run its fixed actions and follow their jobs. Never its own settings, and never a command of their own. Off when left out.",
-          "type": "boolean"
-        },
-        "gpu_data_dir": {
-          "description": "A directory the install scripts of vendors whose drivers are downloaded by hand look for the packages in, under the vendor's name; the working directory when left out.",
-          "type": "string"
-        },
-        "gpu_sudo": {
-          "default": true,
-          "description": "Run GPU settings, tool installs and actions that need root with sudo -n when fit does not run as root; sudo must not ask for a password. On when left out.",
-          "type": "boolean"
-        },
-        "job_timeout": {
-          "default": "1h",
-          "description": "How long a job, an action or an install, may run before it is killed, 10s to 168h. 1h when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "refresh_interval": {
-          "default": "30s",
-          "description": "How often the node reads its hardware again, 5s to 1h. 30s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "config.AgentPeer": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "description": "The peer's host and port, as its listen.address says.",
-          "type": "string"
-        },
-        "password": {
-          "description": "The peer's listen.password.",
-          "type": "string"
-        },
-        "role": {
-          "description": "The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own.",
-          "enum": [
-            "hub",
-            "node",
-            "client"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "address",
-        "password",
-        "role"
-      ],
-      "type": "object"
-    },
     "config.AutoHTTPS": {
       "additionalProperties": false,
       "properties": {
@@ -1353,6 +899,460 @@
       },
       "type": "object"
     },
+    "config.LLM": {
+      "additionalProperties": false,
+      "properties": {
+        "hub": {
+          "$ref": "#/$defs/config.LLMHub",
+          "description": "Run a hub: nodes and proxies link to it, and it passes calls between them."
+        },
+        "node": {
+          "$ref": "#/$defs/config.LLMNode",
+          "description": "Run a node: it serves models from local or remote upstreams to the hubs and proxies linked to it."
+        },
+        "proxy": {
+          "$ref": "#/$defs/config.LLMProxy",
+          "description": "Run a proxy: an OpenAI- and Anthropic-compatible API, for agents, that calls the models of the nodes it reaches."
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMHub": {
+      "additionalProperties": false,
+      "properties": {
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The hub's web pages; none when left out."
+        },
+        "id": {
+          "description": "The hub's stable ID, which its peers know it by. Made when left out, and written back here.",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/config.LLMLimits",
+          "description": "Bounds on the hub's links; the defaults when left out."
+        },
+        "listen": {
+          "$ref": "#/$defs/config.LLMListen",
+          "description": "Where the hub takes links from nodes and proxies; none when left out. Its pages change it."
+        },
+        "max_nodes": {
+          "default": 1024,
+          "description": "The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The name the hub shows its peers; the host's name when left out. Its pages change it.",
+          "type": "string"
+        },
+        "peers": {
+          "description": "The nodes and proxies the hub dials. Its pages change them.",
+          "items": {
+            "$ref": "#/$defs/config.LLMPeer"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_conns": {
+          "default": 1024,
+          "description": "The most links the role takes from its peers at once; one past it is refused, and its dialer backs off. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_inflight": {
+          "default": 1024,
+          "description": "The most calls and streams a peer may have running here on one link at once; one past it fails at once. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ping_interval": {
+          "default": "15s",
+          "description": "How long a link may hear nothing before it is pinged; one that hears nothing for three of them is closed. 15s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "retry_interval": {
+          "default": "5s",
+          "description": "The most a dialer waits between attempts at a peer it cannot reach; the waits grow to it, at random within each step. 5s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "slow_timeout": {
+          "default": "30s",
+          "description": "How long a ping may wait for its pong, behind everything sent before it, before the link is taken for too slow and closed. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "stream_idle": {
+          "default": "2m",
+          "description": "How long a stream, as a model call relayed between roles, may carry nothing either way before it ends. 2m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMListen": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The password peers prove they know when they link; it never crosses the network.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "password"
+      ],
+      "type": "object"
+    },
+    "config.LLMModel": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "description": "The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header.",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "azure_openai",
+            "ollama",
+            "cohere"
+          ],
+          "type": "string"
+        },
+        "api_key": {
+          "description": "The key sent upstream: as Authorization: Bearer for openai, ollama and cohere, as x-api-key for anthropic, x-goog-api-key for gemini, api-key for azure_openai. None when left out. The pages never show it whole.",
+          "type": "string"
+        },
+        "api_version": {
+          "description": "The api-version query every call of an azure_openai model carries, as 2024-10-21: required for azure_openai, and only taken there.",
+          "type": "string"
+        },
+        "base_url": {
+          "description": "The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434.",
+          "type": "string"
+        },
+        "description": {
+          "description": "A note about the model its peers show.",
+          "type": "string"
+        },
+        "disabled": {
+          "description": "Keep the model without serving it.",
+          "type": "boolean"
+        },
+        "max_inflight": {
+          "description": "The most calls to the model the node forwards at once; a call past it goes to another node. No bound but proxy.max_inflight's when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's.",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "The model ID sent upstream in place of name: in the body's model, a form's model field, Gemini's path, or as an azure_openai model's deployment. name when left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "api",
+        "base_url"
+      ],
+      "type": "object"
+    },
+    "config.LLMNode": {
+      "additionalProperties": false,
+      "properties": {
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The node's web pages; none when left out."
+        },
+        "description": {
+          "description": "A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The node's stable ID, which its peers know it by. Made when left out, and written back here.",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/config.LLMLimits",
+          "description": "Bounds on the node's links; the defaults when left out."
+        },
+        "listen": {
+          "$ref": "#/$defs/config.LLMListen",
+          "description": "Where the node takes links from hubs and proxies; none when left out. Its pages change it."
+        },
+        "models": {
+          "description": "The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them.",
+          "items": {
+            "$ref": "#/$defs/config.LLMModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "The name the node shows its peers; the host's name when left out. Its pages, and a hub that settings.allow_hub_manage lets, change it.",
+          "type": "string"
+        },
+        "peers": {
+          "description": "The hubs and proxies the node dials. Its pages change them.",
+          "items": {
+            "$ref": "#/$defs/config.LLMPeer"
+          },
+          "type": "array"
+        },
+        "proxy": {
+          "$ref": "#/$defs/config.LLMNodeProxy",
+          "description": "Bounds on the calls the node forwards to its models' upstreams; the defaults when left out."
+        },
+        "settings": {
+          "$ref": "#/$defs/config.LLMNodeSettings",
+          "description": "The node's own settings; the defaults when left out. Only its own pages change them."
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMNodeProxy": {
+      "additionalProperties": false,
+      "properties": {
+        "connect_timeout": {
+          "default": "10s",
+          "description": "How long a connection to an upstream may take. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "first_byte_timeout": {
+          "default": "5m",
+          "description": "How long an upstream may take to begin its response, from when the call starts, its connect included, as a model reading a long prompt does. 5m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": "5m",
+          "description": "How long an upstream may go silent in the middle of its response before the call is cut short. 5m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_body_bytes": {
+          "default": 33554432,
+          "description": "The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_inflight": {
+          "default": 256,
+          "description": "The most calls the node forwards at once, across its models; a call past it goes to another node. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "30m",
+          "description": "The most one call may take, from its start to the end of its response. 30m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMNodeSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_hub_manage": {
+          "description": "Let linked hubs manage the node: edit its models, change GPU settings, run its fixed actions and follow their jobs. Never its own settings, and never a command of their own. Off when left out.",
+          "type": "boolean"
+        },
+        "gpu_data_dir": {
+          "description": "A directory the install scripts of vendors whose drivers are downloaded by hand look for the packages in, under the vendor's name; the working directory when left out.",
+          "type": "string"
+        },
+        "gpu_sudo": {
+          "default": true,
+          "description": "Run GPU settings, tool installs and actions that need root with sudo -n when fit does not run as root; sudo must not ask for a password. On when left out.",
+          "type": "boolean"
+        },
+        "job_timeout": {
+          "default": "1h",
+          "description": "How long a job, an action or an install, may run before it is killed, 10s to 168h. 1h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "refresh_interval": {
+          "default": "30s",
+          "description": "How often the node reads its hardware again, 5s to 1h. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMPeer": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "The peer's host and port, as its listen.address says.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The peer's listen.password.",
+          "type": "string"
+        },
+        "role": {
+          "description": "The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own.",
+          "enum": [
+            "hub",
+            "node",
+            "proxy"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "password",
+        "role"
+      ],
+      "type": "object"
+    },
+    "config.LLMProxy": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "$ref": "#/$defs/config.LLMProxyAPI",
+          "description": "The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."
+        },
+        "api_keys": {
+          "description": "The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them.",
+          "items": {
+            "$ref": "#/$defs/config.LLMProxyKey"
+          },
+          "type": "array"
+        },
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The proxy's web pages; none when left out."
+        },
+        "id": {
+          "description": "The proxy's stable ID, which its peers know it by. Made when left out, and written back here.",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/config.LLMLimits",
+          "description": "Bounds on the proxy's links; the defaults when left out."
+        },
+        "listen": {
+          "$ref": "#/$defs/config.LLMListen",
+          "description": "Where the proxy takes links from hubs and nodes; none when left out. Its pages change it."
+        },
+        "name": {
+          "description": "The name the proxy shows its peers; the host's name when left out. Its pages change it.",
+          "type": "string"
+        },
+        "peers": {
+          "description": "The hubs and nodes the proxy dials. Its pages change them.",
+          "items": {
+            "$ref": "#/$defs/config.LLMPeer"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "config.LLMProxyAPI": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the API's certificate, followed by any intermediates; with key_file, the API is served over TLS.",
+          "type": "string"
+        },
+        "first_byte_timeout": {
+          "default": "5m",
+          "description": "How long a call may wait for its response to begin. 5m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with the certificate's private key.",
+          "type": "string"
+        },
+        "max_body_bytes": {
+          "default": 33554432,
+          "description": "The largest request body a call may carry; one past it gets 413. It is held whole, to read the model it names and to send it again when a route cannot serve it. 32 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_conns": {
+          "default": 256,
+          "description": "The most connections the API keeps open at once; one past it is closed as soon as it is accepted. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_inflight": {
+          "default": 256,
+          "description": "The most calls the API forwards at once; one past it gets 429. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": "30m",
+          "description": "The most one call may take, to the end of its response. 30m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "type": "object"
+    },
+    "config.LLMProxyKey": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "description": "When the key was made, in seconds since 1970.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hash": {
+          "description": "The SHA-256 of the key, in hex.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The key's ID, 16 hex digits.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What the key is for: 1 to 64 characters.",
+          "type": "string"
+        },
+        "prefix": {
+          "description": "The key's first characters, to tell it by on the pages.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "hash"
+      ],
+      "type": "object"
+    },
     "config.Limits": {
       "additionalProperties": false,
       "properties": {
@@ -1477,7 +1477,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
+          "description": "The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload.",
           "type": "object"
         },
         "loggers": {
@@ -2250,77 +2250,17 @@
     "config.Tunnel": {
       "additionalProperties": false,
       "properties": {
-        "client": {
-          "$ref": "#/$defs/config.TunnelClient",
-          "description": "Run a client: local ports and web proxies forwarded through a server to the services of a node."
+        "hub": {
+          "$ref": "#/$defs/config.TunnelHub",
+          "description": "Run a hub: nodes and proxies link to it, and it joins a proxy's tunnels to a node's."
         },
         "node": {
           "$ref": "#/$defs/config.TunnelNode",
-          "description": "Run a node: it links to servers and opens the tunnels they ask for to the services it exposes."
+          "description": "Run a node: it links to hubs and opens the tunnels they ask for to the services it exposes."
         },
-        "server": {
-          "$ref": "#/$defs/config.TunnelServer",
-          "description": "Run a server: nodes and clients link to it, and it joins a client's tunnels to a node's."
-        }
-      },
-      "type": "object"
-    },
-    "config.TunnelClient": {
-      "additionalProperties": false,
-      "properties": {
-        "console": {
-          "$ref": "#/$defs/config.RoleConsole",
-          "description": "The client's web pages; none when left out."
-        },
-        "forwards": {
-          "description": "Local addresses whose connections are tunneled to a node's service.",
-          "items": {
-            "$ref": "#/$defs/config.TunnelForward"
-          },
-          "type": "array"
-        },
-        "idle_timeout": {
-          "default": "2h",
-          "description": "How long a tunnel may carry nothing either way before it is closed. 2h when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "max_tunnels": {
-          "default": 4096,
-          "description": "The most tunnels open at once, over every forward; a connection past it is closed as soon as it is accepted. 4096 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "meta": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Anything else the client tells the servers, which their pages show.",
-          "type": "object"
-        },
-        "name": {
-          "description": "The client's name, which the servers and nodes show. The host's name when left out.",
-          "type": "string"
-        },
-        "open_timeout": {
-          "default": "20s",
-          "description": "How long the opening of a tunnel may take, through the server to the node and on to the service. 20s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "servers": {
-          "description": "The servers the client links to and registers with. None when left out: the console's pages add them.",
-          "items": {
-            "$ref": "#/$defs/config.TunnelUplink"
-          },
-          "type": "array"
-        },
-        "web_proxies": {
-          "description": "Local addresses that serve a server's console pages through its encrypted console_socket.",
-          "items": {
-            "$ref": "#/$defs/config.TunnelWebProxy"
-          },
-          "type": "array"
+        "proxy": {
+          "$ref": "#/$defs/config.TunnelProxy",
+          "description": "Run a proxy: local ports and web proxies forwarded through a hub to the services of a node."
         }
       },
       "type": "object"
@@ -2339,7 +2279,7 @@
           "type": "integer"
         },
         "password": {
-          "description": "The password the WebSocket's messages are encrypted with, which a client's web_proxy needs. The server's password when left out.",
+          "description": "The password the WebSocket's messages are encrypted with, which a proxy's web_proxy needs. The hub's password when left out.",
           "type": "string"
         }
       },
@@ -2352,7 +2292,7 @@
       "additionalProperties": false,
       "properties": {
         "address": {
-          "description": "The server's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC.",
+          "description": "The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC.",
           "type": "string"
         },
         "disabled": {
@@ -2368,16 +2308,16 @@
     "config.TunnelForward": {
       "additionalProperties": false,
       "properties": {
+        "hub": {
+          "description": "The name of the hub the tunnels go through. When left out, they are spread over every hub that has the node, more of them through the faster ones.",
+          "type": "string"
+        },
         "listen": {
           "description": "The local host and port the forward listens on.",
           "type": "string"
         },
         "node": {
           "description": "The node whose service the tunnels go to.",
-          "type": "string"
-        },
-        "server": {
-          "description": "The name of the server the tunnels go through. When left out, they are spread over every server that has the node, more of them through the faster ones.",
           "type": "string"
         },
         "service": {
@@ -2390,6 +2330,117 @@
         "node",
         "service"
       ],
+      "type": "object"
+    },
+    "config.TunnelHub": {
+      "additionalProperties": false,
+      "properties": {
+        "body_password": {
+          "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes.",
+          "type": "string"
+        },
+        "call_timeout": {
+          "default": "15s",
+          "description": "How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "console": {
+          "$ref": "#/$defs/config.RoleConsole",
+          "description": "The hub's web pages; none when left out."
+        },
+        "console_socket": {
+          "$ref": "#/$defs/config.TunnelConsoleSocket",
+          "description": "An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."
+        },
+        "listeners": {
+          "description": "Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them.",
+          "items": {
+            "$ref": "#/$defs/config.TunnelListener"
+          },
+          "type": "array"
+        },
+        "max_links": {
+          "default": 1024,
+          "description": "The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_links_per_peer": {
+          "default": 128,
+          "description": "The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peers": {
+          "default": 1024,
+          "description": "The most nodes and proxies registered at once. 1024 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tunnels": {
+          "default": 16384,
+          "description": "The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The name the hub tells the nodes and proxies that register. The host's name when left out.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out.",
+          "type": "string"
+        },
+        "quic": {
+          "$ref": "#/$defs/config.TunnelHubQUIC",
+          "description": "The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."
+        },
+        "register_timeout": {
+          "default": "10s",
+          "description": "How long a link may take to register once it is open; it is closed past it. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.TunnelHubQUIC": {
+      "additionalProperties": false,
+      "properties": {
+        "cert": {
+          "description": "The PEM certificate the quic listeners present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a quic listener needs one and none is set.",
+          "type": "string"
+        },
+        "handshake_timeout": {
+          "default": "10s",
+          "description": "How long a QUIC handshake may take. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": "30s",
+          "description": "How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "10s",
+          "description": "How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "key": {
+          "description": "The PEM private key of cert.",
+          "type": "string"
+        },
+        "max_handshakes": {
+          "default": 64,
+          "description": "The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. 64 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "config.TunnelListener": {
@@ -2429,9 +2480,16 @@
         },
         "dial_timeout": {
           "default": "5s",
-          "description": "How long a connect to a service may take; shorter than a server's call_timeout, so that the server hears either way. 5s when left out.",
+          "description": "How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "hubs": {
+          "description": "The hubs the node links to and registers with. None when left out: the console's pages add them.",
+          "items": {
+            "$ref": "#/$defs/config.TunnelUplink"
+          },
+          "type": "array"
         },
         "idle_timeout": {
           "default": "2h",
@@ -2441,7 +2499,7 @@
         },
         "max_tunnels": {
           "default": 4096,
-          "description": "The most tunnels open at once, over every server; a server's request for one more is refused. 4096 when left out or 0.",
+          "description": "The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2449,19 +2507,12 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Anything else the node tells the servers, which their pages show.",
+          "description": "Anything else the node tells the hubs, which their pages show.",
           "type": "object"
         },
         "name": {
-          "description": "The node's name, which clients name to reach its services. The host's name when left out.",
+          "description": "The node's name, which proxies name to reach its services. The host's name when left out.",
           "type": "string"
-        },
-        "servers": {
-          "description": "The servers the node links to and registers with. None when left out: the console's pages add them.",
-          "items": {
-            "$ref": "#/$defs/config.TunnelUplink"
-          },
-          "type": "array"
         },
         "services": {
           "description": "The services the node reaches, and the only addresses it opens tunnels to.",
@@ -2473,113 +2524,62 @@
       },
       "type": "object"
     },
-    "config.TunnelServer": {
+    "config.TunnelProxy": {
       "additionalProperties": false,
       "properties": {
-        "body_password": {
-          "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and clients need the same one. It applies to the links that open after it changes.",
-          "type": "string"
-        },
-        "call_timeout": {
-          "default": "15s",
-          "description": "How long a node may take to answer the server: to open a tunnel, or to list or set its services. 15s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
-          "description": "The server's web pages; none when left out."
+          "description": "The proxy's web pages; none when left out."
         },
-        "console_socket": {
-          "$ref": "#/$defs/config.TunnelConsoleSocket",
-          "description": "An encrypted WebSocket that carries the server's console pages to the web_proxies of clients that cannot reach them otherwise. Needs console. None when left out."
-        },
-        "listeners": {
-          "description": "Where nodes and clients link to the server, each over its protocol. None when left out: the console's pages add them.",
+        "forwards": {
+          "description": "Local addresses whose connections are tunneled to a node's service.",
           "items": {
-            "$ref": "#/$defs/config.TunnelListener"
+            "$ref": "#/$defs/config.TunnelForward"
           },
           "type": "array"
         },
-        "max_links": {
-          "default": 1024,
-          "description": "The most links the server keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_links_per_peer": {
-          "default": 128,
-          "description": "The most links one node or client may register, from however many processes of the same name. 128 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_peers": {
-          "default": 1024,
-          "description": "The most nodes and clients registered at once. 1024 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_tunnels": {
-          "default": 16384,
-          "description": "The most tunnels the server passes at once; a client's request for one more is refused. 16384 when left out or 0.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "name": {
-          "description": "The name the server tells the nodes and clients that register. The host's name when left out.",
-          "type": "string"
-        },
-        "password": {
-          "description": "The password nodes and clients register with, which they prove they know without sending it. The server refuses every registration while it is left out.",
-          "type": "string"
-        },
-        "quic": {
-          "$ref": "#/$defs/config.TunnelServerQUIC",
-          "description": "The certificate and the connections of the quic listeners. The server makes a self-signed certificate and writes it here when a quic listener needs one and none is set."
-        },
-        "register_timeout": {
-          "default": "10s",
-          "description": "How long a link may take to register once it is open; it is closed past it. 10s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "config.TunnelServerQUIC": {
-      "additionalProperties": false,
-      "properties": {
-        "cert": {
-          "description": "The PEM certificate the quic listeners present, which nodes and clients pin by its SHA-256 fingerprint; with key. The server makes a self-signed one and writes it here when a quic listener needs one and none is set.",
-          "type": "string"
-        },
-        "handshake_timeout": {
-          "default": "10s",
-          "description": "How long a QUIC handshake may take. 10s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
+        "hubs": {
+          "description": "The hubs the proxy links to and registers with. None when left out: the console's pages add them.",
+          "items": {
+            "$ref": "#/$defs/config.TunnelUplink"
+          },
+          "type": "array"
         },
         "idle_timeout": {
-          "default": "30s",
-          "description": "How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out.",
+          "default": "2h",
+          "description": "How long a tunnel may carry nothing either way before it is closed. 2h when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
-        "keep_alive": {
-          "default": "10s",
-          "description": "How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out.",
-          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
-          "type": "string"
-        },
-        "key": {
-          "description": "The PEM private key of cert.",
-          "type": "string"
-        },
-        "max_handshakes": {
-          "default": 64,
-          "description": "The most QUIC handshakes under way at once; a new connection past it is dropped, and its client tries again. 64 when left out or 0.",
+        "max_tunnels": {
+          "default": 4096,
+          "description": "The most tunnels open at once, over every forward; a connection past it is closed as soon as it is accepted. 4096 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        },
+        "meta": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Anything else the proxy tells the hubs, which their pages show.",
+          "type": "object"
+        },
+        "name": {
+          "description": "The proxy's name, which the hubs and nodes show. The host's name when left out.",
+          "type": "string"
+        },
+        "open_timeout": {
+          "default": "20s",
+          "description": "How long the opening of a tunnel may take, through the hub to the node and on to the service. 20s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "web_proxies": {
+          "description": "Local addresses that serve a hub's console pages through its encrypted console_socket.",
+          "items": {
+            "$ref": "#/$defs/config.TunnelWebProxy"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -2596,7 +2596,7 @@
           "type": "string"
         },
         "name": {
-          "description": "The service's name among the node's, which clients' forwards name.",
+          "description": "The service's name among the node's, which proxies' forwards name.",
           "type": "string"
         }
       },
@@ -2610,12 +2610,12 @@
       "additionalProperties": false,
       "properties": {
         "body_password": {
-          "description": "The server's body_password, when it has one.",
+          "description": "The hub's body_password, when it has one.",
           "type": "string"
         },
         "call_timeout": {
           "default": "10s",
-          "description": "How long the server may take to answer a registration or a call. 10s when left out.",
+          "description": "How long the hub may take to answer a registration or a call. 10s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -2626,23 +2626,23 @@
           "type": "string"
         },
         "endpoints": {
-          "description": "The server's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails.",
+          "description": "The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails.",
           "items": {
             "$ref": "#/$defs/config.TunnelEndpoint"
           },
           "type": "array"
         },
         "name": {
-          "description": "The server's name here, which forwards and the pages name it by. The first endpoint's address when left out.",
+          "description": "The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out.",
           "type": "string"
         },
         "password": {
-          "description": "The server's password.",
+          "description": "The hub's password.",
           "type": "string"
         },
         "ping_interval": {
           "default": "5s",
-          "description": "How often the round trip to the server is measured. 5s when left out.",
+          "description": "How often the round trip to the hub is measured. 5s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -2654,7 +2654,7 @@
         },
         "pool_size": {
           "default": 10,
-          "description": "How many links to the server carry tunnels; each tunnel goes over one throughout. 10 when left out or 0.",
+          "description": "How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left out or 0.",
           "maximum": 100,
           "minimum": 0,
           "type": "integer"
@@ -2664,12 +2664,12 @@
           "type": "boolean"
         },
         "quic_pin": {
-          "description": "The SHA-256 fingerprint of the server's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots.",
+          "description": "The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots.",
           "type": "string"
         },
         "retry_interval": {
           "default": "3s",
-          "description": "How long a link waits after a failed dial, or a lost server, before it dials again. 3s when left out.",
+          "description": "How long a link waits after a failed dial, or a lost hub, before it dials again. 3s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         }
@@ -2694,7 +2694,7 @@
           "type": "integer"
         },
         "name": {
-          "description": "The server's name, for the pages.",
+          "description": "The hub's name, for the pages.",
           "type": "string"
         },
         "password": {
@@ -2702,7 +2702,7 @@
           "type": "string"
         },
         "url": {
-          "description": "The server's console_socket, as ws://host:port/.",
+          "description": "The hub's console_socket, as ws://host:port/.",
           "type": "string"
         }
       },
@@ -4503,10 +4503,6 @@
       "$ref": "#/$defs/config.Admin",
       "description": "The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts."
     },
-    "agent": {
-      "$ref": "#/$defs/config.Agent",
-      "description": "The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here."
-    },
     "auto_https": {
       "$ref": "#/$defs/config.AutoHTTPS",
       "description": "HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out."
@@ -4525,6 +4521,10 @@
         "$ref": "#/$defs/config.Listener"
       },
       "type": "array"
+    },
+    "llm": {
+      "$ref": "#/$defs/config.LLM",
+      "description": "The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which share AI models among machines and serve them to agents. None when left out. What their web pages change is written back here."
     },
     "log": {
       "$ref": "#/$defs/config.Log",
@@ -4567,7 +4567,7 @@
     },
     "tunnel": {
       "$ref": "#/$defs/config.Tunnel",
-      "description": "The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here."
+      "description": "The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which reach services behind NAT through the hub. None when left out. What their web pages change is written back here."
     },
     "upstreams": {
       "description": "The servers requests can be proxied to, by name.",

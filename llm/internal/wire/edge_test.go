@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // recorder is a transport that keeps what a session sends, decoded; fail, when set, fails the send of a frame.

@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 func TestManageAccess(t *testing.T) {
-	n := startNode(t, &config.AgentNode{}, nil)
+	n := startNode(t, &config.LLMNode{}, nil)
 	if _, err := call(n, asHub, model.MethodNodeModelList, struct{}{}); code(err) != model.CodeForbidden {
 		t.Fatalf("hub without allow_hub_manage: %v", err)
 	}
@@ -27,32 +27,32 @@ func TestManageAccess(t *testing.T) {
 		t.Fatalf("hub follow without allow_hub_manage: %v", err)
 	}
 	if err := n.allowManage(client); code(err) != model.CodeForbidden {
-		t.Fatalf("client: %v", err)
+		t.Fatalf("proxy: %v", err)
 	}
 	// The local console gets an empty list, never null.
 	res, err := call(n, local, model.MethodNodeModelList, struct{}{})
 	if ms, ok := res.([]model.Model); err != nil || !ok || ms == nil || len(ms) != 0 {
 		t.Fatalf("model list = %#v %v", res, err)
 	}
-	if err := n.Apply(&config.AgentNode{ID: "node-t", Settings: &config.AgentNodeSettings{AllowHubManage: true}}); err != nil {
+	if err := n.Apply(&config.LLMNode{ID: "node-t", Settings: &config.LLMNodeSettings{AllowHubManage: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := call(n, asHub, model.MethodNodeModelList, struct{}{}); err != nil {
 		t.Fatalf("hub with allow_hub_manage: %v", err)
 	}
-	if err := n.Apply((*config.AgentNode)(nil)); err == nil {
+	if err := n.Apply((*config.LLMNode)(nil)); err == nil {
 		t.Fatal("Apply of no member did not fail")
 	}
 	for _, i := range app.Roles() {
-		if i.ID == "agent.node" && i.Member(&config.Config{}) != nil {
-			t.Fatal("a config without agent.node has a member")
+		if i.ID == "llm.node" && i.Member(&config.Config{}) != nil {
+			t.Fatal("a config without llm.node has a member")
 		}
 	}
 }
 
 func TestJobsThroughMethods(t *testing.T) {
 	fakeTools(t, map[string]string{"ollama": `case "$1" in ps) sleep 30 ;; *) echo "listed $1" ;; esac`})
-	n := startNode(t, &config.AgentNode{Settings: noSudo()}, nil)
+	n := startNode(t, &config.LLMNode{Settings: noSudo()}, nil)
 	for _, m := range []string{model.MethodNodeActionList, model.MethodNodeJobList, model.MethodNodeGPUCatalog} {
 		if _, err := call(n, local, m, struct{}{}); err != nil {
 			t.Fatalf("%s: %v", m, err)
@@ -108,7 +108,7 @@ func TestJobsThroughMethods(t *testing.T) {
 
 func TestProfile(t *testing.T) {
 	ed := &editor{}
-	n := startNode(t, &config.AgentNode{}, ed)
+	n := startNode(t, &config.LLMNode{}, ed)
 	for _, req := range []model.ProfileReq{{Name: " "}, {Name: strings.Repeat("x", 65)}, {Name: "n", Description: strings.Repeat("d", 1025)}} {
 		if _, err := call(n, local, model.MethodNodeProfileSet, req); code(err) != model.CodeBadRequest {
 			t.Fatalf("%+v: %v", req, err)
@@ -128,7 +128,7 @@ func TestProfile(t *testing.T) {
 
 func TestSettings(t *testing.T) {
 	ed := &editor{}
-	n := startNode(t, &config.AgentNode{}, ed)
+	n := startNode(t, &config.LLMNode{}, ed)
 	for _, req := range []model.NodeSettings{
 		{RefreshInterval: "1s"},
 		{RefreshInterval: "soon"},
@@ -141,7 +141,7 @@ func TestSettings(t *testing.T) {
 	}
 	// The defaults and false values are left out of the member.
 	res, err := call(n, local, model.MethodNodeSettingsSet, model.NodeSettings{GPUSudo: true,
-		RefreshInterval: config.DefaultAgentRefreshInterval.String(), JobTimeout: config.DefaultAgentJobTimeout.String()})
+		RefreshInterval: config.DefaultLLMRefreshInterval.String(), JobTimeout: config.DefaultLLMJobTimeout.String()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSettings(t *testing.T) {
 
 func TestModelEdits(t *testing.T) {
 	ed := &editor{}
-	n := startNode(t, &config.AgentNode{}, ed)
+	n := startNode(t, &config.LLMNode{}, ed)
 	save := func(m model.Model) (any, error) { return call(n, local, model.MethodNodeModelSave, m) }
 	models := func() []model.Model {
 		var ms []model.Model
@@ -213,7 +213,7 @@ func TestModelEdits(t *testing.T) {
 	if _, err := save(model.Model{Name: "m2", API: model.APIOpenAI, BaseURL: "http://x"}); err == nil {
 		t.Fatal("save over bad models succeeded")
 	}
-	full := make([]model.Model, config.MaxAgentModels)
+	full := make([]model.Model, config.MaxLLMModels)
 	for i := range full {
 		full[i] = model.Model{Name: fmt.Sprintf("m%d", i), API: model.APIOpenAI, BaseURL: "http://x"}
 	}
@@ -245,7 +245,7 @@ func TestCheckModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(release)
-	n := startNode(t, &config.AgentNode{Models: []config.AgentModel{
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{
 		{Name: "m1", API: model.APIOpenAI, BaseURL: srv.URL, APIKey: "k"},
 		{Name: "slow", API: model.APIOpenAI, BaseURL: srv.URL + "/hang"},
 	}}, nil)
@@ -289,7 +289,7 @@ func TestCheckLoopRechecksErrors(t *testing.T) {
 		w.WriteHeader(stdhttp.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	n := startNode(t, &config.AgentNode{Models: []config.AgentModel{
+	n := startNode(t, &config.LLMNode{Models: []config.LLMModel{
 		{Name: "m1", API: model.APIOpenAI, BaseURL: srv.URL},
 		{Name: "off", API: model.APIOpenAI, BaseURL: srv.URL, Disabled: true},
 	}}, nil)
@@ -304,8 +304,8 @@ func TestCheckLoopRechecksErrors(t *testing.T) {
 }
 
 func TestApplyResetsCheck(t *testing.T) {
-	member := func(base string) *config.AgentNode {
-		return &config.AgentNode{ID: "node-t", Models: []config.AgentModel{{Name: "m1", API: model.APIOpenAI, BaseURL: base}}}
+	member := func(base string) *config.LLMNode {
+		return &config.LLMNode{ID: "node-t", Models: []config.LLMModel{{Name: "m1", API: model.APIOpenAI, BaseURL: base}}}
 	}
 	n := startNode(t, member("http://127.0.0.1:1"), nil)
 	n.setModelErr(model.Model{Name: "m1", API: model.APIOpenAI}, "down", true)
@@ -354,7 +354,7 @@ func TestPushStopsIdle(t *testing.T) {
 	delay := pushDelay
 	t.Cleanup(func() { pushDelay = delay })
 	pushDelay = time.Millisecond
-	n := startNode(t, &config.AgentNode{}, nil)
+	n := startNode(t, &config.LLMNode{}, nil)
 	waitFor(t, "the changes pushed", func() bool {
 		n.push.mu.Lock()
 		defer n.push.mu.Unlock()

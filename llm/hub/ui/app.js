@@ -1,7 +1,7 @@
-// The hub console: overview, nodes (with management of the nodes that allow it), models, clients, connections and
+// The hub console: overview, nodes (with management of the nodes that allow it), models, proxies, connections and
 // settings. Needs ui.js, peers.js and jobs.js.
 //
-// hub 控制台：概览、节点（含对允许代管的节点的管理）、模型、客户端、连接与设置。依赖 ui.js、peers.js 与 jobs.js。
+// hub 控制台：概览、节点（含对允许代管的节点的管理）、模型、代理、连接与设置。依赖 ui.js、peers.js 与 jobs.js。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -10,9 +10,9 @@
   var WORDS = [
     ['app.sub', 'Model hub', '模型汇聚'],
     ['nav.overview', 'Overview', '概览'], ['nav.nodes', 'Nodes', '节点'], ['nav.models', 'Models', '模型'],
-    ['nav.clients', 'Clients', '客户端'], ['nav.peers', 'Connections', '连接'], ['nav.settings', 'Settings', '设置'],
+    ['nav.proxies', 'Proxies', '代理'], ['nav.peers', 'Connections', '连接'], ['nav.settings', 'Settings', '设置'],
     ['nodes.online', 'Nodes online', '在线节点'], ['nodes.total', '{n} known', '共 {n} 个'],
-    ['clients.count', 'Clients', '客户端'], ['models.count', 'Models', '模型'], ['models.ready', '{n} ready', '{n} 个就绪'],
+    ['proxies.count', 'Proxies', '代理'], ['models.count', 'Models', '模型'], ['models.ready', '{n} ready', '{n} 个就绪'],
     ['inflight', 'In flight', '在途'], ['name', 'Name', '名称'], ['host', 'Host', '主机'], ['status', 'Status', '状态'],
     ['gpus', 'GPUs', '显卡'], ['models', 'Models', '模型'], ['api', 'API', '接口'], ['nodes', 'Nodes', '节点'],
     ['ready', 'Ready', '就绪'], ['last_seen', 'Last seen', '最后在线'], ['managed', 'Managed', '可代管'],
@@ -20,7 +20,7 @@
     ['direction', 'Direction', '方向'], ['id', 'ID', 'ID'], ['jobs', 'Jobs', '作业'],
     ['no.nodes', 'No nodes yet: let nodes dial this hub, or add a dial target on the Connections page.', '暂无节点：让节点连接本 hub，或在“连接”页添加连接目标。'],
     ['no.models', 'No models: the online nodes serve none.', '暂无模型：在线节点没有提供模型。'],
-    ['no.clients', 'No client is connected.', '没有已连接的客户端。'],
+    ['no.proxies', 'No proxy is connected.', '没有已连接的代理。'],
     ['node.back', 'All nodes', '全部节点'], ['node.notfound', 'Node not found', '未找到节点'],
     ['tab.info', 'Details', '详情'], ['tab.models', 'Models', '模型管理'], ['tab.gpu', 'GPU', '显卡'],
     ['tab.actions', 'Actions', '操作'], ['tab.jobs', 'Jobs', '作业'], ['tab.profile', 'Profile', '资料'],
@@ -65,13 +65,13 @@
         var nodes = r[0] || [], peers = r[1], hm = r[2] || {};
         nodes.forEach(function (n) { nodeNames[n.info.id] = n.info.name || n.info.id; });
         var online = nodes.filter(function (n) { return n.online; });
-        var clients = distinct((peers.conns || []).filter(function (c) { return c.role === 'client'; }));
+        var proxies = distinct((peers.conns || []).filter(function (c) { return c.role === 'proxy'; }));
         var ms = hm.models || [];
         var ready = ms.filter(function (m) { return m.ready > 0; }).length;
         var inflight = online.reduce(function (s, n) { return s + (n.info.inflight || 0); }, 0);
         UI.mount(stats,
           UI.stat('server', t('nodes.online'), online.length + ' / ' + nodes.length, t('nodes.total', { n: nodes.length }), online.length ? 'ok' : ''),
-          UI.stat('users', t('clients.count'), clients.length, null, 'info'),
+          UI.stat('users', t('proxies.count'), proxies.length, null, 'info'),
           UI.stat('cube', t('models.count'), ms.length, t('models.ready', { n: ready }), ready ? 'ok' : 'warn'),
           UI.stat('activity', t('inflight'), inflight));
         UI.mount(models, modelTable(ms));
@@ -410,13 +410,13 @@
     UI.every(5000, load);
   }
 
-  // ---- Clients / 客户端 ----
-  function clientsPage(el) {
+  // ---- Proxies / 代理 ----
+  function proxiesPage(el) {
     var box = h('div');
-    UI.mount(el, UI.card(t('nav.clients'), box, null, true));
+    UI.mount(el, UI.card(t('nav.proxies'), box, null, true));
     function load() {
       UI.rpc('/mesh/peers').then(function (p) {
-        var cs = (p.conns || []).filter(function (c) { return c.role === 'client'; });
+        var cs = (p.conns || []).filter(function (c) { return c.role === 'proxy'; });
         UI.mount(box, UI.table([
           { label: t('name'), render: function (c) { return h('div', h('b', c.name || c.id), h('div', ellipsisId(c.id))); } },
           { label: t('host'), render: function (c) { return c.hostname || '—'; } },
@@ -425,7 +425,7 @@
           { label: t('remote'), render: function (c) { return c.remote; } },
           { label: t('connected'), render: function (c) { return UI.ago(c.connected_at); } },
           { label: t('status'), render: function (c) { return c.draining ? UI.badge('draining', 'warn') : UI.onlineBadge(true); } }
-        ], cs, { empty: t('no.clients') }));
+        ], cs, { empty: t('no.proxies') }));
       }).catch(UI.fail);
     }
     load();
@@ -452,16 +452,16 @@
 
   var app = document.getElementById('app');
   var s = UI.boot(app, {
-    brand: 'fit agent hub', sub: t('app.sub'),
+    brand: 'fit llm hub', sub: t('app.sub'),
     start: function (me) {
       var sh = UI.shell({
-        brand: 'fit agent hub', sub: (me.identity && me.identity.name) || t('app.sub'), user: me.user,
+        brand: 'fit llm hub', sub: (me.identity && me.identity.name) || t('app.sub'), user: me.user,
         onLogout: function () { s.logout(); },
         nav: [
           { id: 'overview', icon: 'dashboard', label: t('nav.overview') },
           { id: 'nodes', icon: 'server', label: t('nav.nodes') },
           { id: 'models', icon: 'cube', label: t('nav.models') },
-          { id: 'clients', icon: 'users', label: t('nav.clients') },
+          { id: 'proxies', icon: 'users', label: t('nav.proxies') },
           { id: 'peers', icon: 'link', label: t('nav.peers') },
           { id: 'settings', icon: 'settings', label: t('nav.settings') }
         ]
@@ -472,7 +472,7 @@
         'nodes': function () { nodesPage(sh.page('nodes', t('nav.nodes'))); },
         'nodes/:id': function (p) { nodePage(sh, p.id); },
         'models': function () { modelsPage(sh.page('models', t('nav.models'))); },
-        'clients': function () { clientsPage(sh.page('clients', t('nav.clients'))); },
+        'proxies': function () { proxiesPage(sh.page('proxies', t('nav.proxies'))); },
         'peers': function () { PeersPanel.mount(sh.page('peers', t('nav.peers'))); },
         'settings': function () { settingsPage(sh.page('settings', t('nav.settings')), me); }
       }, 'overview');

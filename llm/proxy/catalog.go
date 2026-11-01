@@ -1,11 +1,11 @@
-package client
+package proxy
 
 import (
 	"sort"
 	"sync"
 	"sync/atomic"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // Route kinds: a directly connected node, or a hub that picks a node itself.
@@ -22,9 +22,9 @@ type Route struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Ready bool   `json:"ready"`
-	// Inflight: calls in progress on that node for the model (node), as last pushed plus the ones this client
+	// Inflight: calls in progress on that node for the model (node), as last pushed plus the ones this proxy
 	// started since.
-	// Inflight：该节点上此模型的进行中调用（node），即最近推送的值加上本 client 之后发起的调用。
+	// Inflight：该节点上此模型的进行中调用（node），即最近推送的值加上本 proxy 之后发起的调用。
 	Inflight int `json:"inflight"`
 	// Nodes / ReadyNodes: how many nodes behind the hub serve the model, and how many are ready (hub).
 	// Nodes / ReadyNodes：hub 背后提供该模型的节点数与就绪数（hub）。
@@ -32,8 +32,8 @@ type Route struct {
 	ReadyNodes int `json:"ready_nodes,omitempty"`
 }
 
-// CatalogModel is one model name and format with every route to it (MethodClientModels).
-// CatalogModel 一个模型名称与格式及其全部路由（MethodClientModels）。
+// CatalogModel is one model name and format with every route to it (MethodProxyModels).
+// CatalogModel 一个模型名称与格式及其全部路由（MethodProxyModels）。
 type CatalogModel struct {
 	Name   string  `json:"name"`
 	API    string  `json:"api"`
@@ -57,7 +57,7 @@ type catalog struct {
 	mu       sync.Mutex
 	hubs     map[string]*hubEntry
 	nodes    map[string]*nodeEntry
-	inflight map[string]int // calls this client runs on a direct node, per node id / 本 client 在直连节点上的调用数，按节点 ID
+	inflight map[string]int // calls this proxy runs on a direct node, per node id / 本 proxy 在直连节点上的调用数，按节点 ID
 	rr       atomic.Uint64
 }
 
@@ -99,8 +99,8 @@ func (c *catalog) drop(id string) {
 	c.mu.Unlock()
 }
 
-// addInflight counts a call this client runs on direct node id.
-// addInflight 记录本 client 在直连节点 id 上运行的调用。
+// addInflight counts a call this proxy runs on direct node id.
+// addInflight 记录本 proxy 在直连节点 id 上运行的调用。
 func (c *catalog) addInflight(id string, d int) {
 	c.mu.Lock()
 	if c.inflight[id] += d; c.inflight[id] <= 0 {

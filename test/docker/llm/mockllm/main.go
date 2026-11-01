@@ -1,4 +1,4 @@
-// Command mockllm is the upstream model service of the docker end-to-end test of fit's agent: a tiny OpenAI / Anthropic compatible
+// Command mockllm is the upstream model service of the docker end-to-end test of fit's LLM feature: a tiny OpenAI / Anthropic compatible
 // server that echoes what it received, so the test can check what a node forwarded (model rewrite, API key, headers).
 //
 // Every route is under a tag (/u/<tag>/v1/...), one tag per simulated upstream; the API key of tag t is "sk-<t>".

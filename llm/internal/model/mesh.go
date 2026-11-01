@@ -3,9 +3,9 @@ package model
 // Roles.
 // 角色。
 const (
-	RoleNode   = "node"
-	RoleHub    = "hub"
-	RoleClient = "client"
+	RoleNode  = "node"
+	RoleHub   = "hub"
+	RoleProxy = "proxy"
 	// RoleLocal is the caller of a method made by the process's own web console (never sent over the mesh).
 	// RoleLocal 由进程自身 Web 控制台发起的调用的调用方角色（不会经互联发送）。
 	RoleLocal = "local"
@@ -13,7 +13,7 @@ const (
 
 // Roles lists the three program roles.
 // Roles 列出三个程序角色。
-var Roles = []string{RoleNode, RoleHub, RoleClient}
+var Roles = []string{RoleNode, RoleHub, RoleProxy}
 
 // Mesh management methods: only RoleLocal (the process's own console).
 // 互联管理方法：只有 RoleLocal（进程自身的控制台）。

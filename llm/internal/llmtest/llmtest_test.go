@@ -1,4 +1,4 @@
-package agenttest
+package llmtest
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/lesismal/fit/agent/hub"
 	_ "github.com/lesismal/fit/handler/respond"
+	_ "github.com/lesismal/fit/llm/hub"
 )
 
 // fatalTB is a testing.TB whose Fatal ends only the goroutine it runs on,
@@ -104,7 +104,7 @@ func TestStartFails(t *testing.T) {
 		{"compile", `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
 			"routes": [{"handler": {"module": "nope"}}]}`, "", `no module "nope"`},
 		{"listen", web(busy.Addr().String()), "", "listen"},
-		{"apply", `{"agent": {"hub": {"console": {"address": "127.0.0.1:0",
+		{"apply", `{"llm": {"hub": {"console": {"address": "127.0.0.1:0",
 			"users": [{"username": "a", "password_hash": "` + hash + `"}], "cert_file": "/missing/c", "key_file": "/missing/k"}}}}`, "", "console"},
 		{"store", web("127.0.0.1:0"), garbage, "store"},
 		{"too big for the store", strings.Repeat(" ", 64<<20+1), filepath.Join(t.TempDir(), "big.store"), "larger"},

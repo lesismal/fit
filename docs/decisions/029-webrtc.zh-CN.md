@@ -28,8 +28,8 @@ goroutine 上读 socket、跑定时器。fib 的这些包正是 025 想要的：
   （fib 的 TURN 服务器只在自己的 UDP 端口上应答 Binding 请求）。I86 进行时，它的消息改用 `webrtc/stun` 的，只保留服务器
   部分，这样进程里只有一套 STUN 编解码，修复对两边都生效。025 的其他决定不变：选中的候选对上跑 QUIC，信令在汇合点的
   fit 上，一切都有上限。
-- **配置中的 `webrtc`。** 一个顶层成员，存放 fit 在网关之外为 WebRTC 运行的东西，与 `agent` 和 `tunnel` 一样
-  （[决定 028](028-agent-and-tunnel.zh-CN.md)）：`webrtc.turn`，即 TURN 服务器，是 `app` 包的一个角色，运行在 listener
+- **配置中的 `webrtc`。** 一个顶层成员，存放 fit 在网关之外为 WebRTC 运行的东西，与 `llm` 和 `tunnel` 一样
+  （[决定 028](028-llm-and-tunnel.zh-CN.md)）：`webrtc.turn`，即 TURN 服务器，是 `app` 包的一个角色，运行在 listener
   的引擎上，随每个配置应用、迁移和停止。WHIP 和 WHEP（I109）是路由上的 handler 模块，它们的对端共用的 UDP 端口是旁边的
   另一个角色 `webrtc.media`。
 - **TURN 服务器**（`webrtc/turn`，I87、I111）：监听的 UDP 地址，同一个 binding，以及 TCP 和 TLS 地址（I111，A55），

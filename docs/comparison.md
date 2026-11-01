@@ -376,5 +376,5 @@ Traefik's:
 The [roadmap](roadmap.md) expands these milestones with scope, exit criteria and performance
 targets. Since 1.0, it adds what none of the three does, run beside the gateway on its engine: the
 config kept encrypted and changed from a console behind logins, WebRTC, the tunnel, which reaches
-services behind NAT, and the agent, which shares AI models among machines
+services behind NAT, and the LLM feature, which shares AI models among machines
 ([after 1.0](roadmap.md#after-10)).

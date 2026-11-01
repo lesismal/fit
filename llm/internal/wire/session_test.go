@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // pair connects a dialer and a listener session; closing either "connection" closes both sessions.

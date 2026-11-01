@@ -4519,7 +4519,7 @@ config kept encrypted in a file of fit's own format, its password in the bootstr
 
 ### I105 Roles in fit's config — done
 
-The agent-and-tunnel track's foundation ([decision 028](decisions/028-agent-and-tunnel.md)).
+The agent-and-tunnel track's foundation ([decision 028](decisions/028-llm-and-tunnel.md)).
 
 - **Config**: `agent` (`hub`, `node`, `client`) and `tunnel` (`server`, `node`, `client`), each role
   a member; `RoleConsole` (admin.console's fields, the address required), checked as the console is;
@@ -4564,10 +4564,13 @@ fibhub as `tunnel/server`, `tunnel/node` (fibhub's pod) and `tunnel/client`; [th
   write-back and a restart from the store), slow peers, large transfers, cut connections; Docker:
   `test/docker/tunnel`, 208 checks and 17 after a restart. Not tested against fibhub's binaries.
 - **Benchmark**: none yet; the tunnel's data path has no harness scenario.
+- **Renamed**: the roles are now `tunnel.hub`, `tunnel.node` and `tunnel.proxy` (the server and
+  client roles), in the packages `tunnel/hub`, `tunnel/node` and `tunnel/proxy`; the node's and
+  proxy's `servers` are `hubs`, a forward's `server` is `hub`, and so on the wire ([the tunnel](tunnel.md)).
 
 ### I107 The agent — done
 
-agenthub as `agent/hub`, `agent/node` and `agent/client`, on today's fib; [the agent](agent.md).
+agenthub as `agent/hub`, `agent/node` and `agent/client`, on today's fib; [the agent](llm.md).
 
 - The mesh on fib's WebSocket, its listener a binding of its own (`listen.address`, `/ws`), its
   streams paced by credits; a link that falls behind is dropped by `slow_timeout` (stopgaps for
@@ -4827,7 +4830,7 @@ fib's A55–A59, built for fit's WebRTC ([decision 029](decisions/029-webrtc.md)
 ### I112 The agent's model APIs — done
 
 The agent serves every stateless inference endpoint of the mainstream model APIs
-([Models and APIs](agent.md#models-and-apis)).
+([Models and APIs](llm.md#models-and-apis)).
 
 - **Kinds**: a model's `api` is `openai`, `anthropic`, `gemini`, `azure_openai`, `ollama` or
   `cohere`; `azure_openai` models are called as `openai`, so a name is unique per agent API
@@ -4867,6 +4870,9 @@ The agent serves every stateless inference endpoint of the mainstream model APIs
 - **Gaps**: the client holds a body whole (within `api.max_body_bytes`), uploads included, to read
   the model and retry another route; Gemini's tuned models (`tunedModels/...`) and Vertex AI are
   not served.
+- **Renamed**: the feature is now `llm`, its roles `llm.hub`, `llm.node` and `llm.proxy` (the
+  client role), in the packages `llm/hub`, `llm/node` and `llm/proxy`; "agent" now means only
+  the AI agents that call `llm.proxy` ([the LLM feature](llm.md)).
 
 ## Notes for later iterations
 

@@ -60,21 +60,21 @@ func (r *fakeRole) isStopped() bool {
 }
 
 func hubMember(c *config.Config) any {
-	if c.Agent == nil {
-		return (*config.AgentHub)(nil)
+	if c.LLM == nil {
+		return (*config.LLMHub)(nil)
 	}
-	return c.Agent.Hub
+	return c.LLM.Hub
 }
 
-func serverMember(c *config.Config) any {
+func tunnelHubMember(c *config.Config) any {
 	if c.Tunnel == nil {
-		return (*config.TunnelServer)(nil)
+		return (*config.TunnelHub)(nil)
 	}
-	return c.Tunnel.Server
+	return c.Tunnel.Hub
 }
 
 func TestInfoPath(t *testing.T) {
-	if got := (Info{ID: "tunnel.server"}).Path(); !slices.Equal(got, []string{"tunnel", "server"}) {
+	if got := (Info{ID: "tunnel.hub"}).Path(); !slices.Equal(got, []string{"tunnel", "hub"}) {
 		t.Fatalf("Path = %v", got)
 	}
 }
@@ -93,16 +93,16 @@ func TestRegisterPanics(t *testing.T) {
 		Register(info)
 	}
 	mustPanic("no ID", Info{Member: hubMember, New: newRole}, "lacks")
-	mustPanic("no Member", Info{ID: "agent.hub", New: newRole}, "lacks")
-	mustPanic("no New", Info{ID: "agent.hub", Member: hubMember}, "lacks")
-	Register(Info{ID: "tunnel.server", Member: serverMember, New: newRole})
-	Register(Info{ID: "agent.hub", Member: hubMember, New: newRole})
-	mustPanic("twice", Info{ID: "agent.hub", Member: hubMember, New: newRole}, "twice")
+	mustPanic("no Member", Info{ID: "llm.hub", New: newRole}, "lacks")
+	mustPanic("no New", Info{ID: "llm.hub", Member: hubMember}, "lacks")
+	Register(Info{ID: "tunnel.hub", Member: tunnelHubMember, New: newRole})
+	Register(Info{ID: "llm.hub", Member: hubMember, New: newRole})
+	mustPanic("twice", Info{ID: "llm.hub", Member: hubMember, New: newRole}, "twice")
 	var ids []string
 	for _, i := range Roles() {
 		ids = append(ids, i.ID)
 	}
-	if !slices.Equal(ids, []string{"agent.hub", "tunnel.server"}) {
+	if !slices.Equal(ids, []string{"llm.hub", "tunnel.hub"}) {
 		t.Fatalf("Roles = %v, want sorted", ids)
 	}
 }
@@ -113,18 +113,18 @@ func TestSet(t *testing.T) {
 		want   bool
 	}{
 		{nil, false},
-		{(*config.AgentHub)(nil), false},
-		{(*config.AgentNode)(nil), false},
-		{(*config.AgentClient)(nil), false},
-		{(*config.TunnelServer)(nil), false},
+		{(*config.LLMHub)(nil), false},
+		{(*config.LLMNode)(nil), false},
+		{(*config.LLMProxy)(nil), false},
+		{(*config.TunnelHub)(nil), false},
 		{(*config.TunnelNode)(nil), false},
-		{(*config.TunnelClient)(nil), false},
-		{&config.AgentHub{}, true},
-		{&config.AgentNode{}, true},
-		{&config.AgentClient{}, true},
-		{&config.TunnelServer{}, true},
+		{(*config.TunnelProxy)(nil), false},
+		{&config.LLMHub{}, true},
+		{&config.LLMNode{}, true},
+		{&config.LLMProxy{}, true},
+		{&config.TunnelHub{}, true},
 		{&config.TunnelNode{}, true},
-		{&config.TunnelClient{}, true},
+		{&config.TunnelProxy{}, true},
 		{"another member", true},
 	} {
 		if got := set(tc.member); got != tc.want {
@@ -137,24 +137,24 @@ func TestCheck(t *testing.T) {
 	newRole := func(*Host) (Role, error) { return &fakeRole{}, nil }
 	var checkErr error
 	withRoles(t,
-		Info{ID: "agent.hub", Member: hubMember, New: newRole, Check: func(*config.Config) error { return checkErr }},
-		Info{ID: "tunnel.server", Member: serverMember, New: newRole},
+		Info{ID: "llm.hub", Member: hubMember, New: newRole, Check: func(*config.Config) error { return checkErr }},
+		Info{ID: "tunnel.hub", Member: tunnelHubMember, New: newRole},
 	)
 	every := &config.Config{
-		Agent:  &config.Agent{Hub: &config.AgentHub{}, Node: &config.AgentNode{}, Client: &config.AgentClient{}},
-		Tunnel: &config.Tunnel{Server: &config.TunnelServer{}, Node: &config.TunnelNode{}, Client: &config.TunnelClient{}},
+		LLM:    &config.LLM{Hub: &config.LLMHub{}, Node: &config.LLMNode{}, Proxy: &config.LLMProxy{}},
+		Tunnel: &config.Tunnel{Hub: &config.TunnelHub{}, Node: &config.TunnelNode{}, Proxy: &config.TunnelProxy{}},
 	}
 	if got := len(members(every)); got != 6 {
 		t.Fatalf("members = %d, want 6", got)
 	}
-	// The hub and the server are registered; the other four roles are not.
+	// The LLM hub and the tunnel hub are registered; the other four roles are not.
 	err := Check(every)
 	var es config.Errors
-	if !errors.As(err, &es) || len(es) != 4 || !strings.Contains(es[0].Msg, "built without the agent.node role") {
+	if !errors.As(err, &es) || len(es) != 4 || !strings.Contains(es[0].Msg, "built without the llm.node role") {
 		t.Fatalf("Check = %v", err)
 	}
 
-	only := &config.Config{Agent: &config.Agent{Hub: &config.AgentHub{}}}
+	only := &config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}}}
 	if err := Check(only); err != nil {
 		t.Fatalf("Check of a registered role = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestCheck(t *testing.T) {
 		want []string
 	}{
 		{"Errors", config.Errors{{Msg: "a"}, {Msg: "b"}}, []string{"a", "b"}},
-		{"Error", &config.Error{Path: "agent.hub", Msg: "c"}, []string{"c"}},
+		{"Error", &config.Error{Path: "llm.hub", Msg: "c"}, []string{"c"}},
 		{"plain", errors.New("d"), []string{"d"}},
 	} {
 		checkErr = tc.err
@@ -189,19 +189,19 @@ func TestCheck(t *testing.T) {
 func TestManagerApply(t *testing.T) {
 	hub := &fakeRole{}
 	var newErr error
-	server := &fakeRole{}
+	tunnelHub := &fakeRole{}
 	var hosts []*Host
 	withRoles(t,
-		Info{ID: "agent.hub", Member: hubMember, New: func(h *Host) (Role, error) {
+		Info{ID: "llm.hub", Member: hubMember, New: func(h *Host) (Role, error) {
 			hosts = append(hosts, h)
 			return hub, nil
 		}},
-		Info{ID: "tunnel.server", Member: serverMember, New: func(h *Host) (Role, error) {
+		Info{ID: "tunnel.hub", Member: tunnelHubMember, New: func(h *Host) (Role, error) {
 			hosts = append(hosts, h)
 			if newErr != nil {
 				return nil, newErr
 			}
-			return server, nil
+			return tunnelHub, nil
 		}},
 	)
 	root, err := logs.New(nil, io.Discard, io.Discard)
@@ -212,14 +212,14 @@ func TestManagerApply(t *testing.T) {
 	m := NewManager(nil, nil, root, nil)
 	defer m.Stop(context.Background())
 
-	both := &config.Config{Agent: &config.Agent{Hub: &config.AgentHub{}}, Tunnel: &config.Tunnel{Server: &config.TunnelServer{}}}
+	both := &config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}}, Tunnel: &config.Tunnel{Hub: &config.TunnelHub{}}}
 
-	// New fails for the server: the hub runs alone.
+	// New fails for the tunnel hub: the LLM hub runs alone.
 	newErr = errors.New("no listener")
-	if err := m.Apply(both); err == nil || !strings.Contains(err.Error(), "tunnel.server: no listener") {
+	if err := m.Apply(both); err == nil || !strings.Contains(err.Error(), "tunnel.hub: no listener") {
 		t.Fatalf("Apply = %v", err)
 	}
-	if got := m.Running(); !slices.Equal(got, []string{"agent.hub"}) {
+	if got := m.Running(); !slices.Equal(got, []string{"llm.hub"}) {
 		t.Fatalf("Running = %v", got)
 	}
 	for _, h := range hosts {
@@ -228,18 +228,18 @@ func TestManagerApply(t *testing.T) {
 		}
 	}
 
-	// The server's first Apply fails: it is stopped and not kept.
+	// The tunnel hub's first Apply fails: it is stopped and not kept.
 	newErr = nil
-	server.applyErr = errors.New("bad member")
-	if err := m.Apply(both); err == nil || !strings.Contains(err.Error(), "tunnel.server: bad member") {
+	tunnelHub.applyErr = errors.New("bad member")
+	if err := m.Apply(both); err == nil || !strings.Contains(err.Error(), "tunnel.hub: bad member") {
 		t.Fatalf("Apply = %v", err)
 	}
-	if !server.isStopped() || slices.Contains(m.Running(), "tunnel.server") {
-		t.Fatal("a server whose first Apply failed is kept")
+	if !tunnelHub.isStopped() || slices.Contains(m.Running(), "tunnel.hub") {
+		t.Fatal("a tunnel hub whose first Apply failed is kept")
 	}
 
-	// Both start; then an Apply to the running hub fails, and it runs on.
-	server.applyErr, server.stopped = nil, false
+	// Both start; then an Apply to the running LLM hub fails, and it runs on.
+	tunnelHub.applyErr, tunnelHub.stopped = nil, false
 	if err := m.Apply(both); err != nil {
 		t.Fatalf("Apply = %v", err)
 	}
@@ -247,20 +247,20 @@ func TestManagerApply(t *testing.T) {
 	if err := m.Apply(both); err == nil || !strings.Contains(err.Error(), "it runs as it did") {
 		t.Fatalf("Apply = %v", err)
 	}
-	if got := m.Running(); !slices.Equal(got, []string{"agent.hub", "tunnel.server"}) {
+	if got := m.Running(); !slices.Equal(got, []string{"llm.hub", "tunnel.hub"}) {
 		t.Fatalf("Running = %v", got)
 	}
 
-	// A config leaving the hub out stops it.
+	// A config leaving the LLM hub out stops it.
 	if err := m.Apply(&config.Config{Tunnel: both.Tunnel}); err != nil {
 		t.Fatalf("Apply = %v", err)
 	}
-	if !hub.isStopped() || !slices.Equal(m.Running(), []string{"tunnel.server"}) {
+	if !hub.isStopped() || !slices.Equal(m.Running(), []string{"tunnel.hub"}) {
 		t.Fatalf("hub stopped %v, Running %v", hub.isStopped(), m.Running())
 	}
 
 	m.Stop(context.Background())
-	if !server.isStopped() || len(m.Running()) != 0 {
+	if !tunnelHub.isStopped() || len(m.Running()) != 0 {
 		t.Fatal("Stop left a role running")
 	}
 }
@@ -268,7 +268,7 @@ func TestManagerApply(t *testing.T) {
 func TestManagerHostWithoutLog(t *testing.T) {
 	m := NewManager(nil, nil, nil, nil)
 	defer m.Stop(context.Background())
-	if h := m.host("agent.hub"); h.Log != nil || h.ID != "agent.hub" || h.m != m {
+	if h := m.host("llm.hub"); h.Log != nil || h.ID != "llm.hub" || h.m != m {
 		t.Fatalf("host = %+v", h)
 	}
 }
@@ -281,7 +281,7 @@ type editResult struct {
 func TestHostEditWithoutEditor(t *testing.T) {
 	m := NewManager(nil, nil, nil, nil)
 	defer m.Stop(context.Background())
-	h := m.host("agent.hub")
+	h := m.host("llm.hub")
 	got := make(chan editResult, 1)
 	h.Edit(func(b []byte) ([]byte, error) { return b, nil }, func(ws []string, err error) { got <- editResult{ws, err} })
 	if r := <-got; r.err == nil || !strings.Contains(r.err.Error(), "cannot be changed here") {
@@ -301,10 +301,10 @@ func TestHostEdit(t *testing.T) {
 	m := NewManager(nil, nil, nil, editor)
 	defer m.Stop(context.Background())
 	got := make(chan editResult, 1)
-	m.host("tunnel.server").Edit(func([]byte) ([]byte, error) { return []byte(`{"name":"x"}`), nil },
+	m.host("tunnel.hub").Edit(func([]byte) ([]byte, error) { return []byte(`{"name":"x"}`), nil },
 		func(ws []string, err error) { got <- editResult{ws, err} })
 	r := <-got
-	if r.err != nil || !slices.Equal(r.warnings, []string{`tunnel.server {"name":"x"}`}) || !slices.Equal(gotPath, []string{"tunnel", "server"}) {
+	if r.err != nil || !slices.Equal(r.warnings, []string{`tunnel.hub {"name":"x"}`}) || !slices.Equal(gotPath, []string{"tunnel", "hub"}) {
 		t.Fatalf("Edit = %v %v, path %v", r.warnings, r.err, gotPath)
 	}
 }
@@ -319,7 +319,7 @@ func TestHostEditBusyAndStopped(t *testing.T) {
 		return nil, nil
 	}
 	m := NewManager(nil, nil, nil, editor)
-	h := m.host("agent.hub")
+	h := m.host("llm.hub")
 	results := make(chan error, MaxEdits+2)
 	done := func(_ []string, err error) { results <- err }
 	nop := func(b []byte) ([]byte, error) { return b, nil }

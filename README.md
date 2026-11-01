@@ -13,9 +13,10 @@ its routes from a strict config, written in fit's own .conf format, in YAML or i
 place through an Admin API, or from Docker, Consul, etcd and Kubernetes. Its config may be kept
 encrypted in a file of its own and changed from a web console behind logins. Beside the gateway, on
 the same engine, it runs a TURN server and serves WebRTC's WHIP and WHEP, as a media server or in
-front of other media servers; the tunnel, which reaches services behind NAT; and the agent, which
-shares AI models among machines. Every milestone's iterations are done, 1.0's included, and 1.0's
-external security review is still to come; see [progress](docs/progress.md) for what works, and
+front of other media servers; the tunnel, which reaches services behind NAT; and the LLM feature
+(`llm`), which shares AI models among machines and serves them to agents. Every milestone's
+iterations are done, 1.0's included, and 1.0's external security review is still to come; see
+[progress](docs/progress.md) for what works, and
 [bench](bench/README.md) for how it is measured against nginx, Caddy and Traefik.
 
 ## Docs
@@ -32,7 +33,7 @@ external security review is still to come; see [progress](docs/progress.md) for 
   [Traefik](docs/migrating-from-traefik.md).
 - [The console](docs/console.md): the config kept encrypted in a store, `admin.store`, and changed
   from web pages behind logins, `admin.console`; `fit store export` and `import`.
-- [The tunnel](docs/tunnel.md) and [the agent](docs/agent.md): roles run beside the gateway on its
+- [The tunnel](docs/tunnel.md) and [the LLM feature](docs/llm.md): roles run beside the gateway on its
   engine, reaching services behind NAT and sharing AI models among machines.
 - [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, WHIP and WHEP
   with fit as the media server, and other media servers behind fit's one HTTP endpoint and UDP port.

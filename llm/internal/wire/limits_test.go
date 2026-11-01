@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/model"
 )
 
 // Drain is announced once; the peer sees it while running calls and streams go on, and Inflight counts them.

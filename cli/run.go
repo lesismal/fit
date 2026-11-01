@@ -212,7 +212,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	if boot != nil {
 		configs.UseStore(boot.admin, boot.st.Write)
 	}
-	// The agent's and the tunnel's roles run on the listeners' engine, and
+	// The llm and tunnel roles run on the listeners' engine, and
 	// write what their pages change back into the config through configs.
 	apps := app.NewManager(s.Engine(), env.Engine, root, configs.EditMember)
 	apps.SetDrainTimeout(*grace)

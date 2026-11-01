@@ -17,10 +17,10 @@ import (
 	"github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 type fibclientResponse = fibhttp.ClientResponse

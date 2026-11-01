@@ -1,12 +1,12 @@
-# An agent node: serves models of several kinds (a local Ollama, through its
+# An LLM node: serves models of several kinds (a local Ollama, through its
 # OpenAI-compatible API and its own, and hosted Anthropic, Gemini, Azure
 # OpenAI and Cohere models, whose keys are placeholders to replace) to the
-# hub it links to (examples/agent-hub), and through it to clients. Its console is on
+# hub it links to (examples/llm-hub), and through it to proxies. Its console is on
 # 127.0.0.1:9100, user admin, password example-password. The id is written
 # out, as fit would otherwise write a new one back into this file.
-# Run one file, from the repository's root: fit run -c examples/agent-node/fit.yaml
+# Run one file, from the repository's root: fit run -c examples/llm-node/fit.yaml
 # fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
-agent:
+llm:
   node:
     id: node-0d9e4b7a61c2f835
     name: gpu-1

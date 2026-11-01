@@ -14,8 +14,8 @@ import (
 
 	"github.com/lesismal/fib"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -82,7 +82,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 var (
-	allPeers = []string{model.RoleNode, model.RoleHub, model.RoleClient}
+	allPeers = []string{model.RoleNode, model.RoleHub, model.RoleProxy}
 	toNode   = func(addr string) model.DialReq {
 		return model.DialReq{Addr: addr, Password: "pw", Role: model.RoleNode}
 	}
@@ -97,7 +97,7 @@ func TestMeshBothDirections(t *testing.T) {
 	start(t, node, addr)
 	hub, _ := newTestMesh(t, model.RoleHub, "h1", allPeers)
 	start(t, hub, "", toNode(addr))
-	client, _ := newTestMesh(t, model.RoleClient, "c1", allPeers)
+	client, _ := newTestMesh(t, model.RoleProxy, "c1", allPeers)
 	start(t, client, "", toNode(addr))
 	waitFor(t, "hello", func() bool { return hub.Online("n1") && client.Online("n1") && node.Online("h1") && node.Online("c1") })
 
@@ -112,10 +112,10 @@ func TestMeshBothDirections(t *testing.T) {
 	if err != nil || got["from"] != "n1" {
 		t.Fatalf("node → hub: %v %v", got, err)
 	}
-	// client is not allowed to call /echo.
-	// client 无权调用 /echo。
+	// proxy is not allowed to call /echo.
+	// proxy 无权调用 /echo。
 	if _, err := Call[map[string]string](ctx, client, "n1", "/echo", nil); err == nil {
-		t.Fatal("client call was not refused")
+		t.Fatal("proxy call was not refused")
 	}
 	if raw, err := hub.CallRaw(ctx, "n1", "/echo", nil); err != nil || !strings.Contains(string(raw), `"h1"`) {
 		t.Fatalf("CallRaw: %s %v", raw, err)
@@ -139,7 +139,7 @@ func TestMeshRefusesRoleAndPassword(t *testing.T) {
 	addr := freeAddr(t)
 	node, _ := newTestMesh(t, model.RoleNode, "n1", []string{model.RoleHub})
 	start(t, node, addr)
-	client, _ := newTestMesh(t, model.RoleClient, "c1", allPeers)
+	client, _ := newTestMesh(t, model.RoleProxy, "c1", allPeers)
 	start(t, client, "", toNode(addr))
 	bad, _ := newTestMesh(t, model.RoleHub, "h2", allPeers)
 	start(t, bad, "", model.DialReq{Addr: addr, Password: "wrong", Role: model.RoleNode})
@@ -151,7 +151,7 @@ func TestMeshRefusesRoleAndPassword(t *testing.T) {
 		t.Fatal("refused peers are online")
 	}
 	if e := client.Targets()[0].Error; !strings.Contains(e, "not accepted") {
-		t.Fatalf("client error = %q", e)
+		t.Fatalf("proxy error = %q", e)
 	}
 	if e := bad.Targets()[0].Error; !strings.Contains(e, "authentication") {
 		t.Fatalf("wrong password error = %q", e)
@@ -201,10 +201,10 @@ func TestMeshExpectedRole(t *testing.T) {
 	node, _ := newTestMesh(t, model.RoleNode, "n1", allPeers)
 	start(t, node, addr)
 	hub, _ := newTestMesh(t, model.RoleHub, "h1", allPeers)
-	start(t, hub, "", model.DialReq{Addr: addr, Password: "pw", Role: model.RoleClient})
+	start(t, hub, "", model.DialReq{Addr: addr, Password: "pw", Role: model.RoleProxy})
 	waitFor(t, "refusal", func() bool { ts := hub.Targets(); return len(ts) == 1 && ts[0].Error != "" })
 	if hub.Online("n1") {
-		t.Fatal("a node accepted as a client peer")
+		t.Fatal("a node accepted as a proxy peer")
 	}
 	// Re-dialing with only the role changed keeps the password.
 	// 只改角色重新拨号时保留密码。
@@ -342,7 +342,7 @@ func TestMeshStreamAndPush(t *testing.T) {
 		hubPushes <- caller.ID + ":" + s
 	})
 	start(t, hub, "", toNode(addr))
-	client, _ := newTestMesh(t, model.RoleClient, "c1", allPeers)
+	client, _ := newTestMesh(t, model.RoleProxy, "c1", allPeers)
 	start(t, client, "", toNode(addr))
 	waitFor(t, "hello", func() bool { return hub.Online("n1") && client.Online("n1") && node.Online("h1") && node.Online("c1") })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -391,7 +391,7 @@ func TestMeshStreamAndPush(t *testing.T) {
 		return code
 	}
 	if code := recvCode(client, "/count", map[string]int{"n": 1}); code != model.CodeForbidden {
-		t.Fatalf("client stream: code %d", code)
+		t.Fatalf("proxy stream: code %d", code)
 	}
 	if code := recvCode(hub, "/count", map[string]int{"n": -1}); code != model.CodeBadRequest {
 		t.Fatalf("bad request stream: code %d", code)
@@ -403,8 +403,8 @@ func TestMeshStreamAndPush(t *testing.T) {
 		t.Fatalf("offline stream: %v", err)
 	}
 
-	// Pushes: the client's is dropped (not allowed), the hub's arrives; node pushes back over the incoming connection.
-	// 推送：client 的被丢弃（无权），hub 的送达；node 经入站连接反向推送。
+	// Pushes: the proxy's is dropped (not allowed), the hub's arrives; node pushes back over the incoming connection.
+	// 推送：proxy 的被丢弃（无权），hub 的送达；node 经入站连接反向推送。
 	if err := client.Push("n1", "/note", "from client"); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 package model
 
-// Node methods every peer role (hub, client) may call.
-// 所有对端角色（hub、client）都可调用的节点方法。
+// Node methods every peer role (hub, proxy) may call.
+// 所有对端角色（hub、proxy）都可调用的节点方法。
 const (
 	MethodNodeInfo = "/node/info" // NodeInfo
 	// MethodNodeProxy is a stream method: ProxyReq opens it, the first stream-data frame is a JSON ProxyHead, every
@@ -11,8 +11,8 @@ const (
 	MethodNodeProxy = "/node/proxy"
 )
 
-// NodeReadMethods are the node methods open to hub and client.
-// NodeReadMethods 对 hub 与 client 开放的节点方法。
+// NodeReadMethods are the node methods open to hub and proxy.
+// NodeReadMethods 对 hub 与 proxy 开放的节点方法。
 var NodeReadMethods = []string{MethodNodeInfo, MethodNodeProxy}
 
 // Node management methods: the node's own console, and a hub when the node allows it (NodeSettings.AllowHubManage).
@@ -51,8 +51,8 @@ const (
 	MethodNodeSettingsSet = "/node/settings/set" // NodeSettings
 )
 
-// MethodNodeUpdate is the push of a node to its hub / client peers whenever its NodeInfo changes.
-// MethodNodeUpdate 节点信息变化时节点推送给其 hub / client 对端。
+// MethodNodeUpdate is the push of a node to its hub / proxy peers whenever its NodeInfo changes.
+// MethodNodeUpdate 节点信息变化时节点推送给其 hub / proxy 对端。
 const MethodNodeUpdate = "/node/update"
 
 // Model is a model a node serves: an upstream API endpoint. Name is how agents ask for it; Upstream is the model id

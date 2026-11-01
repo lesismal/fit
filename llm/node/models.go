@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
 )
 
 // Model checks: a check probes the upstream's model list; enabled models are
@@ -111,12 +111,12 @@ func (n *Node) listModels() []model.Model {
 func validModel(m *model.Model) error {
 	m.Name, m.Upstream, m.BaseURL = strings.TrimSpace(m.Name), strings.TrimSpace(m.Upstream), strings.TrimRight(strings.TrimSpace(m.BaseURL), "/")
 	m.APIKey, m.Description, m.APIVersion = strings.TrimSpace(m.APIKey), strings.TrimSpace(m.Description), strings.TrimSpace(m.APIVersion)
-	c := config.AgentModel{Name: m.Name, API: m.API, BaseURL: m.BaseURL, Upstream: m.Upstream, APIKey: m.APIKey,
+	c := config.LLMModel{Name: m.Name, API: m.API, BaseURL: m.BaseURL, Upstream: m.Upstream, APIKey: m.APIKey,
 		APIVersion: m.APIVersion, Description: m.Description, MaxInflight: m.MaxInflight}
 	if isMasked(c.APIKey) {
 		c.APIKey = ""
 	}
-	if _, msg := config.CheckAgentModel(&c); msg != "" {
+	if _, msg := config.CheckLLMModel(&c); msg != "" {
 		return mesh.BadRequest("%s", msg)
 	}
 	return nil
@@ -136,8 +136,8 @@ func (n *Node) editModels(ctx context.Context, fn func(models []model.Model) ([]
 		if err != nil {
 			return err
 		}
-		if len(models) > config.MaxAgentModels {
-			return mesh.BadRequest("at most %d models", config.MaxAgentModels)
+		if len(models) > config.MaxLLMModels {
+			return mesh.BadRequest("at most %d models", config.MaxLLMModels)
 		}
 		return role.Set(m, "models", models)
 	})

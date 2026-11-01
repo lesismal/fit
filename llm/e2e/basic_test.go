@@ -4,37 +4,37 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lesismal/fit/agent/client"
-	"github.com/lesismal/fit/agent/internal/agenttest"
-	"github.com/lesismal/fit/agent/internal/model"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/proxy"
 )
 
-// A client linked to a node calls its model through the client's API: the
+// A proxy linked to a node calls its model through the proxy's API: the
 // node rewrites the model, uses its key, and streams the answer back.
-func TestClientNodeCall(t *testing.T) {
-	mock := agenttest.StartMockLLM(t)
+func TestProxyNodeCall(t *testing.T) {
+	mock := llmtest.StartMockLLM(t)
 	nodeAddr := freeAddr(t)
-	nf := agenttest.Start(t, member("node", `{"console": `+agenttest.Console()+`, "listen": {"address": "`+nodeAddr+`", "password": "`+meshPass+`"},
+	nf := llmtest.Start(t, member("node", `{"console": `+llmtest.Console()+`, "listen": {"address": "`+nodeAddr+`", "password": "`+meshPass+`"},
 		"models": [{"name": "m1", "api": "openai", "base_url": "`+mock.BaseURL("a")+`", "upstream": "up-a", "api_key": "sk-a"}]}`), "")
-	cf := agenttest.Start(t, member("client", `{"console": `+agenttest.Console()+`, "api": {"address": "127.0.0.1:0"},
+	cf := llmtest.Start(t, member("proxy", `{"console": `+llmtest.Console()+`, "api": {"address": "127.0.0.1:0"},
 		"peers": [{"address": "`+nodeAddr+`", "password": "`+meshPass+`", "role": "node"}]}`), "")
-	n, c := nodeOf(t, nf), clientOf(t, cf)
-	agenttest.Eventually(t, "the link", func() bool { return c.Mesh.Online(n.Self().ID) })
+	n, c := nodeOf(t, nf), proxyOf(t, cf)
+	llmtest.Eventually(t, "the link", func() bool { return c.Mesh.Online(n.Self().ID) })
 
 	p := pages(t, c.Console().URL())
-	var key client.KeyCreateResp
-	if err := p.RPC(client.MethodClientKeysCreate, client.KeyCreateReq{Name: "test"}, &key); err != nil {
+	var key proxy.KeyCreateResp
+	if err := p.RPC(proxy.MethodProxyKeysCreate, proxy.KeyCreateReq{Name: "test"}, &key); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(key.Key, client.KeyPrefix) {
+	if !strings.HasPrefix(key.Key, proxy.KeyPrefix) {
 		t.Fatalf("key %+v", key)
 	}
 	if !strings.Contains(string(cf.Current()), key.KeyView.ID) || strings.Contains(string(cf.Current()), key.Key) {
 		t.Fatalf("the config after the key: %s", cf.Current())
 	}
-	agenttest.Eventually(t, "the model in the catalog", func() bool {
-		var cat []client.CatalogModel
-		return p.RPC(client.MethodClientModels, nil, &cat) == nil && len(cat) == 1 && cat[0].Ready
+	llmtest.Eventually(t, "the model in the catalog", func() bool {
+		var cat []proxy.CatalogModel
+		return p.RPC(proxy.MethodProxyModels, nil, &cat) == nil && len(cat) == 1 && cat[0].Ready
 	})
 
 	a := newAgent(c.API(), key.Key)

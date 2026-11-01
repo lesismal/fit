@@ -147,7 +147,7 @@ func installFor(v *Vendor, family string) *InstallMethod {
 // EnvDataDir names the environment variable install scripts read the node's data directory from (vendors whose
 // driver packages must be downloaded by hand look for them there).
 // EnvDataDir 安装脚本从中读取节点数据目录的环境变量名（驱动包需手动下载的厂商在该目录下查找）。
-const EnvDataDir = "FIT_AGENT_GPU_DATA_DIR"
+const EnvDataDir = "FIT_LLM_GPU_DATA_DIR"
 
 var reDisplay = regexp.MustCompile(`^[A-Za-z0-9._-]*:[0-9]+(\.[0-9]+)?$`)
 

@@ -1,5 +1,5 @@
-// Package model holds the types and mesh method names shared by node, hub and client.
-// Package model 存放 node、hub、client 共用的类型与互联方法名。
+// Package model holds the types and mesh method names shared by node, hub and proxy.
+// Package model 存放 node、hub、proxy 共用的类型与互联方法名。
 package model
 
 // APIResp is the envelope of every JSON HTTP API response of the consoles (mesh replies carry the bare data; errors use
@@ -42,12 +42,12 @@ const (
 	APICohere      = "cohere"       // Cohere v2
 )
 
-// APIs lists every kind, as the config's agent.node.models[].api takes them.
-// APIs 列出所有种类，即配置 agent.node.models[].api 接受的值。
+// APIs lists every kind, as the config's llm.node.models[].api takes them.
+// APIs 列出所有种类，即配置 llm.node.models[].api 接受的值。
 var APIs = []string{APIOpenAI, APIAnthropic, APIGemini, APIAzureOpenAI, APIOllama, APICohere}
 
-// Protocols lists the APIs agents speak to agent.client: every kind's but azure_openai, which agents call as openai.
-// Protocols 列出 agent 向 agent.client 讲的接口：除 azure_openai 外每种的接口，azure_openai 以 openai 调用。
+// Protocols lists the APIs agents speak to llm.proxy: every kind's but azure_openai, which agents call as openai.
+// Protocols 列出 agent 向 llm.proxy 讲的接口：除 azure_openai 外每种的接口，azure_openai 以 openai 调用。
 var Protocols = []string{APIOpenAI, APIAnthropic, APIGemini, APIOllama, APICohere}
 
 // Protocol returns the API agents speak to reach a model of kind api.

@@ -1,10 +1,10 @@
-// Package client is the agent's client role, agent.client in fit's config:
+// Package proxy is the LLM feature's proxy role, llm.proxy in fit's config:
 // it links to hubs, often a public one, and to nodes directly, keeps a
 // catalog of the models they offer, and serves the model APIs agents speak
 // (OpenAI, Anthropic, Gemini, Ollama, Cohere) on an address of its own, to
 // agents on its machine or, on a LAN address with TLS, its LAN, behind API
-// keys, forwarding each call byte for byte over the mesh. See docs/agent.md.
-package client
+// keys, forwarding each call byte for byte over the mesh. See docs/llm.md.
+package proxy
 
 import (
 	"bytes"
@@ -18,11 +18,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
 )
 
 //go:embed ui
@@ -30,29 +30,29 @@ var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
-		ID: "agent.client",
+		ID: "llm.proxy",
 		Member: func(c *config.Config) any {
-			if c.Agent == nil || c.Agent.Client == nil {
+			if c.LLM == nil || c.LLM.Proxy == nil {
 				return nil
 			}
-			return c.Agent.Client
+			return c.LLM.Proxy
 		},
 		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
 	})
 }
 
-// Client local-only methods (the client's own pages).
+// Proxy local-only methods (the proxy's own pages).
 const (
-	MethodClientModels     = "/client/models"      // -> []CatalogModel
-	MethodClientStats      = "/client/stats"       // -> StatsResp
-	MethodClientKeysList   = "/client/keys/list"   // -> []KeyView
-	MethodClientKeysCreate = "/client/keys/create" // KeyCreateReq -> KeyCreateResp (the full key, shown once)
-	MethodClientKeysDelete = "/client/keys/delete" // KeyIDReq
-	MethodClientProfileSet = "/client/profile/set" // model.ProfileReq (name only)
+	MethodProxyModels     = "/proxy/models"      // -> []CatalogModel
+	MethodProxyStats      = "/proxy/stats"       // -> StatsResp
+	MethodProxyKeysList   = "/proxy/keys/list"   // -> []KeyView
+	MethodProxyKeysCreate = "/proxy/keys/create" // KeyCreateReq -> KeyCreateResp (the full key, shown once)
+	MethodProxyKeysDelete = "/proxy/keys/delete" // KeyIDReq
+	MethodProxyProfileSet = "/proxy/profile/set" // model.ProfileReq (name only)
 )
 
-// Client is a running client.
-type Client struct {
+// Proxy is a running proxy.
+type Proxy struct {
 	*role.Base
 	cat   *catalog
 	keys  *keyStore
@@ -65,11 +65,11 @@ type Client struct {
 	apiKey []byte
 }
 
-// New returns a client on h, started by its first Apply.
-func New(h *app.Host) *Client {
+// New returns a proxy on h, started by its first Apply.
+func New(h *app.Host) *Proxy {
 	pages, _ := fs.Sub(uiFS, "ui")
-	c := &Client{cat: newCatalog(), keys: &keyStore{}, stats: newStats(), maxAttempts: 4}
-	c.Base = role.New(h, role.Spec{Role: model.RoleClient, Pages: pages, Me: c.me})
+	c := &Proxy{cat: newCatalog(), keys: &keyStore{}, stats: newStats(), maxAttempts: 4}
+	c.Base = role.New(h, role.Spec{Role: model.RoleProxy, Pages: pages, Me: c.me})
 	c.Register(c)
 	m, r := c.Mesh, c.Router
 	m.OnPeerUp(c.peerUp)
@@ -94,18 +94,18 @@ func New(h *app.Host) *Client {
 		}
 		c.cat.setNode(caller, info)
 	})
-	mesh.Handle(r, MethodClientModels, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+	mesh.Handle(r, MethodProxyModels, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return c.cat.list(), nil
 	})
-	mesh.Handle(r, MethodClientStats, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+	mesh.Handle(r, MethodProxyStats, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return c.stats.snapshot(), nil
 	})
-	mesh.Handle(r, MethodClientKeysList, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
+	mesh.Handle(r, MethodProxyKeysList, nil, 0, func(context.Context, model.Identity, *struct{}) (any, error) {
 		return c.keys.list(), nil
 	})
-	mesh.Handle(r, MethodClientKeysCreate, nil, role.EditTimeout, c.createKey)
-	mesh.Handle(r, MethodClientKeysDelete, nil, role.EditTimeout, c.deleteKey)
-	mesh.Handle(r, MethodClientProfileSet, nil, role.EditTimeout, func(ctx context.Context, _ model.Identity, req *model.ProfileReq) (any, error) {
+	mesh.Handle(r, MethodProxyKeysCreate, nil, role.EditTimeout, c.createKey)
+	mesh.Handle(r, MethodProxyKeysDelete, nil, role.EditTimeout, c.deleteKey)
+	mesh.Handle(r, MethodProxyProfileSet, nil, role.EditTimeout, func(ctx context.Context, _ model.Identity, req *model.ProfileReq) (any, error) {
 		name := strings.TrimSpace(req.Name)
 		if name == "" || utf8.RuneCountInString(name) > 64 {
 			return nil, mesh.BadRequest("name must have 1 to 64 characters")
@@ -115,7 +115,7 @@ func New(h *app.Host) *Client {
 	return c
 }
 
-func (c *Client) me() map[string]any {
+func (c *Proxy) me() map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.api == nil {
@@ -125,7 +125,7 @@ func (c *Client) me() map[string]any {
 }
 
 // API returns the URL of the agent API, or "" when there is none.
-func (c *Client) API() string {
+func (c *Proxy) API() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.api == nil {
@@ -134,12 +134,12 @@ func (c *Client) API() string {
 	return c.api.url()
 }
 
-// Apply moves the client to member, a *config.AgentClient: its keys, its
+// Apply moves the proxy to member, a *config.LLMProxy: its keys, its
 // API, and the base's identity, mesh and pages.
-func (c *Client) Apply(member any) error {
-	m, ok := member.(*config.AgentClient)
+func (c *Proxy) Apply(member any) error {
+	m, ok := member.(*config.LLMProxy)
 	if !ok || m == nil {
-		return errors.New("agent.client: no member")
+		return errors.New("llm.proxy: no member")
 	}
 	c.keys.set(m.APIKeys)
 	if err := c.applyAPI(m.API); err != nil {
@@ -149,7 +149,7 @@ func (c *Client) Apply(member any) error {
 }
 
 // applyAPI starts, changes or stops the agent API.
-func (c *Client) applyAPI(cfg *config.AgentClientAPI) error {
+func (c *Proxy) applyAPI(cfg *config.LLMProxyAPI) error {
 	var k []byte
 	if cfg != nil {
 		k, _ = json.Marshal(cfg)
@@ -180,9 +180,9 @@ func (c *Client) applyAPI(cfg *config.AgentClientAPI) error {
 	return nil
 }
 
-// Stop ends the client: its API stops, and its links drain until ctx ends,
+// Stop ends the proxy: its API stops, and its links drain until ctx ends,
 // for 10s at most.
-func (c *Client) Stop(ctx context.Context) {
+func (c *Proxy) Stop(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	c.mu.Lock()
@@ -196,7 +196,7 @@ func (c *Client) Stop(ctx context.Context) {
 }
 
 // peerUp fetches what a new hub or node offers.
-func (c *Client) peerUp(p model.PeerConn) {
+func (c *Proxy) peerUp(p model.PeerConn) {
 	ctx, cancel := context.WithTimeout(context.Background(), mesh.DefaultTimeout)
 	defer cancel()
 	switch p.Role {
@@ -221,11 +221,11 @@ func (c *Client) peerUp(p model.PeerConn) {
 	}
 }
 
-// editKeys changes the keys of the client's member, and waits for the
+// editKeys changes the keys of the proxy's member, and waits for the
 // config to be applied.
-func (c *Client) editKeys(ctx context.Context, fn func(keys []config.AgentClientKey) ([]config.AgentClientKey, error)) error {
+func (c *Proxy) editKeys(ctx context.Context, fn func(keys []config.LLMProxyKey) ([]config.LLMProxyKey, error)) error {
 	return c.Edit(ctx, func(m map[string]json.RawMessage) error {
-		var keys []config.AgentClientKey
+		var keys []config.LLMProxyKey
 		if raw, ok := m["api_keys"]; ok {
 			if err := json.Unmarshal(raw, &keys); err != nil {
 				return err
@@ -235,19 +235,19 @@ func (c *Client) editKeys(ctx context.Context, fn func(keys []config.AgentClient
 		if err != nil {
 			return err
 		}
-		if len(keys) > config.MaxAgentKeys {
-			return mesh.BadRequest("at most %d keys", config.MaxAgentKeys)
+		if len(keys) > config.MaxLLMKeys {
+			return mesh.BadRequest("at most %d keys", config.MaxLLMKeys)
 		}
 		return role.Set(m, "api_keys", keys)
 	})
 }
 
-func (c *Client) createKey(ctx context.Context, _ model.Identity, req *KeyCreateReq) (any, error) {
+func (c *Proxy) createKey(ctx context.Context, _ model.Identity, req *KeyCreateReq) (any, error) {
 	k, secret, err := newKey(req.Name)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.editKeys(ctx, func(keys []config.AgentClientKey) ([]config.AgentClientKey, error) {
+	if err := c.editKeys(ctx, func(keys []config.LLMProxyKey) ([]config.LLMProxyKey, error) {
 		return append(keys, k), nil
 	}); err != nil {
 		return nil, err
@@ -256,8 +256,8 @@ func (c *Client) createKey(ctx context.Context, _ model.Identity, req *KeyCreate
 	return KeyCreateResp{KeyView: KeyView{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt}, Key: secret}, nil
 }
 
-func (c *Client) deleteKey(ctx context.Context, _ model.Identity, req *KeyIDReq) (any, error) {
-	err := c.editKeys(ctx, func(keys []config.AgentClientKey) ([]config.AgentClientKey, error) {
+func (c *Proxy) deleteKey(ctx context.Context, _ model.Identity, req *KeyIDReq) (any, error) {
+	err := c.editKeys(ctx, func(keys []config.LLMProxyKey) ([]config.LLMProxyKey, error) {
 		for i, k := range keys {
 			if k.ID == req.ID {
 				return append(keys[:i:i], keys[i+1:]...), nil

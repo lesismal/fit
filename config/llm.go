@@ -10,64 +10,64 @@ import (
 	"unicode"
 )
 
-// The agent's roles link over a mesh of WebSocket connections: each role may
+// The LLM feature's roles link over a mesh of WebSocket connections: each role may
 // listen for links and dial any number of peers, which authenticate with a
 // shared password (HMAC challenge-response; the password never crosses the
 // wire). What their pages change is written back into their members here.
-// See docs/agent.md.
+// See docs/llm.md.
 
-// The bounds of the agent's members.
+// The bounds of the LLM feature's members.
 const (
-	MaxAgentPeers  = 64
-	MaxAgentModels = 256
-	MaxAgentKeys   = 256
+	MaxLLMPeers  = 64
+	MaxLLMModels = 256
+	MaxLLMKeys   = 256
 )
 
-// The defaults of the agent's members.
+// The defaults of the LLM feature's members.
 const (
-	DefaultAgentMaxConns          = 1024
-	DefaultAgentMaxInflight       = 1024
-	DefaultAgentMaxNodes          = 1024
-	DefaultAgentNodeMaxInflight   = 256
-	DefaultAgentMaxBodyBytes      = 32 << 20
-	DefaultAgentClientMaxConns    = 256
-	DefaultAgentClientMaxInflight = 256
+	DefaultLLMMaxConns         = 1024
+	DefaultLLMMaxInflight      = 1024
+	DefaultLLMMaxNodes         = 1024
+	DefaultLLMNodeMaxInflight  = 256
+	DefaultLLMMaxBodyBytes     = 32 << 20
+	DefaultLLMProxyMaxConns    = 256
+	DefaultLLMProxyMaxInflight = 256
 )
 
-// The defaults of the agent's durations.
+// The defaults of the LLM feature's durations.
 var (
-	DefaultAgentPingInterval     = Duration(15 * time.Second)
-	DefaultAgentSlowTimeout      = Duration(30 * time.Second)
-	DefaultAgentRetryInterval    = Duration(5 * time.Second)
-	DefaultAgentStreamIdle       = Duration(2 * time.Minute)
-	DefaultAgentRefreshInterval  = Duration(30 * time.Second)
-	DefaultAgentJobTimeout       = Duration(time.Hour)
-	DefaultAgentConnectTimeout   = Duration(10 * time.Second)
-	DefaultAgentFirstByteTimeout = Duration(5 * time.Minute)
-	DefaultAgentIdleTimeout      = Duration(5 * time.Minute)
-	DefaultAgentCallTimeout      = Duration(30 * time.Minute)
+	DefaultLLMPingInterval     = Duration(15 * time.Second)
+	DefaultLLMSlowTimeout      = Duration(30 * time.Second)
+	DefaultLLMRetryInterval    = Duration(5 * time.Second)
+	DefaultLLMStreamIdle       = Duration(2 * time.Minute)
+	DefaultLLMRefreshInterval  = Duration(30 * time.Second)
+	DefaultLLMJobTimeout       = Duration(time.Hour)
+	DefaultLLMConnectTimeout   = Duration(10 * time.Second)
+	DefaultLLMFirstByteTimeout = Duration(5 * time.Minute)
+	DefaultLLMIdleTimeout      = Duration(5 * time.Minute)
+	DefaultLLMCallTimeout      = Duration(30 * time.Minute)
 )
 
-// AgentListen is where a role takes links from its peers.
-type AgentListen struct {
+// LLMListen is where a role takes links from its peers.
+type LLMListen struct {
 	Address  string `json:"address" fit:"required" doc:"The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address."`
 	Password string `json:"password" fit:"required" doc:"The password peers prove they know when they link; it never crosses the network."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentPeer is a peer a role dials and keeps linked to, redialing with
+// LLMPeer is a peer a role dials and keeps linked to, redialing with
 // backoff whenever the link is lost.
-type AgentPeer struct {
+type LLMPeer struct {
 	Address  string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
 	Password string `json:"password" fit:"required" doc:"The peer's listen.password."`
-	Role     string `json:"role" fit:"required" enum:"hub,node,client" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
+	Role     string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentLimits bound a role's links.
-type AgentLimits struct {
+// LLMLimits bound a role's links.
+type LLMLimits struct {
 	MaxConns      int      `json:"max_conns,omitempty" min:"0" default:"1024" doc:"The most links the role takes from its peers at once; one past it is refused, and its dialer backs off. 1024 when left out or 0."`
 	MaxInflight   int      `json:"max_inflight,omitempty" min:"0" default:"1024" doc:"The most calls and streams a peer may have running here on one link at once; one past it fails at once. 1024 when left out or 0."`
 	PingInterval  Duration `json:"ping_interval,omitempty" default:"\"15s\"" doc:"How long a link may hear nothing before it is pinged; one that hears nothing for three of them is closed. 15s when left out."`
@@ -80,31 +80,31 @@ type AgentLimits struct {
 
 // Conns, Inflight, Ping, Slow, Retry and Idle return l's settings, their
 // defaults when l or they are left out.
-func (l *AgentLimits) Conns() int {
+func (l *LLMLimits) Conns() int {
 	if l == nil || l.MaxConns <= 0 {
-		return DefaultAgentMaxConns
+		return DefaultLLMMaxConns
 	}
 	return l.MaxConns
 }
 
-func (l *AgentLimits) Inflight() int {
+func (l *LLMLimits) Inflight() int {
 	if l == nil || l.MaxInflight <= 0 {
-		return DefaultAgentMaxInflight
+		return DefaultLLMMaxInflight
 	}
 	return l.MaxInflight
 }
 
-func (l *AgentLimits) Ping() time.Duration {
-	return orDuration(l, func() Duration { return l.PingInterval }, DefaultAgentPingInterval)
+func (l *LLMLimits) Ping() time.Duration {
+	return orDuration(l, func() Duration { return l.PingInterval }, DefaultLLMPingInterval)
 }
-func (l *AgentLimits) Slow() time.Duration {
-	return orDuration(l, func() Duration { return l.SlowTimeout }, DefaultAgentSlowTimeout)
+func (l *LLMLimits) Slow() time.Duration {
+	return orDuration(l, func() Duration { return l.SlowTimeout }, DefaultLLMSlowTimeout)
 }
-func (l *AgentLimits) Retry() time.Duration {
-	return orDuration(l, func() Duration { return l.RetryInterval }, DefaultAgentRetryInterval)
+func (l *LLMLimits) Retry() time.Duration {
+	return orDuration(l, func() Duration { return l.RetryInterval }, DefaultLLMRetryInterval)
 }
-func (l *AgentLimits) Idle() time.Duration {
-	return orDuration(l, func() Duration { return l.StreamIdle }, DefaultAgentStreamIdle)
+func (l *LLMLimits) Idle() time.Duration {
+	return orDuration(l, func() Duration { return l.StreamIdle }, DefaultLLMStreamIdle)
 }
 
 func orDuration[T any](p *T, get func() Duration, def Duration) time.Duration {
@@ -117,51 +117,51 @@ func orDuration[T any](p *T, get func() Duration, def Duration) time.Duration {
 	return def.Std()
 }
 
-// AgentHub is the agent's hub role: nodes and clients link to it, it keeps
-// the table of its nodes and their models, and it relays the clients' model
+// LLMHub is the LLM feature's hub role: nodes and proxies link to it, it keeps
+// the table of its nodes and their models, and it relays the proxies' model
 // calls to the least loaded node that serves the model.
-type AgentHub struct {
+type LLMHub struct {
 	ID       string       `json:"id,omitempty" doc:"The hub's stable ID, which its peers know it by. Made when left out, and written back here."`
 	Name     string       `json:"name,omitempty" doc:"The name the hub shows its peers; the host's name when left out. Its pages change it."`
 	Console  *RoleConsole `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
-	Listen   *AgentListen `json:"listen,omitempty" doc:"Where the hub takes links from nodes and clients; none when left out. Its pages change it."`
-	Peers    []AgentPeer  `json:"peers,omitempty" doc:"The nodes and clients the hub dials. Its pages change them."`
-	Limits   *AgentLimits `json:"limits,omitempty" doc:"Bounds on the hub's links; the defaults when left out."`
+	Listen   *LLMListen   `json:"listen,omitempty" doc:"Where the hub takes links from nodes and proxies; none when left out. Its pages change it."`
+	Peers    []LLMPeer    `json:"peers,omitempty" doc:"The nodes and proxies the hub dials. Its pages change them."`
+	Limits   *LLMLimits   `json:"limits,omitempty" doc:"Bounds on the hub's links; the defaults when left out."`
 	MaxNodes int          `json:"max_nodes,omitempty" min:"0" default:"1024" doc:"The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
 
 // Nodes returns MaxNodes, its default when left out.
-func (h *AgentHub) Nodes() int {
+func (h *LLMHub) Nodes() int {
 	if h.MaxNodes <= 0 {
-		return DefaultAgentMaxNodes
+		return DefaultLLMMaxNodes
 	}
 	return h.MaxNodes
 }
 
-// AgentNode is the agent's node role: it serves models from upstream APIs to
-// its hubs and clients, reports its hardware, and runs fixed management
+// LLMNode is the LLM feature's node role: it serves models from upstream APIs to
+// its hubs and proxies, reports its hardware, and runs fixed management
 // actions as jobs.
-type AgentNode struct {
-	ID          string             `json:"id,omitempty" doc:"The node's stable ID, which its peers know it by. Made when left out, and written back here."`
-	Name        string             `json:"name,omitempty" doc:"The name the node shows its peers; the host's name when left out. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
-	Description string             `json:"description,omitempty" doc:"A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
-	Console     *RoleConsole       `json:"console,omitempty" doc:"The node's web pages; none when left out."`
-	Listen      *AgentListen       `json:"listen,omitempty" doc:"Where the node takes links from hubs and clients; none when left out. Its pages change it."`
-	Peers       []AgentPeer        `json:"peers,omitempty" doc:"The hubs and clients the node dials. Its pages change them."`
-	Limits      *AgentLimits       `json:"limits,omitempty" doc:"Bounds on the node's links; the defaults when left out."`
-	Models      []AgentModel       `json:"models,omitempty" doc:"The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them."`
-	Settings    *AgentNodeSettings `json:"settings,omitempty" doc:"The node's own settings; the defaults when left out. Only its own pages change them."`
-	Proxy       *AgentNodeProxy    `json:"proxy,omitempty" doc:"Bounds on the calls the node forwards to its models' upstreams; the defaults when left out."`
+type LLMNode struct {
+	ID          string           `json:"id,omitempty" doc:"The node's stable ID, which its peers know it by. Made when left out, and written back here."`
+	Name        string           `json:"name,omitempty" doc:"The name the node shows its peers; the host's name when left out. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
+	Description string           `json:"description,omitempty" doc:"A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it."`
+	Console     *RoleConsole     `json:"console,omitempty" doc:"The node's web pages; none when left out."`
+	Listen      *LLMListen       `json:"listen,omitempty" doc:"Where the node takes links from hubs and proxies; none when left out. Its pages change it."`
+	Peers       []LLMPeer        `json:"peers,omitempty" doc:"The hubs and proxies the node dials. Its pages change them."`
+	Limits      *LLMLimits       `json:"limits,omitempty" doc:"Bounds on the node's links; the defaults when left out."`
+	Models      []LLMModel       `json:"models,omitempty" doc:"The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them."`
+	Settings    *LLMNodeSettings `json:"settings,omitempty" doc:"The node's own settings; the defaults when left out. Only its own pages change them."`
+	Proxy       *LLMNodeProxy    `json:"proxy,omitempty" doc:"Bounds on the calls the node forwards to its models' upstreams; the defaults when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentModel is a model a node serves: an upstream endpoint of one of the
-// APIs AgentAPIs lists. Calls are forwarded byte for byte, with the model's
+// LLMModel is a model a node serves: an upstream endpoint of one of the
+// APIs LLMAPIs lists. Calls are forwarded byte for byte, with the model's
 // key, and the model they name set to upstream.
-type AgentModel struct {
+type LLMModel struct {
 	Name        string `json:"name" fit:"required" doc:"The name agents ask for the model by: 1 to 128 characters, no spaces. A name is unique among a node's models of one agent API: an azure_openai model shares openai's."`
 	API         string `json:"api" fit:"required" enum:"openai,anthropic,gemini,azure_openai,ollama,cohere" doc:"The API the upstream speaks: openai (OpenAI and every OpenAI-compatible server, as DeepSeek, Qwen, Mistral, Groq, xAI, OpenRouter, vLLM, llama.cpp), anthropic, gemini (Google's Gemini API), azure_openai (Azure OpenAI deployments, which agents call as openai), ollama (Ollama's own API) or cohere (Cohere's v2 API). It sets the agent endpoints the model is reached through, the upstream URL and the auth header."`
 	BaseURL     string `json:"base_url" fit:"required" doc:"The upstream's base URL, http or https, without a query or a trailing slash. openai, anthropic and cohere calls go to it with their path appended, as base_url/chat/completions with http://127.0.0.1:8000/v1; gemini's to base_url/models/{upstream}:{method}, with https://generativelanguage.googleapis.com/v1beta; azure_openai's to base_url/openai/deployments/{upstream}/{path}, with https://{resource}.openai.azure.com; ollama's to base_url/api/chat, with http://127.0.0.1:11434."`
@@ -175,20 +175,20 @@ type AgentModel struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentAPIs lists the APIs a model's upstream may speak.
-var AgentAPIs = []string{"openai", "anthropic", "gemini", "azure_openai", "ollama", "cohere"}
+// LLMAPIs lists the APIs a model's upstream may speak.
+var LLMAPIs = []string{"openai", "anthropic", "gemini", "azure_openai", "ollama", "cohere"}
 
-// AgentProtocol returns the API agents call a model of the given api with:
+// LLMProtocol returns the API agents call a model of the given api with:
 // azure_openai's is openai's.
-func AgentProtocol(api string) string {
+func LLMProtocol(api string) string {
 	if api == "azure_openai" {
 		return "openai"
 	}
 	return api
 }
 
-// AgentNodeSettings are a node's own settings.
-type AgentNodeSettings struct {
+// LLMNodeSettings are a node's own settings.
+type LLMNodeSettings struct {
 	AllowHubManage  bool     `json:"allow_hub_manage,omitempty" doc:"Let linked hubs manage the node: edit its models, change GPU settings, run its fixed actions and follow their jobs. Never its own settings, and never a command of their own. Off when left out."`
 	GPUSudo         *bool    `json:"gpu_sudo,omitempty" default:"true" doc:"Run GPU settings, tool installs and actions that need root with sudo -n when fit does not run as root; sudo must not ask for a password. On when left out."`
 	RefreshInterval Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often the node reads its hardware again, 5s to 1h. 30s when left out."`
@@ -200,16 +200,16 @@ type AgentNodeSettings struct {
 
 // Sudo, Refresh and Job return s's settings, their defaults when s or they
 // are left out.
-func (s *AgentNodeSettings) Sudo() bool { return s == nil || s.GPUSudo == nil || *s.GPUSudo }
-func (s *AgentNodeSettings) Refresh() time.Duration {
-	return orDuration(s, func() Duration { return s.RefreshInterval }, DefaultAgentRefreshInterval)
+func (s *LLMNodeSettings) Sudo() bool { return s == nil || s.GPUSudo == nil || *s.GPUSudo }
+func (s *LLMNodeSettings) Refresh() time.Duration {
+	return orDuration(s, func() Duration { return s.RefreshInterval }, DefaultLLMRefreshInterval)
 }
-func (s *AgentNodeSettings) Job() time.Duration {
-	return orDuration(s, func() Duration { return s.JobTimeout }, DefaultAgentJobTimeout)
+func (s *LLMNodeSettings) Job() time.Duration {
+	return orDuration(s, func() Duration { return s.JobTimeout }, DefaultLLMJobTimeout)
 }
 
-// AgentNodeProxy bounds the calls a node forwards to its upstreams.
-type AgentNodeProxy struct {
+// LLMNodeProxy bounds the calls a node forwards to its upstreams.
+type LLMNodeProxy struct {
 	ConnectTimeout   Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long a connection to an upstream may take. 10s when left out."`
 	FirstByteTimeout Duration `json:"first_byte_timeout,omitempty" default:"\"5m\"" doc:"How long an upstream may take to begin its response, from when the call starts, its connect included, as a model reading a long prompt does. 5m when left out."`
 	IdleTimeout      Duration `json:"idle_timeout,omitempty" default:"\"5m\"" doc:"How long an upstream may go silent in the middle of its response before the call is cut short. 5m when left out."`
@@ -222,53 +222,53 @@ type AgentNodeProxy struct {
 
 // Connect, FirstByte, Idle, Total, Inflight and Body return p's settings,
 // their defaults when p or they are left out.
-func (p *AgentNodeProxy) Connect() time.Duration {
-	return orDuration(p, func() Duration { return p.ConnectTimeout }, DefaultAgentConnectTimeout)
+func (p *LLMNodeProxy) Connect() time.Duration {
+	return orDuration(p, func() Duration { return p.ConnectTimeout }, DefaultLLMConnectTimeout)
 }
-func (p *AgentNodeProxy) FirstByte() time.Duration {
-	return orDuration(p, func() Duration { return p.FirstByteTimeout }, DefaultAgentFirstByteTimeout)
+func (p *LLMNodeProxy) FirstByte() time.Duration {
+	return orDuration(p, func() Duration { return p.FirstByteTimeout }, DefaultLLMFirstByteTimeout)
 }
-func (p *AgentNodeProxy) Idle() time.Duration {
-	return orDuration(p, func() Duration { return p.IdleTimeout }, DefaultAgentIdleTimeout)
+func (p *LLMNodeProxy) Idle() time.Duration {
+	return orDuration(p, func() Duration { return p.IdleTimeout }, DefaultLLMIdleTimeout)
 }
-func (p *AgentNodeProxy) Total() time.Duration {
-	return orDuration(p, func() Duration { return p.Timeout }, DefaultAgentCallTimeout)
+func (p *LLMNodeProxy) Total() time.Duration {
+	return orDuration(p, func() Duration { return p.Timeout }, DefaultLLMCallTimeout)
 }
-func (p *AgentNodeProxy) Inflight() int {
+func (p *LLMNodeProxy) Inflight() int {
 	if p == nil || p.MaxInflight <= 0 {
-		return DefaultAgentNodeMaxInflight
+		return DefaultLLMNodeMaxInflight
 	}
 	return p.MaxInflight
 }
-func (p *AgentNodeProxy) Body() int64 {
+func (p *LLMNodeProxy) Body() int64 {
 	if p == nil || p.MaxBodyBytes <= 0 {
-		return DefaultAgentMaxBodyBytes
+		return DefaultLLMMaxBodyBytes
 	}
 	return p.MaxBodyBytes
 }
 
-// AgentClient is the agent's client role: it links to hubs and nodes, near
+// LLMProxy is the LLM feature's proxy role: it links to hubs and nodes, near
 // or across the internet, and serves the model APIs (OpenAI, Anthropic,
 // Gemini, Ollama, Cohere) to agents on its machine or its LAN, calling the
 // models of those hubs and nodes.
-type AgentClient struct {
-	ID      string           `json:"id,omitempty" doc:"The client's stable ID, which its peers know it by. Made when left out, and written back here."`
-	Name    string           `json:"name,omitempty" doc:"The name the client shows its peers; the host's name when left out. Its pages change it."`
-	Console *RoleConsole     `json:"console,omitempty" doc:"The client's web pages; none when left out."`
-	Listen  *AgentListen     `json:"listen,omitempty" doc:"Where the client takes links from hubs and nodes; none when left out. Its pages change it."`
-	Peers   []AgentPeer      `json:"peers,omitempty" doc:"The hubs and nodes the client dials. Its pages change them."`
-	Limits  *AgentLimits     `json:"limits,omitempty" doc:"Bounds on the client's links; the defaults when left out."`
-	API     *AgentClientAPI  `json:"api,omitempty" doc:"The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."`
-	APIKeys []AgentClientKey `json:"api_keys,omitempty" doc:"The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them."`
+type LLMProxy struct {
+	ID      string        `json:"id,omitempty" doc:"The proxy's stable ID, which its peers know it by. Made when left out, and written back here."`
+	Name    string        `json:"name,omitempty" doc:"The name the proxy shows its peers; the host's name when left out. Its pages change it."`
+	Console *RoleConsole  `json:"console,omitempty" doc:"The proxy's web pages; none when left out."`
+	Listen  *LLMListen    `json:"listen,omitempty" doc:"Where the proxy takes links from hubs and nodes; none when left out. Its pages change it."`
+	Peers   []LLMPeer     `json:"peers,omitempty" doc:"The hubs and nodes the proxy dials. Its pages change them."`
+	Limits  *LLMLimits    `json:"limits,omitempty" doc:"Bounds on the proxy's links; the defaults when left out."`
+	API     *LLMProxyAPI  `json:"api,omitempty" doc:"The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out."`
+	APIKeys []LLMProxyKey `json:"api_keys,omitempty" doc:"The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them."`
 
 	At Value `json:"-" fit:"self"`
 }
 
-// AgentClientAPI is the client's API for agents, served on a binding of its
+// LLMProxyAPI is the proxy's API for agents, served on a binding of its
 // own on the listeners' engine: on a loopback address for agents on the
-// client's machine, or on a LAN address, with TLS, for agents on other
+// proxy's machine, or on a LAN address, with TLS, for agents on other
 // machines of the LAN.
-type AgentClientAPI struct {
+type LLMProxyAPI struct {
 	Address          string   `json:"address" fit:"required" doc:"The host and port the API listens on: a loopback address serves agents on this machine; a LAN address, or an empty host, serves agents on other machines too, and needs cert_file and key_file, so that keys never cross a network in the clear."`
 	CertFile         string   `json:"cert_file,omitempty" doc:"A PEM file with the API's certificate, followed by any intermediates; with key_file, the API is served over TLS."`
 	KeyFile          string   `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
@@ -283,34 +283,34 @@ type AgentClientAPI struct {
 
 // Body, Conns, Inflight, FirstByte and Total return a's settings, their
 // defaults when they are left out.
-func (a *AgentClientAPI) Body() int64 {
+func (a *LLMProxyAPI) Body() int64 {
 	if a.MaxBodyBytes <= 0 {
-		return DefaultAgentMaxBodyBytes
+		return DefaultLLMMaxBodyBytes
 	}
 	return a.MaxBodyBytes
 }
-func (a *AgentClientAPI) Conns() int {
+func (a *LLMProxyAPI) Conns() int {
 	if a.MaxConns <= 0 {
-		return DefaultAgentClientMaxConns
+		return DefaultLLMProxyMaxConns
 	}
 	return a.MaxConns
 }
-func (a *AgentClientAPI) Inflight() int {
+func (a *LLMProxyAPI) Inflight() int {
 	if a.MaxInflight <= 0 {
-		return DefaultAgentClientMaxInflight
+		return DefaultLLMProxyMaxInflight
 	}
 	return a.MaxInflight
 }
-func (a *AgentClientAPI) FirstByte() time.Duration {
-	return orDuration(a, func() Duration { return a.FirstByteTimeout }, DefaultAgentFirstByteTimeout)
+func (a *LLMProxyAPI) FirstByte() time.Duration {
+	return orDuration(a, func() Duration { return a.FirstByteTimeout }, DefaultLLMFirstByteTimeout)
 }
-func (a *AgentClientAPI) Total() time.Duration {
-	return orDuration(a, func() Duration { return a.Timeout }, DefaultAgentCallTimeout)
+func (a *LLMProxyAPI) Total() time.Duration {
+	return orDuration(a, func() Duration { return a.Timeout }, DefaultLLMCallTimeout)
 }
 
-// AgentClientKey is an API key agents call a client with. Only its SHA-256 is
+// LLMProxyKey is an API key agents call a proxy with. Only its SHA-256 is
 // kept: the key itself is shown once, when the pages make it.
-type AgentClientKey struct {
+type LLMProxyKey struct {
 	ID        string `json:"id" fit:"required" doc:"The key's ID, 16 hex digits."`
 	Name      string `json:"name" fit:"required" doc:"What the key is for: 1 to 64 characters."`
 	Prefix    string `json:"prefix,omitempty" doc:"The key's first characters, to tell it by on the pages."`
@@ -320,36 +320,36 @@ type AgentClientKey struct {
 	At Value `json:"-" fit:"self"`
 }
 
-// checkAgent checks the agent's roles beyond what decoding does.
-func (c *Config) checkAgent(add func(Value, string, ...any)) {
-	r := c.Agent
+// checkLLM checks the LLM feature's roles beyond what decoding does.
+func (c *Config) checkLLM(add func(Value, string, ...any)) {
+	r := c.LLM
 	if r == nil {
 		return
 	}
 	if h := r.Hub; h != nil {
 		checkRoleConsole(h.Console, add)
-		checkAgentMesh("hub", h.At, h.ID, h.Name, h.Listen, h.Peers, h.Limits, add)
+		checkLLMMesh("hub", h.At, h.ID, h.Name, h.Listen, h.Peers, h.Limits, add)
 	}
 	if n := r.Node; n != nil {
 		checkRoleConsole(n.Console, add)
-		checkAgentMesh("node", n.At, n.ID, n.Name, n.Listen, n.Peers, n.Limits, add)
-		checkAgentNode(n, add)
+		checkLLMMesh("node", n.At, n.ID, n.Name, n.Listen, n.Peers, n.Limits, add)
+		checkLLMNode(n, add)
 	}
-	if cl := r.Client; cl != nil {
+	if cl := r.Proxy; cl != nil {
 		checkRoleConsole(cl.Console, add)
-		checkAgentMesh("client", cl.At, cl.ID, cl.Name, cl.Listen, cl.Peers, cl.Limits, add)
-		checkAgentClient(cl, add)
+		checkLLMMesh("proxy", cl.At, cl.ID, cl.Name, cl.Listen, cl.Peers, cl.Limits, add)
+		checkLLMProxy(cl, add)
 	}
 }
 
-// AgentPeerRoles returns the roles a role of the agent links with.
-func AgentPeerRoles(role string) []string {
+// LLMPeerRoles returns the roles a role of the LLM feature links with.
+func LLMPeerRoles(role string) []string {
 	switch role {
 	case "hub":
-		return []string{"node", "client"}
+		return []string{"node", "proxy"}
 	case "node":
-		return []string{"hub", "client"}
-	case "client":
+		return []string{"hub", "proxy"}
+	case "proxy":
 		return []string{"hub", "node"}
 	}
 	return nil
@@ -359,7 +359,7 @@ func noSpace(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
-func checkAgentMesh(role string, at Value, id, name string, listen *AgentListen, peers []AgentPeer, limits *AgentLimits, add func(Value, string, ...any)) {
+func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, peers []LLMPeer, limits *LLMLimits, add func(Value, string, ...any)) {
 	if len(id) > 128 || !noSpace(id) {
 		add(at.Field("id"), "the ID is up to 128 characters without spaces")
 	}
@@ -374,16 +374,16 @@ func checkAgentMesh(role string, at Value, id, name string, listen *AgentListen,
 			add(l.At.Field("password"), "a listener needs a password")
 		}
 	}
-	if len(peers) > MaxAgentPeers {
-		add(at.Field("peers"), "at most %d peers", MaxAgentPeers)
+	if len(peers) > MaxLLMPeers {
+		add(at.Field("peers"), "at most %d peers", MaxLLMPeers)
 	}
-	accept := AgentPeerRoles(role)
+	accept := LLMPeerRoles(role)
 	for i, p := range peers {
 		pat := at.Field("peers").Index(i)
 		host, _, err := net.SplitHostPort(p.Address)
 		if _, msg := checkAddress(p.Address); msg != "" || err != nil || host == "" {
 			add(pat.Field("address"), "%q is not a host and port, as in \"10.0.0.1:9100\"", p.Address)
-		} else if slices.IndexFunc(peers, func(o AgentPeer) bool { return o.Address == p.Address }) < i {
+		} else if slices.IndexFunc(peers, func(o LLMPeer) bool { return o.Address == p.Address }) < i {
 			add(pat.Field("address"), "%q is listed twice", p.Address)
 		}
 		if p.Password == "" {
@@ -407,14 +407,14 @@ func checkAgentMesh(role string, at Value, id, name string, listen *AgentListen,
 	}
 }
 
-// CheckAgentModel says what is wrong with m, or returns "" and the field it
+// CheckLLMModel says what is wrong with m, or returns "" and the field it
 // is about.
-func CheckAgentModel(m *AgentModel) (field, msg string) {
+func CheckLLMModel(m *LLMModel) (field, msg string) {
 	switch {
 	case m.Name == "" || len(m.Name) > 128 || !noSpace(m.Name):
 		return "name", "the name needs 1 to 128 characters without spaces"
-	case !slices.Contains(AgentAPIs, m.API):
-		return "api", "api is " + strings.Join(AgentAPIs, ", ")
+	case !slices.Contains(LLMAPIs, m.API):
+		return "api", "api is " + strings.Join(LLMAPIs, ", ")
 	case len(m.Upstream) > 256 || !noSpace(m.Upstream):
 		return "upstream", "the upstream model ID is up to 256 characters without spaces"
 	case len(m.APIKey) > 4096 || !noSpace(m.APIKey):
@@ -439,24 +439,24 @@ func CheckAgentModel(m *AgentModel) (field, msg string) {
 	return "", ""
 }
 
-func checkAgentNode(n *AgentNode, add func(Value, string, ...any)) {
+func checkLLMNode(n *LLMNode, add func(Value, string, ...any)) {
 	if len(n.Description) > 1024 {
 		add(n.At.Field("description"), "the description is longer than 1024 bytes")
 	}
-	if len(n.Models) > MaxAgentModels {
-		add(n.At.Field("models"), "at most %d models", MaxAgentModels)
+	if len(n.Models) > MaxLLMModels {
+		add(n.At.Field("models"), "at most %d models", MaxLLMModels)
 	}
 	for i := range n.Models {
 		m := &n.Models[i]
-		if f, msg := CheckAgentModel(m); msg != "" {
+		if f, msg := CheckLLMModel(m); msg != "" {
 			add(m.At.Field(f), "%s", msg)
-		} else if j := slices.IndexFunc(n.Models, func(o AgentModel) bool {
-			return o.Name == m.Name && AgentProtocol(o.API) == AgentProtocol(m.API)
+		} else if j := slices.IndexFunc(n.Models, func(o LLMModel) bool {
+			return o.Name == m.Name && LLMProtocol(o.API) == LLMProtocol(m.API)
 		}); j < i {
 			if n.Models[j].API == m.API {
 				add(m.At.Field("name"), "%s (%s) is listed twice", m.Name, m.API)
 			} else {
-				add(m.At.Field("name"), "%s is listed twice for agents' %s API, as %s and %s", m.Name, AgentProtocol(m.API), n.Models[j].API, m.API)
+				add(m.At.Field("name"), "%s is listed twice for agents' %s API, as %s and %s", m.Name, LLMProtocol(m.API), n.Models[j].API, m.API)
 			}
 		}
 	}
@@ -480,7 +480,7 @@ func checkAgentNode(n *AgentNode, add func(Value, string, ...any)) {
 	}
 }
 
-func checkAgentClient(c *AgentClient, add func(Value, string, ...any)) {
+func checkLLMProxy(c *LLMProxy, add func(Value, string, ...any)) {
 	if a := c.API; a != nil {
 		if _, msg := checkAddress(a.Address); msg != "" {
 			add(a.At.Field("address"), "%s", msg)
@@ -491,14 +491,14 @@ func checkAgentClient(c *AgentClient, add func(Value, string, ...any)) {
 			add(a.At, "cert_file and key_file go together")
 		}
 	}
-	if len(c.APIKeys) > MaxAgentKeys {
-		add(c.At.Field("api_keys"), "at most %d keys", MaxAgentKeys)
+	if len(c.APIKeys) > MaxLLMKeys {
+		add(c.At.Field("api_keys"), "at most %d keys", MaxLLMKeys)
 	}
 	for i, k := range c.APIKeys {
 		at := c.At.Field("api_keys").Index(i)
 		if b, err := hex.DecodeString(k.ID); err != nil || len(b) != 8 {
 			add(at.Field("id"), "the ID is 16 hex digits")
-		} else if slices.IndexFunc(c.APIKeys, func(o AgentClientKey) bool { return o.ID == k.ID }) < i {
+		} else if slices.IndexFunc(c.APIKeys, func(o LLMProxyKey) bool { return o.ID == k.ID }) < i {
 			add(at.Field("id"), "%q is listed twice", k.ID)
 		}
 		if n := len([]rune(strings.TrimSpace(k.Name))); n == 0 || n > 64 {

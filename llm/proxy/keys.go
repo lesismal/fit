@@ -1,4 +1,4 @@
-package client
+package proxy
 
 import (
 	"crypto/rand"
@@ -12,11 +12,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
 )
 
-// KeyPrefix starts every client API key: "ah-" + 32 random bytes,
+// KeyPrefix starts every proxy API key: "ah-" + 32 random bytes,
 // unpadded base64url.
 const KeyPrefix = "ah-"
 
@@ -35,7 +35,7 @@ type KeyView struct {
 	Calls      int64  `json:"calls"`
 }
 
-// KeyCreateReq / KeyCreateResp: MethodClientKeysCreate; Key is shown this
+// KeyCreateReq / KeyCreateResp: MethodProxyKeysCreate; Key is shown this
 // once only.
 type KeyCreateReq struct {
 	Name string `json:"name"`
@@ -59,7 +59,7 @@ type usage struct {
 // keyStore holds the API keys of the config, and their use.
 type keyStore struct {
 	mu    sync.Mutex
-	keys  []config.AgentClientKey
+	keys  []config.LLMProxyKey
 	usage map[string]*usage // by key ID, only for keys of the config
 }
 
@@ -70,7 +70,7 @@ func hashKey(key string) string {
 
 // set replaces the keys with those of the config; the use of the keys kept
 // stays.
-func (s *keyStore) set(keys []config.AgentClientKey) {
+func (s *keyStore) set(keys []config.LLMProxyKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.keys = keys
@@ -100,22 +100,22 @@ func (s *keyStore) list() []KeyView {
 }
 
 // newKey makes a key: the secret, shown once, and what the config keeps.
-func newKey(name string) (config.AgentClientKey, string, error) {
+func newKey(name string) (config.LLMProxyKey, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return config.AgentClientKey{}, "", mesh.BadRequest("name is required")
+		return config.LLMProxyKey{}, "", mesh.BadRequest("name is required")
 	}
 	if utf8.RuneCountInString(name) > 64 {
-		return config.AgentClientKey{}, "", mesh.BadRequest("name is too long (64 characters at most)")
+		return config.LLMProxyKey{}, "", mesh.BadRequest("name is too long (64 characters at most)")
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return config.AgentClientKey{}, "", err
+		return config.LLMProxyKey{}, "", err
 	}
 	secret := KeyPrefix + base64.RawURLEncoding.EncodeToString(b)
 	id := make([]byte, 8)
 	_, _ = rand.Read(id)
-	return config.AgentClientKey{ID: hex.EncodeToString(id), Name: name, Prefix: secret[:shownPrefix], Hash: hashKey(secret),
+	return config.LLMProxyKey{ID: hex.EncodeToString(id), Name: name, Prefix: secret[:shownPrefix], Hash: hashKey(secret),
 		CreatedAt: time.Now().Unix()}, secret, nil
 }
 

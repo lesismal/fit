@@ -36,8 +36,8 @@ a config against it and more.
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
-- [Agent](#agent): [`agent`](#config-agent), [`agent.hub`](#config-agenthub), [`agent.hub.console`](#config-roleconsole), [`agent.hub.listen`](#config-agentlisten), [`agent.hub.peers[]`](#config-agentpeer), [`agent.hub.limits`](#config-agentlimits), [`agent.node`](#config-agentnode), [`agent.node.models[]`](#config-agentmodel), [`agent.node.settings`](#config-agentnodesettings), [`agent.node.proxy`](#config-agentnodeproxy), [`agent.client`](#config-agentclient), [`agent.client.api`](#config-agentclientapi), [`agent.client.api_keys[]`](#config-agentclientkey)
-- [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.server`](#config-tunnelserver), [`tunnel.server.listeners[]`](#config-tunnellistener), [`tunnel.server.console_socket`](#config-tunnelconsolesocket), [`tunnel.server.quic`](#config-tunnelserverquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.servers[]`](#config-tunneluplink), [`tunnel.node.servers[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.client`](#config-tunnelclient), [`tunnel.client.forwards[]`](#config-tunnelforward), [`tunnel.client.web_proxies[]`](#config-tunnelwebproxy)
+- [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
+- [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
@@ -112,8 +112,8 @@ In JSON:
 | `auto_https` | [object](#config-autohttps) |  | HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out. |
 | `metrics` | [object](#config-metrics) |  | Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin. |
 | `acme` | [object](#config-acme) |  | How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload. |
-| `agent` | [object](#config-agent) |  | The agent's roles to run beside the gateway, on its engine: a hub, a node and a client, which share AI models among machines. None when left out. What their web pages change is written back here. |
-| `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client, which reach services behind NAT through the server. None when left out. What their web pages change is written back here. |
+| `llm` | [object](#config-llm) |  | The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which share AI models among machines and serve them to agents. None when left out. What their web pages change is written back here. |
+| `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which reach services behind NAT through the hub. None when left out. What their web pages change is written back here. |
 | `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
@@ -779,7 +779,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `level` | string: `debug`, `info`, `warn`, `error` | `"info"` | The least level written, of every logger levels and loggers do not set one for: debug, info, warn or error. info when left out. A change takes effect on reload. |
-| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), agent and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
+| `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
 | `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json. |
@@ -1244,7 +1244,7 @@ In JSON:
 
 ### `admin.console.users[]`
 
-Also at `agent.hub.console.users[]`.
+Also at `llm.hub.console.users[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1502,23 +1502,23 @@ In JSON:
 | `timeout` | duration | `"10s"` | How long a handshake waits for its name's certificate, as long as fib's handshake timeout by default. 10s when left out. |
 | `idle_timeout` | duration | `"168h"` | How long a name taken on demand is kept, and renewed, with no handshake asking for it; then it is dropped and no longer counts against max_names, and its certificate stays in the storage for the next handshake that asks for it, which the ask URL must allow again. 168h, a week, when left out. |
 
-<a id="agent"></a>
+<a id="llm"></a>
 
-## Agent
+## LLM
 
-The agent's roles, run beside the gateway on its engine: a `hub` that nodes and clients meet at, a
+The LLM feature's roles, run beside the gateway on its engine: a `hub` that nodes and proxies meet at, a
 `node` that serves AI models from local or remote upstreams (OpenAI and every OpenAI-compatible
-API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `client` that serves those APIs to the
+API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `proxy` that serves those APIs to the
 agents of its machine or LAN, calling the models of the nodes it reaches. The roles
 link over a WebSocket mesh, each listening at `listen` and dialing its `peers`. A role runs while
 its member is set; any of them, in any number of processes. What a role's pages, behind
 `console`, change is written back into its member, and kept in `admin.store` when there is one.
-See [the agent](../agent.md).
+See [the LLM feature](../llm.md).
 
 In a .conf file:
 
 ```fit
-agent {
+llm {
 	hub { listen { address :9210; password mesh-secret } }
 	node {
 		peers { address 127.0.0.1:9210; password mesh-secret; role hub }
@@ -1533,7 +1533,7 @@ agent {
 			upstream llama3.2:3b
 		}
 	}
-	client {
+	proxy {
 		peers { address 127.0.0.1:9210; password mesh-secret; role hub }
 		api { address 127.0.0.1:9300 }
 	}
@@ -1543,7 +1543,7 @@ agent {
 In YAML:
 
 ```yaml
-agent:
+llm:
   hub:
     listen:
       address: :9210
@@ -1562,7 +1562,7 @@ agent:
         api: ollama
         base_url: http://127.0.0.1:11434
         upstream: llama3.2:3b
-  client:
+  proxy:
     peers:
       - address: 127.0.0.1:9210
         password: mesh-secret
@@ -1575,7 +1575,7 @@ In JSON:
 
 ```json
 {
-  "agent": {
+  "llm": {
     "hub": {
       "listen": {"address": ":9210", "password": "mesh-secret"}
     },
@@ -1584,7 +1584,7 @@ In JSON:
       "models": [{"name": "qwen3", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"},
         {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"}]
     },
-    "client": {
+    "proxy": {
       "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
       "api": {"address": "127.0.0.1:9300"}
     }
@@ -1592,35 +1592,35 @@ In JSON:
 }
 ```
 
-<a id="config-agent"></a>
+<a id="config-llm"></a>
 
-### `agent`
+### `llm`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `hub` | [object](#config-agenthub) |  | Run a hub: nodes and clients link to it, and it passes calls between them. |
-| `node` | [object](#config-agentnode) |  | Run a node: it serves models from local or remote upstreams to the hubs and clients linked to it. |
-| `client` | [object](#config-agentclient) |  | Run a client: an OpenAI- and Anthropic-compatible API that calls the models of the nodes it reaches. |
+| `hub` | [object](#config-llmhub) |  | Run a hub: nodes and proxies link to it, and it passes calls between them. |
+| `node` | [object](#config-llmnode) |  | Run a node: it serves models from local or remote upstreams to the hubs and proxies linked to it. |
+| `proxy` | [object](#config-llmproxy) |  | Run a proxy: an OpenAI- and Anthropic-compatible API, for agents, that calls the models of the nodes it reaches. |
 
-<a id="config-agenthub"></a>
+<a id="config-llmhub"></a>
 
-### `agent.hub`
+### `llm.hub`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `id` | string |  | The hub's stable ID, which its peers know it by. Made when left out, and written back here. |
 | `name` | string |  | The name the hub shows its peers; the host's name when left out. Its pages change it. |
 | `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
-| `listen` | [object](#config-agentlisten) |  | Where the hub takes links from nodes and clients; none when left out. Its pages change it. |
-| `peers` | list of [object](#config-agentpeer) |  | The nodes and clients the hub dials. Its pages change them. |
-| `limits` | [object](#config-agentlimits) |  | Bounds on the hub's links; the defaults when left out. |
+| `listen` | [object](#config-llmlisten) |  | Where the hub takes links from nodes and proxies; none when left out. Its pages change it. |
+| `peers` | list of [object](#config-llmpeer) |  | The nodes and proxies the hub dials. Its pages change them. |
+| `limits` | [object](#config-llmlimits) |  | Bounds on the hub's links; the defaults when left out. |
 | `max_nodes` | integer, 0 or more | `1024` | The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0. |
 
 <a id="config-roleconsole"></a>
 
-### `agent.hub.console`
+### `llm.hub.console`
 
-Also at `agent.node.console`, `agent.client.console`, `tunnel.server.console`, `tunnel.node.console`, `tunnel.client.console`.
+Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.node.console`, `tunnel.proxy.console`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1633,34 +1633,34 @@ Also at `agent.node.console`, `agent.client.console`, `tunnel.server.console`, `
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
 | `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
 
-<a id="config-agentlisten"></a>
+<a id="config-llmlisten"></a>
 
-### `agent.hub.listen`
+### `llm.hub.listen`
 
-Also at `agent.node.listen`, `agent.client.listen`.
+Also at `llm.node.listen`, `llm.proxy.listen`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address. |
 | `password` | string |  | Required. The password peers prove they know when they link; it never crosses the network. |
 
-<a id="config-agentpeer"></a>
+<a id="config-llmpeer"></a>
 
-### `agent.hub.peers[]`
+### `llm.hub.peers[]`
 
-Also at `agent.node.peers[]`, `agent.client.peers[]`.
+Also at `llm.node.peers[]`, `llm.proxy.peers[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The peer's host and port, as its listen.address says. |
 | `password` | string |  | Required. The peer's listen.password. |
-| `role` | string: `hub`, `node`, `client` |  | Required. The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own. |
+| `role` | string: `hub`, `node`, `proxy` |  | Required. The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own. |
 
-<a id="config-agentlimits"></a>
+<a id="config-llmlimits"></a>
 
-### `agent.hub.limits`
+### `llm.hub.limits`
 
-Also at `agent.node.limits`, `agent.client.limits`.
+Also at `llm.node.limits`, `llm.proxy.limits`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1671,9 +1671,9 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `retry_interval` | duration | `"5s"` | The most a dialer waits between attempts at a peer it cannot reach; the waits grow to it, at random within each step. 5s when left out. |
 | `stream_idle` | duration | `"2m"` | How long a stream, as a model call relayed between roles, may carry nothing either way before it ends. 2m when left out. |
 
-<a id="config-agentnode"></a>
+<a id="config-llmnode"></a>
 
-### `agent.node`
+### `llm.node`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1681,16 +1681,16 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `name` | string |  | The name the node shows its peers; the host's name when left out. Its pages, and a hub that settings.allow_hub_manage lets, change it. |
 | `description` | string |  | A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it. |
 | `console` | [object](#config-roleconsole) |  | The node's web pages; none when left out. |
-| `listen` | [object](#config-agentlisten) |  | Where the node takes links from hubs and clients; none when left out. Its pages change it. |
-| `peers` | list of [object](#config-agentpeer) |  | The hubs and clients the node dials. Its pages change them. |
-| `limits` | [object](#config-agentlimits) |  | Bounds on the node's links; the defaults when left out. |
-| `models` | list of [object](#config-agentmodel) |  | The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them. |
-| `settings` | [object](#config-agentnodesettings) |  | The node's own settings; the defaults when left out. Only its own pages change them. |
-| `proxy` | [object](#config-agentnodeproxy) |  | Bounds on the calls the node forwards to its models' upstreams; the defaults when left out. |
+| `listen` | [object](#config-llmlisten) |  | Where the node takes links from hubs and proxies; none when left out. Its pages change it. |
+| `peers` | list of [object](#config-llmpeer) |  | The hubs and proxies the node dials. Its pages change them. |
+| `limits` | [object](#config-llmlimits) |  | Bounds on the node's links; the defaults when left out. |
+| `models` | list of [object](#config-llmmodel) |  | The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them. |
+| `settings` | [object](#config-llmnodesettings) |  | The node's own settings; the defaults when left out. Only its own pages change them. |
+| `proxy` | [object](#config-llmnodeproxy) |  | Bounds on the calls the node forwards to its models' upstreams; the defaults when left out. |
 
-<a id="config-agentmodel"></a>
+<a id="config-llmmodel"></a>
 
-### `agent.node.models[]`
+### `llm.node.models[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1704,9 +1704,9 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `description` | string |  | A note about the model its peers show. |
 | `max_inflight` | integer, 0 to 100000 |  | The most calls to the model the node forwards at once; a call past it goes to another node. No bound but proxy.max_inflight's when left out or 0. |
 
-<a id="config-agentnodesettings"></a>
+<a id="config-llmnodesettings"></a>
 
-### `agent.node.settings`
+### `llm.node.settings`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1716,9 +1716,9 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `job_timeout` | duration | `"1h"` | How long a job, an action or an install, may run before it is killed, 10s to 168h. 1h when left out. |
 | `gpu_data_dir` | string |  | A directory the install scripts of vendors whose drivers are downloaded by hand look for the packages in, under the vendor's name; the working directory when left out. |
 
-<a id="config-agentnodeproxy"></a>
+<a id="config-llmnodeproxy"></a>
 
-### `agent.node.proxy`
+### `llm.node.proxy`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1729,24 +1729,24 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `max_inflight` | integer, 0 or more | `256` | The most calls the node forwards at once, across its models; a call past it goes to another node. 256 when left out or 0. |
 | `max_body_bytes` | integer, 0 or more | `33554432` | The largest request body a call may carry; one past it fails. A body is held whole only when the model's upstream differs from the name the call gives and the model is named in the body (its JSON model, or a form's model field), to set it. 32 MiB when left out or 0. |
 
-<a id="config-agentclient"></a>
+<a id="config-llmproxy"></a>
 
-### `agent.client`
+### `llm.proxy`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `id` | string |  | The client's stable ID, which its peers know it by. Made when left out, and written back here. |
-| `name` | string |  | The name the client shows its peers; the host's name when left out. Its pages change it. |
-| `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
-| `listen` | [object](#config-agentlisten) |  | Where the client takes links from hubs and nodes; none when left out. Its pages change it. |
-| `peers` | list of [object](#config-agentpeer) |  | The hubs and nodes the client dials. Its pages change them. |
-| `limits` | [object](#config-agentlimits) |  | Bounds on the client's links; the defaults when left out. |
-| `api` | [object](#config-agentclientapi) |  | The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out. |
-| `api_keys` | list of [object](#config-agentclientkey) |  | The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them. |
+| `id` | string |  | The proxy's stable ID, which its peers know it by. Made when left out, and written back here. |
+| `name` | string |  | The name the proxy shows its peers; the host's name when left out. Its pages change it. |
+| `console` | [object](#config-roleconsole) |  | The proxy's web pages; none when left out. |
+| `listen` | [object](#config-llmlisten) |  | Where the proxy takes links from hubs and nodes; none when left out. Its pages change it. |
+| `peers` | list of [object](#config-llmpeer) |  | The hubs and nodes the proxy dials. Its pages change them. |
+| `limits` | [object](#config-llmlimits) |  | Bounds on the proxy's links; the defaults when left out. |
+| `api` | [object](#config-llmproxyapi) |  | The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out. |
+| `api_keys` | list of [object](#config-llmproxykey) |  | The keys agents call the API with, each kept as its SHA-256 alone. Its pages make and delete them. |
 
-<a id="config-agentclientapi"></a>
+<a id="config-llmproxyapi"></a>
 
-### `agent.client.api`
+### `llm.proxy.api`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1759,9 +1759,9 @@ Also at `agent.node.limits`, `agent.client.limits`.
 | `first_byte_timeout` | duration | `"5m"` | How long a call may wait for its response to begin. 5m when left out. |
 | `timeout` | duration | `"30m"` | The most one call may take, to the end of its response. 30m when left out. |
 
-<a id="config-agentclientkey"></a>
+<a id="config-llmproxykey"></a>
 
-### `agent.client.api_keys[]`
+### `llm.proxy.api_keys[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1775,9 +1775,9 @@ Also at `agent.node.limits`, `agent.client.limits`.
 
 ## Tunnel
 
-The tunnel's roles, run beside the gateway on its engine: a `server` that nodes and clients link
-to over TCP, WebSocket or QUIC, a `node` beside the services it exposes, and a `client` that
-forwards local ports and web proxies through a server to a node's service, so that services
+The tunnel's roles, run beside the gateway on its engine: a `hub` that nodes and proxies link
+to over TCP, WebSocket or QUIC, a `node` beside the services it exposes, and a `proxy` that
+forwards local ports and web proxies through a hub to a node's service, so that services
 behind NAT are reached. A role runs while its member is set; any of them, in any number of
 processes. What a role's pages, behind `console`, change is written back into its member, and
 kept in `admin.store` when there is one. See [the tunnel](../tunnel.md).
@@ -1786,20 +1786,20 @@ In a .conf file:
 
 ```fit
 tunnel {
-	server {
+	hub {
 		password a-registration-password
 		listeners { protocol tcp; address :7000 }
 	}
 	node {
 		name lab
-		servers hub {
+		hubs hub {
 			endpoints { address 127.0.0.1:7000 }
 			password a-registration-password
 		}
 		services ssh { address 10.0.0.5:22 }
 	}
-	client {
-		servers hub {
+	proxy {
+		hubs hub {
 			endpoints { address 127.0.0.1:7000 }
 			password a-registration-password
 		}
@@ -1812,14 +1812,14 @@ In YAML:
 
 ```yaml
 tunnel:
-  server:
+  hub:
     password: a-registration-password
     listeners:
       - protocol: tcp
         address: :7000
   node:
     name: lab
-    servers:
+    hubs:
       - name: hub
         endpoints:
           - address: 127.0.0.1:7000
@@ -1827,8 +1827,8 @@ tunnel:
     services:
       - name: ssh
         address: 10.0.0.5:22
-  client:
-    servers:
+  proxy:
+    hubs:
       - name: hub
         endpoints:
           - address: 127.0.0.1:7000
@@ -1844,17 +1844,17 @@ In JSON:
 ```json
 {
   "tunnel": {
-    "server": {
+    "hub": {
       "password": "a-registration-password",
       "listeners": [{"protocol": "tcp", "address": ":7000"}]
     },
     "node": {
       "name": "lab",
-      "servers": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
+      "hubs": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
       "services": [{"name": "ssh", "address": "10.0.0.5:22"}]
     },
-    "client": {
-      "servers": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
+    "proxy": {
+      "hubs": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
       "forwards": [{"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh"}]
     }
   }
@@ -1867,33 +1867,33 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `server` | [object](#config-tunnelserver) |  | Run a server: nodes and clients link to it, and it joins a client's tunnels to a node's. |
-| `node` | [object](#config-tunnelnode) |  | Run a node: it links to servers and opens the tunnels they ask for to the services it exposes. |
-| `client` | [object](#config-tunnelclient) |  | Run a client: local ports and web proxies forwarded through a server to the services of a node. |
+| `hub` | [object](#config-tunnelhub) |  | Run a hub: nodes and proxies link to it, and it joins a proxy's tunnels to a node's. |
+| `node` | [object](#config-tunnelnode) |  | Run a node: it links to hubs and opens the tunnels they ask for to the services it exposes. |
+| `proxy` | [object](#config-tunnelproxy) |  | Run a proxy: local ports and web proxies forwarded through a hub to the services of a node. |
 
-<a id="config-tunnelserver"></a>
+<a id="config-tunnelhub"></a>
 
-### `tunnel.server`
+### `tunnel.hub`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | The name the server tells the nodes and clients that register. The host's name when left out. |
-| `password` | string |  | The password nodes and clients register with, which they prove they know without sending it. The server refuses every registration while it is left out. |
-| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and clients need the same one. It applies to the links that open after it changes. |
-| `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and clients link to the server, each over its protocol. None when left out: the console's pages add them. |
-| `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the server's console pages to the web_proxies of clients that cannot reach them otherwise. Needs console. None when left out. |
-| `quic` | [object](#config-tunnelserverquic) |  | The certificate and the connections of the quic listeners. The server makes a self-signed certificate and writes it here when a quic listener needs one and none is set. |
+| `name` | string |  | The name the hub tells the nodes and proxies that register. The host's name when left out. |
+| `password` | string |  | The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out. |
+| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes. |
+| `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them. |
+| `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out. |
+| `quic` | [object](#config-tunnelhubquic) |  | The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set. |
 | `register_timeout` | duration | `"10s"` | How long a link may take to register once it is open; it is closed past it. 10s when left out. |
-| `call_timeout` | duration | `"15s"` | How long a node may take to answer the server: to open a tunnel, or to list or set its services. 15s when left out. |
-| `max_links` | integer, 0 or more | `1024` | The most links the server keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0. |
-| `max_links_per_peer` | integer, 0 or more | `128` | The most links one node or client may register, from however many processes of the same name. 128 when left out or 0. |
-| `max_peers` | integer, 0 or more | `1024` | The most nodes and clients registered at once. 1024 when left out or 0. |
-| `max_tunnels` | integer, 0 or more | `16384` | The most tunnels the server passes at once; a client's request for one more is refused. 16384 when left out or 0. |
-| `console` | [object](#config-roleconsole) |  | The server's web pages; none when left out. |
+| `call_timeout` | duration | `"15s"` | How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out. |
+| `max_links` | integer, 0 or more | `1024` | The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0. |
+| `max_links_per_peer` | integer, 0 or more | `128` | The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0. |
+| `max_peers` | integer, 0 or more | `1024` | The most nodes and proxies registered at once. 1024 when left out or 0. |
+| `max_tunnels` | integer, 0 or more | `16384` | The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0. |
+| `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
 
 <a id="config-tunnellistener"></a>
 
-### `tunnel.server.listeners[]`
+### `tunnel.hub.listeners[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -1903,26 +1903,26 @@ In JSON:
 
 <a id="config-tunnelconsolesocket"></a>
 
-### `tunnel.server.console_socket`
+### `tunnel.hub.console_socket`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The host and port the WebSocket listens on; it answers on any path. |
-| `password` | string |  | The password the WebSocket's messages are encrypted with, which a client's web_proxy needs. The server's password when left out. |
+| `password` | string |  | The password the WebSocket's messages are encrypted with, which a proxy's web_proxy needs. The hub's password when left out. |
 | `max_conns` | integer, 0 or more | `32` | The most WebSockets open at once; one past it is closed as soon as it opens. 32 when left out or 0. |
 
-<a id="config-tunnelserverquic"></a>
+<a id="config-tunnelhubquic"></a>
 
-### `tunnel.server.quic`
+### `tunnel.hub.quic`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cert` | string |  | The PEM certificate the quic listeners present, which nodes and clients pin by its SHA-256 fingerprint; with key. The server makes a self-signed one and writes it here when a quic listener needs one and none is set. |
+| `cert` | string |  | The PEM certificate the quic listeners present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a quic listener needs one and none is set. |
 | `key` | string |  | The PEM private key of cert. |
 | `idle_timeout` | duration | `"30s"` | How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out. |
 | `keep_alive` | duration | `"10s"` | How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out. |
 | `handshake_timeout` | duration | `"10s"` | How long a QUIC handshake may take. 10s when left out. |
-| `max_handshakes` | integer, 0 or more | `64` | The most QUIC handshakes under way at once; a new connection past it is dropped, and its client tries again. 64 when left out or 0. |
+| `max_handshakes` | integer, 0 or more | `64` | The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. 64 when left out or 0. |
 
 <a id="config-tunnelnode"></a>
 
@@ -1930,43 +1930,43 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | The node's name, which clients name to reach its services. The host's name when left out. |
-| `meta` | object of string |  | Anything else the node tells the servers, which their pages show. |
-| `servers` | list of [object](#config-tunneluplink) |  | The servers the node links to and registers with. None when left out: the console's pages add them. |
+| `name` | string |  | The node's name, which proxies name to reach its services. The host's name when left out. |
+| `meta` | object of string |  | Anything else the node tells the hubs, which their pages show. |
+| `hubs` | list of [object](#config-tunneluplink) |  | The hubs the node links to and registers with. None when left out: the console's pages add them. |
 | `services` | list of [object](#config-tunnelservice) |  | The services the node reaches, and the only addresses it opens tunnels to. |
-| `dial_timeout` | duration | `"5s"` | How long a connect to a service may take; shorter than a server's call_timeout, so that the server hears either way. 5s when left out. |
+| `dial_timeout` | duration | `"5s"` | How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
-| `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every server; a server's request for one more is refused. 4096 when left out or 0. |
+| `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0. |
 | `console` | [object](#config-roleconsole) |  | The node's web pages; none when left out. |
 
 <a id="config-tunneluplink"></a>
 
-### `tunnel.node.servers[]`
+### `tunnel.node.hubs[]`
 
-Also at `tunnel.client.servers[]`.
+Also at `tunnel.proxy.hubs[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | The server's name here, which forwards and the pages name it by. The first endpoint's address when left out. |
-| `endpoints` | list of [object](#config-tunnelendpoint) |  | Required. The server's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails. |
-| `password` | string |  | Required. The server's password. |
-| `body_password` | string |  | The server's body_password, when it has one. |
-| `quic_pin` | string |  | The SHA-256 fingerprint of the server's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots. |
+| `name` | string |  | The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out. |
+| `endpoints` | list of [object](#config-tunnelendpoint) |  | Required. The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails. |
+| `password` | string |  | Required. The hub's password. |
+| `body_password` | string |  | The hub's body_password, when it has one. |
+| `quic_pin` | string |  | The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots. |
 | `quic_insecure` | boolean |  | Take any QUIC certificate, for tests only. |
-| `pool_size` | integer, 0 to 100 | `10` | How many links to the server carry tunnels; each tunnel goes over one throughout. 10 when left out or 0. |
+| `pool_size` | integer, 0 to 100 | `10` | How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left out or 0. |
 | `dial_timeout` | duration | `"5s"` | How long a link's dial may take. 5s when left out. |
-| `call_timeout` | duration | `"10s"` | How long the server may take to answer a registration or a call. 10s when left out. |
-| `retry_interval` | duration | `"3s"` | How long a link waits after a failed dial, or a lost server, before it dials again. 3s when left out. |
-| `ping_interval` | duration | `"5s"` | How often the round trip to the server is measured. 5s when left out. |
+| `call_timeout` | duration | `"10s"` | How long the hub may take to answer a registration or a call. 10s when left out. |
+| `retry_interval` | duration | `"3s"` | How long a link waits after a failed dial, or a lost hub, before it dials again. 3s when left out. |
+| `ping_interval` | duration | `"5s"` | How often the round trip to the hub is measured. 5s when left out. |
 | `ping_timeout` | duration | `"5s"` | How long a ping may go unanswered before it counts as lost. 5s when left out. |
 
 <a id="config-tunnelendpoint"></a>
 
-### `tunnel.node.servers[].endpoints[]`
+### `tunnel.node.hubs[].endpoints[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string |  | Required. The server's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC. |
+| `address` | string |  | Required. The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC. |
 | `disabled` | boolean |  | Leave the endpoint out of the dials, keeping it for later. |
 
 <a id="config-tunnelservice"></a>
@@ -1975,46 +1975,46 @@ Also at `tunnel.client.servers[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | Required. The service's name among the node's, which clients' forwards name. |
+| `name` | string |  | Required. The service's name among the node's, which proxies' forwards name. |
 | `address` | string |  | Required. The service's TCP address, host and port. |
 | `description` | string |  | What the service is, for the pages. |
 
-<a id="config-tunnelclient"></a>
+<a id="config-tunnelproxy"></a>
 
-### `tunnel.client`
+### `tunnel.proxy`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | The client's name, which the servers and nodes show. The host's name when left out. |
-| `meta` | object of string |  | Anything else the client tells the servers, which their pages show. |
-| `servers` | list of [object](#config-tunneluplink) |  | The servers the client links to and registers with. None when left out: the console's pages add them. |
+| `name` | string |  | The proxy's name, which the hubs and nodes show. The host's name when left out. |
+| `meta` | object of string |  | Anything else the proxy tells the hubs, which their pages show. |
+| `hubs` | list of [object](#config-tunneluplink) |  | The hubs the proxy links to and registers with. None when left out: the console's pages add them. |
 | `forwards` | list of [object](#config-tunnelforward) |  | Local addresses whose connections are tunneled to a node's service. |
-| `web_proxies` | list of [object](#config-tunnelwebproxy) |  | Local addresses that serve a server's console pages through its encrypted console_socket. |
-| `open_timeout` | duration | `"20s"` | How long the opening of a tunnel may take, through the server to the node and on to the service. 20s when left out. |
+| `web_proxies` | list of [object](#config-tunnelwebproxy) |  | Local addresses that serve a hub's console pages through its encrypted console_socket. |
+| `open_timeout` | duration | `"20s"` | How long the opening of a tunnel may take, through the hub to the node and on to the service. 20s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
 | `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every forward; a connection past it is closed as soon as it is accepted. 4096 when left out or 0. |
-| `console` | [object](#config-roleconsole) |  | The client's web pages; none when left out. |
+| `console` | [object](#config-roleconsole) |  | The proxy's web pages; none when left out. |
 
 <a id="config-tunnelforward"></a>
 
-### `tunnel.client.forwards[]`
+### `tunnel.proxy.forwards[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `listen` | string |  | Required. The local host and port the forward listens on. |
 | `node` | string |  | Required. The node whose service the tunnels go to. |
 | `service` | string |  | Required. The node's service the tunnels go to. |
-| `server` | string |  | The name of the server the tunnels go through. When left out, they are spread over every server that has the node, more of them through the faster ones. |
+| `hub` | string |  | The name of the hub the tunnels go through. When left out, they are spread over every hub that has the node, more of them through the faster ones. |
 
 <a id="config-tunnelwebproxy"></a>
 
-### `tunnel.client.web_proxies[]`
+### `tunnel.proxy.web_proxies[]`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string |  | The server's name, for the pages. |
+| `name` | string |  | The hub's name, for the pages. |
 | `listen` | string |  | Required. The local host and port the pages are served on. |
-| `url` | string |  | Required. The server's console_socket, as ws://host:port/. |
+| `url` | string |  | Required. The hub's console_socket, as ws://host:port/. |
 | `password` | string |  | Required. The console_socket's password. |
 | `max_conns` | integer, 0 or more | `32` | The most connections open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
 

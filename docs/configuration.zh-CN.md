@@ -3,7 +3,7 @@
 [English](configuration.md) | [简体中文](configuration.zh-CN.md)
 
 fit 从一个或多个文件读取配置，可以是三种格式之一：**.conf** 文件、**YAML** 或 **JSON**。三者逐字段表达相同的内容：fit
-监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，日志、限制、证书和 Admin API 的设置，以及 fit 在网关旁边运行的角色：agent、tunnel 和 WebRTC。Admin API
+监听的地址、为每个请求选择应答者的路由、请求被代理到的 upstream，日志、限制、证书和 Admin API 的设置，以及 fit 在网关旁边运行的角色：llm、tunnel 和 WebRTC。Admin API
 收发的是 JSON；三种格式的字段完全相同，彼此之间都可以转换。
 
 | 格式 | 适合 | 参考 |
@@ -97,8 +97,8 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `auto_https`、`acme` | 默认 HTTPS 和证书 | [HTTPS by default](reference/config.md#https-by-default)、[ACME](reference/config.md#acme) |
 | `engine` | fib 的事件循环、worker 和缓冲区 | [Engine](reference/config.md#engine) |
 | `admin` | Admin API；加密保存配置的 store（`store`）；控制台（`console`） | [Admin API](reference/config.md#admin-api)、[控制台](console.zh-CN.md) |
-| `agent` | agent 的 hub、node 和 client，在多台机器间共享 AI 模型 | [Agent](reference/config.md#agent)、[agent](agent.zh-CN.md) |
-| `tunnel` | tunnel 的 server、node 和 client，用于访问 NAT 后的服务 | [Tunnel](reference/config.md#tunnel)、[tunnel](tunnel.zh-CN.md) |
+| `llm` | llm 的 hub、node 和 proxy，在多台机器间共享 AI 模型并提供给 agent 调用 | [LLM](reference/config.md#llm)、[llm](llm.zh-CN.md) |
+| `tunnel` | tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务 | [Tunnel](reference/config.md#tunnel)、[tunnel](tunnel.zh-CN.md) |
 | `webrtc` | TURN 服务器（`turn`）、`whip` 和 `whep` 的媒体端口（`media`）、`webrtc_proxy` 的转发（`proxy`） | [WebRTC](reference/config.md#webrtc)、[WebRTC](webrtc.zh-CN.md) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | 配置的版本，1；可不写 | [兼容性](compatibility.zh-CN.md#schema-的版本) |

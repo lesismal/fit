@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/gpu"
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/pool"
+	"github.com/lesismal/fit/llm/internal/gpu"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/pool"
 )
 
 // gpuCacheTTL is how long a gpu.Collect result is reused.

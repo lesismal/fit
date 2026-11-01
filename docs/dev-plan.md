@@ -100,8 +100,8 @@ should touch as few of these as it can.
 | `admin/store` | the encrypted store, fitstore (decision 027) |
 | `login` | logins, sessions, CSRF tokens and lockouts, for the console and the roles' pages |
 | `app`, `app/console` | roles in the config: their registry and manager, write-back through `Host.Edit`, and their pages (decision 028) |
-| `agent/...` | the agent's roles: `hub`, `node`, `client` |
-| `tunnel/...` | the tunnel's roles: `server`, `node`, `client` |
+| `llm/...` | the LLM feature's roles: `hub`, `node`, `proxy` |
+| `tunnel/...` | the tunnel's roles: `hub`, `node`, `proxy` |
 | `provider/...` | file, docker, kubernetes, consul, etcd |
 | `observe` | access logs, metrics, tracing |
 | `plugin/...` | compile-time modules and WASM |
@@ -1400,7 +1400,7 @@ password in the config file fit starts with. The design is
 ## Agent and tunnel
 
 agenthub and fibhub, two programs on fib, brought into fit as roles of its config, on its engine,
-their settings kept in its store ([decision 028](decisions/028-agent-and-tunnel.md)).
+their settings kept in its store ([decision 028](decisions/028-llm-and-tunnel.md)).
 
 ### I105 Roles in fit's config
 

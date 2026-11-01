@@ -9,9 +9,9 @@ import (
 	"sort"
 	"sync/atomic"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // maxTries bounds the nodes one call is tried on.
@@ -19,13 +19,13 @@ const maxTries = 3
 
 // proxy serves MethodHubProxy: it picks a node, opens its MethodNodeProxy
 // with the same request and relays the frames both ways as they come: the
-// request body the client streams, and the node's head and response body.
+// request body the proxy streams, and the node's head and response body.
 // Neither direction waits on a goroutine: each frame goes on while the far
 // side has granted credit, and is held against the near side's window
 // otherwise (wire.Pump). Until the node's head arrives, a CodeUnavailable
 // error (or the node going offline) moves the call to the next node, as
-// long as none of a streamed body has been taken from the client; after it,
-// bytes have reached the client, so any failure ends the call.
+// long as none of a streamed body has been taken from the proxy; after it,
+// bytes have reached the proxy, so any failure ends the call.
 func (h *Hub) proxy(ctx context.Context, _ model.Identity, req *model.ProxyReq, st *wire.Stream) (any, error) {
 	req.API = model.Protocol(req.API)
 	if req.Model == "" || !slices.Contains(model.Protocols, req.API) {
@@ -35,7 +35,7 @@ func (h *Hub) proxy(ctx context.Context, _ model.Identity, req *model.ProxyReq, 
 	for _, id := range req.Exclude {
 		exclude[id] = true
 	}
-	// Keep the client's stream alive while nodes are tried and the first
+	// Keep the proxy's stream alive while nodes are tried and the first
 	// byte is awaited.
 	stopKA := st.KeepAlive(0)
 	defer stopKA()
@@ -89,7 +89,7 @@ func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wir
 	done := make(chan relayEnd, 1)
 	var bodyTaken func() int
 	if req.BodyStream {
-		// The client's body goes on to the node; its end half-closes the
+		// The proxy's body goes on to the node; its end half-closes the
 		// node's side.
 		var taken atomic.Int64
 		bodyTaken = func() int { return int(taken.Load()) }
@@ -106,7 +106,7 @@ func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wir
 		case errors.Is(err, io.EOF):
 			done <- relayEnd{res: json.RawMessage(ns.Result())}
 		case frames == 0 && ctx.Err() == nil:
-			// Nothing reached the client: another node may serve it, if
+			// Nothing reached the proxy: another node may serve it, if
 			// the node could not, or its link broke.
 			var we *wire.Error
 			retry := !errors.As(err, &we) || we.Code == model.CodeUnavailable
@@ -124,7 +124,7 @@ func (h *Hub) relay(ctx context.Context, id string, req *model.ProxyReq, st *wir
 	}
 	if e.retry && bodyTaken != nil {
 		ns.Cancel()
-		// A body the client streamed cannot be sent again once any of it
+		// A body the proxy streamed cannot be sent again once any of it
 		// was taken.
 		if bodyTaken() > 0 {
 			e.retry = false

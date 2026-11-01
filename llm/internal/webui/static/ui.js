@@ -1,14 +1,14 @@
-// fit agent UI core, shared by the node, hub and client consoles. Vanilla JS, no build step.
+// fit llm UI core, shared by the node, hub and proxy consoles. Vanilla JS, no build step.
 // Load it synchronously in <head>: it applies the saved theme before the first paint.
 // Never put user data into innerHTML: build nodes with UI.h (text is always set as text).
 //
-// fit agent UI 核心库，node、hub、client 控制台共用。原生 JS，无构建步骤。
+// fit llm UI 核心库，node、hub、proxy 控制台共用。原生 JS，无构建步骤。
 // 在 <head> 中同步加载：首帧渲染前即应用已保存的主题。
 // 禁止把用户数据放进 innerHTML：用 UI.h 构建节点（文本始终以文本方式设置）。
 (function () {
   'use strict';
 
-  var THEME_KEY = 'fit_agent_theme', LANG_KEY = 'fit_agent_lang';
+  var THEME_KEY = 'fit_llm_theme', LANG_KEY = 'fit_llm_lang';
   // "system" follows prefers-color-scheme (no data-theme attribute). / "system" 跟随系统（不设 data-theme）。
   var THEMES = [
     ['system', 'linear-gradient(135deg,#fff 50%,#161923 50%)'], ['light', '#f5f6fa'], ['dark', '#161923'],
@@ -44,7 +44,7 @@
       'online': 'Online', 'offline': 'Offline', 'none': 'None', 'yes': 'Yes', 'no': 'No', 'error': 'Error', 'unknown': 'Unknown',
       'ago.s': '{n}s ago', 'ago.m': '{n}m ago', 'ago.h': '{n}h ago', 'ago.d': '{n}d ago', 'never': 'never',
       'copy': 'Copy', 'copied': 'Copied', 'search': 'Search…', 'menu': 'Menu', 'actions': 'Actions',
-      'config.note': 'This role\'s settings live in fit\'s config, as the agent.{role} member: what these pages change is written back into it, and kept encrypted when fit keeps its config in admin.store.'
+      'config.note': 'This role\'s settings live in fit\'s config, as the llm.{role} member: what these pages change is written back into it, and kept encrypted when fit keeps its config in admin.store.'
     },
     'zh-CN': {
       'theme': '主题', 'lang': '语言', 'theme.system': '跟随系统', 'theme.light': '浅色', 'theme.dark': '深色',
@@ -56,7 +56,7 @@
       'online': '在线', 'offline': '离线', 'none': '无', 'yes': '是', 'no': '否', 'error': '错误', 'unknown': '未知',
       'ago.s': '{n} 秒前', 'ago.m': '{n} 分钟前', 'ago.h': '{n} 小时前', 'ago.d': '{n} 天前', 'never': '从未',
       'copy': '复制', 'copied': '已复制', 'search': '搜索…', 'menu': '菜单', 'actions': '操作',
-      'config.note': '本角色的配置保存在 fit 配置的 agent.{role} 成员中：在这些页面上的修改会写回该配置；当 fit 把配置保存在 admin.store 中时，配置以加密方式保存。'
+      'config.note': '本角色的配置保存在 fit 配置的 llm.{role} 成员中：在这些页面上的修改会写回该配置；当 fit 把配置保存在 admin.store 中时，配置以加密方式保存。'
     }
   };
   function addI18n(d) {
@@ -505,8 +505,8 @@
     return { logout: function () { logout().then(showLogin, showLogin); } };
   }
 
-  // configNote(role): where the role's settings are kept (the agent.<role> member of fit's config).
-  // configNote(role)：角色配置的保存位置（fit 配置中的 agent.<role> 成员）。
+  // configNote(role): where the role's settings are kept (the llm.<role> member of fit's config).
+  // configNote(role)：角色配置的保存位置（fit 配置中的 llm.<role> 成员）。
   function configNote(role) { return h('div.callout', icon('info'), ' ', t('config.note', { role: role || '<role>' })); }
 
   window.UI = {

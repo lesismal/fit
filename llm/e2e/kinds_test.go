@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/client"
-	"github.com/lesismal/fit/agent/internal/agenttest"
+	"github.com/lesismal/fit/llm/internal/llmtest"
+	"github.com/lesismal/fit/llm/proxy"
 )
 
 // upload builds a multipart/form-data body: the fields in order, then a
@@ -70,7 +70,7 @@ func TestOpenAIEndpoints(t *testing.T) {
 	}
 	audio, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "audio/mpeg" || !bytes.Equal(audio, agenttest.SpeechBytes()) {
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "audio/mpeg" || !bytes.Equal(audio, llmtest.SpeechBytes()) {
 		t.Fatalf("speech: %d %s %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), len(audio))
 	}
 	for path, want := range map[string]string{
@@ -120,7 +120,7 @@ func TestOpenAIEndpoints(t *testing.T) {
 	if err == nil || k >= 4<<20 {
 		t.Fatalf("a broken upstream came whole: %d bytes, %v", k, err)
 	}
-	// Past the client's bound, an upload gets 413.
+	// Past the proxy's bound, an upload gets 413.
 	body, ct = upload(t, [][2]string{{"model", "plain"}}, 33<<20)
 	if resp, err := d.a.post("/v1/audio/transcriptions", body, map[string]string{"Content-Type": ct}); err == nil {
 		resp.Body.Close()
@@ -166,7 +166,7 @@ func TestGemini(t *testing.T) {
 	if last := d.mock.Last("g"); last.Query != "alt=sse" || last.Path != "v1beta/models/gemini-2.5-flash:streamGenerateContent" {
 		t.Fatalf("stream upstream saw %+v", last)
 	}
-	agenttest.Eventually(t, "the upstream's call cancelled", func() bool { return d.mock.Stats("g").Canceled == 1 })
+	llmtest.Eventually(t, "the upstream's call cancelled", func() bool { return d.mock.Stats("g").Canceled == 1 })
 	// Without alt=sse, a JSON array.
 	status, body = g.call(t, "/v1/models/gem:streamGenerateContent", map[string]any{"chunks": 2, "chunk_ms": 1}, goog)
 	var arr []map[string]any
@@ -260,7 +260,7 @@ func TestAzureOllamaCohere(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	agenttest.Eventually(t, "the ollama call cancelled", func() bool { return d.mock.Stats("l").Canceled == 1 })
+	llmtest.Eventually(t, "the ollama call cancelled", func() bool { return d.mock.Stats("l").Canceled == 1 })
 
 	// Cohere v2.
 	resp, err = d.a.post("/v2/chat", map[string]any{"model": "cmd", "stream": true}, nil)
@@ -284,22 +284,22 @@ func TestAzureOllamaCohere(t *testing.T) {
 // Through a hub: the hub picks a node by the API agents speak, so an
 // azure_openai model takes OpenAI's calls, and Gemini's path model routes.
 func TestKindsThroughHub(t *testing.T) {
-	mock := agenttest.StartMockLLM(t)
+	mock := llmtest.StartMockLLM(t)
 	hubAddr := freeAddr(t)
-	agenttest.Start(t, member("hub", `{"listen": {"address": "`+hubAddr+`", "password": "`+meshPass+`"}}`), "")
-	agenttest.Start(t, member("node", `{"peers": [{"address": "`+hubAddr+`", "password": "`+meshPass+`", "role": "hub"}],
+	llmtest.Start(t, member("hub", `{"listen": {"address": "`+hubAddr+`", "password": "`+meshPass+`"}}`), "")
+	llmtest.Start(t, member("node", `{"peers": [{"address": "`+hubAddr+`", "password": "`+meshPass+`", "role": "hub"}],
 		"models": [{"name": "az", "api": "azure_openai", "base_url": "`+mock.URL+`/u/z", "api_key": "sk-z", "api_version": "v1"},
 		{"name": "gem", "api": "gemini", "base_url": "`+mock.URL+`/u/g/v1beta", "api_key": "sk-g"}]}`), "")
-	cf := agenttest.Start(t, member("client", `{"console": `+agenttest.Console()+`, "api": {"address": "127.0.0.1:0"},
+	cf := llmtest.Start(t, member("proxy", `{"console": `+llmtest.Console()+`, "api": {"address": "127.0.0.1:0"},
 		"peers": [{"address": "`+hubAddr+`", "password": "`+meshPass+`", "role": "hub"}]}`), "")
-	c := clientOf(t, cf)
+	c := proxyOf(t, cf)
 	cp := pages(t, c.Console().URL())
-	agenttest.Eventually(t, "the client's catalog", func() bool {
-		var cat []client.CatalogModel
-		return cp.RPC(client.MethodClientModels, nil, &cat) == nil && len(cat) == 2 && cat[0].Ready && cat[1].Ready
+	llmtest.Eventually(t, "the proxy's catalog", func() bool {
+		var cat []proxy.CatalogModel
+		return cp.RPC(proxy.MethodProxyModels, nil, &cat) == nil && len(cat) == 2 && cat[0].Ready && cat[1].Ready
 	})
-	var key client.KeyCreateResp
-	if err := cp.RPC(client.MethodClientKeysCreate, client.KeyCreateReq{Name: "k"}, &key); err != nil {
+	var key proxy.KeyCreateResp
+	if err := cp.RPC(proxy.MethodProxyKeysCreate, proxy.KeyCreateReq{Name: "k"}, &key); err != nil {
 		t.Fatal(err)
 	}
 	a := newAgent(c.API(), key.Key)

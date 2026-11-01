@@ -10,16 +10,16 @@
 // uncomment what you need. docs/reference/config.md describes them all.
 //
 // This file:
-// The roles run beside the gateway on its engine: the agent's and the tunnel's, AI
+// The roles run beside the gateway on its engine: the LLM feature's and the tunnel's, AI
 // models shared among machines and services behind NAT reached through a server, and
 // WebRTC's TURN server.
 {
-  // The agent's roles to run beside the gateway, on its engine: a hub, a node and a client,
-  // which share AI models among machines. None when left out. What their web pages change is
-  // written back here.
+  // The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy,
+  // which share AI models among machines and serve them to agents. None when left out. What
+  // their web pages change is written back here.
   // object.
-  // "agent": {
-    // // Run a hub: nodes and clients link to it, and it passes calls between them.
+  // "llm": {
+    // // Run a hub: nodes and proxies link to it, and it passes calls between them.
     // // object.
     // "hub": {
       // // The hub's stable ID, which its peers know it by. Made when left out, and written back here.
@@ -79,7 +79,7 @@
         // "max_conns": 32,
       // },
 
-      // // Where the hub takes links from nodes and clients; none when left out. Its pages change it.
+      // // Where the hub takes links from nodes and proxies; none when left out. Its pages change it.
       // // object.
       // "listen": {
         // // The host and port the role takes links on, as a binding of its own on the listeners' engine;
@@ -92,7 +92,7 @@
         // "password": "",
       // },
 
-      // // The nodes and clients the hub dials. Its pages change them.
+      // // The nodes and proxies the hub dials. Its pages change them.
       // // list of object.
       // "peers": [
         // {
@@ -106,7 +106,7 @@
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
           // // dialing role's own.
-          // // one of: hub, node, client; required.
+          // // one of: hub, node, proxy; required.
           // "role": "hub",
         // },
       // ],
@@ -152,7 +152,7 @@
       // "max_nodes": 1024,
     // },
 
-    // // Run a node: it serves models from local or remote upstreams to the hubs and clients linked
+    // // Run a node: it serves models from local or remote upstreams to the hubs and proxies linked
     // // to it.
     // // object.
     // "node": {
@@ -219,7 +219,7 @@
         // "max_conns": 32,
       // },
 
-      // // Where the node takes links from hubs and clients; none when left out. Its pages change it.
+      // // Where the node takes links from hubs and proxies; none when left out. Its pages change it.
       // // object.
       // "listen": {
         // // The host and port the role takes links on, as a binding of its own on the listeners' engine;
@@ -232,7 +232,7 @@
         // "password": "",
       // },
 
-      // // The hubs and clients the node dials. Its pages change them.
+      // // The hubs and proxies the node dials. Its pages change them.
       // // list of object.
       // "peers": [
         // {
@@ -246,7 +246,7 @@
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
           // // dialing role's own.
-          // // one of: hub, node, client; required.
+          // // one of: hub, node, proxy; required.
           // "role": "hub",
         // },
       // ],
@@ -406,20 +406,20 @@
       // },
     // },
 
-    // // Run a client: an OpenAI- and Anthropic-compatible API that calls the models of the nodes it
-    // // reaches.
+    // // Run a proxy: an OpenAI- and Anthropic-compatible API, for agents, that calls the models of
+    // // the nodes it reaches.
     // // object.
-    // "client": {
-      // // The client's stable ID, which its peers know it by. Made when left out, and written back
+    // "proxy": {
+      // // The proxy's stable ID, which its peers know it by. Made when left out, and written back
       // // here.
       // // string.
       // "id": "",
 
-      // // The name the client shows its peers; the host's name when left out. Its pages change it.
+      // // The name the proxy shows its peers; the host's name when left out. Its pages change it.
       // // string.
       // "name": "",
 
-      // // The client's web pages; none when left out.
+      // // The proxy's web pages; none when left out.
       // // object.
       // "console": {
         // // The host and port the pages listen on. A host that is not a loopback address needs cert_file
@@ -468,7 +468,7 @@
         // "max_conns": 32,
       // },
 
-      // // Where the client takes links from hubs and nodes; none when left out. Its pages change it.
+      // // Where the proxy takes links from hubs and nodes; none when left out. Its pages change it.
       // // object.
       // "listen": {
         // // The host and port the role takes links on, as a binding of its own on the listeners' engine;
@@ -481,7 +481,7 @@
         // "password": "",
       // },
 
-      // // The hubs and nodes the client dials. Its pages change them.
+      // // The hubs and nodes the proxy dials. Its pages change them.
       // // list of object.
       // "peers": [
         // {
@@ -495,12 +495,12 @@
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
           // // dialing role's own.
-          // // one of: hub, node, client; required.
+          // // one of: hub, node, proxy; required.
           // "role": "hub",
         // },
       // ],
 
-      // // Bounds on the client's links; the defaults when left out.
+      // // Bounds on the proxy's links; the defaults when left out.
       // // object.
       // "limits": {
         // // The most links the role takes from its peers at once; one past it is refused, and its dialer
@@ -607,31 +607,30 @@
     // },
   // },
 
-  // The tunnel's roles to run beside the gateway, on its engine: a server, a node and a client,
-  // which reach services behind NAT through the server. None when left out. What their web pages
+  // The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy,
+  // which reach services behind NAT through the hub. None when left out. What their web pages
   // change is written back here.
   // object.
   // "tunnel": {
-    // // Run a server: nodes and clients link to it, and it joins a client's tunnels to a node's.
+    // // Run a hub: nodes and proxies link to it, and it joins a proxy's tunnels to a node's.
     // // object.
-    // "server": {
-      // // The name the server tells the nodes and clients that register. The host's name when left
-      // // out.
+    // "hub": {
+      // // The name the hub tells the nodes and proxies that register. The host's name when left out.
       // // string.
       // "name": "",
 
-      // // The password nodes and clients register with, which they prove they know without sending it.
-      // // The server refuses every registration while it is left out.
+      // // The password nodes and proxies register with, which they prove they know without sending it.
+      // // The hub refuses every registration while it is left out.
       // // string.
       // "password": "",
 
       // // When set, the body of every frame on the links is encrypted with AES-256-GCM under a key
-      // // made from it, and nodes and clients need the same one. It applies to the links that open
+      // // made from it, and nodes and proxies need the same one. It applies to the links that open
       // // after it changes.
       // // string.
       // "body_password": "",
 
-      // // Where nodes and clients link to the server, each over its protocol. None when left out: the
+      // // Where nodes and proxies link to the hub, each over its protocol. None when left out: the
       // // console's pages add them.
       // // list of object.
       // "listeners": [
@@ -651,7 +650,7 @@
         // },
       // ],
 
-      // // An encrypted WebSocket that carries the server's console pages to the web_proxies of clients
+      // // An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies
       // // that cannot reach them otherwise. Needs console. None when left out.
       // // object.
       // "console_socket": {
@@ -659,8 +658,8 @@
         // // string; required.
         // "address": "127.0.0.1:9000",
 
-        // // The password the WebSocket's messages are encrypted with, which a client's web_proxy needs.
-        // // The server's password when left out.
+        // // The password the WebSocket's messages are encrypted with, which a proxy's web_proxy needs.
+        // // The hub's password when left out.
         // // string.
         // "password": "",
 
@@ -670,12 +669,12 @@
         // "max_conns": 32,
       // },
 
-      // // The certificate and the connections of the quic listeners. The server makes a self-signed
+      // // The certificate and the connections of the quic listeners. The hub makes a self-signed
       // // certificate and writes it here when a quic listener needs one and none is set.
       // // object.
       // "quic": {
-        // // The PEM certificate the quic listeners present, which nodes and clients pin by its SHA-256
-        // // fingerprint; with key. The server makes a self-signed one and writes it here when a quic
+        // // The PEM certificate the quic listeners present, which nodes and proxies pin by its SHA-256
+        // // fingerprint; with key. The hub makes a self-signed one and writes it here when a quic
         // // listener needs one and none is set.
         // // string.
         // "cert": "",
@@ -699,7 +698,7 @@
         // "handshake_timeout": "10s",
 
         // // The most QUIC handshakes under way at once; a new connection past it is dropped, and its
-        // // client tries again. 64 when left out or 0.
+        // // proxy tries again. 64 when left out or 0.
         // // integer, 0 or more; default 64.
         // "max_handshakes": 64,
       // },
@@ -709,31 +708,31 @@
       // // duration, as "1.5s" or "2m"; default "10s".
       // "register_timeout": "10s",
 
-      // // How long a node may take to answer the server: to open a tunnel, or to list or set its
+      // // How long a node may take to answer the hub: to open a tunnel, or to list or set its
       // // services. 15s when left out.
       // // duration, as "1.5s" or "2m"; default "15s".
       // "call_timeout": "15s",
 
-      // // The most links the server keeps open at once, registered or not; one past it is closed as
-      // // soon as it opens. 1024 when left out or 0.
+      // // The most links the hub keeps open at once, registered or not; one past it is closed as soon
+      // // as it opens. 1024 when left out or 0.
       // // integer, 0 or more; default 1024.
       // "max_links": 1024,
 
-      // // The most links one node or client may register, from however many processes of the same
-      // // name. 128 when left out or 0.
+      // // The most links one node or proxy may register, from however many processes of the same name.
+      // // 128 when left out or 0.
       // // integer, 0 or more; default 128.
       // "max_links_per_peer": 128,
 
-      // // The most nodes and clients registered at once. 1024 when left out or 0.
+      // // The most nodes and proxies registered at once. 1024 when left out or 0.
       // // integer, 0 or more; default 1024.
       // "max_peers": 1024,
 
-      // // The most tunnels the server passes at once; a client's request for one more is refused.
-      // // 16384 when left out or 0.
+      // // The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384
+      // // when left out or 0.
       // // integer, 0 or more; default 16384.
       // "max_tunnels": 16384,
 
-      // // The server's web pages; none when left out.
+      // // The hub's web pages; none when left out.
       // // object.
       // "console": {
         // // The host and port the pages listen on. A host that is not a loopback address needs cert_file
@@ -783,34 +782,33 @@
       // },
     // },
 
-    // // Run a node: it links to servers and opens the tunnels they ask for to the services it
-    // // exposes.
+    // // Run a node: it links to hubs and opens the tunnels they ask for to the services it exposes.
     // // object.
     // "node": {
-      // // The node's name, which clients name to reach its services. The host's name when left out.
+      // // The node's name, which proxies name to reach its services. The host's name when left out.
       // // string.
       // "name": "",
 
-      // // Anything else the node tells the servers, which their pages show.
+      // // Anything else the node tells the hubs, which their pages show.
       // // object of string.
       // "meta": {},
 
-      // // The servers the node links to and registers with. None when left out: the console's pages
-      // // add them.
+      // // The hubs the node links to and registers with. None when left out: the console's pages add
+      // // them.
       // // list of object.
-      // "servers": [
+      // "hubs": [
         // {
-          // // The server's name here, which forwards and the pages name it by. The first endpoint's
-          // // address when left out.
+          // // The hub's name here, which forwards and the pages name it by. The first endpoint's address
+          // // when left out.
           // // string.
           // "name": "",
 
-          // // The server's addresses, in the order each link tries them: it dials the first one not
-          // // disabled, and the next when that fails.
+          // // The hub's addresses, in the order each link tries them: it dials the first one not disabled,
+          // // and the next when that fails.
           // // list of object; required.
           // "endpoints": [
             // {
-              // // The server's address: host:port or tcp://host:port for TCP, ws://host:port/path for a
+              // // The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a
               // // WebSocket, quic://host:port for QUIC.
               // // string; required.
               // "address": "127.0.0.1:9000",
@@ -821,15 +819,15 @@
             // },
           // ],
 
-          // // The server's password.
+          // // The hub's password.
           // // string; required.
           // "password": "",
 
-          // // The server's body_password, when it has one.
+          // // The hub's body_password, when it has one.
           // // string.
           // "body_password": "",
 
-          // // The SHA-256 fingerprint of the server's QUIC certificate, as its pages show it, which a quic
+          // // The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic
           // // endpoint checks the certificate against. Without it, or quic_insecure, the certificate is
           // // checked against the system's roots.
           // // string.
@@ -839,8 +837,8 @@
           // // boolean.
           // "quic_insecure": true,
 
-          // // How many links to the server carry tunnels; each tunnel goes over one throughout. 10 when
-          // // left out or 0.
+          // // How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left
+          // // out or 0.
           // // integer, 0 to 100; default 10.
           // "pool_size": 10,
 
@@ -848,16 +846,16 @@
           // // duration, as "1.5s" or "2m"; default "5s".
           // "dial_timeout": "5s",
 
-          // // How long the server may take to answer a registration or a call. 10s when left out.
+          // // How long the hub may take to answer a registration or a call. 10s when left out.
           // // duration, as "1.5s" or "2m"; default "10s".
           // "call_timeout": "10s",
 
-          // // How long a link waits after a failed dial, or a lost server, before it dials again. 3s when
+          // // How long a link waits after a failed dial, or a lost hub, before it dials again. 3s when
           // // left out.
           // // duration, as "1.5s" or "2m"; default "3s".
           // "retry_interval": "3s",
 
-          // // How often the round trip to the server is measured. 5s when left out.
+          // // How often the round trip to the hub is measured. 5s when left out.
           // // duration, as "1.5s" or "2m"; default "5s".
           // "ping_interval": "5s",
 
@@ -871,7 +869,7 @@
       // // list of object.
       // "services": [
         // {
-          // // The service's name among the node's, which clients' forwards name.
+          // // The service's name among the node's, which proxies' forwards name.
           // // string; required.
           // "name": "",
 
@@ -885,8 +883,8 @@
         // },
       // ],
 
-      // // How long a connect to a service may take; shorter than a server's call_timeout, so that the
-      // // server hears either way. 5s when left out.
+      // // How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub
+      // // hears either way. 5s when left out.
       // // duration, as "1.5s" or "2m"; default "5s".
       // "dial_timeout": "5s",
 
@@ -894,8 +892,8 @@
       // // duration, as "1.5s" or "2m"; default "2h".
       // "idle_timeout": "2h",
 
-      // // The most tunnels open at once, over every server; a server's request for one more is
-      // // refused. 4096 when left out or 0.
+      // // The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096
+      // // when left out or 0.
       // // integer, 0 or more; default 4096.
       // "max_tunnels": 4096,
 
@@ -949,34 +947,33 @@
       // },
     // },
 
-    // // Run a client: local ports and web proxies forwarded through a server to the services of a
-    // // node.
+    // // Run a proxy: local ports and web proxies forwarded through a hub to the services of a node.
     // // object.
-    // "client": {
-      // // The client's name, which the servers and nodes show. The host's name when left out.
+    // "proxy": {
+      // // The proxy's name, which the hubs and nodes show. The host's name when left out.
       // // string.
       // "name": "",
 
-      // // Anything else the client tells the servers, which their pages show.
+      // // Anything else the proxy tells the hubs, which their pages show.
       // // object of string.
       // "meta": {},
 
-      // // The servers the client links to and registers with. None when left out: the console's pages
-      // // add them.
+      // // The hubs the proxy links to and registers with. None when left out: the console's pages add
+      // // them.
       // // list of object.
-      // "servers": [
+      // "hubs": [
         // {
-          // // The server's name here, which forwards and the pages name it by. The first endpoint's
-          // // address when left out.
+          // // The hub's name here, which forwards and the pages name it by. The first endpoint's address
+          // // when left out.
           // // string.
           // "name": "",
 
-          // // The server's addresses, in the order each link tries them: it dials the first one not
-          // // disabled, and the next when that fails.
+          // // The hub's addresses, in the order each link tries them: it dials the first one not disabled,
+          // // and the next when that fails.
           // // list of object; required.
           // "endpoints": [
             // {
-              // // The server's address: host:port or tcp://host:port for TCP, ws://host:port/path for a
+              // // The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a
               // // WebSocket, quic://host:port for QUIC.
               // // string; required.
               // "address": "127.0.0.1:9000",
@@ -987,15 +984,15 @@
             // },
           // ],
 
-          // // The server's password.
+          // // The hub's password.
           // // string; required.
           // "password": "",
 
-          // // The server's body_password, when it has one.
+          // // The hub's body_password, when it has one.
           // // string.
           // "body_password": "",
 
-          // // The SHA-256 fingerprint of the server's QUIC certificate, as its pages show it, which a quic
+          // // The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic
           // // endpoint checks the certificate against. Without it, or quic_insecure, the certificate is
           // // checked against the system's roots.
           // // string.
@@ -1005,8 +1002,8 @@
           // // boolean.
           // "quic_insecure": true,
 
-          // // How many links to the server carry tunnels; each tunnel goes over one throughout. 10 when
-          // // left out or 0.
+          // // How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left
+          // // out or 0.
           // // integer, 0 to 100; default 10.
           // "pool_size": 10,
 
@@ -1014,16 +1011,16 @@
           // // duration, as "1.5s" or "2m"; default "5s".
           // "dial_timeout": "5s",
 
-          // // How long the server may take to answer a registration or a call. 10s when left out.
+          // // How long the hub may take to answer a registration or a call. 10s when left out.
           // // duration, as "1.5s" or "2m"; default "10s".
           // "call_timeout": "10s",
 
-          // // How long a link waits after a failed dial, or a lost server, before it dials again. 3s when
+          // // How long a link waits after a failed dial, or a lost hub, before it dials again. 3s when
           // // left out.
           // // duration, as "1.5s" or "2m"; default "3s".
           // "retry_interval": "3s",
 
-          // // How often the round trip to the server is measured. 5s when left out.
+          // // How often the round trip to the hub is measured. 5s when left out.
           // // duration, as "1.5s" or "2m"; default "5s".
           // "ping_interval": "5s",
 
@@ -1049,18 +1046,18 @@
           // // string; required.
           // "service": "",
 
-          // // The name of the server the tunnels go through. When left out, they are spread over every
-          // // server that has the node, more of them through the faster ones.
+          // // The name of the hub the tunnels go through. When left out, they are spread over every hub
+          // // that has the node, more of them through the faster ones.
           // // string.
-          // "server": "",
+          // "hub": "",
         // },
       // ],
 
-      // // Local addresses that serve a server's console pages through its encrypted console_socket.
+      // // Local addresses that serve a hub's console pages through its encrypted console_socket.
       // // list of object.
       // "web_proxies": [
         // {
-          // // The server's name, for the pages.
+          // // The hub's name, for the pages.
           // // string.
           // "name": "",
 
@@ -1068,7 +1065,7 @@
           // // string; required.
           // "listen": "",
 
-          // // The server's console_socket, as ws://host:port/.
+          // // The hub's console_socket, as ws://host:port/.
           // // string; required.
           // "url": "",
 
@@ -1083,7 +1080,7 @@
         // },
       // ],
 
-      // // How long the opening of a tunnel may take, through the server to the node and on to the
+      // // How long the opening of a tunnel may take, through the hub to the node and on to the
       // // service. 20s when left out.
       // // duration, as "1.5s" or "2m"; default "20s".
       // "open_timeout": "20s",
@@ -1097,7 +1094,7 @@
       // // integer, 0 or more; default 4096.
       // "max_tunnels": 4096,
 
-      // // The client's web pages; none when left out.
+      // // The proxy's web pages; none when left out.
       // // object.
       // "console": {
         // // The host and port the pages listen on. A host that is not a loopback address needs cert_file

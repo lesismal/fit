@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
-	"github.com/lesismal/fit/agent/internal/wire"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 var local = model.Identity{Role: model.RoleLocal, ID: "console"}
@@ -137,7 +137,7 @@ func TestProxyBadRequestAndNoHead(t *testing.T) {
 	}
 }
 
-// echo answers with a head, then sends back the body the client streams.
+// echo answers with a head, then sends back the body the proxy streams.
 func echo(node string) func(ctx context.Context, _ *model.ProxyReq, st *wire.Stream) (any, error) {
 	return func(ctx context.Context, _ *model.ProxyReq, st *wire.Stream) (any, error) {
 		head, _ := json.Marshal(model.ProxyHead{Status: 200, Node: node})
@@ -251,7 +251,7 @@ func TestNodeStreamForwarding(t *testing.T) {
 func hubRole(t *testing.T, edit app.Editor) *Role {
 	t.Helper()
 	mgr := app.NewManager(testEngine(), nil, nil, edit)
-	if err := mgr.Apply(&config.Config{Agent: &config.Agent{Hub: &config.AgentHub{}}}); err != nil {
+	if err := mgr.Apply(&config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -276,17 +276,17 @@ func TestRole(t *testing.T) {
 		return nil, err
 	})
 	for _, i := range app.Roles() {
-		if i.ID == "agent.hub" && i.Member(&config.Config{}) != nil {
-			t.Fatal("a config without agent.hub has a member")
+		if i.ID == "llm.hub" && i.Member(&config.Config{}) != nil {
+			t.Fatal("a config without llm.hub has a member")
 		}
 	}
 	if r.Hub() == nil {
 		t.Fatal("no Hub")
 	}
-	if err := r.Apply((*config.AgentHub)(nil)); err == nil {
+	if err := r.Apply((*config.LLMHub)(nil)); err == nil {
 		t.Fatal("Apply of no member did not fail")
 	}
-	if err := r.Apply(&config.AgentHub{ID: "hub-1", Name: "h"}); err != nil {
+	if err := r.Apply(&config.LLMHub{ID: "hub-1", Name: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	set := func(name string) (any, error) {

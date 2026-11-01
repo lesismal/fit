@@ -1,8 +1,8 @@
-// Package hub is the agent's hub role, agent.hub in fit's config: nodes and
-// clients link to it; it keeps the table of its nodes, from what they push,
-// aggregates their models for its clients, relays the clients' model calls
+// Package hub is the LLM feature's hub role, llm.hub in fit's config: nodes and
+// proxies link to it; it keeps the table of its nodes, from what they push,
+// aggregates their models for its proxies, relays the proxies' model calls
 // to the least loaded node that serves the model, and lets its pages manage
-// the nodes that allow it. See docs/agent.md.
+// the nodes that allow it. See docs/llm.md.
 package hub
 
 import (
@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/mesh"
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/role"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/llm/internal/mesh"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/role"
 )
 
 //go:embed ui
@@ -25,12 +25,12 @@ var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
-		ID: "agent.hub",
+		ID: "llm.hub",
 		Member: func(c *config.Config) any {
-			if c.Agent == nil || c.Agent.Hub == nil {
+			if c.LLM == nil || c.LLM.Hub == nil {
 				return nil
 			}
-			return c.Agent.Hub
+			return c.LLM.Hub
 		},
 		New: func(h *app.Host) (app.Role, error) { return New(h), nil },
 	})
@@ -63,11 +63,11 @@ func New(h *app.Host) *Role {
 	return r
 }
 
-// Apply moves the hub to member, a *config.AgentHub.
+// Apply moves the hub to member, a *config.LLMHub.
 func (r *Role) Apply(member any) error {
-	m, ok := member.(*config.AgentHub)
+	m, ok := member.(*config.LLMHub)
 	if !ok || m == nil {
-		return errors.New("agent.hub: no member")
+		return errors.New("llm.hub: no member")
 	}
 	r.hub.setMaxNodes(m.Nodes())
 	return r.Base.Apply(role.Common{ID: m.ID, Name: m.Name, Console: m.Console, Listen: m.Listen, Peers: m.Peers, Limits: m.Limits})

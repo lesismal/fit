@@ -1,7 +1,7 @@
 // PeersPanel: the mesh of a process — its identity, its rpc listener, who it is connected to (in / out) and the
-// addresses it dials. Shared by the node, hub and client consoles. Needs ui.js.
+// addresses it dials. Shared by the node, hub and proxy consoles. Needs ui.js.
 //
-// PeersPanel：进程的互联 —— 自身身份、rpc 监听、与谁相连（入站 / 出站）以及它主动连接的地址。node、hub、client
+// PeersPanel：进程的互联 —— 自身身份、rpc 监听、与谁相连（入站 / 出站）以及它主动连接的地址。node、hub、proxy
 // 控制台共用。依赖 ui.js。
 //
 // PeersPanel.mount(el, {call(method, req) → Promise (default UI.rpc), onPeer(conn) optional}) → {refresh}
@@ -42,8 +42,8 @@
     }
   });
 
-  var ROLES = ['node', 'hub', 'client'];
-  var ROLE_KIND = { 'node': 'primary', 'hub': 'info', 'client': 'ok' };
+  var ROLES = ['node', 'hub', 'proxy'];
+  var ROLE_KIND = { 'node': 'primary', 'hub': 'info', 'proxy': 'ok' };
   function roleBadge(r) { return UI.badge(r || '—', ROLE_KIND[r] || ''); }
 
   // kickRefresh is how long to wait after a kick before refreshing: outgoing connections need a moment to reconnect.

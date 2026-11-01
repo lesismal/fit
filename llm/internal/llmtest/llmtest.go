@@ -1,8 +1,8 @@
-// Package agenttest runs fit with the agent's roles for tests: a config
+// Package llmtest runs fit with the LLM feature's roles for tests: a config
 // loaded, compiled and served as fit runs it, with admin.Configs moving the
 // roles through app.Manager and writing what their pages change back,
 // into an admin.store when one is given. It is for tests only.
-package agenttest
+package llmtest
 
 import (
 	"context"
@@ -20,22 +20,22 @@ import (
 
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/admin/store"
-	"github.com/lesismal/fit/agent/internal/role"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/llm/internal/role"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/upstream"
 )
 
 // StorePassword is the password of the stores Start makes.
-const StorePassword = "agenttest-store-password"
+const StorePassword = "llmtest-store-password"
 
 // User and Password log in to the pages of the roles of Console's configs.
 const (
 	User     = "admin"
-	Password = "agenttest-secret"
+	Password = "llmtest-secret"
 )
 
 var hash = func() string {
@@ -151,8 +151,8 @@ func (f *Fit) Stop() {
 // Current returns the running base config.
 func (f *Fit) Current() []byte { return f.Configs.Current().Data() }
 
-// Role returns the running role of the agent named role (hub, node or
-// client), as its package's type, or nil.
+// Role returns the running role of the LLM feature named role (hub, node or
+// proxy), as its package's type, or nil.
 func (f *Fit) Role(name string) any { return role.Find(f.Server.Engine(), name) }
 
 // Browser is a logged-in user of a role's pages.

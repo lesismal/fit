@@ -227,9 +227,9 @@ xpu-smi discovery
 		DescZH:      "npu-smi 随昇腾 NPU 驱动（Ascend-hdk-*-npu-driver）安装。从昇腾官网下载与卡型号匹配的驱动包，并以 --full 安装。",
 		Install: []InstallMethod{
 			{OS: "any", Title: "Ascend driver package", Script: `set -e
-# Put the driver / firmware .run packages for this card in $FIT_AGENT_GPU_DATA_DIR/ascend first
+# Put the driver / firmware .run packages for this card in $FIT_LLM_GPU_DATA_DIR/ascend first
 # (download them from https://www.hiascend.com/hardware/firmware-drivers/community).
-DIR="${FIT_AGENT_GPU_DATA_DIR:-.}/ascend"
+DIR="${FIT_LLM_GPU_DATA_DIR:-.}/ascend"
 ls "$DIR"/*.run >/dev/null 2>&1 || { echo "No .run packages in $DIR"; exit 1; }
 groupadd -f HwHiAiUser; id HwHiAiUser >/dev/null 2>&1 || useradd -g HwHiAiUser -d /home/HwHiAiUser -m HwHiAiUser -s /bin/bash
 for f in "$DIR"/*npu-driver*.run "$DIR"/*npu-firmware*.run; do
@@ -252,8 +252,8 @@ npu-smi info || echo "Installed: reboot the node to load the driver."
 		DescZH:      "mthreads-gmi 随 MUSA 驱动安装（从摩尔线程开发者网站获取 musa_*.deb / .rpm）。",
 		Install: []InstallMethod{
 			{OS: "debian", Title: "MUSA driver package", Script: `set -e
-# Put the musa driver .deb for this card in $FIT_AGENT_GPU_DATA_DIR/mthreads first
-DIR="${FIT_AGENT_GPU_DATA_DIR:-.}/mthreads"
+# Put the musa driver .deb for this card in $FIT_LLM_GPU_DATA_DIR/mthreads first
+DIR="${FIT_LLM_GPU_DATA_DIR:-.}/mthreads"
 ls "$DIR"/*.deb >/dev/null 2>&1 || { echo "No .deb packages in $DIR"; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 apt-get install -y "$DIR"/*.deb
@@ -269,8 +269,8 @@ mthreads-gmi || echo "Installed: reboot the node to load the driver."
 		DescZH:      "hy-smi 随 DTK / DCU 驱动安装，参数与 rocm-smi 一致。",
 		Install: []InstallMethod{
 			{OS: "any", Title: "DCU driver package", Script: `set -e
-# Put the DCU driver .run package in $FIT_AGENT_GPU_DATA_DIR/hygon first
-DIR="${FIT_AGENT_GPU_DATA_DIR:-.}/hygon"
+# Put the DCU driver .run package in $FIT_LLM_GPU_DATA_DIR/hygon first
+DIR="${FIT_LLM_GPU_DATA_DIR:-.}/hygon"
 ls "$DIR"/*.run >/dev/null 2>&1 || { echo "No .run packages in $DIR"; exit 1; }
 for f in "$DIR"/*.run; do chmod +x "$f"; "$f" -y || "$f"; done
 hy-smi || echo "Installed: reboot the node to load the driver."

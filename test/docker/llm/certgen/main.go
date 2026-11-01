@@ -1,6 +1,6 @@
 // Command certgen writes the self-signed certificate of the docker
-// end-to-end test of the agent: cert.pem and key.pem in -dir, for the names
-// in -hosts. The roles serve their pages and the client its API over TLS
+// end-to-end test of the LLM feature: cert.pem and key.pem in -dir, for the names
+// in -hosts. The roles serve their pages and the proxy its API over TLS
 // with it, since they listen on addresses that are not loopback; the tester
 // does not verify it. Files that exist already are kept.
 package main
@@ -40,7 +40,7 @@ func main() {
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "fit agent e2e"},
+		Subject:               pkix.Name{CommonName: "fit llm e2e"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

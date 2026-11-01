@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/agent/internal/model"
-	"github.com/lesismal/fit/agent/internal/wire"
+	"github.com/lesismal/fit/llm/internal/model"
+	"github.com/lesismal/fit/llm/internal/wire"
 )
 
 // backoff spreads waits over the whole step (full jitter), doubling the step from backoffBase up to the ceiling;
@@ -203,10 +203,10 @@ func TestMeshMaxConns(t *testing.T) {
 		AcceptRoles: allPeers, MaxConns: 1, RetryInterval: 300 * time.Millisecond}, NewRouter())
 	t.Cleanup(n.Stop)
 	start(t, n, addr)
-	c1, _ := newTestMesh(t, model.RoleClient, "c1", allPeers)
+	c1, _ := newTestMesh(t, model.RoleProxy, "c1", allPeers)
 	start(t, c1, "", toNode(addr))
 	waitFor(t, "first", func() bool { return n.Online("c1") })
-	c2, _ := newTestMesh(t, model.RoleClient, "c2", allPeers)
+	c2, _ := newTestMesh(t, model.RoleProxy, "c2", allPeers)
 	start(t, c2, "", toNode(addr))
 	waitFor(t, "refusal", func() bool {
 		ts := c2.Targets()

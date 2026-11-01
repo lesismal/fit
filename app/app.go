@@ -1,7 +1,7 @@
 // Package app runs the roles of the apps fit carries beside its gateway: the
-// agent's hub, node and client, the tunnel's server, node and client, and
+// LLM feature's hub, node and proxy, the tunnel's hub, node and proxy, and
 // WebRTC's TURN server, media server and media proxy.
-// Each role is a member of fit's config, agent.hub or tunnel.server, and runs
+// Each role is a member of fit's config, llm.hub or tunnel.hub, and runs
 // while the config sets it, on the listeners' fib engine, which every role
 // in the process shares with the gateway.
 //
@@ -11,7 +11,7 @@
 // config after, and stops it when one leaves it out. What a role's web pages
 // change is written back into its member with Host.Edit, as a config applied
 // like any other, and so kept in admin.store when the config is kept there.
-// See docs/decisions/028-agent-and-tunnel.md.
+// See docs/decisions/028-llm-and-tunnel.md.
 //
 // Applying a config, and Edit's work, run on the control plane, never on a
 // fib worker.
@@ -38,7 +38,7 @@ import (
 // Role is a running role.
 type Role interface {
 	// Apply moves the role to member, its member of the config being
-	// applied: a *config.TunnelServer for tunnel.server. The first Apply
+	// applied: a *config.TunnelHub for tunnel.hub. The first Apply
 	// starts it. Configs are applied one at a time, on the control plane;
 	// Apply may bind addresses and start dials, and returns once they are
 	// under way. An error leaves the role as it was before, and is
@@ -63,7 +63,7 @@ type Metered interface {
 // Info describes a role.
 type Info struct {
 	// ID is the path of the role's member in the config, its parts joined
-	// with dots, as in tunnel.server.
+	// with dots, as in tunnel.hub.
 	ID string
 	// Member returns the role's member of c, or nil when c leaves it out.
 	Member func(c *config.Config) any
@@ -75,7 +75,7 @@ type Info struct {
 }
 
 // Path returns the parts of the role's member's path, as in
-// ["tunnel", "server"].
+// ["tunnel", "hub"].
 func (i Info) Path() []string { return strings.Split(i.ID, ".") }
 
 var (
@@ -112,17 +112,17 @@ func set(member any) bool {
 		return false
 	}
 	switch m := member.(type) {
-	case *config.AgentHub:
+	case *config.LLMHub:
 		return m != nil
-	case *config.AgentNode:
+	case *config.LLMNode:
 		return m != nil
-	case *config.AgentClient:
+	case *config.LLMProxy:
 		return m != nil
-	case *config.TunnelServer:
+	case *config.TunnelHub:
 		return m != nil
 	case *config.TunnelNode:
 		return m != nil
-	case *config.TunnelClient:
+	case *config.TunnelProxy:
 		return m != nil
 	case *config.TURNServer:
 		return m != nil
@@ -177,26 +177,26 @@ type memberAt struct {
 // members returns the roles c sets, whether or not this binary has them.
 func members(c *config.Config) []memberAt {
 	var ms []memberAt
-	if a := c.Agent; a != nil {
+	if a := c.LLM; a != nil {
 		if a.Hub != nil {
-			ms = append(ms, memberAt{"agent.hub", a.Hub.At})
+			ms = append(ms, memberAt{"llm.hub", a.Hub.At})
 		}
 		if a.Node != nil {
-			ms = append(ms, memberAt{"agent.node", a.Node.At})
+			ms = append(ms, memberAt{"llm.node", a.Node.At})
 		}
-		if a.Client != nil {
-			ms = append(ms, memberAt{"agent.client", a.Client.At})
+		if a.Proxy != nil {
+			ms = append(ms, memberAt{"llm.proxy", a.Proxy.At})
 		}
 	}
 	if t := c.Tunnel; t != nil {
-		if t.Server != nil {
-			ms = append(ms, memberAt{"tunnel.server", t.Server.At})
+		if t.Hub != nil {
+			ms = append(ms, memberAt{"tunnel.hub", t.Hub.At})
 		}
 		if t.Node != nil {
 			ms = append(ms, memberAt{"tunnel.node", t.Node.At})
 		}
-		if t.Client != nil {
-			ms = append(ms, memberAt{"tunnel.client", t.Client.At})
+		if t.Proxy != nil {
+			ms = append(ms, memberAt{"tunnel.proxy", t.Proxy.At})
 		}
 	}
 	if w := c.WebRTC; w != nil && w.TURN != nil {
@@ -220,7 +220,7 @@ type Editor func(source string, path []string, edit func(cur []byte) ([]byte, er
 // Host is what a role is given: the engine it shares, its log, and the way
 // to change its own member of the config.
 type Host struct {
-	// ID is the role's, as in tunnel.server.
+	// ID is the role's, as in tunnel.hub.
 	ID string
 	// Engine is the listeners' engine, which the role adds its bindings to
 	// and dials its connections on, with handlers of their own.
@@ -228,7 +228,7 @@ type Host struct {
 	// Upstream is the engine fit's upstream pools dial through, for an
 	// HTTP client of fib's to dial on.
 	Upstream *fib.Engine
-	// Log is the role's logger: agent, tunnel or webrtc, its messages
+	// Log is the role's logger: llm, tunnel or webrtc, its messages
 	// prefixed with its ID.
 	Log *logs.Logger
 
@@ -421,7 +421,7 @@ func (m *Manager) WriteMetrics(w observe.MetricWriter) {
 func (m *Manager) host(id string) *Host {
 	h := &Host{ID: id, Engine: m.engine, Upstream: m.upstream, m: m}
 	if m.root != nil {
-		name := config.LoggerAgent
+		name := config.LoggerLLM
 		switch {
 		case strings.HasPrefix(id, "tunnel."):
 			name = config.LoggerTunnel

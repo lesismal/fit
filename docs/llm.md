@@ -1,47 +1,48 @@
-# The agent
+# The LLM feature
 
-[English](agent.md) | [简体中文](agent.zh-CN.md)
+[English](llm.md) | [简体中文](llm.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [agent-hub](../examples/agent-hub/fit.conf), [agent-node](../examples/agent-node/fit.conf), [agent-client](../examples/agent-client/fit.conf).
+Config examples, each in .conf, YAML and JSON: [llm-hub](../examples/llm-hub/fit.conf), [llm-node](../examples/llm-node/fit.conf), [llm-proxy](../examples/llm-proxy/fit.conf).
 
-The agent shares AI models among machines. It is three roles of fit, each set by a member of the
+The LLM feature (`llm` in the config) shares AI models among machines and serves them to agents.
+It is three roles of fit, each set by a member of the
 config:
 
-- **`agent.node`** serves models. A model is an upstream endpoint of one of the mainstream model
+- **`llm.node`** serves models. A model is an upstream endpoint of one of the mainstream model
   APIs: OpenAI's and every OpenAI-compatible one, Anthropic's, Google's Gemini, Azure OpenAI,
   Ollama's own and Cohere's ([Models and APIs](#models-and-apis)). It may be a local server, as
   Ollama, vLLM or llama.cpp, or a hosted API with its key. The node also reports its hardware and
   runs a fixed set of management actions.
-- **`agent.hub`** is where nodes and clients meet, usually on a public server that every machine
+- **`llm.hub`** is where nodes and proxies meet, usually on a public server that every machine
   reaches. It keeps a table of its nodes and their models, and relays each call to the least loaded
   node that serves the model.
-- **`agent.client`** gives agents (Claude Code, Codex, an SDK, an app of one's own) the
+- **`llm.proxy`** gives agents (Claude Code, Codex, an SDK, an app of one's own) the
   models' APIs: `/v1/chat/completions`, `/v1/messages`, `/v1beta/models/{model}:generateContent`,
   `/api/chat`, `/v2/chat` and the rest. It builds the path from the local machine or LAN, through a
   public hub, to the nodes of other compute machines, and serves the API to agents on its own
   machine (on a loopback address) or on its LAN (on a LAN address, with TLS and API keys). It need
-  not run on an agent's machine: one client on a LAN machine serves every agent of the LAN.
+  not run on an agent's machine: one proxy on a LAN machine serves every agent of the LAN.
 
-Requests and responses are forwarded byte for byte: the agent never converts one API into another,
+Requests and responses are forwarded byte for byte: fit never converts one API into another,
 so tool calls, thinking, images, audio and streaming work as the upstream supports them.
 
 A process runs every role whose member is set, any combination of them, beside the gateway's
 listeners and routes or without any; a config with roles and no routes needs no listener. Every
-role adds its bindings (its pages, its mesh listener, a client's API) to the listeners' fib engine,
+role adds its bindings (its pages, its mesh listener, a proxy's API) to the listeners' fib engine,
 and dials its peers on it. The node's HTTP client dials its upstreams on the upstream engine that
 fit's own upstream pools use. Why the roles are part of fit is in
-[decision 028](decisions/028-agent-and-tunnel.md). The [tunnel](tunnel.md) and [WebRTC](webrtc.md)
+[decision 028](decisions/028-llm-and-tunnel.md). The [tunnel](tunnel.md) and [WebRTC](webrtc.md)
 roles run the same way, beside these.
 
-Each role logs to fit's `agent` logger, whose level `log.levels` sets, its lines prefixed with the
-role's member, as `agent.node: `.
+Each role logs to fit's `llm` logger, whose level `log.levels` sets, its lines prefixed with the
+role's member, as `llm.node: `.
 
 ## Configuration
 
-The members are `agent.hub`, `agent.node` and `agent.client`. They are decoded as strictly as the
+The members are `llm.hub`, `llm.node` and `llm.proxy`. They are decoded as strictly as the
 rest of the config: an unknown field is an error, and `fit validate` checks every bound below. The
 examples are JSON; the same fields work in a .conf or YAML config. The
-[config reference](reference/config.md#agent) lists the same fields.
+[config reference](reference/config.md#llm) lists the same fields.
 
 ### What every role has
 
@@ -67,7 +68,7 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | --- | --- | --- | --- |
 | `address` | string | required | The peer's host and port, as its `listen.address` says. The host is required and the port is a number. Each address appears once. |
 | `password` | string | required | The peer's `listen.password`. |
-| `role` | string | required | The role the peer must announce: `hub`, `node` or `client`, never the dialing role's own. A hub dials nodes and clients, a node dials hubs and clients, a client dials hubs and nodes. |
+| `role` | string | required | The role the peer must announce: `hub`, `node` or `proxy`, never the dialing role's own. A hub dials nodes and proxies, a node dials hubs and proxies, a proxy dials hubs and nodes. |
 
 `limits`:
 
@@ -80,7 +81,7 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | `retry_interval` | duration | `5s` | The longest wait between dials of a peer that cannot be reached. At least 100ms. |
 | `stream_idle` | duration | `2m` | How long a stream may carry nothing either way before it ends. At least 1s. |
 
-### `agent.hub`
+### `llm.hub`
 
 The fields every role has, and:
 
@@ -88,7 +89,7 @@ The fields every role has, and:
 | --- | --- | --- | --- |
 | `max_nodes` | int | 1024 | The most nodes the hub keeps in its table, offline ones included. Past it, the offline node seen longest ago is forgotten. |
 
-### `agent.node`
+### `llm.node`
 
 The fields every role has, and:
 
@@ -121,7 +122,7 @@ The fields every role has, and:
 | `gpu_sudo` | bool | true | Run GPU settings, tool installs and actions that need root with `sudo -n` when fit does not run as root. sudo must not ask for a password. |
 | `refresh_interval` | duration | `30s` | How often the node reads its hardware again: 5s to 1h. |
 | `job_timeout` | duration | `1h` | How long a job may run before it is killed: 10s to 168h. |
-| `gpu_data_dir` | string | the working directory | Where the install scripts of vendors whose drivers are downloaded by hand look for the packages, under the vendor's name. Scripts see it as `FIT_AGENT_GPU_DATA_DIR`. |
+| `gpu_data_dir` | string | the working directory | Where the install scripts of vendors whose drivers are downloaded by hand look for the packages, under the vendor's name. Scripts see it as `FIT_LLM_GPU_DATA_DIR`. |
 
 `proxy`:
 
@@ -134,20 +135,20 @@ The fields every role has, and:
 | `max_inflight` | int | 256 | The most calls the node forwards at once, across its models. A call past it goes to another node. |
 | `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body a call may carry. A body is held whole only to set its model to `upstream`, when the body names the model. |
 
-### `agent.client`
+### `llm.proxy`
 
 The fields every role has, and:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `api` | object | none | The API agents on the client's machine or LAN call. Without it the client links to its peers but serves no API. |
+| `api` | object | none | The API agents on the proxy's machine or LAN call. Without it the proxy links to its peers but serves no API. |
 | `api_keys` | array | none | The keys agents call the API with; at most 256. The pages make and delete them. |
 
 `api`:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `address` | string | required | The host and port the API listens on. A loopback address, as `127.0.0.1:9301`, serves the agents of the client's machine; a LAN address, as `192.168.1.10:9301`, or an empty host, serves the agents of other machines too, and needs `cert_file` and `key_file`, so that keys never cross a network in the clear. |
+| `address` | string | required | The host and port the API listens on. A loopback address, as `127.0.0.1:9301`, serves the agents of the proxy's machine; a LAN address, as `192.168.1.10:9301`, or an empty host, serves the agents of other machines too, and needs `cert_file` and `key_file`, so that keys never cross a network in the clear. |
 | `cert_file` | string | none | A PEM file with the API's certificate and any intermediates. With `key_file`, the API is served over TLS. |
 | `key_file` | string | none | A PEM file with the certificate's private key. |
 | `max_body_bytes` | int | 33554432 (32 MiB) | The largest request body. It is held whole, to read the model it names and to send it again when a route cannot serve it; one past it gets 413. |
@@ -170,7 +171,7 @@ The fields every role has, and:
 
 ```json
 {
-  "agent": {
+  "llm": {
     "hub": {
       "name": "hub-1",
       "console": {
@@ -190,7 +191,7 @@ The fields every role has, and:
 
 ```json
 {
-  "agent": {
+  "llm": {
     "node": {
       "name": "gpu-1",
       "description": "Two RTX 4090s",
@@ -215,12 +216,12 @@ The fields every role has, and:
 }
 ```
 
-### A client
+### A proxy
 
 ```json
 {
-  "agent": {
-    "client": {
+  "llm": {
+    "proxy": {
       "name": "laptop",
       "console": {
         "address": "127.0.0.1:9300",
@@ -239,25 +240,25 @@ The fields every role has, and:
 ```
 
 The `password_hash` is made with `fit hash-password`; the one above is an example only. API keys
-are made on the client's pages, not written by hand.
+are made on the proxy's pages, not written by hand.
 
 ### Three places
 
-A hub on a public server at hub.example.net, a node on a GPU machine in a lab, and a client on a
-machine of an office LAN, at 192.168.1.10. The node and the client dial the hub; neither needs a
-listener of its own, so neither needs a public address. The client serves the agents of every
+A hub on a public server at hub.example.net, a node on a GPU machine in a lab, and a proxy on a
+machine of an office LAN, at 192.168.1.10. The node and the proxy dial the hub; neither needs a
+listener of its own, so neither needs a public address. The proxy serves the agents of every
 machine of the LAN, over TLS, with its API keys.
 
 The server:
 
 ```json
-{"agent": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
 ```
 
 The GPU machine:
 
 ```json
-{"agent": {"node": {
+{"llm": {"node": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
@@ -266,27 +267,27 @@ The GPU machine:
 The LAN machine:
 
 ```json
-{"agent": {"client": {
+{"llm": {"proxy": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
 
-Agents on the LAN use `https://192.168.1.10:9301` as their base URL. A client that serves only the
+Agents on the LAN use `https://192.168.1.10:9301` as their base URL. A proxy that serves only the
 agents of its own machine listens on loopback, as `127.0.0.1:9301`, and needs no certificate.
 
-Each machine adds a `console` to manage its role from a browser. A client may also dial a node
+Each machine adds a `console` to manage its role from a browser. A proxy may also dial a node
 directly, and one process may run a hub and a node together. The mesh is plain `ws://`: what
 crosses it is not encrypted, so links to a hub across the internet belong on a private network or
 a tunnel, as [The mesh](#the-mesh) says.
 
 ## Models and APIs
 
-A model's `api` is the API its upstream speaks. It sets which endpoints of `agent.client` reach the
+A model's `api` is the API its upstream speaks. It sets which endpoints of `llm.proxy` reach the
 model, the URL the node calls, the header the node sends the model's key in, and where the model is
 named, which is where the node puts `upstream` in place of the name.
 
-| `api` | Upstreams | Agents call, on agent.client | The node calls | Key header | The model is in |
+| `api` | Upstreams | Agents call, on llm.proxy | The node calls | Key header | The model is in |
 | --- | --- | --- | --- | --- | --- |
 | `openai` | OpenAI, and every OpenAI-compatible API: DeepSeek, Qwen (DashScope's compatible mode), Mistral, Groq, xAI, Moonshot, Zhipu, OpenRouter, Together, Fireworks; vLLM, SGLang, llama.cpp's server, LM Studio, Ollama's `/v1` | `POST /v1/{call}` | `base_url/{call}` | `Authorization: Bearer` | the JSON body's `model`, or a form's `model` field |
 | `azure_openai` | Azure OpenAI deployments | as `openai`: `POST /v1/{call}` | `base_url/openai/deployments/{upstream}/{call}?api-version={api_version}`; `responses` goes to `base_url/openai/responses?api-version=…` | `api-key` | the URL's deployment; for `responses`, the body's `model` |
@@ -354,7 +355,7 @@ The `base_url` of each:
 A node serving one model of each:
 
 ```json
-{"agent": {"node": {
+{"llm": {"node": {
   "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
@@ -375,9 +376,9 @@ A node serving one model of each:
 ### The config is the one source
 
 A role keeps nothing in a file of its own. What its pages change is written back into its member:
-the listener, the peers, the name and description, a node's models and settings, a client's API
+the listener, the peers, the name and description, a node's models and settings, a proxy's API
 keys, and the ID made at first start. The change goes through `admin.Configs` as a config edit
-whose source is the member, as `agent.node`: the running config with the member replaced is applied
+whose source is the member, as `llm.node`: the running config with the member replaced is applied
 as any config is, checked first, recorded in the history and open to rollback. A change the check
 refuses changes nothing, and the pages get 400 with the reason. The role then moves to the new
 member without dropping links that did not change.
@@ -393,7 +394,7 @@ Kicking a link from the pages is the one change that is not written: it closes t
 dialer links again.
 
 The members hold secrets: mesh passwords and model API keys, in the clear. A plain config file is
-as safe as the file; `admin.store` keeps them encrypted. A client's API keys are kept as their
+as safe as the file; `admin.store` keeps them encrypted. A proxy's API keys are kept as their
 SHA-256 only, so neither the config nor the store holds a key that can be used.
 
 ## The mesh
@@ -454,9 +455,9 @@ process ID, start time, its mesh address and its pages' URL when it has them. Th
 with its own. A link that has not said hello in 15 seconds is
 closed. A peer is refused when:
 
-- its role is the role's own (hubs never link to hubs, nodes to nodes, clients to clients);
-- its role is not one the role links with: a hub links nodes and clients, a node links hubs and
-  clients, a client links hubs and nodes;
+- its role is the role's own (hubs never link to hubs, nodes to nodes, proxies to proxies);
+- its role is not one the role links with: a hub links nodes and proxies, a node links hubs and
+  proxies, a proxy links hubs and nodes;
 - on a dialed link, its role is not the one `peers[].role` names;
 - its ID is the role's own.
 
@@ -475,7 +476,7 @@ the steps again from 1 second.
 
 ### Request bodies
 
-A client sends a body of up to 1 MiB inside the proxy stream's opening request (`ProxyReq.body`),
+A proxy sends a body of up to 1 MiB inside the proxy stream's opening request (`ProxyReq.body`),
 and a larger one as `body_stream: true` with its size (`body_size`), followed by the body in frames
 of 64 KiB under the stream's credit. A hub relays the frames as they come; a node passes them
 upstream as they arrive. The opening request also carries the call's protocol, path and model, the
@@ -511,7 +512,7 @@ upstream also puts the model in `error`; an answer below 500 clears it.
    `multipart/form-data` with a boundary.
 2. The model (its name, of a kind that speaks the call's API) must be ready and below its
    `max_inflight`, and the node below `proxy.max_inflight`. Otherwise the call fails as
-   unavailable, and a hub or client tries another node. A call the model's kind does not serve,
+   unavailable, and a hub or proxy tries another node. A call the model's kind does not serve,
    as `images/variations` of an `azure_openai` model, fails as not found.
 3. The URL is the kind's. The body goes upstream as it arrives. It is held whole only when the
    model's `upstream` differs from the name the agent asked for and the body names the model, to
@@ -563,7 +564,7 @@ model's key, and, like the pages, can only run the fixed actions.
 ### Pushes
 
 The node pushes its info (identity, description, hardware, models and their state and load, calls
-and jobs running) to every linked hub and client when it changes, at most once per 200ms, and once
+and jobs running) to every linked hub and proxy when it changes, at most once per 200ms, and once
 to each peer as it links. Each push carries a sequence that starts from the node's start time, so a
 receiver drops what is older, across restarts too.
 
@@ -580,18 +581,18 @@ nodes that link again.
 
 The hub lists, per name and API, the models of its online nodes: which nodes serve each, and how
 many are ready. Disabled models are left out. On a change it pushes the list to every linked
-client, at most once per 200ms, and once to each client as it links.
+proxy, at most once per 200ms, and once to each proxy as it links.
 
 ### Picking a node
 
 `/hub/proxy` takes the same request as `/node/proxy`. The hub picks, among the online nodes serving
-the model ready and not excluded by the client, the one with the least load: the model's calls the
+the model ready and not excluded by the proxy, the one with the least load: the model's calls the
 node reported, plus the calls the hub relays to it now. Ties go round robin. It relays the frames
 both ways as they come, under each stream's credit.
 
 Before the node's head, a node that cannot serve the model, goes offline or loses its link is left
 for the next one, up to 3 nodes; a streamed body is retried only while none of it has been taken
-from the client. After the head, bytes have reached the client, and any failure ends the call.
+from the proxy. After the head, bytes have reached the proxy, and any failure ends the call.
 Other errors, as a bad request, end the call at once.
 
 ### Managed calls
@@ -600,7 +601,7 @@ The hub's pages manage a node through two methods, open to the pages only: `/hub
 management method (bounded by 90 seconds) and `/hub/node/stream` for following a job. The node
 decides what is allowed.
 
-## The client
+## The proxy
 
 ### The API
 
@@ -611,14 +612,14 @@ decides what is allowed.
 | `POST /v1beta/models/{model}:{method}`, `/v1/models/{model}:{method}` | gemini | the method; the model is the path's |
 | `POST /api/chat`, `/api/generate`, `/api/embed` | ollama | the path after `/` |
 | `POST /v2/chat`, `/v2/embed`, `/v2/rerank` | cohere | the path after `/v2/` |
-| `GET /v1/models`, `GET /v1/models/{id}` | every model | answered by the client |
-| `GET /v1beta/models`, `GET /v1beta/models/{model}` | gemini models | answered by the client |
-| `GET /api/tags` | ollama models | answered by the client |
+| `GET /v1/models`, `GET /v1/models/{id}` | every model | answered by the proxy |
+| `GET /v1beta/models`, `GET /v1beta/models/{model}` | gemini models | answered by the proxy |
+| `GET /api/tags` | ollama models | answered by the proxy |
 
-The paths are where each vendor's SDKs call once their base URL is the client's, so an agent needs
+The paths are where each vendor's SDKs call once their base URL is the proxy's, so an agent needs
 nothing but the base URL and a key. The API is a binding of its own at `api.address`, apart from
 the pages. Any other path or method gets 404. The model lists need a key too. `GET /v1/models`
-lists every model name the client's hubs and nodes list, with the fields of both OpenAI's and
+lists every model name the proxy's hubs and nodes list, with the fields of both OpenAI's and
 Anthropic's model lists, so either SDK reads it; `GET /v1beta/models` lists the Gemini models as
 Gemini's `models.list` does, and `GET /api/tags` the Ollama models as Ollama's does.
 
@@ -641,11 +642,11 @@ models are counted apart; calls to more are counted together, as `other`.
 
 ### Routing
 
-The client reads the body whole, within `api.max_body_bytes`, to find its model (a Gemini call's
+The proxy reads the body whole, within `api.max_body_bytes`, to find its model (a Gemini call's
 is in its path). It then tries routes in order:
 
 1. Nodes it links to directly, serving the model ready with a kind that speaks the call's API, the
-   least loaded first: the load the node reported plus the calls this client runs on it.
+   least loaded first: the load the node reported plus the calls this proxy runs on it.
 2. Hubs listing the model with a ready node, round robin.
 
 A route that fails before the head because it cannot serve the model now, is offline, or loses its
@@ -680,8 +681,8 @@ cuts the response short.
 
 ### Using it
 
-In these examples, `127.0.0.1:9301` is the client's `api.address` and `<key>` an API key made on
-its pages. An agent on another machine of the LAN uses the client's LAN address over https instead.
+In these examples, `127.0.0.1:9301` is the proxy's `api.address` and `<key>` an API key made on
+its pages. An agent on another machine of the LAN uses the proxy's LAN address over https instead.
 
 The OpenAI SDK (Python):
 
@@ -705,16 +706,16 @@ Codex, in `~/.codex/config.toml`, with a model served with the OpenAI API:
 
 ```toml
 model = "qwen3-32b"
-model_provider = "fit_agent"
+model_provider = "fit_llm"
 
-[model_providers.fit_agent]
-name = "fit agent"
+[model_providers.fit_llm]
+name = "fit llm"
 base_url = "http://127.0.0.1:9301/v1"
-env_key = "FIT_AGENT_API_KEY"
+env_key = "FIT_LLM_API_KEY"
 wire_api = "chat"   # or "responses" when the upstream serves /responses
 ```
 
-then `export FIT_AGENT_API_KEY=<key>` and run `codex`.
+then `export FIT_LLM_API_KEY=<key>` and run `codex`.
 
 The Gemini SDK (Python, `google-genai`), with a model served with the Gemini API. The base URL has
 no version: the SDK appends `/v1beta/models/...`.
@@ -747,7 +748,7 @@ curl http://127.0.0.1:9301/v1/audio/transcriptions -H "Authorization: Bearer <ke
   -F model=whisper -F file=@meeting.wav
 ```
 
-The client's overview page shows these with its own address and models.
+The proxy's overview page shows these with its own address and models.
 
 ## The pages
 
@@ -767,18 +768,18 @@ Logins work as `admin.console`'s, through the same code; [the console guide](con
 users, sessions and lockouts. Passwords are checked with bcrypt on the console's own pool (4
 running, 64 waiting, at most 2 checks at once); a task that waits past 30 seconds gets 504, and
 one past the queue 503. After 5 failed logins from an address within 15 minutes, the address is
-refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_agent_hub`,
-`fit_agent_node` or `fit_agent_client`; HttpOnly, SameSite=Strict, Secure over TLS). Every API
+refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_llm_hub`,
+`fit_llm_node` or `fit_llm_proxy`; HttpOnly, SameSite=Strict, Secure over TLS). Every API
 request but a GET or HEAD carries the session's CSRF token in `X-Fit-Csrf`, and a request whose
 `Origin` is another site is refused with 403. A request body is at most 1 MiB and its header 16 KiB.
 
 What each role's pages show, in English or Chinese:
 
 - **A hub**: an overview; its nodes, and for each one that allows hub management, its models, GPUs,
-  actions, jobs and name; the models of its nodes; the clients linked to it; its links; its name.
+  actions, jobs and name; the models of its nodes; the proxies linked to it; its links; its name.
 - **A node**: an overview, with its name and description; its models, with a check and a test call
   each; its GPUs and their settings; its actions; its jobs; its links; its settings.
-- **A client**: an overview, with the setups of [Using it](#using-it) filled in with its own address
+- **A proxy**: an overview, with the setups of [Using it](#using-it) filled in with its own address
   and models; the models it reaches and their routes; its API keys; its links; its name.
 
 The links page sets the listener and the peers, and kicks a link.
@@ -790,7 +791,7 @@ The API under `/api/`:
 | `POST /api/login` | Starts a session from `{username, password}`; answers `{user, csrf}`. |
 | `POST /api/logout` | Ends the session; answers 204. |
 | `GET /api/session` | The user and the CSRF token. |
-| `GET /api/me` | `{user, identity}`, the role's identity; a client adds `api_url`, its API's URL. |
+| `GET /api/me` | `{user, identity}`, the role's identity; a proxy adds `api_url`, its API's URL. |
 | `POST /api/rpc<method>` | Runs a method, as `/api/rpc/mesh/peers`, and answers its result as JSON, or `{"error", "code"}` with the code's HTTP status; 504 when the method's time ran out. |
 | `POST /api/stream<method>` | Opens a stream method and answers Server-Sent Events: a data event per frame, `end` with the result, `error` with `{code, message}`. Closing the request cancels the stream. |
 
@@ -798,11 +799,11 @@ The pages call the same methods peers call, as a local caller allowed everything
 only the pages may call: the mesh's (`/mesh/peers`, `/mesh/dial`, `/mesh/undial`, `/mesh/kick`,
 `/mesh/listen`); a hub's node table (`/hub/nodes`), managed calls (`/hub/node/call`,
 `/hub/node/stream`) and name (`/hub/profile/set`); a node's settings (`/node/settings/get`,
-`/node/settings/set`); a client's models, counters, keys and name (`/client/models`,
-`/client/stats`, `/client/keys/list`, `/client/keys/create`, `/client/keys/delete`,
-`/client/profile/set`).
+`/node/settings/set`); a proxy's models, counters, keys and name (`/proxy/models`,
+`/proxy/stats`, `/proxy/keys/list`, `/proxy/keys/create`, `/proxy/keys/delete`,
+`/proxy/profile/set`).
 
-A method has 10 seconds, the mesh's included; a node's or a client's method that changes the
+A method has 10 seconds, the mesh's included; a node's or a proxy's method that changes the
 config has 30, a model check 20, a node's GPU status and settings 30, and a hub's managed call 90. Methods run on the role's pool (16 goroutines, 256
 waiting), never on a fib worker; a method past the queue gets 503. A stream's events are written
 without waiting, and its frames are released to the stream only as the browser takes them, so a
@@ -824,7 +825,7 @@ Every bound has a default; a config that sets none is bounded.
 | Frame | 16 MiB | fixed |
 | Pushes waiting per link | 1024, then the link closes | fixed |
 | Dial, handshake, hello | 10s, 5s, 15s | fixed |
-| Method timeout | 10s; 30s for a node's or client's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
+| Method timeout | 10s; 30s for a node's or proxy's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
 | Peers, models, API keys | 64, 256, 256 | fixed |
 | Nodes in a hub's table | 1024 | `max_nodes` |
 | Node calls at once | 256, and per model `max_inflight` | `proxy.max_inflight` |
@@ -836,13 +837,13 @@ Every bound has a default; a config that sets none is bounded.
 | Jobs | 8 running, 200 kept, 1 MiB output each | fixed |
 | Job run time | 1h | `settings.job_timeout` |
 | Node's hardware and GPU reads | 2 running, 16 waiting; GPU status 25s, kept 5s | fixed |
-| Client API body | 32 MiB, held whole | `api.max_body_bytes` |
-| Client API connections, calls | 256, 256 | `api.max_conns`, `api.max_inflight` |
-| Client first byte, total | 5m, 30m | `api` |
-| Client API header size, header read, read, idle | 64 KiB, 10s, 2m, 2m | fixed |
-| Client wait for a slow agent | 60s per write | fixed |
-| Routes per call: client, hub | 4, 3 | fixed |
-| Client counters | 1024 models, the rest as `other` | fixed |
+| Proxy API body | 32 MiB, held whole | `api.max_body_bytes` |
+| Proxy API connections, calls | 256, 256 | `api.max_conns`, `api.max_inflight` |
+| Proxy first byte, total | 5m, 30m | `api` |
+| Proxy API header size, header read, read, idle | 64 KiB, 10s, 2m, 2m | fixed |
+| Proxy wait for a slow agent | 60s per write | fixed |
+| Routes per call: proxy, hub | 4, 3 | fixed |
+| Proxy counters | 1024 models, the rest as `other` | fixed |
 | Role pool | 16 running, 256 waiting | fixed |
 | Config edits waiting | 64, across every role of fit's; each as long as its method's timeout | fixed |
 | Page streams | 16; 30s for a stalled browser | fixed |
@@ -860,7 +861,7 @@ How [the rules](rules.md) hold:
   goroutine. Mesh requests and streams run on goroutines of the session, as many as
   `limits.max_inflight` allows per link.
 - **Bodies stream.** The node forwards calls on fib's asynchronous client, request and response
-  bodies as they come, with backpressure both ways through the streams' credit. Only the client's
+  bodies as they come, with backpressure both ways through the streams' credit. Only the proxy's
   API holds a body whole, within `api.max_body_bytes`, to read the model and to send it again to the
   next route, and a node holds one only to set the model the body names to `upstream`, within
   `proxy.max_body_bytes`.
