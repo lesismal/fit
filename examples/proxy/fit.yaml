@@ -1,4 +1,4 @@
-# proxy.json, written in YAML: fit run, fit validate and fit adapt take either.
+# examples/proxy/fit.json, written in YAML: fit run, fit validate and fit adapt take either.
 listeners:
   - name: web
     address: :8080

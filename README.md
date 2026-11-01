@@ -80,11 +80,11 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.conf
-./bin/fit run -c examples/hello.conf
+./bin/fit validate -c examples/hello/fit.conf
+./bin/fit run -c examples/hello/fit.conf
 ```
 
-`examples/hello.conf` answers `/hello` on port 8080:
+`examples/hello/fit.conf` answers `/hello` on port 8080:
 
 ```fit
 listener web {
@@ -111,7 +111,7 @@ route not-found {
 ```
 
 A config may be a [.conf file](docs/reference/fit.md), fit's own format, as above, YAML
-(`examples/hello.yaml`) or JSON (`examples/hello.json`, with `//` and `/* */` comments and trailing
+(`examples/hello/fit.yaml`) or JSON (`examples/hello/fit.json`, with `//` and `/* */` comments and trailing
 commas allowed), each with the same fields, and may be split across several files and directories
 (`fit run -c base.conf -c conf.d`). `fit adapt` converts between the formats, and from nginx configs
 and Caddyfiles, listing what it left out. [Configuration](docs/configuration.md) has the details.

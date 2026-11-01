@@ -15,7 +15,7 @@ unit。[examples](../examples/README.zh-CN.md) 用 Docker Compose 运行镜像�
 
 ```bash
 docker build -t fit .
-docker run --rm -p 8080:8080 -v "$PWD/examples/hello.json:/etc/fit/fit.json:ro" fit
+docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:ro" fit
 ```
 
 - **自己的配置**放在 `/etc/fit/fit.json`，或放在任意位置并以 `run -c <路径>` 作为命令。
@@ -94,7 +94,7 @@ sudo install -m 0755 bin/fit /usr/local/bin/fit
 sudo install -m 0644 deploy/systemd/fit.service deploy/systemd/fit@.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/fit.sysusers /usr/lib/sysusers.d/fit.conf
 sudo systemd-sysusers
-sudo install -D -m 0644 examples/hello.json /etc/fit/fit.json
+sudo install -D -m 0644 examples/hello/fit.json /etc/fit/fit.json
 sudo systemctl daemon-reload
 sudo systemctl enable --now fit
 ```

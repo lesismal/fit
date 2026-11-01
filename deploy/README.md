@@ -16,7 +16,7 @@ request on port 8080.
 
 ```bash
 docker build -t fit .
-docker run --rm -p 8080:8080 -v "$PWD/examples/hello.json:/etc/fit/fit.json:ro" fit
+docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:ro" fit
 ```
 
 - **Your config** goes at `/etc/fit/fit.json`, or anywhere with `run -c <path>` as the command.
@@ -101,7 +101,7 @@ sudo install -m 0755 bin/fit /usr/local/bin/fit
 sudo install -m 0644 deploy/systemd/fit.service deploy/systemd/fit@.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/fit.sysusers /usr/lib/sysusers.d/fit.conf
 sudo systemd-sysusers
-sudo install -D -m 0644 examples/hello.json /etc/fit/fit.json
+sudo install -D -m 0644 examples/hello/fit.json /etc/fit/fit.json
 sudo systemctl daemon-reload
 sudo systemctl enable --now fit
 ```

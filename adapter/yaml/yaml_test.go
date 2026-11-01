@@ -69,11 +69,11 @@ func TestRoundTrip(t *testing.T) {
 // TestExamples checks that the YAML examples say what their JSON twins do.
 func TestExamples(t *testing.T) {
 	for _, name := range []string{"hello", "proxy"} {
-		j, err := os.ReadFile("../../examples/" + name + ".json")
+		j, err := os.ReadFile("../../examples/" + name + "/fit.json")
 		if err != nil {
 			t.Fatal(err)
 		}
-		y, err := os.ReadFile("../../examples/" + name + ".yaml")
+		y, err := os.ReadFile("../../examples/" + name + "/fit.yaml")
 		if err != nil {
 			t.Fatal(err)
 		}

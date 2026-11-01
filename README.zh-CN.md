@@ -75,11 +75,11 @@ make build
 ```
 
 ```bash
-./bin/fit validate -c examples/hello.conf
-./bin/fit run -c examples/hello.conf
+./bin/fit validate -c examples/hello/fit.conf
+./bin/fit run -c examples/hello/fit.conf
 ```
 
-`examples/hello.conf` 在 8080 端口上回答 `/hello`：
+`examples/hello/fit.conf` 在 8080 端口上回答 `/hello`：
 
 ```fit
 listener web {
@@ -105,8 +105,8 @@ route not-found {
 }
 ```
 
-配置可以是 fit 自己的 [.conf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML（`examples/hello.yaml`）或 JSON
-（`examples/hello.json`，可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），三者字段相同，并可以分散在多个文件和目录中
+配置可以是 fit 自己的 [.conf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML（`examples/hello/fit.yaml`）或 JSON
+（`examples/hello/fit.json`，可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），三者字段相同，并可以分散在多个文件和目录中
 （`fit run -c base.conf -c conf.d`）。`fit adapt` 在这些格式之间转换，也能转换 nginx 配置和 Caddyfile，并列出未转换的部分。
 详见 [配置](docs/configuration.zh-CN.md)。
 

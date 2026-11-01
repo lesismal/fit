@@ -41,7 +41,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	for _, example := range []string{"../examples/hello.json", "../examples/proxy.json"} {
+	for _, example := range []string{"../examples/hello/fit.json", "../examples/proxy/fit.json"} {
 		if code, stdout, stderr := runFit("validate", "-c", example); code != 0 || stdout != example+": valid\n" {
 			t.Fatalf("%s: %d %q %q", example, code, stdout, stderr)
 		}
