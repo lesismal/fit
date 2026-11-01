@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # device.sh runs a device of the tunnel's docker test environment, whose
-# services a node reaches: an echo service on TCP port 7 and a web server on
+# services a node reaches: an echo service on TCP port 7 and a web hub on
 # port 80 whose pages name the device, with big.bin (8 MiB of random bytes)
 # and big.sha256 to check a tunnel's data. Port 9 is closed, a service that
 # refuses connects.

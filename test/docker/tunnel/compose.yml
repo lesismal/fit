@@ -1,25 +1,25 @@
 # The docker test environment of fit's tunnel roles; fit-tunnel-docker.sh
 # starts, stops and tests it.
 #
-#                 wan (hub-1, hub-2, nodes, clients, tester)
-#   dev-lab ── lan-lab ── node lab                    client alice ── tester
-#   dev-office ── lan-office ── node office           client bob
+#                 wan (hub-1, hub-2, nodes, proxies, tester)
+#   dev-lab ── lan-lab ── node lab                    proxy alice ── tester
+#   dev-office ── lan-office ── node office           proxy bob
 #
-# Each instance is one fit running one role, tunnel.server, tunnel.node or
-# tunnel.client, from conf/NAME.json: a bootstrap config whose admin.store
+# Each instance is one fit running one role, tunnel.hub, tunnel.node or
+# tunnel.proxy, from conf/NAME.json: a bootstrap config whose admin.store
 # keeps the config, encrypted, on a volume of the instance's own. The
-# devices are on internal networks only their node is on too: the clients
+# devices are on internal networks only their node is on too: the proxies
 # and the tester reach them through tunnels or not at all. hub-1, node lab
-# and client alice start with nothing but their console and are set up
+# and proxy alice start with nothing but their console and are set up
 # through its pages' API, which writes into their config in the store;
-# hub-2, node office and client bob start from a full config.
+# hub-2, node office and proxy bob start from a full config.
 #
 # fit 隧道角色的 docker 测试环境；由 fit-tunnel-docker.sh 启动、停止和测试。
-# 每个实例是一个只运行一个角色（tunnel.server、tunnel.node 或 tunnel.client）
+# 每个实例是一个只运行一个角色（tunnel.hub、tunnel.node 或 tunnel.proxy）
 # 的 fit，配置来自 conf/NAME.json：其 admin.store 把配置加密保存在实例自己的
-# 卷上。设备只在内部网络上，只有它们的节点也在那里。hub-1、节点 lab 和客户端
+# 卷上。设备只在内部网络上，只有它们的节点也在那里。hub-1、节点 lab 和 proxy
 # alice 启动时只有控制台，通过页面 API 配置，配置写回存储中的配置；hub-2、
-# 节点 office 和客户端 bob 从完整配置启动。
+# 节点 office 和 proxy bob 从完整配置启动。
 
 name: ${FIT_TUNNEL_DOCKER_PROJECT:-fit-tunnel-test}
 

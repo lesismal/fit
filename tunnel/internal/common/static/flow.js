@@ -1,5 +1,5 @@
 // flow.js draws tunnels as a diagram in a dialog. openFlow() shows every
-// open tunnel across the page's columns (clients, servers, nodes, services),
+// open tunnel across the page's columns (proxies, hubs, nodes, services),
 // over the control links (dashed) that carry them; openFlow(id) shows one
 // tunnel's whole path, from the local app to the service. A page defines
 // flowAll(), the graph of its tunnels, and flowOne(id), the graph of
@@ -13,9 +13,9 @@
 
 const FLOW_ICONS={
  app:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8.5h18M7 12.5l2.5 2-2.5 2M12 16.5h4.5"/>',
- client:'<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20M10 8.5l-2 2 2 2M14 8.5l2 2-2 2"/>',
+ proxy:'<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20M10 8.5l-2 2 2 2M14 8.5l2 2-2 2"/>',
  forward:'<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
- server:'<circle cx="12" cy="5.5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M10.8 7.7 6.2 15.8M13.2 7.7l4.6 8.1M7.5 18h9"/>',
+ hub:'<circle cx="12" cy="5.5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M10.8 7.7 6.2 15.8M13.2 7.7l4.6 8.1M7.5 18h9"/>',
  pod:'<path d="M12 2.8 20 7.3v9.4L12 21.2 4 16.7V7.3z"/><path d="M4 7.3 12 12l8-4.7M12 12v9.2"/>',
  node:'<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/>',
  web:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z"/>',
@@ -23,7 +23,7 @@ const FLOW_ICONS={
  lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'};
 // The flow kinds: a tunnel node has the kind pod, and a service the kind
 // node.
-const FLOW_KINDS={app:'Local app',client:'Client',forward:'Forward',server:'Server',pod:'Node',node:'Service'};
+const FLOW_KINDS={app:'Local app',proxy:'Proxy',forward:'Forward',hub:'Hub',pod:'Node',node:'Service'};
 // flowNodeIcon picks a service's icon by its name.
 const flowNodeIcon=name=>/ssh|shell|term/i.test(name)?'ssh':/web|http|page|ui/i.test(name)?'web':'node';
 const flowState=s=>s==='registered'?'ok':s==='failed'?'bad':s?'wait':'';

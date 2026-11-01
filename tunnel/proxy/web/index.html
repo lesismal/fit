@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fit tunnel proxy</title>
+<link rel="stylesheet" href="/static/base.css">
+<script src="/static/theme.js"></script>
+<script src="/static/workbench.js"></script>
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header><h1>tunnel proxy <span id="name"></span></h1><span id="meta"></span></header>
+<main>
+<section data-view="hubs" data-icon="hub"><h2>Hubs<button class="h2btn primary" data-click="editHub" data-args="[null]">Add hub</button></h2><div id="hubs"></div></section>
+<section data-view="nodes" data-icon="pod"><h2>Nodes and services</h2><div id="nodes"></div></section>
+<section data-view="forwards" data-icon="forward"><h2>Forwards</h2><div id="forwards"></div>
+<form class="inline" data-submit="addForward">
+<input id="fListen" placeholder="local address, 127.0.0.1:2222" required><input id="fNode" placeholder="node" required><input id="fService" placeholder="service" required>
+<input id="fHub" placeholder="hub (optional: any)"><button class="primary">Forward</button></form></section>
+<section data-view="tunnels" data-icon="tunnel"><h2>Tunnels<button class="h2btn" data-click="openFlow">Details</button></h2><div id="tunnels"></div></section>
+<section data-view="info" data-icon="info"><h2>Proxy info</h2>
+<form class="inline" data-submit="saveMeta"><input id="metaText" placeholder="key=value, key2=value2 — told to hubs"><button class="primary">Update hubs</button></form></section>
+</main>
+<dialog id="editor">
+<h3 id="edTitle">Services</h3>
+<table><thead><tr><th>Name</th><th>Address (host:port)</th><th>Description</th><th></th></tr></thead><tbody id="edRows"></tbody></table>
+<p><button data-click="addRow">Add service</button></p>
+<p class="end"><button data-click="closeDialog" data-args="[&quot;editor&quot;]">Cancel</button> <button class="primary" data-click="saveServices">Save to node</button></p>
+</dialog>
+<div id="msg"></div>
+<script src="/static/base.js"></script>
+<script src="/static/flow.js"></script>
+<script src="/static/config.js"></script>
+<script src="/proxy.js"></script>
+</body>
+</html>

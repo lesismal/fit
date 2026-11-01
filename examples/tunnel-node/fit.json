@@ -1,5 +1,5 @@
-// A tunnel node, behind NAT: it links out to the server (examples/tunnel-server)
-// and opens tunnels, for the clients the server joins, to the services it
+// A tunnel node, behind NAT: it links out to the hub (examples/tunnel-hub)
+// and opens tunnels, for the proxies the hub joins, to the services it
 // exposes, and to nothing else.
 // Run one file, from the repository's root: fit run -c examples/tunnel-node/fit.json
 // fit.json, fit.yaml and fit.conf here say the same; -c on the directory would join all three.
@@ -7,7 +7,7 @@
   "tunnel": {
     "node": {
       "name": "lab",
-      "servers": [
+      "hubs": [
         {
           "name": "hub",
           // Tried in turn: the WebSocket when TCP is blocked.

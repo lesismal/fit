@@ -1,6 +1,6 @@
 //go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || windows
 
-// Package link is the protocol the tunnel's server, nodes and clients speak
+// Package link is the protocol the tunnel's hub, nodes and proxies speak
 // over a transport connection: framed calls, replies and
 // notifies, and the tunnel frames among them.
 //
@@ -30,7 +30,7 @@
 // JSON, or nothing for no value; a string, such as an error, a kick's
 // reason or a tunnel's close reason, is its bytes. The body of a tunnel
 // frame (proto.MethodTunnelData, Ack and Close) is the tunnel's ID, 8 bytes
-// big-endian, and then the payload; the server passes such a body on, as it
+// big-endian, and then the payload; the hub passes such a body on, as it
 // is, to the other end of the tunnel.
 //
 // With a body password (package bodycrypt) set on both sides, every frame's
@@ -197,7 +197,7 @@ func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
 }
 
 // SetMaxFrame sets the longest frame the link takes, at most MaxFrame: a
-// server keeps it short until a link has registered.
+// hub keeps it short until a link has registered.
 func (l *Link) SetMaxFrame(n int) { l.maxFrame.Store(int64(min(n, MaxFrame))) }
 
 // Conn is the link's connection.

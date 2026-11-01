@@ -36,7 +36,7 @@ type Status struct {
 	// ServiceRTT is, by service name, how long the connects to the
 	// services took.
 	ServiceRTT map[string]latency.Stats `json:"service_rtt"`
-	Servers    []uplink.Status          `json:"servers"`
+	Hubs       []uplink.Status          `json:"hubs"`
 	Tunnels    []TunnelView             `json:"tunnels"`
 	// Open and MaxTunnels are the tunnels open, and the most there may be.
 	Open       int `json:"open"`
@@ -47,12 +47,12 @@ type Status struct {
 func (n *Node) Status() Status {
 	cfg := n.Config()
 	st := Status{Name: cfg.NodeName(), Version: proto.Version, Meta: cfg.Meta, Services: []ServiceView{}, ServiceRTT: n.ServiceRTT(),
-		Servers: []uplink.Status{}, Tunnels: n.Tunnels(), Open: n.limit.Open(), MaxTunnels: cfg.Tunnels()}
+		Hubs: []uplink.Status{}, Tunnels: n.Tunnels(), Open: n.limit.Open(), MaxTunnels: cfg.Tunnels()}
 	for _, s := range cfg.Services {
 		st.Services = append(st.Services, ServiceView{Name: s.Name, Address: s.Address, Description: s.Description})
 	}
 	for _, u := range n.Uplinks() {
-		st.Servers = append(st.Servers, u.Status())
+		st.Hubs = append(st.Hubs, u.Status())
 	}
 	return st
 }
@@ -61,37 +61,37 @@ func (n *Node) Status() Status {
 // the config is made with common.Edit, off the worker.
 func (n *Node) api(api *console.API) {
 	api.Handle("GET", "/api/status", func(r *console.Request) { _ = r.JSON(stdhttp.StatusOK, n.Status()) })
-	api.Handle("POST", "/api/servers", func(r *console.Request) {
-		var req common.ServerReq
+	api.Handle("POST", "/api/hubs", func(r *console.Request) {
+		var req common.HubReq
 		if !r.Decode(&req) {
 			return
 		}
-		r.Logf("adds server %q", req.Name)
-		common.Edit(n.h, r, func(m common.Member) error { return common.EditServer(m, "", req, false) }, nil)
+		r.Logf("adds hub %q", req.Name)
+		common.Edit(n.h, r, func(m common.Member) error { return common.EditHub(m, "", req, false) }, nil)
 	})
-	api.Handle("POST", "/api/servers/update", func(r *console.Request) {
+	api.Handle("POST", "/api/hubs/update", func(r *console.Request) {
 		var req struct {
-			Name              string           `json:"name"`
-			Server            common.ServerReq `json:"server"`
-			ClearBodyPassword bool             `json:"clear_body_password"`
+			Name              string        `json:"name"`
+			Hub               common.HubReq `json:"hub"`
+			ClearBodyPassword bool          `json:"clear_body_password"`
 		}
 		if !r.Decode(&req) {
 			return
 		}
-		r.Logf("changes server %q", req.Name)
+		r.Logf("changes hub %q", req.Name)
 		common.Edit(n.h, r, func(m common.Member) error {
-			return common.EditServer(m, req.Name, req.Server, req.ClearBodyPassword)
+			return common.EditHub(m, req.Name, req.Hub, req.ClearBodyPassword)
 		}, nil)
 	})
-	api.Handle("POST", "/api/servers/delete", func(r *console.Request) {
+	api.Handle("POST", "/api/hubs/delete", func(r *console.Request) {
 		var req struct {
 			Name string `json:"name"`
 		}
 		if !r.Decode(&req) {
 			return
 		}
-		r.Logf("removes server %q", req.Name)
-		common.Edit(n.h, r, func(m common.Member) error { return common.DeleteServer(m, req.Name) }, nil)
+		r.Logf("removes hub %q", req.Name)
+		common.Edit(n.h, r, func(m common.Member) error { return common.DeleteHub(m, req.Name) }, nil)
 	})
 	api.Handle("POST", "/api/services", func(r *console.Request) {
 		var req []ServiceView
@@ -107,8 +107,8 @@ func (n *Node) api(api *console.API) {
 	})
 	api.Handle("POST", "/api/tunnels/close", func(r *console.Request) {
 		var req struct {
-			Server string `json:"server"`
-			ID     string `json:"id"`
+			Hub string `json:"hub"`
+			ID  string `json:"id"`
 		}
 		if !r.Decode(&req) {
 			return
@@ -118,9 +118,9 @@ func (n *Node) api(api *console.API) {
 			common.Fail(r, stdhttp.StatusBadRequest, "the id is not a tunnel's")
 			return
 		}
-		u := n.uplink(req.Server)
+		u := n.uplink(req.Hub)
 		if u == nil {
-			common.Fail(r, stdhttp.StatusNotFound, "no such server")
+			common.Fail(r, stdhttp.StatusNotFound, "no such hub")
 			return
 		}
 		e := u.Tunnels.Get(id)

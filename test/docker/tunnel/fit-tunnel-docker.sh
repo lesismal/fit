@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # fit-tunnel-docker.sh starts, stops and tests the docker test environment
-# of compose.yml: tunnel servers hub-1 and hub-2, nodes lab and office,
-# clients alice and bob, each a fit of its own, the devices dev-lab and
+# of compose.yml: tunnel hubs hub-1 and hub-2, nodes lab and office,
+# proxies alice and bob, each a fit of its own, the devices dev-lab and
 # dev-office behind the nodes, and a tester that drives every feature
 # through the consoles' API and the tunnels. It is a functional test, not a
 # load test: it measures nothing.
 #
 #   fit-tunnel-docker.sh start      build the image from this checkout and
 #                                   start a fresh environment (new stores)
-#   fit-tunnel-docker.sh setup      set up hub-1, node lab and client alice
+#   fit-tunnel-docker.sh setup      set up hub-1, node lab and proxy alice
 #                                   through their consoles, as the test does
 #   fit-tunnel-docker.sh test       start afresh, set up, test every feature,
 #                                   restart every instance, check they came
@@ -28,12 +28,12 @@
 # fit-tunnel-test).
 #
 # fit-tunnel-docker.sh 启动、停止和测试 compose.yml 描述的 docker 测试环境：
-# 隧道服务端 hub-1、hub-2，节点 lab、office，客户端 alice、bob（各自是一个
+# 隧道 hub hub-1、hub-2，节点 lab、office，proxy alice、bob（各自是一个
 # fit），节点后面的设备 dev-lab、dev-office，以及通过控制台 API 和隧道测试全部
 # 功能的测试容器。这是功能测试，不是压力测试。
 #
 #   start    从本仓库构建镜像并启动一个全新的环境（新的加密存储）
-#   setup    像测试那样通过控制台配置 hub-1、节点 lab 和客户端 alice
+#   setup    像测试那样通过控制台配置 hub-1、节点 lab 和 proxy alice
 #   test     全新启动、配置、测试全部功能、重启所有实例、检查设置从存储恢复
 #   stop     停止并删除环境，包括存储
 #   status   容器状态和各控制台地址

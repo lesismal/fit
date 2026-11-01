@@ -189,11 +189,11 @@ func (editRole) Stop(ctx context.Context) {}
 var hosts = make(chan *app.Host, 1)
 
 func init() {
-	app.Register(app.Info{ID: "tunnel.server", Member: func(c *config.Config) any {
+	app.Register(app.Info{ID: "tunnel.hub", Member: func(c *config.Config) any {
 		if c.Tunnel == nil {
 			return nil
 		}
-		return c.Tunnel.Server
+		return c.Tunnel.Hub
 	}, New: func(h *app.Host) (app.Role, error) {
 		hosts <- h
 		return editRole{}, nil
@@ -215,7 +215,7 @@ func TestEdit(t *testing.T) {
 		return nil, nil
 	})
 	defer m.Stop(context.Background())
-	if err := m.Apply(&config.Config{Tunnel: &config.Tunnel{Server: &config.TunnelServer{}}}); err != nil {
+	if err := m.Apply(&config.Config{Tunnel: &config.Tunnel{Hub: &config.TunnelHub{}}}); err != nil {
 		t.Fatal(err)
 	}
 	h := <-hosts
@@ -243,8 +243,8 @@ func TestEdit(t *testing.T) {
 	}
 	base := strings.TrimSuffix(c.URL(), "/")
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
-	resp, err := client.Post(base+"/api/login", "application/json", strings.NewReader(`{"username":"admin","password":"pw"}`))
+	proxy := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	resp, err := proxy.Post(base+"/api/login", "application/json", strings.NewReader(`{"username":"admin","password":"pw"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestEdit(t *testing.T) {
 		{"/api/ok", 200, `"ok":true`},
 		{"/api/fail", 409, `taken`},
 	} {
-		resp, err := client.Get(base + c.path)
+		resp, err := proxy.Get(base + c.path)
 		if err != nil {
 			t.Fatal(err)
 		}

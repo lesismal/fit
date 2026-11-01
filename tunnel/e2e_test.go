@@ -28,9 +28,9 @@ import (
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 
-	_ "github.com/lesismal/fit/tunnel/client"
+	_ "github.com/lesismal/fit/tunnel/hub"
 	_ "github.com/lesismal/fit/tunnel/node"
-	_ "github.com/lesismal/fit/tunnel/server"
+	_ "github.com/lesismal/fit/tunnel/proxy"
 )
 
 func TestMain(m *testing.M) {
@@ -224,7 +224,7 @@ func (p *page) status(out any) {
 }
 
 // Views of the pages' status, as much as the tests read.
-type serverStatus struct {
+type hubStatus struct {
 	Listen    []string `json:"listen"`
 	Listeners []struct {
 		Protocol, Address, URL, Error string
@@ -257,35 +257,35 @@ type uplinkStatus struct {
 
 type nodeStatus struct {
 	Services []struct{ Name, Address string } `json:"services"`
-	Servers  []uplinkStatus                   `json:"servers"`
+	Hubs     []uplinkStatus                   `json:"hubs"`
 	Tunnels  []struct {
 		ID string `json:"id"`
 	} `json:"tunnels"`
 }
 
-type clientStatus struct {
-	Servers []struct {
+type proxyStatus struct {
+	Hubs []struct {
 		uplinkStatus
 		Nodes []struct {
 			Name     string                  `json:"name"`
 			Services []struct{ Name string } `json:"services"`
 		} `json:"nodes"`
-	} `json:"servers"`
+	} `json:"hubs"`
 	Forwards []struct{ Listen, Addr, Error string } `json:"forwards"`
 	Tunnels  []struct {
 		ID string `json:"id"`
 	} `json:"tunnels"`
 }
 
-// hub is one fit running a server, a node and a client, all on its engine,
+// hub is one fit running a hub, a node and a proxy, all on its engine,
 // the node reaching services echo, banner and stall.
 type hub struct {
 	proc                        *proc
-	server, node, client        *page
+	hub, node, proxy            *page
 	echo, stall, banner         string
 	stalled                     <-chan net.Conn
 	echoListen, stallListen     string
-	serverCon, nodeCon, cliCon  string
+	hubCon, nodeCon, cliCon     string
 	bodyPassword, protocol, url string
 }
 
@@ -294,7 +294,7 @@ type hubOpts struct {
 	bodyPassword string
 }
 
-// uplinkJSON is a server member of a node or client, to url.
+// uplinkJSON is a hub member of a node or proxy, to url.
 func uplinkJSON(url, password, body string) string {
 	extra := ""
 	if body != "" {
@@ -313,7 +313,7 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	h.banner = tunneltest.Echo(t, "hello from the service\n")
 	h.stalled, h.stall = tunneltest.Stall(t)
 	h.echoListen, h.stallListen = freeAddr(t), freeAddr(t)
-	h.serverCon, h.nodeCon, h.cliCon = freeAddr(t), freeAddr(t), freeAddr(t)
+	h.hubCon, h.nodeCon, h.cliCon = freeAddr(t), freeAddr(t), freeAddr(t)
 	var listen string
 	switch o.protocol {
 	case "quic":
@@ -331,14 +331,14 @@ func startHub(t *testing.T, o hubOpts) *hub {
 		body = fmt.Sprintf(`, "body_password": %q`, o.bodyPassword)
 	}
 	doc := fmt.Sprintf(`{"tunnel": {
- "server": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
- "node": {"name": "lab", "servers": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
- "client": {"name": "me", "servers": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
-}}`, body, protocolOf(o.protocol), listen, consoleJSON(h.serverCon),
+ "hub": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
+ "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
+ "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
+}}`, body, protocolOf(o.protocol), listen, consoleJSON(h.hubCon),
 		uplinkJSON(h.url, "pw", o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
 		uplinkJSON(h.url, "pw", o.bodyPassword), h.echoListen, h.stallListen, consoleJSON(h.cliCon))
 	h.proc = startFit(t, doc, nil)
-	h.server, h.node, h.client = login(t, h.serverCon), login(t, h.nodeCon), login(t, h.cliCon)
+	h.hub, h.node, h.proxy = login(t, h.hubCon), login(t, h.nodeCon), login(t, h.cliCon)
 	h.waitNode(t, "lab", "echo")
 	return h
 }
@@ -350,13 +350,13 @@ func protocolOf(p string) string {
 	return p
 }
 
-// waitNode waits for the client to hear of node's service.
+// waitNode waits for the proxy to hear of node's service.
 func (h *hub) waitNode(t *testing.T, node, service string) {
 	t.Helper()
-	waitFor(t, "the client to hear of "+node+"/"+service, func() bool {
-		var st clientStatus
-		h.client.status(&st)
-		for _, s := range st.Servers {
+	waitFor(t, "the proxy to hear of "+node+"/"+service, func() bool {
+		var st proxyStatus
+		h.proxy.status(&st)
+		for _, s := range st.Hubs {
 			for _, n := range s.Nodes {
 				for _, sv := range n.Services {
 					if n.Name == node && sv.Name == service {
@@ -431,7 +431,7 @@ func testTunnel(t *testing.T, o hubOpts) {
 		wg.Wait()
 	})
 
-	// A service that does not read holds back the client that writes to
+	// A service that does not read holds back the proxy that writes to
 	// it, with no more than a window and the sockets' buffers between them.
 	t.Run("slow service", func(t *testing.T) {
 		c, err := net.Dial("tcp", h.stallListen)
@@ -462,8 +462,8 @@ func testTunnel(t *testing.T, o hubOpts) {
 		}
 	})
 
-	// A client that does not read holds back the service.
-	t.Run("slow client", func(t *testing.T) {
+	// A proxy that does not read holds back the service.
+	t.Run("slow proxy", func(t *testing.T) {
 		c, err := net.Dial("tcp", h.stallListen)
 		if err != nil {
 			t.Fatal(err)
@@ -483,15 +483,15 @@ func testTunnel(t *testing.T, o hubOpts) {
 			}
 		}
 		if written >= 256<<20 {
-			t.Fatalf("the service wrote %d MiB to a client that reads nothing", written>>20)
+			t.Fatalf("the service wrote %d MiB to a proxy that reads nothing", written>>20)
 		}
 		_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
 		if n, err := io.CopyN(io.Discard, c, int64(written)); err != nil {
-			t.Fatalf("the client read %d of %d: %v", n, written, err)
+			t.Fatalf("the proxy read %d of %d: %v", n, written, err)
 		}
 	})
 
-	// A service that goes away mid-transfer closes the client's end.
+	// A service that goes away mid-transfer closes the proxy's end.
 	t.Run("cut service", func(t *testing.T) {
 		c, err := net.Dial("tcp", h.stallListen)
 		if err != nil {
@@ -504,13 +504,13 @@ func testTunnel(t *testing.T, o hubOpts) {
 		_ = svc.Close()
 		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 		if _, err := io.Copy(io.Discard, c); err != nil && !isReset(err) {
-			t.Fatalf("the client's end: %v", err)
+			t.Fatalf("the proxy's end: %v", err)
 		}
 	})
 
-	// A client that goes away mid-transfer closes the node's end, and the
-	// server's route.
-	t.Run("cut client", func(t *testing.T) {
+	// A proxy that goes away mid-transfer closes the node's end, and the
+	// hub's route.
+	t.Run("cut proxy", func(t *testing.T) {
 		c, err := net.Dial("tcp", h.echoListen)
 		if err != nil {
 			t.Fatal(err)
@@ -527,14 +527,14 @@ func testTunnel(t *testing.T, o hubOpts) {
 			h.node.status(&st)
 			return len(st.Tunnels) == 0
 		})
-		waitFor(t, "the server's route to go", func() bool {
-			var st serverStatus
-			h.server.status(&st)
+		waitFor(t, "the hub's route to go", func() bool {
+			var st hubStatus
+			h.hub.status(&st)
 			return len(st.Tunnels) == 0
 		})
 	})
 
-	t.Run("the server's pages close a tunnel", func(t *testing.T) {
+	t.Run("the hub's pages close a tunnel", func(t *testing.T) {
 		c, err := net.Dial("tcp", h.echoListen)
 		if err != nil {
 			t.Fatal(err)
@@ -542,25 +542,25 @@ func testTunnel(t *testing.T, o hubOpts) {
 		defer c.Close()
 		echoConn(t, c, "hi")
 		var id string
-		waitFor(t, "the tunnel at the server", func() bool {
-			var st serverStatus
-			h.server.status(&st)
+		waitFor(t, "the tunnel at the hub", func() bool {
+			var st hubStatus
+			h.hub.status(&st)
 			for _, r := range st.Tunnels {
 				id = r.ID
 				return true
 			}
 			return false
 		})
-		h.server.post("/api/tunnels/close", map[string]string{"id": id})
+		h.hub.post("/api/tunnels/close", map[string]string{"id": id})
 		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 		if n, err := c.Read(make([]byte, 8)); err != io.EOF && !isReset(err) {
-			t.Fatalf("read %d, %v after the server closed the tunnel", n, err)
+			t.Fatalf("read %d, %v after the hub closed the tunnel", n, err)
 		}
 	})
 
-	t.Run("the server's pages set the node's services", func(t *testing.T) {
-		var st serverStatus
-		h.server.status(&st)
+	t.Run("the hub's pages set the node's services", func(t *testing.T) {
+		var st hubStatus
+		h.hub.status(&st)
 		var id uint32
 		for _, p := range st.Peers {
 			if p.Info.Type == "node" {
@@ -568,14 +568,14 @@ func testTunnel(t *testing.T, o hubOpts) {
 			}
 		}
 		services := []map[string]string{{"name": "echo", "address": h.echo}, {"name": "banner", "address": h.banner}, {"name": "stall", "address": h.stall}, {"name": "more", "address": h.echo}}
-		h.server.post("/api/peers/services", map[string]any{"id": id, "services": services})
+		h.hub.post("/api/peers/services", map[string]any{"id": id, "services": services})
 		// Written back into the node's member of the config.
 		if m := h.proc.member("tunnel", "node", "services"); !strings.Contains(string(m), `"more"`) {
 			t.Fatalf("the node's services in the config: %s", m)
 		}
 		h.waitNode(t, "lab", "more")
 		// A service that is not host:port is refused, and the config kept.
-		code, body := h.server.do("POST", "/api/peers/services", map[string]any{"id": id, "services": []map[string]string{{"name": "bad", "address": "nowhere"}}}, nil)
+		code, body := h.hub.do("POST", "/api/peers/services", map[string]any{"id": id, "services": []map[string]string{{"name": "bad", "address": "nowhere"}}}, nil)
 		if code == 200 {
 			t.Fatalf("a bad service was taken: %s", body)
 		}
@@ -584,10 +584,10 @@ func testTunnel(t *testing.T, o hubOpts) {
 		}
 	})
 
-	t.Run("the client's pages add a forward", func(t *testing.T) {
+	t.Run("the proxy's pages add a forward", func(t *testing.T) {
 		listen := freeAddr(t)
-		h.client.post("/api/forwards", map[string]string{"listen": listen, "node": "lab", "service": "banner", "server": "hub"})
-		if m := h.proc.member("tunnel", "client", "forwards"); !strings.Contains(string(m), listen) {
+		h.proxy.post("/api/forwards", map[string]string{"listen": listen, "node": "lab", "service": "banner", "hub": "hub"})
+		if m := h.proc.member("tunnel", "proxy", "forwards"); !strings.Contains(string(m), listen) {
 			t.Fatalf("the forwards in the config: %s", m)
 		}
 		c, err := net.Dial("tcp", listen)
@@ -602,11 +602,11 @@ func testTunnel(t *testing.T, o hubOpts) {
 			t.Fatalf("%q, %v", buf, err)
 		}
 		// Twice on one address is refused.
-		if code, _ := h.client.do("POST", "/api/forwards", map[string]string{"listen": listen, "node": "lab", "service": "echo"}, nil); code == 200 {
+		if code, _ := h.proxy.do("POST", "/api/forwards", map[string]string{"listen": listen, "node": "lab", "service": "echo"}, nil); code == 200 {
 			t.Fatal("two forwards on one address")
 		}
-		h.client.post("/api/forwards/delete", map[string]string{"listen": listen})
-		if m := h.proc.member("tunnel", "client", "forwards"); strings.Contains(string(m), listen) {
+		h.proxy.post("/api/forwards/delete", map[string]string{"listen": listen})
+		if m := h.proc.member("tunnel", "proxy", "forwards"); strings.Contains(string(m), listen) {
 			t.Fatalf("the forwards in the config: %s", m)
 		}
 	})
@@ -620,7 +620,7 @@ func testTunnel(t *testing.T, o hubOpts) {
 		}
 		defer c.Close()
 		echoConn(t, c, "before")
-		h.client.post("/api/meta", map[string]string{"site": "lab"})
+		h.proxy.post("/api/meta", map[string]string{"site": "lab"})
 		h.node.post("/api/services", []map[string]string{{"name": "echo", "address": h.echo}, {"name": "stall", "address": h.stall}, {"name": "banner", "address": h.banner}, {"name": "more", "address": h.echo}, {"name": "again", "address": h.echo}})
 		echoConn(t, c, "after")
 	})
@@ -643,18 +643,18 @@ func isReset(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "reset") || strings.Contains(err.Error(), "closed"))
 }
 
-// The server's pages add, change and remove listeners, written into the
-// config; a quic listener gets a certificate the server makes and keeps
+// The hub's pages add, change and remove listeners, written into the
+// config; a quic listener gets a certificate the hub makes and keeps
 // there; the node's pages move it to quic, pinned.
-func TestServerPages(t *testing.T) {
+func TestHubPages(t *testing.T) {
 	h := startHub(t, hubOpts{protocol: "tcp"})
 	udp := freeUDPAddr(t)
-	h.server.post("/api/listeners", map[string]string{"protocol": "quic", "address": udp})
+	h.hub.post("/api/listeners", map[string]string{"protocol": "quic", "address": udp})
 	waitFor(t, "the quic certificate in the config", func() bool {
-		return strings.Contains(string(h.proc.member("tunnel", "server", "quic")), "BEGIN CERTIFICATE")
+		return strings.Contains(string(h.proc.member("tunnel", "hub", "quic")), "BEGIN CERTIFICATE")
 	})
-	var st serverStatus
-	h.server.status(&st)
+	var st hubStatus
+	h.hub.status(&st)
 	if st.QUICFingerprint == "" || len(st.Listeners) != 2 {
 		t.Fatalf("status %+v", st)
 	}
@@ -664,15 +664,15 @@ func TestServerPages(t *testing.T) {
 		}
 	}
 	// The node moves to the quic listener, pinned to the certificate.
-	h.node.post("/api/servers/update", map[string]any{"name": "hub", "server": map[string]any{
+	h.node.post("/api/hubs/update", map[string]any{"name": "hub", "hub": map[string]any{
 		"name": "hub", "endpoints": []map[string]any{{"protocol": "quic", "address": udp, "enabled": true}}, "quic_pin": st.QUICFingerprint, "pool_size": 2}})
-	if m := string(h.proc.member("tunnel", "node", "servers")); !strings.Contains(m, "quic://"+udp) || !strings.Contains(m, `"password":"pw"`) || !strings.Contains(m, "retry_interval") {
-		t.Fatalf("the node's servers in the config: %s", m)
+	if m := string(h.proc.member("tunnel", "node", "hubs")); !strings.Contains(m, "quic://"+udp) || !strings.Contains(m, `"password":"pw"`) || !strings.Contains(m, "retry_interval") {
+		t.Fatalf("the node's hubs in the config: %s", m)
 	}
 	waitFor(t, "the node over quic", func() bool {
 		var ns nodeStatus
 		h.node.status(&ns)
-		return len(ns.Servers) == 1 && ns.Servers[0].State == "registered"
+		return len(ns.Hubs) == 1 && ns.Hubs[0].State == "registered"
 	})
 	echoOnce(t, h.echoListen, "over quic")
 
@@ -682,11 +682,11 @@ func TestServerPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer busy.Close()
-	code, body := h.server.do("POST", "/api/listeners", map[string]string{"protocol": "tcp", "address": busy.Addr().String()}, nil)
+	code, body := h.hub.do("POST", "/api/listeners", map[string]string{"protocol": "tcp", "address": busy.Addr().String()}, nil)
 	if code != 200 || !strings.Contains(body, "warnings") {
 		t.Fatalf("a listener on a busy address: %d %s", code, body)
 	}
-	h.server.status(&st)
+	h.hub.status(&st)
 	failed := false
 	for _, l := range st.Listeners {
 		failed = failed || l.Address == busy.Addr().String() && l.Error != ""
@@ -694,14 +694,14 @@ func TestServerPages(t *testing.T) {
 	if !failed {
 		t.Fatalf("listeners %+v", st.Listeners)
 	}
-	h.server.post("/api/listeners/delete", map[string]string{"protocol": "tcp", "address": busy.Addr().String()})
+	h.hub.post("/api/listeners/delete", map[string]string{"protocol": "tcp", "address": busy.Addr().String()})
 	// Two of one address are refused.
-	if code, _ := h.server.do("POST", "/api/listeners", map[string]string{"protocol": "quic", "address": udp}, nil); code == 200 {
+	if code, _ := h.hub.do("POST", "/api/listeners", map[string]string{"protocol": "quic", "address": udp}, nil); code == 200 {
 		t.Fatal("a second listener on one address")
 	}
 	// A password changed keeps the links registered.
-	h.server.post("/api/settings", map[string]any{"body_password": "", "socket_address": ""})
-	h.server.status(&st)
+	h.hub.post("/api/settings", map[string]any{"body_password": "", "socket_address": ""})
+	h.hub.status(&st)
 	nodes := 0
 	for _, p := range st.Peers {
 		if p.Info.Type == "node" {
@@ -712,12 +712,12 @@ func TestServerPages(t *testing.T) {
 		t.Fatalf("peers %+v", st.Peers)
 	}
 	// Without the session's CSRF token, nothing changes.
-	saved := h.server.csrf
-	h.server.csrf = ""
-	if code, _ := h.server.do("POST", "/api/listeners/delete", map[string]string{"protocol": "quic", "address": udp}, nil); code != 403 {
+	saved := h.hub.csrf
+	h.hub.csrf = ""
+	if code, _ := h.hub.do("POST", "/api/listeners/delete", map[string]string{"protocol": "quic", "address": udp}, nil); code != 403 {
 		t.Fatalf("without the CSRF token: %d", code)
 	}
-	h.server.csrf = saved
+	h.hub.csrf = saved
 }
 
 // What the pages change is kept in the store, and read back from there
@@ -730,15 +730,15 @@ func TestRestartFromStore(t *testing.T) {
 	}
 	listen, con := freeAddr(t), freeAddr(t)
 	echo := tunneltest.Echo(t, "")
-	doc := fmt.Sprintf(`{"tunnel": {"server": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
- "node": {"name": "lab", "servers": [%s], "console": %s}}}`, listen, uplinkJSON(listen, "pw", ""), consoleJSON(con))
+	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
+ "node": {"name": "lab", "hubs": [%s], "console": %s}}}`, listen, uplinkJSON(listen, "pw", ""), consoleJSON(con))
 	if err := st.Write([]byte(doc)); err != nil {
 		t.Fatal(err)
 	}
 	p := startFit(t, doc, st)
 	pg := login(t, con)
 	pg.post("/api/services", []map[string]string{{"name": "echo", "address": echo, "description": "kept"}})
-	pg.post("/api/servers", map[string]any{"name": "other", "endpoints": []map[string]any{{"protocol": "tcp", "address": freeAddr(t), "enabled": true}}, "password": "x"})
+	pg.post("/api/hubs", map[string]any{"name": "other", "endpoints": []map[string]any{{"protocol": "tcp", "address": freeAddr(t), "enabled": true}}, "password": "x"})
 	p.stop()
 
 	st2, data, err := store.Open(path, "store-password")
@@ -753,16 +753,16 @@ func TestRestartFromStore(t *testing.T) {
 	waitFor(t, "the node to register with its services", func() bool {
 		var ns nodeStatus
 		pg.status(&ns)
-		return len(ns.Services) == 1 && ns.Services[0].Address == echo && len(ns.Servers) == 2 && ns.Servers[0].State == "registered"
+		return len(ns.Services) == 1 && ns.Services[0].Address == echo && len(ns.Hubs) == 2 && ns.Hubs[0].State == "registered"
 	})
 }
 
-// A client's web proxy serves the server's console through its encrypted
+// A proxy's web proxy serves the hub's console through its encrypted
 // console socket.
 func TestWebProxy(t *testing.T) {
 	sock, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t)
-	doc := fmt.Sprintf(`{"tunnel": {"server": {"name": "hub", "password": "pw", "console": %s, "console_socket": {"address": %q, "password": "sock"}},
- "client": {"name": "me", "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}]}}}`, consoleJSON(con), sock, proxy, sock)
+	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "console": %s, "console_socket": {"address": %q, "password": "sock"}},
+ "proxy": {"name": "me", "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}]}}}`, consoleJSON(con), sock, proxy, sock)
 	startFit(t, doc, nil)
 	var body string
 	waitFor(t, "the page through the proxy", func() bool {
@@ -775,12 +775,12 @@ func TestWebProxy(t *testing.T) {
 		body = string(data)
 		return resp.StatusCode == 200
 	})
-	if !strings.Contains(body, "tunnel server") {
+	if !strings.Contains(body, "tunnel hub") {
 		t.Fatalf("the page: %s", body)
 	}
 	// The console's login works through it too, and so its API.
 	pg := login(t, proxy)
-	var st serverStatus
+	var st hubStatus
 	pg.status(&st)
 	// A large static file arrives whole.
 	resp, err := pg.c.Get("http://" + proxy + "/static/base.css")
@@ -794,7 +794,7 @@ func TestWebProxy(t *testing.T) {
 	}
 	// A wrong password gets nothing.
 	other := freeAddr(t)
-	doc2 := fmt.Sprintf(`{"tunnel": {"client": {"name": "x", "web_proxies": [{"listen": %q, "url": "ws://%s/", "password": "wrong"}]}}}`, other, sock)
+	doc2 := fmt.Sprintf(`{"tunnel": {"proxy": {"name": "x", "web_proxies": [{"listen": %q, "url": "ws://%s/", "password": "wrong"}]}}}`, other, sock)
 	startFit(t, doc2, nil)
 	c := &http.Client{Timeout: 5 * time.Second}
 	if resp, err := c.Get("http://" + other + "/"); err == nil {
@@ -815,8 +815,8 @@ func TestWrongPasswords(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			con := freeAddr(t)
-			doc := fmt.Sprintf(`{"tunnel": {"server": {"name": "hub", "password": "pw", "body_password": "aes", "listeners": [{"protocol": "tcp", "address": %q}]},
- "node": {"name": "lab", "servers": [%s], "console": %s}}}`, listen, uplinkJSON(listen, tc.password, tc.body), consoleJSON(con))
+			doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "body_password": "aes", "listeners": [{"protocol": "tcp", "address": %q}]},
+ "node": {"name": "lab", "hubs": [%s], "console": %s}}}`, listen, uplinkJSON(listen, tc.password, tc.body), consoleJSON(con))
 			if tc.body == "" {
 				doc = strings.Replace(doc, `, "body_password": "aes"`, "", 1)
 			}
@@ -825,23 +825,23 @@ func TestWrongPasswords(t *testing.T) {
 			var ns nodeStatus
 			waitFor(t, "the node to fail", func() bool {
 				pg.status(&ns)
-				return len(ns.Servers) == 1 && ns.Servers[0].State == "failed" && strings.Contains(ns.Servers[0].Error, tc.want)
+				return len(ns.Hubs) == 1 && ns.Hubs[0].State == "failed" && strings.Contains(ns.Hubs[0].Error, tc.want)
 			})
 			p.stop()
 		})
 	}
 }
 
-// Limits hold: past max_tunnels, a client's connection is closed at once.
+// Limits hold: past max_tunnels, a proxy's connection is closed at once.
 func TestMaxTunnels(t *testing.T) {
 	listen, fwd, con := freeAddr(t), freeAddr(t), freeAddr(t)
 	echo := tunneltest.Echo(t, "")
-	doc := fmt.Sprintf(`{"tunnel": {"server": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
- "node": {"name": "lab", "servers": [%s], "services": [{"name": "echo", "address": %q}]},
- "client": {"name": "me", "max_tunnels": 2, "servers": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}], "console": %s}}}`,
+	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
+ "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}]},
+ "proxy": {"name": "me", "max_tunnels": 2, "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}], "console": %s}}}`,
 		listen, uplinkJSON(listen, "pw", ""), echo, uplinkJSON(listen, "pw", ""), fwd, consoleJSON(con))
 	startFit(t, doc, nil)
-	h := &hub{client: login(t, con)}
+	h := &hub{proxy: login(t, con)}
 	h.waitNode(t, "lab", "echo")
 	var conns []net.Conn
 	for range 2 {

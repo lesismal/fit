@@ -1,9 +1,9 @@
-// Package uplink is a node's or client's connection to a tunnel server: a
+// Package uplink is a node's or proxy's connection to a tunnel hub: a
 // pool of links that keep dialing until they connect, register each time
-// they connect, and dial again once they lose the server. The uplink pings
-// the server to measure the link, over the registered link the server
+// they connect, and dial again once they lose the hub. The uplink pings
+// the hub to measure the link, over the registered link the hub
 // numbered lowest. Each tunnel goes over one link of the pool throughout, so
-// its frames keep their order, and closes when that link loses the server.
+// its frames keep their order, and closes when that link loses the hub.
 //
 // An uplink runs on goroutines of its own, one for each link of its pool
 // and one that pings, which wait on dials and calls; nothing of it blocks a
@@ -32,7 +32,7 @@ import (
 
 	"github.com/lesismal/fit/tunnel/internal/transport/quic"
 
-	// Servers may be reached over WebSocket.
+	// Hubs may be reached over WebSocket.
 	_ "github.com/lesismal/fit/tunnel/internal/transport/ws"
 )
 
@@ -79,16 +79,16 @@ type Status struct {
 	Addr    string    `json:"addr"`
 	State   string    `json:"state"`
 	Error   string    `json:"error,omitempty"`
-	Server  string    `json:"server,omitempty"`
+	Hub     string    `json:"hub,omitempty"`
 	PeerID  uint32    `json:"peer_id,omitempty"`
 	Since   time.Time `json:"since,omitempty"`
 	Tunnels int       `json:"tunnels"`
-	// RTT is the round trip to the server, as the pings measure it.
+	// RTT is the round trip to the hub, as the pings measure it.
 	RTT latency.Stats `json:"rtt"`
 	// BodyEncrypted reports whether frame bodies are encrypted.
 	BodyEncrypted bool `json:"body_encrypted"`
 	// PoolSize is how many connections the uplink makes, Pool how many of
-	// them are registered now, and Places the places the server gave those
+	// them are registered now, and Places the places the hub gave those
 	// among the connections of the peer's name, lowest first.
 	PoolSize int   `json:"pool_size"`
 	Pool     int   `json:"pool"`
@@ -121,9 +121,9 @@ type LinkStatus struct {
 	Addr  string `json:"addr"`
 }
 
-// Uplink is the connection to one server.
+// Uplink is the connection to one hub.
 type Uplink struct {
-	// Name is the server's, as the role names it.
+	// Name is the hub's, as the role names it.
 	Name    string
 	Config  *config.TunnelUplink
 	Tunnels *tunnel.Table
@@ -132,7 +132,7 @@ type Uplink struct {
 	OnRegistered func(*Uplink)
 	// OnPing, if set, adds to each ping what else the peer measured.
 	OnPing func(*proto.PingReq)
-	// OnPong, if set, gets the server's answer to each ping.
+	// OnPong, if set, gets the hub's answer to each ping.
 	OnPong func(*Uplink, *proto.PingRsp)
 
 	engine  *fib.Engine
@@ -151,17 +151,17 @@ type Uplink struct {
 	conns   map[*link.Link]proto.RegisterRsp
 	state   string
 	lastErr string
-	server  string
+	hub     string
 	since   time.Time
 	stopped bool
 	stop    chan struct{}
 }
 
-// New is an uplink to the server cfg names, which registers as what info
+// New is an uplink to the hub cfg names, which registers as what info
 // returns, its tunnels bounded by limit. setup registers the methods the
-// server may call on it.
+// hub may call on it.
 func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log *logs.Logger, info func() proto.Info, setup func(u *Uplink, r *link.Router)) *Uplink {
-	u := &Uplink{Name: cfg.ServerName(), Config: cfg, Tunnels: tunnel.NewTable(limit), engine: engine, log: log, info: info, pool: map[*link.Link]string{}, conns: map[*link.Link]proto.RegisterRsp{}, state: StateConnecting, stop: make(chan struct{})}
+	u := &Uplink{Name: cfg.HubName(), Config: cfg, Tunnels: tunnel.NewTable(limit), engine: engine, log: log, info: info, pool: map[*link.Link]string{}, conns: map[*link.Link]proto.RegisterRsp{}, state: StateConnecting, stop: make(chan struct{})}
 	if cfg.BodyPassword != "" {
 		coder, err := bodycrypt.New(cfg.BodyPassword)
 		if err != nil {
@@ -173,7 +173,7 @@ func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log 
 	r.Log = log
 	u.Tunnels.Register(r)
 	r.HandleNotify(proto.MethodKick, func(_ *link.Link, body []byte) {
-		u.fail("kicked by the server: "+string(body), true)
+		u.fail("kicked by the hub: "+string(body), true)
 	}, true)
 	if setup != nil {
 		setup(u, r)
@@ -182,8 +182,8 @@ func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log 
 	return u
 }
 
-// Start dials the pool's links to the server, each of which goes on dialing
-// until it connects, and again whenever it loses the server, until the
+// Start dials the pool's links to the hub, each of which goes on dialing
+// until it connects, and again whenever it loses the hub, until the
 // uplink stops.
 func (u *Uplink) Start() {
 	u.mu.Lock()
@@ -199,7 +199,7 @@ func (u *Uplink) Start() {
 	}
 }
 
-// keep keeps a link of the pool to the server: it dials, registers, and
+// keep keeps a link of the pool to the hub: it dials, registers, and
 // once the link closes dials again, an interval after each failure or
 // loss, until the uplink stops.
 func (u *Uplink) keep() {
@@ -221,7 +221,7 @@ func (u *Uplink) keep() {
 	}
 }
 
-// dial opens a link to the server, unless the uplink stopped: on the first
+// dial opens a link to the hub, unless the uplink stopped: on the first
 // of its addresses that it connects to, in the order of their priority.
 func (u *Uplink) dial() (*link.Link, error) {
 	dials := Dials(u.Config)
@@ -253,7 +253,7 @@ func (u *Uplink) dial() (*link.Link, error) {
 		}
 		u.pool[l] = shown
 		if len(errs) > 0 {
-			u.log.Infof("server %s: fell back to %s, after %s", u.Name, shown, strings.Join(errs, "; "))
+			u.log.Infof("hub %s: fell back to %s, after %s", u.Name, shown, strings.Join(errs, "; "))
 		}
 		return l, nil
 	}
@@ -271,7 +271,7 @@ func (u *Uplink) register(l *link.Link) {
 	var rsp proto.RegisterRsp
 	if err := l.Call(proto.MethodRegister, &req, &rsp, u.Config.Call()); err != nil {
 		u.fail("register: "+err.Error(), false)
-		u.log.Warnf("server %s: registering failed: %v", u.Name, err)
+		u.log.Warnf("hub %s: registering failed: %v", u.Name, err)
 		_ = l.Close()
 		return
 	}
@@ -288,13 +288,13 @@ func (u *Uplink) register(l *link.Link) {
 	}
 	first := len(u.conns) == 0
 	u.conns[l] = rsp
-	u.state, u.lastErr, u.server = StateRegistered, "", rsp.Server
+	u.state, u.lastErr, u.hub = StateRegistered, "", rsp.Hub
 	if first {
 		u.since = time.Now()
 	}
 	f := u.OnRegistered
 	u.mu.Unlock()
-	u.log.Debugf("server %s: registered with %q as peer %d, link %d in place %d", u.Name, rsp.Server, rsp.Peer, rsp.Conn, rsp.Index)
+	u.log.Debugf("hub %s: registered with %q as peer %d, link %d in place %d", u.Name, rsp.Hub, rsp.Peer, rsp.Conn, rsp.Index)
 	if !first {
 		return
 	}
@@ -306,7 +306,7 @@ func (u *Uplink) register(l *link.Link) {
 	go u.ping()
 }
 
-// lost records that l lost the server, and closes the tunnels it carried.
+// lost records that l lost the hub, and closes the tunnels it carried.
 func (u *Uplink) lost(l *link.Link) {
 	u.mu.Lock()
 	delete(u.pool, l)
@@ -323,7 +323,7 @@ func (u *Uplink) lost(l *link.Link) {
 	if none {
 		u.rtt.Reset()
 	}
-	u.Tunnels.CloseLink(l, "server connection lost")
+	u.Tunnels.CloseLink(l, "hub connection lost")
 }
 
 // fail records why the uplink is not registered: always, or only while
@@ -336,7 +336,7 @@ func (u *Uplink) fail(msg string, always bool) {
 	u.mu.Unlock()
 }
 
-// pingLoop pings the server every PingInterval until the uplink stops.
+// pingLoop pings the hub every PingInterval until the uplink stops.
 func (u *Uplink) pingLoop() {
 	t := time.NewTicker(u.Config.Ping())
 	defer t.Stop()
@@ -350,14 +350,14 @@ func (u *Uplink) pingLoop() {
 	}
 }
 
-// ping measures a round trip to the server, telling it what the uplink
+// ping measures a round trip to the hub, telling it what the uplink
 // and OnPing measured before.
 func (u *Uplink) ping() {
 	if !u.pinging.CompareAndSwap(false, true) {
 		return
 	}
 	defer u.pinging.Store(false)
-	c, err := u.Client()
+	c, err := u.Proxy()
 	if err != nil {
 		return
 	}
@@ -369,7 +369,7 @@ func (u *Uplink) ping() {
 	start := time.Now()
 	err = c.Call(proto.MethodPing, &req, &rsp, u.Config.PingWait())
 	d := time.Since(start)
-	if now, _ := u.Client(); now != c {
+	if now, _ := u.Proxy(); now != c {
 		// The connection the ping went over is gone, which says nothing of
 		// the link.
 		return
@@ -384,14 +384,14 @@ func (u *Uplink) ping() {
 	}
 }
 
-// RTT is the round trip to the server.
+// RTT is the round trip to the hub.
 func (u *Uplink) RTT() latency.Stats { return u.rtt.Stats() }
 
 // ErrNotRegistered is the error of a call on an uplink that is not
 // registered.
-var ErrNotRegistered = errors.New("tunnel: not registered with the server")
+var ErrNotRegistered = errors.New("tunnel: not registered with the hub")
 
-// linksLocked is the registered links, by the places the server gave
+// linksLocked is the registered links, by the places the hub gave
 // them. Callers hold mu.
 func (u *Uplink) linksLocked() []*link.Link {
 	links := make([]*link.Link, 0, len(u.conns))
@@ -402,9 +402,9 @@ func (u *Uplink) linksLocked() []*link.Link {
 	return links
 }
 
-// Client is the registered link the server numbered lowest, which the
-// uplink calls the server over.
-func (u *Uplink) Client() (*link.Link, error) {
+// Proxy is the registered link the hub numbered lowest, which the
+// uplink calls the hub over.
+func (u *Uplink) Proxy() (*link.Link, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	links := u.linksLocked()
@@ -440,11 +440,11 @@ func (u *Uplink) NextTunnelID() (uint64, *link.Link, error) {
 
 // ErrLinksFull is the error of a tunnel that every link of the pool has no
 // room for: each carries proto.MaxTunnelsPerLink.
-var ErrLinksFull = errors.New("tunnel: every link to the server carries as many tunnels as it may; a larger pool_size carries more")
+var ErrLinksFull = errors.New("tunnel: every link to the hub carries as many tunnels as it may; a larger pool_size carries more")
 
-// Call calls method on the server.
+// Call calls method on the hub.
 func (u *Uplink) Call(method proto.Method, req, rsp any) error {
-	c, err := u.Client()
+	c, err := u.Proxy()
 	if err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func (u *Uplink) Status() Status {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	cfg := u.Config
-	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Server: u.server, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: cfg.BodyPassword != "", PoolSize: cfg.Pool(), Places: []int{},
+	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Hub: u.hub, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: cfg.BodyPassword != "", PoolSize: cfg.Pool(), Places: []int{},
 		Links: []LinkStatus{}, Protos: map[string]int{}, Endpoints: []EndpointView{}, QUICPin: cfg.QUICPin, QUICInsecure: cfg.QUICInsecure, HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}
 	for _, e := range cfg.Endpoints {
 		st.Endpoints = append(st.Endpoints, EndpointView{Protocol: e.Protocol(), Address: e.Address, Enabled: !e.Disabled})
@@ -490,7 +490,7 @@ func (u *Uplink) Status() Status {
 		addr := u.pool[c]
 		if i == 0 {
 			st.PeerID = rsp.Peer
-			// The address the uplink calls the server over.
+			// The address the uplink calls the hub over.
 			st.Addr = addr
 		}
 		st.Places = append(st.Places, rsp.Index)

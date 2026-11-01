@@ -19,23 +19,23 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
-// fakeServer registers every link that asks, numbering them, and answers
+// fakeHub registers every link that asks, numbering them, and answers
 // pings, or fails them while failPings is set.
-type fakeServer struct {
+type fakeHub struct {
 	addr      string
 	conns     atomic.Uint32
 	failPings atomic.Bool
 	links     chan *link.Link
 }
 
-func newFakeServer(t *testing.T) *fakeServer {
+func newFakeHub(t *testing.T) *fakeHub {
 	t.Helper()
-	s := &fakeServer{links: make(chan *link.Link, 16)}
+	s := &fakeHub{links: make(chan *link.Link, 16)}
 	r := link.NewRouter()
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, _ []byte) (any, error) {
 		n := s.conns.Add(1)
 		s.links <- l
-		return &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Server: "srv"}, nil
+		return &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Hub: "srv"}, nil
 	}, true)
 	r.HandleCall(proto.MethodPing, func(*link.Link, []byte) (any, error) {
 		if s.failPings.Load() {
@@ -110,9 +110,9 @@ func TestDials(t *testing.T) {
 }
 
 // An uplink falls back to the endpoints that answer, registers its pool,
-// pings, and calls the server; a kick and a stop show in its status.
+// pings, and calls the hub; a kick and a stop show in its status.
 func TestUplink(t *testing.T) {
-	s := newFakeServer(t)
+	s := newFakeHub(t)
 	cfg := &config.TunnelUplink{
 		Name:          "srv",
 		Password:      "p",
@@ -134,7 +134,7 @@ func TestUplink(t *testing.T) {
 		t.Errorf("OnRegistered ran %d times", n)
 	}
 	st := u.Status()
-	if st.State != StateRegistered || st.Server != "srv" || st.PeerID != 7 || st.Protos["tcp"] != 2 || len(st.Endpoints) != 2 || st.Addr != "tcp://"+s.addr {
+	if st.State != StateRegistered || st.Hub != "srv" || st.PeerID != 7 || st.Protos["tcp"] != 2 || len(st.Endpoints) != 2 || st.Addr != "tcp://"+s.addr {
 		t.Errorf("status %+v", st)
 	}
 	var nodes []string
@@ -161,8 +161,8 @@ func TestUplink(t *testing.T) {
 	if st := u.Status(); st.State != StateStopped {
 		t.Errorf("state %q", st.State)
 	}
-	if _, err := u.Client(); !errors.Is(err, ErrNotRegistered) {
-		t.Errorf("client: %v", err)
+	if _, err := u.Proxy(); !errors.Is(err, ErrNotRegistered) {
+		t.Errorf("proxy: %v", err)
 	}
 	if _, _, err := u.NextTunnelID(); !errors.Is(err, ErrNotRegistered) {
 		t.Errorf("tunnel ID: %v", err)
@@ -175,7 +175,7 @@ func TestUplink(t *testing.T) {
 // New tunnels go over the link that carries the fewest, and none goes over
 // links that carry as many as they may.
 func TestNextTunnelID(t *testing.T) {
-	s := newFakeServer(t)
+	s := newFakeHub(t)
 	u := newUplink(t, &config.TunnelUplink{PoolSize: 2, Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
 	var links []*link.Link
 	for range 2 {
@@ -256,7 +256,7 @@ func TestBodyPassword(t *testing.T) {
 
 // A dial of an uplink that stopped fails, and closes a link it made.
 func TestDialStopped(t *testing.T) {
-	s := newFakeServer(t)
+	s := newFakeHub(t)
 	for _, addr := range []string{closedAddr(t), s.addr} {
 		u := newUplink(t, &config.TunnelUplink{Endpoints: []config.TunnelEndpoint{{Address: addr}}})
 		u.Stop()
@@ -278,7 +278,7 @@ func TestPingSkips(t *testing.T) {
 }
 
 // replyConn answers each call sent on it with reply, and then closes its
-// link, as a server that registers a link and drops it at once.
+// link, as a hub that registers a link and drops it at once.
 type replyConn struct {
 	l     *link.Link
 	reply any

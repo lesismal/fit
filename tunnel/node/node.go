@@ -1,10 +1,10 @@
 // Package node is the tunnel's node role, tunnel.node in fit's config.
-// A node links to one or more tunnel servers, registers with
+// A node links to one or more tunnel hubs, registers with
 // the services it reaches, and opens the TCP connections to those services
-// that the tunnels the servers route to it ask for, and to no other
-// address. Its console pages show its servers and tunnels and change which
-// servers it links to, over which protocols, and which services it reaches;
-// a server's pages may set its services too. Every such change is written
+// that the tunnels the hubs route to it ask for, and to no other
+// address. Its console pages show its hubs and tunnels and change which
+// hubs it links to, over which protocols, and which services it reaches;
+// a hub's pages may set its services too. Every such change is written
 // back into the node's member of the config, and applied from there.
 //
 // Everything runs on the listeners' fib engine: the links and tunnels are
@@ -83,9 +83,9 @@ func New(h *app.Host) *Node {
 // Config is the member the node runs.
 func (n *Node) Config() *config.TunnelNode { return n.cfg.Load() }
 
-// Apply moves the node to member, a *config.TunnelNode. A server whose
+// Apply moves the node to member, a *config.TunnelNode. A hub whose
 // settings are unchanged keeps its links and tunnels; one that changed links
-// anew, and its tunnels close. The servers kept are told of new services
+// anew, and its tunnels close. The hubs kept are told of new services
 // and meta. A console that does not start fails the first Apply, and is
 // returned beside the rest applied after.
 func (n *Node) Apply(member any) error {
@@ -107,7 +107,7 @@ func (n *Node) Apply(member any) error {
 	}
 	prev := n.cfg.Swap(cfg)
 	n.limit.SetMax(cfg.Tunnels())
-	// A new name is a new peer to the servers: every link registers anew.
+	// A new name is a new peer to the hubs: every link registers anew.
 	renamed := prev != nil && prev.NodeName() != cfg.NodeName()
 	n.mu.Lock()
 	old := map[string]*uplink.Uplink{}
@@ -115,10 +115,10 @@ func (n *Node) Apply(member any) error {
 		old[u.Name] = u
 	}
 	var start, kept, stop []*uplink.Uplink
-	next := make([]*uplink.Uplink, 0, len(cfg.Servers))
-	for i := range cfg.Servers {
-		sc := &cfg.Servers[i]
-		if u := old[sc.ServerName()]; u != nil && !renamed && uplink.Same(u.Config, sc) {
+	next := make([]*uplink.Uplink, 0, len(cfg.Hubs))
+	for i := range cfg.Hubs {
+		sc := &cfg.Hubs[i]
+		if u := old[sc.HubName()]; u != nil && !renamed && uplink.Same(u.Config, sc) {
 			delete(old, u.Name)
 			kept = append(kept, u)
 			next = append(next, u)
@@ -163,15 +163,15 @@ func (n *Node) Apply(member any) error {
 	return consoleErr
 }
 
-// sameInfo reports whether a and b tell the servers the same.
+// sameInfo reports whether a and b tell the hubs the same.
 func sameInfo(a, b proto.Info) bool {
 	return slices.Equal(a.Services, b.Services) && maps.Equal(a.Meta, b.Meta)
 }
 
-// update tells u's server what the node is now.
+// update tells u's hub what the node is now.
 func (n *Node) update(u *uplink.Uplink, info proto.Info) {
 	if err := u.Call(proto.MethodUpdate, &info, nil); err != nil && !errors.Is(err, uplink.ErrNotRegistered) {
-		n.log.Warnf("server %s: telling it the node's services: %v", u.Name, err)
+		n.log.Warnf("hub %s: telling it the node's services: %v", u.Name, err)
 	}
 }
 
@@ -211,7 +211,7 @@ func (n *Node) Stop(ctx context.Context) {
 	n.console.Stop(ctx)
 }
 
-// infoOf is what a node of cfg tells the servers.
+// infoOf is what a node of cfg tells the hubs.
 func infoOf(cfg *config.TunnelNode) proto.Info {
 	info := proto.NewInfo(cfg.NodeName(), proto.TypeNode)
 	info.Services = make([]proto.Service, 0, len(cfg.Services))
@@ -222,7 +222,7 @@ func infoOf(cfg *config.TunnelNode) proto.Info {
 	return info
 }
 
-// Info is what the node tells servers about itself.
+// Info is what the node tells hubs about itself.
 func (n *Node) Info() proto.Info {
 	if cfg := n.Config(); cfg != nil {
 		return infoOf(cfg)
@@ -256,12 +256,12 @@ func (n *Node) serviceMeter(name string) *latency.Meter {
 
 func (n *Node) newUplink(sc *config.TunnelUplink) *uplink.Uplink {
 	u := uplink.New(n.h.Engine, sc, n.limit, n.log, n.Info, n.setupUplink)
-	// Servers tell clients how fast the node reaches its services.
+	// Hubs tell proxies how fast the node reaches its services.
 	u.OnPing = func(req *proto.PingReq) { req.ServiceRTT = n.ServiceRTT() }
 	return u
 }
 
-// setupUplink registers the methods a server calls on the node. They run
+// setupUplink registers the methods a hub calls on the node. They run
 // on the link's goroutines, which may wait.
 func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 	r.HandleCall(proto.MethodNodeInfo, func(*link.Link, []byte) (any, error) {
@@ -286,14 +286,14 @@ func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 		}
 		rsp, err := n.openTunnel(u, l, &req)
 		if err != nil {
-			n.log.Warnf("tunnel %d to service %q for client %q: %v", req.ID, req.Service, req.Client, err)
+			n.log.Warnf("tunnel %d to service %q for proxy %q: %v", req.ID, req.Service, req.Proxy, err)
 			return nil, err
 		}
 		return rsp, nil
 	}, false)
 }
 
-// setServices writes services, which a server set, into the node's member
+// setServices writes services, which a hub set, into the node's member
 // of the config, and waits for the config to apply, for at most wait.
 func (n *Node) setServices(services []proto.Service, wait time.Duration) error {
 	list := make([]config.TunnelService, 0, len(services))
@@ -334,7 +334,7 @@ func (n *Node) openTunnel(u *uplink.Uplink, l *link.Link, req *proto.TunnelOpenR
 		d := time.Since(start)
 		meter.Add(d)
 		e := tunnel.New(u.Tunnels, l, req.ID, true)
-		e.Node, e.Service, e.Addr, e.Peer = info.Name, svc.Name, svc.Addr, req.Client
+		e.Node, e.Service, e.Addr, e.Peer = info.Name, svc.Name, svc.Addr, req.Proxy
 		e.ConnectRTT = latency.Ms(d)
 		if err := u.Tunnels.Add(e); err != nil {
 			rmu.Lock()
@@ -363,11 +363,11 @@ func (n *Node) openTunnel(u *uplink.Uplink, l *link.Link, req *proto.TunnelOpenR
 		meter.Lost()
 		return nil, err
 	}
-	n.log.Debugf("tunnel %d open: client %q to service %q at %s", req.ID, req.Client, svc.Name, svc.Addr)
+	n.log.Debugf("tunnel %d open: proxy %q to service %q at %s", req.ID, req.Proxy, svc.Name, svc.Addr)
 	return &proto.TunnelOpenRsp{ID: req.ID, Addr: svc.Addr}, nil
 }
 
-// Uplinks is the node's connections to servers.
+// Uplinks is the node's connections to hubs.
 func (n *Node) Uplinks() []*uplink.Uplink {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -385,7 +385,7 @@ func (n *Node) uplink(name string) *uplink.Uplink {
 
 // TunnelView is a tunnel as the pages show it.
 type TunnelView struct {
-	Server string `json:"server"`
+	Hub string `json:"hub"`
 	tunnel.Snapshot
 }
 
@@ -394,7 +394,7 @@ func (n *Node) Tunnels() []TunnelView {
 	out := []TunnelView{}
 	for _, u := range n.Uplinks() {
 		for _, s := range u.Tunnels.List() {
-			out = append(out, TunnelView{Server: u.Name, Snapshot: s})
+			out = append(out, TunnelView{Hub: u.Name, Snapshot: s})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })

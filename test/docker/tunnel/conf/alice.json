@@ -7,7 +7,7 @@
     }
   },
   "tunnel": {
-    "client": {
+    "proxy": {
       "name": "alice",
       "web_proxies": [
         {

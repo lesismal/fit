@@ -9,7 +9,7 @@
   "tunnel": {
     "node": {
       "name": "office",
-      "servers": [
+      "hubs": [
         {
           "name": "hub-2",
           "endpoints": [
@@ -43,7 +43,7 @@
         {
           "name": "http",
           "address": "dev-office:80",
-          "description": "web server of dev-office"
+          "description": "web hub of dev-office"
         }
       ],
       "meta": {

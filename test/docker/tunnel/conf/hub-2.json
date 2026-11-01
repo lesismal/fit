@@ -7,7 +7,7 @@
     }
   },
   "tunnel": {
-    "server": {
+    "hub": {
       "name": "hub-2",
       "password": "reg-pass-1234",
       "body_password": "body-pass-1234",

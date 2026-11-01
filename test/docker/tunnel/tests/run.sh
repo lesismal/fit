@@ -4,7 +4,7 @@
 # every instance's console and through their tunnels:
 #
 #   run.sh all            set everything up, then test every feature
-#   run.sh setup          only set up hub-1, node lab and client alice
+#   run.sh setup          only set up hub-1, node lab and proxy alice
 #   run.sh features       only the feature tests (after setup)
 #   run.sh restart-check  after the instances restarted: their settings came
 #                         back from the configs in their stores, and
@@ -19,7 +19,7 @@
 # 的 API 和它们的隧道测试 fit 隧道角色的全部功能：
 #
 #   run.sh all            先完成配置，再测试全部功能
-#   run.sh setup          只配置 hub-1、节点 lab 和客户端 alice
+#   run.sh setup          只配置 hub-1、节点 lab 和 proxy alice
 #   run.sh features       只运行功能测试（配置之后）
 #   run.sh restart-check  实例重启之后：设置从存储中的配置恢复，一切照常工作
 #
@@ -179,19 +179,19 @@ conn_dropped() {
 	}
 }
 
-# peer URL PAGE NAME TYPE prints the server's peer of that name and type
-# (node or client).
+# peer URL PAGE NAME TYPE prints the hub's peer of that name and type
+# (node or proxy).
 peer() { get "$1" "$2" /api/status | jq -e -c --arg n "$3" --arg t "$4" '.peers[] | select(.info.name == $n and .info.type == $t)'; }
 peer_id() { peer "$@" | jq -r .id; }
 kick() { post "$1" "$2" /api/peers/kick "{\"id\":$(peer_id "$@")}" >/dev/null; }
 
-# protos URL PAGE SERVER prints the protocols of the uplink to SERVER, as
+# protos URL PAGE HUB prints the protocols of the uplink to HUB, as
 # "proto:count ...".
-protos() { get "$1" "$2" /api/status | jq -r --arg s "$3" '.servers[] | select(.name == $s) | .protos // {} | to_entries | map("\(.key):\(.value)") | sort | join(" ")'; }
+protos() { get "$1" "$2" /api/status | jq -r --arg s "$3" '.hubs[] | select(.name == $s) | .protos // {} | to_entries | map("\(.key):\(.value)") | sort | join(" ")'; }
 protos_are() { is "$(protos "$1" "$2" "$3")" "$4"; }
-registered() { is "$(get "$1" "$2" /api/status | jq -r --arg s "$3" '.servers[] | select(.name == $s) | .state')" registered; }
+registered() { is "$(get "$1" "$2" /api/status | jq -r --arg s "$3" '.hubs[] | select(.name == $s) | .state')" registered; }
 
-server_json() { # NAME HOST FINGERPRINT
+hub_json() { # NAME HOST FINGERPRINT
 	jq -n -c --arg n "$1" --arg h "$2" --arg fp "$3" --arg pw "$HUB_PASSWORD" --arg body "$BODY_PASSWORD" '{
 		name: $n, password: $pw, body_password: $body, pool_size: 2, quic_pin: $fp,
 		endpoints: [
@@ -209,7 +209,7 @@ services_json() { # NAME:ADDRESS[:DESCRIPTION]...
 	(IFS=,; echo "[${out[*]}]")
 }
 
-LAB_SERVICES=("echo|dev-lab:7|echo service of dev-lab" "http|dev-lab:80|web server of dev-lab" "dead|dev-lab:9|nothing listens")
+LAB_SERVICES=("echo|dev-lab:7|echo service of dev-lab" "http|dev-lab:80|web hub of dev-lab" "dead|dev-lab:9|nothing listens")
 
 wait_pages() {
 	local u
@@ -244,26 +244,26 @@ setup() {
 	check "hub-1 has 3 open listeners and its settings" \
 		js "$HUB1" hub1 '(.listeners | length) == 3 and all(.listeners[]; .error == null and .url != null) and .settings.has_password and .settings.has_body_password and .settings.has_socket_password and .body_encrypted'
 
-	check "both servers have a QUIC fingerprint" eventually 10 fingerprints
+	check "both hubs have a QUIC fingerprint" eventually 10 fingerprints
 	fingerprints
 	echo "$FP1" >"$STATE/fp-hub-1"
 	echo "$FP2" >"$STATE/fp-hub-2"
 
 	section "setup: node lab through its console / 通过控制台配置节点 lab"
-	check "node lab starts with no servers" js "$LAB" lab '(.servers | length) == 0'
-	check "add server hub-1 (QUIC pinned, WebSocket, TCP)" post "$LAB" lab /api/servers "$(server_json hub-1 hub-1 "$FP1")"
-	check "add server hub-2 (QUIC pinned, WebSocket, TCP)" post "$LAB" lab /api/servers "$(server_json hub-2 hub-2 "$FP2")"
-	check "a server added twice is refused" refused "$LAB" lab /api/servers "$(server_json hub-1 hub-1 "$FP1")"
+	check "node lab starts with no hubs" js "$LAB" lab '(.hubs | length) == 0'
+	check "add hub hub-1 (QUIC pinned, WebSocket, TCP)" post "$LAB" lab /api/hubs "$(hub_json hub-1 hub-1 "$FP1")"
+	check "add hub hub-2 (QUIC pinned, WebSocket, TCP)" post "$LAB" lab /api/hubs "$(hub_json hub-2 hub-2 "$FP2")"
+	check "a hub added twice is refused" refused "$LAB" lab /api/hubs "$(hub_json hub-1 hub-1 "$FP1")"
 	check "set services echo, http and dead" post "$LAB" lab /api/services "$(services_json "${LAB_SERVICES[@]}")"
 
-	section "setup: client alice through its console / 通过控制台配置客户端 alice"
-	check "add server hub-1" post "$ALICE" alice /api/servers "$(server_json hub-1 hub-1 "$FP1")"
-	check "add server hub-2" post "$ALICE" alice /api/servers "$(server_json hub-2 hub-2 "$FP2")"
+	section "setup: proxy alice through its console / 通过控制台配置 proxy alice"
+	check "add hub hub-1" post "$ALICE" alice /api/hubs "$(hub_json hub-1 hub-1 "$FP1")"
+	check "add hub hub-2" post "$ALICE" alice /api/hubs "$(hub_json hub-2 hub-2 "$FP2")"
 	local f
 	for f in '7301 lab echo' '7302 lab http' '7303 office echo' '7304 office http' '7305 lab echo hub-1' '7306 lab dead' '7307 lab http hub-2'; do
 		set -- $f
 		check "add forward :$1 → $2/$3${4:+@$4}" post "$ALICE" alice /api/forwards \
-			"$(jq -n -c --arg l "0.0.0.0:$1" --arg n "$2" --arg s "$3" --arg v "${4:-}" '{listen: $l, node: $n, service: $s, server: $v}')"
+			"$(jq -n -c --arg l "0.0.0.0:$1" --arg n "$2" --arg s "$3" --arg v "${4:-}" '{listen: $l, node: $n, service: $s, hub: $v}')"
 	done
 	check "a forward on a port already used is refused" refused "$ALICE" alice /api/forwards '{"listen":"0.0.0.0:7301","node":"lab","service":"echo"}'
 	check "alice's forwards all listen" js "$ALICE" alice '(.forwards | length) == 7 and all(.forwards[]; .error == null)'
@@ -285,16 +285,16 @@ t_pages() {
 	done
 }
 
-t_servers() {
-	section "servers / 服务端"
+t_hubs() {
+	section "hubs / hub"
 	check "hub-2 (from its config) has TCP, WebSocket and QUIC listeners" \
 		js "$HUB2" hub2 '([.listeners[].protocol] | sort) == ["quic","tcp","ws"] and all(.listeners[]; .error == null)'
 	check "hub-2 (from its config) has its passwords" js "$HUB2" hub2 '.settings.has_password and .settings.has_body_password and .settings.has_socket_password'
-	check "both servers have a QUIC fingerprint" fingerprints
+	check "both hubs have a QUIC fingerprint" fingerprints
 	local h name url pg
 	for h in "hub-1|$HUB1|hub1" "hub-2|$HUB2|hub2"; do
 		IFS='|' read -r name url pg <<<"$h"
-		for p in "lab node" "office node" "alice client" "bob client"; do
+		for p in "lab node" "office node" "alice proxy" "bob proxy"; do
 			set -- $p
 			check "$name has $2 $1 registered" eventually 60 peer "$url" "$pg" "$1" "$2"
 		done
@@ -311,19 +311,19 @@ t_links() {
 	check "office → hub-1 over TCP (from its config)" eventually 30 protos_are "$OFFICE" office hub-1 "tcp:2"
 	check "bob → hub-1 over TCP with the default pool of 10" eventually 30 protos_are "$BOB" bob hub-1 "tcp:10"
 	check "hub-1 counts 2 links of lab" t "[[ \$(peer '$HUB1' hub1 lab node | jq .conns) == 2 ]]"
-	check "hub-1 counts 10 links of bob" t "[[ \$(peer '$HUB1' hub1 bob client | jq .conns) == 10 ]]"
-	check "bodies encrypted on every uplink" t "for u in '$LAB|lab' '$ALICE|alice' '$OFFICE|office' '$BOB|bob'; do get \"\${u%%|*}\" \"\${u#*|}\" /api/status | jq -e 'all(.servers[]; .body_encrypted)' >/dev/null || exit 1; done"
-	check "latency measured on the links (pings every 5s)" eventually 20 js "$LAB" lab 'all(.servers[]; .rtt.samples > 0)'
+	check "hub-1 counts 10 links of bob" t "[[ \$(peer '$HUB1' hub1 bob proxy | jq .conns) == 10 ]]"
+	check "bodies encrypted on every uplink" t "for u in '$LAB|lab' '$ALICE|alice' '$OFFICE|office' '$BOB|bob'; do get \"\${u%%|*}\" \"\${u#*|}\" /api/status | jq -e 'all(.hubs[]; .body_encrypted)' >/dev/null || exit 1; done"
+	check "latency measured on the links (pings every 5s)" eventually 20 js "$LAB" lab 'all(.hubs[]; .rtt.samples > 0)'
 }
 
 t_discovery() {
-	section "nodes and services seen by clients / 客户端看到的节点与服务"
+	section "nodes and services seen by proxies / proxy 看到的节点与服务"
 	check "alice sees lab and office on hub-1" eventually 30 js "$ALICE" alice \
-		'[.servers[] | select(.name == "hub-1") | .nodes[].name] | sort == ["lab","office"]'
+		'[.hubs[] | select(.name == "hub-1") | .nodes[].name] | sort == ["lab","office"]'
 	check "alice sees lab's services echo, http, dead" js "$ALICE" alice \
-		'[.servers[] | select(.name == "hub-2") | .nodes[] | select(.name == "lab") | .services[].name] | sort == ["dead","echo","http"]'
-	check "alice's share of lab over the two servers adds up to 1" js "$ALICE" alice \
-		'([.servers[] | .nodes[] | select(.name == "lab") | .share] | add) as $s | $s > 0.99 and $s < 1.01'
+		'[.hubs[] | select(.name == "hub-2") | .nodes[] | select(.name == "lab") | .services[].name] | sort == ["dead","echo","http"]'
+	check "alice's share of lab over the two hubs adds up to 1" js "$ALICE" alice \
+		'([.hubs[] | .nodes[] | select(.name == "lab") | .share] | add) as $s | $s > 0.99 and $s < 1.01'
 	check "node office has its services from its config" js "$OFFICE" office '[.services[].name] | sort == ["echo","http"]'
 }
 
@@ -383,11 +383,11 @@ t_tunnel_views() {
 	hold 1 alice 7305 # lab/echo@hub-1
 	fd=${HELD[0]}
 	check "hub-1 lists alice → lab/echo with bytes both ways" eventually 10 js "$HUB1" hub1 \
-		'any(.tunnels[]; .client == "alice" and .node == "lab" and .service == "echo" and .up > 0 and .down > 0)'
-	check "node lab lists it" js "$LAB" lab 'any(.tunnels[]; .server == "hub-1" and .service == "echo")'
-	check "alice lists it" js "$ALICE" alice 'any(.tunnels[]; .server == "hub-1" and .node == "lab" and .service == "echo")'
-	check "hub-2 does not (the forward names hub-1)" is "$(tunnels_of "$HUB2" hub2 '.client == "alice"')" 0
-	id=$(get "$HUB1" hub1 /api/status | jq -r '[.tunnels[] | select(.client == "alice" and .service == "echo")][0].id')
+		'any(.tunnels[]; .proxy == "alice" and .node == "lab" and .service == "echo" and .up > 0 and .down > 0)'
+	check "node lab lists it" js "$LAB" lab 'any(.tunnels[]; .hub == "hub-1" and .service == "echo")'
+	check "alice lists it" js "$ALICE" alice 'any(.tunnels[]; .hub == "hub-1" and .node == "lab" and .service == "echo")'
+	check "hub-2 does not (the forward names hub-1)" is "$(tunnels_of "$HUB2" hub2 '.proxy == "alice"')" 0
+	id=$(get "$HUB1" hub1 /api/status | jq -r '[.tunnels[] | select(.proxy == "alice" and .service == "echo")][0].id')
 	check "close it from hub-1's console" post "$HUB1" hub1 /api/tunnels/close "{\"id\":\"$id\"}"
 	check "  … the connection closes" closed_by_peer "$fd"
 	check "closing an unknown tunnel is refused" refused "$HUB1" hub1 /api/tunnels/close '{"id":"999999"}'
@@ -395,32 +395,32 @@ t_tunnel_views() {
 
 	hold 1 alice 7305
 	fd=${HELD[0]}
-	id=$(get "$LAB" lab /api/status | jq -r '[.tunnels[] | select(.server == "hub-1" and .service == "echo")][0].id')
-	check "close it from node lab's console" post "$LAB" lab /api/tunnels/close "{\"server\":\"hub-1\",\"id\":\"$id\"}"
+	id=$(get "$LAB" lab /api/status | jq -r '[.tunnels[] | select(.hub == "hub-1" and .service == "echo")][0].id')
+	check "close it from node lab's console" post "$LAB" lab /api/tunnels/close "{\"hub\":\"hub-1\",\"id\":\"$id\"}"
 	check "  … the connection closes" closed_by_peer "$fd"
 	release
 
 	hold 1 alice 7305
 	fd=${HELD[0]}
-	id=$(get "$ALICE" alice /api/status | jq -r '[.tunnels[] | select(.server == "hub-1" and .service == "echo")][0].id')
-	check "close it from alice's console" post "$ALICE" alice /api/tunnels/close "{\"server\":\"hub-1\",\"id\":\"$id\"}"
+	id=$(get "$ALICE" alice /api/status | jq -r '[.tunnels[] | select(.hub == "hub-1" and .service == "echo")][0].id')
+	check "close it from alice's console" post "$ALICE" alice /api/tunnels/close "{\"hub\":\"hub-1\",\"id\":\"$id\"}"
 	check "  … the connection closes" closed_by_peer "$fd"
 	release
 	check "no tunnels left on hub-1" eventually 10 is "$(tunnels_of "$HUB1" hub1 'true')" 0
 }
 
 t_balance() {
-	section "load balancing over two servers / 两台服务端之间的负载均衡"
-	hold 16 alice 7301 # lab/echo, no server named
+	section "load balancing over two hubs / 两台 hub 之间的负载均衡"
+	hold 16 alice 7301 # lab/echo, no hub named
 	local n1 n2
-	n1=$(tunnels_of "$HUB1" hub1 '.client == "alice"')
-	n2=$(tunnels_of "$HUB2" hub2 '.client == "alice"')
+	n1=$(tunnels_of "$HUB1" hub1 '.proxy == "alice"')
+	n2=$(tunnels_of "$HUB2" hub2 '.proxy == "alice"')
 	check "16 tunnels to lab spread over hub-1 ($n1) and hub-2 ($n2)" t "(( $n1 > 0 && $n2 > 0 && $n1 + $n2 == 16 ))"
 	release
 }
 
 t_node_admin() {
-	section "nodes managed from servers and clients / 从服务端和客户端管理节点"
+	section "nodes managed from hubs and proxies / 从 hub 和 proxy 管理节点"
 	local id
 	id=$(peer_id "$HUB1" hub1 office node)
 	check "hub-1 queries node office" t "post '$HUB1' hub1 /api/peers/refresh '{\"id\":$id}' | jq -e '[.services[].name] | sort == [\"echo\",\"http\"]'"
@@ -428,10 +428,10 @@ t_node_admin() {
 		"{\"id\":$id,\"services\":$(services_json "echo|dev-office:7" "http|dev-office:80" "http2|dev-office:80|added from hub-1")}"
 	check "  … node office has http2" eventually 10 js "$OFFICE" office 'any(.services[]; .name == "http2")'
 	check "  … hub-2 hears of it" eventually 15 js "$HUB2" hub2 'any(.peers[] | select(.info.name == "office") | .info.services[]; .name == "http2")'
-	check "querying a client as a node is refused" refused "$HUB1" hub1 /api/peers/refresh "{\"id\":$(peer_id "$HUB1" hub1 alice client)}"
-	check "alice refreshes hub-2's nodes" t "post '$ALICE' alice /api/nodes/refresh '{\"server\":\"hub-2\"}' | jq -e '[.nodes[].name] | sort == [\"lab\",\"office\"]'"
+	check "querying a proxy as a node is refused" refused "$HUB1" hub1 /api/peers/refresh "{\"id\":$(peer_id "$HUB1" hub1 alice proxy)}"
+	check "alice refreshes hub-2's nodes" t "post '$ALICE' alice /api/nodes/refresh '{\"hub\":\"hub-2\"}' | jq -e '[.nodes[].name] | sort == [\"lab\",\"office\"]'"
 	check "alice sets node office's services through hub-2 (removes http2)" post "$ALICE" alice /api/nodes/services \
-		"{\"server\":\"hub-2\",\"node\":\"office\",\"services\":$(services_json "echo|dev-office:7|echo service of dev-office" "http|dev-office:80|web server of dev-office")}"
+		"{\"hub\":\"hub-2\",\"node\":\"office\",\"services\":$(services_json "echo|dev-office:7|echo service of dev-office" "http|dev-office:80|web hub of dev-office")}"
 	check "  … node office no longer has http2" eventually 10 js "$OFFICE" office '[.services[].name] | sort == ["echo","http"]'
 	check "node lab edits its own services (adds tmp)" post "$LAB" lab /api/services "$(services_json "${LAB_SERVICES[@]}" "tmp|dev-lab:7")"
 	check "  … hub-1 hears of it" eventually 15 js "$HUB1" hub1 'any(.peers[] | select(.info.name == "lab") | .info.services[]; .name == "tmp")'
@@ -469,19 +469,19 @@ t_forwards() {
 	check "removing an unknown forward is refused" refused "$ALICE" alice /api/forwards/delete '{"listen":"0.0.0.0:7399"}'
 	check "a forward to an unknown node drops its connections" forward_dropped alice 7308 nonode echo
 	check "a forward to a service the node does not have drops its connections" forward_dropped alice 7308 lab noservice
-	check "a forward through an unknown server is refused" refused "$ALICE" alice /api/forwards '{"listen":"0.0.0.0:7308","node":"lab","service":"echo","server":"nope"}'
+	check "a forward through an unknown hub is refused" refused "$ALICE" alice /api/forwards '{"listen":"0.0.0.0:7308","node":"lab","service":"echo","hub":"nope"}'
 }
 
 t_meta() {
 	section "meta / 元数据"
 	check "alice sets her meta" post "$ALICE" alice /api/meta '{"team":"qa","owner":"alice"}'
-	check "  … hub-1 sees it" eventually 15 t "peer '$HUB1' hub1 alice client | jq -e '.info.meta.team == \"qa\"'"
+	check "  … hub-1 sees it" eventually 15 t "peer '$HUB1' hub1 alice proxy | jq -e '.info.meta.team == \"qa\"'"
 	check "hub-2 sees office's meta from its config" t "peer '$HUB2' hub2 office node | jq -e '.info.meta.site == \"office\"'"
-	check "hub-1 sees bob's meta from its config" t "peer '$HUB1' hub1 bob client | jq -e '.info.meta.owner == \"bob\"'"
+	check "hub-1 sees bob's meta from its config" t "peer '$HUB1' hub1 bob proxy | jq -e '.info.meta.owner == \"bob\"'"
 }
 
 t_webproxy() {
-	section "server consoles through clients' encrypted web proxies / 通过客户端加密 web 代理访问服务端控制台"
+	section "hub consoles through proxies' encrypted web proxies / 通过 proxy 加密 web 代理访问 hub 控制台"
 	check "alice :7381 serves hub-1's console, which asks for its login" eventually 20 is "$(code https://alice:7381/api/status)" 401
 	check "  … logged in through it, hub-1's status" t "login https://alice:7381 proxy1 && get https://alice:7381 proxy1 /api/status | jq -e '.name == \"hub-1\"'"
 	check "alice :7382 serves hub-2's console" t "login https://alice:7382 proxy2 && get https://alice:7382 proxy2 /api/status | jq -e '.name == \"hub-2\"'"
@@ -503,7 +503,7 @@ t_fallback() {
 	check "  … tunnels through hub-1 work" eventually 20 echo_once alice 7305
 	check "hub-1 removes its WebSocket listener" post "$HUB1" hub1 /api/listeners/delete '{"protocol":"ws","address":":7001","path":"/tunnel"}'
 	# Only a QUIC listener's removal closes its links; kick the others.
-	check "  … and kicks lab and alice off it" t "kick '$HUB1' hub1 lab node && kick '$HUB1' hub1 alice client"
+	check "  … and kicks lab and alice off it" t "kick '$HUB1' hub1 lab node && kick '$HUB1' hub1 alice proxy"
 	check "  … lab falls back to TCP" eventually 40 protos_are "$LAB" lab hub-1 "tcp:2"
 	check "  … alice falls back to TCP" eventually 40 protos_are "$ALICE" alice hub-1 "tcp:2"
 	check "  … tunnels through hub-1 work" eventually 20 echo_once alice 7305
@@ -519,30 +519,30 @@ t_fallback() {
 	check "  … office registers with hub-1 again" eventually 60 registered "$OFFICE" office hub-1
 	check "  … the QUIC fingerprint is unchanged (kept in the config)" js "$HUB1" hub1 ".quic_fingerprint == \"$(cat "$STATE/fp-hub-1")\""
 	local id
-	id=$(peer_id "$HUB1" hub1 alice client)
-	check "hub-1 kicks lab and alice" t "kick '$HUB1' hub1 lab node && kick '$HUB1' hub1 alice client"
+	id=$(peer_id "$HUB1" hub1 alice proxy)
+	check "hub-1 kicks lab and alice" t "kick '$HUB1' hub1 lab node && kick '$HUB1' hub1 alice proxy"
 	check "  … lab comes back over QUIC" eventually 40 protos_are "$LAB" lab hub-1 "quic:2"
 	check "  … alice comes back over QUIC" eventually 40 protos_are "$ALICE" alice hub-1 "quic:2"
-	check "  … with a new peer id" t "[[ \$(peer_id '$HUB1' hub1 alice client) != $id ]]"
+	check "  … with a new peer id" t "[[ \$(peer_id '$HUB1' hub1 alice proxy) != $id ]]"
 	check "  … tunnels through hub-1 work" eventually 20 echo_once alice 7305
 	check "kicking an unknown peer is refused" refused "$HUB1" hub1 /api/peers/kick '{"id":99999}'
 }
 
 t_uplink_edit() {
-	section "servers edited on nodes and clients / 在节点和客户端上编辑服务端"
-	check "alice edits hub-2: QUIC off, passwords left empty are kept" post "$ALICE" alice /api/servers/update \
-		"$(jq -n -c --arg fp "$(cat "$STATE/fp-hub-2")" '{name: "hub-2", server: {name: "hub-2", password: "", pool_size: 3, quic_pin: $fp, endpoints: [
+	section "hubs edited on nodes and proxies / 在节点和 proxy 上编辑 hub"
+	check "alice edits hub-2: QUIC off, passwords left empty are kept" post "$ALICE" alice /api/hubs/update \
+		"$(jq -n -c --arg fp "$(cat "$STATE/fp-hub-2")" '{name: "hub-2", hub: {name: "hub-2", password: "", pool_size: 3, quic_pin: $fp, endpoints: [
 			{protocol: "quic", address: "hub-2:7443", enabled: false}, {protocol: "ws", address: "ws://hub-2:7001/tunnel", enabled: true}, {protocol: "tcp", address: "hub-2:7000", enabled: true}]}}')"
 	check "  … alice → hub-2 over WebSocket, pool of 3" eventually 40 protos_are "$ALICE" alice hub-2 "ws:3"
 	check "  … tunnels through hub-2 work" eventually 20 http_has alice 7307 "device dev-lab"
-	check "alice puts hub-2 back" post "$ALICE" alice /api/servers/update \
-		"$(jq -n -c --argjson s "$(server_json hub-2 hub-2 "$(cat "$STATE/fp-hub-2")")" '{name: "hub-2", server: ($s | .password = "" | .body_password = "")}')"
+	check "alice puts hub-2 back" post "$ALICE" alice /api/hubs/update \
+		"$(jq -n -c --argjson s "$(hub_json hub-2 hub-2 "$(cat "$STATE/fp-hub-2")")" '{name: "hub-2", hub: ($s | .password = "" | .body_password = "")}')"
 	check "  … over QUIC again" eventually 40 protos_are "$ALICE" alice hub-2 "quic:2"
-	check "lab adds a server with a wrong QUIC pin and nothing else" post "$LAB" lab /api/servers \
+	check "lab adds a hub with a wrong QUIC pin and nothing else" post "$LAB" lab /api/hubs \
 		"$(jq -n -c --arg pw "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "badpin", password: $pw, body_password: $b, pool_size: 1, quic_pin: ("00" * 32), endpoints: [{protocol: "quic", address: "hub-1:7443", enabled: true}]}')"
-	check "  … it fails on the pin" eventually 30 t "get '$LAB' lab /api/status | jq -e '.servers[] | select(.name == \"badpin\") | .state != \"registered\" and (.error // \"\" | test(\"pin|certificate\"; \"i\"))'"
-	check "lab removes it" post "$LAB" lab /api/servers/delete '{"name":"badpin"}'
-	check "removing an unknown server is refused" refused "$LAB" lab /api/servers/delete '{"name":"nope"}'
+	check "  … it fails on the pin" eventually 30 t "get '$LAB' lab /api/status | jq -e '.hubs[] | select(.name == \"badpin\") | .state != \"registered\" and (.error // \"\" | test(\"pin|certificate\"; \"i\"))'"
+	check "lab removes it" post "$LAB" lab /api/hubs/delete '{"name":"badpin"}'
+	check "removing an unknown hub is refused" refused "$LAB" lab /api/hubs/delete '{"name":"nope"}'
 }
 
 # t_peers runs fits of its own in the tester, each a node: right and wrong
@@ -551,15 +551,15 @@ t_peers() {
 	section "peers with wrong secrets, a node in the tester / 错误密钥的对端，测试容器中的节点"
 	local con=http://127.0.0.1:7180 dir=/tmp/peers
 	mkdir -p "$dir"
-	run_peer() { # NAME SERVER-JSON [SERVICES-JSON]
+	run_peer() { # NAME HUB-JSON [SERVICES-JSON]
 		jq -n --arg n "$1" --argjson s "$2" --argjson v "${3:-[]}" --arg h "$(jq -r '.tunnel.node.console.users[0].password_hash' /conf/node-lab.json)" \
-			'{tunnel: {node: {name: $n, servers: [$s], services: $v, console: {address: "127.0.0.1:7180", users: [{username: "admin", password_hash: $h}]}}}}' >"$dir/$1.json"
+			'{tunnel: {node: {name: $n, hubs: [$s], services: $v, console: {address: "127.0.0.1:7180", users: [{username: "admin", password_hash: $h}]}}}}' >"$dir/$1.json"
 		fit run -c "$dir/$1.json" >"$dir/$1.log" 2>&1 &
 		PEER_PID=$!
 		eventually 10 login "$con" tester >/dev/null
 	}
 	stop_peer() { kill "$PEER_PID" 2>/dev/null; wait "$PEER_PID" 2>/dev/null; }
-	uplink_error() { get "$con" tester /api/status | jq -e -r --arg re "$1" '.servers[0] | .state != "registered" and (.error // "" | test($re; "i"))'; }
+	uplink_error() { get "$con" tester /api/status | jq -e -r --arg re "$1" '.hubs[0] | .state != "registered" and (.error // "" | test($re; "i"))'; }
 	up() { # ADDRESS PASSWORD [BODY]
 		jq -n -c --arg a "$1" --arg p "$2" --arg b "${3:-}" '{name: "hub", endpoints: [{address: $a}], password: $p, retry_interval: "1s"} + (if $b == "" then {} else {body_password: $b} end)'
 	}
@@ -570,12 +570,12 @@ t_peers() {
 	stop_peer
 
 	run_peer intruder "$(up hub-1:7000 "$HUB_PASSWORD" wrong-body-pass)"
-	check "a wrong body password: never registers" t "sleep 5; get '$con' tester /api/status | jq -e '.servers[0].state != \"registered\"'"
+	check "a wrong body password: never registers" t "sleep 5; get '$con' tester /api/status | jq -e '.hubs[0].state != \"registered\"'"
 	check "  … hub-1 has no such peer" t "! peer '$HUB1' hub1 intruder node"
 	stop_peer
 
 	run_peer intruder "$(up hub-1:7000 "$HUB_PASSWORD")"
-	check "no body password where the server has one: never registers" t "sleep 5; get '$con' tester /api/status | jq -e '.servers[0].state != \"registered\"'"
+	check "no body password where the hub has one: never registers" t "sleep 5; get '$con' tester /api/status | jq -e '.hubs[0].state != \"registered\"'"
 	stop_peer
 
 	run_peer intruder "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "hub", endpoints: [{address: "quic://hub-1:7443"}], password: $p, body_password: $b, quic_pin: ("0" * 64)}')"
@@ -584,7 +584,7 @@ t_peers() {
 
 	socat TCP-LISTEN:7777,fork,reuseaddr EXEC:cat &
 	local echo_pid=$!
-	# Left without a name, the server is named by its address.
+	# Left without a name, the hub is named by its address.
 	run_peer tnode "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{endpoints: [{address: "ws://hub-2:7001/tunnel"}], password: $p, body_password: $b, pool_size: 1}')" \
 		'[{"name":"echo","address":"127.0.0.1:7777"}]'
 	check "a node over a WebSocket URL registers" eventually 20 t "registered '$con' tester ws://hub-2:7001/tunnel"
@@ -620,9 +620,9 @@ restart_check() {
 		'([.listeners[].protocol] | sort) == ["quic","tcp","ws"] and all(.listeners[]; .error == null) and .settings.has_password and .settings.has_body_password and .settings.has_socket_password'
 	check "hub-1 kept its QUIC certificate" js "$HUB1" hub1 ".quic_fingerprint == \"$(cat "$STATE/fp-hub-1")\""
 	check "hub-2 kept its QUIC certificate" js "$HUB2" hub2 ".quic_fingerprint == \"$(cat "$STATE/fp-hub-2")\""
-	check "lab kept its servers and services" js "$LAB" lab '([.servers[].name] | sort) == ["hub-1","hub-2"] and ([.services[].name] | sort) == ["dead","echo","http"]'
-	check "alice kept her servers, forwards and meta" js "$ALICE" alice \
-		'([.servers[].name] | sort) == ["hub-1","hub-2"] and (.forwards | length) == 7 and .meta.team == "qa"'
+	check "lab kept its hubs and services" js "$LAB" lab '([.hubs[].name] | sort) == ["hub-1","hub-2"] and ([.services[].name] | sort) == ["dead","echo","http"]'
+	check "alice kept her hubs, forwards and meta" js "$ALICE" alice \
+		'([.hubs[].name] | sort) == ["hub-1","hub-2"] and (.forwards | length) == 7 and .meta.team == "qa"'
 	check "office kept its services" js "$OFFICE" office '[.services[].name] | sort == ["echo","http"]'
 	check "lab → hub-1 over QUIC again" eventually 60 protos_are "$LAB" lab hub-1 "quic:2"
 	check "alice → hub-2 over QUIC again" eventually 60 protos_are "$ALICE" alice hub-2 "quic:2"
@@ -641,7 +641,7 @@ features() {
 		exit 1
 	}
 	t_pages
-	t_servers
+	t_hubs
 	t_links
 	t_discovery
 	t_tunnels

@@ -1,13 +1,13 @@
-// Package proto is what the tunnel's server, nodes and clients say to each
+// Package proto is what the tunnel's hub, nodes and proxies say to each
 // other over their links (package link, which documents the wire format):
 // the methods, the messages they carry, the password check of a
 // registration and the frames of a tunnel.
 //
-// A tunnel is a TCP connection a client accepted, carried to a node through
-// the server, and the TCP connection the node opened to a service for it.
+// A tunnel is a TCP connection a proxy accepted, carried to a node through
+// the hub, and the TCP connection the node opened to a service for it.
 // Its data, acknowledgements and close travel as notifies whose body is a
 // frame: the tunnel's ID, 8 bytes big-endian, and then the payload. The
-// server passes a frame on as it is, to the other end of the tunnel.
+// hub passes a frame on as it is, to the other end of the tunnel.
 package proto
 
 import (
@@ -46,41 +46,41 @@ func version() string {
 	return "fit"
 }
 
-// The types of peer a server serves.
+// The types of peer a hub serves.
 const (
-	TypeNode   = "node"
-	TypeClient = "client"
+	TypeNode  = "node"
+	TypeProxy = "proxy"
 )
 
 // Method is what a call or notify asks for: one byte on the wire.
 type Method uint8
 
-// The methods: those a peer calls on the server, those the server calls on
+// The methods: those a peer calls on the hub, those the hub calls on
 // a node, and the tunnel methods, which go both ways.
 const (
-	// MethodRegister authenticates a node or client and registers it:
+	// MethodRegister authenticates a node or proxy and registers it:
 	// RegisterReq answered with RegisterRsp. It must be the first call on a
-	// connection; the server refuses every other one until it succeeds.
-	// Every connection of a peer's pool registers, and the server takes the
+	// connection; the hub refuses every other one until it succeeds.
+	// Every connection of a peer's pool registers, and the hub takes the
 	// connections of one type and name, from however many processes, for
 	// one peer.
 	MethodRegister Method = 1
 	// MethodUpdate replaces what a registered peer told about itself: Info
 	// answered with "ok".
 	MethodUpdate Method = 2
-	// MethodNodes lists the nodes a server has: an empty request answered
-	// with NodeList. The server also notifies it, with a NodeList, to every
-	// client whenever the list changes.
+	// MethodNodes lists the nodes a hub has: an empty request answered
+	// with NodeList. The hub also notifies it, with a NodeList, to every
+	// proxy whenever the list changes.
 	MethodNodes Method = 3
-	// MethodSetNodeServices has the server set a node's services:
+	// MethodSetNodeServices has the hub set a node's services:
 	// SetServicesReq answered with the node's new Info.
 	MethodSetNodeServices Method = 4
-	// MethodPing measures a peer's link to the server: a peer calls it
-	// every few seconds with a PingReq, which tells the server what the
-	// peer measured, and the server answers with a PingRsp. The time the
+	// MethodPing measures a peer's link to the hub: a peer calls it
+	// every few seconds with a PingReq, which tells the hub what the
+	// peer measured, and the hub answers with a PingRsp. The time the
 	// call takes is the link's round trip.
 	MethodPing Method = 5
-	// MethodKick tells a peer the server is closing its connection, with the
+	// MethodKick tells a peer the hub is closing its connection, with the
 	// reason as the body.
 	MethodKick Method = 6
 
@@ -91,9 +91,9 @@ const (
 	// the node's new Info.
 	MethodNodeSetServices Method = 17
 
-	// MethodTunnelOpen opens a tunnel: a client calls it on the server with
-	// a TunnelOpenReq, and the server calls it on the node with the same
-	// request, Client filled in. Both answer with a TunnelOpenRsp.
+	// MethodTunnelOpen opens a tunnel: a proxy calls it on the hub with
+	// a TunnelOpenReq, and the hub calls it on the node with the same
+	// request, Proxy filled in. Both answer with a TunnelOpenRsp.
 	MethodTunnelOpen Method = 32
 	// MethodTunnelData carries a frame of the tunnel's bytes.
 	MethodTunnelData Method = 33
@@ -150,7 +150,7 @@ type Service struct {
 	Desc string `json:"desc,omitempty"`
 }
 
-// Info is what a peer tells the server about itself.
+// Info is what a peer tells the hub about itself.
 type Info struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
@@ -180,7 +180,7 @@ func (info *Info) FindService(name string) (Service, bool) {
 }
 
 // RegisterReq authenticates and registers a connection of a peer's pool.
-// MAC is the HMAC-SHA256, keyed with the server's password, of the peer's
+// MAC is the HMAC-SHA256, keyed with the hub's password, of the peer's
 // type and name, Time and Nonce; see Sign.
 type RegisterReq struct {
 	Info  Info   `json:"info"`
@@ -191,21 +191,21 @@ type RegisterReq struct {
 
 // RegisterRsp answers a registration.
 type RegisterRsp struct {
-	// Peer is the peer's number on the server, for as long as any of its
+	// Peer is the peer's number on the hub, for as long as any of its
 	// connections lasts.
 	Peer uint32 `json:"peer"`
-	// Conn is the connection's number on the server, which no other
-	// connection has while it lasts. The tunnels a client opens over it
+	// Conn is the connection's number on the hub, which no other
+	// connection has while it lasts. The tunnels a proxy opens over it
 	// have it in their IDs' high 32 bits.
 	Conn uint32 `json:"conn"`
 	// Index is the connection's place among the peer's connections: the
 	// lowest that none of them holds, as a Unix file descriptor is.
 	Index int `json:"index"`
-	// Server is the server's name.
-	Server string `json:"server"`
+	// Hub is the hub's name.
+	Hub string `json:"hub"`
 }
 
-// NodeView is a node as the server lists it to clients.
+// NodeView is a node as the hub lists it to proxies.
 type NodeView struct {
 	Info  Info      `json:"info"`
 	Addr  string    `json:"addr"`
@@ -213,43 +213,43 @@ type NodeView struct {
 	NodeLatency
 }
 
-// NodeLatency is how fast a node's links are: to the server, and to each of
+// NodeLatency is how fast a node's links are: to the hub, and to each of
 // its services.
 type NodeLatency struct {
-	// RTT is the round trip between the server and the node.
+	// RTT is the round trip between the hub and the node.
 	RTT latency.Stats `json:"rtt"`
 	// ServiceRTT is, by service name, how long the node's connects to the
 	// service took.
 	ServiceRTT map[string]latency.Stats `json:"serviceRtt,omitempty"`
 }
 
-// PingReq is what a peer measured: its round trips to the server and, for
+// PingReq is what a peer measured: its round trips to the hub and, for
 // a node, its connects to its services.
 type PingReq struct {
 	RTT        latency.Stats            `json:"rtt"`
 	ServiceRTT map[string]latency.Stats `json:"serviceRtt,omitempty"`
 }
 
-// PingRsp answers a ping. A client is told how fast each node's links are,
-// by node name, which it weighs, with its own round trip to the server, to
-// pick the server a tunnel goes through.
+// PingRsp answers a ping. A proxy is told how fast each node's links are,
+// by node name, which it weighs, with its own round trip to the hub, to
+// pick the hub a tunnel goes through.
 type PingRsp struct {
 	Nodes map[string]NodeLatency `json:"nodes,omitempty"`
 }
 
-// NodeList is the nodes of a server.
+// NodeList is the nodes of a hub.
 type NodeList struct {
-	Server string     `json:"server"`
-	Nodes  []NodeView `json:"nodes"`
-	// Epoch is the server's, picked when it starts, and Version counts the
-	// changes of its nodes, so that a client keeps the newest of the lists
+	Hub   string     `json:"hub"`
+	Nodes []NodeView `json:"nodes"`
+	// Epoch is the hub's, picked when it starts, and Version counts the
+	// changes of its nodes, so that a proxy keeps the newest of the lists
 	// it is sent: the answer to a call may arrive after a notify of a later
 	// change. Zero when they are not counted.
 	Epoch   uint64 `json:"epoch,omitempty"`
 	Version uint64 `json:"version,omitempty"`
 }
 
-// Older reports whether l is older than cur, a list from the same server:
+// Older reports whether l is older than cur, a list from the same hub:
 // both counted, in the same epoch, l with the lower version.
 func (l *NodeList) Older(cur *NodeList) bool {
 	return cur != nil && l.Version != 0 && cur.Version != 0 && l.Epoch == cur.Epoch && l.Version < cur.Version
@@ -266,9 +266,9 @@ type TunnelOpenReq struct {
 	ID      uint64 `json:"id"`
 	Node    string `json:"node"`
 	Service string `json:"service"`
-	// Client is the name of the client that opens it, which the server
+	// Proxy is the name of the proxy that opens it, which the hub
 	// fills in for the node.
-	Client string `json:"client,omitempty"`
+	Proxy string `json:"proxy,omitempty"`
 }
 
 // TunnelOpenRsp answers a TunnelOpenReq once the node is connected to the
@@ -280,7 +280,7 @@ type TunnelOpenRsp struct {
 }
 
 // TunnelID is the ID of the seq-th tunnel opened over the connection the
-// server numbered conn.
+// hub numbered conn.
 func TunnelID(conn uint32, seq uint32) uint64 { return uint64(conn)<<32 | uint64(seq) }
 
 // TunnelConn is the connection number in a tunnel's ID.
@@ -308,7 +308,7 @@ func ParseAck(payload []byte) (int64, error) {
 	return int64(binary.BigEndian.Uint64(payload)), nil
 }
 
-// MaxClockSkew is how far a registration's Time may be from the server's
+// MaxClockSkew is how far a registration's Time may be from the hub's
 // clock.
 const MaxClockSkew = 5 * time.Minute
 
@@ -348,12 +348,12 @@ func (v *Verifier) Verify(req *RegisterReq) error {
 	if req.Info.Name == "" {
 		return errors.New("tunnel: a peer needs a name")
 	}
-	if req.Info.Type != TypeNode && req.Info.Type != TypeClient {
+	if req.Info.Type != TypeNode && req.Info.Type != TypeProxy {
 		return fmt.Errorf("tunnel: unknown peer type %q", req.Info.Type)
 	}
 	now := time.Now()
 	if d := now.Sub(time.Unix(req.Time, 0)); d > MaxClockSkew || d < -MaxClockSkew {
-		return errors.New("tunnel: registration time too far from the server's clock")
+		return errors.New("tunnel: registration time too far from the hub's clock")
 	}
 	want := mac(req, v.Password)
 	if len(req.Nonce) < 16 || len(req.Nonce) > 128 || !hmac.Equal([]byte(want), []byte(req.MAC)) {

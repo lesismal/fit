@@ -42,7 +42,7 @@ func init() {
 }
 
 // env is a Node on an engine of its own, with the member its pages and
-// servers edit.
+// hubs edit.
 type env struct {
 	t *testing.T
 	e *fib.Engine
@@ -175,9 +175,9 @@ func freeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// server is a tunnel server that registers whatever links to it, and
+// hub is a tunnel hub that registers whatever links to it, and
 // hands the tests its links to call the node over.
-type server struct {
+type hub struct {
 	t     *testing.T
 	l     transport.Listener
 	links chan *link.Link
@@ -189,14 +189,14 @@ type server struct {
 	conn    uint32
 }
 
-func newServer(t *testing.T, e *fib.Engine) *server {
+func newHub(t *testing.T, e *fib.Engine) *hub {
 	t.Helper()
-	s := &server{t: t, links: make(chan *link.Link, 16), updates: make(chan proto.Info, 16)}
+	s := &hub{t: t, links: make(chan *link.Link, 16), updates: make(chan proto.Info, 16)}
 	r := link.NewRouter()
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
 		s.mu.Lock()
 		s.conn++
-		rsp := &proto.RegisterRsp{Peer: 1, Conn: s.conn, Server: "fake"}
+		rsp := &proto.RegisterRsp{Peer: 1, Conn: s.conn, Hub: "fake"}
 		s.mu.Unlock()
 		select {
 		case s.links <- l:
@@ -235,7 +235,7 @@ func newServer(t *testing.T, e *fib.Engine) *server {
 }
 
 // link waits for a link of the node to register.
-func (s *server) link() *link.Link {
+func (s *hub) link() *link.Link {
 	s.t.Helper()
 	select {
 	case l := <-s.links:
@@ -246,8 +246,8 @@ func (s *server) link() *link.Link {
 	}
 }
 
-// uplinkJSON is a server member of a node, to the fake server s.
-func (s *server) uplinkJSON(extra string) string {
+// uplinkJSON is a hub member of a node, to the fake hub s.
+func (s *hub) uplinkJSON(extra string) string {
 	return fmt.Sprintf(`{"name": "hub", "endpoints": [{"address": %q}], "password": "pw", "pool_size": 1, "retry_interval": "100ms", "ping_interval": "200ms"%s}`, s.l.URL(), extra)
 }
 

@@ -7,9 +7,9 @@
     }
   },
   "tunnel": {
-    "client": {
+    "proxy": {
       "name": "bob",
-      "servers": [
+      "hubs": [
         {
           "name": "hub-2",
           "endpoints": [

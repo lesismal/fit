@@ -1,5 +1,5 @@
-// Package tunnel is the end of a tunnel that nodes and clients share: a TCP
-// connection of their own, joined to the link to the server that carries
+// Package tunnel is the end of a tunnel that nodes and proxies share: a TCP
+// connection of their own, joined to the link to the hub that carries
 // the tunnel's frames.
 //
 // Each end sends no more than proto.Window bytes the other has not
@@ -40,8 +40,8 @@ type Link interface {
 type Endpoint struct {
 	ID uint64
 	// Node and Service are where the tunnel goes, Addr the service's
-	// address, and Peer the other party: the client's name at a node, the
-	// listener's address at a client. Addr changes only through SetAddr
+	// address, and Peer the other party: the proxy's name at a node, the
+	// listener's address at a proxy. Addr changes only through SetAddr
 	// once the end is in a table.
 	Node, Service, Addr, Peer string
 	Created                   time.Time
@@ -309,7 +309,7 @@ func (h *Handler) OnClose(c *fib.Connection, err error) {
 	}
 }
 
-// Table is the ends of the tunnels the links to one server carry.
+// Table is the ends of the tunnels the links to one hub carry.
 type Table struct {
 	// Limit, when set, bounds the tunnels open: those of every table that
 	// shares it.
