@@ -124,6 +124,24 @@ func startFake(t *testing.T) *fakeServer {
 			w.Header().Set("Location", "/res/big")
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(strings.Repeat("a=x\r\n", 20000)))
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/noloc"):
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/badloc"):
+			w.Header().Set("Location", ":bad")
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/cut"):
+			// The answer is cut short.
+			w.Header().Set("Content-Length", "1000")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("v=0\r\n"))
+			w.(http.Flusher).Flush()
+			panic(http.ErrAbortHandler)
+		case r.Method == "OPTIONS":
+			w.Header().Set("Accept-Post", "application/sdp")
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "GET":
+			w.Header().Add("Link", `<`+r.URL.Path+`/more>; rel="more"`)
+			_, _ = w.Write([]byte("got " + r.URL.Path))
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/nocand"):
 			w.Header().Set("Location", "/res/nocand")
 			w.WriteHeader(http.StatusCreated)

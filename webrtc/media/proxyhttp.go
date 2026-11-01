@@ -202,10 +202,7 @@ func (h *ProxyHandler) session(c *fibhttp.Context, p *Proxy, s *proxySession, ba
 		h.patch(c, p, s, b, target, base)
 	default:
 		h.forward(c, b, target, nil, func(x *exchange, resp *stdhttp.Response, body []byte, err error) {
-			if err == nil {
-				setLinks(resp.Header, resp.Header["Link"], x.out.URL, s.Location, base)
-			}
-			h.passOn(x, resp, body, err)
+			h.passOnLinked(x, resp, body, err, s.Location, base)
 		})
 	}
 }
@@ -237,10 +234,7 @@ func (h *ProxyHandler) patch(c *fibhttp.Context, p *Proxy, s *proxySession, b *u
 				return
 			}
 		}
-		if err == nil {
-			setLinks(resp.Header, resp.Header["Link"], x.out.URL, s.Location, base)
-		}
-		h.passOn(x, resp, body, err)
+		h.passOnLinked(x, resp, body, err, s.Location, base)
 	})
 }
 
@@ -276,6 +270,19 @@ func (h *ProxyHandler) passOn(x *exchange, resp *stdhttp.Response, body []byte, 
 		return
 	}
 	_ = x.c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: responseHeader(resp.Header), Body: body})
+}
+
+// passOnLinked is passOn for a response about a session, its URL loc at
+// the media server and base in fit: its Links are rewritten by setLinks,
+// which passOn would drop.
+func (h *ProxyHandler) passOnLinked(x *exchange, resp *stdhttp.Response, body []byte, err error, loc, base string) {
+	if err != nil {
+		h.passOn(x, resp, body, err)
+		return
+	}
+	hdr := responseHeader(resp.Header)
+	setLinks(hdr, resp.Header["Link"], x.out.URL, loc, base)
+	_ = x.c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: hdr, Body: body})
 }
 
 func isTimeout(err error) bool {
