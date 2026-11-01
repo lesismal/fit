@@ -268,7 +268,7 @@ func TestConsoleSessions(t *testing.T) {
 		}
 	}
 	// A cookie made up is no session.
-	b.c.Jar.SetCookies(mustURL(f.url), []*http.Cookie{{Name: sessionCookie, Value: "made-up"}})
+	b.c.Jar.SetCookies(mustURL(f.url), []*http.Cookie{{Name: f.console.cookie, Value: "made-up"}})
 	if code, _, _ := b.do("GET", "/api/session", ""); code != http.StatusUnauthorized {
 		t.Errorf("a made-up cookie: %d", code)
 	}

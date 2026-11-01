@@ -59,7 +59,8 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 type Options struct {
 	// Config is the role's console member.
 	Config *config.RoleConsole
-	// Cookie names the session's cookie, as fit_tunnel_hub.
+	// Cookie names the session's cookie, as fit_tunnel_hub; the console's
+	// port is added to it, as fit_tunnel_hub_7100.
 	Cookie string
 	// Pages are the role's files: index.html, and what it loads, served
 	// as they are, from memory.
@@ -156,6 +157,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	if addrs, err := engine.BindingAddrs(c.index); err == nil && len(addrs) > 0 {
 		c.addr = addrs[0]
 	}
+	c.cookie = login.CookieName(o.Cookie, c.addr)
 	for range Workers {
 		c.workers.Go(c.work)
 	}

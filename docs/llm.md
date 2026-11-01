@@ -813,8 +813,9 @@ Logins work as `admin.console`'s, through the same code; [the console guide](con
 users, sessions and lockouts. Passwords are checked with bcrypt on the console's own pool (4
 running, 64 waiting, at most 2 checks at once); a task that waits past 30 seconds gets 504, and
 one past the queue 503. After 5 failed logins from an address within 15 minutes, the address is
-refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_llm_hub`,
-`fit_llm_node` or `fit_llm_proxy`; HttpOnly, SameSite=Strict, Secure over TLS). Every API
+refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_llm_hub_<port>`,
+`fit_llm_node_<port>` or `fit_llm_proxy_<port>`, with the console's port, since a browser sends a
+host's cookies to all its ports, so that consoles on one host keep their logins apart; HttpOnly, SameSite=Strict, Secure over TLS). Every API
 request but a GET or HEAD carries the session's CSRF token in `X-Fit-Csrf`, and a request whose
 `Origin` is another site is refused with 403. A request body is at most 1 MiB and its header 16 KiB.
 

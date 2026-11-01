@@ -127,7 +127,7 @@ func TestConsoleRequests(t *testing.T) {
 	}
 	// An unknown session's cookie is not logged in.
 	req, _ := http.NewRequest("GET", b.base+"/api/session", nil)
-	req.AddCookie(&http.Cookie{Name: "fit_test", Value: "nope"})
+	req.AddCookie(&http.Cookie{Name: c.cookie, Value: "nope"})
 	if resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req); err != nil || resp.StatusCode != 401 {
 		t.Errorf("an unknown session: %v %v", resp, err)
 	} else {
@@ -367,5 +367,30 @@ func TestLimitHandlerCloses(t *testing.T) {
 			t.Errorf("%s: %d connections counted", name, n)
 		}
 		_ = engine.RemoveBinding(i)
+	}
+}
+
+// Two consoles of one role on one host keep their logins apart: a browser
+// sends a host's cookies to each of its ports, so each console's cookie
+// carries its port.
+func TestConsolesShareAHost(t *testing.T) {
+	engine := newEngine(t)
+	var bs []*browser
+	jar, _ := cookiejar.New(nil)
+	for range 2 {
+		c, err := Start(engine, options(t, discardLog(t), nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Stop(context.Background())
+		b := newBrowser(t, strings.TrimSuffix(c.URL(), "/"), nil)
+		b.c.Jar = jar // one browser
+		b.login()
+		bs = append(bs, b)
+	}
+	for i, b := range bs {
+		if code, _ := b.do("GET", "/api/session", ""); code != 200 {
+			t.Errorf("console %d lost its login: %d", i, code)
+		}
 	}
 }

@@ -50,6 +50,7 @@ type Console struct {
 	schema []byte
 	logins *login.Logins
 	secure bool
+	cookie string // sessionCookie and the port: browsers share cookies among a host's ports
 	logf   func(format string, args ...any)
 
 	ln   net.Listener
@@ -90,6 +91,7 @@ func StartConsole(c *config.Console, a *config.Admin, configs *Configs, report f
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs.ln = newLimitListener(ln, c.Conns())
+	cs.cookie = login.CookieName(sessionCookie, ln.Addr())
 	if tlsConf != nil {
 		cs.ln = tls.NewListener(cs.ln, tlsConf)
 	}
@@ -205,7 +207,7 @@ func (cs *Console) authed(next http.Handler) http.Handler {
 
 // lookup returns the live session r's cookie names, a copy, or nil.
 func (cs *Console) lookup(r *http.Request) *login.Session {
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(cs.cookie)
 	if err != nil {
 		return nil
 	}
@@ -255,7 +257,7 @@ func (cs *Console) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, s := cs.logins.Start(body.Username)
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: cs.secure, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: cs.cookie, Value: token, Path: "/", HttpOnly: true, Secure: cs.secure, SameSite: http.SameSiteStrictMode})
 	cs.logf("console: %q logged in from %s", body.Username, addr)
 	writeJSON(w, http.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
 }
@@ -269,12 +271,12 @@ func clientAddr(r *http.Request) string {
 }
 
 func (cs *Console) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := r.Cookie(cs.cookie); err == nil {
 		if s, ok := cs.logins.End(c.Value); ok {
 			cs.logf("console: %q logged out", s.User)
 		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: cs.secure, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: cs.cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: cs.secure, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -2,6 +2,7 @@ package login
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -109,5 +110,21 @@ func TestLockout(t *testing.T) {
 	}
 	if n := l.Addresses(); n > MaxAddresses {
 		t.Errorf("%d addresses kept", n)
+	}
+}
+
+func TestCookieName(t *testing.T) {
+	for _, tc := range []struct {
+		addr net.Addr
+		want string
+	}{
+		{&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2020}, "fit_console_2020"},
+		{&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}, "fit_console"},
+		{nil, "fit_console"},
+		{&net.UnixAddr{Name: "/run/fit.sock", Net: "unix"}, "fit_console"},
+	} {
+		if got := CookieName("fit_console", tc.addr); got != tc.want {
+			t.Errorf("%v: %q, want %q", tc.addr, got, tc.want)
+		}
 	}
 }

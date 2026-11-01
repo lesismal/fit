@@ -16,6 +16,8 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -235,4 +237,14 @@ func (l *Logins) forgetFailures(now time.Time) {
 	if len(l.fails) >= MaxAddresses {
 		delete(l.fails, oldest)
 	}
+}
+
+// CookieName is a console's session cookie: name with the port addr listens
+// on, since a browser sends a host's cookies to every port of it, and two
+// consoles on one host would otherwise end each other's logins.
+func CookieName(name string, addr net.Addr) string {
+	if a, ok := addr.(*net.TCPAddr); ok && a.Port != 0 {
+		return name + "_" + strconv.Itoa(a.Port)
+	}
+	return name
 }

@@ -166,7 +166,8 @@ refuses a `password_hash` that is not a bcrypt hash, an empty user name and a na
   taken does not tell names apart; at most two checks run at once, the rest wait.
 - **Lockouts.** A client address that fails 5 times in 15 minutes is refused for 15 minutes, with
   `429` and `Retry-After`. The table of addresses holds 4,096 at most.
-- **Sessions.** A login gives a session: 32 random bytes in the cookie `fit_console`, `HttpOnly`,
+- **Sessions.** A login gives a session: 32 random bytes in the cookie `fit_console_<port>` (the console's port, so that consoles
+  of several fits on one host keep their logins apart), `HttpOnly`,
   `SameSite=Strict`, and `Secure` over TLS. The console keeps only its SHA-256, and ends it after
   `session_timeout` without a request, after `session_lifetime` in all, at logout, or when
   `max_sessions` is passed and it is the oldest. Sessions are in memory: a restart logs everyone

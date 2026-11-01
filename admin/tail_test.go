@@ -108,7 +108,7 @@ func TestConsoleTLS(t *testing.T) {
 	}
 	var secure bool
 	for _, ck := range resp.Cookies() {
-		secure = secure || ck.Name == sessionCookie && ck.Secure
+		secure = secure || strings.HasPrefix(ck.Name, sessionCookie+"_") && ck.Secure
 	}
 	if !secure {
 		t.Error("the session cookie is not Secure")
