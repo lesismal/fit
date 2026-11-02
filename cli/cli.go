@@ -25,8 +25,9 @@ Commands:
 	build      build a fit with more modules, or fewer, as fit build -h says
 	version    print the versions of fit, fib and Go
 	hash-password
-	           print the bcrypt hash of the password read from standard input,
-	           for basic_auth and the console's users
+	           print the bcrypt hash of a password, asked for twice, masked, on
+	           a terminal, or read from standard input, for basic_auth and the
+	           console's users
 	store      export or import the config kept encrypted in admin.store
 	help       print this help
 `

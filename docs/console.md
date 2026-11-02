@@ -156,12 +156,16 @@ config files again.
 ## Users and fit hash-password
 
 A user is a name and a bcrypt hash; a password is never written in clear text. `fit hash-password`
-reads a password from the first line of standard input, never from its arguments, which other users
-of the machine could see, and prints its hash:
+prints a password's hash. From a terminal it asks for the password twice, showing a `*` for each
+character typed, and stops if the two differ; otherwise it reads the first line of standard input.
+It never takes the password from its arguments, which other users of the machine could see:
 
 ```sh
 $ fit hash-password
-correct horse battery staple
+Password: ****************************
+Confirm password: ****************************
+$2a$10$...
+$ echo 'correct horse battery staple' | fit hash-password
 $2a$10$...
 ```
 

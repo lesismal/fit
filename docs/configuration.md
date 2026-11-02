@@ -158,8 +158,8 @@ converts between the formats, merging several files into one:
 | a directory | one file | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` prints the config's JSON Schema, for editors to complete and check JSON and YAML as
-they are written; `fit schema -template fit` prints the .conf template. `fit hash-password` reads a
-password from standard input and prints its bcrypt hash, for `basic_auth`'s users and the
+they are written; `fit schema -template fit` prints the .conf template. `fit hash-password` asks for a
+password twice, masked, from a terminal (or reads it from standard input) and prints its bcrypt hash, for `basic_auth`'s users and the
 console's.
 
 ## Changing a running config

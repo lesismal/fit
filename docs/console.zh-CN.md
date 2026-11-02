@@ -132,12 +132,15 @@ TLS 可选，例如经 SSH 隧道访问的控制台。
 
 ## 用户与 fit hash-password
 
-用户是一个名字和一个 bcrypt 哈希；密码从不以明文写入。`fit hash-password` 从标准输入的第一行读取密码，从不从参数读取
-（机器上的其他用户能看到参数），并输出它的哈希：
+用户是一个名字和一个 bcrypt 哈希；密码从不以明文写入。`fit hash-password` 输出密码的哈希。在终端中，它提示输入两次密码，
+每输入一个字符显示一个 `*`，两次不一致则退出；否则从标准输入的第一行读取密码。它从不从参数读取密码（机器上的其他用户能看到参数）：
 
 ```sh
 $ fit hash-password
-correct horse battery staple
+Password: ****************************
+Confirm password: ****************************
+$2a$10$...
+$ echo 'correct horse battery staple' | fit hash-password
 $2a$10$...
 ```
 
