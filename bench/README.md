@@ -338,7 +338,7 @@ fitbench run, named by its workload and level (`w1-api-500.json`), the plan deri
 (`plan.txt`, `plan-derived.json`), and the report, `report.md` and `report.zh-CN.md`, with the
 tables it cites in `tables.md`. fitbench run alone writes `results/run-<time>/results.json`, which
 git ignores. The latest report is
-[the 2026-10-30 plan, fit after the 2026-10-27 analysis's memory and throughput work, with the host's own kernel settings](results/plan-2026-10-30/report.md). To
+[the 2026-11-02 plan, fit on fib 4b24cf3 after the W1 regression's fix and the proxy's allocation work](results/plan-2026-11-02/report.md). To
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
