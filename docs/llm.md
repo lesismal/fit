@@ -2,7 +2,7 @@
 
 [English](llm.md) | [简体中文](llm.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [llm-hub](../examples/llm-hub/fit.conf), [llm-node](../examples/llm-node/fit.conf), [llm-proxy](../examples/llm-proxy/fit.conf).
+Config examples, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [llm-hub](https://github.com/lesismal/fit-examples/blob/main/llm-hub/fit.conf), [llm-node](https://github.com/lesismal/fit-examples/blob/main/llm-node/fit.conf), [llm-proxy](https://github.com/lesismal/fit-examples/blob/main/llm-proxy/fit.conf).
 
 The LLM feature (`llm` in the config) shares AI models among machines and serves them to agents.
 It is three roles of fit, each set by a member of the

@@ -109,7 +109,7 @@ should touch as few of these as it can.
 | `bench` | the benchmark harness, configs for nginx, Caddy, Traefik and fit, results |
 | `test/e2e` | end-to-end and conformance suites |
 | `internal/fibtest` | running fib handlers in tests without a network |
-| `examples` | example configs |
+| `examples` | example configs; moved to [fit-examples](https://github.com/lesismal/fit-examples) |
 
 ## Index
 

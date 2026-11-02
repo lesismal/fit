@@ -2,7 +2,7 @@
 
 [English](llm.md) | [简体中文](llm.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[llm-hub](../examples/llm-hub/fit.conf), [llm-node](../examples/llm-node/fit.conf), [llm-proxy](../examples/llm-proxy/fit.conf)。
+配置示例（.conf 格式，在 [fit-examples](https://github.com/lesismal/fit-examples) 中）：[llm-hub](https://github.com/lesismal/fit-examples/blob/main/llm-hub/fit.conf), [llm-node](https://github.com/lesismal/fit-examples/blob/main/llm-node/fit.conf), [llm-proxy](https://github.com/lesismal/fit-examples/blob/main/llm-proxy/fit.conf)。
 
 LLM 功能（配置中的 `llm`）在多台机器之间共享 AI 模型，并提供给 agent 调用。它是 fit 的三个角色，各由配置中的一个成员开启：
 

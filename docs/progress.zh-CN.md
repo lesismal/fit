@@ -2759,7 +2759,7 @@ context。`TestBodyOverNetwork` 经 HTTP/1.1 发送恰好达到和超过限制�
   `provider/standard` 导入 fit 自带的四种，因此构建时可以去掉它们；引用了二进制文件所没有的种类的配置会被拒绝，并列出
   它有的种类。
 - **模块模板**：[docs/modules.zh-CN.md](modules.zh-CN.md)（及其英文版）说明模块是什么、参数及其 tag、`Provision`、
-  `Cleanup` 和 `Drain`、它遵守的规则、如何测试以及如何编译进来；[examples/module/hello](../examples/module/hello)
+  `Cleanup` 和 `Drain`、它遵守的规则、如何测试以及如何编译进来；[examples/module/hello](https://github.com/lesismal/fit-examples/tree/main/module/hello)
   是一个独立的模块（有自己的 `go.mod`），是给其路由的响应加上 `X-Hello` 的中间件。
 - **测试**：`TestBuildWithModule` 从检出的源码构建带示例模块、不带 provider 的 fit，检查 `fit version` 显示
   `test+build`，校验并运行使用该模块的配置（响应带 `X-Hello`），并确认使用 Docker provider 的配置被拒绝；没有 go 命令
@@ -3550,6 +3550,22 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
   角色的一个 fit。
 - **基准测试**：无；控制面（规则 21）。
 - **不足**：schema 的字段说明在中文页面上仍为英文；配置启动的角色在 `WB.refresh` 后显示在菜单中，配置页面保存时会调用它。
+
+### 示例迁到 fit-examples — 已完成
+
+用户的要求：配置示例放到 [lesismal/fit-examples](https://github.com/lesismal/fit-examples)，每项功能一个目录，
+先写 .conf 格式、单独一个文件；YAML 和 JSON 以后再做，写进该仓库的计划。
+
+- **fit-examples**：`examples/` 的每个目录连同其 `fit.conf` 和它引用的文件（`static/www`、CA 文件、WASM 插件）；
+  Docker Compose 示例的配置改成 .conf；Compose 和 Kubernetes 示例从 `FIT_DIR` 指定的 fit 源码目录构建 fit；
+  模块模板改为 `github.com/lesismal/fit-examples/module/hello`。它的测试对每个 `fit.conf` 运行 `fit validate`；
+  CI 分别用它固定的 fit 和 fit 的 `main` 运行，并运行 Compose 和 kind 示例。`fit.yaml` 和 `fit.json` 是它计划中的
+  下一步；旧版本保存在本仓库这次改动之前的历史中。
+- **fit**：`examples/` 已删除。测试用到的配置移到 `cli/testdata`（hello、proxy）；`TestBuildWithModule` 构建的模块
+  移到 `plugin/build/testdata/hello`。检查示例三种格式一致的测试随示例移走，待 fit-examples 有了 YAML 和 JSON 后在那里恢复。
+  CI 新增 `examples` 任务，用本仓库的 fit 校验 fit-examples 并把其模块编进去；packaging 和 Helm 任务用本仓库构建的镜像
+  运行它的 Compose 和 Kubernetes 示例。文档改为链接到 fit-examples。
+- **基准测试**：无，未改动代码路径。
 
 ## 给后续迭代的说明
 

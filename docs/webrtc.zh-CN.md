@@ -2,7 +2,7 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf)。
+配置示例（.conf 格式，在 [fit-examples](https://github.com/lesismal/fit-examples) 中）：[webrtc-turn](https://github.com/lesismal/fit-examples/blob/main/webrtc-turn/fit.conf), [whip-whep](https://github.com/lesismal/fit-examples/blob/main/whip-whep/fit.conf), [webrtc-proxy](https://github.com/lesismal/fit-examples/blob/main/webrtc-proxy/fit.conf)。
 
 fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）：
 TURN 服务器；以 fit 为媒体服务器的 WHIP 和 WHEP；以及 fit 作为其他媒体服务器的前端，代理它们的 WHIP 和 WHEP，

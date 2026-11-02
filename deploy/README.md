@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 fit is one static binary with one config file. This directory packages it three ways: a container
-image, a Helm chart for Kubernetes, and systemd units. [examples](../examples/README.md) runs the
+image, a Helm chart for Kubernetes, and systemd units. [fit-examples](https://github.com/lesismal/fit-examples) runs the
 image with Docker Compose and the chart in a kind cluster, and CI runs each as written here.
 
 ## The container image
@@ -16,7 +16,7 @@ request on port 8080.
 
 ```bash
 docker build -t fit .
-docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:ro" fit
+docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -c /etc/fit/fit.conf
 ```
 
 - **Your config** goes at `/etc/fit/fit.json`, or anywhere with `run -c <path>` as the command.
@@ -97,7 +97,7 @@ The rest (`resources`, `nodeSelector`, `tolerations`, `affinity`, `podSecurityCo
 [values.yaml](helm/fit/values.yaml).
 
 Until a release publishes the image, build it and load it into the cluster, as
-[the Kubernetes example](../examples/kubernetes/README.md) does with kind:
+[the Kubernetes example](https://github.com/lesismal/fit-examples/blob/main/kubernetes/README.md) does with kind:
 `--set image.repository=fit --set image.tag=local`.
 
 ## systemd
@@ -111,7 +111,7 @@ sudo install -m 0755 bin/fit /usr/local/bin/fit
 sudo install -m 0644 deploy/systemd/fit.service deploy/systemd/fit@.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/fit.sysusers /usr/lib/sysusers.d/fit.conf
 sudo systemd-sysusers
-sudo install -D -m 0644 examples/hello/fit.json /etc/fit/fit.json
+sudo install -D -m 0644 deploy/docker/fit.json /etc/fit/fit.json
 sudo systemctl daemon-reload
 sudo systemctl enable --now fit
 ```

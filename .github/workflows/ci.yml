@@ -268,6 +268,32 @@ jobs:
             ${{ runner.temp }}/report.yaml
             ${{ runner.temp }}/fit.log
 
+  # The config examples, in lesismal/fit-examples, validated with the fit of
+  # this checkout rather than the one they pin, and the template module
+  # built into it.
+  examples:
+    name: Examples (fit-examples)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/checkout@v5
+        with:
+          repository: lesismal/fit-examples
+          path: .fit-examples
+      - name: Validate the examples
+        working-directory: .fit-examples
+        run: |
+          go mod edit -replace "github.com/lesismal/fit=$GITHUB_WORKSPACE"
+          go mod tidy
+          go test -count=1 ./...
+      - name: Build fit with the example module
+        run: |
+          go run ./cmd/fit build -fit . -with "github.com/lesismal/fit-examples/module/hello=.fit-examples/module/hello" -o "$RUNNER_TEMP/fit-hello"
+          "$RUNNER_TEMP/fit-hello" version
+
   # The container image with the Docker Compose example, and the systemd
   # units, each run as deploy/README.md and the examples' READMEs say (I66).
   packaging:
@@ -278,8 +304,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/checkout@v5
+        with:
+          repository: lesismal/fit-examples
+          path: .fit-examples
       - name: Docker Compose example
-        run: examples/docker-compose/test.sh
+        run: FIT_DIR="$GITHUB_WORKSPACE" .fit-examples/docker-compose/test.sh
       - name: systemd units
         run: |
           go build -o "$RUNNER_TEMP/fit" ./cmd/fit
@@ -304,8 +334,12 @@ jobs:
           fi
       - name: helm lint
         run: helm lint deploy/helm/fit
+      - uses: actions/checkout@v5
+        with:
+          repository: lesismal/fit-examples
+          path: .fit-examples
       - name: Kubernetes example
-        run: examples/kubernetes/test.sh
+        run: FIT_DIR="$GITHUB_WORKSPACE" .fit-examples/kubernetes/test.sh
 
   fuzz:
     name: Fuzz (short)

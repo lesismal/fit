@@ -73,7 +73,7 @@ func TestBuildFlags(t *testing.T) {
 
 func TestAdaptFlags(t *testing.T) {
 	dir := t.TempDir()
-	hello := "../examples/hello/fit.json"
+	hello := "testdata/hello.json"
 	for _, tt := range []struct {
 		args []string
 		code int

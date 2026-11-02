@@ -4,7 +4,7 @@
 
 模块是为 fit 增加处理器或中间件的 Go 包。它用 `fit build` 编译进二进制文件，就像 xcaddy 把插件编进 Caddy：
 对速度要紧的代码，它像 fit 自带的模块一样在 fib 的 worker 上运行，与请求之间没有任何中间层。
-[`examples/module/hello`](../examples/module/hello) 是一个模板：一个给每个响应加上字段的中间件，带有自己的
+fit-examples 中的 [`module/hello`](https://github.com/lesismal/fit-examples/tree/main/module/hello) 是一个模板：一个给每个响应加上字段的中间件，带有自己的
 `go.mod`。
 
 ## 模块是什么

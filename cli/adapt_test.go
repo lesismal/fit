@@ -13,7 +13,7 @@ import (
 // TestYAMLConfig checks that fit validate takes YAML, and points its errors
 // at the YAML.
 func TestYAMLConfig(t *testing.T) {
-	if code, stdout, stderr := runFit("validate", "-c", "../examples/hello/fit.yaml"); code != 0 || !strings.Contains(stdout, "valid") {
+	if code, stdout, stderr := runFit("validate", "-c", "testdata/hello.yaml"); code != 0 || !strings.Contains(stdout, "valid") {
 		t.Errorf("hello.yaml: %d %q %q", code, stdout, stderr)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.yml")
@@ -30,7 +30,7 @@ func TestYAMLConfig(t *testing.T) {
 }
 
 func TestAdapt(t *testing.T) {
-	code, yaml, stderr := runFit("adapt", "-c", "../examples/proxy/fit.json", "-to", "yaml")
+	code, yaml, stderr := runFit("adapt", "-c", "testdata/proxy.json", "-to", "yaml")
 	if code != 0 || !strings.Contains(yaml, "upstreams:\n  - name: app") {
 		t.Fatalf("to yaml: %d %q %q", code, yaml, stderr)
 	}
@@ -43,7 +43,7 @@ func TestAdapt(t *testing.T) {
 	if code, _, stderr := runFit("validate", "-c", out); code != 0 {
 		t.Errorf("the JSON it wrote: %d %q", code, stderr)
 	}
-	for _, args := range [][]string{{"-to", "toml"}, {"-from", "xml", "-c", "../examples/proxy/fit.json"}} {
+	for _, args := range [][]string{{"-to", "toml"}, {"-from", "xml", "-c", "testdata/proxy.json"}} {
 		if code, _, _ := runFit(append([]string{"adapt"}, args...)...); code == 0 {
 			t.Errorf("%v: no error", args)
 		}
@@ -88,79 +88,16 @@ func TestJSONWithComments(t *testing.T) {
 	}
 }
 
-// exampleTwinsExempt names the example directories whose fit.json has no
-// .conf and YAML twins: it is a part of a larger example.
-var exampleTwinsExempt = map[string]string{
-	"docker-compose": "the config of compose.yaml's fit container",
-}
-
-// exampleNoValidate names the examples that fit validate cannot check here,
-// because they name files a user supplies, which validate opens.
-var exampleNoValidate = map[string]string{
-	"https": "its certificate and key files are the user's own",
-}
-
-// TestExampleFitFiles checks every example directory with a fit.json: it
-// has fit.conf and fit.yaml beside it, each of the three is valid, and the
-// .conf and the YAML say what the JSON does. The examples name their files
-// relative to the repository's root, where they are run from.
-func TestExampleFitFiles(t *testing.T) {
-	t.Chdir("..")
-	jsons, _ := filepath.Glob("examples/*/fit.json")
-	n := 0
-	for _, j := range jsons {
-		dir := filepath.Dir(j)
-		name := filepath.Base(dir)
-		files := []string{j}
-		if _, ok := exampleTwinsExempt[name]; !ok {
-			n++
-			files = append(files, filepath.Join(dir, "fit.conf"), filepath.Join(dir, "fit.yaml"))
-		}
-		_, fromJSON, _ := runFit("adapt", "-c", j)
-		for _, f := range files {
-			if _, err := os.Stat(f); err != nil {
-				t.Errorf("%s: %v", dir, err)
-				continue
-			}
-			if _, ok := exampleNoValidate[name]; !ok {
-				if code, stdout, stderr := runFit("validate", "-c", f); code != 0 || stdout != f+": valid\n" || stderr != "" {
-					t.Errorf("%s: %d %q %q", f, code, stdout, stderr)
-				}
-			}
-			if f == j {
-				continue
-			}
-			code, out, stderr := runFit("adapt", "-c", f)
-			if code != 0 || !sameJSON(out, fromJSON) {
-				t.Errorf("%s is not the twin of %s: %d %q\n%s\n%s", f, j, code, stderr, out, fromJSON)
-			}
-		}
-	}
-	if n < 40 {
-		t.Errorf("only %d examples with twins", n)
-	}
-	for name := range exampleTwinsExempt {
-		if _, err := os.Stat(filepath.Join("examples", name, "fit.json")); err != nil {
-			t.Errorf("exempt example %s: %v", name, err)
-		}
-	}
-	for name := range exampleNoValidate {
-		if _, err := os.Stat(filepath.Join("examples", name, "fit.json")); err != nil {
-			t.Errorf("unvalidated example %s: %v", name, err)
-		}
-	}
-}
-
 // TestAdaptFit writes a config as a .conf file and reads it back.
 func TestAdaptFit(t *testing.T) {
-	code, out, stderr := runFit("adapt", "-c", "../examples/proxy/fit.json", "-to", "fit")
+	code, out, stderr := runFit("adapt", "-c", "testdata/proxy.json", "-to", "fit")
 	if code != 0 || !strings.Contains(out, "upstream app 127.0.0.1:9000 127.0.0.1:9001 {\n\tmax_conns 256\n") {
 		t.Fatalf("to fit: %d %q %q", code, out, stderr)
 	}
 	f := filepath.Join(t.TempDir(), "proxy.conf")
 	_ = os.WriteFile(f, []byte(out), 0o644)
 	_, back, _ := runFit("adapt", "-c", f)
-	_, want, _ := runFit("adapt", "-c", "../examples/proxy/fit.json")
+	_, want, _ := runFit("adapt", "-c", "testdata/proxy.json")
 	if !sameJSON(back, want) {
 		t.Errorf("the round trip changed it:\n%s\n%s", back, want)
 	}

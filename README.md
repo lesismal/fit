@@ -43,8 +43,8 @@ iterations are done, 1.0's included, and 1.0's external security review is still
 - [Development plan](docs/dev-plan.md): the milestones broken into small iterations.
 - [Progress](docs/progress.md): what is done, and where to pick up.
 - [Compatibility](docs/compatibility.md): what stays stable from 1.0, and how renamed fields are handled.
-- [Examples](examples/README.md): a config for each feature, in all three formats, and fit run
-  with Docker Compose and in Kubernetes.
+- [Examples](https://github.com/lesismal/fit-examples): a config for each feature, in .conf, and fit run with Docker Compose and in
+  Kubernetes, in the fit-examples repository.
 - [Deploying](deploy/README.md): the container image, the Helm chart and systemd units.
 
 ## Installing
@@ -87,12 +87,8 @@ fit needs Go 1.27.3 or later.
 make build
 ```
 
-```bash
-./bin/fit validate -c examples/hello/fit.conf
-./bin/fit run -c examples/hello/fit.conf
-```
-
-`examples/hello/fit.conf` answers `/hello` on port 8080:
+A config such as this one, `hello.conf`, [hello](https://github.com/lesismal/fit-examples/blob/main/hello/fit.conf) in fit-examples,
+answers `/hello` on port 8080:
 
 ```fit
 listener web {
@@ -118,9 +114,13 @@ route not-found {
 }
 ```
 
-A config may be a [.conf file](docs/reference/fit.md), fit's own format, as above, YAML
-(`examples/hello/fit.yaml`) or JSON (`examples/hello/fit.json`, with `//` and `/* */` comments and trailing
-commas allowed), each with the same fields, and may be split across several files and directories
+```bash
+./bin/fit validate -c hello.conf
+./bin/fit run -c hello.conf
+```
+
+A config may be a [.conf file](docs/reference/fit.md), fit's own format, as above, YAML or JSON
+(with `//` and `/* */` comments and trailing commas allowed), each with the same fields, and may be split across several files and directories
 (`fit run -c base.conf -c conf.d`). `fit adapt` converts between the formats, and from nginx configs
 and Caddyfiles, listing what it left out. [Configuration](docs/configuration.md) has the details.
 

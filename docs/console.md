@@ -2,7 +2,7 @@
 
 [English](console.md) | [简体中文](console.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [console](../examples/console/fit.conf), [admin](../examples/admin/fit.conf).
+Config examples, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [console](https://github.com/lesismal/fit-examples/blob/main/console/fit.conf), [admin](https://github.com/lesismal/fit-examples/blob/main/admin/fit.conf).
 
 fit can keep its config encrypted in a file of its own, the **store**, and serve a **console**: web
 pages behind a user name and password from which every part of the config is read and changed. The

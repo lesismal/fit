@@ -216,9 +216,9 @@ func TestPositions(t *testing.T) {
 }
 
 // TestRoundTrip writes configs as .conf files and reads them back: the
-// templates, the examples and the test configs.
+// templates and the test configs.
 func TestRoundTrip(t *testing.T) {
-	files, _ := filepath.Glob("../../examples/*/fit.json")
+	files, _ := filepath.Glob("../../cli/testdata/*.json")
 	more, _ := filepath.Glob("../../config/testdata/*.json")
 	files = append(append(files, more...), "../../templates/json/fit.json")
 	n := 0

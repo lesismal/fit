@@ -2,7 +2,7 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf).
+Config examples, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [webrtc-turn](https://github.com/lesismal/fit-examples/blob/main/webrtc-turn/fit.conf), [whip-whep](https://github.com/lesismal/fit-examples/blob/main/whip-whep/fit.conf), [webrtc-proxy](https://github.com/lesismal/fit-examples/blob/main/webrtc-proxy/fit.conf).
 
 fit serves WebRTC with fib's WebRTC packages, beside the gateway on its engine
 ([decision 029](decisions/029-webrtc.md)): a TURN server, and WHIP and WHEP with fit as the media

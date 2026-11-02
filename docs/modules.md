@@ -5,7 +5,7 @@
 A module is a Go package that adds a handler or a middleware to fit. It is compiled into the
 binary with `fit build`, as xcaddy builds Caddy's plugins in: for code where speed matters, it
 runs as fit's own modules do, on fib's workers, with nothing between it and the request.
-[`examples/module/hello`](../examples/module/hello) is a template: a middleware that adds a field
+[`module/hello`](https://github.com/lesismal/fit-examples/tree/main/module/hello) in fit-examples is a template: a middleware that adds a field
 to every response, with its own `go.mod`.
 
 ## What a module is

@@ -2,7 +2,7 @@
 
 [English](tunnel.md) | [简体中文](tunnel.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [tunnel-hub](../examples/tunnel-hub/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-proxy](../examples/tunnel-proxy/fit.conf).
+Config examples, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [tunnel-hub](https://github.com/lesismal/fit-examples/blob/main/tunnel-hub/fit.conf), [tunnel-node](https://github.com/lesismal/fit-examples/blob/main/tunnel-node/fit.conf), [tunnel-proxy](https://github.com/lesismal/fit-examples/blob/main/tunnel-proxy/fit.conf).
 
 fit's tunnel reaches TCP services on machines that only a host beside them can reach, through a
 hub anyone can reach. It is three roles of fit's config, which run on the listeners' fib engine
