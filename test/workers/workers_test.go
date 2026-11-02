@@ -165,6 +165,10 @@ func cases(e *env) []tc {
 		{module: "fastcgi", handler: `{"module": "fastcgi", "params": {"address": "` + e.fcgi + `", "root": "/srv"}}`, status: 200},
 		{module: "static", handler: `{"module": "static", "params": {"root": "` + e.root + `"}}`, status: 200, inline: true},
 		{module: "respond", handler: `{"module": "respond", "params": {"body": "x"}}`, status: 200, inline: true},
+		// The pages' files are in memory; the room API's waits, a bcrypt
+		// login and an event stream, are handler/mediapages' TestLogin and
+		// TestWatcherCutAndSlow.
+		{module: "media_pages", handler: `{"module": "media_pages", "params": {"prefix": "/api"}}`, status: 200, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }

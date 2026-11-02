@@ -10,11 +10,11 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-11-03 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色与 I117 媒体页面待做（决定 030） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色（`streaming`：RTMP、RTSP、SRT、`httpflv`、`hls`、`stream_whip`、`stream_whep`）与 I117 媒体页面（`media_pages`、房间 API、麦克风和摄像头开关）已完成（决定 030） |
 | fib | fib `main` 的 `9824c68`（`v1.6.1-0.20261031223653-9824c6852e7d`）：`63b38d4` 让 Windows 上从本地端口拨号时跳过在另一地址上被占用的端口（A59，fit 的 WebRTC 代理中继用它拨号），`749189e` 让 A59 的测试避开处于 TIME_WAIT 的端口，`9824c68` 让 HTTP 客户端自己关闭的连接在它所失败的请求得知原因之前就不再计入 MaxConnsPerHost；此前为 fib `main` 的 `84a67f7`（`v1.6.1-0.20261031213322-84a67f76ecfc`），带 A56（`74100b2`，从不让 worker 等待的 TURN 服务器）、A57（`bf669ce`，上限、带端口的对端检查、事件和统计）、A58（`496301d`，原地修改限制和凭据、排空）、A55（`97201b6`，经 TCP 和 TLS 的 TURN）和 A59（`3655193`，从指定的本地地址和端口范围拨号），用于 I111；此前为 fib `main` 的 `80c7f76`（`v1.6.1-0.20261031191422-80c7f7662ab4`），第一个带 WebRTC 的提交（`webrtc` 及其各包，A49 的 `Engine.OpenUDPPeer`），用于 I108；此前为 fib `main` 的 `47948dd6`（`v1.6.1-0.20261031164450-47948dd66351`）：`47948dd6` 让 QPACK 解码器按字符串在字段段中的位置记住它，浏览器每次请求都发送的字面量因此只解码一次（W2 经 h3：site +4.0%，edge +2.8%）；此前为 fib `main` 的 `c20ab7a1`（`v1.6.1-0.20261031151458-c20ab7a1705e`）：`c20ab7a1` 让 HTTP/3 请求流在其 OnWritable 回调运行完之前不被回收，修复了 fit 的 CI 在 `TestStuckClientsPastMaxConns/h3` 中遇到的数据竞争，`e66f4cf6` 修复一个偶发失败的 arpc 测试；此前为 fib `main` 的 `d7e117c1`（`v1.6.1-0.20261031142854-d7e117c1f901`）：`d7e117c1` 让对端每次都不加索引重复发送的长头部字面量只解码一次，nghttp2 客户端发送 bearer token 正是如此（W1 h2 +6.7%，每请求 28.60 降到 26.86 us），基于修复和补全测试的 `2ea8ddb7` 与 `da0ac655`；此前为 fib `main` 的 `a6131b0c`（`v1.6.1-0.20261031112846-a6131b0c0af3`），其还回缓冲的测试改为在处理函数取缓冲时查找池化 body，基于 `d3707ca7`：HTTP/2 的 stream 把来自缓冲池的 body 分帧后即还回池里，此前交给垃圾回收，缓冲池的那一档因此被取空（A48；W1 h2 +1.3%，分配从每秒 850 降到 677 MB）；此前为 fib `main` 的 `6bd106d9`（`v1.6.1-0.20261031020358-6bd106d9d44b`），为 Windows CI 放宽了两个计时测试的余量，基于 `46827ea7`：不超过 4 KiB 的整份响应 body 取自缓冲池，经 `ClientResponse.TakeBody` 和 `Context.WriteResponseOwned` 还回池里，`NewBufferedBody` 请求体不再拷贝（A48；W1 HTTP/1.1 +3.0%，即 `861689c9` 让堆变小后多出的回收所耗的 3%）；此前为 fib `main` 的 `7dcb41da`（`v1.6.1-0.20261030055545-7dcb41da8e7c`）：`4f870993` 在推送的 stream 归连接之前就绑定它的 Context，修复了 fib 的 CI 遇到的数据竞争，`7dcb41da` 修复一个 early data 测试在 Windows 上的预热；`a4ae3a0c`：在 Go 里边发送边加密的文件，除最后一块外都告诉内核后面还有数据，让 TCP 填满段（不用内核 TLS 时 1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +6.4%，W2 site HTTPS/1.1 +1.7%）；此前为 fib `main` 的 `881ff97a`（`v1.6.1-0.20261029202329-881ff97a25f2`）：`6c61693d` 让流式响应体放在 64 KiB 的池化块里（W4 proxy-download h1 +11%，约 55 降到 32 MiB；h2 +8%，约 137 降到 100 MiB），`8895a6aa` 让任务池的队列随积压增长，而不是按上限分配（W6 h2 50 降到 32 MiB），`24beda14` 和 `881ff97a` 让内核 TLS 加密的连接用 MSG_MORE 按整记录写，并且只为 512 KiB 及以上的文件切换到内核 TLS（1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +29%，fit 因此去掉 NoKernelTLS）；此前为 fib `main` 的 `c794cf89`（`v1.6.1-0.20261029134914-c794cf8960fe`）：`d5b8d477` 让整份发送的 HTTP/2 响应按 socket 的进度分帧，`0eb21d67` 让流式的 Content-Length 响应体直接从读缓冲交给回调，`08faed60` 让加密后的 TLS 记录贴合缓冲池的档位（W4 download h2 +11.5%，约 167 降到 77 MiB；proxy-download h1 +6.6%、h2 +2.7%），`c794cf89` 让流式的 HTTP/2 请求体在被消费前占住连接窗口（W4 proxy-upload h2 约 312 降到 252 MiB）；此前为 fib `main` 的 `4ad4ebef`（`v1.6.1-0.20261029100241-4ad4ebefac94`）：流式的 HTTP/2、HTTP/3 请求体按 64 KiB 的池化块等待（W4 proxy-upload h2 +12.7%，553 降到 322 MiB）；此前为 fib `main` 的 `56f08db3`（`v1.6.1-0.20261029003614-56f08db38f88`）：`861689c9` 让连接的读轮次从 16 KiB 开始并记住是否增长过（W1 在 10,000 在途 1,076 降到 639 MiB，W4 在 2% 以内），`b926ebf5` 和 `c6c2e10b` 减少 HTTP/3 每个包的工作（W2 site h3 +2.3%）；此前为 fib `main` 的 `f0378649`（`v1.6.1-0.20261028184321-f037864957c0`）：`d4319879` 回收 body 未流式的 HTTP/3 请求（W0 h3 在 500 到 10,000 在途 +17.6% 到 +20.0%），`f0378649` 去掉其测试对 body 大小的假设；此前为 fib `main` 的 `a7b8b456`（`v1.6.1-0.20261028010536-a7b8b456e081`）：`7f1fac3a` 让 Close 在并发的 ShutdownBinding 修改监听器列表时所持的锁下取用该列表，修复了 fit 的 CI 在 macOS 上遇到的数据竞争；`8696ef40` 让应答了早期数据并关闭连接的 TLS 服务端等握手结束后再关闭，以免 Windows 客户端因连接重置丢失应答；`a7b8b456` 修复了一个 HTTP/3 测试中的数据竞争；此前为 fib `main` 的 `33a039f1`（`v1.6.1-0.20261026175603-33a039f1382f`），带有为 I83 而加的 fib `log` 包（`185658f1`，以及处理 `ServeDuplex` panic 的 `33a039f1`）；此前为 fib `main` 的 `a88c75d2`（`v1.6.1-0.20261025180753-a88c75d2f19b`）：在 `b0809b4` 之上加了 A46（在别处完成工作的响应体过滤器，为 I81 而加）以及自 `b0809b4` 起的 HTTP/2、HTTP/3 和 TLS 改进；`b0809b4` 本身是 v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON、logfmt 或行格式的访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；配置加密保存在 store 中（`admin.store`、`fit store export` 和 `import`），以及登录后可修改全部配置的控制台（`admin.console`）；agent 的角色，即经 WebSocket mesh 共享 AI 模型的 hub、node 和 client，以及 tunnel 的角色，经 TCP、WebSocket 或 QUIC 通过服务器访问 NAT 后的 TCP 服务，两者都在各自的页面上设置和修改；WebRTC：经 UDP、TCP 和 TLS 的 TURN 服务器，以 fit 为媒体服务器的 WHIP 和 WHEP，以及按 ICE ufrag 路由、经一个 UDP 端口代理的媒体服务器；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 1.0 的外部安全审计，在代码之外安排；NAT 后主机之间的 P2P 隧道（I86、I88–I93：目前只有 `p2p/stun` 和 `webrtc.turn` 两部分）以及 VPN（I95–I103：目前只有 `vpn/packet`） |
-| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：I116，基于 fib `media/hub` 的流媒体角色（RTMP、RTSP、SRT、HTTP-FLV、HLS，以及基于 hub 的 WHIP 和 WHEP），与 I117 媒体页面，都基于 I115 的 `mediaauth`。下一个可用的迭代编号是 I118，下一个可用的 fib 请求编号是 A60 |
+| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：基于 UDP 的 RTSP 有待 fib 的 A60。下一个可用的迭代编号是 I118，下一个可用的 fib 请求编号是 A61 |
 **2026-10-27 的压测。** [方案与分析](../bench/results/plan-2026-10-27/analysis.md)在压测机上跑了 232 轮，只保留了一项优化：fib `d4319879` 回收 body 未流式的 HTTP/3 请求，500/5,000/10,000 在途分别 +17.6%、+19.2%、+20.0%，每请求 CPU 降 14-16%，h1/h2 不变。读缓冲 start（W4 proxy-download -4.9%）、sendfile 下载（-13.9%）和 fit-only 的 HTTP/1.1 改动经实测否决，数字在分析里。
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -3577,7 +3577,7 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
   `webrtc_proxy` 端到端的 401、403 和 201、查询参数 token、Basic 和 bcrypt 用户、无凭据的 DELETE、原地修改策略的重载与
   移除策略的重载；`fit media-token` 的 token 被同一 secret 的策略接受，及其错误。
 - **基准测试**：无；媒体处理器的信令不在热路径上，没有 `auth` 的路由行为不变（规则 21）。
-- **不足**：还没有签发 token 的 Admin API 端点（页面 I117 会提供）；token 只能通过更换 secret 吊销。
+- **不足**：没有签发 token 的 Admin API 端点（由页面 I117 签发）；token 只能通过更换 secret 吊销。
 
 ### I116 流媒体角色 — 已完成
 
@@ -3615,6 +3615,53 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
 - **基准测试**：无；新角色不在现有路由的热路径上，其分发由 fib 完成（规则 21）。
 - **不足**：基于 UDP 的 RTSP 有待 fib 的 A60（要求 UDP 的 SETUP 得到 461）；没有 RTMPS 和 SRT 按流的 passphrase；拉取和
   转发远端源不在范围内；bcrypt 用户在 RTMP、RTSP 或 SRT 上的第一次尝试按设计会被拒绝。
+
+### I117 媒体页面 — 已完成
+
+用户的要求：fit 提供基础的媒体页面，页面本身也在可配置的认证之后；页面可以开关麦克风和摄像头；对 WebRTC，不论设备
+是否存在开关都能用，另一方根据对端宣告的开关状态作出反应，而不是因为收不到数据而反复报错
+（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）。
+
+- **处理器 `media_pages`**（`handler/mediapages` 包）：`prefix`（`/media`）、`title`、`auth`、`login`、`whip` 和
+  `whep`（含 `{stream}` 的 URL 模板，默认 `/whip/{stream}` 和 `/whep/{stream}`）、`hls`、`links`（`{stream}`、
+  `{token}`、`{host}`）、`ice_servers`，以及上限 `max_rooms`（64）、`max_members`（16；每个房间的事件流为其两倍）、
+  `max_message_bytes`（1024）、`member_ttl`（30s）、`stall_timeout`（30s）。路由：`<prefix>`（308 到 `<prefix>/`）、
+  `<prefix>/`、`call`、`publish`、`play`（同一个页面）、`app.js`、`app.css`（ETag、`no-cache`；页面带只允许
+  `'self'` 和端点所在源的 CSP）、`api/config`、`api/login`、`api/logout`，以及房间 API
+  `api/rooms/<room>/join`、`members/<name>`、`leave` 和 `events`（SSE）。
+- **认证**：房间 API 用 `Guard` 检查策略：加入和关注需要 `<room>-*` 上的 `play`，宣告推流需要 `<room>-<name>` 上的
+  `publish`（否则 `403`，之后的变更也一样）；成员的变更需要加入时返回的 key（128 位随机数；错误的 key 为 `404`，
+  名字被另一个 key 占用为 `409`）。`login` 接收 `{user, password}`，在 bcrypt 池上执行 `Policy.Login`，应答
+  `Policy.Issue` 签发的令牌，同时设为 cookie `fit_media_token`（`HttpOnly`、`SameSite=Strict`、TLS 上 `Secure`、
+  `Path=/`、`Max-Age` 与令牌一致）；`logout` 清除它。
+- **页面**（`web/index.html`、`app.js`、`app.css`，嵌入；无外部资源；中英文）：每个推流方一开始就提供一个
+  `sendonly` 的音频和一个视频收发器；开关（麦克风、摄像头、屏幕）只做 `replaceTrack`：设备的轨道，没有设备时的合成
+  轨道（WebAudio 静音；320x180、每秒 2 帧、写着名字的 canvas），关闭时为空并停止设备。每次开关以及每 `member_ttl`/3
+  向房间 API 宣告状态；成员宣告推流（WHIP 得到 201 之后）才播放它；失败的 WHEP POST 最多重试 6 次，从 1 秒翻倍到 15 秒；
+  推流方用同样的退避重试，遵守 `Retry-After`，遇到 401、403 和 422 则停止。会话的 DELETE 先于它的 PeerConnection
+  关闭（或 2 秒后照样关闭），以免 DTLS 关闭先结束会话、让 DELETE 得到 404；对已离开成员的观看不发 DELETE，服务器已
+  结束它。`window.fitMedia` 为测试提供 `join`、`leave`、`mic`、`cam` 和 `status`。
+- **房间**：按引擎和前缀保存，通过引用计数在重载之间共享（`acquire`、`release`）；一把锁只用于 map 操作；每个房间一个
+  定时器，每 `member_ttl`/3 清除静默的成员、向关注者发 ping，并忘掉空房间。事件是完整的成员列表，每次变化一份共享快照，
+  用 `WriteNoWait` 写出；超过上限时关注者只保留最新快照，在 `OnWritable` 时发送，写超时为 `stall_timeout`。每个事件流
+  保持住请求和配置；`Drain` 结束被换下配置的事件流，`EventSource` 会重连到新配置。
+- **SFU**：检查了 `webrtc.media`，无需改动：超过 `ice_timeout` 和 `connect_timeout` 什么都不发的推流方会保留（由 consent
+  维持），它的观看方也是；只推音频的推流方可被请求两种媒体的观看方播放（视频应答为 inactive），也可被只请求音频的观看方
+  播放；只请求视频的观看方得到 `422` 而不是 `500`。测试 `TestOneKindPublishers`、`TestSilentPublisher`
+  （`webrtc/media/kinds_test.go`）；测试工具中新增 `newPeerWith`，用于设置客户端的 consent 间隔。
+- **测试**（竞态检测）：页面、资源、ETag、CSP、重定向、`api/config`；明文和 bcrypt 用户的登录、cookie 的属性、错误密码、
+  过大的 body、登出、关闭登录；参数检查；房间 API 的 401 和 403、只能播放的用户、key 作为凭证、`409`、`max_members`、
+  `max_rooms`、关注者上限、超限的 body、`member_ttl`、空房间被忘掉；中途断开的关注者被忘掉，从不读取的关注者在
+  `stall_timeout` 后被断开，而另一个关注者得到 100 个成员 2000 次变化后的最终状态；重载保留房间并结束旧配置的事件流，
+  最后一个配置离开时 hub 关闭。浏览器测试 `test/docker/mediapages/e2e.sh`（Linux 容器中的无头 Chromium 156，一个浏览器用假设备、另一个完全没有设备，
+  通过 DevTools 驱动）：登录，三个成员互相播放，没有设备的成员发送合成轨道并显示“没有麦克风 · 没有摄像头”，麦克风和
+  摄像头的开关传到其他人，静默的成员保持连接，一个成员关着两者加入，整个过程中每个会话只有一次 WHIP 和一次 WHEP POST
+  （不重新协商、不重试），离开，推流页和播放页，没有推送的流，以及控制台没有错误。
+- **示例**：`examples/media-pages`（`fit.conf`、`fit.yaml`、`fit.json`）：`media_auth`、`webrtc.media`、`whip`、`whep`
+  和带登录的 `media_pages`。
+- **基准测试**：无；页面及其 API 不在热路径上（规则 21）。
+- **不足**：没有签发令牌的 Admin API 端点（由页面的登录签发）；HLS 模式只在浏览器自己能播放 HLS 时（Safari）可用，
+  没有嵌入播放器脚本；浏览器测试没有覆盖屏幕共享（无头 Chromium 没有可选的屏幕）。
 
 ## 给后续迭代的说明
 

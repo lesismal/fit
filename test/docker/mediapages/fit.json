@@ -1,0 +1,95 @@
+{
+  "listeners": [
+    {
+      "name": "web",
+      "address": "127.0.0.1:8080"
+    }
+  ],
+  "media_auth": [
+    {
+      "name": "media",
+      "secret": "a-test-secret-of-some-length",
+      "users": [
+        {
+          "name": "alice",
+          "password": "alice-password",
+          "publish": [
+            "*"
+          ],
+          "play": [
+            "*"
+          ]
+        },
+        {
+          "name": "bob",
+          "password": "bob-password",
+          "publish": [
+            "e2e-*"
+          ],
+          "play": [
+            "e2e-*"
+          ]
+        },
+        {
+          "name": "carol",
+          "password": "carol-password",
+          "publish": [
+            "e2e-*"
+          ],
+          "play": [
+            "e2e-*"
+          ]
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "match": {
+        "path": [
+          "/media",
+          "/media/*"
+        ]
+      },
+      "handler": {
+        "module": "media_pages",
+        "params": {
+          "auth": "media",
+          "login": true,
+          "title": "fit media e2e"
+        }
+      }
+    },
+    {
+      "match": {
+        "path": [
+          "/whip/*"
+        ]
+      },
+      "handler": {
+        "module": "whip",
+        "params": {
+          "auth": "media"
+        }
+      }
+    },
+    {
+      "match": {
+        "path": [
+          "/whep/*"
+        ]
+      },
+      "handler": {
+        "module": "whep",
+        "params": {
+          "auth": "media"
+        }
+      }
+    }
+  ],
+  "webrtc": {
+    "media": {
+      "listen": "127.0.0.1:8189"
+    }
+  }
+}

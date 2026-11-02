@@ -114,8 +114,51 @@ pages).
 
 ## The media pages (I117)
 
-To be written with I117: the handler `media_pages`, its login, its room API, and the switches of
-the microphone and the camera.
+- **A handler, its assets embedded.** `media_pages` serves under its `prefix` an index, a room
+  call, a publish page and a play page, their HTML, script and style built into the binary and
+  answered with a Content Security Policy that allows this server and the endpoints' origins
+  alone: no CDN, nothing that breaks offline or on an intranet. The endpoints are URL templates
+  (`whip`, `whep`, `hls`, `links`, with `{stream}`), so that the pages serve fit's `whip` and
+  `whep`, the streaming role's handlers, or another server's, without depending on their code.
+- **Login.** `login` checks a user of the `auth` policy with `Policy.Login` (bcrypt on mediaauth's
+  pool, the request retained) and answers with `Policy.Issue`'s token for the user's own grant
+  and the policy's `token_ttl`: as the cookie `fit_media_token`, `HttpOnly`, `SameSite=Strict`,
+  `Secure` over TLS and `Path=/` so that the endpoints on other paths get it, and in the body, for
+  endpoints on another origin, which the page sends it to as a bearer token. A token pasted into
+  the page works the same. The HTML stays public, since it holds the login; the route's
+  middleware can put it behind more.
+- **Switches without renegotiation.** A publisher always offers one audio and one video
+  transceiver, `sendonly`, device or not; a switch is `RTCRtpSender.replaceTrack`: the device's
+  track, a synthetic one when there is no device (silence from WebAudio, a canvas frame with the
+  name at 2 frames a second), or none when switched off, the device then released. Nothing is
+  renegotiated, no PeerConnection is restarted, and the SFU is not told: it forwards what comes,
+  and nothing when nothing does.
+- **State through the room API, not through media.** Each member announces `{audio, video,
+  audioDevice, videoDevice, screen, publishing}` through the handler's room API, and the others
+  get the room's members with Server-Sent Events on every change. A viewer shows the avatar, "mic
+  off" or "no camera" from what is announced instead of guessing from frames that do not come,
+  and plays a member's stream only once it is announced as published, which the publisher does
+  once its WHIP POST was answered; a failed WHEP request is tried again at most 6 times, backing
+  off to 15 seconds. SSE rather than a WebSocket: one direction is all that is needed, it is
+  plain HTTP through every proxy and middleware, `EventSource` reconnects by itself, and the few
+  writes go through `POST`s that carry the same credentials.
+- **Rights.** Joining and following a room needs `play` on `<room>-*`, the name checked as a
+  pattern would be (a grant of `room1-*` or `*` matches it); announcing publishing needs `publish`
+  on `<room>-<name>`, the stream the member's WHIP POST will need. A join is answered with a key,
+  128 random bits, which the member's changes, heartbeats and leave need, as a WHIP session's URL
+  is its capability; a name held by a member with another key is `409` until that member goes.
+- **Bounded, never blocking.** The rooms are in memory under one lock held for map work alone;
+  rooms, members a room, event streams a room (twice the members), bodies and a member's life
+  without a heartbeat are bounded, each with a default. An event stream is written with
+  `WriteNoWait`; above the response's limit, only the latest state is kept for it, sent once
+  `OnWritable` says the browser took the last, and the stream is cut off past `stall_timeout`.
+  Rooms are kept per engine and prefix, shared by the configs that serve them, so a reload keeps
+  them; a swapped-out config's streams end at its drain, and the browsers follow the room again.
+- **The SFU as it was.** `webrtc.media` was checked against silent and one-kind publishers: ICE
+  consent, not media, keeps a session, so a publisher with everything switched off stays, with
+  its viewers; a viewer that offers both kinds of an audio-only publisher has its video answered
+  inactive, and one that offers only a kind not sent is answered `422`. No change was needed;
+  tests now hold it.
 
 ## Consequences
 

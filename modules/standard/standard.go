@@ -5,6 +5,7 @@ package standard
 import (
 	_ "github.com/lesismal/fit/handler/fastcgi"
 	_ "github.com/lesismal/fit/handler/forward"
+	_ "github.com/lesismal/fit/handler/mediapages"
 	_ "github.com/lesismal/fit/handler/proxy"
 	_ "github.com/lesismal/fit/handler/respond"
 	_ "github.com/lesismal/fit/handler/static"

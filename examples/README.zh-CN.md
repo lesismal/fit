@@ -127,6 +127,7 @@ llm 的示例写明了 `id`，否则 fit 会生成一个并写回文件。
 | [whip-whep](whip-whep/fit.conf) | fit 作为媒体服务器：用 WHIP 推流，用 WHEP 播放。 |
 | [streaming](streaming/fit.conf) | 流媒体角色：经 RTMP、RTSP、SRT 或 WHIP 推流，经这些协议以及 HTTP-FLV、HLS 和 WHEP 播放，受 media_auth 策略保护。 |
 | [webrtc-proxy](webrtc-proxy/fit.conf) | fit 后面的 WHIP 和 WHEP 媒体服务器，媒体经由一个 UDP 端口中继。 |
+| [media-pages](media-pages/fit.conf) | fit 的媒体页面：带登录的房间通话、推流和播放页面，使用 fit 的媒体服务器，由一个 media_auth 策略保护。 |
 
 ## 模块
 

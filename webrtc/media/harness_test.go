@@ -182,7 +182,13 @@ type peer struct {
 
 func newPeer(t *testing.T, e *fib.Engine) *peer {
 	t.Helper()
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{Engine: e, ListenAddr: "127.0.0.1:0"})
+	return newPeerWith(t, webrtc.Configuration{Engine: e, ListenAddr: "127.0.0.1:0"})
+}
+
+// newPeerWith is newPeer with a configuration of its own.
+func newPeerWith(t *testing.T, cfg webrtc.Configuration) *peer {
+	t.Helper()
+	pc, err := webrtc.NewPeerConnection(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

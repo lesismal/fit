@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="{{base}}">
+<title>{{title}}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Crect width=%2724%27 height=%2724%27 rx=%276%27 fill=%27%236e6ef0%27/%3E%3Cpath d=%27M15 10l4.5-2.3v8.6L15 14M5 7h9v10H5z%27 fill=%27white%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="./" data-nav="home">
+    <span class="brand__logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 10l4.55-2.28A1 1 0 0 1 21 8.62v6.76a1 1 0 0 1-1.45.9L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></span>
+    <span class="brand__name" id="brand-title">{{title}}</span>
+  </a>
+  <nav class="tabs" aria-label="Pages">
+    <a class="tab" href="./" data-nav="home" data-i18n="nav.home">Home</a>
+    <a class="tab" href="call" data-nav="call" data-i18n="nav.call">Call</a>
+    <a class="tab" href="publish" data-nav="publish" data-i18n="nav.publish">Publish</a>
+    <a class="tab" href="play" data-nav="play" data-i18n="nav.play">Play</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="badge" id="who" hidden></span>
+  <button class="btn btn--sm" id="login-open" type="button" data-i18n="auth.login" hidden>Log in</button>
+  <button class="btn btn--sm btn--ghost" id="logout" type="button" data-i18n="auth.logout" hidden>Log out</button>
+  <button class="btn btn--sm btn--ghost" id="lang" type="button" title="Language">中文</button>
+</header>
+
+<main class="content">
+  <section id="view-home" class="view" hidden>
+    <div class="hero">
+      <h1 id="home-title">{{title}}</h1>
+      <p data-i18n="home.lead">Calls, publishing and playing over fit's WebRTC media server.</p>
+    </div>
+    <div class="grid grid--3">
+      <a class="card card--link" href="call" data-nav="call">
+        <div class="card__body"><h3 data-i18n="nav.call">Call</h3><p class="muted" data-i18n="home.call">A room call: everyone publishes their camera and microphone and plays the others. Switch either off at any time; the others see it.</p></div>
+      </a>
+      <a class="card card--link" href="publish" data-nav="publish">
+        <div class="card__body"><h3 data-i18n="nav.publish">Publish</h3><p class="muted" data-i18n="home.publish">Send a camera, a microphone or a screen to a stream with WHIP, and get the stream's URLs for other tools.</p></div>
+      </a>
+      <a class="card card--link" href="play" data-nav="play">
+        <div class="card__body"><h3 data-i18n="nav.play">Play</h3><p class="muted" data-i18n="home.play">Play a stream with WHEP, or HLS where the browser plays it.</p></div>
+      </a>
+    </div>
+    <div class="card">
+      <div class="card__head"><h3 data-i18n="home.server">This server</h3></div>
+      <div class="card__body"><dl class="kv" id="home-info"></dl></div>
+    </div>
+  </section>
+
+  <section id="view-call" class="view" hidden>
+    <div class="card">
+      <div class="card__body">
+        <form class="form-row" id="call-form" autocomplete="off">
+          <label class="field"><span class="field__label" data-i18n="call.room">Room</span><input class="input" id="call-room" maxlength="64" required pattern="[A-Za-z0-9._~\-]{1,64}"></label>
+          <label class="field"><span class="field__label" data-i18n="call.name">My name</span><input class="input" id="call-name" maxlength="63" required pattern="[A-Za-z0-9._~\-]{1,63}"></label>
+          <div class="field field--end"><div class="btn-row">
+            <button class="btn btn--primary" id="call-join" type="submit" data-i18n="call.join">Join</button>
+            <button class="btn btn--danger" id="call-leave" type="button" data-i18n="call.leave" disabled>Leave</button>
+          </div></div>
+        </form>
+        <p class="hint" id="call-hint"></p>
+      </div>
+    </div>
+    <div class="toolbar" id="call-tools">
+      <button class="toggle" id="call-mic" type="button" aria-pressed="true"><span class="toggle__icon" data-icon="mic"></span><span data-i18n="tools.mic">Microphone</span></button>
+      <button class="toggle" id="call-cam" type="button" aria-pressed="true"><span class="toggle__icon" data-icon="cam"></span><span data-i18n="tools.cam">Camera</span></button>
+      <button class="toggle" id="call-screen" type="button" aria-pressed="false"><span class="toggle__icon" data-icon="screen"></span><span data-i18n="tools.screen">Screen</span></button>
+    </div>
+    <div class="tiles" id="call-tiles"></div>
+  </section>
+
+  <section id="view-publish" class="view" hidden>
+    <div class="grid grid--2">
+      <div class="card">
+        <div class="card__body form">
+          <label class="field"><span class="field__label" data-i18n="pub.stream">Stream</span><input class="input" id="pub-stream" maxlength="128" pattern="[A-Za-z0-9._~\-]{1,128}"></label>
+          <div class="toolbar toolbar--left">
+            <button class="toggle" id="pub-mic" type="button" aria-pressed="true"><span class="toggle__icon" data-icon="mic"></span><span data-i18n="tools.mic">Microphone</span></button>
+            <button class="toggle" id="pub-cam" type="button" aria-pressed="true"><span class="toggle__icon" data-icon="cam"></span><span data-i18n="tools.cam">Camera</span></button>
+            <button class="toggle" id="pub-screen" type="button" aria-pressed="false"><span class="toggle__icon" data-icon="screen"></span><span data-i18n="tools.screen">Screen</span></button>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--primary" id="pub-start" type="button" data-i18n="pub.start">Start publishing</button>
+            <button class="btn btn--danger" id="pub-stop" type="button" data-i18n="pub.stop" disabled>Stop</button>
+            <span class="badge" id="pub-state"></span>
+          </div>
+          <p class="hint" id="pub-hint"></p>
+        </div>
+      </div>
+      <div class="stage" id="pub-tile"></div>
+    </div>
+    <div class="card">
+      <div class="card__head"><h3 data-i18n="links.title">The stream's URLs</h3></div>
+      <div class="card__body"><dl class="kv" id="pub-links"></dl></div>
+    </div>
+  </section>
+
+  <section id="view-play" class="view" hidden>
+    <div class="card">
+      <div class="card__body">
+        <form class="form-row" id="play-form" autocomplete="off">
+          <label class="field"><span class="field__label" data-i18n="pub.stream">Stream</span><input class="input" id="play-stream" maxlength="128" required pattern="[A-Za-z0-9._~\-]{1,128}"></label>
+          <label class="field" id="play-mode-field"><span class="field__label" data-i18n="play.mode">Over</span><select class="select" id="play-mode"><option value="whep">WebRTC (WHEP)</option><option value="hls">HLS</option></select></label>
+          <div class="field field--end"><div class="btn-row">
+            <button class="btn btn--primary" id="play-start" type="submit" data-i18n="play.start">Play</button>
+            <button class="btn btn--danger" id="play-stop" type="button" data-i18n="pub.stop" disabled>Stop</button>
+          </div></div>
+        </form>
+        <p class="hint" id="play-hint"></p>
+      </div>
+    </div>
+    <div class="stage stage--play" id="play-tile"></div>
+    <div class="card">
+      <div class="card__head"><h3 data-i18n="links.title">The stream's URLs</h3></div>
+      <div class="card__body"><dl class="kv" id="play-links"></dl></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="login" class="dialog">
+  <form method="dialog" class="form" id="login-form">
+    <h2 data-i18n="auth.title">Log in</h2>
+    <div class="form" id="login-user">
+      <label class="field"><span class="field__label" data-i18n="auth.user">User</span><input class="input" id="login-name" autocomplete="username"></label>
+      <label class="field"><span class="field__label" data-i18n="auth.password">Password</span><input class="input" id="login-password" type="password" autocomplete="current-password"></label>
+    </div>
+    <p class="muted or" id="login-or" data-i18n="auth.or">or</p>
+    <label class="field" id="login-token-field"><span class="field__label" data-i18n="auth.token">Token</span><input class="input mono" id="login-token" autocomplete="off" spellcheck="false"></label>
+    <p class="hint error" id="login-error"></p>
+    <div class="btn-row btn-row--end">
+      <button class="btn btn--ghost" value="cancel" type="button" id="login-cancel" data-i18n="auth.cancel">Cancel</button>
+      <button class="btn btn--primary" id="login-submit" type="submit" data-i18n="auth.login">Log in</button>
+    </div>
+  </form>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

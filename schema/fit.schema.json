@@ -3482,6 +3482,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "media_pages"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.media_pages"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "proxy"
               }
             }
@@ -3615,6 +3631,7 @@
             "forward_proxy",
             "hls",
             "httpflv",
+            "media_pages",
             "proxy",
             "respond",
             "static",
@@ -3864,6 +3881,89 @@
         "wait": {
           "description": "How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. 404 at once for a stream without a publisher when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.media_pages": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "The media_auth policy the room API checks, and the pages' login and tokens belong to: joining a room and following it needs play on <room>-*, announcing that one publishes publish on <room>-<name>, as the WHIP and WHEP endpoints the pages use check with their own auth, which should name the same policy. Everyone may use the room API when left out, as the route's middleware allow.",
+          "type": "string"
+        },
+        "hls": {
+          "description": "The URL of a stream's HLS playlist, {stream} standing for its name, as /hls/{stream}/index.m3u8 for the streaming role's hls handler: the play page plays it where the browser plays HLS itself, with the page's token. None when left out.",
+          "type": "string"
+        },
+        "ice_servers": {
+          "description": "STUN and TURN servers the pages' PeerConnections use, as a browser's iceServers. None when left out: fit's media server is an ICE lite agent that browsers reach directly, and tells them of its own ICE servers in its answers' Link headers.",
+          "items": {
+            "$ref": "#/$defs/config.ICEServer"
+          },
+          "type": "array"
+        },
+        "links": {
+          "description": "Further URLs the publish and play pages show for a stream, for tools outside the browser, as the streaming role's RTMP, RTSP, SRT and HTTP-FLV ones: {stream} stands for the stream's name, {token} for the page's token, {host} for the host the page was loaded from.",
+          "items": {
+            "$ref": "#/$defs/mediapages.Link"
+          },
+          "type": "array"
+        },
+        "login": {
+          "description": "Show a login form for the users of the auth policy: a right password is answered with a token the policy signs, for its token_ttl, set as the HttpOnly cookie fit_media_token (SameSite=Strict, Secure over TLS), which the WHIP, WHEP and HLS requests of the pages carry, and handed to the page too. Without it the pages ask for a token instead, as fit media-token prints, when auth needs one.",
+          "type": "boolean"
+        },
+        "max_members": {
+          "default": 16,
+          "description": "How many members a room may have; a join past it is answered 503. A room may have twice as many watchers, its members' event streams among them. 16 when left out.",
+          "maximum": 256,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_message_bytes": {
+          "default": 1024,
+          "description": "The largest body a request of the room API or the login may have, in bytes; a larger one is answered 413. 1024 when left out.",
+          "maximum": 65536,
+          "minimum": 256,
+          "type": "integer"
+        },
+        "max_rooms": {
+          "default": 64,
+          "description": "How many rooms may have members or watchers at once; a join or a watch past it is answered 503. 64 when left out.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "member_ttl": {
+          "default": "30s",
+          "description": "How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "/media",
+          "description": "The path the pages are served under, which the route must match with what is below it, as /media/* beside /media; a request outside it gets 404. /media when left out.",
+          "type": "string"
+        },
+        "stall_timeout": {
+          "default": "30s",
+          "description": "How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "title": {
+          "description": "The pages' title; fit media when left out.",
+          "type": "string"
+        },
+        "whep": {
+          "default": "/whep/{stream}",
+          "description": "The URL streams are played from with WHEP, {stream} standing for the stream's name. /whep/{stream} when left out.",
+          "type": "string"
+        },
+        "whip": {
+          "default": "/whip/{stream}",
+          "description": "The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip handler's, or stream_whip's for the streaming role, on this server or another. /whip/{stream} when left out.",
           "type": "string"
         }
       },
@@ -4950,6 +5050,24 @@
       },
       "required": [
         "path"
+      ],
+      "type": "object"
+    },
+    "mediapages.Link": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "What the URL is, as RTMP or SRT.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The URL, with {stream}, {token} and {host} filled in by the page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
       ],
       "type": "object"
     },
