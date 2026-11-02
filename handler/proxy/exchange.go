@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+	"weak"
 
 	fibhttp "github.com/lesismal/fib/http"
 
@@ -390,7 +391,16 @@ func (x *exchange) arm(start time.Time, timeout time.Duration, gen uint32, why e
 	switch {
 	case d.timer == nil:
 		d.due = at
-		d.timer = time.AfterFunc(timeout, x.expire)
+		// The timer holds the exchange weakly: one the pool lets go of
+		// while its timer is still set is collected rather than held until
+		// the timer fires, which at many requests in flight kept tens of
+		// MiB of exchanges past the pool.
+		w := weak.Make(x)
+		d.timer = time.AfterFunc(timeout, func() {
+			if x := w.Value(); x != nil {
+				x.expire()
+			}
+		})
 	case d.due.IsZero() || at.Before(d.due):
 		d.due = at
 		d.timer.Reset(time.Until(at))
@@ -400,8 +410,8 @@ func (x *exchange) arm(start time.Time, timeout time.Duration, gen uint32, why e
 
 // lift takes the request's deadline away. It leaves the timer set for the
 // request the exchange may serve next, unless stop says it will serve none,
-// as an exchange that is not recycled does not: a timer left set would hold
-// it until it fired.
+// as an exchange that is not recycled does not: a timer left set would only
+// fire for nothing.
 func (d *exchangeDeadline) lift(stop bool) {
 	d.mu.Lock()
 	d.at, d.why = time.Time{}, nil
