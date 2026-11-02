@@ -1,7 +1,7 @@
-// Package webui is what the pages of the LLM feature's roles share: the shared
-// frontend (ui.css, ui.js, peers.js, jobs.js), served under /static/ beside
-// each role's own index.html and app.js, and the API that runs the role's
-// mesh methods for its pages, on app/console behind its logins:
+// Package webui is the API that runs an LLM role's mesh methods for the
+// workbench's pages (package app/workbench), on app/console behind its
+// logins, at /api/ on the role's own console and at /api/m/llm.<role>/ on
+// any console that shows the role:
 //
 //   - GET /api/me: the user, the role's identity and, for a proxy, its API's
 //     URL;
@@ -19,11 +19,9 @@ package webui
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	stdhttp "net/http"
 	"strings"
 	"sync"
@@ -38,48 +36,6 @@ import (
 	"github.com/lesismal/fit/llm/internal/pool"
 	"github.com/lesismal/fit/llm/internal/wire"
 )
-
-//go:embed static
-var staticFS embed.FS
-
-// Pages returns a role's pages: its own files at the root, and the shared
-// ones under static/.
-func Pages(role fs.FS) fs.FS {
-	shared, _ := fs.Sub(staticFS, "static")
-	return pages{role: role, shared: shared}
-}
-
-type pages struct{ role, shared fs.FS }
-
-func (p pages) Open(name string) (fs.File, error) {
-	if name == "static" {
-		return p.shared.Open(".")
-	}
-	if rest, ok := strings.CutPrefix(name, "static/"); ok {
-		return p.shared.Open(rest)
-	}
-	return p.role.Open(name)
-}
-
-func (p pages) ReadDir(name string) ([]fs.DirEntry, error) {
-	if name == "static" {
-		return fs.ReadDir(p.shared, ".")
-	}
-	if rest, ok := strings.CutPrefix(name, "static/"); ok {
-		return fs.ReadDir(p.shared, rest)
-	}
-	entries, err := fs.ReadDir(p.role, name)
-	if err == nil && name == "." {
-		if d, err := fs.Stat(p.shared, "."); err == nil {
-			entries = append(entries, fs.FileInfoToDirEntry(staticDir{d}))
-		}
-	}
-	return entries, err
-}
-
-type staticDir struct{ fs.FileInfo }
-
-func (staticDir) Name() string { return "static" }
 
 // The bounds of the pages' API.
 const (

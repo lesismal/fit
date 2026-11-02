@@ -20,7 +20,7 @@ func TestPages(t *testing.T) {
 		"models": [{"name": "m", "api": "openai", "base_url": "`+mock.BaseURL("a")+`", "api_key": "sk-a"}]}`), "")
 	n := nodeOf(t, nf)
 	base := strings.TrimSuffix(n.Console().URL(), "/")
-	for _, path := range []string{"/", "/app.js", "/static/ui.js", "/static/ui.css", "/static/peers.js", "/static/jobs.js", "/static/flow.js", "/static/forms.js"} {
+	for _, path := range []string{"/", "/core/ui.js", "/core/ui.css", "/core/workbench.js", "/llm/peers.js", "/llm/jobs.js", "/llm/flow.js", "/llm/forms.js", "/llm/node.js"} {
 		resp, err := http.Get(base + path)
 		if err != nil {
 			t.Fatal(err)
@@ -49,6 +49,13 @@ func TestPages(t *testing.T) {
 	}
 	if status, body := p.Do("POST", "/api/rpc/node/info", "{}"); status != 200 || !strings.Contains(body, `"models"`) {
 		t.Fatalf("info: %d %s", status, body)
+	}
+	// The workbench lists the node's module, and reaches its API at /api/m/llm.node/.
+	if status, body := p.Do("GET", "/api/workbench", ""); status != 200 || !strings.Contains(body, `"modules":["llm.node"]`) {
+		t.Fatalf("workbench: %d %s", status, body)
+	}
+	if status, body := p.Do("POST", "/api/m/llm.node/rpc/node/info", "{}"); status != 200 || !strings.Contains(body, `"models"`) {
+		t.Fatalf("info through the module: %d %s", status, body)
 	}
 	if status, _ := p.Do("POST", "/api/rpc/nope", "{}"); status != 404 {
 		t.Fatalf("an unknown method: %d", status)

@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"embed"
 	"encoding/json"
 	stdhttp "net/http"
 	"slices"
@@ -14,12 +13,6 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/uplink"
 )
-
-//go:embed web
-var web embed.FS
-
-// pages are the console's files: the proxy's page and the shared ones.
-var pages = common.Pages(web, "web")
 
 // ServiceView is a node's service, as the pages show and set it.
 type ServiceView struct {
@@ -293,3 +286,6 @@ func listenOf(raw json.RawMessage) string {
 	_ = json.Unmarshal(raw, &f)
 	return f.Listen
 }
+
+// Module returns the proxy's module, which the workbench shows.
+func (c *Proxy) Module() *console.Module { return c.console.Module() }

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -392,5 +394,50 @@ func TestConsolesShareAHost(t *testing.T) {
 		if code, _ := b.do("GET", "/api/session", ""); code != 200 {
 			t.Errorf("console %d lost its login: %d", i, code)
 		}
+	}
+}
+
+// A console logs through Logf without a Log, and through nothing without
+// either; a login's body is bounded whatever MaxBody says.
+func TestConsoleLogfAndLoginBound(t *testing.T) {
+	for _, withLogf := range []bool{true, false} {
+		o := options(t, nil, nil)
+		var mu sync.Mutex
+		var lines []string
+		if withLogf {
+			o.Logf = func(format string, args ...any) {
+				mu.Lock()
+				lines = append(lines, fmt.Sprintf(format, args...))
+				mu.Unlock()
+			}
+		}
+		o.MaxBody = 1 << 20
+		c, err := Start(newEngine(t), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := strings.TrimSuffix(c.URL(), "/")
+		resp, err := http.Post(base+"/api/login", "application/json", strings.NewReader(`{"username":"admin","password":"`+strings.Repeat("x", MaxLoginBytes)+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("a large login: %d", resp.StatusCode)
+		}
+		resp, err = http.Post(base+"/api/login", "application/json", strings.NewReader(`{"username":"admin","password":"secret"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || c.Logins() == nil {
+			t.Errorf("login: %d", resp.StatusCode)
+		}
+		c.Stop(context.Background())
+		mu.Lock()
+		if got := strings.Join(lines, "\n"); withLogf != strings.Contains(got, `"admin" logged in`) {
+			t.Errorf("Logf %v: %q", withLogf, got)
+		}
+		mu.Unlock()
 	}
 }

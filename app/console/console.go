@@ -1,7 +1,13 @@
 // Package console serves a role's web pages, on the listeners' fib engine:
-// the role's files, and its JSON API behind logins that work as
-// admin.console's do, through package login. The agent's and the tunnel's
-// roles each start one where their console member says.
+// the workbench's files, and the JSON API behind logins that work as
+// admin.console's do, through package login. The llm and tunnel roles each
+// start one where their console member says, and admin.console starts one
+// for every role of the process.
+//
+// A console's API is its own routes, under /api/, and its modules', each
+// under /api/m/<module>/: a module is a role's API, which the workbench's
+// pages call there whichever console serves them, so that one console may
+// show every role that runs beside it.
 //
 // Requests are served on fib's workers, and nothing here blocks one: a
 // password is checked, and an API handler's blocking work done, on the
@@ -19,6 +25,7 @@ import (
 	"net"
 	stdhttp "net/http"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +54,9 @@ const (
 	TaskTimeout = 30 * time.Second
 )
 
+// MaxLoginBytes bounds a login's body, whatever a console's MaxBody.
+const MaxLoginBytes = 4 << 10
+
 // CSRFHeader carries a session's CSRF token on every request that is not a
 // GET or a HEAD.
 const CSRFHeader = "X-Fit-Csrf"
@@ -67,8 +77,65 @@ type Options struct {
 	Pages fs.FS
 	// Log says who logged in, who failed to, and what each user changed.
 	Log *logs.Logger
+	// Logf, when Log is nil, is told what Log would be.
+	Logf func(format string, args ...any)
 	// Routes adds the role's API to the console, under /api/.
 	Routes func(api *API)
+	// Modules, when not nil, returns the modules the console serves,
+	// each under /api/m/<ID>/. It is called for each request to a module,
+	// and for GET /api/workbench, on a fib worker: it must not block.
+	Modules func() []*Module
+	// MaxBody bounds a request's body; MaxBodyBytes when 0.
+	MaxBody int64
+}
+
+// Module is an API a console serves under /api/m/<ID>/: a role's, made once
+// for the role and kept, since its routes are added on its first request.
+type Module struct {
+	// ID names the module, as the role's member of the config is named:
+	// llm.hub, tunnel.proxy, or admin for the config's own.
+	ID string
+	// Routes adds the module's endpoints, as Options.Routes does: an
+	// endpoint the module adds as /api/x is served at /api/m/<ID>/x.
+	Routes func(api *API)
+
+	once  sync.Once
+	table routeTable
+}
+
+// routes returns the module's endpoints, adding them on the first call.
+func (m *Module) routes() *routeTable {
+	m.once.Do(func() {
+		m.table.exact = map[string]Handler{}
+		if m.Routes != nil {
+			m.Routes(&API{t: &m.table})
+		}
+	})
+	return &m.table
+}
+
+// routeTable is a set of endpoints: exact ones by "METHOD /api/path", then
+// prefixes, the longest first.
+type routeTable struct {
+	exact    map[string]Handler
+	prefixes []prefixRoute
+}
+
+type prefixRoute struct {
+	method, prefix string
+	h              Handler
+}
+
+func (t *routeTable) lookup(method, p string) Handler {
+	if h := t.exact[method+" "+p]; h != nil {
+		return h
+	}
+	for _, pr := range t.prefixes {
+		if (pr.method == "" || pr.method == method) && strings.HasPrefix(p, pr.prefix) {
+			return pr.h
+		}
+	}
+	return nil
 }
 
 // Console is a role's pages, served on an engine of fit's.
@@ -79,9 +146,11 @@ type Console struct {
 	secure  bool
 	cookie  string
 	logins  *login.Logins
-	log     *logs.Logger
+	infof   func(format string, args ...any)
+	warnf   func(format string, args ...any)
 	files   map[string]file
-	routes  map[string]Handler // by "METHOD /api/path"
+	routes  routeTable
+	modules func() []*Module
 	tasks   chan func()
 	limit   *limitHandler
 	stop    chan struct{}
@@ -99,6 +168,9 @@ type Request struct {
 	*fibhttp.Context
 	// User is who made it.
 	User string
+	// Path is the request's path as its endpoint was added: under /api/,
+	// without a module's /api/m/<ID> before it.
+	Path string
 	c    *Console
 }
 
@@ -107,13 +179,21 @@ type Request struct {
 type Handler func(r *Request)
 
 // API is where a role adds its endpoints.
-type API struct{ c *Console }
+type API struct{ t *routeTable }
 
 // Handle adds the endpoint method path, as "POST" "/api/listeners", which
 // only logged-in users reach, with the session's CSRF token on anything but
 // a GET or a HEAD.
 func (a *API) Handle(method, path string, h Handler) {
-	a.c.routes[method+" "+path] = h
+	a.t.exact[method+" "+path] = h
+}
+
+// HandlePrefix adds an endpoint for every path under prefix, as "/api/x/",
+// of method, or of any method when method is "", that no endpoint Handle
+// added matches; the longest prefix wins.
+func (a *API) HandlePrefix(method, prefix string, h Handler) {
+	a.t.prefixes = append(a.t.prefixes, prefixRoute{method: method, prefix: prefix, h: h})
+	slices.SortStableFunc(a.t.prefixes, func(x, y prefixRoute) int { return len(y.prefix) - len(x.prefix) })
 }
 
 // Start serves the console o describes on engine, as a binding of its own,
@@ -124,19 +204,32 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, log: o.Log,
-		files: map[string]file{}, routes: map[string]Handler{}, tasks: make(chan func(), Queue), stop: make(chan struct{})}
+	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules,
+		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), stop: make(chan struct{})}
+	switch {
+	case o.Log != nil:
+		c.infof, c.warnf = o.Log.Infof, o.Log.Warnf
+	case o.Logf != nil:
+		c.infof, c.warnf = o.Logf, o.Logf
+	default:
+		c.infof = func(string, ...any) {}
+		c.warnf = c.infof
+	}
 	if o.Pages != nil {
 		if err := c.loadFiles(o.Pages); err != nil {
 			return nil, err
 		}
 	}
 	if o.Routes != nil {
-		o.Routes(&API{c})
+		o.Routes(&API{t: &c.routes})
+	}
+	maxBody := o.MaxBody
+	if maxBody <= 0 {
+		maxBody = MaxBodyBytes
 	}
 	var h fib.Handler = fibhttp.NewHandlerWithConfig(fibhttp.Config{
 		MaxHeaderBytes:    MaxHeader,
-		MaxBodyBytes:      MaxBodyBytes,
+		MaxBodyBytes:      maxBody,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -163,6 +256,9 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	}
 	return c, nil
 }
+
+// Logins returns the console's logins.
+func (c *Console) Logins() *login.Logins { return c.logins }
 
 // Addr returns where the console listens.
 func (c *Console) Addr() net.Addr { return c.addr }
@@ -257,9 +353,7 @@ func (r *Request) Decode(v any) bool {
 
 // Logf logs a message of the user's, as "console: %q: ...".
 func (r *Request) Logf(format string, args ...any) {
-	if r.c.log != nil {
-		r.c.log.Infof("console: %q: %s", r.User, fmt.Sprintf(format, args...))
-	}
+	r.c.infof("console: %q: %s", r.User, fmt.Sprintf(format, args...))
 }
 
 // Error answers status with {"error": msg}.
@@ -329,16 +423,61 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusForbidden, "the request lacks the session's "+CSRFHeader+" token")
 		return
 	}
-	if r.Method == stdhttp.MethodGet && p == "/api/session" {
-		_ = WriteJSON(ctx, stdhttp.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
-		return
+	if r.Method == stdhttp.MethodGet {
+		switch p {
+		case "/api/session":
+			_ = WriteJSON(ctx, stdhttp.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
+			return
+		case "/api/workbench":
+			_ = WriteJSON(ctx, stdhttp.StatusOK, workbenchBody{User: s.User, Modules: c.moduleIDs()})
+			return
+		}
 	}
-	hd := c.routes[r.Method+" "+p]
+	t, rel := &c.routes, p
+	if rest, ok := strings.CutPrefix(p, "/api/m/"); ok {
+		id, sub, _ := strings.Cut(rest, "/")
+		m := c.module(id)
+		if m == nil {
+			_ = Error(ctx, stdhttp.StatusNotFound, "no module "+strconv.Quote(id)+" runs here")
+			return
+		}
+		t, rel = m.routes(), "/api/"+sub
+	}
+	hd := t.lookup(r.Method, rel)
 	if hd == nil {
 		_ = Error(ctx, stdhttp.StatusNotFound, "no such endpoint")
 		return
 	}
-	hd(&Request{Context: ctx, User: s.User, c: c})
+	hd(&Request{Context: ctx, User: s.User, Path: rel, c: c})
+}
+
+// workbenchBody is what GET /api/workbench answers: who is logged in, and
+// the IDs of the modules served, for the pages' menu.
+type workbenchBody struct {
+	User    string   `json:"user"`
+	Modules []string `json:"modules"`
+}
+
+func (c *Console) moduleIDs() []string {
+	ids := []string{}
+	if c.modules != nil {
+		for _, m := range c.modules() {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids
+}
+
+func (c *Console) module(id string) *Module {
+	if c.modules == nil {
+		return nil
+	}
+	for _, m := range c.modules() {
+		if m.ID == id {
+			return m
+		}
+	}
+	return nil
 }
 
 func (c *Console) origin(r *stdhttp.Request) string {
@@ -375,6 +514,10 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusUnsupportedMediaType, "the body must be sent as application/json")
 		return
 	}
+	if len(ctx.Body()) > MaxLoginBytes {
+		_ = Error(ctx, stdhttp.StatusRequestEntityTooLarge, "a login's body is 4 KiB at most")
+		return
+	}
 	var body loginBody
 	if json.Unmarshal(ctx.Body(), &body) != nil {
 		_ = Error(ctx, stdhttp.StatusBadRequest, "the body must be {\"username\", \"password\"}")
@@ -394,25 +537,21 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		}
 		if !ok {
 			c.logins.Failed(addr)
-			if c.log != nil {
-				c.log.Warnf("console: a failed login as %q from %s", body.Username, addr)
-			}
+			c.warnf("console: a failed login as %q from %s", body.Username, addr)
 			_ = Error(ctx, stdhttp.StatusUnauthorized, "the user name or password is wrong")
 			return
 		}
 		token, s := c.logins.Start(body.Username)
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
-		if c.log != nil {
-			c.log.Infof("console: %q logged in from %s", body.Username, addr)
-		}
+		c.infof("console: %q logged in from %s", body.Username, addr)
 		_ = WriteJSON(ctx, stdhttp.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
 	})
 }
 
 func (c *Console) logout(ctx *fibhttp.Context) {
 	if ck, err := ctx.Request.Cookie(c.cookie); err == nil {
-		if s, ok := c.logins.End(ck.Value); ok && c.log != nil {
-			c.log.Infof("console: %q logged out", s.User)
+		if s, ok := c.logins.End(ck.Value); ok {
+			c.infof("console: %q logged out", s.User)
 		}
 	}
 	ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())

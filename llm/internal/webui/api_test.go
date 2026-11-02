@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	stdhttp "net/http"
 	"net/http/cookiejar"
 	"strings"
@@ -44,7 +43,7 @@ func startUI(t *testing.T, router *mesh.Router, p *pool.Pool, extra func(api *co
 		Config: &config.RoleConsole{Address: "127.0.0.1:0", MaxConns: 64,
 			Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}}},
 		Cookie: "fit_webui_test",
-		Pages:  Pages(fstest.MapFS{"index.html": {Data: []byte("<p>")}}),
+		Pages:  fstest.MapFS{"index.html": {Data: []byte("<p>")}},
 		Routes: func(api *console.API) {
 			Register(api, Options{Router: router, Pool: p, Me: func() map[string]any { return map[string]any{"role": "test"} }})
 			if extra != nil {
@@ -446,24 +445,6 @@ func TestSSEEnds(t *testing.T) {
 	// Ended: a late frame is only released, and the response left alone.
 	s.frame([]byte("late"), nil)
 	s.frame(nil, errors.New("late"))
-}
-
-func TestPagesStatic(t *testing.T) {
-	p := Pages(fstest.MapFS{"index.html": {Data: []byte("<p>")}})
-	f, err := p.Open("static")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi, err := f.Stat(); err != nil || !fi.IsDir() {
-		t.Fatalf("static: %v %v", fi, err)
-	}
-	f.Close()
-	if _, err := fs.ReadDir(p, "static/ui.js"); err == nil {
-		t.Fatal("a file read as a directory")
-	}
-	if _, err := fs.ReadDir(p, "missing"); err == nil {
-		t.Fatal("a missing directory read")
-	}
 }
 
 // TestSSEGone covers a frame arriving once the browser has gone: it cannot

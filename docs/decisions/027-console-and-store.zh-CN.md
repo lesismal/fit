@@ -50,6 +50,9 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
   `admin.console.address`（127.0.0.1:2020），TLS 来自 `cert_file` 和 `key_file`，非 loopback 地址必须设置 TLS。Admin API 和它
   的规则不变；控制台在自己的检查之后，在进程内调用 Admin API 的处理函数来处理配置、版本、回滚、状态和缓存，两者经同一条
   路径应用配置。
+  *2026-11-02 修改：* 控制台现在是监听器的 fib 引擎上它自己的一个绑定，与角色的页面一样由 `app/console` 提供，并提供
+  workbench（`app/workbench`）：配置模块与每个运行中角色的模块，各在 `/api/m/<模块>/` 下，只需登录一次。Admin API 的处理
+  函数在控制台的有界池上运行，绝不在 fib worker 上。它的绑定不是配置中的监听器，所以监听器失败的配置仍让它可以访问。
 - **登录。** `users` 是用户名和 bcrypt 哈希，与 `basic_auth` 的写法相同，由 `fit hash-password` 生成；密码从不以明文写入。
   用户名不存在时也与一个占位哈希比较；同时最多做两次校验；一个客户端地址 15 分钟内失败 5 次后被拒绝 15 分钟，记录的地址最多
   4,096 个。会话是放在 cookie 里的 32 个随机字节，cookie 为 `HttpOnly`、`SameSite=Strict`，走 TLS 时还有 `Secure`；服务端

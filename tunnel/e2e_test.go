@@ -775,7 +775,7 @@ func TestWebProxy(t *testing.T) {
 		body = string(data)
 		return resp.StatusCode == 200
 	})
-	if !strings.Contains(body, "tunnel hub") {
+	if !strings.Contains(body, "core/workbench.js") {
 		t.Fatalf("the page: %s", body)
 	}
 	// The console's login works through it too, and so its API.
@@ -783,14 +783,14 @@ func TestWebProxy(t *testing.T) {
 	var st hubStatus
 	pg.status(&st)
 	// A large static file arrives whole.
-	resp, err := pg.c.Get("http://" + proxy + "/static/base.css")
+	resp, err := pg.c.Get("http://" + proxy + "/core/ui.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 200 || len(data) < 20000 {
-		t.Fatalf("base.css: %d, %d bytes", resp.StatusCode, len(data))
+		t.Fatalf("ui.css: %d, %d bytes", resp.StatusCode, len(data))
 	}
 	// A wrong password gets nothing.
 	other := freeAddr(t)

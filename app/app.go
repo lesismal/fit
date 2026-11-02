@@ -30,6 +30,7 @@ import (
 
 	"github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
@@ -58,6 +59,13 @@ type Metered interface {
 	// scrape's goroutine, beside the role's work, and must not wait for an
 	// Apply.
 	WriteMetrics(w observe.MetricWriter)
+}
+
+// Paged is a role with web pages: the workbench shows its module beside the
+// other roles', on admin.console as on the role's own console.
+type Paged interface {
+	// Module returns the role's module, the same one for the role's life.
+	Module() *console.Module
 }
 
 // Info describes a role.
@@ -293,6 +301,9 @@ type Manager struct {
 	// metered is the running roles that have metrics, for scrapes that
 	// must not wait for an Apply.
 	metered atomic.Pointer[[]Metered]
+	// modules is the running roles' modules, for consoles that must not
+	// wait for an Apply.
+	modules atomic.Pointer[[]*console.Module]
 
 	// drain is the roles' drain timeout, in nanoseconds; 0 for the default.
 	drain atomic.Int64
@@ -397,15 +408,30 @@ func (m *Manager) Apply(c *config.Config) error {
 	return errors.Join(errs...)
 }
 
-// noteMetered records the running roles that have metrics. m.mu is held.
+// noteMetered records the running roles that have metrics, and their
+// modules. m.mu is held.
 func (m *Manager) noteMetered() {
 	var ms []Metered
+	var mods []*console.Module
 	for _, id := range slices.Sorted(maps.Keys(m.running)) {
 		if mt, ok := m.running[id].(Metered); ok {
 			ms = append(ms, mt)
 		}
+		if p, ok := m.running[id].(Paged); ok {
+			mods = append(mods, p.Module())
+		}
 	}
 	m.metered.Store(&ms)
+	m.modules.Store(&mods)
+}
+
+// Modules returns the modules of the running roles that have pages, in the
+// order of their IDs. It does not wait for an Apply.
+func (m *Manager) Modules() []*console.Module {
+	if p := m.modules.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // WriteMetrics writes the metrics of the running roles that have them, in

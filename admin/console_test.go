@@ -13,11 +13,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lesismal/fib"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/login"
 )
+
+// testEngine returns a running fib engine, stopped when t ends.
+func testEngine(t *testing.T) *fib.Engine {
+	t.Helper()
+	engine, err := fib.New(fib.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _ = engine.Run(); close(done) }()
+	t.Cleanup(func() { engine.Stop(); <-done; _ = engine.Close() })
+	return engine
+}
 
 // consoleFixture is a console in front of a fixture's Configs, with a
 // clock a test moves.
@@ -42,7 +57,7 @@ func startConsole(t *testing.T, c *config.Console) *consoleFixture {
 		c.Users = []config.ConsoleUser{{Username: "ada", PasswordHash: string(hash)}}
 	}
 	var err error
-	f.console, err = StartConsole(c, &config.Admin{}, f.configs, nil, func(format string, args ...any) {
+	f.console, err = StartConsole(testEngine(t), c, &config.Admin{}, f.configs, nil, nil, func(format string, args ...any) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.logs = append(f.logs, strings.TrimSpace(fmtSprintf(format, args...)))
@@ -115,7 +130,7 @@ func (b *browser) login(user, password string) int {
 	b.t.Helper()
 	code, body, _ := b.do("POST", "/api/login", `{"username": "`+user+`", "password": "`+password+`"}`)
 	if code == http.StatusOK {
-		var s sessionBody
+		var s struct{ CSRF string }
 		_ = json.Unmarshal([]byte(body), &s)
 		b.csrf = s.CSRF
 	}
@@ -131,7 +146,7 @@ func TestConsoleLoginAndEdit(t *testing.T) {
 		!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatalf("the page: %d %q %v", code, body, h)
 	}
-	for _, path := range []string{"/api/session", "/api/schema", "/api/admin/config"} {
+	for _, path := range []string{"/api/session", "/api/m/admin/schema", "/api/m/admin/config"} {
 		if code, _, _ := b.do("GET", path, ""); code != http.StatusUnauthorized {
 			t.Errorf("GET %s without a login: %d", path, code)
 		}
@@ -150,23 +165,23 @@ func TestConsoleLoginAndEdit(t *testing.T) {
 	}
 
 	// Reads.
-	code, body, h := b.do("GET", "/api/admin/config", "")
+	code, body, h := b.do("GET", "/api/m/admin/config", "")
 	if code != http.StatusOK || !strings.Contains(body, `"one"`) || h.Get("Cache-Control") != "no-store" {
 		t.Fatalf("config: %d %s %v", code, body, h)
 	}
 	etag := h.Get("ETag")
-	if code, body, _ := b.do("GET", "/api/schema", ""); code != http.StatusOK || !strings.Contains(body, `"$defs"`) || !strings.Contains(body, `"console"`) {
+	if code, body, _ := b.do("GET", "/api/m/admin/schema", ""); code != http.StatusOK || !strings.Contains(body, `"$defs"`) || !strings.Contains(body, `"console"`) {
 		t.Errorf("schema: %d %.200s", code, body)
 	}
 
 	// A change without the CSRF token is refused; with it, applied.
 	csrf := b.csrf
 	b.csrf = ""
-	if code, _, _ := b.do("PUT", "/api/admin/config", doc("two")); code != http.StatusForbidden {
+	if code, _, _ := b.do("PUT", "/api/m/admin/config", doc("two")); code != http.StatusForbidden {
 		t.Errorf("without the CSRF token: %d", code)
 	}
 	b.csrf = csrf
-	if code, body, _ := b.do("PUT", "/api/admin/config", doc("two"), "If-Match", etag); code != http.StatusOK {
+	if code, body, _ := b.do("PUT", "/api/m/admin/config", doc("two"), "If-Match", etag); code != http.StatusOK {
 		t.Fatalf("put: %d %s", code, body)
 	}
 	if got := f.served(t); got != "two" {
@@ -179,18 +194,18 @@ func TestConsoleLoginAndEdit(t *testing.T) {
 		t.Errorf("logs: %q", f.logs)
 	}
 	// A stale ETag, and a config that does not load.
-	if code, _, _ := b.do("PUT", "/api/admin/config", doc("three"), "If-Match", etag); code != http.StatusPreconditionFailed {
+	if code, _, _ := b.do("PUT", "/api/m/admin/config", doc("three"), "If-Match", etag); code != http.StatusPreconditionFailed {
 		t.Errorf("a stale ETag: %d", code)
 	}
-	if code, body, _ := b.do("PUT", "/api/admin/config", `{"listeners": []}`); code != http.StatusBadRequest || !strings.Contains(body, "at least one listener") {
+	if code, body, _ := b.do("PUT", "/api/m/admin/config", `{"listeners": []}`); code != http.StatusBadRequest || !strings.Contains(body, "at least one listener") {
 		t.Errorf("a bad config: %d %s", code, body)
 	}
 
 	// Another page's request is refused, even with the cookie.
-	if code, _, _ := b.do("GET", "/api/admin/config", "", "Origin", "http://evil.example"); code != http.StatusForbidden {
+	if code, _, _ := b.do("GET", "/api/m/admin/config", "", "Origin", "http://evil.example"); code != http.StatusForbidden {
 		t.Errorf("another origin: %d", code)
 	}
-	if code, _, _ := b.do("GET", "/api/admin/config", "", "Origin", f.url); code != http.StatusOK {
+	if code, _, _ := b.do("GET", "/api/m/admin/config", "", "Origin", f.url); code != http.StatusOK {
 		t.Errorf("the console's own origin: %d", code)
 	}
 
@@ -268,7 +283,7 @@ func TestConsoleSessions(t *testing.T) {
 		}
 	}
 	// A cookie made up is no session.
-	b.c.Jar.SetCookies(mustURL(f.url), []*http.Cookie{{Name: f.console.cookie, Value: "made-up"}})
+	b.c.Jar.SetCookies(mustURL(f.url), []*http.Cookie{{Name: login.CookieName(sessionCookie, f.console.Addr()), Value: "made-up"}})
 	if code, _, _ := b.do("GET", "/api/session", ""); code != http.StatusUnauthorized {
 		t.Errorf("a made-up cookie: %d", code)
 	}
@@ -292,4 +307,34 @@ func mustURL(s string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// The console shows the config's module and the roles' beside it, each
+// role's API under /api/m/<role>/.
+func TestConsoleModules(t *testing.T) {
+	f := start(t, doc("one"), &config.Admin{})
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	c := &config.Console{Address: "127.0.0.1:0", Users: []config.ConsoleUser{{Username: "ada", PasswordHash: string(hash)}}}
+	role := &console.Module{ID: "llm.hub", Routes: func(api *console.API) {
+		api.Handle("GET", "/api/me", func(r *console.Request) { _ = r.JSON(http.StatusOK, map[string]string{"role": "hub"}) })
+	}}
+	cs, err := StartConsole(testEngine(t), c, &config.Admin{}, f.configs, func() []*console.Module { return []*console.Module{role} }, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Shutdown(context.Background())
+	cf := &consoleFixture{fixture: f, console: cs, url: strings.TrimSuffix(cs.URL(), "/")}
+	b := cf.browser(t)
+	if code := b.login("ada", "pw"); code != http.StatusOK {
+		t.Fatalf("login: %d", code)
+	}
+	if code, body, _ := b.do("GET", "/api/workbench", ""); code != http.StatusOK || body != `{"user":"ada","modules":["admin","llm.hub"]}` {
+		t.Fatalf("workbench: %d %s", code, body)
+	}
+	if code, body, _ := b.do("GET", "/api/m/llm.hub/me", ""); code != http.StatusOK || body != `{"role":"hub"}` {
+		t.Fatalf("the role's API: %d %s", code, body)
+	}
+	if code, body, h := b.do("GET", "/api/m/admin/versions", ""); code != http.StatusOK || !strings.Contains(h.Get("Content-Type"), "json") {
+		t.Fatalf("versions: %d %s %v", code, body, h)
+	}
 }

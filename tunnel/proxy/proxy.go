@@ -90,7 +90,7 @@ type Proxy struct {
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Proxy {
 	c := &Proxy{h: h, log: h.Log, limit: tunnel.NewLimit(config.DefaultTunnelTunnels), nodes: map[*uplink.Uplink]*proto.NodeList{}, quit: make(chan struct{})}
-	c.console = common.NewConsole(h.Engine, "fit_tunnel_proxy", pages, h.Log, c.api)
+	c.console = common.NewConsole(h.Engine, "tunnel.proxy", h.Log, c.api)
 	return c
 }
 

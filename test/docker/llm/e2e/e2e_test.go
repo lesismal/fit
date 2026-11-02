@@ -96,7 +96,7 @@ func testConsoles(t *testing.T) {
 				}
 				return nil
 			})
-			for _, p := range []string{"/", "/app.js", "/static/ui.js", "/static/ui.css", "/static/peers.js", "/static/jobs.js"} {
+			for _, p := range []string{"/", "/core/ui.js", "/core/ui.css", "/core/workbench.js", "/llm/peers.js", "/llm/jobs.js", "/llm/node.js"} {
 				resp, err := plain.Get(c.base + p)
 				if err != nil {
 					t.Fatal(err)

@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
 	stdhttp "net/http"
@@ -16,12 +15,6 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/latency"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 )
-
-//go:embed web
-var web embed.FS
-
-// pages are the console's files: the hub's page and the shared ones.
-var pages = common.Pages(web, "web")
 
 // InfoView is what a peer told about itself, as the pages show it: a node
 // is a node, and its services are services.
@@ -406,3 +399,6 @@ func editSettings(m common.Member, req settingsReq) error {
 	m["console_socket"] = data
 	return nil
 }
+
+// Module returns the hub's module, which the workbench shows.
+func (s *Hub) Module() *console.Module { return s.console.Module() }

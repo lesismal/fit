@@ -1,8 +1,8 @@
-/* fit llm UI — shared design system of the node, hub and proxy consoles.
+/* fit workbench UI — the design system of every module of the workbench, first made for the LLM roles' consoles.
    Themes: <html data-theme="light|dark|ocean|sunset|graphite">; without data-theme the theme follows the system
    (prefers-color-scheme). Pure CSS, no web fonts or remote assets, so it works offline / on intranets.
 
-   fit llm UI —— node、hub、proxy 控制台共用的设计系统。
+   fit workbench UI —— workbench 各模块共用的设计系统，最初为 LLM 各角色的控制台而作。
    主题：<html data-theme="light|dark|ocean|sunset|graphite">；未设置 data-theme 时跟随系统（prefers-color-scheme）。
    纯 CSS，不依赖 Web 字体或远程资源，离线 / 内网可用。 */
 
@@ -128,8 +128,45 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .content { padding: 24px 28px 48px; display: flex; flex-direction: column; gap: 20px; max-width: 1480px; width: 100%; }
 .menu-btn { display: none; }
 
+/* ---- Workbench menu tree / 工作台菜单树 ---- */
+.sidebar { overflow: hidden; }
+.brand { position: relative; }
+.brand__text { min-width: 0; flex: 1; }
+.wb-fold { color: var(--sidebar-text); margin-left: auto; }
+.wb-fold:hover { background: var(--sidebar-active); color: var(--sidebar-strong); }
+.wb-fold svg { transition: transform .2s; }
+.tree__filter { background: var(--sidebar-2); border-color: transparent; color: var(--sidebar-strong); margin: 0 4px 6px; width: auto; }
+.tree__filter::placeholder { color: var(--sidebar-text); opacity: .7; }
+.tree { overflow-y: auto; flex: 1; min-height: 0; margin: 0 -4px; padding: 0 4px; scrollbar-width: thin; }
+.tree__node { display: flex; flex-direction: column; }
+.tree__kids { display: none; flex-direction: column; gap: 1px; }
+.tree__node.is-open > .tree__kids, .tree__node.is-filtered > .tree__kids { display: flex; }
+.tree__head { font-weight: 600; }
+.tree__group { margin-top: 4px; }
+.tree__group > .tree__head { color: var(--sidebar-strong); }
+.tree__chev { margin-left: auto; display: inline-flex; opacity: .6; }
+.tree__chev svg { width: 14px !important; height: 14px !important; transition: transform .15s; }
+.tree__node.is-open > .tree__head .tree__chev svg, .tree__node.is-filtered > .tree__head .tree__chev svg { transform: rotate(90deg); }
+.tree__d1 { padding-left: 26px; }
+.tree__d2 { padding-left: 42px; font-size: 13px; padding-top: 7px; padding-bottom: 7px; }
+.tree__d2 svg { width: 16px; height: 16px; }
+.tree__node.has-active:not(.is-open) > .tree__head { color: var(--sidebar-strong); box-shadow: inset 3px 0 0 var(--primary); }
+.shell { transition: grid-template-columns .2s; }
+.shell.is-mini { grid-template-columns: 64px 1fr; }
+.shell.is-mini .sidebar { padding: 18px 8px; }
+.shell.is-mini .brand { flex-direction: column; padding: 4px 0 12px; }
+.shell.is-mini .brand__text, .shell.is-mini .tree__filter, .shell.is-mini .nav__item > span, .shell.is-mini .sidebar__foot .row { display: none; }
+.shell.is-mini .wb-fold { margin: 0; }
+.shell.is-mini .wb-fold svg { transform: rotate(180deg); }
+.shell.is-mini .nav__item { justify-content: center; padding: 9px 0; }
+.shell.is-mini .tree__d1, .shell.is-mini .tree__d2 { padding-left: 0; }
+.shell.is-mini .tree__group > .tree__head { display: none; }
+.shell.is-mini .tree__kids { display: flex; }
+.shell.is-mini .tree__node > .tree__kids > .tree__node > .tree__head { display: none; }
+
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
+  .shell, .shell.is-mini { grid-template-columns: 1fr; }
+  .wb-fold { display: none; }
   .sidebar { position: fixed; z-index: 50; left: 0; top: 0; width: 248px; transform: translateX(-100%); transition: transform .2s; }
   .shell.nav-open .sidebar { transform: none; box-shadow: var(--shadow-lg); }
   .menu-btn { display: inline-flex; }
@@ -358,3 +395,57 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .lm-rtt { font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rtt-good { color: var(--ok); fill: var(--ok); } .rtt-fair { color: var(--warn); fill: var(--warn); } .rtt-poor { color: var(--danger); fill: var(--danger); }
 .lm-legend { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+
+/* The config editor (gateway/config.js). / 配置编辑器（gateway/config.js）。 */
+.cf-form { display: flex; flex-direction: column; }
+.cf-field { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 4px 16px; padding: 10px 0; border-bottom: 1px dashed var(--border); align-items: start; }
+.cf-form > .cf-field:last-child { border-bottom: 0; }
+.cf-name { padding-top: 6px; min-width: 0; overflow-wrap: anywhere; }
+.cf-label { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.cf-req { color: var(--danger); margin-left: 3px; }
+.cf-ctl { min-width: 0; }
+.cf-ctl > .input, .cf-ctl > .select { max-width: 560px; }
+.cf-doc { grid-column: 2; color: var(--muted); font-size: 12px; line-height: 1.5; margin: 2px 0 4px; }
+.cf-body > .cf-doc, .cf-params > .cf-doc { grid-column: auto; }
+.cf-field.is-error .cf-label, .cf-node.is-error > summary .cf-label { color: var(--danger); }
+.cf-field.is-error .input, .cf-field.is-error .select, .cf-field.is-error .textarea, .cf-row.is-error .input, .cf-row.is-error .select { border-color: var(--danger); }
+.cf-node { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); margin: 8px 0; }
+.cf-node.is-error { border-color: var(--danger); }
+.cf-node > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-height: 40px; flex-wrap: wrap; }
+.cf-node > summary::-webkit-details-marker { display: none; }
+.cf-chev { display: inline-flex; color: var(--muted); }
+.cf-chev svg { transition: transform .15s; }
+.cf-node[open] > summary > .cf-chev svg { transform: rotate(90deg); }
+.cf-node > .cf-body { padding: 6px 14px 12px; border-top: 1px solid var(--border); }
+.cf-item { background: var(--surface); box-shadow: var(--shadow-sm); border-radius: var(--radius); margin: 0 0 10px; }
+.cf-item > summary { min-height: 48px; padding: 10px 16px; }
+.cf-item > summary .cf-label { font-size: 13.5px; color: var(--text); }
+.cf-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.cf-spacer { flex: 1; }
+.cf-btns { display: inline-flex; gap: 2px; margin-left: auto; flex: none; }
+.cf-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.cf-row > .input, .cf-row > .select, .cf-row > .textarea { flex: 1; min-width: 0; }
+.cf-row > .cf-key, .cf-mapitem .cf-key { flex: 0 0 200px; max-width: 200px; }
+.cf-mapitem { border-left: 2px solid var(--border); padding-left: 10px; margin: 8px 0; }
+.cf-params { border-left: 2px solid var(--primary-soft); padding-left: 12px; margin-top: 6px; }
+.btn.cf-up svg { transform: rotate(-90deg); }
+.btn.cf-down svg { transform: rotate(90deg); }
+.cf-flash { animation: cf-flash 1.8s ease-out; }
+@keyframes cf-flash { from { background: var(--warn-soft); } to { background: transparent; } }
+.cf-pre { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; overflow: auto; max-height: 65vh; margin: 0; white-space: pre; }
+.cf-raw { min-height: 65vh; }
+.ov-upstream + .ov-upstream { border-top: 1px solid var(--border); padding-top: 14px; }
+@media (max-width: 700px) {
+  .cf-state { display: none; }
+  .cf-field { grid-template-columns: 1fr; }
+  .cf-doc { grid-column: 1; }
+  .cf-row > .cf-key, .cf-mapitem .cf-key { flex-basis: 110px; max-width: 110px; }
+}
+
+/* Narrow screens: the top bar wraps, and the preference pickers move below it. / 窄屏：顶栏换行，偏好选择器移到下一行。 */
+@media (max-width: 700px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .topbar > div:nth-child(2) { min-width: 0; flex: 1; }
+  .topbar .prefs { order: 10; width: 100%; justify-content: flex-end; }
+  .topbar > .row { flex-wrap: wrap; }
+}

@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"os"
 	"runtime/debug"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/llm/internal/mesh"
 	"github.com/lesismal/fit/llm/internal/model"
@@ -42,8 +42,6 @@ const (
 type Spec struct {
 	// Role is model.RoleHub, model.RoleNode or model.RoleProxy.
 	Role string
-	// Pages are the role's own files: index.html and app.js.
-	Pages fs.FS
 	// Me adds to what GET /api/me answers.
 	Me func() map[string]any
 }
@@ -72,6 +70,8 @@ type Base struct {
 	started  int64
 	hostname string
 
+	module *console.Module
+
 	mu         sync.Mutex
 	id, name   string
 	console    *console.Console
@@ -97,6 +97,7 @@ func New(h *app.Host, spec Spec) *Base {
 	b.Mesh = mesh.New(mesh.Options{Self: b.Self, AcceptRoles: config.LLMPeerRoles(spec.Role), Engine: h.Engine, Log: h.Log}, b.Router)
 	mesh.RegisterAdmin(b.Router, b.Mesh, b.EditMesh)
 	b.registerSettings()
+	b.module = &console.Module{ID: "llm." + spec.Role, Routes: b.routes}
 	return b
 }
 
@@ -229,10 +230,8 @@ func (b *Base) applyConsole(cfg *config.RoleConsole) error {
 	if cfg != nil {
 		var err error
 		c, err = console.Start(b.H.Engine, console.Options{
-			Config: cfg, Cookie: "fit_llm_" + b.Role, Pages: webui.Pages(b.Pages), Log: b.Log,
-			Routes: func(api *console.API) {
-				webui.Register(api, webui.Options{Router: b.Router, Pool: b.Pool, Me: b.me})
-			},
+			Config: cfg, Cookie: "fit_llm_" + b.Role, Pages: workbench.Pages(), Log: b.Log,
+			Routes: b.routes, Modules: func() []*console.Module { return []*console.Module{b.module} },
 		})
 		if err != nil {
 			b.mu.Lock()
@@ -246,6 +245,14 @@ func (b *Base) applyConsole(cfg *config.RoleConsole) error {
 	b.mu.Unlock()
 	return nil
 }
+
+// routes adds the role's API to a console.
+func (b *Base) routes(api *console.API) {
+	webui.Register(api, webui.Options{Router: b.Router, Pool: b.Pool, Me: b.me})
+}
+
+// Module returns the role's module, which the workbench shows.
+func (b *Base) Module() *console.Module { return b.module }
 
 func (b *Base) me() map[string]any {
 	out := map[string]any{"identity": b.Self()}

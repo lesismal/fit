@@ -7,9 +7,7 @@ package hub
 
 import (
 	"context"
-	"embed"
 	"errors"
-	"io/fs"
 	"strings"
 	"time"
 
@@ -19,9 +17,6 @@ import (
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/role"
 )
-
-//go:embed ui
-var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
@@ -44,8 +39,7 @@ type Role struct {
 
 // New returns a hub on h, started by its first Apply.
 func New(h *app.Host) *Role {
-	pages, _ := fs.Sub(uiFS, "ui")
-	b := role.New(h, role.Spec{Role: model.RoleHub, Pages: pages})
+	b := role.New(h, role.Spec{Role: model.RoleHub})
 	r := &Role{Base: b}
 	r.hub = newHub(b.Mesh, b.Self, b.Log)
 	b.Register(r)

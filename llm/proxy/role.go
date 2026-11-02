@@ -9,10 +9,8 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +22,6 @@ import (
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/role"
 )
-
-//go:embed ui
-var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
@@ -68,9 +63,8 @@ type Proxy struct {
 
 // New returns a proxy on h, started by its first Apply.
 func New(h *app.Host) *Proxy {
-	pages, _ := fs.Sub(uiFS, "ui")
 	c := &Proxy{cat: newCatalog(), keys: &keyStore{}, stats: newStats(), maxAttempts: 4}
-	c.Base = role.New(h, role.Spec{Role: model.RoleProxy, Pages: pages, Me: c.me})
+	c.Base = role.New(h, role.Spec{Role: model.RoleProxy, Me: c.me})
 	c.Register(c)
 	m, r := c.Mesh, c.Router
 	m.OnPeerUp(c.peerUp)

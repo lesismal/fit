@@ -1,5 +1,5 @@
 // Package common holds what the tunnel's three roles share around their
-// console pages and their config: the pages' shared styles and scripts, the
+// console pages and their config: the role's module of the workbench, the
 // starting and moving of a role's console, the write-back of what a page
 // changes into the role's member of the config, and the relay of two
 // connections with backpressure both ways.
@@ -7,65 +7,49 @@ package common
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	stdhttp "net/http"
-	"path"
 	"reflect"
-	"testing/fstest"
+	"strings"
 	"time"
 
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
 )
-
-//go:embed static
-var static embed.FS
-
-// Pages returns a role's pages: the files of dir in role at the root, and
-// the shared styles and scripts under static/.
-func Pages(role fs.FS, dir string) fs.FS {
-	files := fstest.MapFS{}
-	add := func(src fs.FS, from, to string) {
-		_ = fs.WalkDir(src, from, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			data, err := fs.ReadFile(src, p)
-			if err != nil {
-				return err
-			}
-			rel := p[len(from)+1:]
-			files[path.Join(to, rel)] = &fstest.MapFile{Data: data}
-			return nil
-		})
-	}
-	add(role, dir, ".")
-	add(static, "static", "static")
-	return files
-}
 
 // Console is a role's console, moved from config to config.
 type Console struct {
 	engine *fib.Engine
 	cookie string
-	pages  fs.FS
 	log    *logs.Logger
 	routes func(*console.API)
+	module *console.Module
 
 	cfg *config.RoleConsole
 	c   *console.Console
 }
 
-// NewConsole returns a role's console, not started: Apply starts it.
-func NewConsole(engine *fib.Engine, cookie string, pages fs.FS, log *logs.Logger, routes func(*console.API)) *Console {
-	return &Console{engine: engine, cookie: cookie, pages: pages, log: log, routes: routes}
+// NewConsole returns the console of the role id, as tunnel.hub, not
+// started: Apply starts it. routes adds the role's API, to its console and
+// to its module, which any console may show.
+func NewConsole(engine *fib.Engine, id string, log *logs.Logger, routes func(*console.API)) *Console {
+	return &Console{engine: engine, cookie: "fit_" + strings.ReplaceAll(id, ".", "_"), log: log, routes: routes,
+		module: &console.Module{ID: id, Routes: routes}}
+}
+
+// Module returns the role's module.
+func (c *Console) Module() *console.Module { return c.module }
+
+// options are the console's options for cfg.
+func (c *Console) options(cfg *config.RoleConsole) console.Options {
+	return console.Options{Config: cfg, Cookie: c.cookie, Pages: workbench.Pages(), Log: c.log, Routes: c.routes,
+		Modules: func() []*console.Module { return []*console.Module{c.module} }}
 }
 
 // Apply moves the console to cfg, which may be nil for none: it is started
@@ -87,10 +71,10 @@ func (c *Console) Apply(cfg *config.RoleConsole) error {
 		c.cfg = nil
 		return nil
 	}
-	n, err := console.Start(c.engine, console.Options{Config: cfg, Cookie: c.cookie, Pages: c.pages, Log: c.log, Routes: c.routes})
+	n, err := console.Start(c.engine, c.options(cfg))
 	if err != nil {
 		if c.cfg != nil {
-			c.c, _ = console.Start(c.engine, console.Options{Config: c.cfg, Cookie: c.cookie, Pages: c.pages, Log: c.log, Routes: c.routes})
+			c.c, _ = console.Start(c.engine, c.options(c.cfg))
 		}
 		return err
 	}

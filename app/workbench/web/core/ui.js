@@ -1,14 +1,17 @@
-// fit llm UI core, shared by the node, hub and proxy consoles. Vanilla JS, no build step.
+// fit workbench UI core, shared by every module of the workbench. Vanilla JS, no build step.
 // Load it synchronously in <head>: it applies the saved theme before the first paint.
 // Never put user data into innerHTML: build nodes with UI.h (text is always set as text).
+// A module gets UI.scope(server, ns): the same library, whose requests go to its server module's API, /api/m/<server>/,
+// and whose words are looked up in its namespace first.
 //
-// fit llm UI 核心库，node、hub、proxy 控制台共用。原生 JS，无构建步骤。
+// fit workbench UI 核心库，workbench 各模块共用。原生 JS，无构建步骤。
 // 在 <head> 中同步加载：首帧渲染前即应用已保存的主题。
 // 禁止把用户数据放进 innerHTML：用 UI.h 构建节点（文本始终以文本方式设置）。
+// 模块拿到 UI.scope(server, ns)：同一套库，其请求发往服务端模块的 API /api/m/<server>/，其词条先在其命名空间中查找。
 (function () {
   'use strict';
 
-  var THEME_KEY = 'fit_llm_theme', LANG_KEY = 'fit_llm_lang';
+  var THEME_KEY = 'fit_theme', LANG_KEY = 'fit_lang';
   // "system" follows prefers-color-scheme (no data-theme attribute). / "system" 跟随系统（不设 data-theme）。
   var THEMES = [
     ['system', 'linear-gradient(135deg,#fff 50%,#161923 50%)'], ['light', '#f5f6fa'], ['dark', '#161923'],
@@ -59,17 +62,21 @@
       'config.note': '本角色的配置保存在 fit 配置的 llm.{role} 成员中：在这些页面上的修改会写回该配置；当 fit 把配置保存在 admin.store 中时，配置以加密方式保存。'
     }
   };
-  function addI18n(d) {
+  // addI18n(dict, ns): ns, when given, keeps the words to the module that adds them (see scope).
+  // addI18n(dict, ns)：给出 ns 时，词条只属于添加它们的模块（见 scope）。
+  function addI18n(d, ns) {
+    var pre = ns ? ns + ':' : '';
     Object.keys(d).forEach(function (l) {
       DICT[l] = DICT[l] || {};
-      Object.keys(d[l]).forEach(function (k) { DICT[l][k] = d[l][k]; });
+      Object.keys(d[l]).forEach(function (k) { DICT[l][pre + k] = d[l][k]; });
     });
   }
-  function t(key, vars) {
-    var s = (DICT[lang] && DICT[lang][key]) || DICT.en[key] || key;
+  function word(key) { return (DICT[lang] && DICT[lang][key]) || DICT.en[key]; }
+  function fill(s, vars) {
     if (vars) s = s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; });
     return s;
   }
+  function t(key, vars) { return fill(word(key) || key, vars); }
 
   // ---- DOM ----
   // h('div.card#id', {onclick: fn, title: '…'}, child, 'text', [more]) / 构建元素
@@ -144,7 +151,25 @@
     book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15ZM20 17v5H6.5a2.5 2.5 0 0 1 0-5"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
-    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    chev: '<path d="m9 18 6-6-6-6"/>',
+    fold: '<path d="m15 18-6-6 6-6"/>',
+    route: '<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    layers: '<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+    code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+    plug: '<path d="M12 22v-5M9 8V2M15 8V2M18 8v4a6 6 0 0 1-12 0V8Z"/>',
+    forward: '<path d="M15 17l5-5-5-5"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/>',
+    radio: '<circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2"/>',
+    listen: '<path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0"/><circle cx="12" cy="12" r="1"/><path d="M12 13v8"/>',
+    pod: '<path d="M12 2.8 20 7.3v9.4L12 21.2 4 16.7V7.3z"/><path d="M4 7.3 12 12l8-4.7M12 12v9.2"/>',
+    tunnel: '<path d="M3 8h14M13 4l4 4-4 4M21 16H7M11 12l-4 4 4 4"/>',
+    proxy: '<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20M10 8.5l-2 2 2 2M14 8.5l2 2-2 2"/>',
+    hub: '<circle cx="12" cy="5.5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M10.8 7.7 6.2 15.8M13.2 7.7l4.6 8.1M7.5 18h9"/>',
+    save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+    undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>'
   };
   function icon(name, cls) {
     var span = document.createElement('span');
@@ -180,6 +205,7 @@
   // quiet (internal): a 401 does not call the unauthorized callback (the session check and the login form handle it).
   // quiet（内部使用）：401 时不调用未登录回调（由会话检查与登录表单自行处理）。
   function api(method, path, body, quiet) {
+    if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
     var opt = { method: method, headers: {}, credentials: 'same-origin' };
     addCsrf(method, opt.headers);
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
@@ -194,9 +220,28 @@
       });
     });
   }
+  // raw(method, path, body, headers) → Promise of the fetch Response, for a caller that needs its headers (as an ETag):
+  // the module's base and the CSRF header are applied, a body that is not a string is sent as JSON, and a 401 calls
+  // the unauthorized callback; the status is the caller's to check.
+  // raw(method, path, body, headers) → fetch Response 的 Promise，供需要应答头（如 ETag）的调用方使用：应用模块前缀与 CSRF
+  // 请求头，非字符串的 body 以 JSON 发送，401 时调用未登录回调；状态码由调用方检查。
+  function raw(method, path, body, headers) {
+    if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
+    var opt = { method: method, headers: {}, credentials: 'same-origin' };
+    Object.keys(headers || {}).forEach(function (k) { opt.headers[k] = headers[k]; });
+    addCsrf(method, opt.headers);
+    if (body !== undefined) {
+      opt.headers['Content-Type'] = opt.headers['Content-Type'] || 'application/json';
+      opt.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+    return fetch(path, opt).then(function (r) {
+      if (r.status === 401 && onUnauthorized) onUnauthorized();
+      return r;
+    });
+  }
   // rpc calls a method of the process itself: POST /api/rpc<method>, e.g. rpc('/mesh/peers') → POST /api/rpc/mesh/peers.
   // rpc 调用进程自身的方法：POST /api/rpc<method>，例如 rpc('/mesh/peers') → POST /api/rpc/mesh/peers。
-  function rpc(method, req) { return api('POST', '/api/rpc' + method, req || {}); }
+  function rpc(method, req) { return (this && this.api ? this : UI).api('POST', '/api/rpc' + method, req || {}); }
 
   // stream reads a streaming endpoint (Server-Sent Events answering a POST) with fetch, so the request carries the
   // CSRF header and a JSON body. onData gets every "message" event (parsed JSON); the promise resolves with the "end"
@@ -206,6 +251,7 @@
   // onData 收到每个 "message" 事件（已解析的 JSON）；"end" 事件的数据即 promise 的结果，"error" 事件、
   // HTTP 错误（同 api）或连接提前关闭时 reject。opts：{signal（AbortController.signal：中止即在服务端取消流），headers}。
   function stream(path, body, onData, opts) {
+    if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
     opts = opts || {};
     var headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
     addCsrf('POST', headers);
@@ -255,7 +301,7 @@
     });
   }
   // rpcStream opens a stream method of the process itself: POST /api/stream<method>. / 打开进程自身的流方法：POST /api/stream<method>。
-  function rpcStream(method, req, onData, signal) { return stream('/api/stream' + method, req || {}, onData, { signal: signal }); }
+  function rpcStream(method, req, onData, signal) { return (this && this.stream ? this : UI).stream('/api/stream' + method, req || {}, onData, { signal: signal }); }
 
   // ---- Session / 会话 ----
   // GET /api/session → {user, csrf} (401 when not logged in); POST /api/login {username, password} → {user, csrf};
@@ -266,7 +312,9 @@
   function session() { return api('GET', '/api/session', undefined, true).then(remember); }
   function login(user, pass) { return api('POST', '/api/login', { username: user, password: pass }, true).then(remember); }
   function logout() { return api('POST', '/api/logout', {}).then(function (v) { setCsrf(''); return v; }, function (e) { setCsrf(''); throw e; }); }
-  function me() { return api('GET', '/api/me'); }
+  function me() { return (this && this.api ? this : UI).api('GET', '/api/me'); }
+  // GET /api/workbench → {user, modules: [the IDs of the server modules served]}. / 已登录用户与服务端模块 ID 列表。
+  function workbench() { return api('GET', '/api/workbench'); }
 
   // ---- Feedback / 反馈 ----
   var toastBox = null;
@@ -279,9 +327,18 @@
   function fail(e) { if (e && e.status === 401) return; toast(e && e.message ? e.message : String(e), 'error'); }
 
   // modal({title, body, wide, actions:[{label, kind, onclick → false keeps it open / 返回 false 保持打开}]}) → close()
+  var modals = [];
+  // closeModals closes every modal open, as when the page changes. / 关闭所有打开的弹窗（如切换页面时）。
+  function closeModals() { modals.slice().forEach(function (c) { c(); }); }
   function modal(o) {
-    var box, wrap;
-    function close() { wrap.remove(); document.removeEventListener('keydown', onKey); if (o.onclose) o.onclose(); }
+    var box, wrap, closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      modals.splice(modals.indexOf(close), 1);
+      wrap.remove(); document.removeEventListener('keydown', onKey); if (o.onclose) o.onclose();
+    }
+    modals.push(close);
     function onKey(e) { if (e.key === 'Escape') close(); }
     var foot = (o.actions || [{ label: t('close') }]).map(function (a) {
       var b = h('button.btn' + (a.kind ? '.btn--' + a.kind : ''), {
@@ -412,62 +469,10 @@
     return h('div.prefs', icon('sun', 'muted'), th, lg);
   }
 
-  // shell({brand, sub, nav:[{id, icon, label, href} | {section}], user, onLogout}) builds sidebar + topbar.
-  // shell 构建侧栏 + 顶栏。
-  function shell(o) {
-    var titleEl = h('div.topbar__title'), crumbEl = h('div.topbar__crumb'), toolsEl = h('div.row');
-    var content = h('main.content');
-    var navItems = {};
-    var nav = h('nav.nav', o.nav.map(function (n) {
-      if (n.section) return h('div.nav__label', n.section);
-      var a = h('a.nav__item', { href: n.href || '#/' + n.id }, icon(n.icon), h('span', n.label));
-      navItems[n.id] = a;
-      return a;
-    }));
-    var root = h('div.shell');
-    var foot = h('div.sidebar__foot', o.user ? h('div.row', icon('users'), h('span.ellipsis', o.user)) : null,
-      o.onLogout ? h('a.nav__item', { href: '#', onclick: function (e) { e.preventDefault(); o.onLogout(); } }, icon('logout'), h('span', t('logout'))) : null,
-      o.footer || null);
-    var side = h('aside.sidebar', h('div.brand', h('div.brand__logo', icon('logo')), h('div', h('div.brand__name', o.brand), h('div.brand__sub', o.sub || ''))), nav, foot);
-    var menu = h('button.btn.btn--ghost.btn--icon.menu-btn', { type: 'button', 'aria-label': t('menu'), onclick: function () { root.classList.toggle('nav-open'); } }, icon('menu'));
-    var top = h('header.topbar', menu, h('div', titleEl, crumbEl), h('div.topbar__spacer'), toolsEl, prefs());
-    mount(root, side, h('div.main', top, content));
-    window.addEventListener('hashchange', function () { root.classList.remove('nav-open'); });
-    return {
-      el: root, content: content, tools: toolsEl,
-      page: function (id, title, crumb) {
-        Object.keys(navItems).forEach(function (k) { navItems[k].classList.toggle('is-active', k === id); });
-        titleEl.textContent = title || ''; crumbEl.textContent = crumb || '';
-        document.title = (title ? title + ' · ' : '') + o.brand;
-        clear(toolsEl);
-        return clear(content);
-      }
-    };
-  }
-
-  // router(routes:{'nodes': fn(params), 'nodes/:id': fn}, fallback) — hash routing. / 哈希路由。
+  // every(ms, fn): setInterval until the page changes. / 定时执行，直到切换页面。
   var timers = [];
   function every(ms, fn) { var id = setInterval(fn, ms); timers.push(id); return id; }
-  function router(routes, fallback) {
-    function run() {
-      timers.forEach(clearInterval); timers = [];
-      var path = location.hash.replace(/^#\/?/, '').split('?')[0];
-      var parts = path.split('/').filter(Boolean);
-      var keys = Object.keys(routes);
-      for (var i = 0; i < keys.length; i++) {
-        var pat = keys[i].split('/').filter(Boolean), params = {}, ok = pat.length === parts.length;
-        for (var j = 0; ok && j < pat.length; j++) {
-          if (pat[j][0] === ':') params[pat[j].slice(1)] = decodeURIComponent(parts[j]);
-          else if (pat[j] !== parts[j]) ok = false;
-        }
-        if (ok) return routes[keys[i]](params);
-      }
-      location.hash = '#/' + fallback;
-    }
-    window.addEventListener('hashchange', run);
-    run();
-    return run;
-  }
+  function stopTimers() { timers.forEach(clearInterval); timers = []; }
 
   // loginPage({brand, sub, onSubmit(user, pass) → Promise}) / 登录页
   function loginPage(el, o) {
@@ -486,37 +491,32 @@
       h('div.card', h('div.card__body', { style: { padding: '26px' } }, form)))));
   }
 
-  // boot(el, {brand, sub, username, start(me)}): checks the session (GET /api/session) and shows the console when
-  // logged in, the login page otherwise (also on any later 401). start gets the reply of GET /api/me and builds the
-  // page into el.
-  // boot(el, {brand, sub, username, start(me)})：检查会话（GET /api/session），已登录时显示控制台，否则显示登录页
-  // （之后任何 401 也会回到登录页）。start 收到 GET /api/me 的应答，并在 el 中构建页面。
-  function boot(el, o) {
-    function showLogin() {
-      setCsrf('');
-      loginPage(el, {
-        brand: o.brand, sub: o.sub, username: o.username || 'admin',
-        onSubmit: function (u, p) { return login(u, p).then(run); }
-      });
-    }
-    function run() { return me().then(o.start); }
-    onUnauthorized = showLogin;
-    session().then(run).catch(function (e) { if (e && e.status === 401) showLogin(); else fail(e); });
-    return { logout: function () { logout().then(showLogin, showLogin); } };
-  }
-
   // configNote(role): where the role's settings are kept (the llm.<role> member of fit's config).
   // configNote(role)：角色配置的保存位置（fit 配置中的 llm.<role> 成员）。
   function configNote(role) { return h('div.callout', icon('info'), ' ', t('config.note', { role: role || '<role>' })); }
 
-  window.UI = {
+  // scope(server, ns) → the library for a module: requests to /api/... go to /api/m/<server>/..., and t looks up ns's
+  // words first. / 模块用的库：/api/... 请求发往 /api/m/<server>/...，t 先查 ns 的词条。
+  function scope(server, ns) {
+    var s = Object.create(UI);
+    s.base = server ? '/api/m/' + encodeURIComponent(server) : '';
+    // Bound, so that a module may pass them around, as PeersPanel's call. / 绑定，模块可把它们作为回调传递。
+    s.raw = raw.bind(s); s.api = api.bind(s); s.rpc = rpc.bind(s); s.stream = stream.bind(s); s.rpcStream = rpcStream.bind(s); s.me = me.bind(s);
+    if (ns) {
+      s.t = function (key, vars) { return fill(word(ns + ':' + key) || word(key) || key, vars); };
+      s.addI18n = function (d) { addI18n(d, ns); };
+    }
+    return s;
+  }
+
+  var UI = window.UI = {
     t: t, addI18n: addI18n, lang: function () { return lang; }, zh: function () { return lang === 'zh-CN'; },
-    h: h, mount: mount, clear: clear, icon: icon,
-    api: api, rpc: rpc, stream: stream, rpcStream: rpcStream, setUnauthorized: function (fn) { onUnauthorized = fn; },
-    session: session, login: login, logout: logout, me: me, boot: boot, configNote: configNote,
-    toast: toast, fail: fail, modal: modal, confirm: confirmBox, busy: busy, copy: copyText,
+    h: h, mount: mount, clear: clear, icon: icon, base: '',
+    api: api, raw: raw, rpc: rpc, stream: stream, rpcStream: rpcStream, setUnauthorized: function (fn) { onUnauthorized = fn; },
+    session: session, login: login, logout: logout, me: me, workbench: workbench, configNote: configNote, scope: scope,
+    toast: toast, fail: fail, modal: modal, closeModals: closeModals, confirm: confirmBox, busy: busy, copy: copyText,
     fmtMB: fmtMB, fmtNum: fmtNum, fmtDur: fmtDur, ago: ago, fmtTime: fmtTime,
     badge: badge, onlineBadge: onlineBadge, meter: meter, stat: stat, kv: kv, empty: empty, card: card, table: table,
-    tabs: tabs, field: field, btn: btn, prefs: prefs, shell: shell, router: router, every: every, loginPage: loginPage
+    tabs: tabs, field: field, btn: btn, prefs: prefs, every: every, stopTimers: stopTimers, loginPage: loginPage
   };
 })();

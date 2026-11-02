@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -22,20 +20,13 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
-func TestPages(t *testing.T) {
-	pages := Pages(fstest.MapFS{"web/index.html": {Data: []byte("hi")}, "web/js/app.js": {Data: []byte("1")}}, "web")
-	for _, name := range []string{"index.html", "js/app.js", "static/base.css"} {
-		if _, err := fs.ReadFile(pages, name); err != nil {
-			t.Errorf("%s: %v", name, err)
-		}
+func TestModule(t *testing.T) {
+	c := NewConsole(tunneltest.Engine(t), "tunnel.hub", discardLog(t), nil)
+	if m := c.Module(); m == nil || m.ID != "tunnel.hub" || c.cookie != "fit_tunnel_hub" {
+		t.Fatalf("module %+v, cookie %q", m, c.cookie)
 	}
-	// A role without the directory has the shared files alone.
-	pages = Pages(fstest.MapFS{}, "web")
-	if _, err := fs.ReadFile(pages, "index.html"); err == nil {
-		t.Error("an index.html out of nowhere")
-	}
-	if _, err := fs.ReadFile(pages, "static/base.js"); err != nil {
-		t.Error(err)
+	if o := c.options(nil); o.Modules()[0] != c.Module() {
+		t.Fatal("the console's module is not the role's")
 	}
 }
 
@@ -59,7 +50,7 @@ func discardLog(t *testing.T) *logs.Logger {
 }
 
 func TestConsoleApply(t *testing.T) {
-	c := NewConsole(tunneltest.Engine(t), "fit_test", fstest.MapFS{"index.html": {Data: []byte("hi")}}, discardLog(t), nil)
+	c := NewConsole(tunneltest.Engine(t), "tunnel.test", discardLog(t), nil)
 	defer c.Stop(context.Background())
 	if c.Addr() != "" || c.URL() != "" {
 		t.Fatal("an address before Apply")
@@ -236,7 +227,7 @@ func TestEdit(t *testing.T) {
 		api.Handle("GET", "/api/ok", OK)
 		api.Handle("GET", "/api/fail", func(r *console.Request) { Fail(r, 409, "taken") })
 	}
-	c := NewConsole(tunneltest.Engine(t), "fit_test", nil, nil, routes)
+	c := NewConsole(tunneltest.Engine(t), "tunnel.test", nil, routes)
 	defer c.Stop(context.Background())
 	if err := c.Apply(&config.RoleConsole{Address: "127.0.0.1:0", Users: []config.ConsoleUser{{Username: "admin", PasswordHash: hash(t, "pw")}}}); err != nil {
 		t.Fatal(err)

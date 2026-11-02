@@ -179,7 +179,9 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 ## 控制台
 
-每个角色的 `console` 提供它的页面，登录方式与 `admin.console` 相同（见[控制台](console.zh-CN.md)）：
+每个角色的 `console` 提供它的页面，即[控制台指南](console.zh-CN.md#页面)中的 workbench，菜单中只有该角色的模块；fit 同时
+运行 `admin.console` 时，它们也显示在那里，作为隧道组下的 `tunnel.hub`、`tunnel.node` 或 `tunnel.proxy` 模块，无需 `console`
+成员。角色自己的控制台登录方式与 `admin.console` 相同（见[控制台](console.zh-CN.md)）：
 `{address, cert_file, key_file, users, session_timeout, session_lifetime, max_sessions, max_conns}`，
 用户的 bcrypt 哈希由 `fit hash-password` 生成，会话 cookie 加 CSRF token；除非设置 `cert_file` 和
 `key_file`，只能监听回环地址。

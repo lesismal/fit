@@ -192,7 +192,10 @@ not registered, to 64 KiB.
 
 ## Consoles
 
-Each role's `console` serves its pages, behind logins as `admin.console`'s are
+Each role's `console` serves its pages, the workbench of [the console guide](console.md#the-pages)
+with the role's module alone in its menu; when fit also runs `admin.console`, they show there too,
+as the module `tunnel.hub`, `tunnel.node` or `tunnel.proxy` under Tunnel, with no `console` member
+needed. A role's own console is behind logins as `admin.console`'s are
 ([the console](console.md)): `{address, cert_file, key_file, users, session_timeout,
 session_lifetime, max_sessions, max_conns}`, users with bcrypt hashes from `fit hash-password`, a
 session cookie and a CSRF token, and a loopback address unless `cert_file` and `key_file` are set.

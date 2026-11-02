@@ -798,6 +798,9 @@ The proxy's overview page shows these with its own address and models.
 ## The pages
 
 A role's `console` member serves its web pages, as a binding of its own on the listeners' engine:
+the workbench of [the console guide](console.md#the-pages), with the role's module alone in its
+menu. When fit also runs `admin.console`, the role's pages show there too, as the module `llm.hub`,
+`llm.node` or `llm.proxy` under LLM, behind its login, with no `console` member needed.
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |

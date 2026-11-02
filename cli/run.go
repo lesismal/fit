@@ -244,7 +244,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	var console *admin.Console
 	if c.Admin != nil && c.Admin.Console != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
-		console, err = admin.StartConsole(c.Admin.Console, c.Admin, configs, func(r admin.Result) {
+		console, err = admin.StartConsole(s.Engine(), c.Admin.Console, c.Admin, configs, apps.Modules, func(r admin.Result) {
 			printApplied(stdout, stderr, r)
 		}, adminLog.Infof)
 		if err != nil {

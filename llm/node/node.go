@@ -11,10 +11,8 @@ package node
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"slices"
 	"strings"
 	"sync"
@@ -30,9 +28,6 @@ import (
 	"github.com/lesismal/fit/llm/internal/role"
 	"github.com/lesismal/fit/logs"
 )
-
-//go:embed ui
-var uiFS embed.FS
 
 func init() {
 	app.Register(app.Info{
@@ -108,8 +103,7 @@ type Node struct {
 
 // New returns a node on h, started by its first Apply.
 func New(h *app.Host) *Node {
-	pages, _ := fs.Sub(uiFS, "ui")
-	b := role.New(h, role.Spec{Role: model.RoleNode, Pages: pages})
+	b := role.New(h, role.Spec{Role: model.RoleNode})
 	n := &Node{Base: b, log: b.Log, work: pool.New(workWorkers, workQueue), rt: map[string]*modelRT{},
 		gpu: &gpuCache{}, stopCh: make(chan struct{}), set: settingsOf(nil), lim: limitsOf(nil)}
 	n.jobs = NewJobs(pool.New(maxRunning, maxRunning))

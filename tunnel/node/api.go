@@ -1,7 +1,6 @@
 package node
 
 import (
-	"embed"
 	stdhttp "net/http"
 	"strconv"
 	"strings"
@@ -13,12 +12,6 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/uplink"
 )
-
-//go:embed web
-var web embed.FS
-
-// pages are the console's files: the node's page and the shared ones.
-var pages = common.Pages(web, "web")
 
 // ServiceView is a service, as the pages show and set it.
 type ServiceView struct {
@@ -132,3 +125,6 @@ func (n *Node) api(api *console.API) {
 		common.OK(r)
 	})
 }
+
+// Module returns the node's module, which the workbench shows.
+func (n *Node) Module() *console.Module { return n.console.Module() }

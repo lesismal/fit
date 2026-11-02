@@ -100,7 +100,7 @@ func TestConsoleSocket(t *testing.T) {
 	}
 
 	var got []byte
-	for !bytes.Contains(got, []byte("tunnel hub")) {
+	for !bytes.Contains(got, []byte("core/workbench.js")) {
 		plain, err := sess.Open(w.next())
 		if err != nil {
 			t.Fatal(err)

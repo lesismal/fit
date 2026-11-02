@@ -20,6 +20,7 @@ once, is sealed in the store, and is what fit starts from next time. The design 
 - [The pages](#the-pages)
 - [Limits and timeouts](#limits-and-timeouts)
 - [Roles' pages](#roles-pages)
+- [The workbench's modules](#the-workbenchs-modules)
 
 ## Two files
 
@@ -137,12 +138,20 @@ kill -HUP "$(pidof fit)"    # or restart fit
 cross a network in the clear; `fit validate` refuses one without. On a loopback address TLS is
 optional, as for a console reached through an SSH tunnel.
 
-The console is a server of its own, on net/http and goroutines of its own like the Admin API, not on
-the listeners' fib engine, so a config that breaks the listeners does not lock you out of fixing it.
-It calls the Admin API's handlers in process, behind its own logins, so both apply configs by the
-one path and with the same checks; the Admin API keeps its own address, `token_file` and rules, and
-listens too. The console needs no store: without one, it changes the running config as the Admin
-API does, in memory, and a restart starts from the config files again.
+The console serves the **workbench**: one page with a menu on the left, a tree of groups (Gateway,
+Tunnel, LLM, System), their modules and each module's pages, and the page picked on the right. Its
+config module edits the config; and every [LLM](llm.md) and [tunnel](tunnel.md) role running in the
+same fit shows beside it as a module of its own, with every page the role's own console has, behind
+the one login.
+
+The console is a binding of its own on the listeners' fib engine, as the roles' pages are, not one of
+the config's listeners: a config whose listeners fail to bind leaves it reachable to fix them. Its
+requests are served on fib's workers and nothing there blocks: a password is checked, and each Admin
+API call made, on the console's own bounded pool. It calls the Admin API's handlers in process,
+behind its own logins, so both apply configs by the one path and with the same checks; the Admin API
+keeps its own address, `token_file` and rules, and listens too. The console needs no store: without
+one, it changes the running config as the Admin API does, in memory, and a restart starts from the
+config files again.
 
 ## Users and fit hash-password
 
@@ -183,24 +192,35 @@ change a user made with the config version it applied.
 
 ## The pages
 
-After logging in, three tabs:
+After logging in, the workbench. Its menu can be filtered, folded to icons, and its groups and
+modules opened and closed; the theme (light, dark and three more) and the language (English or
+Chinese) are picked at the top right. Each page has its own URL, `#/<module>/<page>`.
 
-- **Config**: a form for each part of the config, made from fit's JSON Schema, embedded in the
-  binary: every object, list and module typed by its schema, with each field's doc. A field fit
-  adds is edited with no change to the console. `admin` is not in the form.
-- **JSON**: the whole config as text, edited as it is.
-- **Versions**: the configs applied (`admin.history` of them), where each came from, each one's
-  text, and a button to roll back to it.
+- **Gateway**: an overview of the running config (status, routes, services, upstreams and their
+  health, certificates, the version), then the parts of the config the gateway is made of, each a
+  page: listeners, the reverse proxy's routes and upstreams, the forward proxy's routes, layer 4
+  services, TLS and certificates.
+- **Tunnel** and **LLM**: a module for each role running, as `tunnel.hub` or `llm.node`, with the
+  role's pages.
+- **System**: the rest of the config, part by part; the whole config as JSON; and the versions
+  applied (`admin.history` of them), where each came from, each one's text, and a button to roll
+  back to it.
 
-**Save** sends the whole config with `If-Match`; the result says which version it was applied as,
-with any warnings. A config with errors is refused and its errors are shown at their paths. When
-the config was changed elsewhere since the page read it (`412`), the page says so: discard the
-changes to read it again, or copy them from the JSON tab first.
+The config's pages are forms made from fit's JSON Schema, embedded in the binary: every object,
+list and module typed by its schema, with each field's doc. A field fit adds is edited with no change
+to the console. `admin` is not in the forms. Every page edits the same draft of the config: **Save
+and apply** sends it whole, with `If-Match`; the result says which version it was applied as, with
+any warnings. A config with errors is refused and its errors are shown at their paths. When the
+config was changed elsewhere since the page read it (`412`), the page says so: discard the changes to
+read it again, or copy them from the JSON page first.
 
 For scripts, the console's own endpoints are `POST /api/login` (a JSON body
-`{"username", "password"}`, at most 4 KiB, answered with the user and the CSRF token),
-`POST /api/logout`, `GET /api/session` and `GET /api/schema`; under `/api/admin/` it serves the
-Admin API's endpoints, behind a session instead of the token.
+`{"username", "password"}`, answered with the user and the CSRF token), `POST /api/logout`,
+`GET /api/session` and `GET /api/workbench` (the user and the IDs of the modules served). Each
+module's endpoints are under `/api/m/<module>/`: the config's module, `admin`, serves
+`GET /api/m/admin/schema` and, under `/api/m/admin/`, the Admin API's endpoints, behind a session
+instead of the token, as `GET /api/m/admin/config`; a role's module serves its pages' API, as
+`POST /api/m/llm.hub/rpc/hub/nodes`.
 
 ## Limits and timeouts
 
@@ -208,19 +228,30 @@ Admin API's endpoints, behind a session instead of the token.
 | --- | --- |
 | Connections | `max_conns`, 32 |
 | Sessions | `max_sessions`, 64, the oldest ended past it |
-| A request's header | 64 KiB, read within 10s |
-| A request's body | `admin.max_config_bytes`, 4 MiB, read within 1m; a login's body 4 KiB |
-| Writing a response | 1m |
-| An idle connection | 1m |
+| A request's header | 16 KiB, read within 10s |
+| A request's body | `admin.max_config_bytes` and 64 KiB, 4 MiB and 64 KiB by default, read within 30s |
+| Writing a response | 30s; a role's streams are bounded by each wait for the browser instead, 30s |
+| An idle connection | 2m |
 | Password checks at once | 2 |
+| Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
 | Failed logins | 5 an address in 15 minutes, then refused for 15 minutes; 4,096 addresses kept |
 
 ## Roles' pages
 
-The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles have pages of their own, each set by the
-role's `console`: the same fields as `admin.console`, but `address` is required, and served on the
-listeners' fib engine. Their users, logins, lockouts, sessions and the TLS rule work as the
-console's do, with tables of their own. What a role's pages change is written back into its member
-of the config, applied by the same path as the console's changes, so it shows in the console's
-Versions tab and, with a store, is sealed in the store. The console edits the same members as a
-whole: a role's pages are for working with the role, the console for the config.
+The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles can also have pages of their own,
+each set by the role's `console`: the same fields as `admin.console`, but `address` is required, and
+served on the listeners' fib engine, as a role on a machine without `admin.console` needs. Each
+serves the same workbench, with the role's module alone in its menu. Their users, logins, lockouts,
+sessions and the TLS rule work as the console's do, with tables of their own. What a role's pages
+change, on its own console or as a module of `admin.console`'s workbench, is written back into its
+member of the config, applied by the same path as the console's changes, so it shows in the
+Versions page and, with a store, is sealed in the store. The config's own pages edit the same
+members as a whole: a role's pages are for working with the role, the config's for the config.
+
+## The workbench's modules
+
+The pages are plain HTML, CSS and JavaScript in `app/workbench/web`, embedded in the binary and
+served from memory, with nothing fetched from elsewhere. `core/` holds the library every module uses
+(`ui.js`, `ui.css`) and the workbench (`workbench.js`); each module is a script that registers itself
+with `WB.module`, naming the server module whose API it calls, the group it goes under and its
+pages. A module shows when the console serving the page serves its server module.

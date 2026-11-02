@@ -211,7 +211,7 @@ func New(h *app.Host) *Hub {
 	s := &Hub{h: h, log: h.Log, links: map[*link.Link]struct{}{}, peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
 		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
 	s.router = s.newRouter()
-	s.console = common.NewConsole(h.Engine, "fit_tunnel_hub", pages, h.Log, s.api)
+	s.console = common.NewConsole(h.Engine, "tunnel.hub", h.Log, s.api)
 	return s
 }
 

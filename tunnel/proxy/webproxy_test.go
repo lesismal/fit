@@ -67,7 +67,7 @@ func TestWebProxy(t *testing.T) {
 		body = b
 		return err == nil && code == 200
 	})
-	if !strings.Contains(body, "tunnel hub") {
+	if !strings.Contains(body, "core/workbench.js") {
 		t.Fatalf("the page: %s", body)
 	}
 	url := "ws://" + sock + "/"

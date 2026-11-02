@@ -65,6 +65,11 @@ started with, in clear text, and the encrypted store.
   `key_file`, which an address that is not a loopback one must have. The Admin API and its rules
   are unchanged; the console calls its handlers in process, behind its own checks, for the config,
   versions, rollback, status and caches, so that both apply configs by the one path.
+  *Changed 2026-11-02:* the console is now a binding of its own on the listeners' fib engine,
+  served by `app/console` as the roles' pages are, and serves the workbench (`app/workbench`): the
+  config's module and every running role's, each under `/api/m/<module>/`, behind one login. The
+  Admin API's handlers run on the console's bounded pool, never on a fib worker. Its binding is not
+  one of the config's listeners, so a config whose listeners fail still leaves it reachable.
 - **Logins.** `users` are names and bcrypt hashes, as `basic_auth` takes them and `fit
   hash-password` makes them; a password is never written in clear text. A login is checked against
   a dummy hash when the name is unknown, two checks run at once at most, and a client address that

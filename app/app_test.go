@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/logs"
 )
@@ -262,6 +263,47 @@ func TestManagerApply(t *testing.T) {
 	m.Stop(context.Background())
 	if !tunnelHub.isStopped() || len(m.Running()) != 0 {
 		t.Fatal("Stop left a role running")
+	}
+}
+
+// pagedRole is a role with a module.
+type pagedRole struct {
+	fakeRole
+	m *console.Module
+}
+
+func (r *pagedRole) Module() *console.Module { return r.m }
+
+// The manager lists the modules of the running roles that have them, in the
+// order of their IDs, and none once they stop.
+func TestManagerModules(t *testing.T) {
+	hub := &pagedRole{m: &console.Module{ID: "llm.hub"}}
+	tunnelHub := &pagedRole{m: &console.Module{ID: "tunnel.hub"}}
+	withRoles(t,
+		Info{ID: "tunnel.hub", Member: tunnelHubMember, New: func(*Host) (Role, error) { return tunnelHub, nil }},
+		Info{ID: "llm.hub", Member: hubMember, New: func(*Host) (Role, error) { return hub, nil }},
+		Info{ID: "llm.node", Member: func(c *config.Config) any {
+			if c.LLM == nil {
+				return (*config.LLMNode)(nil)
+			}
+			return c.LLM.Node
+		}, New: func(*Host) (Role, error) { return &fakeRole{}, nil }},
+	)
+	m := NewManager(nil, nil, nil, nil)
+	defer m.Stop(context.Background())
+	if got := m.Modules(); len(got) != 0 {
+		t.Fatalf("Modules before Apply = %v", got)
+	}
+	c := &config.Config{LLM: &config.LLM{Hub: &config.LLMHub{}, Node: &config.LLMNode{}}, Tunnel: &config.Tunnel{Hub: &config.TunnelHub{}}}
+	if err := m.Apply(c); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Modules(); len(got) != 2 || got[0] != hub.m || got[1] != tunnelHub.m {
+		t.Fatalf("Modules = %v", got)
+	}
+	m.Stop(context.Background())
+	if got := m.Modules(); len(got) != 0 {
+		t.Fatalf("Modules after Stop = %v", got)
 	}
 }
 

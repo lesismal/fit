@@ -697,7 +697,9 @@ proxy 的概览页用它自己的地址与模型显示这些示例。
 
 ## 页面
 
-角色的 `console` 成员提供其 Web 页面，作为监听引擎上一个独立的绑定：
+角色的 `console` 成员提供其 Web 页面，作为监听引擎上一个独立的绑定：即[控制台指南](console.zh-CN.md#页面)中的 workbench，
+菜单中只有该角色的模块。fit 同时运行 `admin.console` 时，角色的页面也显示在那里，作为 LLM 组下的 `llm.hub`、`llm.node` 或
+`llm.proxy` 模块，用其登录，无需 `console` 成员。
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |

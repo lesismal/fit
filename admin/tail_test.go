@@ -84,7 +84,7 @@ func TestConsoleTLS(t *testing.T) {
 	c := &config.Console{Address: "127.0.0.1:0", CertFile: cert.CertFile, KeyFile: cert.KeyFile,
 		Users: []config.ConsoleUser{{Username: "ada", PasswordHash: string(hash)}}}
 	f := start(t, doc("one"), &config.Admin{})
-	cs, err := StartConsole(c, &config.Admin{}, f.configs, nil, nil)
+	cs, err := StartConsole(testEngine(t), c, &config.Admin{}, f.configs, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestConsoleStartFails(t *testing.T) {
 	f := start(t, doc("one"), &config.Admin{})
 	dir := t.TempDir()
 	c := &config.Console{Address: "127.0.0.1:0", CertFile: dir + "/none.crt", KeyFile: dir + "/none.key"}
-	if _, err := StartConsole(c, &config.Admin{}, f.configs, nil, nil); err == nil {
+	if _, err := StartConsole(testEngine(t), c, &config.Admin{}, f.configs, nil, nil, nil); err == nil {
 		t.Error("started without its certificate")
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -130,7 +130,7 @@ func TestConsoleStartFails(t *testing.T) {
 	}
 	defer ln.Close()
 	c = &config.Console{Address: ln.Addr().String()}
-	if _, err := StartConsole(c, &config.Admin{}, f.configs, nil, nil); err == nil {
+	if _, err := StartConsole(testEngine(t), c, &config.Admin{}, f.configs, nil, nil, nil); err == nil {
 		t.Error("started on a taken address")
 	}
 }
@@ -143,13 +143,19 @@ func TestConsoleRefuses(t *testing.T) {
 	if code, _, h := b.do("POST", "/index.html", "x"); code != http.StatusMethodNotAllowed || h.Get("Allow") != "GET, HEAD" {
 		t.Errorf("POST to a page: %d %v", code, h)
 	}
+	if code, _, _ := b.do("GET", "/api/nope", ""); code != http.StatusUnauthorized {
+		t.Errorf("an endpoint before a login: %d", code)
+	}
+	if code := b.login("ada", "pw"); code != http.StatusOK {
+		t.Fatalf("login: %d", code)
+	}
 	if code, _, _ := b.do("GET", "/api/nope", ""); code != http.StatusNotFound {
 		t.Errorf("an endpoint that is not there: %d", code)
 	}
 	if code, _, _ := b.do("POST", "/api/login", "{"); code != http.StatusBadRequest {
 		t.Errorf("a login that is not JSON: %d", code)
 	}
-	if got := clientAddr(&http.Request{RemoteAddr: "pipe"}); got != "pipe" {
-		t.Errorf("clientAddr without a port: %q", got)
+	if code, _, _ := b.do("GET", "/api/m/nope/x", ""); code != http.StatusNotFound {
+		t.Errorf("a module that is not there: %d", code)
 	}
 }

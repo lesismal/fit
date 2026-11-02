@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/lesismal/fib"
@@ -108,8 +107,7 @@ func newBase(t *testing.T, role string, ed *editor) *Base {
 	hostMu.Lock()
 	h := lastHost
 	hostMu.Unlock()
-	pages := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}, "app.js": {Data: []byte("")}}
-	b := New(h, Spec{Role: role, Pages: pages, Me: func() map[string]any { return map[string]any{"extra": 1} }})
+	b := New(h, Spec{Role: role, Me: func() map[string]any { return map[string]any{"extra": 1} }})
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

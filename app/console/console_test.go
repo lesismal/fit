@@ -17,6 +17,13 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
+// testModule is a module with an endpoint, a prefix and a longer prefix.
+var testModule = &Module{ID: "test.mod", Routes: func(api *API) {
+	api.Handle("GET", "/api/who", func(r *Request) { _ = r.JSON(200, map[string]string{"user": r.User, "path": r.Path}) })
+	api.HandlePrefix("", "/api/any/", func(r *Request) { _ = r.JSON(200, map[string]string{"short": r.Path}) })
+	api.HandlePrefix("GET", "/api/any/long/", func(r *Request) { _ = r.JSON(200, map[string]string{"long": r.Path}) })
+}}
+
 func startConsole(t *testing.T) (*Console, string) {
 	t.Helper()
 	engine, err := fib.New(fib.DefaultConfig())
@@ -41,6 +48,7 @@ func startConsole(t *testing.T) (*Console, string) {
 				r.Go(func() { _ = r.JSON(200, v) })
 			})
 		},
+		Modules: func() []*Module { return []*Module{testModule} },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +120,27 @@ func TestConsole(t *testing.T) {
 	}
 	if code, _ := b.do("POST", "/api/nope", `{}`); code != 404 {
 		t.Errorf("no such endpoint: %d", code)
+	}
+	// The modules: the list, an endpoint, the prefixes, the longest first.
+	if code, body := b.do("GET", "/api/workbench", ""); code != 200 || body != `{"user":"admin","modules":["test.mod"]}` {
+		t.Errorf("workbench: %d %s", code, body)
+	}
+	for path, want := range map[string]string{
+		"/api/m/test.mod/who":        `{"path":"/api/who","user":"admin"}`,
+		"/api/m/test.mod/any/x":      `{"short":"/api/any/x"}`,
+		"/api/m/test.mod/any/long/y": `{"long":"/api/any/long/y"}`,
+	} {
+		if code, body := b.do("GET", path, ""); code != 200 || body != want {
+			t.Errorf("%s: %d %s", path, code, body)
+		}
+	}
+	if code, body := b.do("POST", "/api/m/test.mod/any/long/y", "{}"); code != 200 || body != `{"short":"/api/any/long/y"}` {
+		t.Errorf("a prefix of another method: %d %s", code, body)
+	}
+	for _, path := range []string{"/api/m/nope/who", "/api/m/test.mod/nope", "/api/m/test.mod"} {
+		if code, _ := b.do("GET", path, ""); code != 404 {
+			t.Errorf("%s: %d", path, code)
+		}
 	}
 	req, _ := http.NewRequest("GET", base+"/api/now", nil)
 	req.Header.Set("Origin", "http://evil.example")
