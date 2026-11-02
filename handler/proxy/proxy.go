@@ -374,7 +374,16 @@ func appendForwardedValue(dst []byte, v string) []byte {
 	if validToken(v) {
 		return append(dst, v...)
 	}
-	return strconv.AppendQuote(dst, v)
+	// Printable ASCII with no quote or backslash, as a host and port are,
+	// is quoted as it is, which is what AppendQuote would make of it.
+	for i := range len(v) {
+		if c := v[i]; c < ' ' || c > '~' || c == '"' || c == '\\' {
+			return strconv.AppendQuote(dst, v)
+		}
+	}
+	dst = append(dst, '"')
+	dst = append(dst, v...)
+	return append(dst, '"')
 }
 
 // tokenChars are the bytes an HTTP token may hold.
@@ -426,10 +435,28 @@ func removeHopByHop(h stdhttp.Header) {
 // Connection field's values, names.
 func removeConnectionNamed(h stdhttp.Header, connection []string) {
 	for _, value := range connection {
-		for name := range strings.SplitSeq(value, ",") {
-			if name = textproto.TrimString(name); name != "" {
-				delete(h, textproto.CanonicalMIMEHeaderKey(name))
-			}
+		if strings.IndexByte(value, ',') < 0 {
+			// One name, as nearly every Connection field has.
+			removeConnectionToken(h, value)
+			continue
 		}
+		for name := range strings.SplitSeq(value, ",") {
+			removeConnectionToken(h, name)
+		}
+	}
+}
+
+// removeConnectionToken deletes from h the field one of a Connection field's
+// names names. The names nearly every Connection field holds are known
+// already in their canonical form.
+func removeConnectionToken(h stdhttp.Header, name string) {
+	switch name = textproto.TrimString(name); {
+	case name == "":
+	case strings.EqualFold(name, "keep-alive"):
+		delete(h, "Keep-Alive")
+	case strings.EqualFold(name, "close"):
+		delete(h, "Close")
+	default:
+		delete(h, textproto.CanonicalMIMEHeaderKey(name))
 	}
 }
