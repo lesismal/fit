@@ -99,7 +99,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | `bench` | 基准测试框架，nginx、Caddy、Traefik 和 fit 的配置，测试结果 |
 | `test/e2e` | 端到端测试和一致性测试 |
 | `internal/fibtest` | 在测试中不经网络运行 fib handler |
-| `examples` | 示例配置 |
+| `examples` | 示例配置；已迁到 [fit-examples](https://github.com/lesismal/fit-examples) |
 
 ## 索引
 

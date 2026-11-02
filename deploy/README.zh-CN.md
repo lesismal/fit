@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 fit 是一个静态二进制加一个配置文件。本目录提供三种打包方式：容器镜像、Kubernetes 的 Helm chart、systemd
-unit。[examples](../examples/README.zh-CN.md) 用 Docker Compose 运行镜像，在 kind 集群里安装 chart；CI
+unit。[fit-examples](https://github.com/lesismal/fit-examples/blob/main/README.zh-CN.md) 用 Docker Compose 运行镜像，在 kind 集群里安装 chart；CI
 按这里写的步骤逐一运行它们。
 
 ## 容器镜像
@@ -15,7 +15,7 @@ unit。[examples](../examples/README.zh-CN.md) 用 Docker Compose 运行镜像�
 
 ```bash
 docker build -t fit .
-docker run --rm -p 8080:8080 -v "$PWD/examples/hello/fit.json:/etc/fit/fit.json:ro" fit
+docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -c /etc/fit/fit.conf
 ```
 
 - **自己的配置**放在 `/etc/fit/fit.json`，或放在任意位置并以 `run -c <路径>` 作为命令。
@@ -87,7 +87,7 @@ chart 创建的内容：
 其余的值（`resources`、`nodeSelector`、`tolerations`、`affinity`、`podSecurityContext`、`securityContext`、
 `podAnnotations`、`serviceAccount`）与多数 chart 相同；见 [values.yaml](helm/fit/values.yaml)。
 
-在正式发布镜像之前，先构建镜像并载入集群，就像 [Kubernetes 示例](../examples/kubernetes/README.zh-CN.md)
+在正式发布镜像之前，先构建镜像并载入集群，就像 [Kubernetes 示例](https://github.com/lesismal/fit-examples/blob/main/kubernetes/README.zh-CN.md)
 用 kind 做的那样：`--set image.repository=fit --set image.tag=local`。
 
 ## systemd
@@ -101,7 +101,7 @@ sudo install -m 0755 bin/fit /usr/local/bin/fit
 sudo install -m 0644 deploy/systemd/fit.service deploy/systemd/fit@.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/fit.sysusers /usr/lib/sysusers.d/fit.conf
 sudo systemd-sysusers
-sudo install -D -m 0644 examples/hello/fit.json /etc/fit/fit.json
+sudo install -D -m 0644 deploy/docker/fit.json /etc/fit/fit.json
 sudo systemctl daemon-reload
 sudo systemctl enable --now fit
 ```

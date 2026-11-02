@@ -34,14 +34,14 @@ func same(t *testing.T, a, b []byte) bool {
 // adapts it back: the same JSON comes out, and fit loads it as it loads the
 // JSON. The bench's config is in fit's own format, fit.conf, and the
 // template's JSON has its fields in comments, so neither is here; the
-// examples' comments are taken out first.
+// test configs' comments are taken out first.
 func TestRoundTrip(t *testing.T) {
 	var files []string
-	for _, glob := range []string{"../../examples/*.json", "../../examples/*/fit.json", "../../deploy/*/fit.json"} {
+	for _, glob := range []string{"../../cli/testdata/*.json", "../../deploy/*/fit.json"} {
 		m, _ := filepath.Glob(glob)
 		files = append(files, m...)
 	}
-	if len(files) < 4 {
+	if len(files) < 3 {
 		t.Fatalf("found %d configs", len(files))
 	}
 	for _, f := range files {
@@ -49,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The examples' JSON has comments.
+		// The test configs' JSON has comments.
 		if data, err = config.Standardize(data); err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
@@ -67,35 +67,6 @@ func TestRoundTrip(t *testing.T) {
 		// And YAML to JSON to YAML is stable.
 		if y2, err := FromJSON(r.JSON); err != nil || !bytes.Equal(y, y2) {
 			t.Errorf("%s: YAML not stable: %v\n%s\n%s", f, err, y, y2)
-		}
-	}
-}
-
-// TestExamples checks that the YAML examples say what their JSON twins do:
-// every example directory with a fit.yaml has a fit.json.
-func TestExamples(t *testing.T) {
-	ys, _ := filepath.Glob("../../examples/*/fit.yaml")
-	if len(ys) < 40 {
-		t.Fatalf("only %d YAML examples", len(ys))
-	}
-	for _, f := range ys {
-		j, err := os.ReadFile(filepath.Join(filepath.Dir(f), "fit.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if j, err = config.Standardize(j); err != nil {
-			t.Fatalf("%s: %v", f, err)
-		}
-		y, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r, err := Adapt(y)
-		if err != nil {
-			t.Fatalf("%s: %v", f, err)
-		}
-		if !same(t, j, r.JSON) {
-			t.Errorf("%s says something else than its fit.json:\n%s", f, r.JSON)
 		}
 	}
 }

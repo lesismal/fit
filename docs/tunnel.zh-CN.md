@@ -2,7 +2,7 @@
 
 [English](tunnel.md) | [简体中文](tunnel.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[tunnel-hub](../examples/tunnel-hub/fit.conf), [tunnel-node](../examples/tunnel-node/fit.conf), [tunnel-proxy](../examples/tunnel-proxy/fit.conf)。
+配置示例（.conf 格式，在 [fit-examples](https://github.com/lesismal/fit-examples) 中）：[tunnel-hub](https://github.com/lesismal/fit-examples/blob/main/tunnel-hub/fit.conf), [tunnel-node](https://github.com/lesismal/fit-examples/blob/main/tunnel-node/fit.conf), [tunnel-proxy](https://github.com/lesismal/fit-examples/blob/main/tunnel-proxy/fit.conf)。
 
 fit 的隧道让人经由一台谁都能连上的 hub，访问只有旁边那台主机才连得到的机器上的 TCP 服务。它是
 fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和网关的路由并存，也可以单独运行（[决策 028](decisions/028-llm-and-tunnel.zh-CN.md)）。

@@ -38,7 +38,7 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
 - [开发计划](docs/dev-plan.zh-CN.md)：拆分成小迭代的里程碑。
 - [开发进度](docs/progress.zh-CN.md)：已完成的内容，以及从哪里继续。
 - [兼容性](docs/compatibility.zh-CN.md)：从 1.0 起保持稳定的内容，以及重命名字段的处理。
-- [示例](examples/README.zh-CN.md)：每个功能一份配置，三种格式各一份，以及用 Docker Compose 和在 Kubernetes 中运行 fit。
+- [示例](https://github.com/lesismal/fit-examples/blob/main/README.zh-CN.md)：每个功能一份 .conf 配置，以及用 Docker Compose 和在 Kubernetes 中运行 fit，在 fit-examples 仓库中。
 - [部署](deploy/README.zh-CN.md)：容器镜像、Helm chart 和 systemd unit。
 
 ## 安装
@@ -80,12 +80,7 @@ fit 需要 Go 1.27.3 或更高版本。
 make build
 ```
 
-```bash
-./bin/fit validate -c examples/hello/fit.conf
-./bin/fit run -c examples/hello/fit.conf
-```
-
-`examples/hello/fit.conf` 在 8080 端口上回答 `/hello`：
+下面这份配置 `hello.conf`（即 fit-examples 中的 [hello](https://github.com/lesismal/fit-examples/blob/main/hello/fit.conf)）在 8080 端口上回答 `/hello`：
 
 ```fit
 listener web {
@@ -111,8 +106,13 @@ route not-found {
 }
 ```
 
-配置可以是 fit 自己的 [.conf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML（`examples/hello/fit.yaml`）或 JSON
-（`examples/hello/fit.json`，可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），三者字段相同，并可以分散在多个文件和目录中
+```bash
+./bin/fit validate -c hello.conf
+./bin/fit run -c hello.conf
+```
+
+配置可以是 fit 自己的 [.conf 文件](docs/reference/fit.zh-CN.md)（如上）、YAML 或 JSON
+（可以写 `//` 和 `/* */` 注释，最后一个元素后可以带逗号），三者字段相同，并可以分散在多个文件和目录中
 （`fit run -c base.conf -c conf.d`）。`fit adapt` 在这些格式之间转换，也能转换 nginx 配置和 Caddyfile，并列出未转换的部分。
 详见 [配置](docs/configuration.zh-CN.md)。
 

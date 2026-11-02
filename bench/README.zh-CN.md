@@ -272,7 +272,7 @@ worker），不含页缓存；相当于 RSS 去掉文件映射的部分。WebSoc
 `sweep-DATE`）中，每轮 fitbench 一个 JSON，以工作负载和档位命名（`w1-api-500.json`），还有为它推导的方案（`plan.txt`、
 `plan-derived.json`）和报告 `report.md`、`report.zh-CN.md`，报告引用的表格在 `tables.md`。单独运行 fitbench 时写出
 `results/run-<时间>/results.json`，git 忽略它。最新的报告是
-[2026-11-02 的方案，即修复 W1 回退并优化代理分配后、基于 fib 4b24cf3 的 fit](results/plan-2026-11-02/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
+[2026-11-03 的方案，即 HTTP/3 随连接数扩展、API 网关更快、基于 fib 3664a1e 的 fit](results/plan-2026-11-03/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
 `params` 运行：
 
 ```bash

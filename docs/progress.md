@@ -3823,7 +3823,7 @@ Differences from the plan:
   with what it has.
 - **The module template**: [docs/modules.md](modules.md) (and its Chinese twin) says what a module
   is, its params and their tags, `Provision`, `Cleanup` and `Drain`, the rules it follows, how to
-  test it and how to build it in; [examples/module/hello](../examples/module/hello), a module of
+  test it and how to build it in; [examples/module/hello](https://github.com/lesismal/fit-examples/tree/main/module/hello), a module of
   its own (`go.mod` and all), is a middleware that adds `X-Hello` to its routes' responses.
 - **Tests**: `TestBuildWithModule` builds fit from the checkout with the example module and
   without the providers, checks `fit version` says `test+build`, validates and serves a config of
@@ -5100,12 +5100,33 @@ does not come ([decision 030](decisions/030-media-auth-and-pages.md)).
   off and on reaching the others, a silent member staying connected, a member joining with both
   off, one WHIP and one WHEP POST a session throughout (no renegotiation, no retries), leave, the
   publish and play pages, a stream not published, and no console errors.
-- **Example**: `examples/media-pages` (`fit.conf`, `fit.yaml`, `fit.json`): `media_auth`,
+- **Example**: `media-pages` in fit-examples (`fit.conf`): `media_auth`,
   `webrtc.media`, `whip`, `whep` and `media_pages` with a login.
 - **Benchmark**: none; the pages and their API are off the hot path (rule 21).
 - **Gaps**: no Admin API endpoint issues tokens (the pages' login does); the HLS mode plays only
   where the browser plays HLS itself (Safari), with no player script embedded; screen sharing is
   not covered by the browser test (headless Chromium has no screen to pick).
+
+### The examples moved to fit-examples — done
+
+What the user asked for: the config examples in [lesismal/fit-examples](https://github.com/lesismal/fit-examples),
+a directory per feature with its config in .conf, one file, first; YAML and JSON later, in that
+repository's plan.
+
+- **fit-examples**: every directory of `examples/` with its `fit.conf` and the files it names
+  (`static/www`, the CA files, the WASM plugin), the Docker Compose example's config now in .conf,
+  the Compose and Kubernetes examples building fit from a checkout in `FIT_DIR`, the template module
+  as `github.com/lesismal/fit-examples/module/hello`. Its test runs `fit validate` on every
+  `fit.conf`; its CI against the fit it pins and fit's `main`, and the Compose and kind examples.
+  `fit.yaml` and `fit.json` are its plan's next items; the old ones are in this repository's
+  history, before this change.
+- **fit**: `examples/` is gone. The configs the tests used are `cli/testdata` (hello, proxy); the
+  module `TestBuildWithModule` builds is `plugin/build/testdata/hello`. The tests that held the
+  examples' three formats together go with them, to come back in fit-examples with its YAML and
+  JSON. CI's new `examples` job validates fit-examples against this checkout and builds its module
+  in; the packaging and Helm jobs run its Compose and Kubernetes examples with this checkout's image.
+  The docs link to fit-examples.
+- **Benchmark**: none; no code path changed.
 
 ## Notes for later iterations
 

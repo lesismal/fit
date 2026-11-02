@@ -61,7 +61,7 @@ func repoRoot(t *testing.T) string {
 }
 
 // TestBuildWithModule builds fit from this checkout with the example
-// module examples/module/hello and without the providers, and serves a
+// module in testdata/hello and without the providers, and serves a
 // route of the module with the binary: an external module builds into fit
 // and runs. It needs the go command, and the modules fit requires, from
 // the module cache or the network.
@@ -83,7 +83,7 @@ func TestBuildWithModule(t *testing.T) {
 	defer cancel()
 	err := Build(ctx, Options{
 		Output: bin, Fit: Module{Dir: root}, Version: "test+build",
-		With:    []Module{{Path: FitModule + "/examples/module/hello", Dir: filepath.Join(root, "examples", "module", "hello")}},
+		With:    []Module{{Path: FitModule + "/plugin/build/testdata/hello", Dir: filepath.Join(root, "plugin", "build", "testdata", "hello")}},
 		Without: []string{FitModule + "/provider/standard"},
 		Keep:    filepath.Join(dir, "main"), Stderr: &log,
 	})

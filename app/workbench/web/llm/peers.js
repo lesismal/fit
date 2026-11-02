@@ -70,7 +70,7 @@
       }
       // A process connects to the other two roles only. / 进程只连接另外两种角色。
       function add() {
-        var a = h('input.input', { placeholder: '192.168.1.10:9201' }), p = h('input.input', { type: 'password', autocomplete: 'new-password' });
+        var a = h('input.input', { placeholder: '192.168.1.10:9201', 'data-fill': true }), p = h('input.input', { type: 'password', autocomplete: 'new-password' });
         var role = h('select.select', ROLES.filter(function (r) { return r !== selfRole; }).map(function (r) { return h('option', { value: r }, r); }));
         UI.modal({
           title: t('pp.add_title'),
@@ -89,7 +89,7 @@
       // editListen 修改 rpc 监听（ListenReq；密码留空表示保留当前密码）。
       function editListen() {
         var ls = (last && last.listen) || {};
-        var a = h('input.input', { value: ls.addr || '', placeholder: '0.0.0.0:9101' });
+        var a = h('input.input', { value: ls.addr || '', placeholder: '0.0.0.0:9101', 'data-fill': true });
         var p = h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: ls.has_password ? t('pp.listen_pw_keep') : '' });
         UI.modal({
           title: t('pp.listen_edit'),

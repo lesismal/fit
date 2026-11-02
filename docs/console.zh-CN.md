@@ -2,7 +2,7 @@
 
 [English](console.md) | [简体中文](console.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[console](../examples/console/fit.conf), [admin](../examples/admin/fit.conf)。
+配置示例（.conf 格式，在 [fit-examples](https://github.com/lesismal/fit-examples) 中）：[console](https://github.com/lesismal/fit-examples/blob/main/console/fit.conf), [admin](https://github.com/lesismal/fit-examples/blob/main/admin/fit.conf)。
 
 fit 可以把配置加密保存在它自己格式的文件里，即 **store**，并提供 **控制台**：用户名和密码登录后的网页，从中读取和修改
 配置的每一部分。两者是 `admin` 中与 [Admin API](reference/config.md#admin-api) 并列的 `admin.store` 和

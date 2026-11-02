@@ -2,7 +2,7 @@
 
 [English](streaming.md) | [简体中文](streaming.zh-CN.md)
 
-配置示例，.conf、YAML 和 JSON 各一份：[streaming](../examples/streaming/fit.conf)。
+配置示例（.conf）在 [fit-examples](https://github.com/lesismal/fit-examples)：[streaming](https://github.com/lesismal/fit-examples/blob/main/streaming/fit.conf)。
 
 fit 的流媒体角色在网关旁、在同一个引擎上运行 fib 的媒体 hub（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）：
 一路流按其路径（如 `live/cam`）只推送一次，经 RTMP、RTSP、SRT 或 WHIP 推入，即可经其中任何一种协议播放，也可经

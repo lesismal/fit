@@ -399,9 +399,9 @@
             { key: 'address', kind: 'text', label: t('c.api_addr'), hint: t('c.api_addr_hint'), placeholder: '127.0.0.1:9301' },
             { key: 'cert_file', kind: 'text', label: t('c.api_cert'), hint: t('c.api_cert_hint'), placeholder: '' },
             { key: 'key_file', kind: 'text', label: t('c.api_key'), hint: t('c.api_key_hint'), placeholder: '' },
-            { key: 'max_body_bytes', kind: 'int', label: t('c.api_body'), hint: t('c.api_body_hint') },
-            { key: 'max_conns', kind: 'int', label: t('c.api_conns'), hint: t('c.api_conns_hint') },
-            { key: 'max_inflight', kind: 'int', label: t('c.api_inflight'), hint: t('c.api_inflight_hint') },
+            { key: 'max_body_bytes', kind: 'int', label: t('c.api_body'), hint: t('c.api_body_hint'), placeholder: '33554432' },
+            { key: 'max_conns', kind: 'int', label: t('c.api_conns'), hint: t('c.api_conns_hint'), placeholder: '256' },
+            { key: 'max_inflight', kind: 'int', label: t('c.api_inflight'), hint: t('c.api_inflight_hint'), placeholder: '256' },
             { key: 'first_byte_timeout', kind: 'dur', label: t('c.api_first'), hint: t('c.api_first_hint'), placeholder: '5m' },
             { key: 'timeout', kind: 'dur', label: t('c.api_total'), hint: t('c.api_total_hint'), placeholder: '30m' }
           ],

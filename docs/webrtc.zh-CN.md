@@ -2,7 +2,7 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
-配置示例，每个都有 .conf、YAML 和 JSON 三种格式：[webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf)。
+配置示例（.conf 格式，在 [fit-examples](https://github.com/lesismal/fit-examples) 中）：[webrtc-turn](https://github.com/lesismal/fit-examples/blob/main/webrtc-turn/fit.conf), [whip-whep](https://github.com/lesismal/fit-examples/blob/main/whip-whep/fit.conf), [webrtc-proxy](https://github.com/lesismal/fit-examples/blob/main/webrtc-proxy/fit.conf)。
 
 fit 用 fib 的 WebRTC 各包提供 WebRTC 服务，与网关一起运行在其引擎上（[决定 029](decisions/029-webrtc.zh-CN.md)）：
 TURN 服务器；以 fit 为媒体服务器的 WHIP 和 WHEP；以及 fit 作为其他媒体服务器的前端，代理它们的 WHIP 和 WHEP，
@@ -360,7 +360,7 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_webrtc_media_peer_c
 
 fit 自带一套媒体页面，嵌在二进制里：处理器 `media_pages` 在它的 `prefix` 下提供带登录的首页、房间通话、
 推流页和播放页，走上一节的 WHIP 和 WHEP 端点（或用 `whip` 和 `whep` 指向流媒体角色的端点，可以在本机，
-也可以在别的服务器）。示例 [media-pages](../examples/media-pages/fit.conf) 把这些都配好了：
+也可以在别的服务器）。示例 [media-pages](https://github.com/lesismal/fit-examples/blob/main/media-pages/fit.conf) 把这些都配好了：
 
 ```fit
 media_auth media {

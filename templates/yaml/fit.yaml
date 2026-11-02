@@ -11,7 +11,7 @@
 # The version of fit's config this one is written for, 1; fit refuses a config written for a
 # version it does not read, rather than read it wrongly. Optional: a config that leaves it out
 # is read as version 1.
-# integer, 1.
+# integer, 1; default 1.
 schema_version: 1
 
 # The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by
@@ -1722,13 +1722,13 @@ upstreams:
 
   # # The most events one wait of an event loop collects; the rest wait for the next. 1024 when
   # # left out or 0.
-  # # integer, 0 or more.
-  # poll_batch: 0
+  # # integer, 0 or more; default 1024.
+  # poll_batch: 1024
 
   # # The bytes a connection reads its socket into at a time, which is also the most a proxied
   # # body is passed on in one write. 64 KiB when left out or 0.
-  # # integer, 0 to 67108864.
-  # read_buffer_size: 0
+  # # integer, 0 to 67108864; default 65536.
+  # read_buffer_size: 65536
 
   # # The bytes a connection may have waiting to be written before it stops reading until they
   # # drain, the backpressure on one connection; limits.max_pending_bytes bounds them all
@@ -3362,8 +3362,8 @@ upstreams:
     # # The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one
     # # when left out. Each publisher's offer is answered with the first of its codecs of each kind
     # # that is listed here, which its viewers must accept.
-    # # list of string.
-    # codecs: []
+    # # list of string; default ["opus","VP8","VP9","H264","AV1"].
+    # codecs: ["opus","VP8","VP9","H264","AV1"]
 
     # # The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503.
     # # 1024 when left out or 0.

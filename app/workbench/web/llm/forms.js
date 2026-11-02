@@ -46,7 +46,7 @@
           var v = cur[f.key];
           var el = h('input.input' + (f.kind === 'text' ? '' : '.mono'), {
             type: f.kind === 'int' ? 'number' : 'text', min: f.kind === 'int' ? 0 : null, autocomplete: 'off', spellcheck: 'false',
-            placeholder: f.placeholder || t('st.default'), value: v == null || v === 0 && f.kind !== 'int' ? '' : String(v)
+            placeholder: f.placeholder || t('st.default'), 'data-fill': !!f.placeholder, value: v == null || v === 0 && f.kind !== 'int' ? '' : String(v)
           });
           inputs[f.key] = el;
           return UI.field(f.label, el, f.hint);
@@ -76,8 +76,8 @@
       return card({
         title: t('st.limits'), get: '/mesh/limits/get', set: '/mesh/limits/set', note: t('st.limits_note'),
         fields: [
-          { key: 'max_conns', kind: 'int', label: t('st.max_conns'), hint: t('st.max_conns_hint') },
-          { key: 'max_inflight', kind: 'int', label: t('st.max_inflight'), hint: t('st.max_inflight_hint') },
+          { key: 'max_conns', kind: 'int', label: t('st.max_conns'), hint: t('st.max_conns_hint'), placeholder: '1024' },
+          { key: 'max_inflight', kind: 'int', label: t('st.max_inflight'), hint: t('st.max_inflight_hint'), placeholder: '1024' },
           { key: 'ping_interval', kind: 'dur', label: t('st.ping'), hint: t('st.ping_hint'), placeholder: '15s' },
           { key: 'slow_timeout', kind: 'dur', label: t('st.slow'), hint: t('st.slow_hint'), placeholder: '30s' },
           { key: 'retry_interval', kind: 'dur', label: t('st.retry'), hint: t('st.retry_hint'), placeholder: '5s' },

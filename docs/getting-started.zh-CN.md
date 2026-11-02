@@ -238,7 +238,7 @@ curl -X POST localhost:2019/rollback/1
 - [配置参考](reference/config.zh-CN.md)：每个字段及其类型和默认值，附示例。
 - 从其他服务器迁移：[nginx](migrating-from-nginx.zh-CN.md)、[Caddy](migrating-from-caddy.zh-CN.md)、
   [Traefik](migrating-from-traefik.zh-CN.md)。
-- [示例](../examples/README.zh-CN.md)：每个功能一份配置，三种格式各一份。
+- [示例](https://github.com/lesismal/fit-examples/blob/main/README.zh-CN.md)：每个功能一份 .conf 配置，在 fit-examples 仓库中。
 - 网关之外：[WebRTC](webrtc.zh-CN.md)，TURN 服务器以及 WHIP 和 WHEP；[tunnel](tunnel.zh-CN.md)，访问 NAT 后的服务；
   [llm](llm.zh-CN.md)，在多台机器间共享 AI 模型。
 - [兼容性](compatibility.zh-CN.md)：在各 1.x 版本间保持稳定的内容。

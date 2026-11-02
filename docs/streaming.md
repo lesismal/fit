@@ -2,7 +2,7 @@
 
 [English](streaming.md) | [简体中文](streaming.zh-CN.md)
 
-Config example, in .conf, YAML and JSON: [streaming](../examples/streaming/fit.conf).
+Config example, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [streaming](https://github.com/lesismal/fit-examples/blob/main/streaming/fit.conf).
 
 fit's streaming role runs fib's media hub beside the gateway, on its engine
 ([decision 030](decisions/030-media-auth-and-pages.md)): a stream is published once, by its path

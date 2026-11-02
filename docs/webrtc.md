@@ -2,7 +2,7 @@
 
 [English](webrtc.md) | [简体中文](webrtc.zh-CN.md)
 
-Config examples, each in .conf, YAML and JSON: [webrtc-turn](../examples/webrtc-turn/fit.conf), [whip-whep](../examples/whip-whep/fit.conf), [webrtc-proxy](../examples/webrtc-proxy/fit.conf).
+Config examples, in .conf, in [fit-examples](https://github.com/lesismal/fit-examples): [webrtc-turn](https://github.com/lesismal/fit-examples/blob/main/webrtc-turn/fit.conf), [whip-whep](https://github.com/lesismal/fit-examples/blob/main/whip-whep/fit.conf), [webrtc-proxy](https://github.com/lesismal/fit-examples/blob/main/webrtc-proxy/fit.conf).
 
 fit serves WebRTC with fib's WebRTC packages, beside the gateway on its engine
 ([decision 029](decisions/029-webrtc.md)): a TURN server, and WHIP and WHEP with fit as the media
@@ -423,7 +423,7 @@ The Admin API's `/metrics`, and OpenTelemetry's export, carry
 fit ships pages for its media, embedded in the binary: the handler `media_pages` serves, under its
 `prefix`, an index with a login, a room call, a publish page and a play page, over the WHIP and
 WHEP endpoints of the section above (or of the streaming role, on this server or another, by
-`whip` and `whep`). The [media-pages](../examples/media-pages/fit.conf) example wires it all:
+`whip` and `whep`). The [media-pages](https://github.com/lesismal/fit-examples/blob/main/media-pages/fit.conf) example wires it all:
 
 ```fit
 media_auth media {

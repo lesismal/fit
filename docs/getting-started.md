@@ -256,7 +256,7 @@ encrypted in a file of its own, which every change is written to and fit runs fr
 - The [config reference](reference/config.md): every field, its type and default, with examples.
 - Coming from another server: [nginx](migrating-from-nginx.md), [Caddy](migrating-from-caddy.md),
   [Traefik](migrating-from-traefik.md).
-- [Examples](../examples/README.md): a config for each feature, in all three formats.
+- [Examples](https://github.com/lesismal/fit-examples): a config for each feature, in .conf, in the fit-examples repository.
 - Beside the gateway: [WebRTC](webrtc.md), a TURN server and WHIP and WHEP; [the tunnel](tunnel.md),
   to reach services behind NAT; [the LLM feature](llm.md), to share AI models among machines.
 - [Compatibility](compatibility.md): what stays stable across 1.x releases.

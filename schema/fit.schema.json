@@ -553,11 +553,13 @@
           "type": "integer"
         },
         "poll_batch": {
+          "default": 1024,
           "description": "The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
         "read_buffer_size": {
+          "default": 65536,
           "description": "The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0.",
           "maximum": 67108864,
           "minimum": 0,
@@ -3230,6 +3232,13 @@
       "additionalProperties": false,
       "properties": {
         "codecs": {
+          "default": [
+            "opus",
+            "VP8",
+            "VP9",
+            "H264",
+            "AV1"
+          ],
           "description": "The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept.",
           "items": {
             "type": "string"
@@ -5234,6 +5243,7 @@
       "type": "array"
     },
     "schema_version": {
+      "default": 1,
       "description": "The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1.",
       "maximum": 1,
       "minimum": 1,

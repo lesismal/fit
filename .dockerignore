@@ -5,7 +5,7 @@
 bin
 bench
 docs
-examples
+.fit-examples
 test
 deploy
 !deploy/docker/fit.json

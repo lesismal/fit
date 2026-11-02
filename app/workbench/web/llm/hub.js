@@ -271,8 +271,8 @@
           var f = {
             name: h('input.input', { value: x.name || '', disabled: !!x.name }),
             api: h('select.select', ['openai', 'anthropic', 'gemini', 'azure_openai', 'ollama', 'cohere'].map(function (a) { return h('option', { value: a, selected: a === x.api }, a); })),
-            base: h('input.input', { value: x.base_url || '', placeholder: 'http://127.0.0.1:8000/v1' }),
-            ver: h('input.input', { value: x.api_version || '', placeholder: '2024-10-21' }),
+            base: h('input.input', { value: x.base_url || '', placeholder: 'http://127.0.0.1:8000/v1', 'data-fill': true }),
+            ver: h('input.input', { value: x.api_version || '', placeholder: '2024-10-21', 'data-fill': true }),
             upstream: h('input.input', { value: x.upstream || '' }),
             key: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: x.api_key || '' }),
             max: h('input.input', { type: 'number', min: 0, value: x.max_inflight || 0 }),
@@ -374,7 +374,7 @@
           UI.mount(el, h('div.grid.grid--2', list.map(function (a) {
             var inputs = {};
             var params = (a.params || []).map(function (p) {
-              inputs[p.key] = h('input.input', { placeholder: p.example || '' });
+              inputs[p.key] = h('input.input', { placeholder: p.example || '', 'data-fill': true });
               return UI.field(UI.zh() ? p.label_zh || p.label : p.label, inputs[p.key]);
             });
             var b = UI.btn(t('a.run'), 'play', function () {
@@ -508,7 +508,7 @@
               }
             }, UI.field(t('p.name'), name), UI.kv([[t('id'), id.id], [t('version'), id.version], [t('host'), id.hostname]]), h('div.btn-row', b))),
             Settings.card({ title: t('set.hub'), get: '/hub/settings/get', set: '/hub/settings/set',
-              fields: [{ key: 'max_nodes', kind: 'int', label: t('set.max_nodes'), hint: t('set.max_nodes_hint') }] })),
+              fields: [{ key: 'max_nodes', kind: 'int', label: t('set.max_nodes'), hint: t('set.max_nodes_hint'), placeholder: '1024' }] })),
           Settings.limits()));
       }
 

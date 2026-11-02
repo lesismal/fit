@@ -275,6 +275,17 @@
   }
 
   // ---- the schema / schema ----
+  // doc is a description of the schema in the page's language: the schema's are English, and schema-zh.js holds
+  // their Chinese, by the English text (a test in app/workbench keeps it whole).
+  // doc 返回 schema 描述在页面语言下的文本：schema 中为英文，schema-zh.js 按英文原文保存其中文（app/workbench 中的测试保证其完整）。
+  var RENAMED = /^Renamed (\S+); the old name goes in config version 2\.$/;
+  function doc(text) {
+    if (!text || !UI.zh()) return text;
+    var zh = window.FitSchemaZh && window.FitSchemaZh[text];
+    if (zh) return zh;
+    var m = RENAMED.exec(text);
+    return m ? '已更名为 ' + m[1] + '；旧名称将在配置版本 2 中移除。' : text;
+  }
   function resolve(s) {
     var seen = 0;
     while (s && s.$ref && seen++ < 32) {
@@ -448,10 +459,10 @@
     if (nestedKind(k)) {
       var v = slot.get();
       return node(slot.path, [nameEl, h('span.muted.small', summary(v))],
-        [s.description ? h('div.cf-doc', s.description) : null, control(s, slot)], v !== undefined && k !== 'object');
+        [s.description ? h('div.cf-doc', doc(s.description)) : null, control(s, slot)], v !== undefined && k !== 'object');
     }
     return h('div.cf-field' + (err ? '.is-error' : ''), { 'data-path': slot.path },
-      h('div.cf-name', nameEl), h('div.cf-ctl', control(s, slot)), s.description ? h('div.cf-doc', s.description) : null);
+      h('div.cf-name', nameEl), h('div.cf-ctl', control(s, slot)), s.description ? h('div.cf-doc', doc(s.description)) : null);
   }
 
   function swapOpen(prefix, i, j) {
@@ -575,12 +586,12 @@
     var mpath = join(slot.path, 'module');
     box.appendChild(h('div.cf-field' + (hasError(mpath) ? '.is-error' : ''), { 'data-path': mpath },
       h('div.cf-name', h('span.cf-label', t('cf.module'))), h('div.cf-ctl', sel),
-      s.properties.module.description ? h('div.cf-doc', s.properties.module.description) : null));
+      s.properties.module.description ? h('div.cf-doc', doc(s.properties.module.description)) : null));
     if (v && v.module) {
       var ps = paramsSchema(s, v.module);
       var pslot = child(slot, 'params', join(slot.path, 'params'));
       if (ps && ps.properties && Object.keys(ps.properties).length > 0) {
-        box.appendChild(h('div.cf-params', { 'data-path': pslot.path }, h('div.muted.small', t('cf.params')), ps.description ? h('div.cf-doc', ps.description) : null, objectControl(ps, pslot, true)));
+        box.appendChild(h('div.cf-params', { 'data-path': pslot.path }, h('div.muted.small', t('cf.params')), ps.description ? h('div.cf-doc', doc(ps.description)) : null, objectControl(ps, pslot, true)));
       } else if (!ps) {
         box.appendChild(h('div.cf-field', { 'data-path': pslot.path }, h('div.cf-name', h('span.cf-label', t('cf.params'))), h('div.cf-ctl', jsonControl({}, pslot))));
       }
@@ -620,7 +631,8 @@
       step: s.type === 'integer' ? '1' : numeric ? 'any' : null,
       min: s.minimum, max: s.maximum,
       pattern: s.pattern && !numeric ? s.pattern.replace(/^\^/, '').replace(/\$$/, '') : null,
-      spellcheck: 'false'
+      spellcheck: 'false',
+      'data-fill': ph ? true : null
     });
     input.addEventListener('input', function () {
       var x = input.value, nv;
@@ -659,7 +671,7 @@
     } else {
       body = h('section.card', { 'data-path': name }, h('div.card__body', control(s, slot, true)));
     }
-    return h('div.stack', opts.noDoc || !s.description ? null : h('div.callout', UI.icon('info'), ' ', s.description), body);
+    return h('div.stack', opts.noDoc || !s.description ? null : h('div.callout', UI.icon('info'), ' ', doc(s.description)), body);
   }
 
   // certTable lists the certificates of /status, for the overview and the TLS pages. / 列出 /status 中的证书，供概览与 TLS 页面使用。
@@ -690,7 +702,7 @@
     page: page, section: section, redraw: redraw, changed: changed, save: save, discard: discard, reload: reload, rollback: rollback,
     place: function (fn) { S.places.push(fn); },
     sections: function () { return Object.keys(rootProps()); },
-    describe: function (name) { return resolve(rootProps()[name] || {}).description || ''; },
+    describe: function (name) { return doc(resolve(rootProps()[name] || {}).description || ''); },
     resolve: function (s) { return resolve(s); },
     schemaDef: function (name) { return S.schema && S.schema.$defs[name]; },
     get draft() { return S.draft; },
