@@ -98,7 +98,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `schema_version` | integer, 1 |  | The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1. |
+| `schema_version` | integer, 1 | `1` | The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1. |
 | `listeners` | list of [object](#config-listener) |  | The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https. |
 | `routes` | list of [object](#config-route) |  | How requests are matched, and what handles them. |
 | `upstreams` | list of [object](#config-upstream) |  | The servers requests can be proxied to, by name. |
@@ -1114,8 +1114,8 @@ In JSON:
 | `workers` | integer, 0 or more |  | The most workers each engine's pool runs connections' reads and callbacks on at once. fib's default, which follows the CPUs, when left out or 0. |
 | `min_workers` | integer, 0 or more |  | How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0. |
 | `task_queue` | integer, 0 or more |  | How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0. |
-| `poll_batch` | integer, 0 or more |  | The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0. |
-| `read_buffer_size` | integer, 0 to 67108864 |  | The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0. |
+| `poll_batch` | integer, 0 or more | `1024` | The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0. |
+| `read_buffer_size` | integer, 0 to 67108864 | `65536` | The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0. |
 | `write_watermark` | integer, 0 or more |  | The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. When left out or 0, fib sizes it from read_buffer_size and the machine: four read buffers, at least 64 KiB and at most 256 KiB, so 256 KiB at the default 64 KiB read buffer on a machine with enough memory. |
 | `backlog` | integer, 0 or more |  | The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0. |
 
@@ -2250,7 +2250,7 @@ In JSON:
 | `ice_servers` | list of [object](#config-iceserver) |  | STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's side needs none, as it is an ICE lite agent on its own address. |
 | `turn_urls` | list of string |  | URLs of fit's own TURN server, webrtc.turn, as peers reach it, as in "turn:turn.example.com:3478": each answer's Link headers carry them with time-limited credentials made from webrtc.turn's secret, which must be set. |
 | `turn_credential_ttl` | duration | `"1h"` | How long the TURN credentials an answer carries are good for. 1h when left out. |
-| `codecs` | list of string |  | The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept. |
+| `codecs` | list of string | `["opus","VP8","VP9","H264","AV1"]` | The codecs publishers may send, by encoding name: opus, VP8, VP9, H264 and AV1, every one when left out. Each publisher's offer is answered with the first of its codecs of each kind that is listed here, which its viewers must accept. |
 | `max_peer_connections` | integer, 0 or more | `1024` | The most PeerConnections at once, publishers' and viewers'; one more offer is answered 503. 1024 when left out or 0. |
 | `max_streams` | integer, 0 or more | `64` | The most streams published at once; one more publisher is answered 503. 64 when left out or 0. |
 | `max_viewers` | integer, 0 or more | `256` | The most viewers of one stream; one more is answered 503. Each packet a publisher sends is sent again to every viewer, on the worker that received it. 256 when left out or 0. |

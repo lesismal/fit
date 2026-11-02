@@ -1,7 +1,9 @@
 package workbench
 
 import (
+	"encoding/json"
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -47,6 +49,61 @@ func TestPages(t *testing.T) {
 	for ref := range loaded {
 		if strings.HasSuffix(ref, ".js") && !strings.HasPrefix(ref, "core/") && strings.Index(s, `src="`+ref+`"`) < wb {
 			t.Errorf("%s is loaded before core/workbench.js", ref)
+		}
+	}
+}
+
+// gateway/schema-zh.js holds the Chinese of every description of the
+// config's schema, schema/fit.schema.json, and nothing else; config.js
+// words the renamed fields' own.
+func TestSchemaZh(t *testing.T) {
+	src, err := fs.ReadFile(Pages(), "gateway/schema-zh.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+	start, end := strings.Index(s, "window.FitSchemaZh = "), strings.LastIndex(s, ";")
+	if start < 0 || end < start {
+		t.Fatal("gateway/schema-zh.js does not set window.FitSchemaZh")
+	}
+	var zh map[string]string
+	if err := json.Unmarshal([]byte(s[start+len("window.FitSchemaZh = "):end]), &zh); err != nil {
+		t.Fatalf("gateway/schema-zh.js: %v", err)
+	}
+	raw, err := os.ReadFile("../../schema/fit.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	docs := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if d, ok := v["description"].(string); ok && v["deprecated"] != true {
+				docs[d] = true
+			}
+			for _, x := range v {
+				walk(x)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		}
+	}
+	walk(schema)
+	for d := range docs {
+		if zh[d] == "" {
+			t.Errorf("gateway/schema-zh.js lacks %q", d)
+		}
+	}
+	for d := range zh {
+		if !docs[d] {
+			t.Errorf("gateway/schema-zh.js holds %q, which the schema no longer has", d)
 		}
 	}
 }

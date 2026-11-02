@@ -8,8 +8,8 @@ type Engine struct {
 	Workers        int `json:"workers,omitempty" min:"0" doc:"The most workers each engine's pool runs connections' reads and callbacks on at once. fib's default, which follows the CPUs, when left out or 0."`
 	MinWorkers     int `json:"min_workers,omitempty" min:"0" doc:"How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0."`
 	TaskQueue      int `json:"task_queue,omitempty" min:"0" doc:"How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0."`
-	PollBatch      int `json:"poll_batch,omitempty" min:"0" doc:"The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0."`
-	ReadBufferSize int `json:"read_buffer_size,omitempty" min:"0" max:"67108864" doc:"The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0."`
+	PollBatch      int `json:"poll_batch,omitempty" min:"0" default:"1024" doc:"The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0."`
+	ReadBufferSize int `json:"read_buffer_size,omitempty" min:"0" max:"67108864" default:"65536" doc:"The bytes a connection reads its socket into at a time, which is also the most a proxied body is passed on in one write. 64 KiB when left out or 0."`
 	WriteWatermark int `json:"write_watermark,omitempty" min:"0" doc:"The bytes a connection may have waiting to be written before it stops reading until they drain, the backpressure on one connection; limits.max_pending_bytes bounds them all together. When left out or 0, fib sizes it from read_buffer_size and the machine: four read buffers, at least 64 KiB and at most 256 KiB, so 256 KiB at the default 64 KiB read buffer on a machine with enough memory."`
 	Backlog        int `json:"backlog,omitempty" min:"0" doc:"The length of each listening socket's queue of connections not yet accepted. The system's when left out or 0."`
 

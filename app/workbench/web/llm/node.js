@@ -163,11 +163,11 @@
         var isNew = !m;
         m = m || { api: 'openai' };
         var f = {
-          name: h('input.input', { value: m.name || '', placeholder: 'qwen3-8b', disabled: !isNew }),
+          name: h('input.input', { value: m.name || '', placeholder: 'qwen3-8b', 'data-fill': true, disabled: !isNew }),
           api: h('select.select', { disabled: !isNew }, KINDS.map(function (a) { return h('option', { value: a, selected: m.api === a }, a); })),
-          api_version: h('input.input', { value: m.api_version || '', placeholder: '2024-10-21' }),
-          base_url: h('input.input', { value: m.base_url || '', placeholder: 'http://127.0.0.1:11434/v1' }),
-          upstream: h('input.input', { value: m.upstream || '', placeholder: 'qwen3:8b' }),
+          api_version: h('input.input', { value: m.api_version || '', placeholder: '2024-10-21', 'data-fill': true }),
+          base_url: h('input.input', { value: m.base_url || '', placeholder: 'http://127.0.0.1:11434/v1', 'data-fill': true }),
+          upstream: h('input.input', { value: m.upstream || '', placeholder: 'qwen3:8b', 'data-fill': true }),
           api_key: h('input.input', { type: 'password', autocomplete: 'new-password', value: m.api_key || '' }),
           max_inflight: h('input.input', { type: 'number', min: 0, value: m.max_inflight || 0 }),
           description: h('input.input', { value: m.description || '' }),
@@ -262,7 +262,7 @@
       function tryBox(ready) {
         if (!ready.length) return UI.card(t('m.try'), UI.empty(t('m.no_ready'), 'cube'));
         var sel = h('select.select.select--sm', { style: { width: 'auto' } }, ready.map(function (v, i) { return h('option', { value: i }, v.name + ' (' + v.api + ')'); }));
-        var prompt = h('textarea.textarea', { rows: 2 }, 'Say hello in one sentence.');
+        var prompt = h('textarea.textarea', { rows: 2 }, UI.zh() ? '用一句话打个招呼。' : 'Say hello in one sentence.');
         var out = h('div', { style: { whiteSpace: 'pre-wrap', minHeight: '24px' } });
         var meta = h('div.small.muted');
         var raw = h('pre.console', { style: { maxHeight: '240px', minHeight: '0' } });
@@ -406,7 +406,7 @@
           var cards = list.map(function (a) {
             var inputs = {};
             var fields = (a.params || []).map(function (p) {
-              inputs[p.key] = h('input.input.input--sm', { placeholder: p.example || '', title: p.pattern });
+              inputs[p.key] = h('input.input.input--sm', { placeholder: p.example || '', 'data-fill': true, title: p.pattern });
               return UI.field(zhOr(p, 'label'), inputs[p.key]);
             });
             var run = UI.btn(t('a.run'), 'play', function () {
@@ -481,8 +481,8 @@
           var sudo = h('input', { type: 'checkbox', checked: s.gpu_sudo });
           // Durations are Go duration strings ("30s", "1h"); the server validates the ranges.
           // 时长为 Go duration 字符串（"30s"、"1h"）；范围由服务端校验。
-          var refresh = h('input.input.mono', { placeholder: '30s', autocomplete: 'off', spellcheck: 'false', value: s.refresh_interval || '' });
-          var timeout = h('input.input.mono', { placeholder: '1h', autocomplete: 'off', spellcheck: 'false', value: s.job_timeout || '' });
+          var refresh = h('input.input.mono', { placeholder: '30s', 'data-fill': true, autocomplete: 'off', spellcheck: 'false', value: s.refresh_interval || '' });
+          var timeout = h('input.input.mono', { placeholder: '1h', 'data-fill': true, autocomplete: 'off', spellcheck: 'false', value: s.job_timeout || '' });
           var dataDir = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', value: s.gpu_data_dir || '' });
           var saveSettings = h('button.btn.btn--primary', { type: 'submit' }, t('save'));
           var form = h('form.form', {
@@ -504,8 +504,8 @@
               { key: 'first_byte_timeout', kind: 'dur', label: t('u.first'), hint: t('u.first_hint'), placeholder: '5m' },
               { key: 'idle_timeout', kind: 'dur', label: t('u.idle'), hint: t('u.idle_hint'), placeholder: '5m' },
               { key: 'timeout', kind: 'dur', label: t('u.total'), hint: t('u.total_hint'), placeholder: '30m' },
-              { key: 'max_inflight', kind: 'int', label: t('u.inflight'), hint: t('u.inflight_hint') },
-              { key: 'max_body_bytes', kind: 'int', label: t('u.body'), hint: t('u.body_hint') }
+              { key: 'max_inflight', kind: 'int', label: t('u.inflight'), hint: t('u.inflight_hint'), placeholder: '256' },
+              { key: 'max_body_bytes', kind: 'int', label: t('u.body'), hint: t('u.body_hint'), placeholder: '33554432' }
             ]
           });
           UI.mount(el, h('div.stack', UI.configNote('node'),

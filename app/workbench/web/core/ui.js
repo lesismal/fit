@@ -47,6 +47,7 @@
       'online': 'Online', 'offline': 'Offline', 'none': 'None', 'yes': 'Yes', 'no': 'No', 'error': 'Error', 'unknown': 'Unknown',
       'ago.s': '{n}s ago', 'ago.m': '{n}m ago', 'ago.h': '{n}h ago', 'ago.d': '{n}d ago', 'never': 'never',
       'copy': 'Copy', 'copied': 'Copied', 'search': 'Search…', 'menu': 'Menu', 'actions': 'Actions',
+      'fill.hint': 'Tab fills in {v}',
       'config.note': 'This role\'s settings live in fit\'s config, as the llm.{role} member: what these pages change is written back into it, and kept encrypted when fit keeps its config in admin.store.'
     },
     'zh-CN': {
@@ -59,6 +60,7 @@
       'online': '在线', 'offline': '离线', 'none': '无', 'yes': '是', 'no': '否', 'error': '错误', 'unknown': '未知',
       'ago.s': '{n} 秒前', 'ago.m': '{n} 分钟前', 'ago.h': '{n} 小时前', 'ago.d': '{n} 天前', 'never': '从未',
       'copy': '复制', 'copied': '已复制', 'search': '搜索…', 'menu': '菜单', 'actions': '操作',
+      'fill.hint': '按 Tab 填入 {v}',
       'config.note': '本角色的配置保存在 fit 配置的 llm.{role} 成员中：在这些页面上的修改会写回该配置；当 fit 把配置保存在 admin.store 中时，配置以加密方式保存。'
     }
   };
@@ -442,6 +444,28 @@
       return h('button.tab' + (it[0] === active ? '.is-active' : ''), { type: 'button', onclick: function () { onChange(it[0]); } }, it[1]);
     }));
   }
+  // fillable(input) → input: when it is empty, Tab fills in its placeholder (a default or an example value, not a
+  // hint) and keeps the focus there, as if typed; the next Tab moves on. Mark one in h's attrs with 'data-fill': true.
+  // fillable(input) → input：输入框为空时，Tab 填入其占位值（默认值或示例值，而非提示语）并保持焦点，如同键入；
+  // 再按 Tab 才移到下一项。也可在 h 的属性中以 'data-fill': true 标记。
+  function fillable(el) { if (el) el.setAttribute('data-fill', ''); return el; }
+  document.addEventListener('keydown', function (e) {
+    var el = e.target;
+    if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-fill') || el.value !== '' || !el.placeholder || el.readOnly || el.disabled) return;
+    e.preventDefault();
+    el.value = el.placeholder;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  // A fillable input's title says so, when it has none of its own. / 可填入的输入框若没有自己的 title，则提示可按 Tab 填入。
+  document.addEventListener('focusin', function (e) {
+    var el = e.target;
+    if (el && el.hasAttribute && el.hasAttribute('data-fill') && el.placeholder && (!el.title || el.hasAttribute('data-fill-title'))) {
+      el.title = t('fill.hint', { v: el.placeholder });
+      el.setAttribute('data-fill-title', '');
+    }
+  });
   function field(label, input, hint) { return h('label.field', h('span.field__label', label), input, hint ? h('span.field__hint', hint) : null); }
   function btn(label, iconName, onclick, kind) {
     return h('button.btn' + (kind ? kind.split(' ').map(function (k) { return '.btn--' + k; }).join('') : ''), { type: 'button', onclick: onclick }, iconName ? icon(iconName) : null, label);
@@ -517,6 +541,6 @@
     toast: toast, fail: fail, modal: modal, closeModals: closeModals, confirm: confirmBox, busy: busy, copy: copyText,
     fmtMB: fmtMB, fmtNum: fmtNum, fmtDur: fmtDur, ago: ago, fmtTime: fmtTime,
     badge: badge, onlineBadge: onlineBadge, meter: meter, stat: stat, kv: kv, empty: empty, card: card, table: table,
-    tabs: tabs, field: field, btn: btn, prefs: prefs, every: every, stopTimers: stopTimers, loginPage: loginPage
+    tabs: tabs, field: field, fillable: fillable, btn: btn, prefs: prefs, every: every, stopTimers: stopTimers, loginPage: loginPage
   };
 })();

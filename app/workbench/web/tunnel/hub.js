@@ -274,8 +274,8 @@
       function listenerKey(l) { return { protocol: l.protocol, address: l.address, path: l.path || '' }; }
       function editListener(l, reload) {
         var proto = h('select.select', ['tcp', 'ws', 'quic'].map(function (p) { return h('option', { value: p, selected: l && l.protocol === p }, K.protoName(p)); }));
-        var addr = h('input.input.mono', { value: l ? l.address : '', placeholder: ':7000' });
-        var path = h('input.input.mono', { value: l ? l.path || '' : '', placeholder: '/tunnel' });
+        var addr = h('input.input.mono', { value: l ? l.address : '', placeholder: ':7000', 'data-fill': true });
+        var path = h('input.input.mono', { value: l ? l.path || '' : '', placeholder: '/tunnel', 'data-fill': true });
         var pathRow = UI.field(t('path'), path);
         function sync() { pathRow.hidden = proto.value !== 'ws'; }
         proto.addEventListener('change', sync);

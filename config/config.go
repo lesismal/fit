@@ -23,7 +23,7 @@ const SchemaVersion = 1
 
 // Config is a whole fit config.
 type Config struct {
-	SchemaVersion int        `json:"schema_version,omitempty" min:"1" max:"1" doc:"The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1."`
+	SchemaVersion int        `json:"schema_version,omitempty" min:"1" max:"1" default:"1" doc:"The version of fit's config this one is written for, 1; fit refuses a config written for a version it does not read, rather than read it wrongly. Optional: a config that leaves it out is read as version 1."`
 	Listeners     []Listener `json:"listeners,omitempty" doc:"The addresses fit listens on, and the protocols each one serves. When left out, HTTPS by default makes them from the routes' host names; see auto_https."`
 	Routes        []Route    `json:"routes,omitempty" doc:"How requests are matched, and what handles them."`
 	Upstreams     []Upstream `json:"upstreams,omitempty" doc:"The servers requests can be proxied to, by name."`
