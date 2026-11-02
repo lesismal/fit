@@ -3579,6 +3579,53 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
 - **基准测试**：无；媒体处理器的信令不在热路径上，没有 `auth` 的路由行为不变（规则 21）。
 - **不足**：还没有签发 token 的 Admin API 端点（页面 I117 会提供）；token 只能通过更换 secret 吊销。
 
+### I117 媒体页面 — 已完成
+
+用户的要求：fit 提供基础的媒体页面，页面本身也在可配置的认证之后；页面可以开关麦克风和摄像头；对 WebRTC，不论设备
+是否存在开关都能用，另一方根据对端宣告的开关状态作出反应，而不是因为收不到数据而反复报错
+（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）。
+
+- **处理器 `media_pages`**（`handler/mediapages` 包）：`prefix`（`/media`）、`title`、`auth`、`login`、`whip` 和
+  `whep`（含 `{stream}` 的 URL 模板，默认 `/whip/{stream}` 和 `/whep/{stream}`）、`hls`、`links`（`{stream}`、
+  `{token}`、`{host}`）、`ice_servers`，以及上限 `max_rooms`（64）、`max_members`（16；每个房间的事件流为其两倍）、
+  `max_message_bytes`（1024）、`member_ttl`（30s）、`stall_timeout`（30s）。路由：`<prefix>`（308 到 `<prefix>/`）、
+  `<prefix>/`、`call`、`publish`、`play`（同一个页面）、`app.js`、`app.css`（ETag、`no-cache`；页面带只允许
+  `'self'` 和端点所在源的 CSP）、`api/config`、`api/login`、`api/logout`，以及房间 API
+  `api/rooms/<room>/join`、`members/<name>`、`leave` 和 `events`（SSE）。
+- **认证**：房间 API 用 `Guard` 检查策略：加入和关注需要 `<room>-*` 上的 `play`，宣告推流需要 `<room>-<name>` 上的
+  `publish`（否则 `403`，之后的变更也一样）；成员的变更需要加入时返回的 key（128 位随机数；错误的 key 为 `404`，
+  名字被另一个 key 占用为 `409`）。`login` 接收 `{user, password}`，在 bcrypt 池上执行 `Policy.Login`，应答
+  `Policy.Issue` 签发的令牌，同时设为 cookie `fit_media_token`（`HttpOnly`、`SameSite=Strict`、TLS 上 `Secure`、
+  `Path=/`、`Max-Age` 与令牌一致）；`logout` 清除它。
+- **页面**（`web/index.html`、`app.js`、`app.css`，嵌入；无外部资源；中英文）：每个推流方一开始就提供一个
+  `sendonly` 的音频和一个视频收发器；开关（麦克风、摄像头、屏幕）只做 `replaceTrack`：设备的轨道，没有设备时的合成
+  轨道（WebAudio 静音；320x180、每秒 2 帧、写着名字的 canvas），关闭时为空并停止设备。每次开关以及每 `member_ttl`/3
+  向房间 API 宣告状态；成员宣告推流（WHIP 得到 201 之后）才播放它；失败的 WHEP POST 最多重试 6 次，从 1 秒翻倍到 15 秒；
+  推流方用同样的退避重试，遵守 `Retry-After`，遇到 401、403 和 422 则停止。会话的 DELETE 先于它的 PeerConnection
+  关闭（或 2 秒后照样关闭），以免 DTLS 关闭先结束会话、让 DELETE 得到 404；对已离开成员的观看不发 DELETE，服务器已
+  结束它。`window.fitMedia` 为测试提供 `join`、`leave`、`mic`、`cam` 和 `status`。
+- **房间**：按引擎和前缀保存，通过引用计数在重载之间共享（`acquire`、`release`）；一把锁只用于 map 操作；每个房间一个
+  定时器，每 `member_ttl`/3 清除静默的成员、向关注者发 ping，并忘掉空房间。事件是完整的成员列表，每次变化一份共享快照，
+  用 `WriteNoWait` 写出；超过上限时关注者只保留最新快照，在 `OnWritable` 时发送，写超时为 `stall_timeout`。每个事件流
+  保持住请求和配置；`Drain` 结束被换下配置的事件流，`EventSource` 会重连到新配置。
+- **SFU**：检查了 `webrtc.media`，无需改动：超过 `ice_timeout` 和 `connect_timeout` 什么都不发的推流方会保留（由 consent
+  维持），它的观看方也是；只推音频的推流方可被请求两种媒体的观看方播放（视频应答为 inactive），也可被只请求音频的观看方
+  播放；只请求视频的观看方得到 `422` 而不是 `500`。测试 `TestOneKindPublishers`、`TestSilentPublisher`
+  （`webrtc/media/kinds_test.go`）；测试工具中新增 `newPeerWith`，用于设置客户端的 consent 间隔。
+- **测试**（竞态检测）：页面、资源、ETag、CSP、重定向、`api/config`；明文和 bcrypt 用户的登录、cookie 的属性、错误密码、
+  过大的 body、登出、关闭登录；参数检查；房间 API 的 401 和 403、只能播放的用户、key 作为凭证、`409`、`max_members`、
+  `max_rooms`、关注者上限、超限的 body、`member_ttl`、空房间被忘掉；中途断开的关注者被忘掉，从不读取的关注者在
+  `stall_timeout` 后被断开，而另一个关注者得到 100 个成员 2000 次变化后的最终状态；重载保留房间并结束旧配置的事件流，
+  最后一个配置离开时 hub 关闭。浏览器测试 `test/docker/mediapages/e2e.sh`（Linux 容器中的无头 Chromium 156，一个浏览器用假设备、另一个完全没有设备，
+  通过 DevTools 驱动）：登录，三个成员互相播放，没有设备的成员发送合成轨道并显示“没有麦克风 · 没有摄像头”，麦克风和
+  摄像头的开关传到其他人，静默的成员保持连接，一个成员关着两者加入，整个过程中每个会话只有一次 WHIP 和一次 WHEP POST
+  （不重新协商、不重试），离开，推流页和播放页，没有推送的流，以及控制台没有错误。
+- **示例**：`examples/media-pages`（`fit.conf`、`fit.yaml`、`fit.json`）：`media_auth`、`webrtc.media`、`whip`、`whep`
+  和带登录的 `media_pages`。
+- **基准测试**：无；页面及其 API 不在热路径上（规则 21）。
+- **不足**：没有签发令牌的 Admin API 端点（由页面的登录签发）；HLS 模式只在浏览器自己能播放 HLS 时（Safari）可用，
+  没有嵌入播放器脚本；浏览器测试没有覆盖屏幕共享（无头 Chromium 没有可选的屏幕）。
+
 ## 给后续迭代的说明
 
 - **2026-10-26 对 2026-10-24 那轮压测的收尾。** 四项测量把那一轮留下的问题结了。W4 的大传输：fit 现在

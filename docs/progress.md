@@ -4989,6 +4989,71 @@ other protocols that take media; I115 is the policies every one of them shares, 
 - **Gaps**: no Admin API endpoint issues tokens yet (the pages, I117, will); a token is revoked only
   by changing the secret.
 
+### I117 The media pages — done
+
+What the user asked for: basic pages for fit's media, behind auth that can be configured, which
+switch the microphone and the camera on and off; for WebRTC the switch works whether or not the
+device exists, and the other side reacts to the announced state instead of erring on media that
+does not come ([decision 030](decisions/030-media-auth-and-pages.md)).
+
+- **Handler `media_pages`** (package `handler/mediapages`): `prefix` (`/media`), `title`, `auth`,
+  `login`, `whip` and `whep` (URL templates with `{stream}`, `/whip/{stream}` and
+  `/whep/{stream}`), `hls`, `links` (`{stream}`, `{token}`, `{host}`), `ice_servers`, and the
+  bounds `max_rooms` (64), `max_members` (16; twice as many event streams a room),
+  `max_message_bytes` (1024), `member_ttl` (30s), `stall_timeout` (30s). Routes: `<prefix>` (308
+  to `<prefix>/`), `<prefix>/`, `call`, `publish`, `play` (one page), `app.js`, `app.css` (ETag,
+  `no-cache`; the page with a CSP of `'self'` and the endpoints' origins), `api/config`,
+  `api/login`, `api/logout`, and the room API `api/rooms/<room>/join`, `members/<name>`,
+  `leave` and `events` (SSE).
+- **Auth**: the room API checks the policy with `Guard`: `play` on `<room>-*` to join and follow,
+  `publish` on `<room>-<name>` to announce publishing (`403` otherwise, and on a later change); a
+  member's changes need the key its join returned (128 random bits; `404` for a wrong one, `409`
+  for a name another key holds). `login` takes `{user, password}`, `Policy.Login` on the bcrypt
+  pool, and answers `Policy.Issue`'s token, also as the cookie `fit_media_token` (`HttpOnly`,
+  `SameSite=Strict`, `Secure` over TLS, `Path=/`, `Max-Age` the token's); `logout` clears it.
+- **Pages** (`web/index.html`, `app.js`, `app.css`, embedded; no external asset; English and
+  Chinese): every publisher offers one `sendonly` audio and one video transceiver from the start;
+  the switches (microphone, camera, screen) only `replaceTrack`: the device, a synthetic track
+  without one (silent WebAudio; a 320x180 canvas with the name at 2 fps), none when off, the
+  device stopped. The state is announced to the room API at each switch and every `member_ttl`/3;
+  a member is played only once announced publishing (after its WHIP 201); a failed WHEP POST is
+  retried at most 6 times, 1 s doubling to 15 s; the publisher retries with the same backoff,
+  honours `Retry-After`, and stops on 401, 403 and 422. A session's DELETE goes before its
+  PeerConnection closes (or after 2 s), so that its DTLS close does not end it first and answer the
+  DELETE 404; a viewer of a member that left sends none, the server having ended it.
+  `window.fitMedia` exposes `join`, `leave`, `mic`, `cam` and `status` for tests.
+- **Rooms**: per engine and prefix, shared across reloads by refcount (`acquire`, `release`); one
+  lock for the map work; a timer a room sweeps silent members and pings watchers every
+  `member_ttl`/3, and forgets an empty room. Events are the whole member list, one shared
+  snapshot a change, written with `WriteNoWait`; above the limit a watcher keeps only the latest
+  snapshot and sends it on `OnWritable`, under a write deadline of `stall_timeout`. Each event
+  stream retains the request and the config; `Drain` ends a swapped-out config's streams, and
+  `EventSource` reconnects to the new one.
+- **SFU**: `webrtc.media` checked, unchanged: a publisher sending nothing past `ice_timeout` and
+  `connect_timeout` stays (consent keeps it), with its viewer; an audio-only publisher is played
+  by a viewer of both kinds, video answered inactive, and by one of audio alone; a viewer of video
+  alone gets `422`, not `500`. Tests `TestOneKindPublishers`, `TestSilentPublisher`
+  (`webrtc/media/kinds_test.go`); `newPeerWith` in the harness for a client's consent interval.
+- **Tests** (race detector): pages, assets, ETag, CSP, redirect, `api/config`; login with a
+  plaintext and a bcrypt user, the cookie's attributes, a wrong password, a large body, logout,
+  login off; params; the room API with 401 and 403, play-only users, a key's capability, `409`,
+  `max_members`, `max_rooms`, the watcher bound, bodies past the limit, `member_ttl`, a room
+  forgotten when empty; a watcher cut midway forgotten, a watcher that reads nothing cut after
+  `stall_timeout` while another gets the last state of 100 members' 2000 changes; a reload keeping
+  the rooms and draining the old config's streams, and the hub closed with the last config.
+  Browser, `test/docker/mediapages/e2e.sh` (headless Chromium 156 in a Linux container, one browser with fake devices and one with
+  none at all, driven over DevTools): login, three members playing each other, a member without
+  devices sending synthetic tracks and shown "no microphone · no camera", microphone and camera
+  off and on reaching the others, a silent member staying connected, a member joining with both
+  off, one WHIP and one WHEP POST a session throughout (no renegotiation, no retries), leave, the
+  publish and play pages, a stream not published, and no console errors.
+- **Example**: `examples/media-pages` (`fit.conf`, `fit.yaml`, `fit.json`): `media_auth`,
+  `webrtc.media`, `whip`, `whep` and `media_pages` with a login.
+- **Benchmark**: none; the pages and their API are off the hot path (rule 21).
+- **Gaps**: no Admin API endpoint issues tokens (the pages' login does); the HLS mode plays only
+  where the browser plays HLS itself (Safari), with no player script embedded; screen sharing is
+  not covered by the browser test (headless Chromium has no screen to pick).
+
 ## Notes for later iterations
 
 - **The 2026-10-26 pass over the 2026-10-24 campaign.** Four measurements closed that campaign's

@@ -418,6 +418,79 @@ The Admin API's `/metrics`, and OpenTelemetry's export, carry
 `fit_webrtc_media_restarts_total`. The media server's messages go to the `webrtc` logger, after
 `webrtc.media: `: its addresses at `info`, and a restart that ends its sessions at `warn`.
 
+## The media pages
+
+fit ships pages for its media, embedded in the binary: the handler `media_pages` serves, under its
+`prefix`, an index with a login, a room call, a publish page and a play page, over the WHIP and
+WHEP endpoints of the section above (or of the streaming role, on this server or another, by
+`whip` and `whep`). The [media-pages](../examples/media-pages/fit.conf) example wires it all:
+
+```fit
+media_auth media {
+	secret a-long-random-secret-for-the-logins
+	public play
+	users alice { password_hash $2a$10$Fq1ONPcWafh7L8Rqw/wBlOX87AVAV7hZrin/rWwd7vUZv6MlW.v.G; publish *; play * }
+	users guest { password guest-password; publish lobby-*; play lobby-* }
+}
+
+route pages {
+	match { path /media /media/* }
+	handler media_pages { auth media; login true; title "fit media" }
+}
+
+route publish { match { path /whip/* }; handler whip { auth media } }
+route play { match { path /whep/* }; handler whep { auth media } }
+
+webrtc { media { listen :8189 } }
+```
+
+Browsers open the camera and the microphone only on a secure page: over HTTPS, or on
+`localhost`.
+
+- **Pages.** `/media/` is the index: the endpoints, whether credentials are needed and what the
+  logged-in user may do. `/media/call` is a room call: each member publishes `<room>-<name>` with
+  WHIP and plays every other member with WHEP. `/media/publish` sends a camera, a microphone or a
+  screen to a stream and shows its URLs, WHIP, WHEP, `hls` and the `links` given for tools outside
+  the browser (`{stream}`, `{token}` and `{host}` filled in); `/media/play` plays a stream with
+  WHEP, or with HLS where the browser plays it itself. The pages load no script, style or font
+  from elsewhere, and are answered with a Content Security Policy that lets them reach this server
+  and the endpoints' origins alone.
+- **Login.** With `auth` and `login`, the pages log the policy's users in: `POST
+  /media/api/login` checks the password (a `password_hash` on mediaauth's bcrypt pool) and answers
+  with a token the policy signs for its `token_ttl`, set as the cookie `fit_media_token`
+  (`HttpOnly`, `SameSite=Strict`, `Secure` over TLS, `Path=/`), which `whip`, `whep` and the room
+  API take, and also handed to the page, which sends it as `Authorization: Bearer` to endpoints on
+  another server. A token pasted in, as `fit media-token` prints, works the same. Without a
+  `secret` the tokens are signed with a key of the process, which a restart forgets. The pages'
+  HTML can sit behind the route's own middleware too, as `basic_auth`, `forward_auth` or an IP
+  allow list; a `rate_limit` on the route bounds login attempts.
+- **Switches.** The microphone, the camera and the screen switch on and off at any time, with or
+  without the device. A publisher always offers one audio and one video transceiver; a switch only
+  replaces the track its sender sends, so it never renegotiates nor restarts the PeerConnection.
+  Switched on, a sender sends the device, or without one a synthetic track: silence, or a frame
+  with the member's name at 2 frames a second. Switched off, it sends nothing and the device is
+  released, its light off.
+- **The room API.** Each member announces through the handler's room API whether it publishes,
+  its switches and whether it has the devices: `POST /media/api/rooms/<room>/join`, `POST
+  .../members/<name>` (a change, and every `member_ttl`/3 a heartbeat), `POST .../leave`, and `GET
+  .../events`, Server-Sent Events with the room's members on every change. The others show the
+  member's avatar while its camera is off, "microphone off", "no microphone" or "no camera", and
+  play a member's stream only once it is announced as published, so that nobody asks for a stream
+  that is not there; a viewer whose request fails anyway tries again at most 6 times, waiting 1, 2,
+  4, 8 and 15 seconds. A join needs `play` on `<room>-*`, announcing that one publishes `publish`
+  on `<room>-<name>`; a member's changes need the key its join was answered with.
+- **Bounds.** `max_rooms` rooms (64), `max_members` members a room (16) and twice as many event
+  streams, `max_message_bytes` a request's body (1024), `member_ttl` without a heartbeat (30s),
+  and `stall_timeout` (30s) for a browser to take its events: a browser that does not keep up is
+  sent only the room's latest state once it has taken the last, and is cut off past the timeout.
+  Rooms belong to the handler's prefix on the engine and survive reloads; an event stream of a
+  config swapped out ends after the drain timeout, and the browser follows the room again.
+- **Silence.** The media server keeps a publisher whose switches are all off, and its viewers:
+  ICE consent keeps a session alive, not media, so a publisher may send nothing for as long as it
+  likes. A publisher of audio alone, or of video alone, is played by a viewer that offers both
+  kinds, its other section answered inactive; a viewer that asks for a kind the publisher does not
+  send, and nothing else, is answered `422`.
+
 ## Proxying media servers
 
 Many media servers can sit behind one fit: fit's own `whip` and `whep` on other hosts, or any WHIP

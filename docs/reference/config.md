@@ -41,7 +41,7 @@ a config against it and more.
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`media_pages`](#http-handlers-media_pages), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -2266,6 +2266,8 @@ In JSON:
 
 ### `webrtc.media.ice_servers[]`
 
+Also at `ice_servers[]`.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `urls` | list of string |  | Required. The server's stun:, stuns:, turn: or turns: URLs. |
@@ -2730,6 +2732,106 @@ In JSON:
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take; past it the request is answered 504. 10s when left out. |
 | `idle_timeout` | duration | `"5m"` | How long a tunnel may carry nothing either way before it and its connection to the destination are closed. 5m when left out. |
+
+<a id="http-handlers-media_pages"></a>
+
+### `media_pages`
+
+Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera.
+
+Serves fit's own media pages under `prefix` (`/media`), embedded in the binary, with no script or
+style from elsewhere: an index, a room call (`call`), a publish page (`publish`) and a play page
+(`play`), over the WHIP and WHEP endpoints `whip` and `whep` name, fit's [`whip`](#whip) and
+[`whep`](#whep) or the streaming role's, on this server or another. In a call each member
+publishes `<room>-<name>` and plays the others; the switches of the microphone, the camera and the
+screen replace the tracks the PeerConnection sends and never renegotiate it, a page without the
+device sends a silent track or a frame with its name, and each member announces its switches
+through the room API (`api/rooms/<room>/join`, `members/<name>`, `leave`, and `events`, Server-Sent
+Events), so that the others show "microphone off" or the member's avatar rather than wait on media
+that does not come, and play a member's stream only once it is announced as published. The
+publish and play pages show a stream's URLs: WHIP, WHEP, `hls`, and `links` for tools outside the
+browser. `auth` names the [`media_auth`](#media-auth) policy the room API checks: joining and
+following a room needs `play` on `<room>-*`, announcing that one publishes `publish` on
+`<room>-<name>`. With `login`, the pages log the policy's users in: a token the policy signs comes
+back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token`, which the endpoints take; the
+pages also take a token pasted in, as `fit media-token` prints. The room API is bounded by
+`max_rooms`, `max_members`, twice as many watchers a room, `max_message_bytes`, `member_ttl` and
+`stall_timeout`. The pages themselves can sit behind the route's middleware as well, as
+`basic_auth` or `forward_auth`. The route must match the prefix and what is below it. See
+[WebRTC](../webrtc.md#the-media-pages).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /media /media/* }
+	handler media_pages {
+		auth live
+		login true
+		title "Our media"
+		hls /hls/{stream}/index.m3u8
+		links RTMP { url rtmp://{host}/live/{stream}?token={token} }
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /media
+    - /media/*
+handler:
+  module: media_pages
+  params:
+    auth: live
+    login: true
+    title: Our media
+    hls: /hls/{stream}/index.m3u8
+    links:
+      - name: RTMP
+        url: rtmp://{host}/live/{stream}?token={token}
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/media", "/media/*"]},
+  "handler": {"module": "media_pages", "params": {
+    "auth": "live", "login": true, "title": "Our media",
+    "hls": "/hls/{stream}/index.m3u8",
+    "links": [{"name": "RTMP", "url": "rtmp://{host}/live/{stream}?token={token}"}]
+  }}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string | `"/media"` | The path the pages are served under, which the route must match with what is below it, as /media/* beside /media; a request outside it gets 404. /media when left out. |
+| `title` | string |  | The pages' title; fit media when left out. |
+| `auth` | string |  | The media_auth policy the room API checks, and the pages' login and tokens belong to: joining a room and following it needs play on <room>-*, announcing that one publishes publish on <room>-<name>, as the WHIP and WHEP endpoints the pages use check with their own auth, which should name the same policy. Everyone may use the room API when left out, as the route's middleware allow. |
+| `login` | boolean |  | Show a login form for the users of the auth policy: a right password is answered with a token the policy signs, for its token_ttl, set as the HttpOnly cookie fit_media_token (SameSite=Strict, Secure over TLS), which the WHIP, WHEP and HLS requests of the pages carry, and handed to the page too. Without it the pages ask for a token instead, as fit media-token prints, when auth needs one. |
+| `whip` | string | `"/whip/{stream}"` | The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip handler's, or stream_whip's for the streaming role, on this server or another. /whip/{stream} when left out. |
+| `whep` | string | `"/whep/{stream}"` | The URL streams are played from with WHEP, {stream} standing for the stream's name. /whep/{stream} when left out. |
+| `hls` | string |  | The URL of a stream's HLS playlist, {stream} standing for its name, as /hls/{stream}/index.m3u8 for the streaming role's hls handler: the play page plays it where the browser plays HLS itself, with the page's token. None when left out. |
+| `links` | list of [object](#mediapages-link) |  | Further URLs the publish and play pages show for a stream, for tools outside the browser, as the streaming role's RTMP, RTSP, SRT and HTTP-FLV ones: {stream} stands for the stream's name, {token} for the page's token, {host} for the host the page was loaded from. |
+| `ice_servers` | list of [object](#config-iceserver) |  | STUN and TURN servers the pages' PeerConnections use, as a browser's iceServers. None when left out: fit's media server is an ICE lite agent that browsers reach directly, and tells them of its own ICE servers in its answers' Link headers. |
+| `max_rooms` | integer, 1 or more | `64` | How many rooms may have members or watchers at once; a join or a watch past it is answered 503. 64 when left out. |
+| `max_members` | integer, 1 to 256 | `16` | How many members a room may have; a join past it is answered 503. A room may have twice as many watchers, its members' event streams among them. 16 when left out. |
+| `max_message_bytes` | integer, 256 to 65536 | `1024` | The largest body a request of the room API or the login may have, in bytes; a larger one is answered 413. 1024 when left out. |
+| `member_ttl` | duration | `"30s"` | How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out. |
+| `stall_timeout` | duration | `"30s"` | How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out. |
+
+<a id="mediapages-link"></a>
+
+### `links[]` in `media_pages`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. What the URL is, as RTMP or SRT. |
+| `url` | string |  | Required. The URL, with {stream}, {token} and {host} filled in by the page. |
 
 <a id="http-handlers-proxy"></a>
 

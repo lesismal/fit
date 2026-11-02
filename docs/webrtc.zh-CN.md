@@ -356,6 +356,62 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_webrtc_media_peer_c
 `fit_webrtc_media_key_frame_requests_total{result="sent"|"held"}` 和 `fit_webrtc_media_restarts_total`。
 媒体服务器的消息写入 `webrtc` 日志，前缀 `webrtc.media: `：其地址以 `info` 级别记录，结束会话的重启以 `warn` 级别记录。
 
+## 媒体页面
+
+fit 自带一套媒体页面，嵌在二进制里：处理器 `media_pages` 在它的 `prefix` 下提供带登录的首页、房间通话、
+推流页和播放页，走上一节的 WHIP 和 WHEP 端点（或用 `whip` 和 `whep` 指向流媒体角色的端点，可以在本机，
+也可以在别的服务器）。示例 [media-pages](../examples/media-pages/fit.conf) 把这些都配好了：
+
+```fit
+media_auth media {
+	secret a-long-random-secret-for-the-logins
+	public play
+	users alice { password_hash $2a$10$Fq1ONPcWafh7L8Rqw/wBlOX87AVAV7hZrin/rWwd7vUZv6MlW.v.G; publish *; play * }
+	users guest { password guest-password; publish lobby-*; play lobby-* }
+}
+
+route pages {
+	match { path /media /media/* }
+	handler media_pages { auth media; login true; title "fit media" }
+}
+
+route publish { match { path /whip/* }; handler whip { auth media } }
+route play { match { path /whep/* }; handler whep { auth media } }
+
+webrtc { media { listen :8189 } }
+```
+
+浏览器只在安全的页面上打开摄像头和麦克风：HTTPS，或者 `localhost`。
+
+- **页面。** `/media/` 是首页：端点、是否需要凭据、已登录用户能做什么。`/media/call` 是房间通话：每个成员用
+  WHIP 推送 `<room>-<name>`，用 WHEP 播放其他每个成员。`/media/publish` 把摄像头、麦克风或屏幕推成一路流，
+  并给出它的地址：WHIP、WHEP、`hls`，以及给浏览器之外的工具用的 `links`（填好 `{stream}`、`{token}` 和
+  `{host}`）；`/media/play` 用 WHEP 播放一路流，浏览器自己能播 HLS 时也可以用 HLS。页面不从别处加载任何脚本、
+  样式或字体，应答带内容安全策略（CSP），只允许访问本服务器和端点所在的源。
+- **登录。** 设了 `auth` 和 `login` 时，页面让策略的用户登录：`POST /media/api/login` 核对密码
+  （`password_hash` 在 mediaauth 的 bcrypt 池上核对），应答一个策略签名、有效期为 `token_ttl` 的令牌，设为
+  cookie `fit_media_token`（`HttpOnly`、`SameSite=Strict`、TLS 上加 `Secure`、`Path=/`），`whip`、`whep`
+  和房间 API 都认；令牌也交给页面，页面对别的服务器上的端点用 `Authorization: Bearer` 发送。粘贴进来的令牌
+  （如 `fit media-token` 打印的）用法相同。没有 `secret` 时用进程自己的密钥签名，重启后失效。页面的 HTML
+  也可以再放在路由自己的中间件后面，如 `basic_auth`、`forward_auth` 或 IP 白名单；路由上的 `rate_limit`
+  可以限制登录尝试。
+- **开关。** 麦克风、摄像头和屏幕随时可以打开和关闭，有没有设备都可以。推流方总是提供一个音频和一个视频
+  收发器；开关只替换发送器发送的轨道，所以从不重新协商，也不重建 PeerConnection。打开时发送设备的轨道，
+  没有设备时发送合成轨道：静音，或每秒 2 帧、写着成员名字的画面。关闭时什么都不发送，并释放设备，指示灯熄灭。
+- **房间 API。** 每个成员通过处理器的房间 API 告知自己是否在推流、各开关的状态以及有没有设备：
+  `POST /media/api/rooms/<room>/join`、`POST .../members/<name>`（一次变化，以及每 `member_ttl`/3 一次心跳）、
+  `POST .../leave`，以及 `GET .../events`：Server-Sent Events，每次变化推送房间的成员。其他人在成员的摄像头
+  关闭时显示其头像，显示“麦克风已关”“没有麦克风”或“没有摄像头”，并且只在成员宣告推流之后才播放它的流，
+  所以没有人去请求一路不存在的流；即使请求仍然失败，观看方最多再试 6 次，依次等待 1、2、4、8 和 15 秒。
+  加入需要 `<room>-*` 上的 `play`，宣告推流需要 `<room>-<name>` 上的 `publish`；成员的变更需要它加入时得到的 key。
+- **上限。** `max_rooms` 个房间（64），每个房间 `max_members` 个成员（16）和两倍数量的事件流，请求体最多
+  `max_message_bytes` 字节（1024），没有心跳最多 `member_ttl`（30s），浏览器取走事件最多等 `stall_timeout`
+  （30s）：跟不上的浏览器在取走上一份之后只收到房间的最新状态，超时则被断开。房间属于引擎上处理器的前缀，
+  重载后仍在；被换下的配置上的事件流在 drain 超时后结束，浏览器会重新关注房间。
+- **静默。** 媒体服务器会保留所有开关都关闭的推流方及其观看方：维持会话的是 ICE consent，而不是媒体，所以
+  推流方可以任意长时间什么都不发。只推音频或只推视频的推流方，可以被同时请求两种媒体的观看方播放，另一种的
+  媒体段被应答为 inactive；只请求推流方没有发送的那种媒体的观看方得到 `422`。
+
 ## 代理媒体服务器
 
 许多媒体服务器可以放在一个 fit 后面：其他主机上 fit 自己的 `whip` 和 `whep`，或任何 WHIP、WHEP 服务器，如 MediaMTX、
