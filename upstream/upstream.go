@@ -377,6 +377,23 @@ func (p *Pool) Send(b *Backend, req *stdhttp.Request, callback func(*fibhttp.Cli
 	return p.client.Start(req, callback)
 }
 
+// SendFramed is Send for a request whose header framing, on one side or both,
+// is the caller's, as fib's Client.StartFramed takes it: a header passed on
+// as lines rather than a map, and a response header taken as lines.
+func (p *Pool) SendFramed(b *Backend, req *stdhttp.Request, framing fibhttp.Framing, callback func(*fibhttp.ClientResponse, error)) fibhttp.Call {
+	if p.client == nil {
+		callback(nil, ErrNoEngine)
+		return fibhttp.Call{}
+	}
+	if p.closing.Load() {
+		callback(nil, ErrClosed)
+		return fibhttp.Call{}
+	}
+	req.URL.Scheme = p.scheme
+	req.URL.Host = b.Address
+	return p.client.StartFramed(req, framing, callback)
+}
+
 // SendUpgrade is Send for a request that asks the server to switch
 // protocols, as a WebSocket handshake does: on a 101 the connection leaves
 // the pool and becomes a tunnel (ClientResponse.Tunnel), which handler

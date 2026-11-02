@@ -17,6 +17,12 @@
 // replaces all four with what it sees itself. No proxy is trusted by
 // default, so a client cannot pass itself off as another.
 //
+// Over HTTP/1, a route whose proxy no middleware wraps passes the request's
+// header on as the lines it arrived in, edited as above, and the response's
+// as the upstream's lines, rather than building, sorting and writing a map on
+// each side; the fields keep their order and case (outgoingFramed and
+// responseBlock).
+//
 // Bodies up to 64KB travel whole; larger ones stream in both directions,
 // each side paced by the other, and trailers follow them both ways. How a
 // request fails is in exchange.go.
@@ -79,7 +85,13 @@ type Proxy struct {
 	// do not all wait on one lock.
 	graph module.Holder
 	open  [openShards]openSet
+	// unwrapped says no middleware wraps the proxy, so that a request's
+	// header is what arrived, and may pass on as it came (outgoingFramed).
+	unwrapped bool
 }
+
+// Unwrapped is told that no middleware wraps the proxy in its route.
+func (p *Proxy) Unwrapped() { p.unwrapped = true }
 
 const openShards = 32
 
@@ -205,6 +217,11 @@ func parsePrefix(s string) (netip.Prefix, error) {
 // ends; and an upgrade, by fib as it switches the client's side.
 func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	r := c.Request
+	if p.unwrapped && p.mirror == nil && !x.own {
+		if block := c.RequestHeaderBlock(); block != "" && p.outgoingFramed(c, x, block) {
+			return true
+		}
+	}
 	// The values set in the client's header are the request's, apart from
 	// the exchange, which may serve the next request while the client's
 	// header is still read.
@@ -260,6 +277,7 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		Header:     header,
 		Host:       host,
 	}
+	x.blockResponse = r.ProtoMajor == 1 && r.Method != stdhttp.MethodHead
 	if body := c.Body(); len(body) > 0 {
 		// fib's client takes a buffered body's bytes as they are, rather
 		// than reading them into a copy; they stay put until the exchange
@@ -269,6 +287,307 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 		x.base.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	}
 	return true
+}
+
+// outgoingFramed fills in x.base as outgoing does, for a request whose header
+// passes on as the lines it arrived in, block, rather than through a map:
+// x.framed is the upstream's header, those lines but the ones outgoing drops,
+// with the forwarding fields after them, which fib's client writes as they
+// are. It reports false, having changed nothing that matters, for a request
+// it leaves to outgoing: one whose client is a trusted proxy, whose
+// forwarding fields are kept, one with Expect or Trailer, whose fields are
+// read again (outgoing), and a gRPC call, which gets fields of its own.
+//
+// The proxy's route has no middleware, so nothing before it can have changed
+// the header since it arrived; fib checked every line of it as it parsed it.
+func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bool {
+	r := c.Request
+	clientIP, ip := clientAddr(r.RemoteAddr)
+	if p.isTrusted(clientIP) || isGRPC(r) {
+		return false
+	}
+	connection := r.Header["Connection"]
+	var traceparent string
+	if e := observe.EntryOf(c); e != nil && e.Trace() != nil {
+		traceparent = e.Trace().Traceparent()
+	}
+	dst := x.head[:0]
+	for block != "" {
+		end := strings.IndexByte(block, '\n') + 1
+		line := block[:end]
+		block = block[end:]
+		name := line[:strings.IndexByte(line, ':')]
+		switch framedRequestField(name) {
+		case fieldKeep:
+		case fieldDrop:
+			continue
+		case fieldReadAgain:
+			return false
+		}
+		if len(connection) > 0 && connectionNames(connection, name) ||
+			traceparent != "" && strings.EqualFold(name, "Traceparent") {
+			continue
+		}
+		dst = append(dst, line...)
+	}
+	proto := "http"
+	if r.TLS != nil {
+		proto = "https"
+	}
+	if ip != "" {
+		dst = appendField(dst, "X-Forwarded-For: ", ip)
+	}
+	dst = appendField(dst, "X-Forwarded-Proto: ", proto)
+	dst = appendField(dst, "X-Forwarded-Host: ", r.Host)
+	dst = append(dst, "Forwarded: "...)
+	dst = appendForwardedElement(dst, clientIP, ip, r.Host, proto)
+	dst = append(dst, "\r\n"...)
+	if traceparent != "" {
+		dst = appendField(dst, "Traceparent: ", traceparent)
+	}
+	x.framed = dst
+	x.blockResponse = r.Method != stdhttp.MethodHead
+	if cap(dst) <= maxKeptHead {
+		x.head = dst
+	}
+
+	host := r.Host
+	if p.HostHeader != "" {
+		host = p.HostHeader
+	}
+	x.url = url.URL{Path: r.URL.Path, RawPath: r.URL.RawPath, RawQuery: r.URL.RawQuery}
+	x.base = stdhttp.Request{
+		Method:     r.Method,
+		URL:        &x.url,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Host:       host,
+	}
+	if body := c.Body(); len(body) > 0 {
+		x.base.Body = fibhttp.NewBufferedBody(body)
+		x.base.ContentLength = int64(len(body))
+		x.base.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	}
+	return true
+}
+
+// maxKeptHead is the largest buffer outgoingFramed keeps with an exchange for
+// the next request, past the headers ordinary requests carry.
+const maxKeptHead = 4096
+
+// What outgoingFramed does with a field of the client's request.
+const (
+	fieldKeep = iota
+	// fieldDrop is a field outgoing drops, or replaces with one of its own.
+	fieldDrop
+	// fieldReadAgain is one whose request outgoing serves instead.
+	fieldReadAgain
+)
+
+// framedRequestField is what outgoingFramed does with the field name names,
+// which may be in any case, for a client that is not a trusted proxy.
+func framedRequestField(name string) int {
+	switch len(name) {
+	case 2:
+		if strings.EqualFold(name, "Te") {
+			return fieldDrop
+		}
+	case 4:
+		if strings.EqualFold(name, "Host") {
+			return fieldDrop
+		}
+	case 6:
+		if strings.EqualFold(name, "Expect") {
+			return fieldReadAgain
+		}
+	case 7:
+		if strings.EqualFold(name, "Upgrade") {
+			return fieldDrop
+		}
+		if strings.EqualFold(name, "Trailer") {
+			return fieldReadAgain
+		}
+	case 9:
+		if strings.EqualFold(name, "Forwarded") {
+			return fieldDrop
+		}
+	case 10:
+		if strings.EqualFold(name, "Connection") || strings.EqualFold(name, "Keep-Alive") {
+			return fieldDrop
+		}
+	case 14:
+		if strings.EqualFold(name, "Content-Length") {
+			return fieldDrop
+		}
+	case 15:
+		if strings.EqualFold(name, "X-Forwarded-For") {
+			return fieldDrop
+		}
+	case 16:
+		if strings.EqualFold(name, "Proxy-Connection") || strings.EqualFold(name, "X-Forwarded-Host") {
+			return fieldDrop
+		}
+	case 17:
+		if strings.EqualFold(name, "Transfer-Encoding") || strings.EqualFold(name, "X-Forwarded-Proto") {
+			return fieldDrop
+		}
+	case 18:
+		if strings.EqualFold(name, "Proxy-Authenticate") {
+			return fieldDrop
+		}
+	case 19:
+		if strings.EqualFold(name, "Proxy-Authorization") {
+			return fieldDrop
+		}
+	}
+	return fieldKeep
+}
+
+// responseBlock is the header the client's response is written with for the
+// upstream's, block, as ClientResponse.HeaderBlock has it: its lines but the
+// hop-by-hop ones, those its Connection names and Content-Length, which the
+// response's own framing replaces, and the sticky cookie after them. It is
+// written in x.head, which the request no longer needs.
+func (x *exchange) responseBlock(block string) []byte {
+	dst := x.head[:0]
+	// The Connection field's values, as few as there are, for a second pass
+	// when they name a field.
+	var connection [2]string
+	n := 0
+	named := false
+	for rest := block; rest != ""; {
+		end := strings.IndexByte(rest, '\n') + 1
+		line := rest[:end]
+		rest = rest[end:]
+		colon := strings.IndexByte(line, ':')
+		name := line[:colon]
+		if isHopByHopFold(name) {
+			if len(name) == len("Connection") && strings.EqualFold(name, "Connection") {
+				value := textproto.TrimString(line[colon+1:])
+				if !onlyConnectionOptions(value) {
+					named = true
+					if n < len(connection) {
+						connection[n] = value
+					}
+					n++
+				}
+			}
+			continue
+		}
+		dst = append(dst, line...)
+	}
+	if named {
+		if n > len(connection) {
+			// More Connection fields than kept: read them all again.
+			return x.responseBlockNamed(block, blockHeader(block)["Connection"])
+		}
+		return x.responseBlockNamed(block, connection[:n])
+	}
+	return x.appendCookie(dst)
+}
+
+// responseBlockNamed is responseBlock for a block whose Connection fields,
+// connection, name fields of their own, which are dropped too.
+func (x *exchange) responseBlockNamed(block string, connection []string) []byte {
+	dst := x.head[:0]
+	for rest := block; rest != ""; {
+		end := strings.IndexByte(rest, '\n') + 1
+		line := rest[:end]
+		rest = rest[end:]
+		name := line[:strings.IndexByte(line, ':')]
+		if isHopByHopFold(name) || connectionNames(connection, name) {
+			continue
+		}
+		dst = append(dst, line...)
+	}
+	return x.appendCookie(dst)
+}
+
+// appendCookie appends the sticky cookie's field to dst, if the response
+// sets one, keeps dst as x.head for the next request, unless it grew past
+// what is kept, and returns it.
+func (x *exchange) appendCookie(dst []byte) []byte {
+	if x.setCookie != "" {
+		dst = appendField(dst, "Set-Cookie: ", x.setCookie)
+	}
+	if cap(dst) <= maxKeptHead {
+		x.head = dst
+	}
+	return dst
+}
+
+// onlyConnectionOptions reports whether value, a Connection field's, names
+// nothing but keep-alive and close, as nearly every one does: Keep-Alive is
+// dropped anyway, and there is no Close field.
+func onlyConnectionOptions(value string) bool {
+	for token := range strings.SplitSeq(value, ",") {
+		token = textproto.TrimString(token)
+		if token != "" && !strings.EqualFold(token, "keep-alive") && !strings.EqualFold(token, "close") {
+			return false
+		}
+	}
+	return true
+}
+
+// isHopByHopFold is isHopByHop for a name in any case, and Content-Length
+// too, which a response written from a header block is framed by afresh.
+func isHopByHopFold(name string) bool {
+	switch len(name) {
+	case 2:
+		return strings.EqualFold(name, "Te")
+	case 7:
+		return strings.EqualFold(name, "Trailer") || strings.EqualFold(name, "Upgrade")
+	case 10:
+		return strings.EqualFold(name, "Connection") || strings.EqualFold(name, "Keep-Alive")
+	case 14:
+		return strings.EqualFold(name, "Content-Length")
+	case 16:
+		return strings.EqualFold(name, "Proxy-Connection")
+	case 17:
+		return strings.EqualFold(name, "Transfer-Encoding")
+	case 18:
+		return strings.EqualFold(name, "Proxy-Authenticate")
+	case 19:
+		return strings.EqualFold(name, "Proxy-Authorization")
+	}
+	return false
+}
+
+// blockHeader is block, header lines as ClientResponse.HeaderBlock has them,
+// as a map, for what reads the upstream's response header by name.
+func blockHeader(block string) stdhttp.Header {
+	h := make(stdhttp.Header, strings.Count(block, "\n"))
+	for block != "" {
+		end := strings.IndexByte(block, '\n')
+		line := block[:end-1]
+		block = block[end+1:]
+		name, value, _ := strings.Cut(line, ":")
+		key := textproto.CanonicalMIMEHeaderKey(name)
+		h[key] = append(h[key], textproto.TrimString(value))
+	}
+	return h
+}
+
+// connectionNames reports whether connection, a Connection field's values,
+// names the field name.
+func connectionNames(connection []string, name string) bool {
+	for _, value := range connection {
+		for token := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(textproto.TrimString(token), name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendField appends a header line of prefix, the field's name and its
+// colon and space, and value.
+func appendField(dst []byte, prefix, value string) []byte {
+	dst = append(dst, prefix...)
+	dst = append(dst, value...)
+	return append(dst, "\r\n"...)
 }
 
 // setForwarded sets the fields that tell the upstream about the client. The

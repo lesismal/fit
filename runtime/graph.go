@@ -426,6 +426,9 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	}
 	_, inline := h.(module.Inline)
 	inline = inline && len(mws) == 0
+	if u, ok := h.(module.Unwrapped); ok && len(mws) == 0 {
+		u.Unwrapped()
+	}
 	for i := len(mws) - 1; i >= 0; i-- {
 		h = mws[i].Wrap(h)
 	}
