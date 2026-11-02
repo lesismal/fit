@@ -99,7 +99,7 @@ More: the [JSON reference](reference/json.md).
 | `routes` | A match, middleware and a handler for each kind of request | [Routes](reference/config.md#routes) |
 | `upstreams` | Servers to proxy to, balanced and health checked | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP and UDP proxying | [Services](reference/config.md#services) |
-| handlers | `proxy`, `static`, `respond`, `fastcgi`, `forward_proxy`; `whip`, `whep` and `webrtc_proxy` for WebRTC | [Handlers](reference/config.md#handlers) |
+| handlers | `proxy`, `static`, `respond`, `fastcgi`, `forward_proxy`; `whip`, `whep` and `webrtc_proxy` for WebRTC; `httpflv`, `hls`, `stream_whip` and `stream_whep` for streaming | [Handlers](reference/config.md#handlers) |
 | middleware | authentication, rate limits, caching, compression, headers, rewrites and more | [Middleware](reference/config.md#middleware) |
 | `log`, `access_log`, `telemetry`, `metrics` | Logs, traces and metrics | [Log](reference/config.md#log), [Access log](reference/config.md#access-log), [Telemetry](reference/config.md#telemetry), [Metrics](reference/config.md#metrics) |
 | `limits` | Bounds on connections, headers, bodies and memory | [Limits](reference/config.md#limits) |
@@ -109,6 +109,7 @@ More: the [JSON reference](reference/json.md).
 | `llm` | The LLM feature's hub, node and proxy, which share AI models among machines and serve them to agents | [LLM](reference/config.md#llm), [the LLM feature](llm.md) |
 | `tunnel` | The tunnel's hub, node and proxy, which reach services behind NAT | [Tunnel](reference/config.md#tunnel), [the tunnel](tunnel.md) |
 | `webrtc` | A TURN server (`turn`), the media port of `whip` and `whep` (`media`), and the relay of `webrtc_proxy` (`proxy`) | [WebRTC](reference/config.md#webrtc), [WebRTC](webrtc.md) |
+| `streaming` | The streaming role: a media hub with RTMP, RTSP and SRT listeners and the WebRTC port of `stream_whip` and `stream_whep` | [Streaming](reference/config.md#streaming), [streaming](streaming.md) |
 | `providers` | Docker, Consul, etcd and Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | The version of the config, 1; optional | [Compatibility](compatibility.md#the-schemas-version) |
 

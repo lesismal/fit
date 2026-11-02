@@ -4989,6 +4989,59 @@ other protocols that take media; I115 is the policies every one of them shares, 
 - **Gaps**: no Admin API endpoint issues tokens yet (the pages, I117, will); a token is revoked only
   by changing the secret.
 
+### I116 The streaming role — done
+
+What the user asked for: streaming media with configurable auth on every protocol that takes it
+([decision 030](decisions/030-media-auth-and-pages.md), [streaming](streaming.md)).
+
+- **Config**: top-level `streaming` with the hub's `max_streams` (64), `max_players` (256, a
+  stream, over every protocol) and `gop_cache_bytes` (8 MiB); `rtmp` (`listen`, `auth`,
+  `max_conns` 1024, `handshake_timeout` 10s, `idle_timeout` 30s, `play_wait`, `max_message_bytes`
+  8 MiB); `rtsp` (`listen`, `auth`, `auth_methods` digest and basic, `realm`, `max_conns`,
+  `session_timeout` and `idle_timeout` 60s, `play_wait`); `srt` (`listen`, `auth`, `max_conns`,
+  `latency` 120ms, `passphrase`, `peer_idle_timeout` 5s, `play_wait`); `webrtc` (`listen`,
+  `public_ips`, `ice_servers`, `max_sessions` 256, `connect_timeout` 15s, `play_wait`,
+  `max_offer_bytes` 32 KiB, at most 64 KiB). Checked when loaded: a policy of each `auth`, the
+  addresses and their clashes within the role and with `webrtc.media` and `webrtc.proxy`, the
+  passphrase's length, the realm. `HasApps` counts the role.
+- **Package `streaming`**: the role (`New`, `Apply`, `Stop`, `Lookup` by engine, `Hub`, `RTC`,
+  `Addr`, `WriteMetrics`) and the handlers `httpflv` (`prefix`, `auth`, `wait`, `cors`), `hls`
+  (`prefix`, `auth`, `format` fmp4 or ts, `target_duration`, `part_duration`, `playlist_size`,
+  `max_bytes` 32 MiB, `play_wait`, `idle_timeout`, `cors`), `stream_whip` and `stream_whep`
+  (`stream`, `prefix`, `auth`). Credentials: RTMP's query of the stream name or app; RTSP's Digest
+  (fit's own challenges and nonces, against `Policy.Password`), Basic, or a query token; SRT's `s=`,
+  `u=` and `s=`, or the resource's query; HTTP through `mediaauth.Guard`, HLS carrying a query
+  token into its playlists' URIs. A `password_hash` user is refused once on RTMP, RTSP and SRT
+  while the hash is checked off the worker, and passes at once after. Reloads: `auth` in place;
+  another field of a listener restarts it; the hub's limits restart the hub; `hls`'s segmenters
+  shared across configs by their params.
+- **Metrics**: `fit_streaming_streams{state}`, `fit_streaming_players`,
+  `fit_streaming_published_total`, `fit_streaming_auth_refused_total{protocol,reason}`,
+  `fit_streaming_restarts_total`.
+- **Tests** (race detector): config validation; RTMP publish and play by token, password and a
+  bcrypt user (refused once, then let in), refusals counted; HTTP-FLV by query token, Bearer, Basic
+  and cookie, 401, 403, 404; HLS's playlists naming the token, a segment with and without it;
+  RTSP's challenges, Digest (and a stale or foreign nonce, another algorithm, qop), Basic, a bcrypt
+  user's 503 then 200, a query token, 403, fib's client playing by Digest and publishing by token,
+  and refused without; SRT's handshake by `s=`, `u=`, the query, 1401, 1403 and 1402 then let in;
+  `stream_whip` and `stream_whep` 401, 403, a WHEP viewer of an RTMP stream through the route's
+  session URL and its DELETE, a WHIP publisher played over RTMP; limits (connections closed as they
+  open, streams, players); cut connections (a publisher cut ends its stream and its HTTP-FLV and
+  RTMP players, a player that never reads holds up nothing, a silent client closed after the
+  handshake timeout); reloads (auth in place with the publisher kept, a listener restarted on its
+  address, the hub restarted, the role removed); 503 without the role or `streaming.webrtc`.
+  ffmpeg 7.1 interop in a Linux container (`scripts/streaming-interop.sh`, `TestInterop`): RTMP
+  with a token, RTSP with Digest and with a query token, SRT with `s=` publish, each played over
+  RTMP, RTSP (TCP, Digest, UDP falling back to TCP), SRT, HTTP-FLV, HLS fMP4 and HLS MPEG-TS with
+  credentials (64 cells, 93 to 100 frames of 100 each) and refused without; RTMP without and with a
+  viewing token, RTSP without and with a wrong password, SRT without and with a viewing token are
+  refused and never publish.
+- **Benchmark**: none; a new role off the existing routes' hot path, and its fan-out is fib's
+  (rule 21).
+- **Gaps**: RTSP over UDP waits on fib's A60 (a SETUP for UDP is answered 461); RTMPS and SRT's
+  per-stream passphrases are not offered; pull and relay of remote sources are out of scope; a
+  bcrypt user's first attempt over RTMP, RTSP or SRT is refused by design.
+
 ## Notes for later iterations
 
 - **The 2026-10-26 pass over the 2026-10-24 campaign.** Four measurements closed that campaign's

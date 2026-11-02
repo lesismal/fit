@@ -263,7 +263,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I118.
 | I113 | The LLM roles' node list, links and traffic: a hub's nodes synced to its proxies, every link's bytes and latency, every route's calls, a link map on each role's pages, and the roles' remaining settings set there | I112 | done |
 | **Media** | | | |
 | I115 | Media auth: named `media_auth` policies (tokens, users, signed tokens, public actions, stream patterns), package `mediaauth`, `auth` on `whip`, `whep` and `webrtc_proxy`, `fit media-token` | I109, I110 | done |
-| I116 | The streaming role: fib's `media/hub` with RTMP, RTSP and SRT listeners, and `httpflv`, `hls`, `stream_whip` and `stream_whep` handlers, each with `auth` | I115 | todo |
+| I116 | The streaming role: fib's `media/hub` with RTMP, RTSP and SRT listeners, and `httpflv`, `hls`, `stream_whip` and `stream_whep` handlers, each with `auth` | I115 | done |
 | I117 | The media pages: `media_pages`, login, publish, play and a room call with the microphone and camera switched on and off, and a bounded room API | I115 | todo |
 
 ## M0, foundations
@@ -1566,7 +1566,8 @@ set of named policies comes first; the streaming role and the pages build on it,
   and Digest, HTTP through `mediaauth.FromHTTP`, HLS carrying a query token to its segments).
 - **Done when**: ffmpeg in a Linux container pushes over RTMP, RTSP and SRT with and without valid
   credentials and plays over each egress; limits and reloads hold; under the race detector.
-- **Touches**: `streaming` (new), `config`, `app`, `cli`, `schema`, `docs`, `test/docker`.
+- **Touches**: `streaming` (new), `config`, `app`, `schema`, `docs`, `examples`, `scripts`,
+  `test/workers`.
 
 ### I117 The media pages
 

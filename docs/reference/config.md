@@ -40,8 +40,9 @@ a config against it and more.
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser)
+- [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -117,6 +118,7 @@ In JSON:
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which reach services behind NAT through the hub. None when left out. What their web pages change is written back here. |
 | `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
 | `media_auth` | list of [object](#config-mediaauth) |  | Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow. |
+| `streaming` | [object](#config-streaming) |  | fit's streaming role, beside the gateway on its engine: one media hub where a stream is published once, over RTMP, RTSP, SRT or WHIP, and played over any of them, HTTP-FLV and HLS too, each listener and handler with its media_auth policy. None when left out. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -2266,6 +2268,8 @@ In JSON:
 
 ### `webrtc.media.ice_servers[]`
 
+Also at `streaming.webrtc.ice_servers[]`.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `urls` | list of string |  | Required. The server's stun:, stuns:, turn: or turns: URLs. |
@@ -2435,6 +2439,231 @@ In JSON:
 | `password_hash` | string |  | Instead of the password, its bcrypt hash, as fit hash-password makes it: Basic and the query's user and pass only, checked off fib's workers. A password once found right is remembered, as a keyed SHA-256, so that the next check is at once. |
 | `publish` | list of string |  | The streams the user may publish, as a token's publish lists them. None when left out. |
 | `play` | list of string |  | The streams the user may play. None when left out. |
+
+<a id="streaming"></a>
+
+## Streaming
+
+fit's streaming role: one media hub, fib's, where a stream is published once, by its path as
+`live/cam`, and played over every protocol. `rtmp` takes and plays streams as
+`rtmp://host/live/cam`; `rtsp` as `rtsp://host/live/cam`, RTP interleaved on the connection;
+`srt` by the caller's stream ID, as `#!::r=live/cam,m=publish`; and `webrtc` is the UDP port of
+the [`stream_whip`](#stream_whip) and [`stream_whep`](#stream_whep) handlers. The
+[`httpflv`](#httpflv) and [`hls`](#hls) handlers play the hub's streams on routes. The hub holds
+at most `max_streams` streams and `max_players` players a stream, each stream keeping its latest
+group of pictures, up to `gop_cache_bytes`, so that a new player starts at once with a picture;
+each listener bounds its connections and the time a client may be idle.
+
+Each listener names a [`media_auth`](#media-auth) policy with `auth`: RTMP takes a token, or a
+user and password, in the query of the stream name (`rtmp://host/live/cam?token=T`); RTSP takes
+Digest from users with a plaintext password, Basic when `auth_methods` offers it, or a token in
+the URL's query; SRT takes a token as the stream ID's `s=`, a user and password as `u=` and `s=`,
+or either in the resource's query. These protocols decide in a hook that answers before it
+returns, and fit never holds up a worker: a `password_hash` user whose password the policy has
+not found right before is refused once while it is checked off the worker, and passes at once
+the next time; tokens and plaintext passwords pass the first time. A reload changes `auth` in
+place; a change of another field of a listener starts that listener again, closing its
+connections, and a change of the hub's limits ends every stream. See
+[Streaming](../streaming.md) and [decision 030](../decisions/030-media-auth-and-pages.md).
+
+In a .conf file:
+
+```fit
+listener web :8080
+
+media_auth live {
+	public play
+	tokens studio {
+		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		publish live/*
+	}
+	users alice { password alice-password; publish alice/*; play * }
+}
+
+streaming {
+	max_streams 64
+	max_players 256
+	rtmp { listen :1935; auth live }
+	rtsp { listen :8554; auth live }
+	srt { listen :8890; auth live; latency 200ms }
+	webrtc { listen :8188 }
+}
+
+route { match { path /live/* }; handler httpflv { auth live } }
+route { match { path /hls/* }; handler hls { prefix /hls/; auth live } }
+route { match { path /whip/* }; handler stream_whip { auth live } }
+route { match { path /whep/* }; handler stream_whep { auth live } }
+```
+
+In YAML:
+
+```yaml
+listeners:
+  - name: web
+    address: :8080
+media_auth:
+  - name: live
+    public:
+      - play
+    tokens:
+      - name: studio
+        token_sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        publish:
+          - live/*
+    users:
+      - name: alice
+        password: alice-password
+        publish:
+          - alice/*
+        play:
+          - '*'
+streaming:
+  max_streams: 64
+  max_players: 256
+  rtmp:
+    listen: :1935
+    auth: live
+  rtsp:
+    listen: :8554
+    auth: live
+  srt:
+    listen: :8890
+    auth: live
+    latency: 200ms
+  webrtc:
+    listen: :8188
+routes:
+  - match:
+      path:
+        - /live/*
+    handler:
+      module: httpflv
+      params:
+        auth: live
+  - match:
+      path:
+        - /hls/*
+    handler:
+      module: hls
+      params:
+        prefix: /hls/
+        auth: live
+  - match:
+      path:
+        - /whip/*
+    handler:
+      module: stream_whip
+      params:
+        auth: live
+  - match:
+      path:
+        - /whep/*
+    handler:
+      module: stream_whep
+      params:
+        auth: live
+```
+
+In JSON:
+
+```json
+{
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "media_auth": [
+    {
+      "name": "live",
+      "public": ["play"],
+      "tokens": [{"name": "studio", "token_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "publish": ["live/*"]}],
+      "users": [{"name": "alice", "password": "alice-password", "publish": ["alice/*"], "play": ["*"]}]
+    }
+  ],
+  "streaming": {
+    "max_streams": 64,
+    "max_players": 256,
+    "rtmp": {"listen": ":1935", "auth": "live"},
+    "rtsp": {"listen": ":8554", "auth": "live"},
+    "srt": {"listen": ":8890", "auth": "live", "latency": "200ms"},
+    "webrtc": {"listen": ":8188"}
+  },
+  "routes": [
+    {"match": {"path": ["/live/*"]}, "handler": {"module": "httpflv", "params": {"auth": "live"}}},
+    {"match": {"path": ["/hls/*"]}, "handler": {"module": "hls", "params": {"prefix": "/hls/", "auth": "live"}}},
+    {"match": {"path": ["/whip/*"]}, "handler": {"module": "stream_whip", "params": {"auth": "live"}}},
+    {"match": {"path": ["/whep/*"]}, "handler": {"module": "stream_whep", "params": {"auth": "live"}}}
+  ]
+}
+```
+
+<a id="config-streaming"></a>
+
+### `streaming`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_streams` | integer, 0 or more | `64` | The most streams at once, each a path with a publisher or players waiting for one; one more publisher is refused. 64 when left out or 0. A change of max_streams, max_players or gop_cache_bytes starts the hub again, ending every stream and connection. |
+| `max_players` | integer, 0 or more | `256` | The most players of one stream at once, over every protocol, HLS counting once a stream and format; one more is refused. Each packet a publisher sends is handed to every player on the worker that received it. 256 when left out or 0. |
+| `gop_cache_bytes` | integer, 0 or more | `8388608` | The bytes each stream keeps of its latest group of pictures, from its last key frame on, so that a new player starts at once with a picture; a group that outgrows it is dropped and caching starts again at the next key frame. 8 MiB when left out or 0. |
+| `rtmp` | [object](#config-streamrtmp) |  | Take and play streams over RTMP, as rtmp://host/app/stream: OBS and ffmpeg publish, players play. None when left out. |
+| `rtsp` | [object](#config-streamrtsp) |  | Take and play streams over RTSP 1.0 with interleaved RTP (RTP/AVP/TCP), as rtsp://host/app/stream. None when left out. |
+| `srt` | [object](#config-streamsrt) |  | Take and play streams over SRT, MPEG-TS on UDP, the stream named by the caller's stream ID. None when left out. |
+| `webrtc` | [object](#config-streamwebrtc) |  | The UDP port the PeerConnections of the stream_whip and stream_whep handlers share, which publish into the hub with WHIP and play from it with WHEP. Routes with those handlers answer 503 without it. None when left out. |
+
+<a id="config-streamrtmp"></a>
+
+### `streaming.rtmp`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The TCP address RTMP clients connect to, as in ":1935". A change of any field but auth starts the listener again, closing its connections. |
+| `auth` | string |  | The media_auth policy a publish and a play must satisfy, by the stream's path, app/stream: credentials go in the query of the stream name or the app, as rtmp://host/live/cam?token=T or ?user=U&pass=P. A refusal is answered with NetStream.Publish.Unauthorized or NetStream.Play.Failed and the connection closed. Everyone may publish and play when left out. A change applies to the next publish and play. |
+| `max_conns` | integer, 0 or more | `1024` | The most connections at once; one more is closed as it opens. 1024 when left out or 0. |
+| `handshake_timeout` | duration | `"10s"` | How long a client may take from connecting to publishing or playing. 10s when left out. |
+| `idle_timeout` | duration | `"30s"` | How long a publisher may send nothing, and a player's output not move, before its connection is closed. 30s when left out. |
+| `play_wait` | duration |  | How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. A play of a stream without a publisher fails at once when left out. |
+| `max_message_bytes` | integer, 0 or more | `8388608` | The largest RTMP message a client may send, a video frame among them; a larger one closes its connection. 8 MiB when left out or 0. |
+
+<a id="config-streamrtsp"></a>
+
+### `streaming.rtsp`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The TCP address RTSP clients connect to, as in ":8554". RTP goes interleaved on the same connection (RTP/AVP/TCP); a SETUP asking for UDP is answered 461, which ffmpeg and most players then retry over TCP. A change of any field but auth starts the listener again, closing its connections. |
+| `auth` | string |  | The media_auth policy ANNOUNCE and RECORD (publish) and DESCRIBE and PLAY (play) must satisfy, by the stream's path: a user with a plaintext password by Digest, a user by Basic when auth_methods offers it, or a token in the URL's query, as rtsp://host/live/cam?token=T. A refusal is 401 with the challenges, or 403. Everyone may publish and play when left out. A change applies to the next request. |
+| `auth_methods` | list of string: `digest`, `basic` |  | The schemes a 401 offers for users: digest, which needs a user's plaintext password, and basic, which sends the password in the clear and is the only one a password_hash user can use. ["digest"] when left out. |
+| `realm` | string | `"fit"` | The realm of the challenges, which Digest's response is computed with. fit when left out. |
+| `max_conns` | integer, 0 or more | `1024` | The most connections at once; one more is closed as it opens. 1024 when left out or 0. |
+| `session_timeout` | duration | `"60s"` | How long a session may go without a request, RTCP or, while recording, RTP before it and its connection end; clients are told so in the Session header and send keep-alives. 60s when left out. |
+| `idle_timeout` | duration | `"60s"` | How long a connection without a session may go without a request before it is closed. 60s when left out. |
+| `play_wait` | duration |  | How long a player may outlive its stream's publisher, waiting for the next one. A player ends with its publisher when left out. |
+
+<a id="config-streamsrt"></a>
+
+### `streaming.srt`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The UDP address SRT callers reach, as in ":8890". A change of any field but auth starts the listener again, ending its sessions. |
+| `auth` | string |  | The media_auth policy a caller must satisfy, publish for m=publish and play otherwise, by the stream ID's resource: a token as s= (#!::r=live/cam,m=publish,s=T), a user and password as u= and s=, or token, or user and pass, in the resource's query (live/cam?token=T). A refusal rejects the handshake with 1401 (unauthorized) or 1403 (forbidden). Everyone may publish and play when left out. A change applies to the next caller. |
+| `max_conns` | integer, 0 or more | `1024` | The most sessions at once; one more caller is rejected with 1402. 1024 when left out or 0. |
+| `latency` | duration | `"120ms"` | The receive latency asked for, the time a packet may take to be sent again when lost; the caller's wins when larger. 120ms when left out. |
+| `passphrase` | string |  | Encrypt every session with this passphrase, 10 to 79 characters, which callers must have too (pbkeylen 16). Unencrypted when left out. |
+| `peer_idle_timeout` | duration | `"5s"` | How long a peer may send nothing, keep-alives included, before its session ends. 5s when left out. |
+| `play_wait` | duration |  | How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. A caller playing a stream without a publisher is rejected with 1404 when left out. |
+
+<a id="config-streamwebrtc"></a>
+
+### `streaming.webrtc`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen` | string |  | Required. The UDP address every peer's media reaches fit at, one port all the role's PeerConnections share, as in ":8188"; not webrtc.media's. A wildcard host advertises every interface's address that is up, unless public_ips is set. A change of any field starts it again, ending its sessions. |
+| `public_ips` | list of string |  | The addresses peers are told to reach the port at instead of the interfaces' own, as behind a 1:1 NAT. |
+| `ice_servers` | list of [object](#config-iceserver) |  | STUN and TURN servers the peers are told of in Link headers (RFC 9725), for their side of ICE; fit's is an ICE lite agent on its own address. |
+| `max_sessions` | integer, 0 or more | `256` | The most WHIP and WHEP sessions at once; one more offer is answered 503. 256 when left out or 0. |
+| `connect_timeout` | duration | `"15s"` | How long a session may take from its answer to a connected PeerConnection before it is ended; once connected, ICE consent bounds it. 15s when left out. |
+| `play_wait` | duration |  | How long a WHEP offer may wait for a stream with no publisher yet, its request held, before it is answered 404. Answered 404 at once when left out. |
+| `max_offer_bytes` | integer, 0 to 65536 | `32768` | The largest offer taken; a larger one is answered 400. At most 64 KiB. 32 KiB when left out or 0. |
 
 <a id="providers"></a>
 
@@ -2731,6 +2960,121 @@ In JSON:
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take; past it the request is answered 504. 10s when left out. |
 | `idle_timeout` | duration | `"5m"` | How long a tunnel may carry nothing either way before it and its connection to the destination are closed. 5m when left out. |
 
+<a id="http-handlers-hls"></a>
+
+### `hls`
+
+Plays the streaming role's streams over HLS, fMP4 or MPEG-TS segments, Low-Latency HLS optional: /live/cam/index.m3u8 plays live/cam.
+
+Plays the [`streaming`](#streaming) role's streams over HLS (RFC 8216): `/live/cam/index.m3u8`
+is the playlist of `live/cam`, after `prefix`, in fragmented MP4 segments, or MPEG-TS ones with
+`format` `ts`; the other format is played with `?format=ts` or `?format=fmp4`. A stream is cut
+into segments of `target_duration` from the first playlist request on, held in memory up to
+`max_bytes`, and stops after `idle_timeout` without requests; `part_duration` turns on
+Low-Latency HLS. A stream without a publisher is `404`, unless `play_wait` lets the playlist
+request wait. `auth` names a [`media_auth`](#media-auth) policy every request, playlist and
+segment, must satisfy with `play` on the stream's path; a playlist fetched with a `token` query
+parameter names its playlists and segments with the token too, so that Safari and ffmpeg, which
+send no header, play on. A reload that keeps the params keeps the segments. See
+[Streaming](../streaming.md).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /hls/* }
+	handler hls { prefix /hls/; auth live; target_duration 2s }
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /hls/*
+handler:
+  module: hls
+  params:
+    prefix: /hls/
+    auth: live
+    target_duration: 2s
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/hls/*"]},
+  "handler": {"module": "hls", "params": {"prefix": "/hls/", "auth": "live", "target_duration": "2s"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string |  | The part of the path before the stream's: with /hls/, /hls/live/cam/index.m3u8 is the playlist of live/cam. / when left out. |
+| `auth` | string |  | The media_auth policy every request, playlist and segment, must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and parts with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out. |
+| `format` | string: `fmp4`, `ts` |  | The segment format of a playlist's URL without a format query parameter: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus. The other is played with ?format=ts or ?format=fmp4. fmp4 when left out. |
+| `target_duration` | duration | `"2s"` | How long segments are: a stream with video is cut at the first key frame after it. Set it to the key frame interval. 2s when left out. |
+| `part_duration` | duration |  | Turns on Low-Latency HLS with parts this long, 200ms to 1s being usual: blocking playlist reloads, EXT-X-PART and preload hints. Off when left out. |
+| `playlist_size` | integer, 0 to 100 | `6` | How many segments a playlist lists. 6 when left out or 0. |
+| `max_bytes` | integer, 0 or more | `33554432` | The bytes of segments one stream and format holds; the oldest go first. 32 MiB when left out or 0. |
+| `play_wait` | duration |  | How long a playlist request may wait for a stream with no publisher yet. 404 at once when left out. |
+| `idle_timeout` | duration | `"30s"` | How long a stream's segmenting runs without a request before it stops. 30s when left out. |
+| `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
+
+<a id="http-handlers-httpflv"></a>
+
+### `httpflv`
+
+Plays the streaming role's streams as HTTP-FLV, and as WebSocket-FLV to a WebSocket upgrade: /live/cam.flv plays live/cam.
+
+Plays the [`streaming`](#streaming) role's streams as HTTP-FLV, an FLV file that never ends as the
+body of a GET, and as WebSocket-FLV, the same bytes in binary messages, to a WebSocket upgrade:
+what flv.js, mpegts.js and ffmpeg play with low latency. The stream's path is the request's after
+`prefix` and before `.flv`: `/live/cam.flv` plays `live/cam`. A player starts at the stream's
+latest key frame; one that falls behind has its packets dropped, video until the next key frame,
+and one whose output does not move is closed. A stream without a publisher is `404`, unless
+`wait` lets the player wait. `auth` names a [`media_auth`](#media-auth) policy whose credentials
+must allow `play` on the stream's path: a bearer token, Basic, the `token` query parameter or the
+`fit_media_token` cookie; `401` with a `Bearer` challenge without them, `403` when they do not
+allow it. See [Streaming](../streaming.md).
+
+In a .conf file:
+
+```fit
+route { match { path /live/* }; handler httpflv { auth live; cors * } }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /live/*
+handler:
+  module: httpflv
+  params:
+    auth: live
+    cors: '*'
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/live/*"]},
+  "handler": {"module": "httpflv", "params": {"auth": "live", "cors": "*"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string |  | The part of the path before the stream's: with /flv/, /flv/live/cam.flv plays live/cam. / when left out: /live/cam.flv plays live/cam, the stream rtmp://host/live/cam publishes. |
+| `auth` | string |  | The media_auth policy a player must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may play when left out, as the route's middleware allow. |
+| `wait` | duration |  | How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. 404 at once for a stream without a publisher when left out. |
+| `cors` | string |  | Sent as Access-Control-Allow-Origin, which a web player on another origin (flv.js, mpegts.js) needs, as "*". None when left out. |
+
 <a id="http-handlers-proxy"></a>
 
 ### `proxy`
@@ -2954,6 +3298,105 @@ In JSON:
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
 | `check_interval` | duration | `"1s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out. |
+
+<a id="http-handlers-stream_whep"></a>
+
+### `stream_whep`
+
+Plays the streaming role's streams to WebRTC viewers with WHEP, whatever they were published over.
+
+Plays the [`streaming`](#streaming) role's streams to WebRTC viewers with WHEP, whatever they were
+published over, on the role's `webrtc` port: a POST of a viewer's `application/sdp` offer is
+answered `201` with fit's answer, its `Location` the session's URL; a DELETE of that URL ends the
+viewer's session. The stream's path is `stream`, or the path after `prefix`, as `live/cam` in
+`/whep/live/cam`. H.264, H.265, AV1, Opus and G.711 are sent; AAC, which WebRTC cannot carry, is
+left out, so that an RTMP stream with AAC plays as video alone. A stream without a publisher is
+`404`, unless `streaming.webrtc.play_wait` lets the offer wait. `auth` names a
+[`media_auth`](#media-auth) policy whose credentials must allow `play` on the stream's path. See
+[Streaming](../streaming.md#webrtc).
+
+In a .conf file:
+
+```fit
+route { match { path /whep/* }; handler stream_whep { auth live } }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whep/*
+handler:
+  module: stream_whep
+  params:
+    auth: live
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whep/*"]},
+  "handler": {"module": "stream_whep", "params": {"auth": "live"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stream` | string |  | The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam in /whep/live/cam. A session's URL is the path of its POST followed by its ID, which the route must match too. |
+| `prefix` | string |  | The part of the path before the stream's. /whep/ when left out. |
+| `auth` | string |  | The media_auth policy a POST must satisfy, play on the stream's path, as stream_whip's. A session's URL takes PATCH and DELETE without credentials. Everyone may play when left out. |
+
+<a id="http-handlers-stream_whip"></a>
+
+### `stream_whip`
+
+Takes WebRTC streams published with WHIP (RFC 9725) into the streaming role's hub, which plays them over every protocol.
+
+Takes WebRTC streams published with WHIP (RFC 9725) into the [`streaming`](#streaming) role's hub,
+which plays them over every protocol, on the role's `webrtc` port: a POST of an
+`application/sdp` offer is answered `201` with fit's answer, its `Location` the session's URL,
+the POST's path followed by the session's ID; a DELETE of that URL ends the stream. The stream's
+path is `stream`, or the path after `prefix`, as `live/cam` in `/whip/live/cam`. A path published
+already is `409`, the limits `503`. H.264, H.265, AV1, Opus and G.711 are taken as they come, and
+played to the other protocols in what each carries. `auth` names a [`media_auth`](#media-auth)
+policy whose credentials must allow `publish` on the stream's path; the session's URL needs none,
+its random ID being the capability. Without `streaming.webrtc` the route answers `503`. See
+[Streaming](../streaming.md#webrtc).
+
+In a .conf file:
+
+```fit
+route { match { path /whip/* }; handler stream_whip { auth live } }
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /whip/*
+handler:
+  module: stream_whip
+  params:
+    auth: live
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/whip/*"]},
+  "handler": {"module": "stream_whip", "params": {"auth": "live"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stream` | string |  | The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam in /whip/live/cam. A session's URL is the path of its POST followed by its ID, which the route must match too. |
+| `prefix` | string |  | The part of the path before the stream's. /whip/ when left out. |
+| `auth` | string |  | The media_auth policy a POST must satisfy, publish on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. A session's URL takes PATCH and DELETE without credentials, its random ID being the capability (RFC 9725). Everyone may publish when left out, as the route's middleware allow. |
 
 <a id="http-handlers-webrtc_proxy"></a>
 

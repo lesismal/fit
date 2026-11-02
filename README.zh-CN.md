@@ -30,6 +30,8 @@ TURN 服务器，提供 WebRTC 的 WHIP 和 WHEP（作为媒体服务器，或�
   服务，以及在多台机器间共享 AI 模型。
 - [WebRTC](docs/webrtc.zh-CN.md)：基于 fib WebRTC 的 TURN 服务器，与网关一起运行；以 fit 为媒体服务器的
   WHIP 和 WHEP；以及放在 fit 一个 HTTP 端点和一个 UDP 端口后面的其他媒体服务器。
+- [流媒体](docs/streaming.zh-CN.md)：基于 fib 媒体 hub，一路流经 RTMP、RTSP、SRT 或 WHIP 推送一次，即可经这些协议以及
+  HTTP-FLV、HLS 和 WHEP 播放，每种协议都可受 `media_auth` 策略保护。
 - [编写模块](docs/modules.zh-CN.md)：用 Go 扩展 fit，通过 `fit build` 编入。
 - [nginx、Caddy、Traefik 对比](docs/comparison.zh-CN.md)：fit 从三者各借鉴什么。
 - [路线图](docs/roadmap.zh-CN.md)：目标、设计原则和里程碑。

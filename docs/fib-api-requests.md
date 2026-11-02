@@ -72,6 +72,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A57 | A TURN server's limits and hooks | done, `bf669ce` (in `84a67f7`) | 11 | I111 (029) |
 | A58 | A TURN server changed in place, and drained | done, `496301d` (in `84a67f7`) | 10, 11 | I111 (029) |
 | A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`); Windows fix `63b38d4` (in `9824c68`) | — | I111 (029) |
+| A60 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
 
 ## Evidence
 
@@ -1817,3 +1818,27 @@ sockets toward the media servers, as `webrtc.turn` has for its relayed addresses
 **As built.** `fib.DialOptions{Network, Addr, Timeout, Handler, LocalAddr netip.AddrPort, PortMin, PortMax uint16}` and `Engine.DialWith(opts, done)`: the socket is bound without SO_REUSEADDR, a range searched from a random port, and a range with no port free fails the dial with an error matching `fib.ErrNoLocalPort`; the local address fixes the family.
 
 **How fit uses it.** `webrtc.proxy.relay_ip`, `port_min` and `port_max`, checked when the config loads; each relay dials its media server with `DialWith`, and a range with no port free drops the peer address, counted as `fit_webrtc_proxy_dropped_total{reason="no_port"}` (I111).
+
+## A60: An RTSP server's UDP bindings removed
+
+**Status.** Requested on 2026-11-03, for fit's streaming role ([decision 030](decisions/030-media-auth-and-pages.md)).
+
+**Problem.** `media/rtsp`'s `Server.ListenUDP(engine)` adds two UDP bindings to the engine, the
+server's RTP and RTCP ports, so that a SETUP may take RTP/AVP over UDP. Nothing removes them: the
+binding indices stay unexported, and the server has no `Close`. fit's streaming role starts an RTSP
+listener again when a reload changes its settings, and stops it when the config leaves it out; on
+the shared engine, each of those would leave two sockets bound for the life of the process, and the
+next `ListenUDP` on the same ports would fail.
+
+**Evidence.** `serverUDP` keeps `rtp` and `rtcp`, the indices `AddBinding` returned, and no method
+reads them back; `Server` has `ListenUDP` and `UDPPorts` and nothing that ends the bindings or the
+routes of the UDP sessions.
+
+**Suggested API.** `Server.CloseUDP() error`: removes the two bindings and forgets the routes, ending
+the sessions set up over UDP; `ListenUDP` may be called again after it. Or `ListenUDP` returning
+the binding indices for the caller to remove.
+
+**How fit would use it.** `streaming.rtsp` gets `udp_rtp` and `udp_rtcp` (the RTP and RTCP ports);
+the listener calls `ListenUDP` when it starts and `CloseUDP` when a reload restarts it or the role
+stops. Until then the listener takes RTP over TCP alone: a SETUP asking for UDP is answered `461`,
+and ffmpeg and most players set up again over TCP.

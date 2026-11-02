@@ -459,20 +459,7 @@ func (c *Config) checkMedia(add func(Value, string, ...any)) {
 		add(m.At.Field("listen"), "%s", msg)
 	}
 	checkPublicIPs(m.At.Field("public_ips"), m.PublicIPs, add)
-	for i, s := range m.ICEServers {
-		at := m.At.Field("ice_servers").Index(i)
-		if len(s.URLs) == 0 {
-			add(at.Field("urls"), "at least one URL is needed")
-		}
-		for j, u := range s.URLs {
-			if !iceURL(u) {
-				add(at.Field("urls").Index(j), "%q is not a stun:, stuns:, turn: or turns: URL", u)
-			}
-		}
-		if !linkSafe(s.Username) || !linkSafe(s.Credential) {
-			add(at, "the username and credential may not hold a double quote, a backslash or a control character")
-		}
-	}
+	checkICEServers(m.At.Field("ice_servers"), m.ICEServers, add)
 	for i, u := range m.TURNURLs {
 		if !iceURL(u) || !strings.HasPrefix(strings.ToLower(u), "turn") {
 			add(m.At.Field("turn_urls").Index(i), "%q is not a turn: or turns: URL", u)
@@ -484,6 +471,24 @@ func (c *Config) checkMedia(add func(Value, string, ...any)) {
 	for i, name := range m.Codecs {
 		if !slices.ContainsFunc(MediaCodecs, func(c string) bool { return strings.EqualFold(c, name) }) {
 			add(m.At.Field("codecs").Index(i), "%q is not one of %s", name, strings.Join(MediaCodecs, ", "))
+		}
+	}
+}
+
+// checkICEServers checks ICE servers told to peers in Link headers.
+func checkICEServers(at Value, list []ICEServer, add func(Value, string, ...any)) {
+	for i, s := range list {
+		at := at.Index(i)
+		if len(s.URLs) == 0 {
+			add(at.Field("urls"), "at least one URL is needed")
+		}
+		for j, u := range s.URLs {
+			if !iceURL(u) {
+				add(at.Field("urls").Index(j), "%q is not a stun:, stuns:, turn: or turns: URL", u)
+			}
+		}
+		if !linkSafe(s.Username) || !linkSafe(s.Credential) {
+			add(at, "the username and credential may not hold a double quote, a backslash or a control character")
 		}
 	}
 }

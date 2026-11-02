@@ -130,6 +130,7 @@ fit would otherwise make and write back into the file.
 | --- | --- |
 | [webrtc-turn](webrtc-turn/fit.conf) | A TURN server, with fixed users and time-limited credentials. |
 | [whip-whep](whip-whep/fit.conf) | fit as a media server: streams published with WHIP and played with WHEP. |
+| [streaming](streaming/fit.conf) | The streaming role: streams published over RTMP, RTSP, SRT or WHIP and played over those, HTTP-FLV, HLS and WHEP, behind a media_auth policy. |
 | [webrtc-proxy](webrtc-proxy/fit.conf) | WHIP and WHEP media servers behind fit, their media relayed through one UDP port. |
 
 ## Modules

@@ -68,8 +68,49 @@ pages).
 
 ## The streaming role (I116)
 
-To be written with I116: fib's `media/hub` with RTMP, RTSP and SRT listeners and HTTP egress
-(HTTP-FLV, HLS, WHIP and WHEP on the hub), each with `auth`.
+- **One hub, a role.** A top-level `streaming` runs fib's `media/hub` on the listeners' engine, as
+  `webrtc.media` runs its SFU: `rtmp`, `rtsp` and `srt` are listeners of the role's own, bindings
+  added to the engine, and `webrtc` a UDP port (a fib `webrtc.Mux`) for fib's `media/rtc` server.
+  Routes reach the hub through handlers: `httpflv` (fib's `media/httpflv`), `hls` (`media/hls`,
+  fMP4 or MPEG-TS, Low-Latency HLS optional), and `stream_whip` and `stream_whep`, which map the
+  route's paths onto fib's WHIP and WHEP server and its `Location` back onto the route. Handlers
+  find the role by engine, as `whip` finds `webrtc.media`; the hub is the role's, so a stream
+  outlives a reload of the routes. `webrtc.media` stays the SFU of `whip` and `whep`, apart from the
+  hub: they share neither a port nor streams.
+- **Auth in each protocol's own hook.** RTMP: `OnPublish` and `OnPlay`, the credentials in the
+  query of the stream name or the app (`token`, or `user` and `pass`). RTSP: `OnRequest`, DESCRIBE
+  and PLAY needing `play` and ANNOUNCE and RECORD `publish`, the other methods belonging to a
+  session one of those began; credentials are Digest, checked by fit against a user's plaintext
+  password (`Policy.Password`), Basic when `auth_methods` offers it, or a token in the URL's query,
+  up to the first `/` after it, where clients write the track's control. fit answers the
+  challenges itself rather than through fib's `Password`, which would demand an `Authorization` of
+  every request and so refuse a token in the query. SRT: `OnConnect` in the handshake, `s=` a
+  token or, with `u=`, a password, and the resource's query split off by fit's own stream ID
+  parser so that `r=live/cam?token=T` names `live/cam`. HTTP: `mediaauth.Guard`, as `whip`.
+- **A bcrypt password in a synchronous hook.** The three hooks answer before they return, on a
+  fib worker. A `password_hash` user whose password the policy has not found right before
+  (`ErrPending`) is refused there, as a try again (RTMP's message says so, RTSP 503 with
+  `Retry-After: 1`, SRT 1402), while `Policy.Check` runs the hash on mediaauth's pool; a password
+  found right is remembered, and the next attempt passes at once. Holding the handshake open for
+  the check would need an asynchronous hook fib's servers do not have; refusing a client that
+  retries is what keeps the worker free. Tokens and plaintext passwords never wait.
+- **HLS carries a query token.** A playlist fetched with `?token=` names its playlists, segments,
+  parts, maps and preload hints with the token (an `OnResponse` hook that rewrites the playlist's
+  URIs), since players that send no header (Safari, ffmpeg) fetch them by the playlist's own
+  relative URIs; every request, segment included, is checked.
+- **Limits.** The hub's `max_streams`, `max_players` (over every protocol) and `gop_cache_bytes`;
+  each listener's connections (`max_conns`, closed as they open past it), handshake, idle and
+  session timeouts; WebRTC's sessions, connect timeout and offer size, at most 64 KiB so that the
+  offer arrives whole as fib's server reads it; HLS's bytes a stream and format holds.
+- **Reloads.** A listener's `auth` changes in place, its connections kept. A change of any other
+  field of a listener starts that listener again, closing its connections, on its address (the old
+  one first when they share a port; the old one started again if the new one cannot bind); a change
+  of the hub's limits starts everything again on a new hub. `hls`'s segmenters are shared between
+  configs by their params, so a reload that keeps them keeps the playlists' numbering.
+- **RTSP over TCP only, for now.** fib's RTSP server binds its RTP and RTCP UDP ports with
+  `ListenUDP` and has no way to remove them, which a restart or a stop would need on the shared
+  engine; fit asks fib for it (A60) and takes interleaved RTP meanwhile. A SETUP asking for UDP is
+  answered 461, and ffmpeg and most players set up again over TCP.
 
 ## The media pages (I117)
 

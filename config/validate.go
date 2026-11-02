@@ -260,6 +260,7 @@ func (c *Config) Validate() Errors {
 	c.checkTunnel(add)
 	c.checkWebRTC(add)
 	c.checkMediaAuth(add)
+	c.checkStreaming(add)
 
 	if a := c.ACME; a != nil {
 		if a.Directory != "" {

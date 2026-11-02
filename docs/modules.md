@@ -98,7 +98,7 @@ a main package that imports fit's command line (package `cli`), `modules/standar
 | Flag | |
 | --- | --- |
 | `-with path[@version]`, `-with path=dir` | a module to build in, by version (`latest` when left out) or from its source in `dir`; repeated for each |
-| `-without pkg` | leave out `github.com/lesismal/fit/modules/standard` (every handler and middleware), `github.com/lesismal/fit/provider/standard` (every provider) or `github.com/lesismal/fit/app/standard` (the roles of the LLM feature, the tunnel and the TURN server; `webrtc.media`, `webrtc.proxy` and `media_auth` come with `modules/standard`'s `whip`, `whep` and `webrtc_proxy`); repeated for each; a config that names one left out is refused |
+| `-without pkg` | leave out `github.com/lesismal/fit/modules/standard` (every handler and middleware), `github.com/lesismal/fit/provider/standard` (every provider) or `github.com/lesismal/fit/app/standard` (the roles of the LLM feature, the tunnel and the TURN server; `webrtc.media`, `webrtc.proxy` and `media_auth` come with `modules/standard`'s `whip`, `whep` and `webrtc_proxy`, and `streaming` with its `httpflv`, `hls`, `stream_whip` and `stream_whep`); repeated for each; a config that names one left out is refused |
 | `-fit v`, `-fit dir` | the fit to build on: a version, or a directory of fit's source; the running fit's own version when left out |
 | `-o file` | the binary; `fit` when left out |
 | `-keep dir` | keep the generated main module in `dir`, to read or build again |

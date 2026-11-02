@@ -37,6 +37,8 @@ iterations are done, 1.0's included, and 1.0's external security review is still
   engine, reaching services behind NAT and sharing AI models among machines.
 - [WebRTC](docs/webrtc.md): a TURN server on fib's WebRTC, beside the gateway, WHIP and WHEP
   with fit as the media server, and other media servers behind fit's one HTTP endpoint and UDP port.
+- [Streaming](docs/streaming.md): a stream published once over RTMP, RTSP, SRT or WHIP and played over
+  those, HTTP-FLV, HLS and WHEP, on fib's media hub, each protocol behind a `media_auth` policy.
 - [Writing modules](docs/modules.md): extending fit with Go, built in with `fit build`.
 - [nginx, Caddy and Traefik compared](docs/comparison.md): what fit takes from each.
 - [Roadmap](docs/roadmap.md): goals, design principles and milestones.

@@ -70,6 +70,7 @@
 | A57 | TURN 服务器的限制与钩子 | 已完成，`bf669ce`（在 `84a67f7` 中） | 11 | I111（029） |
 | A58 | 原地修改和排空 TURN 服务器 | 已完成，`496301d`（在 `84a67f7` 中） | 10, 11 | I111（029） |
 | A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中）；Windows 修复 `63b38d4`（在 `9824c68` 中） | — | I111（029） |
+| A60 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
 
 ## 证据
 
@@ -1375,3 +1376,22 @@ PortMax uint16, Timeout, Handler}, done)`：socket 在 connect 前绑定到 `Loc
 **实际实现。** `fib.DialOptions{Network, Addr, Timeout, Handler, LocalAddr netip.AddrPort, PortMin, PortMax uint16}` 和 `Engine.DialWith(opts, done)`：socket 不带 SO_REUSEADDR 绑定，从随机端口开始搜索范围，没有空闲端口时拨号失败，错误匹配 `fib.ErrNoLocalPort`；本地地址决定地址族。
 
 **fit 的使用方式。** `webrtc.proxy.relay_ip`、`port_min` 和 `port_max`，加载配置时检查；每个中继用 `DialWith` 拨向它的媒体服务器，范围内没有空闲端口时丢弃该对端地址，计为 `fit_webrtc_proxy_dropped_total{reason="no_port"}`（I111）。
+
+## A60：移除 RTSP 服务器的 UDP 绑定
+
+**状态。** 2026-11-03 为 fit 的流媒体角色提出（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）。
+
+**问题。** `media/rtsp` 的 `Server.ListenUDP(engine)` 向引擎添加两个 UDP 绑定，即服务器的 RTP 和 RTCP 端口，使 SETUP 可以
+使用基于 UDP 的 RTP/AVP。没有任何东西能移除它们：绑定的索引未导出，服务器也没有 `Close`。重载修改 RTSP 监听器的设置时，fit
+的流媒体角色会重启该监听器，配置去掉它时会停止它；在共享的引擎上，每一次都会留下两个在进程生命期内一直绑定的套接字，而
+下一次在相同端口上的 `ListenUDP` 会失败。
+
+**依据。** `serverUDP` 保存了 `AddBinding` 返回的索引 `rtp` 和 `rtcp`，却没有方法读出它们；`Server` 只有 `ListenUDP` 和
+`UDPPorts`，没有结束这些绑定或 UDP 会话路由的方法。
+
+**建议的 API。** `Server.CloseUDP() error`：移除这两个绑定并清除路由，结束经 UDP 建立的会话；之后可以再次调用 `ListenUDP`。
+或者让 `ListenUDP` 返回绑定索引，由调用方移除。
+
+**fit 的使用方式。** `streaming.rtsp` 增加 `udp_rtp` 和 `udp_rtcp`（RTP 和 RTCP 端口）；监听器启动时调用 `ListenUDP`，重载重启
+它或角色停止时调用 `CloseUDP`。在此之前该监听器只接受基于 TCP 的 RTP：要求 UDP 的 SETUP 得到 `461`，ffmpeg 和多数播放器
+随后改用 TCP 重新建立。

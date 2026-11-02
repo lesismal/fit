@@ -47,8 +47,34 @@
 
 ## 流媒体角色（I116）
 
-由 I116 编写：fib 的 `media/hub`，带 RTMP、RTSP、SRT 监听和 HTTP 出口（HTTP-FLV、HLS、基于 hub 的 WHIP 和 WHEP），
-每个都有 `auth`。
+- **一个 hub，一个角色。** 顶层的 `streaming` 在监听器的引擎上运行 fib 的 `media/hub`，就像 `webrtc.media` 运行它的 SFU：
+  `rtmp`、`rtsp` 和 `srt` 是角色自己的监听器，即添加到引擎上的绑定；`webrtc` 是给 fib `media/rtc` 服务器用的 UDP 端口（fib 的
+  `webrtc.Mux`）。路由经处理器访问 hub：`httpflv`（fib 的 `media/httpflv`）、`hls`（`media/hls`，fMP4 或 MPEG-TS，可选
+  低延迟 HLS），以及 `stream_whip` 和 `stream_whep`，它们把路由的路径映射到 fib 的 WHIP 和 WHEP 服务器，再把其 `Location`
+  映射回路由。处理器按引擎找到角色，就像 `whip` 找到 `webrtc.media`；hub 属于角色，所以流在路由重载后仍然存在。
+  `webrtc.media` 仍是 `whip` 和 `whep` 的 SFU，与 hub 无关：两者既不共用端口也不共用流。
+- **在各协议自己的钩子中认证。** RTMP：`OnPublish` 和 `OnPlay`，凭据在流名或 app 的查询参数中（`token`，或 `user` 和
+  `pass`）。RTSP：`OnRequest`，DESCRIBE 和 PLAY 需要 `play`，ANNOUNCE 和 RECORD 需要 `publish`，其余方法属于前者开始的会话；
+  凭据为 Digest（fit 用用户的明文密码 `Policy.Password` 检查）、`auth_methods` 提供时的 Basic，或 URL 查询参数中的 token
+  （截至其后第一个 `/`，客户端在那里写轨道的 control）。fit 自己发出质询，而不用 fib 的 `Password`，因为后者要求每个请求都带
+  `Authorization`，会拒绝查询参数中的 token。SRT：握手中的 `OnConnect`，`s=` 是 token，与 `u=` 一起时是密码；fit 自己的
+  stream ID 解析器把资源的查询参数分出，使 `r=live/cam?token=T` 指 `live/cam`。HTTP：`mediaauth.Guard`，与 `whip` 相同。
+- **同步钩子中的 bcrypt 密码。** 这三个钩子都在返回前作答，运行在 fib 的 worker 上。使用 `password_hash`、密码此前未被确认
+  正确（`ErrPending`）的用户在这里被拒绝，表示请重试（RTMP 的消息如此说明，RTSP 返回带 `Retry-After: 1` 的 503，SRT 返回
+  1402），同时 `Policy.Check` 在 mediaauth 的池中检查哈希；确认正确的密码被记住，下一次尝试立即通过。在检查期间保持握手需要
+  fib 服务器所没有的异步钩子；拒绝一个会重试的客户端才能让 worker 保持空闲。token 和明文密码从不等待。
+- **HLS 携带查询参数中的 token。** 用 `?token=` 获取的播放列表，其中的播放列表、分片、part、map 和预加载提示都带上该 token
+  （一个改写播放列表 URI 的 `OnResponse` 钩子），因为不发送请求头的播放器（Safari、ffmpeg）按播放列表自己的相对 URI 获取它们；
+  每个请求（包括分片）都会检查。
+- **上限。** hub 的 `max_streams`、`max_players`（跨所有协议）和 `gop_cache_bytes`；每个监听器的连接数（`max_conns`，超出时
+  在打开时关闭）、握手、空闲和会话超时；WebRTC 的会话数、连接超时和 offer 大小（最多 64 KiB，使 offer 如 fib 服务器读取的
+  那样整体到达）；HLS 每路流每种格式保留的字节数。
+- **重载。** 监听器的 `auth` 原地生效，其连接保留。监听器其他字段的修改会在其地址上重启该监听器并关闭其连接（两者共用端口时
+  先关旧的；新的无法绑定时重新启动旧的）；hub 上限的修改会在一个新 hub 上重启一切。`hls` 的分片器按参数在配置之间共享，
+  因此参数不变的重载保留播放列表的编号。
+- **目前 RTSP 只走 TCP。** fib 的 RTSP 服务器用 `ListenUDP` 绑定 RTP 和 RTCP 的 UDP 端口，却无法移除它们，而在共享引擎上
+  重启或停止都需要这一点；fit 向 fib 提出这一请求（A60），在此期间使用交织的 RTP。要求 UDP 的 SETUP 得到 461，ffmpeg 和
+  多数播放器随后改用 TCP 重新建立。
 
 ## 媒体页面（I117）
 

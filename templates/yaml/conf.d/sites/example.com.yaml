@@ -692,6 +692,94 @@ routes:
         # # duration, as "1.5s" or "2m"; default "5m".
         # idle_timeout: "5m"
   # -
+    # # A route whose handler is hls, with every one of its params.
+    # name: "hls-example"
+    # handler:
+      # # Plays the streaming role's streams over HLS, fMP4 or MPEG-TS segments, Low-Latency HLS
+      # # optional: /live/cam/index.m3u8 plays live/cam.
+      # module: "hls"
+      # params:
+        # # The part of the path before the stream's: with /hls/, /hls/live/cam/index.m3u8 is the
+        # # playlist of live/cam. / when left out.
+        # # string.
+        # prefix: ""
+
+        # # The media_auth policy every request, playlist and segment, must satisfy, play on the
+        # # stream's path: a bearer token, Basic, the token query parameter or the fit_media_token
+        # # cookie. A playlist fetched with a token in its query names its playlists, segments and parts
+        # # with the token too, so that a player that sends no header (Safari, ffmpeg) plays on.
+        # # Everyone may play when left out.
+        # # string.
+        # auth: ""
+
+        # # The segment format of a playlist's URL without a format query parameter: fmp4, fragmented
+        # # MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus. The
+        # # other is played with ?format=ts or ?format=fmp4. fmp4 when left out.
+        # # one of: fmp4, ts.
+        # format: "fmp4"
+
+        # # How long segments are: a stream with video is cut at the first key frame after it. Set it to
+        # # the key frame interval. 2s when left out.
+        # # duration, as "1.5s" or "2m"; default "2s".
+        # target_duration: "2s"
+
+        # # Turns on Low-Latency HLS with parts this long, 200ms to 1s being usual: blocking playlist
+        # # reloads, EXT-X-PART and preload hints. Off when left out.
+        # # duration, as "1.5s" or "2m".
+        # part_duration: "10s"
+
+        # # How many segments a playlist lists. 6 when left out or 0.
+        # # integer, 0 to 100; default 6.
+        # playlist_size: 6
+
+        # # The bytes of segments one stream and format holds; the oldest go first. 32 MiB when left out
+        # # or 0.
+        # # integer, 0 or more; default 33554432.
+        # max_bytes: 33554432
+
+        # # How long a playlist request may wait for a stream with no publisher yet. 404 at once when
+        # # left out.
+        # # duration, as "1.5s" or "2m".
+        # play_wait: "10s"
+
+        # # How long a stream's segmenting runs without a request before it stops. 30s when left out.
+        # # duration, as "1.5s" or "2m"; default "30s".
+        # idle_timeout: "30s"
+
+        # # Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left
+        # # out.
+        # # string.
+        # cors: ""
+  # -
+    # # A route whose handler is httpflv, with every one of its params.
+    # name: "httpflv-example"
+    # handler:
+      # # Plays the streaming role's streams as HTTP-FLV, and as WebSocket-FLV to a WebSocket upgrade:
+      # # /live/cam.flv plays live/cam.
+      # module: "httpflv"
+      # params:
+        # # The part of the path before the stream's: with /flv/, /flv/live/cam.flv plays live/cam. /
+        # # when left out: /live/cam.flv plays live/cam, the stream rtmp://host/live/cam publishes.
+        # # string.
+        # prefix: ""
+
+        # # The media_auth policy a player must satisfy, play on the stream's path: a bearer token,
+        # # Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401
+        # # with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may
+        # # play when left out, as the route's middleware allow.
+        # # string.
+        # auth: ""
+
+        # # How long a player may wait for a stream with no publisher yet, or for the next one after its
+        # # publisher leaves. 404 at once for a stream without a publisher when left out.
+        # # duration, as "1.5s" or "2m".
+        # wait: "10s"
+
+        # # Sent as Access-Control-Allow-Origin, which a web player on another origin (flv.js,
+        # # mpegts.js) needs, as "*". None when left out.
+        # # string.
+        # cors: ""
+  # -
     # # A route whose handler is proxy, with every one of its params.
     # name: "proxy-example"
     # handler:
@@ -838,6 +926,53 @@ routes:
         # # left out.
         # # duration, as "1.5s" or "2m"; default "1s".
         # check_interval: "1s"
+  # -
+    # # A route whose handler is stream_whep, with every one of its params.
+    # name: "stream_whep-example"
+    # handler:
+      # # Plays the streaming role's streams to WebRTC viewers with WHEP, whatever they were published
+      # # over.
+      # module: "stream_whep"
+      # params:
+        # # The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam
+        # # in /whep/live/cam. A session's URL is the path of its POST followed by its ID, which the
+        # # route must match too.
+        # # string.
+        # stream: ""
+
+        # # The part of the path before the stream's. /whep/ when left out.
+        # # string.
+        # prefix: ""
+
+        # # The media_auth policy a POST must satisfy, play on the stream's path, as stream_whip's. A
+        # # session's URL takes PATCH and DELETE without credentials. Everyone may play when left out.
+        # # string.
+        # auth: ""
+  # -
+    # # A route whose handler is stream_whip, with every one of its params.
+    # name: "stream_whip-example"
+    # handler:
+      # # Takes WebRTC streams published with WHIP (RFC 9725) into the streaming role's hub, which
+      # # plays them over every protocol.
+      # module: "stream_whip"
+      # params:
+        # # The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam
+        # # in /whip/live/cam. A session's URL is the path of its POST followed by its ID, which the
+        # # route must match too.
+        # # string.
+        # stream: ""
+
+        # # The part of the path before the stream's. /whip/ when left out.
+        # # string.
+        # prefix: ""
+
+        # # The media_auth policy a POST must satisfy, publish on the stream's path: a bearer token,
+        # # Basic, the token query parameter or the fit_media_token cookie. 401 with a Bearer challenge
+        # # without credentials, 403 when they do not allow it. A session's URL takes PATCH and DELETE
+        # # without credentials, its random ID being the capability (RFC 9725). Everyone may publish
+        # # when left out, as the route's middleware allow.
+        # # string.
+        # auth: ""
   # -
     # # A route whose handler is webrtc_proxy, with every one of its params.
     # name: "webrtc_proxy-example"

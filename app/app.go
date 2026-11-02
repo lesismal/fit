@@ -138,6 +138,8 @@ func set(member any) bool {
 		return m != nil
 	case *config.WebRTCProxy:
 		return m != nil
+	case *config.Streaming:
+		return m != nil
 	}
 	return true
 }
@@ -218,6 +220,9 @@ func members(c *config.Config) []memberAt {
 	}
 	if len(c.MediaAuth) > 0 {
 		ms = append(ms, memberAt{"media_auth", c.MediaAuth[0].At})
+	}
+	if c.Streaming != nil {
+		ms = append(ms, memberAt{"streaming", c.Streaming.At})
 	}
 	return ms
 }
@@ -454,7 +459,7 @@ func (m *Manager) host(id string) *Host {
 		switch {
 		case strings.HasPrefix(id, "tunnel."):
 			name = config.LoggerTunnel
-		case strings.HasPrefix(id, "webrtc."):
+		case strings.HasPrefix(id, "webrtc."), id == "streaming", id == "media_auth":
 			name = config.LoggerWebRTC
 		}
 		h.Log = m.root.Logger(name).Prefixed(id + ": ")

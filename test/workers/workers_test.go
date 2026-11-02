@@ -191,6 +191,15 @@ var notCovered = map[string]string{
 	// in the client's, which webrtc/media's proxy tests drive against slow
 	// and gone media servers.
 	"webrtc_proxy": "webrtc/media's TestProxySignaling",
+	// They need the streaming role and a publisher: fib's media handlers
+	// answer a play from the hub's callbacks, an HLS request waiting for
+	// its segment retained, and a WHEP offer's answer from a goroutine of
+	// fib's; a password_hash user waits on mediaauth's pool. The streaming
+	// package's tests drive them with players, slow ones among them.
+	"httpflv":     "streaming's TestHTTPFLVAuth and TestCutConnections",
+	"hls":         "streaming's TestHLSAuth",
+	"stream_whip": "streaming's TestStreamWHIPWHEP",
+	"stream_whep": "streaming's TestStreamWHIPWHEP",
 }
 
 // handlerOf compiles a config of c's route and returns its handler.

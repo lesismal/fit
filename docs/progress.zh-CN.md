@@ -3579,6 +3579,43 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
 - **基准测试**：无；媒体处理器的信令不在热路径上，没有 `auth` 的路由行为不变（规则 21）。
 - **不足**：还没有签发 token 的 Admin API 端点（页面 I117 会提供）；token 只能通过更换 secret 吊销。
 
+### I116 流媒体角色 — 已完成
+
+用户的要求：流媒体，每种接收媒体的协议都有可配置的认证（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)、
+[流媒体](streaming.zh-CN.md)）。
+
+- **配置**：顶层 `streaming`，hub 的 `max_streams`（64）、`max_players`（256，每路流，跨所有协议）和 `gop_cache_bytes`
+  （8 MiB）；`rtmp`（`listen`、`auth`、`max_conns` 1024、`handshake_timeout` 10s、`idle_timeout` 30s、`play_wait`、
+  `max_message_bytes` 8 MiB）；`rtsp`（`listen`、`auth`、`auth_methods` digest 和 basic、`realm`、`max_conns`、
+  `session_timeout` 和 `idle_timeout` 60s、`play_wait`）；`srt`（`listen`、`auth`、`max_conns`、`latency` 120ms、
+  `passphrase`、`peer_idle_timeout` 5s、`play_wait`）；`webrtc`（`listen`、`public_ips`、`ice_servers`、`max_sessions` 256、
+  `connect_timeout` 15s、`play_wait`、`max_offer_bytes` 32 KiB，最多 64 KiB）。加载时检查：每个 `auth` 引用的策略存在、地址
+  及其在角色内以及与 `webrtc.media`、`webrtc.proxy` 的冲突、passphrase 长度、realm。`HasApps` 计入该角色。
+- **`streaming` 包**：角色（`New`、`Apply`、`Stop`、按引擎的 `Lookup`、`Hub`、`RTC`、`Addr`、`WriteMetrics`），以及处理器
+  `httpflv`（`prefix`、`auth`、`wait`、`cors`）、`hls`（`prefix`、`auth`、`format` fmp4 或 ts、`target_duration`、
+  `part_duration`、`playlist_size`、`max_bytes` 32 MiB、`play_wait`、`idle_timeout`、`cors`）、`stream_whip` 和
+  `stream_whep`（`stream`、`prefix`、`auth`）。凭据：RTMP 流名或 app 的查询参数；RTSP 的 Digest（fit 自己的质询和 nonce，
+  对照 `Policy.Password`）、Basic 或查询参数 token；SRT 的 `s=`、`u=` 加 `s=`，或资源的查询参数；HTTP 经
+  `mediaauth.Guard`，HLS 把查询参数 token 带入播放列表的 URI。`password_hash` 用户在 RTMP、RTSP 和 SRT 上先被拒绝一次，
+  同时在 worker 之外检查哈希，之后立即通过。重载：`auth` 原地生效；监听器的其他字段重启该监听器；hub 的上限重启 hub；
+  `hls` 的分片器按参数在配置之间共享。
+- **指标**：`fit_streaming_streams{state}`、`fit_streaming_players`、`fit_streaming_published_total`、
+  `fit_streaming_auth_refused_total{protocol,reason}`、`fit_streaming_restarts_total`。
+- **测试**（竞态检测）：配置检查；RTMP 按 token、密码和 bcrypt 用户推流和播放（先拒绝一次，再放行），拒绝被计数；HTTP-FLV
+  按查询参数 token、Bearer、Basic 和 cookie，401、403、404；HLS 播放列表带上 token，分片带与不带 token；RTSP 的质询、Digest
+  （以及过期或他处的 nonce、其他算法、qop）、Basic、bcrypt 用户先 503 后 200、查询参数 token、403，fib 客户端按 Digest 播放、
+  按 token 推流，无凭据被拒；SRT 握手按 `s=`、`u=`、查询参数，1401、1403，以及 1402 后放行；`stream_whip` 和 `stream_whep`
+  的 401、403，WHEP 观看者经路由的会话 URL 观看 RTMP 流及其 DELETE，WHIP 推流者经 RTMP 播放；上限（连接在打开时关闭、流数、
+  播放者数）；切断的连接（推流者被切断时结束其流及其 HTTP-FLV 和 RTMP 播放者，从不读取的播放者不拖住任何人，不说话的客户端
+  在握手超时后被关闭）；重载（`auth` 原地生效且推流者保留、监听器在原地址重启、hub 重启、角色被移除）；没有角色或
+  `streaming.webrtc` 时返回 503。Linux 容器中与 ffmpeg 7.1 互通（`scripts/streaming-interop.sh`、`TestInterop`）：RTMP 带
+  token、RTSP 带 Digest 和查询参数 token、SRT 带 `s=` 推流，每路都带凭据经 RTMP、RTSP（TCP、Digest、从 UDP 回退到 TCP）、SRT、
+  HTTP-FLV、HLS fMP4 和 HLS MPEG-TS 播放（64 个单元，每个 100 帧中得到 93 到 100 帧），不带凭据被拒；RTMP 不带和带观看 token、
+  RTSP 不带和带错误密码、SRT 不带和带观看 token 推流都被拒绝，从未推流成功。
+- **基准测试**：无；新角色不在现有路由的热路径上，其分发由 fib 完成（规则 21）。
+- **不足**：基于 UDP 的 RTSP 有待 fib 的 A60（要求 UDP 的 SETUP 得到 461）；没有 RTMPS 和 SRT 按流的 passphrase；拉取和
+  转发远端源不在范围内；bcrypt 用户在 RTMP、RTSP 或 SRT 上的第一次尝试按设计会被拒绝。
+
 ## 给后续迭代的说明
 
 - **2026-10-26 对 2026-10-24 那轮压测的收尾。** 四项测量把那一轮留下的问题结了。W4 的大传输：fit 现在

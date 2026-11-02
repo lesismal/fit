@@ -253,7 +253,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I113 | LLM 角色的节点列表、连接与流量：hub 的节点同步给 proxy，每条连接的字节数与延迟，每条路由的调用，每个角色页面上的链路图，以及角色其余设置在页面上的修改 | I112 | done |
 | **媒体** | | | |
 | I115 | 媒体认证：命名的 `media_auth` 策略（token、用户、签名 token、公开动作、流模式），`mediaauth` 包，`whip`、`whep` 和 `webrtc_proxy` 的 `auth`，`fit media-token` | I109, I110 | done |
-| I116 | 流媒体角色：fib 的 `media/hub`，带 RTMP、RTSP 和 SRT 监听，以及 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` 处理器，各有 `auth` | I115 | todo |
+| I116 | 流媒体角色：fib 的 `media/hub`，带 RTMP、RTSP 和 SRT 监听，以及 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` 处理器，各有 `auth` | I115 | done |
 | I117 | 媒体页面：`media_pages`，登录、推流、播放和房间通话，可开关麦克风和摄像头，以及有上限的房间 API | I115 | todo |
 
 ## M0 基础
@@ -1338,7 +1338,7 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
   经 `mediaauth.FromHTTP`，HLS 把查询参数中的 token 带到分片）。
 - **完成标准**：Linux 容器中的 ffmpeg 带与不带有效凭据经 RTMP、RTSP 和 SRT 推流，并经每种出口播放；上限和重载正常；在
   竞态检测下通过。
-- **涉及**：`streaming`（新）、`config`、`app`、`cli`、`schema`、`docs`、`test/docker`。
+- **涉及**：`streaming`（新）、`config`、`app`、`schema`、`docs`、`examples`、`scripts`、`test/workers`。
 
 ### I117 媒体页面
 

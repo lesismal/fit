@@ -90,7 +90,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `routes` | 每类请求的匹配条件、中间件和处理器 | [Routes](reference/config.md#routes) |
 | `upstreams` | 被代理的服务器，带负载均衡和健康检查 | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP 和 UDP 代理 | [Services](reference/config.md#services) |
-| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy`；WebRTC 用的 `whip`、`whep` 和 `webrtc_proxy` | [Handlers](reference/config.md#handlers) |
+| 处理器 | `proxy`、`static`、`respond`、`fastcgi`、`forward_proxy`；WebRTC 用的 `whip`、`whep` 和 `webrtc_proxy`；流媒体用的 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` | [Handlers](reference/config.md#handlers) |
 | 中间件 | 认证、限流、缓存、压缩、头部、改写等 | [Middleware](reference/config.md#middleware) |
 | `log`、`access_log`、`telemetry`、`metrics` | 日志、链路追踪和指标 | [Log](reference/config.md#log)、[Access log](reference/config.md#access-log)、[Telemetry](reference/config.md#telemetry)、[Metrics](reference/config.md#metrics) |
 | `limits` | 连接、头部、请求体和内存的上限 | [Limits](reference/config.md#limits) |
@@ -100,6 +100,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 | `llm` | llm 的 hub、node 和 proxy，在多台机器间共享 AI 模型并提供给 agent 调用 | [LLM](reference/config.md#llm)、[llm](llm.zh-CN.md) |
 | `tunnel` | tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务 | [Tunnel](reference/config.md#tunnel)、[tunnel](tunnel.zh-CN.md) |
 | `webrtc` | TURN 服务器（`turn`）、`whip` 和 `whep` 的媒体端口（`media`）、`webrtc_proxy` 的转发（`proxy`） | [WebRTC](reference/config.md#webrtc)、[WebRTC](webrtc.zh-CN.md) |
+| `streaming` | 流媒体角色：带 RTMP、RTSP、SRT 监听器以及 `stream_whip` 和 `stream_whep` 的 WebRTC 端口的媒体 hub | [Streaming](reference/config.md#streaming)、[流媒体](streaming.zh-CN.md) |
 | `providers` | Docker、Consul、etcd 和 Kubernetes | [Providers](reference/config.md#providers) |
 | `schema_version` | 配置的版本，1；可不写 | [兼容性](compatibility.zh-CN.md#schema-的版本) |
 
