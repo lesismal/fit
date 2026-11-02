@@ -6,15 +6,62 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
 )
 
+// TestExchangeDeadlineCarriesOver checks the deadline's timer across a
+// recycle: the timer set for a request that ended whole is left set, and
+// when it fires during the next request, whose deadline is later, it cancels
+// nothing and is set again, to cancel that request once its own deadline
+// passes; and an exchange that is not recycled has its timer stopped.
+func TestExchangeDeadlineCarriesOver(t *testing.T) {
+	cause := func(x *exchange) error {
+		if c := x.cause.Load(); c != nil {
+			return *c
+		}
+		return nil
+	}
+	x := &exchange{recyclable: true}
+	x.arm(time.Now(), 20*time.Millisecond, x.gen.Load(), errRouteTimeout)
+	x.whole = true
+	x.deadline.lift(!x.recyclable || !x.whole)
+	if !x.reset() {
+		t.Fatal("reset refused a recyclable exchange")
+	}
+	x.recyclable = true
+	start := time.Now()
+	x.arm(start, 300*time.Millisecond, x.gen.Load(), errRouteTimeout)
+	time.Sleep(100 * time.Millisecond)
+	if err := cause(x); err != nil {
+		t.Fatalf("the first request's timer cancelled the second with %v", err)
+	}
+	for cause(x) == nil && time.Since(start) < 5*time.Second {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := cause(x); !errors.Is(err, errRouteTimeout) {
+		t.Fatalf("the second request's deadline passed with cause %v", err)
+	}
+	if took := time.Since(start); took < 300*time.Millisecond {
+		t.Fatalf("the second request was cancelled after %v, before its deadline", took)
+	}
+
+	y := &exchange{}
+	y.arm(time.Now(), time.Hour, y.gen.Load(), errRouteTimeout)
+	y.deadline.lift(!y.recyclable || !y.whole)
+	if !y.deadline.due.IsZero() || y.deadline.timer.Stop() {
+		t.Fatal("the timer of an exchange that is not recycled was left set")
+	}
+}
+
 // TestExchangeStateIsAllItHolds checks that an exchange keeps nothing of a
 // request outside exchangeState, which recycle clears in one assignment: a
-// field added beside gen and the locks would carry over to the next request.
+// field added beside gen, the locks and the deadline, whose timer carries
+// over on purpose and whose request's part settle lifts, would carry over to
+// the next request.
 func TestExchangeStateIsAllItHolds(t *testing.T) {
-	want := map[string]bool{"exchangeState": true, "gen": true, "callMu": true, "mu": true}
+	want := map[string]bool{"exchangeState": true, "gen": true, "callMu": true, "mu": true, "deadline": true}
 	typ := reflect.TypeFor[exchange]()
 	for i := range typ.NumField() {
 		if name := typ.Field(i).Name; !want[name] {

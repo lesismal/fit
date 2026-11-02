@@ -114,7 +114,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	}
 	gen := x.gen.Load()
 	if timeout > 0 {
-		x.deadline = time.AfterFunc(timeout, func() { x.cancel(gen, why) })
+		x.arm(x.start, timeout, gen, why)
 	}
 	// The request, its body among it, stays the handler's until the
 	// response is written.
@@ -250,6 +250,11 @@ type exchange struct {
 	// callMu orders call and cause, and recycle after them.
 	callMu sync.Mutex
 
+	// deadline is the timer of the route's timeout, or of the call's
+	// grpc-timeout, which stays with the exchange from one request to the
+	// next (see arm).
+	deadline exchangeDeadline
+
 	// mu orders what the upstream body's callbacks and OnWritable's do to
 	// the client's response, since a resumed body and OnWritable's function
 	// run on goroutines of fib's.
@@ -298,9 +303,6 @@ type exchangeState struct {
 	// request has been sent again.
 	policy  *retryPolicy
 	attempt int
-	// deadline is the route's timeout's, or the call's grpc-timeout's, or
-	// nil.
-	deadline *time.Timer
 	// grpc says the request is a gRPC call, which is answered as gRPC
 	// answers when it fails (grpc.go).
 	grpc bool
@@ -319,8 +321,10 @@ type exchangeState struct {
 
 	// recyclable says the exchange may go back to the pool once it ends the
 	// ordinary way: its request arrived whole, with nothing that sends it
-	// again elsewhere (a mirror) or answers it as gRPC.
+	// again elsewhere (a mirror) or answers it as gRPC. whole says it is
+	// ending so, its response written whole, and recycle comes next.
 	recyclable bool
+	whole      bool
 
 	// resp and started are guarded by mu.
 	resp    *fibhttp.ClientResponse
@@ -350,12 +354,83 @@ func (x *exchange) settle() bool {
 	if t := x.timer.Load(); t != nil {
 		t.Stop()
 	}
-	if x.deadline != nil {
-		x.deadline.Stop()
-	}
+	// The timer stays set only for an exchange that goes on to recycle.
+	x.deadline.lift(!x.recyclable || !x.whole)
 	x.open.remove(x)
 	x.pool.Done(x.backend, x.failed)
 	return true
+}
+
+// exchangeDeadline is an exchange's timeout, which cancels its request with
+// why once at has passed. Its timer is the exchange's from one request to the
+// next, and moves only when a request's deadline comes sooner than it is set
+// for: a deadline lifted, as a request that ends lifts it, or set later, as
+// the next request on a recycled exchange sets it, leaves the timer to fire
+// when it was set to, find no deadline or one still ahead, and stop or set
+// itself again for the rest. An exchange that serves request after request
+// moves its timer once per timeout rather than making one per request.
+type exchangeDeadline struct {
+	mu    sync.Mutex
+	timer *time.Timer
+	// due is when the timer is set to fire, zero when it is not set.
+	due time.Time
+	// at is the request's deadline, zero when it has none; gen is the
+	// request's, as exchange.gen counted it, and why its cause for cancel.
+	at  time.Time
+	gen uint32
+	why error
+}
+
+// arm sets x's deadline for the request gen, at timeout from start.
+func (x *exchange) arm(start time.Time, timeout time.Duration, gen uint32, why error) {
+	d := &x.deadline
+	at := start.Add(timeout)
+	d.mu.Lock()
+	d.at, d.gen, d.why = at, gen, why
+	switch {
+	case d.timer == nil:
+		d.due = at
+		d.timer = time.AfterFunc(timeout, x.expire)
+	case d.due.IsZero() || at.Before(d.due):
+		d.due = at
+		d.timer.Reset(time.Until(at))
+	}
+	d.mu.Unlock()
+}
+
+// lift takes the request's deadline away. It leaves the timer set for the
+// request the exchange may serve next, unless stop says it will serve none,
+// as an exchange that is not recycled does not: a timer left set would hold
+// it until it fired.
+func (d *exchangeDeadline) lift(stop bool) {
+	d.mu.Lock()
+	d.at, d.why = time.Time{}, nil
+	if stop && !d.due.IsZero() {
+		d.timer.Stop()
+		d.due = time.Time{}
+	}
+	d.mu.Unlock()
+}
+
+// expire is the deadline's timer firing: it cancels the request whose
+// deadline has passed, or sets the timer again for one still ahead.
+func (x *exchange) expire() {
+	d := &x.deadline
+	d.mu.Lock()
+	d.due = time.Time{}
+	at, gen, why := d.at, d.gen, d.why
+	if at.IsZero() {
+		d.mu.Unlock()
+		return
+	}
+	if wait := time.Until(at); wait > 0 {
+		d.due = at
+		d.timer.Reset(wait)
+		d.mu.Unlock()
+		return
+	}
+	d.mu.Unlock()
+	x.cancel(gen, why)
 }
 
 // send sends the request upstream, keeping its Call for cancel, and
@@ -398,7 +473,9 @@ var exchanges = sync.Pool{New: func() any { return new(exchange) }}
 func (x *exchange) recycle() {
 	if x.reset() {
 		exchanges.Put(x)
+		return
 	}
+	x.deadline.lift(true)
 }
 
 // reset clears the exchange for a request to come and moves gen on, and
@@ -479,6 +556,7 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 		} else {
 			_ = x.c.WriteResponse(out)
 		}
+		x.whole = true
 		x.release()
 		x.recycle()
 		return
