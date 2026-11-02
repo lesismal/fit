@@ -1435,8 +1435,8 @@ upstreams:
   # # integer, 0 to 1024.
   # event_loops: 0
 
-  # # The most workers each engine's pool runs connections' reads and callbacks on at once. fib's
-  # # default, which follows the CPUs, when left out or 0.
+  # # The most workers each engine's pool runs connections' reads and callbacks on at once. 100
+  # # for each CPU fit may use, and at least min_workers, when left out or 0.
   # # integer, 0 or more.
   # workers: 0
 

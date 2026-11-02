@@ -5,7 +5,7 @@ package config
 // or 0, keeps fib's own default.
 type Engine struct {
 	EventLoops     int `json:"event_loops,omitempty" min:"0" max:"1024" doc:"How many event loops each engine waits for its connections' events on, which spread the waits, accepts and wake-ups over cores; the connections' work runs on the workers either way. fib's default when left out or 0: 1 on up to 4 CPUs, 2 on up to 16, and the CPUs divided by 8 on more. Windows has one loop whatever this says."`
-	Workers        int `json:"workers,omitempty" min:"0" doc:"The most workers each engine's pool runs connections' reads and callbacks on at once. fib's default, which follows the CPUs, when left out or 0."`
+	Workers        int `json:"workers,omitempty" min:"0" doc:"The most workers each engine's pool runs connections' reads and callbacks on at once. 100 for each CPU fit may use, and at least min_workers, when left out or 0."`
 	MinWorkers     int `json:"min_workers,omitempty" min:"0" doc:"How many workers an idle pool keeps, rather than retiring every one and starting them again when work arrives. None when left out or 0."`
 	TaskQueue      int `json:"task_queue,omitempty" min:"0" doc:"How many tasks each engine's pool holds waiting for a worker. fib's default, which follows its workers, when left out or 0."`
 	PollBatch      int `json:"poll_batch,omitempty" min:"0" default:"1024" doc:"The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0."`
