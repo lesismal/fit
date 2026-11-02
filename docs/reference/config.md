@@ -39,6 +39,7 @@ a config against it and more.
 - [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
+- [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
 - [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
@@ -115,6 +116,7 @@ In JSON:
 | `llm` | [object](#config-llm) |  | The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which share AI models among machines and serve them to agents. None when left out. What their web pages change is written back here. |
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which reach services behind NAT through the hub. None when left out. What their web pages change is written back here. |
 | `webrtc` | [object](#config-webrtc) |  | What fit runs for WebRTC beside the gateway, on its engine: a TURN server, the media port of the whip and whep handlers, and the relay of the webrtc_proxy handler. None when left out. |
+| `media_auth` | list of [object](#config-mediaauth) |  | Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow. |
 | `providers` | list of [object](#config-provider) |  | Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts. |
 
 <a id="listeners"></a>
@@ -2286,6 +2288,154 @@ In JSON:
 | `port_min` | integer, 0 to 65535 |  | The lowest local port of the sockets toward the media servers, for a firewall in front of them that admits a range; with port_max. A port in use is skipped, and a peer address that finds the range full is dropped. Ports the kernel picks when both are left out. Applies to the next relay. |
 | `port_max` | integer, 0 to 65535 |  | The highest local port of the sockets toward the media servers; with port_min. The range bounds the relays at once, beside max_relays. |
 
+<a id="media-auth"></a>
+
+## Media auth
+
+Named policies of who may publish and play which streams, for the handlers and roles that take
+media: [`whip`](#whip), [`whep`](#whep) and [`webrtc_proxy`](#webrtc_proxy) refer to one by name
+with their `auth` param. A policy lets in static `tokens`, sent as `Authorization: Bearer`, a
+`token` query parameter or the `fit_media_token` cookie; `users` with a password, sent as
+`Authorization: Basic` (or, where a protocol has no header, as `user` and `pass` in the query); and
+tokens fit signs with its `secret`, which `fit media-token` prints and carry their subject, expiry
+and streams. Each token and user lists the stream patterns it may `publish` and `play`, with `*`
+matching any run of characters, as `live/*` or `room1-*`. `public` lists the actions anyone may take
+without credentials, as `["play"]` for streams anyone may watch. Missing or bad credentials are
+answered `401` with a `Bearer` challenge, and credentials that do not allow the action `403`. A
+handler without `auth` lets everyone in, as the route's middleware allow.
+
+The checks never hold up a worker: a token is looked up by its SHA-256 or its signature checked, a
+plaintext password compared in constant time; a `password_hash` is checked with bcrypt on a small
+pool of its own, and remembered once found right. A reload changes a policy in place, for the
+requests and sessions that follow. See [WebRTC](../webrtc.md#auth) and
+[decision 030](../decisions/030-media-auth-and-pages.md).
+
+In a .conf file:
+
+```fit
+listener web :8080
+
+media_auth live {
+	secret a-secret-of-at-least-16-bytes
+	public play
+	tokens studio {
+		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		publish live/*
+	}
+	users alice { password alice-password; publish alice-*; play * }
+	token_ttl 12h
+}
+
+route { match { path /whip/* }; handler whip { auth live } }
+route { match { path /whep/* }; handler whep { auth live } }
+
+webrtc { media { listen :8189 } }
+```
+
+In YAML:
+
+```yaml
+listeners:
+  - name: web
+    address: :8080
+media_auth:
+  - name: live
+    secret: a-secret-of-at-least-16-bytes
+    public:
+      - play
+    tokens:
+      - name: studio
+        token_sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        publish:
+          - live/*
+    users:
+      - name: alice
+        password: alice-password
+        publish:
+          - alice-*
+        play:
+          - '*'
+    token_ttl: 12h
+routes:
+  - match:
+      path:
+        - /whip/*
+    handler:
+      module: whip
+      params:
+        auth: live
+  - match:
+      path:
+        - /whep/*
+    handler:
+      module: whep
+      params:
+        auth: live
+webrtc:
+  media:
+    listen: :8189
+```
+
+In JSON:
+
+```json
+{
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "media_auth": [
+    {
+      "name": "live",
+      "secret": "a-secret-of-at-least-16-bytes",
+      "public": ["play"],
+      "tokens": [{"name": "studio", "token_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "publish": ["live/*"]}],
+      "users": [{"name": "alice", "password": "alice-password", "publish": ["alice-*"], "play": ["*"]}],
+      "token_ttl": "12h"
+    }
+  ],
+  "routes": [
+    {"match": {"path": ["/whip/*"]}, "handler": {"module": "whip", "params": {"auth": "live"}}},
+    {"match": {"path": ["/whep/*"]}, "handler": {"module": "whep", "params": {"auth": "live"}}}
+  ],
+  "webrtc": {"media": {"listen": ":8189"}}
+}
+```
+
+<a id="config-mediaauth"></a>
+
+### `media_auth[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'. |
+| `tokens` | list of [object](#config-mediatoken) |  | Static bearer tokens, each with the streams it may publish and play: sent as Authorization: Bearer, a token query parameter or the fit_media_token cookie. |
+| `users` | list of [object](#config-mediauser) |  | Users with a password, each with the streams they may publish and play: sent as Authorization: Basic, as user and pass query parameters where a protocol has no header (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens signed with secret. |
+| `secret` | string |  | The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it. |
+| `public` | list of string: `publish`, `play` |  | The actions anyone may take without credentials, as ["play"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials. |
+| `token_ttl` | duration | `"12h"` | How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out. |
+
+<a id="config-mediatoken"></a>
+
+### `media_auth[].tokens[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | What the token is called in logs, which never show the token itself: token:<name>, or token when left out. |
+| `token` | string |  | The token, at least 16 characters. Or token_sha256, one of the two. |
+| `token_sha256` | string |  | Instead of the token, its SHA-256 in hex, so that the config does not hold it, as sha256sum prints it for the token alone, without a newline: printf %s "$TOKEN" \| sha256sum. |
+| `publish` | list of string |  | The streams the token may publish, by name or path, with * matching any run of characters, '/' among them, as live/* or room1-*. None when left out. |
+| `play` | list of string |  | The streams the token may play, as publish lists them. None when left out. |
+
+<a id="config-mediauser"></a>
+
+### `media_auth[].users[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string |  | Required. The user's name; it may not contain a colon or a control character. |
+| `password` | string |  | The user's password. A user with one can also log in with RTSP's Digest, which needs the password itself. Or password_hash, one of the two. |
+| `password_hash` | string |  | Instead of the password, its bcrypt hash, as fit hash-password makes it: Basic and the query's user and pass only, checked off fib's workers. A password once found right is remembered, as a keyed SHA-256, so that the next check is at once. |
+| `publish` | list of string |  | The streams the user may publish, as a token's publish lists them. None when left out. |
+| `play` | list of string |  | The streams the user may play. None when left out. |
+
 <a id="providers"></a>
 
 ## Providers
@@ -2820,7 +2970,10 @@ request. DELETE, PATCH and the rest of a session's requests go to the media serv
 it; a PATCH that only trickles candidates is answered `204` by fit. A request or answer past
 `max_sdp_bytes` is refused, and a media server that does not answer within `timeout` is answered
 `504`. `media_addrs` names the address fit relays to, for a media server whose answer's
-candidates fit cannot reach. See [WebRTC](../webrtc.md#proxying-media-servers).
+candidates fit cannot reach. `auth` names a [`media_auth`](#media-auth) policy an offer is checked
+against before any media server sees it, for `action`, `publish` on a WHIP endpoint or `play` on a
+WHEP one, on the last segment of its path; a session's requests go on without credentials. See
+[WebRTC](../webrtc.md#proxying-media-servers).
 
 In a .conf file:
 
@@ -2864,6 +3017,8 @@ In JSON:
 | `media_addrs` | object of string |  | The address fit relays a media server's peers to, by the media server's address in the upstream, as {"10.0.0.2:8080": "10.0.0.2:8189"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first. |
 | `timeout` | duration | `"10s"` | The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out. |
 | `max_sdp_bytes` | integer, 0 or more | `32768` | The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0. |
+| `auth` | string |  | The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow. |
+| `action` | string: `publish`, `play` |  | What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with auth. |
 
 <a id="http-handlers-whep"></a>
 
@@ -2877,12 +3032,14 @@ answer, which sends the stream's audio and video, its `Location` the session's U
 that URL ends the viewer's session. The stream's name is `stream`, or the last segment of the
 path, as `cam1` in `/whep/cam1`. A stream not published is answered `404`, one with `max_viewers`
 already `503`. Viewers' key frame requests reach the publisher at most once a
-`key_frame_interval`. See [WebRTC](../webrtc.md#whip-and-whep).
+`key_frame_interval`. `auth` names a [`media_auth`](#media-auth) policy whose credentials must
+allow `play` on the stream's name, or that makes `play` public, as `whip`'s does for `publish`. See
+[WebRTC](../webrtc.md#whip-and-whep).
 
 In a .conf file:
 
 ```fit
-route { match { path /whep/* }; handler whep }
+route { match { path /whep/* }; handler whep { auth live } }
 ```
 
 In YAML, a route:
@@ -2893,6 +3050,8 @@ match:
     - /whep/*
 handler:
   module: whep
+  params:
+    auth: live
 ```
 
 In JSON:
@@ -2900,13 +3059,14 @@ In JSON:
 ```json
 {
   "match": {"path": ["/whep/*"]},
-  "handler": {"module": "whep"}
+  "handler": {"module": "whep", "params": {"auth": "live"}}
 }
 ```
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `stream` | string |  | The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch. |
+| `auth` | string |  | The media_auth policy a POST must satisfy to play the stream: its credentials need play on the stream's name, or the policy makes play public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials, as whip's. Everyone may play when left out, as the route's middleware allow. |
 
 <a id="http-handlers-whip"></a>
 
@@ -2920,8 +3080,11 @@ its `Location` the session's URL and its ICE servers in `Link` headers; a DELETE
 the stream and its viewers. The stream's name is `stream`, or the last segment of the path, as
 `cam1` in `/whip/cam1`. A name published already is refused with `409`, the limits with `503`, an
 offer with no codec fit forwards with `422`. PATCH (trickle ICE) is answered `405`: fit is an ICE
-lite agent whose answer holds all of its candidates. Auth is the route's middleware, as a bearer
-token checked by `jwt`. See [WebRTC](../webrtc.md#whip-and-whep).
+lite agent whose answer holds all of its candidates. `auth` names a [`media_auth`](#media-auth)
+policy whose credentials must allow `publish` on the stream's name: `401` with a `Bearer`
+challenge without them, `403` when they do not allow it; a session's URL takes its DELETE without
+them, its random ID being the capability. The route's middleware may check too, as a bearer token
+checked by `jwt`. See [WebRTC](../webrtc.md#whip-and-whep).
 
 In a .conf file:
 
@@ -2932,7 +3095,7 @@ route {
 		jwks_url https://auth.example.com/.well-known/jwks.json
 		audience whip
 	}
-	handler whip
+	handler whip { auth live }
 }
 ```
 
@@ -2950,6 +3113,8 @@ middleware:
         - whip
 handler:
   module: whip
+  params:
+    auth: live
 ```
 
 In JSON:
@@ -2958,13 +3123,14 @@ In JSON:
 {
   "match": {"path": ["/whip/*"]},
   "middleware": [{"module": "jwt", "params": {"jwks_url": "https://auth.example.com/.well-known/jwks.json", "audience": ["whip"]}}],
-  "handler": {"module": "whip"}
+  "handler": {"module": "whip", "params": {"auth": "live"}}
 }
 ```
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `stream` | string |  | The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live. |
+| `auth` | string |  | The media_auth policy a POST must satisfy to publish the stream: its credentials, a bearer token or a user and password, need publish on the stream's name, or the policy makes publish public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials: its ID, 128 random bits, is the capability. Everyone may publish when left out, as the route's middleware allow. |
 
 <a id="middleware"></a>
 

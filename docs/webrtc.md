@@ -276,15 +276,69 @@ already; `404` for a viewer of a stream not published, or one that ended while i
 `503` with `Retry-After: 5` past `max_peer_connections`, `max_streams` or `max_viewers`, and `503`
 while `webrtc.media` does not run. The endpoint answers other methods `405`.
 
-Auth is the route's middleware: RFC 9725's bearer token is an `Authorization` field, which `jwt`
-verifies, or `basic_auth`, `forward_auth` and the rest. A DELETE goes through the same route, and
-its session's ID, 128 random bits, is known only to whoever made the session.
+Auth is the handlers' `auth`, a [`media_auth`](reference/config.md#media-auth) policy, or the
+route's middleware, or both; see [Auth](#auth) below.
 
 fit answers without trickle ICE, and PATCH is not supported: fit is an ICE lite agent (RFC 8445
 section 2.5) on the Mux, whose candidates are the port's own addresses, all in the answer, and it
 learns a peer's address from the peer's checks, so the candidates a peer would trickle add nothing.
 An ICE restart is a new session: a client DELETEs the old one and posts a new offer. Clients
 answered 405 do not trickle, as RFC 9725 says.
+
+### Auth
+
+`auth` names a policy of the config's `media_auth`, which says who may publish and play which
+streams; the handler checks a POST against it before taking the offer's body:
+
+```fit
+media_auth live {
+	secret a-secret-of-at-least-16-bytes
+	public play
+	tokens studio {
+		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		publish live/*
+	}
+	users alice { password alice-password; publish alice-*; play * }
+}
+
+route {
+	match { path /whip/* }
+	handler whip { auth live }
+}
+
+route {
+	match { path /whep/* }
+	handler whep { auth live }
+}
+```
+
+- **Credentials.** A static token from `tokens`, by its value or its `token_sha256`; a token fit
+  signs with the policy's `secret`, which `fit media-token -policy live -publish 'live/*' -ttl 1h`
+  prints, carrying its subject, expiry and streams; or a user of `users` and their password. A
+  token is sent as RFC 9725's `Authorization: Bearer`, as a `token` query parameter (for clients
+  that cannot set a header; the access log writes the URI with `token=REDACTED`), or as the
+  `fit_media_token` cookie; a user as `Authorization: Basic`.
+- **Rights.** Each token and user lists the stream patterns it may `publish` and `play`: `*`
+  matches any run of characters, so `live/*`, `room1-*` and `*` work, and an empty list grants
+  nothing. `public: ["play"]` lets anyone watch while publishing needs credentials.
+- **Answers.** `401` with `WWW-Authenticate: Bearer realm="fit"` without credentials, and with
+  `error="invalid_token"` for an unknown, expired or tampered token or a wrong password; `403`
+  for credentials that do not allow the action on the stream; `503` with `Retry-After: 1` when
+  bcrypt checks are queued past their bounds.
+- **A session's URL.** Its DELETE and OPTIONS need no credentials: the session's ID, 128 random
+  bits, is known only to whoever made the session and is the capability RFC 9725 relies on, and a
+  token that expires during a long stream must not keep its publisher from hanging up.
+- **Never on a worker.** Tokens are looked up by their SHA-256 or their signature checked, and
+  plaintext passwords compared in constant time, on the worker; a `password_hash` is checked with
+  bcrypt on a small pool of its own, a quarter of the CPUs with 256 waiting at most, while the
+  request waits, and a password found right is remembered as a keyed SHA-256, so the next check
+  is at once.
+- **Reloading.** A reload changes a policy in place, for the next offer; sessions already made
+  are kept. A handler whose `auth` names a policy the config lacks fails the config.
+
+The route's middleware still run first, so a policy can sit behind `jwt`, `forward_auth` or an IP
+allow list. Every field is in the [config reference](reference/config.md#media-auth), and the
+design in [decision 030](decisions/030-media-auth-and-pages.md).
 
 ### Media
 
@@ -468,6 +522,11 @@ the one peer address it was opened for.
   `404` for the URL of a session fit no longer has, and `405` for a method other than POST and
   OPTIONS at the endpoint. Every other answer, a media server's refusal of an offer among them, is
   passed on as it is, without its hop-by-hop fields.
+
+With `auth`, a [`media_auth`](#auth) policy, and `action`, `publish` on a WHIP route or `play` on
+a WHEP one, fit checks an offer on the last segment of its path before any media server sees it,
+and answers `401` or `403` itself; a session's requests go on without credentials, and the
+request's `Authorization` goes to the media server as it came, for one that checks it too.
 
 Nothing waits: the offer goes upstream from its last body callback through fib's asynchronous
 client, and the answer is written from the client's callback; a client that leaves cancels it.

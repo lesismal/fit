@@ -19,6 +19,7 @@ import (
 	"github.com/lesismal/fib/webrtc/ice"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/module"
 	"github.com/lesismal/fit/upstream"
 )
@@ -43,7 +44,11 @@ type ProxyHandler struct {
 	MediaAddrs  map[string]string `json:"media_addrs,omitempty" doc:"The address fit relays a media server's peers to, by the media server's address in the upstream, as {\"10.0.0.2:8080\": \"10.0.0.2:8189\"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first."`
 	Timeout     config.Duration   `json:"timeout,omitempty" default:"\"10s\"" doc:"The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out."`
 	MaxSDPBytes int               `json:"max_sdp_bytes,omitempty" min:"0" default:"32768" doc:"The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0."`
+	Auth        string            `json:"auth,omitempty" doc:"The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow."`
+	Action      string            `json:"action,omitempty" enum:"publish,play" doc:"What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with auth."`
 
+	auth    *mediaauth.Policy
+	action  mediaauth.Action
 	pool    *upstream.Pool
 	engine  *fib.Engine
 	media   map[string]netip.AddrPort
@@ -78,6 +83,16 @@ func (h *ProxyHandler) Provision(ctx *module.Context) error {
 	if h.limit <= 0 {
 		h.limit = config.DefaultMediaMaxSDPBytes
 	}
+	auth, err := mediaauth.Provision(ctx, "auth", h.Auth)
+	if err != nil {
+		return err
+	}
+	h.auth = auth
+	if h.Action != "" {
+		h.action, _ = mediaauth.ParseAction(h.Action)
+	} else if h.auth != nil {
+		return ctx.Errorf("action", "auth needs action: publish for a WHIP endpoint, play for a WHEP one")
+	}
 	return nil
 }
 
@@ -97,7 +112,10 @@ func (h *ProxyHandler) ServeHTTP(c *fibhttp.Context) {
 	}
 	switch c.Request.Method {
 	case stdhttp.MethodPost:
-		h.offer(c, p, strings.TrimSuffix(path, "/"))
+		endpoint := strings.TrimSuffix(path, "/")
+		h.auth.Guard(c, h.action, endpoint[strings.LastIndexByte(endpoint, '/')+1:], func(string) {
+			h.offer(c, p, endpoint)
+		})
 	case stdhttp.MethodOptions:
 		h.forward(c, h.pool.Pick(c.Request), c.Request.URL.Path, nil, h.passOn)
 	default:

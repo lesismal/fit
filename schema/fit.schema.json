@@ -1588,6 +1588,121 @@
       },
       "type": "object"
     },
+    "config.MediaAuth": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'.",
+          "type": "string"
+        },
+        "public": {
+          "description": "The actions anyone may take without credentials, as [\"play\"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials.",
+          "items": {
+            "enum": [
+              "publish",
+              "play"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secret": {
+          "description": "The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it.",
+          "type": "string"
+        },
+        "token_ttl": {
+          "default": "12h",
+          "description": "How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "tokens": {
+          "description": "Static bearer tokens, each with the streams it may publish and play: sent as Authorization: Bearer, a token query parameter or the fit_media_token cookie.",
+          "items": {
+            "$ref": "#/$defs/config.MediaToken"
+          },
+          "type": "array"
+        },
+        "users": {
+          "description": "Users with a password, each with the streams they may publish and play: sent as Authorization: Basic, as user and pass query parameters where a protocol has no header (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens signed with secret.",
+          "items": {
+            "$ref": "#/$defs/config.MediaUser"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "config.MediaToken": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "What the token is called in logs, which never show the token itself: token:<name>, or token when left out.",
+          "type": "string"
+        },
+        "play": {
+          "description": "The streams the token may play, as publish lists them. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "publish": {
+          "description": "The streams the token may publish, by name or path, with * matching any run of characters, '/' among them, as live/* or room1-*. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token": {
+          "description": "The token, at least 16 characters. Or token_sha256, one of the two.",
+          "type": "string"
+        },
+        "token_sha256": {
+          "description": "Instead of the token, its SHA-256 in hex, so that the config does not hold it, as sha256sum prints it for the token alone, without a newline: printf %s \"$TOKEN\" | sha256sum.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "config.MediaUser": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The user's name; it may not contain a colon or a control character.",
+          "type": "string"
+        },
+        "password": {
+          "description": "The user's password. A user with one can also log in with RTSP's Digest, which needs the password itself. Or password_hash, one of the two.",
+          "type": "string"
+        },
+        "password_hash": {
+          "description": "Instead of the password, its bcrypt hash, as fit hash-password makes it: Basic and the query's user and pass only, checked off fib's workers. A password once found right is remembered, as a keyed SHA-256, so that the next check is at once.",
+          "type": "string"
+        },
+        "play": {
+          "description": "The streams the user may play. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "publish": {
+          "description": "The streams the user may publish, as a token's publish lists them. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "config.Metrics": {
       "additionalProperties": false,
       "properties": {},
@@ -3517,6 +3632,18 @@
     "http.handlers.webrtc_proxy": {
       "additionalProperties": false,
       "properties": {
+        "action": {
+          "description": "What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with auth.",
+          "enum": [
+            "publish",
+            "play"
+          ],
+          "type": "string"
+        },
+        "auth": {
+          "description": "The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow.",
+          "type": "string"
+        },
         "max_sdp_bytes": {
           "default": 32768,
           "description": "The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0.",
@@ -3549,6 +3676,10 @@
     "http.handlers.whep": {
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "description": "The media_auth policy a POST must satisfy to play the stream: its credentials need play on the stream's name, or the policy makes play public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials, as whip's. Everyone may play when left out, as the route's middleware allow.",
+          "type": "string"
+        },
         "stream": {
           "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch.",
           "type": "string"
@@ -3559,6 +3690,10 @@
     "http.handlers.whip": {
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "description": "The media_auth policy a POST must satisfy to publish the stream: its credentials, a bearer token or a user and password, need publish on the stream's name, or the policy makes publish public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials: its ID, 128 random bits, is the capability. Everyone may publish when left out, as the route's middleware allow.",
+          "type": "string"
+        },
         "stream": {
           "description": "The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live.",
           "type": "string"
@@ -4529,6 +4664,13 @@
     "log": {
       "$ref": "#/$defs/config.Log",
       "description": "fit's own log: what it says about starting, reloading, certificates, providers and the engine, by logger, each with the least level written, and the format and output it writes in, as fib writes its own. Messages at info and debug to stdout and the rest to stderr, at info and above, as lines, when left out."
+    },
+    "media_auth": {
+      "description": "Named policies of who may publish and play which streams, with tokens, users and keys for tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to one with their auth param. A handler without auth lets everyone in, as the route's middleware allow.",
+      "items": {
+        "$ref": "#/$defs/config.MediaAuth"
+      },
+      "type": "array"
     },
     "metrics": {
       "$ref": "#/$defs/config.Metrics",

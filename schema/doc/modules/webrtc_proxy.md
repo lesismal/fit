@@ -7,7 +7,10 @@ request. DELETE, PATCH and the rest of a session's requests go to the media serv
 it; a PATCH that only trickles candidates is answered `204` by fit. A request or answer past
 `max_sdp_bytes` is refused, and a media server that does not answer within `timeout` is answered
 `504`. `media_addrs` names the address fit relays to, for a media server whose answer's
-candidates fit cannot reach. See [WebRTC](../webrtc.md#proxying-media-servers).
+candidates fit cannot reach. `auth` names a [`media_auth`](#media-auth) policy an offer is checked
+against before any media server sees it, for `action`, `publish` on a WHIP endpoint or `play` on a
+WHEP one, on the last segment of its path; a session's requests go on without credentials. See
+[WebRTC](../webrtc.md#proxying-media-servers).
 
 ```json route
 {

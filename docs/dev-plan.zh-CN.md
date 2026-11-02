@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I114。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I118。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -251,6 +251,10 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I111 | 基于 fib A55–A59 的 WebRTC：经 TCP 和 TLS 的 TURN、上限、事件、原地修改与排空；代理的源地址和端口 | I87, I110 | done |
 | I112 | agent 的模型接口：OpenAI 及其兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama 与 Cohere 的全部无状态推理端点 | I107 | done |
 | I113 | LLM 角色的节点列表、连接与流量：hub 的节点同步给 proxy，每条连接的字节数与延迟，每条路由的调用，每个角色页面上的链路图，以及角色其余设置在页面上的修改 | I112 | done |
+| **媒体** | | | |
+| I115 | 媒体认证：命名的 `media_auth` 策略（token、用户、签名 token、公开动作、流模式），`mediaauth` 包，`whip`、`whep` 和 `webrtc_proxy` 的 `auth`，`fit media-token` | I109, I110 | done |
+| I116 | 流媒体角色：fib 的 `media/hub`，带 RTMP、RTSP 和 SRT 监听，以及 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` 处理器，各有 `auth` | I115 | todo |
+| I117 | 媒体页面：`media_pages`，登录、推流、播放和房间通话，可开关麦克风和摄像头，以及有上限的房间 API | I115 | todo |
 
 ## M0 基础
 
@@ -1308,3 +1312,39 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
   内联与流式请求体都是；连接两端都有延迟；中途被切断的调用在每个看到它中断的角色上计为失败；设置的修改写回配置，错误的值
   以 400 拒绝；在竞态检测下通过。
 - **涉及**：`llm`、`docs`。
+
+## 媒体：认证、流媒体与页面
+
+用户要求 fit 接收媒体的每个协议都有可配置的认证、一个流媒体服务器，以及使用它们的页面
+（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）。先做一套命名的策略；流媒体角色和页面在其上并行构建。
+
+### I115 媒体认证策略
+
+- **做**：顶层 `media_auth`：命名的策略，包括静态 token（或其 SHA-256）、用户（明文密码或 bcrypt 哈希）、fit 签发 token
+  用的 secret、公开动作和 token 有效期，每个 token 和用户带它可以推送和播放的流模式。`mediaauth` 包：各项检查，从不阻塞
+  worker（bcrypt 在自己有上限的池上）；从 HTTP（Bearer、Basic、`?token=`、cookie）和 URL（`token`，`user` 和 `pass`）读取
+  凭据；签名 token；按 engine 和名称查找的策略，由角色 `media_auth` 在重载时原地修改。`whip`、`whep` 和 `webrtc_proxy`
+  （配合 `action`）的 `auth`；`fit media-token`。
+- **完成标准**：对每个处理器，没有凭据的 POST 以 401 和 Bearer 质询应答，凭据不允许时 403，允许时 201，覆盖静态、签名和
+  查询参数 token、Basic 和 bcrypt 用户；会话的 DELETE 不需要凭据；重载原地修改策略；`fit media-token` 的 token 被 fit 接受；
+  配置拒绝未知策略、空策略、错误的模式、同时给出 token 和 token_sha256；在竞态检测下通过。
+- **涉及**：`mediaauth`、`config`、`module`、`runtime`、`app`、`webrtc/media`、`cli`、`schema`、`docs`。
+
+### I116 流媒体角色
+
+- **做**：由 fit 运行 fib 的 `media/hub`：顶层 `streaming`，带 RTMP、RTSP 和 SRT 监听，各有 `auth`、上限（流数、每条流的
+  播放者数、超时）以及按 fit 惯例的重载；HTTP 出口作为处理器：`httpflv`、`hls`，以及基于 fib `media/rtc` 的 `stream_whip`
+  和 `stream_whep`，各有 `auth`；按各协议的方式传递凭据（RTMP 和 SRT 的查询参数或 streamid，RTSP 的 Basic 和 Digest，HTTP
+  经 `mediaauth.FromHTTP`，HLS 把查询参数中的 token 带到分片）。
+- **完成标准**：Linux 容器中的 ffmpeg 带与不带有效凭据经 RTMP、RTSP 和 SRT 推流，并经每种出口播放；上限和重载正常；在
+  竞态检测下通过。
+- **涉及**：`streaming`（新）、`config`、`app`、`cli`、`schema`、`docs`、`test/docker`。
+
+### I117 媒体页面
+
+- **做**：处理器 `media_pages`，资源内嵌，提供首页、经 WHIP 和 WHEP 的房间通话、推流和播放页面；用策略的用户登录，签发
+  签名 token 作为 HttpOnly cookie；有上限的房间 API，成员经它通告麦克风和摄像头状态；每个推流者始终提供一个音频和一个视频
+  transceiver，没有设备时用合成轨道，开关从不重新协商；检查 webrtc.media 对静默推流者和请求未发送媒体类型的观看者的处理。
+- **完成标准**：页面在带假设备和不带设备的无头 Chromium 中可用；房间 API 的上限、认证和连接中断在 Go 测试中正常；一个示例
+  配置把它们串起来。
+- **涉及**：`handler/mediapages`（新）、`webrtc/media`、`schema`、`docs`、`examples`。

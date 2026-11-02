@@ -241,12 +241,58 @@ JSON 写法：
 流已结束时 `404`；超过 `max_peer_connections`、`max_streams` 或 `max_viewers` 时 `503` 并带 `Retry-After: 5`，
 `webrtc.media` 未运行时 `503`。端点对其他方法应答 `405`。
 
-认证由路由的中间件完成：RFC 9725 的 bearer token 就是 `Authorization` 字段，由 `jwt` 校验，也可用 `basic_auth`、
-`forward_auth` 等。DELETE 走同一条路由，会话 ID 是 128 位随机数，只有创建会话的一方知道。
+认证由处理器的 `auth`（一条 [`media_auth`](reference/config.md#media-auth) 策略）或路由的中间件完成，也可两者
+同时使用；见下文 [认证](#认证)。
 
 fit 不用 trickle ICE 应答，也不支持 PATCH：fit 在 Mux 上是 ICE lite agent（RFC 8445 第 2.5 节），它的候选就是端口自己
 的地址，全部在 answer 中；它从对端的连通性检查得知对端地址，所以对端 trickle 的候选没有用处。ICE 重启就是一个新会话：
 客户端 DELETE 旧会话，再 POST 新的 offer。按 RFC 9725，收到 405 的客户端不再 trickle。
+
+### 认证
+
+`auth` 指定配置 `media_auth` 中的一条策略，规定谁可以推送、播放哪些流；处理器在读取 offer 的 body 之前用它检查 POST：
+
+```fit
+media_auth live {
+	secret a-secret-of-at-least-16-bytes
+	public play
+	tokens studio {
+		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+		publish live/*
+	}
+	users alice { password alice-password; publish alice-*; play * }
+}
+
+route {
+	match { path /whip/* }
+	handler whip { auth live }
+}
+
+route {
+	match { path /whep/* }
+	handler whep { auth live }
+}
+```
+
+- **凭据。** `tokens` 中的静态 token，写明文或写其 `token_sha256`；fit 用策略的 `secret` 签发的 token，由
+  `fit media-token -policy live -publish 'live/*' -ttl 1h` 打印，带有主体、过期时间和流；或 `users` 中的用户及其密码。
+  token 以 RFC 9725 的 `Authorization: Bearer` 发送，或作为查询参数 `token`（供无法设置请求头的客户端；访问日志写出的
+  URI 中为 `token=REDACTED`），或作为 cookie `fit_media_token`；用户以 `Authorization: Basic` 发送。
+- **权限。** 每个 token 和用户列出可以 `publish` 和 `play` 的流的模式：`*` 匹配任意一串字符，所以 `live/*`、
+  `room1-*` 和 `*` 都可用，空列表不授予任何权限。`public: ["play"]` 让任何人都能观看，推流仍需凭据。
+- **应答。** 没有凭据时 `401` 并带 `WWW-Authenticate: Bearer realm="fit"`；token 未知、过期或被篡改，或密码错误时
+  同样 `401`，并带 `error="invalid_token"`；凭据不允许对该流做该动作时 `403`；bcrypt 检查排队超出上限时 `503` 并带
+  `Retry-After: 1`。
+- **会话的 URL。** 它的 DELETE 和 OPTIONS 不需要凭据：会话 ID 是 128 位随机数，只有创建会话的一方知道，正是
+  RFC 9725 所依赖的凭证；长时间推流期间过期的 token 也不应妨碍推流者挂断。
+- **不占用 worker。** token 按其 SHA-256 查找或校验签名、明文密码以常数时间比较，都在 worker 上完成；`password_hash`
+  在自己的小线程池上用 bcrypt 检查（CPU 数的四分之一，最多 256 个等待），期间请求等待；检查通过的密码以带密钥的
+  SHA-256 记住，下次检查立即完成。
+- **重载。** 重载在原处修改策略，作用于下一个 offer；已建立的会话保留。处理器的 `auth` 指向配置中没有的策略时，配置
+  无法通过。
+
+路由的中间件仍然先执行，所以策略可以放在 `jwt`、`forward_auth` 或 IP 白名单之后。所有字段见
+[配置参考](reference/config.md#media-auth)，设计见 [决定 030](decisions/030-media-auth-and-pages.zh-CN.md)。
 
 ### 媒体
 
@@ -398,6 +444,10 @@ JSON 写法相同：
   `201` 没有 `Location`、answer 没有 ufrag 或没有 fit 能中继到的候选时 `502`（这种会话 fit 会到媒体服务器上 DELETE
   掉）；在 `timeout` 内没有应答时 `504`；fit 已没有的会话的 URL 为 `404`；端点上 POST 和 OPTIONS 以外的方法为 `405`。
   其他应答，包括媒体服务器对 offer 的拒绝，去掉逐跳字段后原样传递。
+
+设置了 `auth`（一条 [`media_auth`](#认证) 策略）和 `action`（WHIP 路由为 `publish`，WHEP 路由为 `play`）时，
+fit 在任何媒体服务器看到 offer 之前，按其路径的最后一段检查它，并自己应答 `401` 或 `403`；会话的请求不需要凭据，
+请求的 `Authorization` 原样发往媒体服务器，供也做检查的媒体服务器使用。
 
 整个过程不等待：offer 在最后一次 body 回调里经 fib 的异步客户端发往上游，answer 在客户端的回调里写回；客户端离开
 会取消请求。

@@ -141,7 +141,10 @@ fit validate -c fit.yaml -c conf.d
 | 一个目录 | 一个文件 | `fit adapt -c conf.d -to fit -o fit.conf` |
 
 `fit schema` 打印配置的 JSON Schema，编辑器可以用它在编写 JSON 和 YAML 时补全和检查；`fit schema -template fit` 打印
-.conf 模板。`fit hash-password` 在终端中提示输入两次密码（输入显示为 `*`，非终端时从标准输入读取）并打印其 bcrypt 哈希，用于 `basic_auth` 的用户和控制台的用户。
+.conf 模板。`fit hash-password` 在终端中提示输入两次密码（输入显示为 `*`，非终端时从标准输入读取）并打印其 bcrypt 哈希，用于 `basic_auth` 的用户、控制台的用户和 `media_auth` 的用户。
+`fit media-token -c fit.conf -policy live -publish 'live/*' -play '*' -ttl 1h -subject obs` 打印一个用
+[`media_auth`](reference/config.md#media-auth) 策略的 `secret` 签名的 token，供 WHIP 或 WHEP 客户端作为 bearer token 发送；
+使用同一 secret 的运行中的 fit 在其过期前都接受它。
 
 ## 修改运行中的配置
 

@@ -37,6 +37,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"llm", "LLM", "llm", "llm.md"},
 	{"tunnel", "Tunnel", "tunnel", "tunnel.md"},
 	{"webrtc", "WebRTC", "webrtc", "webrtc.md"},
+	{"media_auth", "Media auth", "media-auth", "media_auth.md"},
 	{"providers", "Providers", "providers", "providers.md"},
 }
 

@@ -11,8 +11,9 @@
 #
 # This file:
 # The roles run beside the gateway on its engine: the LLM feature's and the tunnel's, AI
-# models shared among machines and services behind NAT reached through a server, and
-# WebRTC's TURN server.
+# models shared among machines and services behind NAT reached through a server,
+# WebRTC's TURN server and media server, and the media_auth policies of who may publish
+# and play which streams.
 
 # The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy,
 # which share AI models among machines and serve them to agents. None when left out. What
@@ -1398,3 +1399,90 @@
     # # bounds the relays at once, beside max_relays.
     # # integer, 0 to 65535.
     # port_max: 0
+
+# Named policies of who may publish and play which streams, with tokens, users and keys for
+# tokens fit signs: the handlers and roles that take media (whip, whep, webrtc_proxy) refer to
+# one with their auth param. A handler without auth lets everyone in, as the route's
+# middleware allow.
+# list of object.
+# media_auth:
+  # -
+    # # The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles,
+    # # refer to it by. Letters, digits, '_', '.' and '-'.
+    # # string; required.
+    # name: ""
+
+    # # Static bearer tokens, each with the streams it may publish and play: sent as Authorization:
+    # # Bearer, a token query parameter or the fit_media_token cookie.
+    # # list of object.
+    # tokens:
+      # -
+        # # What the token is called in logs, which never show the token itself: token:<name>, or token
+        # # when left out.
+        # # string.
+        # name: ""
+
+        # # The token, at least 16 characters. Or token_sha256, one of the two.
+        # # string.
+        # token: ""
+
+        # # Instead of the token, its SHA-256 in hex, so that the config does not hold it, as sha256sum
+        # # prints it for the token alone, without a newline: printf %s "$TOKEN" | sha256sum.
+        # # string.
+        # token_sha256: ""
+
+        # # The streams the token may publish, by name or path, with * matching any run of characters,
+        # # '/' among them, as live/* or room1-*. None when left out.
+        # # list of string.
+        # publish: []
+
+        # # The streams the token may play, as publish lists them. None when left out.
+        # # list of string.
+        # play: []
+
+    # # Users with a password, each with the streams they may publish and play: sent as
+    # # Authorization: Basic, as user and pass query parameters where a protocol has no header
+    # # (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens
+    # # signed with secret.
+    # # list of object.
+    # users:
+      # -
+        # # The user's name; it may not contain a colon or a control character.
+        # # string; required.
+        # name: ""
+
+        # # The user's password. A user with one can also log in with RTSP's Digest, which needs the
+        # # password itself. Or password_hash, one of the two.
+        # # string.
+        # password: ""
+
+        # # Instead of the password, its bcrypt hash, as fit hash-password makes it: Basic and the
+        # # query's user and pass only, checked off fib's workers. A password once found right is
+        # # remembered, as a keyed SHA-256, so that the next check is at once.
+        # # string.
+        # password_hash: "$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG"
+
+        # # The streams the user may publish, as a token's publish lists them. None when left out.
+        # # list of string.
+        # publish: []
+
+        # # The streams the user may play. None when left out.
+        # # list of string.
+        # play: []
+
+    # # The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit
+    # # media-token's and the media pages' logins. Tokens are good for this policy alone, until
+    # # their expiry. When left out, a random key of the process's signs the pages' logins, which a
+    # # restart forgets; fit media-token needs it.
+    # # string.
+    # secret: ""
+
+    # # The actions anyone may take without credentials, as ["play"] for streams anyone may watch
+    # # and only some may publish. None when left out: every request needs credentials.
+    # # list of: publish, play.
+    # public: ["publish","play"]
+
+    # # How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h
+    # # when left out.
+    # # duration, as "1.5s" or "2m"; default "12h".
+    # token_ttl: "12h"

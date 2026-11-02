@@ -252,7 +252,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 		cleanupModules(g)
 		return nil, errs
 	}
-	menv := &module.Env{Upstreams: g.upstreams, WriteStall: c.Limits.WriteStall(), Graph: g, Engine: env.Engine}
+	menv := &module.Env{Upstreams: g.upstreams, WriteStall: c.Limits.WriteStall(), Graph: g, Engine: env.Engine, MediaAuth: c.MediaAuth}
 
 	routes := make([]*Route, len(c.Routes))
 	for i, rc := range c.Routes {

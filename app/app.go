@@ -216,6 +216,9 @@ func members(c *config.Config) []memberAt {
 	if w := c.WebRTC; w != nil && w.Proxy != nil {
 		ms = append(ms, memberAt{"webrtc.proxy", w.Proxy.At})
 	}
+	if len(c.MediaAuth) > 0 {
+		ms = append(ms, memberAt{"media_auth", c.MediaAuth[0].At})
+	}
 	return ms
 }
 

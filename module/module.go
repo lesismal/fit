@@ -132,6 +132,8 @@ type Env struct {
 	// Engine is the fib engine connections to upstreams are dialed
 	// through, or nil, as in tests.
 	Engine *fib.Engine
+	// MediaAuth are the config's media_auth policies, as written.
+	MediaAuth []config.MediaAuth
 }
 
 // Graph returns the hold a module takes on its config for a request that
@@ -176,6 +178,21 @@ func (c *Context) Upstream(name string) (*upstream.Pool, bool) {
 	}
 	p, ok := c.env.Upstreams[name]
 	return p, ok
+}
+
+// MediaAuth returns the media_auth policy of the module's config named
+// name, as written, or nil when there is none. Package mediaauth's
+// Provision takes the policy a module refers to with it.
+func (c *Context) MediaAuth(name string) *config.MediaAuth {
+	if c.env == nil {
+		return nil
+	}
+	for i := range c.env.MediaAuth {
+		if c.env.MediaAuth[i].Name == name {
+			return &c.env.MediaAuth[i]
+		}
+	}
+	return nil
 }
 
 // Errorf returns an error about the param named field, or about the params as

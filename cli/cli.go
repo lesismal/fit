@@ -28,6 +28,9 @@ Commands:
 	           print the bcrypt hash of a password, asked for twice, masked, on
 	           a terminal, or read from standard input, for basic_auth and the
 	           console's users
+	media-token
+	           print a token a media_auth policy's secret signs, for whip, whep
+	           and the other media handlers and roles
 	store      export or import the config kept encrypted in admin.store
 	help       print this help
 `
@@ -59,6 +62,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVersion(args[1:], stdout, stderr)
 	case "hash-password":
 		return runHashPassword(args[1:], stdout, stderr)
+	case "media-token":
+		return runMediaToken(args[1:], stdout, stderr)
 	case "store":
 		return runStore(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":

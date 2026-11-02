@@ -867,6 +867,19 @@ routes:
         # # request is answered 413, and a larger answer 502. 32 KiB when left out or 0.
         # # integer, 0 or more; default 32768.
         # max_sdp_bytes: 32768
+
+        # # The media_auth policy an offer must satisfy before it is sent to a media server: its
+        # # credentials need action on the stream, the last segment of the POST's path. Missing or bad
+        # # credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed
+        # # on without credentials, its ID being the capability; the request's Authorization goes on to
+        # # the media server as it came. Everyone may when left out, as the route's middleware allow.
+        # # string.
+        # auth: ""
+
+        # # What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with
+        # # auth.
+        # # one of: publish, play.
+        # action: "publish"
   # -
     # # A route whose handler is whep, with every one of its params.
     # name: "whep-example"
@@ -881,6 +894,13 @@ routes:
         # # beside /watch.
         # # string.
         # stream: ""
+
+        # # The media_auth policy a POST must satisfy to play the stream: its credentials need play on
+        # # the stream's name, or the policy makes play public. Missing or bad credentials are answered
+        # # 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without
+        # # credentials, as whip's. Everyone may play when left out, as the route's middleware allow.
+        # # string.
+        # auth: ""
   # -
     # # A route whose handler is whip, with every one of its params.
     # name: "whip-example"
@@ -895,3 +915,11 @@ routes:
         # # beside /live.
         # # string.
         # stream: ""
+
+        # # The media_auth policy a POST must satisfy to publish the stream: its credentials, a bearer
+        # # token or a user and password, need publish on the stream's name, or the policy makes publish
+        # # public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A
+        # # session's URL takes its DELETE without credentials: its ID, 128 random bits, is the
+        # # capability. Everyone may publish when left out, as the route's middleware allow.
+        # # string.
+        # auth: ""

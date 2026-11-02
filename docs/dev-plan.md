@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I114.
+Status: `todo`, `doing` or `done`. The next free iteration number is I118.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -261,6 +261,10 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I114.
 | I111 | WebRTC on fib's A55–A59: TURN over TCP and TLS, caps, events, changes in place and drains; the proxy's source address and ports | I87, I110 | done |
 | I112 | The agent's model APIs: every stateless inference endpoint of OpenAI and its compatibles, Anthropic, Gemini, Azure OpenAI, Ollama and Cohere | I107 | done |
 | I113 | The LLM roles' node list, links and traffic: a hub's nodes synced to its proxies, every link's bytes and latency, every route's calls, a link map on each role's pages, and the roles' remaining settings set there | I112 | done |
+| **Media** | | | |
+| I115 | Media auth: named `media_auth` policies (tokens, users, signed tokens, public actions, stream patterns), package `mediaauth`, `auth` on `whip`, `whep` and `webrtc_proxy`, `fit media-token` | I109, I110 | done |
+| I116 | The streaming role: fib's `media/hub` with RTMP, RTSP and SRT listeners, and `httpflv`, `hls`, `stream_whip` and `stream_whep` handlers, each with `auth` | I115 | todo |
+| I117 | The media pages: `media_pages`, login, publish, play and a room call with the microphone and camera switched on and off, and a bounded room API | I115 | todo |
 
 ## M0, foundations
 
@@ -1529,3 +1533,49 @@ server, and fit in front of other media servers, for their signaling and their m
   link has a latency on both ends; a call cut midway is a failure on every role that saw it; the
   settings' edits are written back and a bad value is refused with 400; under the race detector.
 - **Touches**: `llm`, `docs`.
+
+## Media: auth, streaming and pages
+
+Users asked for auth they can configure on every protocol fit takes media over, a streaming
+server, and pages to use them with ([decision 030](decisions/030-media-auth-and-pages.md)). One
+set of named policies comes first; the streaming role and the pages build on it, side by side.
+
+### I115 Media auth policies
+
+- **Do**: top-level `media_auth`: named policies of static tokens (or their SHA-256), users (a
+  password, or a bcrypt hash), a secret for tokens fit signs, public actions and a token lifetime,
+  each token and user with the stream patterns it may publish and play. Package `mediaauth`: the
+  checks, never blocking a worker (bcrypt on a bounded pool of its own), credentials from HTTP
+  (Bearer, Basic, `?token=`, a cookie) and from URLs (`token`, `user` and `pass`), signed tokens,
+  policies found by engine and name and changed in place on reload by the role `media_auth`.
+  `auth` on `whip`, `whep` and `webrtc_proxy` (with `action`); `fit media-token`.
+- **Done when**: a POST without credentials is answered 401 with a Bearer challenge, one with
+  credentials that do not allow it 403, one that does 201, for each handler, for static, signed
+  and query tokens, Basic and a bcrypt user; a session's DELETE needs no credentials; a reload
+  changes a policy in place; a token from `fit media-token` is taken by fit; the config refuses an
+  unknown policy, an empty one, a bad pattern, token with token_sha256; under the race detector.
+- **Touches**: `mediaauth`, `config`, `module`, `runtime`, `app`, `webrtc/media`, `cli`, `schema`,
+  `docs`.
+
+### I116 The streaming role
+
+- **Do**: fib's `media/hub` run by fit: a top-level `streaming` with RTMP, RTSP and SRT listeners,
+  each with `auth`, limits (streams, players a stream, timeouts) and reloads by fit's conventions;
+  HTTP egress as handlers, `httpflv`, `hls`, `stream_whip` and `stream_whep` on fib's `media/rtc`,
+  each with `auth`; credentials in each protocol's way (RTMP and SRT query or streamid, RTSP Basic
+  and Digest, HTTP through `mediaauth.FromHTTP`, HLS carrying a query token to its segments).
+- **Done when**: ffmpeg in a Linux container pushes over RTMP, RTSP and SRT with and without valid
+  credentials and plays over each egress; limits and reloads hold; under the race detector.
+- **Touches**: `streaming` (new), `config`, `app`, `cli`, `schema`, `docs`, `test/docker`.
+
+### I117 The media pages
+
+- **Do**: a handler `media_pages`, its assets embedded, serving an index, a room call over WHIP and
+  WHEP, publish and play pages; a login against the policy's users that issues a signed token as
+  an HttpOnly cookie; a room API, bounded, through which members announce their microphone and
+  camera state; every publisher always offers an audio and a video transceiver, with a synthetic
+  track when there is no device, and the switches never renegotiate; webrtc.media checked against
+  silent publishers and viewers asking for a kind not sent.
+- **Done when**: the pages work in headless Chromium with fake devices and with none; the room
+  API's limits, auth and cut connections hold under Go tests; an example config wires it all.
+- **Touches**: `handler/mediapages` (new), `webrtc/media`, `schema`, `docs`, `examples`.

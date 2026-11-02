@@ -11,6 +11,7 @@ import (
 	"github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/module"
 )
 
@@ -25,6 +26,7 @@ func init() {
 // DELETE of the session's URL ends it.
 type WHIP struct {
 	Stream string `json:"stream,omitempty" doc:"The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whip/cam1 on a route of /whip/*: one route takes every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /live/* beside /live."`
+	Auth   string `json:"auth,omitempty" doc:"The media_auth policy a POST must satisfy to publish the stream: its credentials, a bearer token or a user and password, need publish on the stream's name, or the policy makes publish public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials: its ID, 128 random bits, is the capability. Everyone may publish when left out, as the route's middleware allow."`
 
 	h handler
 }
@@ -33,18 +35,23 @@ type WHIP struct {
 // of the session's URL ends the viewer's session.
 type WHEP struct {
 	Stream string `json:"stream,omitempty" doc:"The stream's name. When left out, the name is the last segment of the path a POST is sent to, as cam1 in /whep/cam1 on a route of /whep/*: one route plays every stream. A session's URL is the path of its POST followed by its ID, which the route must match too, as /watch/* beside /watch."`
+	Auth   string `json:"auth,omitempty" doc:"The media_auth policy a POST must satisfy to play the stream: its credentials need play on the stream's name, or the policy makes play public. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL takes its DELETE without credentials, as whip's. Everyone may play when left out, as the route's middleware allow."`
 
 	h handler
 }
 
-// Provision checks the stream's name.
-func (w *WHIP) Provision(ctx *module.Context) error { return w.h.provision(ctx, Publisher, w.Stream) }
+// Provision checks the stream's name and finds the auth policy.
+func (w *WHIP) Provision(ctx *module.Context) error {
+	return w.h.provision(ctx, Publisher, w.Stream, w.Auth)
+}
 
 // ServeHTTP serves the endpoint and its sessions' URLs.
 func (w *WHIP) ServeHTTP(c *fibhttp.Context) { w.h.ServeHTTP(c) }
 
-// Provision checks the stream's name.
-func (w *WHEP) Provision(ctx *module.Context) error { return w.h.provision(ctx, Viewer, w.Stream) }
+// Provision checks the stream's name and finds the auth policy.
+func (w *WHEP) Provision(ctx *module.Context) error {
+	return w.h.provision(ctx, Viewer, w.Stream, w.Auth)
+}
 
 // ServeHTTP serves the endpoint and its sessions' URLs.
 func (w *WHEP) ServeHTTP(c *fibhttp.Context) { w.h.ServeHTTP(c) }
@@ -54,20 +61,34 @@ type handler struct {
 	Stream string
 	kind   Kind
 	engine *fib.Engine
+	// auth is the media_auth policy, nil for none.
+	auth *mediaauth.Policy
 }
 
 // streamName is what a stream's name may be: what a path segment holds
 // without escapes.
 var streamName = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 
-// provision checks the stream's name and finds the engine the media server
-// is registered under.
-func (h *handler) provision(ctx *module.Context, kind Kind, stream string) error {
+// provision checks the stream's name, finds the engine the media server
+// is registered under, and the auth policy.
+func (h *handler) provision(ctx *module.Context, kind Kind, stream, auth string) error {
 	if stream != "" && !streamName.MatchString(stream) {
 		return ctx.Errorf("stream", "%q is not a name of 1 to 128 letters, digits, '.', '_', '~' and '-'", stream)
 	}
-	h.Stream, h.kind, h.engine = stream, kind, ctx.Engine()
+	p, err := mediaauth.Provision(ctx, "auth", auth)
+	if err != nil {
+		return err
+	}
+	h.Stream, h.kind, h.engine, h.auth = stream, kind, ctx.Engine(), p
 	return nil
+}
+
+// action is what the handler's POSTs ask of its auth policy.
+func (h *handler) action() mediaauth.Action {
+	if h.kind == Publisher {
+		return mediaauth.Publish
+	}
+	return mediaauth.Play
 }
 
 // sessionID is what a session's ID is: 32 hex digits.
@@ -119,6 +140,15 @@ func (h *handler) ServeHTTP(c *fibhttp.Context) {
 		respond(c, stdhttp.StatusNotFound, "no stream name in the path", nil)
 		return
 	}
+	// The offer's body is taken only once its credentials are checked; a
+	// session's URL, above, needs none (see the auth param).
+	h.auth.Guard(c, h.action(), name, func(string) { h.post(c, name, path) })
+}
+
+// post takes an endpoint's POST once its credentials are checked: on the
+// worker, or on mediaauth's pool after a bcrypt check.
+func (h *handler) post(c *fibhttp.Context, name, path string) {
+	srv := Lookup(h.engine)
 	if mt, _, err := mime.ParseMediaType(c.Request.Header.Get("Content-Type")); err != nil || mt != "application/sdp" {
 		respond(c, stdhttp.StatusUnsupportedMediaType, "the offer must be application/sdp", stdhttp.Header{"Accept-Post": {"application/sdp"}})
 		return

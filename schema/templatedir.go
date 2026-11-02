@@ -45,10 +45,11 @@ var dirFiles = []dirFile{
 	{name: "50-providers", fields: []string{"providers"}, about: []string{
 		"Routes, upstreams, services and listeners from Docker, Consul, etcd and Kubernetes.",
 	}},
-	{name: "60-apps", fields: []string{"llm", "tunnel", "webrtc"}, about: []string{
+	{name: "60-apps", fields: []string{"llm", "tunnel", "webrtc", "media_auth"}, about: []string{
 		"The roles run beside the gateway on its engine: the LLM feature's and the tunnel's, AI",
-		"models shared among machines and services behind NAT reached through a server, and",
-		"WebRTC's TURN server.",
+		"models shared among machines and services behind NAT reached through a server,",
+		"WebRTC's TURN server and media server, and the media_auth policies of who may publish",
+		"and play which streams.",
 	}},
 	{name: "sites/api.example.com", fields: []string{"routes", "upstreams"}, about: []string{
 		"A site: the routes of api.example.com, proxied to its upstream, which is here with",
