@@ -1,0 +1,583 @@
+{
+  "started": "2026-11-03T11:40:20.860888537Z",
+  "finished": "2026-11-03T11:46:05.33780109Z",
+  "host": {
+    "architecture": "x86_64",
+    "cores": "8",
+    "cpu(s)": "16",
+    "docker_arch": "x86_64",
+    "docker_cpus": "16",
+    "file_max": "2000500",
+    "kernel": "Linux 7.0.0-38-generic",
+    "max_mhz": "5053",
+    "memory": "64953084 kB",
+    "model_name": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "nr_open": "2000500",
+    "numa_nodes": "1",
+    "os": "linux",
+    "port_range": "1024-65535",
+    "rmem_max": "7500000",
+    "somaxconn": "32768",
+    "tcp_mem_pressure_bytes": "1073741824",
+    "threads_per_core": "2"
+  },
+  "params": {
+    "duration": "15s",
+    "warmup": "5s",
+    "connections": 500,
+    "h2_connections": 20,
+    "h2_streams": 25,
+    "idle_connections": 10000,
+    "idle_settle": "5s",
+    "label": "w0-fixed-500",
+    "network": "host",
+    "server_cpus": "0-2,8-10",
+    "client_cpus": "5-7,13-15",
+    "backend_cpus": "3-4,11-12",
+    "aligned": {
+      "backend_conns": 16384,
+      "backend_idle_per_worker": 2731,
+      "backlog": 32768,
+      "nginx_worker_connections": 65536
+    },
+    "derived": {
+      "machine": {
+        "model": "AMD Ryzen 7 7800X3D 8-Core Processor",
+        "cpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "numa_nodes": 1,
+        "max_mhz": 5053,
+        "memory_bytes": 66511958016,
+        "somaxconn": 32768,
+        "nr_open": 2000500,
+        "file_max": 2000500,
+        "port_lo": 1024,
+        "port_hi": 65535,
+        "rmem_max": 7500000,
+        "tcp_mem_pressure_bytes": 1073741824
+      },
+      "server_cpus": "0-2,8-10",
+      "backend_cpus": "3-4,11-12",
+      "client_cpus": "5-7,13-15",
+      "workers": 6,
+      "backend_workers": 4,
+      "client_threads": 6,
+      "top": 10000,
+      "top_bounds": {
+        "backend": 16000,
+        "client": 10002,
+        "cpu": 15000,
+        "file_max": 250062,
+        "memory": 31715,
+        "nofile": 262144,
+        "ports": 51609,
+        "somaxconn": 163840,
+        "tcp_mem": 32768
+      },
+      "levels": [
+        {
+          "in_flight": 100,
+          "connections": 100,
+          "h2_connections": 10,
+          "h2_streams": 10
+        },
+        {
+          "in_flight": 500,
+          "connections": 500,
+          "h2_connections": 20,
+          "h2_streams": 25
+        },
+        {
+          "in_flight": 2000,
+          "connections": 2000,
+          "h2_connections": 80,
+          "h2_streams": 25
+        },
+        {
+          "in_flight": 5000,
+          "connections": 5000,
+          "h2_connections": 200,
+          "h2_streams": 25
+        },
+        {
+          "in_flight": 10000,
+          "connections": 10000,
+          "h2_connections": 400,
+          "h2_streams": 25
+        }
+      ],
+      "mid": {
+        "in_flight": 500,
+        "connections": 500,
+        "h2_connections": 20,
+        "h2_streams": 25
+      },
+      "w2_levels": [
+        {
+          "in_flight": 500,
+          "connections": 500,
+          "h2_connections": 20,
+          "h2_streams": 25
+        },
+        {
+          "in_flight": 2000,
+          "connections": 2000,
+          "h2_connections": 80,
+          "h2_streams": 25
+        }
+      ],
+      "w3_connections": [
+        100,
+        500
+      ],
+      "w4_level": {
+        "in_flight": 100,
+        "connections": 100,
+        "h2_connections": 10,
+        "h2_streams": 10
+      },
+      "w5_idle": 40000,
+      "w5_idle_bounds": {
+        "file_max": 500125,
+        "memory": 249722,
+        "nofile": 523288,
+        "top": 40000
+      },
+      "w6_rates": [
+        30000,
+        200000
+      ],
+      "w6_rates_from": "estimate: the benchmark host's 20000 and 100000 for 4 server CPUs at 5053 MHz, scaled; the plan calibrates them from W1 at 500",
+      "aligned": {
+        "backend_conns": 16384,
+        "backend_idle_per_worker": 2731,
+        "backlog": 32768,
+        "nginx_worker_connections": 65536
+      },
+      "duration": "15s",
+      "warmup": "5s",
+      "runs": 232,
+      "estimated": "1h33m0s"
+    }
+  },
+  "versions": {
+    "caddy": "v2.10.2 h1:g/gTYjGMD0dec+UgMw8SnfmJ3I9+M2TdvoRL/Ovu6U8=",
+    "docker": "29.1.3",
+    "envoy": "envoy  version: 9e5580933739775e8bce696a57a2e1bc99368f23/1.40.0/Clean/RELEASE/BoringSSL",
+    "fit": "fit v0.0.0-20261103094059-8e4cd91921ae+dirty; fib (devel); go1.27.3 linux/amd64",
+    "h2load": "h2load nghttp2/1.59.0",
+    "h2load-h3": "h2load nghttp2/1.68.0",
+    "nginx": "nginx version: nginx/1.31.4",
+    "wrk": "wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer"
+  },
+  "images": {
+    "caddy": "caddy@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+    "envoy": "envoyproxy/envoy@sha256:459f2a6404c340fe6afccd69d85527012d47f3c036765493e6f8f3113fa384de",
+    "fit": "ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+    "nginx": "nginx@sha256:b34848eff6db786b6b1282d3a9c3fd0b5563dfb6d261df4923378b419e0d24f0"
+  },
+  "results": [
+    {
+      "server": "nginx",
+      "scenario": "fixed",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 688446.6909568809,
+      "requests": 10344843,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.353,
+        "p90": 0.678,
+        "p99": 0.743,
+        "p99.9": 3.626,
+        "mean": 0.41264999999999996,
+        "stdev": 0.40302,
+        "max": 28.733
+      },
+      "cpu_cores": 5.446828122652203,
+      "memory_bytes": 182771712,
+      "anon_bytes": 178143232,
+      "anon_start_bytes": 177725440,
+      "anon_peak_bytes": 178143232,
+      "in_flight": 498,
+      "cpu_us_per_request": 7.911764547929755,
+      "requests_per_sec_per_mib": 4052.293591579176,
+      "bytes_per_in_flight": 838.9397590361446
+    },
+    {
+      "server": "nginx",
+      "scenario": "fixed",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 504019,
+      "requests": 7560285,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 1.13,
+        "stdev": 0.666,
+        "max": 4.54
+      },
+      "cpu_cores": 5.974683627807965,
+      "memory_bytes": 181682176,
+      "anon_bytes": 178323456,
+      "anon_start_bytes": 177725440,
+      "anon_peak_bytes": 178323456,
+      "in_flight": 500,
+      "cpu_us_per_request": 11.85408412739989,
+      "requests_per_sec_per_mib": 2963.728041161338,
+      "bytes_per_in_flight": 1196.032
+    },
+    {
+      "server": "nginx",
+      "scenario": "fixed",
+      "protocol": "h2",
+      "tool": "h2load",
+      "requests_per_sec": 720578.93,
+      "requests": 10808684,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.664,
+        "stdev": 0.358,
+        "max": 4.31
+      },
+      "cpu_cores": 5.845712860877054,
+      "memory_bytes": 183816192,
+      "anon_bytes": 180158464,
+      "anon_start_bytes": 177725440,
+      "anon_peak_bytes": 180158464,
+      "in_flight": 500,
+      "tls": "TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / id-ecPublicKey",
+      "cpu_us_per_request": 8.112522608560111,
+      "requests_per_sec_per_mib": 4193.984314296108,
+      "bytes_per_in_flight": 4866.048
+    },
+    {
+      "server": "nginx",
+      "scenario": "fixed",
+      "protocol": "h3",
+      "tool": "h2load-h3",
+      "requests_per_sec": 1624961.67,
+      "requests": 24374425,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.315,
+        "stdev": 0.127,
+        "max": 3.45
+      },
+      "cpu_cores": 4.354607616824544,
+      "memory_bytes": 202264576,
+      "anon_bytes": 198434816,
+      "anon_start_bytes": 177725440,
+      "anon_peak_bytes": 198926336,
+      "in_flight": 500,
+      "cpu_us_per_request": 2.6798217442412313,
+      "requests_per_sec_per_mib": 8565.46117695507,
+      "bytes_per_in_flight": 42401.792
+    },
+    {
+      "server": "caddy",
+      "scenario": "fixed",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 256850.17652390117,
+      "requests": 3860743,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 1.866,
+        "p90": 4.245,
+        "p99": 10.067,
+        "p99.9": 14.239,
+        "mean": 2.2112399999999997,
+        "stdev": 1.97215,
+        "max": 29.621
+      },
+      "cpu_cores": 5.788420646577341,
+      "memory_bytes": 35729408,
+      "anon_bytes": 32706560,
+      "anon_start_bytes": 11542528,
+      "anon_peak_bytes": 34123776,
+      "in_flight": 498,
+      "cpu_us_per_request": 22.536175465850615,
+      "requests_per_sec_per_mib": 7892.647364076185,
+      "bytes_per_in_flight": 45343.871485943775
+    },
+    {
+      "server": "caddy",
+      "scenario": "fixed",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 141830.53,
+      "requests": 2127458,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 3.52,
+        "stdev": 2.9,
+        "max": 61.84
+      },
+      "cpu_cores": 5.838090663113414,
+      "memory_bytes": 32649216,
+      "anon_bytes": 29892608,
+      "anon_start_bytes": 11403264,
+      "anon_peak_bytes": 34840576,
+      "in_flight": 500,
+      "cpu_us_per_request": 41.16243987182036,
+      "requests_per_sec_per_mib": 4268.588723254174,
+      "bytes_per_in_flight": 46874.624
+    },
+    {
+      "server": "caddy",
+      "scenario": "fixed",
+      "protocol": "h2",
+      "tool": "h2load",
+      "requests_per_sec": 146697.6,
+      "requests": 2200464,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 3.38,
+        "stdev": 2.76,
+        "max": 45.32
+      },
+      "cpu_cores": 5.856911727760522,
+      "memory_bytes": 34279424,
+      "anon_bytes": 31219712,
+      "anon_start_bytes": 12054528,
+      "anon_peak_bytes": 35635200,
+      "in_flight": 500,
+      "tls": "TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / id-ecPublicKey",
+      "cpu_us_per_request": 39.92506849301231,
+      "requests_per_sec_per_mib": 4316.619034482759,
+      "bytes_per_in_flight": 47161.344
+    },
+    {
+      "server": "caddy",
+      "scenario": "fixed",
+      "protocol": "h3",
+      "tool": "h2load-h3",
+      "requests_per_sec": 231779.93,
+      "requests": 3476699,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 2.15,
+        "stdev": 1.45,
+        "max": 36.46
+      },
+      "cpu_cores": 5.837589651359532,
+      "memory_bytes": 40910848,
+      "anon_bytes": 38207488,
+      "anon_start_bytes": 11874304,
+      "anon_peak_bytes": 65110016,
+      "in_flight": 500,
+      "cpu_us_per_request": 25.185915153911438,
+      "requests_per_sec_per_mib": 3732.7417010568697,
+      "bytes_per_in_flight": 106471.424
+    },
+    {
+      "server": "envoy",
+      "scenario": "fixed",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 264865.2456444812,
+      "requests": 3981764,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 1.903,
+        "p90": 2.195,
+        "p99": 2.336,
+        "p99.9": 2.917,
+        "mean": 1.8720999999999999,
+        "stdev": 0.26912,
+        "max": 3.533
+      },
+      "cpu_cores": 5.965598083718031,
+      "memory_bytes": 34131968,
+      "anon_bytes": 30740480,
+      "anon_start_bytes": 15822848,
+      "anon_peak_bytes": 30740480,
+      "in_flight": 498,
+      "cpu_us_per_request": 22.52314405841464,
+      "requests_per_sec_per_mib": 9034.710577613216,
+      "bytes_per_in_flight": 29955.0843373494
+    },
+    {
+      "server": "envoy",
+      "scenario": "fixed",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 433935,
+      "requests": 6509025,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 1.18,
+        "stdev": 0.308,
+        "max": 2.46
+      },
+      "cpu_cores": 4.974544489728498,
+      "memory_bytes": 27594752,
+      "anon_bytes": 24317952,
+      "anon_start_bytes": 15802368,
+      "anon_peak_bytes": 24317952,
+      "in_flight": 500,
+      "cpu_us_per_request": 11.463801006437594,
+      "requests_per_sec_per_mib": 18711.025770591208,
+      "bytes_per_in_flight": 17031.168
+    },
+    {
+      "server": "envoy",
+      "scenario": "fixed",
+      "protocol": "h2",
+      "tool": "h2load",
+      "requests_per_sec": 438380,
+      "requests": 6575700,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 1.21,
+        "stdev": 0.48,
+        "max": 2.69
+      },
+      "cpu_cores": 5.881512795870922,
+      "memory_bytes": 27545600,
+      "anon_bytes": 24231936,
+      "anon_start_bytes": 15831040,
+      "anon_peak_bytes": 24231936,
+      "in_flight": 500,
+      "tls": "TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / id-ecPublicKey",
+      "cpu_us_per_request": 13.416471544940284,
+      "requests_per_sec_per_mib": 18969.790398918187,
+      "bytes_per_in_flight": 16801.792
+    },
+    {
+      "server": "envoy",
+      "scenario": "fixed",
+      "protocol": "h3",
+      "tool": "h2load-h3",
+      "requests_per_sec": 170088.33,
+      "requests": 2551325,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 3.03,
+        "stdev": 1.97,
+        "max": 16.77
+      },
+      "cpu_cores": 4.984134912107377,
+      "memory_bytes": 232132608,
+      "anon_bytes": 229158912,
+      "anon_start_bytes": 15826944,
+      "anon_peak_bytes": 229158912,
+      "in_flight": 500,
+      "cpu_us_per_request": 29.303215053656988,
+      "requests_per_sec_per_mib": 778.2832409244463,
+      "bytes_per_in_flight": 426663.936
+    },
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "http/1.1",
+      "tool": "wrk",
+      "requests_per_sec": 693221.1497314059,
+      "requests": 10424225,
+      "errors": 0,
+      "latency_ms": {
+        "p50": 0.349,
+        "p90": 0.687,
+        "p99": 0.979,
+        "p99.9": 2.951,
+        "mean": 0.40246,
+        "stdev": 0.19677,
+        "max": 7.059
+      },
+      "cpu_cores": 5.9152437371738005,
+      "memory_bytes": 18644992,
+      "anon_bytes": 15286272,
+      "anon_start_bytes": 5738496,
+      "anon_peak_bytes": 16998400,
+      "goroutines_max": 127,
+      "in_flight": 498,
+      "cpu_us_per_request": 8.532982208442009,
+      "requests_per_sec_per_mib": 42762.55767017829,
+      "bytes_per_in_flight": 22610.248995983937
+    },
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "h2c",
+      "tool": "h2load",
+      "requests_per_sec": 3047675,
+      "requests": 45715125,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.142,
+        "stdev": 0.065,
+        "max": 4.14
+      },
+      "cpu_cores": 5.959444111253981,
+      "memory_bytes": 16343040,
+      "anon_bytes": 13549568,
+      "anon_start_bytes": 5828608,
+      "anon_peak_bytes": 13549568,
+      "goroutines_max": 152,
+      "in_flight": 500,
+      "cpu_us_per_request": 1.9554066989603485,
+      "requests_per_sec_per_mib": 235853.9298669891,
+      "bytes_per_in_flight": 15441.92
+    },
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "h2",
+      "tool": "h2load",
+      "requests_per_sec": 2888606.73,
+      "requests": 43329101,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.147,
+        "stdev": 0.064,
+        "max": 4.13
+      },
+      "cpu_cores": 5.9588216550869015,
+      "memory_bytes": 15630336,
+      "anon_bytes": 12644352,
+      "anon_start_bytes": 5611520,
+      "anon_peak_bytes": 12644352,
+      "goroutines_max": 166,
+      "in_flight": 500,
+      "tls": "TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / id-ecPublicKey",
+      "cpu_us_per_request": 2.0628705158098493,
+      "requests_per_sec_per_mib": 239547.56167152576,
+      "bytes_per_in_flight": 14065.664
+    },
+    {
+      "server": "fit",
+      "scenario": "fixed",
+      "protocol": "h3",
+      "tool": "h2load-h3",
+      "requests_per_sec": 2418655.07,
+      "requests": 36279826,
+      "errors": 0,
+      "latency_ms": {
+        "mean": 0.205,
+        "stdev": 0.055,
+        "max": 3.37
+      },
+      "cpu_cores": 5.370554199258328,
+      "memory_bytes": 21884928,
+      "anon_bytes": 19427328,
+      "anon_start_bytes": 5652480,
+      "anon_peak_bytes": 19427328,
+      "goroutines_max": 215,
+      "in_flight": 500,
+      "cpu_us_per_request": 2.2204713131163136,
+      "requests_per_sec_per_mib": 130545.16085178156,
+      "bytes_per_in_flight": 27549.696
+    }
+  ],
+  "startup_goroutines": {
+    "fit": 59
+  },
+  "startup_anon_bytes": {
+    "caddy": 11542528,
+    "envoy": 15822848,
+    "fit": 5738496,
+    "nginx": 177725440
+  }
+}

@@ -338,7 +338,7 @@ fitbench run, named by its workload and level (`w1-api-500.json`), the plan deri
 (`plan.txt`, `plan-derived.json`), and the report, `report.md` and `report.zh-CN.md`, with the
 tables it cites in `tables.md`. fitbench run alone writes `results/run-<time>/results.json`, which
 git ignores. The latest report is
-[the third 2026-11-03 plan, fit on fib ff5761a: a lock for each client host, and an opt-in for the 200k tail](results/plan-2026-11-03c/report.md) (the gains are in [the second](results/plan-2026-11-03b/report.md)). To
+[the fourth 2026-11-03 plan, fit on fib c492d7e: HTTP/2 answers past a taken lock, fit ahead of nginx in the API gateway over h2](results/plan-2026-11-03d/report.md). To
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
