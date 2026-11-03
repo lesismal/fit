@@ -55,7 +55,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS on Intel: the hosted arm64 runners (macos-latest) were short
+        # of capacity, and their jobs waited 15 minutes for one before being
+        # cancelled ("not acquired by Runner of type hosted", 2026-11-03).
+        os: [ubuntu-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
