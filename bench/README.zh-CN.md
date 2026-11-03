@@ -272,7 +272,7 @@ worker），不含页缓存；相当于 RSS 去掉文件映射的部分。WebSoc
 `sweep-DATE`）中，每轮 fitbench 一个 JSON，以工作负载和档位命名（`w1-api-500.json`），还有为它推导的方案（`plan.txt`、
 `plan-derived.json`）和报告 `report.md`、`report.zh-CN.md`，报告引用的表格在 `tables.md`。单独运行 fitbench 时写出
 `results/run-<时间>/results.json`，git 忽略它。最新的报告是
-[2026-11-03 第四次的方案，即锁被占用时 HTTP/2 响应入队、API 网关走 h2 领先 nginx、基于 fib c492d7e 的 fit](results/plan-2026-11-03d/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
+[2026-11-04 的方案，即 API 网关走 HTTP/1.1 达到 nginx 的 87-99%、基于 fib ea27938 的 fit](results/plan-2026-11-04/report.zh-CN.md)。要复现某个结果，在压测机上用其中记录的
 `params` 运行：
 
 ```bash
