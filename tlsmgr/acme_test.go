@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,14 @@ func (l *logLines) logf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
+}
+
+// snapshot returns a copy of the lines so far, which the ACME's goroutines
+// may still be adding to.
+func (l *logLines) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.lines)
 }
 
 func (l *logLines) count(substr string) int {
@@ -208,7 +217,7 @@ func TestStoredCertificate(t *testing.T) {
 		t.Errorf("serial %s, want the stored %s", got, cert.Leaf.SerialNumber)
 	}
 	if n := l.count("trying again"); n != 0 {
-		t.Errorf("the CA was asked: %q", l.lines)
+		t.Errorf("the CA was asked: %q", l.snapshot())
 	}
 }
 
@@ -255,7 +264,7 @@ func TestSlowCA(t *testing.T) {
 	if m := most.Load(); m > 2 {
 		t.Errorf("%d requests to the CA at once, past max_concurrent 2", m)
 	}
-	for _, line := range l.lines {
+	for _, line := range l.snapshot() {
 		// A loaded runner can see the timeout cut a TLS handshake to the CA
 		// short, which the client reports as EOF rather than the deadline.
 		if !strings.Contains(line, "context deadline exceeded") && !strings.HasSuffix(strings.SplitN(line, "; trying again", 2)[0], ": EOF") {

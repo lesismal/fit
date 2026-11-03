@@ -196,7 +196,7 @@ func TestFakeCASharedFaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.count("keeping the challenge's answer") != 1 || l.count("removing the challenge's answer") != 1 {
-		t.Errorf("the storage's failures not reported: %q", l.lines)
+		t.Errorf("the storage's failures not reported: %q", l.snapshot())
 	}
 }
 
@@ -330,7 +330,7 @@ func TestEnsureStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.count("storing the certificate") != 1 || l.count("giving back the storage's lock") == 0 {
-		t.Errorf("the storage's failures not reported: %q", l.lines)
+		t.Errorf("the storage's failures not reported: %q", l.snapshot())
 	}
 
 	// A stored certificate that cannot be used, and a storage that cannot
@@ -343,7 +343,7 @@ func TestEnsureStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.count("g.fit.test: the stored certificate cannot be used") == 0 {
-		t.Errorf("an unusable certificate not reported: %q", l.lines)
+		t.Errorf("an unusable certificate not reported: %q", l.snapshot())
 	}
 	st.fault = func(op, key string) error {
 		if op == "load" && strings.HasPrefix(key, "certificates/") {
@@ -355,7 +355,7 @@ func TestEnsureStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.count("h.fit.test: loading the certificate") == 0 {
-		t.Errorf("a failed load not reported: %q", l.lines)
+		t.Errorf("a failed load not reported: %q", l.snapshot())
 	}
 }
 
@@ -586,7 +586,7 @@ func TestSharedLookupFaults(t *testing.T) {
 		t.Error("a failed load answered")
 	}
 	if l.count("looking up a challenge") != 2 {
-		t.Errorf("the failures not reported: %q", l.lines)
+		t.Errorf("the failures not reported: %q", l.snapshot())
 	}
 	// A name that makes another key, or none, is not looked up.
 	for _, bad := range []string{"", "A.fit.test", "a/b"} {
@@ -600,7 +600,7 @@ func TestSharedLookupFaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a.sharedALPNChallenge("b.fit.test") != nil || l.count("the shared challenge's certificate") != 1 {
-		t.Errorf("a challenge's certificate that does not parse: %q", l.lines)
+		t.Errorf("a challenge's certificate that does not parse: %q", l.snapshot())
 	}
 	if _, err := encodeCert(&tls.Certificate{Certificate: [][]byte{{1}}}); err == nil {
 		t.Error("a certificate without a key encoded")
