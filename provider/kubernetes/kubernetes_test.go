@@ -718,7 +718,24 @@ func TestProviderStatus(t *testing.T) {
 	count := func() int {
 		return a.patchCount(kindClasses.path) + a.patchCount(kindGateways.path) + a.patchCount(kindRoutes.path) + a.patchCount(tlsPath)
 	}
+	// The statuses are compared with the informers' copies, which a write
+	// reaches only through its watch: one slower than a resync, as on a
+	// loaded runner, has the same status written again before. So the writes
+	// are let settle first, two resyncs in a row with none; ones that never
+	// settle are writes with nothing changed too.
 	before := count()
+	for quiet, deadline := 0, time.Now().Add(30*resync); quiet < 2; {
+		time.Sleep(resync)
+		n := count()
+		if n == before {
+			quiet++
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status writes did not settle: %d more in the last %s", n-before, resync)
+		}
+		quiet, before = 0, n
+	}
 	time.Sleep(3 * resync)
 	if n := count(); n != before {
 		t.Fatalf("%d more status writes with nothing changed", n-before)
