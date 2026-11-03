@@ -86,10 +86,12 @@ func TestConsoleSocket(t *testing.T) {
 		consoleJSON("127.0.0.1:0"), sock))
 	w := v.dialSocket(sock)
 	sess := w.session("s")
-	// The request goes in two messages, the second while the console is
-	// being dialed.
+	// The request goes in more than one message, the second while the
+	// console is being dialed. Its end waits for the WebSocket past
+	// max_conns below: answered, the request would end the first
+	// WebSocket, and the next would not be past max_conns.
 	_ = w.c.Send(sess.Seal([]byte("GET / HTTP/1.1\r\n")))
-	_ = w.c.Send(sess.Seal([]byte("Host: x\r\nConnection: close\r\n\r\n")))
+	_ = w.c.Send(sess.Seal([]byte("Host: x\r\nConnection: close\r\n")))
 
 	// Past max_conns, a WebSocket closes at once, maybe before its dial
 	// has returned.
@@ -98,6 +100,7 @@ func TestConsoleSocket(t *testing.T) {
 		refused.waitClosed()
 		_ = c.Close()
 	}
+	_ = w.c.Send(sess.Seal([]byte("\r\n")))
 
 	var got []byte
 	for !bytes.Contains(got, []byte("core/workbench.js")) {
