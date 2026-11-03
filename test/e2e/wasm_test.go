@@ -138,7 +138,12 @@ func TestProxyWasmResponse(t *testing.T) {
 			}
 			want := strings.ToUpper(strings.Repeat("abcdefghijklmnop", n/16+1)[:n])
 			if resp.StatusCode != 200 || string(body) != want || resp.Header.Get("X-Response-Code") != "200" {
-				t.Fatalf("%s %d: %d, %d bytes, %v", proto.name, n, resp.StatusCode, len(body), resp.Header)
+				i := 0
+				for i < len(body) && i < len(want) && body[i] == want[i] {
+					i++
+				}
+				end := min(i+48, len(body))
+				t.Fatalf("%s %d: %d, %d bytes, %v; first difference at %d: got %q want %q", proto.name, n, resp.StatusCode, len(body), resp.Header, i, body[i:end], want[i:min(i+48, len(want))])
 			}
 			if tr := resp.Trailer; tr.Get("X-Body-Bytes") != strconv.Itoa(n) || tr.Get("X-Upstream-Seen") != "up" || tr.Get("X-Upstream") != "" {
 				t.Fatalf("%s %d: trailer %v", proto.name, n, tr)
