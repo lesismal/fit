@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -92,6 +93,13 @@ func (f *consoleFixture) logged(want string) bool {
 	return false
 }
 
+// logLines is a copy of the logs so far.
+func (f *consoleFixture) logLines() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.logs)
+}
+
 // browser is a client with cookies, as a browser on the console's pages is.
 type browser struct {
 	t    *testing.T
@@ -161,7 +169,7 @@ func TestConsoleLoginAndEdit(t *testing.T) {
 		t.Fatalf("login: %d", code)
 	}
 	if !f.logged(`"ada" logged in`) || !f.logged(`a failed login as "nobody"`) {
-		t.Errorf("logs: %q", f.logs)
+		t.Errorf("logs: %q", f.logLines())
 	}
 
 	// Reads.
@@ -191,7 +199,7 @@ func TestConsoleLoginAndEdit(t *testing.T) {
 		t.Errorf("source: %q", v.Source)
 	}
 	if !f.logged(`"ada": PUT /config applied config version`) {
-		t.Errorf("logs: %q", f.logs)
+		t.Errorf("logs: %q", f.logLines())
 	}
 	// A stale ETag, and a config that does not load.
 	if code, _, _ := b.do("PUT", "/api/m/admin/config", doc("three"), "If-Match", etag); code != http.StatusPreconditionFailed {

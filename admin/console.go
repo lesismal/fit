@@ -128,18 +128,25 @@ func (cs *Console) proxy(r *console.Request) {
 		for k, v := range w.header {
 			h[k] = v
 		}
+		// The change is logged before the answer goes, so that whoever
+		// has the answer finds the change in the log.
+		cs.logChange(r.User, req.Method, path, w)
 		_ = r.Context.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: h, Body: w.body.Bytes()})
-		if req.Method == http.MethodGet || req.Method == http.MethodHead {
+	})
+}
+
+// logChange says what a user's request changed; reads say nothing.
+func (cs *Console) logChange(user, method, path string, w *recorder) {
+	if method == http.MethodGet || method == http.MethodHead {
+		return
+	}
+	if w.status < 300 {
+		if v := w.header.Get(VersionHeader); v != "" {
+			cs.logf("console: %q: %s %s applied config version %s", user, method, path, v)
 			return
 		}
-		if w.status < 300 {
-			if v := w.header.Get(VersionHeader); v != "" {
-				cs.logf("console: %q: %s %s applied config version %s", r.User, req.Method, path, v)
-				return
-			}
-		}
-		cs.logf("console: %q: %s %s: %d", r.User, req.Method, path, w.status)
-	})
+	}
+	cs.logf("console: %q: %s %s: %d", user, method, path, w.status)
 }
 
 // recorder is the Admin API's answer, held whole: the API's answers are
