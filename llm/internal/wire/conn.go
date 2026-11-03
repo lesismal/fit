@@ -150,9 +150,13 @@ func (c *Conn) RemoteAddr() string {
 // Close 关闭连接及其会话。
 func (c *Conn) Close() { c.closeWith(websocket.CloseNormal, "", ErrClosed) }
 
+// The session closes first, with err: once the WebSocket is closed, its
+// OnClose may run on a worker at once and close the session with the
+// transport's error, which OnClose would then report instead of err.
+// 先以 err 关闭会话：WebSocket 一关闭，其 OnClose 可能立即在 worker 上运行，用传输层的错误关闭会话，OnClose 报告的就不是 err 了。
 func (c *Conn) closeWith(code uint16, reason string, err error) {
-	_ = c.ws.Close(code, reason)
 	c.Session.Close(err)
+	_ = c.ws.Close(code, reason)
 }
 
 // forceClose closes a connection whose peer is dead or too slow. The close frame queues behind whatever is still
