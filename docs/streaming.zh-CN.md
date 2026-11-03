@@ -87,7 +87,7 @@ worker。因此，使用 `password_hash` 的用户，若其密码自策略加载
 
 RTP 交织在 RTSP 连接上传输（RTP/AVP/TCP）。要求 UDP 的 SETUP 得到 `461 Unsupported Transport`；ffmpeg 和多数播放器随后
 改用 TCP 建立，用 `-rtsp_transport tcp` 可省去第一次尝试。基于 UDP 的 RTP 有待 fib：它的 RTSP 服务器尚不能移除自己添加的
-UDP 绑定，而重载需要这一点（fib 请求 A60）。
+UDP 绑定，而重载需要这一点（fib 请求 A61）。
 
 ## SRT
 

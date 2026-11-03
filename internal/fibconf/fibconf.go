@@ -3,6 +3,8 @@
 package fibconf
 
 import (
+	"runtime"
+
 	"github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
@@ -18,6 +20,19 @@ import (
 // connection's.
 const ReadBufferSize = 64 << 10
 
+// WorkersPerCPU is the ceiling of an engine's pool of workers for each CPU
+// fit may use, when the config does not say: a tenth of fib's default. fib
+// sizes its pool for handlers that wait on a database or another server;
+// fit's never wait, but a worker can still wait on a lock, and the pool
+// starts another worker for each task that finds the rest busy. Proxying W1
+// at 5,000 requests in flight to one backend, thousands of workers waited on
+// the HTTP client's lock, each with its read round's buffers taken, and the
+// pool grew to 6,000-9,000 goroutines. At 100 a CPU the tasks wait in the
+// pool's queue instead, holding nothing: the peak memory fell from 321-383
+// to 186-200 MiB over HTTP/1.1 and from 305-398 to 238-285 MiB over h2, at
+// the same throughput.
+const WorkersPerCPU = 100
+
 // Config returns fib's default config for an engine named name, with fit's
 // own ReadBufferSize, and with what e sets in place of those; e may be nil.
 func Config(name string, e *config.Engine) fib.Config {
@@ -30,12 +45,17 @@ func Config(name string, e *config.Engine) fib.Config {
 	// fit prints its own startup configuration, so fib's per-parameter list
 	// would only repeat it, twice over.
 	cfg.LogSettings = false
+	workers := runtime.GOMAXPROCS(0) * WorkersPerCPU
 	if e == nil {
+		cfg.SetPoolSizing(workers, 0)
 		return cfg
 	}
-	if e.Workers > 0 || e.TaskQueue > 0 {
-		cfg.SetPoolSizing(e.Workers, e.TaskQueue)
+	if e.Workers > 0 {
+		workers = e.Workers
+	} else {
+		workers = max(workers, e.MinWorkers)
 	}
+	cfg.SetPoolSizing(workers, e.TaskQueue)
 	if e.MinWorkers > 0 {
 		cfg.MinWorkerCount = e.MinWorkers
 	}

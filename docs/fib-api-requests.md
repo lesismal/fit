@@ -72,7 +72,8 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A57 | A TURN server's limits and hooks | done, `bf669ce` (in `84a67f7`) | 11 | I111 (029) |
 | A58 | A TURN server changed in place, and drained | done, `496301d` (in `84a67f7`) | 10, 11 | I111 (029) |
 | A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`); Windows fix `63b38d4` (in `9824c68`) | — | I111 (029) |
-| A60 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
+| A60 | Header blocks passed through a proxy as lines, both ways | done, fib branch `perf/header-blocks` (not yet on `main`) | 12 | — |
+| A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
 
 ## Evidence
 
@@ -1819,7 +1820,58 @@ sockets toward the media servers, as `webrtc.turn` has for its relayed addresses
 
 **How fit uses it.** `webrtc.proxy.relay_ip`, `port_min` and `port_max`, checked when the config loads; each relay dials its media server with `DialWith`, and a range with no port free drops the peer address, counted as `fit_webrtc_proxy_dropped_total{reason="no_port"}` (I111).
 
-## A60: An RTSP server's UDP bindings removed
+## A60: Header blocks passed through a proxy as lines, both ways
+
+**Status.** Requested on 2026-11-03, for the HTTP/1.1 API workload (W1) of the load test plan
+(`bench/results/plan-2026-11-03/report.md`, "What is left"). Done on fib branch `perf/header-blocks`;
+fit's proxy uses it on its branch `perf/hdr-passthrough`. Neither is on `main` yet.
+
+**Problem.** A request proxied over HTTP/1 had its header built into a map four times over: fib's
+server parsed the client's head into `Request.Header`, the proxy edited that map, fib's client
+gathered, sorted and wrote it out again, read the upstream's response head into another map, the
+proxy dropped the hop-by-hop fields from it, and fib's server gathered, sorted and wrote that one
+out. At 500 in flight on six CPUs fit spent 61k cycles a request in user space against nginx's 26k;
+the header maps, the sorts and the two marshals were about a fifth of fit's CPU.
+
+**Evidence.** pprof of W1 at 500 in flight (`fit` on fib `3664a1e`): `fastRequest` 5.5% (its
+`collectRequestFields` 2.5%, `appendCollectedFields` 1.6%), `parseResponseHead` 3.5%,
+`Proxy.outgoing` 3.4%, `appendResponseHead` 1.8%, `removeHopByHop` 1.2%, of which the map
+iteration, `sortHeaderFields`, hashing and inserts were most.
+
+**Suggested API.** The request's field lines as they arrived on `Context`; a client request that
+takes a pre-framed block of field lines for its header; a client response that hands over its field
+lines in place of a map; and a server `Response` that writes field lines as they are.
+
+**As built.** `Context.RequestHeaderBlock() string`: the field lines of an HTTP/1 request as they
+arrived, each ended by CRLF, Host among them, names in the client's case (`""` over HTTP/2 and
+HTTP/3, and for a head fib leaves to `net/http`); it does not follow changes to `Request.Header`.
+`Client.StartFramed(req, Framing{HeaderBlock []byte, ResponseHeaderBlock bool}, callback)`:
+`HeaderBlock` is written as it is after the request line, Host and Content-Length, in place of
+`req.Header`, with no User-Agent of the client's own (it must not hold Host, Content-Length,
+Transfer-Encoding or Trailer); a request that goes out on HTTP/2, with a streamed body, or through
+`net/http` has its fields added to `req.Header` instead. With `ResponseHeaderBlock`, a response head
+fib reads itself comes as `ClientResponse.HeaderBlock() string`, every line as it arrived, with a nil
+`Header`; one over HTTP/2, or left to `net/http`, has its map as before. `Response.HeaderBlock []byte`
+is written after `Header`'s fields on HTTP/1, unsorted and unchecked (no framing fields), with no
+`Date` of fib's when it holds one; over HTTP/2 and HTTP/3, and when an `OnHeader` or `OnResponse`
+hook may change the header, its fields are added to a copy of `Header`, and an `OnFinish` hook is
+handed `Header` alone.
+
+**How fit uses it.** A route whose proxy no middleware wraps (`module.Unwrapped`, which the route
+compiler calls) passes an HTTP/1 request's header on from `RequestHeaderBlock` (`outgoingFramed`):
+it drops the hop-by-hop fields, those Connection names, Content-Length, Host and the client's
+forwarding fields, matched without regard to case, and appends `X-Forwarded-For`, `-Proto`, `-Host`,
+`Forwarded` and the trace's `Traceparent`; a client that is a trusted proxy, a request with Expect
+or Trailer, a gRPC call and a mirrored route keep the map path. Every HTTP/1 client's response but
+HEAD's asks for the upstream's head as lines, which go on through `Response.HeaderBlock` without the
+hop-by-hop fields, those Connection names and Content-Length, with the sticky cookie after them; a
+304, and a body that streams, go back to a map. The lines keep the order and case they came in, and
+the upstream's Date. A/B on W1 at 500 in flight, three rounds each: the request side +5.6% requests
+a second over HTTP/1.1 (24.69 to 23.37 µs a request), the response side +4.0% more (23.37 to 22.41);
+h2c within noise, peak memory unchanged.
+
+
+## A61: An RTSP server's UDP bindings removed
 
 **Status.** Requested on 2026-11-03, for fit's streaming role ([decision 030](decisions/030-media-auth-and-pages.md)).
 

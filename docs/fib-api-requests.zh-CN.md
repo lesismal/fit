@@ -70,7 +70,8 @@
 | A57 | TURN 服务器的限制与钩子 | 已完成，`bf669ce`（在 `84a67f7` 中） | 11 | I111（029） |
 | A58 | 原地修改和排空 TURN 服务器 | 已完成，`496301d`（在 `84a67f7` 中） | 10, 11 | I111（029） |
 | A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中）；Windows 修复 `63b38d4`（在 `9824c68` 中） | — | I111（029） |
-| A60 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
+| A60 | 代理两个方向都按行转发头部块 | 已完成，fib 分支 `perf/header-blocks`（尚未进入 `main`） | 12 | — |
+| A61 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
 
 ## 证据
 
@@ -1377,7 +1378,46 @@ PortMax uint16, Timeout, Handler}, done)`：socket 在 connect 前绑定到 `Loc
 
 **fit 的使用方式。** `webrtc.proxy.relay_ip`、`port_min` 和 `port_max`，加载配置时检查；每个中继用 `DialWith` 拨向它的媒体服务器，范围内没有空闲端口时丢弃该对端地址，计为 `fit_webrtc_proxy_dropped_total{reason="no_port"}`（I111）。
 
-## A60：移除 RTSP 服务器的 UDP 绑定
+## A60：代理两个方向都按行转发头部块
+
+**状态。** 2026-11-03 为负载测试计划中 HTTP/1.1 的 API 负载（W1）提出（`bench/results/plan-2026-11-03/report.md`
+的“剩下的问题”）。已在 fib 分支 `perf/header-blocks` 上完成；fit 的代理在其分支 `perf/hdr-passthrough` 上使用。
+两者都还没有进入 `main`。
+
+**问题。** 经 HTTP/1 代理的请求，其头部要反复建成 map：fib 的 server 把客户端的请求头解析进 `Request.Header`，
+代理编辑这个 map，fib 的客户端再收集、排序、写出；读上游响应头时又建一个 map，代理从中删掉逐跳字段，fib 的
+server 再收集、排序、写出。在 6 个 CPU、500 并发下，fit 每个请求的用户态是 61k 周期，nginx 是 26k；头部 map、
+排序和两次编组约占 fit CPU 的五分之一。
+
+**依据。** W1 在 500 并发下的 pprof（fit 用 fib `3664a1e`）：`fastRequest` 5.5%（其中 `collectRequestFields`
+2.5%、`appendCollectedFields` 1.6%），`parseResponseHead` 3.5%，`Proxy.outgoing` 3.4%，`appendResponseHead`
+1.8%，`removeHopByHop` 1.2%，大头是 map 遍历、`sortHeaderFields`、哈希和插入。
+
+**建议的 API。** 在 `Context` 上给出请求到达时的字段行；客户端请求接受一段已成帧的字段行作为头部；客户端响应
+以字段行代替 map 交出；server 的 `Response` 原样写出字段行。
+
+**实际实现。** `Context.RequestHeaderBlock() string`：HTTP/1 请求到达时的字段行，每行以 CRLF 结束，含 Host，
+字段名保持客户端的大小写（HTTP/2、HTTP/3 上以及 fib 交给 `net/http` 解析的请求头为 `""`）；它不随
+`Request.Header` 的修改而变。`Client.StartFramed(req, Framing{HeaderBlock []byte, ResponseHeaderBlock bool}, callback)`：
+`HeaderBlock` 原样写在请求行、Host 和 Content-Length 之后，代替 `req.Header`，客户端不再加自己的 User-Agent
+（块里不能有 Host、Content-Length、Transfer-Encoding、Trailer）；走 HTTP/2、带流式 body 或交给 `net/http` 的
+请求则把这些字段加进 `req.Header`。设置 `ResponseHeaderBlock` 时，fib 自己读的响应头以
+`ClientResponse.HeaderBlock() string` 给出，每行保持原样，`Header` 为 nil；经 HTTP/2 或交给 `net/http` 的响应仍是
+map。`Response.HeaderBlock []byte` 在 HTTP/1 上写在 `Header` 的字段之后，不排序、不检查（不能含成帧字段），
+块里有 `Date` 时 fib 不再加自己的；HTTP/2、HTTP/3 上，以及有 `OnHeader` 或 `OnResponse` hook 可能修改头部时，
+其字段加进 `Header` 的副本，`OnFinish` hook 只拿到 `Header` 本身。
+
+**fit 的使用方式。** 代理没有被任何中间件包裹的路由（`module.Unwrapped`，由路由编译时调用）从
+`RequestHeaderBlock` 转发 HTTP/1 请求的头部（`outgoingFramed`）：不区分大小写地去掉逐跳字段、Connection 点名的
+字段、Content-Length、Host 和客户端的转发字段，再追加 `X-Forwarded-For`、`-Proto`、`-Host`、`Forwarded` 以及跟踪的
+`Traceparent`；客户端是受信任代理、请求带 Expect 或 Trailer、gRPC 调用和带镜像的路由仍走 map。除 HEAD 外，每个
+HTTP/1 客户端的响应都要求上游的响应头按行给出，去掉逐跳字段、Connection 点名的字段和 Content-Length，再加上粘性
+cookie，经 `Response.HeaderBlock` 转发；304 和流式 body 回到 map。这些行保持到达时的顺序和大小写，以及上游的 Date。
+W1 在 500 并发下的 A/B，各三轮：请求一侧使 HTTP/1.1 的每秒请求数 +5.6%（每请求 24.69 降到 23.37 µs），响应一侧
+再 +4.0%（23.37 降到 22.41）；h2c 在噪声以内，峰值内存不变。
+
+
+## A61：移除 RTSP 服务器的 UDP 绑定
 
 **状态。** 2026-11-03 为 fit 的流媒体角色提出（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)）。
 

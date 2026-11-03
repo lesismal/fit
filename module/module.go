@@ -103,6 +103,14 @@ type Inline interface {
 	Inline()
 }
 
+// Unwrapped is implemented by a handler that can serve requests for less when
+// no middleware wraps it, as the proxy passes a request's header on as it
+// arrived when nothing can have changed it. Unwrapped is called once, when
+// the route is compiled, on a route's handler that has no middleware.
+type Unwrapped interface {
+	Unwrapped()
+}
+
 // Holder is a hold on the config a module belongs to: a module whose
 // requests outlive its handler's return takes one for each with Retain, and
 // gives it back with Release when the request is over, so that the config

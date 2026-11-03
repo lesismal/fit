@@ -109,7 +109,7 @@ pages).
   configs by their params, so a reload that keeps them keeps the playlists' numbering.
 - **RTSP over TCP only, for now.** fib's RTSP server binds its RTP and RTCP UDP ports with
   `ListenUDP` and has no way to remove them, which a restart or a stop would need on the shared
-  engine; fit asks fib for it (A60) and takes interleaved RTP meanwhile. A SETUP asking for UDP is
+  engine; fit asks fib for it (A61) and takes interleaved RTP meanwhile. A SETUP asking for UDP is
   answered 461, and ffmpeg and most players set up again over TCP.
 
 ## The media pages (I117)

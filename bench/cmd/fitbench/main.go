@@ -374,8 +374,16 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	step("starting the load generators")
+	// The load generators' /tmp, where h2load logs every request of a run at
+	// a fixed rate, is a tmpfs. On the container's overlay over ext4, a write
+	// to the log that needed a buffer the journal was committing, which it
+	// does every 5s, held h2load in the kernel for about 10ms, and every
+	// other h2load thread behind it on the shared file's lock: no request
+	// was sent or answered meanwhile, about one in a thousand at 30,000 a
+	// second waited 10ms more, and a run's 99.9th percentile landed near
+	// 10ms whenever a commit fell on a busy write, for every server.
 	if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenName, "--ulimit", "nofile=1048576:1048576",
-		"-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro", "-v", h.data + ":/fitbench/data:ro",
+		"--tmpfs", "/tmp", "-v", filepath.Join(h.work, "idleconn") + ":/fitbench/idleconn:ro", "-v", h.data + ":/fitbench/data:ro",
 		"-e", "OPENSSL_CONF=/fitbench/data/openssl.cnf"},
 		h.netArgs...), h.clientCPUs...), loadgenTag, "sleep", "infinity")...); err != nil {
 		return err
@@ -388,7 +396,7 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		if _, err := docker(ctx, append(append(append([]string{"run", "-d", "--name", loadgenH3Name, "--ulimit", "nofile=1048576:1048576",
-			"-v", h.data + ":/fitbench/data:ro", "-e", "OPENSSL_CONF=/fitbench/data/openssl.cnf"},
+			"--tmpfs", "/tmp", "-v", h.data + ":/fitbench/data:ro", "-e", "OPENSSL_CONF=/fitbench/data/openssl.cnf"},
 			h.netArgs...), h.clientCPUs...), loadgenH3Tag, "sleep", "infinity")...); err != nil {
 			return err
 		}

@@ -90,7 +90,7 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	}
 	timeout, why := p.timeout, errRouteTimeout
 	if isGRPC(c.Request) {
-		x.grpc = true
+		x.grpc, x.blockResponse = true, false
 		x.base.Header["Te"] = teTrailers
 		timeout, why = x.callTimeout(p.timeout)
 	}
@@ -260,6 +260,11 @@ type exchange struct {
 	// the client's response, since a resumed body and OnWritable's function
 	// run on goroutines of fib's.
 	mu sync.Mutex
+
+	// head is the buffer outgoingFramed writes the upstream's header in,
+	// which stays with the exchange from one request to the next: fib's
+	// client copies it as the request is sent.
+	head []byte
 }
 
 // headerFields are the values of the fields outgoing sets in the client's
@@ -293,6 +298,12 @@ type exchangeState struct {
 	out      *stdhttp.Request
 	start    time.Time
 	timeouts upstream.Timeouts
+	// framed is the upstream's header as lines, when outgoingFramed made
+	// it, in place of base's Header; blockResponse asks for the upstream's
+	// response header as its lines, which go on to the client as lines too
+	// (responseBlock), as an HTTP/1 client's may.
+	framed        []byte
+	blockResponse bool
 	// stall bounds each wait for the client to take what was written.
 	stall   time.Duration
 	pool    *upstream.Pool
@@ -447,7 +458,11 @@ func (x *exchange) expire() {
 // abandons it at once if cancel came first.
 func (x *exchange) send(out *stdhttp.Request) {
 	x.callMu.Lock()
-	x.call = x.pool.Send(x.backend, out, x.onResponse)
+	if x.framed != nil || x.blockResponse {
+		x.call = x.pool.SendFramed(x.backend, out, fibhttp.Framing{HeaderBlock: x.framed, ResponseHeaderBlock: x.blockResponse}, x.onResponse)
+	} else {
+		x.call = x.pool.Send(x.backend, out, x.onResponse)
+	}
 	call, cause := x.call, x.cause.Load()
 	x.callMu.Unlock()
 	if cause != nil {
@@ -555,9 +570,19 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 			return
 		}
 		header := resp.Header
-		removeHopByHop(header)
-		x.addCookie(header)
-		out := fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body, Trailer: resp.Trailer()}
+		var block []byte
+		if header == nil && resp.StatusCode != stdhttp.StatusNotModified {
+			block = x.responseBlock(resp.HeaderBlock())
+		} else {
+			if header == nil {
+				// A 304's Content-Length is the server's to read from its
+				// header.
+				header = blockHeader(resp.HeaderBlock())
+			}
+			removeHopByHop(header)
+			x.addCookie(header)
+		}
+		out := fibhttp.Response{StatusCode: resp.StatusCode, Header: header, HeaderBlock: block, Body: body, Trailer: resp.Trailer()}
 		if pooled {
 			// fib's client copied the body into a buffer from its pool,
 			// which the response gives back once it has gone, rather than
@@ -700,8 +725,12 @@ func (x *exchange) addCookie(h stdhttp.Header) {
 func (x *exchange) begin() {
 	x.started = true
 	h := x.c.Header()
-	announced := x.resp.Header["Trailer"]
-	for key, values := range x.resp.Header {
+	src := x.resp.Header
+	if src == nil {
+		src = blockHeader(x.resp.HeaderBlock())
+	}
+	announced := src["Trailer"]
+	for key, values := range src {
 		h[key] = values
 	}
 	removeHopByHop(h)

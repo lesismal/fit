@@ -1,6 +1,7 @@
 package fibconf
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/lesismal/fib"
@@ -16,6 +17,8 @@ func TestDefaults(t *testing.T) {
 	// configuration instead of fib's per-parameter list.
 	want.WriteBufferHighWatermark = 0
 	want.LogSettings = false
+	// The pool's ceiling is fit's, 100 workers a CPU.
+	want.SetPoolSizing(runtime.GOMAXPROCS(0)*WorkersPerCPU, 0)
 	for _, e := range []*config.Engine{nil, {}} {
 		got := Config("fit", e)
 		if got.Name != "fit" {
@@ -53,5 +56,10 @@ func TestSet(t *testing.T) {
 	def := fib.DefaultConfig()
 	if got := Config("fit", &config.Engine{Workers: 40}); got.MaxEvents != def.MaxEvents || got.IOPollerCount != def.IOPollerCount {
 		t.Errorf("Workers alone changed MaxEvents %d or IOPollerCount %d", got.MaxEvents, got.IOPollerCount)
+	}
+	// min_workers above fit's ceiling raises the ceiling to it.
+	many := runtime.GOMAXPROCS(0)*WorkersPerCPU + 10
+	if got := Config("fit", &config.Engine{MinWorkers: many}); got.WorkerCount != many || got.MinWorkerCount != many {
+		t.Errorf("MinWorkers %d alone: WorkerCount %d, MinWorkerCount %d", many, got.WorkerCount, got.MinWorkerCount)
 	}
 }

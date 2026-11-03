@@ -98,7 +98,7 @@ check, the request held without a worker.
 RTP goes interleaved on the RTSP connection (RTP/AVP/TCP). A SETUP that asks for UDP is answered
 `461 Unsupported Transport`; ffmpeg and most players then set up over TCP, and
 `-rtsp_transport tcp` skips the first try. RTP over UDP waits on fib: its RTSP server cannot yet
-remove the UDP bindings it adds, which a reload would need (fib request A60).
+remove the UDP bindings it adds, which a reload would need (fib request A61).
 
 ## SRT
 
