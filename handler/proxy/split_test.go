@@ -59,33 +59,39 @@ func TestSplitFailover(t *testing.T) {
 	}
 }
 
-// mirrorServer records the requests it gets, after a delay.
+// mirrorServer records the requests it gets; a held one answers none of
+// them until release.
 type mirrorServer struct {
 	*httptest.Server
-	delay time.Duration
-	mu    sync.Mutex
-	got   []string
-	count atomic.Int32
+	mu      sync.Mutex
+	got     []string
+	count   atomic.Int32
+	release func()
 }
 
-func newMirrorServer(t *testing.T, delay time.Duration) *mirrorServer {
-	m := &mirrorServer{delay: delay}
+func newMirrorServer(t *testing.T, hold bool) *mirrorServer {
+	released := make(chan struct{})
+	m := &mirrorServer{release: sync.OnceFunc(func() { close(released) })}
 	m.Server = httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		body, _ := io.ReadAll(r.Body)
 		m.mu.Lock()
 		m.got = append(m.got, r.Method+" "+r.URL.RequestURI()+" "+r.Header.Get("X-Test")+" "+string(body))
 		m.mu.Unlock()
 		m.count.Add(1)
-		time.Sleep(m.delay)
+		if hold {
+			<-released
+		}
 		_, _ = io.WriteString(w, "mirror")
 	}))
+	// Released before Close, which waits for the handlers.
 	t.Cleanup(m.Close)
+	t.Cleanup(m.release)
 	return m
 }
 
 func TestMirror(t *testing.T) {
 	a, aHits := countingServer(t, 200, "main")
-	m := newMirrorServer(t, 0)
+	m := newMirrorServer(t, false)
 	base := startFit(t, splitConfig(`{"upstream": "a", "mirror": {"upstream": "c"}}`, a, refused(t), m.Listener.Addr().String()))
 	req, _ := stdhttp.NewRequest("POST", base+"/p?q=1", strings.NewReader("payload"))
 	req.Header.Set("X-Test", "t")
@@ -109,13 +115,13 @@ func TestMirror(t *testing.T) {
 	}
 }
 
-// TestMirrorDoesNotSlow sends requests through a mirror that takes a second
-// to answer: they are answered at once, and the copies stop at the bound.
+// TestMirrorDoesNotSlow sends requests through a mirror that answers none
+// of its copies while they are under way: they are answered all the same,
+// and the copies stop at the bound.
 func TestMirrorDoesNotSlow(t *testing.T) {
 	a, _ := countingServer(t, 200, "main")
-	m := newMirrorServer(t, time.Second)
+	m := newMirrorServer(t, true)
 	base := startFit(t, splitConfig(`{"upstream": "a", "mirror": {"upstream": "c"}}`, a, refused(t), m.Listener.Addr().String()))
-	start := time.Now()
 	var wg sync.WaitGroup
 	for range 400 {
 		wg.Add(1)
@@ -126,19 +132,29 @@ func TestMirrorDoesNotSlow(t *testing.T) {
 			}
 		}()
 	}
+	// Every request answered while the mirror holds every copy it got: none
+	// waited for its copy. A request that did would never be answered, and
+	// its client would time out.
 	wg.Wait()
-	if d := time.Since(start); d > 900*time.Millisecond {
-		t.Errorf("400 requests took %v beside a mirror that takes 1s", d)
+	// The copies held are under way still, so the mirror never gets more
+	// than the bound; it is given a moment to get what it would.
+	deadline := time.Now().Add(5 * time.Second)
+	for last := int32(-1); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		n := m.count.Load()
+		if n > 0 && n == last {
+			break
+		}
+		last = n
 	}
-	time.Sleep(1500 * time.Millisecond)
 	if n := m.count.Load(); n == 0 || n > maxMirrored {
 		t.Errorf("the mirror got %d copies, want 1 to %d", n, maxMirrored)
 	}
+	m.release()
 }
 
 func TestMirrorPercent(t *testing.T) {
 	a, _ := countingServer(t, 200, "main")
-	m := newMirrorServer(t, 0)
+	m := newMirrorServer(t, false)
 	base := startFit(t, splitConfig(`{"upstream": "a", "mirror": {"upstream": "c", "percent": 25}}`, a, refused(t), m.Listener.Addr().String()))
 	for range 400 {
 		do(t, "GET", base+"/", "")
