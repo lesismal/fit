@@ -83,12 +83,16 @@ func TestLeaveAndRejoin(t *testing.T) {
 	}
 	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
+	// errs holds the errors seen, which a failure reports: the count alone
+	// does not tell a refused dial from a retry or a request turned away.
+	var errs []string
 	seen := func(n int) map[string]int {
 		got := map[string]int{}
 		for range n {
 			r := do(t, p, "/")
 			if r.err != nil {
 				got["error"]++
+				errs = append(errs, r.err.Error())
 				continue
 			}
 			got[r.body[:1]]++
@@ -102,7 +106,7 @@ func TestLeaveAndRejoin(t *testing.T) {
 	flaky.Close() // its port now refuses connections
 	got := seen(20)
 	if got["error"] != 1 || got["g"] != 19 {
-		t.Fatalf("one failure should take flaky out: %v", got)
+		t.Fatalf("one failure should take flaky out: %v, errors %q", got, errs)
 	}
 	if !p.Backends()[1].Down() {
 		t.Fatal("flaky is not down")
