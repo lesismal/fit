@@ -129,3 +129,28 @@ func TestSameAddress(t *testing.T) {
 		t.Fatal("sameAddress")
 	}
 }
+
+// Basic that is not base64 or names no user, and a nonce of another length,
+// are not right; a quoted value keeps what a backslash escapes, and a
+// parameter without = ends the list.
+func TestRTSPMalformed(t *testing.T) {
+	p, err := mediaauth.New(&config.MediaAuth{Name: "x", Users: []config.MediaUser{{Name: "alice", Password: "pw", Play: []string{"*"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := newRTSPAuth(&config.StreamRTSP{AuthMethods: []string{"digest", "basic"}})
+	now := time.Now()
+	for _, authz := range []string{"Basic !!!", "Basic " + base64Std(":pw"), "Basic " + base64Std("alice"),
+		`Digest username="alice", realm="fit", nonce="short", uri="rtsp://h/s", response="x"`} {
+		if _, good, _ := a.verify(p, "DESCRIBE", authz, now); good {
+			t.Errorf("%s was right", authz)
+		}
+	}
+	if c, good, _ := a.verify(p, "DESCRIBE", "Basic "+base64Std("alice:pw"), now); !good || c.User != "alice" {
+		t.Fatalf("a right Basic: %+v %v", c, good)
+	}
+	m := parseAuthParams(`a="x\"y", b=2, c`)
+	if m["a"] != `x"y` || m["b"] != "2" || len(m) != 2 {
+		t.Fatalf("parseAuthParams: %q", m)
+	}
+}
