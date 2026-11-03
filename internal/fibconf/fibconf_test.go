@@ -52,6 +52,15 @@ func TestSet(t *testing.T) {
 			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
 		}
 	}
+	if got.BlockingWait {
+		t.Error("BlockingWait = true with loop_wait left out, want fib's parked loops")
+	}
+	if got := Config("fit", &config.Engine{LoopWait: "park"}); got.BlockingWait {
+		t.Error("BlockingWait = true with loop_wait park, want fib's parked loops")
+	}
+	if got := Config("fit", &config.Engine{LoopWait: LoopWaitBlock}); !got.BlockingWait {
+		t.Error("BlockingWait = false with loop_wait block, want true")
+	}
 	// What it leaves out stays fib's.
 	def := fib.DefaultConfig()
 	if got := Config("fit", &config.Engine{Workers: 40}); got.MaxEvents != def.MaxEvents || got.IOPollerCount != def.IOPollerCount {

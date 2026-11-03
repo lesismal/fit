@@ -33,6 +33,18 @@ const ReadBufferSize = 64 << 10
 // the same throughput.
 const WorkersPerCPU = 100
 
+// LoopWaitBlock is the loop_wait that blocks the event loops in epoll_wait
+// rather than parking them in Go's network poller, fib's default and fit's.
+// Parked, a loop waiting for events gives its P up at once, but Go looks for
+// a parked goroutine's events only when a P runs out of work, or every 10ms,
+// so on a busy server the loop hears of them late. Blocking is a trade
+// rather than a default: W6 (500 connections proxied to nginx at 200,000
+// requests a second, 6 CPUs) over HTTP/1.1 had its p99 at 2.88-3.88ms
+// blocked against 4.28-4.36ms parked, but its median at 1.57ms against
+// 0.95ms; h2 and the maximum did not change, and W1 at 500 in flight served
+// h2 0.9% less.
+const LoopWaitBlock = "block"
+
 // Config returns fib's default config for an engine named name, with fit's
 // own ReadBufferSize, and with what e sets in place of those; e may be nil.
 func Config(name string, e *config.Engine) fib.Config {
@@ -46,6 +58,8 @@ func Config(name string, e *config.Engine) fib.Config {
 	// would only repeat it, twice over.
 	cfg.LogSettings = false
 	workers := runtime.GOMAXPROCS(0) * WorkersPerCPU
+	// See LoopWait.
+	cfg.BlockingWait = e != nil && e.LoopWait == LoopWaitBlock
 	if e == nil {
 		cfg.SetPoolSizing(workers, 0)
 		return cfg
