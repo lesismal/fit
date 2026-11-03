@@ -114,12 +114,16 @@ func backend(t testing.TB, serve func(net.Conn)) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The accept loop is counted too, so that its Add of a connection,
+	// made while it is counted, never races the cleanup's Wait.
 	var wg sync.WaitGroup
 	t.Cleanup(func() {
 		l.Close()
 		wg.Wait()
 	})
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			c, err := l.Accept()
 			if err != nil {
