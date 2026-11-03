@@ -470,6 +470,11 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   Switched on, a sender sends the device, or without one a synthetic track: silence, or a frame
   with the member's name at 2 frames a second. Switched off, it sends nothing and the device is
   released, its light off.
+- **The spotlight.** A member's tile in the call, one's own among them, has a button, and takes a
+  double click, that enlarges it: it takes the top of the call, centred, as large as the window
+  leaves room for with a row of the others below, which keep their grid. The same button, or
+  another double click, puts it back; enlarging another tile puts the first back. The video plays
+  on throughout, and a member that leaves while enlarged takes the spotlight with it.
 - **The room API.** Each member announces through the handler's room API whether it publishes,
   its switches and whether it has the devices: `POST /media/api/rooms/<room>/join`, `POST
   .../members/<name>` (a change, and every `member_ttl`/3 a heartbeat), `POST .../leave`, and `GET

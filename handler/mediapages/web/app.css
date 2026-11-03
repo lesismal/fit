@@ -129,6 +129,16 @@ p { margin: 6px 0 0; }
 .tile__state { margin-left: auto; background: rgba(0, 0, 0, .55); padding: 2px 9px; border-radius: 999px; font-size: 12px; }
 .tile__note { position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, .55); padding: 2px 9px; border-radius: 999px; font-size: 12px; }
 .tile__note:empty, .tile__state:empty { display: none; }
+.tile__zoom { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .55); color: var(--stage-text); cursor: pointer; display: grid; opacity: 0; transition: opacity .15s; }
+.tile__zoom i { display: grid; width: 100%; height: 100%; }
+.tile__zoom svg { width: 100%; height: 100%; }
+.tile:hover .tile__zoom, .tile__zoom:focus-visible, .tile--spot .tile__zoom { opacity: 1; }
+@media (hover: none) { .tile__zoom { opacity: 1; } }
+/* The tile in the spotlight: the first row on its own, centred, as large as
+   the width allows while its 16:9 leaves the window's height room for the
+   page's controls above it and a row of the other tiles, which keep their
+   grid below it; at least 480px wide. */
+.tiles--spot .tile--spot { order: -1; grid-column: 1 / -1; justify-self: center; width: min(100%, max(480px, calc((100vh - 480px) * 16 / 9))); }
 
 /* Login dialog and toast */
 .dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 22px; width: min(380px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }

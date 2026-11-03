@@ -47,6 +47,7 @@
       'tile.me': 'me', 'tile.micoff': 'microphone off', 'tile.nomic': 'no microphone', 'tile.camoff': 'camera off',
       'tile.nocam': 'no camera', 'tile.screen': 'screen', 'tile.waiting': 'not publishing', 'tile.connecting': 'connecting',
       'tile.retry': 'retrying', 'tile.gaveup': 'not reachable',
+      'tile.expand': 'Enlarge', 'tile.shrink': 'Back to the grid',
       'pub.stream': 'Stream', 'pub.start': 'Start publishing', 'pub.stop': 'Stop', 'pub.live': 'publishing',
       'pub.connecting': 'connecting', 'pub.off': 'not publishing', 'pub.retry': 'retrying',
       'play.mode': 'Over', 'play.start': 'Play', 'play.nohls': 'This browser does not play HLS by itself; use the URL below in a player.',
@@ -76,6 +77,7 @@
       'tile.me': '我', 'tile.micoff': '麦克风已关', 'tile.nomic': '没有麦克风', 'tile.camoff': '摄像头已关',
       'tile.nocam': '没有摄像头', 'tile.screen': '屏幕共享', 'tile.waiting': '未推流', 'tile.connecting': '连接中',
       'tile.retry': '重试中', 'tile.gaveup': '连接不上',
+      'tile.expand': '放大', 'tile.shrink': '还原',
       'pub.stream': '流名', 'pub.start': '开始推流', 'pub.stop': '停止', 'pub.live': '推流中',
       'pub.connecting': '连接中', 'pub.off': '未推流', 'pub.retry': '重试中',
       'play.mode': '方式', 'play.start': '播放', 'play.nohls': '这个浏览器不能直接播放 HLS，请把下面的地址交给播放器。',
@@ -153,6 +155,8 @@
     cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 10l4.55-2.28A1 1 0 0 1 21 8.62v6.76a1 1 0 0 1-1.45.9L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>',
     camoff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M15 10l4.55-2.28A1 1 0 0 1 21 8.62v6.76M15 15v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1"/></svg>',
     screen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
+    shrink: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>',
   };
   function icon(name) { var i = el('i'); i.innerHTML = ICONS[name]; return i; }
 
@@ -791,6 +795,44 @@
     this.root.dataset.member = name;
   }
 
+  // zoomable gives a tile of the call a button, and a double click, that
+  // puts it in the spotlight: across the top, centred, the other tiles in
+  // the grid below. Again puts it back. One tile at a time; the video
+  // stays where it is in the page, so it plays on.
+  Tile.prototype.zoomable = function () {
+    var self = this;
+    this.zoom = el('button', 'tile__zoom');
+    this.zoom.type = 'button';
+    this.zoom.addEventListener('click', function () { spotlight(self); });
+    this.root.addEventListener('dblclick', function () { spotlight(self); });
+    this.root.appendChild(this.zoom);
+    this.drawZoom();
+  };
+
+  Tile.prototype.drawZoom = function () {
+    if (!this.zoom) return;
+    var on = call.spot === this;
+    this.zoom.textContent = '';
+    this.zoom.appendChild(icon(on ? 'shrink' : 'expand'));
+    this.zoom.title = t(on ? 'tile.shrink' : 'tile.expand');
+    this.zoom.setAttribute('aria-label', this.zoom.title);
+    this.zoom.setAttribute('aria-pressed', on ? 'true' : 'false');
+  };
+
+  // spotlight puts tile in the spotlight, or takes it out when it is there
+  // already; null takes out whichever is.
+  function spotlight(tile) {
+    var was = call.spot;
+    call.spot = tile && tile !== was ? tile : null;
+    if (was) { was.root.classList.remove('tile--spot'); was.drawZoom(); }
+    if (call.spot) {
+      call.spot.root.classList.add('tile--spot');
+      call.spot.drawZoom();
+      call.spot.root.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    $('call-tiles').classList.toggle('tiles--spot', !!call.spot);
+  }
+
   // show draws a member's announced state: its avatar while its camera is
   // off, and what is off or missing.
   Tile.prototype.show = function (st, status) {
@@ -825,6 +867,7 @@
     pub: null,
     members: {}, // name -> {state, tile, viewer}
     me: null, // my tile
+    spot: null, // the tile in the spotlight
     events: null,
     eventsRetry: 0,
     heartbeat: 0,
@@ -909,6 +952,7 @@
     var r = await sendJoin(false);
     if (!r) { await leaveCall(true); return; }
     call.me = new Tile(name, true);
+    call.me.zoomable();
     $('call-tiles').appendChild(call.me.root);
     if (call.mayPublish) {
       call.pub = new Publisher(local, room + '-' + name, function (p) {
@@ -1019,6 +1063,7 @@
       var x = call.members[m.name];
       if (!x) {
         x = { name: m.name, state: m, tile: new Tile(m.name, false), viewer: null };
+        x.tile.zoomable();
         call.members[m.name] = x;
         $('call-tiles').appendChild(x.tile.root);
       }
@@ -1038,6 +1083,7 @@
       if (seen[name]) return;
       var x = call.members[name];
       if (x.viewer) x.viewer.stop(true);
+      if (call.spot === x.tile) spotlight(null);
       x.tile.root.remove();
       delete call.members[name];
     });
@@ -1094,6 +1140,7 @@
     call.key = '';
     call.publishing = false;
     if (call.local) { call.local.close(); call.local = null; }
+    spotlight(null);
     call.me = null;
     $('call-tiles').textContent = '';
     renderCallControls();
@@ -1419,10 +1466,15 @@
       return joinCall();
     },
     leave: function () { return leaveCall(false); },
+    spot: function (name) {
+      var x = name === call.name ? { tile: call.me } : call.members[name];
+      spotlight(x ? x.tile : null);
+    },
     mic: function (on) { if (call.local && call.local.audioOn !== on) return toggle(call.local, 'audio', mediaChanged); },
     cam: function (on) { if (call.local && call.local.videoOn !== on) return toggle(call.local, 'video', mediaChanged); },
     status: function () {
       var l = call.local;
+      var spot = call.spot ? (call.spot === call.me ? call.name : call.spot.name) : '';
       var members = {};
       Object.keys(call.members).forEach(function (n) {
         var x = call.members[n];
@@ -1452,6 +1504,7 @@
         pub: call.pub ? { phase: call.pub.phase, connected: call.pub.connected, posts: call.pub.posts, error: call.pub.error } : null,
         senders: senders,
         members: members,
+        spot: spot,
         problems: problems.slice(),
       };
     },
