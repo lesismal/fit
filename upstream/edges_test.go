@@ -100,6 +100,30 @@ func TestProberEdges(t *testing.T) {
 	}
 }
 
+// TestSendFramedFails sends framed requests through a pool with no engine
+// and through one that is closed.
+func TestSendFramedFails(t *testing.T) {
+	c, err := decode(t, `{"addresses": ["127.0.0.1:1"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []bool{false, true} {
+		p := mustNew(t, nil, c)
+		want := ErrNoEngine
+		if engine {
+			p = mustNew(t, startEngine(t), c)
+			want = ErrClosed
+		}
+		p.Close()
+		req, _ := stdhttp.NewRequest("GET", "http://x/", nil)
+		var got error
+		p.SendFramed(p.Backends()[0], req, fibhttp.Framing{HeaderBlock: []byte("A: 1\r\n")}, func(_ *fibhttp.ClientResponse, err error) { got = err })
+		if got != want {
+			t.Errorf("engine %v: %v, want %v", engine, got, want)
+		}
+	}
+}
+
 // TestSendUpgradeFails sends upgrades through a pool with no engine and
 // through one that is closed.
 func TestSendUpgradeFails(t *testing.T) {
