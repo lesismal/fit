@@ -83,16 +83,35 @@ func TestLeaveAndRejoin(t *testing.T) {
 	}
 	p := mustNew(t, startEngine(t), c)
 	defer p.Close()
-	// errs holds the errors seen, which a failure reports: the count alone
-	// does not tell a refused dial from a retry or a request turned away.
+	fb, failTimeout := p.Backends()[1], 300*time.Millisecond
+	// fail_timeout alone keeps flaky out, and a run slowed down enough, as
+	// one under -race beside other loads is, spends it within the requests
+	// below: flaky is then rightly tried again, and fails again. So rather
+	// than count on the requests being quick, seen checks what the window
+	// promises of each request: one to flaky that failed took it out, and
+	// none went to it while it was out, the window in force from the
+	// request's start to its answer. errs holds the errors seen, which a
+	// failure reports: the count alone does not tell a refused dial from a
+	// retry or a request turned away.
 	var errs []string
 	seen := func(n int) map[string]int {
+		t.Helper()
 		got := map[string]int{}
 		for range n {
+			until, start := fb.downUntil.Load(), time.Now().UnixNano()
 			r := do(t, p, "/")
+			// The callback runs before Done: wait for Done to count the
+			// request's failure or success.
+			settle(t, fb, 0)
+			if (r.err != nil || r.body[:1] == "f") && until != 0 && time.Now().UnixNano() < until {
+				t.Fatalf("flaky took a request while down: body %q, error %v; errors before %q", r.body, r.err, errs)
+			}
 			if r.err != nil {
 				got["error"]++
 				errs = append(errs, r.err.Error())
+				if fb.downUntil.Load() < start+int64(failTimeout) {
+					t.Fatalf("a failure did not take flaky out for fail_timeout: %q", errs)
+				}
 				continue
 			}
 			got[r.body[:1]]++
@@ -104,12 +123,11 @@ func TestLeaveAndRejoin(t *testing.T) {
 	}
 
 	flaky.Close() // its port now refuses connections
-	got := seen(20)
-	if got["error"] != 1 || got["g"] != 19 {
+	// The first request to flaky fails, and seen holds the rest to the
+	// window: one error in a quick run, one more each fail_timeout in a
+	// slow one.
+	if got := seen(20); got["error"] < 1 || got["error"]+got["g"] != 20 {
 		t.Fatalf("one failure should take flaky out: %v, errors %q", got, errs)
-	}
-	if !p.Backends()[1].Down() {
-		t.Fatal("flaky is not down")
 	}
 
 	// Back on the same port; after fail_timeout it is tried again.
@@ -122,14 +140,15 @@ func TestLeaveAndRejoin(t *testing.T) {
 	again.Listener = ln
 	again.Start()
 	defer again.Close()
-	if got := seen(10); got["f"] != 0 {
-		t.Fatalf("flaky took requests while down: %v", got)
+	// While its window lasts, seen fails a request that reaches flaky.
+	if got := seen(10); got["error"] != 0 {
+		t.Fatalf("back on its port: %v, errors %q", got, errs)
 	}
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(time.Until(time.Unix(0, fb.downUntil.Load())) + 50*time.Millisecond)
 	if got := seen(10); got["g"] != 5 || got["f"] != 5 {
 		t.Fatalf("after rejoining: %v", got)
 	}
-	if p.Backends()[1].Down() {
+	if fb.Down() {
 		t.Fatal("flaky is still down")
 	}
 }
