@@ -40,6 +40,12 @@ func proxyWasmFilter(t *testing.T, name string) string {
 	return out
 }
 
+// filterTimeout is the response filter's call timeout in these tests, which
+// check what the filter does to a body, not the timeout: a busy machine took
+// longer than the 100ms default over a call, whose instance was then made
+// again, failing every response it followed, the others' included.
+const filterTimeout = `"timeout": "10s"`
+
 // streamingBackend answers a path ending in /<bytes> with that many bytes of "abc..."
 // in 16 KB writes, each flushed, and the trailer X-Upstream.
 func streamingBackend(t *testing.T) *httptest.Server {
@@ -80,7 +86,7 @@ func TestProxyWasmResponse(t *testing.T) {
       "tls": {"certificates": [{"cert_file": "`+cert.CertFile+`", "key_file": "`+cert.KeyFile+`"}]}}],
   "upstreams": [{"name": "app", "addresses": ["`+backend.Listener.Addr().String()+`"]}],
   "routes": [{"match": {"path": ["/n/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}},
-    "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "upper", "instances": 2}}]}]
+    "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "upper", "instances": 2, `+filterTimeout+`}}]}]
 }`)
 	tlsAddr := addrs["tls"]
 	https := func(h2 bool) *stdhttp.Client {
@@ -169,9 +175,9 @@ func TestProxyWasmResponseSlowPeers(t *testing.T) {
   "routes": [
     {"match": {"path": ["/plain"]}, "handler": {"module": "respond", "params": {"body": "plain"}}},
     {"match": {"path": ["/n/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}},
-      "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "upper", "instances": 1}}]},
+      "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "upper", "instances": 1, `+filterTimeout+`}}]},
     {"match": {"path": ["/slow/*"]}, "handler": {"module": "proxy", "params": {"upstream": "app"}},
-      "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "slow:20", "instances": 1, "timeout": "1s"}}]}
+      "middleware": [{"module": "wasm", "params": {"path": "`+filter+`", "config": "slow:20", "instances": 1, `+filterTimeout+`}}]}
   ]
 }`)
 	base := "http://" + addrs["web"]
