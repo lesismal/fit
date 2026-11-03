@@ -427,9 +427,9 @@ func TestRefusedCredentials(t *testing.T) {
 	if s.Allocations() != 0 {
 		t.Fatalf("%d allocations", s.Allocations())
 	}
-	if n := metric(s, "fit_turn_auth_failures_total"); n < 4 {
-		t.Fatalf("%v auth failures counted", n)
-	}
+	// fib's server tells of a failure after it has answered it, so the
+	// last one may be counted after its client has the answer.
+	eventually(t, "four auth failures counted", func() bool { return metric(s, "fit_turn_auth_failures_total") >= 4 })
 }
 
 func TestQuotas(t *testing.T) {
@@ -449,9 +449,10 @@ func TestQuotas(t *testing.T) {
 	if _, err := newClient(t, addr, user, pass, false).allocate(t); code(err) != 508 {
 		t.Fatalf("a third allocation: %v, want 508", err)
 	}
-	if metric(s, `fit_turn_refused_total{code="486"}`) != 1 || metric(s, `fit_turn_refused_total{code="508"}`) != 1 {
-		t.Fatalf("refusals:\n%s", metrics(s))
-	}
+	// A refusal is counted after it is answered, as auth failures are.
+	eventually(t, "the refusals counted", func() bool {
+		return metric(s, `fit_turn_refused_total{code="486"}`) == 1 && metric(s, `fit_turn_refused_total{code="508"}`) == 1
+	})
 }
 
 // permErr sends to peer until its permission's refusal shows, and returns
