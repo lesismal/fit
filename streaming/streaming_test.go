@@ -44,6 +44,7 @@ func TestRTMPAuth(t *testing.T) {
 	if _, err := publishRTMP(t, e, url+"/live/cam?token="+pubToken, 5*time.Second); err != nil {
 		t.Fatalf("the publishing token: %v", err)
 	}
+	f.waitLive(t, "live/cam")
 	if _, err := publishRTMP(t, e, url+"/live/alice?user=alice&pass=alice-pw", time.Second); err != nil {
 		t.Fatalf("alice: %v", err)
 	}
@@ -93,7 +94,9 @@ func TestRTMPAuth(t *testing.T) {
 	}
 	waitFor(t, "the player's packets", func() bool { return r.packets.Load() > 10 })
 
-	// The refusals are counted, and the streams.
+	// The refusals are counted, and the streams, once all three are live.
+	f.waitLive(t, "live/alice")
+	f.waitLive(t, "live/bob")
 	var w observe.TextWriter
 	f.role().WriteMetrics(&w)
 	m := string(w.B)
@@ -119,6 +122,7 @@ func TestHTTPFLVAuth(t *testing.T) {
 	if _, err := publishRTMP(t, e, "rtmp://"+f.addr(t, "rtmp")+"/live/cam?token="+pubToken, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	resp, _ := get(t, f.base+"/flv/live/cam.flv", 0, nil)
 	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("Www-Authenticate") != `Bearer realm="fit"` {
 		t.Fatalf("no credentials: %d %v", resp.StatusCode, resp.Header)
@@ -157,6 +161,7 @@ func TestHLSAuth(t *testing.T) {
 	if _, err := publishRTMP(t, e, "rtmp://"+f.addr(t, "rtmp")+"/live/cam?token="+pubToken, 8*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	if resp, _ := get(t, f.base+"/hls/live/cam/index.m3u8", 1<<16, nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("no credentials: %d", resp.StatusCode)
 	}

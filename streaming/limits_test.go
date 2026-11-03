@@ -41,6 +41,7 @@ func TestLimits(t *testing.T) {
 	if _, err := publishRTMP(t, e, url+"/live/a", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/a")
 	if _, err := publishRTMP(t, e, url+"/live/b", time.Second); err == nil {
 		t.Fatal("a second stream past max_streams")
 	}
@@ -82,6 +83,7 @@ func TestCutConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	// A player that never reads, its window full.
 	stuck, err := net.Dial("tcp", strings.TrimPrefix(f.base, "http://"))
 	if err != nil {
@@ -156,6 +158,7 @@ func TestReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	closed := func() bool {
 		_, ok := f.role().Hub().Stream("live/cam")
 		return !ok
@@ -195,6 +198,7 @@ func TestReload(t *testing.T) {
 	if _, err := publishRTMP(t, e, url+"/live/cam?token="+pubToken, 20*time.Second); err != nil {
 		t.Fatalf("a publisher on the new hub: %v", err)
 	}
+	f.waitLive(t, "live/cam")
 	resp, _ := get(t, f.base+"/flv/live/cam.flv?token="+viewToken, 3, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("HTTP-FLV of the new hub: %d", resp.StatusCode)

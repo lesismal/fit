@@ -299,6 +299,17 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
+// waitLive waits for the stream at path to go live. An RTMP publish is
+// answered once the path is reserved, before its tracks arrive, and until
+// they do a player of any protocol finds no stream.
+func (f *fit) waitLive(t *testing.T, path string) {
+	t.Helper()
+	waitFor(t, path+" to go live", func() bool {
+		st, ok := f.role().Hub().Stream(path)
+		return ok && st.Publishing
+	})
+}
+
 // get sends a GET to url with what set adds, and returns the response
 // with up to max bytes of its body.
 func get(t *testing.T, url string, max int64, set func(*http.Request)) (*http.Response, []byte) {

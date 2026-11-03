@@ -94,6 +94,7 @@ func TestRTSPAuth(t *testing.T) {
 	if _, err := publishRTMP(t, e, "rtmp://"+f.addr(t, "rtmp")+"/live/cam?token="+pubToken, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	addr := f.addr(t, "rtsp")
 	url := "rtsp://" + addr + "/live/cam"
 	c := dialRTSP(t, addr)
@@ -244,6 +245,7 @@ func TestSRTAuth(t *testing.T) {
 	if _, err := publishRTMP(t, e, "rtmp://"+f.addr(t, "rtmp")+"/live/cam?token="+pubToken, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	for _, c := range []struct {
 		id   string
 		want error
@@ -278,6 +280,7 @@ func TestStreamWHIPWHEP(t *testing.T) {
 	if _, err := publishRTMPWith(t, e, "rtmp://"+f.addr(t, "rtmp")+"/live/cam?token="+pubToken, 10*time.Second, highProfile); err != nil {
 		t.Fatal(err)
 	}
+	f.waitLive(t, "live/cam")
 	post := func(path string, set func(*http.Request)) int {
 		req, _ := http.NewRequest("POST", f.base+path, strings.NewReader("v=0\r\n"))
 		req.Header.Set("Content-Type", "application/sdp")
