@@ -2,11 +2,15 @@ package listener
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	stdhttp "net/http"
+	"os"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/lesismal/fib/http3"
 
 	"github.com/lesismal/fit/internal/certtest"
+	"github.com/lesismal/fit/runtime"
 )
 
 // h3Get fetches target over HTTP/3, trusting cert, with name as the TLS
@@ -173,5 +178,56 @@ func TestAltSvcLeavesSharedHeaders(t *testing.T) {
 	resp.Body.Close()
 	if resp.Header.Get("Alt-Svc") != "" || resp.Header.Get("X-A") != "1" {
 		t.Fatalf("plain picked up web's Alt-Svc: %v", resp.Header)
+	}
+}
+
+// TestH3PortZeroRetries checks that a listener at port 0 whose HTTP/3 port,
+// the one TCP got, turns out taken for UDP is bound again on another port,
+// with its Alt-Svc naming the port TCP and UDP then share; and that one at a
+// port of its own fails as it did.
+func TestH3PortZeroRetries(t *testing.T) {
+	cert, err := certtest.Write(t.TempDir(), "a.example", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tried []string
+	check := checkUDP
+	t.Cleanup(func() { checkUDP = check })
+	checkUDP = func(address string) error {
+		tried = append(tried, address)
+		if len(tried) <= 2 {
+			return &net.OpError{Op: "listen", Net: "udp", Err: &os.SyscallError{Syscall: "bind", Err: syscall.EADDRINUSE}}
+		}
+		return check(address)
+	}
+	_, s := start(t, fmt.Sprintf(`{"listeners": [
+    {"name": "web", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h3"], "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`, cert.CertFile, cert.KeyFile))
+	if len(tried) != 3 {
+		t.Fatalf("UDP ports tried: %v, want 3", tried)
+	}
+	resp, err := tlsClient(addrOf(s, "web"), false, cert).Get("https://a.example/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	_, port, _ := net.SplitHostPort(addrOf(s, "web"))
+	if got := resp.Header.Get("Alt-Svc"); !strings.Contains(got, `":`+port+`"`) {
+		t.Fatalf("Alt-Svc %q, want port %s", got, port)
+	}
+
+	// A port of the listener's own is not changed.
+	tried = tried[:0]
+	free := freePort(t)
+	rt := new(runtime.Runtime)
+	swap(t, rt, fmt.Sprintf(`{"listeners": [
+    {"name": "web", "address": "127.0.0.1:%d", "protocols": ["http/1.1", "h3"], "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`, free, cert.CertFile, cert.KeyFile))
+	defer rt.Close()
+	if s2, err := Start(rt); err == nil {
+		s2.Close()
+		t.Fatal("a listener at a port of its own whose UDP port is taken started")
+	} else if !errors.Is(err, syscall.EADDRINUSE) || len(tried) != 1 {
+		t.Fatalf("%v after %v, want the port taken after one try", err, tried)
 	}
 }

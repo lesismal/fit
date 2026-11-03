@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -194,6 +195,26 @@ func (s *Server) SetDrainTimeout(d time.Duration) {
 // bindings may be listening on the address, which fib's SO_REUSEPORT lets
 // the two share while one replaces the other.
 func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
+	for attempt := 1; ; attempt++ {
+		b, err := s.bindOnce(l, shared)
+		if err != nil && errors.Is(err, errUDPPortTaken) && attempt < maxPortZeroBinds {
+			continue
+		}
+		return b, err
+	}
+}
+
+// errUDPPortTaken is the HTTP/3 port a listener at port 0 found taken: the
+// port TCP got, which UDP shares so that Alt-Svc names one port, can be held
+// by another socket for UDP alone, and bind tries another port.
+var errUDPPortTaken = errors.New("the port TCP got is taken for UDP")
+
+// maxPortZeroBinds bounds how many ports bind tries for a listener at port 0
+// whose HTTP/3 port is taken.
+const maxPortZeroBinds = 8
+
+// bindOnce is bind's one try.
+func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
 		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key()}
 	var tlsConfig *tls.Config
@@ -285,15 +306,22 @@ func (s *Server) bind(l *runtime.Listener, shared bool) (*binding, error) {
 		udpAddress = net.JoinHostPort(host, strconv.Itoa(b.addr.(*net.TCPAddr).Port))
 	}
 	if h3 {
+		// Port 0 with TCP: the port TCP got may be taken for UDP.
+		taken := func(err error) error {
+			if _, port, _ := net.SplitHostPort(l.Address); tcp && port == "0" && errors.Is(err, syscall.EADDRINUSE) {
+				return fmt.Errorf("%w: %w", errUDPPortTaken, err)
+			}
+			return err
+		}
 		if !shared {
-			if err := checkFreeUDP(udpAddress); err != nil {
-				return fail(err)
+			if err := checkUDP(udpAddress); err != nil {
+				return fail(taken(err))
 			}
 		}
 		h := http3.NewHandlerWithConfig(http3Config(l, tlsConfig), &dispatcher{rt: s.rt, name: l.Name})
 		var err error
 		if b.udpIndex, b.udpAddr, err = s.addBinding(fib.Binding{Network: "udp", Addr: udpAddress, Handler: h}); err != nil {
-			return fail(err)
+			return fail(taken(err))
 		}
 		if tcpDispatcher != nil {
 			tcpDispatcher.setAltSvc(http3.AltSvc(b.udpAddr.(*net.UDPAddr).Port))
@@ -507,6 +535,10 @@ func checkFree(address string) error {
 	}
 	return ln.Close()
 }
+
+// checkUDP is checkFreeUDP for an HTTP/3 port, which a test replaces to
+// find the port taken.
+var checkUDP = checkFreeUDP
 
 // checkFreeUDP is checkFree for HTTP/3's UDP port.
 func checkFreeUDP(address string) error {
