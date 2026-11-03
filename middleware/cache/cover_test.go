@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,10 +32,10 @@ func provisioned(t *testing.T, m *Cache) *Cache {
 }
 
 // answering is an origin that answers each request with header and body.
-func answering(header stdhttp.Header, body string, count *int) fibhttp.Handler {
+func answering(header stdhttp.Header, body string, count *atomic.Int64) fibhttp.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 		if count != nil {
-			*count++
+			count.Add(1)
 		}
 		h := header.Clone()
 		h.Set("Date", clock().UTC().Format(stdhttp.TimeFormat))
@@ -313,7 +314,7 @@ func TestDiskStale(t *testing.T) {
 	start := time.Now()
 	at(t, start, 0)
 	m, d := diskCache(t, "diskstale", t.TempDir())
-	var n int
+	var n atomic.Int64
 	plain := m.Wrap(answering(stdhttp.Header{"Cache-Control": {"max-age=10"}}, "plain", &n))
 	swr := m.Wrap(answering(stdhttp.Header{"Cache-Control": {"max-age=10, stale-while-revalidate=60"}}, "swr", &n))
 	fibtest.Serve(plain, "GET", "http://example.com/plain")
@@ -328,10 +329,10 @@ func TestDiskStale(t *testing.T) {
 	if rec := fibtest.Serve(swr, "GET", "http://example.com/swr"); !strings.HasSuffix(rec.Response.Header.Get("Cache-Status"), "detail=stale-while-revalidate") {
 		t.Errorf("stale-while-revalidate on disk: %q", rec.Response.Header.Get("Cache-Status"))
 	}
-	waitFor(t, "the background fetch", func() bool { return m.store.background.Load() == 0 })
-	if n != 4 {
-		t.Errorf("%d fetches", n)
-	}
+	// The stale response is answered before its fetch starts on the disk
+	// pool's goroutine, so the fetch is waited for by its count, and then
+	// for its end, which reads the clock this test sets back as it ends.
+	waitFor(t, "the background fetch", func() bool { return n.Load() == 4 && m.store.background.Load() == 0 })
 	// A 304 freshens a response on disk too.
 	e := &entry{status: 200, header: stdhttp.Header{}, body: []byte("old"), responseTime: clock(), lifetime: time.Minute}
 	m.store.put("http://example.com/r", e)
@@ -344,14 +345,14 @@ func TestDiskStale(t *testing.T) {
 // on, and writes and removals are dropped.
 func TestDiskRefused(t *testing.T) {
 	m, d := diskCache(t, "diskrefused", t.TempDir())
-	var n int
+	var n atomic.Int64
 	h := m.Wrap(answering(stdhttp.Header{"Cache-Control": {"max-age=60"}}, "x", &n))
 	fibtest.Serve(h, "GET", "http://example.com/x")
 	waitFor(t, "the file written", func() bool { c, _ := d.stats(); return c == 1 })
 	memoryDrop(m, "http://example.com/x")
 	d.pool = filepool.New(0, 0, time.Second)
-	if rec := fibtest.Serve(h, "GET", "http://example.com/x"); rec.Response.StatusCode != 200 || n != 2 {
-		t.Errorf("%d, %d fetches", rec.Response.StatusCode, n)
+	if rec := fibtest.Serve(h, "GET", "http://example.com/x"); rec.Response.StatusCode != 200 || n.Load() != 2 {
+		t.Errorf("%d, %d fetches", rec.Response.StatusCode, n.Load())
 	}
 	d.remove("http://example.com/x")
 	d.pending.Store(maxPendingWrites)

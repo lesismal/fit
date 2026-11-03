@@ -4,6 +4,7 @@ import (
 	"errors"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func leftContext(t *testing.T, target string) (c *fibhttp.Context, rec *endedRec
 // nothing is read or answered.
 func TestDiskReadClientGone(t *testing.T) {
 	m, d := diskCache(t, "diskgone", t.TempDir())
-	var n int
+	var n atomic.Int64
 	h := m.Wrap(answering(stdhttp.Header{"Cache-Control": {"max-age=60"}}, "x", &n))
 	fibtest.Serve(h, "GET", "http://example.com/x")
 	waitFor(t, "the file written", func() bool { c, _ := d.stats(); return c == 1 })
@@ -53,8 +54,8 @@ func TestDiskReadClientGone(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the request did not end")
 	}
-	if rec.Written || n != 1 {
-		t.Errorf("answered %v, %d fetches", rec.Written, n)
+	if rec.Written || n.Load() != 1 {
+		t.Errorf("answered %v, %d fetches", rec.Written, n.Load())
 	}
 }
 
@@ -92,10 +93,10 @@ func TestRevalidateUnderWay(t *testing.T) {
 	if !first {
 		t.Fatal("not first")
 	}
-	var n int
+	var n atomic.Int64
 	m.revalidate("k", &entry{}, httptest.NewRequest("GET", "http://example.com/k", nil), answering(nil, "", &n))
 	m.store.finish(f, fetchResult{status: 200})
-	if n != 0 || m.store.background.Load() != 0 {
-		t.Errorf("%d fetches, %d in the background", n, m.store.background.Load())
+	if n.Load() != 0 || m.store.background.Load() != 0 {
+		t.Errorf("%d fetches, %d in the background", n.Load(), m.store.background.Load())
 	}
 }
