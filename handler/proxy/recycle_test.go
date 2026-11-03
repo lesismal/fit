@@ -60,9 +60,11 @@ func TestExchangeDeadlineCarriesOver(t *testing.T) {
 // field added beside gen, the locks and the deadline, whose timer carries
 // over on purpose and whose request's part settle lifts, would carry over to
 // the next request. head is a buffer that carries over on purpose too: what
-// it holds is the request's only through exchangeState's framed.
+// it holds is the request's only through exchangeState's framed; and so is
+// respond, the exchange's own callback.
 func TestExchangeStateIsAllItHolds(t *testing.T) {
-	want := map[string]bool{"exchangeState": true, "gen": true, "callMu": true, "mu": true, "deadline": true, "head": true}
+	want := map[string]bool{"exchangeState": true, "gen": true, "callMu": true, "mu": true, "deadline": true, "head": true,
+		"respond": true}
 	typ := reflect.TypeFor[exchange]()
 	for i := range typ.NumField() {
 		if name := typ.Field(i).Name; !want[name] {

@@ -265,6 +265,10 @@ type exchange struct {
 	// which stays with the exchange from one request to the next: fib's
 	// client copies it as the request is sent.
 	head []byte
+
+	// respond is onResponse as the function value Send takes, made once
+	// for every request the exchange serves rather than allocated for each.
+	respond func(*fibhttp.ClientResponse, error)
 }
 
 // headerFields are the values of the fields outgoing sets in the client's
@@ -457,11 +461,14 @@ func (x *exchange) expire() {
 // send sends the request upstream, keeping its Call for cancel, and
 // abandons it at once if cancel came first.
 func (x *exchange) send(out *stdhttp.Request) {
+	if x.respond == nil {
+		x.respond = x.onResponse
+	}
 	x.callMu.Lock()
 	if x.framed != nil || x.blockResponse {
-		x.call = x.pool.SendFramed(x.backend, out, fibhttp.Framing{HeaderBlock: x.framed, ResponseHeaderBlock: x.blockResponse}, x.onResponse)
+		x.call = x.pool.SendFramed(x.backend, out, fibhttp.Framing{HeaderBlock: x.framed, ResponseHeaderBlock: x.blockResponse}, x.respond)
 	} else {
-		x.call = x.pool.Send(x.backend, out, x.onResponse)
+		x.call = x.pool.Send(x.backend, out, x.respond)
 	}
 	call, cause := x.call, x.cause.Load()
 	x.callMu.Unlock()
