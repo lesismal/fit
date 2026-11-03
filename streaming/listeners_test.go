@@ -178,7 +178,7 @@ func TestListenersMove(t *testing.T) {
 		was[proto] = a.String()
 	}
 	rtc := s.RTC()
-	if err := s.Apply(all(6*time.Second, 200*time.Millisecond,&config.StreamWebRTC{Listen: "127.0.0.1:0", PublicIPs: []string{"127.0.0.1"},
+	if err := s.Apply(all(6*time.Second, 200*time.Millisecond, &config.StreamWebRTC{Listen: "127.0.0.1:0", PublicIPs: []string{"127.0.0.1"},
 		ICEServers: []config.ICEServer{{URLs: []string{"stun:stun.example.com"}}}})); err != nil {
 		t.Fatal(err)
 	}
