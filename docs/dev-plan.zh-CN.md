@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I124。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I130。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -261,6 +261,13 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I121 | 运行中的服务与它所依据的配置之间的一致性：不一致与说明两类差异及可选修复、一致性页面、`fit check`，以及 `GET /config/check`/`POST /config/reconcile` | I120 | done |
 | I122 | workbench 的功能标签与监听端口：流媒体、媒体认证、WebRTC、隧道与 LLM 配置各自成页，每个监听端口列出它所提供的功能并链接到各自的页面 | I121 | done |
 | I123 | workbench 的引擎菜单：一个一级条目，每个监听端口是其功能的子菜单，按用户要求的顺序（处理器、反向/正向代理、缓存与中间件、流媒体、WebRTC、四层/SOCKS/TLS/ACME/默认 HTTPS），端口行带该端口的功能标签 | I122 | done |
+| **AI 助手** | | | |
+| I124 | 决定 031；`admin.assistant` 及其设置页面；各 API 的模型客户端，流式、带工具调用，基于 fib 的异步 HTTP 客户端；密钥保存在 store 中 | I120 | todo |
+| I125 | workbench 的对话面板与只读工具：工具注册表、SSE 对话、页面上下文、脱敏、fit 日志环 | I124 | todo |
+| I126 | 提议：修改类工具、diff 与应用流程、按用户的级别与审计日志 | I125 | todo |
+| I127 | Skill：格式、内置集合、Skills 页面、导入导出、`/name` | I126 | todo |
+| I128 | 在工作处询问 AI：保存错误、一致性、引擎菜单、表单字段、指标与角色页面上的入口 | I127 | todo |
+| I129 | 迁移与审查：`migrate` 与 `security-review` 端到端，在固定配置集上评估 | I127 | todo |
 
 ## M0 基础
 
@@ -1444,3 +1451,161 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
   `/api/status` 的实际地址、默认 HTTPS 与无监听两种情况，以及活动链接高亮；点击条目落到正确页面（按顺序要求筛选路由）；配置保存后
   菜单更新且不丢失当前页面；监听页面不再绘制端口卡片；bundle 测试通过，mock 与真实浏览器检查成立。
 - **涉及**：`app/workbench`、`docs`。
+
+## workbench 中的 AI 助手
+
+2026-11-04 提出，已审核。workbench 增加一个助手：每个页面旁的对话面板，读取运行中的 fit 在做什么、加以解释，并起草配置
+修改，由用户点击后应用。它是用户所设置的模型 API 的客户端（带密钥的托管 API、本地服务器，或本 fit 自己的 `llm.proxy`），
+自身不带模型。决定 031 记录下面的选择。
+
+原则，按约束顺序：
+
+- **模型提议，人来应用。** 每个会改动东西的工具都只是往一个提议中添加内容（经应用路径校验过的 diff）；任何修改都离不开人：
+  具备相应级别、已登录的用户点击应用，并在显示 diff 的弹窗中二次确认，修改才会生效，带 `If-Match` 并保存，像其他修改一样进入
+  `/versions` 与审计日志。没有无人值守模式。
+- **不阻塞 fib worker**（规则 1）：模型调用走 fib 的异步 HTTP 客户端，流式回答边到边解析，工具在控制台的池上运行；每个会话、
+  工具结果、流缓冲与审计条目都有上限。
+- **密钥不外泄**：模型 API 密钥保存在 store 中，只写、掩码显示，从不发给浏览器；交给模型的一切工具结果都去掉密码哈希、密钥、
+  token 与证书私钥；日志只有在设置允许时才发送。
+- **工具输出是数据，不是指令**：工具返回的配置原文、日志与头部在提示中作为数据隔离；其中任何内容都不能扩大助手的权限。
+- **默认关闭**：没有 `admin.assistant` 就没有面板，也没有任何外发调用。
+
+### 功能（工具注册表）
+
+每个功能是一个工具，带名称、JSON schema、级别（`read` 或 `propose`）与开销上限。`GET /api/m/ai/tools` 列出它们；面板的
+功能页展示它们，每个可在设置中启用或禁用。
+
+| 分组 | 工具 | 级别 | 作用 |
+| --- | --- | --- | --- |
+| 配置 | `config_get` | read | 基础或生效配置，整体或按成员，`.conf`/`.yaml`/`.json`，已脱敏 |
+| 配置 | `schema_describe` | read | 某成员的 schema、说明、默认值与示例（中英文） |
+| 配置 | `config_validate` | read | 按 `fit validate` 校验原文或补丁，错误带行列 |
+| 配置 | `versions_diff` | read | 保留的版本，以及两个版本之间的 diff |
+| 运行时 | `status_get` | read | 已绑定的监听、运行中的角色、引擎限制、运行时长 |
+| 运行时 | `metrics_query` | read | 按路由、上游、监听的计数与直方图，限定时间窗口 |
+| 运行时 | `upstream_health` | read | 上游池、成员、健康状态与最近的失败 |
+| 运行时 | `consistency_check` | read | `GET /config/check` 的差异与修复 |
+| 运行时 | `certs_list` | read | 所提供的证书、域名、签发者、到期时间、ACME 状态 |
+| 运行时 | `cache_zones` | read | 缓存区、大小、命中率 |
+| 角色 | `llm_nodes`、`tunnel_nodes` | read | 角色的节点列表、链路、延迟与流量 |
+| 日志 | `log_tail` | read | fit 自身日志，来自新增的有上限内存环，按 logger 与级别，已脱敏 |
+| 日志 | `access_log_sample` | read | 匹配某路由、状态码或客户端的最近访问日志行，有上限 |
+| 修改 | `config_propose` | propose | 按成员的补丁，以三种格式渲染为 diff 并校验，等待点击 |
+| 修改 | `reconcile_propose` | propose | 选定的一组一致性修复 |
+| 修改 | `rollback_propose` | propose | 回滚到某个保留版本 |
+| 修改 | `cache_purge_propose` | propose | 按缓存区、键或前缀清除 |
+| 转换 | `adapt_convert` | read | nginx 或 Caddyfile 原文经 `fit adapt` 转换，并列出未能转换的部分 |
+
+所有工具都触及不到：`admin.console` 的用户与密码、store 的密钥、`admin.assistant` 本身、Admin API 自身的地址与 token，以及
+配置之外的任何文件。
+
+### Skill
+
+skill 是一个命名的任务：说明何时使用的描述、提示词、可调用的工具子集（永远不超过用户的级别）、可选的输入与可选的模型。内置
+skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存在 store 中），以带 front matter 的 Markdown 导入导出，并可启用或
+禁用任意一个。在对话中用 `/name` 运行某个 skill；不指定时助手根据已启用 skill 的描述自行选择。
+
+| Skill | 作用 | 工具 |
+| --- | --- | --- |
+| `explain` | 解释当前页面、某成员或某个值，并链接到文档 | 配置、schema |
+| `route-builder` | 根据一句话生成路由、匹配器、处理器与中间件 | 配置、修改 |
+| `reverse-proxy` | 带健康检查、负载均衡、超时与重试的上游池 | 配置、运行时、修改 |
+| `tls-acme` | ACME 或文件证书、默认 HTTPS、重定向、客户端证书 | 配置、证书、修改 |
+| `rate-limit-auth` | 路由上的限流、IP 名单、basic、JWT 或 forward auth | 配置、修改 |
+| `cache-tuning` | 根据命中率与路由流量调整缓存区与规则 | 缓存、指标、修改 |
+| `diagnose` | 某路由为何返回 502/504 或变慢：结合健康状态、指标与日志 | 运行时、日志 |
+| `drift-explain` | 解释每个一致性差异并推荐修复 | 一致性、修改 |
+| `log-analysis` | 归类并解释 fit 日志与访问日志中的错误与异常 | 日志 |
+| `security-review` | 管理入口暴露、TLS 设置、缺失的限制与无上限的请求体，给出带修复的发现 | 配置、状态、修改 |
+| `migrate` | nginx、Caddy 或 Traefik 配置迁移到 fit：先用转换器，剩余部分交给模型 | 转换、配置、修改 |
+| `media-setup` | 根据服务描述配置流媒体、媒体认证、WebRTC 与媒体页面 | 配置、修改 |
+| `llm-mesh-setup` | 根据所描述的机器配置 LLM hub、node、proxy 角色及其模型 | 配置、角色、修改 |
+| `tunnel-setup` | 为 NAT 后的服务配置隧道 hub、node 与 proxy | 配置、角色、修改 |
+
+### 设置
+
+配置中的 `admin.assistant`，其密钥在 store 中，在设置页面编辑：
+
+| 设置 | 作用 |
+| --- | --- |
+| `providers` | 命名的模型端点：`kind`（`anthropic`、`openai`、`openai_responses`、`gemini`、`azure_openai`、`ollama`，或任意 `base_url` 的 `openai_compatible`，如 vLLM、llama.cpp、DeepSeek 或某个网关）、`base_url`、`api_version`、保存在 store 中或从 `env:NAME` 读取的密钥、额外头部、超时 |
+| `llm_proxy` | 以本 fit 的 `llm.proxy` 作为提供方，经其回环地址访问，使助手使用 mesh 中的模型 |
+| `models` | 每个提供方可用的模型（有列表接口的从中获取，否则手写），带上下文长度及是否支持工具调用 |
+| `default_model` | 对话使用的提供方与模型；skill 可指定自己的 |
+| `params` | 最大输出 token、温度、API 支持时的 thinking 或推理强度 |
+| `limits` | 每个会话的轮数、每轮的工具调用次数、每个工具结果的字节数、每个用户保留的会话历史、并发对话数、每用户每天的 token |
+| `data` | 是否发送日志、是否发送访问日志行、额外的脱敏规则 |
+| `users` | 每个控制台用户的级别：`off`、`read`（只读工具）、`propose` 或 `apply`（默认 `read`） |
+| `audit` | 保留多少条审计记录 |
+
+设置页面在保存前可测试提供方（一次短调用，显示延迟与模型列表）。
+
+迭代 I124–I129 见[索引](#索引)。
+
+### I124 助手的设置与模型客户端
+
+- **做**：决定 031。schema 与配置中的 `admin.assistant`，其密钥保存在 store 中（fitstore 载荷版本 3，仍可读版本 2），掩码显示且
+  只写。新包 `assistant/model` 中的模型客户端：对每种 `kind`，构造带系统提示、消息与工具的请求，以有上限的缓冲解析流式回答
+  （SSE，Ollama 为 NDJSON）为文本、thinking 与工具调用，统计用量；超时、浏览器离开时取消、仅在首字节之前重试；`llm_proxy`
+  提供方。workbench 的 `ai` 模块，含设置页面、提供方测试与模型列表，中英文。`GET/PUT /api/m/ai/settings`、
+  `POST /api/m/ai/providers/test`。
+- **完成条件**：每种 kind 都针对其 API 的录制假服务调用通过，并在 `test/docker` 中针对 Ollama 与一个 OpenAI 兼容服务器调用通过，
+  工具调用往返成功；密钥从不出现在响应、页面或日志中；慢速、中断或超大的流被限制并失败；在 race 检测下通过。
+- **涉及**：`assistant`（新）、`admin`、`admin/store`、`config`、`schema`、`app/workbench`、`docs`。
+
+### I125 对话面板与只读工具
+
+- **做**：上表中只读工具的注册表，各有 schema、级别与上限，在控制台池上通过进程内 Admin API 运行；对每个结果去除密钥；
+  为 `log_tail` 增加 fit 自身日志的有上限内存环。`POST /api/m/ai/chat` 以 SSE 流式输出事件（文本、工具调用、工具结果、用量、
+  结束），循环受 `limits` 限制；会话按用户保存在 store 中（加密、跨重启保留），数量与大小有上限，可列出与删除。面板：可从每个页面打开，当前页面与选中项作为上下文发送，
+  流式 Markdown，工具调用折叠显示，停止、重试、新会话；功能页面。
+- **完成条件**：关于某路由、某上游的健康状态或某条日志错误的问题由工具给出回答，中英文；录制的模型请求中没有任何密钥；超过
+  上限的工具结果被截断并注明；循环在上限处停止；两个用户的会话互相隔离，并在上限内跨重启保留；在 race 检测下通过，面板在浏览器中可用。
+- **涉及**：`assistant`、`admin`、`admin/store`、`observe`、`app/workbench`、`docs`。
+
+### I126 提议、级别与审计日志
+
+- **做**：propose 工具：模型可以连续调用多个，每次都向该会话唯一的待定提议添加一步；提议包含各步骤、基础版本的 ETag、合并后的
+  `.conf`/`.yaml`/`.json` 三种 diff 与整体校验结果；面板显示它及每一步，并提供应用与放弃。点击应用会弹出显示完整 diff 的确认窗口，
+  只有确认后才以该用户身份带 `If-Match` 执行：配置类步骤合并后经 `PUT /config/text` 作为一次修改应用（reconcile 与回滚走各自的
+  接口）并保存，之后再执行缓存清除；配置部分要么全部生效要么全不生效；过期的提议被拒绝，并在新版本上重新提议。来自 `admin.assistant.users` 的按用户级别，在每个工具与每次
+  应用时检查。store 中的审计日志：用户、时间、会话、skill、工具调用、提议、结果与版本；`GET /api/m/ai/audit` 及其页面。
+- **完成条件**：用自然语言提出的修改成为有效提议，应用后成为 `/versions` 列出的新版本；多次 propose 调用合成一个提议、作为一个
+  版本应用，其中一步失败则全部不应用；没有点击和弹窗确认就不会应用，取消弹窗时配置与 store 都不变；`read` 用户拿不到
+  propose 工具，`propose` 用户不能应用；校验失败的提议不能应用；禁止的成员不能被提议；审计日志在上限内跨重启保留；在 race
+  检测下通过。
+- **涉及**：`assistant`、`admin`、`admin/store`、`app/workbench`、`docs`。
+
+### I127 Skill
+
+- **做**：skill 格式（name、title、description、inputs、tools、model、prompt、examples），为带 front matter 的 Markdown；上表的
+  内置 skill，嵌入；用户 skill 保存在 store 中，数量与大小有上限；Skills 页面可列出、查看、添加、编辑、启用、禁用、导入与导出；
+  面板中的 `/name` 与 skill 选择器；skill 的工具与用户级别取交集。
+- **完成条件**：每个内置 skill 在固定示例配置上、针对录制模型完成其任务；在页面中添加的用户 skill 可运行并跨重启保留；指定了
+  超出用户级别工具的 skill 不能调用它；错误的 front matter 被拒绝并给出行号；中英文；在 race 检测下通过。
+- **涉及**：`assistant`、`admin/store`、`app/workbench`、`docs`。
+
+### I128 在工作处询问 AI
+
+- **做**：在以下位置增加“问 AI”按钮，打开面板并预填 skill 与上下文：保存错误（`explain`，带错误与原文）、每个一致性差异
+  （`drift-explain`）、每个引擎端口与路由（`diagnose`）、每个表单字段（`explain`，带其 schema 路径）、指标突增或上游下线
+  （`diagnose`），以及 LLM 与隧道的链路图。
+- **完成条件**：每个入口以正确的 skill 与上下文打开面板，首个回答用到了它们；助手关闭或用户级别为 `off` 时不显示按钮；中英文；
+  bundle 测试与浏览器检查通过。
+- **涉及**：`app/workbench`、`docs`。
+
+### I129 迁移与审查
+
+- **做**：`migrate`：nginx 与 Caddyfile 原文先经 `fit adapt`，转换器报告无法转换的部分交给模型，Traefik 的 YAML 或 label 完全由
+  模型转换，每个结果都是一个提议，并列出无法映射的项；`security-review`：带严重程度、成员与修复提议的发现。一组固定的输入配置
+  及期望结果，按需针对选定模型运行，报告有多少能转换为可通过校验并保留路由的配置。
+- **完成条件**：该组配置转换并通过校验，未转换项被列出；审查找出其测试集中预设的问题；该组用 `make assistant-eval` 运行，
+  提供方由环境变量设置，默认不在 CI 中运行。
+- **涉及**：`assistant`、`adapter`、`cli`、`docs`。
+
+### 审核结论（2026-11-04）
+
+- 批量提议：允许；模型在一轮中的多次 propose 调用合成一个提议，作为一次修改应用。
+- 不做无人值守应用：每个修改都必须点击应用，并在弹窗中二次确认后才生效并保存配置。
+- 会话保存在 store 中，跨重启保留，受 `limits` 的上限约束。
+- 不提供 CLI：助手只在 workbench 中。

@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I124.
+Status: `todo`, `doing` or `done`. The next free iteration number is I130.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -271,6 +271,13 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I124.
 | I121 | Consistency between what the running service does and the config it runs from: the drift and info differences with the fixes offered, the Consistency page, `fit check`, and `GET /config/check`/`POST /config/reconcile` | I120 | done |
 | I122 | The workbench's feature tabs and listener ports: streaming, media auth, WebRTC, tunnel and LLM config on pages of their own, and each listener port listing the features it serves with links to their pages | I121 | done |
 | I123 | The workbench's Engine menu: one first-level entry, each listener port a submenu of its features in the order asked (handlers, reverse/forward proxy, cache and middleware, streaming, WebRTC, layer 4/SOCKS/TLS/ACME/HTTPS by default), with the port's feature tags on its line | I122 | done |
+| **AI assistant** | | | |
+| I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | todo |
+| I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | todo |
+| I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | todo |
+| I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
+| I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
+| I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
 
 ## M0, foundations
 
@@ -1715,3 +1722,193 @@ set of named policies comes first; the streaming role and the pages build on it,
   says); the menu updates after a config save without losing the page; the Listeners page no longer
   draws the port cards; the bundle's tests pass and the mock/real-browser checks hold.
 - **Touches**: `app/workbench`, `docs`.
+
+## AI assistant in the workbench
+
+Proposed and reviewed 2026-11-04. The workbench gains an assistant: a chat panel beside every page
+that reads what the running fit does, explains it, and drafts config changes the user applies with a
+click. It is a client of model APIs the user sets (a hosted API with its key, a local server, or this
+fit's own `llm.proxy`), never a model of its own. Decision 031 records the choices below.
+
+Principles, in the order they bind:
+
+- **The model proposes, a person applies.** Every tool that changes something adds to a proposal (a
+  diff checked through the apply path); nothing is ever applied without a person: a logged-in user with
+  the right level clicks Apply and confirms again in a dialog that shows the diff, and only then is the
+  change applied, with `If-Match`, saved, and listed in `/versions` and in the audit log like any other
+  change. There is no unattended mode.
+- **Nothing blocks a fib worker** (rule 1): model calls go out on fib's asynchronous HTTP client,
+  streamed answers are parsed as they arrive, tools run on the console pool; every conversation, tool
+  result, stream buffer and audit entry is bounded.
+- **Secrets never leave**: model API keys are kept in the store, written once and shown masked, never
+  sent to the browser; password hashes, keys, tokens and certificates' private parts are redacted from
+  everything a tool hands the model; logs go only if the settings allow it.
+- **Tool output is data, not instructions**: config text, logs and headers a tool returns are fenced
+  as data in the prompt; nothing in them widens what the assistant may do.
+- **Off by default**: no `admin.assistant`, no panel, no outgoing calls.
+
+### Functions (the tool registry)
+
+Every function is a tool with a name, a JSON schema, a level (`read` or `propose`) and a cost bound.
+`GET /api/m/ai/tools` lists them; the panel's Functions page shows them, each enabled or disabled by
+the settings.
+
+| Group | Tool | Level | What it does |
+| --- | --- | --- | --- |
+| Config | `config_get` | read | base or effective config, whole or by members, in `.conf`/`.yaml`/`.json`, redacted |
+| Config | `schema_describe` | read | a member's schema, description, defaults and examples (English or Chinese) |
+| Config | `config_validate` | read | text or a patch checked as `fit validate` checks it, errors with line and column |
+| Config | `versions_diff` | read | the kept versions, and the diff between two of them |
+| Runtime | `status_get` | read | listeners bound, roles running, engine limits, uptime |
+| Runtime | `metrics_query` | read | counters and histograms by route, upstream, listener, over a bounded window |
+| Runtime | `upstream_health` | read | pools, their members, health and recent failures |
+| Runtime | `consistency_check` | read | `GET /config/check`'s differences and fixes |
+| Runtime | `certs_list` | read | certificates served, names, issuers, expiry, ACME state |
+| Runtime | `cache_zones` | read | zones, sizes, hit rates |
+| Roles | `llm_nodes`, `tunnel_nodes` | read | the roles' node lists, links, latency and traffic |
+| Logs | `log_tail` | read | fit's own log, from a new bounded in-memory ring, by logger and level, redacted |
+| Logs | `access_log_sample` | read | recent access log lines matching a route, status or client, bounded |
+| Change | `config_propose` | propose | a patch by members, rendered as a diff in the three formats, validated, waiting for a click |
+| Change | `reconcile_propose` | propose | a chosen set of Consistency fixes |
+| Change | `rollback_propose` | propose | a rollback to a kept version |
+| Change | `cache_purge_propose` | propose | a purge by zone, key or prefix |
+| Convert | `adapt_convert` | read | nginx or Caddyfile text through `fit adapt`, with what it could not convert |
+
+Out of reach of every tool: `admin.console` users and passwords, the store's key, `admin.assistant`
+itself, the Admin API's own addresses and tokens, and any file outside the config.
+
+### Skills
+
+A skill is a named task: a description saying when to use it, a prompt, the subset of tools it may
+call (never wider than the user's level), optional inputs and an optional model. Built-in skills are
+embedded in the bundle; users add their own on the Skills page (stored in the store), import and export
+them as Markdown with front matter, and enable or disable any. In the chat, `/name` runs one; without a
+name the assistant picks from the enabled skills' descriptions.
+
+| Skill | What it does | Tools |
+| --- | --- | --- |
+| `explain` | explains the current page, a member or a value, with links to the docs | config, schema |
+| `route-builder` | a route, its matcher, handler and middleware from a sentence | config, change |
+| `reverse-proxy` | an upstream pool with health checks, load balancing, timeouts and retries | config, runtime, change |
+| `tls-acme` | certificates by ACME or files, HTTPS by default, redirects, client certificates | config, certs, change |
+| `rate-limit-auth` | rate limits, IP lists, basic, JWT or forward auth on routes | config, change |
+| `cache-tuning` | cache zones and rules, from hit rates and the routes' traffic | cache, metrics, change |
+| `diagnose` | why a route answers 502/504 or is slow: health, metrics and logs read together | runtime, logs |
+| `drift-explain` | each Consistency difference explained, a fix recommended | consistency, change |
+| `log-analysis` | errors and anomalies in fit's log and the access log, grouped and explained | logs |
+| `security-review` | admin exposure, TLS settings, missing limits and bodies without bounds, as findings with fixes | config, status, change |
+| `migrate` | an nginx, Caddy or Traefik config to fit: the converter first, the model for what it left | convert, config, change |
+| `media-setup` | streaming, media auth, WebRTC and media pages from a description of the service | config, change |
+| `llm-mesh-setup` | LLM hub, node and proxy roles, and their models, from the machines described | config, roles, change |
+| `tunnel-setup` | tunnel hub, node and proxy for services behind NAT | config, roles, change |
+
+### Settings
+
+`admin.assistant` in the config, its secrets in the store, edited on the Settings page:
+
+| Setting | What it sets |
+| --- | --- |
+| `providers` | named model endpoints: `kind` (`anthropic`, `openai`, `openai_responses`, `gemini`, `azure_openai`, `ollama`, or `openai_compatible` with any `base_url`, as vLLM, llama.cpp, DeepSeek or a gateway), `base_url`, `api_version`, the key kept in the store or read from `env:NAME`, extra headers, timeouts |
+| `llm_proxy` | a provider that is this fit's `llm.proxy`, reached on its loopback address, so the assistant uses the mesh's models |
+| `models` | per provider, the models offered (fetched from the provider's list where it has one, or written), with context size and whether they call tools |
+| `default_model` | provider and model the chat uses; skills may name their own |
+| `params` | max output tokens, temperature, thinking or reasoning effort where the API has it |
+| `limits` | turns per conversation, tool calls per turn, bytes per tool result, conversation history kept per user, concurrent chats, tokens per user per day |
+| `data` | send logs or not, send access log lines or not, extra redaction patterns |
+| `users` | per console user, `off`, `read` (read tools only), `propose` or `apply` (default `read`) |
+| `audit` | how many audit entries to keep |
+
+The Settings page tests a provider (a short call, its latency and model list) before it is saved.
+
+The iterations, I124–I129, are in the [index](#index).
+
+### I124 The assistant's settings and model client
+
+- **Do**: decision 031. `admin.assistant` in the schema and the config, its keys in the store (fitstore
+  payload version 3, version 2 still read), shown masked and written only. A model client in a new
+  package `assistant/model`: for each `kind`, the request with system prompt, messages and tools, the
+  streamed answer (SSE, or NDJSON for Ollama) parsed with bounded buffers into text, thinking and tool
+  calls, the usage counted; timeouts, a cancel when the browser goes away, retries only before the first
+  byte; the `llm_proxy` provider. The workbench's `ai` module with the Settings page, a provider test and
+  the model list, English and Chinese. `GET/PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`.
+- **Done when**: each kind is called against a recorded fake of its API and, in `test/docker`, against
+  Ollama and an OpenAI-compatible server, a tool call round-tripping; a key never appears in a response,
+  the page or a log; a slow, cut or oversized stream is bounded and failed; under the race detector.
+- **Touches**: `assistant` (new), `admin`, `admin/store`, `config`, `schema`, `app/workbench`, `docs`.
+
+### I125 The chat panel and the read tools
+
+- **Do**: the tool registry with the read tools above, each with its schema, level and bounds, run on the
+  console pool against the Admin API in process; redaction of secrets from every result; a bounded ring of
+  fit's own log for `log_tail`. `POST /api/m/ai/chat` streaming events (text, tool call, tool result,
+  usage, done) as SSE, the loop bounded by `limits`; conversations kept per user in the store (encrypted,
+  across restarts), bounded in number and size, listed and deleted. The panel: open from every page, the current page and selection sent as context, streamed
+  Markdown, tool calls shown folded, stop, retry, new conversation; the Functions page.
+- **Done when**: a question about a route, an upstream's health or a log error is answered from the tools,
+  in English and Chinese; no secret reaches a recorded request to the model; a tool result over its bound
+  is cut and says so; the loop stops at its limits; two users' conversations stay apart and hold across a
+  restart within their bounds; under the race
+  detector, and the panel works in a browser.
+- **Touches**: `assistant`, `admin`, `admin/store`, `observe`, `app/workbench`, `docs`.
+
+### I126 Proposals, levels and the audit log
+
+- **Do**: the propose tools: the model may call several in a row, and each adds a step to one pending
+  proposal per conversation, which holds the steps, the base version's ETag, the combined diff in
+  `.conf`, `.yaml` and `.json`, and the validation of the whole; the panel shows it with each step,
+  Apply and Discard. Apply opens a confirmation dialog with the whole diff, and only its confirm runs
+  the steps as the user with `If-Match` — the config steps merged and applied as one change through
+  `PUT /config/text` (a reconcile and a rollback as their own endpoints), then saved, a cache purge
+  after them — all or nothing for the config; a stale proposal is refused and offered again on the
+  new version. Per-user levels
+  from `admin.assistant.users`, checked on every tool and every apply. The audit log in the store: user,
+  time, conversation, skill, tool calls, proposal, outcome and version; `GET /api/m/ai/audit` and its page.
+- **Done when**: a change asked in words becomes a valid proposal and, applied, a new version that
+  `/versions` lists; several propose calls make one proposal applied as one version, and one failing
+  step applies none of them; nothing is applied without the click and the dialog's confirm, and
+  cancelling the dialog leaves the config and the store unchanged; a `read` user gets no propose tools, a
+  `propose` user cannot apply; a proposal that fails validation cannot be applied; the forbidden members
+  cannot be proposed; the audit log holds across a restart within its bound; under the race detector.
+- **Touches**: `assistant`, `admin`, `admin/store`, `app/workbench`, `docs`.
+
+### I127 Skills
+
+- **Do**: the skill format (name, title, description, inputs, tools, model, prompt, examples) as Markdown
+  with front matter; the built-in skills above, embedded; user skills kept in the store, bounded in number
+  and size; the Skills page to list, view, add, edit, enable, disable, import and export them; `/name` and
+  a skill picker in the panel; a skill's tools intersected with the user's level.
+- **Done when**: each built-in skill runs its task on a fixed example config against a recorded model; a
+  user skill added on the page runs and survives a restart; a skill naming a tool above the user's level
+  cannot call it; bad front matter is refused with its line; English and Chinese; under the race detector.
+- **Touches**: `assistant`, `admin/store`, `app/workbench`, `docs`.
+
+### I128 Ask AI where the work is
+
+- **Do**: an Ask AI button that opens the panel with a skill and context filled in, on a save's errors
+  (`explain` with the error and the text), each Consistency difference (`drift-explain`), each Engine port
+  and route (`diagnose`), each form field (`explain` with its schema path), a metrics spike or an
+  upstream down (`diagnose`), and the LLM and tunnel link maps.
+- **Done when**: each entry opens the panel with the right skill and context and its first answer uses
+  them; the buttons are absent when the assistant is off or the user's level is `off`; English and
+  Chinese; the bundle's tests and a browser check pass.
+- **Touches**: `app/workbench`, `docs`.
+
+### I129 Migration and review
+
+- **Do**: `migrate`: nginx and Caddyfile text through `fit adapt` first, the model converting what the
+  converter reported it could not, Traefik's YAML or labels by the model alone, each result a proposal
+  with the items it could not map listed; `security-review`: findings with severity, member and a
+  proposed fix. A fixed set of input configs with the expected outcome, run against a chosen model on
+  demand, reporting how many convert to a config that validates and keeps the routes.
+- **Done when**: the set's configs convert and validate, their unconverted items named; the review
+  finds the planted issues of its set; the set runs from `make assistant-eval` with a provider set in the
+  environment, never in CI by default.
+- **Touches**: `assistant`, `adapter`, `cli`, `docs`.
+
+### Decisions from review (2026-11-04)
+
+- Batch proposals: allowed; the model's propose calls in a turn make one proposal, applied as one change.
+- No unattended apply: every change needs the Apply click and a second confirmation in a dialog before
+  it takes effect and is saved.
+- Conversations are kept in the store, across restarts, within the bounds of `limits`.
+- No CLI: the assistant lives in the workbench only.
