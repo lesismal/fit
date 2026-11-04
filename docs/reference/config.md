@@ -3083,25 +3083,33 @@ In JSON:
 Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera.
 
 Serves fit's own media pages under `prefix` (`/media`), embedded in the binary, with no script or
-style from elsewhere: an index, a room call (`call`), a publish page (`publish`) and a play page
-(`play`), over the WHIP and WHEP endpoints `whip` and `whep` name, fit's [`whip`](#whip) and
-[`whep`](#whep) or the streaming role's, on this server or another. In a call each member
-publishes `<room>-<name>` and plays the others; the switches of the microphone, the camera and the
-screen replace the tracks the PeerConnection sends and never renegotiate it, a page without the
-device sends a silent track or a frame with its name, and each member announces its switches
-through the room API (`api/rooms/<room>/join`, `members/<name>`, `leave`, and `events`, Server-Sent
-Events), so that the others show "microphone off" or the member's avatar rather than wait on media
-that does not come, and play a member's stream only once it is announced as published. The
-publish and play pages show a stream's URLs: WHIP, WHEP, `hls`, and `links` for tools outside the
-browser. `auth` names the [`media_auth`](#media-auth) policy the room API checks: joining and
-following a room needs `play` on `<room>-*`, announcing that one publishes `publish` on
-`<room>-<name>`. With `login`, the pages log the policy's users in: a token the policy signs comes
-back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token`, which the endpoints take; the
-pages also take a token pasted in, as `fit media-token` prints. The room API is bounded by
-`max_rooms`, `max_members`, twice as many watchers a room, `max_message_bytes`, `member_ttl` and
-`stall_timeout`. The pages themselves can sit behind the route's middleware as well, as
-`basic_auth` or `forward_auth`. The route must match the prefix and what is below it. See
-[WebRTC](../webrtc.md#the-media-pages).
+style from elsewhere: an index, a room call (`call`) with a chat of text messages and small files,
+a publish page (`publish`) and a play page (`play`), over the WHIP and WHEP endpoints `whip` and
+`whep` name, fit's [`whip`](#whip) and [`whep`](#whep) or the streaming role's, on this server or
+another. In a call each member publishes `<room>-<name>` and plays the others; the switches of the
+microphone, the camera and the screen replace the tracks the PeerConnection sends and never
+renegotiate it, a page without the device sends a silent track or a frame with its name, and each
+member announces its switches through the room API (`api/rooms/<room>/join`, `members/<name>`,
+`leave`, and `events`, Server-Sent Events), so that the others show "microphone off" or the
+member's avatar rather than wait on media that does not come, and play a member's stream only once
+it is announced as published. The publish and play pages show a stream's URLs: WHIP, WHEP, `hls`,
+and `links` for tools outside the browser. `auth` names the [`media_auth`](#media-auth) policy the
+room API checks: joining and following a room needs `play` on `<room>-*`, announcing that one
+publishes `publish` on `<room>-<name>`. With `login`, the pages log the policy's users in: a token
+the policy signs comes back as the `HttpOnly`, `SameSite=Strict` cookie `fit_media_token`, which the
+endpoints take; the pages also take a token pasted in, as `fit media-token` prints. With `pages`
+false, none of the pages is served: every path under the prefix that is not the API, the redirect
+from the prefix included, answers 404, for a deployment whose page is its own, and the login and
+the room API stay for that page. The chat, on unless `chat` is false, carries the members' text
+messages and small files through the room API's `chat` and `files` routes and starts each `events`
+watcher with the room's `history` event; each file is at most `max_file_bytes` (5 MiB when left
+out), a room keeps 64 messages, and the handler's rooms 64 MiB of file bytes together, a watcher
+that falls behind being ended. A member joins with the microphone and the camera on only where
+`mic_default` and `cam_default` say so, both off when left out, and the URL's `mic=0|1` and
+`cam=0|1` override them. The room API is bounded by `max_rooms`, `max_members`, twice as many
+watchers a room, `max_message_bytes`, `member_ttl` and `stall_timeout`. The pages themselves can
+sit behind the route's middleware as well, as `basic_auth` or `forward_auth`. The route must match
+the prefix and what is below it. See [WebRTC](../webrtc.md#the-media-pages).
 
 In a .conf file:
 
@@ -3112,6 +3120,11 @@ route {
 		auth live
 		login true
 		title "Our media"
+		pages true
+		mic_default false
+		cam_default false
+		chat true
+		max_file_bytes 5MiB
 		hls /hls/{stream}/index.m3u8
 		links RTMP { url rtmp://{host}/live/{stream}?token={token} }
 	}
@@ -3131,6 +3144,11 @@ handler:
     auth: live
     login: true
     title: Our media
+    pages: true
+    mic_default: false
+    cam_default: false
+    chat: true
+    max_file_bytes: 5242880
     hls: /hls/{stream}/index.m3u8
     links:
       - name: RTMP
@@ -3144,6 +3162,8 @@ In JSON:
   "match": {"path": ["/media", "/media/*"]},
   "handler": {"module": "media_pages", "params": {
     "auth": "live", "login": true, "title": "Our media",
+    "pages": true, "mic_default": false, "cam_default": false,
+    "chat": true, "max_file_bytes": 5242880,
     "hls": "/hls/{stream}/index.m3u8",
     "links": [{"name": "RTMP", "url": "rtmp://{host}/live/{stream}?token={token}"}]
   }}
@@ -3156,6 +3176,7 @@ In JSON:
 | `title` | string |  | The pages' title; fit media when left out. |
 | `auth` | string |  | The media_auth policy the room API checks, and the pages' login and tokens belong to: joining a room and following it needs play on <room>-*, announcing that one publishes publish on <room>-<name>, as the WHIP and WHEP endpoints the pages use check with their own auth, which should name the same policy. Everyone may use the room API when left out, as the route's middleware allow. |
 | `login` | boolean |  | Show a login form for the users of the auth policy: a right password is answered with a token the policy signs, for its token_ttl, set as the HttpOnly cookie fit_media_token (SameSite=Strict, Secure over TLS), which the WHIP, WHEP and HLS requests of the pages carry, and handed to the page too. Without it the pages ask for a token instead, as fit media-token prints, when auth needs one. |
+| `pages` | boolean | `true` | Serve the pages: the index, the call, the publish and the play pages, and their script and style. False serves none of them: their paths answer 404, for a deployment whose page is its own; the login and the room API stay, for that page. True when left out. |
 | `whip` | string | `"/whip/{stream}"` | The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip handler's, or stream_whip's for the streaming role, on this server or another. /whip/{stream} when left out. |
 | `whep` | string | `"/whep/{stream}"` | The URL streams are played from with WHEP, {stream} standing for the stream's name. /whep/{stream} when left out. |
 | `hls` | string |  | The URL of a stream's HLS playlist, {stream} standing for its name, as /hls/{stream}/index.m3u8 for the streaming role's hls handler: the play page plays it where the browser plays HLS itself, with the page's token. None when left out. |
@@ -3164,6 +3185,10 @@ In JSON:
 | `max_rooms` | integer, 1 or more | `64` | How many rooms may have members or watchers at once; a join or a watch past it is answered 503. 64 when left out. |
 | `max_members` | integer, 1 to 256 | `16` | How many members a room may have; a join past it is answered 503. A room may have twice as many watchers, its members' event streams among them. 16 when left out. |
 | `max_message_bytes` | integer, 256 to 65536 | `1024` | The largest body a request of the room API or the login may have, in bytes; a larger one is answered 413. 1024 when left out. |
+| `mic_default` | boolean |  | Whether a member's microphone is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a silent track while it is off, so a switch never renegotiates. The URL's mic=0 or mic=1 overrides it. |
+| `cam_default` | boolean |  | Whether a member's camera is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a frame with its name while it is off, so a switch never renegotiates. The URL's cam=0 or cam=1 overrides it. |
+| `chat` | boolean | `true` | Whether a room call has a chat: the pages show it, and the room API carries the members' text messages and small files between them. False answers the chat's API 404 and shows no chat window. True when left out. |
+| `max_file_bytes` | integer, 1024 to 33554432 | `5242880` | The largest file a member may send in a room's chat, in bytes; a larger one is answered 413, and the page refuses it before sending. 5 MiB (5242880) when left out. |
 | `member_ttl` | duration | `"30s"` | How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out. |
 | `stall_timeout` | duration | `"30s"` | How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out. |
 

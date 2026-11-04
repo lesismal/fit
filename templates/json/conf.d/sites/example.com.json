@@ -865,6 +865,12 @@
           // // boolean.
           // "login": true,
 
+          // // Serve the pages: the index, the call, the publish and the play pages, and their script and
+          // // style. False serves none of them: their paths answer 404, for a deployment whose page is its
+          // // own; the login and the room API stay, for that page. True when left out.
+          // // boolean; default true.
+          // "pages": true,
+
           // // The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip
           // // handler's, or stream_whip's for the streaming role, on this server or another.
           // // /whip/{stream} when left out.
@@ -932,6 +938,29 @@
           // // answered 413. 1024 when left out.
           // // integer, 256 to 65536; default 1024.
           // "max_message_bytes": 1024,
+
+          // // Whether a member's microphone is on when it joins a call in the pages: off when left out,
+          // // for the member to switch on, and a publisher sends a silent track while it is off, so a
+          // // switch never renegotiates. The URL's mic=0 or mic=1 overrides it.
+          // // boolean.
+          // "mic_default": true,
+
+          // // Whether a member's camera is on when it joins a call in the pages: off when left out, for
+          // // the member to switch on, and a publisher sends a frame with its name while it is off, so a
+          // // switch never renegotiates. The URL's cam=0 or cam=1 overrides it.
+          // // boolean.
+          // "cam_default": true,
+
+          // // Whether a room call has a chat: the pages show it, and the room API carries the members'
+          // // text messages and small files between them. False answers the chat's API 404 and shows no
+          // // chat window. True when left out.
+          // // boolean; default true.
+          // "chat": true,
+
+          // // The largest file a member may send in a room's chat, in bytes; a larger one is answered 413,
+          // // and the page refuses it before sending. 5 MiB (5242880) when left out.
+          // // integer, 1024 to 33554432; default 5242880.
+          // "max_file_bytes": 5242880,
 
           // // How long a member stays in its room without a heartbeat: the pages send one every third of
           // // it. 30s when left out.

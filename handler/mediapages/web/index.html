@@ -69,7 +69,27 @@
       <button class="toggle" id="call-cam" type="button" aria-pressed="true"><span class="toggle__icon" data-icon="cam"></span><span data-i18n="tools.cam">Camera</span></button>
       <button class="toggle" id="call-screen" type="button" aria-pressed="false"><span class="toggle__icon" data-icon="screen"></span><span data-i18n="tools.screen">Screen</span></button>
     </div>
-    <div class="tiles" id="call-tiles"></div>
+    <div class="call-stage" id="call-stage">
+      <div class="tiles" id="call-tiles"></div>
+      <aside class="chat" id="call-chat" hidden>
+        <div class="chat__head">
+          <h3 data-i18n="chat.title">Chat</h3>
+          <span class="badge" id="chat-count"></span>
+        </div>
+        <div class="chat__log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <p class="chat__empty muted" id="chat-empty" data-i18n="chat.empty">No messages yet.</p>
+        <form class="chat__send" id="chat-form" autocomplete="off">
+          <label class="field chat__field"><span class="field__label" data-i18n="chat.message">Message</span><input class="input" id="chat-text" maxlength="1008"></label>
+          <button class="btn btn--primary" id="chat-send" type="submit" data-i18n="chat.send">Send</button>
+        </form>
+        <div class="chat__tools">
+          <label class="btn btn--sm btn--ghost chat__pick"><input class="chat__pick-input" id="chat-file" type="file"><span data-i18n="chat.choose">Choose file</span></label>
+          <span class="muted chat__filename" id="chat-filename"></span>
+          <button class="btn btn--sm" id="chat-file-send" type="button" data-i18n="chat.sendfile">Send file</button>
+        </div>
+        <p class="hint" id="chat-hint"></p>
+      </aside>
+    </div>
   </section>
 
   <section id="view-publish" class="view" hidden>

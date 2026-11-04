@@ -140,6 +140,36 @@ p { margin: 6px 0 0; }
    grid below it; at least 480px wide. */
 .tiles--spot .tile--spot { order: -1; grid-column: 1 / -1; justify-self: center; width: min(100%, max(480px, calc((100vh - 480px) * 16 / 9))); }
 
+/* The call: the tiles and, when the room's chat is on, its window beside them
+   on a wide window and below them on a narrow one. The chat keeps a bounded
+   height and scrolls on its own; the spotlight's rules above are unaffected. */
+.call-stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.call-stage--chat { grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+.chat { display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.chat__head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.chat__head h3 { margin-right: auto; }
+.chat__log { flex: 1 1 auto; height: min(46vh, 440px); min-height: 140px; max-height: 440px; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface-2); }
+.chat__empty { padding: 10px 12px; margin: 0; text-align: center; }
+.chat__msg { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chat__msg--mine .chat__from { color: var(--primary); }
+.chat__meta { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+.chat__from { font-weight: 650; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.chat__text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat__file { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 9px; }
+.chat__file-name { overflow-wrap: anywhere; }
+.chat__file-size { color: var(--muted); font-size: 12px; }
+.chat__send { display: flex; gap: 8px; align-items: end; padding: 10px 12px 0; }
+.chat__field { flex: 1; min-width: 0; }
+.chat__tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px 0; }
+.chat__pick { position: relative; }
+.chat__pick-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.chat__filename { flex: 1 1 90px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.chat > .hint { margin: 6px 12px 10px; min-height: 1.2em; }
+@media (max-width: 1000px) {
+  .call-stage--chat { grid-template-columns: minmax(0, 1fr); }
+  .chat__log { height: min(38vh, 320px); max-height: 320px; }
+}
+
 /* Login dialog and toast */
 .dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 22px; width: min(380px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }
 .dialog::backdrop { background: rgba(10, 12, 20, .45); }

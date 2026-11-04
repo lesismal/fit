@@ -8,11 +8,13 @@
 // docs/decisions/030-media-auth-and-pages.md.
 //
 // Nothing blocks a worker: the room API's state is in memory under short
-// locks, its events are written with WriteNoWait and a slow browser is sent
-// only the latest state once it has taken the last, and a bcrypt login runs
-// on mediaauth's pool. Every part is bounded: rooms, members a room,
-// watchers a room, the size of a request's body, a member's life without a
-// heartbeat, and each wait for a browser to take its events.
+// locks, its events are written with WriteNoWait, a slow browser is sent only
+// the latest state once it has taken the last, its chat messages wait in a
+// bounded queue that cuts the stream when it overflows, and a bcrypt login
+// runs on mediaauth's pool. Every part is bounded: rooms, members a room,
+// watchers a room, messages a room, the bytes of files across the rooms, the
+// size of a request's body, a member's life without a heartbeat, and each
+// wait for a browser to take its events.
 package mediapages
 
 import (
@@ -51,6 +53,9 @@ const (
 	DefaultMaxRooms        = 64
 	DefaultMaxMembers      = 16
 	DefaultMaxMessageBytes = 1024
+	DefaultMaxFileBytes    = 5 << 20
+	MinMaxFileBytes        = 1024
+	MaxMaxFileBytes        = 32 << 20
 	DefaultMemberTTL       = 30 * time.Second
 	DefaultStallTimeout    = 30 * time.Second
 )
@@ -61,6 +66,7 @@ type Pages struct {
 	Title           string             `json:"title,omitempty" doc:"The pages' title; fit media when left out."`
 	Auth            string             `json:"auth,omitempty" doc:"The media_auth policy the room API checks, and the pages' login and tokens belong to: joining a room and following it needs play on <room>-*, announcing that one publishes publish on <room>-<name>, as the WHIP and WHEP endpoints the pages use check with their own auth, which should name the same policy. Everyone may use the room API when left out, as the route's middleware allow."`
 	Login           bool               `json:"login,omitempty" doc:"Show a login form for the users of the auth policy: a right password is answered with a token the policy signs, for its token_ttl, set as the HttpOnly cookie fit_media_token (SameSite=Strict, Secure over TLS), which the WHIP, WHEP and HLS requests of the pages carry, and handed to the page too. Without it the pages ask for a token instead, as fit media-token prints, when auth needs one."`
+	Pages           *bool              `json:"pages,omitempty" default:"true" doc:"Serve the pages: the index, the call, the publish and the play pages, and their script and style. False serves none of them: their paths answer 404, for a deployment whose page is its own; the login and the room API stay, for that page. True when left out."`
 	WHIP            string             `json:"whip,omitempty" default:"\"/whip/{stream}\"" doc:"The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip handler's, or stream_whip's for the streaming role, on this server or another. /whip/{stream} when left out."`
 	WHEP            string             `json:"whep,omitempty" default:"\"/whep/{stream}\"" doc:"The URL streams are played from with WHEP, {stream} standing for the stream's name. /whep/{stream} when left out."`
 	HLS             string             `json:"hls,omitempty" doc:"The URL of a stream's HLS playlist, {stream} standing for its name, as /hls/{stream}/index.m3u8 for the streaming role's hls handler: the play page plays it where the browser plays HLS itself, with the page's token. None when left out."`
@@ -69,6 +75,10 @@ type Pages struct {
 	MaxRooms        int                `json:"max_rooms,omitempty" min:"1" default:"64" doc:"How many rooms may have members or watchers at once; a join or a watch past it is answered 503. 64 when left out."`
 	MaxMembers      int                `json:"max_members,omitempty" min:"1" max:"256" default:"16" doc:"How many members a room may have; a join past it is answered 503. A room may have twice as many watchers, its members' event streams among them. 16 when left out."`
 	MaxMessageBytes int                `json:"max_message_bytes,omitempty" min:"256" max:"65536" default:"1024" doc:"The largest body a request of the room API or the login may have, in bytes; a larger one is answered 413. 1024 when left out."`
+	MicDefault      bool               `json:"mic_default,omitempty" doc:"Whether a member's microphone is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a silent track while it is off, so a switch never renegotiates. The URL's mic=0 or mic=1 overrides it."`
+	CamDefault      bool               `json:"cam_default,omitempty" doc:"Whether a member's camera is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a frame with its name while it is off, so a switch never renegotiates. The URL's cam=0 or cam=1 overrides it."`
+	Chat            *bool              `json:"chat,omitempty" default:"true" doc:"Whether a room call has a chat: the pages show it, and the room API carries the members' text messages and small files between them. False answers the chat's API 404 and shows no chat window. True when left out."`
+	MaxFileBytes    int64              `json:"max_file_bytes,omitempty" min:"1024" max:"33554432" default:"5242880" doc:"The largest file a member may send in a room's chat, in bytes; a larger one is answered 413, and the page refuses it before sending. 5 MiB (5242880) when left out."`
 	MemberTTL       config.Duration    `json:"member_ttl,omitempty" default:"\"30s\"" doc:"How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out."`
 	StallTimeout    config.Duration    `json:"stall_timeout,omitempty" default:"\"30s\"" doc:"How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out."`
 
@@ -78,6 +88,7 @@ type Pages struct {
 	hub      *hub
 	settings *settings
 	assets   map[string]*asset
+	pages    bool   // serve the pages
 	conf     []byte // GET api/config's answer
 }
 
@@ -92,7 +103,9 @@ type Link struct {
 type settings struct {
 	maxRooms, maxMembers, maxWatchers int
 	maxMessage                        int
+	maxFile                           int64
 	memberTTL, stall                  time.Duration
+	chat                              bool
 }
 
 // assets are the pages' files.
@@ -152,12 +165,23 @@ func (p *Pages) Provision(ctx *module.Context) error {
 	}
 	p.auth = pol
 	p.graph = ctx.Graph()
+	p.pages = p.Pages == nil || *p.Pages
+	chat := p.Chat == nil || *p.Chat
+	maxFile := p.MaxFileBytes
+	if maxFile == 0 {
+		maxFile = DefaultMaxFileBytes
+	}
+	if maxFile < MinMaxFileBytes || maxFile > MaxMaxFileBytes {
+		return ctx.Errorf("max_file_bytes", "a file is at least %d and at most %d bytes", MinMaxFileBytes, MaxMaxFileBytes)
+	}
 	st := &settings{
 		maxRooms:   orInt(p.MaxRooms, DefaultMaxRooms),
 		maxMembers: orInt(p.MaxMembers, DefaultMaxMembers),
 		maxMessage: orInt(p.MaxMessageBytes, DefaultMaxMessageBytes),
+		maxFile:    maxFile,
 		memberTTL:  orDur(p.MemberTTL.Std(), DefaultMemberTTL),
 		stall:      orDur(p.StallTimeout.Std(), DefaultStallTimeout),
+		chat:       chat,
 	}
 	st.maxWatchers = 2 * st.maxMembers
 	if st.memberTTL < 3*time.Second {
@@ -176,6 +200,8 @@ func (p *Pages) Provision(ctx *module.Context) error {
 		"hls":        p.HLS,
 		"links":      p.Links,
 		"iceServers": iceServers(p.ICEServers),
+		"call":       map[string]any{"mic": p.MicDefault, "cam": p.CamDefault},
+		"chat":       map[string]any{"enabled": chat, "maxFileBytes": maxFile},
 		"room": map[string]any{
 			"maxMembers":  st.maxMembers,
 			"heartbeatMs": (st.memberTTL / 3).Milliseconds(),
@@ -184,6 +210,9 @@ func (p *Pages) Provision(ctx *module.Context) error {
 	}
 	if p.conf, err = json.Marshal(conf); err != nil {
 		return err
+	}
+	if !p.pages {
+		return nil
 	}
 	return p.buildAssets(slices.Sorted(mapsKeys(origins)))
 }
@@ -314,6 +343,10 @@ func (p *Pages) buildAssets(origins []string) error {
 func (p *Pages) ServeHTTP(c *fibhttp.Context) {
 	path := c.Request.URL.Path
 	if path == p.prefix {
+		if !p.pages {
+			plain(c, stdhttp.StatusNotFound, "not found", nil)
+			return
+		}
 		q := ""
 		if c.Request.URL.RawQuery != "" {
 			q = "?" + c.Request.URL.RawQuery
@@ -449,7 +482,12 @@ func (p *Pages) cookie(c *fibhttp.Context, tok string, maxAge int) string {
 // readBody gathers a request's body, up to limit bytes, and calls done with
 // it; a larger one is answered 413.
 func readBody(c *fibhttp.Context, limit int, done func([]byte)) {
-	if c.Request.ContentLength > int64(limit) {
+	readBodyN(c, int64(limit), done)
+}
+
+// readBodyN is readBody for a limit that is not an int.
+func readBodyN(c *fibhttp.Context, limit int64, done func([]byte)) {
+	if c.Request.ContentLength > limit {
 		plain(c, stdhttp.StatusRequestEntityTooLarge, "the body is too large", nil)
 		return
 	}
@@ -463,7 +501,7 @@ func readBody(c *fibhttp.Context, limit int, done func([]byte)) {
 			finished = true
 			return
 		}
-		if len(buf)+len(data) > limit {
+		if int64(len(buf))+int64(len(data)) > limit {
 			finished = true
 			plain(c, stdhttp.StatusRequestEntityTooLarge, "the body is too large", nil)
 			return

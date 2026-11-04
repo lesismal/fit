@@ -13,6 +13,13 @@
  * off" or "no camera", rather than wait on media that does not come; and a
  * member's stream is played only once it is announced as published, so that
  * nobody asks for a stream that is not there.
+ *
+ * The microphone and camera start as the config's call.mic and call.cam say
+ * (off unless configured), with the URL's mic=0|1 and cam=0|1 over them; the
+ * user switches them afterwards, still without a renegotiation. When the
+ * config's chat is on, the call page carries the room chat: text messages and
+ * small files carried by the room API, its history on joining, and a file
+ * downloaded with the page's credentials.
  */
 'use strict';
 
@@ -60,6 +67,12 @@
       'err.409': 'The stream is published already.', 'err.503': 'The server is busy; trying again.',
       'err.422': 'The browser and the server share no codec.', 'err.media': 'The media could not be opened: {e}',
       'copy': 'Copy', 'copied': 'Copied.',
+      'chat.title': 'Chat', 'chat.empty': 'No messages yet.', 'chat.message': 'Message',
+      'chat.send': 'Send', 'chat.choose': 'Choose file', 'chat.sendfile': 'Send file',
+      'chat.nofile': 'No file chosen', 'chat.download': 'Download',
+      'chat.toobig': 'The file is {size}, larger than the room chat\'s limit of {max}.',
+      'chat.nojoin': 'Join a room to chat.', 'chat.sendfail': 'The message could not be sent: {e}',
+      'chat.filefail': 'The file could not be sent: {e}', 'chat.downloadfail': 'The file could not be downloaded: {e}',
     },
     zh: {
       'nav.home': '首页', 'nav.call': '通话', 'nav.publish': '推流', 'nav.play': '播放',
@@ -90,6 +103,12 @@
       'err.409': '这路流已经有人在推了。', 'err.503': '服务器忙，正在重试。',
       'err.422': '浏览器和服务器没有共同的编码。', 'err.media': '无法打开媒体：{e}',
       'copy': '复制', 'copied': '已复制。',
+      'chat.title': '聊天', 'chat.empty': '还没有消息。', 'chat.message': '消息',
+      'chat.send': '发送', 'chat.choose': '选择文件', 'chat.sendfile': '发送文件',
+      'chat.nofile': '未选择文件', 'chat.download': '下载',
+      'chat.toobig': '这个文件有 {size}，超过了房间聊天的 {max} 上限。',
+      'chat.nojoin': '加入房间后才能聊天。', 'chat.sendfail': '消息发送失败：{e}',
+      'chat.filefail': '文件发送失败：{e}', 'chat.downloadfail': '文件下载失败：{e}',
     },
   };
   var lang = 'en';
@@ -102,6 +121,9 @@
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
     document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
     $('lang').textContent = lang === 'zh' ? 'English' : '中文';
+    $('call-chat').setAttribute('aria-label', t('chat.title'));
+    updateChatFilename();
+    renderChatLog();
   }
 
   /* ---------- small helpers ---------- */
@@ -165,6 +187,7 @@
   var S = {
     conf: null,
     auth: null, // {token, expires, subject, publish, play}
+    joinDefaults: { mic: false, cam: false }, // conf.call, the URL's mic=0|1 and cam=0|1 over it
   };
 
   function loadAuth() {
@@ -543,6 +566,8 @@
       try {
         r = await this.connect();
       } catch (e) {
+        // A connect the page stopped, as leaving does, is not a problem.
+        if (!this.active) break;
         r = { retry: true, error: String(e && e.message || e) };
         problem(this.stream + ': ' + r.error);
       }
@@ -586,12 +611,14 @@
     this.audio = pc.addTransceiver('audio', { direction: 'sendonly' });
     this.video = pc.addTransceiver('video', { direction: 'sendonly' });
     await this.apply();
+    if (!this.active || this.pc !== pc) return { retry: false }; // left while connecting
     pc.addEventListener('connectionstatechange', function () {
       self.connected = pc.connectionState === 'connected';
       self.onstate(self);
     });
     var offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    if (!this.active || this.pc !== pc) return { retry: false }; // left while connecting
     this.posts++;
     var res = await postOffer(endpoint(S.conf.whip, this.stream), pc.localDescription.sdp);
     if (res.status !== 201) return failure(res);
@@ -683,6 +710,8 @@
       try {
         r = await this.connect();
       } catch (e) {
+        // A connect the page stopped, as leaving does, is not a problem.
+        if (!this.active) break;
         r = { retry: true, error: String(e && e.message || e) };
         problem(this.stream + ': ' + r.error);
       }
@@ -733,6 +762,7 @@
     });
     var offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    if (!this.active || this.pc !== pc) return { retry: false }; // left while connecting
     this.posts++;
     var res = await postOffer(endpoint(S.conf.whep, this.stream), pc.localDescription.sdp);
     if (res.status !== 201) return failure(res);
@@ -875,6 +905,8 @@
     joinedAt: 0,
     mayPublish: true,
     gen: 0,
+    chatMsgs: [], // the room chat's messages, oldest first
+    chatIds: {}, // the ids shown, so that the SSE echo of a sent message is not drawn twice
   };
 
   function callStatus(v) {
@@ -895,8 +927,9 @@
     $('call-room').disabled = on;
     $('call-name').disabled = on;
     var l = call.local;
-    press('call-mic', l ? l.audioOn : true);
-    press('call-cam', l ? l.videoOn : true);
+    var d = S.joinDefaults;
+    press('call-mic', l ? l.audioOn : d.mic);
+    press('call-cam', l ? l.videoOn : d.cam);
     press('call-screen', l ? l.screenOn : false);
     $('call-screen').disabled = !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia;
   }
@@ -941,6 +974,7 @@
     call.name = name;
     call.key = load('sessionStorage', 'fitMediaKey:' + room + ':' + name) || '';
     call.members = {};
+    clearChat();
     hint('call-hint', t('call.joining'));
     var local = call.local || newLocal(name, 'call-mic', 'call-cam');
     local.name = name;
@@ -974,6 +1008,7 @@
     call.heartbeat = setInterval(sendState, (S.conf.room && S.conf.room.heartbeatMs) || 10000);
     renderMe();
     renderCallControls();
+    renderChatPanel();
     hint('call-hint', t('call.joined', { room: room, name: name }), 'ok');
   }
 
@@ -1042,6 +1077,18 @@
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       call.seq = data.seq;
       onMembers(data.members || []);
+    });
+    // The room's chat, when it has one: its history first, then each new
+    // message; a sent message comes back here too, and is dropped by its id.
+    es.addEventListener('history', function (ev) {
+      call.eventsRetry = 0;
+      onChatHistory(ev.data);
+    });
+    es.addEventListener('chat', function (ev) {
+      call.eventsRetry = 0;
+      var m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      addChatMessage(m);
     });
     es.addEventListener('error', function () {
       if (es.readyState !== EventSource.CLOSED || call.events !== es) return;
@@ -1140,11 +1187,319 @@
     call.key = '';
     call.publishing = false;
     if (call.local) { call.local.close(); call.local = null; }
+    clearChat();
+    renderChatPanel();
     spotlight(null);
     call.me = null;
     $('call-tiles').textContent = '';
     renderCallControls();
     if (!quiet) hint('call-hint', t('call.left'));
+  }
+
+  /* ---------- the room chat ---------- */
+
+  // The page keeps at most this many messages: the server's history is 64,
+  // so this only bounds a long-lived window and a stream that keeps sending.
+  var CHAT_MAX_MESSAGES = 200;
+
+  var chatFileChosen = null; // the file picked, not sent yet
+
+  function chatConf() { return (S.conf && S.conf.chat) || {}; }
+  function chatEnabled() { return !!chatConf().enabled; }
+  function chatMaxFile() { return Number(chatConf().maxFileBytes) || 0; }
+
+  // formatBytes is a file's size for the page: 5 MiB, 68.4 KiB, 100 B.
+  function formatBytes(n) {
+    n = Number(n) || 0;
+    var units = ['B', 'KiB', 'MiB', 'GiB'];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 || n >= 10 ? Math.round(n * 10) / 10 : n.toFixed(1)) + ' ' + units[i];
+  }
+
+  function timeText(at) {
+    var d = new Date(Number(at) || Date.now());
+    try { return d.toLocaleTimeString(); } catch (e) { return d.toISOString().slice(11, 19); }
+  }
+
+  // updateChatFilename shows the picked file, or that there is none.
+  function updateChatFilename() {
+    var e = $('chat-filename');
+    if (e) e.textContent = chatFileChosen ? chatFileChosen.name : t('chat.nofile');
+  }
+
+  // renderChatLog draws every message again, as a language change does.
+  function renderChatLog() {
+    var log = $('chat-log');
+    if (!log) return;
+    log.textContent = '';
+    call.chatMsgs.forEach(function (m) { log.appendChild(chatRow(m)); });
+    renderChatEmpty();
+    updateChatCount();
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderChatEmpty() {
+    $('chat-empty').hidden = call.chatMsgs.length > 0;
+  }
+
+  function updateChatCount() {
+    var b = $('chat-count');
+    b.textContent = call.chatMsgs.length ? String(call.chatMsgs.length) : '';
+    b.className = 'badge';
+  }
+
+  // renderChatPanel shows the chat only for a room call whose config has it.
+  function renderChatPanel() {
+    var on = chatEnabled() && call.active;
+    $('call-chat').hidden = !on;
+    $('call-stage').classList.toggle('call-stage--chat', on);
+    if (on) {
+      var max = Number((S.conf.room && S.conf.room.maxMessage) || 1024);
+      $('chat-text').maxLength = Math.max(32, max - 16); // room for {"text":...} in the JSON body
+      renderChatEmpty();
+      updateChatCount();
+    }
+  }
+
+  // chatRow builds one message: who and when, then its text, or a file's
+  // name and size with a download control. User text only ever goes in with
+  // textContent.
+  function chatRow(m) {
+    var row = el('div', 'chat__msg' + (m.from === call.name ? ' chat__msg--mine' : ''));
+    if (m.id) row.dataset.id = String(m.id);
+    var meta = el('div', 'chat__meta');
+    meta.appendChild(el('span', 'chat__from', m.from || ''));
+    meta.appendChild(el('span', 'chat__at', timeText(m.at)));
+    row.appendChild(meta);
+    if (m.file && typeof m.file === 'object') {
+      var box = el('div', 'chat__file');
+      box.appendChild(el('span', 'chat__file-name', m.file.name || 'file'));
+      box.appendChild(el('span', 'chat__file-size', formatBytes(m.file.size)));
+      var b = el('button', 'btn btn--sm btn--ghost chat__download', t('chat.download'));
+      b.type = 'button';
+      b.addEventListener('click', function () { downloadChatFile(m); });
+      box.appendChild(b);
+      row.appendChild(box);
+    } else {
+      row.appendChild(el('div', 'chat__text', m.text || ''));
+    }
+    return row;
+  }
+
+  // addChatMessage puts a message at the end, unless its id was drawn
+  // already: the answer to a POST and its SSE echo are the same message. It
+  // scrolls to the bottom only while the window is at the bottom.
+  function addChatMessage(m) {
+    if (!m || typeof m !== 'object') return false;
+    var id = m.id == null ? '' : String(m.id);
+    if (id) {
+      if (call.chatIds[id]) return false;
+      call.chatIds[id] = true;
+    }
+    call.chatMsgs.push(m);
+    while (call.chatMsgs.length > CHAT_MAX_MESSAGES) {
+      var old = call.chatMsgs.shift();
+      if (old.id) delete call.chatIds[String(old.id)];
+    }
+    var log = $('chat-log');
+    var atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+    log.appendChild(chatRow(m));
+    renderChatEmpty();
+    updateChatCount();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    return true;
+  }
+
+  // onChatHistory fills the window from a history event, oldest first. A
+  // reconnected stream sends it again, so the window starts over from it.
+  function onChatHistory(raw) {
+    var data;
+    try { data = JSON.parse(raw); } catch (e) { return; }
+    var list = data && data.messages;
+    if (!Array.isArray(list)) return;
+    call.chatMsgs = [];
+    call.chatIds = {};
+    $('chat-log').textContent = '';
+    list.forEach(function (m) { addChatMessage(m); });
+    $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  }
+
+  // clearChat empties the window: leaving a room clears the chat.
+  function clearChat() {
+    call.chatMsgs = [];
+    call.chatIds = {};
+    $('chat-log').textContent = '';
+    hint('chat-hint', '');
+    $('chat-file').value = '';
+    chatFileChosen = null;
+    updateChatFilename();
+    renderChatEmpty();
+    updateChatCount();
+  }
+
+  // chatRequest posts to the room's chat API with the member's headers: the
+  // page's credentials go with it, and the member's name and key say who
+  // sends.
+  async function chatRequest(path, opts) {
+    opts = opts || {};
+    var h = headers(opts.headers || {});
+    h['X-Fit-Member'] = call.name;
+    h['X-Fit-Room-Key'] = call.key;
+    opts.method = opts.method || 'POST';
+    opts.credentials = 'same-origin';
+    opts.headers = h;
+    var res = await fetch('api/rooms/' + encodeURIComponent(call.room) + '/' + path, opts);
+    var text = await res.text().catch(function () { return ''; });
+    var data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+    return { status: res.status, data: data, text: text };
+  }
+
+  function chatError(r) {
+    var msg = (r.data && (r.data.error || r.data.message)) || (r.text || '').trim();
+    return msg || ('HTTP ' + r.status);
+  }
+
+  // sendChatText sends a text message and shows it at once from the answer;
+  // the SSE echo of it is dropped by its id. It resolves with the message,
+  // and with null when the message could not be sent.
+  async function sendChatText(text) {
+    text = text == null ? '' : String(text);
+    if (!text.trim()) return null;
+    if (!call.active || !call.key || !chatEnabled()) {
+      hint('chat-hint', t('chat.nojoin'), 'error');
+      return null;
+    }
+    try {
+      var r = await chatRequest('chat', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text }) });
+      if (r.status === 200 && r.data && r.data.id) {
+        hint('chat-hint', '');
+        addChatMessage(r.data);
+        return r.data;
+      }
+      hint('chat-hint', t('chat.sendfail', { e: chatError(r) }), 'error');
+      problem('chat: ' + r.status);
+      return null;
+    } catch (e) {
+      hint('chat-hint', t('chat.sendfail', { e: String((e && e.message) || e) }), 'error');
+      problem('chat: ' + e);
+      return null;
+    }
+  }
+
+  // fileType guesses a file's Content-Type from its name; the server stores
+  // it and says it back on the download.
+  function fileType(name) {
+    var ext = (String(name).split('.').pop() || '').toLowerCase();
+    var types = {
+      txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+      svg: 'image/svg+xml', pdf: 'application/pdf', zip: 'application/zip',
+    };
+    return types[ext] || 'application/octet-stream';
+  }
+
+  // chatBytes takes the forms a test or the picker may give: a file, bytes,
+  // an array of byte values, a string, or a number of bytes.
+  async function chatBytes(bytes) {
+    if (bytes == null) return new Uint8Array(0);
+    if (bytes instanceof Uint8Array) return bytes;
+    if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+    if (Array.isArray(bytes)) return Uint8Array.from(bytes);
+    if (typeof bytes === 'number') {
+      var n = Math.max(0, Math.min(Math.floor(bytes), 1 << 28));
+      var b = new Uint8Array(n);
+      for (var i = 0; i < n; i++) b[i] = (i * 7 + 3) & 255;
+      return b;
+    }
+    if (typeof bytes === 'string') return new TextEncoder().encode(bytes);
+    if (typeof Blob !== 'undefined' && bytes instanceof Blob) return new Uint8Array(await bytes.arrayBuffer());
+    try { return new Uint8Array(bytes); } catch (e) { return new Uint8Array(0); }
+  }
+
+  // sendChatFile sends a file, refusing one larger than conf.chat.maxFileBytes
+  // before it goes, with a hint. It resolves with the file's message.
+  async function sendChatFile(name, bytes, type) {
+    name = String(name == null ? '' : name).trim();
+    var data = await chatBytes(bytes);
+    var max = chatMaxFile();
+    if (max > 0 && data.length > max) {
+      var tooBig = t('chat.toobig', { size: formatBytes(data.length), max: formatBytes(max) });
+      hint('chat-hint', tooBig, 'error');
+      throw new Error(tooBig);
+    }
+    if (!name) {
+      hint('chat-hint', t('chat.nofile'), 'error');
+      throw new Error(t('chat.nofile'));
+    }
+    if (!call.active || !call.key || !chatEnabled()) {
+      hint('chat-hint', t('chat.nojoin'), 'error');
+      throw new Error(t('chat.nojoin'));
+    }
+    var shown = false; // the answer's error was shown already
+    try {
+      var r = await chatRequest('files?file=' + encodeURIComponent(name), {
+        headers: { 'Content-Type': type || fileType(name) }, body: data,
+      });
+      if (r.status === 200 && r.data && r.data.id) {
+        hint('chat-hint', '');
+        addChatMessage(r.data);
+        return r.data;
+      }
+      hint('chat-hint', t('chat.filefail', { e: chatError(r) }), 'error');
+      shown = true;
+      problem('files: ' + r.status);
+      throw new Error(chatError(r));
+    } catch (e) {
+      if (!shown) {
+        // A network failure, not the answer's error: say so.
+        hint('chat-hint', t('chat.filefail', { e: String((e && e.message) || e) }), 'error');
+        problem('files: ' + e);
+      }
+      throw e;
+    }
+  }
+
+  // downloadChatFile fetches a file with the page's credentials (its cookie,
+  // or a pasted token as Authorization) and saves the answer as a blob under
+  // the file's name.
+  async function downloadChatFile(m) {
+    if (!m || !m.id || !call.active) return;
+    try {
+      var res = await fetch('api/rooms/' + encodeURIComponent(call.room) + '/files/' + encodeURIComponent(String(m.id)), {
+        credentials: 'same-origin', headers: headers({}),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var blob = await res.blob();
+      var name = (m.file && m.file.name) || String(m.id);
+      var url = URL.createObjectURL(blob);
+      var a = el('a');
+      a.href = url;
+      a.download = name;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    } catch (e) {
+      hint('chat-hint', t('chat.downloadfail', { e: String((e && e.message) || e) }), 'error');
+      problem('download: ' + e);
+    }
+  }
+
+  // chatMessages is what the page has of the chat, for the tests.
+  function chatMessages() {
+    return call.chatMsgs.map(function (m) {
+      return {
+        id: m.id == null ? '' : String(m.id),
+        from: m.from || '',
+        text: m.file ? '' : (m.text || ''),
+        file: m.file && typeof m.file === 'object' ? { name: m.file.name || '', size: Number(m.file.size) || 0, type: m.file.type || '' } : null,
+        at: Number(m.at) || 0,
+        atText: timeText(m.at),
+      };
+    });
   }
 
   /* ---------- publish and play pages ---------- */
@@ -1409,6 +1764,37 @@
     $('call-cam').addEventListener('click', function () { if (call.local) toggle(call.local, 'video', mediaChanged); else flip('call-cam'); });
     $('call-screen').addEventListener('click', function () { if (call.local) toggle(call.local, 'screen', mediaChanged); });
 
+    $('chat-form').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var input = $('chat-text');
+      if (!input.value.trim()) return;
+      var m = await sendChatText(input.value);
+      if (m) input.value = '';
+    });
+    $('chat-file').addEventListener('change', function () {
+      var f = this.files && this.files[0];
+      chatFileChosen = f || null;
+      updateChatFilename();
+      if (f && chatMaxFile() > 0 && f.size > chatMaxFile()) {
+        hint('chat-hint', t('chat.toobig', { size: formatBytes(f.size), max: formatBytes(chatMaxFile()) }), 'error');
+        this.value = '';
+        chatFileChosen = null;
+        updateChatFilename();
+      } else {
+        hint('chat-hint', '');
+      }
+    });
+    $('chat-file-send').addEventListener('click', async function () {
+      var f = $('chat-file').files && $('chat-file').files[0];
+      if (!f) { hint('chat-hint', t('chat.nofile'), 'error'); return; }
+      try {
+        await sendChatFile(f.name, f, f.type);
+        $('chat-file').value = '';
+        chatFileChosen = null;
+        updateChatFilename();
+      } catch (e) { /* the hint is shown */ }
+    });
+
     $('pub-start').addEventListener('click', startPub);
     $('pub-stop').addEventListener('click', stopPub);
     $('pub-stream').addEventListener('input', function () { renderLinks('pub-links', $('pub-stream').value.trim()); });
@@ -1433,16 +1819,36 @@
       if (pubPage.pub) hangUp(pubPage.pub.location);
     });
 
+    S.joinDefaults = joinDefaults();
     renderCallControls();
-    if (params.get('mic') === '0') { press('call-mic', false); press('pub-mic', false); }
-    if (params.get('cam') === '0') { press('call-cam', false); press('pub-cam', false); }
+    // The URL's mic=0|1 and cam=0|1 also set the publish page's switches.
+    var micParam = params.get('mic'), camParam = params.get('cam');
+    if (micParam === '0' || micParam === '1') press('pub-mic', micParam === '1');
+    if (camParam === '0' || camParam === '1') press('pub-cam', camParam === '1');
+    clearChat();
+    renderChatPanel();
     show(viewOf(location.pathname), false);
     if (needsCredentials('play') && needsCredentials('publish')) showLogin('');
     if (params.get('auto') === '1' && view === 'call') joinCall();
   }
 
-  // newLocal opens a Local with the switches as they are before it starts,
-  // or as the URL's mic=0 and cam=0 say.
+  // joinDefaults is how the microphone and camera start when a member joins:
+  // conf.call's mic and cam, off unless configured, and the URL's mic=0|1 and
+  // cam=0|1 over them.
+  function joinDefaults() {
+    var c = (S.conf && S.conf.call) || {};
+    var d = { mic: c.mic === true, cam: c.cam === true };
+    var p = new URLSearchParams(location.search);
+    if (p.get('mic') === '1') d.mic = true;
+    else if (p.get('mic') === '0') d.mic = false;
+    if (p.get('cam') === '1') d.cam = true;
+    else if (p.get('cam') === '0') d.cam = false;
+    return d;
+  }
+
+  // newLocal opens a Local with the switches as they are before it starts:
+  // conf.call's defaults, the URL's mic=0|1 and cam=0|1 over them, and what
+  // the user flipped before joining.
   function newLocal(name, mic, cam) {
     var l = new Local(name);
     l.audioOn = $(mic).getAttribute('aria-pressed') === 'true';
@@ -1472,6 +1878,10 @@
     },
     mic: function (on) { if (call.local && call.local.audioOn !== on) return toggle(call.local, 'audio', mediaChanged); },
     cam: function (on) { if (call.local && call.local.videoOn !== on) return toggle(call.local, 'video', mediaChanged); },
+    chat: function (text) { return sendChatText(text); },
+    file: function (name, bytes) { return sendChatFile(name, bytes); },
+    messages: function () { return chatMessages(); },
+    chatEnabled: function () { return chatEnabled(); },
     status: function () {
       var l = call.local;
       var spot = call.spot ? (call.spot === call.me ? call.name : call.spot.name) : '';
@@ -1505,6 +1915,13 @@
         senders: senders,
         members: members,
         spot: spot,
+        chat: {
+          enabled: chatEnabled(),
+          maxFileBytes: chatMaxFile(),
+          count: call.chatMsgs.length,
+          panel: !$('call-chat').hidden,
+          hint: $('chat-hint').textContent,
+        },
         problems: problems.slice(),
       };
     },

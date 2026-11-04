@@ -32,12 +32,20 @@ import (
 //     and is its heartbeat; 404 once the member is gone, which the page
 //     answers by joining again.
 //   - POST leave: {name, key} leaves; a page's unload sends it as a beacon.
-//   - GET events: Server-Sent Events, "room" with the room's members
-//     whenever they change, and a comment as a ping every heartbeat. It
-//     needs play on <room>-*.
+//   - POST chat: {text} adds a text message, from the member named by the
+//     X-Fit-Member and X-Fit-Room-Key headers, and is answered with the
+//     message; the room's watchers get it as a "chat" event.
+//   - POST files?file=<name>: the body is a file, answered with the file's
+//     message; its bytes are downloaded at GET files/<message id>.
+//   - GET files/<id>: the bytes of a file message, or 404 once it is gone.
+//   - GET events: Server-Sent Events, "history" with the room's chat
+//     messages when the chat is on, "room" with the room's members whenever
+//     they change, "chat" with each new message, and a comment as a ping
+//     every heartbeat. It needs play on <room>-*.
 //
 // The key, 128 random bits only its member knows, is what lets it change
-// its state, as a WHIP session's URL lets its peer end it.
+// its state, as a WHIP session's URL lets its peer end it; the chat asks for
+// it too, so that only a member can speak as itself.
 
 // roomName and memberName are what the names of rooms and members may be:
 // together, <room>-<name>, they are a stream's name of whip and whep.
@@ -72,7 +80,7 @@ type memberJSON struct {
 	state
 }
 
-// room is a room's members and watchers.
+// room is a room's members and watchers, and its chat.
 type room struct {
 	name     string
 	members  map[string]*member
@@ -81,6 +89,9 @@ type room struct {
 	seq      uint64
 	snap     *snapshot
 	timer    *time.Timer
+
+	messages  []*message // the chat, oldest first, at most chatHistory
+	fileBytes int64      // the bytes of messages' files
 }
 
 // snapshot is a room's members, as the event that tells them.
@@ -101,6 +112,9 @@ type hub struct {
 	rooms    map[string]*room
 	watchers int
 	closed   bool
+
+	fileBytes int64  // the bytes of the rooms' files, at most chatFileBytes
+	chatSeq   uint64 // numbers the chat messages across the rooms
 }
 
 type hubKey struct {
@@ -155,6 +169,7 @@ func (h *hub) release() {
 	}
 	clear(h.rooms)
 	h.watchers = 0
+	h.fileBytes = 0
 	h.mu.Unlock()
 	for _, w := range ws {
 		w.end(true)
@@ -216,6 +231,7 @@ func (h *hub) tick(r *room) {
 	}
 	if len(r.members) == 0 && len(r.watchers) == 0 {
 		delete(h.rooms, r.name)
+		h.forgetLocked(r)
 		h.mu.Unlock()
 		return
 	}
@@ -381,9 +397,15 @@ func (p *Pages) rooms(c *fibhttp.Context, rest string) {
 		plain(c, stdhttp.StatusNotFound, "not a room's name: 1 to 64 letters, digits, '.', '_', '~' and '-'", nil)
 		return
 	}
+	// The chat's API is not there when the chat is off.
+	chatAPI := op == "chat" || op == "files" || strings.HasPrefix(op, "files/")
+	if chatAPI && !p.hub.set.Load().chat {
+		plain(c, stdhttp.StatusNotFound, "no such API", nil)
+		return
+	}
 	method := c.Request.Method
 	want := stdhttp.MethodPost
-	if op == "events" {
+	if op == "events" || strings.HasPrefix(op, "files/") {
 		want = stdhttp.MethodGet
 	}
 	if method != want {
@@ -404,6 +426,13 @@ func (p *Pages) rooms(c *fibhttp.Context, rest string) {
 			}
 			writeJSON(c, stdhttp.StatusOK, map[string]any{}, nil)
 		})
+	case op == "chat":
+		p.auth.Guard(c, mediaauth.Play, roomN+"-*", func(string) { p.chat(c, roomN) })
+	case op == "files":
+		p.auth.Guard(c, mediaauth.Play, roomN+"-*", func(string) { p.upload(c, roomN) })
+	case strings.HasPrefix(op, "files/"):
+		id := strings.TrimPrefix(op, "files/")
+		p.auth.Guard(c, mediaauth.Play, roomN+"-*", func(string) { p.download(c, roomN, id) })
 	case strings.HasPrefix(op, "members/"):
 		name := strings.TrimPrefix(op, "members/")
 		readBody(c, p.settings.maxMessage, func(body []byte) {
@@ -484,9 +513,12 @@ type watcher struct {
 
 	mu      sync.Mutex
 	ended   bool
-	waiting bool      // above the limit: OnWritable is set
+	started bool      // the stream's headers and its first events are written
+	waiting bool      // above the write limit: OnWritable is set
 	pending *snapshot // the latest snapshot while waiting
 	sent    uint64    // the seq of the last snapshot written
+	queue   [][]byte  // chat events the browser has not taken, in order
+	queued  int       // the bytes queue holds
 }
 
 // watch starts a room's event stream.
@@ -510,7 +542,18 @@ func (p *Pages) watch(c *fibhttp.Context, roomN string) {
 	r.watchers[w] = struct{}{}
 	h.watchers++
 	snap := r.snapshotLocked()
+	var msgs []*message
+	if set.chat {
+		// The messages are immutable, so the history is built outside the
+		// lock from their pointers; only the slice is copied here.
+		msgs = make([]*message, len(r.messages))
+		copy(msgs, r.messages)
+	}
 	h.mu.Unlock()
+	var history []byte
+	if set.chat {
+		history = historyEvent(msgs)
+	}
 
 	c.Retain()
 	p.graph.Retain()
@@ -523,14 +566,65 @@ func (p *Pages) watch(c *fibhttp.Context, roomN string) {
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("X-Accel-Buffering", "no")
 	c.WriteHeader(stdhttp.StatusOK)
-	w.mu.Lock()
-	ok := w.write([]byte("retry: 2000\n\n"))
-	w.mu.Unlock()
-	if ok {
-		c.Flush()
-		w.push(snap)
+	if !w.start(history, snap) {
+		// The stream failed while it was being started, and is ended.
+		return
 	}
+	c.Flush()
 	c.OnCancel(func(error) { w.end(false) })
+}
+
+// start writes the stream's first events: the retry hint, the chat's history
+// when the chat is on, and the room's snapshot; then what was held back while
+// they were written. It returns false once the stream failed and was ended.
+func (w *watcher) start(history []byte, snap *snapshot) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.ended {
+		return false
+	}
+	if !w.write([]byte("retry: 2000\n\n")) {
+		return false
+	}
+	if len(history) > 0 && !w.write(history) {
+		return false
+	}
+	if snap != nil {
+		w.sent = snap.seq
+		if !w.write(snap.ev) {
+			return false
+		}
+	}
+	w.started = true
+	return w.flushLocked()
+}
+
+// flushLocked writes, in order, what the browser has not taken while it
+// takes it; w.mu is held. It returns false once the stream failed and was
+// ended.
+func (w *watcher) flushLocked() bool {
+	for !w.waiting && len(w.queue) > 0 {
+		ev := w.queue[0]
+		w.queue[0] = nil
+		w.queue = w.queue[1:]
+		w.queued -= len(ev)
+		if !w.write(ev) {
+			return false
+		}
+	}
+	if w.waiting {
+		return true
+	}
+	if s := w.pending; s != nil {
+		w.pending = nil
+		if s.seq > w.sent {
+			w.sent = s.seq
+			if !w.write(s.ev) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // push sends snap, unless a later one was sent; while the browser has not
@@ -541,7 +635,7 @@ func (w *watcher) push(snap *snapshot) {
 	if w.ended || snap.seq <= w.sent {
 		return
 	}
-	if w.waiting {
+	if !w.started || w.waiting {
 		if w.pending == nil || snap.seq > w.pending.seq {
 			w.pending = snap
 		}
@@ -551,11 +645,31 @@ func (w *watcher) push(snap *snapshot) {
 	w.write(snap.ev)
 }
 
+// post sends a chat message's event, held in order while the browser has not
+// taken what it was sent. Past the queue's bounds the stream is cut, and the
+// browser reconnects and refills its window from the history.
+func (w *watcher) post(msg *message) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.ended {
+		return
+	}
+	if !w.started || w.waiting {
+		w.queue = append(w.queue, msg.ev)
+		w.queued += len(msg.ev)
+		if len(w.queue) > maxWatcherQueueEvents || w.queued > maxWatcherQueueBytes {
+			w.cutLocked()
+		}
+		return
+	}
+	w.write(msg.ev)
+}
+
 // ping sends a comment, which keeps proxies from closing a quiet stream.
 func (w *watcher) ping() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.ended || w.waiting {
+	if w.ended || w.waiting || !w.started {
 		return
 	}
 	w.write([]byte(": ping\n\n"))
@@ -581,8 +695,8 @@ func (w *watcher) write(b []byte) bool {
 	return true
 }
 
-// writable sends the latest snapshot held back, once the browser has taken
-// what was sent.
+// writable sends what the browser has taken, once it has taken what was
+// sent.
 func (w *watcher) writable(err error) {
 	if err != nil {
 		w.end(false)
@@ -595,13 +709,7 @@ func (w *watcher) writable(err error) {
 	}
 	w.waiting = false
 	_ = w.c.SetWriteDeadline(time.Time{})
-	if s := w.pending; s != nil {
-		w.pending = nil
-		if s.seq > w.sent {
-			w.sent = s.seq
-			w.write(s.ev)
-		}
-	}
+	w.flushLocked()
 }
 
 // end ends the stream once: it leaves its room, finishes the response when
@@ -613,7 +721,25 @@ func (w *watcher) end(finish bool) {
 		return
 	}
 	w.ended = true
+	w.pending = nil
+	w.queue, w.queued = nil, 0
 	w.mu.Unlock()
+	w.detach(finish)
+}
+
+// cutLocked ends a stream that fell behind, as end does with finish set, but
+// from under w.mu: the response is finished elsewhere, since a write there
+// must not wait for the lock. w.mu is held.
+func (w *watcher) cutLocked() {
+	w.ended = true
+	w.pending = nil
+	w.queue, w.queued = nil, 0
+	go w.detach(true)
+}
+
+// detach leaves the room's watchers, finishes the response when finish is
+// set, and lets go of the request.
+func (w *watcher) detach(finish bool) {
 	h := w.h
 	h.mu.Lock()
 	if _, ok := w.room.watchers[w]; ok {
