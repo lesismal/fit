@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I118.
+Status: `todo`, `doing` or `done`. The next free iteration number is I119.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -265,6 +265,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I118.
 | I115 | Media auth: named `media_auth` policies (tokens, users, signed tokens, public actions, stream patterns), package `mediaauth`, `auth` on `whip`, `whep` and `webrtc_proxy`, `fit media-token` | I109, I110 | done |
 | I116 | The streaming role: fib's `media/hub` with RTMP, RTSP and SRT listeners, and `httpflv`, `hls`, `stream_whip` and `stream_whep` handlers, each with `auth` | I115 | done |
 | I117 | The media pages: `media_pages`, login, publish, play and a room call with the microphone and camera switched on and off, and a bounded room API | I115 | done |
+| I118 | The media pages' room chat: text messages and small files over the room API, a page switch, and the microphone and camera a member joins with | I117 | done |
 
 ## M0, foundations
 
@@ -1580,3 +1581,19 @@ set of named policies comes first; the streaming role and the pages build on it,
 - **Done when**: the pages work in headless Chromium with fake devices and with none; the room
   API's limits, auth and cut connections hold under Go tests; an example config wires it all.
 - **Touches**: `handler/mediapages` (new), `webrtc/media`, `schema`, `docs`, `examples`.
+
+### I118 The media pages' room chat
+
+- **Do**: a chat in the room call: text messages and small files (at most `max_file_bytes`, 5 MiB
+  by default) through the room API (`POST .../chat`, `POST .../files`, `GET .../files/<id>`, a
+  `history` event and one `chat` event a message on `events`), a member named with the key its
+  join returned and never in a URL; `pages` to serve the pages or none, the login and the room API
+  staying; `mic_default` and `cam_default` for the microphone and camera a member joins with, the
+  URL's `mic=0|1` and `cam=0|1` overriding them; the chat bounded to 64 messages a room and 64 MiB
+  of file bytes across the handler's rooms, a watcher that falls behind cut off.
+- **Done when**: two members exchange a text message and a file through the page, and a late
+  watcher gets the history; a file past `max_file_bytes` is answered 413 and a body past
+  `max_message_bytes` 413; `pages: false` answers 404 for the pages while the login and the room
+  API stay; the bounds, eviction and slow watchers hold under the race detector; the pages' browser
+  test joins with the microphone and camera off, switches them on and sends a message and a file.
+- **Touches**: `handler/mediapages`, `schema`, `docs`, `test/docker/mediapages`.

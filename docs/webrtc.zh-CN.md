@@ -358,7 +358,7 @@ Admin API 的 `/metrics` 和 OpenTelemetry 导出中有 `fit_webrtc_media_peer_c
 
 ## 媒体页面
 
-fit 自带一套媒体页面，嵌在二进制里：处理器 `media_pages` 在它的 `prefix` 下提供带登录的首页、房间通话、
+fit 自带一套媒体页面，嵌在二进制里：处理器 `media_pages` 在它的 `prefix` 下提供带登录的首页、带聊天功能的房间通话、
 推流页和播放页，走上一节的 WHIP 和 WHEP 端点（或用 `whip` 和 `whep` 指向流媒体角色的端点，可以在本机，
 也可以在别的服务器）。示例 [media-pages](https://github.com/lesismal/fit-examples/blob/main/media-pages/fit.conf) 把这些都配好了：
 
@@ -372,7 +372,16 @@ media_auth media {
 
 route pages {
 	match { path /media /media/* }
-	handler media_pages { auth media; login true; title "fit media" }
+	handler media_pages {
+		auth media
+		login true
+		title "fit media"
+		pages true
+		mic_default false
+		cam_default false
+		chat true
+		max_file_bytes 5242880
+	}
 }
 
 route publish { match { path /whip/* }; handler whip { auth media } }
@@ -387,7 +396,9 @@ webrtc { media { listen :8189 } }
   WHIP 推送 `<room>-<name>`，用 WHEP 播放其他每个成员。`/media/publish` 把摄像头、麦克风或屏幕推成一路流，
   并给出它的地址：WHIP、WHEP、`hls`，以及给浏览器之外的工具用的 `links`（填好 `{stream}`、`{token}` 和
   `{host}`）；`/media/play` 用 WHEP 播放一路流，浏览器自己能播 HLS 时也可以用 HLS。页面不从别处加载任何脚本、
-  样式或字体，应答带内容安全策略（CSP），只允许访问本服务器和端点所在的源。
+  样式或字体，应答带内容安全策略（CSP），只允许访问本服务器和端点所在的源。`pages` 为 false 时一个页面也不提供：
+  前缀下所有不是 API 的路径，包括从 `<prefix>` 到 `<prefix>/` 的重定向，都应答 404，供页面由自己实现的部署使用；
+  登录和房间 API 保留，供那个页面使用。
 - **登录。** 设了 `auth` 和 `login` 时，页面让策略的用户登录：`POST /media/api/login` 核对密码
   （`password_hash` 在 mediaauth 的 bcrypt 池上核对），应答一个策略签名、有效期为 `token_ttl` 的令牌，设为
   cookie `fit_media_token`（`HttpOnly`、`SameSite=Strict`、TLS 上加 `Secure`、`Path=/`），`whip`、`whep`
@@ -397,7 +408,9 @@ webrtc { media { listen :8189 } }
   可以限制登录尝试。
 - **开关。** 麦克风、摄像头和屏幕随时可以打开和关闭，有没有设备都可以。推流方总是提供一个音频和一个视频
   收发器；开关只替换发送器发送的轨道，所以从不重新协商，也不重建 PeerConnection。打开时发送设备的轨道，
-  没有设备时发送合成轨道：静音，或每秒 2 帧、写着成员名字的画面。关闭时什么都不发送，并释放设备，指示灯熄灭。
+  没有设备时发送合成轨道：静音，或每秒 2 帧、写着成员名字的画面。关闭时什么都不发送，并释放设备，指示灯熄灭。成员加入时
+  麦克风和摄像头是否打开由 `mic_default` 和 `cam_default` 决定：不写时都是关闭的，由成员自己打开；URL 中的 `mic=0|1`
+  和 `cam=0|1` 对这次访问覆盖配置。
 - **放大。** 通话中每个成员的画面（包括自己的）都有一个放大按钮，双击画面也可以：放大的画面占据通话区域上方中央，
   在给下方留出一排其他成员画面的前提下尽可能大，其他成员仍按原来的网格排列在下方。再按一次按钮或再双击一次即还原；
   放大另一个画面时，原来放大的那个自动还原。视频始终继续播放；被放大的成员离开时，布局恢复为网格。
@@ -407,10 +420,27 @@ webrtc { media { listen :8189 } }
   关闭时显示其头像，显示“麦克风已关”“没有麦克风”或“没有摄像头”，并且只在成员宣告推流之后才播放它的流，
   所以没有人去请求一路不存在的流；即使请求仍然失败，观看方最多再试 6 次，依次等待 1、2、4、8 和 15 秒。
   加入需要 `<room>-*` 上的 `play`，宣告推流需要 `<room>-<name>` 上的 `publish`；成员的变更需要它加入时得到的 key。
+- **房间聊天。** 房间通话有聊天，除非 `chat` 为 false：文字消息和小文件，在房间存在期间保存在内存里，页面显示它们，
+  房间 API 在成员之间传递它们；为 false 时不显示聊天窗口，聊天的 API 应答 404。消息经房间 API 的
+  `POST .../chat`、`POST .../files?file=<name>`、`GET .../files/<id>` 以及 `events` 流收发，格式为
+  `{"id", "from", "at", "text"}`，文件消息为 `{"id", "from", "at", "file": {"name", "size", "type"}}`；`id` 是
+  128 位随机数的十六进制形式，也是文件在 `files/<id>` 中的 id，`at` 是 Unix 毫秒。请求用 `X-Fit-Member: <name>`
+  和 `X-Fit-Room-Key: <key>`（加入时得到的 key）标明成员，所以 key 从不放在会被访问日志写入的 URL 里；key 不对时
+  应答 404“no such member”，加入或关注和 API 的其他部分一样需要 `<room>-*` 上的 `play`（否则 `401` 或 `403`）。
+  聊天开启时，`events` 先发房间的 `history` 事件 `{"messages": [...]}`（最旧的在前），之后和以前一样推送成员，
+  并且每条新消息发一个 `event: chat`，绝不早于流的响应头；页面用 POST 的应答立即显示自己发出的消息，收到相同 id
+  的回声时去重。文字必须是 UTF-8 且非空白（否则 400）；请求体最多 `max_message_bytes`，超过即 413，因此文字也受它
+  限制；文件不超过 `max_file_bytes`（不写时为 5 MiB），更大的请求体同样应答 413，按 `Content-Length` 或随请求体到达
+  判定，页面则在发送前就拒绝。下载同样需要 `<room>-*` 上的 `play`，以附件形式应答保存的字节：`Content-Disposition`、
+  保存的 `Content-Type`、`X-Content-Type-Options: nosniff` 和 `Cache-Control: no-store`；未知或已被淘汰的 id 为
+  404。`api/config` 告诉页面 `call.mic`、`call.cam`、`chat.enabled` 和 `chat.maxFileBytes`。
 - **上限。** `max_rooms` 个房间（64），每个房间 `max_members` 个成员（16）和两倍数量的事件流，请求体最多
   `max_message_bytes` 字节（1024），没有心跳最多 `member_ttl`（30s），浏览器取走事件最多等 `stall_timeout`
-  （30s）：跟不上的浏览器在取走上一份之后只收到房间的最新状态，超时则被断开。房间属于引擎上处理器的前缀，
-  重载后仍在；被换下的配置上的事件流在 drain 超时后结束，浏览器会重新关注房间。
+  （30s）：跟不上的浏览器在取走上一份之后只收到房间的最新状态，超时则被断开。聊天同样有上限：每个房间最多 64 条消息，
+  文字和文件合计，最旧的被丢弃；所有房间的文件字节合计最多 64 MiB，超过时最旧的文件消息被丢弃，其下载随后为 404；
+  无法一次写完消息的关注者最多排队 256 个事件或 1 MiB，超过则结束它的流，EventSource 会重连并由历史补齐。消息和文件
+  数据一旦保存就不再改变，并随房间一起消失。房间属于引擎上处理器的前缀，重载后仍在；被换下的配置上的事件流在 drain
+  超时后结束，浏览器会重新关注房间。
 - **静默。** 媒体服务器会保留所有开关都关闭的推流方及其观看方：维持会话的是 ICE consent，而不是媒体，所以
   推流方可以任意长时间什么都不发。只推音频或只推视频的推流方，可以被同时请求两种媒体的观看方播放，另一种的
   媒体段被应答为 inactive；只请求推流方没有发送的那种媒体的观看方得到 `422`。

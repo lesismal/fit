@@ -421,9 +421,9 @@ The Admin API's `/metrics`, and OpenTelemetry's export, carry
 ## The media pages
 
 fit ships pages for its media, embedded in the binary: the handler `media_pages` serves, under its
-`prefix`, an index with a login, a room call, a publish page and a play page, over the WHIP and
-WHEP endpoints of the section above (or of the streaming role, on this server or another, by
-`whip` and `whep`). The [media-pages](https://github.com/lesismal/fit-examples/blob/main/media-pages/fit.conf) example wires it all:
+`prefix`, an index with a login, a room call with a chat, a publish page and a play page, over the
+WHIP and WHEP endpoints of the section above (or of the streaming role, on this server or another,
+by `whip` and `whep`). The [media-pages](https://github.com/lesismal/fit-examples/blob/main/media-pages/fit.conf) example wires it all:
 
 ```fit
 media_auth media {
@@ -435,7 +435,16 @@ media_auth media {
 
 route pages {
 	match { path /media /media/* }
-	handler media_pages { auth media; login true; title "fit media" }
+	handler media_pages {
+		auth media
+		login true
+		title "fit media"
+		pages true
+		mic_default false
+		cam_default false
+		chat true
+		max_file_bytes 5242880
+	}
 }
 
 route publish { match { path /whip/* }; handler whip { auth media } }
@@ -454,7 +463,9 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   the browser (`{stream}`, `{token}` and `{host}` filled in); `/media/play` plays a stream with
   WHEP, or with HLS where the browser plays it itself. The pages load no script, style or font
   from elsewhere, and are answered with a Content Security Policy that lets them reach this server
-  and the endpoints' origins alone.
+  and the endpoints' origins alone. With `pages` false, no page is served at all: every path under
+  the prefix that is not the API, the redirect from `<prefix>` included, answers 404, for a
+  deployment whose page is its own; the login and the room API stay, for that page.
 - **Login.** With `auth` and `login`, the pages log the policy's users in: `POST
   /media/api/login` checks the password (a `password_hash` on mediaauth's bcrypt pool) and answers
   with a token the policy signs for its `token_ttl`, set as the cookie `fit_media_token`
@@ -469,7 +480,9 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   replaces the track its sender sends, so it never renegotiates nor restarts the PeerConnection.
   Switched on, a sender sends the device, or without one a synthetic track: silence, or a frame
   with the member's name at 2 frames a second. Switched off, it sends nothing and the device is
-  released, its light off.
+  released, its light off. A member joins with the microphone and the camera on only where
+  `mic_default` and `cam_default` say so: both are off when left out, for the member to switch on,
+  and the URL's `mic=0|1` and `cam=0|1` override them for that visit.
 - **The spotlight.** A member's tile in the call, one's own among them, has a button, and takes a
   double click, that enlarges it: it takes the top of the call, centred, as large as the window
   leaves room for with a row of the others below, which keep their grid. The same button, or
@@ -484,12 +497,38 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   that is not there; a viewer whose request fails anyway tries again at most 6 times, waiting 1, 2,
   4, 8 and 15 seconds. A join needs `play` on `<room>-*`, announcing that one publishes `publish`
   on `<room>-<name>`; a member's changes need the key its join was answered with.
+- **The room chat.** A room call has a chat unless `chat` is false: text messages and small files,
+  kept in memory while the room lasts, that the pages show and the room API carries; false shows
+  no chat window and answers the chat's API 404. A message is sent and followed through the room
+  API's `POST .../chat`, `POST .../files?file=<name>`, `GET .../files/<id>` and the `events`
+  stream, and is `{"id", "from", "at", "text"}`, or `{"id", "from", "at", "file": {"name", "size",
+  "type"}}` for a file; the `id` is 128 random bits in hex, also the file's in `files/<id>`, and
+  `at` is Unix milliseconds. A request names its member with `X-Fit-Member: <name>` and
+  `X-Fit-Room-Key: <key>`, the key its join returned, so the key never goes in a URL the access
+  log would write; a wrong key answers 404 "no such member", and joining or following needs `play`
+  on `<room>-*` as the rest of the API does (`401` or `403` without it). With the chat on,
+  `events` starts with the room's `history` event, `{"messages": [...]}` oldest first, and then
+  carries the members as before and an `event: chat` with each new message, never before the
+  stream's headers; the page shows a sent message at once from the POST's answer and drops the
+  echo with the same id. Text must be UTF-8 and not blank, 400 otherwise; a request's body is at
+  most `max_message_bytes`, past which 413, so the text is bounded by it; a file is at most
+  `max_file_bytes`, 5 MiB when left out, and a larger body is answered 413, by its
+  `Content-Length` or as it arrives, the page refusing it before sending. A download needs `play`
+  on `<room>-*` too, and answers the stored bytes as an attachment: `Content-Disposition`, the
+  stored `Content-Type`, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`; an
+  unknown or evicted id is 404. `api/config` tells the page `call.mic`, `call.cam`,
+  `chat.enabled` and `chat.maxFileBytes`.
 - **Bounds.** `max_rooms` rooms (64), `max_members` members a room (16) and twice as many event
   streams, `max_message_bytes` a request's body (1024), `member_ttl` without a heartbeat (30s),
   and `stall_timeout` (30s) for a browser to take its events: a browser that does not keep up is
   sent only the room's latest state once it has taken the last, and is cut off past the timeout.
-  Rooms belong to the handler's prefix on the engine and survive reloads; an event stream of a
-  config swapped out ends after the drain timeout, and the browser follows the room again.
+  The chat is bounded too: at most 64 messages a room, text and files together, the oldest dropped;
+  at most 64 MiB of file bytes across the handler's rooms, past which the oldest file messages go,
+  their download then 404; and a watcher that cannot take a message at once queues at most 256
+  events or 1 MiB, past which its stream ends, EventSource reconnecting and the history refilling
+  it. Messages and file data are immutable once stored, and go with their room. Rooms belong to
+  the handler's prefix on the engine and survive reloads; an event stream of a config swapped out
+  ends after the drain timeout, and the browser follows the room again.
 - **Silence.** The media server keeps a publisher whose switches are all off, and its viewers:
   ICE consent keeps a session alive, not media, so a publisher may send nothing for as long as it
   likes. A publisher of audio alone, or of video alone, is played by a viewer that offers both

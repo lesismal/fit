@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I118。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I119。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -255,6 +255,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I115 | 媒体认证：命名的 `media_auth` 策略（token、用户、签名 token、公开动作、流模式），`mediaauth` 包，`whip`、`whep` 和 `webrtc_proxy` 的 `auth`，`fit media-token` | I109, I110 | done |
 | I116 | 流媒体角色：fib 的 `media/hub`，带 RTMP、RTSP 和 SRT 监听，以及 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` 处理器，各有 `auth` | I115 | done |
 | I117 | 媒体页面：`media_pages`，登录、推流、播放和房间通话，可开关麦克风和摄像头，以及有上限的房间 API | I115 | done |
+| I118 | 媒体页面的房间聊天：经房间 API 收发的文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头 | I117 | done |
 
 ## M0 基础
 
@@ -1348,3 +1349,16 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
 - **完成标准**：页面在带假设备和不带设备的无头 Chromium 中可用；房间 API 的上限、认证和连接中断在 Go 测试中正常；一个示例
   配置把它们串起来。
 - **涉及**：`handler/mediapages`（新）、`webrtc/media`、`schema`、`docs`、`examples`。
+
+### I118 媒体页面的房间聊天
+
+- **做**：房间通话中的聊天：文字消息和小文件（最大 `max_file_bytes`，默认 5 MiB）经房间 API
+  （`POST .../chat`、`POST .../files`、`GET .../files/<id>`，以及 `events` 上的 `history` 事件和每条消息一个
+  `chat` 事件）收发，成员用加入时得到的 key 标明、key 从不放在 URL 里；`pages` 决定是否提供页面，登录和房间 API
+  保留；`mic_default` 和 `cam_default` 决定成员加入时麦克风和摄像头是否打开，URL 的 `mic=0|1` 和 `cam=0|1` 覆盖
+  它们；聊天有上限：每个房间 64 条消息、所有房间共 64 MiB 文件字节，跟不上的关注者被断开。
+- **完成标准**：两个成员通过页面互发一条文字消息和一个文件，后加入的关注者得到历史；超过 `max_file_bytes` 的文件
+  以 413 应答，超过 `max_message_bytes` 的请求体以 413 应答；`pages: false` 时页面的路径为 404，登录和房间 API
+  仍在；各项上限、淘汰和慢关注者在竞态检测下成立；页面的浏览器测试以麦克风和摄像头关闭加入，打开它们，并发送一条
+  消息和一个文件。
+- **涉及**：`handler/mediapages`、`schema`、`docs`、`test/docker/mediapages`。
