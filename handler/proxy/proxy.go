@@ -42,6 +42,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/lesismal/fib/bufferpool"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
@@ -311,7 +312,11 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 	if e := observe.EntryOf(c); e != nil && e.Trace() != nil {
 		traceparent = e.Trace().Traceparent()
 	}
-	dst := x.head[:0]
+	// The header is built in a buffer of the pool's, which send gives back
+	// once fib's client has copied it, rather than one the exchange keeps
+	// through the wait for the upstream: with thousands of requests in
+	// flight, that wait is where the buffers would pile up.
+	dst := bufferpool.Get(len(block) + forwardingRoom + 3*len(r.Host) + len(traceparent))[:0]
 	for block != "" {
 		end := strings.IndexByte(block, '\n') + 1
 		line := block[:end]
@@ -322,6 +327,7 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 		case fieldDrop:
 			continue
 		case fieldReadAgain:
+			bufferpool.Put(dst)
 			return false
 		}
 		if len(connection) > 0 && connectionNames(connection, name) ||
@@ -347,9 +353,6 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 	}
 	x.framed = dst
 	x.blockResponse = r.Method != stdhttp.MethodHead
-	if cap(dst) <= maxKeptHead {
-		x.head = dst
-	}
 
 	host := r.Host
 	if p.HostHeader != "" {
@@ -372,9 +375,10 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 	return true
 }
 
-// maxKeptHead is the largest buffer outgoingFramed keeps with an exchange for
-// the next request, past the headers ordinary requests carry.
-const maxKeptHead = 4096
+// forwardingRoom is what outgoingFramed's buffer has room for past the
+// client's lines, besides three copies of the host and the traceparent: the
+// forwarding fields' names and an address, as most requests need.
+const forwardingRoom = 160
 
 // What outgoingFramed does with a field of the client's request.
 const (
@@ -448,9 +452,10 @@ func framedRequestField(name string) int {
 // upstream's, block, as ClientResponse.HeaderBlock has it: its lines but the
 // hop-by-hop ones, those its Connection names and Content-Length, which the
 // response's own framing replaces, and the sticky cookie after them. It is
-// written in x.head, which the request no longer needs.
+// written in a buffer of the pool's, which the caller gives back once the
+// response is written.
 func (x *exchange) responseBlock(block string) []byte {
-	dst := x.head[:0]
+	dst := x.headBuffer(block)
 	// The Connection field's values, as few as there are, for a second pass
 	// when they name a field.
 	var connection [2]string
@@ -478,6 +483,7 @@ func (x *exchange) responseBlock(block string) []byte {
 		dst = append(dst, line...)
 	}
 	if named {
+		bufferpool.Put(dst)
 		if n > len(connection) {
 			// More Connection fields than kept: read them all again.
 			return x.responseBlockNamed(block, blockHeader(block)["Connection"])
@@ -490,7 +496,7 @@ func (x *exchange) responseBlock(block string) []byte {
 // responseBlockNamed is responseBlock for a block whose Connection fields,
 // connection, name fields of their own, which are dropped too.
 func (x *exchange) responseBlockNamed(block string, connection []string) []byte {
-	dst := x.head[:0]
+	dst := x.headBuffer(block)
 	for rest := block; rest != ""; {
 		end := strings.IndexByte(rest, '\n') + 1
 		line := rest[:end]
@@ -504,15 +510,17 @@ func (x *exchange) responseBlockNamed(block string, connection []string) []byte 
 	return x.appendCookie(dst)
 }
 
+// headBuffer is an empty buffer of the pool's with room for block and the
+// sticky cookie.
+func (x *exchange) headBuffer(block string) []byte {
+	return bufferpool.Get(len(block) + len(x.setCookie) + len("Set-Cookie: \r\n"))[:0]
+}
+
 // appendCookie appends the sticky cookie's field to dst, if the response
-// sets one, keeps dst as x.head for the next request, unless it grew past
-// what is kept, and returns it.
+// sets one, and returns it.
 func (x *exchange) appendCookie(dst []byte) []byte {
 	if x.setCookie != "" {
 		dst = appendField(dst, "Set-Cookie: ", x.setCookie)
-	}
-	if cap(dst) <= maxKeptHead {
-		x.head = dst
 	}
 	return dst
 }

@@ -18,6 +18,7 @@ import (
 	"unsafe"
 	"weak"
 
+	"github.com/lesismal/fib/bufferpool"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/module"
@@ -271,11 +272,6 @@ type exchange struct {
 	// run on goroutines of fib's.
 	mu sync.Mutex
 
-	// head is the buffer outgoingFramed writes the upstream's header in,
-	// which stays with the exchange from one request to the next: fib's
-	// client copies it as the request is sent.
-	head []byte
-
 	// respond is onResponse as the function value Send takes, made once
 	// for every request the exchange serves rather than allocated for each.
 	respond func(*fibhttp.ClientResponse, error)
@@ -481,6 +477,12 @@ func (x *exchange) send(out *stdhttp.Request) {
 		x.call = x.pool.Send(x.backend, out, x.respond)
 	}
 	call, cause := x.call, x.cause.Load()
+	if x.framed != nil && x.policy == nil {
+		// fib's client has copied the header, and nothing sends it again:
+		// it goes back to the pool now rather than wait with the exchange.
+		bufferpool.Put(x.framed)
+		x.framed = nil
+	}
 	x.callMu.Unlock()
 	if cause != nil {
 		call.Cancel(*cause)
@@ -528,6 +530,10 @@ func (x *exchange) reset() bool {
 	}
 	x.gen.Add(1)
 	x.callMu.Unlock()
+	if x.framed != nil {
+		// Kept for retries, which are over.
+		bufferpool.Put(x.framed)
+	}
 	x.exchangeState = exchangeState{}
 	return true
 }
@@ -535,6 +541,9 @@ func (x *exchange) reset() bool {
 // recycleUnused gives back an exchange no request was sent with, which
 // nothing can have kept.
 func (x *exchange) recycleUnused() {
+	if x.framed != nil {
+		bufferpool.Put(x.framed)
+	}
 	x.exchangeState = exchangeState{}
 	exchanges.Put(x)
 }
@@ -607,6 +616,10 @@ func (x *exchange) onResponse(resp *fibhttp.ClientResponse, err error) {
 			_ = x.c.WriteResponseOwned(out)
 		} else {
 			_ = x.c.WriteResponse(out)
+		}
+		if block != nil {
+			// Read as the response was written.
+			bufferpool.Put(block)
 		}
 		x.whole = true
 		x.release()
