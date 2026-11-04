@@ -268,12 +268,10 @@ func TestWatcherCatchesUp(t *testing.T) {
 	if _, e := h.join("r", "bob", "", state{}, false); e != nil {
 		t.Fatal(e.msg)
 	}
-	var texts []string
 	for _, text := range []string{"one", "two"} {
 		if _, e := h.chat("r", "ann", key, text); e != nil {
 			t.Fatal(e.msg)
 		}
-		texts = append(texts, text)
 	}
 	if _, e := h.join("r", "cat", "", state{}, false); e != nil {
 		t.Fatal(e.msg)
