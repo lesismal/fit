@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I138.
+Status: `todo`, `doing` or `done`. The next free iteration number is I140.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -286,7 +286,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I138.
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
-| I137 | A video site end to end: the example, library and player pages, the workbench's library and channel pages, docs | I134, I135 | todo |
+| I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
+| I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
+| I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
 
 ## M0, foundations
 
@@ -2118,12 +2120,60 @@ keeps the reads behind one interface so that it can be added).
 - **Do**: an example in [fit-examples](https://github.com/lesismal/fit-examples): a library, `vod`
   and channel routes, `media_tokens` behind the route's middleware for the site's API, a small Go
   API that logs a viewer in and hands out URLs, and a page with hls.js. `media_pages` gains a
-  library page and a player page behind the policy's login (hls.js vendored, Apache-2.0). The
-  workbench gains library and channel pages under the Engine menu's streaming entry: items and
-  their probe, rescan, a channel's list or schedule, start, stop and skip, and push targets' state.
+  library page and a player page behind the policy's login (hls.js vendored, Apache-2.0).
   `docs/media-library.md`, in English and Chinese.
 - **Done when**: in Docker on Linux, headless Chromium logs in to the example's API, plays a film
   and a channel through the URLs it issues, seeks, and is refused once a URL and its grant expire;
-  the workbench's pages pass their browser tests; `TestChapterExamples` and the schema's
-  descriptions cover the new fields.
-- **Touches**: `handler/mediapages`, `app/workbench`, `schema`, `docs`, `test/docker`, fit-examples.
+  `TestChapterExamples` and the schema's descriptions cover the new fields.
+- **Touches**: `handler/mediapages`, `schema`, `docs`, `test/docker`, fit-examples.
+
+### I138 The workbench's media library pages
+
+- **Do**: the workbench manages all of this track, in English and Chinese, behind its logins.
+  - **Menu**: a `media_library` page in the flat menu beside streaming and media auth (I122); in the
+    Engine menu (I123), each port's streaming entry lists its `vod` routes and channels, and the
+    port's line gains a `VOD` tag.
+  - **Config pages**: `media_library` (roots, patterns, scan interval, bounds, `follow_symlinks`),
+    `vod` routes (library, container, segment duration, cache, `encrypt`), `streaming.channels`
+    with `push` targets, and `media_auth`'s `url_signing` (bound fields, `play_grace`, `cookie`,
+    `max_sessions`, `on_limit`, `referers`, `origins`), each with the UI, `.conf`, `.yaml` and
+    `.json` tabs checked through the apply path, as every config page is (I120).
+  - **Library browser**: each library's items in a table, searched, filtered (codec, resolution,
+    probe errors) and paged from the Admin API; an item's page with its tracks, codecs, renditions,
+    subtitles, poster and sidecar, its probe error if any, and a preview player (hls.js) on a
+    short-lived URL the workbench signs for the logged-in user; rescan a library, with its progress.
+  - **Channels**: each channel's list or schedule edited as a timeline (items dragged in from the
+    library, start times in its time zone, loop and shuffle), what plays now and next with its
+    position, start, stop and skip, and a preview; each push target's state (connected, retrying,
+    the last error), bytes and bitrate.
+  - **Playback URLs and sessions**: a form that issues a test URL through `media_tokens` (subject,
+    resource, address, ttl) and shows it with a player, never storing it; the policy's keys with
+    their names and ages (never the secrets), rotated one or all with a confirm, as I119 does; live
+    playback sessions by subject, resource, address and start, each endable, with the counts per
+    subject against `max_sessions`.
+  - **Metrics**: per library and channel the viewers now, requests and bytes a second, the segment
+    and sample-table caches' hit rates and bytes, the file pool's queue and refusals, and 403s by
+    reason (expired, wrong resource, address, session cap), from fit's metrics.
+- **Done when**: every page works in a real browser against a running fit and in the bundle's mock
+  tests, in English and Chinese; config saved from each page is checked and applied, its errors
+  linked back to the field; the preview plays through a signed URL and stops once it is refused;
+  a channel's schedule edited on its timeline takes effect at the next item; a rotated key and an
+  ended session take effect at once; no secret, token or signature reaches the browser beyond the
+  preview's own short-lived URL; the Admin API's new read endpoints are bounded and paged under
+  the race detector.
+- **Touches**: `app/workbench`, `admin`, `medialib`, `streaming`, `mediaauth`, `docs`.
+
+### I139 Media files managed from the workbench
+
+- **Do**: files of a library managed in the workbench: uploads into a root's `upload_dir`, resumable
+  in chunks (`POST` to create, `PATCH` at an offset, `HEAD` to resume), bounded by `max_upload_bytes`,
+  concurrent uploads and disk free, written to a temporary file on the file pool and renamed into
+  place once whole, then probed; rename, move between folders of a root, and delete, each confirmed;
+  a sidecar's title, poster, renditions and subtitles edited in a form; a file in use by a channel
+  or still playing warned about before it is moved or deleted; every change by a logged-in user,
+  CSRF-checked, and written to the audit log once it exists (I126).
+- **Done when**: a multi-GB upload resumes after a cut connection and plays once it is probed; an
+  upload past a bound is refused 413 and leaves no partial file; a path out of the roots is refused;
+  a rename keeps the item's `id` when its sidecar names one; a deleted item leaves the catalog and
+  its caches; under the race detector.
+- **Touches**: `medialib`, `admin`, `app/workbench`, `schema`, `docs`.

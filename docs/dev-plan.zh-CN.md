@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I138。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I140。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -276,7 +276,9 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
 | I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | todo |
 | I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | todo |
-| I137 | 影视站端到端：示例、媒体库与播放页面、workbench 的媒体库与频道页面、文档 | I134, I135 | todo |
+| I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | todo |
+| I138 | workbench 的媒体库页面：菜单条目、配置页面、带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥与当前会话、指标 | I135, I123 | todo |
+| I139 | 在 workbench 中管理媒体文件：断点续传上传、重命名、移动、删除与 sidecar，有上限并需确认 | I138 | todo |
 
 ## M0 基础
 
@@ -1758,8 +1760,39 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 
 - **做**：[fit-examples](https://github.com/lesismal/fit-examples) 中的示例：一个媒体库、`vod` 和频道路由、置于路由中间件之后供影视站 API
   使用的 `media_tokens`、一个让观众登录并发放 URL 的小型 Go API，以及一个使用 hls.js 的页面。`media_pages` 增加在策略登录之后的媒体库页面和
-  播放页面（hls.js 随附，Apache-2.0）。workbench 在引擎菜单的流媒体条目下增加媒体库和频道页面：条目及其探测信息、重新扫描、频道的列表或排期、
-  开始、停止和跳过，以及推流目标的状态。`docs/media-library.md`，中英文。
+  播放页面（hls.js 随附，Apache-2.0）。`docs/media-library.md`，中英文。
 - **完成标准**：在 Linux 的 Docker 中，无头 Chromium 登录示例 API，经其签发的 URL 播放一部电影和一个频道、拖动进度，并在 URL 及其授权过期
-  后被拒绝；workbench 页面通过浏览器测试；`TestChapterExamples` 和 schema 描述覆盖新字段。
-- **涉及**：`handler/mediapages`、`app/workbench`、`schema`、`docs`、`test/docker`、fit-examples。
+  后被拒绝；`TestChapterExamples` 和 schema 描述覆盖新字段。
+- **涉及**：`handler/mediapages`、`schema`、`docs`、`test/docker`、fit-examples。
+
+### I138 workbench 的媒体库页面
+
+- **做**：在 workbench 中、登录之后管理本方向的全部功能，中英文。
+  - **菜单**：扁平菜单中在流媒体和媒体认证旁增加 `media_library` 页面（I122）；引擎菜单（I123）中每个端口的流媒体条目列出其 `vod` 路由和频道，
+    端口行增加 `VOD` 标签。
+  - **配置页面**：`media_library`（根目录、模式、扫描间隔、上限、`follow_symlinks`）、`vod` 路由（媒体库、容器格式、分片时长、缓存、`encrypt`）、
+    带 `push` 目标的 `streaming.channels`，以及 `media_auth` 的 `url_signing`（绑定字段、`play_grace`、`cookie`、`max_sessions`、`on_limit`、
+    `referers`、`origins`），与所有配置页面一样有 UI、`.conf`、`.yaml` 和 `.json` 标签，经应用路径校验（I120）。
+  - **媒体库浏览**：每个媒体库的条目以表格展示，经 Admin API 搜索、筛选（编码、分辨率、探测错误）和分页；条目页面显示其轨道、编码、多码率、
+    字幕、海报和 sidecar，探测错误（如有），以及一个预览播放器（hls.js），使用 workbench 为当前登录用户签发的短期 URL；重新扫描媒体库并显示进度。
+  - **频道**：以时间线编辑每个频道的列表或排期（从媒体库拖入条目、按其时区设置开始时间、循环和随机），显示正在播放和接下来播放的条目及进度，
+    开始、停止和跳过，以及预览；每个推流目标的状态（已连接、重试中、最近的错误）、字节数和码率。
+  - **播放 URL 与会话**：一个经 `media_tokens` 签发测试 URL 的表单（主体、资源、地址、ttl），带播放器展示，从不保存；策略的密钥及其名称和
+    使用时长（从不显示密钥本身），确认后轮换一个或全部，与 I119 相同；按主体、资源、地址和开始时间列出当前播放会话，每个都可结束，并显示每个
+    主体相对 `max_sessions` 的会话数。
+  - **指标**：每个媒体库和频道的当前观看人数、每秒请求数和字节数、分片缓存和样本表缓存的命中率与字节数、文件池的队列与拒绝数，以及按原因
+    （过期、资源不符、地址、会话上限）统计的 403，来自 fit 的指标。
+- **完成标准**：每个页面在真实浏览器中对运行中的 fit、以及在前端包的 mock 测试中都能工作，中英文；从每个页面保存的配置经校验后应用，错误链接
+  回对应字段；预览经签名 URL 播放，被拒绝后停止；在时间线上修改的频道排期从下一个条目起生效；轮换密钥和结束会话立即生效；除预览自己的短期
+  URL 外，没有任何密钥、token 或签名到达浏览器；Admin API 新增的读接口有上限并分页，在 race 检测下通过。
+- **涉及**：`app/workbench`、`admin`、`medialib`、`streaming`、`mediaauth`、`docs`。
+
+### I139 在 workbench 中管理媒体文件
+
+- **做**：在 workbench 中管理媒体库的文件：上传到根目录的 `upload_dir`，分块断点续传（`POST` 创建、`PATCH` 按偏移写入、`HEAD` 查询续传位置），
+  受 `max_upload_bytes`、并发上传数和磁盘剩余空间限制，在文件池上写入临时文件、完整后重命名到位，再进行探测；重命名、在根目录内的文件夹间
+  移动和删除，各需确认；用表单编辑 sidecar 的标题、海报、多码率和字幕；移动或删除正被频道使用或仍在播放的文件前给出警告；每个修改都需要登录
+  用户、经 CSRF 校验，审计日志存在后（I126）写入审计日志。
+- **完成标准**：数 GB 的上传在连接中断后能续传，探测完成后可以播放；超过上限的上传返回 413 且不留下残缺文件；根目录之外的路径被拒绝；sidecar
+  指定了 `id` 时重命名保持条目 `id` 不变；删除的条目从目录和缓存中移除；在 race 检测下通过。
+- **涉及**：`medialib`、`admin`、`app/workbench`、`schema`、`docs`。
