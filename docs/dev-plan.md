@@ -287,6 +287,18 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I140.
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
+| **Cluster management** | | | |
+| I138 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
+| I139 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I138 | todo |
+| I140 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I139 | todo |
+| I141 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I140 | todo |
+| I142 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I140 | todo |
+| I143 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I142 | todo |
+| I144 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I143 | todo |
+| I145 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I144 | todo |
+| I146 | The manager's users and roles per group, and the audit log; the Users and audit pages | I144 | todo |
+| I147 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I139 | todo |
+| I148 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I145, I125 | todo |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
 
@@ -2177,3 +2189,273 @@ keeps the reads behind one interface so that it can be added).
   a rename keeps the item's `id` when its sidecar names one; a deleted item leaves the catalog and
   its caches; under the race detector.
 - **Touches**: `medialib`, `admin`, `app/workbench`, `schema`, `docs`.
+
+## Cluster management
+
+Proposed 2026-11-05. One fit manages many: an instance set aside as the manager (or any instance
+with the feature on) holds the address and an administrator's credentials of other fit instances,
+its members, connects to them, shows them together, groups them, and changes their configs
+together, previewed, checked on every member and rolled out in stages. Every feature has its pages
+in the workbench under a first-level **Cluster** entry in the left menu; nothing here is an API
+alone. Decision 033 records the choices below.
+
+Principles, in the order they bind:
+
+- **The manager is not in the data path.** Members serve traffic from their own configs whether or
+  not the manager runs; a manager down, or gone, costs management and nothing else. There is no
+  consensus among members and no runtime state shared between them (rate-limit counters, caches,
+  sessions): that would be a data-plane track of its own.
+- **Members change as little as possible.** The manager speaks the APIs a member already has: its
+  console, logged in with a user name and password, through which the console passes on the Admin
+  API; or the Admin API itself with its bearer token. Every change on a member goes through that
+  member's own apply path with `If-Match`, lands in its `/versions` and can be rolled back there.
+- **Credentials stay in the manager's store.** Cluster management needs `admin.store`; members'
+  passwords and tokens are kept encrypted there, written once in the pages and shown masked, never
+  sent to a browser or written to a log. Members' certificates are verified (a CA, or a SHA-256
+  fingerprint pinned once a person confirms it); there is no silent `insecure`.
+- **A person applies.** A change to many members is shown as a diff per member, checked by each
+  member without applying it, and applied only after a confirm dialog, in batches with health gates
+  and rolled back on failure. Drift is reported and fixed by a click; there is no unattended sync in
+  this track.
+- **Nothing blocks a worker** (rule 1): the manager's calls to members go out on fib's asynchronous
+  HTTP client; fan-out is bounded in concurrency, every call has timeouts (rule 10), and every
+  answer, cache, history and audit entry is bounded (rule 11).
+- **Off by default**: no `admin.cluster`, no Cluster menu, no outgoing calls.
+
+Words used below: the **manager**, the fit that manages; a **member** (node), a fit it manages; a
+**group** (resource group), a set of members by labels or by name; a **template**, config members
+the manager owns on the members of the groups it is attached to; a **rollout**, one change applied
+to many members in stages.
+
+The workbench's Cluster menu, built up by the iterations below:
+
+| Entry | Page | Iteration |
+| --- | --- | --- |
+| Overview | every member's health, version, config version, drift, nearest certificate expiry and connections, as cards or a table, filtered by group and label | I140 |
+| Nodes | add, edit, remove and test members; credentials written once; a certificate's fingerprint confirmed on first contact; a member's detail page | I140 |
+| Node switcher | in the header: open any member's own pages (config, Engine, Consistency, versions) from the manager | I141 |
+| Groups | groups by label selector or by name, their members, and bulk operations with each member's result | I142 |
+| Templates | templates, their owned paths and variables, attached to groups; sync state per member; import from a member; compare two members | I143 |
+| Rollouts | plan (diffs and checks per member), strategy, progress batch by batch, pause, resume, abort, roll back; history | I144 |
+| Drift and alerts | drift per member against the templates, one-click fixes as rollouts; alert rules and webhooks | I145 |
+| Users and audit | the manager's users and their roles per group; the audit log of every cluster action | I146 |
+| Metrics, logs, certificates | requests, errors and connections per member and group over time; logs tailed across members; the certificate inventory | I148 |
+
+Not in this track: consensus or shared runtime state among members; a replacement for Kubernetes
+or GitOps (the Kubernetes provider stays the way to drive fit from a cluster's resources); a
+manager with a standby (its store is exported and imported as any store is); upgrading members'
+binaries (I149 records the question, not a plan).
+
+### I138 Decision 033; what a member needs to be managed
+
+- **Do**: decision 033. On every fit, so that a manager can manage it: `GET /node` in the Admin
+  API (and `/api/node` through the console): a node ID made once and kept in the store (or beside
+  the config file without one), the host name, fit's and fib's versions, the start time, the
+  running config's version and ETag, the roles running, a digest of the schema, and a capability
+  list a manager checks before using an endpoint; a dry run, `PUT`/`PATCH /config?dry_run=1` and
+  `PUT /config/text?dry_run=1`, which checks a config through the whole apply path, compiled and
+  loaded, without applying it, answering as an apply does; login answers that a program can use
+  (the CSRF token in the login's JSON as well as from `/api/session`); failed logins slowed per user
+  and per address, with backoff and a cap, so that a member's console on a network withstands
+  guessing.
+- **Done when**: `/node` answers the same ID across restarts, with and without a store; a dry run
+  refuses what an apply refuses with the same errors and leaves the version, the config and the
+  store as they were; a program logs in, reads and applies with the CSRF token; the tenth wrong
+  password in a row is slowed and the right one still works once the backoff ends; under the race
+  detector.
+- **Pages**: the workbench's Account menu shows the node ID and versions; the config pages gain a
+  **Check** button beside Save that runs the dry run and shows its errors where Save would.
+- **Touches**: `docs/decisions` (033), `admin`, `admin/store`, `login`, `app/console`,
+  `app/workbench`, `docs`.
+
+### I139 The manager: members, their credentials and their state
+
+- **Do**: `admin.cluster` (`poll_interval`, `timeout`, `max_nodes`, `max_concurrency`,
+  `max_response_bytes`), refused without `admin.store`; the store's payload gains `cluster`:
+  members, groups, templates, rollouts and the audit log, the payload's version bumped and the old
+  one still read. A member has a name, labels, a URL and its access: `console` (user name and
+  password; logged in again on 401 or when the session ends; a member asking for a password change
+  reported, not changed) or `admin_api` (a bearer token); TLS by the system's CAs, a `ca` PEM, or a
+  pinned `fingerprint`. A poller on the console pool reads each member's `/node`, `/status` and
+  `/config/check` every `poll_interval`, keeping its reachability, latency, last error, versions,
+  uptime, config version and ETag, reload counts, connections, upstream backends down, nearest
+  certificate expiry and drift count. The manager's endpoints, as console module `cluster`:
+  `GET/POST/PUT/DELETE /api/m/cluster/nodes[/<name>]`, `POST .../nodes/<name>/test` (which answers
+  the certificate's fingerprint for a person to confirm), and `GET /api/m/cluster/state`.
+- **Done when**: in Docker, a manager and three members: members added by password and by token
+  show their state; a wrong password, a certificate not trusted, a pin that does not match and a
+  member down are each reported apart; a member's restart and a manager's restart are recovered
+  from; no password, token or session cookie appears in any answer, page or log; the poller's
+  concurrency and response caps hold; under the race detector.
+- **Pages**: none yet beyond what I140 draws on these endpoints.
+- **Touches**: `cluster` (new), `config`, `admin`, `admin/store`, `app`, `schema`, `docs`,
+  `test/docker`.
+
+### I140 The Cluster menu: overview, nodes and a node's page
+
+- **Do**: the first-level **Cluster** entry in the workbench's left menu, shown when `admin.cluster`
+  is set, with **Overview** and **Nodes**. Overview: a card or a row per member, its state colored,
+  with health, fit version, config version, drift, nearest certificate expiry, connections and
+  latency; filtered by group, label and state, sorted, refreshed as the poller reads. Nodes: add and
+  edit a member in a form (name, labels, URL, access, credentials written once and shown masked,
+  TLS), **Test** showing the certificate's fingerprint for a person to trust, remove with a confirm.
+  A member's page: its `/node`, listeners, upstreams and their backends, certificates, versions and
+  consistency, read through the manager. The menu's labels and every page in English and Chinese;
+  `docs/cluster.md` in both, with a manager-only config (`fit run -admin` with `admin.cluster`) and
+  the recipe for members behind NAT through the tunnel until I147.
+- **Done when**: in a browser, against the Docker set of I139, a member is added, tested, trusted,
+  edited and removed; the overview shows each failure mode of I139 and recovers; a credential
+  field never shows what was written; the bundle's tests and the browser checks pass in both
+  languages.
+- **Pages**: Cluster → Overview, Nodes, a node's page.
+- **Touches**: `app/workbench`, `cluster`, `docs`.
+
+### I141 A member's own pages, opened from the manager
+
+- **Do**: a node switcher in the workbench's header: choosing a member opens the workbench's own
+  pages (config with its text tabs, Engine, Consistency, versions, the role pages) against that
+  member, the manager passing `/api/n/<member>/...` on to the member's API with the stored session;
+  the member's schema read from the member; the page's title bar names the member in a color of its
+  own so that no one edits the wrong one; a member whose version the bundle does not know opens
+  read-only. Every write through the switcher in the manager's audit log with its user.
+- **Done when**: every config page reads and saves a member's config, the save's errors linking to
+  the right field; a stale ETag on the member is refused as it would be locally; a member of an
+  older or newer version opens read-only; switching back to the manager leaves no member's data on
+  the page; the body caps hold; browser checks in both languages.
+- **Pages**: the node switcher; every existing page, against a member.
+- **Touches**: `cluster`, `app/console`, `app/workbench`, `docs`.
+
+### I142 Resource groups and operations on many
+
+- **Do**: groups: a label selector, members by name, or both; a member in any number of groups;
+  group variables for I143. Operations on a group or a selection of members, run with bounded
+  concurrency and answered per member: reload, rollback to the previous version, run the
+  consistency check, purge cache zones by key or prefix, test connectivity. `/api/m/cluster/groups`
+  and `POST /api/m/cluster/ops`.
+- **Done when**: a selector's members follow a label's change; an operation on five members where
+  one is down reports four done and one failed, with the error; a purge reaches every member's
+  zone; under the race detector.
+- **Pages**: Cluster → Groups: the list, a group's form (selector with its members previewed,
+  variables), a group's page with its members' states and an operations bar; Overview's filter by
+  group; each operation confirmed in a dialog naming the members, and its results per member.
+- **Touches**: `cluster`, `app/workbench`, `docs`.
+
+### I143 Templates: config shared by a group
+
+- **Do**: a template owns paths in the config: whole members (`media_auth`, `tls`, `log`), and
+  named elements (`routes` by name, `upstreams`, `listeners` and `services` by name; a route in a
+  template must be named); its values may use variables (`${node.name}`, `${node.labels.region}`,
+  a group's variables). Templates attached to groups, in an order that settles overlaps; a member's
+  desired config is its own config with the owned paths taken from its templates, every other path
+  left to the member. Each member's sync state: in sync, out of sync with its diff, or conflict where
+  someone changed an owned path on the member. A template made from a member's config (pick paths
+  from it); two members' configs compared side by side; secret values in a template kept in the
+  store and masked; paths to files (`cert_file`, `token_file`) warned as the member's own. The
+  manager tells each member what it owns (`PUT /node/managed`, kept in the member's store), and the
+  member's own workbench marks those fields managed and asks before a local change to them.
+- **Done when**: a template of routes and an upstream attached to a group renders per member with
+  its variables; a member's other routes are untouched; an owned route changed on a member shows as
+  a conflict on the manager and is marked on the member's page; a template from a member's config
+  reproduces it; under the race detector.
+- **Pages**: Cluster → Templates: the list; a template's editor (form and `.conf`/`.yaml`/`.json`
+  text tabs as on the config pages, its owned paths listed, its variables), its groups, and each
+  member's rendered result and sync state; **Compare** for two members; **Import from a node**.
+- **Touches**: `cluster`, `admin`, `app/workbench`, `docs`.
+
+### I144 Rollouts
+
+- **Do**: a rollout from a template's change, a sync of out-of-sync members, or a section copied
+  from one member to others. Its plan: each member's diff and the member's dry run (I138), its
+  ETag taken. Its strategy: all at once, rolling by batch size or percentage with a pause, or a
+  canary of the first members waiting for a person to go on. After each batch a health gate: the
+  member reachable, its reload succeeded, no new drift, and if set its 5xx ratio under a threshold
+  over a window. On a failed gate the rollout stops and rolls back the batch (each member to the
+  version it had, by `/rollback/{n}` with `If-Match`), or all of it if asked. A member whose ETag
+  changed since the plan is skipped and flagged, not overwritten. Pause, resume, abort; one rollout
+  at a time per member; rollouts kept in the store, with each member's outcome and versions.
+- **Done when**: in Docker with five members: a rolling rollout applies in batches; a member
+  given a config that loads but fails its gate stops the rollout and is rolled back; a canary waits
+  for its go; a member edited locally after the plan is skipped; a manager restarted in the middle
+  shows the rollout paused where it stopped and resumes it; under the race detector.
+- **Pages**: Cluster → Rollouts: a new rollout's plan (members, diffs, dry run errors linked to the
+  member's page), the strategy form, the confirm dialog with the diff; a running rollout's progress
+  batch by batch with each member's gate, and pause, resume, abort and roll back; the history.
+- **Touches**: `cluster`, `app/workbench`, `docs`, `test/docker`.
+
+### I145 Drift and alerts
+
+- **Do**: drift checked on every poll: each member against its templates and its own consistency
+  check; a fix is a rollout of that member (I144), never applied unasked. Alert rules: member down
+  for a while, drift, a rollout failed, a certificate expiring within days, upstream backends down,
+  reloads failing; sent to webhooks (generic JSON, with a template for chat services), with a
+  repeat interval and a silence, the webhook's secret in the store; alerts kept, bounded.
+- **Done when**: each rule fires once its condition has lasted its time and resolves after;
+  silences hold; a webhook that times out does not delay the poller; under the race detector.
+- **Pages**: Cluster → Drift and alerts: members out of sync with their diffs and a **Fix** that
+  opens a rollout's plan; the alert rules' form, webhooks, active and past alerts, silences; a
+  badge on the Cluster menu while alerts are active.
+- **Touches**: `cluster`, `app/workbench`, `docs`.
+
+### I146 Users, roles and the audit log
+
+- **Do**: the manager's console users get roles per group: `viewer` (read), `operator` (operations
+  and rollouts of existing templates), `admin` (members, credentials, templates, groups), checked on
+  every endpoint and every switcher write; consistent with the assistant's levels (I126) when both
+  are on. The audit log of every cluster action: user, time, members, operation, the diff's digest,
+  outcome and the versions before and after, in the store, bounded; exported as JSON lines.
+- **Done when**: each role is refused what it may not do, in the API and with the controls hidden in
+  the pages; every action of I139–I145 leaves its entry; the log holds across a restart within its
+  bound; under the race detector.
+- **Pages**: Cluster → Users and audit: users' roles per group; the audit log filtered by user,
+  member, operation and time, each entry opening its diff.
+- **Touches**: `cluster`, `login`, `app/workbench`, `docs`.
+
+### I147 Members behind NAT, linking out
+
+- **Do**: `admin.cluster_member` on a member: the manager's URL, and an enrollment token made on
+  the manager, used once for a credential of its own; the member links out to the manager over a
+  WebSocket on fib's client, reconnecting with backoff, and the manager reaches that member's API
+  over the link, as it reaches others over HTTP. The manager's certificate pinned by the member at
+  enrollment; a member removed on the manager loses its credential.
+- **Done when**: a member with no open port is managed like the others through everything above;
+  the link survives the manager's restart and a network cut; a used or expired enrollment token is
+  refused; under the race detector.
+- **Pages**: Nodes gains **Add by enrollment**: a token made with its lifetime and the config line
+  to paste on the member, and the member shown as linked or waiting.
+- **Touches**: `cluster`, `config`, `admin`, `app/workbench`, `schema`, `docs`.
+
+### I148 Metrics, logs and certificates across the cluster
+
+- **Do**: series kept by the manager from each poll, bounded per member: requests per second, 4xx
+  and 5xx, connections, bytes, reloads; summed per group. Logs tailed from several members at once
+  through fit's log ring (I125), merged by time. The certificate inventory: every member's
+  certificates with names, issuer and expiry. `fit cluster` in the CLI (nodes, state, groups, diff,
+  rollout start/status/abort) through the manager's Admin API. When the assistant is on (I124–I126):
+  read tools over the cluster's state, and proposals that become rollout plans.
+- **Done when**: the series match the members' own metrics; a merged tail follows three members;
+  a certificate about to expire on one member is listed first; the CLI drives a rollout end to end;
+  under the race detector.
+- **Pages**: Cluster → Metrics (charts per member and group), Logs (members chosen, filters,
+  follow), Certificates (the inventory, sorted by expiry); Overview's sparklines.
+- **Touches**: `cluster`, `cli`, `app/workbench`, `docs`.
+
+### I149 Upgrading members' binaries (a question, not a plan)
+
+Upgrading fit itself across members (a release downloaded, its signature checked against a pinned
+key, the binary replaced and fit restarted with its listening sockets handed on, rolled out as in
+I144) needs a graceful restart fit does not have yet. Decision 033 records whether it is taken up,
+or left to packages, containers and orchestrators, which the overview's version column already
+serves.
+
+### Open questions for review (2026-11-05)
+
+1. Access to members: the console's user name and password (as asked) and the Admin API's token,
+   both offered, password first. Keep both?
+2. Credentials need `admin.store` on the manager. Acceptable, or also allow a plain file?
+3. I141 opens a member's pages with the manager's bundle (one UI, read-only on unknown versions)
+   rather than the member's own bundle proxied whole. Agreed?
+4. Templates own whole members and named elements; unnamed routes cannot be shared. Enough?
+5. No unattended sync: drift is reported, a person rolls out the fix. Agreed, or an opt-in
+   `auto_sync` per group?
+6. I147 (members linking out) before or after I143–I144? Until then the tunnel reaches them.
+7. Binary upgrades (I149): in scope or not?
