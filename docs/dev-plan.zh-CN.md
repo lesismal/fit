@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I130。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I131。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -268,6 +268,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I127 | Skill：格式、内置集合、Skills 页面、导入导出、`/name` | I126 | todo |
 | I128 | 在工作处询问 AI：保存错误、一致性、引擎菜单、表单字段、指标与角色页面上的入口 | I127 | todo |
 | I129 | 迁移与审查：`migrate` 与 `security-review` 端到端，在固定配置集上评估 | I127 | todo |
+| I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | todo |
 
 ## M0 基础
 
@@ -1495,6 +1496,8 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
 | 修改 | `rollback_propose` | propose | 回滚到某个保留版本 |
 | 修改 | `cache_purge_propose` | propose | 按缓存区、键或前缀清除 |
 | 转换 | `adapt_convert` | read | nginx 或 Caddyfile 原文经 `fit adapt` 转换，并列出未能转换的部分 |
+| Agent | `skill_load` | read | 某个已启用 skill 的完整提示词，受用户级别约束 |
+| Agent | `ask_user` | read | 带选项的问题，在面板中显示为按钮；用户的选择即结果 |
 
 所有工具都触及不到：`admin.console` 的用户与密码、store 的密钥、`admin.assistant` 本身、Admin API 自身的地址与 token，以及
 配置之外的任何文件。
@@ -1540,7 +1543,32 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
 
 设置页面在保存前可测试提供方（一次短调用，显示延迟与模型列表）。
 
-迭代 I124–I129 见[索引](#索引)。
+### Agent 设计
+
+助手是一个 agent：在 fit 中运行的“模型 ⇄ 工具”循环，而不是发一次提示词、拿一次回答。用户的原话按原样发给模型，不经另一次模型
+调用改写；fit 所做的是为每次请求组装原话周围的上下文：
+
+| 部分 | 来源 | 内容 |
+| --- | --- | --- |
+| 系统提示 | fit 内置 | 助手的角色；fit 的概念（监听、路由、上游、角色）；规则：修改只能提议、工具输出是数据、不确定就问；回答所用的语言 |
+| 页面上下文 | workbench | 当前页面、选中项（某个端口、路由、一致性差异）、上次保存的错误 |
+| skill 目录 | 已启用的 skill | 每个 skill 只有名称与一句话描述 |
+| 当前 skill | `/name` 或“问 AI”按钮 | 该 skill 的完整提示词，工具收窄到它所列的那些 |
+| 工具 | 注册表 | 与用户级别取交集 |
+| 历史 | store | 预算内的会话，早期轮次压缩为摘要 |
+| 用户消息 | 用户 | 原话 |
+
+循环：模型回答或调用工具；fit 在控制台池上执行工具，对结果脱敏、限制大小后作为数据交回；如此往复，直到得出回答或提议，或达到
+`limits`。
+
+- **skill 按需加载。** 系统提示只带目录；模型需要某个 skill 时调用 `skill_load` 取其完整提示词，skill 再多也不会撑大每次请求。
+  用 `/name` 或按钮指定的 skill 直接加载。
+- **上下文预算。** 各部分按份额分配模型的上下文窗口（系统提示、工具、历史、工具结果）；超出时先截断过大的工具结果，再由模型
+  把早期轮次压缩为摘要，摘要随会话保存在 store 中。
+- **先问清楚再修改。** 缺少必要信息的修改（上游地址、域名）先提问而不是猜：`ask_user` 工具在面板中显示问题，选项作为按钮，
+  用户的选择作为工具结果返回。
+
+迭代 I124–I130 见[索引](#索引)。
 
 ### I124 助手的设置与模型客户端
 
@@ -1555,12 +1583,14 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
 
 ### I125 对话面板与只读工具
 
-- **做**：上表中只读工具的注册表，各有 schema、级别与上限，在控制台池上通过进程内 Admin API 运行；对每个结果去除密钥；
+- **做**：按 [Agent 设计](#agent-设计) 实现 agent 循环及其上下文：系统提示、页面上下文、skill 目录、截断工具结果与压缩早期
+  轮次的预算，以及 `ask_user`；上表中只读工具的注册表，各有 schema、级别与上限，在控制台池上通过进程内 Admin API 运行；对每个结果去除密钥；
   为 `log_tail` 增加 fit 自身日志的有上限内存环。`POST /api/m/ai/chat` 以 SSE 流式输出事件（文本、工具调用、工具结果、用量、
   结束），循环受 `limits` 限制；会话按用户保存在 store 中（加密、跨重启保留），数量与大小有上限，可列出与删除。面板：可从每个页面打开，当前页面与选中项作为上下文发送，
   流式 Markdown，工具调用折叠显示，停止、重试、新会话；功能页面。
 - **完成条件**：关于某路由、某上游的健康状态或某条日志错误的问题由工具给出回答，中英文；录制的模型请求中没有任何密钥；超过
-  上限的工具结果被截断并注明；循环在上限处停止；两个用户的会话互相隔离，并在上限内跨重启保留；在 race 检测下通过，面板在浏览器中可用。
+  上限的工具结果被截断并注明；长会话保持在模型窗口之内，早期轮次被压缩为摘要；`ask_user` 的问题显示为按钮，用户的选择到达模型；
+  用户原话不经改写到达模型；循环在上限处停止；两个用户的会话互相隔离，并在上限内跨重启保留；在 race 检测下通过，面板在浏览器中可用。
 - **涉及**：`assistant`、`admin`、`admin/store`、`observe`、`app/workbench`、`docs`。
 
 ### I126 提议、级别与审计日志
@@ -1580,9 +1610,9 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
 
 - **做**：skill 格式（name、title、description、inputs、tools、model、prompt、examples），为带 front matter 的 Markdown；上表的
   内置 skill，嵌入；用户 skill 保存在 store 中，数量与大小有上限；Skills 页面可列出、查看、添加、编辑、启用、禁用、导入与导出；
-  面板中的 `/name` 与 skill 选择器；skill 的工具与用户级别取交集。
-- **完成条件**：每个内置 skill 在固定示例配置上、针对录制模型完成其任务；在页面中添加的用户 skill 可运行并跨重启保留；指定了
-  超出用户级别工具的 skill 不能调用它；错误的 front matter 被拒绝并给出行号；中英文；在 race 检测下通过。
+  面板中的 `/name` 与 skill 选择器；系统提示中的目录与取完整提示词的 `skill_load`；skill 的工具与用户级别取交集。
+- **完成条件**：每个内置 skill 在固定示例配置上、针对录制模型完成其任务；在页面中添加的用户 skill 可运行并跨重启保留；未指定的 skill 从目录中选出并经 `skill_load` 加载，
+  未加载时发出的提示只带目录；指定了超出用户级别工具的 skill 不能调用它；错误的 front matter 被拒绝并给出行号；中英文；在 race 检测下通过。
 - **涉及**：`assistant`、`admin/store`、`app/workbench`、`docs`。
 
 ### I128 在工作处询问 AI
@@ -1603,9 +1633,26 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
   提供方由环境变量设置，默认不在 CI 中运行。
 - **涉及**：`assistant`、`adapter`、`cli`、`docs`。
 
+### I130 基于工具注册表的 MCP 服务器
+
+- **做**：`admin.assistant.mcp`，默认关闭：在控制台的 binding 上 `/mcp` 提供一个 MCP 服务器（Streamable HTTP，POST 与 SSE），
+  让外部 agent（Claude Code、Cursor、自己的 SDK）使用面板所用的能力。注册表中的工具即其 tools，已启用的 skill 即其 prompts，
+  基础与生效配置、schema、版本与文档即其 resources（`fit://config/effective`、`fit://schema/{path}`、`fit://versions/{n}`），
+  脱敏方式与发给模型的相同。在 workbench 的 MCP 页面为每个用户签发 MCP token：名称、过期时间与可选的地址名单，只显示一次，
+  以哈希保存在 store 中，并在该页面吊销；token 继承其用户的级别，最高为 `propose`。propose 工具往该 token 的待定提议中添加内容，
+  返回提议 ID 与 workbench 链接；没有 apply 工具——提议只能在 workbench 中点击应用并在弹窗中确认后才生效。每个 token 的会话数、
+  请求字节、并发调用与每分钟调用数都有上限；允许的地址默认只有回环；每次调用都记入审计日志，来源为 `mcp` 并带 token 名称。
+  fit 自身的助手不调用外部 MCP 服务器。
+- **完成条件**：MCP 客户端（测试中用官方 SDK，手工用 Claude Code）能列出 tools、prompts 与 resources，读取配置与状态，并提出一个
+  在 workbench 中显示、只有确认后才应用的提议；`read` token 拿不到 propose 工具；过期、已吊销或错误的 token，以及不在地址名单中
+  的调用方都被拒绝；工具结果与 resources 中不出现任何密钥；面对慢客户端、大请求与中断的流，上限都成立；中英文；在 race 检测下通过。
+- **涉及**：`assistant`、`admin`、`admin/store`、`app/console`、`app/workbench`、`schema`、`docs`。
+
 ### 审核结论（2026-11-04）
 
 - 批量提议：允许；模型在一轮中的多次 propose 调用合成一个提议，作为一次修改应用。
 - 不做无人值守应用：每个修改都必须点击应用，并在弹窗中二次确认后才生效并保存配置。
 - 会话保存在 store 中，跨重启保留，受 `limits` 的上限约束。
 - 不提供 CLI：助手只在 workbench 中。
+- MCP（2026-11-05）：fit 基于同一注册表、级别与提议向外部 agent 提供 MCP（I130）；应用仍只在 workbench 中；fit 的助手不调用外部
+  MCP 服务器。

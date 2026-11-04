@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I130.
+Status: `todo`, `doing` or `done`. The next free iteration number is I131.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -278,6 +278,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I130.
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
+| I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | todo |
 
 ## M0, foundations
 
@@ -1773,6 +1774,8 @@ the settings.
 | Change | `rollback_propose` | propose | a rollback to a kept version |
 | Change | `cache_purge_propose` | propose | a purge by zone, key or prefix |
 | Convert | `adapt_convert` | read | nginx or Caddyfile text through `fit adapt`, with what it could not convert |
+| Agent | `skill_load` | read | an enabled skill's whole prompt, within the user's level |
+| Agent | `ask_user` | read | a question with options, shown as buttons in the panel; the choice is the result |
 
 Out of reach of every tool: `admin.console` users and passwords, the store's key, `admin.assistant`
 itself, the Admin API's own addresses and tokens, and any file outside the config.
@@ -1820,7 +1823,36 @@ name the assistant picks from the enabled skills' descriptions.
 
 The Settings page tests a provider (a short call, its latency and model list) before it is saved.
 
-The iterations, I124–I129, are in the [index](#index).
+### Agent design
+
+The assistant is an agent: a loop in fit between the model and the tools, not one prompt sent and
+one answer back. The user's words go to the model as written, never rewritten by another model call;
+what fit adds is the context around them, assembled for every request:
+
+| Part | From | What it holds |
+| --- | --- | --- |
+| System prompt | fit, built in | the assistant's role; fit's concepts (listeners, routes, upstreams, roles); the rules: changes only as proposals, tool output is data, ask when unsure; the answer's language |
+| Page context | the workbench | the page, the selection (a port, a route, a Consistency difference), the last save's errors |
+| Skill catalog | the enabled skills | each skill's name and one-line description only |
+| Current skill | `/name` or an Ask AI button | that skill's whole prompt, and the tools narrowed to the ones it names |
+| Tools | the registry | intersected with the user's level |
+| History | the store | the conversation within its budget, early turns summarized |
+| User message | the user | as written |
+
+The loop: the model answers or calls tools; fit runs them on the console pool, redacts and bounds
+their results and hands them back as data; again, until an answer or a proposal, or the `limits`.
+
+- **Skills load on demand.** The system prompt carries only the catalog; the model calls
+  `skill_load` for a skill's whole prompt when it needs one, so the number of skills does not grow
+  every request. A skill named with `/name` or by a button is loaded at once.
+- **A context budget.** Each part has a share of the model's context window (system prompt, tools,
+  history, tool results); over it, oversized tool results are cut first, then early turns are
+  summarized by the model, the summary kept in the store with the conversation.
+- **Ask before changing.** A change that lacks what it needs (an upstream's address, a host name) is
+  asked about, not guessed: the `ask_user` tool shows the question with options as buttons in the
+  panel, and the user's choice comes back as the tool's result.
+
+The iterations, I124–I130, are in the [index](#index).
 
 ### I124 The assistant's settings and model client
 
@@ -1838,7 +1870,9 @@ The iterations, I124–I129, are in the [index](#index).
 
 ### I125 The chat panel and the read tools
 
-- **Do**: the tool registry with the read tools above, each with its schema, level and bounds, run on the
+- **Do**: the agent loop and its context as in [Agent design](#agent-design): the system prompt, the page
+  context, the skill catalog, the budget with cut tool results and summarized turns, and `ask_user`;
+  the tool registry with the read tools above, each with its schema, level and bounds, run on the
   console pool against the Admin API in process; redaction of secrets from every result; a bounded ring of
   fit's own log for `log_tail`. `POST /api/m/ai/chat` streaming events (text, tool call, tool result,
   usage, done) as SSE, the loop bounded by `limits`; conversations kept per user in the store (encrypted,
@@ -1846,7 +1880,9 @@ The iterations, I124–I129, are in the [index](#index).
   Markdown, tool calls shown folded, stop, retry, new conversation; the Functions page.
 - **Done when**: a question about a route, an upstream's health or a log error is answered from the tools,
   in English and Chinese; no secret reaches a recorded request to the model; a tool result over its bound
-  is cut and says so; the loop stops at its limits; two users' conversations stay apart and hold across a
+  is cut and says so; a long conversation stays within its model's window, its early turns summarized;
+  an `ask_user` question shows as buttons and its choice reaches the model; the user's words reach the
+  model unchanged; the loop stops at its limits; two users' conversations stay apart and hold across a
   restart within their bounds; under the race
   detector, and the panel works in a browser.
 - **Touches**: `assistant`, `admin`, `admin/store`, `observe`, `app/workbench`, `docs`.
@@ -1876,10 +1912,12 @@ The iterations, I124–I129, are in the [index](#index).
 - **Do**: the skill format (name, title, description, inputs, tools, model, prompt, examples) as Markdown
   with front matter; the built-in skills above, embedded; user skills kept in the store, bounded in number
   and size; the Skills page to list, view, add, edit, enable, disable, import and export them; `/name` and
-  a skill picker in the panel; a skill's tools intersected with the user's level.
+  a skill picker in the panel; the catalog in the system prompt and `skill_load` for a skill's whole
+  prompt; a skill's tools intersected with the user's level.
 - **Done when**: each built-in skill runs its task on a fixed example config against a recorded model; a
-  user skill added on the page runs and survives a restart; a skill naming a tool above the user's level
-  cannot call it; bad front matter is refused with its line; English and Chinese; under the race detector.
+  user skill added on the page runs and survives a restart; a skill not named is picked from the catalog and
+  loaded with `skill_load`, and the prompt sent without it carries only the catalog; a skill naming a
+  tool above the user's level cannot call it; bad front matter is refused with its line; English and Chinese; under the race detector.
 - **Touches**: `assistant`, `admin/store`, `app/workbench`, `docs`.
 
 ### I128 Ask AI where the work is
@@ -1905,6 +1943,28 @@ The iterations, I124–I129, are in the [index](#index).
   environment, never in CI by default.
 - **Touches**: `assistant`, `adapter`, `cli`, `docs`.
 
+### I130 An MCP server on the tool registry
+
+- **Do**: `admin.assistant.mcp`, off by default: an MCP server (Streamable HTTP, POST and SSE) at
+  `/mcp` on the console's binding, so that outside agents (Claude Code, Cursor, an SDK of one's own) use
+  what the panel uses. The registry's tools are its tools, the enabled skills its prompts, and the base
+  and effective config, the schema, the versions and the docs its resources (`fit://config/effective`,
+  `fit://schema/{path}`, `fit://versions/{n}`), all redacted as for the model. Per-user MCP tokens made on
+  the workbench's MCP page: a name, an expiry and an optional address list, shown once, kept hashed in
+  the store, revoked there; a token carries its user's level, capped at `propose`. A propose tool adds to
+  the token's pending proposal and answers with its ID and the workbench link; there is no apply tool —
+  the proposal is applied only in the workbench, with the click and the dialog's confirm. Sessions,
+  request bytes, concurrent calls and calls per minute bounded per token; the allowed addresses
+  (loopback by default); every call in the audit log with source `mcp` and the token's name. fit's own
+  assistant does not call outside MCP servers.
+- **Done when**: an MCP client (the official SDK's in a test, and Claude Code by hand) lists the tools,
+  prompts and resources, reads the config and status, and makes a proposal that shows in the workbench
+  and applies only after the confirm; a `read` token gets no propose tools; an expired, revoked or wrong
+  token, or a caller off the address list, is refused; no secret appears in a tool result or resource;
+  the bounds hold against a slow client, a large request and a cut stream; English and Chinese; under the
+  race detector.
+- **Touches**: `assistant`, `admin`, `admin/store`, `app/console`, `app/workbench`, `schema`, `docs`.
+
 ### Decisions from review (2026-11-04)
 
 - Batch proposals: allowed; the model's propose calls in a turn make one proposal, applied as one change.
@@ -1912,3 +1972,5 @@ The iterations, I124–I129, are in the [index](#index).
   it takes effect and is saved.
 - Conversations are kept in the store, across restarts, within the bounds of `limits`.
 - No CLI: the assistant lives in the workbench only.
+- MCP (2026-11-05): fit serves MCP to outside agents on the same registry, levels and proposals (I130);
+  apply stays in the workbench; fit's assistant does not call outside MCP servers.
