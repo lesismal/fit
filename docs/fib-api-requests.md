@@ -74,6 +74,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`); Windows fix `63b38d4` (in `9824c68`) | — | I111 (029) |
 | A60 | Header blocks passed through a proxy as lines, both ways | done, fib branch `perf/header-blocks` (not yet on `main`) | 12 | — |
 | A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
+| A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib branch `feat/splice-body` (not yet on `main`) | 12 | — |
 
 ## Evidence
 
@@ -1894,3 +1895,51 @@ the binding indices for the caller to remove.
 the listener calls `ListenUDP` when it starts and `CloseUDP` when a reload restarts it or the role
 stops. Until then the listener takes RTP over TCP alone: a SETUP asking for UDP is answered `461`,
 and ffmpeg and most players set up again over TCP.
+
+
+## A62: A proxied HTTP/1.1 upload moved by splice(2)
+
+**Status.** Requested on 2026-11-04, for W4's proxied uploads (`bench/results/plan-2026-11-04b/report.md`,
+"Proxied uploads over HTTP/1.1"). Done on fib branch `feat/splice-body`; fit's proxy uses it by default.
+Neither is on `main` yet.
+
+**Problem.** A proxied upload passed through user space twice: fib's server read it out of the client's
+socket, and fib's client wrote it into the upstream's, whose send buffer took fresh pages the kernel
+zeroes first. W4 (1 MiB POSTs through fit to nginx over HTTP/1.1, 100 in flight, fit on six CPUs) cost
+fit ~620 µs of CPU a request, 87% of it in the kernel, against Caddy's ~588.
+
+**Evidence.** perf on fit's CPUs during W4 (fit `ca704c3`, fib `07ee9e0`): `_copy_to_iter` 22.5% (the
+receive copy), `kernel_init_pages` 17.1% (zeroing the upstream's send-buffer pages, from `tcp_sendmsg` →
+`sk_page_frag_refill`), `_copy_from_iter` 5.0%.
+
+**Suggested API.** A way to move the rest of a request body from the client's connection to the upstream
+connection fib's client sends it on, with `splice(2)` through a pipe: Linux only, plaintext HTTP/1.1 on both
+sides, a body framed by its `Content-Length`, falling back to the copy for everything else.
+
+**As built.** `fib.Connection.SpliceTo(dst, fib.Splice{Begin, Read, Written}) error` moves the next n
+bytes that arrive on a connection to `dst`'s socket through a pooled pipe (128 KiB, at most 256 per
+poller), with `SPLICE_F_NONBLOCK|SPLICE_F_MOVE`, never waiting: from the source's next round its reads go
+to the splice instead of `OnData`; `Begin`, on that round, sends `dst` what goes ahead and says how many
+bytes to move; a full pipe pauses the source's reads as a hold does, and `dst`'s drain resumes them;
+exactly n bytes are moved, and what follows them reaches `OnData`. `Read` hears the source's side end,
+before its last bytes are handed on, and `Written` the destination's; a source that fails closes `dst`,
+and a destination that fails leaves the source's reads held. It refuses (`ErrSpliceUnsupported`,
+`ErrSpliceBusy`) off Linux, for a connection with a layer such as TLS, or with no pipe free, and the caller
+copies. `fibhttp.Context.SpliceBody(w *BodyWriter, fallback func()) bool` offers a streamed HTTP/1 body
+framed by its `Content-Length` to the request `w` is the body of; fib's client takes it up on an HTTP/1
+connection it can splice to — the bytes the server had read already go first, by an ordinary write, then
+exactly the rest by splice — and otherwise calls `fallback`, once, before it wants any of the body, for the
+caller to push it through `OnBody` as before. The server ends the body as it would one it read, and parses
+the request pipelined behind it; a body whose upstream failed is handed back to be read and dropped, or
+the connection closed past 256 KB, as a body nothing took. The client counts a response that comes once
+the splice's last write has gone as answering a whole request, so the upstream connection is reused.
+
+**How fit uses it.** The proxy offers every upload of 128 KB or more framed by its length, with no
+trailers, to `SpliceBody` (`spliceMinBody`), pushing it through its `BodyWriter` from the fallback; the
+proxy's `splice_uploads` (true by default) turns it off. An upload to an h2, h2c or TLS upstream is
+declined by fib's client and goes the old way. A/B on W4, five rounds: HTTP/1.1 uploads 9.55k → 10.33k
+requests a second (+8.2%, now held by nginx's four CPUs rather than fit's six), 616 → 369 µs of CPU a
+request (-40%), p99 23.6 → 18.3 ms, peak memory 46 → 29 MiB; h2 uploads, and downloads, within noise.
+perf on fit's CPUs: `_copy_to_iter` 665k → 36k cycles a request, `kernel_init_pages` 505k → 60k,
+`_copy_from_iter` 148k → 26k; fit's cycles a request 2.95M → 1.74M. W1 (`api`) and W0 (`fixed`) over
+HTTP/1.1 at 500 in flight within noise (273k → 273k and 680k → 681k requests a second).

@@ -52,7 +52,10 @@ func (e *uploadError) Unwrap() error { return e.err }
 // is pushed upstream piece by piece from Context.OnBody through a
 // fibhttp.BodyWriter: when the upstream falls behind, the body is held with
 // Context.HoldBody, which stops reading the client, and resumed when the
-// writer has room, so nothing waits and memory stays bounded.
+// writer has room, so nothing waits and memory stays bounded. A large one
+// framed by its length is offered to fib's client to splice instead (see
+// spliceMinBody), which it does on an HTTP/1.1 connection without TLS on
+// Linux, and otherwise hands back to be pushed.
 //
 // The upstream request is cancelled when the client goes away, when the
 // upstream takes longer than its response_header_timeout to begin its
@@ -159,7 +162,41 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		}
 		out.ContentLength = -1
 	}
+	// A large upload framed by its length may go by splice(2) instead, from
+	// the client's socket to the upstream's, when fib's client sends it on
+	// an HTTP/1.1 connection without TLS; otherwise fib hands it back, and it
+	// is pushed through the writer as below (see spliceMinBody).
+	if p.splice && out.ContentLength >= spliceMinBody &&
+		c.SpliceBody(body, func() {
+			spliceDeclines.Add(1)
+			pushBody(c, body, r, announced)
+		}) {
+		spliceOffers.Add(1)
+		x.send(out)
+		return
+	}
 	x.send(out)
+	pushBody(c, body, r, announced)
+}
+
+// spliceMinBody is the smallest upload offered for splicing: the first 64KB
+// of a larger body comes in with its head, and goes through the proxy, so
+// that one smaller than this has too little left for a pipe to be worth it.
+// Uploading 1 MiB bodies over HTTP/1.1 at 100 in flight to nginx (W4),
+// splicing cut fit's CPU a request from 616 to 369 µs, most of it the
+// kernel's copies and the zeroing of the upstream's send-buffer pages, and
+// its peak memory from 46 to 29 MiB.
+const spliceMinBody = 128 << 10
+
+// spliceOffers counts the uploads offered for splicing, and spliceDeclines
+// those fib's client handed back, which went through the proxy after all, so
+// that the tests can tell which way an upload went.
+var spliceOffers, spliceDeclines atomic.Int64
+
+// pushBody passes the client's body, still arriving, on through body as it
+// arrives: each piece is written to the writer, and the client's body is held
+// while the writer has more than its limit waiting for the upstream.
+func pushBody(c *fibhttp.Context, body *fibhttp.BodyWriter, r *stdhttp.Request, announced []string) {
 	c.OnBody(func(data []byte, fin bool, err error) {
 		switch {
 		case err != nil:

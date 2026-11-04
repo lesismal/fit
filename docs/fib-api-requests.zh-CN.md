@@ -72,6 +72,7 @@
 | A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中）；Windows 修复 `63b38d4`（在 `9824c68` 中） | — | I111（029） |
 | A60 | 代理两个方向都按行转发头部块 | 已完成，fib 分支 `perf/header-blocks`（尚未进入 `main`） | 12 | — |
 | A61 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
+| A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib 分支 `feat/splice-body`（尚未进入 `main`） | 12 | — |
 
 ## 证据
 
@@ -1435,3 +1436,40 @@ W1 在 500 并发下的 A/B，各三轮：请求一侧使 HTTP/1.1 的每秒请�
 **fit 的使用方式。** `streaming.rtsp` 增加 `udp_rtp` 和 `udp_rtcp`（RTP 和 RTCP 端口）；监听器启动时调用 `ListenUDP`，重载重启
 它或角色停止时调用 `CloseUDP`。在此之前该监听器只接受基于 TCP 的 RTP：要求 UDP 的 SETUP 得到 `461`，ffmpeg 和多数播放器
 随后改用 TCP 重新建立。
+
+
+## A62：用 splice(2) 搬运代理的 HTTP/1.1 上传
+
+**状态。** 2026-11-04 为 W4 的代理上传提出（`bench/results/plan-2026-11-04b/report.zh-CN.md`，"并发 10,000 时内存的构成、HTTP/1.1 代理上传"）。
+已在 fib 分支 `feat/splice-body` 完成；fit 的代理默认使用它。二者都尚未进入 `main`。
+
+**问题。** 代理的上传两次经过用户态：fib 的 server 把它从客户端的 socket 读出，fib 的 client 再把它写进上游的 socket，
+而上游的发送缓冲要用内核先清零的新页。W4（1 MiB 的 POST 经 fit 发给 nginx，HTTP/1.1，100 并发，fit 用六个 CPU）中 fit
+每个请求约耗 620 µs CPU，其中 87% 在内核，Caddy 约 588 µs。
+
+**依据。** W4 期间 fit 所在 CPU 上的 perf（fit `ca704c3`，fib `07ee9e0`）：`_copy_to_iter` 22.5%（接收拷贝），
+`kernel_init_pages` 17.1%（为上游发送缓冲的页清零，来自 `tcp_sendmsg` → `sk_page_frag_refill`），`_copy_from_iter` 5.0%。
+
+**建议的 API。** 把请求 body 的剩余部分从客户端连接经管道用 `splice(2)` 搬到 fib 的 client 发送它所用的上游连接：仅
+Linux，两侧都是明文 HTTP/1.1，body 以 `Content-Length` 定界，其余情况仍走拷贝。
+
+**实际实现。** `fib.Connection.SpliceTo(dst, fib.Splice{Begin, Read, Written}) error` 经池化的管道（128 KiB，每个 poller
+最多 256 个），用 `SPLICE_F_NONBLOCK|SPLICE_F_MOVE` 把连接上接下来到达的 n 个字节搬到 `dst` 的 socket，从不等待：从源连接
+的下一轮起，它的读交给 splice 而不是 `OnData`；`Begin` 在那一轮里先把要排在前面的内容发给 `dst`，并说明要搬多少字节；
+管道满时像 hold 一样暂停源连接的读，`dst` 排空后恢复；不多不少正好搬 n 个字节，其后的字节照常交给 `OnData`。`Read` 在
+源一侧结束时得到通知（在最后的字节交出之前），`Written` 在目标一侧结束时得到通知；源一侧失败会关闭 `dst`，目标一侧失败
+则让源连接的读保持暂停。在非 Linux 上、对带 TLS 等 layer 的连接、或没有空闲管道时它会拒绝（`ErrSpliceUnsupported`、
+`ErrSpliceBusy`），由调用方改用拷贝。`fibhttp.Context.SpliceBody(w *BodyWriter, fallback func()) bool` 把一个以
+`Content-Length` 定界的流式 HTTP/1 body 提供给以 `w` 为 body 的请求；fib 的 client 在能 splice 的 HTTP/1 连接上接手——server
+已读到的字节先用普通写发出，剩下的不多不少用 splice 搬运——否则在需要 body 之前调用一次 `fallback`，由调用方像以前一样经
+`OnBody` 推送。server 像结束自己读完的 body 一样结束它，并解析 pipeline 在其后的请求；上游失败的 body 交还 server，像
+没人接管的 body 一样读掉丢弃，超过 256 KB 则关闭连接。splice 的最后一次写出之后到达的响应，client 视为对完整请求的回答，
+上游连接因此得以复用。
+
+**fit 的使用方式。** 代理把每个 128 KB 及以上、以长度定界、没有 trailer 的上传交给 `SpliceBody`（`spliceMinBody`），在
+fallback 中经它的 `BodyWriter` 推送；代理的 `splice_uploads`（默认 true）可以关闭它。发往 h2、h2c 或 TLS 上游的上传会被
+fib 的 client 拒绝，照旧转发。W4 的 A/B，五轮：HTTP/1.1 上传每秒请求数 9.55k → 10.33k（+8.2%，瓶颈从 fit 的六个 CPU 变为
+nginx 的四个 CPU），每请求 CPU 616 → 369 µs（-40%），p99 23.6 → 18.3 ms，峰值内存 46 → 29 MiB；h2 上传与下载在噪声以内。
+fit 所在 CPU 上的 perf：每请求 `_copy_to_iter` 665k → 36k cycles，`kernel_init_pages` 505k → 60k，`_copy_from_iter`
+148k → 26k；fit 每请求 2.95M → 1.74M cycles。W1（`api`）与 W0（`fixed`）在 HTTP/1.1、500 并发下均在噪声以内（每秒
+273k → 273k 与 680k → 681k 请求）。

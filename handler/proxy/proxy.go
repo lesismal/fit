@@ -24,8 +24,11 @@
 // responseBlock).
 //
 // Bodies up to 64KB travel whole; larger ones stream in both directions,
-// each side paced by the other, and trailers follow them both ways. How a
-// request fails is in exchange.go.
+// each side paced by the other, and trailers follow them both ways. On Linux
+// an upload of 128KB or more framed by its length, from an HTTP/1.1 client
+// without TLS to an HTTP/1.1 upstream without TLS, goes by splice(2), from one
+// socket to the other through a pipe, unless splice_uploads turns it off. How
+// a request fails is in exchange.go.
 package proxy
 
 import (
@@ -66,6 +69,7 @@ type Proxy struct {
 	Retry             *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
 	TunnelIdleTimeout config.Duration `json:"tunnel_idle_timeout,omitempty" default:"\"10m\"" doc:"How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out."`
 	Timeout           config.Duration `json:"timeout,omitempty" doc:"The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out."`
+	SpliceUploads     *bool           `json:"splice_uploads,omitempty" default:"true" doc:"On Linux, move a large upload (128KB or more, framed by its Content-Length) from a client's HTTP/1.1 connection without TLS to an HTTP/1.1 upstream without TLS with splice(2), the kernel passing its pages from one socket to the other, rather than copying it through the proxy. An upload that cannot go so, to an h2, h2c or TLS upstream, or chunked, goes the ordinary way. False copies every upload. True when left out."`
 
 	pool     *upstream.Pool
 	split    []weighted
@@ -80,6 +84,8 @@ type Proxy struct {
 	timeout    time.Duration
 	trusted    []netip.Prefix
 	stall      time.Duration
+	// splice is SpliceUploads, resolved.
+	splice bool
 	// graph is the config the proxy belongs to, held by each exchange until
 	// it is over; open are the exchanges under way, which Drain cuts off.
 	// They are spread over several sets, so that exchanges starting at once
@@ -181,6 +187,7 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 		p.retry = newRetryPolicy(r)
 	}
 	p.timeout = p.Timeout.Std()
+	p.splice = p.SpliceUploads == nil || *p.SpliceUploads
 	if p.tunnelIdle = p.TunnelIdleTimeout.Std(); p.tunnelIdle <= 0 {
 		p.tunnelIdle = DefaultTunnelIdleTimeout
 	}
