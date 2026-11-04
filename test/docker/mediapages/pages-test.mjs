@@ -2,10 +2,15 @@
  * Browser test of fit's media pages: two headless Chromiums in a Linux
  * container, one with fake devices and one with none at all, driven over
  * DevTools. alice and bob (fake devices) and carol (no devices) log in and
- * join a room, switch their microphones and cameras off and on, and each
- * checks what the others see, that no PeerConnection was renegotiated or
- * restarted, that no WHEP request was refused or retried, and that the
- * pages logged no errors.
+ * join a room, which starts with the microphone and camera off as the config
+ * says; they switch them on after joining, and each checks what the others
+ * see, that no PeerConnection was renegotiated or restarted, that no WHEP
+ * request was refused or retried, and that the pages logged no errors. They
+ * then use the room chat: a text message and a small file reach the other
+ * member, the file downloads intact, a file past max_file_bytes is refused
+ * with a hint, and leaving clears the window while joining fills it from the
+ * room's history. The chat sits beside the tiles on a wide window and below
+ * them on a narrow one.
  *
  *   node pages-test.mjs [out-dir]
  *
@@ -54,11 +59,28 @@ class CDP {
         this.errors.push('log: ' + m.params.entry.text + ' ' + (m.params.entry.url || ''));
       }
     });
+    // A dead connection fails what waits on it now, not at its timeout.
+    this.ws.addEventListener('close', () => {
+      for (const p of this.pending.values()) p.rej(new Error('websocket closed'));
+      this.pending.clear();
+    });
   }
-  async send(method, params = {}) {
+  // send runs one protocol command; a command Chromium never answers (a
+  // screenshot on a slow software renderer does) rejects after timeoutMs
+  // instead of hanging the whole test.
+  async send(method, params = {}, timeoutMs = 120000) {
     await this.ready;
     const id = this.id++;
-    const p = new Promise((res, rej) => this.pending.set(id, { res, rej }));
+    const p = new Promise((res, rej) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        rej(new Error('timed out after ' + timeoutMs + 'ms: ' + method));
+      }, timeoutMs);
+      this.pending.set(id, {
+        res: (v) => { clearTimeout(timer); res(v); },
+        rej: (e) => { clearTimeout(timer); rej(e); },
+      });
+    });
     this.ws.send(JSON.stringify({ id, method, params }));
     return p;
   }
@@ -112,8 +134,16 @@ async function login(c, user) {
   await waitFor(() => c.eval(`document.getElementById('who').textContent === ${JSON.stringify(user)}`), user + ' logged in');
 }
 
+// screenshot saves a diagnostic picture. A renderer that never answers the
+// capture must not hang the test: the screenshot is skipped and said so.
 async function screenshot(c, name) {
-  const r = await c.send('Page.captureScreenshot', { format: 'png' });
+  let r;
+  try {
+    r = await c.send('Page.captureScreenshot', { format: 'png' }, 120000);
+  } catch (e) {
+    console.log('     screenshot skipped (' + name + '): ' + e.message);
+    return;
+  }
   const path = OUT + '/' + name + '.png';
   writeFileSync(path, Buffer.from(r.data, 'base64'));
   console.log('     screenshot ' + path);
@@ -140,7 +170,11 @@ async function playing(c, m, what) {
 // pcStats counts c's PeerConnections ever made, from the status.
 async function main() {
   // A page with no credentials: the room API refuses, and the login opens.
-  const anon = await tab(FAKE, BASE + 'call?room=' + ROOM);
+  // The URL's mic=1 and cam=1 override the config's join defaults (both off).
+  const anon = await tab(FAKE, BASE + 'call?room=' + ROOM + '&mic=1&cam=1');
+  await waitFor(() => anon.eval('window.fitMedia.chatEnabled() === true'), 'the config');
+  check(await anon.eval(`document.getElementById('call-mic').getAttribute('aria-pressed') === 'true' && document.getElementById('call-cam').getAttribute('aria-pressed') === 'true'`), "the URL's mic=1 and cam=1 override the join defaults");
+  check(await anon.eval('window.fitMedia.chatEnabled() === true'), 'the room chat is enabled by the config');
   check(await anon.eval(`document.getElementById('login').open`), 'a page without credentials opens the login');
   const anonJoin = await anon.eval(`fetch('api/rooms/${ROOM}/join', {method: 'POST', body: '{"name":"x"}'}).then(r => r.status)`);
   check(anonJoin === 401, 'the room API refuses a join without credentials', anonJoin);
@@ -155,9 +189,52 @@ async function main() {
   const cookie = await alice.eval('document.cookie');
   check(!/fit_media_token/.test(cookie), 'the token cookie is HttpOnly', cookie);
 
+  // A deployment with the chat off serves no chat window, and one whose
+  // mic_default is on starts the call with the microphone on: the same page
+  // under another media_pages prefix with its own params.
+  const nochat = await tab(FAKE, BASE.replace('/media/', '/nochat/') + 'call?room=' + ROOM);
+  await waitFor(() => nochat.eval('window.fitMedia.status().chat.maxFileBytes === 65536'), 'the chat-off config');
+  check(await nochat.eval('window.fitMedia.chatEnabled() === false'), 'a chat-off deployment serves chat.enabled false');
+  check(await nochat.eval(`document.getElementById('call-chat').hidden`), 'a chat-off deployment shows no chat window');
+  await login(nochat, 'alice'); // the page's own origin: the session token is per tab
+  await nochat.eval(`window.fitMedia.join('${ROOM}', 'nora')`);
+  const ns = await waitFor(async () => {
+    const st = await status(nochat);
+    return st.joined && st.local ? st : null;
+  }, 'nora joined');
+  check(ns.local.audioOn === true && ns.local.videoOn === false, 'mic_default true and cam_default false start the join so', ns.local);
+  check(await nochat.eval(`document.getElementById('call-mic').getAttribute('aria-pressed') === 'true' && document.getElementById('call-cam').getAttribute('aria-pressed') === 'false'`), "the switches show mic_default and cam_default");
+  check(await nochat.eval('window.fitMedia.chatEnabled() === false'), 'a chat-off deployment still has no chat after joining');
+  check(await nochat.eval(`document.getElementById('call-chat').hidden`), 'a chat-off deployment shows no chat window after joining');
+  check(await nochat.eval('window.fitMedia.messages().length === 0'), 'a chat-off deployment has no messages');
+  await nochat.eval('window.fitMedia.leave()');
+
   await alice.eval(`window.fitMedia.join('${ROOM}', 'alice')`);
   await bob.eval(`window.fitMedia.join('${ROOM}', 'bob')`);
   await carol.eval(`window.fitMedia.join('${ROOM}', 'carol')`);
+
+  // The call starts with the microphone and camera off, as mic_default and
+  // cam_default say, and its switches show that.
+  for (const [c, n] of [[alice, 'alice'], [bob, 'bob'], [carol, 'carol']]) {
+    const st = await waitFor(async () => {
+      const s = await status(c);
+      return s.joined && s.local && s.senders.audio === 'none' && s.senders.video === 'none' ? s : null;
+    }, n + ' joins silent');
+    check(st.local.audioOn === false && st.local.videoOn === false, n + "'s microphone and camera start off", st.local);
+    check(await c.eval(`document.getElementById('call-mic').getAttribute('aria-pressed') === 'false' && document.getElementById('call-cam').getAttribute('aria-pressed') === 'false'`), n + "'s switches show them off");
+    check(await c.eval(`!document.getElementById('call-chat').hidden && window.fitMedia.chatEnabled()`), n + "'s chat window is shown");
+  }
+  // Switched on after joining, for the checks that follow: no renegotiation.
+  for (const [c, n, kind] of [[alice, 'alice', 'device'], [bob, 'bob', 'device'], [carol, 'carol', 'synthetic']]) {
+    await c.eval('window.fitMedia.mic(true)');
+    await c.eval('window.fitMedia.cam(true)');
+    const st = await waitFor(async () => {
+      const s = await status(c);
+      return s.senders.audio === kind && s.senders.video === kind ? s : null;
+    }, n + ' switched on');
+    check(st.local.audioOn === true && st.local.videoOn === true, n + "'s switches turn the microphone and camera on", st.local);
+    check(await c.eval(`document.getElementById('call-mic').getAttribute('aria-pressed') === 'true' && document.getElementById('call-cam').getAttribute('aria-pressed') === 'true'`), n + "'s switches show them on");
+  }
 
   // Everyone plays everyone.
   for (const [c, me, others] of [[alice, 'alice', ['bob', 'carol']], [bob, 'bob', ['alice', 'carol']], [carol, 'carol', ['alice', 'bob']]]) {
@@ -244,6 +321,7 @@ async function main() {
   check(d.avatar, 'bob shows dave\'s avatar', d);
   const ds = await status(dave);
   check(ds.senders.audio === 'none' && ds.senders.video === 'none' && ds.local.has.video, 'dave sends nothing, his devices left closed', ds);
+  check(ds.local.audioOn === false && ds.local.videoOn === false, "dave's URL mic=0 and cam=0 keep the defaults off", ds.local);
   await sleep(2000);
   const dv = (await status(bob)).members.dave.viewer;
   check(dv.connected && dv.posts === 1 && dv.notFound === 0, 'bob plays a silent dave with one request', dv);
@@ -251,10 +329,93 @@ async function main() {
   check(await playing(bob, 'dave', 'bob plays dave once on'), 'bob plays dave once his camera is on');
   await screenshot(carol, 'call-no-devices');
 
-  // A member leaves: the others drop its tile.
+  // The room chat: a text message from alice, its local echo deduplicated
+  // against the SSE echo, a small file that downloads intact, and a file
+  // past max_file_bytes (65536 in fit.json) refused with a hint.
+  const said = 'hello from alice, ' + Date.now();
+  const echoed = await alice.eval(`window.fitMedia.chat(${JSON.stringify(said)})`);
+  check(echoed && echoed.id && echoed.text === said && echoed.from === 'alice', 'alice sends a text message', echoed);
+  const heard = await waitFor(async () => {
+    const ms = await bob.eval('JSON.stringify(window.fitMedia.messages())').then(JSON.parse);
+    return ms.find((m) => m.text === said) || null;
+  }, 'bob hears alice');
+  check(heard.from === 'alice' && heard.at > 0 && !!heard.atText, 'bob sees the message, its sender and time', heard);
+  await sleep(800); // past the SSE echo of alice's own message
+  for (const [c, n] of [[alice, 'alice'], [bob, 'bob']]) {
+    const ms = await c.eval('JSON.stringify(window.fitMedia.messages())').then(JSON.parse);
+    check(ms.filter((m) => m.text === said).length === 1, n + ' has the message once, not echoing it twice', ms.length);
+  }
+  await screenshot(alice, 'call-chat');
+
+  // A small file: bob sees its name and size, and its download control gets
+  // the bytes back, saved as a blob under the file's name.
+  const small = Array.from({ length: 2048 }, (_, i) => (i * 7 + 3) & 255);
+  const sentFile = await alice.eval(`window.fitMedia.file('note.txt', ${JSON.stringify(small)})`);
+  check(sentFile && sentFile.file && sentFile.file.name === 'note.txt' && sentFile.file.size === 2048, 'alice sends a small file', sentFile);
+  const fileAtBob = await waitFor(async () => {
+    const ms = await bob.eval('JSON.stringify(window.fitMedia.messages())').then(JSON.parse);
+    return ms.find((m) => m.file && m.file.name === 'note.txt') || null;
+  }, 'bob sees the file');
+  check(fileAtBob.from === 'alice' && fileAtBob.file.size === 2048, 'bob sees the file, its name and size', fileAtBob);
+  await bob.eval(`(() => {
+    window.__dl = null; window.__dlBlob = null;
+    const create = URL.createObjectURL.bind(URL);
+    window.__createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = function (b) { window.__dlBlob = b; return create(b); };
+    window.__anchorClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) { window.__dl = { name: this.download, href: this.href }; return; }
+      return window.__anchorClick.call(this);
+    };
+  })()`);
+  await bob.eval(`document.querySelector('#chat-log [data-id=${JSON.stringify(fileAtBob.id)}] button.chat__download').click()`);
+  const downloaded = await waitFor(() => bob.eval('window.__dl && window.__dl.name'), 'the download');
+  check(downloaded === 'note.txt', 'the download saves the file under its name', downloaded);
+  const got = await bob.eval('window.__dlBlob.arrayBuffer().then((b) => Array.from(new Uint8Array(b)))');
+  check(got.length === small.length && got.every((v, i) => v === small[i]), 'the downloaded file is byte for byte the file sent', got.length);
+  await bob.eval('URL.createObjectURL = window.__createObjectURL; HTMLAnchorElement.prototype.click = window.__anchorClick');
+
+  // Bigger than max_file_bytes: refused at once with a hint, never sent.
+  const refused = await alice.eval(`window.fitMedia.file('big.bin', new Uint8Array(70000)).then(() => 'sent', (e) => e.message)`);
+  check(/larger than/.test(refused), 'an oversized file is refused before sending', refused);
+  const chatHint = await alice.eval(`document.getElementById('chat-hint').textContent`);
+  check(/larger than/.test(chatHint), 'the refusal shows the size hint', chatHint);
+  await sleep(300);
+  check(await bob.eval(`window.fitMedia.messages().some((m) => m.file && m.file.name === 'big.bin') === false`), 'the oversized file was not sent');
+
+  // Layout: the chat window is beside the tiles on a wide window, below them
+  // on a narrow one, and the spotlight still works with it up.
+  const boxes = `(() => {
+    const t = document.getElementById('call-tiles').getBoundingClientRect();
+    const c = document.getElementById('call-chat').getBoundingClientRect();
+    return { tiles: { left: t.left, right: t.right, top: t.top, bottom: t.bottom }, chat: { left: c.left, right: c.right, top: c.top, bottom: c.bottom }, width: innerWidth };
+  })()`;
+  const wide = await alice.eval(boxes);
+  check(wide.width >= 1000 && wide.chat.left >= wide.tiles.right - 2 && Math.abs(wide.chat.top - wide.tiles.top) < 40, 'wide: the chat window is beside the tiles', wide);
+  await alice.send('Emulation.setDeviceMetricsOverride', { width: 760, height: 860, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  const narrow = await alice.eval(boxes);
+  check(narrow.chat.top >= narrow.tiles.bottom - 2, 'narrow: the chat window is below the tiles', narrow);
+  await alice.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  await alice.eval(`window.fitMedia.spot('bob')`);
+  await waitFor(async () => (await status(alice)).spot === 'bob' && (await alice.eval(`document.querySelector('[data-member="bob"]').classList.contains('tile--spot')`)), 'bob in the spotlight');
+  check(true, 'the spotlight works with the chat window up');
+  await alice.eval(`window.fitMedia.spot('bob')`);
+
+  // A member leaves: the others drop its tile, and the chat window clears;
+  // joining again fills it from the room's history.
   await bob.eval('window.fitMedia.leave()');
   await waitFor(async () => !(await status(alice)).members.bob, 'bob gone at alice');
   check(true, 'alice drops bob once he leaves');
+  check(await bob.eval('window.fitMedia.messages().length === 0'), "bob's chat window clears when he leaves");
+  check(await bob.eval(`document.getElementById('call-chat').hidden`), "bob's chat window hides when he leaves");
+  await bob.eval(`window.fitMedia.join('${ROOM}', 'bob')`);
+  const history = await waitFor(async () => {
+    const ms = await bob.eval('JSON.stringify(window.fitMedia.messages())').then(JSON.parse);
+    return ms.find((m) => m.text === said) && ms.find((m) => m.file && m.file.name === 'note.txt') ? ms : null;
+  }, "bob's history");
+  check(history.length >= 2 && (await bob.eval(`!document.getElementById('call-chat').hidden`)), 'joining again fills the chat from the room history', history.length);
 
   // The publish and play pages.
   await alice.eval('window.fitMedia.leave()');
@@ -286,7 +447,7 @@ async function main() {
   await waitFor(() => bob.eval('!!window.fitMedia && document.getElementById("home-info").children.length > 0'), 'home');
   await screenshot(bob, 'home');
 
-  for (const [c, n] of [[alice, 'alice'], [bob, 'bob'], [carol, 'carol'], [dave, 'dave']]) {
+  for (const [c, n] of [[alice, 'alice'], [bob, 'bob'], [carol, 'carol'], [dave, 'dave'], [nochat, 'nochat']]) {
     // play-waiting's 404s are the WHEP requests for a stream nobody
     // publishes, which the play page asked for: they are expected there.
     const errs = c.errors.filter((e) => !(n === 'carol' && /whep\/e2e-nobody/.test(e)));

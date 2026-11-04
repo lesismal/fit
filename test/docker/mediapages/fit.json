@@ -56,7 +56,33 @@
         "params": {
           "auth": "media",
           "login": true,
-          "title": "fit media e2e"
+          "title": "fit media e2e",
+          "pages": true,
+          "mic_default": false,
+          "cam_default": false,
+          "chat": true,
+          "max_file_bytes": 65536
+        }
+      }
+    },
+    {
+      "match": {
+        "path": [
+          "/nochat",
+          "/nochat/*"
+        ]
+      },
+      "handler": {
+        "module": "media_pages",
+        "params": {
+          "prefix": "/nochat",
+          "auth": "media",
+          "login": true,
+          "title": "fit media e2e without chat",
+          "chat": false,
+          "mic_default": true,
+          "cam_default": false,
+          "max_file_bytes": 65536
         }
       }
     },

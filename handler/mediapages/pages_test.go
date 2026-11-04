@@ -264,13 +264,19 @@ func TestPages(t *testing.T) {
 		Public                 map[string]bool
 		Links                  []Link
 		ICEServers             []map[string]any
-		Room                   struct{ MaxMembers, HeartbeatMs int }
+		Call                   struct{ Mic, Cam bool }
+		Chat                   struct {
+			Enabled      bool  `json:"enabled"`
+			MaxFileBytes int64 `json:"maxFileBytes"`
+		}
+		Room struct{ MaxMembers, HeartbeatMs int }
 	}
 	if err := json.Unmarshal([]byte(body), &c); err != nil || resp.StatusCode != 200 {
 		t.Fatalf("config: %d %s", resp.StatusCode, body)
 	}
 	if c.Title != "Our media" || c.WHIP != "/whip/{stream}" || c.WHEP != "https://media.example.com/whep/{stream}" || !c.Login || !c.Auth ||
-		c.Public["play"] || len(c.Links) != 1 || len(c.ICEServers) != 1 || c.Room.MaxMembers != 16 || c.Room.HeartbeatMs != 10000 {
+		c.Public["play"] || len(c.Links) != 1 || len(c.ICEServers) != 1 || c.Room.MaxMembers != 16 || c.Room.HeartbeatMs != 10000 ||
+		c.Call.Mic || c.Call.Cam || !c.Chat.Enabled || c.Chat.MaxFileBytes != DefaultMaxFileBytes {
 		t.Fatalf("config: %s", body)
 	}
 	if resp, _ := do(t, "POST", f.base+"/media/api/config", "{}", nil); resp.StatusCode != http.StatusMethodNotAllowed {
@@ -355,6 +361,8 @@ func TestParams(t *testing.T) {
 		{`{"title": "<b>"}`, "title"},
 		{`{"links": [{"name": "x", "url": "a\"b"}]}`, "links"},
 		{`{"member_ttl": "1s"}`, "member_ttl"},
+		{`{"max_file_bytes": 1023}`, "minimum"},
+		{`{"max_file_bytes": 33554433}`, "maximum"},
 	} {
 		c, err := config.Load([]byte(conf(tc.params)))
 		if err == nil {
@@ -612,4 +620,59 @@ func TestReload(t *testing.T) {
 		defer hubsMu.Unlock()
 		return hubs[hubKey{f.env.Engine, "/media"}] == nil
 	})
+}
+
+// api/config carries the call and chat settings, their defaults, and the
+// values the params set.
+func TestPagesConfigDefaults(t *testing.T) {
+	type confJSON struct {
+		Call struct{ Mic, Cam bool }
+		Chat struct {
+			Enabled      bool  `json:"enabled"`
+			MaxFileBytes int64 `json:"maxFileBytes"`
+		}
+	}
+	read := func(f *fit) confJSON {
+		t.Helper()
+		resp, body := do(t, "GET", f.base+"/media/api/config", "", nil)
+		var c confJSON
+		if resp.StatusCode != 200 || json.Unmarshal([]byte(body), &c) != nil {
+			t.Fatalf("config: %d %s", resp.StatusCode, body)
+		}
+		return c
+	}
+	c := read(startFit(t, conf(`{}`)))
+	if c.Call.Mic || c.Call.Cam || !c.Chat.Enabled || c.Chat.MaxFileBytes != DefaultMaxFileBytes {
+		t.Fatalf("defaults: %+v", c)
+	}
+	c = read(startFit(t, conf(`{"mic_default": true, "cam_default": true, "max_file_bytes": 2048}`)))
+	if !c.Call.Mic || !c.Call.Cam || !c.Chat.Enabled || c.Chat.MaxFileBytes != 2048 {
+		t.Fatalf("params: %+v", c)
+	}
+	// The configured bound is in the config even when the chat is off.
+	c = read(startFit(t, conf(`{"chat": false}`)))
+	if c.Chat.Enabled || c.Chat.MaxFileBytes != DefaultMaxFileBytes {
+		t.Fatalf("chat off: %+v", c)
+	}
+}
+
+// pages: false serves none of the pages, the redirect included, while the
+// login and the room API stay.
+func TestPagesOff(t *testing.T) {
+	f := startFit(t, conf(`{"auth": "live", "login": true, "pages": false}`))
+	for _, p := range []string{"/media", "/media/", "/media/call", "/media/publish", "/media/play",
+		"/media/app.js", "/media/app.css", "/media/nothing"} {
+		if resp, _ := do(t, "GET", f.base+p, "", nil); resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	if resp, _ := do(t, "GET", f.base+"/media/api/config", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("config: %d", resp.StatusCode)
+	}
+	if resp, _ := do(t, "POST", f.base+"/media/api/login", `{"user": "ann", "password": "ann-password"}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("login: %d", resp.StatusCode)
+	}
+	if code, _ := join(t, f, "room1", `{"name": "ann"}`, basic("ann", "ann-password")); code != 200 {
+		t.Fatalf("join: %d", code)
+	}
 }
