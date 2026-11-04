@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I131。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I138。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -269,6 +269,14 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I128 | 在工作处询问 AI：保存错误、一致性、引擎菜单、表单字段、指标与角色页面上的入口 | I127 | todo |
 | I129 | 迁移与审查：`migrate` 与 `security-review` 端到端，在固定配置集上评估 | I127 | todo |
 | I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | todo |
+| **媒体库** | | | |
+| I131 | 决定 032；fib A63，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | todo |
+| I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | todo |
+| I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | todo |
+| I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
+| I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | todo |
+| I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | todo |
+| I137 | 影视站端到端：示例、媒体库与播放页面、workbench 的媒体库与频道页面、文档 | I134, I135 | todo |
 
 ## M0 基础
 
@@ -1656,3 +1664,102 @@ skill 嵌入在 bundle 中；用户可在 Skills 页面添加自己的（保存�
 - 不提供 CLI：助手只在 workbench 中。
 - MCP（2026-11-05）：fit 基于同一注册表、级别与提议向外部 agent 提供 MCP（I130）；应用仍只在 workbench 中；fit 的助手不调用外部
   MCP 服务器。
+
+## 媒体库：点播与频道
+
+2026-11-05 提出。影视站把电影和剧集存为文件，希望在 Web 上点播、也按排期作为频道播放，只给自己的 API 放行的观众看，而且只在一段时间内有效。
+fit 为此增加媒体库：把目录中的文件编目，不转码地以 HLS 点播，也作为直播频道推入流媒体 hub，按需再推到其他服务器；以及会过期的播放
+URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个播放列表、分片和密钥请求上校验。它建立在流媒体角色（I116）、媒体认证（I115）
+和媒体 token（I119）之上；决定 032 记录下面的选择。
+
+原则，按约束力排序：
+
+- **文件事先准备好，不转码。** fit 按文件存储的原样提供其中的编码（H.264、H.265、AV1；AAC、Opus）。多码率是各自独立、事先做好的文件；
+  `scripts/` 中给出用 ffmpeg 制作的脚本。进程内转码不做，与流媒体角色一致。
+- **不阻塞 worker**（规则 1）：探测文件、读取样本表和读取分片字节都在媒体库自己的有上限的文件池上执行；请求被保留等待，由池继续。目录、
+  样本表和生成的分片各有字节上限（规则 11）。
+- **谁能看由影视站的 API 决定，fit 负责校验。** fit 不保存影视站的账号。API 自己或经 `media_tokens` 为观众、资源和有效期签发 URL，fit
+  在 worker 上立即校验，不回调。
+- **泄露的 URL 很快失效，也打不开别的。** URL 有效期短，绑定一个资源（一部片子或一个频道），按需绑定观众地址或会话；播放器取的每个播放
+  列表、分片、密钥和字幕都带着授权；每个主体的播放会话数有上限。
+- **默认关闭**：没有 `media_library` 就不提供文件、不扫描。
+
+不在本方向内：转码、带 license 服务器的 DRM（Widevine、FairPlay、PlayReady）、按观众加水印，以及对象存储中的媒体库（有需求时作为后续
+迭代；文件池把读取放在一个接口后面，以便日后加入）。
+
+### I131 决定 032；fib 中的 MP4 读取器
+
+- **做**：决定 032。在 [fib-api-requests.md](fib-api-requests.zh-CN.md) 中向 fib 提出 A63：非分片 MP4（ISO BMFF）文件的读取器，放在
+  fib 的 `media/fmp4` 或新的 `media/mp4` 中；通过 `io.ReaderAt` 解析 `moov`（`stts`、`ctts`、`stss`、`stsc`、`stsz`/`stz2`、
+  `stco`/`co64`、编辑列表），不读整个文件；`moov` 在文件尾部也能找到；像 `media/av` 那样给出每条轨道的编码配置；按时间和关键帧查找样本；
+  样本表以紧凑形式保存，构建前即可知道其大小；做模糊测试。fib 加入后 fit 升级到该提交。
+- **完成标准**：fib 的测试读取 ffmpeg 生成的各编码组合文件，`moov` 在头部和尾部、带 B 帧和编辑列表，每个样本的时间、偏移和大小都与
+  ffprobe 一致；样本表内存在其上限内；对读取器的模糊测试没有 panic。
+- **涉及**：`docs/decisions`（032）、`docs/fib-api-requests.md`、fib 的 `media`、`go.mod`。
+
+### I132 媒体库
+
+- **做**：顶层 `media_library`：命名的媒体库，各有 `roots`（目录）、包含与排除模式和 `scan_interval`；启动时、按间隔以及
+  `POST /media/library/<name>/rescan` 时扫描；条目目录，每个条目有稳定的 `id`（来自其在根目录下的路径，或 sidecar 中指定）、标题、时长、
+  轨道与编码、大小、多码率（按命名规则或 sidecar `<name>.json` 分组的文件）、音轨、字幕（`.vtt`，`.srt` 转为 WebVTT）和海报；探测在文件池上
+  进行，受条目数、并发探测数和 sidecar 大小限制；探测失败的文件连同错误列出，但不提供；根目录之外的路径被拒绝（`..`，以及指向外部的符号
+  链接，除非 `follow_symlinks`）；目录按 engine 保存，重载时原地修改，与 `media_auth` 的策略一样；Admin API 的
+  `GET /media/library/<name>` 和 `GET /media/library/<name>/items/<id>`。
+- **完成标准**：一个由 ffmpeg 生成文件组成的媒体库列出每个条目，时长和编码与 ffprobe 一致，多码率和字幕正确分组；新增、修改或删除的文件在
+  重新扫描后体现；损坏的文件连同错误列出；根目录之外的路径或符号链接被拒绝；上限和重载在 race 检测下成立。
+- **涉及**：`medialib`（新）、`config`、`app`、`admin`、`schema`、`docs`、`test/workers`。
+
+### I133 点播
+
+- **做**：基于媒体库的处理器 `vod`：每个条目一个主播放列表（多码率作为 variant，带 `BANDWIDTH`、`RESOLUTION` 和 `CODECS`；音轨组与字幕
+  组），媒体播放列表由 fMP4 分片组成，或为旧播放器用 MPEG-TS（`container`），按接近 `segment_duration` 的关键帧切分，请求时从样本表生成并
+  放入有上限的缓存；初始化分片；文件本身支持 `Range`（206、416），供下载和简单播放器使用，fib 允许时走 sendfile；`ETag` 和
+  `Last-Modified` 来自文件，`Cache-Control` 由路由设置，便于 CDN 缓存分片；`auth` 使用 `media_auth` 策略，动作 `play`，流名
+  `vod/<library>/<id>`。
+- **完成标准**：无头 Chromium 中的 hls.js 和 ffmpeg 能播放每个条目并拖动进度，每个分片都从关键帧开始，音频与视频相差不超过一帧，Safari
+  原生播放器手动验证；ffprobe 认为每个分片都有效；播放中被修改或删除的文件返回 404 并清除其缓存；上限在 race 检测下成立；在 Linux 上测量
+  每秒分片数和 RSS，对比 nginx 提供事先切好的同样文件。
+- **涉及**：`handler/vod`（新）、`medialib`、`schema`、`docs`、`test/workers`、`bench`。
+
+### I134 频道：把文件作为直播流播放并向外推流
+
+- **做**：`streaming.channels`：频道以其流名向 hub 推送一组媒体库条目，按顺序、随机、循环或按某时区的排期开始时间播放，用 fit 的定时器按
+  样本时间戳控制节奏，条目之间时间戳保持连续（HLS 中为 discontinuity）；流媒体角色的每种出口都能播放它（HLS、HTTP-FLV、WHEP，以及
+  RTMP、RTSP 和 SRT 播放），各按其 `auth`；`push` 目标把频道或 hub 中任意流转推到外部 RTMP 或 SRT 服务器（如 CDN 的接入点），断开后带退避
+  重连；频道在重载时原地修改，新的列表或排期从下一个条目起生效；Admin API 列出频道和推流目标，并可开始、停止和跳过。
+- **完成标准**：一个频道连续播放两个条目，经每种出口用 ffmpeg 和 hls.js 播放，没有间断，时间戳没有跳变；排期的条目按时开始；推流目标
+  （fit 自身，以及容器中的外部服务器）收到流，并在目标重启后恢复；在 race 检测下通过。
+- **涉及**：`streaming`、`medialib`、`config`、`schema`、`docs`、`test/workers`。
+
+### I135 会过期的播放 URL
+
+- **做**：`media_auth` 中的签名播放 URL：`url_signing`，用策略 `keys` 密钥环（I119）中的一个密钥签名，每个 URL 带 `exp`、`kid`，按需带观众
+  地址（`ip`，或其 /24、/64）和会话 `sid`，以及 `sig`：对资源路径前缀（`/vod/<library>/<id>/` 或频道的路径）、过期时间和所绑定字段的 HMAC；
+  在 worker 上校验，不回调。播放列表给其分片、初始化分片、密钥和字幕发放该资源自己的授权，放在它们的 URI 中，或作为资源路径上的 cookie
+  （`cookie`，供会丢弃查询参数的播放器），有效期为 URL 过期时间加 `play_grace` 与条目时长二者中较长者，使电影不会播到一半停止，而泄露的
+  URL 仍会失效。`media_tokens` 增加 `POST <prefix>/urls`：影视站的 API 给出观众（主体、地址）、资源和不超过 `max_ttl` 的 ttl，直接拿回完整
+  URL。`max_sessions` 按 `sid` 统计每个主体的播放会话，拒绝新会话或结束最早的（`on_limit`）；`referers` 和 `origins` 白名单；吊销通过轮换
+  密钥，与 I119 相同。token 和签名不写入任何日志。
+- **完成标准**：`/urls` 返回的 URL 能在 hls.js 中播放；过期后其播放列表返回 403，而正在播放的播放器可以播到授权结束；一个条目的 URL 用于
+  另一个条目，或路径改动任何一个字节，都被拒绝；绑定地址的 URL 从其他地址访问被拒绝；`max_sessions: 2` 时第三个会话被拒绝，或结束最早的；
+  轮换密钥只拒绝它签发的 URL；访问日志显示 `REDACTED`；在 race 检测下通过。
+- **涉及**：`mediaauth`、`handler/vod`、`handler/mediatokens`、`streaming`、`config`、`schema`、`docs`、`test/workers`。
+
+### I136 加密分片
+
+- **做**：`vod` 和频道 HLS 上的 `encrypt`：分片用 AES-128 加密（`METHOD=AES-128`，MPEG-TS 和 fMP4 均可），每个条目或频道一个从媒体库密钥派生
+  的密钥，频道每 `key_rotation` 个分片轮换一次；密钥 URI 只对持有该资源授权的请求提供，使没有授权而复制走的分片无法播放；加密在文件池上进行，
+  缓冲区有上限。
+- **完成标准**：hls.js 和 ffmpeg 能播放加密的条目和频道；没有授权或授权属于其他资源的密钥请求被拒绝；单独取得的分片无法解码；在 Linux 上测量
+  每个分片的开销。
+- **涉及**：`handler/vod`、`streaming`、`medialib`、`schema`、`docs`。
+
+### I137 影视站端到端
+
+- **做**：[fit-examples](https://github.com/lesismal/fit-examples) 中的示例：一个媒体库、`vod` 和频道路由、置于路由中间件之后供影视站 API
+  使用的 `media_tokens`、一个让观众登录并发放 URL 的小型 Go API，以及一个使用 hls.js 的页面。`media_pages` 增加在策略登录之后的媒体库页面和
+  播放页面（hls.js 随附，Apache-2.0）。workbench 在引擎菜单的流媒体条目下增加媒体库和频道页面：条目及其探测信息、重新扫描、频道的列表或排期、
+  开始、停止和跳过，以及推流目标的状态。`docs/media-library.md`，中英文。
+- **完成标准**：在 Linux 的 Docker 中，无头 Chromium 登录示例 API，经其签发的 URL 播放一部电影和一个频道、拖动进度，并在 URL 及其授权过期
+  后被拒绝；workbench 页面通过浏览器测试；`TestChapterExamples` 和 schema 描述覆盖新字段。
+- **涉及**：`handler/mediapages`、`app/workbench`、`schema`、`docs`、`test/docker`、fit-examples。

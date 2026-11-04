@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I131.
+Status: `todo`, `doing` or `done`. The next free iteration number is I138.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -279,6 +279,14 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I131.
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | todo |
+| **Media library** | | | |
+| I131 | Decision 032; fib A63, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | todo |
+| I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
+| I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | todo |
+| I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
+| I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
+| I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
+| I137 | A video site end to end: the example, library and player pages, the workbench's library and channel pages, docs | I134, I135 | todo |
 
 ## M0, foundations
 
@@ -1974,3 +1982,148 @@ The iterations, I124–I130, are in the [index](#index).
 - No CLI: the assistant lives in the workbench only.
 - MCP (2026-11-05): fit serves MCP to outside agents on the same registry, levels and proposals (I130);
   apply stays in the workbench; fit's assistant does not call outside MCP servers.
+
+## Media library: video on demand and channels
+
+Proposed 2026-11-05. A video site keeps its films and episodes as files and wants them played on
+the web, on demand and as scheduled channels, by the viewers its own API lets in, and only for a
+while. fit gains a media library: directories of files catalogued, served as HLS on demand without
+transcoding, and played into the streaming hub as live channels pushed on to other servers if
+asked; and playback URLs that expire, signed for one viewer and one title by the site's API and
+checked by fit on every playlist, segment and key. It builds on the streaming role (I116), media
+auth (I115) and media tokens (I119); decision 032 records the choices below.
+
+Principles, in the order they bind:
+
+- **Files are prepared, not transcoded.** fit serves the codecs a file holds (H.264, H.265, AV1;
+  AAC, Opus) as they are stored. Renditions are files of their own, made beforehand; a script in
+  `scripts/` shows how with ffmpeg. Transcoding in process stays out, as in the streaming role.
+- **Nothing blocks a worker** (rule 1): probing a file, reading its sample table and reading a
+  segment's bytes run on a bounded file pool of the library's own; a request waits retained and
+  goes on from the pool. The catalog, the sample tables and the built segments are each bounded in
+  bytes (rule 11).
+- **The site's API decides who watches; fit checks.** fit keeps none of the site's accounts. The
+  API signs a URL for a viewer, a resource and a lifetime, itself or through `media_tokens`, and
+  fit checks it on the worker, at once, without calling back.
+- **A leaked URL dies soon and opens nothing else.** URLs are short-lived, bound to one resource (a
+  title or a channel) and, if asked, to the viewer's address or session; every playlist, segment,
+  key and subtitle a player fetches carries the grant; playback sessions per subject are capped.
+- **Off by default**: no `media_library`, no files served and no scans.
+
+Not in this track: transcoding, DRM with license servers (Widevine, FairPlay, PlayReady),
+watermarks per viewer, and libraries in object storage (a later iteration if asked; the file pool
+keeps the reads behind one interface so that it can be added).
+
+### I131 Decision 032; an MP4 reader in fib
+
+- **Do**: decision 032. Ask fib for A63 in [fib-api-requests.md](fib-api-requests.md): a reader of
+  MP4 files that are not fragmented (ISO BMFF), in fib's `media/fmp4` or a new `media/mp4`, which
+  parses `moov` (`stts`, `ctts`, `stss`, `stsc`, `stsz`/`stz2`, `stco`/`co64`, edit lists) through
+  an `io.ReaderAt` without reading the whole file, finds a `moov` at the end as well as at the
+  front, gives each track's codec config as `media/av` does, finds samples by time and by
+  keyframe, and keeps its sample table in a compact form whose size is known before it is built;
+  fuzzed. fib adds it and fit moves to that commit.
+- **Done when**: fib's tests read ffmpeg-made files of each codec pair, `moov` at the front and at
+  the back, with B-frames and edit lists, and every sample's times, offset and size match
+  ffprobe's; a sample table's memory is within its bound; fuzzing the reader finds no panic.
+- **Touches**: `docs/decisions` (032), `docs/fib-api-requests.md`, fib's `media`, `go.mod`.
+
+### I132 Media libraries
+
+- **Do**: a top-level `media_library`: named libraries, each with `roots` (directories), include
+  and exclude patterns, and `scan_interval`; a scan on start, on the interval and on
+  `POST /media/library/<name>/rescan`; a catalog of items, each with a stable `id` (from its path
+  under the root, or a sidecar's), a title, its duration, tracks and codecs, size, renditions (files
+  grouped by a naming rule or a sidecar `<name>.json`), audio tracks, subtitles (`.vtt`, `.srt`
+  turned into WebVTT) and a poster; probing on the file pool, bounded by items, concurrent probes
+  and sidecar size; a file that fails to probe listed with its error, not served; paths outside the
+  roots refused (`..`, and symlinks leading out unless `follow_symlinks`); the catalog kept per
+  engine and changed in place on reload, as `media_auth`'s policies are; the Admin API's
+  `GET /media/library/<name>` and `GET /media/library/<name>/items/<id>`.
+- **Done when**: a library of ffmpeg-made files lists every item with the durations and codecs
+  ffprobe gives, its renditions and subtitles grouped; a file added, changed or removed shows after
+  a rescan; a broken file is listed with its error; a path or symlink out of the roots is refused;
+  the bounds and a reload hold under the race detector.
+- **Touches**: `medialib` (new), `config`, `app`, `admin`, `schema`, `docs`, `test/workers`.
+
+### I133 Video on demand
+
+- **Do**: a handler `vod` on a library: for each item a master playlist (renditions as variants
+  with `BANDWIDTH`, `RESOLUTION` and `CODECS`; audio and subtitle groups), media playlists of fMP4
+  segments, or MPEG-TS for older players (`container`), cut at keyframes near `segment_duration`,
+  built from the sample tables on request and kept in a bounded cache; init segments; the file
+  itself with `Range` (206, 416) for downloads and plain players, by sendfile where fib allows;
+  `ETag` and `Last-Modified` from the file, `Cache-Control` set by the route, so that a CDN can
+  keep segments; `auth` with a `media_auth` policy, action `play` on the stream `vod/<library>/<id>`.
+- **Done when**: hls.js in headless Chromium and ffmpeg play every item and seek, each segment
+  starting on a keyframe and audio within a frame of video, and Safari's own player plays them by
+  hand; ffprobe finds every segment valid; a file changed or removed while it plays is answered 404
+  and its cache entries dropped; the bounds hold under the race detector; on Linux, segments a
+  second and RSS measured against nginx serving the same files cut beforehand.
+- **Touches**: `handler/vod` (new), `medialib`, `schema`, `docs`, `test/workers`, `bench`.
+
+### I134 Channels: files played as live streams, and pushed out
+
+- **Do**: `streaming.channels`: a channel publishes into the hub, under its stream name, a list of
+  library items, in order, shuffled, looped, or on a schedule of start times in a time zone, paced
+  by the samples' timestamps on fit's timers, with timestamps kept continuous from one item to the
+  next (a discontinuity in HLS); every egress of the streaming role serves it (HLS, HTTP-FLV,
+  WHEP, and RTMP, RTSP and SRT play) under its `auth`; `push` targets that relay a channel, or any
+  stream of the hub, to outside RTMP or SRT servers (a CDN's ingest), reconnecting with backoff;
+  channels changed in place on reload, a new list or schedule taking effect at the next item; the
+  Admin API to list channels and push targets, and to start, stop and skip.
+- **Done when**: a channel plays two items back to back through each egress, with ffmpeg and
+  hls.js, without a gap or a jump in the timestamps; a scheduled item starts at its time; a push
+  target (fit itself and an outside server in a container) receives the stream and gets it back
+  after the target restarts; under the race detector.
+- **Touches**: `streaming`, `medialib`, `config`, `schema`, `docs`, `test/workers`.
+
+### I135 Playback URLs that expire
+
+- **Do**: signed playback URLs in `media_auth`: `url_signing`, signed with a key of the policy's
+  `keys` ring (I119), each URL carrying `exp`, `kid`, if asked the viewer's address (`ip`, or its
+  /24 or /64) and a session `sid`, and `sig`, an HMAC over the resource's path prefix
+  (`/vod/<library>/<id>/` or a channel's), the expiry and the bound fields; checked on the worker
+  without a callback. The playlist hands its segments, init segments, keys and subtitles a grant
+  of its own for that resource, in their URIs or as a cookie on the resource's path (`cookie`,
+  for players that drop query parameters), that lives `play_grace` beyond the URL's expiry or the
+  item's duration, whichever is longer, so that a film does not stop halfway while a leaked URL
+  still dies. `media_tokens` gains `POST <prefix>/urls`: the site's API names the viewer (subject,
+  address), the resources and a ttl up to `max_ttl`, and gets the URLs back whole. `max_sessions`
+  per subject counts playback sessions by `sid`, refusing a new one or ending the oldest
+  (`on_limit`); `referers` and `origins` allow lists; revocation by rotating a key, as in I119.
+  Tokens and signatures never reach a log.
+- **Done when**: a URL from `/urls` plays in hls.js; once it expires its playlist is refused 403,
+  while a player already playing goes on to the end of its grant; a URL for one item is refused for
+  another and for a path changed in any byte; a URL bound to an address is refused from another;
+  a third session past `max_sessions: 2` is refused, or ends the oldest; rotating a key refuses
+  the URLs it signed and only those; the access log shows `REDACTED`; under the race detector.
+- **Touches**: `mediaauth`, `handler/vod`, `handler/mediatokens`, `streaming`, `config`, `schema`,
+  `docs`, `test/workers`.
+
+### I136 Encrypted segments
+
+- **Do**: `encrypt` on `vod` and on a channel's HLS: segments encrypted with AES-128 (`METHOD=AES-128`,
+  for MPEG-TS and fMP4), a key per item or channel derived from a library secret and rotated every
+  `key_rotation` segments on channels; the key URI served by fit only to a grant for that resource,
+  so that segments copied without a grant cannot be played; encryption on the file pool, its
+  buffers bounded.
+- **Done when**: hls.js and ffmpeg play encrypted items and channels; a key request without a grant,
+  or with one for another resource, is refused; segments fetched alone do not decode; the cost a
+  segment measured on Linux.
+- **Touches**: `handler/vod`, `streaming`, `medialib`, `schema`, `docs`.
+
+### I137 A video site, end to end
+
+- **Do**: an example in [fit-examples](https://github.com/lesismal/fit-examples): a library, `vod`
+  and channel routes, `media_tokens` behind the route's middleware for the site's API, a small Go
+  API that logs a viewer in and hands out URLs, and a page with hls.js. `media_pages` gains a
+  library page and a player page behind the policy's login (hls.js vendored, Apache-2.0). The
+  workbench gains library and channel pages under the Engine menu's streaming entry: items and
+  their probe, rescan, a channel's list or schedule, start, stop and skip, and push targets' state.
+  `docs/media-library.md`, in English and Chinese.
+- **Done when**: in Docker on Linux, headless Chromium logs in to the example's API, plays a film
+  and a channel through the URLs it issues, seeks, and is refused once a URL and its grant expire;
+  the workbench's pages pass their browser tests; `TestChapterExamples` and the schema's
+  descriptions cover the new fields.
+- **Touches**: `handler/mediapages`, `app/workbench`, `schema`, `docs`, `test/docker`, fit-examples.
