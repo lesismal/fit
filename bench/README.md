@@ -338,7 +338,7 @@ fitbench run, named by its workload and level (`w1-api-500.json`), the plan deri
 (`plan.txt`, `plan-derived.json`), and the report, `report.md` and `report.zh-CN.md`, with the
 tables it cites in `tables.md`. fitbench run alone writes `results/run-<time>/results.json`, which
 git ignores. The latest report is
-[the second 2026-11-04 plan, fit on fib 07ee9e0: the API gateway over HTTP/1.1 with an 18% shorter tail, and less memory](results/plan-2026-11-04b/report.md). To
+[the third 2026-11-04 plan, fit on fib 60d67aa: proxied uploads by splice(2)](results/plan-2026-11-04c/report.md). To
 reproduce a run, run the harness with the `params` recorded in it, on the benchmark host:
 
 ```bash
