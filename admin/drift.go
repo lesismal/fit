@@ -982,8 +982,10 @@ func makeArray(root any, tokens []string) (any, error) {
 	return root, nil
 }
 
-// sortDeletes orders delete patches so that those of one array go from the
-// highest index down, so that removing one does not move another.
+// sortDeletes orders delete patches so that removing one does not move
+// another: at the first segment where two paths part, a higher index of an
+// array goes first, and where one path holds the other, the deeper one goes
+// first.
 func sortDeletes(patches []*ConfigPatch) {
 	slices.SortStableFunc(patches, func(a, b *ConfigPatch) int {
 		at, aerr := parsePointer(a.Path)
@@ -991,19 +993,17 @@ func sortDeletes(patches []*ConfigPatch) {
 		if aerr != nil || berr != nil || len(at) == 0 || len(bt) == 0 {
 			return 0
 		}
-		for i := 0; i < min(len(at), len(bt))-1; i++ {
-			if c := strings.Compare(at[i], bt[i]); c != 0 {
-				return c
+		for i := range min(len(at), len(bt)) {
+			if at[i] == bt[i] {
+				continue
 			}
+			ai, aok := strconv.Atoi(at[i])
+			bi, bok := strconv.Atoi(bt[i])
+			if aok == nil && bok == nil {
+				return bi - ai
+			}
+			return strings.Compare(at[i], bt[i])
 		}
-		if len(at) != len(bt) {
-			return len(at) - len(bt)
-		}
-		ai, aok := strconv.Atoi(at[len(at)-1])
-		bi, bok := strconv.Atoi(bt[len(bt)-1])
-		if aok == nil && bok == nil {
-			return bi - ai
-		}
-		return strings.Compare(at[len(at)-1], bt[len(bt)-1])
+		return len(bt) - len(at)
 	})
 }
