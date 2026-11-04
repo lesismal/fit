@@ -171,6 +171,28 @@
     if (problems.length > 50) problems.shift();
   }
 
+
+  // playWhenReady starts a media element, and tries it again after a
+  // short wait when the browser refused it for a load that had not
+  // finished, or restarted under the call: a video element whose source
+  // is set and played at once drops that first play sometimes. A refusal
+  // by the autoplay policy is left to the click that plays it.
+  function playWhenReady(video) {
+    if (!video) return;
+    var tries = 0;
+    function attempt() {
+      if (!video.paused) return;
+      var p = video.play();
+      if (p && p.catch) {
+        p.catch(function (e) {
+          if (e && e.name === 'NotAllowedError') return;
+          if (video.paused && ++tries <= 10) setTimeout(attempt, 300);
+        });
+      }
+    }
+    attempt();
+  }
+
   var ICONS = {
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>',
     micoff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M9 9v1a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.9-.7M19 10a7 7 0 0 1-1.1 3.8M5 10a7 7 0 0 0 11 5.7M12 17v5"/></svg>',
@@ -753,7 +775,7 @@
       stream.addTrack(ev.track);
       self.tracks = stream.getTracks().length;
       if (self.videoEl.srcObject !== stream) self.videoEl.srcObject = stream;
-      self.videoEl.play().catch(function () { /* a click plays it */ });
+      playWhenReady(self.videoEl);
       self.onstate(self);
     });
     pc.addEventListener('connectionstatechange', function () {
@@ -1567,7 +1589,7 @@
     renderPub();
   }
 
-  var playPage = { viewer: null, tile: null, timer: 0 };
+  var playPage = { viewer: null, tile: null, timer: 0, hls: false, hlsErr: null, hlsTimer: 0, hlsTries: 0 };
 
   function playTile(name) {
     playPage.tile = new Tile(name, false);
@@ -1620,8 +1642,22 @@
       }
       var u = endpoint(S.conf.hls, stream);
       if (token() && !(S.auth && S.auth.subject)) u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(token());
+      // An HLS load fails now and then, as the playlist of a stream that
+      // has just started has no segment to parse yet: load it again.
+      playPage.hlsTries = 0;
+      playPage.hlsErr = function () {
+        if (!playPage.hls || playPage.hlsTries >= 10) return;
+        playPage.hlsTries++;
+        clearTimeout(playPage.hlsTimer);
+        playPage.hlsTimer = setTimeout(function () {
+          if (!playPage.hls || !playPage.tile) return;
+          playPage.tile.video.load();
+          playWhenReady(playPage.tile.video);
+        }, 1000);
+      };
+      video.addEventListener('error', playPage.hlsErr);
       video.src = u;
-      video.play().catch(function () {});
+      playWhenReady(video);
       playPage.hls = true;
       renderPlay();
       return;
@@ -1635,8 +1671,14 @@
 
   function stopPlay() {
     if (playPage.viewer) { playPage.viewer.stop(); playPage.viewer = null; }
-    if (playPage.tile) { playPage.tile.video.removeAttribute('src'); playPage.tile.video.load(); }
+    if (playPage.tile) {
+      if (playPage.hlsErr) playPage.tile.video.removeEventListener('error', playPage.hlsErr);
+      playPage.tile.video.removeAttribute('src');
+      playPage.tile.video.load();
+    }
     playPage.hls = false;
+    playPage.hlsErr = null;
+    clearTimeout(playPage.hlsTimer);
     clearInterval(playPage.timer);
     $('play-tile').textContent = '';
     playPage.tile = null;
@@ -1808,7 +1850,7 @@
 
     // A click anywhere plays what the browser held back until a gesture.
     document.addEventListener('click', function () {
-      document.querySelectorAll('video').forEach(function (v) { if (v.srcObject && v.paused) v.play().catch(function () {}); });
+      document.querySelectorAll('video').forEach(function (v) { if ((v.srcObject || v.currentSrc) && v.paused) playWhenReady(v); });
     });
     window.addEventListener('pagehide', function () {
       if (call.active && call.key && navigator.sendBeacon) {
