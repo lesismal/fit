@@ -56,7 +56,38 @@
     ['cf.deprecated', 'deprecated', '已弃用'],
     ['cf.c.listener', 'Listener', '监听'], ['cf.c.names', 'Names', '域名'], ['cf.c.issuer', 'Issuer', '签发者'], ['cf.c.from', 'Valid from', '生效时间'],
     ['cf.c.until', 'Expires', '过期时间'], ['cf.c.serial', 'Serial', '序列号'], ['cf.c.left', '{n} days left', '剩余 {n} 天'], ['cf.c.expired', 'expired', '已过期'],
-    ['cf.c.none', 'No listener serves a certificate.', '没有监听在提供证书。']
+    ['cf.c.none', 'No listener serves a certificate.', '没有监听在提供证书。'],
+    // import / export / 导入与导出
+    ['cf.ie.export', 'Export', '导出'], ['cf.ie.import', 'Import', '导入'],
+    ['cf.ie.export.title', 'Export {what}', '导出{what}'], ['cf.ie.import.title', 'Import {what}', '导入{what}'],
+    ['cf.ie.whole', 'the whole config', '整个配置'], ['cf.ie.part', 'this page\'s part ({m})', '本页的部分（{m}）'],
+    ['cf.ie.format', 'Format', '格式'],
+    ['cf.ie.f.conf', '.conf (fit\'s config syntax)', '.conf（fit 配置语法）'], ['cf.ie.f.yaml', '.yaml', '.yaml'], ['cf.ie.f.json', '.json', '.json'],
+    ['cf.ie.f.store', '.store (encrypted fitstore)', '.store（加密的 fitstore）'],
+    ['cf.ie.password', 'Store password', 'store 密码'],
+    ['cf.ie.export.pw.hint', 'Seals the file with this password, to open it with the same password. Left empty, the file is sealed with the running store\'s key: opening it elsewhere then needs that store\'s key file or FIT_STORE_PASSWORD.',
+      '用此密码加密文件，之后用同一密码打开。留空则用运行中 store 的密钥加密：在别处打开时需要该 store 的密钥文件或 FIT_STORE_PASSWORD。'],
+    ['cf.ie.import.pw.hint', 'The password the file was sealed with. Leave it empty for a file sealed with the running store\'s key.',
+      '文件加密时所用的密码。若文件是用运行中 store 的密钥加密的，请留空。'],
+    ['cf.ie.pw.ascii', 'The store password must be printable ASCII here (it is sent in a request header).', '此处的 store 密码只能是可打印的 ASCII 字符（它在请求头中发送）。'],
+    ['cf.ie.export.note', 'Exports the config as it is saved and running; changes not saved yet are not in the file.', '导出的是已保存并在运行的配置；尚未保存的修改不在文件中。'],
+    ['cf.ie.export.dirty', 'This draft has unsaved changes: save them first to have them in the file.', '当前草稿有未保存的修改：如需包含它们，请先保存。'],
+    ['cf.ie.exported', 'Exported {name}.', '已导出 {name}。'],
+    ['cf.ie.file', 'File', '文件'], ['cf.ie.file.need', 'Choose a file to import.', '请选择要导入的文件。'],
+    ['cf.ie.warn.whole', 'The file replaces the whole config (admin aside), and is applied at once as a new config version.',
+      '文件将替换整个配置（admin 除外），并立即作为新的配置版本应用。'],
+    ['cf.ie.warn.part', 'The file replaces {m} in the config, and is applied at once as a new config version. Other members in the file are ignored; a member the file lacks is removed from the config.',
+      '文件将替换配置中的 {m}，并立即作为新的配置版本应用。文件中的其他成员会被忽略；文件中缺少的成员会从配置中移除。'],
+    ['cf.ie.dirty', 'This draft has unsaved changes. Importing reads the config again afterwards, so they will be lost.',
+      '当前草稿有未保存的修改。导入后会重新读取配置，这些修改将会丢失。'],
+    ['cf.ie.dirty.q', 'Importing discards the changes not saved. Go on?', '导入会放弃尚未保存的修改。继续？'],
+    ['cf.ie.apply', 'Import and apply', '导入并应用'],
+    ['cf.ie.failed', 'The import was not applied; the running config stays.', '导入未应用；运行中的配置保持不变。'],
+    ['cf.ie.page', 'Import / Export', '导入 / 导出'],
+    ['cf.ie.page.note', 'Export the whole config to a file, or import a file that replaces it. A page that edits part of the config has its own Export and Import buttons, next to its format tabs, for that part only.',
+      '把整个配置导出为文件，或导入文件替换整个配置。编辑部分配置的页面在其格式标签旁另有“导出”与“导入”按钮，只针对该部分。'],
+    ['cf.ie.formats', 'Text formats (.conf, .yaml, .json) are readable and editable; .store is fit\'s encrypted binary format, as admin.store keeps the config.',
+      '文本格式（.conf、.yaml、.json）可读可编辑；.store 是 fit 的加密二进制格式，与 admin.store 保存配置的格式相同。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });
@@ -250,12 +281,15 @@
     paintRaw(r);
     paintBar();
   }
-  function rawErrorParts(r) {
-    if (!r.error && (!r.details || !r.details.length)) return [];
+  function rawErrorParts(r) { return problemParts(t('cf.raw.parse.bad'), r.error, r.details); }
+  // problemParts renders an error and its problems ({path, line, column, message}) under a title, for a raw text that
+  // does not parse and for an import that fails. / 在标题下渲染错误及其问题，供无法解析的原始文本与失败的导入使用。
+  function problemParts(title, error, details) {
+    if (!error && (!details || !details.length)) return [];
     return [
-      h('b', t('cf.raw.parse.bad')),
-      r.error ? h('div.small', r.error) : null,
-      r.details && r.details.length ? h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, r.details.map(function (e) {
+      h('b', title),
+      error ? h('div.small', error) : null,
+      details && details.length ? h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, details.map(function (e) {
         var at = e.line ? ' (' + t('cf.line', { l: e.line, c: e.column || 0 }) + ')' : '';
         return h('li', h('code', e.path || t('cf.whole')), at, ': ', e.message);
       })) : null
@@ -334,11 +368,17 @@
     if (S.rawSel && S.rawSel.key === c.key) { var sel = S.rawSel; S.rawSel = null; selectRaw(r, sel.line, sel.column); }
   }
 
+  // tabBar is a page's format tabs, with the Export and Import of the page's members beside them.
+  // tabBar 是页面的格式标签页，旁边是本页成员的导出与导入按钮。
   function tabBar(c, tb) {
     var items = [['ui', t('cf.tab.ui')], ['conf', t('cf.tab.conf')], ['yaml', t('cf.tab.yaml')], ['json', t('cf.tab.json')]];
     var bar2 = UI.tabs(items, tb.fmt, function (k) { switchTab(c, k); });
-    bar2.classList.add('cf-tabs');
-    return bar2;
+    bar2.classList.add('cf-tabs__list');
+    var ms = membersOf(c);
+    var tools = h('div.btn-row.cf-tabs__tools',
+      UI.btn(t('cf.ie.export'), 'download', function () { exportDialog(ms, RAW_FORMATS.indexOf(tb.fmt) >= 0 ? tb.fmt : 'yaml'); }, 'ghost sm'),
+      UI.btn(t('cf.ie.import'), 'upload', function () { importDialog(ms); }, 'ghost sm'));
+    return h('div.cf-tabs', bar2, tools);
   }
   // switchTab changes the page's tab: leaving a raw text parses it first, and a text that does not parse keeps the
   // page on its raw tab. / 切换页面标签：离开原始文本前先解析，无法解析时停留在该标签页。
@@ -367,6 +407,135 @@
     if (!c || !c.opts) return [];
     var ms = typeof c.opts.members === 'function' ? c.opts.members() : c.opts.members;
     return (ms || []).filter(function (x) { return typeof x === 'string' && x; });
+  }
+
+  // ---- import / export / 导入与导出 ----
+  // Export: POST /config/export {format, members?, password?} answers the file, named by its Content-Disposition.
+  // Import: POST /config/import?format=…&members=… with the file as the body (Fit-Store-Password for a store sealed
+  // with its own password, If-Match the draft's ETag) answers as PUT /config/text does. members, when given, are the
+  // top-level members taken from the file (the page's part); without them the file is the whole config.
+  // 导出：POST /config/export {format, members?, password?} 应答文件，文件名取自 Content-Disposition。
+  // 导入：POST /config/import?format=…&members=…，请求体为文件（自带密码加密的 store 用 Fit-Store-Password，If-Match 为草稿的
+  // ETag），应答同 PUT /config/text。给出 members 时只取文件中的这些顶层成员（本页的部分）；否则文件即整个配置。
+  var IE_FORMATS = ['conf', 'yaml', 'json', 'store'];
+  var IE_EXT = { conf: 'conf', yaml: 'yaml', yml: 'yaml', json: 'json', store: 'store' };
+
+  // ieWhat names what an import or export covers. / 导入或导出所涉及的范围。
+  function ieWhat(members) { return members && members.length ? t('cf.ie.part', { m: members.join(', ') }) : t('cf.ie.whole'); }
+  function formatSelect(fmt, onchange) {
+    var sel = h('select.select', { onchange: onchange }, IE_FORMATS.map(function (f) { return h('option', { value: f, selected: f === fmt }, t('cf.ie.f.' + f)); }));
+    sel.value = fmt;
+    return sel;
+  }
+  // A header value is Latin-1 to fetch; a store password is kept to printable ASCII. / 请求头值须为可打印 ASCII。
+  function asciiOK(pw) { return /^[\x20-\x7e]*$/.test(pw); }
+  // fileName is the name a reply's Content-Disposition gives, if any. / 应答 Content-Disposition 中的文件名（若有）。
+  function fileName(cd) {
+    if (!cd) return '';
+    var m = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(cd);
+    if (m) { try { return decodeURIComponent(m[1].trim()); } catch (e) { /* as written / 原样 */ } }
+    m = /filename\s*=\s*"([^"]*)"/.exec(cd) || /filename\s*=\s*([^;]+)/.exec(cd);
+    return m ? m[1].trim() : '';
+  }
+  function saveBlob(blob, name) {
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  // exportDialog asks for the format (and a store's password) and downloads the members' part of the running config,
+  // or all of it. / exportDialog 询问格式（及 store 密码），下载运行中配置的成员部分或整个配置。
+  function exportDialog(members, fmt) {
+    members = members || [];
+    var pw = h('input.input', { type: 'password', name: 'store-password', autocomplete: 'new-password' });
+    var pwField = UI.field(t('cf.ie.password'), pw, t('cf.ie.export.pw.hint'));
+    var sel = formatSelect(IE_FORMATS.indexOf(fmt) >= 0 ? fmt : 'yaml', function () { pwField.hidden = sel.value !== 'store'; });
+    pwField.hidden = sel.value !== 'store';
+    var err = h('div.callout.callout--danger', { hidden: true });
+    function go() {
+      err.hidden = true;
+      var f = sel.value, body = { format: f };
+      if (members.length) body.members = members;
+      if (f === 'store' && pw.value) body.password = pw.value;
+      return call('POST', '/config/export', body).then(function (r) {
+        if (!r.ok) {
+          return readJSON(r).then(function (res) {
+            if (r.status === 401) return;
+            err.textContent = res.error || r.status + ' ' + r.statusText; err.hidden = false;
+            return false;
+          });
+        }
+        return r.blob().then(function (b) {
+          var name = fileName(r.headers.get('Content-Disposition')) || 'fit-' + (members.length ? members.join('-') : 'config') + '.' + f;
+          saveBlob(b, name);
+          UI.toast(t('cf.ie.exported', { name: name }));
+        });
+      });
+    }
+    UI.modal({
+      title: t('cf.ie.export.title', { what: ieWhat(members) }),
+      body: h('div.stack', h('div.callout', UI.icon('info'), ' ', t('cf.ie.export.note')),
+        isDirty() ? h('div.callout.callout--warn', UI.icon('alert'), ' ', t('cf.ie.export.dirty')) : null,
+        UI.field(t('cf.ie.format'), sel), pwField, err),
+      actions: [{ label: t('cancel') }, { label: t('cf.ie.export'), kind: 'primary', onclick: go }]
+    });
+  }
+
+  // importDialog asks for a file, its format (from its extension) and a store's password, and applies it in place of
+  // the members' part of the config, or of all of it; a success reads the config again as a save does.
+  // importDialog 询问文件、格式（按扩展名推断）与 store 密码，用其替换配置中成员的部分或整个配置并立即应用；
+  // 成功后与保存一样重新读取配置。
+  function importDialog(members) {
+    members = members || [];
+    var pw = h('input.input', { type: 'password', name: 'store-password', autocomplete: 'off' });
+    var pwField = UI.field(t('cf.ie.password'), pw, t('cf.ie.import.pw.hint'));
+    var sel = formatSelect('yaml', function () { pwField.hidden = sel.value !== 'store'; });
+    var file = h('input.input', { type: 'file', accept: '.conf,.yaml,.yml,.json,.store', onchange: function () {
+      var f = file.files && file.files[0], m = f ? /\.([A-Za-z]+)$/.exec(f.name) : null, ext = m ? IE_EXT[m[1].toLowerCase()] : null;
+      if (ext) sel.value = ext;
+      pwField.hidden = sel.value !== 'store';
+    } });
+    pwField.hidden = true;
+    var err = h('div.callout.callout--danger', { hidden: true });
+    function showErr(parts) { UI.mount(err, parts); err.hidden = false; }
+    function go() {
+      err.hidden = true;
+      var f = file.files && file.files[0], fmt = sel.value;
+      if (!f) { showErr(t('cf.ie.file.need')); return false; }
+      if (fmt === 'store' && !asciiOK(pw.value)) { showErr(t('cf.ie.pw.ascii')); return false; }
+      return (isDirty() ? UI.confirm(t('cf.ie.dirty.q'), t('cf.ie.apply'), true) : Promise.resolve(true)).then(function (ok) {
+        if (!ok) return false;
+        var q = '/config/import?format=' + encodeURIComponent(fmt) + (members.length ? '&members=' + encodeURIComponent(members.join(',')) : '');
+        var hd = { 'Content-Type': fmt === 'store' ? 'application/octet-stream' : 'text/plain; charset=utf-8' };
+        if (S.etag) hd['If-Match'] = S.etag;
+        if (fmt === 'store' && pw.value) hd['Fit-Store-Password'] = pw.value;
+        return call('POST', q, f, hd).then(function (r) {
+          return readJSON(r).then(function (res) {
+            if (r.ok) {
+              var w = res.warnings || [];
+              return fetchConfig(false).then(function () {
+                S.message = w.length ? { kind: 'warn', text: t('cf.warnings', { v: res.version }), list: w } : null;
+                UI.toast(t('cf.applied', { v: res.version }));
+                paintNotice(); redraw();
+                refreshMenu();
+              });
+            }
+            if (r.status === 401) return;
+            if (r.status === 412) { showErr([h('b', t('cf.ie.failed')), h('div.small', t('cf.changed'))]); return false; }
+            showErr(problemParts(t('cf.ie.failed'), res.error || (res.errors && res.errors.length ? '' : r.status + ' ' + r.statusText), res.errors));
+            return false;
+          });
+        });
+      });
+    }
+    UI.modal({
+      title: t('cf.ie.import.title', { what: ieWhat(members) }),
+      body: h('div.stack',
+        h('div.callout.callout--warn', UI.icon('alert'), ' ', members.length ? t('cf.ie.warn.part', { m: members.join(', ') }) : t('cf.ie.warn.whole')),
+        isDirty() ? h('div.callout.callout--warn', UI.icon('alert'), ' ', t('cf.ie.dirty')) : null,
+        UI.field(t('cf.ie.file'), file), UI.field(t('cf.ie.format'), sel), pwField, err),
+      actions: [{ label: t('cancel') }, { label: t('cf.ie.apply'), kind: 'danger', onclick: go }]
+    });
   }
 
   // ---- state / 状态 ----
@@ -1041,6 +1210,8 @@
     ensure: function () { return ensure(); },
     page: page, section: section, redraw: redraw, changed: changed, save: save, discard: discard, reload: reload, rollback: rollback,
     place: function (fn) { S.places.push(fn); },
+    // exportDialog(members, fmt) and importDialog(members): the whole config without members. / 无 members 时为整个配置。
+    exportDialog: function (members, fmt) { exportDialog(members, fmt); }, importDialog: function (members) { importDialog(members); },
     sections: function () { return Object.keys(rootProps()); },
     describe: function (name) { return doc(resolve(rootProps()[name] || {}).description || ''); },
     resolve: function (s) { return resolve(s); },

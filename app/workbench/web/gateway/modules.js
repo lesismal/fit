@@ -393,7 +393,9 @@
   // ---- System: the config's other members / 系统：配置的其余成员 ----
   WB.module({
     id: 'sys.config', server: 'admin', group: 'system', order: 1, icon: 'settings', label: 'm.config', words: WORDS,
-    nav: SYS.concat(['other']).map(function (s) { return { id: s, icon: SYS_ICONS[s], label: 's.' + s }; }),
+    // The last page, transfer, exports and imports the whole config (config.js's dialogs). / 最后一页 transfer 导出与导入整个配置。
+    nav: SYS.concat(['other']).map(function (s) { return { id: s, icon: SYS_ICONS[s], label: 's.' + s }; })
+      .concat([{ id: 'transfer', icon: 'swap', label: 'cf.ie.page' }]),
     setup: function (UI, sh) {
       var h = UI.h, t = UI.t;
       var routes = {};
@@ -414,6 +416,20 @@
           if (!rest.length) { body.appendChild(UI.empty(t('other.none'))); return; }
           rest.forEach(function (s) { body.appendChild(h('h3', { style: { margin: '8px 0 0' } }, h('code', s))); body.appendChild(C.section(s)); });
         }, { members: function () { return restMembers(FitConfig.with(UI)); } });
+      };
+      // transfer: the whole config to a file and back; each page with format tabs does the same for its part.
+      // transfer：整个配置导出为文件或从文件导入；带格式标签的页面对其部分做同样的事。
+      routes.transfer = function () {
+        edit(UI, sh, 'transfer', t('cf.ie.page'), function (body) {
+          var C = FitConfig.with(UI);
+          body.appendChild(h('div.callout', UI.icon('info'), ' ', t('cf.ie.page.note')));
+          body.appendChild(UI.card(t('cf.ie.export.title', { what: t('cf.ie.whole') }), h('div.stack',
+            h('div.small.muted', t('cf.ie.export.note')), h('div.small.muted', t('cf.ie.formats')),
+            h('div.btn-row', UI.btn(t('cf.ie.export'), 'download', function () { C.exportDialog([], 'yaml'); }, 'primary')))));
+          body.appendChild(UI.card(t('cf.ie.import.title', { what: t('cf.ie.whole') }), h('div.stack',
+            h('div.callout.callout--warn', UI.icon('alert'), ' ', t('cf.ie.warn.whole')),
+            h('div.btn-row', UI.btn(t('cf.ie.import'), 'upload', function () { C.importDialog([]); }, 'danger')))));
+        });
       };
       return { routes: routes };
     }

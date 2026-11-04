@@ -57,14 +57,20 @@ type Session struct {
 	User          string
 	CSRF          string
 	Created, Seen time.Time
+	// MustChange is a session of a user whose password is temporary, as
+	// SetTemporary made it: it may change the password and nothing else,
+	// until Expires; changing it clears MustChange.
+	MustChange bool
+	Expires    time.Time
 }
 
 // Logins are the users who may log in and the sessions of those who did.
 // Its methods are safe to call from any goroutine.
 type Logins struct {
-	usersMu  sync.RWMutex      // held for a brief read by Check, and for a change of users
-	users    map[string][]byte // user name to bcrypt hash
-	dummy    []byte            // a hash to check unknown names against
+	usersMu  sync.RWMutex         // held for a brief read by Check, and for a change of users
+	users    map[string][]byte    // user name to bcrypt hash
+	temp     map[string]time.Time // users whose password is temporary, to when it lasts
+	dummy    []byte               // a hash to check unknown names against
 	idle     time.Duration
 	lifetime time.Duration
 	max      int
@@ -85,7 +91,7 @@ type failures struct {
 // New returns the logins o describes, with no session yet.
 func New(o Options) (*Logins, error) {
 	l := &Logins{
-		users: map[string][]byte{}, idle: o.Idle, lifetime: o.Lifetime, max: max(o.MaxSessions, 1),
+		users: map[string][]byte{}, temp: map[string]time.Time{}, idle: o.Idle, lifetime: o.Lifetime, max: max(o.MaxSessions, 1),
 		now: time.Now, checks: make(chan struct{}, Checks),
 		sessions: map[[sha256.Size]byte]*Session{}, fails: map[string]*failures{},
 	}
@@ -149,11 +155,49 @@ func (l *Logins) HasUser(user string) bool {
 
 // SetPassword sets user's bcrypt hash, adding the user when it is not there
 // yet: a password changed from a console is checked here from then on,
-// before fit restarts and reads it from the store.
+// before fit restarts and reads it from the store. A temporary password is
+// temporary no more, and the user's sessions may do everything again.
 func (l *Logins) SetPassword(user string, hash []byte) {
 	l.usersMu.Lock()
-	defer l.usersMu.Unlock()
 	l.users[user] = slices.Clone(hash)
+	_, wasTemp := l.temp[user]
+	delete(l.temp, user)
+	l.usersMu.Unlock()
+	if !wasTemp {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, s := range l.sessions {
+		if s.User == user {
+			s.MustChange, s.Expires = false, time.Time{}
+		}
+	}
+}
+
+// SetTemporary makes user's password a temporary one, good until until: a
+// session started with it may only change the password (Session.MustChange),
+// and after until Expired reports it, so that the console refuses it.
+func (l *Logins) SetTemporary(user string, until time.Time) {
+	l.usersMu.Lock()
+	defer l.usersMu.Unlock()
+	l.temp[user] = until
+}
+
+// Temporary returns when user's temporary password stops working, and false
+// when the password is not temporary.
+func (l *Logins) Temporary(user string) (time.Time, bool) {
+	l.usersMu.RLock()
+	defer l.usersMu.RUnlock()
+	until, ok := l.temp[user]
+	return until, ok
+}
+
+// Expired reports whether user's password is a temporary one past its time:
+// a login or a password change with it is refused, until fit restarts.
+func (l *Logins) Expired(user string) bool {
+	until, ok := l.Temporary(user)
+	return ok && !l.now().Before(until)
 }
 
 // Start starts a session for user and returns its token, ending the oldest
@@ -164,6 +208,9 @@ func (l *Logins) Start(user string) (string, Session) {
 	_, _ = rand.Read(csrf)
 	now := l.now()
 	s := &Session{User: user, CSRF: base64.RawURLEncoding.EncodeToString(csrf), Created: now, Seen: now}
+	if until, ok := l.Temporary(user); ok {
+		s.MustChange, s.Expires = true, until
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for len(l.sessions) >= l.max {

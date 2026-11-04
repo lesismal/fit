@@ -87,6 +87,11 @@ type Options struct {
 	Modules func() []*Module
 	// MaxBody bounds a request's body; MaxBodyBytes when 0.
 	MaxBody int64
+	// PasswordRoutes are the endpoints, as "POST /api/m/admin/account/password",
+	// that a session whose password is temporary (login.Session.MustChange)
+	// may call beside GET /api/session, GET /api/workbench and the logout;
+	// every other answers 403 until the password changes.
+	PasswordRoutes []string
 }
 
 // Module is an API a console serves under /api/m/<ID>/: a role's, made once
@@ -151,6 +156,7 @@ type Console struct {
 	files   map[string]file
 	routes  routeTable
 	modules func() []*Module
+	pwOnly  []string // Options.PasswordRoutes
 	tasks   chan func()
 	limit   *limitHandler
 	stop    chan struct{}
@@ -204,7 +210,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules,
+	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), stop: make(chan struct{})}
 	switch {
 	case o.Log != nil:
@@ -423,10 +429,14 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusForbidden, "the request lacks the session's "+CSRFHeader+" token")
 		return
 	}
+	if s.MustChange && !c.passwordRoute(r.Method, p) {
+		_ = WriteJSON(ctx, stdhttp.StatusForbidden, mustChangeBody{Error: "change the temporary password first", MustChange: true})
+		return
+	}
 	if r.Method == stdhttp.MethodGet {
 		switch p {
 		case "/api/session":
-			_ = WriteJSON(ctx, stdhttp.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
+			_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(s))
 			return
 		case "/api/workbench":
 			_ = WriteJSON(ctx, stdhttp.StatusOK, workbenchBody{User: s.User, Modules: c.moduleIDs()})
@@ -507,6 +517,40 @@ type loginBody struct {
 type sessionBody struct {
 	User string `json:"user"`
 	CSRF string `json:"csrf"`
+	// MustChange is a session whose password is temporary, and Expires when
+	// that password stops working.
+	MustChange bool   `json:"must_change_password,omitempty"`
+	Expires    string `json:"password_expires,omitempty"`
+}
+
+func newSessionBody(s *login.Session) sessionBody {
+	b := sessionBody{User: s.User, CSRF: s.CSRF, MustChange: s.MustChange}
+	if s.MustChange {
+		b.Expires = s.Expires.UTC().Format(time.RFC3339)
+	}
+	return b
+}
+
+// mustChangeBody is the answer to a request a session with a temporary
+// password may not make, and passwordExpiredBody a login with such a
+// password past its time.
+type mustChangeBody struct {
+	Error      string `json:"error"`
+	MustChange bool   `json:"must_change_password"`
+}
+
+type passwordExpiredBody struct {
+	Error   string `json:"error"`
+	Expired bool   `json:"password_expired"`
+}
+
+// passwordRoute reports whether a session with a temporary password may
+// call method and path.
+func (c *Console) passwordRoute(method, p string) bool {
+	if method == stdhttp.MethodGet && (p == "/api/session" || p == "/api/workbench") {
+		return true
+	}
+	return slices.Contains(c.pwOnly, method+" "+p)
 }
 
 func (c *Console) login(ctx *fibhttp.Context) {
@@ -541,10 +585,15 @@ func (c *Console) login(ctx *fibhttp.Context) {
 			_ = Error(ctx, stdhttp.StatusUnauthorized, "the user name or password is wrong")
 			return
 		}
+		if c.logins.Expired(body.Username) {
+			c.warnf("console: a login as %q from %s with its temporary password, which has expired", body.Username, addr)
+			_ = WriteJSON(ctx, stdhttp.StatusUnauthorized, passwordExpiredBody{Error: "the temporary password of " + strconv.Quote(body.Username) + " has expired without being changed; restart fit with -admin to set a new one in time", Expired: true})
+			return
+		}
 		token, s := c.logins.Start(body.Username)
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 		c.infof("console: %q logged in from %s", body.Username, addr)
-		_ = WriteJSON(ctx, stdhttp.StatusOK, sessionBody{User: s.User, CSRF: s.CSRF})
+		_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(&s))
 	})
 }
 

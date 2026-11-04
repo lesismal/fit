@@ -129,3 +129,91 @@ func hasAdmin(data []byte) bool {
 // errAdminInStore is a config with admin of its own, while admin comes from
 // the bootstrap file.
 var errAdminInStore = config.Errors{{Path: "admin", Msg: "admin is set in the config file fit started with, while the rest of the config is kept in the store; it changes when fit restarts"}}
+
+// MergeConfig returns over, a config as a JSON object, merged onto base,
+// another: an object member both set is merged the same way, member by
+// member, and every other value over sets replaces base's, lists whole.
+// base's members come first, in their order, then those only over sets.
+func MergeConfig(base, over []byte) ([]byte, error) {
+	b, err := decodeObject(base)
+	if err != nil {
+		return nil, err
+	}
+	o, err := decodeObject(over)
+	if err != nil {
+		return nil, err
+	}
+	return encodeJSON(mergeObjects(b, o)), nil
+}
+
+func mergeObjects(base, over *object) *object {
+	for _, k := range over.keys {
+		ov, _ := over.get(k)
+		if bv, ok := base.get(k); ok {
+			bo, bok := bv.(*object)
+			oo, ook := ov.(*object)
+			if bok && ook {
+				base.set(k, mergeObjects(bo, oo))
+				continue
+			}
+		}
+		base.set(k, ov)
+	}
+	return base
+}
+
+// DefaultConsoleUser is the console user fit run -admin adds when the
+// config names none, with a temporary password, DefaultConsolePassword.
+const (
+	DefaultConsoleUser     = "admin"
+	DefaultConsolePassword = "admin"
+)
+
+// WithDefaultConsole returns data, a config as standard JSON, with admin and
+// admin.console set, their defaults where the config leaves them out, as
+// fit run -admin asks; when admin.console names no user, it gets
+// DefaultConsoleUser with hash, the bcrypt hash of DefaultConsolePassword,
+// and temp names that user, whose password is to be changed in time.
+func WithDefaultConsole(data []byte, hash string) (out []byte, temp string, err error) {
+	root, err := decodeObject(data)
+	if err != nil {
+		return nil, "", err
+	}
+	a, err := memberObject(root, "admin", "admin")
+	if err != nil {
+		return nil, "", err
+	}
+	c, err := memberObject(a, "console", "admin.console")
+	if err != nil {
+		return nil, "", err
+	}
+	if users, ok := c.get("users"); !ok || isEmptyList(users) {
+		u := &object{vals: map[string]any{}}
+		u.set("username", DefaultConsoleUser)
+		u.set("password_hash", hash)
+		c.set("users", []any{u})
+		temp = DefaultConsoleUser
+	}
+	return encodeJSON(root), temp, nil
+}
+
+// memberObject returns o's member k, an object at path, adding an empty one when o
+// has none.
+func memberObject(o *object, k, path string) (*object, error) {
+	v, ok := o.get(k)
+	if !ok || v == nil {
+		m := &object{vals: map[string]any{}}
+		o.set(k, m)
+		return m, nil
+	}
+	m, ok := v.(*object)
+	if !ok {
+		return nil, config.Errors{{Path: path, Msg: "must be an object"}}
+	}
+	return m, nil
+}
+
+func isEmptyList(v any) bool {
+	l, ok := v.([]any)
+	return v == nil || ok && len(l) == 0
+}

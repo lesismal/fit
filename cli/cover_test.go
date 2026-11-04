@@ -80,7 +80,7 @@ func TestStoreCommandErrors(t *testing.T) {
 	}
 
 	writeFile(t, cfg, `{"admin": {"address": "127.0.0.1:0"}}`)
-	if code, stderr := storeRun("export", "-c", cfg); code != 1 || !strings.Contains(stderr, "sets no admin.store") {
+	if code, stderr := storeRun("export", "-c", cfg); code != 1 || !strings.Contains(stderr, "names no store") {
 		t.Errorf("no admin.store: %d %q", code, stderr)
 	}
 
@@ -164,7 +164,7 @@ func TestStoreImportKeepsConsoleUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := openStore(std)
+	b, err := openStore(std, storeSpec{})
 	if err != nil || b == nil {
 		t.Fatalf("the store: %v, %v", b, err)
 	}

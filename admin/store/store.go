@@ -271,6 +271,53 @@ func (s *Store) derive() {
 // Path returns the store's file.
 func (s *Store) Path() string { return s.path }
 
+// Seal returns a fitstore file holding data, a base config as JSON, and
+// users, sealed with the store's own key, as an export of it that opens with
+// the store's password; the store's file is not touched.
+func (s *Store) Seal(data []byte, users []User) ([]byte, error) {
+	plaintext, err := encode(data, users)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seal(version, plaintext), nil
+}
+
+// Unseal opens file, a whole fitstore file such as an export, with the
+// store's password, and returns the base config and the users it holds; the
+// store's file and what the store remembers are not touched.
+func (s *Store) Unseal(file []byte) ([]byte, []User, error) {
+	return Unseal(file, s.password)
+}
+
+// Seal returns a fitstore file holding data and users, sealed with a key
+// password gives with a new salt, as Create's first Write would make it.
+func Seal(password string, data []byte, users []User) ([]byte, error) {
+	s, err := Create("", password)
+	if err != nil {
+		return nil, err
+	}
+	return s.Seal(data, users)
+}
+
+// Unseal opens file, a whole fitstore file, with password, and returns the
+// base config and the users it holds.
+func Unseal(file []byte, password string) ([]byte, []User, error) {
+	if password == "" {
+		return nil, nil, errors.New("store: the password is empty")
+	}
+	if len(file) > MaxBytes+headerLen+chacha20poly1305.Overhead {
+		return nil, nil, fmt.Errorf("store: the file is larger than %d bytes", MaxBytes)
+	}
+	s := &Store{path: "the file", password: password}
+	data, err := s.open(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, s.users, nil
+}
+
 // Users returns the console users kept beside the config.
 func (s *Store) Users() []User {
 	s.mu.Lock()

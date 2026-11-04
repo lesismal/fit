@@ -189,6 +189,9 @@
   var CSRF = 'X-Fit-Csrf';
   var csrfToken = '';
   var onUnauthorized = null;
+  // onMustChange is called when a reply says the session must change its default password first (403
+  // {"must_change_password": true}). / 应答表明会话须先修改默认密码（403 {"must_change_password": true}）时调用。
+  var onMustChange = null;
   function setCsrf(v) { csrfToken = v || ''; }
   function addCsrf(method, headers) { if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers[CSRF] = csrfToken; }
   // httpError builds the Error of a failed reply: JSON {"error": "message", "code": <int>}.
@@ -199,8 +202,16 @@
     var msg = j && typeof j === 'object' ? (typeof j.error === 'string' ? j.error : (j.error && j.error.message) || j.message) : null;
     var err = new Error(msg || (r.status + ' ' + r.statusText));
     err.status = r.status; err.code = j && typeof j === 'object' && j.code != null ? j.code : undefined;
+    // must_change_password (403: the default password must be changed first) and password_expired (401 of a login
+    // with the expired default password). / must_change_password（403：须先修改默认密码）与 password_expired
+    // （以过期的默认密码登录时的 401）。
+    if (j && typeof j === 'object') { err.mustChange = j.must_change_password === true; err.passwordExpired = j.password_expired === true; }
+    if (err.mustChange && r.status === 403) mustChange();
     return err;
   }
+  // mustChange tells the workbench that the session must change its default password before anything else.
+  // mustChange 通知工作台：会话须先修改默认密码。
+  function mustChange() { if (onMustChange) onMustChange(); }
   // api(method, path, body) → Promise of the reply's JSON body (null for 204 or an empty body); a non-2xx status
   // rejects with an Error carrying message, status and code.
   // api(method, path, body) → 应答 JSON 体的 Promise（204 或空应答体为 null）；非 2xx 时 reject 带 message、status 与 code 的 Error。
@@ -223,21 +234,32 @@
     });
   }
   // raw(method, path, body, headers) → Promise of the fetch Response, for a caller that needs its headers (as an ETag):
-  // the module's base and the CSRF header are applied, a body that is not a string is sent as JSON, and a 401 calls
-  // the unauthorized callback; the status is the caller's to check.
+  // the module's base and the CSRF header are applied, a body that is not a string, Blob (a File) or ArrayBuffer is
+  // sent as JSON, a 401 calls the unauthorized callback, and a 403 that asks for the default password's change calls
+  // that callback; the status is the caller's to check.
   // raw(method, path, body, headers) → fetch Response 的 Promise，供需要应答头（如 ETag）的调用方使用：应用模块前缀与 CSRF
-  // 请求头，非字符串的 body 以 JSON 发送，401 时调用未登录回调；状态码由调用方检查。
+  // 请求头，非字符串、Blob（File）或 ArrayBuffer 的 body 以 JSON 发送，401 时调用未登录回调，要求修改默认密码的 403 时调用
+  // 相应回调；状态码由调用方检查。
   function raw(method, path, body, headers) {
     if (this && this.base && path.indexOf('/api/') === 0) path = this.base + path.slice(4);
     var opt = { method: method, headers: {}, credentials: 'same-origin' };
     Object.keys(headers || {}).forEach(function (k) { opt.headers[k] = headers[k]; });
     addCsrf(method, opt.headers);
     if (body !== undefined) {
+      var as = typeof body === 'string' || (typeof Blob !== 'undefined' && body instanceof Blob) || body instanceof ArrayBuffer;
       opt.headers['Content-Type'] = opt.headers['Content-Type'] || 'application/json';
-      opt.body = typeof body === 'string' ? body : JSON.stringify(body);
+      opt.body = as ? body : JSON.stringify(body);
     }
     return fetch(path, opt).then(function (r) {
       if (r.status === 401 && onUnauthorized) onUnauthorized();
+      if (r.status === 403 && onMustChange) {
+        // The body stays the caller's: a clone is read. / 应答体仍归调用方：读取的是副本。
+        r.clone().text().then(function (x) {
+          var j = null;
+          try { j = JSON.parse(x); } catch (e) { /* not json / 非 JSON */ }
+          if (j && j.must_change_password === true) mustChange();
+        }, function () { /* ignore / 忽略 */ });
+      }
       return r;
     });
   }
@@ -306,10 +328,15 @@
   function rpcStream(method, req, onData, signal) { return (this && this.stream ? this : UI).stream('/api/stream' + method, req || {}, onData, { signal: signal }); }
 
   // ---- Session / 会话 ----
-  // GET /api/session → {user, csrf} (401 when not logged in); POST /api/login {username, password} → {user, csrf};
+  // GET /api/session → {user, csrf, must_change_password, password_expires?} (401 when not logged in); POST /api/login
+  // {username, password} → the same (a 401 with password_expired: true for the expired default password);
   // POST /api/logout → 204; GET /api/me → {user, identity, api_url?}. session and login remember the CSRF token.
-  // GET /api/session → {user, csrf}（未登录时 401）；POST /api/login {username, password} → {user, csrf}；
-  // POST /api/logout → 204；GET /api/me → {user, identity, api_url?}。session 与 login 会记住 CSRF 令牌。
+  // must_change_password: the session runs on the default password of `fit run -admin`, which must be changed before
+  // anything else, by password_expires (RFC 3339).
+  // GET /api/session → {user, csrf, must_change_password, password_expires?}（未登录时 401）；POST /api/login
+  // {username, password} → 同上（默认密码已过期时为带 password_expired: true 的 401）；POST /api/logout → 204；
+  // GET /api/me → {user, identity, api_url?}。session 与 login 会记住 CSRF 令牌。must_change_password：会话使用的是
+  // `fit run -admin` 的默认密码，须在 password_expires（RFC 3339）之前修改，修改前不能做其他操作。
   function remember(s) { setCsrf(s && s.csrf); return s; }
   function session() { return api('GET', '/api/session', undefined, true).then(remember); }
   function login(user, pass) { return api('POST', '/api/login', { username: user, password: pass }, true).then(remember); }
@@ -326,7 +353,7 @@
     toastBox.appendChild(el);
     setTimeout(function () { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 300); }, kind === 'error' ? 6000 : 3000);
   }
-  function fail(e) { if (e && e.status === 401) return; toast(e && e.message ? e.message : String(e), 'error'); }
+  function fail(e) { if (e && (e.status === 401 || e.mustChange)) return; toast(e && e.message ? e.message : String(e), 'error'); }
 
   // modal({title, body, wide, actions:[{label, kind, onclick → false keeps it open / 返回 false 保持打开}]}) → close()
   var modals = [];
@@ -537,6 +564,7 @@
     t: t, addI18n: addI18n, lang: function () { return lang; }, zh: function () { return lang === 'zh-CN'; },
     h: h, mount: mount, clear: clear, icon: icon, base: '',
     api: api, raw: raw, rpc: rpc, stream: stream, rpcStream: rpcStream, setUnauthorized: function (fn) { onUnauthorized = fn; },
+    setMustChange: function (fn) { onMustChange = fn; },
     session: session, login: login, logout: logout, me: me, workbench: workbench, configNote: configNote, scope: scope,
     toast: toast, fail: fail, modal: modal, closeModals: closeModals, confirm: confirmBox, busy: busy, copy: copyText,
     fmtMB: fmtMB, fmtNum: fmtNum, fmtDur: fmtDur, ago: ago, fmtTime: fmtTime,

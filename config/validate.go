@@ -30,6 +30,9 @@ func (c *Config) Validate() Errors {
 	case len(c.Routes) == 0 && c.HasApps():
 		// Only roles, the LLM feature's, the tunnel's or WebRTC's, which
 		// listen where their own members say.
+	case len(c.Routes) == 0 && c.Admin != nil && c.Admin.Console != nil:
+		// Only the console, as fit run -admin starts with nothing else:
+		// the rest is configured from it.
 	case !auto.on():
 		errs = append(errs, &Error{Path: "listeners", Msg: "at least one listener is needed"})
 	case len(c.autoNames("")) == 0:

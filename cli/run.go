@@ -16,6 +16,7 @@ import (
 
 	"github.com/lesismal/fit/adapter"
 	"github.com/lesismal/fit/admin"
+	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
@@ -25,6 +26,7 @@ import (
 	fitruntime "github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tlsmgr"
 	"github.com/lesismal/fit/upstream"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func runRun(args []string, stdout, stderr io.Writer) int {
@@ -58,6 +60,8 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	watch := flags.Bool("watch", false, "apply the config again each time one of its files changes, or a directory's files are added or taken out, as SIGHUP does")
 	watchInterval := flags.Duration("watch-interval", file.DefaultInterval, "how often watched files are looked at: the config's, with -watch, and certificate files, with -watch-certs")
 	watchCerts := flags.Bool("watch-certs", true, "apply the running config again each time the certificate or key files it loaded change")
+	adminOn := flags.Bool("admin", false, "serve the Admin API and the console with their defaults where the config leaves them out, and keep the config in a store; with no console user in the config, the user admin logs in with the password admin, which must be changed within -timeout")
+	timeout := flags.Duration("timeout", 10*time.Minute, "with -admin, how long the console's default password, admin, works: it must be changed within that time, before the console or the Admin API can be used, or fit must be restarted")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -65,17 +69,34 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		fmt.Fprintf(stderr, "fit run: unexpected argument %q\n", flags.Arg(0))
 		return 2
 	}
+	timeoutSet := false
+	flags.Visit(func(f *flag.Flag) { timeoutSet = timeoutSet || f.Name == "timeout" })
+	if timeoutSet && !*adminOn {
+		fmt.Fprintln(stderr, "fit run: -timeout is the default password's time, which needs -admin")
+		return 2
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(stderr, "fit run: -timeout must be more than 0")
+		return 2
+	}
+	started := time.Now()
 
 	paths := cfgPaths.orDefault()
 	cfgName := strings.Join(paths, ", ")
-	set, srcs, err := loadSet(paths)
-	// With admin.store, the config runs from the store, and the files
-	// give admin, and the store's first content when it has none.
+	// The config files, a .store among them aside, and the store that goes
+	// with them: the one admin.store names, a .store given with -c, or the
+	// one beside the files, when it exists or -admin is given. With a
+	// store, the config runs from what it holds merged onto the files'.
+	set, srcs, spec, err := loadBoot(paths, len(cfgPaths) > 0, *adminOn)
 	var boot *storeBoot
+	var tempUser string
 	if err == nil {
 		var std []byte
-		if std, err = config.Standardize(set.JSON); err == nil {
-			boot, err = openStore(std)
+		if std, err = config.Standardize(set.JSON); err == nil && *adminOn {
+			std, tempUser, err = withDefaultAdmin(std)
+		}
+		if err == nil {
+			boot, err = openStore(std, spec)
 		}
 	}
 	mapErrors := set.MapErrors
@@ -84,13 +105,18 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		if boot != nil && !boot.seeded {
 			cfgName, mapErrors = boot.st.Path(), func(err error) error { return err }
 			c, err = config.Load(boot.full())
+		} else if boot != nil {
+			// The files' config, with the admin -admin may have added:
+			// its errors are mapped to the files by their paths.
+			c, err = config.Load(boot.full())
+			err = mapErrors(err)
 		} else {
 			c, err = config.Load(set.JSON)
 			err = mapErrors(err)
 		}
 	}
 	if err == nil && boot != nil && *watch {
-		err = errors.New("-watch watches config files, but with admin.store the config is in the store; send SIGHUP to read the store again")
+		err = fmt.Errorf("-watch watches config files, but the config is kept in the store %s; send SIGHUP to read the store again", boot.st.Path())
 	}
 	if err != nil {
 		printConfigError(stderr, "fit run", cfgName, err)
@@ -119,9 +145,12 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 				return 1
 			}
 			fmt.Fprintf(stdout, "fit: the config of %s is kept in the store %s from now on\n", strings.Join(paths, ", "), boot.st.Path())
-		} else if len(boot.ignored) > 0 {
-			slices.Sort(boot.ignored)
-			fmt.Fprintf(warnWriter(stderr), "fit: %s sets %s beside admin; left out, since the config runs from the store %s\n", strings.Join(paths, ", "), strings.Join(boot.ignored, ", "), boot.st.Path())
+		} else if boot.merged {
+			if err := boot.st.Write(boot.base); err != nil {
+				fmt.Fprintf(stderr, "fit run: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "fit: the store %s merged onto %s, the store's values winning\n", boot.st.Path(), strings.Join(paths, ", "))
 		}
 	}
 	// Upstream connections are dialed through an engine of their own, so
@@ -214,6 +243,15 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		// The console's passwords changed since the bootstrap file was
 		// written are kept beside the config in the store.
 		configs.UseConsoleUsers(boot.st.Users(), boot.st.SetUsers)
+		configs.UseSealer(boot.st)
+		// The default user's password is temporary until it is changed,
+		// which keeps the changed hash in the store.
+		if tempUser != "" && !slices.ContainsFunc(boot.users, func(u store.User) bool { return u.Username == tempUser }) {
+			until := started.Add(*timeout)
+			configs.UseTemporaryPassword(tempUser, until)
+			fmt.Fprintf(warnWriter(stderr), "fit: the console user %q has the password %q until it is changed, which must be by %s; until then the console asks for that change and the Admin API refuses every request\n",
+				tempUser, admin.DefaultConsolePassword, until.Format(time.RFC3339))
+		}
 	}
 	// The llm and tunnel roles run on the listeners' engine, and
 	// write what their pages change back into the config through configs.
@@ -481,4 +519,15 @@ func printApplied(stdout, stderr io.Writer, r admin.Result) {
 	for _, e := range r.Deprecated {
 		fmt.Fprintf(stderr, "fit: %s\n", e)
 	}
+}
+
+// withDefaultAdmin returns the config std, standard JSON, with admin and
+// admin.console set, as -admin asks, and the default console user, whose
+// password is temporary, when the config names no user.
+func withDefaultAdmin(std []byte) ([]byte, string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(admin.DefaultConsolePassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, "", err
+	}
+	return admin.WithDefaultConsole(std, string(hash))
 }

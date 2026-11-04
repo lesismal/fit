@@ -4,8 +4,11 @@
    配置编辑器的格式标签页、原始文本编辑器与“是否设置”复选框（gateway/config.js）。
    配置编辑器其余的样式在 core/ui.css 中；index.html 在本文件之后加载它。 */
 
-/* The UI / .conf / .yaml / .json tabs of a config-editing page. / 编辑配置页面的 UI/.conf/.yaml/.json 标签页。 */
-.cf-tabs { margin-bottom: 12px; }
+/* The UI / .conf / .yaml / .json tabs of a config-editing page, with its Export and Import beside them.
+   编辑配置页面的 UI/.conf/.yaml/.json 标签页，旁边是其导出与导入按钮。 */
+.cf-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.cf-tabs__list { flex: 1 1 auto; min-width: 0; }
+.cf-tabs__tools { flex: none; }
 
 /* A raw format's panel: the hint, the parse-error callout, the loading line, the text and its tools. / 原始文本面板。 */
 .cf-raw-panel { gap: 8px; }

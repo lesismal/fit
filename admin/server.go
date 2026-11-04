@@ -171,6 +171,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /config/render", s.renderText)
 	mux.HandleFunc("POST /config/parse", s.parseText)
 	mux.HandleFunc("PUT /config/text", s.putText)
+	mux.HandleFunc("POST /config/export", s.exportConfig)
+	mux.HandleFunc("POST /config/import", s.importConfig)
 	mux.HandleFunc("POST /load", s.load)
 	mux.HandleFunc("POST /rollback/{n}", s.rollback)
 	mux.HandleFunc("GET /versions", s.versions)
@@ -221,6 +223,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // not a loopback name, as a web page's is after DNS rebinding.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, _ := s.configs.TemporaryPassword(); user != "" {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("the console user %q still has its temporary password: change it on the console first", user))
+			return
+		}
 		if s.token != nil && !isDashboard(r) {
 			got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if !ok || subtle.ConstantTimeCompare([]byte(got), s.token) != 1 {

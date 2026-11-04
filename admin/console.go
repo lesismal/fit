@@ -85,13 +85,19 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 			return out
 		},
 		// A config as large as the Admin API takes, with room for the
-		// request's own JSON around it.
+		// request's own JSON around it, or a store's binary import.
 		MaxBody: a.ConfigBytes() + 64<<10,
+		// A session whose password is temporary reads who it is and
+		// changes it, and does nothing else.
+		PasswordRoutes: []string{"GET /api/m/" + AdminModule + "/users", "POST /api/m/" + AdminModule + "/account/password"},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs.logins = cs.c.Logins()
+	if user, until := configs.TemporaryPassword(); user != "" {
+		cs.logins.SetTemporary(user, until)
+	}
 	return cs, nil
 }
 
@@ -205,6 +211,16 @@ func (cs *Console) accountPassword(r *console.Request) {
 	if msg := passwordProblem(body.Password); msg != "" {
 		_ = console.Error(r.Context, http.StatusBadRequest, msg)
 		return
+	}
+	if _, temp := cs.logins.Temporary(r.User); temp {
+		if cs.logins.Expired(r.User) {
+			_ = console.Error(r.Context, http.StatusForbidden, "the temporary password has expired without being changed; restart fit with -admin to set a new one in time")
+			return
+		}
+		if body.Password == body.CurrentPassword {
+			_ = console.Error(r.Context, http.StatusBadRequest, "the new password must not be the temporary one")
+			return
+		}
 	}
 	addr, ok := cs.passwordReady(r)
 	if !ok {

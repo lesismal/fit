@@ -12,6 +12,8 @@ fit 可以把配置加密保存在它自己格式的文件里，即 **store**，
 - [两个文件](#两个文件)
 - [store](#store)
 - [fit store export 与 import](#fit-store-export-与-import)
+- [fit run -admin](#fit-run--admin)
+- [配置的导入与导出](#配置的导入与导出)
 - [控制台](#控制台)
 - [用户与 fit hash-password](#用户与-fit-hash-password)
 - [登录与会话](#登录与会话)
@@ -46,8 +48,10 @@ fit 可以把配置加密保存在它自己格式的文件里，即 **store**，
 ```
 
 fit 第一次以这个文件启动时还没有 store：`listeners` 和 `routes` 是它的初始内容，store 立即写入，fit 输出
-`the config of fit.json is kept in the store /var/lib/fit/fit.store from now on`。此后以 store 为准：引导文件中
-`admin` 之外的设置被忽略，并给出警告，列出被忽略的成员，引导文件只读取 `admin`。要重新从文件开始，删除 store。
+`the config of fit.json is kept in the store /var/lib/fit/fit.store from now on`。此后每次启动时把 store 合并到引导文件之上，
+store 的值优先：对象逐个成员合并，store 中的列表或值整体替换文件中的（因此运行的是 store 的 `listeners` 和
+`routes`）。只有文件设置的成员会保留，合并后的配置写回 store，并输出 `the store ... merged onto ...`。要重新从文件开始，
+删除 store。*（2026-11-04 修改：此前文件中的这些成员被忽略。）*
 
 `admin` 的设置，包括 store 和控制台的，在 fit 启动时读取；修改后在 fit 重启时生效。
 
@@ -107,6 +111,47 @@ fit store import -c /etc/fit/fit.json /root/fit-config.json
 rm /root/fit-config.json
 kill -HUP "$(pidof fit)"    # 或重启 fit
 ```
+
+## fit run -admin
+
+`fit run -admin` 在没有相关配置时开启 Admin API 和控制台，用于首次启动或从控制台配置一台机器：
+
+```bash
+fit run -admin                       # 有 fit.json 时使用它，否则不需要任何配置
+fit run -admin -c site.yaml -timeout 30m
+```
+
+- 配置未设置的 `admin` 与 `admin.console` 使用默认值（Admin API 在 127.0.0.1:2019，控制台在 127.0.0.1:2020）。
+  没有 `admin.console.users` 时，用户 `admin` 以密码 `admin` 登录。
+- 该密码是**临时的**：必须在 `-timeout`（默认 10m，自启动时起算）内修改。修改之前，用它登录只能打开“修改默认密码”
+  页面：控制台的其他接口一律返回 403 及 `"must_change_password": true`，Admin API 对所有请求返回 403。超过
+  `-timeout` 后该密码无法再登录（401，`"password_expired": true`），须以 `-admin` 重启 fit 并及时修改。新密码不能是
+  `admin`，并保存在 store 中，重启后用新密码登录，不再要求修改。
+- 配置保存在 store 中，页面上的每次修改都写入它。没有 `admin.store` 时，store 是配置文件旁扩展名为 `.store` 的文件
+  （`site.yaml` 对应 `site.store`，`fit.json` 或无配置对应 `fit.store`），密码为 `$FIT_STORE_PASSWORD`，未设置时为
+  store 旁的**密钥文件**，即 store 路径加 `.key`（`site.store.key`），两者都不存在时以随机密钥创建，权限 0600。密钥文件
+  应与 store 一起保存：复制到别处的 store 用它打开，或把 `$FIT_STORE_PASSWORD` 设为其内容。
+- 只有 `admin.console`、没有监听和路由的配置是合法的，fit 可以在尚无服务内容时启动。
+
+`-c` 也接受 `.store` 文件（最多一个），可与配置文件一起或单独给出：`fit run -c site.store` 运行 store 中的配置，
+`fit run -c base.yaml -c site.store` 按上文把它合并到 `base.yaml` 之上；此后写入的就是这个 store（文件设置了
+`admin.store` 时仍使用其密码）。配置文件旁的 `.store` 只要存在就会使用，不论是否给出 `-admin`。`fit store export`
+和 `fit store import` 接受同样的 `-c`。
+
+## 配置的导入与导出
+
+控制台 Global 菜单中的 **Import / Export** 页面导入或导出整个配置；每个编辑部分配置的页面在其格式标签旁有
+**Export** 和 **Import** 按钮，只处理该部分。格式为 `.conf`、`.yaml`、`.json` 和 fitstore 格式的 `.store`：导出
+`.store` 时用对话框中给出的密码封存，未给出时用运行中 store 的密钥（之后用密钥文件或 `$FIT_STORE_PASSWORD` 打开）。
+整个配置的 `.store` 导出还包含修改过密码的控制台用户，因此在别处 `fit run -c backup.store -admin` 可以同时恢复两者。
+导入立即生效，经过与保存相同的路径，并写入 store；带页面成员时只取文件中的这些成员，其余忽略。`admin` 从不导出或导入。
+
+两者都是 Admin API 的接口，控制台在进程内调用：
+
+| 接口 | |
+| --- | --- |
+| `POST /config/export` | 请求体 `{"format": "conf"\|"yaml"\|"json"\|"store", "members": [...], "password": "..."}`；返回文件，带 `Content-Disposition`。 |
+| `POST /config/import?format=...&members=a,b` | 请求体为文件（`text/plain`，`store` 为 `application/octet-stream`），自带密码的 store 用 `Fit-Store-Password`，`If-Match` 可选；返回同 `PUT /config/text`。 |
 
 ## 控制台
 

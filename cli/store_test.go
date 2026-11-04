@@ -69,12 +69,10 @@ func TestServeStore(t *testing.T) {
 		t.Fatalf("stop: %d %q", code, s.err.String())
 	}
 
-	// After a restart, the store wins over the bootstrap file's routes.
+	// After a restart, the store is merged onto the bootstrap file, and
+	// wins over its routes: lists are replaced whole.
 	s = startServe(t, "-c", cfg, "-watch-certs=false")
 	out = s.out.waitFor(t, "fit: admin API on ", 1)
-	if !strings.Contains(s.err.String(), "sets listeners, routes beside admin; left out") {
-		t.Errorf("no warning of what the store wins over: %q", s.err.String())
-	}
 	if got := get(t, "http://"+adminRE.FindStringSubmatch(out)[1]+"/config"); !strings.Contains(got, `"three"`) {
 		t.Errorf("after a restart: %s", got)
 	}

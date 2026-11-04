@@ -31,6 +31,24 @@ started with, in clear text, and the encrypted store.
   console, the Admin API or a rollback, is written to the store once it runs; one that cannot be
   written stays applied, and the result says it is not saved. SIGHUP applies the store again (as
   `fit store import` may have changed it); `-watch` is refused with a store.
+  *Changed 2026-11-04:* the store is merged onto the config files at each start, its values
+  winning (objects member by member, lists and other values whole), and the merged config is
+  written back; members only the files set are kept rather than left out. `-c` may name one
+  `.store` file, used as the store; without `admin.store`, a store beside the config files
+  (`site.yaml` gives `site.store`) is used once it exists, its password `$FIT_STORE_PASSWORD` or the
+  key file `<store>.key`, which fit makes, 0600 and random, when neither exists.
+- **`fit run -admin`** *(added 2026-11-04)* sets `admin`, `admin.console` and their defaults where
+  the config leaves them out, and keeps the config in a store (the default one above when there is
+  no `admin.store`). With no console user configured, the user `admin` has the password `admin`,
+  which is temporary: it must be changed within `-timeout` (10m) of the start. Until then a session
+  with it may only read who it is and change the password (other console endpoints answer 403 with
+  `must_change_password`), and the Admin API refuses every request; after the time it no longer
+  logs in, until fit restarts. A changed password is kept in the store, so that a restart asks
+  nothing. A config with only the console and no listener is valid.
+- **Import and export** *(added 2026-11-04)*: `POST /config/export` and `POST /config/import` move
+  the whole config or a page's top-level members as `.conf`, `.yaml`, `.json` or a `.store` file
+  sealed with a password of its own or the running store's key; an import is applied by the one
+  path every config takes, and `admin` is never exported or imported.
 - **`admin` is never in the store, and never shown.** The bootstrap file's `admin` is put into
   every config as it is loaded, after providers are merged, and not into the base config: `GET
   /config`, `/versions` and `/config/effective` hold no password, hash or key path, as decision 005

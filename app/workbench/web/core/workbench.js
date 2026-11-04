@@ -40,7 +40,18 @@
       'wb.global': 'Global',
       'tag.http': 'HTTP', 'tag.connect': 'HTTP CONNECT', 'tag.tcpudp': 'TCP/UDP', 'tag.tls': 'TLS',
       'tag.streaming': 'RTMP / RTSP / SRT', 'tag.mediaauth': 'media tokens', 'tag.webrtc': 'WebRTC',
-      'tag.tunnel': 'Tunnel', 'tag.llm': 'LLM'
+      'tag.tunnel': 'Tunnel', 'tag.llm': 'LLM',
+      'dp.title': 'Change the default password',
+      'dp.note': 'You signed in as {user} with the default password fit run -admin set. It is temporary: change it now, before anything else. Until it is changed, the console does nothing else.',
+      'dp.left': 'The default password stops working in {left}.',
+      'dp.at': 'It stops working at {at}.',
+      'dp.current': 'Current (default) password', 'dp.new': 'New password', 'dp.confirm': 'Confirm the new password',
+      'dp.hint': 'At most 72 bytes (bcrypt\'s limit).',
+      'dp.need': 'Enter the current password and the new one.',
+      'dp.mismatch': 'The new passwords do not match.',
+      'dp.same': 'The new password must differ from the current one.',
+      'dp.submit': 'Change password and continue', 'dp.done': 'Password changed for {user}.',
+      'dp.expired': 'The default password has expired and no longer works. Restart fit with -admin to get a new one, then sign in and change it in time.'
     },
     'zh-CN': {
       'wb.sub': '工作台', 'wb.filter': '筛选菜单', 'wb.fold': '收起菜单', 'wb.none': '没有匹配项',
@@ -48,7 +59,18 @@
       'wb.global': '全局配置',
       'tag.http': 'HTTP', 'tag.connect': 'HTTP CONNECT', 'tag.tcpudp': 'TCP/UDP', 'tag.tls': 'TLS',
       'tag.streaming': 'RTMP / RTSP / SRT', 'tag.mediaauth': '媒体令牌', 'tag.webrtc': 'WebRTC',
-      'tag.tunnel': '隧道', 'tag.llm': 'LLM'
+      'tag.tunnel': '隧道', 'tag.llm': 'LLM',
+      'dp.title': '修改默认密码',
+      'dp.note': '你以 {user} 身份使用 fit run -admin 设置的默认密码登录。该密码是临时的：请先修改它。修改之前，控制台不能进行其他操作。',
+      'dp.left': '默认密码将在 {left} 后失效。',
+      'dp.at': '失效时间：{at}。',
+      'dp.current': '当前（默认）密码', 'dp.new': '新密码', 'dp.confirm': '确认新密码',
+      'dp.hint': '最多 72 字节（bcrypt 的限制）。',
+      'dp.need': '请输入当前密码和新密码。',
+      'dp.mismatch': '两次输入的新密码不一致。',
+      'dp.same': '新密码必须与当前密码不同。',
+      'dp.submit': '修改密码并继续', 'dp.done': '{user} 的密码已修改。',
+      'dp.expired': '默认密码已过期，不能再使用。请以 -admin 重新启动 fit 获取新的默认密码，然后登录并及时修改。'
     }
   });
 
@@ -100,6 +122,8 @@
   // The state of the page shown. / 当前页面的状态。
   var mods = [], byId = {}, open = {}, items = {}, nodes = {}, ports = {}, current = null;
   var shownPage = { module: '', navId: '' };
+  // locked: the session must change its default password first, so no page is drawn. / 须先修改默认密码，不绘制任何页面。
+  var locked = false;
   var root, titleEl, crumbEl, toolsEl, content, navEl, filterEl;
 
   try { open = JSON.parse(load(OPEN_KEY) || '{}') || {}; } catch (e) { open = {}; }
@@ -368,6 +392,7 @@
 
   // route shows the page the URL names: #/<module>/<route>. / 显示 URL 所指的页面。
   function route() {
+    if (locked) return;
     UI.stopTimers();
     UI.closeModals();
     root.classList.remove('nav-open');
@@ -440,15 +465,112 @@
     });
   }
 
+  // fmtLeft is a countdown's text: 9:05, or 1:02:03. / 倒计时文字：9:05 或 1:02:03。
+  function fmtLeft(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000)), hh = Math.floor(s / 3600), mm = Math.floor(s % 3600 / 60), ss = s % 60;
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return (hh ? hh + ':' + p(mm) : mm) + ':' + p(ss);
+  }
+
+  // changePage is the full page a session on the default password of `fit run -admin` gets instead of the workbench:
+  // the current and a new password, and the time left before the default password stops working. It looks like the
+  // login page. o: {session, onDone(), onLogout()}; it returns a function that stops its countdown.
+  // changePage 是使用 `fit run -admin` 默认密码的会话看到的整页（代替工作台）：当前密码与新密码，以及默认密码失效前的
+  // 剩余时间，外观同登录页。o：{session, onDone(), onLogout()}；返回停止其倒计时的函数。
+  function changePage(el, o) {
+    var s = o.session || {}, user = s.user || '';
+    var until = s.password_expires ? Date.parse(s.password_expires) : NaN;
+    var name = h('input', { type: 'text', name: 'username', autocomplete: 'username', value: user, hidden: true, readonly: true });
+    var cur = h('input.input', { type: 'password', name: 'current-password', autocomplete: 'current-password' });
+    var np = h('input.input', { type: 'password', name: 'new-password', autocomplete: 'new-password' });
+    var cf = h('input.input', { type: 'password', name: 'confirm-password', autocomplete: 'new-password' });
+    var err = h('div.callout.callout--danger', { hidden: true });
+    var left = h('div.callout.callout--warn', { hidden: isNaN(until) });
+    var b = h('button.btn.btn--primary', { type: 'submit', style: { width: '100%', height: '40px' } }, t('dp.submit'));
+    var out = h('button.btn', { type: 'button', style: { width: '100%' }, onclick: function () { stop(); o.onLogout(); } }, UI.icon('logout'), t('logout'));
+    function showErr(e) { err.textContent = e && e.message ? e.message : String(e); err.hidden = false; }
+    var form = h('form.form', {
+      onsubmit: function (e) {
+        e.preventDefault(); err.hidden = true;
+        if (!cur.value || !np.value) { showErr(t('dp.need')); return; }
+        if (np.value !== cf.value) { showErr(t('dp.mismatch')); return; }
+        if (np.value === cur.value) { showErr(t('dp.same')); return; }
+        UI.busy(b, UI.api('POST', '/api/m/admin/account/password', { current_password: cur.value, password: np.value })).then(function (r) {
+          stop();
+          UI.toast(t('dp.done', { user: (r && r.user) || user }));
+          o.onDone();
+        }, showErr);
+      }
+    }, name, h('div.callout', UI.icon('info'), ' ', t('dp.note', { user: user })), left,
+      UI.field(t('dp.current'), cur), UI.field(t('dp.new'), np, t('dp.hint')), UI.field(t('dp.confirm'), cf), err, b, out);
+    var body = h('div.card__body', { style: { padding: '26px' } }, form);
+    // expired replaces the form: the default password no longer works, only a restart with -admin helps.
+    // expired 替换表单：默认密码已失效，只能以 -admin 重新启动。
+    function expired() {
+      stop();
+      UI.mount(body, h('div.form', h('div.callout.callout--danger', UI.icon('alert'), ' ', t('dp.expired')),
+        h('button.btn.btn--primary', { type: 'button', style: { width: '100%', height: '40px' }, onclick: o.onLogout }, UI.icon('logout'), t('logout'))));
+    }
+    var timer = null;
+    function tick() {
+      if (isNaN(until)) return;
+      var ms = until - Date.now();
+      if (ms <= 0) { expired(); return; }
+      UI.mount(left, UI.icon('alert'), ' ', t('dp.left', { left: fmtLeft(ms) }), ' ',
+        h('span.small.muted', t('dp.at', { at: UI.fmtTime(until / 1000) })));
+    }
+    function stop() { if (timer) clearInterval(timer); timer = null; }
+    UI.mount(el, h('div.login', h('div.login__prefs', UI.prefs()), h('div.login__box',
+      h('div.login__brand', h('div.brand__logo', UI.icon('logo')), h('div', h('div.brand__name', 'fit'), h('div.brand__sub.muted', t('dp.title')))),
+      h('div.card', body))));
+    tick();
+    if (!isNaN(until) && until > Date.now()) timer = setInterval(tick, 1000);
+    setTimeout(function () { if (document.body.contains(cur)) cur.focus(); }, 30);
+    return stop;
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     var app = document.getElementById('app');
     var started = false;
+    // stopChange stops the change page's countdown; checking: a session read after a 403 is under way.
+    // stopChange 停止修改页的倒计时；checking：403 之后的会话读取正在进行。
+    var stopChange = null, checking = false;
+    function unlock() { if (stopChange) stopChange(); stopChange = null; locked = false; }
     function showLogin() {
+      unlock();
       UI.stopTimers();
       UI.closeModals();
-      UI.loginPage(app, { brand: 'fit', sub: t('wb.sub'), username: 'admin', onSubmit: function (u, p) { return UI.login(u, p).then(run); } });
+      UI.loginPage(app, { brand: 'fit', sub: t('wb.sub'), username: 'admin', onSubmit: function (u, p) { return UI.login(u, p).then(enter); } });
     }
-    function logout() { UI.logout().then(showLogin, showLogin); }
+    function logout() { unlock(); UI.logout().then(showLogin, showLogin); }
+    // enter goes on with a session: to the change page while its default password must be changed, else to the
+    // workbench. / enter 以会话继续：须修改默认密码时进入修改页，否则进入工作台。
+    function enter(s) {
+      if (s && s.must_change_password) { showChange(s); return; }
+      unlock();
+      return run();
+    }
+    function showChange(s) {
+      unlock();
+      locked = true;
+      UI.stopTimers();
+      UI.closeModals();
+      stopChange = changePage(app, {
+        session: s, onLogout: logout,
+        // The same session goes on: read it again, for its CSRF token and its state. / 同一会话继续：重新读取其 CSRF 令牌与状态。
+        onDone: function () { UI.session().then(enter).catch(function (e) { if (e && e.status === 401) showLogin(); else UI.fail(e); }); }
+      });
+    }
+    // A reply anywhere that asks for the default password's change sends the user to the change page.
+    // 任何要求修改默认密码的应答都把用户带到修改页。
+    UI.setMustChange(function () {
+      if (locked || checking) return;
+      checking = true;
+      UI.session().then(function (s) {
+        checking = false;
+        if (s && s.must_change_password) showChange(s);
+      }, function (e) { checking = false; if (e && e.status === 401) showLogin(); });
+    });
     var served = '';
     function run() {
       return UI.workbench().then(function (wb) {
@@ -460,8 +582,9 @@
       });
     }
     refresh = function () {
+      if (locked) return Promise.resolve();
       return UI.workbench().then(function (wb) {
-        if ((wb.modules || []).join(',') === served) return;
+        if (locked || (wb.modules || []).join(',') === served) return;
         var keep = mods.filter(function (m) { return m.ready; });
         served = (wb.modules || []).join(',');
         UI.mount(app, build(wb, logout));
@@ -473,6 +596,6 @@
       });
     };
     UI.setUnauthorized(showLogin);
-    UI.session().then(run).catch(function (e) { if (e && e.status === 401) showLogin(); else UI.fail(e); });
+    UI.session().then(enter).catch(function (e) { if (e && e.status === 401) showLogin(); else UI.fail(e); });
   });
 })();

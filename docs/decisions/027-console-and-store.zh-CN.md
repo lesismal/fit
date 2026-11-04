@@ -24,6 +24,18 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
   的其余字段作为种子，并立即写出 store。此后每个应用成功的配置，无论来自控制台、Admin API 还是回滚，在开始运行后都写入
   store；写入失败时配置仍保持应用，结果里说明它没有保存。SIGHUP 重新应用 store（`fit store import` 可能改了它）；有 store 时
   拒绝 `-watch`。
+  *2026-11-04 修改：* 每次启动时把 store 合并到配置文件之上，store 的值优先（对象逐成员合并，列表和其他值整体替换），合并结果
+  写回 store；只有文件设置的成员保留而不再被忽略。`-c` 可以给出一个 `.store` 文件作为 store；没有 `admin.store` 时，配置文件
+  旁的 store（`site.yaml` 对应 `site.store`）存在即使用，密码为 `$FIT_STORE_PASSWORD` 或密钥文件 `<store>.key`，两者都不存在时
+  由 fit 以随机内容创建，权限 0600。
+- **`fit run -admin`**（2026-11-04 新增）为配置未设置的 `admin`、`admin.console` 填入默认值，并把配置保存在 store 中（没有
+  `admin.store` 时用上述默认 store）。没有配置控制台用户时，用户 `admin` 的密码为 `admin`，且是临时的：必须在启动后
+  `-timeout`（10m）内修改。修改前，用它登录的会话只能查看自己并修改密码（控制台其他接口返回 403 及
+  `must_change_password`），Admin API 拒绝所有请求；超时后它无法再登录，直到 fit 重启。改过的密码保存在 store 中，重启后
+  不再要求修改。只有控制台、没有监听的配置是合法的。
+- **导入与导出**（2026-11-04 新增）：`POST /config/export` 与 `POST /config/import` 以 `.conf`、`.yaml`、`.json`，或用自身
+  密码或运行中 store 密钥封存的 `.store` 文件，迁移整个配置或某个页面的顶层成员；导入经过所有配置共用的应用路径，`admin`
+  从不导出或导入。
 - **`admin` 从不进入 store，也从不展示。** 引导文件的 `admin` 在每个配置加载时、合并 provider 之后注入，不进入基础配置：
   `GET /config`、`/versions` 和 `/config/effective` 里没有密码、哈希或密钥路径，这正是决定 005 对 token 的要求。有 store 时，
   带 `admin` 的配置被拒绝：`admin` 来自引导文件，在 fit 重启时生效。

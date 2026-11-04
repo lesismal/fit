@@ -92,6 +92,18 @@ type Configs struct {
 
 	// apps runs the agent's and the tunnel's roles, or is nil; under mu.
 	apps *app.Manager
+
+	// sealer is the store, when there is one, whose key seals and opens
+	// the fitstore files exported and imported.
+	sealer *store.Store
+
+	// tempUser is the console user whose password is a temporary one, as
+	// fit run -admin makes it, until tempUntil; while tempUser is set the
+	// Admin API refuses every request. Under tempMu, a lock of its own,
+	// since the Admin API's guard reads it on every request.
+	tempMu    sync.Mutex
+	tempUser  string
+	tempUntil time.Time
 }
 
 // Version is a config that was applied.
@@ -181,6 +193,46 @@ func (cs *Configs) UseConsoleUsers(users []store.User, save func([]store.User) e
 	cs.users, cs.saveUsers = slices.Clone(users), save
 }
 
+// UseSealer gives Configs the store whose key seals and opens the fitstore
+// files exported and imported without a password of their own.
+func (cs *Configs) UseSealer(st *store.Store) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.sealer = st
+}
+
+// Sealer returns the store UseSealer gave, or nil.
+func (cs *Configs) Sealer() *store.Store {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.sealer
+}
+
+// UseTemporaryPassword says that the console user's password is a temporary
+// one, good until until: the console asks for it to be changed first, and
+// the Admin API refuses every request until it is.
+func (cs *Configs) UseTemporaryPassword(user string, until time.Time) {
+	cs.tempMu.Lock()
+	defer cs.tempMu.Unlock()
+	cs.tempUser, cs.tempUntil = user, until
+}
+
+// TemporaryPassword returns the console user whose password is temporary,
+// and until when, or "" when none is.
+func (cs *Configs) TemporaryPassword() (string, time.Time) {
+	cs.tempMu.Lock()
+	defer cs.tempMu.Unlock()
+	return cs.tempUser, cs.tempUntil
+}
+
+func (cs *Configs) passwordChanged(user string) {
+	cs.tempMu.Lock()
+	defer cs.tempMu.Unlock()
+	if cs.tempUser == user {
+		cs.tempUser, cs.tempUntil = "", time.Time{}
+	}
+}
+
 // ConsoleUsers returns the console users whose passwords changed since fit
 // started, and whether a store keeps them.
 func (cs *Configs) ConsoleUsers() (users []store.User, stored bool) {
@@ -232,6 +284,7 @@ func (cs *Configs) SetConsolePassword(username, hash string) error {
 		return err
 	}
 	cs.users = out
+	cs.passwordChanged(username)
 	return nil
 }
 

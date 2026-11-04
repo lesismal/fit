@@ -14,6 +14,8 @@ once, is sealed in the store, and is what fit starts from next time. The design 
 - [Two files](#two-files)
 - [The store](#the-store)
 - [fit store export and import](#fit-store-export-and-import)
+- [fit run -admin](#fit-run--admin)
+- [Importing and exporting the config](#importing-and-exporting-the-config)
 - [The console](#the-console)
 - [Users and fit hash-password](#users-and-fit-hash-password)
 - [Logins and sessions](#logins-and-sessions)
@@ -51,8 +53,11 @@ A file cannot hold the password that opens it, so a config with a store is in tw
 The first time fit starts with this file there is no store yet: `listeners` and `routes` are its
 first content, the store is written at once, and fit says
 `the config of fit.json is kept in the store /var/lib/fit/fit.store from now on`. From then on the
-store wins: what the bootstrap file sets beside `admin` is left out, with a warning naming the
-members left out, and only `admin` is read from it. To start again from the file, remove the store.
+store is merged onto the bootstrap file at each start, the store's values winning: objects are
+merged member by member, and a list or a value the store holds replaces the file's whole (so the
+store's `listeners` and `routes` are what runs). A member only the file sets is kept, and the merged
+config is written back to the store, with `the store ... merged onto ...` said. To start again from
+the file, remove the store. *(Changed 2026-11-04: the file's members were left out before.)*
 
 `admin`'s settings, the store's and the console's included, are read when fit starts; a change to
 them takes effect when fit restarts.
@@ -125,6 +130,61 @@ fit store import -c /etc/fit/fit.json /root/fit-config.json
 rm /root/fit-config.json
 kill -HUP "$(pidof fit)"    # or restart fit
 ```
+
+## fit run -admin
+
+`fit run -admin` turns the Admin API and the console on with no config for them, for a first start
+or a machine set up from the console:
+
+```bash
+fit run -admin                       # fit.json when there is one, or no config at all
+fit run -admin -c site.yaml -timeout 30m
+```
+
+- `admin` and `admin.console` get their defaults where the config leaves them out (the Admin API on
+  127.0.0.1:2019, the console on 127.0.0.1:2020). With no `admin.console.users`, the user `admin`
+  logs in with the password `admin`.
+- That password is **temporary**: it must be changed within `-timeout` (10m when left out),
+  counted from the start. Until it is changed, a login with it opens only the "change the default
+  password" page: every other console endpoint answers 403 with `"must_change_password": true`,
+  and the Admin API answers every request 403. After `-timeout` the password no longer logs in
+  (401, `"password_expired": true`), and fit must be restarted with `-admin` to set it in time.
+  The new password must differ from `admin`, and is kept in the store, so a restart logs in with it
+  and asks for nothing.
+- The config is kept in a store, which every change from the pages is written to. Without
+  `admin.store`, the store is the file beside the config with `.store` for its extension
+  (`site.yaml` gives `site.store`, `fit.json` or no config gives `fit.store`), and its password is
+  `$FIT_STORE_PASSWORD` or, without it, the **key file** beside the store, the store's path with
+  `.key` added (`site.store.key`), made 0600 with a random key when neither exists yet. Keep the key
+  file with the store: a store copied elsewhere opens with it, or with `$FIT_STORE_PASSWORD` set to
+  its contents.
+- A config with only `admin.console` and no listener or route is valid, so that fit can start with
+  nothing to serve yet.
+
+`-c` takes a `.store` file too, at most one, beside config files or alone: `fit run -c site.store`
+runs what the store holds, and `fit run -c base.yaml -c site.store` merges it onto `base.yaml` as
+above; the store is then the one written to (`admin.store`'s password still applies when the files
+set it). A `.store` beside the config files is used whether or not `-admin` is given, once it
+exists. `fit store export` and `fit store import` take the same `-c`.
+
+## Importing and exporting the config
+
+The console's Global menu has an **Import / Export** page for the whole config, and every config
+page that edits part of it has **Export** and **Import** buttons beside its format tabs, for that
+part only. The formats are `.conf`, `.yaml`, `.json` and `.store`, the fitstore format: a `.store`
+export is sealed with a password given in the dialog, or with the running store's key when none is
+given (it then opens with the key file or `$FIT_STORE_PASSWORD`). A whole-config `.store` export
+holds the console users whose passwords changed too, so that `fit run -c backup.store -admin`
+elsewhere restores both. An import is applied at once, through the path every save takes, and saved
+to the store; with a page's members, those are taken from the file and the rest of it is ignored.
+`admin` is never exported or imported.
+
+Both are Admin API endpoints, which the console calls in process:
+
+| Endpoint | |
+| --- | --- |
+| `POST /config/export` | Body `{"format": "conf"\|"yaml"\|"json"\|"store", "members": [...], "password": "..."}`; answers the file, with `Content-Disposition`. |
+| `POST /config/import?format=...&members=a,b` | Body the file (`text/plain`, or `application/octet-stream` for `store`), `Fit-Store-Password` for a store with a password of its own, `If-Match` optional; answers as `PUT /config/text`. |
 
 ## The console
 
