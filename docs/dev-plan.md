@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I120.
+Status: `todo`, `doing` or `done`. The next free iteration number is I124.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -267,6 +267,10 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I120.
 | I117 | The media pages: `media_pages`, login, publish, play and a room call with the microphone and camera switched on and off, and a bounded room API | I115 | done |
 | I118 | The media pages' room chat: text messages and small files over the room API, a page switch, and the microphone and camera a member joins with | I117 | done |
 | I119 | Media tokens from a route: the handler `media_tokens`, batch issuance signed with one key of the policy's `keys` ring, prefix bounds on the stream names, and revocation by rotating one key or all of them | I115 | done |
+| I120 | The workbench's config pages: a flat module menu, per-page `.conf`/`.yaml`/`.json` tabs checked through the apply path, and console passwords changed in the pages and kept in the store | I114 | done |
+| I121 | Consistency between what the running service does and the config it runs from: the drift and info differences with the fixes offered, the Consistency page, `fit check`, and `GET /config/check`/`POST /config/reconcile` | I120 | done |
+| I122 | The workbench's feature tabs and listener ports: streaming, media auth, WebRTC, tunnel and LLM config on pages of their own, and each listener port listing the features it serves with links to their pages | I121 | done |
+| I123 | The workbench's Engine menu: one first-level entry, each listener port a submenu of its features in the order asked (handlers, reverse/forward proxy, cache and middleware, streaming, WebRTC, layer 4/SOCKS/TLS/ACME/HTTPS by default), with the port's feature tags on its line | I122 | done |
 
 ## M0, foundations
 
@@ -1624,3 +1628,90 @@ set of named policies comes first; the streaming role and the pages build on it,
   workbench's schema descriptions cover the new fields and params.
 - **Touches**: `handler/mediatokens` (new), `config`, `mediaauth`, `cli`, `modules/standard`,
   `schema`, `docs`, `test/workers`.
+
+### I120 The workbench's config pages and console passwords
+
+- **Do**: every admin console account changes its own password and a logged-in user may reset another's,
+  kept in the store file; the config menu with no Gateway/System tree, its global modules and its
+  protocol modules peers in one flat sidebar; every config page edited either as a form (a tree with an
+  include checkbox for each optional member and inputs) or as raw `.conf`, `.yaml` or `.json` text of the
+  members that page is about, checked as `fit validate` checks a config before anything is applied.
+  fitstore's payload becomes version 2: the base config under `config`, and the console users whose
+  passwords changed under `users`, a version 1 store still read; `admin.WithConsoleUsers`, `Configs`'
+  console-user overrides, `login`'s `Users`, `HasUser`, `SetPassword` and `EndUserSessions`; the endpoints
+  `GET /api/users`, `POST /api/account/password` and `POST /api/users/password`; `POST /config/render`,
+  `POST /config/parse` and `PUT /config/text?format=&members=`, which merges a page's members into the
+  config and applies it through the one path, with errors mapped to the text's line and column;
+  `app/workbench/web`'s flat menu, account module and per-page tabs, and its forms' include checkboxes.
+- **Done when**: every console user changes its own password (another user may reset it) in the pages and
+  it holds across a restart, kept in the store, `409` without one; the menu lists modules flat in the
+  browser, English and Chinese; a page's `.conf`, `.yaml` and `.json` tabs render its part, accept an
+  edit and apply it, and refuse text that does not parse or does not load with its errors and line and
+  column, applying nothing; the bundle's files are all loaded and the workbench's schema words stay
+  whole; under the race detector.
+- **Touches**: `admin`, `admin/store`, `login`, `cli`, `app/workbench`, `docs`.
+
+### I121 Consistency between the running service and its config
+
+- **Do**: a checker of what a running fit does against the config it runs from: the restart-only
+  settings in force (`log`, `access_log`, `telemetry`, `engine`, `acme`, `providers`) and the engine
+  limits read from the running engine; the roles configured against those running; the elements
+  providers added to the effective config but not the base config; the listeners bound and their
+  addresses; the certificates served against the listeners' `tls.acme` names; the upstream pools and
+  their health; and the cache zones. Each difference has a stable ID, a category, a kind — `drift`,
+  actionable, or `info`, a runtime fact that is not a disagreement — the config and runtime values, and
+  the fixes offered: `add`, `delete` or `replace` in the base config, or `reapply`. `GET /config/check`
+  answers with the running version, its ETag and the differences; `POST /config/reconcile` takes the
+  chosen `{"fixes": [{"id", "action"}]}` with `If-Match`, rechecks under the apply lock, applies the
+  patches through the one config path and answers as `PUT /config` does. The workbench's Consistency
+  page shows each difference with its values and lets the user choose and confirm one fix per item,
+  then applies the selection together and checks again; `fit check` does the same from a terminal
+  through the Admin API, with `-json` and `-fix`, and the bootstrap file's `admin` addresses the API.
+- **Done when**: a restart-only member or an engine limit changed after start is listed as drift with
+  the in-force value and a revert fix, and applying it leaves the check clean; a role configured but not
+  running, a provider element missing from the base config, a missing or extra listener or upstream
+  pool, an uncovered `tls.acme` name and a missing cache zone are detected with their fixes; nothing is
+  applied when a fix or the merged config fails to load; a stale `If-Match` is refused; the page works in
+  a browser in English and Chinese and the CLI lists the differences and fixes them one by one, exiting
+  0/1/2; under the race detector.
+- **Touches**: `admin`, `cli`, `app/workbench`, `docs`.
+
+### I122 The workbench's feature tabs and listener ports
+
+- **Do**: put the config's `streaming`, `media_auth`, `webrtc`, `tunnel` and `llm` members on pages of
+  their own in the flat menu (with a small tag naming each), out of Global and the "other" page, with the
+  same UI/`.conf`/`.yaml`/`.json` editor and save-error links; and, on the Listeners page, list for every
+  port the features that port serves — HTTP routes grouped by handler (reverse proxy, forward proxy,
+  static, respond, FastCGI, media tokens, the streaming and WebRTC handlers), route middleware, layer 4
+  services, SOCKS, and TLS with certificates/ACME or HTTPS by default — each linking to the page that
+  edits it, with the address the kernel actually bound, and the ports HTTPS by default makes when the
+  config writes none; a handler link opens the routes page filtered to that handler.
+- **Done when**: the sidebar shows the feature entries after the protocol pages, in English and Chinese;
+  the five pages edit their members (raw tabs included) and their save errors link to them; the Listeners
+  page shows a card per configured (or generated) port with its features, counts and links, the bound
+  addresses from `/api/status` (degrading when it fails), and the deep link lands on the filtered routes;
+  no duplicate config pages remain under Global/Other; the bundle's tests pass and the pages work in a
+  browser, and under the race detector where Go is touched (none here).
+- **Touches**: `app/workbench`, `docs`.
+
+### I123 The workbench's Engine menu
+
+- **Do**: a first-level **Engine** entry in the workbench menu whose submenus are the listener ports
+  (the ones the config writes, and those HTTPS by default makes when it writes none), each opening to
+  the features it serves, in the user's order: its handlers (static, respond, FastCGI, media tokens,
+  media pages — each linking to the routes page filtered to it, then any other handler module), its
+  reverse-proxy and forward-proxy routes, its cache (zone page and routes page) and other middleware
+  grouped, the streaming handlers (streaming page and each handler's filtered routes), the WebRTC
+  handlers (WebRTC page and filtered routes), its layer 4 services, SOCKS, TLS certificates, ACME,
+  HTTPS by default and the HTTP redirect, and last a link to the listener form; the port's line shows
+  its address and its tags (PROXY protocol, HTTP/3, on-demand and client certificates), and the menu
+  follows config changes. The workbench menu gains dynamic per-module navigation, third-level entries
+  that link to other pages, a menu-only rebuild and a recursive filter; the Listeners page keeps the
+  listener form and points at the Engine menu.
+- **Done when**: Engine shows after Listeners in the menu, in English and Chinese; each port opens to
+  its entries in the order above with the expected hrefs and counts, the port's protocols and feature
+  tags on its line, bound addresses from `/api/status`, the HTTPS-by-default and no-listener cases, and
+  active link highlighting; clicking an entry lands on the right page (filtered routes where the order
+  says); the menu updates after a config save without losing the page; the Listeners page no longer
+  draws the port cards; the bundle's tests pass and the mock/real-browser checks hold.
+- **Touches**: `app/workbench`, `docs`.

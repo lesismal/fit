@@ -11,11 +11,11 @@ this file says what was done, and where the work differs from the plan.
 | | |
 | --- | --- |
 | Last updated | 2026-11-04 |
-| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .conf format and configs in several files, I81, Proxy-Wasm's response callbacks, I82, fit's own log by logger and level, and I83, fit's log in fib's formats with loggers of their own, and the access log's formats. P2P, NAT traversal: I84, STUN messages and the STUN server, I85, A49 in fib, and I87, the TURN server, done; I86 and I88–I93 to come, on fib's WebRTC packages since decision 029. VPN, a network of fit nodes: I94, IP packets and the overlay route table, done; I95–I103 to come. Console: I104, the config kept encrypted and the console, done. Agent and tunnel: I105, roles in fit's config, I106, the tunnel, and I107, the agent, done; I112, the agent's model APIs (OpenAI and compatible, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), done; I113, the LLM roles' node list, links and traffic, done; I114, every page in one workbench, done. WebRTC: I108, decision 029 and fib `80c7f76`, I109, WHIP and WHEP with fit as the media server, I110, media servers proxied behind one UDP port, and I111, fib's A55–A59 taken up (TURN over TCP and TLS, per-allocation caps, a port-aware peer check, events, changes in place and drains; the proxy's source address and ports), done. Media: I115, media auth policies (`media_auth`, package `mediaauth`, `auth` on `whip`, `whep` and `webrtc_proxy`, `fit media-token`), done; I116, the streaming role (`streaming`: RTMP, RTSP, SRT, `httpflv`, `hls`, `stream_whip`, `stream_whep`), and I117, the media pages (`media_pages`, a room API, microphone and camera switches), done; I118, the room chat of their calls (text messages and small files, a page switch, and the microphone and camera a member joins with), done (decision 030); I119, media tokens from a route (`media_tokens`: batch issuance for a business backend signed with one key of the policy's `keys` ring, prefix bounds, revocation of one key or of all), done |
-| fib | fib's `main` at `9824c68` (`v1.6.1-0.20261031223653-9824c6852e7d`): `63b38d4` has a Windows dial from a local port skip one held on another address (A59, which fit's WebRTC proxy relay dials with), `749189e` keeps A59's tests off ports in TIME_WAIT, and `9824c68` has a connection the HTTP client closes stop counting against MaxConnsPerHost before the request it failed hears why; before it, fib's `main` at `84a67f7` (`v1.6.1-0.20261031213322-84a67f76ecfc`), with A56 (`74100b2`, a TURN server that never makes a worker wait), A57 (`bf669ce`, caps, a port-aware peer check, events and stats), A58 (`496301d`, limits and credentials in place, a drain), A55 (`97201b6`, TURN over TCP and TLS) and A59 (`3655193`, a dial from a chosen local address and port range), for I111; before it, fib's `main` at `80c7f76` (`v1.6.1-0.20261031191422-80c7f7662ab4`), the first with WebRTC (`webrtc` and its packages, `Engine.OpenUDPPeer` for A49), for I108; before it, fib's `main` at `47948dd6` (`v1.6.1-0.20261031164450-47948dd66351`): `47948dd6` has QPACK's decoder remember each string by its place in the section, so that a browser's literals, sent on every request, are decoded once (W2 over h3: site +4.0%, edge +2.8%); before it, fib's `main` at `c20ab7a1` (`v1.6.1-0.20261031151458-c20ab7a1705e`): `c20ab7a1` holds an HTTP/3 request stream until its OnWritable callback has run, a data race fit's CI met in `TestStuckClientsPastMaxConns/h3`, and `e66f4cf6` fixes an intermittent arpc test; before it, fib's `main` at `d7e117c1` (`v1.6.1-0.20261031142854-d7e117c1f901`): `d7e117c1` decodes a long header literal a peer repeats unindexed once, as nghttp2 clients send a bearer token (W1 h2 +6.7%, 28.60 to 26.86 us a request), on `2ea8ddb7` and `da0ac655`, which fix and cover tests; before it, fib's `main` at `a6131b0c` (`v1.6.1-0.20261031112846-a6131b0c0af3`), whose give-back test looks for a pooled body at the handler's Get, on `d3707ca7`: an HTTP/2 stream gives a body from the pool back once it has framed it, where it had left it to the collector and so emptied the pool's size class (A48; W1 h2 +1.3%, allocation 850 to 677 MB/s); before it, fib's `main` at `6bd106d9` (`v1.6.1-0.20261031020358-6bd106d9d44b`), which widens two timing tests' margins for Windows CI, on `46827ea7`: a whole response's body of up to 4 KiB comes from the pool and goes back with `ClientResponse.TakeBody` and `Context.WriteResponseOwned`, and a `NewBufferedBody` request body is not copied (A48; W1 HTTP/1.1 +3.0%, the 3% that `861689c9`'s smaller heap had cost in collections); before it, fib's `main` at `7dcb41da` (`v1.6.1-0.20261030055545-7dcb41da8e7c`): `4f870993` binds a pushed stream's Context before the stream is the connection's, a data race fib's CI met, and `7dcb41da` fixes an early data test's warm-up on Windows; `a4ae3a0c`: a file sealed in Go as it is sent tells the kernel more follows each chunk but its last, so TCP fills its segments (a 1 MiB SendFile download over HTTPS/1.1 without the kernel's TLS +6.4%, W2 site HTTPS/1.1 +1.7%); before it, fib's `main` at `881ff97a` (`v1.6.1-0.20261029202329-881ff97a25f2`): `6c61693d` keeps a streamed response body in pooled 64 KiB chunks (W4 proxy-download h1 +11%, about 55 to 32 MiB; h2 +8%, about 137 to 100 MiB), `8895a6aa` grows a task pool's queue with its backlog instead of allocating it at its limit (W6 h2 50 to 32 MiB), `24beda14` and `881ff97a` make a connection the kernel's TLS seals write whole records with MSG_MORE and switch to the kernel's TLS only for files of 512 KiB or more (a 1 MiB SendFile download over HTTPS/1.1 +29%, which lets fit drop NoKernelTLS); before it, fib's `main` at `c794cf89` (`v1.6.1-0.20261029134914-c794cf8960fe`): `d5b8d477` frames an HTTP/2 response sent whole as the socket takes it, `0eb21d67` hands a streamed Content-Length response body to its sink from the read, `08faed60` fits sealed TLS records to the pool's size classes (W4 download h2 +11.5%, about 167 to 77 MiB; proxy-download h1 +6.6%, h2 +2.7%), and `c794cf89` makes a streamed HTTP/2 body hold the connection's window until it is consumed (W4 proxy-upload h2 about 312 to 252 MiB); before it, fib's `main` at `4ad4ebef` (`v1.6.1-0.20261029100241-4ad4ebefac94`): a streamed HTTP/2 or HTTP/3 request body waits in 64 KiB pooled chunks (W4 proxy-upload h2 +12.7%, 553 to 322 MiB); before it, fib's `main` at `56f08db3` (`v1.6.1-0.20261029003614-56f08db38f88`): `861689c9` starts a connection's read round at 16 KiB and remembers when it grew (W1 at 10,000 in flight 1,076 to 639 MiB, W4 within 2%), `b926ebf5` and `c6c2e10b` cut HTTP/3's per-packet work (W2 site h3 +2.3%); before it, fib's `main` at `f0378649` (`v1.6.1-0.20261028184321-f037864957c0`): `d4319879` recycles HTTP/3 request streams whose body did not stream (W0 h3 +17.6% to +20.0% at 500 to 10,000 in flight), and `f0378649` removes its test's body-size assumption; before it, fib's `main` at `a7b8b456` (`v1.6.1-0.20261028010536-a7b8b456e081`): `7f1fac3a`, whose Close takes the listeners under the lock a concurrent ShutdownBinding changes them under, a data race fit's CI met on macOS, and `8696ef40`, whose TLS server that answers early data and closes waits for the end of its handshake, so that a Windows client does not lose the answer to a reset, and `a7b8b456`, a fix of an HTTP/3 test's race; before it, fib's `main` at `33a039f1` (`v1.6.1-0.20261026175603-33a039f1382f`), with fib's package `log`, made for I83 (`185658f1`, and `33a039f1` for `ServeDuplex`'s panics); before it, fib's `main` at `a88c75d2` (`v1.6.1-0.20261025180753-a88c75d2f19b`): `b0809b4` with A46, a body filter whose work is done elsewhere, made for I81, and the HTTP/2, HTTP/3 and TLS work since; `b0809b4` itself: v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
+| Milestone | M0, foundations: done (I01–I08). M1, the proxy core: done (I09–I23); its review fixes R01–R07f are all done. M2, dynamic config and TLS: done (I24–I35, with I30b and I30c). M3, gateway features: done (I36–I55, with I53b). M4, platform integration: done (I56–I66). M5, caching and extensions: done (I67–I75). 1.0: its iterations done (I76–I78); since, I79, a Caddyfile converter and JSON with comments, I80, fit's own .conf format and configs in several files, I81, Proxy-Wasm's response callbacks, I82, fit's own log by logger and level, and I83, fit's log in fib's formats with loggers of their own, and the access log's formats. P2P, NAT traversal: I84, STUN messages and the STUN server, I85, A49 in fib, and I87, the TURN server, done; I86 and I88–I93 to come, on fib's WebRTC packages since decision 029. VPN, a network of fit nodes: I94, IP packets and the overlay route table, done; I95–I103 to come. Console: I104, the config kept encrypted and the console, done. Agent and tunnel: I105, roles in fit's config, I106, the tunnel, and I107, the agent, done; I112, the agent's model APIs (OpenAI and compatible, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), done; I113, the LLM roles' node list, links and traffic, done; I114, every page in one workbench, done. WebRTC: I108, decision 029 and fib `80c7f76`, I109, WHIP and WHEP with fit as the media server, I110, media servers proxied behind one UDP port, and I111, fib's A55–A59 taken up (TURN over TCP and TLS, per-allocation caps, a port-aware peer check, events, changes in place and drains; the proxy's source address and ports), done. Media: I115, media auth policies (`media_auth`, package `mediaauth`, `auth` on `whip`, `whep` and `webrtc_proxy`, `fit media-token`), done; I116, the streaming role (`streaming`: RTMP, RTSP, SRT, `httpflv`, `hls`, `stream_whip`, `stream_whep`), and I117, the media pages (`media_pages`, a room API, microphone and camera switches), done; I118, the room chat of their calls (text messages and small files, a page switch, and the microphone and camera a member joins with), done (decision 030); I119, media tokens from a route (`media_tokens`: batch issuance for a business backend signed with one key of the policy's `keys` ring, prefix bounds, revocation of one key or of all), done; I120, the workbench's config pages (a flat module menu, per-page `.conf`/`.yaml`/`.json` tabs checked through the apply path, console passwords changed in the pages and kept in the store), done; I121, consistency between what the running service does and the config it runs from (the drift and info differences with the fixes offered, the Consistency page, `fit check`, and `GET /config/check`/`POST /config/reconcile`), done; I122, the workbench's feature tabs (streaming, media auth, WebRTC, tunnel and LLM config on pages of their own) and each listener port's features with links to their config pages, done; I123, the Engine menu (a first-level entry, each listener port a submenu of its features in the asked order, with the port's feature tags on its line), done |
+| fib | fib's `main` at `60d67aa` (`v1.6.1-0.20261104101432-60d67aa22f8d`): `1262648` adds `Connection.SpliceTo` and `Context.SpliceBody` (A62) and `60d67aa` documents them and their tests' fallbacks, which fit's proxy now uses by default for large HTTP/1.1 uploads (`splice_uploads`); before it, fib's `main` at `9824c68` (`v1.6.1-0.20261031223653-9824c6852e7d`): `63b38d4` has a Windows dial from a local port skip one held on another address (A59, which fit's WebRTC proxy relay dials with), `749189e` keeps A59's tests off ports in TIME_WAIT, and `9824c68` has a connection the HTTP client closes stop counting against MaxConnsPerHost before the request it failed hears why; before it, fib's `main` at `84a67f7` (`v1.6.1-0.20261031213322-84a67f76ecfc`), with A56 (`74100b2`, a TURN server that never makes a worker wait), A57 (`bf669ce`, caps, a port-aware peer check, events and stats), A58 (`496301d`, limits and credentials in place, a drain), A55 (`97201b6`, TURN over TCP and TLS) and A59 (`3655193`, a dial from a chosen local address and port range), for I111; before it, fib's `main` at `80c7f76` (`v1.6.1-0.20261031191422-80c7f7662ab4`), the first with WebRTC (`webrtc` and its packages, `Engine.OpenUDPPeer` for A49), for I108; before it, fib's `main` at `47948dd6` (`v1.6.1-0.20261031164450-47948dd66351`): `47948dd6` has QPACK's decoder remember each string by its place in the section, so that a browser's literals, sent on every request, are decoded once (W2 over h3: site +4.0%, edge +2.8%); before it, fib's `main` at `c20ab7a1` (`v1.6.1-0.20261031151458-c20ab7a1705e`): `c20ab7a1` holds an HTTP/3 request stream until its OnWritable callback has run, a data race fit's CI met in `TestStuckClientsPastMaxConns/h3`, and `e66f4cf6` fixes an intermittent arpc test; before it, fib's `main` at `d7e117c1` (`v1.6.1-0.20261031142854-d7e117c1f901`): `d7e117c1` decodes a long header literal a peer repeats unindexed once, as nghttp2 clients send a bearer token (W1 h2 +6.7%, 28.60 to 26.86 us a request), on `2ea8ddb7` and `da0ac655`, which fix and cover tests; before it, fib's `main` at `a6131b0c` (`v1.6.1-0.20261031112846-a6131b0c0af3`), whose give-back test looks for a pooled body at the handler's Get, on `d3707ca7`: an HTTP/2 stream gives a body from the pool back once it has framed it, where it had left it to the collector and so emptied the pool's size class (A48; W1 h2 +1.3%, allocation 850 to 677 MB/s); before it, fib's `main` at `6bd106d9` (`v1.6.1-0.20261031020358-6bd106d9d44b`), which widens two timing tests' margins for Windows CI, on `46827ea7`: a whole response's body of up to 4 KiB comes from the pool and goes back with `ClientResponse.TakeBody` and `Context.WriteResponseOwned`, and a `NewBufferedBody` request body is not copied (A48; W1 HTTP/1.1 +3.0%, the 3% that `861689c9`'s smaller heap had cost in collections); before it, fib's `main` at `7dcb41da` (`v1.6.1-0.20261030055545-7dcb41da8e7c`): `4f870993` binds a pushed stream's Context before the stream is the connection's, a data race fib's CI met, and `7dcb41da` fixes an early data test's warm-up on Windows; `a4ae3a0c`: a file sealed in Go as it is sent tells the kernel more follows each chunk but its last, so TCP fills its segments (a 1 MiB SendFile download over HTTPS/1.1 without the kernel's TLS +6.4%, W2 site HTTPS/1.1 +1.7%); before it, fib's `main` at `881ff97a` (`v1.6.1-0.20261029202329-881ff97a25f2`): `6c61693d` keeps a streamed response body in pooled 64 KiB chunks (W4 proxy-download h1 +11%, about 55 to 32 MiB; h2 +8%, about 137 to 100 MiB), `8895a6aa` grows a task pool's queue with its backlog instead of allocating it at its limit (W6 h2 50 to 32 MiB), `24beda14` and `881ff97a` make a connection the kernel's TLS seals write whole records with MSG_MORE and switch to the kernel's TLS only for files of 512 KiB or more (a 1 MiB SendFile download over HTTPS/1.1 +29%, which lets fit drop NoKernelTLS); before it, fib's `main` at `c794cf89` (`v1.6.1-0.20261029134914-c794cf8960fe`): `d5b8d477` frames an HTTP/2 response sent whole as the socket takes it, `0eb21d67` hands a streamed Content-Length response body to its sink from the read, `08faed60` fits sealed TLS records to the pool's size classes (W4 download h2 +11.5%, about 167 to 77 MiB; proxy-download h1 +6.6%, h2 +2.7%), and `c794cf89` makes a streamed HTTP/2 body hold the connection's window until it is consumed (W4 proxy-upload h2 about 312 to 252 MiB); before it, fib's `main` at `4ad4ebef` (`v1.6.1-0.20261029100241-4ad4ebefac94`): a streamed HTTP/2 or HTTP/3 request body waits in 64 KiB pooled chunks (W4 proxy-upload h2 +12.7%, 553 to 322 MiB); before it, fib's `main` at `56f08db3` (`v1.6.1-0.20261029003614-56f08db38f88`): `861689c9` starts a connection's read round at 16 KiB and remembers when it grew (W1 at 10,000 in flight 1,076 to 639 MiB, W4 within 2%), `b926ebf5` and `c6c2e10b` cut HTTP/3's per-packet work (W2 site h3 +2.3%); before it, fib's `main` at `f0378649` (`v1.6.1-0.20261028184321-f037864957c0`): `d4319879` recycles HTTP/3 request streams whose body did not stream (W0 h3 +17.6% to +20.0% at 500 to 10,000 in flight), and `f0378649` removes its test's body-size assumption; before it, fib's `main` at `a7b8b456` (`v1.6.1-0.20261028010536-a7b8b456e081`): `7f1fac3a`, whose Close takes the listeners under the lock a concurrent ShutdownBinding changes them under, a data race fit's CI met on macOS, and `8696ef40`, whose TLS server that answers early data and closes waits for the end of its handshake, so that a Windows client does not lose the answer to a reset, and `a7b8b456`, a fix of an HTTP/3 test's race; before it, fib's `main` at `33a039f1` (`v1.6.1-0.20261026175603-33a039f1382f`), with fib's package `log`, made for I83 (`185658f1`, and `33a039f1` for `ServeDuplex`'s panics); before it, fib's `main` at `a88c75d2` (`v1.6.1-0.20261025180753-a88c75d2f19b`): `b0809b4` with A46, a body filter whose work is done elsewhere, made for I81, and the HTTP/2, HTTP/3 and TLS work since; `b0809b4` itself: v1.6.0 with A42, the HTTP/3 server sending a round's datagrams in one batch (`a34c5db`), A43, h2 over TLS sealing a corked round as one record (`5a02929`), and a fix of A43's test; by commit, not tag, rule 19. Before it, `github.com/lesismal/fib v1.6.0` (`55e4140`, the first tag with what fit needs since v1.5.6, and fib's TLS fix that verifies a resumed session's peer again and requires Go 1.27.3; before it, fib's `main` at `fcb1718`: `86071b8` with A40, made for I67, a whole response sent while the body is still arriving saying Connection: close, made for I77, and fixes of two intermittent tests, `benchmark/rpc`'s `TestClientCountsFailures` and `http`'s `TestBodyWriterHoldsNoGoroutine`; before it, fib's `main` at `86071b8`, which is `4f1c3e9` with fib's prefork and eBPF reuseport balancing, `5fc8250` and `aa0ba7e`, and A38; by commit, not tag, rule 19); with A32 and A33 since I49 and I50, A34 and A35 since I51 and I52, A36 and A37 since I53 and I53b, A38 since I66's CI fixes, A42 and A43 since the v1.0.0 report |
 | What works | `fit run` serves fixed responses and static files, and proxies to HTTP/1.1, h2c and h2 upstreams (with a CA, a server name and a client certificate of their own), with passive and active (HTTP and TCP) health checks, nine load balancing policies (round robin, weighted, least connections, random, P2C, consistent hashing on IP, URI, header or cookie) and sticky cookies, over HTTP/1.1, h2c, TLS (HTTP/1.1 and h2, certificates from files, loaded again when they change, or obtained and renewed with ACME through HTTP-01 or TLS-ALPN-01, kept in a directory or, for instances on several hosts, in Redis, etcd or Consul, where they share each certificate and challenge, or during the handshake on demand, chosen by SNI, with OCSP responses stapled; and HTTPS by default, with redirects, for a config that names only host names) and HTTP/3, writes access logs as JSON, logfmt or lines, reloads its config on SIGHUP, when the file changes (`-watch`), or through the Admin API (read, load, edit by JSON pointer and merge patch, ETags against lost updates, rollback to a kept version), serves Prometheus metrics on the Admin API, traces requests with W3C trace context sent on to upstreams and exports spans and metrics over OTLP/HTTP, and keeps responses in an HTTP cache by RFC 9111's rules, in memory and on disk, where they are found again after a restart, shared by the routes of a zone and kept across reloads, fetched once for many clients, answered stale while refreshed or when the upstream fails, and purged by URL or tag through the Admin API, serves a read-only dashboard of its routes, services, upstreams and their health, certificates and config versions, merges what providers provide into its config by written precedence rules and shows the effective config and where each part came from (`GET /config/effective`), takes routes, upstreams and services from the labels of Docker containers, following them as they start and stop, takes upstreams, routes and services from the tags of the services in a Consul catalog, following their health checks, and listeners, routes, upstreams and services from keys in Consul's KV store and in etcd, serves a Kubernetes cluster's Gateways of its GatewayClasses (Gateway API), with HTTP, HTTPS (certificates from Secrets), TLS passthrough, TCP and UDP listeners, and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes, writing their status back, and its Ingresses of fit's IngressClasses, with a few annotations, and shuts down gracefully; routes match by host, path, method, header, query, remote IP and path regexp, or an expression combining them, by priority, then specificity, then how many matchers they set; middleware rewrites paths, redirects, and sets, adds and deletes request and response fields, limits a route's request rate (by client IP, header or route), its requests under way, and the size of its bodies, and asks for a user and password (Basic auth, bcrypt) or a client certificate, which TLS listeners can require or verify when given (mTLS), asks an auth service (ForwardAuth), or verifies JSON Web Tokens with keys from files or a JWK set; the proxy retries within a budget and bounds a route's requests with a timeout; a circuit breaker stops sending a route's requests on while they fail; the proxy splits requests over upstreams by weight, mirrors a share to another and fails over to a backup; responses are compressed with zstd, brotli or gzip as they are written; WebSockets are proxied from HTTP/1.1, h2 and h3 entries to HTTP/1.1 upstreams, and gRPC calls to h2 and h2c upstreams, streaming both ways, with gRPC statuses for what fails at the proxy; tcp listeners proxy their connections to an upstream, byte for byte, and udp listeners their datagrams, a session per client, and TLS connections by their SNI without terminating them, with the PROXY protocol taken from trusted proxies (also on HTTP listeners) and sent to upstreams (services); one port serves HTTP, TLS terminated or passed through by its name, SOCKS and raw TCP, told apart by what a client sends first; SOCKS (CONNECT) and HTTP CONNECT forward proxies with access rules for clients and destinations; `fit validate`, `fit schema`, `fit version`, `fit hash-password`; the config kept encrypted in a store (`admin.store`, `fit store export` and `import`) and a console behind logins from which all of it is changed (`admin.console`); the agent's roles, hubs, nodes and clients that share AI models over a WebSocket mesh, and the tunnel's, which reach TCP services behind NAT through a server over TCP, WebSocket or QUIC, both set up and changed on pages of their own; WebRTC: a TURN server over UDP, TCP and TLS, WHIP and WHEP with fit as the media server, and media servers proxied behind one UDP port, routed by ICE ufrag; fit is packaged as a container image (linux/amd64 and arm64, published on a tag), a Helm chart that runs it as a Gateway API and Ingress controller, and systemd units, with examples for Docker Compose and Kubernetes; the benchmark harness runs nginx, Caddy, Traefik and fit |
 | What does not | 1.0's external security review, which is arranged outside the code; P2P tunnels between hosts behind NAT (I86, I88–I93: `p2p/stun` and `webrtc.turn` are their only parts so far) and the VPN (I95–I103: `vpn/packet` only) |
-| Next | P2P: I86, the STUN client on fib's `webrtc/stun`, then I88 and I89 on fib's TURN client and ICE agent; I90 (A50 in fib) beside them. VPN: I95 (A51 in fib), I97 and I98 wait on nothing new. fib requests open: A50 and A51 for those, and A52–A54, which would replace the agent's and the tunnel's stopgaps. Media: RTSP over UDP waits on fib's A61. The next free iteration number is I120, and the next free fib request A62 |
+| Next | P2P: I86, the STUN client on fib's `webrtc/stun`, then I88 and I89 on fib's TURN client and ICE agent; I90 (A50 in fib) beside them. VPN: I95 (A51 in fib), I97 and I98 wait on nothing new. fib requests open: A50 and A51 for those, and A52–A54, which would replace the agent's and the tunnel's stopgaps. Media: RTSP over UDP waits on fib's A61. The next free iteration number is I124, and the next free fib request A63 |
 **The 2026-10-27 benchmark pass.** [The plan and its analysis](../bench/results/plan-2026-10-27/analysis.md) ran 232 runs on the benchmark host and kept one optimization: fib `d4319879` recycles HTTP/3 request streams whose body did not stream, measured at +17.6%, +19.2% and +20.0% at 500, 5,000 and 10,000 in flight, with CPU a request down 14-16% and h1/h2 unchanged. The read-buffer start (W4 proxy-download -4.9%), the sendfile download (-13.9%) and the fit-only HTTP/1.1 change were measured and rejected; their numbers are in the analysis.
 
 **M0 is done.** Its exit criteria hold, with one caveat: `fit run -c fit.json` serves a fixed
@@ -5354,3 +5354,245 @@ repository's plan.
   content type ignores `c.Header()`; a response with other fields goes through `WriteResponse`.
 - **Error positions.** Error tests compare whole messages with line:column. Work out expected
   columns from the document rather than counting by hand.
+
+### I120 The workbench's config pages and console passwords — done
+
+What the user asked for: every admin console account can change its password (a logged-in user may also
+reset another's), kept in the store file; the config menu with no Gateway/System tree, its global
+modules and its protocol modules as peers in the sidebar; and every config page edited either as a form
+(a tree with a checkbox for each optional member and inputs) or as raw `.conf`, `.yaml` or `.json` text
+of the members that page is about, checked as `fit validate` checks a config before anything is
+applied.
+
+- **Store** (`admin/store`, `admin/bootstrap.go`, `admin/configs.go`, `cli`): fitstore's payload is
+  version 2 — the sealed JSON is `{"config": <base config>, "users": [{"username", "password_hash"}]}`
+  — the header's version byte is 2 on writes and 1 is still read, so a version 1 store is written as
+  version 2 on the next write (the seed, a config apply or a password change). `Store.Users` and
+  `Store.SetUsers`, with `Open`, `Read` and `Write` keeping their API and remembering the users
+  (`Write` keeps them, `SetUsers` re-seals the config last read or written); the payload's config is
+  embedded as it was written and one that is not JSON is refused. `admin.WithConsoleUsers` replaces
+  `admin.console.users[].password_hash` by user name in the bootstrap file's admin, member order kept;
+  `Configs.UseConsoleUsers`, `ConsoleUsers`, `SetConsoleUsers` and `SetConsolePassword` keep and write
+  the overrides under `cs.mu` (the password read-modify-write is one step, so two changes at once do not
+  lose one). `cli/run.go` merges the store's users into the bootstrap admin before the config loads and
+  wires the overrides; `fit store import` keeps the users the old store held, and `export` still prints
+  the config only.
+- **Passwords** (`admin/console.go`, `login`): exact console routes `GET /api/users`
+  (`{"user", "store", "users"}`), `POST /api/account/password` (`{"current_password", "password"}`) and
+  `POST /api/users/password` (`{"username", "password"}`), under the admin module as
+  `/api/m/admin/...`; bcrypt's verify, the new hash and the store write run in one `r.Go` on the
+  console's pool; a wrong current password counts as a failed login for the address (403, then 429 with
+  `Retry-After` once it is locked out), 400 for an empty or over-72-byte password and an unknown user,
+  409 without a store, and 500 when the write fails, the old password still good. Success sets the
+  login's hash, ends the user's other sessions (the caller's own stays) and logs
+  `console: %q changed the password of %q` or `console: %q set the password of %q`. `login` gains
+  `Users`, `HasUser`, `SetPassword` and `EndUserSessions`, with a users `RWMutex`.
+- **Menu** (`app/workbench/web/core/workbench.js`): no group tree. The sidebar's first level is the
+  modules, in a `RANK` order — overview, listeners, global settings (`sys.config`, named "Global" /
+  "全局配置"), JSON, versions and account, then HTTP (reverse proxy, and the cache), HTTP CONNECT (the
+  forward proxy), TCP/UDP (layer 4) and TLS — with the roles after them by group and order. A module
+  with one page is a link; one with several opens its pages below, a small protocol tag under its label.
+  The filter, fold/mini mode, per-module open state and the router are kept, and the breadcrumb is the
+  module, then the page.
+- **Config pages** (`app/workbench/web/gateway/config.js`, `modules.js`, `config.css`, `admin/check.go`,
+  `admin/server.go`): `FitConfig.page(el, sh, render, opts)` with `opts.members` draws the `UI`,
+  `.conf`, `.yaml` and `.json` tabs above the notice. The text is rendered by `POST /config/render`,
+  parsed (400 ms after typing) by `POST /config/parse` into the shared draft, and saved by
+  `PUT /config/text?format=&members=`, which adapts the text and merges those members into the base
+  config inside `configs.Update`, so it is loaded, compiled, bound and saved to the store like every
+  apply, with the ETag rules; its errors are mapped to the text's line and column and nothing is
+  applied on a failure. When the draft has unsaved changes outside the page's members the page saves
+  the whole draft with `PUT /config` instead, so no edit is dropped; text that does not parse blocks a
+  save. The form gets an include checkbox for each optional non-boolean member (checking sets a default,
+  unchecking deletes it). The pages' members are listeners, routes (both route pages, with a note that
+  the text holds every route), upstreams, services, auto_https, acme, each system member, and the
+  "other" list.
+- **Account pages** (`app/workbench/web/account/account.js`): `#/account/password` (the current
+  password, the new one and its confirmation) and `#/account/users` (the users, with a reset-password
+  modal, the caller marked "you"); a callout and disabled forms when the console has no store.
+- **Tests** (race detector): `admin`'s accounts (`GET /api/users`, a self change, a reset, the
+  401/400/403/409/429/500 answers, sessions ended, a store round trip, a console restarted from the
+  merged admin), `store`'s payload versions, users and writes, `login`'s users and session ends, `cli`'s
+  openStore merge and import keeping the users, and the text endpoints (render/parse round trips in the
+  three formats, parse errors with line and column, part saves replacing and removing members, foreign
+  members and `admin` refused, an invalid config refused with line and column and the running config
+  kept, 412, an unknown format). The workbench bundle's TestPages passes with the new files, and its
+  schema words are still whole.
+- **Benchmark**: none; the control plane (rule 21).
+- **Gaps**: a role's console users (the config's `llm.<role>.console.users`) change with the config, not
+  from the Account pages, which only `admin.console` serves; `fit store export` prints the config only,
+  not the password overrides, so an export/import loses them when the old store does not open; the
+  whole-draft save fallback shows the draft's paths, not a raw text's line and column, for its errors;
+  builds in this session used the sibling fib checkout through a local `go.work`, since the repo's
+  `go.mod` still names the fib hash before the proxy-splice commit (no fib change was needed for I120).
+
+### I121 Consistency between the running service and its config — done
+
+What the user asked for: check that every feature the running fit service has agrees with the config
+it runs from; if not, list the differences and let the user confirm, one by one, how to fix each (add,
+delete, change).
+
+- **The checker** (`admin/drift.go`): `Configs.Check()` compares the runtime with the config it runs
+  from and answers `GET /config/check` with the running version, its ETag, the differences and their
+  counts. Rules: the restart-only members (`access_log`, `log`, `telemetry`, `engine`, `acme`,
+  `providers`) that changed since fit started, against the values in force (`admin` is info: it comes
+  from the bootstrap file); the engine limits `max_conns`, `max_pending_bytes` and
+  `max_write_queue_bytes` that the config sets, against the running engine's `Settings()`; the roles
+  configured against `app.Roles()` and the manager's `Running()`; the elements `Version.sources` says a
+  provider added to the effective config, with `add` fixes that append them to the base config
+  (`shadowed` elements are info); the listeners bound (`listener.Server.Addrs()`) against the graph's,
+  with port `0` as info; certificates served by each listener against its effective `tls.acme` names
+  (written names drift with a `delete` fix, names HTTPS by default adds and certificates obtained on
+  demand are info); upstream pools against the effective config, with an all-down upstream as info; and
+  cache zones in use against `cache.Zones()`, a zone kept from an earlier config being info. Each
+  difference has a stable ID, a category, a kind (`drift` or `info`), the config and runtime values and
+  its fixes: a patch (`add`/`delete`/`replace`) into the base config, or `reapply`. `Configs` now keeps
+  the loaded `*config.Config` of the running version (`currentCfg`, no public JSON change) so the check
+  does not reload the config, and the check reads the runtime under no `cs.mu` (the retained graph's
+  certificate managers stand in for `Status()`), so `POST /config/reconcile` can recheck inside
+  `configs.Update`'s edit callback, validate the selected IDs and actions, apply the patches (creating
+  missing arrays for `/x/-` appends, deleting high indexes first) and answer as `PUT /config` does. A
+  missing `If-Match` is 428, a stale one 412, and an unknown ID, unoffered action, empty fix list or
+  vanished patch path 400, applying nothing.
+- **CLI** (`cli/check.go`, `fit check`): loads the bootstrap config as `fit validate` does, reads only
+  `admin.address` and `admin.token_file` (the rest of `admin` has fit's own JSON, so it is not decoded
+  with encoding/json), reaches the Admin API over TCP or the `unix/` socket, prints the version, the
+  drift/info counts and each difference with its values and fixes, and exits 0 (no drift), 1 (drift
+  remains) or 2 (usage/config/connection error). `-json` prints the raw answer; `-fix` prompts for one
+  fix per drift item (numbered, `s`/empty skips, re-prompting on bad input, EOF-safe), sends the chosen
+  `{id, action}` list with `If-Match`, prints the applied version and warnings, rechecks and prints what
+  remains. `fit help` lists it.
+- **The pages** (`app/workbench/web/gateway/check.js`, `check.css`): a `sys.check` module after
+  Versions in the flat menu, at `#/sys.check/check`, showing each difference with its category heading,
+  kind badge, config and runtime values, a fix select per drift row (localized by action, patch path
+  shown) and an unchecked apply tick, and a disabled-at-zero apply bar; the confirmation modal lists the
+  chosen items before `POST /api/m/admin/config/reconcile` with the check's ETag; success toasts the
+  applied version, clears the selection and rechecks, 412 shows the changed-elsewhere notice with
+  Check again, 400 shows the server error and rechecks. Info rows are shown muted without controls; a
+  green callout says when nothing drifted. English and Chinese words for every label.
+- **Tests** (race detector): `admin`'s 18 drift tests (clean check, restart-only both directions and
+  `admin` info, engine limits, written/auto/wildcard/served certificates, listener missing/extra/port 0,
+  roles configured/running and their delete patch, provider pinning with the effective config unchanged
+  and shadowed info, upstream extra/missing/down, cache missing/kept, endpoint ordering, If-Match 412/
+  428, unknown ID/action, empty and duplicate fixes, missing-array creation, invalid-result rejection,
+  reapply); `cli`'s 19 `fit check` tests with a TCP and a Unix fake Admin API (listing, `-json`,
+  consistent/info-only exits, fix selection and skip, re-prompt, POST body and If-Match, 412, 400/500/
+  503, tokens, no `admin`, a bootstrap whose console holds fit's own duration JSON, bad config/args,
+  unreachable port, timeout, help); `app/workbench`'s bundle tests; and a real-endpoint browser run of
+  the page (drift of an engine limit and a restart-only member, selecting both, the confirmation modal,
+  apply, recheck clean, Chinese), plus `fit check` against a real demo (listing, `-json`, `-fix`
+  applying and rechecking clean).
+- **Benchmark**: none; the control plane (rule 21).
+- **Gaps**: a role's `Apply` failing for a role already running is not observable, so the checker cannot
+  see it; some role listeners bind asynchronously (an `llm.hub` whose listen address cannot be assigned
+  counts as running while its mesh listener failed), so those are not drift either; HTTPS-by-default
+  generated listeners are not listed as differences; routes and services appear only through provider
+  additions because they are compiled from the effective config by construction; a cache zone kept from
+  an earlier config is transient by nature; and a `network` field is not compared for listeners
+  (address/protocol are).
+
+### I122 The workbench's feature tabs and listener ports — done
+
+What the user asked for: the left menu should have separate entries for each protocol/feature family —
+forward proxy, reverse proxy, streaming media and the like — and the Listeners page should list, for
+every listener port, all the features that port serves, each linking to the page where it is edited.
+
+- **Feature pages** (`app/workbench/web/gateway/features.js`, `features.css`): `gw.streaming`
+  (streaming), `gw.mediaauth` (`media_auth`), `gw.webrtc` (`webrtc`), `gw.tunnel` (`tunnel`) and
+  `gw.llm` (`llm`) are modules of their own in the flat menu, after Cache and before the running roles'
+  modules, each with a small tag (RTMP / RTSP / SRT, media tokens, WebRTC, Tunnel, LLM) and one page
+  editing its member through the shared draft, so the UI/`.conf`/`.yaml`/`.json` tabs, the include
+  checkboxes and the save bar work as on every config page. Their pages register `C.place` at load, so a
+  save's problems link to the page that edits them from any page. Tunnel and LLM pages show the role
+  note (the role starts when the config applies); the streaming page points at the routes where its
+  handlers (HLS, HTTP-FLV, WHIP/WHEP) are configured. Global and the "other" page no longer list these
+  members (`SYS` keeps log, access log, telemetry, metrics, limits, engine, providers), so no config
+  page is duplicated.
+- **Port features** (`modules.js` Listeners page): after the schema form, a "What each port serves"
+  section with one card per configured listener, plus the ports HTTPS by default makes when the config
+  writes none. Each card shows the name, the written address, the address the kernel actually bound
+  when different (from one `GET /api/status` per draw, with a muted fallback note when it cannot be
+  read), protocol badges, and a row per feature with its count and a link to the page that edits it:
+  reverse-proxy routes (`#/gw.reverse/routes?handler=proxy`), forward-proxy routes
+  (`#/gw.forward/routes`), the streaming handlers grouped with links to the streaming page and one
+  filtered route link per handler, WebRTC handlers likewise, static/respond/FastCGI/media tokens/media
+  pages with localized labels and filtered route links, cache middleware zones (`#/gw.cache/zones`) and
+  the routes page, the other middleware grouped and named, layer 4 services (`#/gw.l4/services`), SOCKS
+  (edited on that page), TLS certificates (`#/gw.tls/certs`), ACME (`#/gw.tls/acme`), TLS by default
+  (`#/gw.tls/auto_https`) and the generated HTTP redirect (`#/gw.tls/auto_https`), with PROXY protocol,
+  HTTP/3, on-demand and client-certificate tags; a port with nothing else says so. Routes and
+  middleware are attributed only to listeners that serve HTTP. The reverse-proxy routes page reads
+  `?handler=<module>` from the URL on entry and preselects that handler's filter tab, without overriding
+  a tab clicked afterwards.
+- **Tests**: the bundle's `TestPages` (every file loaded by index.html, core first) and `TestSchemaZh`
+  pass; a headless-browser mock run of the admin endpoints checked 45 things — menu order/tags, card
+  counts and every link target, the proxy deep link and the tab behaviour, a draft change redrawing the
+  cards and re-reading `/api/status` once, the five feature pages, the "other" page, zh-CN words,
+  HTTPS-by-default generated ports, `/api/status` failure degradation, TLS/ACME rows, and auto-HTTPS
+  off; a real-backend browser run against a demo with five listeners (HTTP, TLS, SOCKS, TCP, UDP),
+  proxy/static/respond/forward-proxy/HLS/media-token routes, cache middleware, layer 4 services, a
+  streaming RTMP role and a media auth policy checked 16 things — the sidebar order and tags, the five
+  port cards and their features, the `?handler=proxy` deep link filtering the routes page, the five
+  feature pages with their four tabs, Global no longer listing the moved members, and the Chinese
+  labels.
+- **Benchmark**: none; the control plane (rule 21).
+- **Gaps**: a SOCKS, TCP or UDP listener shows no route rows even though routes with no `listeners` are
+  served by every HTTP-capable listener (they do not serve HTTP); the grouped streaming/WebRTC rows
+  need one small link per handler because the route filter selects one module at a time; unknown handler
+  modules are labelled by their id; and the port cards describe the config with the running
+  `auto_https`-generated ports and bound addresses, not a live count of connections per port.
+
+### I123 The workbench's Engine menu — done
+
+What the user asked for: a new first-level left-menu entry **Engine / 引擎**, each listener port a submenu
+of the features that port serves, in this order — handlers (static / respond / FastCGI / media tokens /
+media pages → the routes page filtered to each), PROXY protocol / HTTP/3 / on-demand certificates /
+client certificates as small tags, reverse-proxy and forward-proxy routes, cache (zones page and routes
+page) and the other middleware, streaming handlers (streaming page and each handler's routes), WebRTC
+handlers (WebRTC page and routes), layer 4 services, SOCKS, TLS certificates, ACME, HTTPS by default and
+the HTTP redirect — and the per-port features out of the Listeners page.
+
+- **Workbench menu** (`core/workbench.js`): a module's `nav` may be a function, called whenever the menu
+  is built or rebuilt; a nav item with `kids` is a collapsible second-level node whose children are
+  third-level links to other modules' pages (or muted rows); a nav item with `href` is an external link,
+  and a module may consist only of links. A module may have a `boot` called once after the shell is
+  built. `WB.refreshMenu()` recomputes the dynamic navs and redraws only the sidebar, keeping the open
+  state, the page shown and the filter, then re-marks the active page and highlights the link whose
+  `href` is the current hash. The filter is recursive, so a module or port stays visible when a
+  descendant link matches (and opens while filtering). Other modules' static `nav` arrays are unchanged.
+- **The Engine module** (`gateway/engine.js`): a first-level entry after Listeners, with no page of its
+  own, whose nav is built from the shared config draft plus `GET /api/status`: one collapsible node per
+  configured listener in order (or, when the config writes none and HTTPS by default is on, the generated
+  `https`/`http` ports; or a link to the listener form when there is no port). A port's head shows its
+  name, address and bound address (in the title), and a one-line line of its protocols and feature tags:
+  PROXY protocol, HTTP/3, on-demand certificates, client certificates, HTTPS by default. Its children
+  are, in the asked order: `static`, `respond`, `fastcgi`, `media_tokens`, `media_pages` and any other
+  handler (each to the routes page filtered to it), reverse-proxy routes (`?handler=proxy`) and
+  forward-proxy routes, cache zones and cached routes plus the other middleware grouped (naming the
+  modules), the streaming page and each present streaming handler's filtered routes, the WebRTC page and
+  its handlers' routes, layer 4 services, SOCKS (edited on the Listeners page), TLS certificates, ACME,
+  automatic HTTPS, the HTTP redirect, and last the listener form. Each entry carries its count, a
+  localized label and an icon; clicking it navigates to the page that edits it. The module loads once
+  from `boot`, re-reads the draft when `config.js` dispatches `fit:config` after a config fetch, and
+  rebuilds the menu through `WB.refreshMenu`.
+- **The Listeners page** (`modules.js`): the port-feature cards of I122 are gone; the page says the
+  features are in the Engine menu and keeps editing the listeners themselves. The reverse-proxy routes
+  page still reads `?handler=` and preselects the handler's filter. `config.js` dispatches `fit:config`
+  after a successful config fetch; `index.html` loads the new script and stylesheet.
+- **Tests**: the bundle's `TestPages` (every file loaded by index.html, core first) and `TestSchemaZh`
+  pass; `node --check` on the changed JS; a headless-browser mock of the admin endpoints (46 checks: menu structure/order/hrefs/counts/tags, clicks, filter, auto_https and no-listener cases, fit:config refresh, active highlight, zh, no uncaught exceptions); and a real-backend browser run against a demo with five
+  listeners (HTTP with PROXY protocol, TLS with h2/h3, on-demand and client certificates, SOCKS, TCP,
+  UDP), routes (proxy/static/respond/forward proxy/HLS/media tokens), cache middleware, layer 4
+  services, a streaming RTMP role and a media auth policy: 13 checks passed — Engine after Listeners
+  with its Ports tag, five visible port submenus, the port tag lines (PROXY protocol v1/v2, HTTP/3,
+  on-demand and client certificates), the web port's entries in the exact asked order with their counts,
+  the reverse-proxy entry landing on the filtered routes page with the link highlighted, the cache/
+  streaming/port-config entries landing on their pages, the Listeners page with no cards and a pointer
+  to Engine, the filter keeping Engine and the port for an "hls" match, the menu following a config
+  change (a second proxy route made the count 2), and the Chinese labels/order.
+- **Benchmark**: none; the control plane (rule 21).
+- **Gaps**: the third level is links only (no Engine page of its own; the port head toggles rather than
+  opening a page); a SOCKS/TCP/UDP port shows no route entries (it serves no HTTP); a feature with two
+  pages is two entries (cache zones / cached routes, streaming config / each handler's routes); the
+  port's bound address and the status-failure note are in the row's title, not visible; the menu keeps
+  as many ports as the config has, which is long for a config with dozens of listeners.

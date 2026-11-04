@@ -141,13 +141,18 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .tree__node { display: flex; flex-direction: column; }
 .tree__kids { display: none; flex-direction: column; gap: 1px; }
 .tree__node.is-open > .tree__kids, .tree__node.is-filtered > .tree__kids { display: flex; }
+/* The flat menu: modules are the first level, the pages of a multi-page module follow indented under it.
+   扁平菜单：一级即模块，多页模块的页面缩进在其下。 */
+.tree__mod { font-weight: 600; }
 .tree__head { font-weight: 600; }
-.tree__group { margin-top: 4px; }
-.tree__group > .tree__head { color: var(--sidebar-strong); }
+/* A module's label and, under it, its protocol tag, so that a long tag never truncates the label.
+   模块标签及其下方的协议标记，长标记不会截断标签。 */
+.tree__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tree__tag { flex: none; align-self: flex-start; padding: 1px 6px; border-radius: 999px; background: var(--sidebar-active); color: var(--sidebar-text); font-size: 10px; font-weight: 600; letter-spacing: .02em; line-height: 1.35; white-space: nowrap; }
+.nav__item.is-active .tree__tag { color: var(--sidebar-strong); }
 .tree__chev { margin-left: auto; display: inline-flex; opacity: .6; }
 .tree__chev svg { width: 14px !important; height: 14px !important; transition: transform .15s; }
 .tree__node.is-open > .tree__head .tree__chev svg, .tree__node.is-filtered > .tree__head .tree__chev svg { transform: rotate(90deg); }
-.tree__d1 { padding-left: 26px; }
 .tree__d2 { padding-left: 42px; font-size: 13px; padding-top: 7px; padding-bottom: 7px; }
 .tree__d2 svg { width: 16px; height: 16px; }
 .tree__node.has-active:not(.is-open) > .tree__head { color: var(--sidebar-strong); box-shadow: inset 3px 0 0 var(--primary); }
@@ -159,10 +164,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .shell.is-mini .wb-fold { margin: 0; }
 .shell.is-mini .wb-fold svg { transform: rotate(180deg); }
 .shell.is-mini .nav__item { justify-content: center; padding: 9px 0; }
-.shell.is-mini .tree__d1, .shell.is-mini .tree__d2 { padding-left: 0; }
-.shell.is-mini .tree__group > .tree__head { display: none; }
+.shell.is-mini .tree__d2 { padding-left: 0; }
 .shell.is-mini .tree__kids { display: flex; }
-.shell.is-mini .tree__node > .tree__kids > .tree__node > .tree__head { display: none; }
+.shell.is-mini .tree__node > .tree__head { display: none; }
+.shell.is-mini .tree__text { display: none; }
 
 @media (max-width: 900px) {
   .shell, .shell.is-mini { grid-template-columns: 1fr; }
@@ -230,6 +235,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .textarea { height: auto; min-height: 90px; padding: 9px 11px; resize: vertical; }
 .textarea--code { font-family: var(--mono); font-size: 12.5px; min-height: 120px; }
 .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.input:disabled, .select:disabled, .textarea:disabled { opacity: .6; cursor: not-allowed; }
 .select { appearance: none; padding-right: 30px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
 .select--sm, .input--sm { height: 30px; font-size: 12.5px; }
 .form { display: flex; flex-direction: column; gap: 14px; }
@@ -435,6 +441,11 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .cf-pre { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; overflow: auto; max-height: 65vh; margin: 0; white-space: pre; }
 .cf-raw { min-height: 65vh; }
 .ov-upstream + .ov-upstream { border-top: 1px solid var(--border); padding-top: 14px; }
+
+/* The account pages (account/account.js): a form of a readable width, and the users table.
+   账户页面（account/account.js）：宽度适中的表单，以及用户表。 */
+.acct-form { max-width: 480px; }
+.acct-table td:first-child { white-space: nowrap; }
 @media (max-width: 700px) {
   .cf-state { display: none; }
   .cf-field { grid-template-columns: 1fr; }

@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -126,5 +127,73 @@ func TestCookieName(t *testing.T) {
 		if got := CookieName("fit_console", tc.addr); got != tc.want {
 			t.Errorf("%v: %q, want %q", tc.addr, got, tc.want)
 		}
+	}
+}
+
+// TestUsersAndPasswords: the users may be read, and a password set or added
+// from a console, which Check uses from then on.
+func TestUsersAndPasswords(t *testing.T) {
+	l, _ := newLogins(t)
+	if got := l.Users(); !slices.Equal(got, []string{"admin"}) {
+		t.Errorf("users: %v", got)
+	}
+	if !l.HasUser("admin") || l.HasUser("nobody") || l.HasUser("") {
+		t.Error("HasUser")
+	}
+	ctx := context.Background()
+	hash, _ := bcrypt.GenerateFromPassword([]byte("new"), bcrypt.MinCost)
+	l.SetPassword("admin", hash)
+	if ok, err := l.Check(ctx, "admin", "new"); err != nil || !ok {
+		t.Errorf("the new password: %v %v", ok, err)
+	}
+	if ok, _ := l.Check(ctx, "admin", "secret"); ok {
+		t.Error("the old password still checks")
+	}
+	bobHash, _ := bcrypt.GenerateFromPassword([]byte("bob"), bcrypt.MinCost)
+	l.SetPassword("bob", bobHash)
+	if got := l.Users(); !slices.Equal(got, []string{"admin", "bob"}) {
+		t.Errorf("users after an addition: %v", got)
+	}
+	if ok, _ := l.Check(ctx, "bob", "bob"); !ok {
+		t.Error("a user added by its password does not check")
+	}
+}
+
+// TestEndUserSessions: a user's sessions end, but the one whose token is
+// kept; an empty token keeps none.
+func TestEndUserSessions(t *testing.T) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	l, err := New(Options{Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}},
+		Idle: time.Minute, Lifetime: time.Hour, MaxSessions: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	l.SetClock(func() time.Time { return now })
+	l.SetPassword("bob", hash)
+	mine, _ := l.Start("admin")
+	other, _ := l.Start("admin")
+	third, _ := l.Start("admin")
+	bobs, _ := l.Start("bob")
+	if n := l.EndUserSessions("admin", mine); n != 2 {
+		t.Errorf("ended %d sessions, want 2", n)
+	}
+	for _, tc := range []struct {
+		name  string
+		token string
+		live  bool
+	}{{"the caller's", mine, true}, {"another", other, false}, {"a third", third, false}, {"another user's", bobs, true}} {
+		if _, ok := l.Lookup(tc.token); ok != tc.live {
+			t.Errorf("%s session: live %v, want %v", tc.name, ok, tc.live)
+		}
+	}
+	if n := l.EndUserSessions("admin", ""); n != 1 {
+		t.Errorf("ended %d sessions, want 1", n)
+	}
+	if n := l.EndUserSessions("nobody", ""); n != 0 {
+		t.Errorf("ended %d sessions of an unknown user", n)
+	}
+	if _, ok := l.Lookup(bobs); !ok {
+		t.Error("another user's session ended")
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
@@ -58,7 +59,10 @@ type Configs struct {
 	// first is the config fit started with, whose access log and Admin API
 	// stay until a restart.
 	first *config.Config
-	keep  int
+	// currentCfg is the config the running version loaded, which
+	// GET /config/check compares the runtime with; under mu.
+	currentCfg *config.Config
+	keep       int
 
 	mu      sync.Mutex // held for a whole Apply, so that applies follow one another
 	history []*Version // oldest first; the last is the running config
@@ -79,6 +83,12 @@ type Configs struct {
 	admin []byte
 	save  func([]byte) error
 	saved [sha256.Size]byte
+
+	// With a console, users are the console users whose passwords changed
+	// since fit started, and saveUsers, when not nil, writes a new list
+	// beside the config in the store; all under mu.
+	users     []store.User
+	saveUsers func([]store.User) error
 
 	// apps runs the agent's and the tunnel's roles, or is nil; under mu.
 	apps *app.Manager
@@ -136,7 +146,7 @@ type Result struct {
 // env, and keep is how many configs, the running one included, are kept to
 // be read back.
 func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, first *config.Config, data []byte, source string, keep int) *Configs {
-	cs := &Configs{rt: rt, server: server, env: env, first: first, keep: max(keep, 1), parts: map[string]*provider.Part{}}
+	cs := &Configs{rt: rt, server: server, env: env, first: first, currentCfg: first, keep: max(keep, 1), parts: map[string]*provider.Part{}}
 	var version uint64
 	if g := rt.Current(); g != nil {
 		version = g.Version
@@ -160,6 +170,69 @@ func (cs *Configs) UseStore(admin []byte, save func(data []byte) error) {
 	defer cs.mu.Unlock()
 	cs.admin, cs.save = admin, save
 	cs.saved = sha256.Sum256(cs.history[len(cs.history)-1].data)
+}
+
+// UseConsoleUsers gives Configs the console users whose passwords changed
+// since fit started, and save, which writes a new list beside the config in
+// the store.
+func (cs *Configs) UseConsoleUsers(users []store.User, save func([]store.User) error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.users, cs.saveUsers = slices.Clone(users), save
+}
+
+// ConsoleUsers returns the console users whose passwords changed since fit
+// started, and whether a store keeps them.
+func (cs *Configs) ConsoleUsers() (users []store.User, stored bool) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return slices.Clone(cs.users), cs.saveUsers != nil
+}
+
+// SetConsoleUsers writes users beside the config, then keeps them; it gives
+// an error and keeps the old list when there is no store or the write fails.
+// The write is the config's own, small one, and is made here under mu.
+func (cs *Configs) SetConsoleUsers(users []store.User) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.saveUsers == nil {
+		return errors.New("admin: no store keeps the console users")
+	}
+	if err := cs.saveUsers(users); err != nil {
+		return err
+	}
+	cs.users = slices.Clone(users)
+	return nil
+}
+
+// SetConsolePassword writes hash as username's console password hash beside
+// the config in the store, replacing the user's own or adding it; the read
+// and the write are one step, so that two changes at once do not lose one.
+// It gives an error, and changes nothing, when no store keeps the users or
+// the write fails.
+func (cs *Configs) SetConsolePassword(username, hash string) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.saveUsers == nil {
+		return errors.New("admin: no store keeps the console users")
+	}
+	out := make([]store.User, 0, len(cs.users)+1)
+	found := false
+	for _, u := range cs.users {
+		if u.Username == username {
+			u.PasswordHash = hash
+			found = true
+		}
+		out = append(out, u)
+	}
+	if !found {
+		out = append(out, store.User{Username: username, PasswordHash: hash})
+	}
+	if err := cs.saveUsers(out); err != nil {
+		return err
+	}
+	cs.users = out
+	return nil
 }
 
 func (cs *Configs) record(version uint64, data []byte, source, baseSource string, m *provider.Merged) {
@@ -319,6 +392,9 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	if ws := c.Warnings(); len(ws) > 0 {
 		deprecated = config.AsErrors(m.Errors(ws))
 	}
+	// What the check compares the runtime with is this config, not the one
+	// it replaced.
+	cs.currentCfg = c
 	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Warnings: warnings, Deprecated: deprecated}, c, m, nil
 }
 

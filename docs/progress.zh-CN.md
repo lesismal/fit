@@ -10,11 +10,11 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-11-04 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色（`streaming`：RTMP、RTSP、SRT、`httpflv`、`hls`、`stream_whip`、`stream_whep`）与 I117 媒体页面（`media_pages`、房间 API、麦克风和摄像头开关）已完成；I118 房间通话中的聊天（文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头）已完成（决定 030）；I119 从一个路由签发媒体 token（`media_tokens`：供业务后端用策略 `keys` 密钥环中的一个密钥批量签发、对前缀的限制、轮换一个密钥或全部密钥来吊销）已完成 |
-| fib | fib `main` 的 `9824c68`（`v1.6.1-0.20261031223653-9824c6852e7d`）：`63b38d4` 让 Windows 上从本地端口拨号时跳过在另一地址上被占用的端口（A59，fit 的 WebRTC 代理中继用它拨号），`749189e` 让 A59 的测试避开处于 TIME_WAIT 的端口，`9824c68` 让 HTTP 客户端自己关闭的连接在它所失败的请求得知原因之前就不再计入 MaxConnsPerHost；此前为 fib `main` 的 `84a67f7`（`v1.6.1-0.20261031213322-84a67f76ecfc`），带 A56（`74100b2`，从不让 worker 等待的 TURN 服务器）、A57（`bf669ce`，上限、带端口的对端检查、事件和统计）、A58（`496301d`，原地修改限制和凭据、排空）、A55（`97201b6`，经 TCP 和 TLS 的 TURN）和 A59（`3655193`，从指定的本地地址和端口范围拨号），用于 I111；此前为 fib `main` 的 `80c7f76`（`v1.6.1-0.20261031191422-80c7f7662ab4`），第一个带 WebRTC 的提交（`webrtc` 及其各包，A49 的 `Engine.OpenUDPPeer`），用于 I108；此前为 fib `main` 的 `47948dd6`（`v1.6.1-0.20261031164450-47948dd66351`）：`47948dd6` 让 QPACK 解码器按字符串在字段段中的位置记住它，浏览器每次请求都发送的字面量因此只解码一次（W2 经 h3：site +4.0%，edge +2.8%）；此前为 fib `main` 的 `c20ab7a1`（`v1.6.1-0.20261031151458-c20ab7a1705e`）：`c20ab7a1` 让 HTTP/3 请求流在其 OnWritable 回调运行完之前不被回收，修复了 fit 的 CI 在 `TestStuckClientsPastMaxConns/h3` 中遇到的数据竞争，`e66f4cf6` 修复一个偶发失败的 arpc 测试；此前为 fib `main` 的 `d7e117c1`（`v1.6.1-0.20261031142854-d7e117c1f901`）：`d7e117c1` 让对端每次都不加索引重复发送的长头部字面量只解码一次，nghttp2 客户端发送 bearer token 正是如此（W1 h2 +6.7%，每请求 28.60 降到 26.86 us），基于修复和补全测试的 `2ea8ddb7` 与 `da0ac655`；此前为 fib `main` 的 `a6131b0c`（`v1.6.1-0.20261031112846-a6131b0c0af3`），其还回缓冲的测试改为在处理函数取缓冲时查找池化 body，基于 `d3707ca7`：HTTP/2 的 stream 把来自缓冲池的 body 分帧后即还回池里，此前交给垃圾回收，缓冲池的那一档因此被取空（A48；W1 h2 +1.3%，分配从每秒 850 降到 677 MB）；此前为 fib `main` 的 `6bd106d9`（`v1.6.1-0.20261031020358-6bd106d9d44b`），为 Windows CI 放宽了两个计时测试的余量，基于 `46827ea7`：不超过 4 KiB 的整份响应 body 取自缓冲池，经 `ClientResponse.TakeBody` 和 `Context.WriteResponseOwned` 还回池里，`NewBufferedBody` 请求体不再拷贝（A48；W1 HTTP/1.1 +3.0%，即 `861689c9` 让堆变小后多出的回收所耗的 3%）；此前为 fib `main` 的 `7dcb41da`（`v1.6.1-0.20261030055545-7dcb41da8e7c`）：`4f870993` 在推送的 stream 归连接之前就绑定它的 Context，修复了 fib 的 CI 遇到的数据竞争，`7dcb41da` 修复一个 early data 测试在 Windows 上的预热；`a4ae3a0c`：在 Go 里边发送边加密的文件，除最后一块外都告诉内核后面还有数据，让 TCP 填满段（不用内核 TLS 时 1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +6.4%，W2 site HTTPS/1.1 +1.7%）；此前为 fib `main` 的 `881ff97a`（`v1.6.1-0.20261029202329-881ff97a25f2`）：`6c61693d` 让流式响应体放在 64 KiB 的池化块里（W4 proxy-download h1 +11%，约 55 降到 32 MiB；h2 +8%，约 137 降到 100 MiB），`8895a6aa` 让任务池的队列随积压增长，而不是按上限分配（W6 h2 50 降到 32 MiB），`24beda14` 和 `881ff97a` 让内核 TLS 加密的连接用 MSG_MORE 按整记录写，并且只为 512 KiB 及以上的文件切换到内核 TLS（1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +29%，fit 因此去掉 NoKernelTLS）；此前为 fib `main` 的 `c794cf89`（`v1.6.1-0.20261029134914-c794cf8960fe`）：`d5b8d477` 让整份发送的 HTTP/2 响应按 socket 的进度分帧，`0eb21d67` 让流式的 Content-Length 响应体直接从读缓冲交给回调，`08faed60` 让加密后的 TLS 记录贴合缓冲池的档位（W4 download h2 +11.5%，约 167 降到 77 MiB；proxy-download h1 +6.6%、h2 +2.7%），`c794cf89` 让流式的 HTTP/2 请求体在被消费前占住连接窗口（W4 proxy-upload h2 约 312 降到 252 MiB）；此前为 fib `main` 的 `4ad4ebef`（`v1.6.1-0.20261029100241-4ad4ebefac94`）：流式的 HTTP/2、HTTP/3 请求体按 64 KiB 的池化块等待（W4 proxy-upload h2 +12.7%，553 降到 322 MiB）；此前为 fib `main` 的 `56f08db3`（`v1.6.1-0.20261029003614-56f08db38f88`）：`861689c9` 让连接的读轮次从 16 KiB 开始并记住是否增长过（W1 在 10,000 在途 1,076 降到 639 MiB，W4 在 2% 以内），`b926ebf5` 和 `c6c2e10b` 减少 HTTP/3 每个包的工作（W2 site h3 +2.3%）；此前为 fib `main` 的 `f0378649`（`v1.6.1-0.20261028184321-f037864957c0`）：`d4319879` 回收 body 未流式的 HTTP/3 请求（W0 h3 在 500 到 10,000 在途 +17.6% 到 +20.0%），`f0378649` 去掉其测试对 body 大小的假设；此前为 fib `main` 的 `a7b8b456`（`v1.6.1-0.20261028010536-a7b8b456e081`）：`7f1fac3a` 让 Close 在并发的 ShutdownBinding 修改监听器列表时所持的锁下取用该列表，修复了 fit 的 CI 在 macOS 上遇到的数据竞争；`8696ef40` 让应答了早期数据并关闭连接的 TLS 服务端等握手结束后再关闭，以免 Windows 客户端因连接重置丢失应答；`a7b8b456` 修复了一个 HTTP/3 测试中的数据竞争；此前为 fib `main` 的 `33a039f1`（`v1.6.1-0.20261026175603-33a039f1382f`），带有为 I83 而加的 fib `log` 包（`185658f1`，以及处理 `ServeDuplex` panic 的 `33a039f1`）；此前为 fib `main` 的 `a88c75d2`（`v1.6.1-0.20261025180753-a88c75d2f19b`）：在 `b0809b4` 之上加了 A46（在别处完成工作的响应体过滤器，为 I81 而加）以及自 `b0809b4` 起的 HTTP/2、HTTP/3 和 TLS 改进；`b0809b4` 本身是 v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色（`streaming`：RTMP、RTSP、SRT、`httpflv`、`hls`、`stream_whip`、`stream_whep`）与 I117 媒体页面（`media_pages`、房间 API、麦克风和摄像头开关）已完成；I118 房间通话中的聊天（文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头）已完成（决定 030）；I119 从一个路由签发媒体 token（`media_tokens`：供业务后端用策略 `keys` 密钥环中的一个密钥批量签发、对前缀的限制、轮换一个密钥或全部密钥来吊销）已完成；I120 workbench 的配置页面（平铺的模块菜单、每页按 `.conf`/`.yaml`/`.json` 原文编辑并经应用路径校验、控制台用户在页面中修改密码并保存在 store 中）已完成；I121 运行中的服务与它所依据的配置之间的一致性（不一致与说明两类差异及可选修复、一致性页面、`fit check`，以及 `GET /config/check`/`POST /config/reconcile`）已完成；I122 workbench 的功能标签（流媒体、媒体认证、WebRTC、隧道与 LLM 配置各自成页）以及每个监听端口列出其功能并链接到各自配置页面，已完成；I123 引擎菜单（一级条目，每个监听端口是其功能的子菜单，按要求的顺序，端口行带其功能标签）已完成 |
+| fib | fib `main` 的 `60d67aa`（`v1.6.1-0.20261104101432-60d67aa22f8d`）：`1262648` 增加 `Connection.SpliceTo` 与 `Context.SpliceBody`（A62），`60d67aa` 为它们及其测试的回退补文档；fit 的代理现在默认用它搬运较大的 HTTP/1.1 上传（`splice_uploads`）；在它之前，fib `main` 的 `9824c68`（`v1.6.1-0.20261031223653-9824c6852e7d`）：`63b38d4` 让 Windows 上从本地端口拨号时跳过在另一地址上被占用的端口（A59，fit 的 WebRTC 代理中继用它拨号），`749189e` 让 A59 的测试避开处于 TIME_WAIT 的端口，`9824c68` 让 HTTP 客户端自己关闭的连接在它所失败的请求得知原因之前就不再计入 MaxConnsPerHost；此前为 fib `main` 的 `84a67f7`（`v1.6.1-0.20261031213322-84a67f76ecfc`），带 A56（`74100b2`，从不让 worker 等待的 TURN 服务器）、A57（`bf669ce`，上限、带端口的对端检查、事件和统计）、A58（`496301d`，原地修改限制和凭据、排空）、A55（`97201b6`，经 TCP 和 TLS 的 TURN）和 A59（`3655193`，从指定的本地地址和端口范围拨号），用于 I111；此前为 fib `main` 的 `80c7f76`（`v1.6.1-0.20261031191422-80c7f7662ab4`），第一个带 WebRTC 的提交（`webrtc` 及其各包，A49 的 `Engine.OpenUDPPeer`），用于 I108；此前为 fib `main` 的 `47948dd6`（`v1.6.1-0.20261031164450-47948dd66351`）：`47948dd6` 让 QPACK 解码器按字符串在字段段中的位置记住它，浏览器每次请求都发送的字面量因此只解码一次（W2 经 h3：site +4.0%，edge +2.8%）；此前为 fib `main` 的 `c20ab7a1`（`v1.6.1-0.20261031151458-c20ab7a1705e`）：`c20ab7a1` 让 HTTP/3 请求流在其 OnWritable 回调运行完之前不被回收，修复了 fit 的 CI 在 `TestStuckClientsPastMaxConns/h3` 中遇到的数据竞争，`e66f4cf6` 修复一个偶发失败的 arpc 测试；此前为 fib `main` 的 `d7e117c1`（`v1.6.1-0.20261031142854-d7e117c1f901`）：`d7e117c1` 让对端每次都不加索引重复发送的长头部字面量只解码一次，nghttp2 客户端发送 bearer token 正是如此（W1 h2 +6.7%，每请求 28.60 降到 26.86 us），基于修复和补全测试的 `2ea8ddb7` 与 `da0ac655`；此前为 fib `main` 的 `a6131b0c`（`v1.6.1-0.20261031112846-a6131b0c0af3`），其还回缓冲的测试改为在处理函数取缓冲时查找池化 body，基于 `d3707ca7`：HTTP/2 的 stream 把来自缓冲池的 body 分帧后即还回池里，此前交给垃圾回收，缓冲池的那一档因此被取空（A48；W1 h2 +1.3%，分配从每秒 850 降到 677 MB）；此前为 fib `main` 的 `6bd106d9`（`v1.6.1-0.20261031020358-6bd106d9d44b`），为 Windows CI 放宽了两个计时测试的余量，基于 `46827ea7`：不超过 4 KiB 的整份响应 body 取自缓冲池，经 `ClientResponse.TakeBody` 和 `Context.WriteResponseOwned` 还回池里，`NewBufferedBody` 请求体不再拷贝（A48；W1 HTTP/1.1 +3.0%，即 `861689c9` 让堆变小后多出的回收所耗的 3%）；此前为 fib `main` 的 `7dcb41da`（`v1.6.1-0.20261030055545-7dcb41da8e7c`）：`4f870993` 在推送的 stream 归连接之前就绑定它的 Context，修复了 fib 的 CI 遇到的数据竞争，`7dcb41da` 修复一个 early data 测试在 Windows 上的预热；`a4ae3a0c`：在 Go 里边发送边加密的文件，除最后一块外都告诉内核后面还有数据，让 TCP 填满段（不用内核 TLS 时 1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +6.4%，W2 site HTTPS/1.1 +1.7%）；此前为 fib `main` 的 `881ff97a`（`v1.6.1-0.20261029202329-881ff97a25f2`）：`6c61693d` 让流式响应体放在 64 KiB 的池化块里（W4 proxy-download h1 +11%，约 55 降到 32 MiB；h2 +8%，约 137 降到 100 MiB），`8895a6aa` 让任务池的队列随积压增长，而不是按上限分配（W6 h2 50 降到 32 MiB），`24beda14` 和 `881ff97a` 让内核 TLS 加密的连接用 MSG_MORE 按整记录写，并且只为 512 KiB 及以上的文件切换到内核 TLS（1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +29%，fit 因此去掉 NoKernelTLS）；此前为 fib `main` 的 `c794cf89`（`v1.6.1-0.20261029134914-c794cf8960fe`）：`d5b8d477` 让整份发送的 HTTP/2 响应按 socket 的进度分帧，`0eb21d67` 让流式的 Content-Length 响应体直接从读缓冲交给回调，`08faed60` 让加密后的 TLS 记录贴合缓冲池的档位（W4 download h2 +11.5%，约 167 降到 77 MiB；proxy-download h1 +6.6%、h2 +2.7%），`c794cf89` 让流式的 HTTP/2 请求体在被消费前占住连接窗口（W4 proxy-upload h2 约 312 降到 252 MiB）；此前为 fib `main` 的 `4ad4ebef`（`v1.6.1-0.20261029100241-4ad4ebefac94`）：流式的 HTTP/2、HTTP/3 请求体按 64 KiB 的池化块等待（W4 proxy-upload h2 +12.7%，553 降到 322 MiB）；此前为 fib `main` 的 `56f08db3`（`v1.6.1-0.20261029003614-56f08db38f88`）：`861689c9` 让连接的读轮次从 16 KiB 开始并记住是否增长过（W1 在 10,000 在途 1,076 降到 639 MiB，W4 在 2% 以内），`b926ebf5` 和 `c6c2e10b` 减少 HTTP/3 每个包的工作（W2 site h3 +2.3%）；此前为 fib `main` 的 `f0378649`（`v1.6.1-0.20261028184321-f037864957c0`）：`d4319879` 回收 body 未流式的 HTTP/3 请求（W0 h3 在 500 到 10,000 在途 +17.6% 到 +20.0%），`f0378649` 去掉其测试对 body 大小的假设；此前为 fib `main` 的 `a7b8b456`（`v1.6.1-0.20261028010536-a7b8b456e081`）：`7f1fac3a` 让 Close 在并发的 ShutdownBinding 修改监听器列表时所持的锁下取用该列表，修复了 fit 的 CI 在 macOS 上遇到的数据竞争；`8696ef40` 让应答了早期数据并关闭连接的 TLS 服务端等握手结束后再关闭，以免 Windows 客户端因连接重置丢失应答；`a7b8b456` 修复了一个 HTTP/3 测试中的数据竞争；此前为 fib `main` 的 `33a039f1`（`v1.6.1-0.20261026175603-33a039f1382f`），带有为 I83 而加的 fib `log` 包（`185658f1`，以及处理 `ServeDuplex` panic 的 `33a039f1`）；此前为 fib `main` 的 `a88c75d2`（`v1.6.1-0.20261025180753-a88c75d2f19b`）：在 `b0809b4` 之上加了 A46（在别处完成工作的响应体过滤器，为 I81 而加）以及自 `b0809b4` 起的 HTTP/2、HTTP/3 和 TLS 改进；`b0809b4` 本身是 v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON、logfmt 或行格式的访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；配置加密保存在 store 中（`admin.store`、`fit store export` 和 `import`），以及登录后可修改全部配置的控制台（`admin.console`）；agent 的角色，即经 WebSocket mesh 共享 AI 模型的 hub、node 和 client，以及 tunnel 的角色，经 TCP、WebSocket 或 QUIC 通过服务器访问 NAT 后的 TCP 服务，两者都在各自的页面上设置和修改；WebRTC：经 UDP、TCP 和 TLS 的 TURN 服务器，以 fit 为媒体服务器的 WHIP 和 WHEP，以及按 ICE ufrag 路由、经一个 UDP 端口代理的媒体服务器；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 1.0 的外部安全审计，在代码之外安排；NAT 后主机之间的 P2P 隧道（I86、I88–I93：目前只有 `p2p/stun` 和 `webrtc.turn` 两部分）以及 VPN（I95–I103：目前只有 `vpn/packet`） |
-| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：基于 UDP 的 RTSP 有待 fib 的 A61。下一个可用的迭代编号是 I120，下一个可用的 fib 请求编号是 A62 |
+| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：基于 UDP 的 RTSP 有待 fib 的 A61。下一个可用的迭代编号是 I124，下一个可用的 fib 请求编号是 A63 |
 **2026-10-27 的压测。** [方案与分析](../bench/results/plan-2026-10-27/analysis.md)在压测机上跑了 232 轮，只保留了一项优化：fib `d4319879` 回收 body 未流式的 HTTP/3 请求，500/5,000/10,000 在途分别 +17.6%、+19.2%、+20.0%，每请求 CPU 降 14-16%，h1/h2 不变。读缓冲 start（W4 proxy-download -4.9%）、sendfile 下载（-13.9%）和 fit-only 的 HTTP/1.1 改动经实测否决，数字在分析里。
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -3831,3 +3831,155 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
   stream 运行 fib handler，不经过网络。带 content type 的 `Context.Respond` 会忽略 `c.Header()`；需要其他响应头
   字段时用 `WriteResponse`。
 - **错误位置。** 错误测试比较带 行:列 的完整消息。期望的列号应该从文档计算，而不是手数。
+
+### I120 workbench 的配置页面与控制台密码 — 已完成
+
+用户的要求：每个控制台管理员账号可以修改自己的密码（已登录用户也可以重置另一个账号的密码），修改保存在 store 文件中；配置菜单去掉
+网关/系统分组树，全局模块与各协议模块在左侧平铺并列；每个配置页面既能用表单编辑（树形，每个可省略成员带复选框与输入框），也能用
+`.conf`、`.yaml`、`.json` 原文编辑该页面所管的成员，保存前经过与 `fit validate` 及应用相同的检查。
+
+- **store**（`admin/store`、`admin/bootstrap.go`、`admin/configs.go`、`cli`）：fitstore 的载荷升级为第 2 版——封存的 JSON 是
+  `{"config": <基础配置>, "users": [{"username", "password_hash"}]}`——写入时头部版本字节为 2，仍可读取第 1 版，因此第 1 版的
+  store 在下一次写入（首次种子、应用配置或修改密码）时写成第 2 版。新增 `Store.Users` 与 `Store.SetUsers`，`Open`、`Read`、
+  `Write` 的 API 不变并记住用户（`Write` 保留已有用户，`SetUsers` 用最近读写的配置重新封存）；载荷中的配置按原样嵌入，不是
+  JSON 的配置被拒绝。`admin.WithConsoleUsers` 按用户名替换引导文件 admin 中 `admin.console.users[].password_hash`，保持成员
+  顺序；`Configs.UseConsoleUsers`、`ConsoleUsers`、`SetConsoleUsers` 与 `SetConsolePassword` 在 `cs.mu` 下保存并写出这些
+  覆盖（密码的读取-修改-写入是一步，两个并发修改不会丢失一个）。`cli/run.go` 在配置加载前把 store 中的用户合并进引导文件的
+  admin，并接上覆盖的读写；`fit store import` 保留旧 store 的用户，`export` 仍只打印配置。
+- **密码**（`admin/console.go`、`login`）：控制台在 admin 模块下新增精确路由 `GET /api/users`
+  （`{"user", "store", "users"}`）、`POST /api/account/password`（`{"current_password", "password"}`）与
+  `POST /api/users/password`（`{"username", "password"}`），即 `/api/m/admin/...`；bcrypt 校验、新哈希与 store 写入都在
+  控制台有界池上的同一次 `r.Go` 中完成；当前密码错误计入该地址的登录失败（403，锁定后 429 并带 `Retry-After`），空密码或超过
+  72 字节、未知用户返回 400，没有 store 返回 409，写入失败返回 500 且旧密码仍然有效。成功时设置登录中的哈希，结束该用户的其他
+  会话（调用者自己的保留），并记录 `console: %q changed the password of %q` 或 `console: %q set the password of %q`。
+  `login` 新增 `Users`、`HasUser`、`SetPassword` 与 `EndUserSessions`，用户表由 `RWMutex` 保护。
+- **菜单**（`app/workbench/web/core/workbench.js`）：去掉分组树。左侧第一级即模块，按 `RANK` 顺序排列——概览、监听器、全局设置
+  （`sys.config`，更名为“全局配置”）、JSON、版本与账户，然后是 HTTP（反向代理与缓存）、HTTP CONNECT（正向代理）、TCP/UDP
+  （四层）与 TLS——角色按组和 order 排在它们之后。只有一页的模块是链接，多页模块在其下展开页面，标签下方有小号协议标记。筛选、
+  收起为图标、每个模块的展开状态与路由都保留；面包屑为模块，再是页面。
+- **配置页面**（`app/workbench/web/gateway/config.js`、`modules.js`、`config.css`、`admin/check.go`、
+  `admin/server.go`）：`FitConfig.page(el, sh, render, opts)` 带 `opts.members` 时在提示上方绘制 `UI`、`.conf`、`.yaml`、
+  `.json` 标签页。文本由 `POST /config/render` 呈现，输入后 400ms 由 `POST /config/parse` 解析进共享草稿，保存时由
+  `PUT /config/text?format=&members=` 适配文本并在 `configs.Update` 中把这些成员合并进基础配置，因此和每次应用一样经过加载、
+  编译、绑定与 store 写入，并遵守 ETag 规则；错误映射到原文的行与列，失败时不应用任何修改。草稿在页面成员之外还有未保存修改时，
+  页面改用 `PUT /config` 保存整份草稿，避免丢失其他修改；无法解析的文本阻止保存。表单中每个可选的非布尔成员带一个“是否设置”复选
+  框（勾选时填入默认值，取消勾选时删除）。各页面的成员为 listeners、routes（两个路由页面，附说明文本包含全部路由）、
+  upstreams、services、auto_https、acme、每个系统成员，以及“其他”列表。
+- **账户页面**（`app/workbench/web/account/account.js`）：`#/account/password`（当前密码、新密码及确认）与
+  `#/account/users`（用户列表与重置密码弹窗，调用者标为“当前”）；没有 store 时显示提示并禁用表单。
+- **测试**（竞态检测）：`admin` 的账户测试（`GET /api/users`、修改自己的密码、重置、401/400/403/409/429/500、会话结束、
+  store 往返、用合并后的 admin 重启控制台）、`store` 的载荷版本、用户与写入、`login` 的用户与会话结束、`cli` 的 openStore
+  合并与 import 保留用户，以及文本端点（三种格式的 render/parse 往返、解析错误带行列号、部分保存替换与删除成员、外来成员与
+  `admin` 被拒绝、无效配置被拒绝并给出行列号且运行中的配置不变、412、未知格式）。workbench bundle 的 TestPages 在新增文件后
+  通过，schema 说明保持完整。
+- **基准**：无；控制面（规则 21）。
+- **差距**：角色的控制台用户（配置中的 `llm.<role>.console.users`）随配置修改，不通过只由 `admin.console` 提供的账户页面；
+  `fit store export` 只打印配置、不打印密码覆盖，所以旧 store 打不开时 export/import 会丢失它们；走整份草稿保存的兜底路径时，
+  其错误显示草稿路径而不是原文行号列号；本次会话的构建通过本地 `go.work` 使用同级 fib 检出，因为仓库的 `go.mod` 仍指向
+  proxy-splice 提交之前的 fib 哈希（I120 不需要 fib 改动）。
+
+### I121 运行中的服务与它所依据的配置之间的一致性 — 已完成
+
+用户的要求：检查运行中的 fit 服务的所有功能与它所依据的配置是否一致；不一致时列出差异，并让用户逐项确认如何修正（增、删、改）。
+
+- **检查器**（`admin/drift.go`）：`Configs.Check()` 比较运行时与它运行所依据的配置，`GET /config/check` 返回运行中的版本、ETag、
+  差异及其计数。规则：启动后改过的只在启动时生效的成员（`access_log`、`log`、`telemetry`、`engine`、`acme`、`providers`）
+  与生效值比较（`admin` 属于 info：它来自引导文件）；配置显式设置的引擎上限 `max_conns`、`max_pending_bytes`、
+  `max_write_queue_bytes` 与运行中引擎的 `Settings()` 比较；配置中的角色与 `app.Roles()` 及管理器的 `Running()` 比较；
+  `Version.sources` 标明由 provider 加入生效配置的元素，给出把它们加入基础配置的 `add` 修复（`shadowed` 元素属于 info）；已绑定的
+  监听（`listener.Server.Addrs()`）与运行图中的监听比较，端口 `0` 属于 info；每个监听提供的证书与其生效的 `tls.acme` 名字比较
+  （配置中写明的名字缺失为 drift，附 `delete` 修复；默认 HTTPS 加入的名字与按需签发的证书属于 info）；上游池与生效配置比较，
+  全部后端不可用的上游属于 info；使用中的缓存区与 `cache.Zones()` 比较，从更早配置保留下来的区属于 info。每个差异都有稳定 ID、
+  类别、种类（`drift` 或 `info`）、配置值与运行值，以及可选修复：写入基础配置的补丁（`add`/`delete`/`replace`）或 `reapply`。
+  `Configs` 现在保留运行版本加载后的 `*config.Config`（`currentCfg`，公开 JSON 不变），检查因此不必重新加载配置；检查读取运行时
+  时不持有 `cs.mu`（用保留的运行图中的证书管理器代替 `Status()`），所以 `POST /config/reconcile` 能在 `configs.Update` 的编辑
+  回调内重新检查、校验选中的 ID 与动作、应用补丁（为 `/x/-` 追加创建缺失数组，按索引从大到小删除）并按 `PUT /config` 的方式
+  应答。缺少 `If-Match` 返回 428，过期返回 412，未知 ID、未提供的动作、空修复列表或已消失的补丁路径返回 400，且不做任何应用。
+- **CLI**（`cli/check.go`，`fit check`）：像 `fit validate` 一样加载引导配置，只读取 `admin.address` 与 `admin.token_file`
+  （`admin` 其余字段是 fit 自己的 JSON，故不用 encoding/json 整体解码），经 TCP 或 `unix/` socket 访问 Admin API，打印版本、
+  drift/info 计数与每处差异的值和修复，退出码 0（无不一致）、1（仍有 drift）或 2（用法/配置/连接错误）。`-json` 输出原始应答；
+  `-fix` 为每处 drift 逐项提示修复（编号，`s`/空跳过，输入错误重新提示，EOF 安全），把选中的 `{id, action}` 与 `If-Match`
+  一起发送，打印应用的版本与警告，重新检查并打印剩余差异。`fit help` 中列出该命令。
+- **页面**（`app/workbench/web/gateway/check.js`、`check.css`）：平铺菜单中 Versions 之后的 `sys.check` 模块，路径
+  `#/sys.check/check`，按类别标题显示每处差异，带种类标记、配置值与运行值；每个 drift 行有一个修复下拉（按动作本地化，并显示
+  补丁路径）和默认不勾选的“应用本项”复选框，以及数量为零时禁用的应用栏；确认弹窗列出所选项目，再带检查的 ETag
+  `POST /api/m/admin/config/reconcile`；成功提示应用的版本、清空选择并重新检查，412 显示“配置已在别处修改”及“重新检查”，400
+  显示服务端错误并重新检查。info 行以弱化样式显示且没有控件；没有不一致时显示绿色提示。所有标签都有中英文。
+- **测试**（竞态检测）：`admin` 的 18 个 drift 测试（干净检查、只在启动时生效成员的两种方向与 `admin` info、引擎上限、写明/自动/
+  通配/已提供证书、监听缺失/多余/端口 0、角色的配置/运行与删除补丁、provider 钉入且生效配置不变与 shadowed info、上游多余/缺失/
+  不可用、缓存缺失/保留、端点顺序、If-Match 412/428、未知 ID/动作、空与重复修复、缺失数组创建、无效结果拒绝、reapply）；
+  `cli` 的 19 个 `fit check` 测试（TCP 与 Unix 假 Admin API：列表、`-json`、无不一致/仅 info 的退出码、选择与跳过修复、重新提示、
+  POST 体与 If-Match、412、400/500/503、token、无 `admin`、控制台含 fit 自有 duration JSON 的引导文件、坏配置/参数、不可达端口、
+  超时、帮助）；`app/workbench` 的 bundle 测试；以及真实端点上的浏览器运行（引擎上限与只在启动时生效成员的 drift、全选、确认弹窗、
+  应用、重新检查为干净、中文），和针对真实 demo 的 `fit check`（列表、`-json`、`-fix` 应用后重新检查为干净）。
+- **基准**：无；控制面（规则 21）。
+- **差距**：已运行角色的 `Apply` 失败不可观测，检查器看不到；部分角色监听是异步绑定的（监听地址无法分配的 `llm.hub` 会被算作
+  运行中而其 mesh 监听其实失败），因此也不属于 drift；默认 HTTPS 生成的监听不作为差异列出；路由与四层服务只通过 provider 加入项
+  出现（它们按构造由生效配置编译而来）；从更早配置保留下来的缓存区本身是瞬态的；监听的 `network` 字段未比较（地址与协议已比较）。
+
+### I122 workbench 的功能标签与监听端口 — 已完成
+
+用户的要求：左侧菜单应为各协议/功能单独设条目（正向代理、反向代理、流媒体等）；“监听”页面应为每个监听端口列出该端口提供的
+全部功能，每项都能跳转到编辑它的页面。
+
+- **功能页面**（`app/workbench/web/gateway/features.js`、`features.css`）：`gw.streaming`（流媒体）、
+  `gw.mediaauth`（媒体认证）、`gw.webrtc`（WebRTC）、`gw.tunnel`（隧道角色）与 `gw.llm`（LLM 角色）在平铺菜单中各自成模块，
+  位于“缓存”之后、运行角色的模块之前，各带一个小标签（RTMP / RTSP / SRT、媒体令牌、WebRTC、隧道、LLM）与一个编辑其成员的
+  页面；它们编辑同一份共享草稿，因此 UI/`.conf`/`.yaml`/`.json` 标签页、可省略成员复选框与保存栏都和普通配置页面一致。页面在
+  加载时注册 `C.place`，任意页面保存时的问题都会链接到编辑该成员的页面。隧道与 LLM 页面显示角色提示（配置应用后角色启动）；
+  流媒体页面指向设置其处理器（HLS、HTTP-FLV、WHIP/WHEP）的路由页面。“全局配置”与“其他”页面不再列出这些成员（`SYS` 保留
+  日志、访问日志、遥测、指标、限制、引擎、配置来源），配置页面不再重复。
+- **端口功能**（`modules.js` 的监听页面）：在 schema 表单之后增加“各端口提供的功能”区，每个已配置监听一张卡片；配置未写监听时
+  给出默认 HTTPS 生成的端口。卡片显示名称、写入地址、内核实际绑定的地址（与写入不同时；每次绘制读取一次 `GET /api/status`，
+  读取失败时给出弱化提示）、协议标签，以及每项功能一行，带数量与编辑页面的链接：反向代理路由
+  （`#/gw.reverse/routes?handler=proxy`）、正向代理路由（`#/gw.forward/routes`）、流媒体处理器（链接流媒体页面，另按处理器给出
+  筛选后的路由链接）、WebRTC 处理器（同样）、静态文件/直接应答/FastCGI/媒体令牌/媒体页面（本地化名称加处理器的筛选路由链接）、
+  缓存中间件（`#/gw.cache/zones` 与路由页面）、其余中间件（归为一组并列出模块）、四层服务（`#/gw.l4/services`）、SOCKS（本页
+  编辑）、TLS 证书（`#/gw.tls/certs`）、ACME（`#/gw.tls/acme`）、默认 HTTPS（`#/gw.tls/auto_https`）与生成的 HTTP 重定向
+  （`#/gw.tls/auto_https`），以及 PROXY 协议、HTTP/3、按需证书、客户端证书标签；没有其他功能的端口会说明。路由与中间件只归属
+  于提供 HTTP 的监听。反向代理路由页面在进入时读取 URL 中的 `?handler=<模块>` 并预选该处理器的筛选标签，之后点击的标签不会被
+  覆盖。
+- **测试**：bundle 的 `TestPages`（index.html 加载全部文件、core 在前）与 `TestSchemaZh` 通过；对 Admin 端点做无头浏览器
+  mock 运行，检查了 45 项——菜单顺序与标签、卡片数量与全部链接目标、代理深链与标签行为、草稿改动后重绘卡片且每次绘制只读一次
+  `/api/status`、五个功能页面、“其他”页面、中文词条、默认 HTTPS 生成的端口、`/api/status` 失败降级、TLS/ACME 行与关闭自动
+  HTTPS；对真实后端（五个监听：HTTP、TLS、SOCKS、TCP、UDP，以及 proxy/static/respond/正向代理/HLS/媒体令牌路由、缓存中间件、
+  四层服务、流媒体 RTMP 角色与媒体认证策略）运行了 16 项检查——菜单顺序与标签、五张端口卡片及其功能、`?handler=proxy` 深链筛选
+  路由页面、五个功能页面及其四个标签页、全局配置不再列出被移出的成员、中文标签。
+- **基准**：无；控制面（规则 21）。
+- **差距**：SOCKS、TCP 或 UDP 监听不显示路由行，即使未写 `listeners` 的路由会被所有可服务 HTTP 的监听承接（它们不提供 HTTP）；
+  流媒体/WebRTC 分组行需要为每个处理器各给一个小链接，因为路由筛选一次只选一个模块；未知处理器以模块 ID 显示；端口卡片描述的是
+  配置与运行中的 `auto_https` 生成端口及绑定地址，而不是每个端口的实时连接数。
+
+### I123 workbench 的引擎菜单 — 已完成
+
+用户的要求：左侧菜单新增一级 **引擎** 条目，每个监听端口作为子菜单列出该端口提供的功能，顺序为：处理器（静态文件/直接应答/
+FastCGI/媒体令牌/媒体页面 → 各自筛选的路由页），PROXY 协议/HTTP/3/按需证书/客户端证书以小标签显示，反向代理与正向代理路由，
+缓存（缓存区页与路由页）及其他中间件，流媒体处理器（流媒体页与各处理器路由），WebRTC 处理器（WebRTC 页与路由），四层服务、
+SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能从监听页面移出。
+
+- **workbench 菜单**（`core/workbench.js`）：模块的 `nav` 可为函数，在菜单构建或重建时调用；带 `kids` 的条目为可折叠的
+  第二级节点，其子项为指向其他模块页面的第三级链接（或无链接的灰色行）；带 `href` 的条目为外链，模块也可以只由链接组成。模块
+  可有 `boot`，在外框构建后调用一次。`WB.refreshMenu()` 重新计算动态导航并只重绘侧栏，保留展开状态、当前页面与筛选，然后重新
+  标记当前页面并高亮 `href` 即当前哈希的链接。筛选是递归的：任一后代匹配时模块或端口仍显示，筛选时节点展开。其他模块的静态
+  `nav` 不受影响。
+- **引擎模块**（`gateway/engine.js`）：位于监听之后的一级条目，没有自己的页面，其导航来自共享配置草稿加 `GET /api/status`：
+  按顺序为每个已配置监听一个可折叠节点（配置未写监听且默认 HTTPS 开启时为生成的 `https`/`http` 端口；一个端口也没有时为指向
+  监听表单的链接）。端口头部显示名称、地址与实际绑定地址（在 title 中），以及一行协议与功能标签：PROXY 协议、HTTP/3、按需证书、
+  客户端证书、默认 HTTPS。其子项按要求的顺序：`static`、`respond`、`fastcgi`、`media_tokens`、`media_pages` 及其他处理器
+  （各自筛选的路由页）、反向代理路由（`?handler=proxy`）与正向代理路由、缓存区与缓存的路由及其他归组中间件（列出模块）、
+  流媒体页面与各流媒体处理器的筛选路由、WebRTC 页面与其处理器路由、四层服务、SOCKS（在监听页面编辑）、TLS 证书、ACME、
+  默认 HTTPS、HTTP 重定向，最后是监听表单。每个条目带数量、本地化标签与图标；点击即导航到编辑它的页面。模块经 `boot` 加载一次，
+  在 `config.js` 于配置读取后派发 `fit:config` 时重新读取草稿，并经 `WB.refreshMenu` 重建菜单。
+- **监听页面**（`modules.js`）：I122 的端口功能卡片已移除；页面说明这些功能在引擎菜单中，并继续编辑监听本身。反向代理路由页仍
+  读取 `?handler=` 并预选对应处理器筛选。`config.js` 在成功读取配置后派发 `fit:config`；`index.html` 加载新脚本与样式。
+- **测试**：bundle 的 `TestPages`（index.html 加载全部文件、core 在前）与 `TestSchemaZh` 通过；改动 JS 的 `node --check`；
+  对 Admin 端点做无头浏览器 mock 检查（46 项：菜单结构/顺序/链接/数量/标签、点击、筛选、auto_https 与无监听两种情况、fit:config 刷新、活动高亮、中文、无未捕获异常）；以及针对真实后端的浏览器运行（五个监听：带 PROXY 协议的 HTTP、带 h2/h3 与按需/客户端证书的
+  TLS、SOCKS、TCP、UDP；路由 proxy/static/respond/正向代理/HLS/媒体令牌；缓存中间件、四层服务、流媒体 RTMP 角色与媒体认证
+  策略）：13 项通过——引擎位于监听之后并带 Ports 标签、五个可见端口子菜单、端口标签行（PROXY 协议 v1/v2、HTTP/3、按需与客户端
+  证书）、web 端口条目按要求的精确顺序及数量、反向代理条目落到筛选后的路由页且链接高亮、缓存/流媒体/端口配置条目落到各自页面、
+  监听页面没有卡片并指向引擎、筛选 “hls” 时引擎与端口仍可见、配置变化后菜单更新（新增第二个代理路由后数量变为 2）、中文标签
+  与顺序。
+- **基准**：无；控制面（规则 21）。
+- **差距**：第三级只有链接（引擎没有自己的页面；点击端口头部只切换展开）；SOCKS/TCP/UDP 端口不显示路由条目（不提供 HTTP）；
+  一个功能有两处页面时是两个条目（缓存区/缓存的路由、流媒体配置/各处理器路由）；端口的实际绑定地址与 status 读取失败提示在行的
+  title 中而不可见；端口很多时菜单会很长。

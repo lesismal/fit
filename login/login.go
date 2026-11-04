@@ -17,6 +17,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -60,6 +62,7 @@ type Session struct {
 // Logins are the users who may log in and the sessions of those who did.
 // Its methods are safe to call from any goroutine.
 type Logins struct {
+	usersMu  sync.RWMutex      // held for a brief read by Check, and for a change of users
 	users    map[string][]byte // user name to bcrypt hash
 	dummy    []byte            // a hash to check unknown names against
 	idle     time.Duration
@@ -113,13 +116,44 @@ func (l *Logins) Check(ctx context.Context, user, password string) (bool, error)
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
+	l.usersMu.RLock()
 	hash, known := l.users[user]
+	l.usersMu.RUnlock()
 	if !known {
 		hash = l.dummy
 	}
 	err := bcrypt.CompareHashAndPassword(hash, []byte(password))
 	<-l.checks
 	return err == nil && known, nil
+}
+
+// Users returns the users who may log in, sorted.
+func (l *Logins) Users() []string {
+	l.usersMu.RLock()
+	defer l.usersMu.RUnlock()
+	names := make([]string, 0, len(l.users))
+	for name := range l.users {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// HasUser reports whether user may log in.
+func (l *Logins) HasUser(user string) bool {
+	l.usersMu.RLock()
+	defer l.usersMu.RUnlock()
+	_, ok := l.users[user]
+	return ok
+}
+
+// SetPassword sets user's bcrypt hash, adding the user when it is not there
+// yet: a password changed from a console is checked here from then on,
+// before fit restarts and reads it from the store.
+func (l *Logins) SetPassword(user string, hash []byte) {
+	l.usersMu.Lock()
+	defer l.usersMu.Unlock()
+	l.users[user] = slices.Clone(hash)
 }
 
 // Start starts a session for user and returns its token, ending the oldest
@@ -184,6 +218,27 @@ func (l *Logins) End(token string) (Session, bool) {
 		return Session{}, false
 	}
 	return *s, true
+}
+
+// EndUserSessions ends every session of user but the one of keepToken, which
+// is the caller's own, and returns how many it ended. An empty keepToken
+// keeps none of them.
+func (l *Logins) EndUserSessions(user, keepToken string) int {
+	var keep [sha256.Size]byte
+	if keepToken != "" {
+		keep = sha256.Sum256([]byte(keepToken))
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ended := 0
+	for key, s := range l.sessions {
+		if s.User != user || keepToken != "" && key == keep {
+			continue
+		}
+		delete(l.sessions, key)
+		ended++
+	}
+	return ended
 }
 
 // LockedOut returns how long addr is still refused logins.

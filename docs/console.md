@@ -18,6 +18,7 @@ once, is sealed in the store, and is what fit starts from next time. The design 
 - [Users and fit hash-password](#users-and-fit-hash-password)
 - [Logins and sessions](#logins-and-sessions)
 - [The pages](#the-pages)
+- [Checking the running config](#checking-the-running-config)
 - [Limits and timeouts](#limits-and-timeouts)
 - [Roles' pages](#roles-pages)
 - [The workbench's modules](#the-workbenchs-modules)
@@ -81,9 +82,12 @@ config as it loads, after providers are merged, but not into the base config, so
 `/versions` and `/config/effective` hold no password, hash or key path. A config sent with `admin`
 is refused while there is a store: `admin` comes from the bootstrap file alone.
 
-**The format** is fit's own, `fitstore` version 1: a 59-byte header (the magic `FITSTORE`, the
-version, Argon2id's settings, a salt and a nonce), then the config as JSON sealed with
-XChaCha20-Poly1305, the header as its additional data. The key is derived from the password with
+**The format** is fit's own, `fitstore`. A 59-byte header (the magic `FITSTORE`, the version,
+Argon2id's settings, a salt and a nonce), then a JSON payload sealed with XChaCha20-Poly1305, the
+header as its additional data. Version 2, which fit writes, seals
+`{"config": <the base config>, "users": [{"username", "password_hash"}]}`: the console users whose
+passwords changed from the pages, beside the config. A version 1 store, which seals the config alone,
+is still read, and is written as version 2 from then on. The key is derived from the password with
 Argon2id (time 3, 64 MiB, 4 threads) once, when fit starts; each write takes a new nonce, so writes
 cost no derivation. A write goes to a temporary file beside the store, made 0600, synced and renamed
 over it, so a crash leaves the old store or the new one, never half of one.
@@ -138,11 +142,11 @@ kill -HUP "$(pidof fit)"    # or restart fit
 cross a network in the clear; `fit validate` refuses one without. On a loopback address TLS is
 optional, as for a console reached through an SSH tunnel.
 
-The console serves the **workbench**: one page with a menu on the left, a tree of groups (Gateway,
-Tunnel, LLM, System), their modules and each module's pages, and the page picked on the right. Its
-config module edits the config; and every [LLM](llm.md) and [tunnel](tunnel.md) role running in the
-same fit shows beside it as a module of its own, with every page the role's own console has, behind
-the one login.
+The console serves the **workbench**: one page with a flat menu on the left, the config's modules and
+each running role's as peers in it (the global pages first, then the protocols), each module's pages
+under it, and the page picked on the right. Its config module edits the config; and every
+[LLM](llm.md) and [tunnel](tunnel.md) role running in the same fit shows beside it as a module of its
+own, with every page the role's own console has, behind the one login.
 
 The console is a binding of its own on the listeners' fib engine, as the roles' pages are, not one of
 the config's listeners: a config whose listeners fail to bind leaves it reachable to fix them. Its
@@ -173,6 +177,15 @@ $2a$10$...
 most 72 bytes, bcrypt's limit, and not empty. The same hashes serve `basic_auth`. `fit validate`
 refuses a `password_hash` that is not a bcrypt hash, an empty user name and a name listed twice.
 
+**Changing a password.** The pages' Account module changes the signed-in user's password, with the
+current one, and lets any console user set another user's password (every console user is an
+administrator). A new password is non-empty and at most 72 bytes; it is hashed with bcrypt on the
+console's pool and written beside the config in the store, replacing that user's password from the
+bootstrap file. The change ends that user's other sessions (the caller's own stays) and is recorded
+in the `admin` log. Without `admin.store` there is nowhere to keep it: the pages say so and the
+endpoints answer `409`. The users and their first hashes stay in the bootstrap file's
+`admin.console.users`; the users of a role's pages change with the config.
+
 ## Logins and sessions
 
 - **Checking a password.** A name that is not a user is checked against a dummy hash, so the time
@@ -196,35 +209,118 @@ change a user made with the config version it applied.
 
 ## The pages
 
-After logging in, the workbench. Its menu can be filtered, folded to icons, and its groups and
-modules opened and closed; the theme (light, dark and three more) and the language (English or
-Chinese) are picked at the top right. Each page has its own URL, `#/<module>/<page>`.
+After logging in, the workbench. Its menu is one flat list of the modules the console serves: the
+config's global pages first (overview, listeners, the engine, the global settings, the whole config as
+JSON, the versions, the consistency check and the account pages), then the protocol and feature pages,
+then a module for each role running. A module's pages open under it; a module with one page is a link.
+The **Engine** entry is the running listeners seen from their ports: each port opens to the features it
+serves — its handlers, reverse and forward proxy routes, cache, streaming and WebRTC handlers, layer 4
+services, SOCKS, and TLS/ACME/HTTPS by default — each a link to the page that edits it, with the tags
+that port carries (PROXY protocol, HTTP/3, on-demand and client certificates) on its line. The menu can
+be filtered, folded to icons, and its modules opened and closed; the theme (light, dark and three more)
+and the language (English or Chinese) are picked at the top right. Each page has its own URL,
+`#/<module>/<page>`.
 
-- **Gateway**: an overview of the running config (status, routes, services, upstreams and their
-  health, certificates, the version), then the parts of the config the gateway is made of, each a
-  page: listeners, the reverse proxy's routes and upstreams, the forward proxy's routes, layer 4
-  services, TLS and certificates.
+- **Global**: an overview of the running config (status, routes, services, upstreams and their
+  health, certificates, the version); the listeners; the rest of the config, part by part (log,
+  access log, telemetry, metrics, limits, engine, providers, and whatever else the schema holds); the
+  whole config as JSON; and the versions applied (`admin.history` of them), where each came from, each
+  one's text, and a button to roll back to it.
+- **HTTP**, **TCP/UDP**, **TLS**: the protocol pages, each with a small tag in the menu: the reverse
+  proxy's routes and upstreams and the cache (HTTP), the forward proxy's routes (HTTP CONNECT), the
+  layer 4 services (TCP and UDP), and TLS's certificates, HTTPS by default and ACME.
+- **Streaming**, **Media auth**, **WebRTC**, **Tunnel roles**, **LLM roles**: the config's `streaming`,
+  `media_auth`, `webrtc`, `tunnel` and `llm` members, each on a page of its own instead of under Global,
+  with a tag naming what it is. The streaming page points at the routes where its handlers (HLS,
+  HTTP-FLV, WHIP/WHEP) are set; the tunnel and LLM pages say their roles start when the config applies.
+- **Account**: the signed-in user's password, and the console users' (below).
 - **Tunnel** and **LLM**: a module for each role running, as `tunnel.hub` or `llm.node`, with the
   role's pages.
-- **System**: the rest of the config, part by part; the whole config as JSON; and the versions
-  applied (`admin.history` of them), where each came from, each one's text, and a button to roll
-  back to it.
+
+The **Engine** menu is that same view in the menu, one submenu per listener port, in the order the
+config and HTTPS by default make them: a port opens to its handlers (static, respond, FastCGI, media
+tokens, media pages — each linking to the routes page filtered to it), its reverse-proxy and
+forward-proxy routes, its cache (the zones page and the routes page) and other middleware, the
+streaming handlers (the streaming page and each handler's filtered routes), the WebRTC handlers (the
+WebRTC page and their routes), its layer 4 services, SOCKS, TLS certificates, ACME, HTTPS by default and
+the redirect to it, and finally a link to the listener form. The bound address is shown beside the
+written one (and the ports HTTPS by default made when the config writes none), and the port's line
+carries its tags: PROXY protocol, HTTP/3, on-demand and client certificates. The Listeners page edits
+the listeners themselves and says the features are in the Engine menu. A link to a handler's routes
+opens the routes page filtered to that handler.
 
 The config's pages are forms made from fit's JSON Schema, embedded in the binary: every object,
-list and module typed by its schema, with each field's doc. A field fit adds is edited with no change
-to the console. `admin` is not in the forms. Every page edits the same draft of the config: **Save
-and apply** sends it whole, with `If-Match`; the result says which version it was applied as, with
-any warnings. A config with errors is refused and its errors are shown at their paths. When the
-config was changed elsewhere since the page read it (`412`), the page says so: discard the changes to
-read it again, or copy them from the JSON page first.
+list and module typed by its schema, with each field's doc, and a checkbox for each member that may
+be left out, so that the form is the tree the config is. A field fit adds is edited with no change to
+the console. `admin` is not in the forms. Each config page also has `.conf`, `.yaml` and `.json`
+tabs that edit the members that page is about as raw text, in that format: the text is read from the
+draft, adapted to fit's JSON as it changes (and marked when it does not parse, which stops a save),
+and **Save and apply** sends it, with `If-Match`, for the server to merge those members into the
+config and apply it through the one path — so it is checked as `fit validate` and the apply check it,
+and a text that fails is answered with its path, line and column and applies nothing.
+
+Every page edits the same draft of the config: **Save and apply** sends it whole, with `If-Match`,
+or, from a raw tab, sends that page's text, which is merged into the config first. The result says
+which version it was applied as, with any warnings. A config with errors is refused and its errors
+are shown at their paths. When the config was changed elsewhere since the page read it (`412`), the
+page says so: discard the changes to read it again, or copy them from the JSON page first.
 
 For scripts, the console's own endpoints are `POST /api/login` (a JSON body
 `{"username", "password"}`, answered with the user and the CSRF token), `POST /api/logout`,
 `GET /api/session` and `GET /api/workbench` (the user and the IDs of the modules served). Each
 module's endpoints are under `/api/m/<module>/`: the config's module, `admin`, serves
-`GET /api/m/admin/schema` and, under `/api/m/admin/`, the Admin API's endpoints, behind a session
-instead of the token, as `GET /api/m/admin/config`; a role's module serves its pages' API, as
+`GET /api/m/admin/schema`, the Admin API's endpoints under `/api/m/admin/`, behind a session instead
+of the token, as `GET /api/m/admin/config`, and the pages' own: `GET /api/m/admin/users` (the
+signed-in user, the users, and whether a store keeps them), `POST /api/m/admin/account/password`
+(one's own password, with the current one), `POST /api/m/admin/users/password` (another user's), and
+the raw editors' `POST /api/m/admin/config/render?format=`, `POST /api/m/admin/config/parse?format=`
+and `PUT /api/m/admin/config/text?format=&members=`. A role's module serves its pages' API, as
 `POST /api/m/llm.hub/rpc/hub/nodes`.
+
+## Checking the running config
+
+A running fit knows what it actually runs; the config it runs from says what it should. The two can
+differ, and the console's **Consistency** page and `fit check` list where, so that each can be settled
+deliberately: every difference says whether it is **drift**, which a config change settles, or
+**info**, a runtime fact that is not a disagreement.
+
+What is compared: the runtime — the listeners bound, the roles running, the certificates served, the
+cache zones, the engine limits in force and the provider parts — with the effective config, the base
+config with providers merged in. The differences found:
+
+| | |
+| --- | --- |
+| Settings that take effect at start | `log`, `access_log`, `telemetry`, `engine`, `acme` and `providers` changed since fit started: the config says one thing and the running service uses what it started with. The fix writes the in-force value back into the config (or keeps the config for the next restart). `limits.max_conns`, `max_pending_bytes` and `max_write_queue_bytes` are the same, read from the running engine. `admin` is info only: it comes from the bootstrap file. |
+| Roles | A role the config sets that is not running (it failed to start), and one running that the config no longer sets: remove it from the config, or apply the config again to retry or stop it. |
+| Provider parts | Elements a provider (`docker`, `consul`, `consul_kv`, `etcd`, `kubernetes`) added to the effective config but not to the base config: add them to the config (`listeners`, `routes`, `upstreams`, `services`), or leave them provider-owned. Shadowed provider elements are info. |
+| Listeners | A config listener with nothing bound, or a bound listener the config no longer has, is drift; a listener at port `0` whose chosen port can be written back is info. |
+| TLS | A `tls.acme` name no certificate served by its listener covers is drift (remove the name, or keep it and wait for ACME); a name HTTPS by default added, or a certificate obtained on demand, is info. |
+| Upstreams | A config upstream with no pool, or a pool the config does not have, is drift; an upstream all of whose backends are down is info. |
+| Cache | A cache zone the config uses but nothing serves is drift; a zone kept from an earlier config is info. |
+
+The pages show each item with its config and runtime values, its category and kind, and one select of
+the fixes offered (`add`, `delete`, `replace` or `reapply`); nothing is applied until the user has
+chosen, item by item, and confirmed the whole selection. The selected fixes then go through the one
+save path: they are checked, applied as a new config version and written to the store, so a fix that
+would not load refuses everything and a config changed in the meantime (`412`) is reported. The
+`admin` logger records the applied version.
+
+`fit check` does the same from a terminal, through the Admin API:
+
+```sh
+fit check -c /etc/fit/fit.json          # list the differences; exit 1 when there is drift
+fit check -c /etc/fit/fit.json -json    # the check as JSON
+fit check -c /etc/fit/fit.json -fix     # choose one fix per item, then apply them together
+```
+
+The bootstrap file's `admin.address` (and `token_file`) say where the Admin API is. The exit code is
+`0` when nothing drifted, `1` when drift remains (including after `-fix`), and `2` for a usage,
+config-load, connection or decoding error.
+
+For scripts and other pages, the endpoints are `GET /config/check` (the running version, its ETag, the
+differences and their counts) and `POST /config/reconcile` (a JSON body of the chosen
+`{"fixes": [{"id", "action"}]}` and `If-Match`); on the console they are
+`GET /api/m/admin/config/check` and `POST /api/m/admin/config/reconcile`.
 
 ## Limits and timeouts
 
@@ -238,7 +334,8 @@ instead of the token, as `GET /api/m/admin/config`; a role's module serves its p
 | An idle connection | 2m |
 | Password checks at once | 2 |
 | Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
-| Failed logins | 5 an address in 15 minutes, then refused for 15 minutes; 4,096 addresses kept |
+| A password change | bcrypt's time on the console's pool, two checks at once, then one store write |
+| Failed logins | 5 an address in 15 minutes, then refused for 15 minutes; a wrong current password in a password change counts too; 4,096 addresses kept |
 
 ## Roles' pages
 
@@ -257,5 +354,5 @@ members as a whole: a role's pages are for working with the role, the config's f
 The pages are plain HTML, CSS and JavaScript in `app/workbench/web`, embedded in the binary and
 served from memory, with nothing fetched from elsewhere. `core/` holds the library every module uses
 (`ui.js`, `ui.css`) and the workbench (`workbench.js`); each module is a script that registers itself
-with `WB.module`, naming the server module whose API it calls, the group it goes under and its
-pages. A module shows when the console serving the page serves its server module.
+with `WB.module`, naming the server module whose API it calls, its place in the menu and its pages.
+A module shows when the console serving the page serves its server module.

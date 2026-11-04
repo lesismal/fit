@@ -1,0 +1,43 @@
+/* The consistency check page: one row per difference with the config and running values beside it, and a bar at the
+   bottom for the fixes the user picked (gateway/check.js). The rest of its styles are core/ui.css, which index.html
+   loads before this file.
+
+   一致性检查页面：每处差异一行，旁边是配置值与运行值；底部一条栏用于用户选中的修复（gateway/check.js）。
+   其余样式在 core/ui.css 中；index.html 在本文件之前加载它。 */
+
+.ck-page { gap: 16px; }
+
+/* The green statement when the service and its config agree. / 服务与其配置一致时的绿色说明。 */
+.ck-ok { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); color: var(--text-2); }
+.ck-ok svg { color: var(--ok); vertical-align: -3px; }
+.ck-ok__detail { margin-top: 4px; color: var(--muted); }
+
+/* The differences of one category: a card of the design system, a row per difference. / 同一类别的差异：设计系统的卡片，每处差异一行。 */
+.ck-cat__body { padding: 0; }
+.ck-row { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
+.ck-row:last-child { border-bottom: 0; }
+/* A drift may be fixed here: marked with the warning colour's left edge; an info item stays quiet. / 不一致项可在此修复，以警告色左边线标记；说明项保持安静。 */
+.ck-row.is-drift { border-left-color: var(--warn); }
+.ck-row__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ck-row__name { font-size: 14px; overflow-wrap: anywhere; }
+.ck-row__detail { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+/* The config and running values: side by side, each capped in height and scrollable. / 配置值与运行值：并排，各自限高可滚动。 */
+.ck-vals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ck-val { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ck-val__label { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.ck-pre { max-height: 200px; margin: 0; padding: 10px 12px; overflow: auto; white-space: pre; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+@media (max-width: 800px) { .ck-vals { grid-template-columns: minmax(0, 1fr); } }
+
+/* The fix choice and its apply tick of a drift row. / 不一致行的修复选择与应用勾选。 */
+.ck-fix { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; border-top: 1px dashed var(--border); }
+.ck-fix__label { flex: none; }
+.ck-fix__select { width: auto; max-width: min(560px, 100%); }
+
+/* The bar with the apply button, kept at the bottom while the page is long. / 带应用按钮的底栏，页面较长时固定在底部。 */
+.ck-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(8px); }
+.ck-bar__left { min-width: 0; }
+
+/* The stale-check notice after a 412, with its check again action. / 412 之后的过期检查提示及其“重新检查”操作。 */
+.ck-notice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ck-notice .btn { margin-left: 4px; }

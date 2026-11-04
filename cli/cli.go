@@ -19,6 +19,8 @@ Commands:
 
 	run        serve a config, from files or directories, until SIGINT or SIGTERM
 	validate   check a config without running it
+	check      ask a running fit, through its Admin API, whether what it runs
+	           agrees with the config it runs from, and list the differences
 	adapt      convert a config between .conf, YAML and native JSON, or from
 	           nginx or a Caddyfile into one of them
 	schema     print the JSON Schema of the native config
@@ -52,6 +54,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRun(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
+	case "check":
+		return runCheck(args[1:], stdout, stderr)
 	case "adapt":
 		return runAdapt(args[1:], stdout, stderr)
 	case "schema":

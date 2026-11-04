@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
@@ -97,6 +98,86 @@ func TestStoreCommandErrors(t *testing.T) {
 	writeFile(t, cfg, `{"admin": {"store": {"path": `+js(filepath.Join(dir, "missing", "fit.store"))+`, "password": "a"}}}`)
 	if code, stderr := storeRun("import", "-c", cfg, good); code != 1 || !strings.Contains(stderr, "fit store import: store: ") {
 		t.Errorf("import into a missing directory: %d %q", code, stderr)
+	}
+}
+
+// TestStoreImportKeepsConsoleUsers: an import replaces the config, not the
+// console users whose password hashes the store keeps, and fit run reads
+// them into the bootstrap file's admin.
+func TestStoreImportKeepsConsoleUsers(t *testing.T) {
+	dir := t.TempDir()
+	cfg, path := filepath.Join(dir, "fit.json"), filepath.Join(dir, "fit.store")
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	writeFile(t, cfg, `{"admin": {"store": {"path": `+js(path)+`, "password": "a"},
+  "console": {"address": "127.0.0.1:0", "users": [{"username": "ada", "password_hash": `+js(string(hash))+`}]}}}`)
+	storeRun := func(stdout *bytes.Buffer, args ...string) (int, string) {
+		var stderr bytes.Buffer
+		code := run(append([]string{"store"}, args...), stdout, &stderr)
+		return code, stderr.String()
+	}
+	first := filepath.Join(dir, "first.json")
+	writeFile(t, first, `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond", "params": {"body": "one"}}}]}`)
+	var out bytes.Buffer
+	if code, stderr := storeRun(&out, "import", "-c", cfg, first); code != 0 {
+		t.Fatalf("the first import: %d %q", code, stderr)
+	}
+	// The console changed ada's password: the store keeps its hash.
+	st, _, err := store.Open(path, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := []store.User{{Username: "ada", PasswordHash: "changed-hash"}}
+	if err := st.SetUsers(changed); err != nil {
+		t.Fatal(err)
+	}
+
+	second := filepath.Join(dir, "second.json")
+	writeFile(t, second, `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond", "params": {"body": "two"}}}]}`)
+	if code, stderr := storeRun(&out, "import", "-c", cfg, second); code != 0 {
+		t.Fatalf("the second import: %d %q", code, stderr)
+	}
+	opened, data, err := store.Open(path, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"two"`) {
+		t.Errorf("the imported config: %q", data)
+	}
+	if got := opened.Users(); len(got) != 1 || got[0] != changed[0] {
+		t.Errorf("the users the store kept: %v", got)
+	}
+	// Export prints the config, not the users.
+	out.Reset()
+	if code, stderr := storeRun(&out, "export", "-c", cfg); code != 0 {
+		t.Fatalf("the export: %d %q", code, stderr)
+	}
+	if !strings.Contains(out.String(), `"two"`) || strings.Contains(out.String(), "changed-hash") {
+		t.Errorf("the exported config: %q", out.String())
+	}
+	// fit run opens the store and merges the users into the bootstrap
+	// file's admin, so that a restart logs in with the changed password.
+	set, _, err := loadSet([]string{cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	std, err := config.Standardize(set.JSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := openStore(std)
+	if err != nil || b == nil {
+		t.Fatalf("the store: %v, %v", b, err)
+	}
+	var a struct {
+		Console struct {
+			Users []store.User `json:"users"`
+		} `json:"console"`
+	}
+	if err := json.Unmarshal(b.admin, &a); err != nil {
+		t.Fatalf("the bootstrap admin: %v, %s", err, b.admin)
+	}
+	if len(a.Console.Users) != 1 || a.Console.Users[0] != changed[0] {
+		t.Errorf("the admin's users: %v", a.Console.Users)
 	}
 }
 

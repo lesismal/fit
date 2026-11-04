@@ -52,7 +52,10 @@ func openStore(data []byte) (*storeBoot, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &storeBoot{st: st, admin: adminJSON, base: base}
+	// The store keeps the password hashes of the console users changed
+	// since the bootstrap file was written; they replace its own, so that
+	// a restart logs in with the changed passwords.
+	b := &storeBoot{st: st, admin: admin.WithConsoleUsers(adminJSON, st.Users()), base: base}
 	if base == nil {
 		b.base, b.seeded = rest, true
 		return b, nil
@@ -158,6 +161,12 @@ func runStore(args []string, stdout, stderr io.Writer) int {
 	}
 	_ = json.Unmarshal(adminJSON, &a) // openStore read it
 	password, _ := storePassword(a.Store)
+	// An import replaces the config, not the console's passwords: the users
+	// the old store keeps stay, when it opens.
+	var users []store.User
+	if b != nil {
+		users = b.st.Users()
+	}
 	st, err := store.Create(a.Store.Path, password)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
@@ -192,6 +201,12 @@ func runStore(args []string, stdout, stderr io.Writer) int {
 	if err := st.Write(data); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 1
+	}
+	if len(users) > 0 {
+		if err := st.SetUsers(users); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
+			return 1
+		}
 	}
 	fmt.Fprintf(stdout, "%s: sealed into %s\n", name, st.Path())
 	return 0

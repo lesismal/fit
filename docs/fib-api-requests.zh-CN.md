@@ -72,7 +72,7 @@
 | A59 | 从指定的本地地址和端口范围发起拨号 | 已完成，`3655193`（在 `84a67f7` 中）；Windows 修复 `63b38d4`（在 `9824c68` 中） | — | I111（029） |
 | A60 | 代理两个方向都按行转发头部块 | 已完成，fib 分支 `perf/header-blocks`（尚未进入 `main`） | 12 | — |
 | A61 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
-| A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib 分支 `feat/splice-body`（尚未进入 `main`） | 12 | — |
+| A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib `main` 的 `60d67aa` | 12 | — |
 
 ## 证据
 
@@ -1441,7 +1441,7 @@ W1 在 500 并发下的 A/B，各三轮：请求一侧使 HTTP/1.1 的每秒请�
 ## A62：用 splice(2) 搬运代理的 HTTP/1.1 上传
 
 **状态。** 2026-11-04 为 W4 的代理上传提出（`bench/results/plan-2026-11-04b/report.zh-CN.md`，"并发 10,000 时内存的构成、HTTP/1.1 代理上传"）。
-已在 fib 分支 `feat/splice-body` 完成；fit 的代理默认使用它。二者都尚未进入 `main`。
+已在 fib 的 `main` 的 `60d67aa`（`v1.6.1-0.20261104101432-60d67aa22f8d`）完成；fit 的代理默认使用它，fit 也已移到该提交。
 
 **问题。** 代理的上传两次经过用户态：fib 的 server 把它从客户端的 socket 读出，fib 的 client 再把它写进上游的 socket，
 而上游的发送缓冲要用内核先清零的新页。W4（1 MiB 的 POST 经 fit 发给 nginx，HTTP/1.1，100 并发，fit 用六个 CPU）中 fit

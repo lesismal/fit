@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/config"
 )
 
@@ -46,6 +47,69 @@ func WithAdmin(data, admin []byte) []byte {
 	out = append(out, sep+`"admin": `...)
 	out = append(out, admin...)
 	return append(out, "\n}"...)
+}
+
+// WithConsoleUsers returns admin (the bootstrap file's admin, as JSON) with
+// the password_hash of each user in admin.console.users replaced by the one
+// users gives for its username; a user not in admin is ignored. admin is
+// returned unchanged when it does not parse or sets no console.
+func WithConsoleUsers(admin []byte, users []store.User) []byte {
+	if len(users) == 0 {
+		return admin
+	}
+	root, err := decodeJSON(admin)
+	if err != nil {
+		return admin
+	}
+	a, ok := root.(*object)
+	if !ok {
+		return admin
+	}
+	consoles, ok := a.get("console")
+	if !ok {
+		return admin
+	}
+	c, ok := consoles.(*object)
+	if !ok {
+		return admin
+	}
+	listed, ok := c.get("users")
+	if !ok {
+		return admin
+	}
+	arr, ok := listed.([]any)
+	if !ok {
+		return admin
+	}
+	hashes := make(map[string]string, len(users))
+	for _, u := range users {
+		hashes[u.Username] = u.PasswordHash
+	}
+	changed := false
+	for _, e := range arr {
+		u, ok := e.(*object)
+		if !ok {
+			continue
+		}
+		name, ok := u.get("username")
+		if !ok {
+			continue
+		}
+		username, ok := name.(string)
+		if !ok {
+			continue
+		}
+		hash, ok := hashes[username]
+		if !ok {
+			continue
+		}
+		u.set("password_hash", hash)
+		changed = true
+	}
+	if !changed {
+		return admin // nothing to replace: keep the bytes as they were
+	}
+	return encodeJSON(root)
 }
 
 // hasAdmin reports whether a config, standard JSON, sets admin.

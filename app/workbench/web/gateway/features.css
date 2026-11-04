@@ -1,0 +1,47 @@
+/* The ports' feature cards on the Listeners page (gateway/modules.js): one card per listener, listing what serves it and
+   the page where each feature is edited. The rest of the page is core/ui.css and the config form's config.css; index.html
+   loads this file after them.
+
+   监听页面上的端口功能卡片（gateway/modules.js）：每个监听一张卡片，列出服务它的各项功能及各自的编辑页面。
+   页面其余部分用 core/ui.css 与配置表单的 config.css；index.html 在它们之后加载本文件。 */
+
+.lp-ports__head { margin: 20px 0 0; }
+.lp-ports__note { margin: -6px 0 2px; }
+.lp-ports { gap: 12px; }
+
+/* A port's card head: its name, addresses and protocols on one wrapping row. / 端口卡片的头部：名称、地址与协议在同一行。 */
+.lp-port__addrs { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); }
+.lp-port__addr { color: var(--text); }
+.lp-port__protos { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* The features serving the port: one row each, with its link, label, count and a small arrow. / 端口所提供的功能：每行一项。 */
+.lp-feats { list-style: none; margin: 0; padding: 0; }
+.lp-feat + .lp-feat { border-top: 1px dashed var(--border); }
+.lp-feat__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 2px; }
+.lp-feat__link, .lp-feat__nolink { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-weight: 550; }
+.lp-feat__link:hover { color: var(--primary); text-decoration: none; }
+.lp-feat__link:hover .lp-feat__arrow { color: var(--primary); transform: translateX(2px); }
+.lp-feat__count {
+  flex: none;
+  min-width: 21px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.lp-feat__arrow { flex: none; width: 13px; height: 13px; color: var(--muted); transition: transform .15s, color .15s; }
+.lp-feat__detail { white-space: nowrap; }
+.lp-feat__more { font-size: 12px; color: var(--primary); white-space: nowrap; }
+.lp-feat__more::before { content: '·'; color: var(--muted); margin-right: 6px; }
+
+/* The port's feature tags without a page: PROXY protocol, HTTP/3, the TLS extras. / 无独立页面的功能标签。 */
+.lp-port__tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.lp-tag { padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11.5px; color: var(--muted); }
+
+.lp-port__none { padding-top: 2px; }
+.lp-status-note { margin: 0; }

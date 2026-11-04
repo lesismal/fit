@@ -74,7 +74,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A59 | A dial from a chosen local address and port range | done, `3655193` (in `84a67f7`); Windows fix `63b38d4` (in `9824c68`) | — | I111 (029) |
 | A60 | Header blocks passed through a proxy as lines, both ways | done, fib branch `perf/header-blocks` (not yet on `main`) | 12 | — |
 | A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
-| A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib branch `feat/splice-body` (not yet on `main`) | 12 | — |
+| A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
 
 ## Evidence
 
@@ -1900,8 +1900,8 @@ and ffmpeg and most players set up again over TCP.
 ## A62: A proxied HTTP/1.1 upload moved by splice(2)
 
 **Status.** Requested on 2026-11-04, for W4's proxied uploads (`bench/results/plan-2026-11-04b/report.md`,
-"Proxied uploads over HTTP/1.1"). Done on fib branch `feat/splice-body`; fit's proxy uses it by default.
-Neither is on `main` yet.
+"Proxied uploads over HTTP/1.1"). Done on fib's `main` at `60d67aa` (`v1.6.1-0.20261104101432-60d67aa22f8d`); fit's proxy uses it by
+default, and fit is on that commit.
 
 **Problem.** A proxied upload passed through user space twice: fib's server read it out of the client's
 socket, and fib's client wrote it into the upstream's, whose send buffer took fresh pages the kernel

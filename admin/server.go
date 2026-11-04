@@ -50,6 +50,18 @@ const VersionHeader = "Fit-Config-Version"
 //	GET    /config/effective    the config as it runs, with what providers
 //	                            provided merged in, and where each part
 //	                            came from
+//	GET    /config/check        the differences between the running service
+//	                            and the config it runs from, with how to fix
+//	                            each drift
+//	POST   /config/reconcile    apply the fixes a client selected from
+//	                            /config/check: {"fixes":[{"id","action"}]}
+//	POST   /config/render       a config fragment, a JSON object, written in
+//	                            the text format ?format= names: .conf, .yaml
+//	                            or .json
+//	POST   /config/parse        the JSON of such a text
+//	PUT    /config/text         apply the text as the whole config, or, with
+//	                            ?members=a,b, as those top-level members
+//	                            only, leaving the rest as it is
 //	GET    /status              what fit is doing now: listeners,
 //	                            connections, upstreams and their backends'
 //	                            health, certificates
@@ -68,6 +80,15 @@ const VersionHeader = "Fit-Config-Version"
 // /config is the base config, as the file or the API wrote it; what
 // providers provide is merged into it, and only GET /config/effective
 // shows that.
+//
+// GET /config/check compares what fit runs with the config it runs from and
+// lists each difference, a drift with the fixes that end it or an info that
+// is a runtime fact. POST /config/reconcile applies the fixes a client
+// selected, by ID and action: it checks again inside the edit that applies
+// the change, so that a selection is refused with 400 when the difference is
+// gone or the action is not offered, applies each fix's patch to the base
+// config, and applies the result as any change, with If-Match required. A
+// reapply fix applies the running config again, as a reload does.
 type Server struct {
 	configs  *Configs
 	report   func(Result)
@@ -145,6 +166,11 @@ func (s *Server) routes() *http.ServeMux {
 		mux.HandleFunc("DELETE "+p, s.deleteConfig)
 	}
 	mux.HandleFunc("GET /config/effective", s.effective)
+	mux.HandleFunc("GET /config/check", s.check)
+	mux.HandleFunc("POST /config/reconcile", s.reconcile)
+	mux.HandleFunc("POST /config/render", s.renderText)
+	mux.HandleFunc("POST /config/parse", s.parseText)
+	mux.HandleFunc("PUT /config/text", s.putText)
 	mux.HandleFunc("POST /load", s.load)
 	mux.HandleFunc("POST /rollback/{n}", s.rollback)
 	mux.HandleFunc("GET /versions", s.versions)

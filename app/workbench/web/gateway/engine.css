@@ -1,0 +1,75 @@
+/* The Engine menu (gateway/engine.js): a first-level entry whose second level is one listener port each, and whose third
+   level is the features that port serves. The workbench's tree styles are core/ui.css; this file adds the port node, its
+   kid links and their counts, and the small line of a port's protocols and tags. index.html loads it after the others.
+
+   引擎菜单（gateway/engine.js）：一级为引擎，二级为各监听端口，三级为该端口提供的功能。菜单树的基本样式在 core/ui.css；
+   本文件补充端口节点、其子链接与数量，以及端口协议与小标记的一行。index.html 在其他样式之后加载本文件。 */
+
+/* A port: the second level of the Engine menu, indented as a module's pages are. / 端口：引擎菜单的第二级，缩进同模块页面。 */
+.tree__port__head { padding-left: 26px; }
+.tree__port > .tree__kids { gap: 0; }
+
+/* Its protocols and tags: small, muted, wrapping rather than truncated by the narrow sidebar, and plain rather than a
+   pill, which a line of several tags would make too heavy. / 协议与小标记：小字、灰色，在窄侧栏中换行而不截断；
+   一行多个标记时不用胶囊底，以免过重。 */
+.tree__port__head .tree__tag {
+  margin-top: 1px;
+  padding: 0;
+  background: transparent;
+  color: var(--sidebar-text);
+  font-size: 10.5px;
+  font-weight: 500;
+  opacity: .85;
+  /* it wraps on the narrow sidebar, so that every tag is visible rather than hidden behind an ellipsis; the short words
+     keep a port with several TLS extras from getting too tall. The whole line is also in the row's title.
+     在窄侧栏中换行，使每个标记都能看见而不被省略号遮住；短词使带多项 TLS 选项的端口不至于过高。整行也写在行的 title 中。 */
+  display: block;
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.tree__port__head .tree__text { min-width: 0; }
+.tree__port__head .tree__chev { align-self: flex-start; margin-top: 2px; }
+
+/* A feature of the port: the third level, one link or muted row per page that edits it. Its label wraps in full rather
+   than being cut off, so that a long page name still reads. / 端口的功能：第三级，一行一个页面。标签完整换行而不截断，
+   长页面名仍可读全。 */
+.tree__d3 { padding-left: 44px; padding-top: 6px; padding-bottom: 6px; font-size: 12.5px; align-items: flex-start; gap: 8px; }
+.tree__d3 svg { width: 15px; height: 15px; margin-top: 2px; }
+.tree__d3 > .ellipsis { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.35; }
+.tree__kid--muted { cursor: default; }
+.tree__kid--muted:hover { background: transparent; color: var(--sidebar-text); }
+
+/* The number of routes (or services, certificates) behind an entry. / 条目背后的路由（或服务、证书）数量。 */
+.tree__count {
+  flex: none;
+  align-self: flex-start;
+  min-width: 19px;
+  height: 18px;
+  margin-top: 1px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sidebar-active);
+  color: var(--sidebar-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.nav__item.is-active .tree__count { color: var(--sidebar-strong); }
+
+/* A port with a feature shown is marked even while it is open, where the module's has-active rule does not reach.
+   有功能正在显示的端口即使展开也加以标记，此时模块的 has-active 规则不适用。 */
+.tree__port.has-active > .tree__head { color: var(--sidebar-strong); box-shadow: inset 3px 0 0 var(--primary); }
+
+/* Folded menu: the third level loses its indent with the second, and the port's labels hide with the others. A port
+   stays an icon that opens its own entries, rather than all ports' entries showing at once.
+   收起菜单：第三级与第二级一样去掉缩进，端口文字随其他文字隐藏。端口仍是一个图标，点开才显示其子项，而不是同时列出所有
+   端口的子项。 */
+.shell.is-mini .tree__d3 { padding-left: 0; }
+.shell.is-mini .tree__count { display: none; }
+.shell.is-mini .tree__port > .tree__head { display: flex; justify-content: center; padding: 9px 0; }
+.shell.is-mini .tree__port > .tree__head .tree__chev { display: none; }
+.shell.is-mini .tree__port:not(.is-open):not(.is-filtered) > .tree__kids { display: none; }

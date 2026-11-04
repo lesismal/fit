@@ -5,15 +5,18 @@
 //
 //   var C = FitConfig.with(UI)          the store, sharing one draft whoever asks
 //   C.ensure() → Promise                 the schema and the config read (again when it changed and nothing is unsaved)
-//   C.page(el, sh, render)               a page of the editor: the bar in sh.tools, render(body) drawn now and after
-//                                        each save, discard or reload
+//   C.page(el, sh, render, opts)         a page of the editor: the bar in sh.tools, render(body) drawn now and after
+//                                        each save, discard or reload; opts.members are the top-level config members
+//                                        the page edits, and the page then also shows the raw .conf, .yaml and .json
+//                                        tabs that edit that part of the draft (without them, a read-only page)
 //   C.section(name, opts) → node         the form of a top-level member; opts for arrays: {filter(item), make(),
 //                                        chips(item) → nodes, addLabel, empty}
 //   C.place(fn(path, draft) → hash)      where a problem's path is edited, for its link
 //
 // 配置的共享草稿及由 schema 生成的表单编辑器，供网关与系统各模块（admin 服务端模块）使用。所有编辑配置的页面都编辑同一份
 // 草稿（连同 ETag 只读取一次），顶栏中的同一个保存栏整体保存（带 If-Match 的 PUT /config）或放弃修改；保存失败的问题
-// 链接到其所在的页面与字段。表单不含 admin：它在 fit 启动时所用的配置文件中设置。
+// 链接到其所在的页面与字段。表单不含 admin：它在 fit 启动时所用的配置文件中设置。带 opts.members 的页面另外还有 UI、
+// .conf、.yaml、.json 四个标签页：后三者编辑该页所管配置成员在对应格式下的文本，保存时经 /config/text 整体校验后应用。
 (function () {
   'use strict';
   var h = UI.h;
@@ -34,6 +37,15 @@
     ['cf.whole', 'the config', '整个配置'], ['cf.line', 'line {l}, column {c}', '第 {l} 行第 {c} 列'],
     ['cf.raw.bad', 'The JSON page holds text that does not parse: fix it or discard it before saving. The forms show the last JSON that parsed.',
       'JSON 页面中的文本无法解析：保存前请修正或放弃。表单显示的是最后一次可解析的 JSON。'],
+    ['cf.tab.ui', 'UI', '界面'], ['cf.tab.conf', '.conf', '.conf'], ['cf.tab.yaml', '.yaml', '.yaml'], ['cf.tab.json', '.json', '.json'],
+    ['cf.raw.note', 'This is this page\'s part of the config, as {fmt}. Edits here are parsed into the shared draft as you type; Save and apply checks and applies them.',
+      '这是本页所编辑的配置部分（{fmt}）。在此的修改会即时解析进共享草稿；“保存并应用”会校验并应用。'],
+    ['cf.raw.parse.bad', 'The text does not parse, so it is kept as typed and blocks saving.', '文本无法解析，已按原样保留并阻止保存。'],
+    ['cf.raw.blocked', 'A raw tab of the config holds text that does not parse: fix it or discard it before saving.', '配置有原始文本标签页中的文本无法解析：请修正或放弃后再保存。'],
+    ['cf.raw.extra', 'The text sets "{m}", which this page does not edit.', '文本中设置了“{m}”，本页不编辑它。'],
+    ['cf.raw.loading', 'Reading the {fmt} text…', '正在读取 {fmt} 文本…'],
+    ['cf.raw.format', 'Format', '格式化'], ['cf.raw.download', 'Download', '下载'],
+    ['cf.inc', 'Set {name} in the config', '在配置中设置 {name}'],
     ['cf.unset', 'not set', '未设置'], ['cf.set', 'Set', '设置'], ['cf.leaveout', 'Leave out', '移除'],
     ['cf.add', 'Add', '添加'], ['cf.remove', 'Remove', '删除'], ['cf.up', 'Move up', '上移'], ['cf.down', 'Move down', '下移'],
     ['cf.items', '{n} items', '{n} 项'], ['cf.item', '1 item', '1 项'], ['cf.fields', '{n} fields', '{n} 个字段'], ['cf.field', '1 field', '1 个字段'],
@@ -53,18 +65,21 @@
 
   // The store: one, whichever module asks. / 存储：只有一个，供所有模块共用。
   var S = {
-    ui: null, schema: null, draft: null, etag: '', version: '', dirty: false,
+    ui: null, schema: null, draft: null, baseDraft: null, etag: '', version: '', dirty: false,
     errors: [],      // the problems of the last save, {path, line, column, message} / 上次保存的问题
     message: null,   // {kind, text, list, action} shown above the forms / 显示在表单上方的消息
     rawText: null,   // the JSON page's text while it does not parse / JSON 页面中无法解析的文本
     rawError: '',
+    tabs: {},        // page key (location.hash) → {fmt: 'ui'|'conf'|'yaml'|'json', raws: {fmt: rawState}}
+    lastRaw: null,   // {key, fmt} of the last save of a raw tab, for its problems' links / 上次原始文本保存的页面与格式
+    rawSel: null,    // {key, line, column} to select in a raw text after a problem link / 问题链接要定位的文本位置
     open: {},        // path → whether its node is open / 路径 → 节点是否展开
     focus: '',       // the path to show after the next draw / 下次绘制后要定位的路径
     places: [], current: null, loading: null
   };
 
   window.addEventListener('beforeunload', function (e) {
-    if (S.dirty) { e.preventDefault(); e.returnValue = t('cf.leave'); }
+    if (isDirty()) { e.preventDefault(); e.returnValue = t('cf.leave'); }
   });
 
   // ---- requests / 请求 ----
@@ -83,8 +98,12 @@
         S.etag = r.headers.get('ETag') || '';
         S.version = r.headers.get('Fit-Config-Version') || '';
         S.draft = body && typeof body === 'object' ? body : {};
+        S.baseDraft = JSON.parse(JSON.stringify(S.draft));
         S.errors = []; S.rawText = null; S.rawError = '';
+        clearRaw();
         setDirty(false);
+        // A new draft is in: the Engine menu follows it. / 新的草稿已就绪：引擎菜单随之更新。
+        try { window.dispatchEvent(new Event('fit:config')); } catch (e) { /* ignore / 忽略 */ }
         return true;
       });
     });
@@ -96,17 +115,274 @@
       S.loading.catch(function () { S.loading = null; });
       return S.loading;
     }
-    return S.loading.then(function () { return S.dirty ? false : fetchConfig(true); });
+    return S.loading.then(function () { return isDirty() ? false : fetchConfig(true); });
+  }
+
+  // ---- raw tabs / 原始文本标签页 ----
+  // A page of the editor that edits some top-level members shows the UI form and the same fragment of the draft as
+  // .conf, .yaml and .json text. The text, its errors and whether it parses are kept per page (by location.hash), so
+  // navigating away and back keeps unsaved text; discard, reload and a successful save clear every page's state.
+  // 编辑若干顶层成员的页面同时显示 UI 表单与草稿中同一片段的 .conf、.yaml、.json 文本。文本、其错误与是否可解析
+  // 按页面（以 location.hash 为键）保存，离开再返回时未保存的文本仍在；放弃修改、重新读取与成功保存会清空所有页面。
+  var RAW_FORMATS = ['conf', 'yaml', 'json'], RAW_WAIT = 400;
+
+  function pageKey() { return location.hash || '#/'; }
+  function tabOf(key) {
+    var st = S.tabs[key];
+    if (!st) st = S.tabs[key] = { fmt: 'ui', raws: {} };
+    return st;
+  }
+  function rawOf(key, fmt) {
+    var st = tabOf(key);
+    var r = st.raws[fmt];
+    if (!r) r = st.raws[fmt] = { key: key, fmt: fmt, members: [], text: '', base: '', stamp: '', error: '', details: [], timer: null, loading: false, loaded: false, ta: null, view: null };
+    return r;
+  }
+  // rawStates lists every page's raw text, in any format. / 列出所有页面、所有格式的原始文本状态。
+  function rawStates() {
+    var out = [];
+    Object.keys(S.tabs).forEach(function (k) {
+      var raws = S.tabs[k].raws;
+      Object.keys(raws).forEach(function (f) { out.push(raws[f]); });
+    });
+    return out;
+  }
+  function rawDirty() {
+    return rawStates().some(function (r) { return r.timer != null || r.text !== r.base || !!r.error; });
+  }
+  // isDirty: unsaved form edits, or text that is not parsed (or does not parse). / 是否有未保存的表单修改或未解析的文本。
+  function isDirty() { return S.dirty || S.rawText != null || rawDirty(); }
+  function clearRaw() {
+    rawStates().forEach(function (r) { if (r.timer) clearTimeout(r.timer); r.timer = null; r.view = null; });
+    S.tabs = {}; S.lastRaw = null; S.rawSel = null;
+  }
+  // fragment is the page's part of the draft: {member: draft[member]} for the members set. / 页面在草稿中的部分。
+  function fragment(members) {
+    var f = {}, d = S.draft || {};
+    members.forEach(function (m) { if (Object.prototype.hasOwnProperty.call(d, m)) f[m] = d[m]; });
+    return f;
+  }
+  function fragStamp(members) { return JSON.stringify(fragment(members)); }
+  // applyFragment replaces the page's members with the parsed text's, deleting those it leaves out. / 用解析出的片段替换页面的成员。
+  function applyFragment(members, frag) {
+    var d = S.draft || (S.draft = {});
+    members.forEach(function (m) {
+      if (Object.prototype.hasOwnProperty.call(frag, m)) d[m] = frag[m]; else delete d[m];
+    });
+  }
+  // partExcept is a draft without the members a page edits, for comparing what no page's raw text covers.
+  // partExcept 返回去掉页面所编辑成员后的草稿，用于比较页面原始文本未覆盖的修改。
+  function partExcept(d, members) {
+    var out = {}, src = d || {};
+    Object.keys(src).forEach(function (k) { if (members.indexOf(k) < 0) out[k] = src[k]; });
+    return out;
+  }
+  // otherChanges tells whether the draft has unsaved changes outside members. A raw save sends only its page's members
+  // to /config/text, which the server merges into the running config, so it may only be used when nothing else is unsaved;
+  // otherwise the whole draft is saved as the UI tab does. / 草稿在页面成员之外是否有未保存的修改：有则不能只保存本页文本。
+  function otherChanges(members) {
+    if (!S.baseDraft) return false;
+    return JSON.stringify(partExcept(S.draft, members)) !== JSON.stringify(partExcept(S.baseDraft, members));
+  }
+
+  function extraMember(members, frag) {
+    var keys = Object.keys(frag || {}), extra = null;
+    for (var i = 0; i < keys.length && !extra; i++) if (members.indexOf(keys[i]) < 0) extra = keys[i];
+    return extra;
+  }
+
+  // renderRaw (re)reads the page's fragment from the draft, in format r.fmt. When nothing marks it changed since the
+  // last read and it parses, the text is kept as it is (so returning to a tab does not discard it).
+  // renderRaw（重新）从草稿读取页面片段在 r.fmt 格式下的文本；自上次读取以来草稿未变且文本可解析时保留原文本。
+  function renderRaw(r, force) {
+    var members = r.members || [], stamp = fragStamp(members);
+    if (!force && r.loaded && (r.error || r.stamp === stamp)) { paintRaw(r); return Promise.resolve(); }
+    r.loading = true; r.error = ''; r.details = []; r.stamp = stamp;
+    paintRaw(r);
+    return call('POST', '/config/render?format=' + encodeURIComponent(r.fmt), fragment(members)).then(function (res) {
+      return res.text().then(function (x) {
+        if (!res.ok) {
+          var msg = x;
+          try { var j = JSON.parse(x); if (j && j.error) msg = j.error; } catch (e) { /* text / 文本 */ }
+          throw new Error(msg || (res.status + ' ' + res.statusText));
+        }
+        if (!S.tabs[r.key]) return;
+        r.text = x; r.base = x; r.loaded = true; r.loading = false; r.error = ''; r.details = []; r.stamp = stamp;
+        if (r.ta) r.ta.value = r.text;
+        paintRaw(r); paintBar();
+      });
+    }).catch(function (e) {
+      if (e && e.status === 401) return;
+      r.loading = false; r.loaded = true; r.error = e.message || String(e); r.details = [];
+      paintRaw(r); paintBar();
+    });
+  }
+
+  // parseRaw reads the page's raw text as the page's fragment of the draft. / 把页面的原始文本解析为草稿中该页的片段。
+  function parseRaw(r) {
+    var members = r.members || [], text = r.text;
+    return call('POST', '/config/parse?format=' + encodeURIComponent(r.fmt), text, { 'Content-Type': 'text/plain; charset=utf-8' }).then(function (res) {
+      return res.text().then(function (x) {
+        var body = null;
+        try { body = x ? JSON.parse(x) : null; } catch (e) { body = null; }
+        if (!res.ok) {
+          if (res.status === 401) return;
+          setRawError(r, body, x);
+          return;
+        }
+        if (!body || typeof body !== 'object' || Array.isArray(body)) { setRawError(r, null, x || t('cf.raw.parse.bad')); return; }
+        var extra = extraMember(members, body);
+        if (extra) { setRawError(r, null, t('cf.raw.extra', { m: extra })); return; }
+        if (!S.tabs[r.key] || S.tabs[r.key].raws[r.fmt] !== r) return;
+        applyFragment(members, body);
+        r.base = text; r.error = ''; r.details = []; r.stamp = fragStamp(members);
+        paintRaw(r);
+        changed();
+      });
+    }).catch(function (e) {
+      if (e && e.status === 401) return;
+      setRawError(r, null, e.message || String(e));
+    });
+  }
+  function setRawError(r, body, msg) {
+    r.error = (body && body.error) || (typeof msg === 'string' && msg ? msg : t('cf.raw.parse.bad'));
+    r.details = (body && body.errors) || [];
+    paintRaw(r);
+    paintBar();
+  }
+  function rawErrorParts(r) {
+    if (!r.error && (!r.details || !r.details.length)) return [];
+    return [
+      h('b', t('cf.raw.parse.bad')),
+      r.error ? h('div.small', r.error) : null,
+      r.details && r.details.length ? h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, r.details.map(function (e) {
+        var at = e.line ? ' (' + t('cf.line', { l: e.line, c: e.column || 0 }) + ')' : '';
+        return h('li', h('code', e.path || t('cf.whole')), at, ': ', e.message);
+      })) : null
+    ];
+  }
+  // paintRaw updates the error and loading state of a drawn raw panel, but never its text (the cursor stays).
+  // paintRaw 更新已绘制原始文本面板的错误与加载状态，但不碰文本（光标保持）。
+  function paintRaw(r) {
+    var v = r.view;
+    if (!v || !document.body.contains(v.ta)) return;
+    v.ta.disabled = r.loading && !r.loaded;
+    v.ta.classList.toggle('is-invalid', !!r.error);
+    v.load.hidden = !r.loading;
+    var parts = rawErrorParts(r);
+    v.err.hidden = !parts.length;
+    UI.mount(v.err, parts);
+  }
+
+  // flushRaw parses every pending raw text now: save must not apply a text that was not parsed yet. It resolves true
+  // when any text does not parse. / 立即解析所有待解析的原始文本；有文本无法解析时返回 true。
+  function flushRaw() {
+    var pending = rawStates().filter(function (r) { return r.timer != null || (r.text !== r.base && !r.error); });
+    if (!pending.length) return Promise.resolve(rawStates().some(function (r) { return !!r.error; }));
+    return Promise.all(pending.map(function (r) {
+      if (r.timer) { clearTimeout(r.timer); r.timer = null; }
+      return parseRaw(r);
+    })).then(function () { return rawStates().some(function (r) { return !!r.error; }); });
+  }
+
+  function downloadRaw(r) {
+    var name = 'fit-' + (r.members || []).join('-') + '-' + (S.version || 'draft') + '.' + r.fmt;
+    var a = h('a', { href: URL.createObjectURL(new Blob([r.text], { type: 'text/plain; charset=utf-8' })), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  // selectRaw puts the cursor on a line and column of the raw text, as a problem link names. / 把光标定位到问题所指的行列。
+  function selectRaw(r, line, column) {
+    if (!r.ta || !line) return;
+    var lines = r.text.split('\n'), off = 0;
+    for (var i = 0; i < line - 1 && i < lines.length; i++) off += lines[i].length + 1;
+    off = Math.min(off + Math.max(0, (column || 1) - 1), r.text.length);
+    r.ta.focus();
+    r.ta.setSelectionRange(off, Math.min(off + 1, r.text.length));
+    if (r.ta.scrollIntoView) r.ta.scrollIntoView({ block: 'center' });
+  }
+
+  // drawRaw draws one raw format of a page: the hint, a parse-error callout, the text and its tools. / 绘制页面的一个原始文本格式。
+  function drawRaw(c, body, fmt) {
+    var r = rawOf(c.key, fmt);
+    r.members = membersOf(c);
+    var note = c.opts.rawNote, noteText = typeof note === 'function' ? note(fmt) : note || t('cf.raw.note', { fmt: '.' + fmt });
+    var ta = h('textarea.textarea.textarea--code.cf-raw', { spellcheck: 'false', 'aria-label': t('cf.tab.' + fmt) });
+    ta.value = r.text;
+    var load = h('div.muted.small.cf-raw-loading', t('cf.raw.loading', { fmt: '.' + fmt }));
+    var err = h('div.callout.callout--danger', { hidden: true });
+    var copyB = UI.btn(t('copy'), 'copy', function () { UI.copy(r.ta ? r.ta.value : r.text); }, 'ghost sm');
+    var fmtB = UI.btn(t('cf.raw.format'), 'code', function () {
+      UI.busy(fmtB, (r.text !== r.base && !r.error ? parseRaw(r) : Promise.resolve()).then(function () {
+        return r.error ? null : renderRaw(r, true);
+      })).catch(UI.fail);
+    }, 'ghost sm');
+    var dlB = UI.btn(t('cf.raw.download'), 'download', function () { downloadRaw(r); }, 'ghost sm');
+    body.appendChild(h('div.stack.cf-raw-panel', h('div.callout', UI.icon('info'), ' ', noteText), err, load, ta,
+      h('div.btn-row.cf-raw-tools', copyB, fmtB, dlB)));
+    r.ta = ta;
+    r.view = { ta: ta, load: load, err: err };
+    paintRaw(r);
+    ta.addEventListener('input', function () {
+      r.text = ta.value;
+      if (r.timer) clearTimeout(r.timer);
+      r.timer = setTimeout(function () { r.timer = null; parseRaw(r); paintBar(); }, RAW_WAIT);
+      paintBar();
+    });
+    if (!r.loaded && !r.loading) renderRaw(r);
+    if (S.rawSel && S.rawSel.key === c.key) { var sel = S.rawSel; S.rawSel = null; selectRaw(r, sel.line, sel.column); }
+  }
+
+  function tabBar(c, tb) {
+    var items = [['ui', t('cf.tab.ui')], ['conf', t('cf.tab.conf')], ['yaml', t('cf.tab.yaml')], ['json', t('cf.tab.json')]];
+    var bar2 = UI.tabs(items, tb.fmt, function (k) { switchTab(c, k); });
+    bar2.classList.add('cf-tabs');
+    return bar2;
+  }
+  // switchTab changes the page's tab: leaving a raw text parses it first, and a text that does not parse keeps the
+  // page on its raw tab. / 切换页面标签：离开原始文本前先解析，无法解析时停留在该标签页。
+  function switchTab(c, fmt) {
+    var tb = tabOf(c.key);
+    if (tb.fmt === fmt) return;
+    var leaving = tb.fmt === 'ui' ? null : rawOf(c.key, tb.fmt);
+    var wait = Promise.resolve();
+    if (leaving) {
+      if (leaving.timer) { clearTimeout(leaving.timer); leaving.timer = null; }
+      if (leaving.text !== leaving.base && !leaving.error) wait = parseRaw(leaving);
+    }
+    wait.then(function () {
+      if (leaving && leaving.error) {
+        UI.toast(t('cf.raw.parse.bad'), 'error');
+        paintRaw(leaving);
+        return;
+      }
+      tb.fmt = fmt;
+      redraw();
+    }).catch(UI.fail);
+  }
+
+  // membersOf is the top-level config members a page edits, from its opts. / 页面所编辑的顶层配置成员。
+  function membersOf(c) {
+    if (!c || !c.opts) return [];
+    var ms = typeof c.opts.members === 'function' ? c.opts.members() : c.opts.members;
+    return (ms || []).filter(function (x) { return typeof x === 'string' && x; });
   }
 
   // ---- state / 状态 ----
   var bar = null, notice = null;
   function setDirty(d) { S.dirty = d; paintBar(); }
+  // syncInc makes each include checkbox show whether its value is set. / 让每个“是否设置”复选框反映其值是否存在。
+  function syncInc() {
+    var all = document.querySelectorAll('.cf-inc');
+    for (var i = 0; i < all.length; i++) { var b = all[i]; if (b._slot) b.checked = b._slot.get() !== undefined; }
+  }
   // changed marks the draft edited. / 标记草稿已修改。
   function changed() {
     if (S.message && S.message.kind !== 'danger') S.message = null;
     setDirty(true);
     paintNotice();
+    syncInc();
   }
 
   function redraw() {
@@ -126,37 +402,57 @@
   }
 
   function discard() {
-    return (S.dirty || S.rawText != null ? UI.confirm(t('cf.discard.q'), t('cf.discard'), true) : Promise.resolve(true)).then(function (ok) {
+    return (isDirty() ? UI.confirm(t('cf.discard.q'), t('cf.discard'), true) : Promise.resolve(true)).then(function (ok) {
       if (ok) return reload();
     });
   }
 
   function save() {
     if (S.rawText != null) { UI.toast(t('cf.raw.bad'), 'error'); return Promise.resolve(); }
-    return call('PUT', '/config', JSON.stringify(S.draft, null, 2), { 'If-Match': S.etag }).then(function (r) {
-      return readJSON(r).then(function (res) {
-        if (r.ok) {
-          var w = res.warnings || [];
-          return fetchConfig(false).then(function () {
-            S.message = w.length ? { kind: 'warn', text: t('cf.warnings', { v: res.version }), list: w } : null;
-            UI.toast(t('cf.applied', { v: res.version }));
-            paintNotice(); redraw();
-            refreshMenu();
-          });
-        }
-        if (r.status === 401) return;
-        if (r.status === 412) {
-          S.errors = [];
-          S.message = { kind: 'danger', text: t('cf.changed'), action: [t('cf.reread'), reload] };
-        } else {
-          S.errors = res.errors || [];
-          S.message = S.errors.length ? null : { kind: 'danger', text: t('cf.failed', { e: res.error || r.status + ' ' + r.statusText }) };
-        }
-        paintNotice(); redraw();
-        var n = notice && notice.firstChild;
-        if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
-      });
+    var c = S.current, key = c ? c.key : null, tb = key ? S.tabs[key] : null;
+    var fmt = tb && RAW_FORMATS.indexOf(tb.fmt) >= 0 ? tb.fmt : null;
+    var members = membersOf(c);
+    S.lastRaw = null;
+    return flushRaw().then(function (bad) {
+      if (bad) { UI.toast(t('cf.raw.blocked'), 'error'); return; }
+      // The raw text save merges only this page's members into the running config: use it when they are the only
+      // unsaved changes, so that its problems carry the text's line and column; otherwise save the whole draft.
+      // 原始文本保存只把本页成员合并进运行中的配置：仅当只有它们未保存时才用它（其问题带有文本的行列）；
+      // 否则整体保存草稿，以免丢掉其他页面（或本页 UI 标签页）未保存的修改。
+      if (fmt && members.length && !otherChanges(members)) {
+        S.lastRaw = { key: key, fmt: fmt };
+        var q = '/config/text?format=' + encodeURIComponent(fmt) + '&members=' + encodeURIComponent(members.join(','));
+        return call('PUT', q, rawOf(key, fmt).text, { 'Content-Type': 'text/plain; charset=utf-8', 'If-Match': S.etag }).then(handleSave);
+      }
+      return call('PUT', '/config', JSON.stringify(S.draft, null, 2), { 'If-Match': S.etag }).then(handleSave);
     }).catch(UI.fail);
+  }
+
+  // handleSave handles the answer of a save, of the whole config or of a page's raw text: the same answers, the same
+  // notice, and the problems linked to where each is edited. / 处理整体保存或页面原始文本保存的应答：相同的提示与问题链接。
+  function handleSave(r) {
+    return readJSON(r).then(function (res) {
+      if (r.ok) {
+        var w = res.warnings || [];
+        return fetchConfig(false).then(function () {
+          S.message = w.length ? { kind: 'warn', text: t('cf.warnings', { v: res.version }), list: w } : null;
+          UI.toast(t('cf.applied', { v: res.version }));
+          paintNotice(); redraw();
+          refreshMenu();
+        });
+      }
+      if (r.status === 401) return;
+      if (r.status === 412) {
+        S.errors = [];
+        S.message = { kind: 'danger', text: t('cf.changed'), action: [t('cf.reread'), reload] };
+      } else {
+        S.errors = res.errors || [];
+        S.message = S.errors.length ? null : { kind: 'danger', text: t('cf.failed', { e: res.error || r.status + ' ' + r.statusText }) };
+      }
+      paintNotice(); redraw();
+      var n = notice && notice.firstChild;
+      if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
+    });
   }
 
   // refreshMenu shows the modules of the roles a config started, hides those it stopped. / 刷新菜单：显示新启动角色的模块，隐藏已停止的。
@@ -184,7 +480,7 @@
       bar = { el: h('div.row', h('span.cf-state'), disc, saveB), state: null, save: saveB, discard: disc };
       bar.state = bar.el.firstChild;
     }
-    var dirty = S.dirty || S.rawText != null;
+    var dirty = isDirty();
     UI.mount(bar.state, dirty ? UI.badge(t('cf.unsaved'), 'warn', true) : h('span.muted.small', S.version ? t('cf.version', { v: S.version }) : ''));
     bar.save.disabled = !dirty;
     bar.discard.disabled = !dirty;
@@ -194,10 +490,14 @@
     var where = e.path || t('cf.whole');
     var at = e.line ? ' (' + t('cf.line', { l: e.line, c: e.column || 0 }) + ')' : '';
     var hash = e.path ? locate(e.path) : (e.line ? '#/sys.json/json' : null);
+    // A line and column are of the raw text last saved: select its tab at that place. / 行列属于上次保存的原始文本：选中其标签页并定位。
+    var raw = e.line && S.lastRaw && S.tabs[S.lastRaw.key] ? S.lastRaw : null;
+    if (raw) hash = raw.key;
     var label = h('code', where);
     var link = hash ? h('a', { href: hash, onclick: function (ev) {
       ev.preventDefault();
       S.focus = e.path || '';
+      if (raw) { S.tabs[raw.key].fmt = raw.fmt; S.rawSel = { key: raw.key, line: e.line, column: e.column }; }
       if (location.hash === hash) redraw(); else location.hash = hash;
     } }, label) : label;
     return h('li', link, at, ': ', e.message);
@@ -253,16 +553,23 @@
     }
   }
 
-  // page draws a page of the editor. / 绘制编辑器的一个页面。
+  // page draws a page of the editor; with opts.members, it also gets the UI/.conf/.yaml/.json tabs.
+  // page 绘制编辑器的一个页面；给出 opts.members 时另有 UI/.conf/.yaml/.json 标签页。
   function draw(c) {
+    var members = membersOf(c);
+    var tb = members.length && c.key ? tabOf(c.key) : null;
+    if (tb) tb.members = members;
+    var tabs_ = tb ? tabBar(c, tb) : null;
     var body = h('div.stack');
-    UI.mount(c.el, paintNotice(), body);
-    c.render(body);
+    paintNotice();
+    UI.mount(c.el, tabs_, notice, body);
+    if (tabs_ && tb.fmt !== 'ui') drawRaw(c, body, tb.fmt);
+    else c.render(body);
   }
-  function page(el, sh, render) {
+  function page(el, sh, render, opts) {
     paintBar();
     UI.mount(sh.tools, bar.el);
-    var c = S.current = { el: el, render: render };
+    var c = S.current = { el: el, render: render, opts: opts || {}, key: pageKey() };
     el.appendChild(h('div', UI.icon('refresh'), ' ', t('loading')));
     return ensure().then(function () {
       if (S.current !== c) return;
@@ -421,6 +728,21 @@
     return b;
   }
 
+  // incBox is the include checkbox of an optional (non-boolean) field: checked when its value is set. Checking sets an
+  // empty or default value and unchecking deletes it, so an optional member is left out of the config as a whole.
+  // incBox 是可选的（非布尔）字段的“是否设置”复选框：有值时勾选；勾选写入空/默认值，取消勾选删除该值，
+  // 于是可选的成员可以整体不写入配置。
+  function incBox(name, s, slot, inSummary) {
+    var box = h('input.cf-inc', { type: 'checkbox', checked: slot.get() !== undefined, 'aria-label': t('cf.inc', { name: name }) });
+    box._slot = slot;
+    if (!inSummary) box.addEventListener('change', function () { setInc(s, slot, box.checked); });
+    return box;
+  }
+  function setInc(s, slot, on) {
+    if (on) { slot.set(emptyOf(s)); S.open[slot.path] = true; } else slot.set(undefined);
+    changed(); redraw();
+  }
+
   function objectControl(s, slot, top) {
     var v = slot.get();
     if (v === undefined && !top) {
@@ -441,13 +763,28 @@
     return box;
   }
 
-  // node is a collapsible box: a nested value, or an item of a list. / 可折叠框：嵌套值或列表项。
-  function node(path, head, body, defOpen, cls) {
+  // node is a collapsible box: a nested value, or an item of a list. inc (a nested optional field) puts its include
+  // checkbox in the summary; clicking the checkbox must not toggle the box, clicking the rest of the summary does.
+  // node 是可折叠框：嵌套值或列表项。inc 为嵌套的可选字段，其“是否设置”复选框放在 summary 中；
+  // 点击复选框不展开/收起该框，点击 summary 的其余部分照旧切换。
+  function node(path, head, body, defOpen, cls, inc) {
     var err = hasError(path);
     var d = h('details.cf-node' + (cls ? '.' + cls : '') + (err ? '.is-error' : ''), { 'data-path': path });
     d.open = err || (S.open[path] != null ? S.open[path] : !!defOpen);
     d.addEventListener('toggle', function () { S.open[path] = d.open; });
-    d.appendChild(h('summary', h('span.cf-chev', UI.icon('chev')), head));
+    var sum = h('summary', h('span.cf-chev', UI.icon('chev')), head);
+    if (inc) {
+      var box = incBox(inc.name, inc.s, inc.slot, true);
+      sum.insertBefore(box, sum.firstChild);
+      sum.addEventListener('click', function (ev) {
+        if (ev.target !== box) return;
+        // The checkbox's own click already toggles it before this handler runs: take its new state, and cancel the
+        // summary's toggle. / 复选框的点击在处理器运行前已切换其状态：取新状态，并取消 summary 的展开/收起。
+        ev.preventDefault();
+        setInc(inc.s, inc.slot, box.checked);
+      });
+    }
+    d.appendChild(sum);
     d.appendChild(h('div.cf-body', body));
     return d;
   }
@@ -455,14 +792,17 @@
   function field(name, s, slot, required) {
     var k = kind(s);
     var err = hasError(slot.path);
+    var optional = !required && k !== 'boolean';
     var nameEl = h('span.cf-label', name, required ? h('span.cf-req', '*') : null, s.deprecated ? h('span.badge.badge--warn', { style: { marginLeft: '6px' } }, t('cf.deprecated')) : null);
     if (nestedKind(k)) {
       var v = slot.get();
       return node(slot.path, [nameEl, h('span.muted.small', summary(v))],
-        [s.description ? h('div.cf-doc', doc(s.description)) : null, control(s, slot)], v !== undefined && k !== 'object');
+        [s.description ? h('div.cf-doc', doc(s.description)) : null, control(s, slot)], v !== undefined && k !== 'object',
+        null, optional ? { s: s, slot: slot, name: name } : null);
     }
     return h('div.cf-field' + (err ? '.is-error' : ''), { 'data-path': slot.path },
-      h('div.cf-name', nameEl), h('div.cf-ctl', control(s, slot)), s.description ? h('div.cf-doc', doc(s.description)) : null);
+      h('div.cf-name', optional ? [incBox(name, s, slot), nameEl] : nameEl),
+      h('div.cf-ctl', control(s, slot)), s.description ? h('div.cf-doc', doc(s.description)) : null);
   }
 
   function swapOpen(prefix, i, j) {
@@ -710,7 +1050,7 @@
     get version() { return S.version; },
     get focus() { return S.focus; },
     get etag() { return S.etag; },
-    get dirty() { return S.dirty || S.rawText != null; },
+    get dirty() { return isDirty(); },
     // the JSON page's text that does not parse (null when it does). / JSON 页面中无法解析的文本（可解析时为 null）。
     get rawText() { return S.rawText; },
     setRaw: function (text, err) { S.rawText = err ? text : null; S.rawError = err || ''; if (!err) S.errors = S.errors.filter(function (e) { return e.path; }); setDirty(S.dirty); },

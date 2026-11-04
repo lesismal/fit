@@ -211,6 +211,9 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	configs := admin.NewConfigs(rt, s, env, c, data, source, keep)
 	if boot != nil {
 		configs.UseStore(boot.admin, boot.st.Write)
+		// The console's passwords changed since the bootstrap file was
+		// written are kept beside the config in the store.
+		configs.UseConsoleUsers(boot.st.Users(), boot.st.SetUsers)
 	}
 	// The llm and tunnel roles run on the listeners' engine, and
 	// write what their pages change back into the config through configs.

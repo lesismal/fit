@@ -36,13 +36,13 @@ started with, in clear text, and the encrypted store.
   /config`, `/versions` and `/config/effective` hold no password, hash or key path, as decision 005
   asked of the token. A config sent with `admin` is refused while there is a store: `admin` comes
   from the bootstrap file and changes when fit restarts.
-- **The store's format, `fitstore` version 1.** A 59-byte header, then the config as JSON, sealed
+- **The store's format, `fitstore`.** A 59-byte header, then the payload as JSON, sealed
   with XChaCha20-Poly1305 with the header as its additional data:
 
   | Offset | Bytes | |
   | --- | --- | --- |
   | 0 | 8 | `FITSTORE` |
-  | 8 | 1 | format version, 1 |
+  | 8 | 1 | format version: 1 (read) or 2 (written, since 2026-11-04) |
   | 9 | 1 | key derivation, 1 = Argon2id |
   | 10 | 4 | Argon2id time, big endian |
   | 14 | 4 | Argon2id memory in KiB, big endian |
@@ -57,6 +57,12 @@ started with, in clear text, and the encrypted store.
   a changed byte, stops fit from starting, and is not overwritten. Writes go to a temporary file in
   the same directory, made 0600, synced and renamed over the store. Both parts come from
   `golang.org/x/crypto`, already a dependency.
+  *Changed 2026-11-04:* the payload is `fitstore` version 2: the sealed JSON is an object with the
+  base config under `config` and the console users whose passwords changed under `users`, each a
+  `username` and a `password_hash`, so that the pages can change a password and it survives a
+  restart. A version 1 store, which holds the config alone, is still read, and is written as
+  version 2 from then on. `fit store export` still prints the config only; `fit store import`
+  keeps the users the store held.
 - **`fit store export` and `fit store import`**, given the bootstrap file, print the store as JSON
   and seal a config file (in any of fit's formats, checked first) as the store. Changing the
   password is an export, a change to the bootstrap file and an import.
@@ -77,6 +83,10 @@ started with, in clear text, and the encrypted store.
   A session is 32 random bytes in a cookie that is `HttpOnly`, `SameSite=Strict` and, over TLS,
   `Secure`; the server keeps its SHA-256, ends it after `session_timeout` idle (30m) or
   `session_lifetime` (12h), and keeps `max_sessions` (64), dropping the oldest.
+  *Changed 2026-11-04:* a user changes its own password from the pages, with the old one; any
+  logged-in user may also set another user's password. A changed hash is kept in the store beside
+  the config, never in the bootstrap file, so the users there are the first set and the store's
+  overrides them by user name; changing another user's password ends that user's sessions.
 - **Against other web pages.** Every request but a read carries the session's CSRF token in
   `X-Fit-Csrf`, and an `Origin`, when sent, must be the console's own. Pages are sent with a
   Content-Security-Policy of their own files only, `frame-ancestors 'none'`, and API answers with
@@ -85,6 +95,11 @@ started with, in clear text, and the encrypted store.
   binary: a form for each object, list and module, typed by its schema, with the field's doc, so
   that a field fit adds is edited with no change to the console. A raw JSON editor sits beside it.
   Saving sends the whole config with `If-Match`, and the config's errors are shown at their paths.
+  *Changed 2026-11-04:* each config page also edits its part of the config as `.conf`, `.yaml` or
+  `.json` text: the text is adapted to fit's native JSON and applied through the one path a save
+  takes, so it is checked as `fit validate` and the apply check it, and a config that fails is
+  answered with its errors and is not applied. The menu is no longer a tree of groups: the modules,
+  the config's own and each role's, are one flat list.
 
 ## Consequences
 

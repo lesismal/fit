@@ -6,6 +6,10 @@
   <title>fit</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%236e6ef0'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="core/ui.css">
+  <link rel="stylesheet" href="gateway/config.css">
+  <link rel="stylesheet" href="gateway/check.css">
+  <link rel="stylesheet" href="gateway/features.css">
+  <link rel="stylesheet" href="gateway/engine.css">
   <script src="core/ui.js"></script>
 </head>
 <body>
@@ -16,6 +20,14 @@
   <script src="gateway/config.js"></script>
   <script src="gateway/overview.js"></script>
   <script src="gateway/modules.js"></script>
+  <!-- The Engine menu: every listener port and the features it serves. / 引擎菜单：各监听端口及其提供的功能。 -->
+  <script src="gateway/engine.js"></script>
+  <!-- The gateway's features on pages of their own: streaming, media auth, WebRTC, the tunnel and LLM roles. / 网关功能各自成页：流媒体、媒体认证、WebRTC、隧道与 LLM 角色。 -->
+  <script src="gateway/features.js"></script>
+  <!-- The consistency check: what fit runs compared with the config it runs from. / 一致性检查：运行状态与配置的比较。 -->
+  <script src="gateway/check.js"></script>
+  <!-- The account pages: the console users' own and each other's passwords. / 账户页面：控制台用户自己的及彼此的密码。 -->
+  <script src="account/account.js"></script>
   <!-- The tunnel's roles. / 隧道各角色。 -->
   <script src="tunnel/shared.js"></script>
   <script src="tunnel/hub.js"></script>

@@ -27,12 +27,12 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
 - **`admin` 从不进入 store，也从不展示。** 引导文件的 `admin` 在每个配置加载时、合并 provider 之后注入，不进入基础配置：
   `GET /config`、`/versions` 和 `/config/effective` 里没有密码、哈希或密钥路径，这正是决定 005 对 token 的要求。有 store 时，
   带 `admin` 的配置被拒绝：`admin` 来自引导文件，在 fit 重启时生效。
-- **store 的格式 `fitstore` 第 1 版。** 59 字节的头，之后是配置的 JSON，用 XChaCha20-Poly1305 加密，头作为附加数据：
+- **store 的格式 `fitstore`。** 59 字节的头，之后是载荷的 JSON，用 XChaCha20-Poly1305 加密，头作为附加数据：
 
   | 偏移 | 字节数 | |
   | --- | --- | --- |
   | 0 | 8 | `FITSTORE` |
-  | 8 | 1 | 格式版本，1 |
+  | 8 | 1 | 格式版本：1（读取）或 2（2026-11-04 起写入） |
   | 9 | 1 | 密钥派生，1 = Argon2id |
   | 10 | 4 | Argon2id time，大端 |
   | 14 | 4 | Argon2id 内存（KiB），大端 |
@@ -44,6 +44,9 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
   密钥由密码经 Argon2id（time 3、64 MiB、4 线程，RFC 9106 推荐的第二组参数）派生，在 fit 启动时派生一次并保留；每次写入
   使用新的随机 nonce、沿用 salt，所以写入时不再派生。打不开的 store（密码错误或字节被改动）会让 fit 无法启动，且不会被覆盖。
   写入先写到同目录下权限 0600 的临时文件，sync 后 rename 覆盖 store。两种算法都来自已经是依赖的 `golang.org/x/crypto`。
+  *2026-11-04 修改：* 载荷升级为 `fitstore` 第 2 版：加密的 JSON 是一个对象，`config` 里是基础配置，`users` 里是改过密码的控制台
+  用户（各自的 `username` 和 `password_hash`），所以页面上的密码修改重启后仍然有效。第 1 版的 store（只放配置）仍可读取，之后按
+  第 2 版写入。`fit store export` 仍然只打印配置；`fit store import` 保留 store 原有的用户。
 - **`fit store export` 和 `fit store import`**：给定引导文件，把 store 打印为 JSON，或把一个配置文件（fit 的任一格式，先检查）
   加密成 store。改密码就是 export、修改引导文件、再 import。
 - **控制台是一个独立的服务**，和 Admin API 一样用 net/http、跑在自己的 goroutine 上（规则 4），地址为
@@ -58,11 +61,17 @@ Admin API（[决定 005](005-admin-api.zh-CN.md)）已经可以修改一切，�
   4,096 个。会话是放在 cookie 里的 32 个随机字节，cookie 为 `HttpOnly`、`SameSite=Strict`，走 TLS 时还有 `Secure`；服务端
   只保存它的 SHA-256，空闲 `session_timeout`（30m）或存在 `session_lifetime`（12h）后结束，最多保留 `max_sessions`（64）
   个，超出时去掉最老的。
+  *2026-11-04 修改：* 用户可以在页面上凭旧密码修改自己的密码；任何已登录用户也可以设置另一个用户的密码。修改后的哈希保存在
+  store 里配置的旁边，从不写回引导文件，所以引导文件里的 `users` 是初始用户，store 里按用户名覆盖它们；修改另一个用户的密码会
+  结束该用户的会话。
 - **防范其他网页。** 除读取外的每个请求都要在 `X-Fit-Csrf` 里带上会话的 CSRF token；请求带 `Origin` 时必须是控制台自己的。
   页面带有只允许自身文件的 Content-Security-Policy 和 `frame-ancestors 'none'`，API 的应答带 `Cache-Control: no-store`。
 - **所有功能，来自 schema。** 编辑器由嵌入二进制的 `fit.schema.json` 生成：每个对象、列表和模块一个表单，按 schema 定类型，
   附带字段的说明，所以 fit 新增的字段无需修改控制台即可编辑。旁边还有 JSON 原文编辑器。保存时用 `If-Match` 发送整个配置，
   配置的错误显示在对应的路径上。
+  *2026-11-04 修改：* 每个配置页面还可以用 `.conf`、`.yaml` 或 `.json` 原文编辑该页面负责的那部分配置：原文先适配为 fit 的
+  原生 JSON，再走保存的同一条路径应用，因此会经过与 `fit validate` 和实际应用相同的检查；校验失败的配置会返回其错误，且不会
+  被应用。菜单不再是分组树：配置本身的模块和每个角色的模块是一个平铺的列表。
 
 ## 影响
 

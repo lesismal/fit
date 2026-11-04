@@ -1,0 +1,43 @@
+/* The config editor's format tabs, raw text editors and include checkboxes (gateway/config.js).
+   The rest of the config editor's styles are core/ui.css; index.html loads this file after it.
+
+   配置编辑器的格式标签页、原始文本编辑器与“是否设置”复选框（gateway/config.js）。
+   配置编辑器其余的样式在 core/ui.css 中；index.html 在本文件之后加载它。 */
+
+/* The UI / .conf / .yaml / .json tabs of a config-editing page. / 编辑配置页面的 UI/.conf/.yaml/.json 标签页。 */
+.cf-tabs { margin-bottom: 12px; }
+
+/* A raw format's panel: the hint, the parse-error callout, the loading line, the text and its tools. / 原始文本面板。 */
+.cf-raw-panel { gap: 8px; }
+.cf-raw-panel > .callout { margin: 0; }
+.cf-raw-panel .cf-raw-loading { margin: -2px 0 0; }
+.cf-raw {
+  width: 100%;
+  min-height: 62vh;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+/* A text that does not parse: kept as typed, and marked, until it is fixed or discarded. / 无法解析的文本：保留原样并标记。 */
+.cf-raw.is-invalid { border-color: var(--danger); }
+.cf-raw.is-invalid:focus { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.cf-raw-tools { margin-top: 2px; }
+
+/* The include checkbox of an optional field: before its label in a field, or first in a nested node's summary.
+   可选字段的“是否设置”复选框：在字段标签之前，或在嵌套节点 summary 的最前面。 */
+.cf-inc {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 7px 0 0;
+  padding: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.cf-node > summary > .cf-inc { margin: 0 1px 0 0; }
+/* A nested value left out of the config: its summary stays readable, its label a little quieter. / 未设置的嵌套值：标签稍淡。 */
+.cf-node > summary > .cf-inc:not(:checked) ~ .cf-label { color: var(--muted); }

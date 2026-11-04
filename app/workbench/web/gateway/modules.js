@@ -12,7 +12,7 @@
   var WORDS = [
     ['m.listeners', 'Listeners', '监听'], ['m.reverse', 'Reverse proxy', '反向代理'], ['m.forward', 'Forward proxy', '正向代理'],
     ['m.l4', 'L4 proxy', '四层代理'], ['m.tls', 'TLS', 'TLS 证书'], ['m.cache', 'Cache', '缓存'],
-    ['m.config', 'Config', '配置'], ['m.json', 'JSON', 'JSON'], ['m.versions', 'Versions', '版本'],
+    ['m.config', 'Global', '全局配置'], ['m.json', 'JSON', 'JSON'], ['m.versions', 'Versions', '版本'],
     ['s.listeners', 'Listeners', '监听'], ['s.routes', 'Routes', '路由'], ['s.upstreams', 'Upstreams', '上游'],
     ['s.services', 'Layer 4 services', '四层服务'], ['s.auto_https', 'Automatic HTTPS', '自动 HTTPS'], ['s.acme', 'ACME', 'ACME'],
     ['s.certs', 'Certificates', '证书'], ['s.zones', 'Cache zones', '缓存区'],
@@ -25,11 +25,14 @@
     ['r.all', 'All', '全部'], ['r.add', 'Add route', '添加路由'], ['r.none', 'No routes here.', '这里还没有路由。'],
     ['r.reverse.note', 'Routes match requests and hand them to a handler: proxy passes them to an upstream, static serves files, respond answers itself. Forward proxy routes are on their own page.',
       '路由匹配请求并交给处理器：proxy 转发到上游，static 提供静态文件，respond 直接应答。正向代理路由在其单独的页面中。'],
+    ['r.raw.note', 'This is the routes member of the config: every route, the forward proxy routes of the forward proxy page included, not only the ones this page shows.',
+      '这是配置的 routes 成员：全部路由，也包括“正向代理”页面编辑的正向代理路由，而不只是本页显示的那些。'],
     ['fw.note', 'Routes whose handler is forward_proxy: HTTP CONNECT (and plain HTTP) proxying for the clients listed. Listeners can also serve SOCKS5 with the socks protocol.',
       '处理器为 forward_proxy 的路由：为所列客户端提供 HTTP CONNECT（及普通 HTTP）代理。监听也可以通过 socks 协议提供 SOCKS5 代理。'],
     ['fw.add', 'Add forward proxy route', '添加正向代理路由'], ['fw.none', 'No forward proxy route yet.', '还没有正向代理路由。'],
     ['fw.socks', 'Listeners serving SOCKS: {list}', '提供 SOCKS 的监听：{list}'],
-    ['l.add', 'Add listener', '添加监听'], ['u.add', 'Add upstream', '添加上游'], ['sv.add', 'Add service', '添加服务'],
+    ['l.add', 'Add listener', '添加监听'], ['l.engine.note', 'Each port\'s features are grouped under the Engine menu in the sidebar; this page edits the listeners themselves.',
+      '各端口的功能都在侧边栏的“引擎”菜单中分组列出；本页编辑监听本身。'], ['u.add', 'Add upstream', '添加上游'], ['sv.add', 'Add service', '添加服务'],
     ['u.up', '{up} / {all} up', '{up} / {all} 可用'], ['u.addrs', '{n} addresses', '{n} 个地址'],
     // TLS / 证书
     ['c.note', 'The certificates the listeners serve now, files and ACME alike. Set a listener\'s tls on the Listeners page; ACME and automatic HTTPS have their own pages.',
@@ -63,10 +66,19 @@
   ];
 
   var ROLES = { tunnel: 1, llm: 1 };
-  var SYS = ['log', 'access_log', 'telemetry', 'metrics', 'limits', 'engine', 'providers', 'tunnel', 'llm', 'webrtc'];
-  var ELSEWHERE = { listeners: 1, routes: 1, upstreams: 1, services: 1, auto_https: 1, acme: 1, admin: 1 };
+  // The config's members the Global menu edits, and those edited on a page of their own: the feature pages in
+  // features.js, and the protocol pages above. A member in ELSEWHERE is not listed by the "other" page either.
+  // Global 菜单编辑的成员，以及在各自独立页面编辑的成员（features.js 中的功能页面与上面的协议页面）。“其他”页面也不再列出它们。
+  var SYS = ['log', 'access_log', 'telemetry', 'metrics', 'limits', 'engine', 'providers'];
+  var ELSEWHERE = { listeners: 1, routes: 1, upstreams: 1, services: 1, auto_https: 1, acme: 1, admin: 1,
+    tunnel: 1, llm: 1, webrtc: 1, streaming: 1, media_auth: 1 };
   var SYS_ICONS = { log: 'log', access_log: 'book', telemetry: 'activity', metrics: 'activity', limits: 'shield', engine: 'cpu',
-    providers: 'plug', tunnel: 'tunnel', llm: 'cpu', webrtc: 'radio', other: 'cube' };
+    providers: 'plug', other: 'cube' };
+
+  // restMembers is the config's members that no other page edits: what the "other" page owns. / 其余无页面编辑的成员。
+  function restMembers(C) {
+    return C.sections().filter(function (s) { return !ELSEWHERE[s] && SYS.indexOf(s) < 0; });
+  }
 
   function isForward(r) { return !!(r && r.handler && r.handler.module === 'forward_proxy'); }
   function uniqueName(list, base) {
@@ -91,18 +103,23 @@
         case 'services': return '#/gw.l4/services';
         case 'auto_https': case 'acme': return '#/gw.tls/' + sec;
         case 'admin': return null;
+        // The feature members' pages are registered by features.js; nothing here claims them, or the "other" page,
+        // which no longer edits them. / 功能成员的页面由 features.js 注册；此处不认领它们，也不再指向“其他”页面。
+        case 'tunnel': case 'llm': case 'webrtc': case 'streaming': case 'media_auth': return null;
       }
       return SYS.indexOf(sec) >= 0 ? '#/sys.config/' + sec : '#/sys.config/other';
     });
   }
 
-  // edit is the route of a page that edits the config. / 编辑配置的页面路由。
-  function edit(UI, sh, nav, title, render) {
+  // edit is the route of a page that edits the config; opts.members are the config members it edits (for the
+  // UI/.conf/.yaml/.json tabs), opts.rawNote a note shown above the raw text. / 编辑配置的页面路由；opts 见 config.js 的 page。
+  function edit(UI, sh, nav, title, render, opts) {
     var C = FitConfig.with(UI);
     places(C);
     var el = sh.page(nav, title);
-    return C.page(el, sh, render);
+    return C.page(el, sh, render, opts);
   }
+  function members(names) { return { members: names }; }
 
   function chips(UI, list) { return list.filter(Boolean).map(function (x) { return typeof x === 'string' ? UI.h('span.muted.small', x) : x; }); }
 
@@ -123,12 +140,15 @@
     id: 'gw.listeners', server: 'admin', group: 'gateway', order: 2, icon: 'listen', label: 'm.listeners', words: WORDS,
     nav: [{ id: 'listeners', icon: 'listen', label: 's.listeners' }],
     setup: function (UI, sh) {
-      var t = UI.t;
+      var h = UI.h, t = UI.t;
       return {
         routes: {
           'listeners': function () {
             edit(UI, sh, 'listeners', t('s.listeners'), function (body) {
               var C = FitConfig.with(UI);
+              // Each port's features are in the Engine menu; the listener form is what this page edits.
+              // 各端口的功能在引擎菜单中；本页编辑监听表单。
+              body.appendChild(h('div.callout', UI.icon('info'), ' ', t('l.engine.note')));
               body.appendChild(C.section('listeners', {
                 addLabel: t('l.add'),
                 make: function (arr) { return { name: uniqueName(arr, 'web'), address: ':8080', protocols: ['http/1.1'] }; },
@@ -137,7 +157,7 @@
                     [l && l.tls ? UI.badge('tls', 'ok') : null, l && l.socks ? UI.badge('socks', 'info') : null]));
                 }
               }));
-            });
+            }, members(['listeners']));
           }
         }
       };
@@ -151,13 +171,26 @@
     setup: function (UI, sh) {
       var h = UI.h, t = UI.t;
       var sel = 'all';
+      // deep is the ?handler=<module> the page was entered with, so that an Engine menu link lands on that handler's
+      // routes: it is applied once per visit, and a tab clicked afterwards keeps its own choice.
+      // deep 是进入页面时的 ?handler=<module>，使引擎菜单的链接落到该处理器的路由上：每次访问只采用一次，之后点击的标签页保留
+      // 自己的选择。
+      var deep = null;
       function routesPage() {
+        deep = null;
         edit(UI, sh, 'routes', t('s.routes'), function (body) {
           var C = FitConfig.with(UI);
           var rs = (C.draft.routes || []).filter(function (r) { return !isForward(r); });
           var mods = {};
           rs.forEach(function (r) { if (r && r.handler && r.handler.module) mods[r.handler.module] = (mods[r.handler.module] || 0) + 1; });
-          if (C.focus && C.focus.indexOf('routes') === 0) sel = 'all';
+          // A problem's link wins over the deep link, so that its route is shown even when filtered. / 问题链接优先于深链，使其路由显示。
+          var want = null;
+          var q = /[?&]handler=([^&]+)/.exec(location.hash);
+          if (q) { try { want = decodeURIComponent(q[1]); } catch (e) { want = q[1]; } }
+          if (C.focus && C.focus.indexOf('routes') === 0) { sel = 'all'; deep = want || deep; } else if (want && mods[want] && want !== deep) {
+            sel = want;
+            deep = want;
+          }
           if (sel !== 'all' && !mods[sel]) sel = 'all';
           var items = [['all', t('r.all') + ' · ' + rs.length]].concat(Object.keys(mods).sort().map(function (k) { return [k, k + ' · ' + mods[k]]; }));
           body.appendChild(h('div.callout', UI.icon('info'), ' ', t('r.reverse.note')));
@@ -174,7 +207,7 @@
             },
             chips: function (r) { return routeChips(UI, r); }
           }));
-        });
+        }, { members: ['routes'], rawNote: t('r.raw.note') });
       }
       function upstreamsPage() {
         var el = sh.page('upstreams', t('s.upstreams'));
@@ -199,7 +232,7 @@
                 ]);
               }
             }));
-          });
+          }, { members: ['upstreams'] });
         });
       }
       return { routes: { 'routes': routesPage, 'upstreams': upstreamsPage } };
@@ -237,7 +270,7 @@
                     r && r.listeners && r.listeners.length ? h('span.muted.small', '@' + r.listeners.join(',')) : null]);
                 }
               }));
-            });
+            }, { members: ['routes'], rawNote: t('r.raw.note') });
           }
         }
       };
@@ -267,7 +300,7 @@
                     s && s.proxy_protocol ? UI.badge('proxy_protocol ' + s.proxy_protocol) : null]);
                 }
               }));
-            });
+            }, members(['services']));
           }
         }
       };
@@ -292,7 +325,7 @@
       }
       function sec(name) {
         return function () {
-          edit(UI, sh, name, t('s.' + name), function (body) { body.appendChild(FitConfig.with(UI).section(name)); });
+          edit(UI, sh, name, t('s.' + name), function (body) { body.appendChild(FitConfig.with(UI).section(name)); }, members([name]));
         };
       }
       return { routes: { 'certs': certs, 'auto_https': sec('auto_https'), 'acme': sec('acme') } };
@@ -371,16 +404,16 @@
               body.appendChild(h('div.callout.callout--warn', UI.icon('info'), ' ', t('role.note')));
             }
             body.appendChild(FitConfig.with(UI).section(name));
-          });
+          }, members([name]));
         };
       });
       routes.other = function () {
         edit(UI, sh, 'other', t('s.other'), function (body) {
           var C = FitConfig.with(UI);
-          var rest = C.sections().filter(function (s) { return !ELSEWHERE[s] && SYS.indexOf(s) < 0; });
+          var rest = restMembers(C);
           if (!rest.length) { body.appendChild(UI.empty(t('other.none'))); return; }
           rest.forEach(function (s) { body.appendChild(h('h3', { style: { margin: '8px 0 0' } }, h('code', s))); body.appendChild(C.section(s)); });
-        });
+        }, { members: function () { return restMembers(FitConfig.with(UI)); } });
       };
       return { routes: routes };
     }

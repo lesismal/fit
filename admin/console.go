@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
@@ -27,6 +30,10 @@ const (
 	csrfHeader    = console.CSRFHeader
 )
 
+// errNoConsoleStore is why a password cannot change: without a store, a
+// change would be lost at the next restart.
+const errNoConsoleStore = "the console users are not saved: fit has no admin.store; passwords change only with a store"
+
 // AdminModule is the ID of the config's own module of the workbench.
 const AdminModule = "admin"
 
@@ -37,12 +44,13 @@ const AdminModule = "admin"
 // Admin API's handlers run on the console's pool, never on a fib worker. See
 // docs/decisions/027-console-and-store.md.
 type Console struct {
-	c      *console.Console
-	api    http.Handler
-	schema []byte
-	logf   func(format string, args ...any)
-	module *console.Module
-	logins *login.Logins
+	c       *console.Console
+	api     http.Handler
+	schema  []byte
+	logf    func(format string, args ...any)
+	module  *console.Module
+	logins  *login.Logins
+	configs *Configs // whose store keeps the console users
 }
 
 // StartConsole serves the console c describes on engine, for configs, whose
@@ -59,7 +67,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}
-	cs := &Console{schema: sch, logf: logf}
+	cs := &Console{schema: sch, logf: logf, configs: configs}
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
 	cs.api = inner.routes()
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
@@ -87,12 +95,17 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	return cs, nil
 }
 
-// routes adds the config's module: the schema, and every Admin API
-// endpoint under /api/.
+// routes adds the config's module: the schema, the console's own accounts,
+// and every Admin API endpoint under /api/.
 func (cs *Console) routes(api *console.API) {
 	api.Handle("GET", "/api/schema", func(r *console.Request) {
 		_ = console.Write(r.Context, http.StatusOK, "application/schema+json", cs.schema)
 	})
+	// Exact routes beat the catch-all below: they are the console's own,
+	// under the admin module as /api/m/admin/users and the like.
+	api.Handle("GET", "/api/users", cs.users)
+	api.Handle("POST", "/api/account/password", cs.accountPassword)
+	api.Handle("POST", "/api/users/password", cs.userPassword)
 	api.HandlePrefix("", "/api/", cs.proxy)
 }
 
@@ -147,6 +160,201 @@ func (cs *Console) logChange(user, method, path string, w *recorder) {
 		}
 	}
 	cs.logf("console: %q: %s %s: %d", user, method, path, w.status)
+}
+
+// usersBody is GET /api/users's answer: who is logged in, whether a store
+// keeps the passwords, and every user who may log in.
+type usersBody struct {
+	User  string   `json:"user"`
+	Store bool     `json:"store"`
+	Users []string `json:"users"`
+}
+
+// changedBody is a password change's answer: whose password changed.
+type changedBody struct {
+	Changed  bool   `json:"changed"`
+	User     string `json:"user,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
+// users answers GET /api/users, with the users who may log in.
+func (cs *Console) users(r *console.Request) {
+	_, stored := cs.configs.ConsoleUsers()
+	_ = r.JSON(http.StatusOK, usersBody{User: r.User, Store: stored, Users: cs.logins.Users()})
+}
+
+// passwordBody is a user's change of its own password.
+type passwordBody struct {
+	CurrentPassword string `json:"current_password"`
+	Password        string `json:"password"`
+}
+
+// accountPassword answers POST /api/account/password: a user changes its own
+// password, giving the current one. The change is hashed and saved to the
+// store on the console's pool, since bcrypt and disk writes block, and the
+// user's other sessions are ended.
+func (cs *Console) accountPassword(r *console.Request) {
+	var body passwordBody
+	if !r.Decode(&body) {
+		return
+	}
+	if body.CurrentPassword == "" {
+		_ = console.Error(r.Context, http.StatusBadRequest, "the body must hold the current password and the new password")
+		return
+	}
+	if msg := passwordProblem(body.Password); msg != "" {
+		_ = console.Error(r.Context, http.StatusBadRequest, msg)
+		return
+	}
+	addr, ok := cs.passwordReady(r)
+	if !ok {
+		return
+	}
+	user, token := r.User, cs.sessionToken(r)
+	r.Go(func() {
+		ok, err := cs.logins.Check(r.Context.Context(), user, body.CurrentPassword)
+		if err != nil {
+			return // the client left
+		}
+		if !ok {
+			cs.failedPassword(r, addr)
+			return
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			_ = console.Error(r.Context, http.StatusInternalServerError, "hashing the password: "+err.Error())
+			return
+		}
+		if err := cs.savePassword(user, string(hash)); err != nil {
+			_ = console.Error(r.Context, http.StatusInternalServerError, "saving the password: "+err.Error())
+			return
+		}
+		cs.logins.SetPassword(user, hash)
+		cs.logins.EndUserSessions(user, token)
+		cs.logf("console: %q changed the password of %q", user, user)
+		_ = console.WriteJSON(r.Context, http.StatusOK, changedBody{Changed: true, User: user})
+	})
+}
+
+// resetBody is a console user's reset of another's password.
+type resetBody struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// userPassword answers POST /api/users/password: a console user sets another
+// user's password. Every session of the other user ends; all console users
+// are admins, so no role of its own is asked for.
+func (cs *Console) userPassword(r *console.Request) {
+	var body resetBody
+	if !r.Decode(&body) {
+		return
+	}
+	if body.Username == "" {
+		_ = console.Error(r.Context, http.StatusBadRequest, "the body must hold the user name and the new password")
+		return
+	}
+	if msg := passwordProblem(body.Password); msg != "" {
+		_ = console.Error(r.Context, http.StatusBadRequest, msg)
+		return
+	}
+	if !cs.logins.HasUser(body.Username) {
+		_ = console.Error(r.Context, http.StatusBadRequest, fmt.Sprintf("there is no console user named %q", body.Username))
+		return
+	}
+	if _, ok := cs.passwordReady(r); !ok {
+		return
+	}
+	caller, target := r.User, body.Username
+	r.Go(func() {
+		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			_ = console.Error(r.Context, http.StatusInternalServerError, "hashing the password: "+err.Error())
+			return
+		}
+		if err := cs.savePassword(target, string(hash)); err != nil {
+			_ = console.Error(r.Context, http.StatusInternalServerError, "saving the password: "+err.Error())
+			return
+		}
+		cs.logins.SetPassword(target, hash)
+		cs.logins.EndUserSessions(target, "")
+		cs.logf("console: %q set the password of %q", caller, target)
+		_ = console.WriteJSON(r.Context, http.StatusOK, changedBody{Changed: true, Username: target})
+	})
+}
+
+// passwordProblem returns why password cannot be a console password, and ""
+// when it can: bcrypt takes 72 bytes at most.
+func passwordProblem(password string) string {
+	switch {
+	case password == "":
+		return "the new password is empty"
+	case len(password) > 72:
+		return "the new password is longer than bcrypt's 72 bytes"
+	}
+	return ""
+}
+
+// passwordReady answers 429 while a lockout holds the request's address, and
+// 409 when no store keeps the console users; ok says a change may go on, from
+// addr, which the console counts failures by.
+func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
+	addr = clientHost(r.Context.Request)
+	if wait := cs.logins.LockedOut(addr); wait > 0 {
+		refuseChecks(r, wait)
+		return addr, false
+	}
+	if _, stored := cs.configs.ConsoleUsers(); !stored {
+		_ = console.Error(r.Context, http.StatusConflict, errNoConsoleStore)
+		return addr, false
+	}
+	return addr, true
+}
+
+// failedPassword counts a failed password check from addr and answers 403,
+// or 429 once it has locked the address out.
+func (cs *Console) failedPassword(r *console.Request, addr string) {
+	cs.logins.Failed(addr)
+	if wait := cs.logins.LockedOut(addr); wait > 0 {
+		refuseChecks(r, wait)
+		return
+	}
+	_ = console.Error(r.Context, http.StatusForbidden, "the current password is wrong")
+}
+
+// refuseChecks answers 429 for checks an address may not make for wait, as
+// the console refuses logins from it.
+func refuseChecks(r *console.Request, wait time.Duration) {
+	r.Context.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+	_ = console.Error(r.Context, http.StatusTooManyRequests, "too many failed password checks from this address; try again later")
+}
+
+// savePassword writes hash as user's password hash beside the config in the
+// store, replacing the one of a user whose password changed already, and
+// adding user when it is not there yet; two changes at once do not lose one.
+func (cs *Console) savePassword(user, hash string) error {
+	return cs.configs.SetConsolePassword(user, hash)
+}
+
+// sessionToken returns the raw token of the session r was made with, which
+// keeps its session when the user's others end: the console's cookie, named
+// as app/console names it.
+func (cs *Console) sessionToken(r *console.Request) string {
+	ck, err := r.Context.Request.Cookie(login.CookieName(sessionCookie, cs.c.Addr()))
+	if err != nil {
+		return ""
+	}
+	return ck.Value
+}
+
+// clientHost is the host of r's address, as the console counts failed logins
+// by it.
+func clientHost(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // recorder is the Admin API's answer, held whole: the API's answers are
