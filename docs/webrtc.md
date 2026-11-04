@@ -340,6 +340,147 @@ The route's middleware still run first, so a policy can sit behind `jwt`, `forwa
 allow list. Every field is in the [config reference](reference/config.md#media-auth), and the
 design in [decision 030](decisions/030-media-auth-and-pages.md).
 
+#### Issuing tokens from a route
+
+`fit media-token` prints one token for the operator; a business backend that needs many, for many
+users, groups and concurrent meetings, gets them from the handler `media_tokens` over a route of its
+own. The policy's `keys` ring gives each shard — a meeting, a group, a region — a key of its own: a
+batch is signed with one key, its tokens are then checked against every key of the ring, and a
+revoke rotates one key's secret file, so only the tokens that key signed are refused and the other
+shards carry on: a revocation is a shard's outage, not the policy's. The route's middleware
+authenticates the backend — `jwt` here — while the module checks no caller credentials itself: it is
+not the Admin API, so the backend never holds the Admin API's all-powerful token.
+
+```fit
+media_auth live {
+	keys {
+		key k1
+		secret_file /etc/fit/media-secrets/k1
+	}
+	keys {
+		key k2
+		secret_file /etc/fit/media-secrets/k2
+	}
+	keys {
+		key k3
+		secret_file /etc/fit/media-secrets/k3
+	}
+	public play
+}
+
+route media-tokens {
+	match {
+		path /media-tokens /media-tokens/*
+	}
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		audience media-tokens
+	}
+	handler media_tokens {
+		auth live
+		prefixes mtg-
+		max_ttl 24h
+		max_tokens 500
+	}
+}
+```
+
+Each key of the ring is a shard, k1 to k8 as the meetings or groups need, each with its own
+`secret_file`; the ring and its keys come from the config, so a new shard is a key added there and a
+reload, not an API call. A batch names its key, `"key": "k2"`, which signs the whole batch; without
+one it is signed with the ring's first key, k1 here. A token carries no key id: it is checked against
+every key, so a token of another key signed before a rotation stays acceptable, and only a revoke of
+its own key refuses it. Every `secret_file` must hold at least 16 bytes when fit starts, its line breaks at the end
+aside, and the process must be able to write the directory it is in, for a revoke replaces the file
+by an atomic rename; a write that fails is answered 500 and rotates nothing.
+
+The backend signs in to its own identity provider and calls the route with the JWT it got. The
+tokens the route returns are the same media credentials the WHIP, WHEP, pages, streaming and
+`webrtc_proxy` endpoints take, sent as `Authorization: Bearer`.
+
+**A batch for one shard**, with curl:
+
+```sh
+curl -X POST https://gateway.example.com/media-tokens \
+	-H "Authorization: Bearer $BACKEND_JWT" \
+	-H "Content-Type: application/json" \
+	-d '{
+		"key": "k2",
+		"tokens": [
+			{"subject": "alice@mtg-42", "publish": ["mtg-42-*"], "play": ["mtg-42-*"], "ttl": "2h"},
+			{"subject": "bob@mtg-43", "publish": ["mtg-43-*"], "play": ["mtg-43-*"]}
+		]
+	}'
+```
+
+and with Python:
+
+```python
+import json, urllib.request
+
+backend_jwt = "eyJ..."  # from the identity provider the jwt middleware trusts
+req = urllib.request.Request(
+    "https://gateway.example.com/media-tokens",
+    data=json.dumps({"key": "k2", "tokens": [
+        {"subject": "alice@mtg-42", "publish": ["mtg-42-*"], "play": ["mtg-42-*"], "ttl": "2h"},
+        {"subject": "bob@mtg-43", "publish": ["mtg-43-*"], "play": ["mtg-43-*"]},
+    ]}).encode(),
+    headers={"Authorization": "Bearer " + backend_jwt, "Content-Type": "application/json"},
+    method="POST")
+with urllib.request.urlopen(req) as resp:
+    for t in json.load(resp)["tokens"]:
+        print(t["subject"], t["key"], t["token"], t["expires"])
+```
+
+The answer is `{"tokens": [{"token", "subject", "expires", "key"}]}`, in the request's order, the
+key left out for a policy with one secret; a batch with one bad token issues none.
+
+**Rotating one shard's key**, with curl:
+
+```sh
+curl -X POST https://gateway.example.com/media-tokens/revoke \
+	-H "Authorization: Bearer $BACKEND_JWT" \
+	-H "Content-Type: application/json" \
+	-d '{"key": "k2"}'
+```
+
+and with Python:
+
+```python
+import json, urllib.request
+
+backend_jwt = "eyJ..."  # from the identity provider the jwt middleware trusts
+req = urllib.request.Request(
+    "https://gateway.example.com/media-tokens/revoke",
+    data=json.dumps({"key": "k2"}).encode(),
+    headers={"Authorization": "Bearer " + backend_jwt, "Content-Type": "application/json"},
+    method="POST")
+with urllib.request.urlopen(req) as resp:
+    print(json.load(resp))  # {"revoked": true, "since": 1793780000, "keys": ["k2"]}
+```
+
+**Rotating every key**, when the whole policy has to be revoked, is `-d '{"all": true}'` with curl,
+or `json.dumps({"all": True})` as the Python request's data; the answer names every key rotated.
+
+- **A revoke of one key rotates its secret file and its running key at once.** The handler writes 32
+  fresh random bytes to that key's `secret_file`, atomically, and replaces that key: every token it
+  signed is refused at once, by every handler that shares the policy — WHIP, WHEP, the media pages,
+  the streaming role and `media_tokens` — whatever its expiry, while the tokens of the other keys
+  stay good, so one meeting's or one shard's revocation does not interrupt the rest. With `all`,
+  every key is rotated, and with a policy of a single `secret_file` there is one key: the empty
+  revoke, or `{"all": true}`, refuses every token, and a `key` in the body is 400.
+- **Tokens signed after it live until their expiry.** They are signed with the new key and checked
+  as any other; the policy's `token_ttl` and the handler's `max_ttl` still bound them.
+- **The files keep the new secrets across restarts**, which read them again, so the revocation
+  outlives a restart; a config apply re-reads them too, so rotating a file and reloading revokes
+  that shard as well.
+- **The route's middleware authenticates the business backend** — `jwt` above, or `basic_auth`,
+  `forward_auth` or `rate_limit`; the handler checks no caller credentials, and the Admin API is not
+  involved. The route must match the handler's `prefix` and what is below it: a request outside it
+  is 404.
+
+Its params and answers are in the [`media_tokens` chapter](reference/config.md#http-handlers-media_tokens).
+
 ### Media
 
 Each publisher's offer is answered with one codec of each kind, the first of its own that

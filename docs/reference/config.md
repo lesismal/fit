@@ -39,10 +39,10 @@ a config against it and more.
 - [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
-- [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser)
+- [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -2302,12 +2302,13 @@ media: [`whip`](#whip), [`whep`](#whep) and [`webrtc_proxy`](#webrtc_proxy) refe
 with their `auth` param. A policy lets in static `tokens`, sent as `Authorization: Bearer`, a
 `token` query parameter or the `fit_media_token` cookie; `users` with a password, sent as
 `Authorization: Basic` (or, where a protocol has no header, as `user` and `pass` in the query); and
-tokens fit signs with its `secret`, which `fit media-token` prints and carry their subject, expiry
-and streams. Each token and user lists the stream patterns it may `publish` and `play`, with `*`
-matching any run of characters, as `live/*` or `room1-*`. `public` lists the actions anyone may take
-without credentials, as `["play"]` for streams anyone may watch. Missing or bad credentials are
-answered `401` with a `Bearer` challenge, and credentials that do not allow the action `403`. A
-handler without `auth` lets everyone in, as the route's middleware allow.
+tokens fit signs with its `secret`, the file `secret_file` names, or one key of its keyring `keys`,
+which `fit media-token` prints and carry their subject, expiry and streams. Each token and user
+lists the stream patterns it may `publish` and `play`, with `*` matching any run of characters, as
+`live/*` or `room1-*`. `public` lists the actions anyone may take without credentials, as `["play"]`
+for streams anyone may watch. Missing or bad credentials are answered `401` with a `Bearer`
+challenge, and credentials that do not allow the action `403`. A handler without `auth` lets
+everyone in, as the route's middleware allow.
 
 The checks never hold up a worker: a token is looked up by its SHA-256 or its signature checked, a
 plaintext password compared in constant time; a `password_hash` is checked with bcrypt on a small
@@ -2315,13 +2316,40 @@ pool of its own, and remembered once found right. A reload changes a policy in p
 requests and sessions that follow. See [WebRTC](../webrtc.md#auth) and
 [decision 030](../decisions/030-media-auth-and-pages.md).
 
+`secret`, `secret_file` and `keys` are the ways to give a policy what its tokens are signed with,
+one of them: `secret` writes the key in the config; `secret_file` names a file that holds it, read
+each time the config is applied, so that rewriting the file and applying the config revokes every
+token signed before; and `keys` is a keyring, each key a `key` name with its own `secret` or
+`secret_file`, in place of the other two. A token is signed with one key of the ring — the one a
+`media_tokens` request names, or the first, the ring's default — and checked against every key, so
+the token carries no key id and one signed before a key rotation stays acceptable. Rotating a key,
+as the handler [`media_tokens`](#media_tokens) does, replaces only that key's material: the tokens
+it signed are refused at once, by every handler that shares the policy — `whip`, `whep`, the media
+pages, the streaming role and `media_tokens` — while the tokens of the other keys stay good until
+their expiry, so a revocation does not take the whole policy down. Two keys sharing a secret are
+refused by the config, so a token never verifies under two keys and rotating one cannot leave a twin
+good; a ring holds at most 256 keys. `media_tokens` needs a `secret_file` for every key, and
+`fit media-token` signs with the ring's first key or the one its `-key` names.
+
+A revoke writes 32 fresh random bytes to the secret's file, atomically, and then replaces that key
+in memory, so the tokens it signed are refused at once; with a single `secret` or `secret_file`
+there is one key, and every token of the policy is refused. The file keeps the new secret, so the
+revocation outlives a restart, which reads it again, as a config apply after a rotation does. A
+`secret_file` must hold at least 16 bytes, its line breaks at the end aside; a missing or unreadable
+file, a shorter one, or a key with neither a `secret` nor a `secret_file`, fails the config. A
+policy with no `secret`, `secret_file` or `keys` signs with a random key of the process's, which a
+restart forgets, as `fit media-token` does. Revoking is per key, or all keys, but never per subject:
+the tokens a key signed cannot be listed or counted, and one subject's tokens cannot be revoked
+alone.
+
 In a .conf file:
 
 ```fit
 listener web :8080
 
 media_auth live {
-	secret a-secret-of-at-least-16-bytes
+	keys { key k1; secret a-secret-of-at-least-16-bytes }
+	keys { key k2; secret_file /etc/fit/media-secret-k2 }
 	public play
 	tokens studio {
 		token_sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
@@ -2345,7 +2373,11 @@ listeners:
     address: :8080
 media_auth:
   - name: live
-    secret: a-secret-of-at-least-16-bytes
+    keys:
+      - key: k1
+        secret: a-secret-of-at-least-16-bytes
+      - key: k2
+        secret_file: /etc/fit/media-secret-k2
     public:
       - play
     tokens:
@@ -2389,7 +2421,10 @@ In JSON:
   "media_auth": [
     {
       "name": "live",
-      "secret": "a-secret-of-at-least-16-bytes",
+      "keys": [
+        {"key": "k1", "secret": "a-secret-of-at-least-16-bytes"},
+        {"key": "k2", "secret_file": "/etc/fit/media-secret-k2"}
+      ],
       "public": ["play"],
       "tokens": [{"name": "studio", "token_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "publish": ["live/*"]}],
       "users": [{"name": "alice", "password": "alice-password", "publish": ["alice-*"], "play": ["*"]}],
@@ -2413,7 +2448,9 @@ In JSON:
 | `name` | string |  | Required. The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'. |
 | `tokens` | list of [object](#config-mediatoken) |  | Static bearer tokens, each with the streams it may publish and play: sent as Authorization: Bearer, a token query parameter or the fit_media_token cookie. |
 | `users` | list of [object](#config-mediauser) |  | Users with a password, each with the streams they may publish and play: sent as Authorization: Basic, as user and pass query parameters where a protocol has no header (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens signed with secret. |
-| `secret` | string |  | The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it. |
+| `secret` | string |  | The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it. Or secret_file, one of the two, or keys. |
+| `secret_file` | string |  | A file holding the secret tokens are signed with, read each time the config is applied: the handler media_tokens rotates it, and every token signed before is refused. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two, or keys. None when left out: a random key of the process's signs, which a restart forgets. |
+| `keys` | list of [object](#config-mediakey) |  | A keyring of signing keys, each a name and its secret or secret_file, in place of secret or secret_file: a token is signed with one key and checked against every key, so rotating one key, as the handler media_tokens does, refuses only the tokens that key signed and the others stay good. One of the two: keys, or secret/secret_file. None when left out. |
 | `public` | list of string: `publish`, `play` |  | The actions anyone may take without credentials, as ["play"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials. |
 | `token_ttl` | duration | `"12h"` | How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out. |
 
@@ -2440,6 +2477,16 @@ In JSON:
 | `password_hash` | string |  | Instead of the password, its bcrypt hash, as fit hash-password makes it: Basic and the query's user and pass only, checked off fib's workers. A password once found right is remembered, as a keyed SHA-256, so that the next check is at once. |
 | `publish` | list of string |  | The streams the user may publish, as a token's publish lists them. None when left out. |
 | `play` | list of string |  | The streams the user may play. None when left out. |
+
+<a id="config-mediakey"></a>
+
+### `media_auth[].keys[]`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `key` | string |  | Required. The key's name: 1 to 64 letters, digits, '_', '.', '~' and '-', which a media_tokens request names to sign with it, and a revoke to rotate it. |
+| `secret` | string |  | The key's secret, at least 16 bytes. Or secret_file, one of the two. |
+| `secret_file` | string |  | A file holding the key's secret, read each time the config is applied; the handler media_tokens rotates this file to refuse just the tokens this key signed. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. |
 
 <a id="streaming"></a>
 
@@ -3200,6 +3247,138 @@ In JSON:
 | --- | --- | --- | --- |
 | `name` | string |  | Required. What the URL is, as RTMP or SRT. |
 | `url` | string |  | Required. The URL, with {stream}, {token} and {host} filled in by the page. |
+
+<a id="http-handlers-media_tokens"></a>
+
+### `media_tokens`
+
+Issues time-limited media_auth tokens in batches, for a route a business backend calls, and revokes the tokens of one key of the policy's keyring, or of all of them, by rotating their secrets.
+
+Issues time-limited [`media_auth`](#media-auth) tokens in batches, over a route a business backend
+calls, and revokes the tokens of one key of the policy's keyring, or of every key, by rotating their
+secrets: `POST <prefix>` takes the tokens a request wants and answers them, and
+`POST <prefix>/revoke` rotates the secret files of the keys it names. The route's middleware
+authenticates the caller — a `jwt`, `basic_auth`, `forward_auth` or `rate_limit` of the business
+backend's own — and the module checks no caller credentials itself: it is not the Admin API, so a
+backend never holds the Admin API's all-powerful token. `auth` names the policy the tokens belong
+to: it must set a single `secret_file`, or a `keys` keyring whose every key sets a `secret_file`, so
+that a revoke can rotate a file and outlive a restart; a policy with a key that has no
+`secret_file` fails the config.
+
+`prefix` is the path the route serves under, `/media-tokens` when left out: the route must match it
+and what is below it, as `/media-tokens` and `/media-tokens/*`, and a request outside it is answered
+404. `prefixes` bounds the stream names a token may be signed for: every `publish` and `play`
+pattern of a request must start with one of them, as `mtg-` for `mtg-42-*`, so that a token cannot
+be signed for a stream outside them; any valid pattern when left out. `max_ttl` (24h) is the longest
+a request may ask a token to be good for, `max_tokens` (100, 1 to 1000) the most tokens one request
+may ask for, `max_body_bytes` (64 KiB, 256 bytes to 1 MiB) the largest body the route takes, and
+`revoke_timeout` (10s) how long a revoke may wait for its secret files' writes before it is
+answered 504.
+
+`POST <prefix>` takes a batch, `{"key": "<name>", "tokens": [{"subject", "publish", "play",
+"ttl"}]}`, and answers `{"tokens": [{"token", "subject", "expires", "key"}]}` in the request's order.
+`key` is optional: it signs the whole batch with that key of the policy's keyring, the ring's first
+when left out, and a name the policy has no key for is 400; a policy with one secret takes no `key`,
+and a request that gives one is 400. Each answer token names the key that signed it, left out for a
+policy with one secret. `subject` is required, 1 to 128 bytes with no control character; each token
+needs at least one `publish` or `play` pattern, in the config's syntax with `*` matching any run of
+characters; and `ttl` is a duration such as `"2h"`, the smaller of the policy's `token_ttl` and
+`max_ttl` when left out. A batch with one bad token issues none: a body over `max_body_bytes` is
+413, more than `max_tokens` or a bad JSON, `subject`, pattern, `ttl` or `key` 400, a path outside
+the prefix 404, and other methods 405. Issuing is pure computation on the policy's state, so many
+requests run at once and none waits on a disk.
+
+`POST <prefix>/revoke` writes 32 random bytes to the secret file of each key it rotates,
+atomically, and then replaces that key, so that the tokens it signed are refused at once, by every
+handler sharing the policy, while the tokens of the keys left alone stay good until their expiry.
+With a `keys` keyring the body is `{"key": "<name>"}` to rotate one key, or `{"all": true}` to
+rotate every key; a body naming neither, or a key the policy lacks, is 400. A policy with a single
+secret keeps the empty body, or `{}`, and `{"all": true}` rotates it too; a `key` there is 400. It
+answers `{"revoked": true, "since": <unix seconds>, "keys": ["k2"]}`, the keys rotated, left out
+for a single key, 500 when a file cannot be written, which stops the revoke there, so on `all` the
+keys already written stay rotated, 503 with `Retry-After: 1` when a revoke waits already, and 504
+when the writes take longer than `revoke_timeout`. The writes run on a bounded pool of its own, one
+at a time, and the answer is written when it completes, so no worker waits on the disk. See
+[WebRTC](../webrtc.md#issuing-tokens-from-a-route).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /media-tokens /media-tokens/* }
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		issuer https://auth.example.com/
+		audience media-tokens
+		claims_headers { X-User sub }
+	}
+	handler media_tokens {
+		prefix /media-tokens
+		auth live
+		prefixes mtg-
+		max_ttl 12h
+		max_tokens 200
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /media-tokens
+    - /media-tokens/*
+middleware:
+  - module: jwt
+    params:
+      jwks_url: https://auth.example.com/.well-known/jwks.json
+      issuer: https://auth.example.com/
+      audience:
+        - media-tokens
+      claims_headers:
+        X-User: sub
+handler:
+  module: media_tokens
+  params:
+    prefix: /media-tokens
+    auth: live
+    prefixes:
+      - mtg-
+    max_ttl: 12h
+    max_tokens: 200
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/media-tokens", "/media-tokens/*"]},
+  "middleware": [{"module": "jwt", "params": {
+    "jwks_url": "https://auth.example.com/.well-known/jwks.json",
+    "issuer": "https://auth.example.com/",
+    "audience": ["media-tokens"],
+    "claims_headers": {"X-User": "sub"}
+  }}],
+  "handler": {"module": "media_tokens", "params": {
+    "prefix": "/media-tokens",
+    "auth": "live",
+    "prefixes": ["mtg-"],
+    "max_ttl": "12h",
+    "max_tokens": 200
+  }}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prefix` | string | `"/media-tokens"` | The path the route serves under: the route must match it and what is below it, as /media-tokens and /media-tokens/*; a request outside it gets 404. /media-tokens when left out. |
+| `auth` | string |  | The media_auth policy that signs the tokens, as whip's auth names one: it must set secret_file, or a keyring whose keys each set secret_file, so that a revoke can rotate a secret file and outlive a restart. |
+| `prefixes` | list of string |  | The stream-name prefixes this route may sign for: every publish and play pattern of a request must start with one of them, so that a token cannot be signed for a stream outside them, as mtg- for mtg-42-*. Any valid pattern when left out. |
+| `max_ttl` | duration | `"24h"` | The longest a request may ask a token to be good for; a longer ttl is answered 400. 24h when left out. |
+| `max_tokens` | integer, 1 to 1000 | `100` | The most tokens one request may ask for; more is answered 400. 100 when left out. |
+| `max_body_bytes` | integer, 256 to 1048576 | `65536` | The largest request body the route takes; a larger one is answered 413. 64 KiB when left out. |
+| `revoke_timeout` | duration | `"10s"` | How long a revoke may wait for the secret file's write before it is answered 504; the write, one at a time on a pool of its own, never blocks a worker. 10s when left out. |
 
 <a id="http-handlers-proxy"></a>
 

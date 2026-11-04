@@ -45,7 +45,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 // standardModules are the modules in modules/standard, each of which has a
 // chapter in schema/doc/modules.
 var standardModules = map[string]struct{}{
-	"fastcgi": {}, "forward_proxy": {}, "media_pages": {}, "proxy": {}, "respond": {}, "static": {},
+	"fastcgi": {}, "forward_proxy": {}, "media_pages": {}, "media_tokens": {}, "proxy": {}, "respond": {}, "static": {},
 	"basic_auth": {}, "body_limit": {}, "cache": {}, "circuit_breaker": {}, "client_cert": {}, "compress": {},
 	"concurrency_limit": {}, "forward_auth": {}, "headers": {}, "jwt": {}, "rate_limit": {}, "redirect": {},
 	"rewrite": {}, "wasm": {}, "webrtc_proxy": {}, "whep": {}, "whip": {},

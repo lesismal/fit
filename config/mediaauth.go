@@ -8,12 +8,18 @@ import (
 	"time"
 )
 
-// The defaults of MediaAuth.
+// The defaults and bounds of MediaAuth.
 const (
 	DefaultMediaTokenTTL = 12 * time.Hour
 	// MinMediaSecret is the fewest bytes a media_auth secret may have.
 	MinMediaSecret = 16
+	// MaxMediaKeys is the most keys a media_auth policy's keyring may hold.
+	MaxMediaKeys = 256
 )
+
+// mediaKeyName is what a key of a media_auth keyring may be called: a token
+// carries none, but a request and a revoke name it.
+var mediaKeyName = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,64}$`)
 
 // MediaActions are what a media_auth policy grants: publishing a stream and
 // playing it.
@@ -24,12 +30,23 @@ var MediaActions = []string{"publish", "play"}
 // what refers to it by name with their auth param. See
 // docs/decisions/030-media-auth-and-pages.md.
 type MediaAuth struct {
-	Name     string       `json:"name" fit:"required" doc:"The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'."`
-	Tokens   []MediaToken `json:"tokens,omitempty" doc:"Static bearer tokens, each with the streams it may publish and play: sent as Authorization: Bearer, a token query parameter or the fit_media_token cookie."`
-	Users    []MediaUser  `json:"users,omitempty" doc:"Users with a password, each with the streams they may publish and play: sent as Authorization: Basic, as user and pass query parameters where a protocol has no header (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens signed with secret."`
-	Secret   string       `json:"secret,omitempty" doc:"The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it."`
-	Public   []string     `json:"public,omitempty" enum:"publish,play" doc:"The actions anyone may take without credentials, as [\"play\"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials."`
-	TokenTTL Duration     `json:"token_ttl,omitempty" default:"\"12h\"" doc:"How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out."`
+	Name       string       `json:"name" fit:"required" doc:"The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'."`
+	Tokens     []MediaToken `json:"tokens,omitempty" doc:"Static bearer tokens, each with the streams it may publish and play: sent as Authorization: Bearer, a token query parameter or the fit_media_token cookie."`
+	Users      []MediaUser  `json:"users,omitempty" doc:"Users with a password, each with the streams they may publish and play: sent as Authorization: Basic, as user and pass query parameters where a protocol has no header (RTMP, SRT), or RTSP's Digest. They also log in to fit's media pages, which hand out tokens signed with secret."`
+	Secret     string       `json:"secret,omitempty" doc:"The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it. Or secret_file, one of the two, or keys."`
+	SecretFile string       `json:"secret_file,omitempty" doc:"A file holding the secret tokens are signed with, read each time the config is applied: the handler media_tokens rotates it, and every token signed before is refused. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two, or keys. None when left out: a random key of the process's signs, which a restart forgets."`
+	Keys       []MediaKey   `json:"keys,omitempty" doc:"A keyring of signing keys, each a name and its secret or secret_file, in place of secret or secret_file: a token is signed with one key and checked against every key, so rotating one key, as the handler media_tokens does, refuses only the tokens that key signed and the others stay good. One of the two: keys, or secret/secret_file. None when left out."`
+	Public     []string     `json:"public,omitempty" enum:"publish,play" doc:"The actions anyone may take without credentials, as [\"play\"] for streams anyone may watch and only some may publish. None when left out: every request needs credentials."`
+	TokenTTL   Duration     `json:"token_ttl,omitempty" default:"\"12h\"" doc:"How long a token fit issues is good for, unless fit media-token's -ttl says otherwise. 12h when left out."`
+
+	At Value `json:"-" fit:"self"`
+}
+
+// MediaKey is one key of a media_auth policy's keyring.
+type MediaKey struct {
+	Key        string `json:"key" fit:"required" doc:"The key's name: 1 to 64 letters, digits, '_', '.', '~' and '-', which a media_tokens request names to sign with it, and a revoke to rotate it."`
+	Secret     string `json:"secret,omitempty" doc:"The key's secret, at least 16 bytes. Or secret_file, one of the two."`
+	SecretFile string `json:"secret_file,omitempty" doc:"A file holding the key's secret, read each time the config is applied; the handler media_tokens rotates this file to refuse just the tokens this key signed. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -96,11 +113,34 @@ func (c *Config) checkMediaAuth(add func(Value, string, ...any)) {
 		case slices.IndexFunc(c.MediaAuth, func(o MediaAuth) bool { return o.Name == m.Name }) < i:
 			add(m.At.Field("name"), "another media_auth policy is already named %q", m.Name)
 		}
-		if len(m.Tokens) == 0 && len(m.Users) == 0 && m.Secret == "" && len(m.Public) == 0 {
-			add(m.At, "the policy lets no one in: set tokens, users, secret or public")
+		if len(m.Tokens) == 0 && len(m.Users) == 0 && m.Secret == "" && m.SecretFile == "" && len(m.Keys) == 0 && len(m.Public) == 0 {
+			add(m.At, "the policy lets no one in: set tokens, users, secret, secret_file, keys or public")
 		}
-		if m.Secret != "" && len(m.Secret) < MinMediaSecret {
+		switch {
+		case len(m.Keys) > 0 && (m.Secret != "" || m.SecretFile != ""):
+			add(m.At.Field("keys"), "set keys, or secret or secret_file, one of the two")
+		case m.Secret != "" && m.SecretFile != "":
+			add(m.At.Field("secret_file"), "set secret or secret_file, one of the two")
+		case m.Secret != "" && len(m.Secret) < MinMediaSecret:
 			add(m.At.Field("secret"), "the secret is %d bytes: use at least %d", len(m.Secret), MinMediaSecret)
+		}
+		if len(m.Keys) > MaxMediaKeys {
+			add(m.At.Field("keys"), "at most %d keys", MaxMediaKeys)
+		}
+		for j, k := range m.Keys {
+			at := m.At.Field("keys").Index(j)
+			switch {
+			case !mediaKeyName.MatchString(k.Key):
+				add(at.Field("key"), "%q is not a key name: 1 to 64 letters, digits, '.', '_', '~' and '-'", k.Key)
+			case slices.IndexFunc(m.Keys, func(o MediaKey) bool { return o.Key == k.Key }) < j:
+				add(at.Field("key"), "another key is already named %q", k.Key)
+			}
+			switch {
+			case (k.Secret == "") == (k.SecretFile == ""):
+				add(at, "set secret or secret_file, one of the two")
+			case k.Secret != "" && len(k.Secret) < MinMediaSecret:
+				add(at.Field("secret"), "the secret is %d bytes: use at least %d", len(k.Secret), MinMediaSecret)
+			}
 		}
 		for j, a := range m.Public {
 			if slices.Index(m.Public, a) < j {

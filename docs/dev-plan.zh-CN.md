@@ -103,7 +103,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I119。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I120。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -256,6 +256,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I116 | 流媒体角色：fib 的 `media/hub`，带 RTMP、RTSP 和 SRT 监听，以及 `httpflv`、`hls`、`stream_whip` 和 `stream_whep` 处理器，各有 `auth` | I115 | done |
 | I117 | 媒体页面：`media_pages`，登录、推流、播放和房间通话，可开关麦克风和摄像头，以及有上限的房间 API | I115 | done |
 | I118 | 媒体页面的房间聊天：经房间 API 收发的文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头 | I117 | done |
+| I119 | 从一个路由签发媒体 token：`media_tokens` 处理器、用策略 `keys` 密钥环中的一个密钥批量签发、流名的前缀限制，以及通过轮换一个密钥或全部密钥来吊销 | I115 | done |
 
 ## M0 基础
 
@@ -1362,3 +1363,22 @@ fit 基于 fib 的 `webrtc` 各包提供 WebRTC 服务：TURN 服务器、以 fi
   仍在；各项上限、淘汰和慢关注者在竞态检测下成立；页面的浏览器测试以麦克风和摄像头关闭加入，打开它们，并发送一条
   消息和一个文件。
 - **涉及**：`handler/mediapages`、`schema`、`docs`、`test/docker/mediapages`。
+
+### I119 从一个路由签发媒体 token
+
+- **做**：处理器 `media_tokens`，一个供业务后端调用的路由，用来一次签发许多 `media_auth` token 并吊销它们：批量签发
+  （`POST <prefix>`，每个 token 的 subject、publish 和 play 模式、ttl）、路由的 `prefix` 以及对流名的 `prefixes`
+  限制，还有 `max_ttl`、`max_tokens`、`max_body_bytes` 和 `revoke_timeout`；`media_auth` 新增 `keys` 密钥环，每个
+  密钥是一个名称及其自己的 `secret` 或 `secret_file`，用来代替单个 `secret` 或 `secret_file`：token 用一个密钥
+  签发（批次 `key` 指定的那个，或环中的第一个），并用每个密钥校验，所以轮换一个密钥（`POST <prefix>/revoke` 带
+  `{"key": ...}`）只拒绝该密钥签发的 token，其他密钥的 token 保持有效，`{"all": true}` 则轮换所有密钥；吊销把 32
+  个随机字节原子地写入每个被轮换密钥的文件，在自己的有界线程池上完成，然后替换该密钥，之后签发的 token 在过期前有效；
+  文件保留新 secret，重启后吊销仍然有效，应用配置时也会重新读取；两个密钥共用同一 secret 会被拒绝；路由的中间件认证
+  调用方，因此处理器不是 Admin API；`media_auth` 的 `secret`、`secret_file` 和 `keys` 三者取一。
+- **完成标准**：业务后端的路由签发一批 token，策略按所请求的流接受它们、对其他流拒绝，且这批 token 由请求 `key` 指定的
+  密钥签发；坏的 subject、模式、ttl、key 或前缀之外的路径被拒绝，并且整批都不签发；吊销一个密钥后，其文件保存至少 16
+  字节的新 secret，它签发的旧 token 被拒绝，新 token 被由该文件编译出的策略接受，而其他密钥的 token 仍然通过；`all`
+  轮换每个密钥；重启后吊销仍然有效；路由的中间件、各项上限以及吊销池的 503、504 和 500 在竞态检测下成立；
+  `TestChapterExamples` 和 workbench 的 schema 描述覆盖新字段和参数。
+- **涉及**：`handler/mediatokens`（新）、`config`、`mediaauth`、`cli`、`modules/standard`、`schema`、`docs`、
+  `test/workers`。

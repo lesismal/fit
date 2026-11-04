@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -176,6 +177,9 @@ type Policy struct {
 	key [32]byte
 	// mac keys what is remembered of bcrypt passwords found right.
 	mac [32]byte
+	// secretFile is where the config's secret comes from, or empty; under
+	// regMu, like compile and SecretFile.
+	secretFile string
 
 	st atomic.Pointer[state]
 	// applied says the role has set st from a config applied, after which
@@ -191,7 +195,17 @@ type state struct {
 	users   map[string]*user
 	decoy   *user // compared with for an unknown user, so that it takes as long
 	signKey []byte
-	ttl     time.Duration
+	// keys is a keyring, in config order; a token is signed with one key and
+	// checked against each until one matches. Its first is the default.
+	keys []mediaKey
+	ttl  time.Duration
+}
+
+// mediaKey is one key of a policy's keyring.
+type mediaKey struct {
+	name    string
+	signKey []byte
+	file    string // the secret_file it comes from, or empty for inline
 }
 
 type token struct {
@@ -293,14 +307,80 @@ func (p *Policy) compile(cfg *config.MediaAuth, old *state) (*state, error) {
 			break
 		}
 	}
-	if cfg.Secret != "" {
-		m := hmac.New(sha256.New, []byte(cfg.Secret))
-		m.Write([]byte("fit media token\x00" + cfg.Name))
-		st.signKey = m.Sum(nil)
-	} else {
-		st.signKey = p.key[:]
+	switch {
+	case len(cfg.Keys) > 0:
+		if cfg.Secret != "" || cfg.SecretFile != "" {
+			return nil, errors.New("keys: set keys, or secret or secret_file, one of the two")
+		}
+		p.secretFile = ""
+		for _, k := range cfg.Keys {
+			secret, err := keySecret(k)
+			if err != nil {
+				return nil, fmt.Errorf("keys.%s: %w", k.Key, err)
+			}
+			signKey := signKeyFor(cfg.Name, secret)
+			for _, o := range st.keys {
+				if hmac.Equal(o.signKey, signKey) {
+					return nil, fmt.Errorf("keys: %q and %q share a secret", o.name, k.Key)
+				}
+			}
+			st.keys = append(st.keys, mediaKey{name: k.Key, signKey: signKey, file: k.SecretFile})
+		}
+	default:
+		secret := cfg.Secret
+		var err error
+		if cfg.Secret != "" && cfg.SecretFile != "" {
+			return nil, errors.New("secret_file: set secret or secret_file, one of the two")
+		}
+		if cfg.SecretFile != "" {
+			secret, err = secretFile(cfg.SecretFile)
+			if err != nil {
+				return nil, fmt.Errorf("secret_file: %w", err)
+			}
+		}
+		p.secretFile = cfg.SecretFile
+		if secret != "" {
+			st.signKey = signKeyFor(cfg.Name, secret)
+		} else {
+			st.signKey = p.key[:]
+		}
 	}
 	return st, nil
+}
+
+// keySecret returns a ring key's secret, inline or from its file.
+func keySecret(k config.MediaKey) (string, error) {
+	if k.Secret != "" && k.SecretFile != "" {
+		return "", errors.New("set secret or secret_file, one of the two")
+	}
+	if k.Secret != "" {
+		if len(k.Secret) < config.MinMediaSecret {
+			return "", fmt.Errorf("the secret is %d bytes: use at least %d", len(k.Secret), config.MinMediaSecret)
+		}
+		return k.Secret, nil
+	}
+	return secretFile(k.SecretFile)
+}
+
+// secretFile reads a secret from path, its line breaks at the end taken off.
+func secretFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	secret := strings.TrimRight(string(data), "\r\n")
+	if len(secret) < config.MinMediaSecret {
+		return "", fmt.Errorf("%s holds %d bytes: use at least %d", path, len(secret), config.MinMediaSecret)
+	}
+	return secret, nil
+}
+
+// signKeyFor derives the key tokens of policy name are signed and checked
+// with from its secret, as a config's secret or secret_file is one.
+func signKeyFor(name, secret string) []byte {
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte("fit media token\x00" + name))
+	return m.Sum(nil)
 }
 
 func checkPatterns(lists ...[]string) error {
@@ -316,6 +396,122 @@ func checkPatterns(lists ...[]string) error {
 
 // Name returns the policy's name.
 func (p *Policy) Name() string { return p.name }
+
+// SecretFile returns the file the policy's secret is read from, or "" when
+// the config sets secret, or neither.
+func (p *Policy) SecretFile() string {
+	regMu.Lock()
+	defer regMu.Unlock()
+	return p.secretFile
+}
+
+// Rotate replaces the key tokens are signed and checked with, so that every
+// token signed before is refused, for every handler and role sharing the
+// policy; tokens signed after are checked with the new key until they
+// expire. The caller writes the same secret to the policy's secret_file, if
+// it is to outlast a restart and a config applied again; Rotate itself
+// touches no files. It refuses a secret under config.MinMediaSecret.
+func (p *Policy) Rotate(secret string) error {
+	if len(secret) < config.MinMediaSecret {
+		return fmt.Errorf("mediaauth: the secret is %d bytes: use at least %d", len(secret), config.MinMediaSecret)
+	}
+	regMu.Lock()
+	defer regMu.Unlock()
+	st := p.state()
+	if st == nil {
+		return ErrUnavailable
+	}
+	if len(st.keys) > 0 {
+		return errors.New("mediaauth: the policy has a keyring: rotate one key with RotateKey")
+	}
+	next := *st
+	next.signKey = signKeyFor(p.name, secret)
+	p.st.Store(&next)
+	return nil
+}
+
+// RotateKey replaces the key material of one key of the policy's keyring:
+// every token that key signed is refused, while the tokens of the other keys
+// stay good, and tokens signed with the key from now on are checked with the
+// new secret until they expire. The caller writes the same secret to the
+// key's secret_file, if it is to outlast a restart and a config applied
+// again; RotateKey itself touches no files. It refuses a secret under
+// config.MinMediaSecret, and a policy without a keyring.
+func (p *Policy) RotateKey(key, secret string) error {
+	if len(secret) < config.MinMediaSecret {
+		return fmt.Errorf("mediaauth: the secret is %d bytes: use at least %d", len(secret), config.MinMediaSecret)
+	}
+	regMu.Lock()
+	defer regMu.Unlock()
+	st := p.state()
+	if st == nil {
+		return ErrUnavailable
+	}
+	if len(st.keys) == 0 {
+		return errors.New("mediaauth: the policy has no keyring")
+	}
+	signKey := signKeyFor(p.name, secret)
+	keys := slices.Clone(st.keys)
+	found := false
+	for i := range keys {
+		if keys[i].name != key {
+			continue
+		}
+		found = true
+		for _, o := range keys {
+			if o.name != key && hmac.Equal(o.signKey, signKey) {
+				return fmt.Errorf("mediaauth: key %q would share a secret with %q", key, o.name)
+			}
+		}
+		keys[i].signKey = signKey
+	}
+	if !found {
+		return fmt.Errorf("mediaauth: no key named %q", key)
+	}
+	next := *st
+	next.keys = keys
+	p.st.Store(&next)
+	return nil
+}
+
+// Keys returns the names of the policy's keyring, in config order, or nil
+// for a policy with a single secret.
+func (p *Policy) Keys() []string {
+	st := p.state()
+	if st == nil || len(st.keys) == 0 {
+		return nil
+	}
+	names := make([]string, len(st.keys))
+	for i, k := range st.keys {
+		names[i] = k.name
+	}
+	return names
+}
+
+// DefaultKey returns the key Issue signs with: the keyring's first, or ""
+// for a policy with a single secret.
+func (p *Policy) DefaultKey() string {
+	st := p.state()
+	if st == nil || len(st.keys) == 0 {
+		return ""
+	}
+	return st.keys[0].name
+}
+
+// KeyFile returns the file the named key's secret comes from, and whether
+// the policy has that key; the file is "" for an inline secret.
+func (p *Policy) KeyFile(key string) (file string, ok bool) {
+	st := p.state()
+	if st == nil {
+		return "", false
+	}
+	for _, k := range st.keys {
+		if k.name == key {
+			return k.file, true
+		}
+	}
+	return "", false
+}
 
 // state returns p's state, or nil when it is not loaded or removed.
 func (p *Policy) state() *state {
@@ -393,11 +589,19 @@ func (p *Policy) token(st *state, tok string) (string, Grant, error) {
 		return "", Grant{}, ErrBadCredentials
 	}
 	if strings.HasPrefix(tok, TokenPrefix) {
-		cl, err := verify(st.signKey, tok)
-		if err != nil {
-			return "", Grant{}, err
+		if len(st.keys) == 0 {
+			cl, err := verify(st.signKey, tok)
+			if err != nil {
+				return "", Grant{}, err
+			}
+			return cl.Subject, cl.Grant, nil
 		}
-		return cl.Subject, cl.Grant, nil
+		for _, k := range st.keys {
+			if cl, err := verify(k.signKey, tok); err == nil {
+				return cl.Subject, cl.Grant, nil
+			}
+		}
+		return "", Grant{}, ErrBadCredentials
 	}
 	// Looked up by its SHA-256: how long the lookup takes says nothing of
 	// the token.
@@ -577,12 +781,39 @@ type claims struct {
 // Issue returns a token signed with the policy's key: good for subject to
 // take g's actions on g's streams until expiry, now and ttl, the policy's
 // token_ttl when ttl is not positive. The subject is at most 128 bytes,
-// with no control characters, and the patterns those of the config.
+// with no control characters, and the patterns those of the config. With a
+// keyring it signs with the first key; IssueKey names another.
 func (p *Policy) Issue(subject string, g Grant, ttl time.Duration) (tok string, expiry time.Time, err error) {
 	st := p.state()
 	if st == nil {
 		return "", time.Time{}, ErrUnavailable
 	}
+	key := st.signKey
+	if len(st.keys) > 0 {
+		key = st.keys[0].signKey
+	}
+	return issue(st, key, subject, g, ttl)
+}
+
+// IssueKey is Issue signed with the named key of the policy's keyring.
+func (p *Policy) IssueKey(key, subject string, g Grant, ttl time.Duration) (tok string, expiry time.Time, err error) {
+	st := p.state()
+	if st == nil {
+		return "", time.Time{}, ErrUnavailable
+	}
+	if len(st.keys) == 0 {
+		return "", time.Time{}, errors.New("mediaauth: the policy has no keyring")
+	}
+	for _, k := range st.keys {
+		if k.name == key {
+			return issue(st, k.signKey, subject, g, ttl)
+		}
+	}
+	return "", time.Time{}, fmt.Errorf("mediaauth: no key named %q", key)
+}
+
+// issue signs a token with key.
+func issue(st *state, key []byte, subject string, g Grant, ttl time.Duration) (tok string, expiry time.Time, err error) {
 	if subject == "" || len(subject) > 128 || strings.ContainsFunc(subject, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return "", time.Time{}, fmt.Errorf("mediaauth: %q is not a subject: 1 to 128 bytes with no control characters", subject)
 	}
@@ -602,7 +833,7 @@ func (p *Policy) Issue(subject string, g Grant, ttl time.Duration) (tok string, 
 	if len(TokenPrefix)+len(payload)+44 > MaxTokenBytes {
 		return "", time.Time{}, errors.New("mediaauth: the grant is too long for a token")
 	}
-	return TokenPrefix + payload + "." + sign(st.signKey, payload), expiry, nil
+	return TokenPrefix + payload + "." + sign(key, payload), expiry, nil
 }
 
 func sign(key []byte, payload string) string {

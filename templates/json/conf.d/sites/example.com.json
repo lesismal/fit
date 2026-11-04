@@ -975,6 +975,54 @@
       // },
     // },
     // {
+      // // A route whose handler is media_tokens, with every one of its params.
+      // "name": "media_tokens-example",
+      // "handler": {
+        // // Issues time-limited media_auth tokens in batches, for a route a business backend calls, and
+        // // revokes the tokens of one key of the policy's keyring, or of all of them, by rotating their
+        // // secrets.
+        // "module": "media_tokens",
+        // "params": {
+          // // The path the route serves under: the route must match it and what is below it, as
+          // // /media-tokens and /media-tokens/*; a request outside it gets 404. /media-tokens when left
+          // // out.
+          // // string; default "/media-tokens".
+          // "prefix": "/media-tokens",
+
+          // // The media_auth policy that signs the tokens, as whip's auth names one: it must set
+          // // secret_file, or a keyring whose keys each set secret_file, so that a revoke can rotate a
+          // // secret file and outlive a restart.
+          // // string.
+          // "auth": "",
+
+          // // The stream-name prefixes this route may sign for: every publish and play pattern of a
+          // // request must start with one of them, so that a token cannot be signed for a stream outside
+          // // them, as mtg- for mtg-42-*. Any valid pattern when left out.
+          // // list of string.
+          // "prefixes": [],
+
+          // // The longest a request may ask a token to be good for; a longer ttl is answered 400. 24h when
+          // // left out.
+          // // duration, as "1.5s" or "2m"; default "24h".
+          // "max_ttl": "24h",
+
+          // // The most tokens one request may ask for; more is answered 400. 100 when left out.
+          // // integer, 1 to 1000; default 100.
+          // "max_tokens": 100,
+
+          // // The largest request body the route takes; a larger one is answered 413. 64 KiB when left
+          // // out.
+          // // integer, 256 to 1048576; default 65536.
+          // "max_body_bytes": 65536,
+
+          // // How long a revoke may wait for the secret file's write before it is answered 504; the write,
+          // // one at a time on a pool of its own, never blocks a worker. 10s when left out.
+          // // duration, as "1.5s" or "2m"; default "10s".
+          // "revoke_timeout": "10s",
+        // },
+      // },
+    // },
+    // {
       // // A route whose handler is proxy, with every one of its params.
       // "name": "proxy-example",
       // "handler": {

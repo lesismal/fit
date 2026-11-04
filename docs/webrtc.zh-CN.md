@@ -294,6 +294,135 @@ route {
 路由的中间件仍然先执行，所以策略可以放在 `jwt`、`forward_auth` 或 IP 白名单之后。所有字段见
 [配置参考](reference/config.md#media-auth)，设计见 [决定 030](decisions/030-media-auth-and-pages.zh-CN.md)。
 
+#### 从一个路由签发 token
+
+`fit media-token` 为运维人员打印一个 token；业务后端要为许多用户、分组和并发会议签发大量 token 时，改为经它自己的
+路由调用处理器 `media_tokens`。策略的 `keys` 密钥环给每个分片——一个会议、一个分组、一个区域——自己的密钥：一批
+token 用一个密钥签发，校验时依次尝试环中的每个密钥，而吊销只轮换一个密钥的 secret 文件，所以只有该密钥签发的 token
+被拒绝，其他分片照常运行：一次吊销是一个分片的故障，而不是整个策略的。路由的中间件认证该后端——这里是 `jwt`——而
+模块自身不检查任何调用方凭据：它不是 Admin API，所以后端从不持有 Admin API 的全权 token。
+
+```fit
+media_auth live {
+	keys {
+		key k1
+		secret_file /etc/fit/media-secrets/k1
+	}
+	keys {
+		key k2
+		secret_file /etc/fit/media-secrets/k2
+	}
+	keys {
+		key k3
+		secret_file /etc/fit/media-secrets/k3
+	}
+	public play
+}
+
+route media-tokens {
+	match {
+		path /media-tokens /media-tokens/*
+	}
+	middleware jwt {
+		jwks_url https://auth.example.com/.well-known/jwks.json
+		audience media-tokens
+	}
+	handler media_tokens {
+		auth live
+		prefixes mtg-
+		max_ttl 24h
+		max_tokens 500
+	}
+}
+```
+
+密钥环中的每个密钥是一个分片，按会议或分组的需要取 k1 到 k8，各有一个 `secret_file`；密钥环及其密钥都来自配置，所以
+新增一个分片是在配置里加一个密钥再重载，而不是调用 API。一批 token 用 `"key": "k2"` 指明签发的密钥，整批都用它；
+不指明时用环中的第一个密钥，这里是 k1。token 不携带密钥 id：它对环中的每个密钥都校验，所以轮换之前签发的其他密钥的 token
+仍然可用，只有吊销它自己的密钥才会拒绝它。每个 `secret_file` 在 fit 启动时必须至少包含 16 字节（末尾换行除外），进程还
+必须能写入它所在的目录：吊销通过一次原子改名替换该文件，写入失败则返回 500 且不轮换。
+
+业务后端先在自己的身份提供方登录，然后用得到的 JWT 调用该路由。路由返回的 token 与 WHIP、WHEP、页面、流媒体和
+`webrtc_proxy` 端点接受的媒体凭据相同，以 `Authorization: Bearer` 发送。
+
+**为一个分片签发一批 token**，curl：
+
+```sh
+curl -X POST https://gateway.example.com/media-tokens \
+	-H "Authorization: Bearer $BACKEND_JWT" \
+	-H "Content-Type: application/json" \
+	-d '{
+		"key": "k2",
+		"tokens": [
+			{"subject": "alice@mtg-42", "publish": ["mtg-42-*"], "play": ["mtg-42-*"], "ttl": "2h"},
+			{"subject": "bob@mtg-43", "publish": ["mtg-43-*"], "play": ["mtg-43-*"]}
+		]
+	}'
+```
+
+以及 Python：
+
+```python
+import json, urllib.request
+
+backend_jwt = "eyJ..."  # 来自 jwt 中间件所信任的身份提供方
+req = urllib.request.Request(
+    "https://gateway.example.com/media-tokens",
+    data=json.dumps({"key": "k2", "tokens": [
+        {"subject": "alice@mtg-42", "publish": ["mtg-42-*"], "play": ["mtg-42-*"], "ttl": "2h"},
+        {"subject": "bob@mtg-43", "publish": ["mtg-43-*"], "play": ["mtg-43-*"]},
+    ]}).encode(),
+    headers={"Authorization": "Bearer " + backend_jwt, "Content-Type": "application/json"},
+    method="POST")
+with urllib.request.urlopen(req) as resp:
+    for t in json.load(resp)["tokens"]:
+        print(t["subject"], t["key"], t["token"], t["expires"])
+```
+
+应答为 `{"tokens": [{"token", "subject", "expires", "key"}]}`，顺序与请求一致，单密钥策略下 `key` 不出现；
+一批 token 中只要有一个不合法，就一个都不签发。
+
+**轮换一个分片的密钥**，curl：
+
+```sh
+curl -X POST https://gateway.example.com/media-tokens/revoke \
+	-H "Authorization: Bearer $BACKEND_JWT" \
+	-H "Content-Type: application/json" \
+	-d '{"key": "k2"}'
+```
+
+以及 Python：
+
+```python
+import json, urllib.request
+
+backend_jwt = "eyJ..."  # 来自 jwt 中间件所信任的身份提供方
+req = urllib.request.Request(
+    "https://gateway.example.com/media-tokens/revoke",
+    data=json.dumps({"key": "k2"}).encode(),
+    headers={"Authorization": "Bearer " + backend_jwt, "Content-Type": "application/json"},
+    method="POST")
+with urllib.request.urlopen(req) as resp:
+    print(json.load(resp))  # {"revoked": true, "since": 1793780000, "keys": ["k2"]}
+```
+
+**轮换所有密钥**（整个策略都需要吊销时），curl 用 `-d '{"all": true}'`，Python 用
+`json.dumps({"all": True})` 作为请求的 data；应答会列出被轮换的每个密钥。
+
+- **吊销一个密钥会同时轮换它的 secret 文件和运行中的密钥。** 处理器把 32 个随机字节原子地写入该密钥的
+  `secret_file`，然后替换该密钥：它签发的每个 token 立刻被拒绝，凡共享该策略的处理器都如此——WHIP、WHEP、媒体
+  页面、流媒体角色和 `media_tokens`——无论其过期时间如何；而其他密钥的 token 保持有效，所以一个会议或一个分片的
+  吊销不会中断其余部分。用 `all` 时每个密钥都被轮换；只有一个 `secret_file` 的策略只有一个密钥：空请求体或
+  `{"all": true}` 会拒绝它的每个 token，而请求体中的 `key` 返回 400。
+- **在它之后签发的 token 在过期前一直有效。** 它们用新密钥签发，与其他 token 一样校验；策略的 `token_ttl` 和处理器的
+  `max_ttl` 仍然限制它们。
+- **文件保留新 secret，因此重启后吊销仍然有效**，重启会重新读取它们；应用配置也会重新读取，所以只轮换某个文件再重载
+  也能吊销那个分片。
+- **路由的中间件认证业务后端**——上面的 `jwt`，或 `basic_auth`、`forward_auth` 或 `rate_limit`；处理器不检查任何调用方
+  凭据，也不涉及 Admin API。路由必须匹配处理器的 `prefix` 及其下路径：该前缀之外的请求返回 404。
+
+其参数和应答见 [`media_tokens` 一章](reference/config.md#http-handlers-media_tokens)。
+
 ### 媒体
 
 每个推流者的 offer 按每种媒体只应答一个编解码器：它自己列出的、`codecs` 中也有的第一个（未设置时为 opus、VP8、VP9、

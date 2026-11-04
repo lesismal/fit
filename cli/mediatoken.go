@@ -36,6 +36,7 @@ func runMediaToken(args []string, stdout, stderr io.Writer) int {
 	var publish, play patternList
 	fs.Var(&cfgPaths, "c", fmt.Sprintf(configFlagUsage, "read the policy from"))
 	policy := fs.String("policy", "", "the media_auth policy whose secret signs the token (required)")
+	key := fs.String("key", "", "the key of the policy's keyring to sign with; the first when left out, and an error for a policy with a single secret")
 	fs.Var(&publish, "publish", "a stream pattern the token may publish, as live/* or room1-*; give it again, or separate them with commas, for more")
 	fs.Var(&play, "play", "a stream pattern the token may play, as -publish has them")
 	ttl := fs.Duration("ttl", 0, "how long the token is good for; the policy's token_ttl when left out")
@@ -74,8 +75,8 @@ func runMediaToken(args []string, stdout, stderr io.Writer) int {
 	case cfg == nil:
 		fmt.Fprintf(stderr, "fit media-token: %s has no media_auth policy named %q\n", name, *policy)
 		return 1
-	case cfg.Secret == "":
-		fmt.Fprintf(stderr, "fit media-token: media_auth %q has no secret: tokens it would sign could not be checked by a running fit, which signs with a key of its own without one\n", *policy)
+	case cfg.Secret == "" && cfg.SecretFile == "" && len(cfg.Keys) == 0:
+		fmt.Fprintf(stderr, "fit media-token: media_auth %q has neither secret, secret_file nor keys: tokens it would sign could not be checked by a running fit, which signs with a key of its own without one\n", *policy)
 		return 1
 	}
 	p, err := mediaauth.New(cfg)
@@ -83,7 +84,18 @@ func runMediaToken(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "fit media-token: media_auth %q: %v\n", *policy, err)
 		return 1
 	}
-	tok, expiry, err := p.Issue(*subject, mediaauth.Grant{Publish: publish, Play: play}, *ttl)
+	var tok string
+	var expiry time.Time
+	grant := mediaauth.Grant{Publish: publish, Play: play}
+	if *key != "" {
+		if len(p.Keys()) == 0 {
+			fmt.Fprintf(stderr, "fit media-token: media_auth %q has no keyring, so no key %q\n", *policy, *key)
+			return 1
+		}
+		tok, expiry, err = p.IssueKey(*key, *subject, grant, *ttl)
+	} else {
+		tok, expiry, err = p.Issue(*subject, grant, *ttl)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fit media-token: %v\n", err)
 		return 1

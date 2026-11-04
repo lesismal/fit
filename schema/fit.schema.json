@@ -1602,6 +1602,13 @@
     "config.MediaAuth": {
       "additionalProperties": false,
       "properties": {
+        "keys": {
+          "description": "A keyring of signing keys, each a name and its secret or secret_file, in place of secret or secret_file: a token is signed with one key and checked against every key, so rotating one key, as the handler media_tokens does, refuses only the tokens that key signed and the others stay good. One of the two: keys, or secret/secret_file. None when left out.",
+          "items": {
+            "$ref": "#/$defs/config.MediaKey"
+          },
+          "type": "array"
+        },
         "name": {
           "description": "The policy's name, which the auth param of whip, whep and webrtc_proxy, and the media roles, refer to it by. Letters, digits, '_', '.' and '-'.",
           "type": "string"
@@ -1618,7 +1625,11 @@
           "type": "array"
         },
         "secret": {
-          "description": "The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it.",
+          "description": "The key, at least 16 bytes, that tokens fit issues are signed with (HMAC-SHA256): fit media-token's and the media pages' logins. Tokens are good for this policy alone, until their expiry. When left out, a random key of the process's signs the pages' logins, which a restart forgets; fit media-token needs it. Or secret_file, one of the two, or keys.",
+          "type": "string"
+        },
+        "secret_file": {
+          "description": "A file holding the secret tokens are signed with, read each time the config is applied: the handler media_tokens rotates it, and every token signed before is refused. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two, or keys. None when left out: a random key of the process's signs, which a restart forgets.",
           "type": "string"
         },
         "token_ttl": {
@@ -1644,6 +1655,27 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "config.MediaKey": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "The key's name: 1 to 64 letters, digits, '_', '.', '~' and '-', which a media_tokens request names to sign with it, and a revoke to rotate it.",
+          "type": "string"
+        },
+        "secret": {
+          "description": "The key's secret, at least 16 bytes. Or secret_file, one of the two.",
+          "type": "string"
+        },
+        "secret_file": {
+          "description": "A file holding the key's secret, read each time the config is applied; the handler media_tokens rotates this file to refuse just the tokens this key signed. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
       ],
       "type": "object"
     },
@@ -3516,6 +3548,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "media_tokens"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.media_tokens"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "proxy"
               }
             }
@@ -3650,6 +3698,7 @@
             "hls",
             "httpflv",
             "media_pages",
+            "media_tokens",
             "proxy",
             "respond",
             "static",
@@ -4007,6 +4056,54 @@
         "whip": {
           "default": "/whip/{stream}",
           "description": "The URL streams are published to with WHIP, {stream} standing for the stream's name: a whip handler's, or stream_whip's for the streaming role, on this server or another. /whip/{stream} when left out.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "http.handlers.media_tokens": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "The media_auth policy that signs the tokens, as whip's auth names one: it must set secret_file, or a keyring whose keys each set secret_file, so that a revoke can rotate a secret file and outlive a restart.",
+          "type": "string"
+        },
+        "max_body_bytes": {
+          "default": 65536,
+          "description": "The largest request body the route takes; a larger one is answered 413. 64 KiB when left out.",
+          "maximum": 1048576,
+          "minimum": 256,
+          "type": "integer"
+        },
+        "max_tokens": {
+          "default": 100,
+          "description": "The most tokens one request may ask for; more is answered 400. 100 when left out.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_ttl": {
+          "default": "24h",
+          "description": "The longest a request may ask a token to be good for; a longer ttl is answered 400. 24h when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "/media-tokens",
+          "description": "The path the route serves under: the route must match it and what is below it, as /media-tokens and /media-tokens/*; a request outside it gets 404. /media-tokens when left out.",
+          "type": "string"
+        },
+        "prefixes": {
+          "description": "The stream-name prefixes this route may sign for: every publish and play pattern of a request must start with one of them, so that a token cannot be signed for a stream outside them, as mtg- for mtg-42-*. Any valid pattern when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revoke_timeout": {
+          "default": "10s",
+          "description": "How long a revoke may wait for the secret file's write before it is answered 504; the write, one at a time on a pool of its own, never blocks a worker. 10s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         }
       },

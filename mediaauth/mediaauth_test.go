@@ -7,7 +7,10 @@ import (
 	"errors"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -614,3 +617,183 @@ func (p *probe) Provision(ctx *module.Context) error {
 }
 
 func (p *probe) ServeHTTP(*fibhttp.Context) {}
+
+// TestSecretFileAndRotate checks a policy whose secret comes from a file,
+// and Rotate, which refuses every token signed before: the file keeps the
+// new secret, so a policy made from it, as a restart does, checks the new
+// tokens and refuses the old ones.
+func TestSecretFileAndRotate(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "secret")
+	const first = "a-secret-file-of-16+"
+	if err := os.WriteFile(file, []byte(first+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.MediaAuth{Name: "live", SecretFile: file}
+	p, err := New(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.SecretFile(); got != file {
+		t.Fatalf("secret file %q", got)
+	}
+	old, _, err := p.Issue("old", Grant{Publish: []string{"live/*"}}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Allow(Publish, "live/a", Credentials{Token: old}); err != nil {
+		t.Fatalf("the old token before a rotate: %v", err)
+	}
+	// A missing file, a short one, and both secret and secret_file are
+	// refused.
+	short := filepath.Join(dir, "short")
+	if err := os.WriteFile(short, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []struct {
+		name string
+		cfg  config.MediaAuth
+	}{
+		{"a missing secret file", config.MediaAuth{Name: "x", SecretFile: filepath.Join(dir, "nope")}},
+		{"a short secret file", config.MediaAuth{Name: "x", SecretFile: short}},
+		{"secret and secret_file", config.MediaAuth{Name: "x", Secret: "0123456789abcdef", SecretFile: file}},
+	} {
+		if _, err := New(&bad.cfg); err == nil {
+			t.Errorf("%s", bad.name)
+		}
+	}
+	if err := p.Rotate("short"); err == nil {
+		t.Fatal("a short secret rotated")
+	}
+	// Rotate: the file holds the new secret, and the key swaps.
+	const second = "a-second-secret-of-16+"
+	if err := os.WriteFile(file, []byte(second), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Rotate(second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Allow(Publish, "live/a", Credentials{Token: old}); err == nil {
+		t.Fatal("the old token after a rotate")
+	}
+	fresh, _, err := p.Issue("new", Grant{Play: []string{"live/*"}}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Allow(Play, "live/a", Credentials{Token: fresh}); err != nil {
+		t.Fatalf("the new token: %v", err)
+	}
+	again, err := New(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.Allow(Play, "live/a", Credentials{Token: fresh}); err != nil {
+		t.Fatalf("the new token after a restart: %v", err)
+	}
+	if _, err := again.Allow(Publish, "live/a", Credentials{Token: old}); err == nil {
+		t.Fatal("the old token after a restart")
+	}
+}
+
+// TestKeyring: a policy of several keys signs with the first unless a key is
+// named, checks a token against every key, and RotateKey refuses only the
+// named key's tokens; a policy rebuilt from the files agrees.
+func TestKeyring(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{}
+	for _, key := range []string{"k1", "k2"} {
+		path := filepath.Join(dir, key)
+		if err := os.WriteFile(path, []byte("secret-of-"+key+"-16+"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files[key] = path
+	}
+	cfg := config.MediaAuth{Name: "live", Keys: []config.MediaKey{
+		{Key: "k1", SecretFile: files["k1"]},
+		{Key: "k2", SecretFile: files["k2"]},
+	}}
+	p, err := New(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Keys(); !slices.Equal(got, []string{"k1", "k2"}) {
+		t.Fatalf("keys %v", got)
+	}
+	if got := p.DefaultKey(); got != "k1" {
+		t.Fatalf("default key %q", got)
+	}
+	if file, ok := p.KeyFile("k2"); !ok || file != files["k2"] {
+		t.Fatalf("k2's file %q, %v", file, ok)
+	}
+	if _, ok := p.KeyFile("nope"); ok {
+		t.Fatal("a file for an unknown key")
+	}
+	if p.SecretFile() != "" {
+		t.Fatalf("hidden secret file %q", p.SecretFile())
+	}
+	g := Grant{Publish: []string{"mtg/*"}}
+	def, _, err := p.Issue("a", g, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k2tok, _, err := p.IssueKey("k2", "b", g, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range []string{def, k2tok} {
+		if _, err := p.Allow(Publish, "mtg/1", Credentials{Token: tok}); err != nil {
+			t.Fatalf("a keyring token: %v", err)
+		}
+	}
+	if _, _, err := p.IssueKey("nope", "c", g, time.Hour); err == nil {
+		t.Fatal("IssueKey of an unknown key")
+	}
+	if err := p.Rotate("another-secret-16+"); err == nil {
+		t.Fatal("Rotate on a keyring")
+	}
+	if err := p.RotateKey("nope", "another-secret-16+"); err == nil {
+		t.Fatal("RotateKey of an unknown key")
+	}
+	if err := p.RotateKey("k1", "rotated-secret-of-16+"); err != nil {
+		t.Fatal(err)
+	}
+	// k1's tokens are refused, k2's stay good, and a new k1 token works.
+	if _, err := p.Allow(Publish, "mtg/1", Credentials{Token: def}); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("the old k1 token: %v", err)
+	}
+	if _, err := p.Allow(Publish, "mtg/1", Credentials{Token: k2tok}); err != nil {
+		t.Fatalf("k2's token after k1's rotation: %v", err)
+	}
+	newer, _, err := p.IssueKey("k1", "d", g, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Allow(Publish, "mtg/1", Credentials{Token: newer}); err != nil {
+		t.Fatalf("a new k1 token: %v", err)
+	}
+	// The file holds the rotated secret: a policy rebuilt from it, as a
+	// restart reads it, agrees.
+	if err := os.WriteFile(files["k1"], []byte("rotated-secret-of-16+"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again, err := New(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range []string{newer, k2tok} {
+		if _, err := again.Allow(Publish, "mtg/1", Credentials{Token: tok}); err != nil {
+			t.Fatalf("after a restart: %v", err)
+		}
+	}
+	if _, err := again.Allow(Publish, "mtg/1", Credentials{Token: def}); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("the old k1 token after a restart: %v", err)
+	}
+	// Two keys with one secret would make a token verify under both, and a
+	// rotation of one leave the other good: refused.
+	if _, err := New(&config.MediaAuth{Name: "d", Keys: []config.MediaKey{
+		{Key: "a", Secret: "a-shared-secret-16+"},
+		{Key: "b", Secret: "a-shared-secret-16+"},
+	}}); err == nil || !strings.Contains(err.Error(), "share a secret") {
+		t.Fatalf("two keys with one secret: %v", err)
+	}
+}

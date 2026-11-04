@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I119.
+Status: `todo`, `doing` or `done`. The next free iteration number is I120.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -266,6 +266,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I119.
 | I116 | The streaming role: fib's `media/hub` with RTMP, RTSP and SRT listeners, and `httpflv`, `hls`, `stream_whip` and `stream_whep` handlers, each with `auth` | I115 | done |
 | I117 | The media pages: `media_pages`, login, publish, play and a room call with the microphone and camera switched on and off, and a bounded room API | I115 | done |
 | I118 | The media pages' room chat: text messages and small files over the room API, a page switch, and the microphone and camera a member joins with | I117 | done |
+| I119 | Media tokens from a route: the handler `media_tokens`, batch issuance signed with one key of the policy's `keys` ring, prefix bounds on the stream names, and revocation by rotating one key or all of them | I115 | done |
 
 ## M0, foundations
 
@@ -1597,3 +1598,29 @@ set of named policies comes first; the streaming role and the pages build on it,
   API stay; the bounds, eviction and slow watchers hold under the race detector; the pages' browser
   test joins with the microphone and camera off, switches them on and sends a message and a file.
 - **Touches**: `handler/mediapages`, `schema`, `docs`, `test/docker/mediapages`.
+
+### I119 Media tokens from a route
+
+- **Do**: a handler `media_tokens`, a route a business backend calls to sign many `media_auth`
+  tokens at once and revoke them: batch issuance (`POST <prefix>`, per-token subject, publish and
+  play patterns, ttl), the route's `prefix` and the `prefixes` bounds on the stream names, plus
+  `max_ttl`, `max_tokens`, `max_body_bytes` and `revoke_timeout`; a `keys` keyring in `media_auth`,
+  each key a name with its own `secret` or `secret_file`, in place of the single `secret` or
+  `secret_file`: a token is signed with one key, the one a batch's `key` names or the ring's first,
+  and checked against every key, so rotating one key (`POST <prefix>/revoke` with `{"key": ...}`)
+  refuses only the tokens that key signed while the others stay good, and `{"all": true}` rotates
+  every key; the revoke writes 32 random bytes to each rotated key's file, atomically, on a bounded
+  pool of its own, then replaces the key, the tokens signed after it living until their expiry; the
+  files keep the new secrets across restarts, and a config apply re-reads them; two keys sharing a
+  secret are refused; the route's middleware authenticates the caller, so the handler is not the
+  Admin API; `media_auth`'s `secret`, `secret_file` and `keys` are one of them.
+- **Done when**: a backend's route issues a batch whose tokens a policy accepts for the streams
+  asked and refuses for others, the batch signed with the `key` it names; a bad subject, pattern,
+  ttl, key or a path outside the prefix is refused and the batch issues none; a revoke of one key
+  leaves its file holding a new secret of at least 16 bytes, its old tokens refused and a new one
+  accepted by a policy compiled from the file, while the other keys' tokens still verify; `all`
+  rotates every key; a restart keeps the revocation; the route's middleware, the bounds and the
+  revoke pool's 503, 504 and 500 hold under the race detector; `TestChapterExamples` and the
+  workbench's schema descriptions cover the new fields and params.
+- **Touches**: `handler/mediatokens` (new), `config`, `mediaauth`, `cli`, `modules/standard`,
+  `schema`, `docs`, `test/workers`.

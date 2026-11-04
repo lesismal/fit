@@ -169,6 +169,10 @@ func cases(e *env) []tc {
 		// login and an event stream, are handler/mediapages' TestLogin and
 		// TestWatcherCutAndSlow.
 		{module: "media_pages", handler: `{"module": "media_pages", "params": {"prefix": "/api"}}`, status: 200, inline: true},
+		// A path outside the batch endpoint's prefix is 404, answered
+		// inline; a revoke's write on its pool is handler/mediatokens'
+		// TestRevoke, TestRevokePoolIsBusy and TestRevokeTimeout.
+		{module: "media_tokens", handler: `{"module": "media_tokens", "params": {"auth": "live"}}`, status: 404, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }
@@ -215,6 +219,7 @@ func handlerOf(t testing.TB, e *env, c tc) module.Handler {
 	}
 	cfg, err := config.Load([]byte(`{"listeners": [{"name": "web", "address": ":0"}],
   "upstreams": [{"name": "auth", "addresses": ["` + e.auth + `"]}, {"name": "app", "addresses": ["` + e.app + `"]}],
+  "media_auth": [{"name": "live", "secret_file": "` + e.secret + `"}],
   "routes": [{"middleware": ` + mws + `, "handler": ` + c.handler + `}]}`))
 	if err != nil {
 		t.Fatal(err)

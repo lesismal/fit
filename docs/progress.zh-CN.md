@@ -10,11 +10,11 @@
 | | |
 | --- | --- |
 | 最后更新 | 2026-11-04 |
-| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色（`streaming`：RTMP、RTSP、SRT、`httpflv`、`hls`、`stream_whip`、`stream_whep`）与 I117 媒体页面（`media_pages`、房间 API、麦克风和摄像头开关）已完成；I118 房间通话中的聊天（文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头）已完成（决定 030） |
+| 里程碑 | M0 基础：已完成（I01–I08）。M1 代理核心：已完成（I09–I23）；其审查修复 R01–R07f 已全部完成。M2 动态配置与 TLS：已完成（I24–I35，含 I30b 和 I30c）。M3 网关功能：已完成（I36–I55，含 I53b）。M4 平台集成：已完成（I56–I66）。M5 缓存与扩展：已完成（I67–I75）。1.0：迭代已完成（I76–I78）；此后的 I79 增加了 Caddyfile 转换器和带注释的 JSON，I80 增加了 fit 自己的 .conf 格式和多文件配置，I81 增加了 Proxy-Wasm 的响应回调，I82 增加了按 logger 和级别划分的 fit 自身日志，I83 让 fit 的日志采用 fib 的格式、logger 可单独设置，并为访问日志增加了格式。P2P 与 NAT 穿透：I84（STUN 消息与 STUN 服务器）、I85（fib 中的 A49）和 I87（TURN 服务器）已完成；I86 和 I88–I93 待做，自决定 029 起基于 fib 的 WebRTC 各包。VPN（fit 节点组成的网络）：I94（IP 包与 overlay 路由表）已完成；I95–I103 待做。控制台：I104（加密保存的配置与控制台）已完成。Agent 与 tunnel：I105（fit 配置中的角色）、I106（tunnel）和 I107（agent）已完成；I112（agent 的模型接口：OpenAI 及兼容接口、Anthropic、Gemini、Azure OpenAI、Ollama、Cohere）已完成；I113（LLM 角色的节点列表、连接与流量）已完成；I114（所有页面合为一个 workbench）已完成。WebRTC：I108（决定 029 与 fib `80c7f76`）、I109（以 fit 为媒体服务器的 WHIP 和 WHEP）、I110（经一个 UDP 端口代理媒体服务器）和 I111（接入 fib 的 A55–A59：经 TCP 和 TLS 的 TURN、每个 allocation 的上限、带端口的对端检查、事件、原地修改与排空；代理的源地址和端口）已完成。媒体：I115，媒体认证策略（`media_auth`、`mediaauth` 包、`whip`、`whep` 和 `webrtc_proxy` 的 `auth`、`fit media-token`）已完成；I116 流媒体角色（`streaming`：RTMP、RTSP、SRT、`httpflv`、`hls`、`stream_whip`、`stream_whep`）与 I117 媒体页面（`media_pages`、房间 API、麦克风和摄像头开关）已完成；I118 房间通话中的聊天（文字消息和小文件、页面开关，以及成员加入时的麦克风和摄像头）已完成（决定 030）；I119 从一个路由签发媒体 token（`media_tokens`：供业务后端用策略 `keys` 密钥环中的一个密钥批量签发、对前缀的限制、轮换一个密钥或全部密钥来吊销）已完成 |
 | fib | fib `main` 的 `9824c68`（`v1.6.1-0.20261031223653-9824c6852e7d`）：`63b38d4` 让 Windows 上从本地端口拨号时跳过在另一地址上被占用的端口（A59，fit 的 WebRTC 代理中继用它拨号），`749189e` 让 A59 的测试避开处于 TIME_WAIT 的端口，`9824c68` 让 HTTP 客户端自己关闭的连接在它所失败的请求得知原因之前就不再计入 MaxConnsPerHost；此前为 fib `main` 的 `84a67f7`（`v1.6.1-0.20261031213322-84a67f76ecfc`），带 A56（`74100b2`，从不让 worker 等待的 TURN 服务器）、A57（`bf669ce`，上限、带端口的对端检查、事件和统计）、A58（`496301d`，原地修改限制和凭据、排空）、A55（`97201b6`，经 TCP 和 TLS 的 TURN）和 A59（`3655193`，从指定的本地地址和端口范围拨号），用于 I111；此前为 fib `main` 的 `80c7f76`（`v1.6.1-0.20261031191422-80c7f7662ab4`），第一个带 WebRTC 的提交（`webrtc` 及其各包，A49 的 `Engine.OpenUDPPeer`），用于 I108；此前为 fib `main` 的 `47948dd6`（`v1.6.1-0.20261031164450-47948dd66351`）：`47948dd6` 让 QPACK 解码器按字符串在字段段中的位置记住它，浏览器每次请求都发送的字面量因此只解码一次（W2 经 h3：site +4.0%，edge +2.8%）；此前为 fib `main` 的 `c20ab7a1`（`v1.6.1-0.20261031151458-c20ab7a1705e`）：`c20ab7a1` 让 HTTP/3 请求流在其 OnWritable 回调运行完之前不被回收，修复了 fit 的 CI 在 `TestStuckClientsPastMaxConns/h3` 中遇到的数据竞争，`e66f4cf6` 修复一个偶发失败的 arpc 测试；此前为 fib `main` 的 `d7e117c1`（`v1.6.1-0.20261031142854-d7e117c1f901`）：`d7e117c1` 让对端每次都不加索引重复发送的长头部字面量只解码一次，nghttp2 客户端发送 bearer token 正是如此（W1 h2 +6.7%，每请求 28.60 降到 26.86 us），基于修复和补全测试的 `2ea8ddb7` 与 `da0ac655`；此前为 fib `main` 的 `a6131b0c`（`v1.6.1-0.20261031112846-a6131b0c0af3`），其还回缓冲的测试改为在处理函数取缓冲时查找池化 body，基于 `d3707ca7`：HTTP/2 的 stream 把来自缓冲池的 body 分帧后即还回池里，此前交给垃圾回收，缓冲池的那一档因此被取空（A48；W1 h2 +1.3%，分配从每秒 850 降到 677 MB）；此前为 fib `main` 的 `6bd106d9`（`v1.6.1-0.20261031020358-6bd106d9d44b`），为 Windows CI 放宽了两个计时测试的余量，基于 `46827ea7`：不超过 4 KiB 的整份响应 body 取自缓冲池，经 `ClientResponse.TakeBody` 和 `Context.WriteResponseOwned` 还回池里，`NewBufferedBody` 请求体不再拷贝（A48；W1 HTTP/1.1 +3.0%，即 `861689c9` 让堆变小后多出的回收所耗的 3%）；此前为 fib `main` 的 `7dcb41da`（`v1.6.1-0.20261030055545-7dcb41da8e7c`）：`4f870993` 在推送的 stream 归连接之前就绑定它的 Context，修复了 fib 的 CI 遇到的数据竞争，`7dcb41da` 修复一个 early data 测试在 Windows 上的预热；`a4ae3a0c`：在 Go 里边发送边加密的文件，除最后一块外都告诉内核后面还有数据，让 TCP 填满段（不用内核 TLS 时 1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +6.4%，W2 site HTTPS/1.1 +1.7%）；此前为 fib `main` 的 `881ff97a`（`v1.6.1-0.20261029202329-881ff97a25f2`）：`6c61693d` 让流式响应体放在 64 KiB 的池化块里（W4 proxy-download h1 +11%，约 55 降到 32 MiB；h2 +8%，约 137 降到 100 MiB），`8895a6aa` 让任务池的队列随积压增长，而不是按上限分配（W6 h2 50 降到 32 MiB），`24beda14` 和 `881ff97a` 让内核 TLS 加密的连接用 MSG_MORE 按整记录写，并且只为 512 KiB 及以上的文件切换到内核 TLS（1 MiB 文件经 SendFile 的 HTTPS/1.1 下载 +29%，fit 因此去掉 NoKernelTLS）；此前为 fib `main` 的 `c794cf89`（`v1.6.1-0.20261029134914-c794cf8960fe`）：`d5b8d477` 让整份发送的 HTTP/2 响应按 socket 的进度分帧，`0eb21d67` 让流式的 Content-Length 响应体直接从读缓冲交给回调，`08faed60` 让加密后的 TLS 记录贴合缓冲池的档位（W4 download h2 +11.5%，约 167 降到 77 MiB；proxy-download h1 +6.6%、h2 +2.7%），`c794cf89` 让流式的 HTTP/2 请求体在被消费前占住连接窗口（W4 proxy-upload h2 约 312 降到 252 MiB）；此前为 fib `main` 的 `4ad4ebef`（`v1.6.1-0.20261029100241-4ad4ebefac94`）：流式的 HTTP/2、HTTP/3 请求体按 64 KiB 的池化块等待（W4 proxy-upload h2 +12.7%，553 降到 322 MiB）；此前为 fib `main` 的 `56f08db3`（`v1.6.1-0.20261029003614-56f08db38f88`）：`861689c9` 让连接的读轮次从 16 KiB 开始并记住是否增长过（W1 在 10,000 在途 1,076 降到 639 MiB，W4 在 2% 以内），`b926ebf5` 和 `c6c2e10b` 减少 HTTP/3 每个包的工作（W2 site h3 +2.3%）；此前为 fib `main` 的 `f0378649`（`v1.6.1-0.20261028184321-f037864957c0`）：`d4319879` 回收 body 未流式的 HTTP/3 请求（W0 h3 在 500 到 10,000 在途 +17.6% 到 +20.0%），`f0378649` 去掉其测试对 body 大小的假设；此前为 fib `main` 的 `a7b8b456`（`v1.6.1-0.20261028010536-a7b8b456e081`）：`7f1fac3a` 让 Close 在并发的 ShutdownBinding 修改监听器列表时所持的锁下取用该列表，修复了 fit 的 CI 在 macOS 上遇到的数据竞争；`8696ef40` 让应答了早期数据并关闭连接的 TLS 服务端等握手结束后再关闭，以免 Windows 客户端因连接重置丢失应答；`a7b8b456` 修复了一个 HTTP/3 测试中的数据竞争；此前为 fib `main` 的 `33a039f1`（`v1.6.1-0.20261026175603-33a039f1382f`），带有为 I83 而加的 fib `log` 包（`185658f1`，以及处理 `ServeDuplex` panic 的 `33a039f1`）；此前为 fib `main` 的 `a88c75d2`（`v1.6.1-0.20261025180753-a88c75d2f19b`）：在 `b0809b4` 之上加了 A46（在别处完成工作的响应体过滤器，为 I81 而加）以及自 `b0809b4` 起的 HTTP/2、HTTP/3 和 TLS 改进；`b0809b4` 本身是 v1.6.0 加上 A42（HTTP/3 服务端把一轮的数据报一次批量发出，`a34c5db`）、A43（TLS 上的 h2 把 cork 期间的一轮合成一个 record 加密，`5a02929`）和 A43 测试的一处修复；按 commit 而不是 tag 依赖，见规则 19。此前为 `github.com/lesismal/fib v1.6.0`（`55e4140`，第一个带有 fit 自 v1.5.6 以来所需改动的 tag，并带有 fib 的 TLS 修复：会话恢复时重新验证对端，并要求 Go 1.27.3；此前为 fib `main` 的 `fcb1718`：`86071b8` 加上为 I67 实现的 A40、为 I77 实现的修复：请求体仍在到达时发出的完整响应声明 Connection: close，以及两个偶发失败测试的修复：`benchmark/rpc` 的 `TestClientCountsFailures` 和 `http` 的 `TestBodyWriterHoldsNoGoroutine`；此前为 fib `main` 的 `86071b8`，即 `4f1c3e9` 加上 fib 的 prefork 与 eBPF reuseport 均衡 `5fc8250`、`aa0ba7e`，以及 A38；按 commit 而非 tag 依赖，见规则 19）；自 I49 和 I50 起带 A32 和 A33，自 I51 和 I52 起带 A34 和 A35，自 I53 和 I53b 起带 A36 和 A37，自 I66 的 CI 修复起带 A38，自 v1.0.0 报告起带 A42 和 A43 |
 | 可用的功能 | `fit run` 通过 HTTP/1.1、h2c、TLS（HTTP/1.1 和 h2，证书来自文件（文件变化时重新加载）或经 ACME 的 HTTP-01 或 TLS-ALPN-01 获取并续期（保存在目录中，或供多台主机上的实例共享每张证书和质询而保存在 Redis、etcd 或 Consul 中），或在握手时按需获取，按 SNI 选择，并 staple OCSP 响应；只写了域名的配置默认使用 HTTPS 并跳转）和 HTTP/3 返回固定响应和静态文件，并能代理到 HTTP/1.1、h2c 和 h2 上游（可为上游指定 CA、服务器名和客户端证书）（带被动和主动的 HTTP、TCP 健康检查，九种负载均衡策略：轮询、加权轮询、最少连接、随机、P2C、按 IP、URI、请求头或 cookie 的一致性哈希，以及粘性 cookie），写 JSON、logfmt 或行格式的访问日志，收到 SIGHUP、文件变化（`-watch`）或通过 Admin API（读取、加载、按 JSON pointer 和 merge patch 修改、用 ETag 防止丢失更新、回滚到保存的版本）重载配置，用 W3C trace context 追踪请求并传给上游，通过 OTLP/HTTP 导出 span 和指标，按 RFC 9111 的规则把响应保存在 HTTP 缓存里，内存和磁盘两层，重启后仍能找回（同一 zone 的路由共享，reload 后保留），多个客户端只获取一次，刷新期间或上游失败时以陈旧响应回答，并可通过 Admin API 按 URL 或标签清除，在 Admin API 上提供 Prometheus 指标和只读仪表盘（路由、服务、上游及其健康状态、证书和配置版本），按写明的优先级规则把 provider 提供的内容合并进配置，并展示生效配置及其每部分的来源（`GET /config/effective`），从 Docker 容器的标签获取路由、上游和服务并随容器启停跟进，从 Consul 服务目录中服务的 tag 获取上游、路由和服务并跟进其健康检查，从 Consul KV 存储和 etcd 的键获取 listener、路由、上游和服务，服务 Kubernetes 集群中属于其 GatewayClass 的 Gateway（Gateway API），含 HTTP、HTTPS（证书来自 Secret）、TLS 透传、TCP 和 UDP listener，以及它们的 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute，并回写它们的状态，以及属于 fit 的 IngressClass 的 Ingress 和少量注解，并能优雅退出；路由按 host、path、方法、请求头、查询参数、远端 IP 和 path 正则匹配，或用组合它们的表达式匹配，依次看优先级、具体程度和设置的匹配器个数；中间件可以重写 path、跳转，以及设置、添加和删除请求和响应的字段，并能限制路由的请求速率（按客户端 IP、头部或路由）、同时处理的请求数和请求体大小，并能要求用户名和密码（Basic 认证，bcrypt）或客户端证书（TLS 监听器可以要求客户端证书，或在客户端提供时验证，即 mTLS），询问认证服务（ForwardAuth），或用来自文件或 JWK 集合的密钥验证 JSON Web Token；代理在预算内重试，并用超时限制路由的请求；熔断器在路由的请求持续失败时停止转发；代理按权重把请求拆分到多个上游，把一部分镜像到另一个上游，并能故障转移到备用上游；响应在写出时用 zstd、brotli 或 gzip 压缩；能把 HTTP/1.1、h2 和 h3 入口的 WebSocket 代理到 HTTP/1.1 上游，把 gRPC 调用双向流式代理到 h2 和 h2c 上游，代理处失败时回应 gRPC 状态；tcp 监听器把连接逐字节代理到上游，udp 监听器按客户端会话代理数据报，TLS 连接按 SNI 分流且不终止，受信任代理的 PROXY protocol 被接收（HTTP 监听器也可以）并可发送给上游（services）；一个端口同时服务 HTTP、TLS（终止，或按名字透传）、SOCKS 和原始 TCP，按客户端先发的内容区分；带客户端与目标访问规则的 SOCKS（CONNECT）和 HTTP CONNECT 正向代理；`fit validate`、`fit schema`、`fit version`、`fit hash-password`；配置加密保存在 store 中（`admin.store`、`fit store export` 和 `import`），以及登录后可修改全部配置的控制台（`admin.console`）；agent 的角色，即经 WebSocket mesh 共享 AI 模型的 hub、node 和 client，以及 tunnel 的角色，经 TCP、WebSocket 或 QUIC 通过服务器访问 NAT 后的 TCP 服务，两者都在各自的页面上设置和修改；WebRTC：经 UDP、TCP 和 TLS 的 TURN 服务器，以 fit 为媒体服务器的 WHIP 和 WHEP，以及按 ICE ufrag 路由、经一个 UDP 端口代理的媒体服务器；fit 打包为容器镜像（linux/amd64 和 arm64，打标签时发布）、把它作为 Gateway API 与 Ingress 控制器运行的 Helm chart，以及 systemd unit，并附有 Docker Compose 和 Kubernetes 示例；基准框架可以跑 nginx、Caddy、Traefik 和 fit |
 | 尚不可用 | 1.0 的外部安全审计，在代码之外安排；NAT 后主机之间的 P2P 隧道（I86、I88–I93：目前只有 `p2p/stun` 和 `webrtc.turn` 两部分）以及 VPN（I95–I103：目前只有 `vpn/packet`） |
-| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：基于 UDP 的 RTSP 有待 fib 的 A61。下一个可用的迭代编号是 I119，下一个可用的 fib 请求编号是 A62 |
+| 下一步 | P2P：I86，基于 fib `webrtc/stun` 的 STUN 客户端，然后是基于 fib TURN 客户端和 ICE agent 的 I88 和 I89；I90（fib 中的 A50）可与之并行。VPN：I95（fib 中的 A51）、I97 和 I98 不依赖新的东西。未完成的 fib 请求：用于上述迭代的 A50 和 A51，以及可替换 agent 和 tunnel 临时方案的 A52–A54。媒体：基于 UDP 的 RTSP 有待 fib 的 A61。下一个可用的迭代编号是 I120，下一个可用的 fib 请求编号是 A62 |
 **2026-10-27 的压测。** [方案与分析](../bench/results/plan-2026-10-27/analysis.md)在压测机上跑了 232 轮，只保留了一项优化：fib `d4319879` 回收 body 未流式的 HTTP/3 请求，500/5,000/10,000 在途分别 +17.6%、+19.2%、+20.0%，每请求 CPU 降 14-16%，h1/h2 不变。读缓冲 start（W4 proxy-download -4.9%）、sendfile 下载（-13.9%）和 fit-only 的 HTTP/1.1 改动经实测否决，数字在分析里。
 
 **M0 已完成。** 退出标准都已满足，但有一点说明：`fit run -c fit.json` 通过 HTTP/1.1 和 HTTP/2（h2c；
@@ -3704,6 +3704,63 @@ agent 提供各主流模型接口的全部无状态推理端点（[模型与接�
 - **基准测试**：无；页面及其聊天不在热路径上（规则 21）。
 - **不足**：聊天只在内存中，重启后丢失，重载则保留房间；消息不能编辑或删除，文件发送者也不能删除它；每个房间只保留最新的
   64 条消息，被全局 64 MiB 上限淘汰的文件无法再下载。
+
+### I119 从一个路由签发媒体 token — 已完成
+
+用户的要求：提供一个业务后端调用的路由，一次签发许多有时限的 `media_auth` token，供许多用户、分组和并发会议使用，并在用完
+它们后把它们吊销——后端不必持有 Admin API 的 token；随后，因为一次吊销会拒绝策略的所有 token，又加上了签名密钥的密钥环，使
+一个分片或一个会议可以被吊销而不造成大面积中断。
+
+- **配置**（`config/mediaauth.go`、`mediaauth`）：`media_auth` 新增 `secret_file`，即保存签发 token 所用 secret 的文件，
+  每次应用配置时读取，所以轮换该文件再应用配置就会吊销此前签发的所有 token；它必须至少 16 字节（末尾换行除外），文件缺失
+  或不可读则配置失败。`secret` 和 `secret_file` 二者取一。`keys` 是密钥环，用来代替两者：每个 `MediaKey` 是一个 `key`
+  名称（1 到 64 个字母、数字、'_'、'.'、'~' 和 '-'）及其自己的 `secret` 或 `secret_file`，至多 256 个密钥，名称必须
+  唯一，两个密钥共用同一 secret 在编译时被拒绝（`keys: "k1" and "k2" share a secret`），所以一个 token 只会在一个密钥下
+  校验通过，轮换一个密钥也不会悄悄留下同密钥的另一个。`mediaauth.Policy` 新增 `SecretFile()`（单密钥来源的文件）、
+  `Keys()`、`DefaultKey()`、`KeyFile()`、`IssueKey()` 和 `RotateKey()`（替换一个密钥的材料，只拒绝它签发的 token），
+  而 `Rotate()` 仍轮换单密钥并对密钥环报错；两者都拒绝短于 16 字节的 secret 和已移除的策略，且都在注册表的锁下进行，
+  配置应用不会与它们交错。`fit media-token` 接受设了这三者中任一的策略，其 `-key` 用密钥环中指定的密钥签名。
+- **处理器**（`handler/mediatokens`）：`prefix`（/media-tokens）是路由提供服务的路径，其外的请求返回 404；`auth` 是
+  签发 token 的策略，没有它则 Provision 失败（`media_tokens needs a media_auth policy with secret_file, or a keyring
+  of secret_files: ...`），密钥环还必须让每个密钥都有 `secret_file`（`media_tokens needs a secret_file for every key
+  of media_auth "live"'s keyring: ...`）；`prefixes` 是每个 publish 和 play 模式都必须以之开头的流名前缀；`max_ttl`
+  （24h）是请求可要求的最长 ttl；`max_tokens`（100，1 到 1000）；`max_body_bytes`（64 KiB，256 字节到 1 MiB）；
+  `revoke_timeout`（10s）。`POST <prefix>` 接收 `{"key": "<name>", "tokens": [{"subject", "publish", "play",
+  "ttl"}]}`，按请求的顺序应答 `{"tokens": [{"token", "subject", "expires", "key"}]}`：`key` 用密钥环中的该密钥签发
+  整批 token，省略时用环中的第一个，只有一个密钥的策略不接受它、给了就返回 400；每个应答 token 带上签发它的密钥，单密钥
+  策略下为空。`subject` 为 1 到 128 字节且不含控制字符，每个 token 至少有一个模式，`ttl` 是时长，省略时取策略
+  `token_ttl` 和 `max_ttl` 中较小的一个。整批要么全发要么全不发：坏的请求体、subject、模式、ttl、key、前缀或超过
+  `max_tokens` 返回 400，其他方法 405，超过 `max_body_bytes` 返回 413。签发是对策略状态的纯计算，所以许多请求可以同时
+  运行，谁也不持有锁、不等待磁盘。
+- **吊销**（`POST <prefix>/revoke`）：请求体可选；有密钥环时 `{"key": "<name>"}` 轮换一个密钥，`{"all": true}` 轮换
+  每个密钥，两者都不写或指定了策略没有的密钥返回 400；只有一个 secret 时，空请求体、`{}` 或 `{"all": true}` 都轮换那
+  一个密钥，而 `key` 返回 400。随后一个线程池任务把来自 `crypto/rand` 的 32 个随机字节原子地写入每个被轮换密钥的
+  `secret_file`（同目录的临时文件，0600，写入、关闭、改名），并替换该密钥，所以被轮换密钥的 token 立刻被凡共享该策略的
+  处理器（whip、whep、媒体页面、流媒体角色和 `media_tokens`）拒绝，而后留下的密钥的 token 在过期前一直有效。应答为
+  `{"revoked": true, "since": <unix 秒>, "keys": ["k2"]}`（被轮换的密钥，单密钥时不出现），由线程池经 `c.Async`
+  写出；线程池忙时 503 并带 `Retry-After: 1`，写入超过 `revoke_timeout` 返回 504，写入失败返回 500 并在此停止，所以
+  `all` 时已经写好的密钥仍保持轮换。文件保存新 secret，所以重启（会重新读取它们）后吊销依然有效，应用配置也一样。路由的
+  中间件（`jwt`、`basic_auth`、`forward_auth`、`rate_limit`）负责认证业务后端：处理器不检查任何调用方凭据，也不涉及
+  Admin API。
+- **测试**（竞态检测）：config 拒绝同时设置 `keys` 与 `secret`/`secret_file`、同时设置 `secret` 和 `secret_file`，把
+  密钥环算作放行，并拒绝坏的或重复的密钥名称、超过 256 个密钥、既没有或同时有两种 secret 的密钥、以及过短的 inline
+  secret；`mediaauth` 编译含一个 inline 密钥和一个文件密钥的密钥环，`Keys`、`DefaultKey`、`KeyFile`，`Issue` 用默认
+  密钥、`IssueKey` 用指定密钥，两个 token 都通过校验，未知密钥不通过，`RotateKey` 使一个密钥的旧 token 被拒绝而另一个
+  密钥的仍然通过、被轮换密钥的新 token 通过，由文件重建的策略结果一致，`Rotate` 对密钥环报错，重复 secret 被拒绝；处理器
+  用不同的 subject、前缀和 ttl 签发两个 token 并按顺序应答，对正确的流被接受、对其他流被拒绝，用指定密钥签发一批，未知
+  密钥 400，单密钥策略给 `key` 400，省略时使用策略的 ttl，ttl 超过 `max_ttl`、超过 `max_tokens`、坏的 JSON、subject
+  或模式、前缀违规都是 400，请求体超过 `max_body_bytes` 为 413，GET 为 405，前缀之外的路径为 404，整批全不发；轮换
+  一个密钥返回 200、其文件保存新 secret、旧 token 被拒绝而由它签发的 token 被接受、另一个密钥的 token 仍能加入；
+  `{"all": true}` 轮换每个文件；密钥环上既不指定 key 也不 all 返回 400；密钥环里出现 inline 密钥是 Provision 错误；
+  没有 `secret_file` 也是 Provision 错误；吊销线程池的 503、504 和 500；并发的签发与吊销。CLI 用密钥环中指定的密钥签名，并拒绝在单密钥策略上使用 `-key`。`TestChapterExamples` 加载
+  各章，文档的链接测试和 workbench 的 schema 测试覆盖新文字和中文描述。
+- **基准测试**：无；处理器不在热路径上（规则 21），一批只是一些 HMAC 和一次 JSON 编码，一次 token 校验现在在请求路径末尾
+  至多 256 次 HMAC，吊销在其线程池上运行。
+- **不足**：按密钥吊销现在已具备，所以一个分片、一个会议或一个分组的 token 可以被单独拒绝，策略的其余部分照常运行。吊销
+  仍然按密钥而不是按 subject：一个密钥签发的 token 无法列出或计数，一个 subject 的 token 无法单独吊销，需要这种能力的
+  subject 必须拥有自己的密钥（和自己的 `secret_file`）。密钥环来自配置：密钥不能通过 API 创建、轮换或删除，所以新增或
+  移除一个分片就是一次配置应用。除了应答中的 `since` 和 `keys` 没有审计记录；用 `secret` 签名的策略根本无法吊销，因为它
+  没有文件。Admin API 也没有暴露轮换，这是有意的，免得后端持有它的 token。
 
 ### 示例迁到 fit-examples — 已完成
 
