@@ -146,8 +146,10 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 	// A body still arriving goes up as it arrives, through a BodyWriter.
 	// One that announced trailers is sent chunked, with their names in its
 	// Trailer before it goes and their values, known only once it has
-	// ended, handed over as it closes.
-	body := fibhttp.NewBodyWriter(0)
+	// ended, handed over as it closes. The writer holds at most
+	// uploadPending for an upstream that is behind before the client's body
+	// is held (see uploadPending).
+	body := fibhttp.NewBodyWriter(uploadPending)
 	out.Body, out.ContentLength = body, r.ContentLength
 	if len(announced) > 0 {
 		out.Trailer = make(stdhttp.Header, len(announced))
@@ -184,6 +186,14 @@ func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
 		}
 	})
 }
+
+// uploadPending is how much of an upload may wait in the proxy for its
+// upstream, one read of the client's at fit's 64 KiB read buffer, rather than
+// fib's 256 KiB: past it the client's body is held, and the client waits in
+// TCP rather than in fit's memory. Uploading 1 MiB bodies over HTTP/1.1 at
+// 100 in flight, it took fit's peak memory from 99-134 MiB to 46-60 MiB,
+// with the same throughput and CPU a request.
+const uploadPending = 64 << 10
 
 // busy answers a request the upstream has no room for with 503, as a gRPC
 // call's failure for one.

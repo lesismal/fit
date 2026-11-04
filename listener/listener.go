@@ -556,6 +556,10 @@ func checkFreeUDP(address string) error {
 // handler rather than being read whole first.
 const StreamThreshold = 64 << 10
 
+// StreamBuffer is how much of a streamed HTTP/1 request body is buffered for
+// its handler before the connection stops reading the client.
+const StreamBuffer = 64 << 10
+
 // streamsAtHeader picks the requests whose bodies reach their handlers from
 // their headers, before StreamThreshold of them has arrived: gRPC calls,
 // HTTP/2 or HTTP/3 POSTs of application/grpc or a subtype of it, whose
@@ -589,6 +593,11 @@ func httpConfig(l *runtime.Listener) fibhttp.Config {
 	// arrive whole, as most do.
 	c.StreamRequestBody = true
 	c.StreamRequestBodyThreshold = StreamThreshold
+	// What of an HTTP/1 body its handler has not taken is buffered up to a
+	// read, rather than fib's 256 KiB, before the client's reads are held:
+	// the proxy, which takes a body as it arrives, buffers what its upstream
+	// is behind with itself (see the proxy's uploadPending).
+	c.StreamRequestBodyBuffer = StreamBuffer
 	c.StreamRequestBodyAtHeader = streamsAtHeader
 	h1 := slices.Contains(protocols, config.ProtocolHTTP1)
 	h2 := slices.Contains(protocols, config.ProtocolH2C) || slices.Contains(protocols, config.ProtocolH2)
