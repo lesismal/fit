@@ -296,6 +296,35 @@ go run ./bench/cmd/benchreport -in bench/results/RUN/w1-api-500.json -prev bench
 go run ./bench/cmd/benchreport -sweep bench/results/sweep-DATE/l1-c16-h8.json,bench/results/sweep-DATE/l2-c64-h16.json
 ```
 
+### 评分
+
+`-plan DIR`（该结果文件所在的测试计划结果目录）让每张表给出它在计划中的权重、每一行给出它的得分；
+`-scores DIR` 生成各服务器的综合评分排名、评分方法，以及每一项的权重和得分。测试计划的报告两者都要有
+（[规则 24](../docs/rules.zh-CN.md)）：
+
+```bash
+go run ./bench/cmd/benchreport -plan bench/results/plan-DATE -in bench/results/plan-DATE/w1-api-500.json
+go run ./bench/cmd/benchreport -scores bench/results/plan-DATE
+```
+
+一项就是一张表：某个结果文件里的一个场景和一个协议。服务器在一项上的得分（满分 100）是它的吞吐量、CPU 效率、
+内存效率和延迟（最好者的延迟除以它自己的：有 p99 时用 p99，否则用平均值）各自占表中最好者的比例的加权和，
+再乘以它未失败请求的比例；运行失败或无法支持该场景的服务器得 0 分。每个负载的权重由它的各项平分，服务器的
+综合评分是它参加的各项的加权平均，这些项所占计划总权重的比例记为覆盖率。
+
+| 负载 | 权重 | TPS | CPU EER | MEM EER | 延迟 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| W0，原始上限 | 15% | 50% | 25% | 15% | 10% |
+| W1，API 网关 | 25% | 50% | 25% | 15% | 10% |
+| W2，网站 | 15% | 50% | 25% | 15% | 10% |
+| W3，连接抖动 | 10% | 50% | 25% | 15% | 10% |
+| W4，大文件传输 | 10% | 50% | 25% | 15% | 10% |
+| W5，空闲与活跃 | 10% | 40% | 20% | 30% | 10% |
+| W6，固定速率下的延迟 | 15% | 20% | 20% | 10% | 50% |
+
+API 网关权重最高，因为这是 fit 最主要的用途；W5 因为保持大量空闲连接，内存权重更高；W6 是固定速率，能跟上
+的服务器回答的请求数一样多，所以 p99 延迟权重最高。
+
 [`sweep.sh`](sweep.sh) 在压测机上跑完整的连接数扫描，七档，从 16 个 HTTP/1.1 连接（8×32 个流）到 32,768
 个（8,192×32），与 2026-10-23 的扫描相同，结果写入 `results/sweep-DATE`；proxy 只跑第 1-5 档，
 因为超过之后测到的是压测客户端和代理后端，而不是代理本身。

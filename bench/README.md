@@ -366,6 +366,40 @@ the most the server answered at any of them:
 go run ./bench/cmd/benchreport -sweep bench/results/sweep-DATE/l1-c16-h8.json,bench/results/sweep-DATE/l2-c64-h16.json
 ```
 
+### Scores
+
+`-plan DIR`, the folder of the plan's results the file is in, has every table give its weight in the
+plan and every row its score; `-scores DIR` renders the servers ranked by their overall score, how
+the items are scored, and every item's weight and scores. A plan's report has both
+([rule 24](../docs/rules.md#11-load-test-reports)):
+
+```bash
+go run ./bench/cmd/benchreport -plan bench/results/plan-DATE -in bench/results/plan-DATE/w1-api-500.json
+go run ./bench/cmd/benchreport -scores bench/results/plan-DATE
+```
+
+An item is one table, a scenario over a protocol in one results file. A server's score for it, out
+of 100, is the weighted sum of its shares of the table's best throughput, CPU efficiency, memory
+efficiency and latency (the best's over its own: p99 where it is measured, the mean otherwise),
+times the share of its requests that did not fail; a failed run, or a scenario the server cannot
+serve, scores 0. Each workload's weight is shared equally by its items, and a server's overall
+score is the weighted mean over the items it was run in, with the share of the plan's weight they
+hold as its coverage.
+
+| Workload | Weight | TPS | CPU EER | MEM EER | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| W0, the raw ceiling | 15% | 50% | 25% | 15% | 10% |
+| W1, the API gateway | 25% | 50% | 25% | 15% | 10% |
+| W2, the website | 15% | 50% | 25% | 15% | 10% |
+| W3, connection churn | 10% | 50% | 25% | 15% | 10% |
+| W4, large transfers | 10% | 50% | 25% | 15% | 10% |
+| W5, idle and active | 10% | 40% | 20% | 30% | 10% |
+| W6, latency at a fixed rate | 15% | 20% | 20% | 10% | 50% |
+
+The API gateway weighs most, being what fit is most used as; W5 counts memory more, for the idle
+connections it holds, and W6 the p99 latency, since at a fixed rate every server that keeps up
+answers as many.
+
 [`sweep.sh`](sweep.sh) runs the whole sweep on the benchmark host, seven levels from 16 HTTP/1.1
 connections (8×32 streams) to 32,768 (8,192×32), as the 2026-10-23 sweep did, into
 `results/sweep-DATE`; the proxy runs at levels 1-5 only,

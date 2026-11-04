@@ -116,3 +116,15 @@ Every check costs waiting; each change gets the checks its kind needs, no more.
     more work is piled on its CI. fib changes are batched into one push, and fit checks its side
     on a branch while fib's CI runs. At most two sessions run full test suites at once, and one
     at a time uses the benchmark host.
+
+## 11. Load test reports
+
+24. **Every report of the full plan says where fit stands and ranks the servers by score.** Besides
+    what changed, it has a section, *Where fit stands*, saying where fit places in each workload and
+    protocol against the other servers, as the earlier reports do; and the servers ranked by their
+    overall score, as `bench/cmd/benchreport -scores` renders it from the plan's results, with
+    each workload's score and the change from the previous plan's ranking. Its `tables.md` is
+    rendered with `-plan`, so that every table gives its weight and every row its score. The
+    scores and weights are benchreport's (`score.go`, and [bench/README.md](../bench/README.md#scores));
+    a change to them is made there, and said in the next report, whose ranking is then not
+    compared with earlier ones.
