@@ -11,6 +11,12 @@
 // runs made at rising connection counts, it renders instead a table for each
 // scenario and protocol with a column for each run.
 //
+// With -plan, the folder of the plan's results the file belongs to, each
+// table's title also gives its weight in the plan and each row its score; with
+// -scores, the folder alone, it renders instead how the plan is scored, every
+// item's weight and scores, and the servers ranked by their overall score
+// (see score.go).
+//
 // Throughput counts successful responses only: a response the load generator
 // counted as an error is not served.
 package main
@@ -22,6 +28,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,7 +43,24 @@ func main() {
 	idleOnly := flag.Bool("idle-only", false, "render the idle connections alone")
 	idleHeading := flag.String("idle-heading", "Idle connections, bytes each", "the idle connections table's title")
 	sweep := flag.String("sweep", "", "runs at rising connection counts, comma-separated, to render as scaling tables")
+	planDir := flag.String("plan", "", "the folder of the plan's results, to give each table its weight and each row its score")
+	scoresDir := flag.String("scores", "", "the folder of a plan's results, to render its scores and the overall ranking")
 	flag.Parse()
+	if *scoresDir != "" {
+		if err := renderScoresFile(os.Stdout, *scoresDir, *level); err != nil {
+			fmt.Fprintln(os.Stderr, "benchreport:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *planDir != "" {
+		p, err := loadPlan(*planDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "benchreport:", err)
+			os.Exit(1)
+		}
+		scoring = p
+	}
 	if *sweep != "" {
 		var runs []*run
 		for _, path := range strings.Split(*sweep, ",") {
@@ -74,6 +98,8 @@ func main() {
 
 // run is the part of a fitbench report that the tables need.
 type run struct {
+	// name is the results file's name, without .json.
+	name   string
 	Params struct {
 		Connections   int `json:"connections"`
 		H2Connections int `json:"h2_connections"`
@@ -133,6 +159,7 @@ func load(path string) (*run, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
+	r.name = strings.TrimSuffix(filepath.Base(path), ".json")
 	return &r, nil
 }
 
@@ -263,6 +290,11 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		if rated {
 			header[1], header[4] = "TPS", header[4]+" [↓1]"
 		}
+		var sc map[string]float64
+		if scoring != nil {
+			sc = tableScores(cur, k.scenario, k.protocol)
+			header = append(header[:1], append([]string{"Score"}, header[1:]...)...)
+		}
 		if inFlight {
 			header = append(header, "KiB/in-flight")
 		}
@@ -285,6 +317,9 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 			row := []string{r.Server,
 				share(r.tps(), bestTPS, 0), share(r.cpuEER(), bestCPU, 0), share(r.memEER(), bestMem, 0),
 				latency(r), fmt.Sprintf("%.2f", r.CPUCores), mib(r.memory())}
+			if sc != nil {
+				row = append(row[:1], append([]string{fmt.Sprintf("%.1f", sc[r.Server])}, row[1:]...)...)
+			}
 			if inFlight {
 				row = append(row, group(r.BytesPerInFlight/1024, 1))
 			}
@@ -310,6 +345,9 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		for _, r := range failed {
 			row := make([]string, len(header))
 			row[0], row[1] = r.Server, r.failure()
+			if sc != nil {
+				row[1], row[2] = "0.0", r.failure()
+			}
 			table = append(table, row)
 		}
 		name := protocolNames[k.protocol]
@@ -319,10 +357,18 @@ func render(w io.Writer, cur, old *run, prevName string, level int, idle bool, i
 		if rated && len(rows) > 0 {
 			name += fmt.Sprintf(", %s requests a second", group(float64(rows[0].Rate), 0))
 		}
+		if scoring != nil {
+			if weight, ok := scoring.weights[item{cur.name, k.scenario, k.protocol}]; ok {
+				name += fmt.Sprintf(" (weight %.2f%%)", weight*100)
+			}
+		}
 		fmt.Fprintf(w, "%s %s, %s\n\n", hashes, k.scenario, name)
 		writeTable(w, table, 1)
 		if len(skipped) > 0 {
 			fmt.Fprintf(w, "\nNot run: %s, which cannot serve it.\n", strings.Join(skipped, ", "))
+			if scoring != nil {
+				fmt.Fprintf(w, "It scores 0 for this item.\n")
+			}
 		}
 		fmt.Fprintln(w)
 	}
