@@ -464,6 +464,11 @@ func (x *exchange) expire() {
 	x.cancel(gen, why)
 }
 
+// flushBelowActive is the count of a backend's requests under way below
+// which send has a request off an HTTP/1 connection flushed: W1 at 500 in
+// flight gained from it, and at 5,000 lost.
+const flushBelowActive = 1000
+
 // send sends the request upstream, keeping its Call for cancel, and
 // abandons it at once if cancel came first.
 func (x *exchange) send(out *stdhttp.Request) {
@@ -477,7 +482,11 @@ func (x *exchange) send(out *stdhttp.Request) {
 	// their responses travel together (see fibhttp.Framing.Flush). Over
 	// HTTP/1.1 at 500 in flight, flushing cut p99 by a quarter; not corking
 	// for HTTP/2 too cost it 4% of its throughput.
-	framing := fibhttp.Framing{HeaderBlock: x.framed, ResponseHeaderBlock: x.blockResponse, Flush: x.c.Request.ProtoMajor == 1}
+	// Under heavy load it is left held too: at 5,000 in flight, flushing
+	// raised p99, so only a backend with fewer than flushBelowActive
+	// requests under way has them flushed.
+	flush := x.c.Request.ProtoMajor == 1 && x.backend.Active() < flushBelowActive
+	framing := fibhttp.Framing{HeaderBlock: x.framed, ResponseHeaderBlock: x.blockResponse, Flush: flush}
 	x.callMu.Lock()
 	if framing.HeaderBlock != nil || framing.ResponseHeaderBlock || framing.Flush {
 		x.call = x.pool.SendFramed(x.backend, out, framing, x.respond)
