@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I140.
+Status: `todo`, `doing` or `done`. The next free iteration number is I154.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -287,20 +287,23 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I140.
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
-| **Cluster management** | | | |
-| I138 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
-| I139 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I138 | todo |
-| I140 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I139 | todo |
-| I141 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I140 | todo |
-| I142 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I140 | todo |
-| I143 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I142 | todo |
-| I144 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I143 | todo |
-| I145 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I144 | todo |
-| I146 | The manager's users and roles per group, and the audit log; the Users and audit pages | I144 | todo |
-| I147 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I139 | todo |
-| I148 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I145, I125 | todo |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
+| **Cluster management** | | | |
+| I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
+| I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | todo |
+| I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | todo |
+| I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
+| I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | todo |
+| I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
+| I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
+| I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
+| I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
+| I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | todo |
+| I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
+| **AI assistant, continued** | | | |
+| I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | todo |
+| I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
 
 ## M0, foundations
 
@@ -1798,9 +1801,27 @@ the settings.
 | Convert | `adapt_convert` | read | nginx or Caddyfile text through `fit adapt`, with what it could not convert |
 | Agent | `skill_load` | read | an enabled skill's whole prompt, within the user's level |
 | Agent | `ask_user` | read | a question with options, shown as buttons in the panel; the choice is the result |
+| Media (I152) | `media_library_search` | read | a library's items searched and filtered (codec, resolution, probe errors), paged |
+| Media (I152) | `media_item_get` | read | an item's tracks, codecs, renditions, subtitles, sidecar and probe error |
+| Media (I152) | `channels_status` | read | each channel's now and next with its position, and its push targets' state, bytes and last error |
+| Media (I152) | `playback_sessions` | read | live sessions by resource and address, counts per subject against `max_sessions`, 403s by reason; subjects shown hashed unless the settings allow them |
+| Media (I152) | `media_scan_propose` | propose | a rescan of a library |
+| Media (I152) | `media_session_end_propose` | propose | live playback sessions ended |
+| Media (I152) | `media_key_rotate_propose` | propose | a rotation of one `media_auth` key or all, by name |
+| Media (I152) | `media_file_propose` | propose | a rename, move, delete or sidecar edit of library files, with what plays them now |
+| Cluster (I153) | `cluster_members` | read | the manager's members: health, versions, config version, drift, labels, groups |
+| Cluster (I153) | `cluster_templates` | read | templates, their owned paths and variables, sync state per member |
+| Cluster (I153) | `cluster_rollouts` | read | rollouts in progress and their history, batch by batch, with each member's result |
+| Cluster (I153) | `cluster_metrics`, `cluster_log_tail`, `cluster_certs` | read | the manager's series per member and group, logs tailed across members, the certificate inventory |
+| Cluster (I153) | `member` argument | read | every read tool above, as `config_get` or `consistency_check`, run on a chosen member through the manager's session |
+| Cluster (I153) | `rollout_propose` | propose | a change to a template or to a group's members as a rollout plan: per-member diffs, dry runs, strategy and health gates |
+| Cluster (I153) | `cluster_op_propose` | propose | an operation on many members (reload, rollback, check, purge) |
+| Cluster (I153) | `drift_fix_propose` | propose | members' drift against their templates fixed by a rollout |
 
 Out of reach of every tool: `admin.console` users and passwords, the store's key, `admin.assistant`
-itself, the Admin API's own addresses and tokens, and any file outside the config.
+itself, the Admin API's own addresses and tokens, and any file outside the config; `media_auth`'s
+secrets, playback URLs and their signatures (a test URL is issued only in the form of I138), and
+uploads; a cluster's member credentials, enrollment tokens, and adding or removing members.
 
 ### Skills
 
@@ -1826,6 +1847,13 @@ name the assistant picks from the enabled skills' descriptions.
 | `media-setup` | streaming, media auth, WebRTC and media pages from a description of the service | config, change |
 | `llm-mesh-setup` | LLM hub, node and proxy roles, and their models, from the machines described | config, roles, change |
 | `tunnel-setup` | tunnel hub, node and proxy for services behind NAT | config, roles, change |
+| `vod-setup` (I152) | a library, its `vod` routes and `url_signing` for a site's titles, from a description of the site | config, media, change |
+| `channel-scheduler` (I152) | a channel's list or schedule from items described in words, and its push targets | media, config, change |
+| `library-health` (I152) | probe errors, missing renditions or subtitles, codecs players cannot play, and the ffmpeg steps of `scripts/` to prepare them | media |
+| `playback-troubleshoot` (I152) | why a viewer is refused or stalls: 403s by reason, session caps, expired grants, cache and file pool | media, metrics, logs |
+| `fleet-health` (I153) | the members' state read together: who is down, behind, drifting or near a certificate's expiry | cluster |
+| `rollout-planner` (I153) | a change across groups planned: strategy, canary members, batches, health gates and rollback | cluster, change |
+| `cluster-drift` (I153) | each member's drift explained and fixed by a rollout | cluster, change |
 
 ### Settings
 
@@ -1874,7 +1902,7 @@ their results and hands them back as data; again, until an answer or a proposal,
   asked about, not guessed: the `ask_user` tool shows the question with options as buttons in the
   panel, and the user's choice comes back as the tool's result.
 
-The iterations, I124–I130, are in the [index](#index).
+The iterations, I124–I130, I152 and I153, are in the [index](#index).
 
 ### I124 The assistant's settings and model client
 
@@ -1986,6 +2014,32 @@ The iterations, I124–I130, are in the [index](#index).
   the bounds hold against a slow client, a large request and a cut stream; English and Chinese; under the
   race detector.
 - **Touches**: `assistant`, `admin`, `admin/store`, `app/console`, `app/workbench`, `schema`, `docs`.
+
+### I152 The assistant's media library tools and skills
+
+- **Do**: the Media tools and skills above, on the library, `vod`, channels and `url_signing` of
+  I132–I136, the propose tools applied as every proposal is (I126), with the Apply click and the
+  dialog's confirm; a file proposal warns when a channel uses the file or a session plays it.
+  Ask AI on the media library pages (I138): an item's probe error (`library-health`), a channel's
+  push target in error (`channel-scheduler`), the 403s by reason (`playback-troubleshoot`).
+- **Done when**: each skill does its task on a fixed library against a recorded model; no key,
+  signature or playback URL reaches a recorded request; subjects reach it hashed unless allowed;
+  a delete proposal for a file a channel plays names the channel; under the race detector.
+- **Touches**: `assistant`, `admin`, `medialib`, `app/workbench`, `docs`.
+
+### I153 The assistant across a cluster
+
+- **Do**: on a manager (I141), the Cluster tools and skills above; a read tool's `member` argument
+  goes through the manager's session to that member's API; a propose tool becomes a rollout plan
+  or an operation, shown on the Rollouts page and started only with its own confirm (I146). The
+  assistant's level and the manager's role per group (I148) are both checked, the narrower wins.
+  Ask AI on the Cluster pages: an Overview card (`fleet-health`), a failed batch (`rollout-planner`),
+  a drift item (`cluster-drift`). The MCP server (I130) serves these tools on a manager too.
+- **Done when**: a change asked in words for a group becomes a rollout plan with each member's
+  diff and dry run, and runs only after the confirm; an `operator` cannot propose a change to a
+  template it may not edit; no member credential reaches a recorded request; a read across
+  members stays within its bounds when a member is slow or down; under the race detector.
+- **Touches**: `assistant`, `cluster`, `app/workbench`, `docs`.
 
 ### Decisions from review (2026-11-04)
 
@@ -2231,22 +2285,22 @@ The workbench's Cluster menu, built up by the iterations below:
 
 | Entry | Page | Iteration |
 | --- | --- | --- |
-| Overview | every member's health, version, config version, drift, nearest certificate expiry and connections, as cards or a table, filtered by group and label | I140 |
-| Nodes | add, edit, remove and test members; credentials written once; a certificate's fingerprint confirmed on first contact; a member's detail page | I140 |
-| Node switcher | in the header: open any member's own pages (config, Engine, Consistency, versions) from the manager | I141 |
-| Groups | groups by label selector or by name, their members, and bulk operations with each member's result | I142 |
-| Templates | templates, their owned paths and variables, attached to groups; sync state per member; import from a member; compare two members | I143 |
-| Rollouts | plan (diffs and checks per member), strategy, progress batch by batch, pause, resume, abort, roll back; history | I144 |
-| Drift and alerts | drift per member against the templates, one-click fixes as rollouts; alert rules and webhooks | I145 |
-| Users and audit | the manager's users and their roles per group; the audit log of every cluster action | I146 |
-| Metrics, logs, certificates | requests, errors and connections per member and group over time; logs tailed across members; the certificate inventory | I148 |
+| Overview | every member's health, version, config version, drift, nearest certificate expiry and connections, as cards or a table, filtered by group and label | I142 |
+| Nodes | add, edit, remove and test members; credentials written once; a certificate's fingerprint confirmed on first contact; a member's detail page | I142 |
+| Node switcher | in the header: open any member's own pages (config, Engine, Consistency, versions) from the manager | I143 |
+| Groups | groups by label selector or by name, their members, and bulk operations with each member's result | I144 |
+| Templates | templates, their owned paths and variables, attached to groups; sync state per member; import from a member; compare two members | I145 |
+| Rollouts | plan (diffs and checks per member), strategy, progress batch by batch, pause, resume, abort, roll back; history | I146 |
+| Drift and alerts | drift per member against the templates, one-click fixes as rollouts; alert rules and webhooks | I147 |
+| Users and audit | the manager's users and their roles per group; the audit log of every cluster action | I148 |
+| Metrics, logs, certificates | requests, errors and connections per member and group over time; logs tailed across members; the certificate inventory | I150 |
 
 Not in this track: consensus or shared runtime state among members; a replacement for Kubernetes
 or GitOps (the Kubernetes provider stays the way to drive fit from a cluster's resources); a
 manager with a standby (its store is exported and imported as any store is); upgrading members'
-binaries (I149 records the question, not a plan).
+binaries (I151 records the question, not a plan).
 
-### I138 Decision 033; what a member needs to be managed
+### I140 Decision 033; what a member needs to be managed
 
 - **Do**: decision 033. On every fit, so that a manager can manage it: `GET /node` in the Admin
   API (and `/api/node` through the console): a node ID made once and kept in the store (or beside
@@ -2268,7 +2322,7 @@ binaries (I149 records the question, not a plan).
 - **Touches**: `docs/decisions` (033), `admin`, `admin/store`, `login`, `app/console`,
   `app/workbench`, `docs`.
 
-### I139 The manager: members, their credentials and their state
+### I141 The manager: members, their credentials and their state
 
 - **Do**: `admin.cluster` (`poll_interval`, `timeout`, `max_nodes`, `max_concurrency`,
   `max_response_bytes`), refused without `admin.store`; the store's payload gains `cluster`:
@@ -2287,11 +2341,11 @@ binaries (I149 records the question, not a plan).
   member down are each reported apart; a member's restart and a manager's restart are recovered
   from; no password, token or session cookie appears in any answer, page or log; the poller's
   concurrency and response caps hold; under the race detector.
-- **Pages**: none yet beyond what I140 draws on these endpoints.
+- **Pages**: none yet beyond what I142 draws on these endpoints.
 - **Touches**: `cluster` (new), `config`, `admin`, `admin/store`, `app`, `schema`, `docs`,
   `test/docker`.
 
-### I140 The Cluster menu: overview, nodes and a node's page
+### I142 The Cluster menu: overview, nodes and a node's page
 
 - **Do**: the first-level **Cluster** entry in the workbench's left menu, shown when `admin.cluster`
   is set, with **Overview** and **Nodes**. Overview: a card or a row per member, its state colored,
@@ -2302,15 +2356,15 @@ binaries (I149 records the question, not a plan).
   A member's page: its `/node`, listeners, upstreams and their backends, certificates, versions and
   consistency, read through the manager. The menu's labels and every page in English and Chinese;
   `docs/cluster.md` in both, with a manager-only config (`fit run -admin` with `admin.cluster`) and
-  the recipe for members behind NAT through the tunnel until I147.
-- **Done when**: in a browser, against the Docker set of I139, a member is added, tested, trusted,
-  edited and removed; the overview shows each failure mode of I139 and recovers; a credential
+  the recipe for members behind NAT through the tunnel until I149.
+- **Done when**: in a browser, against the Docker set of I141, a member is added, tested, trusted,
+  edited and removed; the overview shows each failure mode of I141 and recovers; a credential
   field never shows what was written; the bundle's tests and the browser checks pass in both
   languages.
 - **Pages**: Cluster → Overview, Nodes, a node's page.
 - **Touches**: `app/workbench`, `cluster`, `docs`.
 
-### I141 A member's own pages, opened from the manager
+### I143 A member's own pages, opened from the manager
 
 - **Do**: a node switcher in the workbench's header: choosing a member opens the workbench's own
   pages (config with its text tabs, Engine, Consistency, versions, the role pages) against that
@@ -2325,10 +2379,10 @@ binaries (I149 records the question, not a plan).
 - **Pages**: the node switcher; every existing page, against a member.
 - **Touches**: `cluster`, `app/console`, `app/workbench`, `docs`.
 
-### I142 Resource groups and operations on many
+### I144 Resource groups and operations on many
 
 - **Do**: groups: a label selector, members by name, or both; a member in any number of groups;
-  group variables for I143. Operations on a group or a selection of members, run with bounded
+  group variables for I145. Operations on a group or a selection of members, run with bounded
   concurrency and answered per member: reload, rollback to the previous version, run the
   consistency check, purge cache zones by key or prefix, test connectivity. `/api/m/cluster/groups`
   and `POST /api/m/cluster/ops`.
@@ -2340,7 +2394,7 @@ binaries (I149 records the question, not a plan).
   group; each operation confirmed in a dialog naming the members, and its results per member.
 - **Touches**: `cluster`, `app/workbench`, `docs`.
 
-### I143 Templates: config shared by a group
+### I145 Templates: config shared by a group
 
 - **Do**: a template owns paths in the config: whole members (`media_auth`, `tls`, `log`), and
   named elements (`routes` by name, `upstreams`, `listeners` and `services` by name; a route in a
@@ -2362,10 +2416,10 @@ binaries (I149 records the question, not a plan).
   member's rendered result and sync state; **Compare** for two members; **Import from a node**.
 - **Touches**: `cluster`, `admin`, `app/workbench`, `docs`.
 
-### I144 Rollouts
+### I146 Rollouts
 
 - **Do**: a rollout from a template's change, a sync of out-of-sync members, or a section copied
-  from one member to others. Its plan: each member's diff and the member's dry run (I138), its
+  from one member to others. Its plan: each member's diff and the member's dry run (I140), its
   ETag taken. Its strategy: all at once, rolling by batch size or percentage with a pause, or a
   canary of the first members waiting for a person to go on. After each batch a health gate: the
   member reachable, its reload succeeded, no new drift, and if set its 5xx ratio under a threshold
@@ -2382,10 +2436,10 @@ binaries (I149 records the question, not a plan).
   batch by batch with each member's gate, and pause, resume, abort and roll back; the history.
 - **Touches**: `cluster`, `app/workbench`, `docs`, `test/docker`.
 
-### I145 Drift and alerts
+### I147 Drift and alerts
 
 - **Do**: drift checked on every poll: each member against its templates and its own consistency
-  check; a fix is a rollout of that member (I144), never applied unasked. Alert rules: member down
+  check; a fix is a rollout of that member (I146), never applied unasked. Alert rules: member down
   for a while, drift, a rollout failed, a certificate expiring within days, upstream backends down,
   reloads failing; sent to webhooks (generic JSON, with a template for chat services), with a
   repeat interval and a silence, the webhook's secret in the store; alerts kept, bounded.
@@ -2396,7 +2450,7 @@ binaries (I149 records the question, not a plan).
   badge on the Cluster menu while alerts are active.
 - **Touches**: `cluster`, `app/workbench`, `docs`.
 
-### I146 Users, roles and the audit log
+### I148 Users, roles and the audit log
 
 - **Do**: the manager's console users get roles per group: `viewer` (read), `operator` (operations
   and rollouts of existing templates), `admin` (members, credentials, templates, groups), checked on
@@ -2404,13 +2458,13 @@ binaries (I149 records the question, not a plan).
   are on. The audit log of every cluster action: user, time, members, operation, the diff's digest,
   outcome and the versions before and after, in the store, bounded; exported as JSON lines.
 - **Done when**: each role is refused what it may not do, in the API and with the controls hidden in
-  the pages; every action of I139–I145 leaves its entry; the log holds across a restart within its
+  the pages; every action of I141–I147 leaves its entry; the log holds across a restart within its
   bound; under the race detector.
 - **Pages**: Cluster → Users and audit: users' roles per group; the audit log filtered by user,
   member, operation and time, each entry opening its diff.
 - **Touches**: `cluster`, `login`, `app/workbench`, `docs`.
 
-### I147 Members behind NAT, linking out
+### I149 Members behind NAT, linking out
 
 - **Do**: `admin.cluster_member` on a member: the manager's URL, and an enrollment token made on
   the manager, used once for a credential of its own; the member links out to the manager over a
@@ -2424,14 +2478,14 @@ binaries (I149 records the question, not a plan).
   to paste on the member, and the member shown as linked or waiting.
 - **Touches**: `cluster`, `config`, `admin`, `app/workbench`, `schema`, `docs`.
 
-### I148 Metrics, logs and certificates across the cluster
+### I150 Metrics, logs and certificates across the cluster
 
 - **Do**: series kept by the manager from each poll, bounded per member: requests per second, 4xx
   and 5xx, connections, bytes, reloads; summed per group. Logs tailed from several members at once
   through fit's log ring (I125), merged by time. The certificate inventory: every member's
   certificates with names, issuer and expiry. `fit cluster` in the CLI (nodes, state, groups, diff,
-  rollout start/status/abort) through the manager's Admin API. When the assistant is on (I124–I126):
-  read tools over the cluster's state, and proposals that become rollout plans.
+  rollout start/status/abort) through the manager's Admin API. The assistant's cluster tools are
+  I153.
 - **Done when**: the series match the members' own metrics; a merged tail follows three members;
   a certificate about to expire on one member is listed first; the CLI drives a rollout end to end;
   under the race detector.
@@ -2439,11 +2493,11 @@ binaries (I149 records the question, not a plan).
   follow), Certificates (the inventory, sorted by expiry); Overview's sparklines.
 - **Touches**: `cluster`, `cli`, `app/workbench`, `docs`.
 
-### I149 Upgrading members' binaries (a question, not a plan)
+### I151 Upgrading members' binaries (a question, not a plan)
 
 Upgrading fit itself across members (a release downloaded, its signature checked against a pinned
 key, the binary replaced and fit restarted with its listening sockets handed on, rolled out as in
-I144) needs a graceful restart fit does not have yet. Decision 033 records whether it is taken up,
+I146) needs a graceful restart fit does not have yet. Decision 033 records whether it is taken up,
 or left to packages, containers and orchestrators, which the overview's version column already
 serves.
 
@@ -2452,10 +2506,10 @@ serves.
 1. Access to members: the console's user name and password (as asked) and the Admin API's token,
    both offered, password first. Keep both?
 2. Credentials need `admin.store` on the manager. Acceptable, or also allow a plain file?
-3. I141 opens a member's pages with the manager's bundle (one UI, read-only on unknown versions)
+3. I143 opens a member's pages with the manager's bundle (one UI, read-only on unknown versions)
    rather than the member's own bundle proxied whole. Agreed?
 4. Templates own whole members and named elements; unnamed routes cannot be shared. Enough?
 5. No unattended sync: drift is reported, a person rolls out the fix. Agreed, or an opt-in
    `auto_sync` per group?
-6. I147 (members linking out) before or after I143–I144? Until then the tunnel reaches them.
-7. Binary upgrades (I149): in scope or not?
+6. I149 (members linking out) before or after I145–I146? Until then the tunnel reaches them.
+7. Binary upgrades (I151): in scope or not?

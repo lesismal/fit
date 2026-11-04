@@ -279,9 +279,9 @@ fit 可以作为反向代理和静态文件服务器使用。
 | [Agent 与 tunnel](dev-plan.zh-CN.md#agent-与-tunnel) | 配置中的角色：tunnel 的 hub、node 和 proxy，用于访问 NAT 后的服务；llm 的 hub、node 和 proxy（最初名为 agent），在多台机器间共享 AI 模型（[决定 028](decisions/028-llm-and-tunnel.zh-CN.md)） | 已完成（I105–I107） | `websocket`、QUIC、异步 HTTP 客户端 |
 | [WebRTC](dev-plan.zh-CN.md#webrtc) | `webrtc.turn`，基于 UDP、TCP 和 TLS 的 TURN 服务器；`whip` 和 `whep` 处理器，fit 作为 SFU；`webrtc_proxy` 处理器，把 WHIP 和 WHEP 代理到媒体服务器，UDP 按 ICE ufrag 路由（[决定 029](decisions/029-webrtc.zh-CN.md)、[WebRTC](webrtc.zh-CN.md)） | 已完成（I87、I108–I111） | `webrtc`、`webrtc/turn/turnserver` |
 | [媒体](dev-plan.zh-CN.md#媒体认证流媒体与页面) | 所有接收媒体的协议共用的 `media_auth` 策略，`whip`、`whep` 和 `webrtc_proxy` 的 `auth`；流媒体角色（RTMP、RTSP、SRT、HTTP-FLV、HLS）；可开关麦克风和摄像头的媒体页面（[决定 030](decisions/030-media-auth-and-pages.zh-CN.md)） | 已完成（I115–I117） | `media/hub`、`media/rtc`、`webrtc` |
-| [AI 助手](dev-plan.zh-CN.md#workbench-中的-ai-助手) | workbench 中基于用户所设模型 API（Anthropic、OpenAI 及兼容、Gemini、Azure OpenAI、Ollama，或 fit 自身的 `llm.proxy`）的对话面板：覆盖配置、运行时、指标与日志的只读工具，以校验过的 diff 提出、由人来应用的配置修改，内置与用户添加的 skill，按用户的级别与审计日志；基于同一套工具、向外部 agent 提供的 MCP 服务器，应用仍只在 workbench 中（决定 031） | 已规划（I124–I130） | fib 的异步 HTTP 客户端 |
+| [AI 助手](dev-plan.zh-CN.md#workbench-中的-ai-助手) | workbench 中基于用户所设模型 API（Anthropic、OpenAI 及兼容、Gemini、Azure OpenAI、Ollama，或 fit 自身的 `llm.proxy`）的对话面板：覆盖配置、运行时、指标与日志的只读工具，以校验过的 diff 提出、由人来应用的配置修改，内置与用户添加的 skill，按用户的级别与审计日志；基于同一套工具、向外部 agent 提供的 MCP 服务器，应用仍只在 workbench 中；媒体库与跨集群的工具和 skill（决定 031） | 已规划（I124–I130、I152–I153） | fib 的异步 HTTP 客户端 |
 | [媒体库](dev-plan.zh-CN.md#媒体库点播与频道) | 面向影视站：`media_library`，为目录中的媒体文件编目；`vod` 处理器，不转码、按关键帧切分的 HLS 点播；频道，把文件按排期作为直播流推入流媒体 hub，并转推到外部 RTMP 和 SRT 服务器；会过期的播放 URL，由影视站的 API 经 `media_tokens` 为某个观众、某部片子签发，传递到每个分片，带会话数上限和加密分片；以上全部功能的 workbench 页面：带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥、当前会话与指标，以及文件上传与管理（决定 032） | 已规划（I131–I139） | `media/hub`、`media/hls`、`media/fmp4`、MP4 读取器（A63） |
-| [集群管理](dev-plan.zh-CN.md#集群管理) | 一个 fit 管理其他 fit：用管理员密码（或 Admin API token）添加成员，凭据加密保存在管理节点的 store 中；workbench 的 **集群** 菜单：所有成员的概览、从管理节点打开成员自己的页面、资源组与批量操作、组内共享并带变量的配置模板、逐成员预览、试运行校验后分批发布并带健康门槛和回滚、漂移与告警、按组的角色和审计日志、NAT 后成员主动连出；管理节点不在数据路径上（决定 033） | 已规划（I138–I148） | fib 的异步 HTTP 客户端、`websocket` |
+| [集群管理](dev-plan.zh-CN.md#集群管理) | 一个 fit 管理其他 fit：用管理员密码（或 Admin API token）添加成员，凭据加密保存在管理节点的 store 中；workbench 的 **集群** 菜单：所有成员的概览、从管理节点打开成员自己的页面、资源组与批量操作、组内共享并带变量的配置模板、逐成员预览、试运行校验后分批发布并带健康门槛和回滚、漂移与告警、按组的角色和审计日志、NAT 后成员主动连出；管理节点不在数据路径上（决定 033） | 已规划（I140–I150） | fib 的异步 HTTP 客户端、`websocket` |
 | [P2P 与 NAT 穿透](dev-plan.zh-CN.md#p2p-与-nat-穿透) | NAT 后的两台主机通过 ICE 直接相连，或经 TURN 中继相连，承载 TCP 和 UDP 服务（[决定 025](decisions/025-p2p.zh-CN.md)） | 进行中：STUN 消息和 STUN 服务器（`p2p/stun`，I84，尚未进入配置的库）和 fib 中的 A49（I85）已完成；STUN 和 TURN 客户端、ICE、隧道和配置待做（I86、I88–I93） | `webrtc/stun`、`webrtc/turn`、`webrtc/ice` |
 | [VPN](dev-plan.zh-CN.md#vpnfit-节点组成的网络) | 节点组成一个覆盖网络，各有一个 TUN 接口，IP 包直接或经中继发送（[决定 026](decisions/026-vpn.zh-CN.md)） | 进行中：IP 包和覆盖网络路由表（`vpn/packet`，I94，尚未进入配置的库）已完成；TUN 设备、中继、协调器和节点待做（I95–I103） | — |
 
@@ -329,8 +329,8 @@ fit 可以作为反向代理和静态文件服务器使用。
 | 媒体文件点播，不转码的 HLS | 媒体库，I132–I133 | MP4 读取器（A63）、`media/hls`、`media/fmp4` |
 | 文件作为直播频道推流，并转推到外部服务器 | 媒体库，I134 | `media/hub`、`media/rtmp`、`media/srt` |
 | 由影视站 API 签发的会过期播放 URL | 媒体库，I135 | — |
-| 在 workbench 的集群菜单中由一个 fit 管理多个 fit 实例 | 集群管理，I139–I141 | — |
-| 资源组共享的配置，分阶段发布，带健康门槛和回滚 | 集群管理，I142–I144 | — |
+| 在 workbench 的集群菜单中由一个 fit 管理多个 fit 实例 | 集群管理，I141–I143 | — |
+| 资源组共享的配置，分阶段发布，带健康门槛和回滚 | 集群管理，I144–I146 | — |
 | 在 workbench 中管理媒体库、频道和播放会话，支持上传 | 媒体库，I138–I139 | — |
 | STUN 服务器 | P2P，I84（库，尚未进入配置） | — |
 | VPN：IP 包和覆盖网络路由表 | VPN，I94（库，尚未进入配置） | — |
