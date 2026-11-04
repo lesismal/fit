@@ -175,6 +175,11 @@ func (h *hub) file(roomN, name, key, fname, ctype string, data []byte) (*message
 		return nil, errNoChatMember
 	}
 	size := int64(len(data))
+	if size > chatFileBytes {
+		// No eviction makes room for it: the files there stay.
+		h.mu.Unlock()
+		return nil, errChatFull
+	}
 	for h.fileBytes+size > chatFileBytes {
 		victim, room := h.oldestFileLocked()
 		if victim == nil {
