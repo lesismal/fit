@@ -112,4 +112,7 @@ fit, its CI green again (red since four pushes, the coverage floor at 97.6% agai
   plan's report says where fit stands and ranks the servers (bc894e5).
 
 The plan ran fit baf933e; the three fixes above came after it and touch none of the plan's paths (WebRTC, the
-Admin API's reconcile, the media chat).
+Admin API's reconcile, the media chat). So does fib 8f58a46, which fit requires from ddc402c: when an
+OnHeaderAsync hook resumed, a write from another goroutine could go into an asynchronous body filter ahead of
+what the held header had kept, and a Proxy-Wasm response filter behind the proxy saw about one response in forty
+start with a later piece of the body; no workload of the plan runs a Proxy-Wasm filter.

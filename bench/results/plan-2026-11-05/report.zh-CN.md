@@ -93,4 +93,6 @@ fit，CI 重新全绿（此前连续四次推送失败：覆盖率 97.6% 低于 
 - 为一致性检查、配置导入导出、控制台、存储、媒体 token、媒体页面和媒体认证补测试：覆盖率 97.6% → 98.2%。
 - `benchreport -plan` 和 `-scores`，即本报告的评分和排名（32bf4c4），以及规则 24：每份方案报告都要说明 fit 的位置并给各服务器排名（bc894e5）。
 
-本轮压测用的是 fit baf933e；上面三项修复在它之后，都不在方案覆盖的路径上（WebRTC、Admin API 的 reconcile、媒体聊天）。
+本轮压测用的是 fit baf933e；上面三项修复在它之后，都不在方案覆盖的路径上（WebRTC、Admin API 的 reconcile、媒体聊天）。fib 8f58a46
+（fit 自 ddc402c 起依赖它）同样如此：OnHeaderAsync 钩子恢复时，另一个 goroutine 的写入可能先于头部挂起期间保留的部分进入异步 body
+过滤器，代理后面的 Proxy-Wasm 响应过滤器约每 40 个响应就有一个以 body 后面的片段开头；方案中没有负载运行 Proxy-Wasm 过滤器。
