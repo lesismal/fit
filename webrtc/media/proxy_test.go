@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lesismal/fib/webrtc"
 	"github.com/lesismal/fib/webrtc/stun"
 
 	"github.com/lesismal/fit/observe"
@@ -115,6 +116,12 @@ func TestProxyPublishAndView(t *testing.T) {
 			t.Fatalf("DELETE again: %d", code)
 		}
 		p.v.waitEnded(t)
+		// Closed, by the media server's close_notify, which the relay
+		// carries past the DELETE's answer, rather than failed when ICE
+		// consent runs out.
+		if s := p.v.pc.ConnectionState(); s != webrtc.PeerConnectionStateClosed {
+			t.Fatalf("the viewer ended %s, not closed by the media server", s)
+		}
 	}
 	for _, p := range pairs {
 		if code := request(t, "DELETE", f.base+p.pub.location); code != http.StatusOK {

@@ -392,7 +392,15 @@ func (p *Proxy) Session(id string) *proxySession {
 	return p.sessions[id]
 }
 
-// End forgets the session id and closes its relays, for its DELETE.
+// endLinger is how long a session's relays outlive its DELETE. The media
+// server closes its PeerConnection as it answers, and the DTLS close_notify
+// that tells the peer at once comes through a relay, after the answer may
+// have: closed with the answer, the relay would drop it, and the peer would
+// end only when ICE consent ran out, 30 seconds on.
+const endLinger = time.Second
+
+// End forgets the session id, for its DELETE, and closes its relays
+// endLinger later.
 func (p *Proxy) End(id string) {
 	p.mu.Lock()
 	s := p.sessions[id]
@@ -401,9 +409,14 @@ func (p *Proxy) End(id string) {
 		relays = p.forgetLocked(s, endProxyDelete)
 	}
 	p.mu.Unlock()
-	for _, r := range relays {
-		r.close()
+	if len(relays) == 0 {
+		return
 	}
+	time.AfterFunc(endLinger, func() {
+		for _, r := range relays {
+			r.close()
+		}
+	})
 }
 
 // expire forgets s when nothing has been relayed for it since its timer
