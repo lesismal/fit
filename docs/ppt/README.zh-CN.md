@@ -23,9 +23,8 @@
 - [spec.md](spec.md)：页面规范，包括配色、字号和每一页的最终文案。
 - [src/gen.py](src/gen.py)：生成中文页 `page-01.svg` … `page-16.svg`。
 - [src/en_gen.py](src/en_gen.py)：用同一套版式生成英文页 `en-page-01.svg` … `en-page-16.svg`。
-- [screenshots/cn/contact-slide.png](screenshots/cn/contact-slide.png) 与
-  [screenshots/en/contact-slide.png](screenshots/en/contact-slide.png)：每份 16 页的总览图；
-  其余 PNG 是一页一张。
+- `screenshots/cn/` 与 `screenshots/en/`：渲染预览图，一页一张，另有 `contact-slide.png`
+  把每份 16 页汇成一张总览图。它们在本机生成，不纳入版本库。
 
 每一页先写成 SVG，再编译进该份演示的 Univer Slide Unit，最后导出 pptx。基准页的数字来自
 `bench/results/plan-2026-10-30`，其余来自[文档](../../README.md)本身。

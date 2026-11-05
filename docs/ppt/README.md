@@ -26,9 +26,9 @@ state of the milestones through 1.0, and three commands to a site over HTTPS.
 - [src/gen.py](src/gen.py): writes the Chinese pages, `page-01.svg` … `page-16.svg`.
 - [src/en_gen.py](src/en_gen.py): writes the English pages, `en-page-01.svg` … `en-page-16.svg`,
   through the same layout system.
-- [screenshots/cn/contact-slide.png](screenshots/cn/contact-slide.png) and
-  [screenshots/en/contact-slide.png](screenshots/en/contact-slide.png): all sixteen pages of each
-  deck in one image; the other PNGs are one file per page.
+- `screenshots/cn/` and `screenshots/en/`: rendered previews, one PNG per page, plus a
+  `contact-slide.png` that shows all sixteen pages of the deck in one image. They are generated
+  locally and are not committed.
 
 A page is authored as SVG and compiled into the deck's Univer Slide Unit, which is then exported
 to pptx. The numbers on the benchmark slide come from `bench/results/plan-2026-10-30`; the rest
