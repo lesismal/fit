@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/binary"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -101,5 +102,37 @@ func TestUsersPastTheBound(t *testing.T) {
 	}
 	if data, err := s.Read(); err != nil || string(data) != `{}` {
 		t.Errorf("the store after the refused write: %v %q", err, data)
+	}
+}
+
+// TestUnsealCostBounded: a file whose header asks for more Argon2id time,
+// memory or threads than MaxUnsealFactor times what fit writes is refused
+// before a key is derived, so that an import cannot make fit allocate up to
+// the 1 GiB a store's own file may ask for.
+func TestUnsealCostBounded(t *testing.T) {
+	file, err := Seal("pw", []byte(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := DefaultParams
+	for _, p := range []Params{
+		{Time: MaxUnsealFactor*d.Time + 1, MemoryKiB: d.MemoryKiB, Threads: d.Threads},
+		{Time: d.Time, MemoryKiB: MaxUnsealFactor*d.MemoryKiB + 8, Threads: d.Threads},
+		{Time: d.Time, MemoryKiB: 64 * d.MemoryKiB, Threads: MaxUnsealFactor*d.Threads + 1},
+	} {
+		f := slices.Clone(file)
+		b := f[len(magic):]
+		binary.BigEndian.PutUint32(b[2:], p.Time)
+		binary.BigEndian.PutUint32(b[6:], p.MemoryKiB)
+		b[10] = p.Threads
+		if _, _, err := Unseal(f, "pw"); err == nil || !strings.Contains(err.Error(), "more than") {
+			t.Errorf("%+v: %v", p, err)
+		}
+	}
+	// What fit writes, and up to the factor, still opens as far as the key.
+	f := slices.Clone(file)
+	binary.BigEndian.PutUint32(f[len(magic)+2:], MaxUnsealFactor*d.Time)
+	if _, _, err := Unseal(f, "pw"); !errors.Is(err, ErrOpen) {
+		t.Errorf("a file within the bound: %v", err)
 	}
 }

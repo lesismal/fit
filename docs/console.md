@@ -95,7 +95,9 @@ passwords changed from the pages, beside the config. A version 1 store, which se
 is still read, and is written as version 2 from then on. The key is derived from the password with
 Argon2id (time 3, 64 MiB, 4 threads) once, when fit starts; each write takes a new nonce, so writes
 cost no derivation. A write goes to a temporary file beside the store, made 0600, synced and renamed
-over it, so a crash leaves the old store or the new one, never half of one.
+over it, so a crash leaves the old store or the new one, never half of one. A file imported through
+the Admin API or the pages may ask for at most twice those settings (time 6, 128 MiB, 8 threads),
+and one is opened at a time; another import of a store file meanwhile gets `503`.
 
 **A store that does not open**, by a wrong password or a changed byte, stops fit from starting, and
 is not overwritten. Losing the password loses the store: keep a copy made with `fit store export`

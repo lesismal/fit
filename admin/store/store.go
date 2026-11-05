@@ -76,6 +76,13 @@ const (
 	maxMemoryKiB = 1 << 20 // 1 GiB
 )
 
+// MaxUnsealFactor bounds the Argon2id cost of a file Unseal opens, such as
+// an import sent to the Admin API: at most this many times DefaultParams'
+// time, memory and threads, as fit's own exports ask for DefaultParams. A
+// store's own file, which Open reads, may ask for up to maxTime and
+// maxMemoryKiB.
+const MaxUnsealFactor = 2
+
 // MaxBytes is the largest store opened.
 const MaxBytes = 64 << 20
 
@@ -302,7 +309,9 @@ func Seal(password string, data []byte, users []User) ([]byte, error) {
 }
 
 // Unseal opens file, a whole fitstore file, with password, and returns the
-// base config and the users it holds.
+// base config and the users it holds. A file that asks for more than
+// MaxUnsealFactor times DefaultParams' Argon2id cost is refused before any
+// key is derived: the file may come from anyone who can call the Admin API.
 func Unseal(file []byte, password string) ([]byte, []User, error) {
 	if password == "" {
 		return nil, nil, errors.New("store: the password is empty")
@@ -311,6 +320,14 @@ func Unseal(file []byte, password string) ([]byte, []User, error) {
 		return nil, nil, fmt.Errorf("store: the file is larger than %d bytes", MaxBytes)
 	}
 	s := &Store{path: "the file", password: password}
+	h, err := parseHeader(s.path, file)
+	if err != nil {
+		return nil, nil, err
+	}
+	if p, d := h.params, DefaultParams; p.Time > MaxUnsealFactor*d.Time || p.MemoryKiB > MaxUnsealFactor*d.MemoryKiB || p.Threads > MaxUnsealFactor*d.Threads {
+		return nil, nil, fmt.Errorf("store: the file asks for Argon2id time %d, %d KiB and %d threads, more than %d times what fit writes (%d, %d KiB, %d)",
+			p.Time, p.MemoryKiB, p.Threads, MaxUnsealFactor, d.Time, d.MemoryKiB, d.Threads)
+	}
 	data, err := s.open(file)
 	if err != nil {
 		return nil, nil, err

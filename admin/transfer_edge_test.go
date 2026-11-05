@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"encoding/binary"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,5 +99,40 @@ func TestImportMembersMissing(t *testing.T) {
 	}
 	if _, ok := cfg["listeners"]; !ok {
 		t.Error("the listeners were removed")
+	}
+}
+
+// TestImportStoreBounded: a store file whose header asks for a costly key
+// derivation is refused before deriving it, and a second store import while
+// one is being opened is refused 503, rather than both deriving at once.
+func TestImportStoreBounded(t *testing.T) {
+	f := start(t, doc("v1"), &config.Admin{})
+	sealed, err := store.Seal("pw", []byte(doc("v2")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(file []byte) (*http.Response, string) {
+		req, _ := http.NewRequest("POST", f.api+"/config/import?format=store", strings.NewReader(string(file)))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set(StorePasswordHeader, "pw")
+		return f.do(t, req)
+	}
+	costly := slices.Clone(sealed)
+	binary.BigEndian.PutUint32(costly[len("FITSTORE")+6:], store.MaxUnsealFactor*store.DefaultParams.MemoryKiB+8)
+	if resp, body := send(costly); resp.StatusCode != 400 || !strings.Contains(body, "more than") {
+		t.Errorf("a costly header: %d %s", resp.StatusCode, body)
+	}
+
+	unsealing <- struct{}{}
+	resp, body := send(sealed)
+	<-unsealing
+	if resp.StatusCode != 503 || resp.Header.Get("Retry-After") == "" || !strings.Contains(body, "being opened") {
+		t.Errorf("an import while another is opened: %d %s", resp.StatusCode, body)
+	}
+	if f.served(t) != "v1" {
+		t.Fatal("a refused import changed the config")
+	}
+	if resp, body := send(sealed); resp.StatusCode != 200 || f.served(t) != "v2" {
+		t.Errorf("an import after: %d %s", resp.StatusCode, body)
 	}
 }

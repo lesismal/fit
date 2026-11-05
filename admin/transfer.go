@@ -124,6 +124,9 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 // fitstore file opens with the password in Fit-Store-Password, or the
 // running store's when there is none; the console users it may hold are not
 // imported.
+// unsealing holds the one store file being opened for an import.
+var unsealing = make(chan struct{}, 1)
+
 func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("format")
 	members, err := queryMembers(r)
@@ -136,6 +139,18 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	if name == formatStore {
 		data, ok := s.readBody(w, r, "application/octet-stream")
 		if !ok {
+			return
+		}
+		// Deriving a file's key takes Argon2id's time and memory (up to
+		// store.MaxUnsealFactor times what fit writes): one import at a
+		// time in the process, from the Admin API and the consoles alike,
+		// and the others are refused rather than kept waiting.
+		select {
+		case unsealing <- struct{}{}:
+			defer func() { <-unsealing }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "another store file is being opened; try again")
 			return
 		}
 		password := r.Header.Get(StorePasswordHeader)
