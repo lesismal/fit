@@ -1,8 +1,11 @@
 package static
 
 import (
+	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/lesismal/fit/internal/dotfile"
 )
 
 // TestDotfiles checks that dotfiles and what lies in dot directories are
@@ -119,6 +122,59 @@ func TestDotfiles(t *testing.T) {
 	explicit := mustLoad(t, root, `, "dotfiles": "deny"`)
 	if got := get(explicit, "GET", "/.env", nil).Response; got.StatusCode != 404 {
 		t.Errorf("explicit deny: %d", got.StatusCode)
+	}
+}
+
+// TestDotfilesShortNames checks that, where files have 8.3 short names, a
+// dotfile's (.git as GIT~1) is answered 404 under deny, with try_files too,
+// as a dotfile is, and is served elsewhere, and under allow. The tree holds the short
+// names as names of their own, which on Windows stand for the aliases NTFS
+// would give .git and .htpasswd.
+func TestDotfilesShortNames(t *testing.T) {
+	root := tree(t, map[string]string{
+		"GIT~1/config":   "[core]",
+		"HTPASS~1":       "u:x",
+		"a/b.txt":        "b",
+		"spa/index.html": "spa",
+	})
+	s := mustLoad(t, root, "")
+	if s.hideShortNames != dotfile.ShortNames {
+		t.Fatalf("hideShortNames %v on %s", s.hideShortNames, goruntime.GOOS)
+	}
+	spa := mustLoad(t, root, `, "try_files": ["{path}", "/spa/index.html"]`)
+	if !dotfile.ShortNames {
+		// Elsewhere they are names as others are.
+		if got := get(s, "GET", "/GIT~1/config", nil).Response; got.StatusCode != 200 {
+			t.Errorf("GET /GIT~1/config off Windows: %d", got.StatusCode)
+		}
+		s = mustLoad(t, root, "")
+		spa = mustLoad(t, root, `, "try_files": ["{path}", "/spa/index.html"]`)
+		s.hideShortNames, spa.hideShortNames = true, true
+	}
+	for _, target := range []string{"/GIT~1/config", "/git~1/config", "/GIT~1./config", "/GIT~1%20/config", "/HTPASS~1", "/HTPASS~1::$DATA", "/GIT~1/"} {
+		got := get(s, "GET", target, nil).Response
+		if got.StatusCode != 404 || strings.Contains(string(got.Body), "[core]") || strings.Contains(string(got.Body), "u:x") {
+			t.Errorf("GET %s: %d %q, want 404", target, got.StatusCode, got.Body)
+		}
+		if got := get(spa, "GET", target, nil).Response; got.StatusCode != 404 {
+			t.Errorf("try_files %s: %d %q, want 404", target, got.StatusCode, got.Body)
+		}
+	}
+	if got := get(s, "GET", "/a/b.txt", nil).Response; got.StatusCode != 200 || string(got.Body) != "b" {
+		t.Errorf("GET /a/b.txt: %d %q", got.StatusCode, got.Body)
+	}
+	a := mustLoad(t, root, `, "dotfiles": "allow"`)
+	if a.hideShortNames {
+		t.Error("allow hides short names")
+	}
+	if got := get(a, "GET", "/GIT~1/config", nil).Response; got.StatusCode != 200 || string(got.Body) != "[core]" {
+		t.Errorf("allow GET /GIT~1/config: %d %q", got.StatusCode, got.Body)
+	}
+	if dotfile.ShortNames {
+		if _, err := load(t, `{"root": `+quote(root)+`, "try_files": ["{path}", "/GIT~1/config"]}`); err == nil ||
+			!strings.Contains(err.Error(), "8.3 short name") {
+			t.Errorf("try_files naming a short name: %v", err)
+		}
 	}
 }
 

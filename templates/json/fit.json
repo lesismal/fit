@@ -800,8 +800,9 @@
 
           // // Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env,
           // // run: deny answers a request for one 404, and try_files passes over it, but /.well-known/
-          // // under the root; allow runs them as other scripts. The path info after a script is not looked
-          // // at. deny when left out.
+          // // under the root; allow runs them as other scripts. On Windows deny also refuses a script with
+          // // a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. The
+          // // path info after a script is not looked at. deny when left out.
           // // one of: deny, allow; default "deny".
           // "dotfiles": "deny",
 
@@ -1343,8 +1344,9 @@
           // // Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do,
           // // are served: deny answers a request for one, or for anything under a dot directory, 404, as
           // // for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and
-          // // security.txt; allow serves them as other files. Listings leave them out either way. deny
-          // // when left out.
+          // // security.txt; allow serves them as other files. Listings leave them out either way. On
+          // // Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for
+          // // .git, which NTFS may give a dotfile. deny when left out.
           // // one of: deny, allow; default "deny".
           // "dotfiles": "deny",
 

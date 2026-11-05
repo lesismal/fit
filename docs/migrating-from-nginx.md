@@ -80,7 +80,8 @@ with the tables below.
 - **Dotfiles are not served.** The `static` and `fastcgi` handlers answer 404 for a path with a
   segment starting with a dot, as `/.git/config`, `/.env` or `/.htpasswd`, as
   `location ~ /\. { deny all; }` would, but for `/.well-known/`; `dotfiles: allow` serves them as
-  nginx does by default.
+  nginx does by default. On Windows they also answer 404 for a segment shaped as an 8.3 short
+  name, as `GIT~1`, which NTFS may give `.git`.
 - **Not converted**: Lua, `njs`, `map`, `geo`, `split_clients`, `mirror` (fit's proxy has a
   `mirror` of its own), `sub_filter`, mail proxying, and nginx's modules. WebAssembly plugins
   (`wasm`) and modules built in with `fit build` take the place of the extensions.

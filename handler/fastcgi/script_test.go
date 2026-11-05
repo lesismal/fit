@@ -11,6 +11,7 @@ import (
 	"net"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/dotfile"
 	"github.com/lesismal/fit/internal/fibtest"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/module"
@@ -821,6 +823,69 @@ func TestReplayable(t *testing.T) {
 		r.ContentLength = tc.length
 		if got := replayable(r); got != tc.want {
 			t.Errorf("%s %d: %v", tc.method, tc.length, got)
+		}
+	}
+}
+
+// TestDotfilesShortNames checks that, where scripts may have 8.3 short
+// names, a script under a dotfile's (/GIT~1/x.php for /.git/x.php) does not
+// run under deny, nor reaches the application, nor is taken by try_files,
+// and that dotfiles allow runs it. The tree holds the short name as a name
+// of its own, which on Windows stands for the alias NTFS would give .git.
+func TestDotfilesShortNames(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"index.php", "GIT~1/x.php"} {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, f), []byte("<?php"), 0o644)
+	}
+	app := app(t, "tcp", "127.0.0.1:0")
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	load := func(extra string) *FastCGI {
+		h, err := loadHandler(t, `{"address": "`+app.Addr().String()+`", "root": `+strconv.Quote(root)+extra+`}`, &module.Env{Engine: engine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(h.Cleanup)
+		return h
+	}
+	h := load("")
+	if h.hideShortNames != dotfile.ShortNames {
+		t.Fatalf("hideShortNames %v", h.hideShortNames)
+	}
+	h.hideShortNames = true // as on Windows
+	before := app.accepted.Load()
+	for _, target := range []string{"/GIT~1/x.php", "/git~1/x.php", "/GIT~1./x.php", "/GIT~1%20/x.php", "/a/HTPASS~1.PHP", "/GIT~1/x.php/info"} {
+		if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", target, nil)); rec.Response.StatusCode != 404 {
+			t.Errorf("GET %s: %d, want 404", target, rec.Response.StatusCode)
+		}
+	}
+	if app.accepted.Load() != before {
+		t.Error("a short name's request reached the application")
+	}
+	// The path info after a script is not looked at.
+	if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", "/index.php/GIT~1", nil)); rec.Response.StatusCode != 200 ||
+		rec.Response.Header.Get("X-Script") != "/index.php" {
+		t.Errorf("GET /index.php/GIT~1: %d %v", rec.Response.StatusCode, rec.Response.Header)
+	}
+	h.TryFiles = []string{"{path}", "/index.php"}
+	if s, _, ok := h.try("/GIT~1/x.php"); !ok || s != "/index.php" {
+		t.Errorf("try under deny: %q %v", s, ok)
+	}
+	if a := load(`, "dotfiles": "allow"`); a.hideShortNames {
+		t.Error("allow hides short names")
+	}
+	h.hideDotfiles, h.hideShortNames = false, false
+	if s, _, ok := h.try("/GIT~1/x.php"); !ok || s != "/GIT~1/x.php" {
+		t.Errorf("try under allow: %q %v", s, ok)
+	}
+	if dotfile.ShortNames {
+		if _, err := loadHandler(t, `{"address": "127.0.0.1:9000", "root": `+strconv.Quote(root)+`, "try_files": ["{path}", "/GIT~1/index.php"]}`, nil); err == nil ||
+			!strings.Contains(err.Error(), "8.3 short name") {
+			t.Errorf("try_files naming a short name: %v", err)
 		}
 	}
 }

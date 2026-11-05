@@ -69,6 +69,6 @@ fit validate -c fit.conf
 - **上限默认开启。** 连接数、请求头和请求体大小、待发送字节数以及每个 upstream 的超时都有安全的默认值；用 `limits` 和
   upstream 的字段修改。
 - **不提供点文件。** `static` 和 `fastcgi` 处理器对含有以点开头的段的路径（如 `/.git/config`、`/.env` 或 `/.htpasswd`）
-  返回 404，相当于 `location ~ /\. { deny all; }`，但 `/.well-known/` 除外；`dotfiles: allow` 会像 nginx 默认那样提供它们。
+  返回 404，相当于 `location ~ /\. { deny all; }`，但 `/.well-known/` 除外；`dotfiles: allow` 会像 nginx 默认那样提供它们。在 Windows 上，形如 8.3 短文件名的段（如 NTFS 可能给 `.git` 的 `GIT~1`）也返回 404。
 - **不转换**：Lua、`njs`、`map`、`geo`、`split_clients`、`mirror`（fit 的 proxy 有自己的 `mirror`）、`sub_filter`、
   邮件代理以及 nginx 的各种模块。WebAssembly 插件（`wasm`）和用 `fit build` 编入的模块取代这些扩展。

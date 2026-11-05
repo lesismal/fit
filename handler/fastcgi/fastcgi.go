@@ -71,7 +71,7 @@ type FastCGI struct {
 	SplitPath             []string          `json:"split_path,omitempty" default:"[\".php\"]" doc:"What ends a script's name in a path, the rest being PATH_INFO: \"/index.php/a/b\" runs /index.php with PATH_INFO /a/b. [\".php\"] when left out."`
 	Index                 string            `json:"index,omitempty" default:"\"index.php\"" doc:"The script a path ending in / runs; index.php when left out."`
 	TryFiles              []string          `json:"try_files,omitempty" doc:"Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; [\"{path}\", \"{path}/index.php\", \"/index.php\"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is."`
-	Dotfiles              string            `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. The path info after a script is not looked at. deny when left out."`
+	Dotfiles              string            `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. On Windows deny also refuses a script with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. The path info after a script is not looked at. deny when left out."`
 	Env                   map[string]string `json:"env,omitempty" doc:"More parameters for the application, set after fit's own."`
 	MaxConns              int               `json:"max_conns,omitempty" min:"0" default:"64" doc:"The most connections to the application, each carrying one request at a time. 64 when left out or 0."`
 	MaxIdleConns          int               `json:"max_idle_conns,omitempty" min:"0" default:"16" doc:"The most idle connections kept for later requests. 16 when left out or 0."`
@@ -88,6 +88,11 @@ type FastCGI struct {
 	stall time.Duration
 	// hideDotfiles is dotfiles deny.
 	hideDotfiles bool
+	// hideShortNames is dotfiles deny on Windows, where root, a Windows
+	// path, has the application's scripts on a volume that may give them 8.3
+	// short names, a dotfile's too (.git as GIT~1): scripts with a segment
+	// of that shape do not run either; see dotfile.HasShortName.
+	hideShortNames bool
 }
 
 // Provision checks the params and makes the connection pool.
@@ -111,6 +116,7 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 		h.Index = "index.php"
 	}
 	h.hideDotfiles = h.Dotfiles != dotfile.Allow
+	h.hideShortNames = h.hideDotfiles && dotfile.ShortNames
 	if h.hideDotfiles && strings.HasPrefix(h.Index, ".") {
 		return ctx.Errorf("index", "%q starts with a dot, which dotfiles deny hides; set dotfiles to allow to run it", h.Index)
 	}
@@ -118,8 +124,8 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
 		}
-		if script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x")); h.hideDotfiles && dotfile.Hidden(script) {
-			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a segment starting with a dot, which dotfiles deny hides; set dotfiles to allow to run it", t)
+		if script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x")); h.hides(script) {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a segment starting with a dot, or on Windows one shaped as an 8.3 short name, which dotfiles deny hides; set dotfiles to allow to run it", t)
 		}
 	}
 	or := func(v *int, d int) {
@@ -189,7 +195,7 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	x := &exchange{h: h, c: c}
 	if len(h.TryFiles) == 0 {
 		x.script, x.pathInfo = h.split(c.Request.URL.Path)
-		if h.hideDotfiles && dotfile.Hidden(x.script) {
+		if h.hides(x.script) {
 			x.answer(stdhttp.StatusNotFound)
 			return
 		}
@@ -208,6 +214,12 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	}, func() { x.answer(stdhttp.StatusServiceUnavailable) }) {
 		x.answer(stdhttp.StatusServiceUnavailable)
 	}
+}
+
+// hides reports whether the handler refuses to run script: a dotfile, or on
+// Windows what may be one's short name, under dotfiles deny.
+func (h *FastCGI) hides(script string) bool {
+	return h.hideDotfiles && dotfile.Hidden(script) || h.hideShortNames && dotfile.HasShortName(script)
 }
 
 // split splits a path into the script it names and its path info.
@@ -241,7 +253,7 @@ func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
 			candidate += "/"
 		}
 		s, i := h.split(candidate)
-		if h.hideDotfiles && dotfile.Hidden(s) {
+		if h.hides(s) {
 			continue
 		}
 		fi, err := os.Stat(filepath.Join(h.Root, filepath.FromSlash(path.Clean(s))))

@@ -1,7 +1,10 @@
 For PHP applications behind PHP-FPM, or any FastCGI application. `try_files` sends paths that are
 no script of their own to a front controller, as most PHP frameworks want. A script whose path has
 a segment that starts with a dot, as `/.git/x.php` or `/.env`, is not run but answered `404`, and
-try_files passes over it, but `/.well-known/`; `dotfiles: allow` runs it.
+try_files passes over it, but `/.well-known/`; `dotfiles: allow` runs it. On Windows, where NTFS
+also names `.git` `GIT~1`, a script with a segment shaped as an 8.3 short name (up to eight
+characters ending in `~` and digits, an extension of up to three) is refused the same way, one
+whose own name has that shape as well.
 
 ```json route
 {

@@ -79,17 +79,21 @@ type Static struct {
 	TryFiles      []string `json:"try_files,omitempty" doc:"Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then."`
 	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
-	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. deny when left out."`
+	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
 	CheckInterval config.Duration `json:"check_interval,omitempty" default:"\"1s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out."`
 
-	root          string
-	index         []string
-	hideDotfiles  bool
-	precompressed []encoding
-	cache         cache
-	stall         time.Duration
-	pool          *filepool.Pool
+	root         string
+	index        []string
+	hideDotfiles bool
+	// hideShortNames is dotfiles deny on Windows, where a dotfile is also
+	// reachable by its 8.3 short name (.git as GIT~1): paths with a segment
+	// of that shape are hidden too; see dotfile.HasShortName.
+	hideShortNames bool
+	precompressed  []encoding
+	cache          cache
+	stall          time.Duration
+	pool           *filepool.Pool
 }
 
 // Provision checks the root and the index names.
@@ -111,6 +115,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 		s.index = []string{"index.html"}
 	}
 	s.hideDotfiles = s.Dotfiles != dotfile.Allow
+	s.hideShortNames = s.hideDotfiles && dotfile.ShortNames
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)
@@ -126,8 +131,8 @@ func (s *Static) Provision(ctx *module.Context) error {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
 		}
-		if s.hideDotfiles && dotfile.Hidden(strings.ReplaceAll(t, "{path}", "/x")) {
-			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a path with a segment starting with a dot, which dotfiles deny hides; set dotfiles to allow to serve it", t)
+		if s.check(strings.ReplaceAll(t, "{path}", "/x")) == stdhttp.StatusNotFound {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a path with a segment starting with a dot, or on Windows one shaped as an 8.3 short name, which dotfiles deny hides; set dotfiles to allow to serve it", t)
 		}
 	}
 	if s.StripPrefix != "" && !strings.HasPrefix(s.StripPrefix, "/") {
@@ -380,13 +385,14 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, q *que
 // look at it, or 0 when it may be served: 400 for one that could name a file
 // outside the root, or a different file on some systems, a ".." segment, a
 // NUL or a backslash, which Windows takes as a separator; and 404 for a
-// dotfile the handler hides.
+// dotfile the handler hides, or on Windows for what may be a dotfile's 8.3
+// short name.
 func (s *Static) check(name string) int {
 	unsafe, hidden := dotfile.Scan(name)
 	switch {
 	case unsafe:
 		return stdhttp.StatusBadRequest
-	case hidden && s.hideDotfiles:
+	case hidden && s.hideDotfiles, s.hideShortNames && dotfile.HasShortName(name):
 		return stdhttp.StatusNotFound
 	}
 	return 0
