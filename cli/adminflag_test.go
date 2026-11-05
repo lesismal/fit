@@ -70,6 +70,9 @@ func TestServeAdminFlag(t *testing.T) {
 	if s := startServe(t, "-c", cfg, "-timeout", "1m"); s.stop(t) != 2 || !strings.Contains(s.err.String(), "needs -admin") {
 		t.Errorf("-timeout without -admin: %q", s.err.String())
 	}
+	if s := startServe(t, "-admin", "-c", cfg, "-timeout", "0s"); s.stop(t) != 2 || s.err.String() != "fit run: -timeout must be more than 0\n" {
+		t.Errorf("-timeout 0: %q", s.err.String())
+	}
 
 	s := startServe(t, "-admin", "-c", cfg, "-watch-certs=false")
 	out := s.out.waitFor(t, "console on ", 1)

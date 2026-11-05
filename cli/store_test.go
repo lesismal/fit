@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -169,4 +170,37 @@ func post(t *testing.T, url, body string) (int, string) {
 	defer resp.Body.Close()
 	got, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(got)
+}
+
+// TestServeStoreMergeUnwritable: a store merged onto the bootstrap file at
+// a restart is written back before fit serves; a store whose directory
+// cannot be written stops fit from starting.
+func TestServeStoreMergeUnwritable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a directory its owner cannot write to")
+	}
+	dir := t.TempDir()
+	stDir := filepath.Join(dir, "st")
+	if err := os.Mkdir(stDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, path := filepath.Join(dir, "fit.json"), filepath.Join(stDir, "fit.store")
+	st, err := store.Create(path, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write([]byte(`{"routes": [{"handler": {"module": "respond", "params": {"body": "stored"}}}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, cfg, `{"admin": {"address": "127.0.0.1:0", "store": {"path": `+js(path)+`, "password": "s3cret"}},
+"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+"routes": [{"handler": {"module": "respond", "params": {"body": "file"}}}]}`)
+	if err := os.Chmod(stDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stDir, 0o700) })
+	s := startServe(t, "-c", cfg, "-watch-certs=false")
+	if code := s.stop(t); code != 1 || !strings.Contains(s.err.String(), "store: open ") || strings.Contains(s.out.String(), "merged onto") {
+		t.Errorf("an unwritable store: %d %q %q", code, s.out.String(), s.err.String())
+	}
 }
