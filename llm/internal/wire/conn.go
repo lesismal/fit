@@ -5,16 +5,19 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	fib "github.com/lesismal/fib"
+	fibtls "github.com/lesismal/fib/tls"
 	"github.com/lesismal/fib/websocket"
 )
 
@@ -93,6 +96,13 @@ type ConnConfig struct {
 	// （≤ 0：DefaultMaxPending、DefaultMaxPendingPerIP）。任何能连到监听方的人都能打开这类连接；超出的连接在打开时即被关闭，
 	// 使它们无法占满 MaxConns 留给知道密码的对端的位置。
 	MaxPending, MaxPendingPerIP int
+	// TLS, on a listener, is the configuration it takes links over TLS (wss://) with, nil for plain ws://; on a
+	// dialer, the one a wss:// URL is dialed with, which must check the listener's certificate (a pin, or the
+	// authorities with the name) and must not resume a session, which would skip the check. The handshake runs
+	// inside TLS either way.
+	// TLS 在监听方是以 TLS（wss://）接受连接所用的配置，nil 表示普通 ws://；在拨号方是拨号 wss:// 地址所用的配置，
+	// 它必须校验监听方的证书（固定指纹，或证书颁发机构与名称），且不得恢复会话（恢复会跳过校验）。两种情况下握手都在 TLS 之内进行。
+	TLS *tls.Config
 	// Accept, if set, vets each new connection on the listener before the handshake; an error closes it with
 	// ErrRefused at the dialer (e.g. while shutting down).
 	// Accept 如已设置，在握手之前审查监听方的每条新连接；返回错误则关闭连接，拨号方得到 ErrRefused（例如正在下线时）。
@@ -433,11 +443,20 @@ func NewHandler(cfg ConnConfig) Listener {
 	wsCfg.CheckOrigin = func(r *http.Request) bool { return r.URL.Path == Path }
 	wsCfg.HTTP.MaxHeaderBytes = 16 << 10
 	wsCfg.HTTP.ReadHeaderTimeout = HandshakeTimeout
-	s.tcp = &tcpConns{Handler: websocket.NewHandlerWithConfig(wsCfg, websocket.HandlerFuncs{
+	var h fib.Handler = websocket.NewHandlerWithConfig(wsCfg, websocket.HandlerFuncs{
 		Open:    s.open,
 		Message: s.message,
 		Close:   s.close,
-	}), maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
+	})
+	if cfg.TLS != nil {
+		// fib's TLS: the handshake takes no worker while it waits, and is
+		// bounded by its own timeout; the connection counts as pending
+		// from its TCP connect.
+		th := fibtls.NewServer(cfg.TLS, h)
+		th.HandshakeTimeout = HandshakeTimeout
+		h = th
+	}
+	s.tcp = &tcpConns{Handler: h, maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
 		pending: map[*fib.Connection]netip.Addr{}, pendingIP: map[netip.Addr]int{}}
 	if s.tcp.maxPending <= 0 {
 		s.tcp.maxPending = DefaultMaxPending
@@ -592,12 +611,16 @@ type dialResult struct {
 	err  error
 }
 
-// Dial connects to a ws:// URL and completes the authentication handshake. ctx bounds the whole dial.
-// Dial 连接 ws:// 地址并完成认证握手。ctx 限定整个拨号过程。
+// Dial connects to a ws:// or wss:// URL and completes the authentication handshake. ctx bounds the whole dial. A
+// wss:// URL needs cfg.TLS.
+// Dial 连接 ws:// 或 wss:// 地址并完成认证握手。ctx 限定整个拨号过程。wss:// 地址需要 cfg.TLS。
 func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 	engine := cfg.Engine
 	if engine == nil {
 		return nil, errors.New("wire: no engine to dial on")
+	}
+	if strings.HasPrefix(url, "wss://") && cfg.TLS == nil {
+		return nil, errors.New("wire: a wss:// URL needs a TLS configuration that checks the listener's certificate")
 	}
 	timeout := HandshakeTimeout
 	if dl, ok := ctx.Deadline(); ok {
@@ -606,6 +629,7 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 	wsCfg := websocket.DefaultDialerConfig()
 	wsCfg.HandshakeTimeout = timeout
 	wsCfg.MaxMessageBytes = int64(cfg.maxFrame())
+	wsCfg.TLSConfig = cfg.TLS
 	// The fib connection under the link, so that a dead or slow peer's
 	// socket can be dropped without the close handshake.
 	var tcp atomic.Pointer[fib.Connection]

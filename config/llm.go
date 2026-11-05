@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"encoding/hex"
 	"net"
 	"net/url"
@@ -8,13 +9,16 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lesismal/fit/internal/certpin"
 )
 
 // The LLM feature's roles link over a mesh of WebSocket connections: each role may
 // listen for links and dial any number of peers, which authenticate with a
 // password (HMAC challenge-response, both ways; the password never crosses
-// the wire) that a listener may set per role. What their pages change is
-// written back into their members here.
+// the wire) that a listener may set per role. Off loopback the links go over
+// TLS, the dialer checking the listener's certificate by a pin or a CA. What
+// their pages change is written back into their members here.
 // See docs/llm.md.
 
 // The bounds of the LLM feature's members.
@@ -61,16 +65,27 @@ type LLMListen struct {
 	NodePassword  string `json:"node_password,omitempty" doc:"The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out."`
 	ProxyPassword string `json:"proxy_password,omitempty" doc:"The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out."`
 	HubPassword   string `json:"hub_password,omitempty" doc:"The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out."`
+	CertFile      string `json:"cert_file,omitempty" doc:"A PEM file with the certificate the listener presents, followed by any intermediates; with key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A listener on an address other than a loopback one needs TLS: this, or self_signed."`
+	KeyFile       string `json:"key_file,omitempty" doc:"A PEM file with the private key of cert_file."`
+	SelfSigned    bool   `json:"self_signed,omitempty" doc:"Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint, which peers set as their pin. For a listener without cert_file."`
+	Cert          string `json:"cert,omitempty" doc:"The PEM certificate self_signed made; with key. Written by the role; delete both for a new one, which every peer must pin again."`
+	Key           string `json:"key,omitempty" doc:"The PEM private key of cert."`
 
 	At Value `json:"-" fit:"self"`
 }
 
+// TLS reports whether the listener takes links over TLS.
+func (l *LLMListen) TLS() bool { return l.CertFile != "" || l.Cert != "" || l.SelfSigned }
+
 // LLMPeer is a peer a role dials and keeps linked to, redialing with
 // backoff whenever the link is lost.
 type LLMPeer struct {
-	Address  string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
-	Password string `json:"password" fit:"required" doc:"The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role."`
-	Role     string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
+	Address    string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
+	Password   string `json:"password" fit:"required" doc:"The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role."`
+	Role       string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
+	Pin        string `json:"pin,omitempty" doc:"The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and only to a listener with exactly that certificate. A peer at an address other than a loopback one needs pin or ca_file."`
+	CAFile     string `json:"ca_file,omitempty" doc:"A PEM file with the certificates of the authorities the peer listener's certificate must chain to: the link is made over TLS (wss://), and the certificate must name server_name, or the address's host. Or pin, one of the two."`
+	ServerName string `json:"server_name,omitempty" doc:"The name the peer listener's certificate must have with ca_file, and the TLS server name sent; the address's host when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -378,7 +393,10 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 	if l := listen; l != nil {
 		if _, msg := checkAddress(l.Address); msg != "" {
 			add(l.At.Field("address"), "%s", msg)
+		} else if host, _, _ := net.SplitHostPort(l.Address); !isLoopback(host) && !l.TLS() {
+			add(l.At.Field("address"), "%q is not a loopback address: set cert_file and key_file, or self_signed, so that links are taken over TLS (wss://) and peers can check whose listener they reach", l.Address)
 		}
+		checkLLMListenTLS(l, add)
 		// A role's own password is only for a role the listener links with.
 		accept := LLMPeerRoles(role)
 		var fields []string
@@ -413,6 +431,7 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 		if !slices.Contains(accept, p.Role) {
 			add(pat.Field("role"), "a %s links with %s, not %q", role, strings.Join(accept, " and "), p.Role)
 		}
+		checkLLMPeerTLS(p, pat, host, add)
 	}
 	if l := limits; l != nil {
 		for _, d := range []struct {
@@ -425,6 +444,43 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 				add(l.At.Field(d.name), "%s is too short: at least %s", d.v, d.min)
 			}
 		}
+	}
+}
+
+// checkLLMListenTLS checks the certificate of a listener.
+func checkLLMListenTLS(l *LLMListen, add func(Value, string, ...any)) {
+	if (l.CertFile == "") != (l.KeyFile == "") {
+		add(l.At, "cert_file and key_file go together")
+	}
+	if (l.Cert == "") != (l.Key == "") {
+		add(l.At, "cert and key go together")
+	}
+	if l.CertFile != "" && (l.SelfSigned || l.Cert != "") {
+		add(l.At.Field("cert_file"), "cert_file, or self_signed with its cert and key: one of the two")
+	}
+	if l.Cert != "" && l.Key != "" {
+		if _, err := tls.X509KeyPair([]byte(l.Cert), []byte(l.Key)); err != nil {
+			add(l.At.Field("cert"), "the certificate and key do not load: %v", err)
+		}
+	}
+}
+
+// checkLLMPeerTLS checks how a peer's listener is verified: a peer off
+// loopback is dialed over TLS, its certificate checked by pin or ca_file.
+func checkLLMPeerTLS(p LLMPeer, at Value, host string, add func(Value, string, ...any)) {
+	if p.Pin != "" {
+		if _, err := certpin.Parse(p.Pin); err != nil {
+			add(at.Field("pin"), "%v", err)
+		}
+	}
+	if p.Pin != "" && p.CAFile != "" {
+		add(at.Field("pin"), "pin or ca_file, one of the two")
+	}
+	if p.ServerName != "" && p.CAFile == "" {
+		add(at.Field("server_name"), "server_name goes with ca_file")
+	}
+	if host != "" && !isLoopback(host) && p.Pin == "" && p.CAFile == "" {
+		add(at.Field("address"), "%q is not a loopback address: set pin to the fingerprint of the peer listener's certificate, as its pages show it, or ca_file, so that the link is made over TLS (wss://) to that listener alone", p.Address)
 	}
 }
 

@@ -2441,6 +2441,31 @@ upstreams:
       # # string.
       # hub_password: ""
 
+      # # A PEM file with the certificate the listener presents, followed by any intermediates; with
+      # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # string.
+      # cert_file: "/etc/fit/example.com.pem"
+
+      # # A PEM file with the private key of cert_file.
+      # # string.
+      # key_file: "/etc/fit/example.com.key"
+
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
+      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
+      # # which peers set as their pin. For a listener without cert_file.
+      # # boolean.
+      # self_signed: true
+
+      # # The PEM certificate self_signed made; with key. Written by the role; delete both for a new
+      # # one, which every peer must pin again.
+      # # string.
+      # cert: ""
+
+      # # The PEM private key of cert.
+      # # string.
+      # key: ""
+
     # # The nodes and proxies the hub dials. Its pages change them.
     # # list of object.
     # peers:
@@ -2459,6 +2484,24 @@ upstreams:
         # # dialing role's own.
         # # one of: hub, node, proxy; required.
         # role: "hub"
+
+        # # The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits
+        # # (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and
+        # # only to a listener with exactly that certificate. A peer at an address other than a loopback
+        # # one needs pin or ca_file.
+        # # string.
+        # pin: ""
+
+        # # A PEM file with the certificates of the authorities the peer listener's certificate must
+        # # chain to: the link is made over TLS (wss://), and the certificate must name server_name, or
+        # # the address's host. Or pin, one of the two.
+        # # string.
+        # ca_file: "/etc/fit/ca.pem"
+
+        # # The name the peer listener's certificate must have with ca_file, and the TLS server name
+        # # sent; the address's host when left out.
+        # # string.
+        # server_name: ""
 
     # # Bounds on the hub's links; the defaults when left out.
     # # object.
@@ -2598,6 +2641,31 @@ upstreams:
       # # string.
       # hub_password: ""
 
+      # # A PEM file with the certificate the listener presents, followed by any intermediates; with
+      # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # string.
+      # cert_file: "/etc/fit/example.com.pem"
+
+      # # A PEM file with the private key of cert_file.
+      # # string.
+      # key_file: "/etc/fit/example.com.key"
+
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
+      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
+      # # which peers set as their pin. For a listener without cert_file.
+      # # boolean.
+      # self_signed: true
+
+      # # The PEM certificate self_signed made; with key. Written by the role; delete both for a new
+      # # one, which every peer must pin again.
+      # # string.
+      # cert: ""
+
+      # # The PEM private key of cert.
+      # # string.
+      # key: ""
+
     # # The hubs and proxies the node dials. Its pages change them.
     # # list of object.
     # peers:
@@ -2616,6 +2684,24 @@ upstreams:
         # # dialing role's own.
         # # one of: hub, node, proxy; required.
         # role: "hub"
+
+        # # The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits
+        # # (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and
+        # # only to a listener with exactly that certificate. A peer at an address other than a loopback
+        # # one needs pin or ca_file.
+        # # string.
+        # pin: ""
+
+        # # A PEM file with the certificates of the authorities the peer listener's certificate must
+        # # chain to: the link is made over TLS (wss://), and the certificate must name server_name, or
+        # # the address's host. Or pin, one of the two.
+        # # string.
+        # ca_file: "/etc/fit/ca.pem"
+
+        # # The name the peer listener's certificate must have with ca_file, and the TLS server name
+        # # sent; the address's host when left out.
+        # # string.
+        # server_name: ""
 
     # # Bounds on the node's links; the defaults when left out.
     # # object.
@@ -2860,6 +2946,31 @@ upstreams:
       # # string.
       # hub_password: ""
 
+      # # A PEM file with the certificate the listener presents, followed by any intermediates; with
+      # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # string.
+      # cert_file: "/etc/fit/example.com.pem"
+
+      # # A PEM file with the private key of cert_file.
+      # # string.
+      # key_file: "/etc/fit/example.com.key"
+
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
+      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
+      # # which peers set as their pin. For a listener without cert_file.
+      # # boolean.
+      # self_signed: true
+
+      # # The PEM certificate self_signed made; with key. Written by the role; delete both for a new
+      # # one, which every peer must pin again.
+      # # string.
+      # cert: ""
+
+      # # The PEM private key of cert.
+      # # string.
+      # key: ""
+
     # # The hubs and nodes the proxy dials. Its pages change them.
     # # list of object.
     # peers:
@@ -2878,6 +2989,24 @@ upstreams:
         # # dialing role's own.
         # # one of: hub, node, proxy; required.
         # role: "hub"
+
+        # # The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits
+        # # (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and
+        # # only to a listener with exactly that certificate. A peer at an address other than a loopback
+        # # one needs pin or ca_file.
+        # # string.
+        # pin: ""
+
+        # # A PEM file with the certificates of the authorities the peer listener's certificate must
+        # # chain to: the link is made over TLS (wss://), and the certificate must name server_name, or
+        # # the address's host. Or pin, one of the two.
+        # # string.
+        # ca_file: "/etc/fit/ca.pem"
+
+        # # The name the peer listener's certificate must have with ca_file, and the TLS server name
+        # # sent; the address's host when left out.
+        # # string.
+        # server_name: ""
 
     # # Bounds on the proxy's links; the defaults when left out.
     # # object.

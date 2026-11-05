@@ -8,8 +8,9 @@ import (
 func TestLLMMembers(t *testing.T) {
 	const hash = `"$2a$10$abcdefghijklmnopqrstuuK3o5D2wC6Qn7oW7v3yTzR3z0e6Gm9Ka"`
 	good := `{"llm": {
-		"hub": {"listen": {"address": ":9200", "password": "p"}, "max_nodes": 10},
-		"node": {"id": "node-1", "name": "gpu", "peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub"}],
+		"hub": {"listen": {"address": ":9200", "password": "p", "self_signed": true}, "max_nodes": 10},
+		"node": {"id": "node-1", "name": "gpu", "peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub", "pin": "` + strings.Repeat("AB:", 31) + `AB"},
+				{"address": "hub.example.net:9200", "password": "p", "role": "proxy", "ca_file": "/etc/fit/ca.pem", "server_name": "hub.example.net"}],
 			"models": [{"name": "m", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "max_inflight": 4},
 				{"name": "m", "api": "anthropic", "base_url": "https://api.example.com/v1"},
 				{"name": "m", "api": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta"},
@@ -18,7 +19,8 @@ func TestLLMMembers(t *testing.T) {
 				{"name": "z", "api": "azure_openai", "base_url": "https://r.openai.azure.com", "api_version": "2024-10-21"}],
 			"settings": {"allow_hub_manage": true, "gpu_sudo": false, "refresh_interval": "10s", "job_timeout": "2h"},
 			"proxy": {"timeout": "10m", "max_inflight": 8}},
-		"proxy": {"listen": {"address": ":9201", "hub_password": "h", "node_password": "n"}, "api": {"address": "127.0.0.1:9300"}, "console": {"address": "127.0.0.1:9301", "users": [{"username": "a", "password_hash": ` + hash + `}]},
+		"proxy": {"listen": {"address": ":9201", "hub_password": "h", "node_password": "n", "cert_file": "/etc/fit/p.pem", "key_file": "/etc/fit/p.key"},
+			"peers": [{"address": "127.0.0.1:9200", "password": "p", "role": "hub"}, {"address": "localhost:9202", "password": "p", "role": "node"}], "api": {"address": "127.0.0.1:9300"}, "console": {"address": "127.0.0.1:9301", "users": [{"username": "a", "password_hash": ` + hash + `}]},
 			"api_keys": [{"id": "0123456789abcdef", "name": "k", "prefix": "ah-xxxxxxx", "hash": "` + strings.Repeat("a", 64) + `"}]}}}`
 	c, err := Load([]byte(good))
 	if err != nil {
@@ -48,6 +50,17 @@ func TestLLMMembers(t *testing.T) {
 		{`{"llm": {"proxy": {"api_keys": [{"id": "x", "name": "k", "hash": "y"}]}}}`, "16 hex digits"},
 		{`{"llm": {"proxy": {"api_keys": [{"id": "0123456789abcdef", "name": "k", "hash": "y"}]}}}`, "64 hex digits"},
 		{`{"llm": {"node": {"name": " x"}}}`, "spaces around it"},
+		// Off loopback, links go over TLS, the listener's certificate checked.
+		{`{"llm": {"hub": {"listen": {"address": "0.0.0.0:9200", "password": "p"}}}}`, "set cert_file and key_file, or self_signed"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p"}}}}`, "is not a loopback address"},
+		{`{"llm": {"node": {"peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub"}]}}}`, "set pin to the fingerprint"},
+		{`{"llm": {"node": {"peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub", "pin": "abcd"}]}}}`, "bad certificate pin"},
+		{`{"llm": {"node": {"peers": [{"address": "10.0.0.1:9200", "password": "p", "role": "hub", "pin": "` + strings.Repeat("a", 64) + `", "ca_file": "c"}]}}}`, "pin or ca_file, one of the two"},
+		{`{"llm": {"node": {"peers": [{"address": "127.0.0.1:9200", "password": "p", "role": "hub", "server_name": "h"}]}}}`, "server_name goes with ca_file"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "cert_file": "c"}}}}`, "cert_file and key_file go together"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "cert_file": "c", "key_file": "k", "self_signed": true}}}}`, "one of the two"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "self_signed": true, "cert": "x"}}}}`, "cert and key go together"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "self_signed": true, "cert": "x", "key": "y"}}}}`, "do not load"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {

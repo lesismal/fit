@@ -34,6 +34,9 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		if len(m.credentials(cfg)) == 0 {
 			return BadRequest("a listener needs a password for a role it links with")
 		}
+		if host, _, _ := net.SplitHostPort(addr); !Loopback(host) && !cfg.TLS() {
+			return BadRequest("%s is not a loopback address: set cert_file and key_file, or self_signed, so that links are taken over TLS and peers can check whose listener they reach", addr)
+		}
 	}
 	m.lmu.Lock()
 	defer m.lmu.Unlock()
@@ -46,7 +49,7 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		return nil
 	}
 	m.stopListenerLocked()
-	m.lcfg, m.lerr, m.lopts = cfg, "", opts
+	m.lcfg, m.lerr, m.lopts, m.lfp = cfg, "", opts, ""
 	if cfg.Addr == "" {
 		m.log(slog.LevelInfo, "mesh: not listening")
 		return nil
@@ -55,18 +58,30 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		m.lerr = "no engine to listen on"
 		return Errorf(model.CodeInternal, "%s", m.lerr)
 	}
+	tc, fp, err := serverTLS(cfg)
+	if err != nil {
+		m.lerr = err.Error()
+		return err
+	}
 	creds := m.credentials(cfg)
-	l := wire.NewHandler(m.connConfig(nil, creds))
+	wc := m.connConfig(nil, creds)
+	wc.TLS = tc
+	l := wire.NewHandler(wc)
 	i, err := m.opts.Engine.AddBinding(fib.Binding{Addr: cfg.Addr, Handler: l})
 	if err != nil {
 		m.lerr = "listen " + cfg.Addr + ": " + err.Error()
 		return Errorf(model.CodeInternal, "%s", m.lerr)
 	}
-	m.binding, m.lst = i, &l
+	m.binding, m.lst, m.lfp = i, &l, fp
 	if addrs, err := m.opts.Engine.BindingAddrs(i); err == nil && len(addrs) > 0 {
 		m.laddr = addrs[0].String()
 	}
-	m.log(slog.LevelInfo, "mesh listening", "addr", m.laddr, "path", WSPath)
+	if tc != nil {
+		m.log(slog.LevelInfo, "mesh listening over TLS (wss://); peers pin its certificate by this fingerprint, or check it with ca_file",
+			"addr", m.laddr, "path", WSPath, "fingerprint", fp)
+	} else {
+		m.log(slog.LevelInfo, "mesh listening", "addr", m.laddr, "path", WSPath)
+	}
 	for _, c := range creds {
 		if len(c.Roles) > 1 {
 			m.log(slog.LevelWarn, "mesh: the listener takes one password from several roles: whoever holds it may link as any of them; give each role a password of its own",
@@ -128,12 +143,13 @@ func (m *Mesh) ListenAddr() string {
 	return m.laddr
 }
 
-// Listen returns the listener as the pages show it: no password, the last
-// failure to listen.
+// Listen returns the listener as the pages show it: no password and no key,
+// the fingerprint of its certificate, the last failure to listen.
 func (m *Mesh) Listen() model.ListenState {
 	m.lmu.Lock()
 	defer m.lmu.Unlock()
-	return model.ListenState{Addr: m.lcfg.Addr, HasPassword: m.lcfg.HasPassword(), Error: m.lerr}
+	return model.ListenState{Addr: m.lcfg.Addr, HasPassword: m.lcfg.HasPassword(), Error: m.lerr,
+		TLS: m.lcfg.TLS(), CertFile: m.lcfg.CertFile, KeyFile: m.lcfg.KeyFile, SelfSigned: m.lcfg.SelfSigned, Fingerprint: m.lfp}
 }
 
 // ValidateAddr checks and normalizes a host:port address; the host may be

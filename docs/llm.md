@@ -64,12 +64,20 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | `node_password` | string | `password` | The password nodes prove to link as a node, on a hub's or a proxy's listener. |
 | `proxy_password` | string | `password` | The password proxies prove to link as a proxy, on a hub's or a node's listener. |
 | `hub_password` | string | `password` | The password hubs prove to link as a hub, on a node's or a proxy's listener. |
+| `cert_file`, `key_file` | string | none | PEM files with the certificate the listener presents, any intermediates after it, and its key. With both, links are taken over TLS (`wss://`), and peers check the certificate with their `ca_file` or `pin`. Read when the listener starts. |
+| `self_signed` | bool | false | Take links over TLS with a self-signed certificate the role makes, for a listener without `cert_file`. The role writes it into `cert` and `key`, so that it outlives a restart, and shows its SHA-256 fingerprint on its links page and in its log: peers set that as their `pin`. |
+| `cert`, `key` | string | none | The PEM certificate and key `self_signed` made, written by the role. Delete both for a new certificate, which every peer must pin again. |
 
 The password a dialer proves decides the role it may say hello as (see
 [Hello and roles](#hello-and-roles)). A listener needs `password`, or the password of at least one
 role it links with; a role with neither is not taken. A role's own password on a listener of a role
 that does not link with it (`hub_password` on a hub's) is an error. A listener that takes one
 password from more than one role, as `password` alone does, logs a warning when it starts.
+
+A listener on an address other than a loopback one (`127.0.0.0/8`, `::1`, `localhost`), an empty
+host among them, needs TLS: `cert_file` and `key_file`, or `self_signed`. Without it the config is
+refused, and the error says what to add. See [Transport and authentication](#transport-and-authentication)
+for why.
 
 `peers[]`:
 
@@ -78,6 +86,13 @@ password from more than one role, as `password` alone does, logs a warning when 
 | `address` | string | required | The peer's host and port, as its `listen.address` says. The host is required and the port is a number. Each address appears once. |
 | `password` | string | required | The password of the dialing role on the peer's listener: a node dials with the peer's `listen.node_password`, a proxy with its `listen.proxy_password`, a hub with its `listen.hub_password`, or with its `listen.password` when it has none for the role. |
 | `role` | string | required | The role the peer must announce: `hub`, `node` or `proxy`, never the dialing role's own. A hub dials nodes and proxies, a node dials hubs and proxies, a proxy dials hubs and nodes. |
+| `pin` | string | none | The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits, colons and case ignored, as its links page and its log show it. The link goes over TLS (`wss://`), and only to a listener with exactly that certificate; its name and dates are not checked. |
+| `ca_file` | string | none | Or a PEM file with the certificates of the authorities the peer's certificate must chain to: the link goes over TLS, and the certificate must name `server_name`, or the address's host. One of `pin` and `ca_file`. Read when the peer is set. |
+| `server_name` | string | the address's host | With `ca_file`, the name the certificate must have, and the TLS server name sent. |
+
+A peer at an address other than a loopback one needs `pin` or `ca_file`; without either the config
+is refused, and the error says what to add. A peer on loopback without them is dialed over plain
+`ws://`; with them, over `wss://`, so its listener needs TLS too.
 
 `limits`:
 
@@ -187,7 +202,8 @@ The fields every role has, and:
         "address": "127.0.0.1:9200",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"},
+      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
+                 "self_signed": true},
       "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
                  "retry_interval": "5s", "stream_idle": "2m"},
       "max_nodes": 1024
@@ -208,7 +224,8 @@ The fields every role has, and:
         "address": "127.0.0.1:9100",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
+                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "models": [
         {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
@@ -236,7 +253,8 @@ The fields every role has, and:
         "address": "127.0.0.1:9300",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
+                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
               "first_byte_timeout": "5m", "timeout": "30m"},
       "api_keys": [
@@ -249,26 +267,30 @@ The fields every role has, and:
 ```
 
 The `password_hash` is made with `fit hash-password`; the one above is an example only. API keys
-are made on the proxy's pages, not written by hand.
+are made on the proxy's pages, not written by hand. The `pin` is the hub's fingerprint, as the hub's
+links page and its log show it once it has made its certificate; the one above is an example only.
 
 ### Three places
 
 A hub on a public server at hub.example.net, a node on a GPU machine in a lab, and a proxy on a
 machine of an office LAN, at 192.168.1.10. The node and the proxy dial the hub; neither needs a
 listener of its own, so neither needs a public address. The proxy serves the agents of every
-machine of the LAN, over TLS, with its API keys.
+machine of the LAN, over TLS, with its API keys. The hub takes links over TLS with a certificate
+it makes itself; the node and the proxy pin it by the fingerprint its links page shows.
 
 The server:
 
 ```json
-{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
+                            "self_signed": true}}}}
 ```
 
 The GPU machine:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
+             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
@@ -277,7 +299,8 @@ The LAN machine:
 
 ```json
 {"llm": {"proxy": {
-  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
+             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
@@ -286,9 +309,9 @@ Agents on the LAN use `https://192.168.1.10:9301` as their base URL. A proxy tha
 agents of its own machine listens on loopback, as `127.0.0.1:9301`, and needs no certificate.
 
 Each machine adds a `console` to manage its role from a browser. A proxy may also dial a node
-directly, and one process may run a hub and a node together. The mesh is plain `ws://`: what
-crosses it is not encrypted, so links to a hub across the internet belong on a private network or
-a tunnel, as [The mesh](#the-mesh) says.
+directly, and one process may run a hub and a node together. A hub with a certificate from an
+authority, for hub.example.net, takes `cert_file` and `key_file` in place of `self_signed`, and its
+peers `ca_file` in place of `pin`.
 
 ## Models and APIs
 
@@ -365,7 +388,8 @@ A node serving one model of each:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
+             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
     {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
@@ -414,8 +438,24 @@ The roles link over a mesh of WebSocket connections.
 ### Transport and authentication
 
 A role with `listen` adds a binding on the listeners' engine at `listen.address`. It upgrades only
-`/ws`; any other path is refused with 403. A dialer connects to `ws://<address>/ws`; the whole
-dial, authentication included, is bounded by 10 seconds.
+`/ws`; any other path is refused with 403. A dialer connects to `wss://<address>/ws` when its peer
+has a `pin` or a `ca_file`, and to `ws://<address>/ws` otherwise, which only a loopback address
+allows; the whole dial, TLS and authentication included, is bounded by 10 seconds.
+
+Off loopback, links go over TLS 1.3, served by fib's TLS, whose handshake takes no worker while it
+waits. The dialer checks the listener's certificate: by its `pin`, the SHA-256 of the certificate,
+compared in constant time, in place of the chain and name checks; or by `ca_file`, the chain to one
+of its authorities and the name. No TLS session is resumed, on either side, so every link checks
+the certificate in a full handshake. The password handshake below still runs inside TLS, so a link
+needs both: the certificate the dialer expects, and the password of its role.
+
+TLS is what keeps a link to the two ends that made it. The password handshake is checked once, when
+the link opens, and the frames after it carry no proof of their own. Over plain `ws://`, one who
+took over a listener's address, knowing no password, could pass a dialer's handshake through to
+the real listener, then send requests on the link as the listener, which the dialer serves: a node
+with `allow_hub_manage` would run them as its hub's. Over TLS, the relay cannot answer for the
+pinned certificate, and the records it passes through are sealed with keys it does not have: what
+it injects ends the link.
 
 After the upgrade, before any frame:
 
@@ -427,7 +467,9 @@ After the upgrade, before any frame:
    acknowledgement carries its own proof: the HMAC-SHA256, keyed with that same password, of a
    fixed label, the challenge and the dialer's nonce.
 4. The dialer checks the listener's proof, and gives up the dial when it is missing or wrong, so
-   that a listener that does not know the password, one that took over the address, gets no link.
+   that a listener that does not know the password gets no link. On its own this does not stop one
+   that took over the address and relays the handshake to the real listener; TLS, with the
+   certificate checked, does.
 
 A listener still takes a dialer of an earlier version, which sends no nonce; a dialer of this
 version takes no listener of an earlier one, which proves nothing, so listeners are upgraded first.
@@ -436,9 +478,25 @@ The handshake takes at most 5 seconds. A listener holds at most 256 connections 
 authenticated yet, from their TCP connect on, and 16 from one IP address; one more is closed as it
 opens, so that connections that never authenticate cannot take the places of those that do. The
 password never crosses the network, and a recorded
-proof cannot be replayed. A wrong password fails the dial, and the dialer backs off. The mesh is
-plain `ws://`: what crosses it after the handshake, prompts and responses included, is not
-encrypted, so links between machines belong on a private network or a tunnel.
+proof cannot be replayed. A wrong password, a certificate that does not match the pin or the
+authorities, or a plain dialer at a TLS listener fails the dial, and the dialer backs off; the
+reason shows on its links page. Over TLS, prompts, responses and management calls are encrypted;
+on loopback, over plain `ws://`, they stay on the machine.
+
+### Moving to TLS
+
+TLS off loopback is required from this version on, and a config that has a listener or a peer off
+loopback without it is refused, so a role that has one does not start until it is changed. For
+each role with such a listener:
+
+1. Add `"self_signed": true` to its `listen` (or `cert_file` and `key_file`), and start it. Its
+   log, and its links page, give the certificate's fingerprint.
+2. Add that fingerprint as `pin` to every peer that dials it (or `ca_file`, for a certificate from
+   an authority).
+
+A listener and its dialers move together: a dialer with a pin gets nowhere with a plain listener,
+and a plain dialer nowhere with a TLS one. Roles on one machine, linked over loopback, need no
+change.
 
 ### Frames, sessions and streams
 
@@ -517,7 +575,7 @@ is closed a second later. `listen.password` alone, or a role's password set the 
 another's, trusts its holder in every role it is the password of, as before roles had passwords of
 their own; give it only to peers trusted in all of them. The roles of one kind share their password:
 a node that knows a hub's `node_password` could pose as that hub to nodes that dial it if it took
-over the hub's address.
+over the hub's address and, off loopback, held the hub's certificate, which its pin names.
 
 ### Pools and backoff
 
@@ -867,7 +925,9 @@ What each role's pages show, in English or Chinese:
   ([Nodes](#nodes)); its traffic; its API keys; its links; its settings: its name, its API (`api`:
   address, certificate and key files, bounds, or none) and `limits`.
 
-The links page sets the listener and the peers, and kicks a link.
+The links page sets the listener and the peers, and kicks a link. It shows whether the listener
+takes TLS and the fingerprint of its certificate, which its dialers pin, and how each peer's
+listener is checked: by a pin, a CA file, or not at all on loopback.
 
 The traffic page draws the role's links as a map of columns, as the tunnel's pages do: a proxy's
 agents, the proxy, its hubs, their nodes and their models; a hub's proxies, the hub, its nodes and

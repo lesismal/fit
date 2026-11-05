@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/lesismal/fit/llm/internal/model"
@@ -52,6 +53,11 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 		if err := m.ValidateRole(req.Role); err != nil {
 			return nil, err
 		}
+		// How the peer's listener is checked comes whole with the request.
+		host, _, _ := net.SplitHostPort(addr)
+		if _, err := clientTLS(*req, host); err != nil {
+			return nil, err
+		}
 		err = edit(ctx, func(s *Settings) error {
 			for i, p := range s.Peers {
 				if p.Addr == addr {
@@ -59,6 +65,7 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 						s.Peers[i].Password = req.Password
 					}
 					s.Peers[i].Role = req.Role
+					s.Peers[i].Pin, s.Peers[i].CAFile, s.Peers[i].ServerName = req.Pin, req.CAFile, req.ServerName
 					return nil
 				}
 			}
@@ -68,7 +75,8 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 			if len(s.Peers) >= MaxTargets {
 				return BadRequest("at most %d dial targets", MaxTargets)
 			}
-			s.Peers = append(s.Peers, model.DialReq{Addr: addr, Password: req.Password, Role: req.Role})
+			s.Peers = append(s.Peers, model.DialReq{Addr: addr, Password: req.Password, Role: req.Role,
+				Pin: req.Pin, CAFile: req.CAFile, ServerName: req.ServerName})
 			return nil
 		})
 		if err != nil {
@@ -124,6 +132,17 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 			}
 			if len(m.credentials(cfg)) == 0 {
 				return BadRequest("a listener needs a password for a role it links with")
+			}
+			// The request says whether and how the listener takes TLS; a
+			// self-signed certificate already made is kept while it stays
+			// self-signed, so that its peers' pins still match.
+			if cfg.Cert == "" && cfg.SelfSigned && cfg.CertFile == "" {
+				if l := s.Listen; l != nil && l.SelfSigned && l.CertFile == "" {
+					cfg.Cert, cfg.Key = l.Cert, l.Key
+				}
+			}
+			if host, _, _ := net.SplitHostPort(cfg.Addr); !Loopback(host) && !cfg.TLS() {
+				return BadRequest("%s is not a loopback address: set cert_file and key_file, or self_signed, so that links are taken over TLS and peers can check whose listener they reach", cfg.Addr)
 			}
 			c := cfg
 			s.Listen = &c

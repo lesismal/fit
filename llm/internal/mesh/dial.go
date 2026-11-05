@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"slices"
 	"sort"
 	"time"
@@ -25,6 +26,11 @@ func (m *Mesh) Dial(req model.DialReq) error {
 	if err := m.ValidateRole(req.Role); err != nil {
 		return err
 	}
+	host, _, _ := net.SplitHostPort(addr)
+	tc, err := clientTLS(req, host)
+	if err != nil {
+		return err
+	}
 	if m.stopped() {
 		return wire.ErrClosed
 	}
@@ -39,13 +45,13 @@ func (m *Mesh) Dial(req model.DialReq) error {
 		return BadRequest("password required")
 	}
 	if old != nil {
-		if old.password == password && old.role == req.Role {
+		if old.password == password && old.role == req.Role && sameTLS(old.req, req) {
 			m.mu.Unlock()
 			return nil
 		}
 		delete(m.targets, addr)
 	}
-	t := &target{addr: addr, password: password, role: req.Role, stopCh: make(chan struct{})}
+	t := &target{addr: addr, password: password, role: req.Role, req: req, tls: tc, stopCh: make(chan struct{})}
 	m.targets[addr] = t
 	m.wg.Add(1)
 	m.mu.Unlock()
@@ -129,7 +135,12 @@ func (m *Mesh) dial(t *target) (*conn, error) {
 		case <-ctx.Done():
 		}
 	}()
-	wc, err := wire.Dial(ctx, "ws://"+t.addr+WSPath, wire.DialConfig{ConnConfig: m.connConfig(t, nil), Engine: m.opts.Engine})
+	cfg := m.connConfig(t, nil)
+	scheme := "ws://"
+	if t.tls != nil {
+		scheme, cfg.TLS = "wss://", t.tls
+	}
+	wc, err := wire.Dial(ctx, scheme+t.addr+WSPath, wire.DialConfig{ConnConfig: cfg, Engine: m.opts.Engine})
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +238,8 @@ func (m *Mesh) Targets() []model.DialTarget {
 	out := make([]model.DialTarget, 0, len(list))
 	for _, t := range list {
 		t.mu.Lock()
-		dt := model.DialTarget{Addr: t.addr, Role: t.role, Error: t.err}
+		dt := model.DialTarget{Addr: t.addr, Role: t.role, Error: t.err, TLS: t.tls != nil, Pin: t.req.Pin, CAFile: t.req.CAFile,
+			ServerName: t.req.ServerName}
 		if c := t.conn; c != nil {
 			c.mu.Lock()
 			if c.registered && c.live() {
@@ -251,11 +263,18 @@ func (m *Mesh) DialReqs() []model.DialReq {
 	m.mu.RLock()
 	out := make([]model.DialReq, 0, len(m.targets))
 	for _, t := range m.targets {
-		out = append(out, model.DialReq{Addr: t.addr, Password: t.password, Role: t.role})
+		out = append(out, model.DialReq{Addr: t.addr, Password: t.password, Role: t.role, Pin: t.req.Pin, CAFile: t.req.CAFile,
+			ServerName: t.req.ServerName})
 	}
 	m.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Addr < out[j].Addr })
 	return out
+}
+
+// sameTLS reports whether a and b dial alike: the same pin, CA file and name.
+// sameTLS 表示 a 与 b 的拨号方式是否相同：相同的固定指纹、CA 文件与名称。
+func sameTLS(a, b model.DialReq) bool {
+	return a.Pin == b.Pin && a.CAFile == b.CAFile && a.ServerName == b.ServerName
 }
 
 // ValidateRole checks that role is one this process connects to (in AcceptRoles, not its own).

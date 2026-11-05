@@ -2,7 +2,9 @@ The LLM feature's roles, run beside the gateway on its engine: a `hub` that node
 `node` that serves AI models from local or remote upstreams (OpenAI and every OpenAI-compatible
 API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `proxy` that serves those APIs to the
 agents of its machine or LAN, calling the models of the nodes it reaches. The roles
-link over a WebSocket mesh, each listening at `listen` and dialing its `peers`. A role runs while
+link over a WebSocket mesh, each listening at `listen` and dialing its `peers`; off loopback the
+links go over TLS, the dialer checking the listener's certificate by its `pin` or its `ca_file`.
+Here the three share a machine and link over loopback. A role runs while
 its member is set; any of them, in any number of processes. What a role's pages, behind
 `console`, change is written back into its member, and kept in `admin.store` when there is one.
 See [the LLM feature](../llm.md).
@@ -11,7 +13,7 @@ See [the LLM feature](../llm.md).
 {
   "llm": {
     "hub": {
-      "listen": {"address": ":9210", "password": "mesh-secret"}
+      "listen": {"address": "127.0.0.1:9210", "password": "mesh-secret"}
     },
     "node": {
       "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],

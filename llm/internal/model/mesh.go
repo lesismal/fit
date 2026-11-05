@@ -75,16 +75,32 @@ type DialReq struct {
 	// Role the peer at Addr must have; its hello is refused otherwise.
 	// Addr 处对端必须具有的角色；否则拒绝其 hello。
 	Role string `json:"role"`
+	// Pin, the SHA-256 of the certificate of the peer's listener in hex, or CAFile, the authorities it must chain
+	// to (with ServerName, the name it must have; Addr's host when empty), dials over TLS (wss://). An Addr off
+	// loopback needs one of them.
+	// Pin（对端监听证书的 SHA-256，十六进制）或 CAFile（证书须链接到的证书颁发机构；ServerName 为证书须具有的名称，为空时
+	// 取 Addr 的主机）使拨号走 TLS（wss://）。非回环的 Addr 需要两者之一。
+	Pin        string `json:"pin,omitempty"`
+	CAFile     string `json:"ca_file,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
 }
+
+// TLS reports whether the target is dialed over TLS.
+// TLS 表示是否通过 TLS 拨号该目标。
+func (d DialReq) TLS() bool { return d.Pin != "" || d.CAFile != "" }
 
 // DialTarget is a dial target and its state. The password is never returned.
 // DialTarget 连接目标及其状态。从不返回密码。
 type DialTarget struct {
-	Addr      string    `json:"addr"`
-	Role      string    `json:"role"`
-	Connected bool      `json:"connected"`
-	Peer      *Identity `json:"peer,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Addr       string    `json:"addr"`
+	Role       string    `json:"role"`
+	TLS        bool      `json:"tls,omitempty"`
+	Pin        string    `json:"pin,omitempty"`
+	CAFile     string    `json:"ca_file,omitempty"`
+	ServerName string    `json:"server_name,omitempty"`
+	Connected  bool      `json:"connected"`
+	Peer       *Identity `json:"peer,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 // ListenConfig is the rpc listener. The passwords are never returned by MethodPeers (HasPassword instead).
@@ -100,7 +116,20 @@ type ListenConfig struct {
 	NodePassword  string `json:"node_password,omitempty"`  // a node's / 节点的
 	ProxyPassword string `json:"proxy_password,omitempty"` // a proxy's / 代理的
 	HubPassword   string `json:"hub_password,omitempty"`   // a hub's / 中心的
+	// CertFile and KeyFile, or Cert and Key (PEM), are the certificate the listener takes links over TLS (wss://)
+	// with; SelfSigned asks the role for one it makes, kept in Cert and Key. An Addr off loopback needs TLS.
+	// CertFile 与 KeyFile，或 Cert 与 Key（PEM），是监听方以 TLS（wss://）接受连接所用的证书；SelfSigned 表示由角色生成
+	// 自签名证书，保存在 Cert 与 Key 中。非回环的 Addr 需要 TLS。
+	CertFile   string `json:"cert_file,omitempty"`
+	KeyFile    string `json:"key_file,omitempty"`
+	SelfSigned bool   `json:"self_signed,omitempty"`
+	Cert       string `json:"cert,omitempty"`
+	Key        string `json:"key,omitempty"`
 }
+
+// TLS reports whether the listener takes links over TLS.
+// TLS 表示监听方是否以 TLS 接受连接。
+func (l ListenConfig) TLS() bool { return l.CertFile != "" || l.Cert != "" || l.SelfSigned }
 
 // PasswordFor is the password a dialer of role proves: the role's own, or Password.
 // PasswordFor 是 role 角色的拨号方要证明的密码：该角色自己的，或 Password。
@@ -135,6 +164,14 @@ type ListenReq = ListenConfig
 type ListenState struct {
 	Addr        string `json:"addr"`
 	HasPassword bool   `json:"has_password"`
+	// TLS: links are taken over TLS (wss://), with the certificate of CertFile, or a self-signed one; Fingerprint
+	// is the SHA-256 of the certificate presented, what dialers pin.
+	// TLS：以 TLS（wss://）接受连接，证书为 CertFile 的，或自签名的；Fingerprint 是所出示证书的 SHA-256，供拨号方固定。
+	TLS         bool   `json:"tls,omitempty"`
+	CertFile    string `json:"cert_file,omitempty"`
+	KeyFile     string `json:"key_file,omitempty"`
+	SelfSigned  bool   `json:"self_signed,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
 	Error       string `json:"error,omitempty"` // last failure to listen / 最近一次监听失败
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/certpin"
 	"github.com/lesismal/fit/llm/internal/mesh"
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/pool"
@@ -77,8 +78,11 @@ type Base struct {
 	console    *console.Console
 	consoleKey []byte
 	lim        *config.LLMLimits
-	applied    bool
-	stopped    bool
+	// generated is the self-signed certificate and key made for the
+	// listener, until the config has them.
+	generated [2]string
+	applied   bool
+	stopped   bool
 }
 
 // Version is the version a role announces.
@@ -200,10 +204,13 @@ func (b *Base) Apply(c Common) error {
 	var listen model.ListenConfig
 	if c.Listen != nil {
 		listen = listenConfig(c.Listen)
+		if err := b.selfSigned(&listen); err != nil {
+			b.Log.Warnf("making the listener's self-signed certificate: %v", err)
+		}
 	}
 	peers := make([]model.DialReq, 0, len(c.Peers))
 	for _, p := range c.Peers {
-		peers = append(peers, model.DialReq{Addr: p.Address, Password: p.Password, Role: p.Role})
+		peers = append(peers, dialReq(p))
 	}
 	if err := b.Mesh.Configure(listen, peers); err != nil {
 		b.Log.Warnf("%v", err)
@@ -371,7 +378,7 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 				return err
 			}
 			for _, p := range ps {
-				s.Peers = append(s.Peers, model.DialReq{Addr: p.Address, Password: p.Password, Role: p.Role})
+				s.Peers = append(s.Peers, dialReq(p))
 			}
 		}
 		if err := fn(&s); err != nil {
@@ -380,18 +387,15 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 		if s.Listen == nil {
 			delete(m, "listen")
 		} else {
-			l := map[string]string{"address": s.Listen.Addr}
-			for k, v := range map[string]string{"password": s.Listen.Password, "node_password": s.Listen.NodePassword,
-				"proxy_password": s.Listen.ProxyPassword, "hub_password": s.Listen.HubPassword} {
-				if v != "" {
-					l[k] = v
-				}
-			}
-			m["listen"], _ = json.Marshal(l)
+			l := s.Listen
+			m["listen"], _ = json.Marshal(config.LLMListen{Address: l.Addr, Password: l.Password, NodePassword: l.NodePassword,
+				ProxyPassword: l.ProxyPassword, HubPassword: l.HubPassword, CertFile: l.CertFile, KeyFile: l.KeyFile,
+				SelfSigned: l.SelfSigned, Cert: l.Cert, Key: l.Key})
 		}
-		peers := make([]map[string]string, 0, len(s.Peers))
+		peers := make([]config.LLMPeer, 0, len(s.Peers))
 		for _, p := range s.Peers {
-			peers = append(peers, map[string]string{"address": p.Addr, "password": p.Password, "role": p.Role})
+			peers = append(peers, config.LLMPeer{Address: p.Addr, Password: p.Password, Role: p.Role, Pin: p.Pin,
+				CAFile: p.CAFile, ServerName: p.ServerName})
 		}
 		return Set(m, "peers", peers)
 	})
@@ -400,7 +404,74 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 // listenConfig is the mesh's listener of l.
 func listenConfig(l *config.LLMListen) model.ListenConfig {
 	return model.ListenConfig{Addr: l.Address, Password: l.Password, NodePassword: l.NodePassword,
-		ProxyPassword: l.ProxyPassword, HubPassword: l.HubPassword}
+		ProxyPassword: l.ProxyPassword, HubPassword: l.HubPassword, CertFile: l.CertFile, KeyFile: l.KeyFile,
+		SelfSigned: l.SelfSigned, Cert: l.Cert, Key: l.Key}
+}
+
+// dialReq is the mesh's dial target of p.
+func dialReq(p config.LLMPeer) model.DialReq {
+	return model.DialReq{Addr: p.Address, Password: p.Password, Role: p.Role, Pin: p.Pin, CAFile: p.CAFile,
+		ServerName: p.ServerName}
+}
+
+// selfSigned gives a self_signed listener without a certificate one: made
+// once, used at once, and written into the config, so that it outlives a
+// restart and the pins of the peers stay good. Until the config has it, the
+// same one is used.
+func (b *Base) selfSigned(l *model.ListenConfig) error {
+	b.mu.Lock()
+	if !l.SelfSigned || l.CertFile != "" || l.Cert != "" {
+		if l.Cert != "" {
+			b.generated = [2]string{}
+		}
+		b.mu.Unlock()
+		return nil
+	}
+	made := b.generated[0] == ""
+	if made {
+		hosts := []string{"localhost"}
+		if b.hostname != "" {
+			hosts = append(hosts, b.hostname)
+		}
+		if host, _, err := net.SplitHostPort(l.Addr); err == nil && host != "" && host != "localhost" && host != b.hostname {
+			hosts = append(hosts, host)
+		}
+		c, k, err := certpin.SelfSigned("fit llm "+b.Role, hosts...)
+		if err != nil {
+			b.mu.Unlock()
+			return err
+		}
+		b.generated = [2]string{string(c), string(k)}
+	}
+	cert, key := b.generated[0], b.generated[1]
+	b.mu.Unlock()
+	l.Cert, l.Key = cert, key
+	if made {
+		b.H.Edit(func(cur []byte) ([]byte, error) {
+			return EditJSON(cur, func(m map[string]json.RawMessage) error {
+				var lm map[string]json.RawMessage
+				if err := json.Unmarshal(m["listen"], &lm); err != nil || lm == nil {
+					return nil
+				}
+				var have string
+				var self bool
+				_ = json.Unmarshal(lm["cert"], &have)
+				_ = json.Unmarshal(lm["self_signed"], &self)
+				if have != "" || !self {
+					return nil
+				}
+				lm["cert"], _ = json.Marshal(cert)
+				lm["key"], _ = json.Marshal(key)
+				m["listen"], _ = json.Marshal(lm)
+				return nil
+			})
+		}, func(_ []string, err error) {
+			if err != nil {
+				b.Log.Warnf("keeping the listener's self-signed certificate in the config: %v", err)
+			}
+		})
+	}
+	return nil
 }
 
 // SetName writes the name into the config.

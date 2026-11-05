@@ -11,6 +11,7 @@ package mesh
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -174,6 +175,11 @@ type target struct {
 	addr     string
 	password string
 	role     string // the role the peer must have / 对端必须具有的角色
+	// req is what the target was set with, its TLS settings among it, and tls the configuration it is dialed with
+	// (nil: plain ws://).
+	// req 是设置该目标时的请求（含其 TLS 设置），tls 为拨号所用的配置（nil 表示普通 ws://）。
+	req model.DialReq
+	tls *tls.Config
 
 	mu     sync.Mutex
 	conn   *conn
@@ -206,6 +212,7 @@ type Mesh struct {
 	binding int     // the listener's binding on the engine, or -1
 	lst     *wire.Listener
 	laddr   string
+	lfp     string // the fingerprint of the listener's certificate, "" without TLS
 
 	nextConn atomic.Int64
 	round    atomic.Uint64 // round robin over the connections of a peer / 在对端的连接之间轮询

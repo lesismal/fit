@@ -397,6 +397,8 @@ type peersResp struct {
 		Addr        string `json:"addr"`
 		HasPassword bool   `json:"has_password"`
 		Error       string `json:"error"`
+		TLS         bool   `json:"tls"`
+		Fingerprint string `json:"fingerprint"`
 	} `json:"listen"`
 	Conns   []peerConn   `json:"conns"`
 	Targets []dialTarget `json:"targets"`

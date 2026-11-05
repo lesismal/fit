@@ -25,7 +25,14 @@
         'pp.stale': 'Refresh failed, showing the last known state: {m}', 'pp.draining': 'draining',
         'pp.listen_edit': 'Change listener', 'pp.listen_addr': 'Listen address', 'pp.listen_addr_hint': 'e.g. 0.0.0.0:9101; empty stops listening',
         'pp.listen_pw': 'Listener password', 'pp.listen_pw_keep': 'empty keeps the current password', 'pp.listen_pw_hint': 'Peers dialing this process need it (it never goes over the wire)',
-        'pp.has_pw': 'password set', 'pp.no_pw': 'no password'
+        'pp.has_pw': 'password set', 'pp.no_pw': 'no password',
+        'pp.pin': 'Certificate pin (SHA-256)', 'pp.pin_hint': 'The fingerprint the peer listener\'s pages show; the link goes over TLS to that certificate alone. A peer off loopback needs a pin or a CA file',
+        'pp.ca_file': 'CA file', 'pp.ca_file_hint': 'Or a PEM file of the authorities the peer\'s certificate chains to, on this machine',
+        'pp.server_name': 'Server name', 'pp.server_name_hint': 'With a CA file: the name the certificate must have; the address\'s host when empty',
+        'pp.tls': 'TLS', 'pp.tls_pin': 'TLS, pinned', 'pp.tls_ca': 'TLS, CA', 'pp.plain': 'plain ws (loopback only)',
+        'pp.self_signed': 'TLS with a self-signed certificate this process makes', 'pp.self_signed_hint': 'Peers pin it by the fingerprint shown here; it is kept across restarts',
+        'pp.cert_file': 'Certificate file', 'pp.key_file': 'Key file', 'pp.cert_hint': 'PEM files on this machine; with both, links are taken over TLS. A listener off loopback needs TLS',
+        'pp.fingerprint': 'Fingerprint (SHA-256)', 'pp.tls_self': 'TLS, self-signed', 'pp.tls_file': 'TLS, certificate file'
       },
       'zh-CN': {
         'pp.self': '本进程', 'pp.listen': 'RPC 监听', 'pp.not_listening': '未监听', 'pp.listening': '监听中', 'pp.conns': '连接',
@@ -40,7 +47,14 @@
         'pp.stale': '刷新失败，显示的是上次的状态：{m}', 'pp.draining': '排空中',
         'pp.listen_edit': '修改监听', 'pp.listen_addr': '监听地址', 'pp.listen_addr_hint': '例如 0.0.0.0:9101；留空表示停止监听',
         'pp.listen_pw': '监听密码', 'pp.listen_pw_keep': '留空表示保留当前密码', 'pp.listen_pw_hint': '连接本进程的对端需要此密码（密码不会在网络上传输）',
-        'pp.has_pw': '已设置密码', 'pp.no_pw': '未设置密码'
+        'pp.has_pw': '已设置密码', 'pp.no_pw': '未设置密码',
+        'pp.pin': '证书指纹（SHA-256）', 'pp.pin_hint': '对端监听页面上显示的指纹；连接走 TLS，且只连向该证书。非回环的对端需要指纹或 CA 文件',
+        'pp.ca_file': 'CA 文件', 'pp.ca_file_hint': '或本机上的 PEM 文件，包含对端证书须链接到的证书颁发机构',
+        'pp.server_name': '服务器名称', 'pp.server_name_hint': '配合 CA 文件：证书须具有的名称；留空时取地址中的主机',
+        'pp.tls': 'TLS', 'pp.tls_pin': 'TLS，固定指纹', 'pp.tls_ca': 'TLS，CA 校验', 'pp.plain': '明文 ws（仅限回环）',
+        'pp.self_signed': '以本进程生成的自签名证书走 TLS', 'pp.self_signed_hint': '对端按此处显示的指纹固定它；重启后保持不变',
+        'pp.cert_file': '证书文件', 'pp.key_file': '私钥文件', 'pp.cert_hint': '本机上的 PEM 文件；两者都设置时以 TLS 接受连接。非回环的监听需要 TLS',
+        'pp.fingerprint': '指纹（SHA-256）', 'pp.tls_self': 'TLS，自签名', 'pp.tls_file': 'TLS，证书文件'
       }
     });
 
@@ -72,12 +86,16 @@
       function add() {
         var a = h('input.input', { placeholder: '192.168.1.10:9201', 'data-fill': true }), p = h('input.input', { type: 'password', autocomplete: 'new-password' });
         var role = h('select.select', ROLES.filter(function (r) { return r !== selfRole; }).map(function (r) { return h('option', { value: r }, r); }));
+        var pin = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false' });
+        var ca = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', placeholder: '/etc/fit/ca.pem' });
+        var sn = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false' });
         UI.modal({
           title: t('pp.add_title'),
-          body: h('div.form', UI.field(t('pp.peer_role'), role, t('pp.role_hint')), UI.field(t('pp.addr'), a, t('pp.addr_hint')), UI.field(t('pp.password'), p)),
+          body: h('div.form', UI.field(t('pp.peer_role'), role, t('pp.role_hint')), UI.field(t('pp.addr'), a, t('pp.addr_hint')), UI.field(t('pp.password'), p),
+            UI.field(t('pp.pin'), pin, t('pp.pin_hint')), UI.field(t('pp.ca_file'), ca, t('pp.ca_file_hint')), UI.field(t('pp.server_name'), sn, t('pp.server_name_hint'))),
           actions: [{ label: t('cancel') }, {
             label: t('pp.add'), kind: 'primary', onclick: function () {
-              var req = { addr: a.value.trim(), password: p.value, role: role.value };
+              var req = { addr: a.value.trim(), password: p.value, role: role.value, pin: pin.value.trim(), ca_file: ca.value.trim(), server_name: sn.value.trim() };
               return act(call('/mesh/dial', req), function (r) {
                 return (r.targets || []).some(function (x) { return x.addr === req.addr && x.role === req.role; });
               });
@@ -91,12 +109,19 @@
         var ls = (last && last.listen) || {};
         var a = h('input.input', { value: ls.addr || '', placeholder: '0.0.0.0:9101', 'data-fill': true });
         var p = h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: ls.has_password ? t('pp.listen_pw_keep') : '' });
+        var ss = h('input', { type: 'checkbox', checked: !!ls.self_signed });
+        var cf = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', value: ls.cert_file || '' });
+        var kf = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', value: ls.key_file || '' });
         UI.modal({
           title: t('pp.listen_edit'),
-          body: h('div.form', UI.field(t('pp.listen_addr'), a, t('pp.listen_addr_hint')), UI.field(t('pp.listen_pw'), p, t('pp.listen_pw_hint'))),
+          body: h('div.form', UI.field(t('pp.listen_addr'), a, t('pp.listen_addr_hint')), UI.field(t('pp.listen_pw'), p, t('pp.listen_pw_hint')),
+            h('label.check', ss, t('pp.self_signed')), h('div.field__hint', t('pp.self_signed_hint')),
+            h('div.form-row', UI.field(t('pp.cert_file'), cf), UI.field(t('pp.key_file'), kf)), h('div.field__hint', t('pp.cert_hint'))),
           actions: [{ label: t('cancel') }, {
             label: t('save'), kind: 'primary', onclick: function () {
-              var req = { addr: a.value.trim(), password: p.value };
+              // The TLS of the listener comes whole with the request: a self-signed certificate already made is kept.
+              // 监听的 TLS 设置随请求整体提交：已生成的自签名证书会被保留。
+              var req = { addr: a.value.trim(), password: p.value, self_signed: ss.checked, cert_file: cf.value.trim(), key_file: kf.value.trim() };
               return act(call('/mesh/listen', req), function (r) { return (r.listen || {}).addr === req.addr && !(r.listen || {}).error; })
                 .then(function () { UI.toast(t('saved')); });
             }
@@ -106,9 +131,11 @@
       function listenView(ls) {
         ls = ls || {};
         var state = ls.error ? UI.badge(t('error'), 'danger', true) : ls.addr ? UI.badge(t('pp.listening'), 'ok', true) : UI.badge(t('pp.not_listening'));
+        var tls = !ls.addr ? '—' : ls.tls ? UI.badge(t(ls.self_signed ? 'pp.tls_self' : 'pp.tls_file'), 'ok') : UI.badge(t('pp.plain'), 'warn');
         return h('div.stack',
           UI.kv([[t('pp.state'), state], [t('pp.addr'), ls.addr ? h('code', ls.addr) : '—'],
-            [t('pp.listen_pw'), ls.has_password ? t('pp.has_pw') : t('pp.no_pw')]]),
+            [t('pp.listen_pw'), ls.has_password ? t('pp.has_pw') : t('pp.no_pw')], [t('pp.tls'), tls],
+            [t('pp.fingerprint'), ls.fingerprint ? h('code.small', { style: { wordBreak: 'break-all' } }, ls.fingerprint) : '—']]),
           ls.error ? h('div.callout.callout--danger', ls.error) : null);
       }
       function draw(r) {
@@ -138,7 +165,9 @@
             }
           }], r.conns, { empty: t('pp.no_conns'), onRowClick: o.onPeer });
         var targets = UI.table([
-          { label: t('pp.addr'), render: function (x) { return h('b.mono', x.addr); } },
+          { label: t('pp.addr'), render: function (x) {
+            return h('div', h('b.mono', x.addr), h('div.small.muted', x.pin ? h('span', { title: x.pin }, t('pp.tls_pin')) : x.ca_file ? h('span', { title: x.ca_file }, t('pp.tls_ca')) : t('pp.plain')));
+          } },
           { label: t('pp.peer_role'), render: function (x) { return roleBadge(x.role); } },
           { label: t('pp.state'), render: function (x) { return x.connected ? UI.badge(t('pp.connected'), 'ok', true) : h('div', UI.badge(t('pp.connecting'), 'warn', true), x.error ? h('div.small', { style: { color: 'var(--danger)' } }, x.error) : null); } },
           { label: t('pp.peer'), render: function (x) { return x.peer ? h('div', h('b', x.peer.name || x.peer.hostname), h('div.small.muted.mono', x.peer.id)) : '—'; } },

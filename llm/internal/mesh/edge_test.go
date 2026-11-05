@@ -558,7 +558,12 @@ func TestAdminEdges(t *testing.T) {
 	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "nope", Password: "pw"}); codeOf(err) != model.CodeBadRequest {
 		t.Fatalf("bad listen address: %v", err)
 	}
-	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "192.0.2.1:0", Password: "pw"}); codeOf(err) != model.CodeInternal {
+	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "192.0.2.1:0", Password: "pw"}); codeOf(err) != model.CodeBadRequest ||
+		!strings.Contains(err.Error(), "set cert_file and key_file, or self_signed") {
+		t.Fatalf("listen off loopback without TLS: %v", err)
+	}
+	cert, key := selfSigned(t)
+	if _, err := invoke(model.MethodListen, model.ListenReq{Addr: "192.0.2.1:0", Password: "pw", SelfSigned: true, Cert: cert, Key: key}); codeOf(err) != model.CodeInternal {
 		t.Fatalf("listen that cannot bind: %v", err)
 	}
 }

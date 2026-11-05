@@ -1048,8 +1048,24 @@
           "description": "The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address.",
           "type": "string"
         },
+        "cert": {
+          "description": "The PEM certificate self_signed made; with key. Written by the role; delete both for a new one, which every peer must pin again.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the certificate the listener presents, followed by any intermediates; with key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A listener on an address other than a loopback one needs TLS: this, or self_signed.",
+          "type": "string"
+        },
         "hub_password": {
           "description": "The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out.",
+          "type": "string"
+        },
+        "key": {
+          "description": "The PEM private key of cert.",
+          "type": "string"
+        },
+        "key_file": {
+          "description": "A PEM file with the private key of cert_file.",
           "type": "string"
         },
         "node_password": {
@@ -1063,6 +1079,10 @@
         "proxy_password": {
           "description": "The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out.",
           "type": "string"
+        },
+        "self_signed": {
+          "description": "Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint, which peers set as their pin. For a listener without cert_file.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1259,8 +1279,16 @@
           "description": "The peer's host and port, as its listen.address says.",
           "type": "string"
         },
+        "ca_file": {
+          "description": "A PEM file with the certificates of the authorities the peer listener's certificate must chain to: the link is made over TLS (wss://), and the certificate must name server_name, or the address's host. Or pin, one of the two.",
+          "type": "string"
+        },
         "password": {
           "description": "The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role.",
+          "type": "string"
+        },
+        "pin": {
+          "description": "The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and only to a listener with exactly that certificate. A peer at an address other than a loopback one needs pin or ca_file.",
           "type": "string"
         },
         "role": {
@@ -1270,6 +1298,10 @@
             "node",
             "proxy"
           ],
+          "type": "string"
+        },
+        "server_name": {
+          "description": "The name the peer listener's certificate must have with ca_file, and the TLS server name sent; the address's host when left out.",
           "type": "string"
         }
       },

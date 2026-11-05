@@ -1623,7 +1623,9 @@ The LLM feature's roles, run beside the gateway on its engine: a `hub` that node
 `node` that serves AI models from local or remote upstreams (OpenAI and every OpenAI-compatible
 API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `proxy` that serves those APIs to the
 agents of its machine or LAN, calling the models of the nodes it reaches. The roles
-link over a WebSocket mesh, each listening at `listen` and dialing its `peers`. A role runs while
+link over a WebSocket mesh, each listening at `listen` and dialing its `peers`; off loopback the
+links go over TLS, the dialer checking the listener's certificate by its `pin` or its `ca_file`.
+Here the three share a machine and link over loopback. A role runs while
 its member is set; any of them, in any number of processes. What a role's pages, behind
 `console`, change is written back into its member, and kept in `admin.store` when there is one.
 See [the LLM feature](../llm.md).
@@ -1632,7 +1634,7 @@ In a .conf file:
 
 ```fit
 llm {
-	hub { listen { address :9210; password mesh-secret } }
+	hub { listen { address 127.0.0.1:9210; password mesh-secret } }
 	node {
 		peers { address 127.0.0.1:9210; password mesh-secret; role hub }
 		models qwen3 {
@@ -1659,7 +1661,7 @@ In YAML:
 llm:
   hub:
     listen:
-      address: :9210
+      address: 127.0.0.1:9210
       password: mesh-secret
   node:
     peers:
@@ -1690,7 +1692,7 @@ In JSON:
 {
   "llm": {
     "hub": {
-      "listen": {"address": ":9210", "password": "mesh-secret"}
+      "listen": {"address": "127.0.0.1:9210", "password": "mesh-secret"}
     },
     "node": {
       "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
@@ -1760,6 +1762,11 @@ Also at `llm.node.listen`, `llm.proxy.listen`.
 | `node_password` | string |  | The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out. |
 | `proxy_password` | string |  | The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out. |
 | `hub_password` | string |  | The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out. |
+| `cert_file` | string |  | A PEM file with the certificate the listener presents, followed by any intermediates; with key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A listener on an address other than a loopback one needs TLS: this, or self_signed. |
+| `key_file` | string |  | A PEM file with the private key of cert_file. |
+| `self_signed` | boolean |  | Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint, which peers set as their pin. For a listener without cert_file. |
+| `cert` | string |  | The PEM certificate self_signed made; with key. Written by the role; delete both for a new one, which every peer must pin again. |
+| `key` | string |  | The PEM private key of cert. |
 
 <a id="config-llmpeer"></a>
 
@@ -1772,6 +1779,9 @@ Also at `llm.node.peers[]`, `llm.proxy.peers[]`.
 | `address` | string |  | Required. The peer's host and port, as its listen.address says. |
 | `password` | string |  | Required. The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. |
 | `role` | string: `hub`, `node`, `proxy` |  | Required. The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own. |
+| `pin` | string |  | The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and only to a listener with exactly that certificate. A peer at an address other than a loopback one needs pin or ca_file. |
+| `ca_file` | string |  | A PEM file with the certificates of the authorities the peer listener's certificate must chain to: the link is made over TLS (wss://), and the certificate must name server_name, or the address's host. Or pin, one of the two. |
+| `server_name` | string |  | The name the peer listener's certificate must have with ca_file, and the TLS server name sent; the address's host when left out. |
 
 <a id="config-llmlimits"></a>
 

@@ -192,9 +192,16 @@ func testConsoles(t *testing.T) {
 
 // ---- mesh ----
 
+// pins are the fingerprints of the listeners' self-signed certificates, by
+// the address they are dialed at: links between containers go over TLS.
+var pins = map[string]string{}
+
+// listenAt is the address each listener is dialed at.
+var listenAt = map[string]string{"hub": "hub:9201", "node2": "node2:9101", "proxy2": "proxy2:9301"}
+
 func dial(t testing.TB, from, addr, role string) {
 	t.Helper()
-	con(from).rpc(t, "/mesh/dial", map[string]string{"addr": addr, "role": role, "password": meshPass}, nil)
+	con(from).rpc(t, "/mesh/dial", map[string]string{"addr": addr, "role": role, "password": meshPass, "pin": pins[addr]}, nil)
 }
 
 // waitTargets waits until every dial target of a console is connected.
@@ -218,14 +225,19 @@ func testMeshSetup(t *testing.T) {
 	hub := con("hub")
 	hub.rpcFail(t, "/mesh/listen", map[string]string{"addr": hubListen}, 400) // no password
 	hub.rpcFail(t, "/mesh/listen", map[string]string{"addr": "no-port", "password": meshPass}, 400)
-	hub.rpc(t, "/mesh/listen", map[string]string{"addr": hubListen, "password": meshPass}, nil)
-	con("node2").rpc(t, "/mesh/listen", map[string]string{"addr": node2Listen, "password": meshPass}, nil)
-	con("proxy2").rpc(t, "/mesh/listen", map[string]string{"addr": client2Listen, "password": meshPass}, nil)
+	// Off loopback a listener needs TLS.
+	if e := hub.rpcFail(t, "/mesh/listen", map[string]string{"addr": hubListen, "password": meshPass}, 400); !strings.Contains(e.Error, "self_signed") {
+		t.Fatalf("a plain listener: %+v", e)
+	}
+	hub.rpc(t, "/mesh/listen", map[string]any{"addr": hubListen, "password": meshPass, "self_signed": true}, nil)
+	con("node2").rpc(t, "/mesh/listen", map[string]any{"addr": node2Listen, "password": meshPass, "self_signed": true}, nil)
+	con("proxy2").rpc(t, "/mesh/listen", map[string]any{"addr": client2Listen, "password": meshPass, "self_signed": true}, nil)
 	for _, name := range []string{"hub", "node2", "proxy2"} {
 		p := con(name).peers(t)
-		if p.Listen.Addr == "" || !p.Listen.HasPassword || p.Listen.Error != "" {
+		if p.Listen.Addr == "" || !p.Listen.HasPassword || p.Listen.Error != "" || !p.Listen.TLS || len(p.Listen.Fingerprint) != 64 {
 			t.Fatalf("%s listen: %+v", name, p.Listen)
 		}
+		pins[listenAt[name]] = p.Listen.Fingerprint
 	}
 
 	// Dial validation.
@@ -234,6 +246,7 @@ func testMeshSetup(t *testing.T) {
 	n1.rpcFail(t, "/mesh/dial", map[string]string{"addr": "hub", "role": "hub", "password": meshPass}, 400)         // no port
 	n1.rpcFail(t, "/mesh/dial", map[string]string{"addr": "hub:9201", "role": "hub"}, 400)                          // no password
 	n1.rpcFail(t, "/mesh/dial", map[string]string{"addr": "hub:9201", "role": "admin", "password": meshPass}, 400)  // unknown role
+	n1.rpcFail(t, "/mesh/dial", map[string]string{"addr": "hub:9201", "role": "hub", "password": meshPass}, 400)    // no pin off loopback
 
 	// Every directed pair of roles.
 	dial(t, "node1", "hub:9201", "hub")
@@ -271,14 +284,15 @@ func testMeshSetup(t *testing.T) {
 
 func testMeshRejects(t *testing.T) {
 	n3 := con("node3")
-	cases := []struct{ addr, role, pass, why string }{
-		{"hub:9201", "hub", "wrong-password", "wrong password"},
-		{"hub:9201", "proxy", meshPass, "declared role differs from the peer's"},
-		{"node2:9101", "hub", meshPass, "same-role peer"},
+	cases := []struct{ addr, role, pass, pin, why string }{
+		{"hub:9201", "hub", "wrong-password", pins["hub:9201"], "wrong password"},
+		{"hub:9201", "proxy", meshPass, pins["hub:9201"], "declared role differs from the peer's"},
+		{"node2:9101", "hub", meshPass, pins["node2:9101"], "same-role peer"},
+		{"hub:9201", "hub", meshPass, pins["node2:9101"], "another listener's pin"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.why, func(t *testing.T) {
-			n3.rpc(t, "/mesh/dial", map[string]string{"addr": tc.addr, "role": tc.role, "password": tc.pass}, nil)
+			n3.rpc(t, "/mesh/dial", map[string]string{"addr": tc.addr, "role": tc.role, "password": tc.pass, "pin": tc.pin}, nil)
 			eventually(t, 15*time.Second, "dial error", func() error {
 				for _, tg := range n3.peers(t).Targets {
 					if tg.Addr == tc.addr {
