@@ -670,5 +670,6 @@ func sameAdmin(a, b *config.Admin) bool {
 		return a == b
 	}
 	return a.Addr() == b.Addr() && a.TokenFile == b.TokenFile && a.HistoryLen() == b.HistoryLen() &&
-		a.ConfigBytes() == b.ConfigBytes() && a.Conns() == b.Conns()
+		a.ConfigBytes() == b.ConfigBytes() && a.Conns() == b.Conns() &&
+		a.CertFile == b.CertFile && a.KeyFile == b.KeyFile && a.ClientCAFile == b.ClientCAFile
 }

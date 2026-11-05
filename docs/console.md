@@ -384,9 +384,18 @@ fit check -c /etc/fit/fit.json -json    # the check as JSON
 fit check -c /etc/fit/fit.json -fix     # choose one fix per item, then apply them together
 ```
 
-The bootstrap file's `admin.address` (and `token_file`) say where the Admin API is. The exit code is
-`0` when nothing drifted, `1` when drift remains (including after `-fix`), and `2` for a usage,
-config-load, connection or decoding error.
+The bootstrap file's `admin.address` (and `token_file`) say where the Admin API is. With
+`admin.cert_file`, fit check speaks https and verifies the API's certificate: with the
+certificate `cert_file` holds when it can read it, as on fit's own host, and the system's CAs, or
+with the CAs of `-ca`; for the address's host, or localhost when that is unspecified, or for
+`-server-name`. With `admin.client_ca_file`, it presents the certificate of `-cert` and `-key`.
+
+```sh
+fit check -c /etc/fit/fit.json -ca /etc/fit/admin-ca.pem -server-name admin.example.com
+```
+
+The exit code is `0` when nothing drifted, `1` when drift remains (including after `-fix`), and
+`2` for a usage, config-load, connection or decoding error.
 
 For scripts and other pages, the endpoints are `GET /config/check` (the running version, its ETag, the
 differences and their counts) and `POST /config/reconcile` (a JSON body of the chosen

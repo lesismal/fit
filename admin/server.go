@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,10 +116,16 @@ type Server struct {
 	done chan struct{} // closed when Serve returns
 }
 
-// Start listens where a says and serves the Admin API for configs. report,
-// when not nil, is called after each config the API applies.
-func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, error) {
+// Start listens where a says and serves the Admin API for configs, over
+// TLS when a sets cert_file. report, when not nil, is called after each
+// config the API applies; warnf, when not nil, hears what goes wrong
+// without stopping the API, as certificate files that changed and do not
+// load.
+func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(format string, args ...any)) (*Server, error) {
 	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceAdmin, done: make(chan struct{})}
+	if warnf == nil {
+		warnf = func(string, ...any) {}
+	}
 	if a.TokenFile != "" {
 		data, err := os.ReadFile(a.TokenFile)
 		if err != nil {
@@ -126,6 +133,13 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		}
 		if s.token = []byte(strings.TrimSpace(string(data))); len(s.token) == 0 {
 			return nil, fmt.Errorf("admin: token_file %s is empty", a.TokenFile)
+		}
+	}
+	var certs *certFiles
+	if a.TLS() {
+		var err error
+		if certs, err = loadCertFiles(a, warnf); err != nil {
+			return nil, err
 		}
 	}
 	network, address := a.Network()
@@ -147,6 +161,11 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	}
 	s.loopback = network == "tcp" && s.token == nil
 	s.ln = newLimitListener(ln, a.Conns(), login.NewPeers(a.Conns()), unauthTimeout)
+	if certs != nil {
+		// Over the limitListener, so that a connection is counted, and its
+		// reads bounded, before its handshake.
+		s.ln = tls.NewListener(s.ln, certs.serverConfig())
+	}
 
 	mux := s.routes()
 	if !a.DisableDashboard {
@@ -162,8 +181,14 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		MaxHeaderBytes:    maxHeaderBytes,
 		ErrorLog:          log.New(io.Discard, "", 0),
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			if tc, ok := c.(*tls.Conn); ok {
+				c = tc.NetConn()
+			}
 			return context.WithValue(ctx, connKey{}, c)
 		},
+		// HTTP/1.1 alone, over TLS too: one request at a time on each of
+		// the connections max_conns counts.
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 	}
 	go func() {
 		defer close(s.done)

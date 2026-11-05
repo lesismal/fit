@@ -24,7 +24,8 @@ docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -
   sysctl `net.ipv4.ip_unprivileged_port_start=0`, as the Helm chart does.
 - **State** such as ACME's certificates goes in a volume, named in the config's storage directory.
 - **The Admin API** listens on 127.0.0.1:2019 by default, inside the container. To reach it from
-  outside, give it an address of every interface and a `token_file`, which fit then requires.
+  outside, give it an address of every interface, a `token_file`, and `cert_file` and `key_file`
+  for TLS, which fit then requires.
 - **The store**, with `admin.store`, is written on every change of the config, to a new file in
   its directory renamed over it: put that directory in a volume, and the password in an
   environment variable (`password_env`) or a mounted file (`password_file`) rather than the config.

@@ -69,7 +69,7 @@ func startEnv(t *testing.T, doc string, a *config.Admin, env runtime.Env) *fixtu
 	}
 	f := &fixture{configs: NewConfigs(rt, s, env, c, data, SourceFile, a.HistoryLen()), server: s,
 		client: &http.Client{Timeout: 10 * time.Second}}
-	if f.admin, err = Start(a, f.configs, nil); err != nil {
+	if f.admin, err = Start(a, f.configs, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -235,7 +235,7 @@ func TestToken(t *testing.T) {
 	if err := os.WriteFile(file, []byte(" \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: file}, f.configs, nil); err == nil || !strings.Contains(err.Error(), "is empty") {
+	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: file}, f.configs, nil, nil); err == nil || !strings.Contains(err.Error(), "is empty") {
 		t.Fatalf("empty token file: %v", err)
 	}
 }
@@ -461,7 +461,7 @@ func TestUnixSocket(t *testing.T) {
 	}
 
 	// One that is in use is not.
-	if _, err := Start(&config.Admin{Address: config.AdminUnixPrefix + path}, f.configs, nil); err == nil || !strings.Contains(err.Error(), "in use") {
+	if _, err := Start(&config.Admin{Address: config.AdminUnixPrefix + path}, f.configs, nil, nil); err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("a socket in use: %v", err)
 	}
 }

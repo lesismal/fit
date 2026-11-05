@@ -1226,8 +1226,14 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 `/config/` and a JSON pointer into it, `POST /load` for a whole config, ETags against lost updates,
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
-unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
+unless told otherwise. To listen anywhere but a loopback address or a Unix socket it needs
+`token_file`, and `cert_file` and `key_file` to be served over TLS (1.2 or later), so that the
+token never crosses a network in the clear; TLS may be set on loopback too. The certificate files
+are read again when they change, so that a renewed certificate is served without a restart, and
+`client_ca_file` asks every client for a certificate that CA issued, besides the token.
+`fit check` reaches such an API over https, trusting the certificate `cert_file` holds when it
+can read it; its `-ca`, `-server-name`, `-cert` and `-key` flags verify it otherwise and present
+a client certificate. It is off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
 where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
 off by default, and a Unix socket has no paths.
 
@@ -1307,9 +1313,12 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string | `"127.0.0.1:2019"` | Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as in "unix//run/fit/admin.sock". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out. |
+| `address` | string | `"127.0.0.1:2019"` | Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as in "unix//run/fit/admin.sock". A host that is not a loopback address or localhost needs token_file, cert_file and key_file, so that only holders of the token reach the API and the token never crosses a network in the clear. 127.0.0.1:2019 when left out. |
 | `mptcp` | boolean |  | Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths. |
 | `token_file` | string |  | A file holding a token that every request must carry, as "Authorization: Bearer <token>"; no token is asked for when left out. |
+| `cert_file` | string |  | A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the API is served over TLS, 1.2 or later. The files are read again when they change, so that a renewed certificate is served without a restart. Not for a Unix socket. |
+| `key_file` | string |  | A PEM file with the certificate's private key. |
+| `client_ca_file` | string |  | A PEM file with the CAs that clients' certificates must chain to: with it, every client must present a valid certificate, besides the token, before it is heard. Needs cert_file and key_file; read again when it changes, as they are. |
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. Until a connection has made a request with the token (any request, without token_file), each of its reads waits 5s at most. 16 when left out or 0. |

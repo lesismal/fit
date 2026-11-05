@@ -101,7 +101,7 @@ func TestDecodeErrors(t *testing.T) {
 func TestStartFails(t *testing.T) {
 	f := start(t, doc("v1"), &config.Admin{})
 	dir := t.TempDir()
-	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: filepath.Join(dir, "missing")}, f.configs, nil); err == nil ||
+	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: filepath.Join(dir, "missing")}, f.configs, nil, nil); err == nil ||
 		!strings.Contains(err.Error(), "token_file") {
 		t.Errorf("a missing token file: %v", err)
 	}
@@ -109,12 +109,12 @@ func TestStartFails(t *testing.T) {
 	if err := os.WriteFile(empty, []byte(" \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: empty}, f.configs, nil); err == nil ||
+	if _, err := Start(&config.Admin{Address: "127.0.0.1:0", TokenFile: empty}, f.configs, nil, nil); err == nil ||
 		!strings.Contains(err.Error(), "is empty") {
 		t.Errorf("an empty token file: %v", err)
 	}
 	// An address taken already.
-	if _, err := Start(&config.Admin{Address: f.admin.Addr().String()}, f.configs, nil); err == nil {
+	if _, err := Start(&config.Admin{Address: f.admin.Addr().String()}, f.configs, nil, nil); err == nil {
 		t.Error("Start on an address in use succeeded")
 	}
 }
@@ -141,7 +141,7 @@ func TestShutdownTimesOut(t *testing.T) {
 	s, err := Start(&config.Admin{Address: "127.0.0.1:0"}, f.configs, func(r Result) {
 		entered <- r
 		<-release
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

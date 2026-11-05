@@ -157,8 +157,8 @@ into it, `POST /load`, and ETags with `If-Match` against lost updates. The diffe
 - `PATCH` is a JSON merge patch (RFC 7396); Caddy's `POST` to append to an array is not there:
   `PUT` the array.
 - fit keeps the configs it applied (`GET /versions`), and `POST /rollback/{n}` applies one again.
-- It listens on 127.0.0.1:2019 too, and takes a bearer token (`admin.token_file`) to listen
-  elsewhere.
+- It listens on 127.0.0.1:2019 too, and takes a bearer token (`admin.token_file`) and TLS
+  (`admin.cert_file`, `admin.key_file`) to listen elsewhere.
 
 ## What works differently
 

@@ -282,7 +282,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		as, err = admin.Start(c.Admin, configs, func(r admin.Result) {
 			printApplied(stdout, stderr, r)
 			adminLog.Infof("loaded a config from the admin API (config version %d)", r.Version)
-		})
+		}, adminLog.Warnf)
 		if err != nil {
 			fmt.Fprintf(stderr, "fit run: %v\n", err)
 			_ = s.Close()

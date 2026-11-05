@@ -256,15 +256,7 @@ func (c *Config) Validate() Errors {
 	}
 
 	if a := c.Admin; a != nil {
-		if network, address := a.Network(); network == "unix" {
-			if address == "" {
-				add(a.At.Field("address"), "%q has no path after %q", a.Address, AdminUnixPrefix)
-			}
-		} else if _, msg := checkAddress(address); msg != "" {
-			add(a.At.Field("address"), "%s", msg)
-		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && a.TokenFile == "" {
-			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file", address)
-		}
+		checkAdminAddress(a, add)
 		checkStore(a.Store, add)
 		checkConsole(a.Console, add)
 	}
@@ -626,6 +618,48 @@ func checkStore(st *Store, add func(Value, string, ...any)) {
 
 // checkConsole checks admin.console: its address, TLS off a loopback
 // address, and its users.
+// checkAdminAddress checks where the Admin API listens, and its TLS: off a
+// loopback address, the API needs a token and TLS, so that the token, which
+// is all it takes to change what fit serves, never crosses a network in the
+// clear.
+func checkAdminAddress(a *Admin, add func(Value, string, ...any)) {
+	if network, address := a.Network(); network == "unix" {
+		if address == "" {
+			add(a.At.Field("address"), "%q has no path after %q", a.Address, AdminUnixPrefix)
+		}
+		if a.CertFile != "" || a.KeyFile != "" || a.ClientCAFile != "" {
+			add(a.At, "a Unix socket is not served over TLS: leave cert_file, key_file and client_ca_file out")
+			return
+		}
+	} else if _, msg := checkAddress(address); msg != "" {
+		add(a.At.Field("address"), "%s", msg)
+	} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) {
+		var missing []string
+		for _, f := range []struct{ name, value string }{{"token_file", a.TokenFile}, {"cert_file", a.CertFile}, {"key_file", a.KeyFile}} {
+			if f.value == "" {
+				missing = append(missing, f.name)
+			}
+		}
+		if len(missing) > 0 {
+			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set %s: off loopback it needs a token (token_file) and TLS (cert_file and key_file), so that the token is not sent in the clear", address, listOf(missing))
+		}
+	}
+	if (a.CertFile == "") != (a.KeyFile == "") {
+		add(a.At, "cert_file and key_file go together")
+	}
+	if a.ClientCAFile != "" && a.CertFile == "" {
+		add(a.At.Field("client_ca_file"), "client certificates are asked for over TLS: set cert_file and key_file too")
+	}
+}
+
+// listOf joins names as English lists them: "a", "a and b", "a, b and c".
+func listOf(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 func checkConsole(c *Console, add func(Value, string, ...any)) {
 	if c == nil {
 		return

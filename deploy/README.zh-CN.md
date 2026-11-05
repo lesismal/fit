@@ -22,8 +22,8 @@ docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -
 - **1024 以下的端口**：Docker 允许容器的用户绑定；在别处用 sysctl
   `net.ipv4.ip_unprivileged_port_start=0` 放开，Helm chart 就是这样做的。
 - **状态**（如 ACME 的证书）放在 volume 里，在配置的存储目录中指定。
-- **Admin API** 默认在容器内的 127.0.0.1:2019 监听。要从外部访问，给它所有网卡的地址和 `token_file`，
-  fit 随后会要求带上 token。
+- **Admin API** 默认在容器内的 127.0.0.1:2019 监听。要从外部访问，给它所有网卡的地址、`token_file`，以及用于 TLS 的
+  `cert_file` 和 `key_file`，此时 fit 要求这几项。
 - **store**：设置 `admin.store` 后，配置每次修改都会写入 store，方式是在其所在目录写一个新文件再改名覆盖：把这个目录放在
   volume 里，密码放在环境变量（`password_env`）或挂载的文件（`password_file`）中，而不是写在配置里。
 - **控制台**：设置 `admin.console` 后，默认在容器内的 127.0.0.1:2020 监听。要从外部访问，给它所有网卡的地址，以及

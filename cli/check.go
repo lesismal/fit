@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -89,7 +92,8 @@ type checkError struct {
 }
 
 // checkAdminOf returns where the bootstrap config data, standard JSON, says
-// the Admin API listens, and the token file its requests carry a token from.
+// the Admin API listens, the token file its requests carry a token from,
+// and its TLS files.
 func checkAdminOf(data []byte) (config.Admin, error) {
 	adminJSON, _, err := admin.SplitAdmin(data)
 	if err != nil {
@@ -98,17 +102,77 @@ func checkAdminOf(data []byte) (config.Admin, error) {
 	if adminJSON == nil {
 		return config.Admin{}, errors.New("the config sets no admin: fit check reaches a running fit through its Admin API")
 	}
-	// Only the address and the token file are read: the rest of admin has
-	// fields whose JSON is fit's own (console durations and the like), which
-	// plain encoding/json does not read, and fit check has no use for them.
+	// Only the address, the token file and the TLS files are read: the rest
+	// of admin has fields whose JSON is fit's own (console durations and the
+	// like), which plain encoding/json does not read, and fit check has no
+	// use for them.
 	var a struct {
-		Address   string `json:"address"`
-		TokenFile string `json:"token_file"`
+		Address      string `json:"address"`
+		TokenFile    string `json:"token_file"`
+		CertFile     string `json:"cert_file"`
+		KeyFile      string `json:"key_file"`
+		ClientCAFile string `json:"client_ca_file"`
 	}
 	if err := json.Unmarshal(adminJSON, &a); err != nil {
 		return config.Admin{}, fmt.Errorf("admin: %w", err)
 	}
-	return config.Admin{Address: a.Address, TokenFile: a.TokenFile}, nil
+	return config.Admin{Address: a.Address, TokenFile: a.TokenFile, CertFile: a.CertFile, KeyFile: a.KeyFile, ClientCAFile: a.ClientCAFile}, nil
+}
+
+// checkTLS is how fit check verifies an Admin API served over TLS, and the
+// certificate it presents to one that asks for it: the -ca, -server-name,
+// -cert and -key flags.
+type checkTLS struct {
+	CA, ServerName, Cert, Key string
+}
+
+// set says whether any of the flags is given.
+func (o checkTLS) set() bool { return o != checkTLS{} }
+
+// config returns the TLS config fit check reaches a's Admin API with, over
+// TLS 1.2 or later: the server's certificate is verified with the CAs of
+// o.CA or, without it, the system's and the certificates of a's own
+// cert_file, when fit check can read it, as on the host fit runs on; for
+// o.ServerName or, without it, the address's host, localhost when that is
+// unspecified, as in ":2019" or "0.0.0.0:2019".
+func (o checkTLS) config(a config.Admin, host string) (*tls.Config, error) {
+	tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: o.ServerName}
+	if tc.ServerName == "" {
+		tc.ServerName = strings.Trim(host, "[]")
+		if ip, err := netip.ParseAddr(tc.ServerName); tc.ServerName == "" || err == nil && ip.IsUnspecified() {
+			tc.ServerName = "localhost"
+		}
+	}
+	if o.CA != "" {
+		data, err := os.ReadFile(o.CA)
+		if err != nil {
+			return nil, fmt.Errorf("-ca: %w", err)
+		}
+		tc.RootCAs = x509.NewCertPool()
+		if !tc.RootCAs.AppendCertsFromPEM(data) {
+			return nil, fmt.Errorf("-ca %s: no PEM certificate found", o.CA)
+		}
+	} else if data, err := os.ReadFile(a.CertFile); err == nil {
+		// The certificate fit serves, trusted as it is: verified against
+		// itself, for the name asked for.
+		if tc.RootCAs, err = x509.SystemCertPool(); err != nil {
+			tc.RootCAs = x509.NewCertPool()
+		}
+		tc.RootCAs.AppendCertsFromPEM(data)
+	}
+	if (o.Cert == "") != (o.Key == "") {
+		return nil, errors.New("-cert and -key go together")
+	}
+	if o.Cert != "" {
+		cert, err := tls.LoadX509KeyPair(o.Cert, o.Key)
+		if err != nil {
+			return nil, fmt.Errorf("-cert and -key: %w", err)
+		}
+		tc.Certificates = []tls.Certificate{cert}
+	} else if a.ClientCAFile != "" {
+		return nil, errors.New("admin.client_ca_file asks for a client certificate: give it with -cert and -key")
+	}
+	return tc, nil
 }
 
 // checkMaxBytes bounds an answer fit check reads.
@@ -122,11 +186,16 @@ type checkAPI struct {
 	token   string
 }
 
-// newCheckAPI returns the client fit check reaches a's Admin API with: plain
-// HTTP over TCP or, for an address under config.AdminUnixPrefix, over the
-// Unix socket it names. No Admin API answers TLS, so none is set up.
-func newCheckAPI(a config.Admin, timeout time.Duration) (*checkAPI, error) {
+// newCheckAPI returns the client fit check reaches a's Admin API with: HTTP
+// over TCP, or HTTPS, verified as o says, when admin sets cert_file; or, for
+// an address under config.AdminUnixPrefix, plain HTTP over the Unix socket
+// it names.
+func newCheckAPI(a config.Admin, o checkTLS, timeout time.Duration) (*checkAPI, error) {
 	api := &checkAPI{client: &http.Client{Timeout: timeout}}
+	network, address := a.Network()
+	if o.set() && (network == "unix" || !a.TLS()) {
+		return nil, errors.New("-ca, -server-name, -cert and -key are for an Admin API served over TLS, and admin sets no cert_file")
+	}
 	if a.TokenFile != "" {
 		data, err := os.ReadFile(a.TokenFile)
 		if err != nil {
@@ -137,9 +206,31 @@ func newCheckAPI(a config.Admin, timeout time.Duration) (*checkAPI, error) {
 			return nil, fmt.Errorf("admin.token_file %s is empty", a.TokenFile)
 		}
 	}
-	network, address := a.Network()
 	if network != "unix" {
-		api.baseURL = "http://" + address
+		host, port, _ := net.SplitHostPort(address)
+		if ip, err := netip.ParseAddr(host); host == "" || err == nil && ip.IsUnspecified() {
+			// Every address, as ":2019": reached on loopback, as not every
+			// system dials an unspecified address.
+			loopback := "127.0.0.1"
+			if err == nil && ip.Is6() {
+				loopback = "::1"
+			}
+			address = net.JoinHostPort(loopback, port)
+		}
+		if !a.TLS() {
+			api.baseURL = "http://" + address
+			return api, nil
+		}
+		tc, err := o.config(a, host)
+		if err != nil {
+			return nil, err
+		}
+		api.baseURL = "https://" + address
+		api.client.Transport = &http.Transport{
+			TLSClientConfig:     tc,
+			TLSHandshakeTimeout: timeout,
+			MaxIdleConns:        1,
+		}
 		return api, nil
 	}
 	api.baseURL = "http://unix"
@@ -240,6 +331,9 @@ func (api *checkAPI) do(method, path string, body []byte, ifMatch string) ([]byt
 	}
 	resp, err := api.client.Do(req)
 	if err != nil {
+		if errors.As(err, new(*tls.CertificateVerificationError)) {
+			err = fmt.Errorf("%w: give the CA the Admin API's certificate chains to with -ca, or the name it is for with -server-name", err)
+		}
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
@@ -265,6 +359,11 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print the check's answer as the JSON the Admin API sent, rather than as a listing")
 	fix := fs.Bool("fix", false, "ask which fix to apply to each difference, one at a time, and apply the ones chosen together")
 	timeout := fs.Duration("timeout", 30*time.Second, "how long fit check waits for the Admin API")
+	var tlsOpts checkTLS
+	fs.StringVar(&tlsOpts.CA, "ca", "", "with admin.cert_file, a PEM file with the CAs the Admin API's certificate is verified with; the system's and the certificate admin.cert_file holds, when it can be read, when left out")
+	fs.StringVar(&tlsOpts.ServerName, "server-name", "", "with admin.cert_file, the name the Admin API's certificate is verified for; the host of admin.address, or localhost when that is unspecified, when left out")
+	fs.StringVar(&tlsOpts.Cert, "cert", "", "with admin.client_ca_file, a PEM file with the client certificate fit check presents")
+	fs.StringVar(&tlsOpts.Key, "key", "", "the private key of -cert")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -289,7 +388,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "fit check: %v\n", err)
 		return 2
 	}
-	api, err := newCheckAPI(a, *timeout)
+	api, err := newCheckAPI(a, tlsOpts, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "fit check: %v\n", err)
 		return 2

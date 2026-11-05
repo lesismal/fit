@@ -141,7 +141,7 @@ fit 的 Admin API 在形式上与 Caddy 相同：对 `/config/` 及其下路径�
 - 路径是 JSON pointer 的各段（`/config/routes/0/handler`），没有 `@id` 快捷方式。
 - `PATCH` 是 JSON merge patch（RFC 7396）；没有 Caddy 用 `POST` 追加数组元素的做法：请 `PUT` 整个数组。
 - fit 保留已应用的配置（`GET /versions`），`POST /rollback/{n}` 可以再次应用其中一份。
-- 它同样监听 127.0.0.1:2019，监听其他地址时需要 bearer token（`admin.token_file`）。
+- 它同样监听 127.0.0.1:2019，监听其他地址时需要 bearer token（`admin.token_file`）和 TLS（`admin.cert_file`、`admin.key_file`）。
 
 ## 行为上的不同
 

@@ -23,7 +23,8 @@ ask for it, how it keeps a web page from using it, and what the history keeps.
   on by default; for fit, a second process on one host would then fail to start, and a listener
   nobody asked for is a surprise in a proxy's config. The address must be a loopback one or a Unix
   socket (`unix/<path>`, made 0600) unless `token_file` is set, so that a remote API always asks
-  for a token.
+  for a token. Later, `cert_file` and `key_file` were added, and a remote API needs them too: it
+  is served over TLS, so that the token never crosses a network in the clear.
 - **Web pages are refused.** A request with `Origin` gets 403, so that a page cannot post a config
   to localhost; `POST /load` takes only `application/json`, which a page cannot send without a
   preflight the API does not answer; and on a TCP address without a token, the `Host` field must

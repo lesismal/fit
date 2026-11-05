@@ -213,9 +213,12 @@ const AdminUnixPrefix = "unix/"
 
 // Admin is where the Admin API listens, and who may use it.
 type Admin struct {
-	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". A host that is not a loopback address or localhost needs token_file, cert_file and key_file, so that only holders of the token reach the API and the token never crosses a network in the clear. 127.0.0.1:2019 when left out."`
 	MPTCP            bool     `json:"mptcp,omitempty" doc:"Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths."`
 	TokenFile        string   `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
+	CertFile         string   `json:"cert_file,omitempty" doc:"A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the API is served over TLS, 1.2 or later. The files are read again when they change, so that a renewed certificate is served without a restart. Not for a Unix socket."`
+	KeyFile          string   `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
+	ClientCAFile     string   `json:"client_ca_file,omitempty" doc:"A PEM file with the CAs that clients' certificates must chain to: with it, every client must present a valid certificate, besides the token, before it is heard. Needs cert_file and key_file; read again when it changes, as they are."`
 	History          int      `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
 	MaxConfigBytes   int64    `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
 	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. Until a connection has made a request with the token (any request, without token_file), each of its reads waits 5s at most. 16 when left out or 0."`
@@ -310,6 +313,9 @@ func (c *Console) Conns() int { return int(orDefault(int64(c.MaxConns), DefaultC
 
 // HistoryLen, ConfigBytes and Conns return the limits, their defaults when
 // left out.
+// TLS says whether the Admin API is served over TLS: cert_file is set.
+func (a *Admin) TLS() bool { return a.CertFile != "" }
+
 func (a *Admin) HistoryLen() int    { return int(orDefault(int64(a.History), DefaultAdminHistory)) }
 func (a *Admin) ConfigBytes() int64 { return orDefault(a.MaxConfigBytes, DefaultAdminMaxConfigBytes) }
 func (a *Admin) Conns() int         { return int(orDefault(int64(a.MaxConns), DefaultAdminMaxConns)) }

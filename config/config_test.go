@@ -394,12 +394,31 @@ func TestValidate(t *testing.T) {
 		{
 			name: "admin on every interface without a token",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": ":2019"}}`,
-			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file: off loopback it needs a token (token_file) and TLS (cert_file and key_file), so that the token is not sent in the clear`},
 		},
 		{
 			name: "admin on another host without a token",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "10.0.0.1:2019"}}`,
-			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file: off loopback it needs a token (token_file) and TLS (cert_file and key_file), so that the token is not sent in the clear`},
+		},
+		{
+			name: "admin off loopback with a token but no TLS",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "10.0.0.1:2019", "token_file": "t"}}`,
+			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set cert_file and key_file: off loopback it needs a token (token_file) and TLS (cert_file and key_file), so that the token is not sent in the clear`},
+		},
+		{
+			name: "admin off loopback with TLS but no token, and a key alone",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "[::]:2019", "key_file": "k", "client_ca_file": "ca"}}`,
+			want: []string{
+				`1:73: admin.address: "[::]:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file and cert_file: off loopback it needs a token (token_file) and TLS (cert_file and key_file), so that the token is not sent in the clear`,
+				`1:61: admin: cert_file and key_file go together`,
+				`1:121: admin.client_ca_file: client certificates are asked for over TLS: set cert_file and key_file too`,
+			},
+		},
+		{
+			name: "admin TLS on a Unix socket",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "unix//run/fit.sock", "cert_file": "c", "key_file": "k"}}`,
+			want: []string{`1:61: admin: a Unix socket is not served over TLS: leave cert_file, key_file and client_ca_file out`},
 		},
 		{
 			name: "admin addresses",
@@ -634,7 +653,9 @@ func TestAdmin(t *testing.T) {
 		{`{"address": "localhost:2019"}`, "tcp", "localhost:2019"},
 		{`{"address": "[::1]:0"}`, "tcp", "[::1]:0"},
 		{`{"address": "127.0.0.2:9"}`, "tcp", "127.0.0.2:9"},
-		{`{"address": ":2019", "token_file": "token"}`, "tcp", ":2019"},
+		{`{"address": ":2019", "token_file": "token", "cert_file": "c", "key_file": "k"}`, "tcp", ":2019"},
+		{`{"address": "10.0.0.1:2019", "token_file": "token", "cert_file": "c", "key_file": "k", "client_ca_file": "ca"}`, "tcp", "10.0.0.1:2019"},
+		{`{"address": "127.0.0.1:2019", "cert_file": "c", "key_file": "k"}`, "tcp", "127.0.0.1:2019"},
 		{`{"address": "unix//run/fit/admin.sock"}`, "unix", "/run/fit/admin.sock"},
 	} {
 		c, err := Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": ` + tt.admin + `}`))
@@ -646,6 +667,9 @@ func TestAdmin(t *testing.T) {
 		}
 	}
 	a := &Admin{}
+	if a.TLS() || !(&Admin{CertFile: "c"}).TLS() {
+		t.Error("TLS() is not whether cert_file is set")
+	}
 	if a.HistoryLen() != DefaultAdminHistory || a.ConfigBytes() != DefaultAdminMaxConfigBytes || a.Conns() != DefaultAdminMaxConns {
 		t.Errorf("defaults: %d %d %d", a.HistoryLen(), a.ConfigBytes(), a.Conns())
 	}

@@ -299,8 +299,16 @@ fit check -c /etc/fit/fit.json -json    # 以 JSON 输出检查结果
 fit check -c /etc/fit/fit.json -fix     # 逐项选择修正，然后一起应用
 ```
 
-引导文件中的 `admin.address`（以及 `token_file`）指明 Admin API 的位置。退出码：没有 drift 为 `0`；仍有 drift（包括 `-fix`
-之后）为 `1`；用法、配置加载、连接或解码错误为 `2`。
+引导文件中的 `admin.address`（以及 `token_file`）指明 Admin API 的位置。设置了 `admin.cert_file` 时，fit check 使用
+https 并校验 API 的证书：能读到 `cert_file` 时（如在 fit 所在主机上）用其中的证书和系统 CA 校验，否则用 `-ca` 中的 CA；
+校验的名称为地址中的主机，主机未指定时为 localhost，也可用 `-server-name` 指定。设置了 `admin.client_ca_file` 时，它出示
+`-cert` 和 `-key` 给出的证书。
+
+```sh
+fit check -c /etc/fit/fit.json -ca /etc/fit/admin-ca.pem -server-name admin.example.com
+```
+
+退出码：没有 drift 为 `0`；仍有 drift（包括 `-fix` 之后）为 `1`；用法、配置加载、连接或解码错误为 `2`。
 
 供脚本与其他页面使用的端点是 `GET /config/check`（运行中的版本、ETag、差异及其计数）与 `POST /config/reconcile`（JSON 请求体
 为选中的 `{"fixes": [{"id", "action"}]}`，带 `If-Match`）；在控制台上对应

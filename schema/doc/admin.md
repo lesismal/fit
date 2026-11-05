@@ -2,8 +2,14 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 `/config/` and a JSON pointer into it, `POST /load` for a whole config, ETags against lost updates,
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
-unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
+unless told otherwise. To listen anywhere but a loopback address or a Unix socket it needs
+`token_file`, and `cert_file` and `key_file` to be served over TLS (1.2 or later), so that the
+token never crosses a network in the clear; TLS may be set on loopback too. The certificate files
+are read again when they change, so that a renewed certificate is served without a restart, and
+`client_ca_file` asks every client for a certificate that CA issued, besides the token.
+`fit check` reaches such an API over https, trusting the certificate `cert_file` holds when it
+can read it; its `-ca`, `-server-name`, `-cert` and `-key` flags verify it otherwise and present
+a client certificate. It is off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
 where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
 off by default, and a Unix socket has no paths.
 

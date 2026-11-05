@@ -46,9 +46,10 @@ func sameOriginRead(r *http.Request, origin string) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
-	host, ok := strings.CutPrefix(origin, "http://")
-	if !ok {
-		host, ok = strings.CutPrefix(origin, "https://")
+	scheme := "http://"
+	if r.TLS != nil {
+		scheme = "https://"
 	}
+	host, ok := strings.CutPrefix(origin, scheme)
 	return ok && host != "" && strings.EqualFold(host, r.Host)
 }
