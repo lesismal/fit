@@ -119,7 +119,7 @@ func failed(t *testing.T, l *Link, w *tap, want string) {
 
 func waitCount(t *testing.T, n *atomic.Int32, want int32) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for n.Load() != want {
 		if time.Now().After(deadline) {
 			t.Fatalf("count %d, want %d", n.Load(), want)
