@@ -119,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I159.
+Status: `todo`, `doing` or `done`. The next free iteration number is I160.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -317,6 +317,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I159.
 | I157 | The workbench's Logs page: each output, its loggers and format, the files on disk with sizes and ages, the rotation and retention form, rotate now and clean up now with a preview and a confirmation, and warnings | I155, I156, I120 | done |
 | **Performance** | | | |
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | todo |
+| **Agent and tunnel, continued** | | | |
+| I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | todo |
 
 ## M0, foundations
 
@@ -2722,6 +2724,47 @@ Principles, in the order they bind:
   checked, and each action is in the `admin` logger; a browser test passes in English and Chinese;
   under the race detector where Go changes.
 - **Touches**: `app/workbench`, `admin`, `logs`, `observe`, `docs`.
+
+## Agent and tunnel, continued
+
+### I159 Issued tokens for the tunnel and the LLM mesh
+
+- **Why**: the security review of 2026-11-06 found that both features authenticate their links with a
+  password shared by every member: the tunnel's hub `password` (and `body_password`), and the LLM
+  mesh's listener `password` or the role passwords added in f1628565. So any member that holds a
+  role's password can pose as the listener to another member of that role, or say hello under another
+  member's ID and receive its share of calls, prompts included; and a peer that answers a dial, or
+  records a link, gets what it needs to guess the password offline: an HMAC over a challenge it chose,
+  or PBKDF2 at 10,000 rounds under a salt every install shares. The links themselves are now TLS or
+  QUIC off loopback (decided the same day), which keeps out an attacker on the path; what is left is
+  that the secret is shared, long-lived and guessable.
+- **Do**: decision 035. Tokens a listener issues, in place of the shared password:
+  - **Not bound to a role.** A valid token is accepted from a node, a proxy or a hub alike; what a link
+    may do still follows from the role it says hello as and the listener's rules for that role
+    (`allow_hub_manage`, `allow_hub_services`, `allow_proxy_services`).
+  - **Each token its own credential.** A token has an ID, a name, a creation time, an optional expiry
+    and an optional note; the listener keeps only a hash of its secret. A member's ID is bound to the
+    token it first registered with, so another token cannot take it over.
+  - **Lifetimes.** A token may expire at a set time or after a duration; an expired token is refused
+    at the next handshake, and the links it holds are closed within a bound.
+  - **Management.** The listener's pages, its Admin API module and the CLI generate a token (shown
+    once), list tokens with their last use and the links using them, change a token's expiry, and
+    revoke one, which closes its links at once. Every change is in the `admin` logger.
+  - **The handshake.** A token's secret is high-entropy (at least 128 bits, generated), so an HMAC
+    over a challenge leaks nothing worth guessing. Both sides add a nonce of their own, the listener
+    proves the token back, and the proofs bind both nonces and the direction. `body_password` keys
+    come from the token by HKDF, not PBKDF2 over a shared salt.
+  - **The shared password.** It stays accepted for one release, for an upgrade, and is then refused;
+    the pages warn while any member still uses it.
+- **Done when**: a node, a proxy and a hub link to a listener with tokens over TLS or QUIC; a token
+  is accepted from any role and the role's rules still apply; one member's token cannot register as
+  another member's ID; an expired token is refused and its links close within the bound; a revoked
+  token's links close at once; generate, list, change expiry and revoke work from the pages, the Admin
+  API and the CLI, and each is logged; a token's secret is shown once and stored only as a hash; the
+  handshake's proofs bind both nonces and the direction, and a reflected or replayed proof is refused;
+  the shared password still links, with a warning; the docs (English and Chinese) explain tokens and
+  the upgrade; under the race detector.
+- **Touches**: `tunnel/...`, `llm/...`, `config`, `admin`, `app`, `cli`, `schema`, `docs`.
 
 ## Performance
 
