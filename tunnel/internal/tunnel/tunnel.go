@@ -125,6 +125,15 @@ func (e *Endpoint) updateHoldLocked() {
 // local sends what the end's connection read to the other end.
 func (e *Endpoint) local(data []byte) {
 	total := int64(len(data))
+	// The window is spent before the frames go: the other end's
+	// acknowledgement of them can come back, on the goroutine that reads
+	// the link, before the last of them is sent, and acked must find them
+	// already counted as sent, or it takes the acknowledgement for one of
+	// more than was sent and closes the tunnel.
+	e.mu.Lock()
+	e.window -= total
+	e.updateHoldLocked()
+	e.mu.Unlock()
 	for len(data) > 0 {
 		n := min(len(data), proto.MaxChunk)
 		if err := e.link.SendTunnel(proto.MethodTunnelData, e.ID, data[:n]); err != nil {
@@ -135,10 +144,6 @@ func (e *Endpoint) local(data []byte) {
 	}
 	e.out.Add(total)
 	e.active.Store(time.Now().UnixNano())
-	e.mu.Lock()
-	e.window -= total
-	e.updateHoldLocked()
-	e.mu.Unlock()
 }
 
 // remote writes what the other end sent to the end's connection, and

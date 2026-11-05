@@ -133,3 +133,32 @@ func TestRemoteSendFails(t *testing.T) {
 		t.Fatalf("open %v, reason %q", tb.Get(1) != nil, l.reason())
 	}
 }
+
+// ackingLink is a link whose other end acknowledges each data frame before
+// SendTunnel returns, as the goroutine that reads a real link can while
+// the end is still sending.
+type ackingLink struct {
+	closeLink
+	e *Endpoint
+}
+
+func (l *ackingLink) SendTunnel(m proto.Method, id uint64, payload []byte) error {
+	if m == proto.MethodTunnelData {
+		l.e.acked(int64(len(payload)))
+	}
+	return l.closeLink.SendTunnel(m, id, payload)
+}
+
+// An acknowledgement that comes back while the end is still sending what
+// it acknowledges is of what was sent: the tunnel stays open, and the
+// window is whole again once everything is acknowledged.
+func TestAckBeforeSendReturns(t *testing.T) {
+	tb, l := NewTable(nil), &ackingLink{}
+	e := New(tb, l, 1, true)
+	l.e = e
+	_ = tb.Add(e)
+	e.local(make([]byte, 3*proto.MaxChunk+1))
+	if tb.Get(1) == nil || e.window != proto.Window {
+		t.Fatalf("open %v, window %d: %s", tb.Get(1) != nil, e.window, l.reason())
+	}
+}
