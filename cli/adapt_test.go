@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,6 +43,20 @@ func TestAdapt(t *testing.T) {
 	}
 	if code, _, stderr := runFit("validate", "-c", out); code != 0 {
 		t.Errorf("the JSON it wrote: %d %q", code, stderr)
+	}
+	// What it writes may hold secrets: a new file is its user's alone,
+	// and one there already keeps its mode.
+	if fi, err := os.Stat(out); err != nil || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Errorf("a new file's mode: %v %v", fi.Mode(), err)
+	}
+	if err := os.Chmod(out, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runFit("adapt", "-c", f, "-o", out); code != 0 {
+		t.Fatalf("again: %d %q", code, stderr)
+	}
+	if fi, err := os.Stat(out); err != nil || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o640 {
+		t.Errorf("an existing file's mode: %v %v", fi.Mode(), err)
 	}
 	for _, args := range [][]string{{"-to", "toml"}, {"-from", "xml", "-c", "testdata/proxy.json"}} {
 		if code, _, _ := runFit(append([]string{"adapt"}, args...)...); code == 0 {

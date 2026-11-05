@@ -116,7 +116,10 @@ func runAdapt(args []string, stdout, stderr io.Writer) int {
 		_, _ = stdout.Write(result)
 		return 0
 	}
-	if err := os.WriteFile(*out, result, 0o644); err != nil {
+	// The config may hold secrets, as a JWT secret or a store's password:
+	// a new file is its user's alone, and one there already keeps its
+	// mode, which WriteFile leaves as it is.
+	if err := os.WriteFile(*out, result, 0o600); err != nil {
 		fmt.Fprintf(stderr, "fit adapt: %v\n", err)
 		return 1
 	}
