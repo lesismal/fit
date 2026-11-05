@@ -32,6 +32,7 @@ import (
 
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 )
@@ -247,6 +248,9 @@ type Host struct {
 	// Log is the role's logger: llm, tunnel or webrtc, its messages
 	// prefixed with its ID.
 	Log *logs.Logger
+	// Admin is the admin logger, where the role records what its managers
+	// change, as the tokens it issues.
+	Admin *logs.Logger
 
 	m *Manager
 }
@@ -463,8 +467,51 @@ func (m *Manager) host(id string) *Host {
 			name = config.LoggerWebRTC
 		}
 		h.Log = m.root.Logger(name).Prefixed(id + ": ")
+		h.Admin = m.root.Logger(config.LoggerAdmin)
 	}
 	return h
+}
+
+// TokenIssuer is a role whose listener issues link tokens (decision 035):
+// the tunnel's hub and the LLM feature's roles.
+type TokenIssuer interface {
+	LinkTokens() *linktoken.Manager
+}
+
+// ErrNoRole is the error of a role that is not running.
+var ErrNoRole = errors.New("app: no such role is running")
+
+// ErrNoTokens is the error of a role that issues no link tokens.
+var ErrNoTokens = errors.New("app: the role issues no link tokens: only tunnel.hub and the llm roles do")
+
+// LinkTokens returns the token manager of the running role id.
+func (m *Manager) LinkTokens(id string) (*linktoken.Manager, error) {
+	m.mu.Lock()
+	r := m.running[id]
+	m.mu.Unlock()
+	if r == nil {
+		return nil, ErrNoRole
+	}
+	ti, ok := r.(TokenIssuer)
+	if !ok {
+		return nil, ErrNoTokens
+	}
+	return ti.LinkTokens(), nil
+}
+
+// TokenRoles returns the IDs of the running roles that issue link tokens,
+// sorted.
+func (m *Manager) TokenRoles() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for id, r := range m.running {
+		if _, ok := r.(TokenIssuer); ok {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // Running returns the IDs of the roles running, sorted.

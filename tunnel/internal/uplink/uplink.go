@@ -13,6 +13,7 @@
 package uplink
 
 import (
+	"encoding/hex"
 	"errors"
 	"slices"
 	"sort"
@@ -24,6 +25,7 @@ import (
 	fib "github.com/lesismal/fib"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
 	"github.com/lesismal/fit/tunnel/internal/latency"
@@ -65,7 +67,7 @@ func Dials(cfg *config.TunnelUplink) []string {
 // a to b keeps its links: everything but its name, which the role keys it
 // by, is compared.
 func Same(a, b *config.TunnelUplink) bool {
-	return a.Password == b.Password && a.BodyPassword == b.BodyPassword && a.Pin == b.Pin && a.CAFile == b.CAFile &&
+	return a.Password == b.Password && a.Token == b.Token && a.BodyPassword == b.BodyPassword && a.Pin == b.Pin && a.CAFile == b.CAFile &&
 		a.QUICInsecure == b.QUICInsecure && a.Pool() == b.Pool() && a.Dial() == b.Dial() && a.Call() == b.Call() &&
 		a.Retry() == b.Retry() && a.Ping() == b.Ping() && a.PingWait() == b.PingWait() &&
 		slices.EqualFunc(a.Endpoints, b.Endpoints, func(x, y config.TunnelEndpoint) bool {
@@ -114,6 +116,9 @@ type Status struct {
 	QUICInsecure    bool           `json:"quic_insecure,omitempty"`
 	HasPassword     bool           `json:"has_password"`
 	HasBodyPassword bool           `json:"has_body_password"`
+	// TokenID is the ID of the token the links register with, "" for
+	// the password; the token itself is not shown.
+	TokenID string `json:"token_id,omitempty"`
 }
 
 // EndpointView is an endpoint as the pages show it.
@@ -144,11 +149,13 @@ type Uplink struct {
 	// OnPong, if set, gets the hub's answer to each ping.
 	OnPong func(*Uplink, *proto.PingRsp)
 
-	engine  *fib.Engine
-	log     *logs.Logger
-	info    func() proto.Info
-	router  *link.Router
-	coder   *bodycrypt.Coder
+	engine *fib.Engine
+	log    *logs.Logger
+	info   func() proto.Info
+	router *link.Router
+	coder  *bodycrypt.Coder
+	// token is what the links register with, nil for the password.
+	token   *linktoken.Secret
 	seq     atomic.Uint32
 	rtt     latency.Meter
 	pinging atomic.Bool
@@ -171,10 +178,22 @@ type Uplink struct {
 // hub may call on it.
 func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log *logs.Logger, info func() proto.Info, setup func(u *Uplink, r *link.Router)) *Uplink {
 	u := &Uplink{Name: cfg.HubName(), Config: cfg, Tunnels: tunnel.NewTable(limit), engine: engine, log: log, info: info, pool: map[*link.Link]string{}, conns: map[*link.Link]proto.RegisterRsp{}, state: StateConnecting, stop: make(chan struct{})}
+	if cfg.Token != "" {
+		sec, err := linktoken.Parse(cfg.Token)
+		if err != nil {
+			// Config validation refuses it: nothing to dial with.
+			u.state, u.lastErr = StateFailed, "token: "+err.Error()
+		}
+		u.token = &sec
+	}
 	if cfg.BodyPassword != "" {
 		// The uplink dials its links: the hub listens.
 		cd, _ := bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
 		u.coder = cd.Dialer()
+		if u.token != nil {
+			// A token's link seals with keys from the token.
+			u.coder = bodycrypt.NewToken(u.token.ID, linktoken.BodyKey(u.token.Stored()), cfg.BodyPassword).Dialer()
+		}
 	}
 	r := link.NewRouter()
 	r.Log = log
@@ -295,7 +314,14 @@ var ErrStopped = errors.New("tunnel: uplink stopped")
 // l if either fails.
 func (u *Uplink) register(l *link.Link) {
 	req := proto.RegisterReq{Info: u.info()}
-	proto.Sign(&req, u.Config.Password)
+	var checkProof func(*proto.RegisterRsp) error
+	err := error(nil)
+	if u.token != nil {
+		checkProof, err = u.challenge(l, &req)
+	} else {
+		proto.Sign(&req, u.Config.Password)
+		checkProof = func(got *proto.RegisterRsp) error { return proto.CheckProof(&req, got, u.Config.Password) }
+	}
 	var rsp proto.RegisterRsp
 	// The answer is checked where the link is read, so that the frames the
 	// hub sends after it are served once it has proven the hub, and none
@@ -305,13 +331,16 @@ func (u *Uplink) register(l *link.Link) {
 		if err := link.Decode(body, &got); err != nil {
 			return err
 		}
-		if err := proto.CheckProof(&req, &got, u.Config.Password); err != nil {
+		if err := checkProof(&got); err != nil {
 			return err
 		}
 		l.SetValue(hubProven{})
 		return nil
 	}
-	if err := l.CallChecked(proto.MethodRegister, &req, &rsp, u.Config.Call(), check); err != nil {
+	if err == nil {
+		err = l.CallChecked(proto.MethodRegister, &req, &rsp, u.Config.Call(), check)
+	}
+	if err != nil {
 		u.fail("register: "+err.Error(), false)
 		u.log.Warnf("hub %s: registering failed: %v", u.Name, err)
 		_ = l.Close()
@@ -346,6 +375,29 @@ func (u *Uplink) register(l *link.Link) {
 	}
 	// Measure the link at once, rather than an interval from now.
 	go u.ping()
+}
+
+// challenge asks the hub on l for a challenge to register with the token,
+// proves the token in req over both nonces, and returns how the hub's
+// answer is checked.
+func (u *Uplink) challenge(l *link.Link, req *proto.RegisterReq) (func(*proto.RegisterRsp) error, error) {
+	own := linktoken.Nonce()
+	var ch proto.ChallengeRsp
+	err := l.Call(proto.MethodChallenge, &proto.ChallengeReq{Token: u.token.ID, Nonce: hex.EncodeToString(own)}, &ch, u.Config.Call())
+	var remote link.RemoteError
+	if errors.As(err, &remote) && (strings.Contains(string(remote), "register first") || strings.Contains(string(remote), "no method")) {
+		return nil, proto.ErrOldHubTokens
+	}
+	if err != nil {
+		return nil, err
+	}
+	hub, err := proto.DecodeNonce(ch.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	sec := *u.token
+	proto.ProveToken(req, sec, own, hub)
+	return func(got *proto.RegisterRsp) error { return proto.CheckTokenProof(req, got, sec, own, hub) }, nil
 }
 
 // lost records that l lost the hub, and closes the tunnels it carried.
@@ -521,6 +573,9 @@ func (u *Uplink) Status() Status {
 	cfg := u.Config
 	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Hub: u.hub, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: cfg.BodyPassword != "", PoolSize: cfg.Pool(), Places: []int{},
 		Links: []LinkStatus{}, Protos: map[string]int{}, Endpoints: []EndpointView{}, Pin: cfg.Pin, CAFile: cfg.CAFile, QUICInsecure: cfg.QUICInsecure, HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}
+	if u.token != nil {
+		st.TokenID = u.token.ID
+	}
 	for _, e := range cfg.Endpoints {
 		st.Endpoints = append(st.Endpoints, EndpointView{Protocol: e.Protocol(), Address: e.Address, Enabled: !e.Disabled})
 	}

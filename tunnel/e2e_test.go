@@ -24,6 +24,7 @@ import (
 	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
@@ -290,11 +291,16 @@ type hub struct {
 	echoListen, stallListen     string
 	hubCon, nodeCon, cliCon     string
 	bodyPassword, protocol, url string
+	// tokens are the node's and the proxy's, with hubOpts.tokens.
+	tokens [2]linktoken.Secret
 }
 
 type hubOpts struct {
 	protocol     string
 	bodyPassword string
+	// tokens has the node and the proxy register with tokens the hub
+	// issued, and the hub take no password.
+	tokens bool
 }
 
 // hubCert is the hub's certificate of a test, as PEM, and its fingerprint,
@@ -324,7 +330,11 @@ func uplinkJSON(url, password, body string) string {
 		_, pin := hubCert()
 		extra += fmt.Sprintf(`, "pin": %q`, pin)
 	}
-	return fmt.Sprintf(`{"name": "hub", "endpoints": [{"address": %q}], "password": %q, "pool_size": 2, "retry_interval": "100ms", "ping_interval": "500ms"%s}`, url, password, extra)
+	cred := fmt.Sprintf(`"password": %q`, password)
+	if strings.HasPrefix(password, config.LinkTokenPrefix) {
+		cred = fmt.Sprintf(`"token": %q`, password)
+	}
+	return fmt.Sprintf(`{"name": "hub", "endpoints": [{"address": %q}], %s, "pool_size": 2, "retry_interval": "100ms", "ping_interval": "500ms"%s}`, url, cred, extra)
 }
 
 func startHub(t *testing.T, o hubOpts) *hub {
@@ -358,13 +368,22 @@ func startHub(t *testing.T, o hubOpts) *hub {
 		pem, _ := hubCert()
 		body += fmt.Sprintf(`, "quic": {"cert": %q, "key": %q}`, pem[0], pem[1])
 	}
+	// The node's and the proxy's credentials: the password, or a token
+	// each that the hub issued.
+	cred, nodeCred, proxyCred := `"password": "pw"`, "pw", "pw"
+	if o.tokens {
+		n, p := linktoken.New(), linktoken.New()
+		cred = fmt.Sprintf(`"tokens": [{"id": %q, "name": "lab", "hash": %q}, {"id": %q, "name": "me", "hash": %q}]`, n.ID, n.Hash(), p.ID, p.Hash())
+		nodeCred, proxyCred = n.String(), p.String()
+		h.tokens = [2]linktoken.Secret{n, p}
+	}
 	doc := fmt.Sprintf(`{"tunnel": {
- "hub": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
+ "hub": {"name": "hub", `+cred+`%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
  "node": {"name": "lab", "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
 }}`, body, protocolOf(o.protocol), listen, consoleJSON(h.hubCon),
-		uplinkJSON(h.url, "pw", o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
-		uplinkJSON(h.url, "pw", o.bodyPassword), h.echoListen, h.stallListen, consoleJSON(h.cliCon))
+		uplinkJSON(h.url, nodeCred, o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
+		uplinkJSON(h.url, proxyCred, o.bodyPassword), h.echoListen, h.stallListen, consoleJSON(h.cliCon))
 	h.proc = startFit(t, doc, nil)
 	h.hub, h.node, h.proxy = login(t, h.hubCon), login(t, h.nodeCon), login(t, h.cliCon)
 	h.waitNode(t, "lab", "echo")
@@ -415,10 +434,14 @@ func echoOnce(t *testing.T, addr, msg string) {
 }
 
 func TestTunnel(t *testing.T) {
-	for _, o := range []hubOpts{{protocol: "tcp"}, {protocol: "ws"}, {protocol: "quic"}, {protocol: "tls"}, {protocol: "wss"}, {protocol: "tcp", bodyPassword: "aes"}, {protocol: "wss", bodyPassword: "aes"}} {
+	for _, o := range []hubOpts{{protocol: "tcp"}, {protocol: "ws"}, {protocol: "quic"}, {protocol: "tls"}, {protocol: "wss"}, {protocol: "tcp", bodyPassword: "aes"}, {protocol: "wss", bodyPassword: "aes"},
+		{protocol: "tls", tokens: true}, {protocol: "wss", tokens: true}, {protocol: "quic", tokens: true}, {protocol: "tcp", bodyPassword: "aes", tokens: true}} {
 		name := o.protocol
 		if o.bodyPassword != "" {
 			name += "+body"
+		}
+		if o.tokens {
+			name += "+tokens"
 		}
 		t.Run(name, func(t *testing.T) { testTunnel(t, o) })
 	}

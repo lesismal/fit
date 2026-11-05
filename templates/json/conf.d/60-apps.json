@@ -142,6 +142,48 @@
         // "key": "",
       // },
 
+      // // The tokens the hub's listener issued, which nodes and proxies link with in place of a
+      // // password: each its own credential, of no role, kept as a hash, with an optional expiry. The
+      // // pages, the Admin API module and fit token make, list, change and revoke them; not written by
+      // // hand.
+      // // list of object.
+      // "tokens": [
+        // {
+          // // The token's ID, 16 hex digits, the part of the token before its secret; unique among the
+          // // listener's.
+          // // string; required.
+          // "id": "",
+
+          // // What the token is for, as the pages list it: 1 to 64 characters.
+          // // string; required.
+          // "name": "",
+
+          // // The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's
+          // // proof with, which cannot be used to link. The token itself is not kept.
+          // // string; required.
+          // "hash": "",
+
+          // // When the token was made, in seconds since 1970.
+          // // integer, 0 or more.
+          // "created_at": 0,
+
+          // // When the token expires, in seconds since 1970: it is refused from then on, and the links it
+          // // holds are closed. Never when left out or 0.
+          // // integer, 0 or more.
+          // "expires_at": 0,
+
+          // // Anything else about the token, for the pages; up to 1024 bytes.
+          // // string.
+          // "note": "",
+
+          // // The members that first linked with the token, which no other token may link as: a tunnel's
+          // // node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token
+          // // frees them.
+          // // list of string.
+          // "members": [],
+        // },
+      // ],
+
       // // The nodes and proxies the hub dials. Its pages change them.
       // // list of object.
       // "peers": [
@@ -150,10 +192,17 @@
           // // string; required.
           // "address": "127.0.0.1:9000",
 
-          // // The password of the dialing role on the peer's listener: a node dials with the peer's
-          // // listen.node_password, a proxy with its listen.proxy_password, a hub with its
-          // // listen.hub_password, or with its listen.password when it has none for the role.
-          // // string; required.
+          // // The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's
+          // // pages, its Admin API module or fit token show once when they make it. Set token or password,
+          // // not both.
+          // // string.
+          // "token": "",
+
+          // // The shared password of the dialing role on the peer's listener, deprecated for token: a node
+          // // dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub
+          // // with its listen.hub_password, or with its listen.password when it has none for the role.
+          // // Taken in this release, with a warning on the peer's pages; refused in the next.
+          // // string.
           // "password": "",
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
@@ -350,6 +399,48 @@
         // "key": "",
       // },
 
+      // // The tokens the node's listener issued, which hubs and proxies link with in place of a
+      // // password: each its own credential, of no role, kept as a hash, with an optional expiry. The
+      // // pages, the Admin API module and fit token make, list, change and revoke them; not written by
+      // // hand.
+      // // list of object.
+      // "tokens": [
+        // {
+          // // The token's ID, 16 hex digits, the part of the token before its secret; unique among the
+          // // listener's.
+          // // string; required.
+          // "id": "",
+
+          // // What the token is for, as the pages list it: 1 to 64 characters.
+          // // string; required.
+          // "name": "",
+
+          // // The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's
+          // // proof with, which cannot be used to link. The token itself is not kept.
+          // // string; required.
+          // "hash": "",
+
+          // // When the token was made, in seconds since 1970.
+          // // integer, 0 or more.
+          // "created_at": 0,
+
+          // // When the token expires, in seconds since 1970: it is refused from then on, and the links it
+          // // holds are closed. Never when left out or 0.
+          // // integer, 0 or more.
+          // "expires_at": 0,
+
+          // // Anything else about the token, for the pages; up to 1024 bytes.
+          // // string.
+          // "note": "",
+
+          // // The members that first linked with the token, which no other token may link as: a tunnel's
+          // // node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token
+          // // frees them.
+          // // list of string.
+          // "members": [],
+        // },
+      // ],
+
       // // The hubs and proxies the node dials. Its pages change them.
       // // list of object.
       // "peers": [
@@ -358,10 +449,17 @@
           // // string; required.
           // "address": "127.0.0.1:9000",
 
-          // // The password of the dialing role on the peer's listener: a node dials with the peer's
-          // // listen.node_password, a proxy with its listen.proxy_password, a hub with its
-          // // listen.hub_password, or with its listen.password when it has none for the role.
-          // // string; required.
+          // // The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's
+          // // pages, its Admin API module or fit token show once when they make it. Set token or password,
+          // // not both.
+          // // string.
+          // "token": "",
+
+          // // The shared password of the dialing role on the peer's listener, deprecated for token: a node
+          // // dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub
+          // // with its listen.hub_password, or with its listen.password when it has none for the role.
+          // // Taken in this release, with a warning on the peer's pages; refused in the next.
+          // // string.
           // "password": "",
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
@@ -667,6 +765,48 @@
         // "key": "",
       // },
 
+      // // The tokens the proxy's listener issued, which hubs and nodes link with in place of a
+      // // password: each its own credential, of no role, kept as a hash, with an optional expiry. The
+      // // pages, the Admin API module and fit token make, list, change and revoke them; not written by
+      // // hand.
+      // // list of object.
+      // "tokens": [
+        // {
+          // // The token's ID, 16 hex digits, the part of the token before its secret; unique among the
+          // // listener's.
+          // // string; required.
+          // "id": "",
+
+          // // What the token is for, as the pages list it: 1 to 64 characters.
+          // // string; required.
+          // "name": "",
+
+          // // The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's
+          // // proof with, which cannot be used to link. The token itself is not kept.
+          // // string; required.
+          // "hash": "",
+
+          // // When the token was made, in seconds since 1970.
+          // // integer, 0 or more.
+          // "created_at": 0,
+
+          // // When the token expires, in seconds since 1970: it is refused from then on, and the links it
+          // // holds are closed. Never when left out or 0.
+          // // integer, 0 or more.
+          // "expires_at": 0,
+
+          // // Anything else about the token, for the pages; up to 1024 bytes.
+          // // string.
+          // "note": "",
+
+          // // The members that first linked with the token, which no other token may link as: a tunnel's
+          // // node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token
+          // // frees them.
+          // // list of string.
+          // "members": [],
+        // },
+      // ],
+
       // // The hubs and nodes the proxy dials. Its pages change them.
       // // list of object.
       // "peers": [
@@ -675,10 +815,17 @@
           // // string; required.
           // "address": "127.0.0.1:9000",
 
-          // // The password of the dialing role on the peer's listener: a node dials with the peer's
-          // // listen.node_password, a proxy with its listen.proxy_password, a hub with its
-          // // listen.hub_password, or with its listen.password when it has none for the role.
-          // // string; required.
+          // // The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's
+          // // pages, its Admin API module or fit token show once when they make it. Set token or password,
+          // // not both.
+          // // string.
+          // "token": "",
+
+          // // The shared password of the dialing role on the peer's listener, deprecated for token: a node
+          // // dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub
+          // // with its listen.hub_password, or with its listen.password when it has none for the role.
+          // // Taken in this release, with a warning on the peer's pages; refused in the next.
+          // // string.
           // "password": "",
 
           // // The role the peer must announce; a link to a peer of another role is refused. Never the
@@ -825,15 +972,59 @@
       // // string.
       // "name": "",
 
-      // // The password nodes and proxies register with, which they prove they know without sending it.
-      // // The hub refuses every registration while it is left out.
+      // // The password every node and proxy may register with, which they prove they know without
+      // // sending it: deprecated for tokens, which give each member a credential of its own. Still
+      // // taken in this release, with a warning on the pages while a member uses it; refused in the
+      // // next. Without it, only tokens register.
       // // string.
       // "password": "",
 
-      // // When set, the body of every frame on the links is encrypted with AES-256-GCM under a key
-      // // made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp
-      // // or ws listener on an address that is not a loopback one is allowed only with it. It applies
-      // // to the links that open after it changes.
+      // // The tokens the hub issued, which nodes and proxies register with in place of the password:
+      // // each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin
+      // // API module and fit token make, list, change and revoke them; not written by hand.
+      // // list of object.
+      // "tokens": [
+        // {
+          // // The token's ID, 16 hex digits, the part of the token before its secret; unique among the
+          // // listener's.
+          // // string; required.
+          // "id": "",
+
+          // // What the token is for, as the pages list it: 1 to 64 characters.
+          // // string; required.
+          // "name": "",
+
+          // // The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's
+          // // proof with, which cannot be used to link. The token itself is not kept.
+          // // string; required.
+          // "hash": "",
+
+          // // When the token was made, in seconds since 1970.
+          // // integer, 0 or more.
+          // "created_at": 0,
+
+          // // When the token expires, in seconds since 1970: it is refused from then on, and the links it
+          // // holds are closed. Never when left out or 0.
+          // // integer, 0 or more.
+          // "expires_at": 0,
+
+          // // Anything else about the token, for the pages; up to 1024 bytes.
+          // // string.
+          // "note": "",
+
+          // // The members that first linked with the token, which no other token may link as: a tunnel's
+          // // node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token
+          // // frees them.
+          // // list of string.
+          // "members": [],
+        // },
+      // ],
+
+      // // When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and
+      // // proxies need the same one: each frame is authenticated, so a tcp or ws listener on an
+      // // address that is not a loopback one is allowed only with it. A link registered with a token
+      // // derives its keys from the token and this, by HKDF; one with the password, from the
+      // // password's PBKDF2. It applies to the links that open after it changes.
       // // string.
       // "body_password": "",
 
@@ -1067,8 +1258,15 @@
             // },
           // ],
 
-          // // The hub's password.
-          // // string; required.
+          // // The token the hub issued for this node or proxy, as fitt1.<id>.<secret>, which its pages,
+          // // its Admin API module or fit token show once when they make it. Set token or password, not
+          // // both.
+          // // string.
+          // "token": "",
+
+          // // The hub's shared password: deprecated for token, taken by hubs of this release with a
+          // // warning, and refused by the next.
+          // // string.
           // "password": "",
 
           // // The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a
@@ -1257,8 +1455,15 @@
             // },
           // ],
 
-          // // The hub's password.
-          // // string; required.
+          // // The token the hub issued for this node or proxy, as fitt1.<id>.<secret>, which its pages,
+          // // its Admin API module or fit token show once when they make it. Set token or password, not
+          // // both.
+          // // string.
+          // "token": "",
+
+          // // The hub's shared password: deprecated for token, taken by hubs of this release with a
+          // // warning, and refused by the next.
+          // // string.
           // "password": "",
 
           // // The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a

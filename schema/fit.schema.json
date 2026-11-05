@@ -995,6 +995,13 @@
             "$ref": "#/$defs/config.LLMPeer"
           },
           "type": "array"
+        },
+        "tokens": {
+          "description": "The tokens the hub's listener issued, which nodes and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand.",
+          "items": {
+            "$ref": "#/$defs/config.LinkToken"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -1195,6 +1202,13 @@
         "settings": {
           "$ref": "#/$defs/config.LLMNodeSettings",
           "description": "The node's own settings; the defaults when left out. Only its own pages change them."
+        },
+        "tokens": {
+          "description": "The tokens the node's listener issued, which hubs and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand.",
+          "items": {
+            "$ref": "#/$defs/config.LinkToken"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -1284,7 +1298,7 @@
           "type": "string"
         },
         "password": {
-          "description": "The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role.",
+          "description": "The shared password of the dialing role on the peer's listener, deprecated for token: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. Taken in this release, with a warning on the peer's pages; refused in the next.",
           "type": "string"
         },
         "pin": {
@@ -1303,11 +1317,14 @@
         "server_name": {
           "description": "The name the peer listener's certificate must have with ca_file, and the TLS server name sent; the address's host when left out.",
           "type": "string"
+        },
+        "token": {
+          "description": "The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's pages, its Admin API module or fit token show once when they make it. Set token or password, not both.",
+          "type": "string"
         }
       },
       "required": [
         "address",
-        "password",
         "role"
       ],
       "type": "object"
@@ -1350,6 +1367,13 @@
           "description": "The hubs and nodes the proxy dials. Its pages change them.",
           "items": {
             "$ref": "#/$defs/config.LLMPeer"
+          },
+          "type": "array"
+        },
+        "tokens": {
+          "description": "The tokens the proxy's listener issued, which hubs and nodes link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand.",
+          "items": {
+            "$ref": "#/$defs/config.LinkToken"
           },
           "type": "array"
         }
@@ -1487,6 +1511,50 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "config.LinkToken": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "description": "When the token was made, in seconds since 1970.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expires_at": {
+          "description": "When the token expires, in seconds since 1970: it is refused from then on, and the links it holds are closed. Never when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hash": {
+          "description": "The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's proof with, which cannot be used to link. The token itself is not kept.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The token's ID, 16 hex digits, the part of the token before its secret; unique among the listener's.",
+          "type": "string"
+        },
+        "members": {
+          "description": "The members that first linked with the token, which no other token may link as: a tunnel's node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token frees them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "What the token is for, as the pages list it: 1 to 64 characters.",
+          "type": "string"
+        },
+        "note": {
+          "description": "Anything else about the token, for the pages; up to 1024 bytes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "hash"
+      ],
       "type": "object"
     },
     "config.Listener": {
@@ -2881,7 +2949,7 @@
           "type": "boolean"
         },
         "body_password": {
-          "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. It applies to the links that open after it changes.",
+          "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. A link registered with a token derives its keys from the token and this, by HKDF; one with the password, from the password's PBKDF2. It applies to the links that open after it changes.",
           "type": "string"
         },
         "call_timeout": {
@@ -2946,7 +3014,7 @@
           "type": "string"
         },
         "password": {
-          "description": "The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out.",
+          "description": "The password every node and proxy may register with, which they prove they know without sending it: deprecated for tokens, which give each member a credential of its own. Still taken in this release, with a warning on the pages while a member uses it; refused in the next. Without it, only tokens register.",
           "type": "string"
         },
         "quic": {
@@ -2958,6 +3026,13 @@
           "description": "How long a link may take to register once it is open; it is closed past it. 10s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "tokens": {
+          "description": "The tokens the hub issued, which nodes and proxies register with in place of the password: each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin API module and fit token make, list, change and revoke them; not written by hand.",
+          "items": {
+            "$ref": "#/$defs/config.LinkToken"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -3212,7 +3287,7 @@
           "type": "string"
         },
         "password": {
-          "description": "The hub's password.",
+          "description": "The hub's shared password: deprecated for token, taken by hubs of this release with a warning, and refused by the next.",
           "type": "string"
         },
         "pin": {
@@ -3252,11 +3327,14 @@
           "description": "How long a link waits after a failed dial, or a lost hub, before it dials again. 3s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "token": {
+          "description": "The token the hub issued for this node or proxy, as fitt1.<id>.<secret>, which its pages, its Admin API module or fit token show once when they make it. Set token or password, not both.",
+          "type": "string"
         }
       },
       "required": [
-        "endpoints",
-        "password"
+        "endpoints"
       ],
       "type": "object"
     },

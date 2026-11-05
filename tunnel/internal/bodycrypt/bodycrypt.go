@@ -35,8 +35,12 @@ const (
 	// The HKDF info of each direction's key.
 	infoToListener = "fit-tunnel-link v3 dialer to listener"
 	infoToDialer   = "fit-tunnel-link v3 listener to dialer"
-	nonceSize      = 12
-	tagSize        = 16
+	// A token's Coder: its salt, and the HKDF info of each direction.
+	saltToken           = "fit-tunnel-link-body token"
+	infoTokenToListener = "fit-tunnel-link v4 token dialer to listener"
+	infoTokenToDialer   = "fit-tunnel-link v4 token listener to dialer"
+	nonceSize           = 12
+	tagSize             = 16
 )
 
 // RandomSize is how many random bytes each side's hello carries, and
@@ -54,17 +58,57 @@ var (
 	ErrReflected = errors.New("bodycrypt: the peer's hello is this side's own, sent back")
 )
 
-// Coder is a password's PBKDF2, from which every link's keys derive, for
-// the side of the links that listened (New's) or dialed (Dialer's).
+// Coder is a password's PBKDF2, or a token's key, from which every link's
+// keys derive, for the side of the links that listened (New's) or dialed
+// (Dialer's).
 type Coder struct {
 	secret []byte
 	dialer bool
+	// token is the ID of the token a token's Coder is of: the link's
+	// hello names it, so that the listener knows the key.
+	token string
+	// tokens, on a listener, are the Coders of the tokens it issued.
+	tokens func(id string) (*Coder, error)
 }
 
 // Dialer is the Coder of the same password for the side that dialed the
 // links. Both sides of a link must not be of the same side: their keys
 // would not match, and the link fails at its first sealed frame.
-func (cd *Coder) Dialer() *Coder { return &Coder{secret: cd.secret, dialer: true} }
+func (cd *Coder) Dialer() *Coder { return &Coder{secret: cd.secret, dialer: true, token: cd.token} }
+
+// Token is the ID of the token cd is of, or "" for a password's.
+func (cd *Coder) Token() string { return cd.token }
+
+// NewToken is the Coder of a link registered with token id, whose body key
+// (package linktoken's BodyKey) is key, and of the body password: HKDF, not
+// PBKDF2, since the token's key has the entropy a password lacks. The keys
+// of each link derive from it as from a password's, under labels of their
+// own.
+func NewToken(id string, key []byte, password string) *Coder {
+	ikm := append(append([]byte(nil), key...), password...)
+	secret, _ := hkdf.Key(sha256.New, ikm, []byte(saltToken), id, 32)
+	return &Coder{secret: secret, token: id}
+}
+
+// WithTokens is cd for a listener that also takes the links of the tokens
+// it issued: of returns the Coder of a token by its ID, or why it is
+// refused.
+func (cd *Coder) WithTokens(of func(id string) (*Coder, error)) *Coder {
+	return &Coder{secret: cd.secret, dialer: cd.dialer, tokens: of}
+}
+
+// ForToken is the Coder of the link whose hello named token id, on a
+// listener.
+func (cd *Coder) ForToken(id string) (*Coder, error) {
+	if cd.tokens == nil || cd.dialer {
+		return nil, ErrNoTokens
+	}
+	return cd.tokens(id)
+}
+
+// ErrNoTokens is the error of a hello naming a token at a side that takes
+// none.
+var ErrNoTokens = errors.New("bodycrypt: the peer's hello names a token, which this side does not take")
 
 // New is the Coder of password.
 func New(password string) (*Coder, error) {
@@ -102,11 +146,15 @@ func (cd *Coder) Session(own, peer []byte) (*Session, error) {
 	if bytes.Equal(own, peer) {
 		return nil, ErrReflected
 	}
+	toListener, toDialer := infoToListener, infoToDialer
+	if cd.token != "" {
+		toListener, toDialer = infoTokenToListener, infoTokenToDialer
+	}
 	dialer, listener := peer, own
-	sendInfo, recvInfo := infoToDialer, infoToListener
+	sendInfo, recvInfo := toDialer, toListener
 	if cd.dialer {
 		dialer, listener = own, peer
-		sendInfo, recvInfo = infoToListener, infoToDialer
+		sendInfo, recvInfo = toListener, toDialer
 	}
 	send, err := cd.aead(dialer, listener, sendInfo)
 	if err != nil {

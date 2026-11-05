@@ -57,6 +57,10 @@ type PeerView struct {
 	Places     []int                    `json:"places"`
 	RTT        latency.Stats            `json:"rtt"`
 	ServiceRTT map[string]latency.Stats `json:"service_rtt,omitempty"`
+	// Tokens are the IDs of the tokens the peer's links registered with,
+	// and Password whether any registered with the shared password.
+	Tokens   []string `json:"tokens"`
+	Password bool     `json:"password,omitempty"`
 }
 
 // RouteView is a tunnel as the pages show it.
@@ -111,6 +115,10 @@ type Status struct {
 	Links           int         `json:"links"`
 	Peers           []PeerView  `json:"peers"`
 	Tunnels         []RouteView `json:"tunnels"`
+	// PasswordPeers are the peers, as type/name, that registered a link
+	// with the shared password, which the pages warn of: it is refused from
+	// the next release.
+	PasswordPeers []string `json:"password_peers"`
 }
 
 // Status is the hub's state.
@@ -146,15 +154,40 @@ func (s *Hub) Status() Status {
 	s.mu.Lock()
 	st.Links = len(s.links)
 	s.mu.Unlock()
+	st.PasswordPeers = []string{}
 	for _, p := range s.Peers() {
 		s.mu.Lock()
 		places := p.placesLocked()
+		tokens, password := p.authLocked()
 		s.mu.Unlock()
 		lat := p.Latency()
-		st.Peers = append(st.Peers, PeerView{ID: p.ID, Addr: p.Addr, Since: p.Since, Info: ViewInfo(p.Info()), Tunnels: counts[p], Conns: len(places), Places: places,
-			RTT: lat.RTT, ServiceRTT: lat.ServiceRTT})
+		info := p.Info()
+		st.Peers = append(st.Peers, PeerView{ID: p.ID, Addr: p.Addr, Since: p.Since, Info: ViewInfo(info), Tunnels: counts[p], Conns: len(places), Places: places,
+			RTT: lat.RTT, ServiceRTT: lat.ServiceRTT, Tokens: tokens, Password: password})
+		if password {
+			st.PasswordPeers = append(st.PasswordPeers, info.Type+"/"+info.Name)
+		}
 	}
 	return st
+}
+
+// authLocked is how the peer's links registered: the tokens', and whether
+// any with the password. Callers hold the hub's lock.
+func (p *Peer) authLocked() ([]string, bool) {
+	tokens := []string{}
+	password := false
+	for _, l := range p.links {
+		c := connOf(l)
+		switch {
+		case c == nil:
+		case c.use == nil:
+			password = true
+		case !slices.Contains(tokens, c.use.Token()):
+			tokens = append(tokens, c.use.Token())
+		}
+	}
+	slices.Sort(tokens)
+	return tokens, password
 }
 
 // listenerReq is a listener as the pages send it.
@@ -179,6 +212,7 @@ func (l listenerReq) listener() config.TunnelListener {
 // left empty stays as it was, unless its clear says to remove it.
 type settingsReq struct {
 	Password            string `json:"password"`
+	ClearPassword       bool   `json:"clear_password"`
 	BodyPassword        string `json:"body_password"`
 	ClearBodyPassword   bool   `json:"clear_body_password"`
 	SocketPassword      string `json:"socket_password"`
@@ -196,6 +230,7 @@ type idReq struct {
 // config is made with common.Edit, off the worker.
 func (s *Hub) api(api *console.API) {
 	api.Handle("GET", "/api/status", func(r *console.Request) { _ = r.JSON(stdhttp.StatusOK, s.Status()) })
+	common.TokenRoutes(api, s.manage)
 	api.Handle("POST", "/api/listeners", func(r *console.Request) {
 		var req listenerReq
 		if !r.Decode(&req) {
@@ -371,10 +406,14 @@ func editListeners(m common.Member, change func([]config.TunnelListener) ([]conf
 
 // editSettings applies what the settings form sent to the member.
 func editSettings(m common.Member, req settingsReq) error {
-	if req.Password != "" {
+	switch {
+	case req.Password != "":
 		if err := m.Set("password", req.Password); err != nil {
 			return err
 		}
+	case req.ClearPassword:
+		// Once every member registers with a token.
+		delete(m, "password")
 	}
 	switch {
 	case req.BodyPassword != "":

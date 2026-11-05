@@ -36,7 +36,7 @@ a config against it and more.
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
-- [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
+- [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.tokens[]`](#config-linktoken), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
 - [WebRTC](#webrtc): [`webrtc`](#config-webrtc), [`webrtc.turn`](#config-turnserver), [`webrtc.turn.tls`](#config-turntls), [`webrtc.turn.users[]`](#config-turnuser), [`webrtc.media`](#config-webrtcmedia), [`webrtc.media.ice_servers[]`](#config-iceserver), [`webrtc.proxy`](#config-webrtcproxy)
 - [Media auth](#media-auth): [`media_auth[]`](#config-mediaauth), [`media_auth[].tokens[]`](#config-mediatoken), [`media_auth[].users[]`](#config-mediauser), [`media_auth[].keys[]`](#config-mediakey)
@@ -1727,6 +1727,7 @@ In JSON:
 | `name` | string |  | The name the hub shows its peers; the host's name when left out. Its pages change it. |
 | `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
 | `listen` | [object](#config-llmlisten) |  | Where the hub takes links from nodes and proxies; none when left out. Its pages change it. |
+| `tokens` | list of [object](#config-linktoken) |  | The tokens the hub's listener issued, which nodes and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `peers` | list of [object](#config-llmpeer) |  | The nodes and proxies the hub dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the hub's links; the defaults when left out. |
 | `max_nodes` | integer, 0 or more | `1024` | The most nodes the hub keeps in its table, offline ones included; past it the offline node seen longest ago is forgotten; online nodes are bounded by limits.max_conns and the hub's peers. 1024 when left out or 0. |
@@ -1768,6 +1769,22 @@ Also at `llm.node.listen`, `llm.proxy.listen`.
 | `cert` | string |  | The PEM certificate self_signed made; with key. Written by the role; delete both for a new one, which every peer must pin again. |
 | `key` | string |  | The PEM private key of cert. |
 
+<a id="config-linktoken"></a>
+
+### `llm.hub.tokens[]`
+
+Also at `llm.node.tokens[]`, `llm.proxy.tokens[]`, `tunnel.hub.tokens[]`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | string |  | Required. The token's ID, 16 hex digits, the part of the token before its secret; unique among the listener's. |
+| `name` | string |  | Required. What the token is for, as the pages list it: 1 to 64 characters. |
+| `hash` | string |  | Required. The SHA-256 of the key the token's secret derives, in hex: what the listener checks a link's proof with, which cannot be used to link. The token itself is not kept. |
+| `created_at` | integer, 0 or more |  | When the token was made, in seconds since 1970. |
+| `expires_at` | integer, 0 or more |  | When the token expires, in seconds since 1970: it is refused from then on, and the links it holds are closed. Never when left out or 0. |
+| `note` | string |  | Anything else about the token, for the pages; up to 1024 bytes. |
+| `members` | list of string |  | The members that first linked with the token, which no other token may link as: a tunnel's node/<name> or proxy/<name>, an LLM role's ID. Written by the listener; revoking the token frees them. |
+
 <a id="config-llmpeer"></a>
 
 ### `llm.hub.peers[]`
@@ -1777,7 +1794,8 @@ Also at `llm.node.peers[]`, `llm.proxy.peers[]`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The peer's host and port, as its listen.address says. |
-| `password` | string |  | Required. The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. |
+| `token` | string |  | The token the peer's listener issued for this role, as fitt1.<id>.<secret>, which the peer's pages, its Admin API module or fit token show once when they make it. Set token or password, not both. |
+| `password` | string |  | The shared password of the dialing role on the peer's listener, deprecated for token: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. Taken in this release, with a warning on the peer's pages; refused in the next. |
 | `role` | string: `hub`, `node`, `proxy` |  | Required. The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own. |
 | `pin` | string |  | The SHA-256 fingerprint of the certificate the peer's listener presents, 64 hex digits (colons allowed), as its pages and its log show it: the link is made over TLS (wss://) and only to a listener with exactly that certificate. A peer at an address other than a loopback one needs pin or ca_file. |
 | `ca_file` | string |  | A PEM file with the certificates of the authorities the peer listener's certificate must chain to: the link is made over TLS (wss://), and the certificate must name server_name, or the address's host. Or pin, one of the two. |
@@ -1809,6 +1827,7 @@ Also at `llm.node.limits`, `llm.proxy.limits`.
 | `description` | string |  | A note about the node its peers show. Its pages, and a hub that settings.allow_hub_manage lets, change it. |
 | `console` | [object](#config-roleconsole) |  | The node's web pages; none when left out. |
 | `listen` | [object](#config-llmlisten) |  | Where the node takes links from hubs and proxies; none when left out. Its pages change it. |
+| `tokens` | list of [object](#config-linktoken) |  | The tokens the node's listener issued, which hubs and proxies link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `peers` | list of [object](#config-llmpeer) |  | The hubs and proxies the node dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the node's links; the defaults when left out. |
 | `models` | list of [object](#config-llmmodel) |  | The models the node serves: each an upstream API endpoint. Its pages, and a hub that settings.allow_hub_manage lets, change them. |
@@ -1866,6 +1885,7 @@ Also at `llm.node.limits`, `llm.proxy.limits`.
 | `name` | string |  | The name the proxy shows its peers; the host's name when left out. Its pages change it. |
 | `console` | [object](#config-roleconsole) |  | The proxy's web pages; none when left out. |
 | `listen` | [object](#config-llmlisten) |  | Where the proxy takes links from hubs and nodes; none when left out. Its pages change it. |
+| `tokens` | list of [object](#config-linktoken) |  | The tokens the proxy's listener issued, which hubs and nodes link with in place of a password: each its own credential, of no role, kept as a hash, with an optional expiry. The pages, the Admin API module and fit token make, list, change and revoke them; not written by hand. |
 | `peers` | list of [object](#config-llmpeer) |  | The hubs and nodes the proxy dials. Its pages change them. |
 | `limits` | [object](#config-llmlimits) |  | Bounds on the proxy's links; the defaults when left out. |
 | `api` | [object](#config-llmproxyapi) |  | The API agents on this machine or the LAN call, /v1/chat/completions, /v1/messages, /v1beta/models/{model}:generateContent, /api/chat, /v2/chat and the rest; none when left out. |
@@ -2013,8 +2033,9 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | string |  | The name the hub tells the nodes and proxies that register. The host's name when left out. |
-| `password` | string |  | The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out. |
-| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. It applies to the links that open after it changes. |
+| `password` | string |  | The password every node and proxy may register with, which they prove they know without sending it: deprecated for tokens, which give each member a credential of its own. Still taken in this release, with a warning on the pages while a member uses it; refused in the next. Without it, only tokens register. |
+| `tokens` | list of [object](#config-linktoken) |  | The tokens the hub issued, which nodes and proxies register with in place of the password: each its own credential, kept as a hash, with an optional expiry. The hub's pages, its Admin API module and fit token make, list, change and revoke them; not written by hand. |
+| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. A link registered with a token derives its keys from the token and this, by HKDF; one with the password, from the password's PBKDF2. It applies to the links that open after it changes. |
 | `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them. |
 | `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out. |
 | `quic` | [object](#config-tunnelhubquic) |  | The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set. |
@@ -2090,7 +2111,8 @@ Also at `tunnel.proxy.hubs[]`.
 | --- | --- | --- | --- |
 | `name` | string |  | The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out. |
 | `endpoints` | list of [object](#config-tunnelendpoint) |  | Required. The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails. |
-| `password` | string |  | Required. The hub's password. |
+| `token` | string |  | The token the hub issued for this node or proxy, as fitt1.<id>.<secret>, which its pages, its Admin API module or fit token show once when they make it. Set token or password, not both. |
+| `password` | string |  | The hub's shared password: deprecated for token, taken by hubs of this release with a warning, and refused by the next. |
 | `body_password` | string |  | The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a loopback one needs it. |
 | `pin` | string |  | The SHA-256 fingerprint of the hub's certificate, as its pages show it, which tls://, wss:// and quic:// endpoints check the certificate against, in place of the chain and name checks: for a hub with a self-signed certificate. Without it or ca_file, the certificate is checked against the system's roots. |
 | `quic_pin` |  |  | Deprecated: renamed `pin`; the old name goes in config version 2. |

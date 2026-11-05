@@ -247,8 +247,11 @@ func TestSealedVersions(t *testing.T) {
 	}{
 		{"version 1", [][]byte{rawFrame(kindSealed|kindCall, proto.MethodRegister, 1, make([]byte, 40))}, true, "version 1"},
 		// Version 2 keyed each direction by the order of the hellos alone.
-		{"version 2", [][]byte{hello(append([]byte{2}, bodycrypt.Random()...))}, true, "version 2, this side's 3"},
-		{"version 4", [][]byte{hello(append([]byte{4}, bodycrypt.Random()...))}, true, "version 4"},
+		{"version 2", [][]byte{hello(append([]byte{2}, bodycrypt.Random()...))}, true, "version 2, this side's 4"},
+		{"version 5", [][]byte{hello(append([]byte{5}, bodycrypt.Random()...))}, true, "version 5"},
+		{"token hello without the token", [][]byte{hello(append([]byte{VersionToken}, bodycrypt.Random()...))}, true, "malformed"},
+		{"token hello of a wrong length", [][]byte{hello(append(append([]byte{VersionToken}, bodycrypt.Random()...), 5, 'a'))}, true, "malformed"},
+		{"token hello at a side without tokens", [][]byte{hello(append(append([]byte{VersionToken}, bodycrypt.Random()...), 1, 'a'))}, true, "names token a"},
 		{"empty hello", [][]byte{hello(nil)}, true, "malformed"},
 		{"short hello", [][]byte{hello([]byte{Version, 1, 2})}, true, "malformed"},
 		{"second hello", [][]byte{hello(append([]byte{Version}, bodycrypt.Random()...)), hello(append([]byte{Version}, bodycrypt.Random()...))}, true, "malformed"},

@@ -40,7 +40,14 @@
 //	hello = header of kind 0x85, method 0, id 0; body = version:uint8
 //	        random:16 bytes
 //
-// version is Version. Once a side has the other's hello, every frame it
+// version is Version. A dialer that registers with a token sends a hello of
+// VersionToken instead, with the token's ID after its random bytes:
+//
+//	body = version:uint8 random:16 bytes idlen:uint8 id
+//
+// and the listener takes the link's keys from that token (package
+// bodycrypt's NewToken); the listener's own hello is of Version still.
+// Once a side has the other's hello, every frame it
 // sends has its body sealed with AES-256-GCM and bit 0x80 of its kind set:
 //
 //	body = sealed body, tag:16 bytes
@@ -114,6 +121,13 @@ const (
 // and 3 names the direction, dialer to listener or back, in each key, so
 // that its peers and version 2's tell each other apart at the hello.
 const Version = 3
+
+// VersionToken is the version of a hello whose link registers with a
+// token: after its random bytes, the token's ID, a byte of its length first.
+// The listener seals the link's bodies with keys derived from the token
+// (package bodycrypt's NewToken), and still sends a hello of Version, which
+// the dialer takes; a listener of before tokens refuses the hello.
+const VersionToken = 4
 
 // maxBeforeHello is the most bytes a link holds of what it sent before the
 // peer's hello came: a registration, not the tunnels that come after it.
@@ -253,6 +267,8 @@ type Link struct {
 	err     error
 	value   any
 	done    chan struct{}
+	// helloToken is the token the peer's hello named.
+	helloToken string
 }
 
 // New is the link on conn, serving what router does, with bodies sealed by
@@ -267,14 +283,34 @@ func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
 	}
 	if coder != nil {
 		l.random = bodycrypt.Random()
-		hello := make([]byte, LengthSize+HeaderSize+1+bodycrypt.RandomSize)
+		tok := coder.Token()
+		n := LengthSize + HeaderSize + 1 + bodycrypt.RandomSize
+		if tok != "" {
+			n += 1 + len(tok)
+		}
+		hello := make([]byte, n)
 		binary.BigEndian.PutUint32(hello, uint32(len(hello)-LengthSize))
 		hello[LengthSize] = kindSealed | kindHello
 		hello[LengthSize+HeaderSize] = Version
 		copy(hello[LengthSize+HeaderSize+1:], l.random)
+		if tok != "" {
+			// A token's link: the listener takes its keys from the token.
+			hello[LengthSize+HeaderSize] = VersionToken
+			hello[LengthSize+HeaderSize+1+bodycrypt.RandomSize] = byte(len(tok))
+			copy(hello[LengthSize+HeaderSize+2+bodycrypt.RandomSize:], tok)
+		}
 		_ = conn.Send(hello)
 	}
 	return l
+}
+
+// HelloToken is the token the peer's hello named, on a listener whose link
+// seals bodies with the token's keys, or "": the registration must be with
+// the same token.
+func (l *Link) HelloToken() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.helloToken
 }
 
 // SetMaxFrame sets the longest frame the link takes, at most MaxFrame: a
@@ -421,13 +457,27 @@ func (l *Link) hello(body []byte) error {
 	if len(body) < 1 {
 		return errHello
 	}
-	if body[0] != Version {
-		return fmt.Errorf("link: the peer's link protocol is version %d, this side's %d; run the same fit version on both sides", body[0], Version)
-	}
-	if len(body) != 1+bodycrypt.RandomSize {
+	coder := l.coder
+	switch {
+	case body[0] == Version && len(body) == 1+bodycrypt.RandomSize:
+	case body[0] == VersionToken && len(body) > 2+bodycrypt.RandomSize && int(body[1+bodycrypt.RandomSize]) == len(body)-2-bodycrypt.RandomSize:
+		// A dialer that registers with a token: its keys are the token's.
+		id := string(body[2+bodycrypt.RandomSize:])
+		c, err := l.coder.ForToken(id)
+		if err != nil {
+			return fmt.Errorf("link: the peer's hello names token %s: %w", id, err)
+		}
+		coder = c
+		l.mu.Lock()
+		l.helloToken = id
+		l.mu.Unlock()
+		body = body[:1+bodycrypt.RandomSize]
+	case body[0] != Version && body[0] != VersionToken:
+		return fmt.Errorf("link: the peer's link protocol is version %d, this side's %d; run the same fit version on both sides", body[0], VersionToken)
+	default:
 		return errHello
 	}
-	sess, err := l.coder.Session(l.random, body[1:])
+	sess, err := coder.Session(l.random, body[1:])
 	if err != nil {
 		return err
 	}
