@@ -428,6 +428,10 @@ t_node_admin() {
 		"{\"id\":$id,\"services\":$(services_json "echo|dev-office:7" "http|dev-office:80" "http2|dev-office:80|added from hub-1")}"
 	check "  … node office has http2" eventually 10 js "$OFFICE" office 'any(.services[]; .name == "http2")'
 	check "  … hub-2 hears of it" eventually 15 js "$HUB2" hub2 'any(.peers[] | select(.info.name == "office") | .info.services[]; .name == "http2")'
+	check "node lab, without allow_hub_services, refuses services from hub-1" refused "$HUB1" hub1 /api/peers/services \
+		"{\"id\":$(peer_id "$HUB1" hub1 lab node),\"services\":$(services_json "x|dev-lab:22")}"
+	check "alice cannot set node lab's services through hub-2 either" refused "$ALICE" alice /api/nodes/services \
+		"{\"hub\":\"hub-2\",\"node\":\"lab\",\"services\":$(services_json "x|dev-lab:22")}"
 	check "querying a proxy as a node is refused" refused "$HUB1" hub1 /api/peers/refresh "{\"id\":$(peer_id "$HUB1" hub1 alice proxy)}"
 	check "alice refreshes hub-2's nodes" t "post '$ALICE' alice /api/nodes/refresh '{\"hub\":\"hub-2\"}' | jq -e '[.nodes[].name] | sort == [\"lab\",\"office\"]'"
 	check "alice sets node office's services through hub-2 (removes http2)" post "$ALICE" alice /api/nodes/services \

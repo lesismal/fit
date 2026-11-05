@@ -57,7 +57,7 @@ func TestHubCalls(t *testing.T) {
 	v := newEnv(t)
 	s := newHub(t, v.e)
 	echo, dead := tunneltest.Echo(t, ""), freeAddr(t)
-	if err := v.apply(fmt.Sprintf(`{"name": "lab", "max_tunnels": 2, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "dead", "address": %q}]}`,
+	if err := v.apply(fmt.Sprintf(`{"name": "lab", "max_tunnels": 2, "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "dead", "address": %q}]}`,
 		s.uplinkJSON(`, "call_timeout": "1s"`), echo, dead)); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +122,30 @@ func TestHubCalls(t *testing.T) {
 		t.Fatalf("a slow config: %v", err)
 	}
 	v.release()
+}
+
+// Without allow_hub_services, a hub, or anyone who registered with it,
+// cannot point the node at an address of its choosing: the node refuses,
+// and its config and services stay as they are.
+func TestHubServicesRefused(t *testing.T) {
+	v := newEnv(t)
+	s := newHub(t, v.e)
+	echo := tunneltest.Echo(t, "")
+	if err := v.apply(fmt.Sprintf(`{"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}]}`, s.uplinkJSON(""), echo)); err != nil {
+		t.Fatal(err)
+	}
+	l := s.link()
+	before := v.current()
+	err := l.Call(proto.MethodNodeSetServices, []proto.Service{{Name: "x", Addr: "10.0.0.1:6379"}}, nil, 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "allow_hub_services") {
+		t.Fatalf("a hub set the services: %v", err)
+	}
+	if v.current() != before || len(v.n.Info().Services) != 1 || v.n.Info().Services[0].Addr != echo {
+		t.Fatalf("member %s, info %+v", v.current(), v.n.Info())
+	}
+	if err := open(l, 1, "x"); err == nil {
+		t.Fatal("a tunnel to the address a hub tried to set")
+	}
 }
 
 // waitUpdate waits for the node to tell s of a service at addr.

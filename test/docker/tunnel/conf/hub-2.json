@@ -11,6 +11,7 @@
       "name": "hub-2",
       "password": "reg-pass-1234",
       "body_password": "body-pass-1234",
+      "allow_proxy_services": true,
       "listeners": [
         {
           "protocol": "tcp",

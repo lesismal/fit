@@ -108,6 +108,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `register_timeout` | 10s | 一条链路注册的时限 |
 | `call_timeout` | 15s | 节点应答的时限：打开隧道、列出或设置服务 |
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | hub 保有资源的上限 |
+| `allow_proxy_services` | false | 允许已注册的 proxy 经 hub 设置节点的服务（proxy 的页面这样做）；开启后任何持有密码的 proxy 都可以。节点仍须开启自己的 `allow_hub_services` 才接受 |
 | `console` | 无 | hub 的页面（见[控制台](#控制台)） |
 
 ### tunnel.node
@@ -118,6 +119,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `meta` | 无 | 告知 hub 的其他信息 |
 | `hubs` | 无 | 要连接的 hub（见下） |
 | `services` | 无 | `{name, address, description}`：节点能访问的服务，也是它唯一会连接的地址 |
+| `allow_hub_services` | false | 允许它的 hub 设置 `services` 并写入本成员；关闭时只有节点自己的成员和页面能设置 |
 | `dial_timeout` | 5s | 连接一个服务的时限 |
 | `idle_timeout` | 2h | 两个方向都没有数据超过这么久的隧道会被关闭 |
 | `max_tunnels` | 4096 | 同时打开的隧道数，跨所有 hub |
@@ -194,11 +196,11 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 - **hub**：节点（含服务和延迟）与 proxy；隧道（含两个方向的字节数和整条路径的延迟）。查询节点、设置
   它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制 QUIC 证书指纹。在这里设置
-  的服务会写入节点自己的成员。
+  的服务在节点的 `allow_hub_services` 允许时写入节点自己的成员。
 - **节点**：它的 hub，以及每条链路使用的协议，可增删改；它的服务，保存后通知所有 hub；它的隧道，
   可关闭。
 - **proxy**：它的 hub（编辑方式同节点）、它们的节点和服务，以及每台 hub 分担某个节点隧道的比例；
-  查询节点，经 hub 设置节点的服务；增删转发；它的隧道，可关闭；告知 hub 的 meta；以及经 Web 代理访问
+  查询节点，在 hub 的 `allow_proxy_services` 与节点的 `allow_hub_services` 都允许时经 hub 设置节点的服务；增删转发；它的隧道，可关闭；告知 hub 的 meta；以及经 Web 代理访问
   每台 hub 的控制台。
 
 页面所做的修改通过 `app.Host.Edit` 写入角色在配置中的成员，再像其他配置一样从那里生效：它进入配置历史；

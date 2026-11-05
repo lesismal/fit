@@ -1994,6 +1994,7 @@ In JSON:
 | `max_links_per_peer` | integer, 0 or more | `128` | The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0. |
 | `max_peers` | integer, 0 or more | `1024` | The most nodes and proxies registered at once. 1024 when left out or 0. |
 | `max_tunnels` | integer, 0 or more | `16384` | The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0. |
+| `allow_proxy_services` | boolean |  | Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services. |
 | `console` | [object](#config-roleconsole) |  | The hub's web pages; none when left out. |
 
 <a id="config-tunnellistener"></a>
@@ -2039,6 +2040,7 @@ In JSON:
 | `meta` | object of string |  | Anything else the node tells the hubs, which their pages show. |
 | `hubs` | list of [object](#config-tunneluplink) |  | The hubs the node links to and registers with. None when left out: the console's pages add them. |
 | `services` | list of [object](#config-tunnelservice) |  | The services the node reaches, and the only addresses it opens tunnels to. |
+| `allow_hub_services` | boolean |  | Let the hubs the node registers with set its services, which are the addresses it opens tunnels to, and write them into this member. Off when left out: only this member and the node's own pages set them. |
 | `dial_timeout` | duration | `"5s"` | How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out. |
 | `idle_timeout` | duration | `"2h"` | How long a tunnel may carry nothing either way before it is closed. 2h when left out. |
 | `max_tunnels` | integer, 0 or more | `4096` | The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0. |

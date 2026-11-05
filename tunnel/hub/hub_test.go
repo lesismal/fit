@@ -205,9 +205,45 @@ func TestUpdatePing(t *testing.T) {
 	}
 }
 
+// Without allow_proxy_services, no peer sets a node's services through
+// the hub: not a proxy, which holds only the shared password, and not a
+// node; the node is never asked.
+func TestNodeServicesRefused(t *testing.T) {
+	v := newHub(t, tcpMember(""))
+	n := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", proto.Service{Name: "a", Addr: "127.0.0.1:1"})
+	asked := make(chan struct{}, 4)
+	n.mu.Lock()
+	n.services = func([]proto.Service) (any, error) {
+		asked <- struct{}{}
+		info := proto.NewInfo("lab", proto.TypeNode)
+		return &info, nil
+	}
+	n.mu.Unlock()
+	evil := []proto.Service{{Name: "x", Addr: "10.0.0.1:6379"}}
+	c := v.dial(v.listen()).mustRegister(proto.TypeProxy, "me")
+	if err := c.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "lab", Services: evil}, nil); err == nil || !strings.Contains(err.Error(), "allow_proxy_services") {
+		t.Fatalf("a proxy set a node's services: %v", err)
+	}
+	if err := v.apply(tcpMember(`, "allow_proxy_services": true`)); err != nil {
+		t.Fatal(err)
+	}
+	other := v.dial(v.listen()).mustRegister(proto.TypeNode, "other")
+	if err := other.call(proto.MethodSetNodeServices, &proto.SetServicesReq{Node: "lab", Services: evil}, nil); err == nil {
+		t.Fatal("a node set another node's services")
+	}
+	select {
+	case <-asked:
+		t.Fatal("the node was asked")
+	default:
+	}
+	if svc := v.s.peerByName(proto.TypeNode, "lab").Info().Services; len(svc) != 1 || svc[0].Name != "a" {
+		t.Fatalf("the node's services changed: %+v", svc)
+	}
+}
+
 // A proxy sets and refreshes a node's services through the hub.
 func TestNodeServices(t *testing.T) {
-	v := newHub(t, tcpMember(""))
+	v := newHub(t, tcpMember(`, "allow_proxy_services": true`))
 	n := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", proto.Service{Name: "a", Addr: "127.0.0.1:1"})
 	n2 := v.dial(v.listen()).mustRegister(proto.TypeNode, "beta")
 	c := v.dial(v.listen()).mustRegister(proto.TypeProxy, "me")

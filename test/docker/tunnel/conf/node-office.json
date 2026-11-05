@@ -9,6 +9,7 @@
   "tunnel": {
     "node": {
       "name": "office",
+      "allow_hub_services": true,
       "hubs": [
         {
           "name": "hub-2",

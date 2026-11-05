@@ -4,8 +4,9 @@
 // that the tunnels the hubs route to it ask for, and to no other
 // address. Its console pages show its hubs and tunnels and change which
 // hubs it links to, over which protocols, and which services it reaches;
-// a hub's pages may set its services too. Every such change is written
-// back into the node's member of the config, and applied from there.
+// a hub's pages may set its services too, when allow_hub_services lets
+// them. Every such change is written back into the node's member of the
+// config, and applied from there.
 //
 // Everything runs on the listeners' fib engine: the links and tunnels are
 // served on its workers, and what waits, a dial to a service or a call, on
@@ -269,6 +270,11 @@ func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 		return &info, nil
 	}, false)
 	r.HandleCall(proto.MethodNodeSetServices, func(_ *link.Link, body []byte) (any, error) {
+		// The services are the only addresses the node connects to: a
+		// hub changes them only when the node's config lets it.
+		if !n.Config().AllowHubServices {
+			return nil, ErrHubServices
+		}
 		var services []proto.Service
 		if err := link.Decode(body, &services); err != nil {
 			return nil, err
@@ -292,6 +298,10 @@ func (n *Node) setupUplink(u *uplink.Uplink, r *link.Router) {
 		return rsp, nil
 	}, false)
 }
+
+// ErrHubServices is a hub's answer when it asks a node whose config does
+// not let it to set its services.
+var ErrHubServices = errors.New("tunnel: this node does not let hubs set its services (allow_hub_services)")
 
 // setServices writes services, which a hub set, into the node's member
 // of the config, and waits for the config to apply, for at most wait.

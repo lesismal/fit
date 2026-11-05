@@ -53,19 +53,20 @@ var (
 
 // TunnelHub is the tunnel's hub role.
 type TunnelHub struct {
-	Name            string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
-	Password        string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
-	BodyPassword    string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
-	Listeners       []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
-	ConsoleSocket   *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
-	QUIC            *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
-	RegisterTimeout Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
-	CallTimeout     Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
-	MaxLinks        int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
-	MaxLinksPerPeer int                  `json:"max_links_per_peer,omitempty" min:"0" default:"128" doc:"The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0."`
-	MaxPeers        int                  `json:"max_peers,omitempty" min:"0" default:"1024" doc:"The most nodes and proxies registered at once. 1024 when left out or 0."`
-	MaxTunnels      int                  `json:"max_tunnels,omitempty" min:"0" default:"16384" doc:"The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0."`
-	Console         *RoleConsole         `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
+	Name               string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
+	Password           string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
+	BodyPassword       string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
+	Listeners          []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
+	ConsoleSocket      *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
+	QUIC               *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
+	RegisterTimeout    Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
+	CallTimeout        Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
+	MaxLinks           int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
+	MaxLinksPerPeer    int                  `json:"max_links_per_peer,omitempty" min:"0" default:"128" doc:"The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0."`
+	MaxPeers           int                  `json:"max_peers,omitempty" min:"0" default:"1024" doc:"The most nodes and proxies registered at once. 1024 when left out or 0."`
+	MaxTunnels         int                  `json:"max_tunnels,omitempty" min:"0" default:"16384" doc:"The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0."`
+	AllowProxyServices bool                 `json:"allow_proxy_services,omitempty" doc:"Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services."`
+	Console            *RoleConsole         `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -103,14 +104,15 @@ type TunnelHubQUIC struct {
 
 // TunnelNode is the tunnel's node role, beside the services it exposes.
 type TunnelNode struct {
-	Name        string            `json:"name,omitempty" doc:"The node's name, which proxies name to reach its services. The host's name when left out."`
-	Meta        map[string]string `json:"meta,omitempty" doc:"Anything else the node tells the hubs, which their pages show."`
-	Hubs        []TunnelUplink    `json:"hubs,omitempty" doc:"The hubs the node links to and registers with. None when left out: the console's pages add them."`
-	Services    []TunnelService   `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to."`
-	DialTimeout Duration          `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out."`
-	IdleTimeout Duration          `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
-	MaxTunnels  int               `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0."`
-	Console     *RoleConsole      `json:"console,omitempty" doc:"The node's web pages; none when left out."`
+	Name             string            `json:"name,omitempty" doc:"The node's name, which proxies name to reach its services. The host's name when left out."`
+	Meta             map[string]string `json:"meta,omitempty" doc:"Anything else the node tells the hubs, which their pages show."`
+	Hubs             []TunnelUplink    `json:"hubs,omitempty" doc:"The hubs the node links to and registers with. None when left out: the console's pages add them."`
+	Services         []TunnelService   `json:"services,omitempty" doc:"The services the node reaches, and the only addresses it opens tunnels to."`
+	AllowHubServices bool              `json:"allow_hub_services,omitempty" doc:"Let the hubs the node registers with set its services, which are the addresses it opens tunnels to, and write them into this member. Off when left out: only this member and the node's own pages set them."`
+	DialTimeout      Duration          `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub hears either way. 5s when left out."`
+	IdleTimeout      Duration          `json:"idle_timeout,omitempty" default:"\"2h\"" doc:"How long a tunnel may carry nothing either way before it is closed. 2h when left out."`
+	MaxTunnels       int               `json:"max_tunnels,omitempty" min:"0" default:"4096" doc:"The most tunnels open at once, over every hub; a hub's request for one more is refused. 4096 when left out or 0."`
+	Console          *RoleConsole      `json:"console,omitempty" doc:"The node's web pages; none when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

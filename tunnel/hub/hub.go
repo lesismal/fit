@@ -475,7 +475,10 @@ func peerOf(c *link.Link) *Peer {
 	return nil
 }
 
-var errNotRegistered = errors.New("tunnel: register first")
+var (
+	errNotRegistered = errors.New("tunnel: register first")
+	errProxyServices = errors.New("tunnel: the hub does not let proxies set nodes' services (allow_proxy_services)")
+)
 
 // accept serves a link a node or proxy opened, which must register within
 // register_timeout; past max_links it is closed at once.
@@ -515,7 +518,12 @@ func (s *Hub) newRouter() *link.Router {
 	r.HandleCall(proto.MethodUpdate, s.update, false)
 	r.HandleCall(proto.MethodPing, s.ping, true)
 	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return s.nodeList(s.nodesVersion.Load()), nil }, false)
-	r.HandleCall(proto.MethodSetNodeServices, func(_ *link.Link, body []byte) (any, error) {
+	r.HandleCall(proto.MethodSetNodeServices, func(l *link.Link, body []byte) (any, error) {
+		// A node's services are the addresses it connects to: only a
+		// proxy the hub's config lets may ask for them to change.
+		if peerOf(l).Info().Type != proto.TypeProxy || !s.settings().cfg.AllowProxyServices {
+			return nil, errProxyServices
+		}
 		var req proto.SetServicesReq
 		if err := link.Decode(body, &req); err != nil {
 			return nil, err

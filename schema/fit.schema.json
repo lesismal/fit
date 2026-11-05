@@ -2821,6 +2821,10 @@
     "config.TunnelHub": {
       "additionalProperties": false,
       "properties": {
+        "allow_proxy_services": {
+          "description": "Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services.",
+          "type": "boolean"
+        },
         "body_password": {
           "description": "When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes.",
           "type": "string"
@@ -2960,6 +2964,10 @@
     "config.TunnelNode": {
       "additionalProperties": false,
       "properties": {
+        "allow_hub_services": {
+          "description": "Let the hubs the node registers with set its services, which are the addresses it opens tunnels to, and write them into this member. Off when left out: only this member and the node's own pages set them.",
+          "type": "boolean"
+        },
         "console": {
           "$ref": "#/$defs/config.RoleConsole",
           "description": "The node's web pages; none when left out."

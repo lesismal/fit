@@ -332,7 +332,7 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	}
 	doc := fmt.Sprintf(`{"tunnel": {
  "hub": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
- "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
+ "node": {"name": "lab", "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
 }}`, body, protocolOf(o.protocol), listen, consoleJSON(h.hubCon),
 		uplinkJSON(h.url, "pw", o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),

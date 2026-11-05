@@ -24,8 +24,8 @@ import (
 func hubDoc(t *testing.T, listen, sock, echo, fwd, proxy, con, extra string) string {
 	t.Helper()
 	return fmt.Sprintf(`{"tunnel": {
- "hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}], "console": %s, "console_socket": {"address": %q, "password": "sock"}},
- "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}]},
+ "hub": {"name": "hub", "password": "pw", "allow_proxy_services": true, "listeners": [{"protocol": "tcp", "address": %q}], "console": %s, "console_socket": {"address": %q, "password": "sock"}},
+ "node": {"name": "lab", "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}]},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}],
   "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}], "console": %s%s}
 }}`, listen, consoleJSON(freeAddr(t)), sock, uplinkJSON("hub", listen), echo, uplinkJSON("hub", listen), fwd, proxy, sock, consoleJSON(con), extra)

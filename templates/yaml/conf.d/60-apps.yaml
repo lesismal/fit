@@ -716,6 +716,12 @@
     # # integer, 0 or more; default 16384.
     # max_tunnels: 16384
 
+    # # Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node
+    # # takes them only with its allow_hub_services. Every proxy that has the password could then do
+    # # it. Off when left out: only the hub's own pages ask nodes to change their services.
+    # # boolean.
+    # allow_proxy_services: true
+
     # # The hub's web pages; none when left out.
     # # object.
     # console:
@@ -862,6 +868,12 @@
         # # What the service is, for the pages.
         # # string.
         # description: ""
+
+    # # Let the hubs the node registers with set its services, which are the addresses it opens
+    # # tunnels to, and write them into this member. Off when left out: only this member and the
+    # # node's own pages set them.
+    # # boolean.
+    # allow_hub_services: true
 
     # # How long a connect to a service may take; shorter than a hub's call_timeout, so that the hub
     # # hears either way. 5s when left out.

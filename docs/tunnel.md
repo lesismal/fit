@@ -113,6 +113,7 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `register_timeout` | 10s | how long a link may take to register |
 | `call_timeout` | 15s | how long a node may take to answer: to open a tunnel, list or set its services |
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | the bounds of what the hub keeps |
+| `allow_proxy_services` | false | let registered proxies set nodes' services through the hub, as a proxy's pages do; every proxy with the password could then. A node still takes them only with its `allow_hub_services` |
 | `console` | none | the hub's pages (see [Consoles](#consoles)) |
 
 ### tunnel.node
@@ -123,6 +124,7 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `meta` | none | anything else the node tells the hubs |
 | `hubs` | none | the hubs it links to (below) |
 | `services` | none | `{name, address, description}`: what the node reaches, and the only addresses it connects to |
+| `allow_hub_services` | false | let its hubs set `services`, written into this member; off, only the node's member and pages set them |
 | `dial_timeout` | 5s | a connect to a service |
 | `idle_timeout` | 2h | a tunnel that carries nothing either way for this long is closed |
 | `max_tunnels` | 4096 | the tunnels open at once, over every hub |
@@ -212,11 +214,13 @@ session cookie and a CSRF token, and a loopback address unless `cert_file` and `
 - **hub**: the nodes, with their services and latency, and the proxies; the tunnels, with their
   bytes each way and their paths' latency. Query a node, set its services, kick a peer, close a
   tunnel. Add, change and remove listeners; set the passwords and the console socket; copy the
-  QUIC certificate's fingerprint. Services set here are written into the node's own member.
+  QUIC certificate's fingerprint. Services set here are written into the node's own member, when
+  the node's `allow_hub_services` lets them.
 - **node**: its hubs, with the protocols each link took, and add, edit and remove them; its
   services, and save them, every hub told; its tunnels, and close one.
 - **proxy**: its hubs, edited as a node's, their nodes and services, with each hub's share of
-  a node's tunnels; query a node, and set its services through a hub; add and remove forwards;
+  a node's tunnels; query a node, and set its services through a hub whose `allow_proxy_services`
+  and node's `allow_hub_services` let it; add and remove forwards;
   its tunnels, and close one; the meta it tells the hubs; and each hub's console through its
   web proxy.
 
