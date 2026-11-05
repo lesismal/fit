@@ -29,6 +29,25 @@ import (
 // extended CONNECT (RFC 8441, RFC 9220) for websocket, which goes upstream
 // as the HTTP/1.1 handshake it stands for. Any other answer the upstream
 // gives is the client's.
+//
+// Only websocket is tunnelled, unless upgrade_protocols names more: an
+// HTTP/1.1 request asking for another protocol goes on as an ordinary
+// request, without its Upgrade field. h2c never is: a tunnel to an upstream
+// speaking HTTP/2 would carry requests no route, middleware or limit of the
+// proxy's sees (h2c smuggling), and HTTP2-Settings is never sent on.
+
+// tunnels reports whether the proxy tunnels an HTTP/1.1 upgrade to protocol.
+func (p *Proxy) tunnels(protocol string) bool {
+	if strings.EqualFold(protocol, "websocket") {
+		return true
+	}
+	for _, allowed := range p.UpgradeProtocols {
+		if strings.EqualFold(protocol, allowed) {
+			return true
+		}
+	}
+	return false
+}
 
 // tunnelWatermark is how much may wait to go to one side of a tunnel before
 // the other side's reads are held.

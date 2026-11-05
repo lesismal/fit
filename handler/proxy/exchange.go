@@ -67,7 +67,9 @@ func (e *uploadError) Unwrap() error { return e.err }
 // its connection is closed on HTTP/1, and on HTTP/2 its stream is reset, or,
 // for a body of no declared length, ended with a Fit-Error trailer.
 func (p *Proxy) ServeHTTP(c *fibhttp.Context) {
-	if protocol, extended := upgradeProtocol(c.Request); protocol != "" {
+	// An HTTP/1.1 upgrade to a protocol the proxy does not tunnel goes on as
+	// an ordinary request, its Upgrade and Connection fields dropped.
+	if protocol, extended := upgradeProtocol(c.Request); protocol != "" && (extended || p.tunnels(protocol)) {
 		pool := p.pool
 		if p.split != nil || p.failover != nil {
 			pool = p.pickPool()

@@ -3499,7 +3499,10 @@ Proxies to an [upstream](#upstreams) by name; or, with `upstreams`, splits reque
 by weight, as a canary release does. `failover` names an upstream that takes over when none of
 the first's addresses is in rotation, `mirror` copies a share of the requests elsewhere, and
 `retry` sends a failed request again, within a budget. WebSockets and gRPC are proxied too,
-streamed both ways.
+streamed both ways. Of HTTP/1.1 upgrades only websocket is tunnelled, and what
+`upgrade_protocols` adds; one to any other protocol goes on as an ordinary request, and h2c is
+never tunnelled, nor HTTP2-Settings sent on, since the upstream's HTTP/2 would carry requests the
+proxy never sees.
 
 In a .conf file:
 
@@ -3568,6 +3571,7 @@ In JSON:
 | `host_header` | string |  | The Host header sent upstream; the client's when left out. |
 | `retry` | [object](#proxy-retry) |  | Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out. |
 | `tunnel_idle_timeout` | duration | `"10m"` | How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out. |
+| `upgrade_protocols` | list of string |  | Protocols besides websocket that an HTTP/1.1 client may switch to through the proxy with Upgrade, as in ["tls/1.2"]; compared ignoring case. A request asking for any other goes on as an ordinary request, without its Upgrade field. h2c cannot be named: its tunnel would carry requests the proxy never sees. Only websocket when left out. |
 | `timeout` | duration |  | The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out. |
 | `splice_uploads` | boolean | `true` | On Linux, move a large upload (128KB or more, framed by its Content-Length) from a client's HTTP/1.1 connection without TLS to an HTTP/1.1 upstream without TLS with splice(2), the kernel passing its pages from one socket to the other, rather than copying it through the proxy. An upload that cannot go so, to an h2, h2c or TLS upstream, or chunked, goes the ordinary way. It costs the proxy about 40% less CPU on such uploads and the upstream about 5% more, which reads the body cold rather than as the proxy just wrote it, and more once the upstream itself is the bottleneck: false suits an upstream whose CPU is scarcer than the proxy's. False copies every upload. True when left out. |
 

@@ -68,6 +68,7 @@ type Proxy struct {
 	HostHeader        string          `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
 	Retry             *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
 	TunnelIdleTimeout config.Duration `json:"tunnel_idle_timeout,omitempty" default:"\"10m\"" doc:"How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out."`
+	UpgradeProtocols  []string        `json:"upgrade_protocols,omitempty" doc:"Protocols besides websocket that an HTTP/1.1 client may switch to through the proxy with Upgrade, as in [\"tls/1.2\"]; compared ignoring case. A request asking for any other goes on as an ordinary request, without its Upgrade field. h2c cannot be named: its tunnel would carry requests the proxy never sees. Only websocket when left out."`
 	Timeout           config.Duration `json:"timeout,omitempty" doc:"The most a request may take, from when the proxy takes it to the end of its response, retries included: one past it before its response began is answered 504, and one whose response is under way is cut short. None when left out."`
 	SpliceUploads     *bool           `json:"splice_uploads,omitempty" default:"true" doc:"On Linux, move a large upload (128KB or more, framed by its Content-Length) from a client's HTTP/1.1 connection without TLS to an HTTP/1.1 upstream without TLS with splice(2), the kernel passing its pages from one socket to the other, rather than copying it through the proxy. An upload that cannot go so, to an h2, h2c or TLS upstream, or chunked, goes the ordinary way. It costs the proxy about 40% less CPU on such uploads and the upstream about 5% more, which reads the body cold rather than as the proxy just wrote it, and more once the upstream itself is the bottleneck: false suits an upstream whose CPU is scarcer than the proxy's. False copies every upload. True when left out."`
 
@@ -174,6 +175,15 @@ func (p *Proxy) Provision(ctx *module.Context) error {
 			return ctx.Params.Field("trusted_proxies").Index(i).Errorf("%q is not an IP address or a network, as in \"10.0.0.1\" or \"10.0.0.0/8\"", s)
 		}
 		p.trusted = append(p.trusted, prefix)
+	}
+	for i, protocol := range p.UpgradeProtocols {
+		name, _, _ := strings.Cut(protocol, "/")
+		switch {
+		case !validToken(name) || strings.Count(protocol, "/") > 1 || strings.HasSuffix(protocol, "/"):
+			return ctx.Params.Field("upgrade_protocols").Index(i).Errorf("%q is not a protocol, as in \"name\" or \"name/version\"", protocol)
+		case strings.EqualFold(name, "h2c"):
+			return ctx.Params.Field("upgrade_protocols").Index(i).Errorf("h2c cannot be tunnelled: the upstream's HTTP/2 requests would bypass the proxy")
+		}
 	}
 	if strings.ContainsAny(p.HostHeader, " \t\r\n\x00/") {
 		return ctx.Errorf("host_header", "%q is not a host", p.HostHeader)
@@ -430,7 +440,7 @@ func framedRequestField(name string) int {
 			return fieldDrop
 		}
 	case 14:
-		if strings.EqualFold(name, "Content-Length") {
+		if strings.EqualFold(name, "Content-Length") || strings.EqualFold(name, "HTTP2-Settings") {
 			return fieldDrop
 		}
 	case 15:
@@ -558,7 +568,7 @@ func isHopByHopFold(name string) bool {
 	case 10:
 		return strings.EqualFold(name, "Connection") || strings.EqualFold(name, "Keep-Alive")
 	case 14:
-		return strings.EqualFold(name, "Content-Length")
+		return strings.EqualFold(name, "Content-Length") || strings.EqualFold(name, "HTTP2-Settings")
 	case 16:
 		return strings.EqualFold(name, "Proxy-Connection")
 	case 17:
@@ -745,11 +755,12 @@ func validToken(s string) bool {
 
 // isHopByHop reports whether name, canonical, is a field that concerns one
 // connection only, RFC 9110 section 7.6.1, or Keep-Alive or
-// Proxy-Connection, which older clients send.
+// Proxy-Connection, which older clients send, or HTTP2-Settings, which only
+// an h2c upgrade has.
 func isHopByHop(name string) bool {
 	switch name {
 	case "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization",
-		"Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		"Te", "Trailer", "Transfer-Encoding", "Upgrade", "Http2-Settings":
 		return true
 	}
 	return false

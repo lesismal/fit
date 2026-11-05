@@ -4242,6 +4242,13 @@
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
+        "upgrade_protocols": {
+          "description": "Protocols besides websocket that an HTTP/1.1 client may switch to through the proxy with Upgrade, as in [\"tls/1.2\"]; compared ignoring case. A request asking for any other goes on as an ordinary request, without its Upgrade field. h2c cannot be named: its tunnel would carry requests the proxy never sees. Only websocket when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "upstream": {
           "description": "The name of the upstream requests go to; or upstreams.",
           "type": "string"
