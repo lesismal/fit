@@ -51,6 +51,14 @@ func TestClient(t *testing.T) {
 	if tc == nil || tc.RootCAs == nil || len(tc.Certificates) != 1 {
 		t.Fatalf("TLS config %+v", tc)
 	}
+	// A server name alone verifies with the system's CAs, for that name.
+	named, err := Client(TLSFiles{ServerName: "admin.example"}, time.Second, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tc := named.Transport.(*http.Transport).TLSClientConfig; tc == nil || tc.ServerName != "admin.example" || tc.RootCAs != nil {
+		t.Errorf("server name: %+v", tc)
+	}
 }
 
 type failingBody struct{}

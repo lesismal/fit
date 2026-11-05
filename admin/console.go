@@ -71,7 +71,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
 	cs.api = inner.routes()
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
-	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
+	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Hosts: c.Hosts, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 	cs.c, err = console.Start(engine, console.Options{
 		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf,
@@ -226,9 +226,17 @@ func (cs *Console) accountPassword(r *console.Request) {
 	if !ok {
 		return
 	}
+	// The check is reserved before it is queued, as a login's is, so that
+	// checks made at once count against the address's failures left.
+	done, wait := cs.logins.Attempt(addr)
+	if wait > 0 {
+		refuseChecks(r, wait)
+		return
+	}
 	user, token := r.User, cs.sessionToken(r)
-	r.Go(func() {
+	r.GoOr(func() {
 		ok, err := cs.logins.Check(r.Context.Context(), user, body.CurrentPassword)
+		done(err == nil && !ok)
 		if err != nil {
 			return // the client left
 		}
@@ -249,7 +257,7 @@ func (cs *Console) accountPassword(r *console.Request) {
 		cs.logins.EndUserSessions(user, token)
 		cs.logf("console: %q changed the password of %q", user, user)
 		_ = console.WriteJSON(r.Context, http.StatusOK, changedBody{Changed: true, User: user})
-	})
+	}, func() { done(false) })
 }
 
 // resetBody is a console user's reset of another's password.
@@ -327,10 +335,9 @@ func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
 	return addr, true
 }
 
-// failedPassword counts a failed password check from addr and answers 403,
-// or 429 once it has locked the address out.
+// failedPassword answers a failed password check from addr, which Attempt's
+// done counted, with 403, or 429 once it has locked the address out.
 func (cs *Console) failedPassword(r *console.Request, addr string) {
-	cs.logins.Failed(addr)
 	if wait := cs.logins.LockedOut(addr); wait > 0 {
 		refuseChecks(r, wait)
 		return
@@ -353,10 +360,9 @@ func (cs *Console) savePassword(user, hash string) error {
 }
 
 // sessionToken returns the raw token of the session r was made with, which
-// keeps its session when the user's others end: the console's cookie, named
-// as app/console names it.
+// keeps its session when the user's others end: the console's cookie.
 func (cs *Console) sessionToken(r *console.Request) string {
-	ck, err := r.Context.Request.Cookie(login.CookieName(sessionCookie, cs.c.Addr()))
+	ck, err := r.Context.Request.Cookie(cs.c.Cookie())
 	if err != nil {
 		return ""
 	}

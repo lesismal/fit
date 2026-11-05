@@ -213,9 +213,11 @@ const AdminUnixPrefix = "unix/"
 
 // Admin is where the Admin API listens, and who may use it.
 type Admin struct {
-	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file, cert_file and key_file are set. 127.0.0.1:2019 when left out."`
 	MPTCP            bool     `json:"mptcp,omitempty" doc:"Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths."`
 	TokenFile        string   `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
+	CertFile         string   `json:"cert_file,omitempty" doc:"A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the Admin API is served over TLS. Required, with token_file, on an address that is not a loopback one, so that the token never crosses a network in the clear; not for a Unix socket."`
+	KeyFile          string   `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
 	History          int      `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
 	MaxConfigBytes   int64    `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
 	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
@@ -270,6 +272,7 @@ type Console struct {
 	MPTCP           bool          `json:"mptcp,omitempty" doc:"Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	CertFile        string        `json:"cert_file,omitempty" doc:"A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS."`
 	KeyFile         string        `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
+	Hosts           []string      `json:"hosts,omitempty" doc:"Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out."`
 	Users           []ConsoleUser `json:"users" fit:"required" doc:"Who may log in: at least one user."`
 	SessionTimeout  Duration      `json:"session_timeout,omitempty" default:"\"30m\"" doc:"How long a login lasts without a request. 30m when left out."`
 	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`

@@ -192,6 +192,7 @@ Both are Admin API endpoints, which the console calls in process:
 | --- | --- | --- |
 | `address` | `127.0.0.1:2020` | The host and port the console listens on. |
 | `cert_file`, `key_file` | | PEM files with the console's certificate (and intermediates) and its key; with them the console is served over TLS 1.2 or later. Set both or neither. |
+| `hosts` | | Host names or IP addresses, without a port, that a request's `Host` field may name beside `localhost` and the loopback addresses and, over TLS, the names the certificate covers. |
 | `users` | | Required. Who may log in: at least one, each a `username` and a `password_hash`. |
 | `session_timeout` | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | `12h` | How long a login lasts at most, however busy. |
@@ -201,6 +202,15 @@ Both are Admin API endpoints, which the console calls in process:
 **An address that is not a loopback one needs `cert_file` and `key_file`**, so that passwords never
 cross a network in the clear; `fit validate` refuses one without. On a loopback address TLS is
 optional, as for a console reached through an SSH tunnel.
+
+**A request's `Host` must name the console.** A request whose `Host` field is not `localhost`, a
+loopback address, one of `hosts` or, over TLS, a name the certificate covers is refused with `403`,
+pages and API alike. This is what stops DNS rebinding: a web page whose name an attacker made
+resolve to `127.0.0.1` sends its own name as `Host`, and an `Origin` to match it, so the `Origin`
+check alone cannot tell it from the console's own pages. A console reached by a name that is
+neither loopback nor in its certificate, as through a proxy that keeps the `Host` it was sent, or
+a tunnel proxy's `web_proxies` entry listening off loopback, lists that name in `hosts`; a role's
+console takes `hosts` too.
 
 The console serves the **workbench**: one page with a flat menu on the left, the config's modules and
 each running role's as peers in it (the global pages first, then the protocols), each module's pages
@@ -251,10 +261,23 @@ endpoints answer `409`. The users and their first hashes stay in the bootstrap f
 - **Checking a password.** A name that is not a user is checked against a dummy hash, so the time
   taken does not tell names apart; at most two checks run at once, the rest wait.
 - **Lockouts.** A client address that fails 5 times in 15 minutes is refused for 15 minutes, with
-  `429` and `Retry-After`. The table of addresses holds 4,096 at most.
+  `429` and `Retry-After`; an IPv6 address counts as its whole `/64`. A check is reserved before it
+  waits for the pool, so logins sent at once count against the failures an address has left: of 30
+  wrong passwords sent together, 5 are checked and the rest answered `429`. The table of addresses
+  holds 4,096 at most.
+- **Logins at once, and from everywhere.** At most 8 logins wait for a check or are checked at once,
+  from every address together; more are answered `429` at once, so that a flood of logins leaves
+  the pool to the console's other work. Past 50 failed logins from every address together within a
+  minute, or the minute before, logins are checked one a second, the rest answered `429`, until a
+  minute passes with fewer: many addresses, each under its own limit, guess no faster.
 - **Sessions.** A login gives a session: 32 random bytes in the cookie `fit_console_<port>` (the console's port, so that consoles
   of several fits on one host keep their logins apart), `HttpOnly`,
-  `SameSite=Strict`, and `Secure` over TLS. The console keeps only its SHA-256, and ends it after
+  `SameSite=Strict`, and `Secure` over TLS. A session works only on requests whose `Host` is the
+  one it logged in at. Over plain HTTP a browser sends the cookie to every port of the host, so a
+  program listening on another port of `127.0.0.1` can read it; over TLS the cookie is
+  `__Host-fit_console_<port>`, which a browser sends only over HTTPS and lets no plain HTTP page,
+  other port's page or subdomain set. Serve the console over TLS when other programs on its host,
+  or the pages they serve, are not trusted. The console keeps only its SHA-256, and ends it after
   `session_timeout` without a request, after `session_lifetime` in all, at logout, or when
   `max_sessions` is passed and it is the oldest. Sessions are in memory: a restart logs everyone
   out.
@@ -377,7 +400,10 @@ fit check -c /etc/fit/fit.json -json    # the check as JSON
 fit check -c /etc/fit/fit.json -fix     # choose one fix per item, then apply them together
 ```
 
-The bootstrap file's `admin.address` (and `token_file`) say where the Admin API is. The exit code is
+The bootstrap file's `admin.address` (and `token_file`) say where the Admin API is; with
+`admin.cert_file` it is reached over HTTPS, its certificate verified with `admin.cert_file` itself
+when `fit check` can read it, or with the CA in `-cacert`, or else the system's CAs, for the
+address's host or the name `-servername` gives. The exit code is
 `0` when nothing drifted, `1` when drift remains (including after `-fix`), and `2` for a usage,
 config-load, connection or decoding error.
 
@@ -396,7 +422,7 @@ differences and their counts) and `POST /config/reconcile` (a JSON body of the c
 | A request's body | `admin.max_config_bytes` and 64 KiB, 4 MiB and 64 KiB by default, read within 30s |
 | Writing a response | 30s; a role's streams are bounded by each wait for the browser instead, 30s |
 | An idle connection | 2m |
-| Password checks at once | 2 |
+| Password checks at once | 2, and 8 waiting or under way |
 | Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
 | A password change | bcrypt's time on the console's pool, two checks at once, then one store write |
 | Failed logins | 5 an address in 15 minutes, then refused for 15 minutes; a wrong current password in a password change counts too; 4,096 addresses kept |

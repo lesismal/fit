@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/listener"
@@ -104,13 +106,14 @@ type Server struct {
 	maxBody  int64
 	source   string // what the configs this server applies are from
 
-	ln   net.Listener
+	ln   net.Listener // over TLS when cert_file is set
 	srv  *http.Server
 	done chan struct{} // closed when Serve returns
 }
 
-// Start listens where a says and serves the Admin API for configs. report,
-// when not nil, is called after each config the API applies.
+// Start listens where a says and serves the Admin API for configs, over TLS
+// when a has cert_file and key_file. report, when not nil, is called after
+// each config the API applies.
 func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, error) {
 	s := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceAdmin, done: make(chan struct{})}
 	if a.TokenFile != "" {
@@ -121,6 +124,14 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		if s.token = []byte(strings.TrimSpace(string(data))); len(s.token) == 0 {
 			return nil, fmt.Errorf("admin: token_file %s is empty", a.TokenFile)
 		}
+	}
+	var tc *tls.Config
+	if a.CertFile != "" {
+		cert, err := tls.LoadX509KeyPair(a.CertFile, a.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("admin: %w", err)
+		}
+		tc = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
 	}
 	network, address := a.Network()
 	if network == "unix" {
@@ -141,6 +152,11 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 	}
 	s.loopback = network == "tcp" && s.token == nil
 	s.ln = newLimitListener(ln, a.Conns())
+	if tc != nil {
+		// The handshake runs on the connection's goroutine, within
+		// ReadHeaderTimeout, as net/http runs a *tls.Conn's.
+		s.ln = tls.NewListener(s.ln, tc)
+	}
 
 	mux := s.routes()
 	if !a.DisableDashboard {
@@ -249,25 +265,12 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "requests from web pages are refused")
 			return
 		}
-		if s.loopback && !loopbackHost(r.Host) {
+		if s.loopback && !console.LoopbackHost(r.Host) {
 			writeError(w, http.StatusForbidden, "the Host field must name a loopback host")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func loopbackHost(hostport string) bool {
-	host := hostport
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
-		host = h
-	}
-	host = strings.Trim(host, "[]")
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // pointer returns the JSON pointer a /config/{path...} request names; none

@@ -9,6 +9,12 @@
 // pages call there whichever console serves them, so that one console may
 // show every role that runs beside it.
 //
+// A request whose Host field names neither a loopback host, a host of the
+// console's config, nor, over TLS, a name its certificate covers is refused,
+// as a web page's is after DNS rebinding; a session's cookie is taken only on
+// requests naming the Host it logged in at, and over TLS it is a __Host-
+// cookie, which no other port or subdomain may set.
+//
 // Requests are served on fib's workers, and nothing here blocks one: a
 // password is checked, and an API handler's blocking work done, on the
 // console's own bounded pool, with the request retained until it answers
@@ -18,6 +24,7 @@ package console
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -70,7 +77,8 @@ type Options struct {
 	// Config is the role's console member.
 	Config *config.RoleConsole
 	// Cookie names the session's cookie, as fit_tunnel_hub; the console's
-	// port is added to it, as fit_tunnel_hub_7100.
+	// port is added to it, as fit_tunnel_hub_7100, and over TLS the __Host-
+	// prefix before it, as __Host-fit_tunnel_hub_7100.
 	Cookie string
 	// Pages are the role's files: index.html, and what it loads, served
 	// as they are, from memory.
@@ -150,6 +158,8 @@ type Console struct {
 	addr    net.Addr
 	secure  bool
 	cookie  string
+	hosts   []string          // the config's hosts, lowercased: names a request's Host may give
+	leaf    *x509.Certificate // the certificate served over TLS, whose names a Host may give
 	logins  *login.Logins
 	infof   func(format string, args ...any)
 	warnf   func(format string, args ...any)
@@ -212,6 +222,9 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	}
 	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), stop: make(chan struct{})}
+	for _, h := range cfg.Hosts {
+		c.hosts = append(c.hosts, strings.ToLower(strings.Trim(h, "[]")))
+	}
 	switch {
 	case o.Log != nil:
 		c.infof, c.warnf = o.Log.Infof, o.Log.Warnf
@@ -247,6 +260,9 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 			return nil, fmt.Errorf("console: %w", err)
 		}
 		c.secure = true
+		if c.leaf, err = x509.ParseCertificate(cert.Certificate[0]); err != nil {
+			return nil, fmt.Errorf("console: %w", err)
+		}
 		h = fibtls.NewServer(fibhttp.ConfigureTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}), h)
 	}
 	c.limit = newLimitHandler(h, cfg.Console().Conns())
@@ -260,6 +276,11 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		c.addr = addrs[0]
 	}
 	c.cookie = login.CookieName(o.Cookie, c.addr)
+	if c.secure {
+		// Secure, for the path /, with no Domain: a cookie no plain HTTP
+		// page, other port's page or subdomain may set or shadow.
+		c.cookie = "__Host-" + c.cookie
+	}
 	for range Workers {
 		c.workers.Go(c.work)
 	}
@@ -268,6 +289,46 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 
 // Logins returns the console's logins.
 func (c *Console) Logins() *login.Logins { return c.logins }
+
+// Cookie returns the name of the console's session cookie.
+func (c *Console) Cookie() string { return c.cookie }
+
+// LoopbackHost reports whether hostport, a request's Host field, names a
+// loopback host: localhost, or a loopback IP address, with a port or not.
+func LoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// hostAllowed reports whether a request whose Host field is hostport is
+// meant for the console: one naming a loopback host, one of the config's
+// hosts or, over TLS, a name the certificate covers. Any other is a web
+// page's after DNS rebinding, its Origin as much the attacker's as its Host.
+func (c *Console) hostAllowed(hostport string) bool {
+	if LoopbackHost(hostport) {
+		return true
+	}
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if host == "" {
+		return false
+	}
+	if slices.Contains(c.hosts, host) {
+		return true
+	}
+	return c.leaf != nil && c.leaf.VerifyHostname(host) == nil
+}
 
 // Addr returns where the console listens.
 func (c *Console) Addr() net.Addr { return c.addr }
@@ -321,7 +382,15 @@ func (c *Console) work() {
 // retained until fn returns; fn answers the request. A full pool answers
 // 503 at once, and a task still waiting for a worker after TaskTimeout is
 // dropped, its request answered 504.
-func (r *Request) Go(fn func()) {
+func (r *Request) Go(fn func()) { r.GoOr(fn, nil) }
+
+// GoOr is Go, with dropped, when not nil, called instead of fn when fn is
+// never run, as the pool is full or fn waited past TaskTimeout: it lets go of
+// what fn would have. It must not block.
+func (r *Request) GoOr(fn, dropped func()) {
+	if dropped == nil {
+		dropped = func() {}
+	}
 	run := r.Context.Async(fn)
 	var once atomic.Bool
 	task := func() {
@@ -335,11 +404,13 @@ func (r *Request) Go(fn func()) {
 		once.Store(true)
 		run = nil
 		r.Context.Release()
+		dropped()
 		_ = Error(r.Context, stdhttp.StatusServiceUnavailable, "the console is busy; try again")
 		return
 	}
 	_ = time.AfterFunc(TaskTimeout, func() {
 		if once.CompareAndSwap(false, true) {
+			dropped()
 			_ = Error(r.Context, stdhttp.StatusGatewayTimeout, "the request took too long")
 			r.Context.Release()
 		}
@@ -404,6 +475,10 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 	}
 	r := ctx.Request
+	if !c.hostAllowed(r.Host) {
+		_ = Error(ctx, stdhttp.StatusForbidden, "the Host field names no host this console serves")
+		return
+	}
 	if o := r.Header.Get("Origin"); o != "" && o != c.origin(r) {
 		_ = Error(ctx, stdhttp.StatusForbidden, "requests from other web pages are refused")
 		return
@@ -506,8 +581,8 @@ func (c *Console) lookup(r *stdhttp.Request) *login.Session {
 		return nil
 	}
 	s, ok := c.logins.Lookup(ck.Value)
-	if !ok {
-		return nil
+	if !ok || !strings.EqualFold(s.Host, r.Host) {
+		return nil // a cookie a browser sent to another of the host's ports, or a name of it
 	}
 	return &s
 }
@@ -571,19 +646,23 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		return
 	}
 	addr := clientAddr(ctx.Request)
-	if wait := c.logins.LockedOut(addr); wait > 0 {
+	// The check is reserved before it is queued, so that logins made at once
+	// count against the address's failures left as they wait.
+	done, wait := c.logins.Attempt(addr)
+	if wait > 0 {
 		ctx.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		_ = Error(ctx, stdhttp.StatusTooManyRequests, "too many failed logins from this address; try again later")
+		_ = Error(ctx, stdhttp.StatusTooManyRequests, "too many failed logins from this address, or from everywhere; try again later")
 		return
 	}
+	host := ctx.Request.Host
 	// bcrypt takes its time on the pool, not on the worker.
-	(&Request{Context: ctx, c: c}).Go(func() {
+	(&Request{Context: ctx, c: c}).GoOr(func() {
 		ok, err := c.logins.Check(ctx.Context(), body.Username, body.Password)
+		done(err == nil && !ok)
 		if err != nil {
 			return // the client left
 		}
 		if !ok {
-			c.logins.Failed(addr)
 			c.warnf("console: a failed login as %q from %s", body.Username, addr)
 			_ = Error(ctx, stdhttp.StatusUnauthorized, "the user name or password is wrong")
 			return
@@ -593,11 +672,11 @@ func (c *Console) login(ctx *fibhttp.Context) {
 			_ = WriteJSON(ctx, stdhttp.StatusUnauthorized, passwordExpiredBody{Error: "the temporary password of " + strconv.Quote(body.Username) + " has expired without being changed; restart fit with -admin to set a new one in time", Expired: true})
 			return
 		}
-		token, s := c.logins.Start(body.Username)
+		token, s := c.logins.Start(body.Username, host)
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 		c.infof("console: %q logged in from %s", body.Username, addr)
 		_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(&s))
-	})
+	}, func() { done(false) })
 }
 
 func (c *Console) logout(ctx *fibhttp.Context) {

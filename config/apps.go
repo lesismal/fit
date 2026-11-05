@@ -44,6 +44,7 @@ type RoleConsole struct {
 	MPTCP           bool          `json:"mptcp,omitempty" doc:"Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	CertFile        string        `json:"cert_file,omitempty" doc:"A PEM file with the pages' certificate, followed by any intermediates; with key_file, the pages are served over TLS."`
 	KeyFile         string        `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
+	Hosts           []string      `json:"hosts,omitempty" doc:"Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out."`
 	Users           []ConsoleUser `json:"users" fit:"required" doc:"Who may log in: at least one user."`
 	SessionTimeout  Duration      `json:"session_timeout,omitempty" default:"\"30m\"" doc:"How long a login lasts without a request. 30m when left out."`
 	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`
@@ -55,7 +56,7 @@ type RoleConsole struct {
 
 // Console returns c as an admin.console, for what the two share.
 func (c *RoleConsole) Console() *Console {
-	return &Console{Address: c.Address, MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
+	return &Console{Address: c.Address, MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Hosts: c.Hosts, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 }
 

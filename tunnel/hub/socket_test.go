@@ -91,7 +91,7 @@ func TestConsoleSocket(t *testing.T) {
 	// max_conns below: answered, the request would end the first
 	// WebSocket, and the next would not be past max_conns.
 	_ = w.c.Send(sess.Seal([]byte("GET / HTTP/1.1\r\n")))
-	_ = w.c.Send(sess.Seal([]byte("Host: x\r\nConnection: close\r\n")))
+	_ = w.c.Send(sess.Seal([]byte("Host: localhost\r\nConnection: close\r\n")))
 
 	// Past max_conns, a WebSocket closes at once, maybe before its dial
 	// has returned.

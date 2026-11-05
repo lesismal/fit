@@ -18,6 +18,7 @@ import (
 
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/apiclient"
 )
 
 // checkResult is GET /config/check's answer, the parts fit check reads: the
@@ -89,7 +90,8 @@ type checkError struct {
 }
 
 // checkAdminOf returns where the bootstrap config data, standard JSON, says
-// the Admin API listens, and the token file its requests carry a token from.
+// the Admin API listens, the token file its requests carry a token from, and
+// the certificate it serves TLS with.
 func checkAdminOf(data []byte) (config.Admin, error) {
 	adminJSON, _, err := admin.SplitAdmin(data)
 	if err != nil {
@@ -98,17 +100,20 @@ func checkAdminOf(data []byte) (config.Admin, error) {
 	if adminJSON == nil {
 		return config.Admin{}, errors.New("the config sets no admin: fit check reaches a running fit through its Admin API")
 	}
-	// Only the address and the token file are read: the rest of admin has
-	// fields whose JSON is fit's own (console durations and the like), which
-	// plain encoding/json does not read, and fit check has no use for them.
+	// Only the address, the token file and the certificate are read: the
+	// rest of admin has fields whose JSON is fit's own (console durations and
+	// the like), which plain encoding/json does not read, and fit check has
+	// no use for them.
 	var a struct {
 		Address   string `json:"address"`
 		TokenFile string `json:"token_file"`
+		CertFile  string `json:"cert_file"`
+		KeyFile   string `json:"key_file"`
 	}
 	if err := json.Unmarshal(adminJSON, &a); err != nil {
 		return config.Admin{}, fmt.Errorf("admin: %w", err)
 	}
-	return config.Admin{Address: a.Address, TokenFile: a.TokenFile}, nil
+	return config.Admin{Address: a.Address, TokenFile: a.TokenFile, CertFile: a.CertFile, KeyFile: a.KeyFile}, nil
 }
 
 // checkMaxBytes bounds an answer fit check reads.
@@ -122,10 +127,20 @@ type checkAPI struct {
 	token   string
 }
 
+// checkTLS is how fit check verifies an Admin API served over TLS: the CA
+// file to verify its certificate with, and the name to verify it for.
+type checkTLS struct {
+	CAFile, ServerName string
+}
+
 // newCheckAPI returns the client fit check reaches a's Admin API with: plain
-// HTTP over TCP or, for an address under config.AdminUnixPrefix, over the
-// Unix socket it names. No Admin API answers TLS, so none is set up.
-func newCheckAPI(a config.Admin, timeout time.Duration) (*checkAPI, error) {
+// HTTP over TCP, HTTPS when a has cert_file, or, for an address under
+// config.AdminUnixPrefix, plain HTTP over the Unix socket it names. Over
+// TLS the certificate is verified with tc.CAFile, or else admin.cert_file
+// itself when fit check can read it, as a certificate made for the Admin API
+// alone is, or else the system's CAs; for tc.ServerName, or else the host of
+// the address.
+func newCheckAPI(a config.Admin, tc checkTLS, timeout time.Duration) (*checkAPI, error) {
 	api := &checkAPI{client: &http.Client{Timeout: timeout}}
 	if a.TokenFile != "" {
 		data, err := os.ReadFile(a.TokenFile)
@@ -138,6 +153,21 @@ func newCheckAPI(a config.Admin, timeout time.Duration) (*checkAPI, error) {
 		}
 	}
 	network, address := a.Network()
+	if network != "unix" && a.CertFile != "" {
+		files := apiclient.TLSFiles{CA: tc.CAFile, ServerName: tc.ServerName}
+		if files.CA == "" {
+			if _, err := os.Stat(a.CertFile); err == nil {
+				files.CA = a.CertFile
+			}
+		}
+		hc, err := apiclient.Client(files, timeout, 2)
+		if err != nil {
+			return nil, fmt.Errorf("the Admin API's TLS: %w", err)
+		}
+		hc.Timeout = timeout
+		api.client, api.baseURL = hc, "https://"+address
+		return api, nil
+	}
 	if network != "unix" {
 		api.baseURL = "http://" + address
 		return api, nil
@@ -265,6 +295,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print the check's answer as the JSON the Admin API sent, rather than as a listing")
 	fix := fs.Bool("fix", false, "ask which fix to apply to each difference, one at a time, and apply the ones chosen together")
 	timeout := fs.Duration("timeout", 30*time.Second, "how long fit check waits for the Admin API")
+	var tc checkTLS
+	fs.StringVar(&tc.CAFile, "cacert", "", "a PEM file of the CA to verify the Admin API's certificate with, when admin.cert_file is set; admin.cert_file itself when left out and readable, the system's CAs otherwise")
+	fs.StringVar(&tc.ServerName, "servername", "", "the name to verify the Admin API's certificate for, when admin.cert_file is set; the host of admin.address when left out")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -289,7 +322,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "fit check: %v\n", err)
 		return 2
 	}
-	api, err := newCheckAPI(a, *timeout)
+	api, err := newCheckAPI(a, tc, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "fit check: %v\n", err)
 		return 2

@@ -2046,7 +2046,7 @@
   // "admin": {
     // // Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as
     // // in "unix//run/fit/admin.sock". The host must be a loopback address or localhost unless
-    // // token_file is set. 127.0.0.1:2019 when left out.
+    // // token_file, cert_file and key_file are set. 127.0.0.1:2019 when left out.
     // // string; default "127.0.0.1:2019".
     // "address": "127.0.0.1:2019",
 
@@ -2060,6 +2060,16 @@
     // // token is asked for when left out.
     // // string.
     // "token_file": "/etc/fit/token",
+
+    // // A PEM file with the Admin API's certificate, followed by any intermediates; with key_file,
+    // // the Admin API is served over TLS. Required, with token_file, on an address that is not a
+    // // loopback one, so that the token never crosses a network in the clear; not for a Unix socket.
+    // // string.
+    // "cert_file": "/etc/fit/example.com.pem",
+
+    // // A PEM file with the certificate's private key.
+    // // string.
+    // "key_file": "/etc/fit/example.com.key",
 
     // // How many of the configs applied, the running one included, are kept to be read back. 10 when
     // // left out or 0.
@@ -2129,6 +2139,13 @@
       // // A PEM file with the certificate's private key.
       // // string.
       // "key_file": "/etc/fit/example.com.key",
+
+      // // Host names or IP addresses, without a port, that a request's Host field may name beside
+      // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+      // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+      // // None when left out.
+      // // list of string.
+      // "hosts": [],
 
       // // Who may log in: at least one user.
       // // list of object; required.
@@ -2438,6 +2455,13 @@
         // // string.
         // "key_file": "/etc/fit/example.com.key",
 
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
+
         // // Who may log in: at least one user.
         // // list of object; required.
         // "users": [
@@ -2582,6 +2606,13 @@
         // // A PEM file with the certificate's private key.
         // // string.
         // "key_file": "/etc/fit/example.com.key",
+
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
 
         // // Who may log in: at least one user.
         // // list of object; required.
@@ -2836,6 +2867,13 @@
         // // A PEM file with the certificate's private key.
         // // string.
         // "key_file": "/etc/fit/example.com.key",
+
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
 
         // // Who may log in: at least one user.
         // // list of object; required.
@@ -3155,6 +3193,13 @@
         // // string.
         // "key_file": "/etc/fit/example.com.key",
 
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
+
         // // Who may log in: at least one user.
         // // list of object; required.
         // "users": [
@@ -3324,6 +3369,13 @@
         // // A PEM file with the certificate's private key.
         // // string.
         // "key_file": "/etc/fit/example.com.key",
+
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
 
         // // Who may log in: at least one user.
         // // list of object; required.
@@ -3526,6 +3578,13 @@
         // // A PEM file with the certificate's private key.
         // // string.
         // "key_file": "/etc/fit/example.com.key",
+
+        // // Host names or IP addresses, without a port, that a request's Host field may name beside
+        // // localhost and the loopback addresses and, over TLS, the names the certificate covers; a
+        // // request naming any other host is refused with 403, as a web page's is after DNS rebinding.
+        // // None when left out.
+        // // list of string.
+        // "hosts": [],
 
         // // Who may log in: at least one user.
         // // list of object; required.

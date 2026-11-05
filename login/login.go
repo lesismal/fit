@@ -1,6 +1,10 @@
 // Package login keeps the logins of fit's web pages: users with bcrypt
 // hashes, sessions with idle and absolute ends, a CSRF token for each, and
-// addresses refused for a while after failing too often. The Admin API's
+// addresses refused for a while after failing too often, an IPv6 address
+// counted by its /64. A login's check is reserved with Attempt before it is
+// queued, so that checks under way count against an address's failures left,
+// and failures from every address together past a bound slow every login
+// down. The Admin API's
 // console and the consoles of the agent and tunnel roles share it; it knows
 // nothing of the server that carries the requests.
 //
@@ -17,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -37,6 +42,18 @@ const (
 	Lockout      = 15 * time.Minute
 	MaxAddresses = 4096
 	Checks       = 2
+	// MaxPending is how many checks Attempt reserves at once, waiting for a
+	// slot or under way, from every address together: one more is refused at
+	// once, so that a flood of logins does not fill the pool a console's other
+	// work waits on.
+	MaxPending = 8
+	// MaxGlobalFailures failures from every address together within
+	// GlobalWindow, or within the window before it, slow every login down to
+	// one check per SlowInterval: many addresses, each under MaxFailures,
+	// guess no faster than that.
+	MaxGlobalFailures = 50
+	GlobalWindow      = time.Minute
+	SlowInterval      = time.Second
 )
 
 // Options are the users and the limits of a set of logins.
@@ -54,8 +71,12 @@ func OptionsOf(c *config.Console) Options {
 
 // Session is a user logged in.
 type Session struct {
-	User          string
-	CSRF          string
+	User string
+	CSRF string
+	// Host is the Host field of the login that started the session: a
+	// console refuses the session's cookie on a request naming another, as
+	// a browser sends a host's cookies to each of its ports.
+	Host          string
 	Created, Seen time.Time
 	// MustChange is a session of a user whose password is temporary, as
 	// SetTemporary made it: it may change the password and nothing else,
@@ -80,12 +101,28 @@ type Logins struct {
 
 	mu       sync.Mutex
 	sessions map[[sha256.Size]byte]*Session // by the hash of their token
-	fails    map[string]*failures           // by client address
+	fails    map[string]*failures           // by client address, as key gives it
+	pending  int                            // checks Attempt reserved, from every address
+	// The failures from every address: n in the window that began at start,
+	// prev in the one before it, and when slowed logins may check again.
+	global struct {
+		start   time.Time
+		n, prev int
+		next    time.Time
+	}
 }
 
+// failures are an address's: n failed since first, a lockout until until, and
+// pending checks under way, which may fail too.
 type failures struct {
-	n            int
+	n, pending   int
 	first, until time.Time
+}
+
+// stale reports whether f no longer counts: its window and any lockout have
+// passed.
+func (f *failures) stale(now time.Time) bool {
+	return now.Sub(f.first) > Window && now.After(f.until)
 }
 
 // New returns the logins o describes, with no session yet.
@@ -200,14 +237,14 @@ func (l *Logins) Expired(user string) bool {
 	return ok && !l.now().Before(until)
 }
 
-// Start starts a session for user and returns its token, ending the oldest
-// when there are too many.
-func (l *Logins) Start(user string) (string, Session) {
+// Start starts a session for user, logged in at host, a request's Host field,
+// and returns its token, ending the oldest when there are too many.
+func (l *Logins) Start(user, host string) (string, Session) {
 	token := rand.Text() + rand.Text() // 52 base32 characters: 260 bits
 	csrf := make([]byte, 24)
 	_, _ = rand.Read(csrf)
 	now := l.now()
-	s := &Session{User: user, CSRF: base64.RawURLEncoding.EncodeToString(csrf), Created: now, Seen: now}
+	s := &Session{User: user, CSRF: base64.RawURLEncoding.EncodeToString(csrf), Host: host, Created: now, Seen: now}
 	if until, ok := l.Temporary(user); ok {
 		s.MustChange, s.Expires = true, until
 	}
@@ -288,14 +325,89 @@ func (l *Logins) EndUserSessions(user, keepToken string) int {
 	return ended
 }
 
+// key returns what addr's failures are counted under: addr, but for an IPv6
+// address its /64, which one host or one network commonly holds whole.
+func key(addr string) string {
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return addr
+	}
+	ip = ip.WithZone("").Unmap()
+	if ip.Is4() {
+		return ip.String()
+	}
+	p, _ := ip.Prefix(64) // 64 bits of an IPv6 address
+	return p.String()
+}
+
 // LockedOut returns how long addr is still refused logins.
 func (l *Logins) LockedOut(addr string) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if f := l.fails[addr]; f != nil {
+	if f := l.fails[key(addr)]; f != nil {
 		return f.until.Sub(l.now())
 	}
 	return 0
+}
+
+// Attempt reserves a password check from addr, before it is queued, and
+// returns done, which the caller calls once with whether the check failed,
+// or once the check is not made after all. It returns instead how long to
+// wait when no check may be made now: addr is locked out, addr has as many
+// checks under way as it has failures left, MaxPending checks are under way,
+// or failures from everywhere slow logins down and one went less than
+// SlowInterval ago.
+func (l *Logins) Attempt(addr string) (done func(failed bool), wait time.Duration) {
+	k := key(addr)
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f := l.fails[k]
+	if f != nil {
+		if w := f.until.Sub(now); w > 0 {
+			return nil, w
+		}
+		if f.stale(now) {
+			f.n, f.first = 0, now
+		}
+		if f.n+f.pending >= MaxFailures {
+			return nil, SlowInterval
+		}
+	}
+	if l.pending >= MaxPending {
+		return nil, SlowInterval
+	}
+	if l.slow(now) {
+		if w := l.global.next.Sub(now); w > 0 {
+			return nil, w
+		}
+		l.global.next = now.Add(SlowInterval)
+	}
+	if f == nil {
+		f = l.entry(k, now)
+	}
+	f.pending++
+	l.pending++
+	var once sync.Once
+	return func(failed bool) {
+		once.Do(func() { l.finish(k, f, failed) })
+	}, 0
+}
+
+// finish ends a check Attempt reserved for f, under k, counting a failure.
+func (l *Logins) finish(k string, f *failures, failed bool) {
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f.pending--
+	l.pending--
+	if failed {
+		l.fail(k, now)
+		return
+	}
+	if f.n == 0 && f.pending == 0 && l.fails[k] == f {
+		delete(l.fails, k) // nothing to remember
+	}
 }
 
 // Failed counts a failed login from addr, refusing it logins for a while
@@ -304,17 +416,54 @@ func (l *Logins) Failed(addr string) {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	f := l.fails[addr]
-	if f == nil || now.Sub(f.first) > Window && now.After(f.until) {
-		if f == nil && len(l.fails) >= MaxAddresses {
-			l.forgetFailures(now)
-		}
-		f = &failures{first: now}
-		l.fails[addr] = f
+	l.fail(key(addr), now)
+}
+
+// fail counts a failure under k. l.mu must be held.
+func (l *Logins) fail(k string, now time.Time) {
+	f := l.fails[k]
+	switch {
+	case f == nil:
+		f = l.entry(k, now)
+	case f.stale(now):
+		f.n, f.first = 0, now
 	}
 	if f.n++; f.n >= MaxFailures {
 		f.until = now.Add(Lockout)
 	}
+	l.roll(now)
+	l.global.n++
+}
+
+// entry adds the failures of k, making room for them. l.mu must be held.
+func (l *Logins) entry(k string, now time.Time) *failures {
+	if len(l.fails) >= MaxAddresses {
+		l.forgetFailures(now)
+	}
+	f := &failures{first: now}
+	l.fails[k] = f
+	return f
+}
+
+// roll starts a new window of the failures from everywhere once the last
+// has passed. l.mu must be held.
+func (l *Logins) roll(now time.Time) {
+	switch d := now.Sub(l.global.start); {
+	case d <= GlobalWindow:
+		return
+	case d <= 2*GlobalWindow:
+		l.global.prev = l.global.n
+	default:
+		l.global.prev = 0
+	}
+	l.global.start, l.global.n = now, 0
+}
+
+// slow reports whether the failures from everywhere slow logins down. l.mu
+// must be held.
+func (l *Logins) slow(now time.Time) bool {
+	l.roll(now)
+	return l.global.n >= MaxGlobalFailures || l.global.prev >= MaxGlobalFailures
 }
 
 // Addresses returns how many addresses' failures are remembered.
@@ -326,17 +475,20 @@ func (l *Logins) Addresses() int {
 
 // forgetFailures makes room in the table of failures: the addresses no
 // longer counted or refused go, or else the one that began failing first.
+// An address with checks under way stays: Attempt bounds them by MaxPending.
 func (l *Logins) forgetFailures(now time.Time) {
 	var oldest string
 	var at time.Time
 	for k, f := range l.fails {
-		if now.Sub(f.first) > Window && now.After(f.until) {
+		switch {
+		case f.pending > 0:
+		case f.stale(now) || f.n == 0:
 			delete(l.fails, k)
-		} else if at.IsZero() || f.first.Before(at) {
+		case at.IsZero() || f.first.Before(at):
 			oldest, at = k, f.first
 		}
 	}
-	if len(l.fails) >= MaxAddresses {
+	if len(l.fails) >= MaxAddresses && !at.IsZero() {
 		delete(l.fails, oldest)
 	}
 }

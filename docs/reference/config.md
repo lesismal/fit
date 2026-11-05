@@ -1215,10 +1215,11 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 `/config/` and a JSON pointer into it, `POST /load` for a whole config, ETags against lost updates,
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
-unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
-where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
-off by default, and a Unix socket has no paths.
+unless told otherwise, and needs `token_file`, `cert_file` and `key_file` to listen anywhere but a
+loopback address, so that it is served over TLS with a token there; `fit check` reaches it over
+HTTPS then. It is off when `admin` is left out. Read when fit starts. `mptcp` has it listen over
+Multipath TCP where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to
+plain TCP; off by default, and a Unix socket has no paths.
 
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
@@ -1226,8 +1227,9 @@ When the store does not exist yet, the rest of the file is its first content. `f
 and `fit store import` read and write it. `admin.console` serves the console, web pages behind a
 user name and password from which every part of the config but `admin` is changed, with a form
 made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
-`key_file`. Its `mptcp` does the same for the console's listener. See
-[the console and the store](../console.md) and
+`key_file`, and it refuses a request whose `Host` names neither a loopback host, one of its
+`hosts`, nor a name its certificate covers. Its `mptcp` does the same for the console's listener.
+See [the console and the store](../console.md) and
 [decision 027](../decisions/027-console-and-store.md).
 
 In a .conf file:
@@ -1296,9 +1298,11 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string | `"127.0.0.1:2019"` | Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as in "unix//run/fit/admin.sock". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out. |
+| `address` | string | `"127.0.0.1:2019"` | Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as in "unix//run/fit/admin.sock". The host must be a loopback address or localhost unless token_file, cert_file and key_file are set. 127.0.0.1:2019 when left out. |
 | `mptcp` | boolean |  | Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths. |
 | `token_file` | string |  | A file holding a token that every request must carry, as "Authorization: Bearer <token>"; no token is asked for when left out. |
+| `cert_file` | string |  | A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the Admin API is served over TLS. Required, with token_file, on an address that is not a loopback one, so that the token never crosses a network in the clear; not for a Unix socket. |
+| `key_file` | string |  | A PEM file with the certificate's private key. |
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0. |
@@ -1327,6 +1331,7 @@ In JSON:
 | `mptcp` | boolean |  | Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `cert_file` | string |  | A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS. |
 | `key_file` | string |  | A PEM file with the certificate's private key. |
+| `hosts` | list of string |  | Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out. |
 | `users` | list of [object](#config-consoleuser) |  | Required. Who may log in: at least one user. |
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
@@ -1721,6 +1726,7 @@ Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.n
 | `mptcp` | boolean |  | Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `cert_file` | string |  | A PEM file with the pages' certificate, followed by any intermediates; with key_file, the pages are served over TLS. |
 | `key_file` | string |  | A PEM file with the certificate's private key. |
+| `hosts` | list of string |  | Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out. |
 | `users` | list of [object](#config-consoleuser) |  | Required. Who may log in: at least one user. |
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |

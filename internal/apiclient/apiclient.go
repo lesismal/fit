@@ -18,9 +18,11 @@ import (
 
 // TLSFiles are the files of a client's TLS: a CA to verify the server
 // with, the system's when empty, and a certificate and key of the
-// client's, none when empty.
+// client's, none when empty; and the name the server's certificate is
+// verified for, the host of the request's URL when empty.
 type TLSFiles struct {
 	CA, Cert, Key string
+	ServerName    string
 }
 
 // Client returns an HTTP client for an API, which connects, TLS handshake
@@ -31,7 +33,7 @@ type TLSFiles struct {
 func Client(files TLSFiles, timeout time.Duration, conns int) (*http.Client, error) {
 	var tc *tls.Config
 	if files != (TLSFiles{}) {
-		tc = &tls.Config{MinVersion: tls.VersionTLS12}
+		tc = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: files.ServerName}
 		if files.CA != "" {
 			pem, err := os.ReadFile(files.CA)
 			if err != nil {

@@ -262,8 +262,13 @@ func (c *Config) Validate() Errors {
 			}
 		} else if _, msg := checkAddress(address); msg != "" {
 			add(a.At.Field("address"), "%s", msg)
-		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && a.TokenFile == "" {
-			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file", address)
+		} else if host, _, _ := net.SplitHostPort(address); !isLoopback(host) && (a.TokenFile == "" || a.CertFile == "" || a.KeyFile == "") {
+			add(a.At.Field("address"), "%q is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file, so that the token is not sent in the clear", address)
+		}
+		if (a.CertFile == "") != (a.KeyFile == "") {
+			add(a.At, "cert_file and key_file go together")
+		} else if network, _ := a.Network(); network == "unix" && a.CertFile != "" {
+			add(a.At.Field("cert_file"), "a Unix socket is not served over TLS: leave out cert_file and key_file")
 		}
 		checkStore(a.Store, add)
 		checkConsole(a.Console, add)
@@ -624,8 +629,23 @@ func checkStore(st *Store, add func(Value, string, ...any)) {
 	}
 }
 
+// checkConsoleHost says what is wrong with h as one of a console's hosts, or
+// returns "".
+func checkConsoleHost(h string) string {
+	if h == "" {
+		return "the host is empty"
+	}
+	if net.ParseIP(strings.Trim(h, "[]")) != nil {
+		return ""
+	}
+	if strings.ContainsAny(h, ":/@*[] ") {
+		return strconv.Quote(h) + " is not a host name or an IP address: give one without a scheme, port or wildcard"
+	}
+	return ""
+}
+
 // checkConsole checks admin.console: its address, TLS off a loopback
-// address, and its users.
+// address, its hosts, and its users.
 func checkConsole(c *Console, add func(Value, string, ...any)) {
 	if c == nil {
 		return
@@ -638,6 +658,11 @@ func checkConsole(c *Console, add func(Value, string, ...any)) {
 	}
 	if (c.CertFile == "") != (c.KeyFile == "") {
 		add(c.At, "cert_file and key_file go together")
+	}
+	for i, h := range c.Hosts {
+		if msg := checkConsoleHost(h); msg != "" {
+			add(c.At.Field("hosts").Index(i), "%s", msg)
+		}
 	}
 	if len(c.Users) == 0 {
 		add(c.At.Field("users"), "list at least one user")

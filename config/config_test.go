@@ -394,12 +394,38 @@ func TestValidate(t *testing.T) {
 		{
 			name: "admin on every interface without a token",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": ":2019"}}`,
-			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+			want: []string{`1:73: admin.address: ":2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file, so that the token is not sent in the clear`},
 		},
 		{
 			name: "admin on another host without a token",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "10.0.0.1:2019"}}`,
-			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file`},
+			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file, so that the token is not sent in the clear`},
+		},
+		{
+			// A token alone would cross the network in the clear.
+			name: "admin on another host with a token and no TLS",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "10.0.0.1:2019", "token_file": "t"}}`,
+			want: []string{`1:73: admin.address: "10.0.0.1:2019" is not a loopback address: the Admin API can change everything fit serves, so listen on localhost, 127.0.0.1, [::1] or a Unix socket, or set token_file, cert_file and key_file, so that the token is not sent in the clear`},
+		},
+		{
+			name: "admin TLS files",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"cert_file": "c"}}`,
+			want: []string{`1:61: admin: cert_file and key_file go together`},
+		},
+		{
+			name: "admin TLS on a Unix socket",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"address": "unix//run/a.sock", "cert_file": "c", "key_file": "k"}}`,
+			want: []string{`1:106: admin.cert_file: a Unix socket is not served over TLS: leave out cert_file and key_file`},
+		},
+		{
+			name: "admin console hosts",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "admin": {"console": {"hosts": ["fit.example", "10.0.0.1", "[::1]", "", "fit.example:443", "*.example", "https://fit.example"], "users": [{"username": "a", "password_hash": "$2a$10$x"}]}}}`,
+			want: []string{
+				`1:120: admin.console.hosts[3]: the host is empty`,
+				`1:124: admin.console.hosts[4]: "fit.example:443" is not a host name or an IP address: give one without a scheme, port or wildcard`,
+				`1:143: admin.console.hosts[5]: "*.example" is not a host name or an IP address: give one without a scheme, port or wildcard`,
+				`1:156: admin.console.hosts[6]: "https://fit.example" is not a host name or an IP address: give one without a scheme, port or wildcard`,
+			},
 		},
 		{
 			name: "admin addresses",
@@ -634,7 +660,7 @@ func TestAdmin(t *testing.T) {
 		{`{"address": "localhost:2019"}`, "tcp", "localhost:2019"},
 		{`{"address": "[::1]:0"}`, "tcp", "[::1]:0"},
 		{`{"address": "127.0.0.2:9"}`, "tcp", "127.0.0.2:9"},
-		{`{"address": ":2019", "token_file": "token"}`, "tcp", ":2019"},
+		{`{"address": ":2019", "token_file": "token", "cert_file": "c", "key_file": "k"}`, "tcp", ":2019"},
 		{`{"address": "unix//run/fit/admin.sock"}`, "unix", "/run/fit/admin.sock"},
 	} {
 		c, err := Load([]byte(`{"listeners": [{"name": "web", "address": ":80"}], "admin": ` + tt.admin + `}`))

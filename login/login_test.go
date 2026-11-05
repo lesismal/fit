@@ -48,7 +48,7 @@ func TestCheck(t *testing.T) {
 
 func TestSessions(t *testing.T) {
 	l, now := newLogins(t)
-	token, s := l.Start("admin")
+	token, s := l.Start("admin", "127.0.0.1:2020")
 	if got, ok := l.Lookup(token); !ok || got.User != "admin" || !CSRFOK(got, s.CSRF) || CSRFOK(got, "x") {
 		t.Fatalf("lookup: %+v %v", got, ok)
 	}
@@ -61,11 +61,11 @@ func TestSessions(t *testing.T) {
 		t.Error("an idle session lives")
 	}
 	// Too many: the oldest goes.
-	a, _ := l.Start("admin")
+	a, _ := l.Start("admin", "127.0.0.1:2020")
 	*now = now.Add(time.Second)
-	b, _ := l.Start("admin")
+	b, _ := l.Start("admin", "127.0.0.1:2020")
 	*now = now.Add(time.Second)
-	c, _ := l.Start("admin")
+	c, _ := l.Start("admin", "127.0.0.1:2020")
 	if _, ok := l.Lookup(a); ok {
 		t.Error("the oldest session lives past max_sessions")
 	}
@@ -171,10 +171,10 @@ func TestEndUserSessions(t *testing.T) {
 	now := time.Now()
 	l.SetClock(func() time.Time { return now })
 	l.SetPassword("bob", hash)
-	mine, _ := l.Start("admin")
-	other, _ := l.Start("admin")
-	third, _ := l.Start("admin")
-	bobs, _ := l.Start("bob")
+	mine, _ := l.Start("admin", "127.0.0.1:2020")
+	other, _ := l.Start("admin", "127.0.0.1:2020")
+	third, _ := l.Start("admin", "127.0.0.1:2020")
+	bobs, _ := l.Start("bob", "127.0.0.1:2020")
 	if n := l.EndUserSessions("admin", mine); n != 2 {
 		t.Errorf("ended %d sessions, want 2", n)
 	}

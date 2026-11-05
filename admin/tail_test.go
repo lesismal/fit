@@ -106,12 +106,13 @@ func TestConsoleTLS(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Strict-Transport-Security") == "" {
 		t.Errorf("%d %v", resp.StatusCode, resp.Header)
 	}
+	// Over TLS the cookie is a __Host- one: Secure, for /, with no Domain.
 	var secure bool
 	for _, ck := range resp.Cookies() {
-		secure = secure || strings.HasPrefix(ck.Name, sessionCookie+"_") && ck.Secure
+		secure = secure || strings.HasPrefix(ck.Name, "__Host-"+sessionCookie+"_") && ck.Secure && ck.Path == "/" && ck.Domain == ""
 	}
 	if !secure {
-		t.Error("the session cookie is not Secure")
+		t.Errorf("the session cookie is not a Secure __Host- one: %v", resp.Cookies())
 	}
 }
 

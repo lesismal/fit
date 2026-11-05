@@ -170,7 +170,11 @@
       "properties": {
         "address": {
           "default": "127.0.0.1:2019",
-          "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out.",
+          "description": "Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file, cert_file and key_file are set. 127.0.0.1:2019 when left out.",
+          "type": "string"
+        },
+        "cert_file": {
+          "description": "A PEM file with the Admin API's certificate, followed by any intermediates; with key_file, the Admin API is served over TLS. Required, with token_file, on an address that is not a loopback one, so that the token never crosses a network in the clear; not for a Unix socket.",
           "type": "string"
         },
         "console": {
@@ -186,6 +190,10 @@
           "description": "How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        },
+        "key_file": {
+          "description": "A PEM file with the certificate's private key.",
+          "type": "string"
         },
         "max_config_bytes": {
           "default": 4194304,
@@ -296,6 +304,13 @@
         "cert_file": {
           "description": "A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS.",
           "type": "string"
+        },
+        "hosts": {
+          "description": "Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "key_file": {
           "description": "A PEM file with the certificate's private key.",
@@ -1934,6 +1949,13 @@
         "cert_file": {
           "description": "A PEM file with the pages' certificate, followed by any intermediates; with key_file, the pages are served over TLS.",
           "type": "string"
+        },
+        "hosts": {
+          "description": "Host names or IP addresses, without a port, that a request's Host field may name beside localhost and the loopback addresses and, over TLS, the names the certificate covers; a request naming any other host is refused with 403, as a web page's is after DNS rebinding. None when left out.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "key_file": {
           "description": "A PEM file with the certificate's private key.",
