@@ -273,7 +273,7 @@ func (t *Tokens) issueBody(c *fibhttp.Context, body []byte) {
 		}
 		out = append(out, tokenAnswer{Token: tok, Subject: req.Subject, Expires: expiry.Unix(), Key: key})
 	}
-	writeJSON(c, stdhttp.StatusOK, issueAnswer{Tokens: out}, nil)
+	writeIssued(c, issueAnswer{Tokens: out})
 }
 
 // check validates one token of a batch, and returns the lifetime to give it:
@@ -442,15 +442,12 @@ func (t *Tokens) revokeTargets(c *fibhttp.Context, in revokeRequest) {
 		timer.Stop()
 		rotated := make([]string, 0, len(targets))
 		for _, target := range targets {
-			secret, err := newSecret()
-			if err != nil {
-				finish(fail(stdhttp.StatusInternalServerError, "a random secret cannot be made"))
-				return
-			}
+			secret := newSecret()
 			if err := writeSecret(target.file, secret); err != nil {
 				finish(fail(stdhttp.StatusInternalServerError, "the secret file cannot be written"))
 				return
 			}
+			var err error
 			if target.key == "" {
 				err = t.auth.Rotate(secret)
 			} else {
@@ -489,24 +486,19 @@ type answer struct {
 	header stdhttp.Header
 }
 
-// writeAnswer writes a's response.
+// writeAnswer writes a's response; every answer has its header.
 func writeAnswer(c *fibhttp.Context, a answer) {
-	hdr := a.header
-	if hdr == nil {
-		hdr = stdhttp.Header{}
-	}
-	hdr.Set("Cache-Control", "no-store")
-	_ = c.WriteResponse(fibhttp.Response{StatusCode: a.status, Header: hdr, Body: a.body})
+	a.header.Set("Cache-Control", "no-store")
+	_ = c.WriteResponse(fibhttp.Response{StatusCode: a.status, Header: a.header, Body: a.body})
 }
 
 // newSecret returns a new signing secret: 32 random bytes, raw URL base64,
-// at least the 16 bytes a policy's secret needs.
-func newSecret() (string, error) {
+// at least the 16 bytes a policy's secret needs. crypto/rand's Read never
+// returns an error: it crashes the program rather than give no randomness.
+func newSecret() string {
 	var b [secretBytes]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+	_, _ = rand.Read(b[:])
+	return base64.RawURLEncoding.EncodeToString(b[:])
 }
 
 // readBody gathers a request's body, up to limit bytes, and calls done with
@@ -549,18 +541,12 @@ func plain(c *fibhttp.Context, status int, msg string, hdr stdhttp.Header) {
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: status, Header: hdr, Body: []byte(msg + "\n")})
 }
 
-func writeJSON(c *fibhttp.Context, status int, v any, hdr stdhttp.Header) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		plain(c, stdhttp.StatusInternalServerError, err.Error(), nil)
-		return
-	}
-	if hdr == nil {
-		hdr = stdhttp.Header{}
-	}
-	hdr.Set("Content-Type", "application/json")
-	hdr.Set("Cache-Control", "no-store")
-	_ = c.WriteResponse(fibhttp.Response{StatusCode: status, Header: hdr, Body: b})
+// writeIssued answers a batch with its tokens; strings and numbers always
+// marshal.
+func writeIssued(c *fibhttp.Context, a issueAnswer) {
+	b, _ := json.Marshal(a)
+	hdr := stdhttp.Header{"Content-Type": {"application/json"}, "Cache-Control": {"no-store"}}
+	_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: hdr, Body: b})
 }
 
 var _ module.Cleaner = (*Tokens)(nil)

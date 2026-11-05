@@ -500,7 +500,9 @@ func TestChatFileEviction(t *testing.T) {
 	chatFileBytes = 2500
 	t.Cleanup(func() { chatFileBytes = old })
 
-	f := startFit(t, conf(`{"auth": "live"}`))
+	// A room is forgotten at its next sweep, every third of member_ttl:
+	// 30s by default would sweep at 10s, as late as the wait for it.
+	f := startFit(t, conf(`{"auth": "live", "member_ttl": "3s"}`))
 	h := hubOf(t, f)
 	ann1 := joinKey(t, f, "room1", "ann", bearer)
 	ann2 := joinKey(t, f, "room2", "ann", bearer)

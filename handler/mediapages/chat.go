@@ -270,12 +270,9 @@ func (h *hub) dropFirstLocked(r *room) {
 	}
 }
 
-// removeMessageLocked removes msg from r's messages, as eviction does.
+// removeMessageLocked removes msg, one of r's messages, as eviction does.
 func (h *hub) removeMessageLocked(r *room, msg *message) {
 	i := slices.Index(r.messages, msg)
-	if i < 0 {
-		return
-	}
 	copy(r.messages[i:], r.messages[i+1:])
 	r.messages[len(r.messages)-1] = nil
 	r.messages = r.messages[:len(r.messages)-1]
@@ -459,18 +456,12 @@ func (p *Pages) download(c *fibhttp.Context, roomN, id string) {
 		plain(c, stdhttp.StatusNotFound, "no such file", nil)
 		return
 	}
-	ctype := msg.File.Type
-	if ctype == "" {
-		ctype = "application/octet-stream"
-	}
-	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": msg.File.Name})
-	if disposition == "" {
-		disposition = "attachment"
-	}
+	// The upload made the type one that parses, application/octet-stream
+	// at worst; a filename parameter of any value formats.
 	hdr := stdhttp.Header{
-		"Content-Type":           {ctype},
+		"Content-Type":           {msg.File.Type},
 		"Content-Length":         {strconv.Itoa(len(msg.data))},
-		"Content-Disposition":    {disposition},
+		"Content-Disposition":    {mime.FormatMediaType("attachment", map[string]string{"filename": msg.File.Name})},
 		"X-Content-Type-Options": {"nosniff"},
 		"Cache-Control":          {"no-store"},
 	}

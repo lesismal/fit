@@ -334,3 +334,79 @@ func TestUploadRefusedBeforeBody(t *testing.T) {
 		t.Fatalf("finished uploads hold %d bytes", n)
 	}
 }
+
+// An upload admitted from a member who leaves before its body is in is
+// refused once the body is, 404, and stores nothing; its reservation is
+// given back.
+func TestUploadMemberLeftMidway(t *testing.T) {
+	f := startFit(t, conf(`{"max_file_bytes": 1048576}`))
+	h := hubOf(t, f)
+	ann := joinKey(t, f, "r", "ann", nil)
+	sent := int(listener.StreamThreshold)
+	conn := openUpload(t, f, "r", "X-Fit-Member: ann\r\nX-Fit-Room-Key: "+ann+"\r\n", 1<<20, sent)
+	deadline := time.Now().Add(waitTimeout)
+	for uploading.Load() != 1<<20 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the upload holds %d bytes", uploading.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if resp, _ := do(t, "POST", f.base+"/media/api/rooms/r/leave", `{"name": "ann", "key": "`+ann+`"}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("leave: %d", resp.StatusCode)
+	}
+	if _, err := conn.Write([]byte(strings.Repeat("f", 1<<20-sent))); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusLine(t, conn); !strings.HasPrefix(got, "HTTP/1.1 404") {
+		t.Fatalf("an upload whose member left: %q", got)
+	}
+	if got := fileBytesOf(t, h); got != 0 {
+		t.Fatalf("the upload stored %d bytes", got)
+	}
+	if n := uploading.Load(); n != 0 {
+		t.Fatalf("the refused upload holds %d bytes", n)
+	}
+}
+
+// A chunked upload that runs past max_file_bytes is answered 413 at the
+// chunk that does, and the chunks after it are let go.
+func TestUploadChunkedPastLimit(t *testing.T) {
+	f := startFit(t, conf(`{"max_file_bytes": 65536}`))
+	h := hubOf(t, f)
+	ann := joinKey(t, f, "r", "ann", nil)
+	chunk := strings.Repeat("c", 40<<10)
+	out := rawPost(t, f, "/media/api/rooms/r/files?file=a.bin", "X-Fit-Member: ann\r\nX-Fit-Room-Key: "+ann+"\r\nConnection: close\r\n",
+		[]string{chunk, chunk, chunk, chunk}, "0\r\n\r\n")
+	if !strings.HasPrefix(out, "HTTP/1.1 413") || strings.Count(out, "HTTP/1.1") != 1 {
+		t.Fatalf("a chunked upload past max_file_bytes: %q", out)
+	}
+	if got := fileBytesOf(t, h); got != 0 {
+		t.Fatalf("the upload stored %d bytes", got)
+	}
+	if n := uploading.Load(); n != 0 {
+		t.Fatalf("the refused upload holds %d bytes", n)
+	}
+}
+
+// A file larger than the hub's whole file budget is refused by the hub
+// itself, and the files it keeps stay.
+func TestHubFileLargerThanBudget(t *testing.T) {
+	old := chatFileBytes
+	chatFileBytes = 1000
+	t.Cleanup(func() { chatFileBytes = old })
+	f := startFit(t, conf(`{}`))
+	h := hubOf(t, f)
+	ann := joinKey(t, f, "r", "ann", nil)
+	if _, e := h.file("r", "ann", ann, "a.bin", "application/octet-stream", make([]byte, 600)); e != nil {
+		t.Fatalf("a file within the budget: %v", e.msg)
+	}
+	if _, e := h.file("r", "ann", ann, "b.bin", "application/octet-stream", make([]byte, 1001)); e != errChatFull {
+		t.Fatalf("a file past the budget: %v", e)
+	}
+	if _, e := h.file("r", "bob", ann, "c.bin", "application/octet-stream", []byte("c")); e != errNoChatMember {
+		t.Fatalf("a file from no member: %v", e)
+	}
+	if got := fileBytesOf(t, h); got != 600 {
+		t.Fatalf("the hub keeps %d bytes", got)
+	}
+}

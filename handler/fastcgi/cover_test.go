@@ -206,3 +206,31 @@ func TestPoolDialFails(t *testing.T) {
 	}
 	(&conn{p: p}).idleTimeout()
 }
+
+// TestLateNotices checks the notices that reach an exchange after it is no
+// longer theirs: a connection got for an exchange already over goes back
+// to the pool unused, a writable notice after the end does nothing, and
+// the loss of a connection the exchange no longer has is no news.
+func TestLateNotices(t *testing.T) {
+	c := dialed(t)
+	c.p.maxIdle, c.p.idle = 1, time.Hour
+	over := &exchange{done: true}
+	over.connected(c, nil)
+	c.p.mu.Lock()
+	idle := len(c.p.idleSet) == 1 && c.p.idleSet[0] == c
+	c.p.mu.Unlock()
+	if over.conn != nil || !idle {
+		t.Fatalf("a connection got for an ended exchange: taken %v, idle %v", over.conn != nil, idle)
+	}
+
+	// x.c is nil: anything past the done check would panic.
+	over.writable(nil)
+	over.writable(errors.New("client gone"))
+
+	other := &conn{}
+	x := &exchange{conn: other}
+	x.lost(c, errors.New("reset"), true)
+	if x.conn != other || x.retried || x.done {
+		t.Fatalf("the loss of another connection: conn kept %v, retried %v, done %v", x.conn == other, x.retried, x.done)
+	}
+}
