@@ -106,7 +106,7 @@ var (
 // certificate, on fib's handshake pool and not on a worker, for at most
 // Timeout; one that gives up leaves it being obtained for the next.
 type OnDemand struct {
-	Ask         string   `json:"ask" fit:"required" doc:"A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute."`
+	Ask         string   `json:"ask" fit:"required" doc:"A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute. At most 8 asks are under way at once, and 5 a second on average, 20 at once, however they are answered; a handshake past them fails without asking."`
 	Rate        int      `json:"rate,omitempty" min:"0" default:"10" doc:"How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0."`
 	Interval    Duration `json:"interval,omitempty" default:"\"1m\"" doc:"The interval rate counts over. 1m when left out."`
 	MaxNames    int      `json:"max_names,omitempty" min:"0" default:"1000" doc:"How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0."`

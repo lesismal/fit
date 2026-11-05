@@ -1598,7 +1598,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ask` | string |  | Required. A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute. |
+| `ask` | string |  | Required. A URL fit asks, with the name in the query as domain=<name>, whether a name may have a certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered for a minute. At most 8 asks are under way at once, and 5 a second on average, 20 at once, however they are answered; a handshake past them fails without asking. |
 | `rate` | integer, 0 or more | `10` | How many certificates may be obtained every interval; a handshake past it fails. 10 when left out or 0. |
 | `interval` | duration | `"1m"` | The interval rate counts over. 1m when left out. |
 | `max_names` | integer, 0 or more | `1000` | How many names may have certificates obtained on demand, in all; past it, a handshake for another fails. 1000 when left out or 0. |

@@ -23,6 +23,7 @@ var (
 	ErrOnDemandRateLimited = errors.New("tlsmgr: on-demand TLS: too many certificates obtained lately")
 	ErrOnDemandTooMany     = errors.New("tlsmgr: on-demand TLS: as many names as max_names have certificates")
 	ErrOnDemandTimeout     = errors.New("tlsmgr: on-demand TLS: the certificate is still being obtained")
+	ErrOnDemandBusy        = errors.New("tlsmgr: on-demand TLS: too many names asked about lately")
 	errOnDemandBadName     = errors.New("tlsmgr: on-demand TLS: not a host name a certificate can be obtained for")
 	errOnDemandOff         = errors.New("tlsmgr: on-demand TLS is not configured")
 )
@@ -36,6 +37,18 @@ const (
 	refusedFor = time.Minute
 	maxRefused = 10000
 	usedEvery  = time.Second
+)
+
+// The bounds of the asks: at most maxAsks under way at once, each holding a
+// handshake worker, and on average one each askEvery, up to askBurst at
+// once, whatever the ask URL answers, so that handshakes for random names
+// can neither flood the ask URL nor take every handshake worker. A name past
+// them is not asked about: its handshake fails at once, and a later one may
+// ask.
+const (
+	maxAsks  = 8
+	askEvery = 200 * time.Millisecond
+	askBurst = 20
 )
 
 // onDemand is what ACME keeps to take on names during handshakes.
@@ -64,6 +77,11 @@ type onDemand struct {
 	// waits holds, for each name being taken on, what its handshakes wait
 	// for.
 	waits map[string]*onDemandWait
+	// asking counts the asks under way, and askAt is when the rate of asks
+	// allows the next with none saved up: at most askBurst*askEvery
+	// ahead of now.
+	asking int
+	askAt  time.Time
 }
 
 // onDemandWait is a certificate being obtained on demand, which handshakes
@@ -76,9 +94,11 @@ type onDemandWait struct {
 
 func newOnDemand(c *config.OnDemand) *onDemand {
 	ask, _ := url.Parse(c.Ask) // checked by config.Validate
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxConnsPerHost, transport.MaxIdleConnsPerHost = maxAsks, maxAsks
 	return &onDemand{
 		ask:      ask,
-		http:     &http.Client{Timeout: c.Wait()},
+		http:     &http.Client{Transport: transport, Timeout: c.Wait()},
 		limit:    c.Limit(),
 		every:    c.Every(),
 		maxNames: c.Names(),
@@ -150,13 +170,19 @@ func (a *ACME) OnDemand(name string) (*tls.Certificate, error) {
 
 // allow asks whether name may have a certificate, and counts it against
 // the rate and max_names if it may. Both are looked at first too, so that a
-// name past them is not asked about.
+// name past them is not asked about; so are the bounds of the asks, which
+// refused names count against too (see maxAsks).
 func (a *ACME) allow(name string) error {
 	od := a.onDemand
 	if err := od.room(a.now(), false); err != nil {
 		return err
 	}
-	if err := od.askFor(name); err != nil {
+	if err := od.startAsk(a.now()); err != nil {
+		return err
+	}
+	err := od.askFor(name)
+	od.endAsk()
+	if err != nil {
 		if errors.Is(err, ErrOnDemandRefused) {
 			od.mu.Lock()
 			if len(od.refused) >= maxRefused {
@@ -191,6 +217,29 @@ func (od *onDemand) room(now time.Time, take bool) error {
 		od.names++
 	}
 	return nil
+}
+
+// startAsk takes a place for an ask at now, within maxAsks and the rate of
+// asks, or returns ErrOnDemandBusy; endAsk gives it back.
+func (od *onDemand) startAsk(now time.Time) error {
+	od.mu.Lock()
+	defer od.mu.Unlock()
+	next := od.askAt
+	if next.Before(now) {
+		next = now
+	}
+	if od.asking >= maxAsks || next.Sub(now) >= askBurst*askEvery {
+		return ErrOnDemandBusy
+	}
+	od.asking++
+	od.askAt = next.Add(askEvery)
+	return nil
+}
+
+func (od *onDemand) endAsk() {
+	od.mu.Lock()
+	od.asking--
+	od.mu.Unlock()
 }
 
 // askFor asks the ask URL about name: ErrOnDemandRefused for any answer

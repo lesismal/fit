@@ -2,6 +2,7 @@ package tlsmgr
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -390,4 +391,87 @@ func TestOnDemandIdleTimer(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, 5*time.Second, "idle.fit.test dropped", func() bool { return a.Certificate("idle.fit.test") == nil })
+}
+
+// TestOnDemandAskBounds has handshakes for random names, as an attacker
+// sends them, ask an ask URL that refuses them all: at most maxAsks are
+// asked at once, the one past them fails at once without asking, and no
+// more than askBurst are asked at once, then one each askEvery, whatever the
+// answers were.
+func TestOnDemandAskBounds(t *testing.T) {
+	dir, caFile := hangingCA(t)
+	release := make(chan struct{})
+	var inFlight, asked atomic.Int32
+	ask := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		inFlight.Add(1)
+		defer inFlight.Add(-1)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	defer ask.Close()
+	var l logLines
+	a := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.URL}}, &l)
+	if tr := a.onDemand.http.Transport.(*http.Transport); tr.MaxConnsPerHost != maxAsks {
+		t.Errorf("the ask URL's connections bounded at %d", tr.MaxConnsPerHost)
+	}
+	a.start()
+	certs := NewCerts(nil, a, nil, true)
+	errs := make(chan error, maxAsks)
+	for i := range maxAsks {
+		go func() {
+			_, err := certs.GetCertificate(hello(fmt.Sprintf("held%d.fit.test", i)))
+			errs <- err
+		}()
+	}
+	eventually(t, 5*time.Second, "every ask under way", func() bool { return inFlight.Load() == maxAsks })
+	begin := time.Now()
+	if _, err := certs.GetCertificate(hello("past.fit.test")); !errors.Is(err, ErrOnDemandBusy) {
+		t.Errorf("past maxAsks: %v", err)
+	}
+	if d := time.Since(begin); d > time.Second {
+		t.Errorf("a handshake past maxAsks waited %v", d)
+	}
+	close(release)
+	for range maxAsks {
+		if err := <-errs; !errors.Is(err, ErrOnDemandRefused) {
+			t.Errorf("a held ask: %v", err)
+		}
+	}
+	if n := asked.Load(); n != maxAsks {
+		t.Errorf("%d asks, want %d", n, maxAsks)
+	}
+
+	// The rate, with the clock stopped.
+	b := testACME(t, &config.ACME{Directory: dir, CAFile: caFile, OnDemand: &config.OnDemand{Ask: ask.URL}}, &l)
+	var now atomic.Pointer[time.Time]
+	start := time.Now()
+	now.Store(&start)
+	b.now = func() time.Time { return *now.Load() }
+	b.start()
+	certs = NewCerts(nil, b, nil, true)
+	asked.Store(0)
+	busy := 0
+	for i := range 200 {
+		_, err := certs.GetCertificate(hello(fmt.Sprintf("r%d.fit.test", i)))
+		if errors.Is(err, ErrOnDemandBusy) {
+			busy++
+		} else if !errors.Is(err, ErrOnDemandRefused) {
+			t.Fatalf("a random name: %v", err)
+		}
+	}
+	if n := asked.Load(); n != askBurst || busy != 200-askBurst {
+		t.Errorf("%d asked and %d busy, want %d asked", n, busy, askBurst)
+	}
+	later := start.Add(askEvery)
+	now.Store(&later)
+	if _, err := certs.GetCertificate(hello("again.fit.test")); !errors.Is(err, ErrOnDemandRefused) {
+		t.Errorf("an ask once askEvery passed: %v", err)
+	}
+	if _, err := certs.GetCertificate(hello("again2.fit.test")); !errors.Is(err, ErrOnDemandBusy) {
+		t.Errorf("a second ask within askEvery: %v", err)
+	}
 }

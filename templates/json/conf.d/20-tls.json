@@ -203,7 +203,8 @@
     // "on_demand": {
       // // A URL fit asks, with the name in the query as domain=<name>, whether a name may have a
       // // certificate: an answer of 2xx allows it, and any other refuses it. Refusals are remembered
-      // // for a minute.
+      // // for a minute. At most 8 asks are under way at once, and 5 a second on average, 20 at once,
+      // // however they are answered; a handshake past them fails without asking.
       // // string; required.
       // "ask": "http://127.0.0.1:5555/allowed",
 
