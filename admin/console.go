@@ -226,12 +226,24 @@ func (cs *Console) accountPassword(r *console.Request) {
 	if !ok {
 		return
 	}
+	// The check is admitted as a login's is: one from an address at a
+	// time, each failure counted before the next is checked.
+	t, wait, busy := cs.logins.Admit(addr)
+	if t == nil {
+		refuseChecks(r, wait, busy)
+		return
+	}
 	user, token := r.User, cs.sessionToken(r)
-	r.Go(func() {
+	r.GoThen(func() {
+		if wait := t.LockedOut(); wait > 0 {
+			refuseChecks(r, wait, false)
+			return
+		}
 		ok, err := cs.logins.Check(r.Context.Context(), user, body.CurrentPassword)
 		if err != nil {
 			return // the client left
 		}
+		t.Done(!ok)
 		if !ok {
 			cs.failedPassword(r, addr)
 			return
@@ -249,7 +261,7 @@ func (cs *Console) accountPassword(r *console.Request) {
 		cs.logins.EndUserSessions(user, token)
 		cs.logf("console: %q changed the password of %q", user, user)
 		_ = console.WriteJSON(r.Context, http.StatusOK, changedBody{Changed: true, User: user})
-	})
+	}, func() { t.Done(false) }) // a check that did not run counts nothing
 }
 
 // resetBody is a console user's reset of another's password.
@@ -317,7 +329,7 @@ func passwordProblem(password string) string {
 func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
 	addr = clientHost(r.Context.Request)
 	if wait := cs.logins.LockedOut(addr); wait > 0 {
-		refuseChecks(r, wait)
+		refuseChecks(r, wait, false)
 		return addr, false
 	}
 	if _, stored := cs.configs.ConsoleUsers(); !stored {
@@ -327,22 +339,26 @@ func (cs *Console) passwordReady(r *console.Request) (addr string, ok bool) {
 	return addr, true
 }
 
-// failedPassword counts a failed password check from addr and answers 403,
-// or 429 once it has locked the address out.
+// failedPassword answers a failed password check from addr, which its
+// ticket counted: 403, or 429 once it has locked the address out.
 func (cs *Console) failedPassword(r *console.Request, addr string) {
-	cs.logins.Failed(addr)
 	if wait := cs.logins.LockedOut(addr); wait > 0 {
-		refuseChecks(r, wait)
+		refuseChecks(r, wait, false)
 		return
 	}
 	_ = console.Error(r.Context, http.StatusForbidden, "the current password is wrong")
 }
 
 // refuseChecks answers 429 for checks an address may not make for wait, as
-// the console refuses logins from it.
-func refuseChecks(r *console.Request, wait time.Duration) {
+// the console refuses logins from it, or, when busy, while another check
+// from it is under way.
+func refuseChecks(r *console.Request, wait time.Duration, busy bool) {
 	r.Context.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-	_ = console.Error(r.Context, http.StatusTooManyRequests, "too many failed password checks from this address; try again later")
+	msg := "too many failed password checks from this address; try again later"
+	if busy {
+		msg = "another password check from this address is under way; try again"
+	}
+	_ = console.Error(r.Context, http.StatusTooManyRequests, msg)
 }
 
 // savePassword writes hash as user's password hash beside the config in the

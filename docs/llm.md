@@ -813,9 +813,10 @@ menu. When fit also runs `admin.console`, the role's pages show there too, as th
 | `max_conns` | int | 32 | The most connections the pages keep open; one past it is closed as soon as it is accepted. |
 
 Logins work as `admin.console`'s, through the same code; [the console guide](console.md) describes
-users, sessions and lockouts. Passwords are checked with bcrypt on the console's own pool (4
-running, 64 waiting, at most 2 checks at once); a task that waits past 30 seconds gets 504, and
-one past the queue 503. After 5 failed logins from an address within 15 minutes, the address is
+users, sessions and lockouts. Logins are checked with bcrypt on a pool of their own (1 running,
+16 waiting), the API's tasks on the console's pool (4 running, 64 waiting), at most 2 checks at
+once; a task that waits past 30 seconds gets 504, and one past the queue 503. After 5 failed
+logins from an address (an IPv6 /64) within 15 minutes, one checked at a time, the address is
 refused for 15 minutes (429, with `Retry-After`). A session is a cookie (`fit_llm_hub_<port>`,
 `fit_llm_node_<port>` or `fit_llm_proxy_<port>`, with the console's port, since a browser sends a
 host's cookies to all its ports, so that consoles on one host keep their logins apart; HttpOnly, SameSite=Strict, Secure over TLS). Every API

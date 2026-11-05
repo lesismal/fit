@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -80,12 +81,18 @@ type Logins struct {
 
 	mu       sync.Mutex
 	sessions map[[sha256.Size]byte]*Session // by the hash of their token
-	fails    map[string]*failures           // by client address
+	fails    map[string]*failures           // by Key of the client address, at most MaxAddresses
+	// noRoomUntil is when fails, full of addresses locked out, may have
+	// room again; zero once a check ends.
+	noRoomUntil time.Time
 }
 
+// failures are an address's failed checks: how many since first, until
+// when it is refused, and whether a check of it is under way.
 type failures struct {
 	n            int
 	first, until time.Time
+	busy         bool
 }
 
 // New returns the logins o describes, with no session yet.
@@ -288,33 +295,129 @@ func (l *Logins) EndUserSessions(user, keepToken string) int {
 	return ended
 }
 
-// LockedOut returns how long addr is still refused logins.
-func (l *Logins) LockedOut(addr string) time.Duration {
+// IPv6Prefix is how many leading bits of an IPv6 address name the client
+// whose failures are counted: a host is given a /64 to pick its addresses
+// from, so counting by the whole address would give it a fresh count with
+// each one.
+const IPv6Prefix = 64
+
+// Key returns what failures from addr are counted by: an IPv4 address as it
+// is (an IPv4-mapped IPv6 one as IPv4), an IPv6 one by its IPv6Prefix, and
+// anything else, as a Unix socket's peer, as it is.
+func Key(addr string) string {
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return addr
+	}
+	ip = ip.Unmap().WithZone("")
+	if ip.Is4() {
+		return ip.String()
+	}
+	p, _ := ip.Prefix(IPv6Prefix)
+	return p.String()
+}
+
+// Ticket is a password check admitted from an address, as Admit gives it:
+// no other check from the address is admitted until Done.
+type Ticket struct {
+	l    *Logins
+	key  string
+	f    *failures
+	done bool // under l.mu
+}
+
+// Admit admits a password check from addr, before it is queued, and returns
+// its ticket; Done must follow, whatever comes of the check. One check from
+// an address (an IPv6 /64) is admitted at a time, so that every failure is
+// counted before the next guess is checked. A refused check returns a nil
+// ticket and how long to wait: while addr is locked out, while another check
+// from it is under way (busy), and while the table of addresses is full of
+// ones locked out or being checked.
+func (l *Logins) Admit(addr string) (t *Ticket, wait time.Duration, busy bool) {
+	key := Key(addr)
+	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if f := l.fails[addr]; f != nil {
+	f := l.fails[key]
+	if f == nil {
+		if len(l.fails) >= MaxAddresses && !l.makeRoom(now) {
+			return nil, max(l.noRoomUntil.Sub(now), time.Second), false
+		}
+		f = &failures{}
+		l.fails[key] = f
+	} else if wait := f.until.Sub(now); wait > 0 {
+		return nil, wait, false
+	} else if f.busy {
+		return nil, time.Second, true
+	}
+	f.busy = true
+	return &Ticket{l: l, key: key, f: f}, 0, false
+}
+
+// LockedOut returns how long the ticket's address is refused logins: a
+// check that waited in a queue asks again before it runs.
+func (t *Ticket) LockedOut() time.Duration {
+	now := t.l.now()
+	t.l.mu.Lock()
+	defer t.l.mu.Unlock()
+	return t.f.until.Sub(now)
+}
+
+// Done ends the ticket's check, counting a failure when failed, and lets
+// the address be checked again. Only the first call counts.
+func (t *Ticket) Done(failed bool) {
+	l := t.l
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if t.done {
+		return
+	}
+	t.done = true
+	f := t.f
+	f.busy = false
+	l.noRoomUntil = time.Time{}
+	if failed {
+		l.count(f, now)
+	} else if f.n == 0 && l.fails[t.key] == f {
+		delete(l.fails, t.key)
+	}
+}
+
+// LockedOut returns how long addr is still refused logins.
+func (l *Logins) LockedOut(addr string) time.Duration {
+	key := Key(addr)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if f := l.fails[key]; f != nil {
 		return f.until.Sub(l.now())
 	}
 	return 0
 }
 
-// Failed counts a failed login from addr, refusing it logins for a while
-// once it has failed too often.
+// Failed counts a failed check from addr, as a ticket's Done does, refusing
+// it logins for a while once it has failed too often. It counts nothing
+// while a check from addr is under way, or the table has no room for it.
 func (l *Logins) Failed(addr string) {
-	now := l.now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	f := l.fails[addr]
-	if f == nil || now.Sub(f.first) > Window && now.After(f.until) {
-		if f == nil && len(l.fails) >= MaxAddresses {
-			l.forgetFailures(now)
-		}
-		f = &failures{first: now}
-		l.fails[addr] = f
+	if t, _, _ := l.Admit(addr); t != nil {
+		t.Done(true)
+	}
+}
+
+// count counts a failure in f, starting its window anew once the last one
+// is over, and locks its address out once it has failed too often.
+func (l *Logins) count(f *failures, now time.Time) {
+	if f.n == 0 || f.over(now) {
+		f.n, f.first = 0, now
 	}
 	if f.n++; f.n >= MaxFailures {
 		f.until = now.Add(Lockout)
 	}
+}
+
+// over reports whether f's window and lockout are both past.
+func (f *failures) over(now time.Time) bool {
+	return now.Sub(f.first) > Window && now.After(f.until)
 }
 
 // Addresses returns how many addresses' failures are remembered.
@@ -324,21 +427,43 @@ func (l *Logins) Addresses() int {
 	return len(l.fails)
 }
 
-// forgetFailures makes room in the table of failures: the addresses no
-// longer counted or refused go, or else the one that began failing first.
-func (l *Logins) forgetFailures(now time.Time) {
+// makeRoom makes room in the full table of failures, and reports whether it
+// did: the addresses no longer counted or refused go, or else the one that
+// began failing first of those neither locked out nor being checked. A
+// lockout is never forgotten early: with every address locked out or being
+// checked, new addresses are refused until the first lockout ends, which
+// bounds the guesses a crowd of addresses gets.
+func (l *Logins) makeRoom(now time.Time) bool {
+	if now.Before(l.noRoomUntil) {
+		return false
+	}
 	var oldest string
-	var at time.Time
+	var at, until time.Time
 	for k, f := range l.fails {
-		if now.Sub(f.first) > Window && now.After(f.until) {
+		switch {
+		case f.busy:
+		case f.over(now):
 			delete(l.fails, k)
-		} else if at.IsZero() || f.first.Before(at) {
+		case now.Before(f.until):
+			if until.IsZero() || f.until.Before(until) {
+				until = f.until
+			}
+		case at.IsZero() || f.first.Before(at):
 			oldest, at = k, f.first
 		}
 	}
-	if len(l.fails) >= MaxAddresses {
-		delete(l.fails, oldest)
+	if len(l.fails) < MaxAddresses {
+		return true
 	}
+	if !at.IsZero() {
+		delete(l.fails, oldest)
+		return true
+	}
+	if until.IsZero() {
+		until = now.Add(time.Second) // every one is being checked
+	}
+	l.noRoomUntil = until
+	return false
 }
 
 // CookieName is a console's session cookie: name with the port addr listens

@@ -441,3 +441,107 @@ func TestConsoleLogfAndLoginBound(t *testing.T) {
 		mu.Unlock()
 	}
 }
+
+// TestConsoleLoginRace: wrong passwords sent at once from one address are
+// checked one at a time, so no more than login.MaxFailures of them are
+// checked before the address is locked out; the rest are answered 429.
+func TestConsoleLoginRace(t *testing.T) {
+	engine := newEngine(t)
+	c, err := Start(engine, options(t, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Stop(context.Background())
+	base := strings.TrimSuffix(c.URL(), "/")
+	const n = 24 // below the console's 32 connections
+	codes := make(chan int, n)
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			b := newBrowser(t, base, nil)
+			req, _ := http.NewRequest("POST", base+"/api/login", strings.NewReader(`{"username":"admin","password":"guess"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := b.c.Do(req)
+			if err != nil {
+				codes <- 0
+				return
+			}
+			resp.Body.Close()
+			codes <- resp.StatusCode
+		})
+	}
+	wg.Wait()
+	close(codes)
+	checked := 0
+	for code := range codes {
+		switch code {
+		case 401:
+			checked++
+		case 429, 503:
+		default:
+			t.Errorf("a guess answered %d", code)
+		}
+	}
+	if checked > login.MaxFailures {
+		t.Errorf("%d guesses checked, want %d at most", checked, login.MaxFailures)
+	}
+	// Once the guesses are over, the address stays locked out.
+	for c.logins.LockedOut("127.0.0.1") <= 0 && checked < login.MaxFailures {
+		b := newBrowser(t, base, nil)
+		if code, _ := b.do("POST", "/api/login", `{"username":"admin","password":"guess"}`); code == 401 {
+			checked++
+		}
+	}
+	if c.logins.LockedOut("127.0.0.1") <= 0 {
+		t.Error("not locked out")
+	}
+	if code, _ := newBrowser(t, base, nil).do("POST", "/api/login", `{"username":"admin","password":"secret"}`); code != 429 {
+		t.Errorf("the right password while locked out: %d", code)
+	}
+}
+
+// TestConsoleLoginQueue: logins waiting for their own pool do not take the
+// workers of logged-in users' tasks, and a full login queue answers 503.
+func TestConsoleLoginQueue(t *testing.T) {
+	engine := newEngine(t)
+	block := make(chan struct{})
+	c, err := Start(engine, options(t, nil, block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { close(block); c.Stop(context.Background()) }()
+	b := newBrowser(t, strings.TrimSuffix(c.URL(), "/"), nil)
+	b.login()
+	code, body := b.do("GET", "/api/session", "")
+	var s sessionBody
+	_ = json.Unmarshal([]byte(body), &s)
+	b.csrf = s.CSRF
+	if code != 200 {
+		t.Fatalf("session: %d", code)
+	}
+
+	// The login pool is full.
+	started := make(chan struct{})
+	for range LoginWorkers {
+		c.checks <- func() { started <- struct{}{}; <-block }
+	}
+	for range LoginWorkers {
+		<-started
+	}
+	for range LoginQueue {
+		c.checks <- func() {}
+	}
+	if code, body := newBrowser(t, b.base, nil).do("POST", "/api/login", `{"username":"admin","password":"secret"}`); code != 503 || !strings.Contains(body, "busy") {
+		t.Errorf("a login with its pool full: %d %s", code, body)
+	}
+	// The address was released with the dropped check.
+	if tk, _, busy := c.logins.Admit("127.0.0.1"); tk == nil || busy {
+		t.Error("a dropped login left its address busy")
+	} else {
+		tk.Done(false)
+	}
+	// A logged-in user's task still runs.
+	if code, body := b.do("POST", "/api/echo", `{"a":1}`); code != 200 {
+		t.Errorf("a logged-in user's request with the login pool full: %d %s", code, body)
+	}
+}

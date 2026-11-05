@@ -249,9 +249,14 @@ endpoints answer `409`. The users and their first hashes stay in the bootstrap f
 ## Logins and sessions
 
 - **Checking a password.** A name that is not a user is checked against a dummy hash, so the time
-  taken does not tell names apart; at most two checks run at once, the rest wait.
+  taken does not tell names apart; at most two checks run at once, the rest wait. Logins are
+  checked on a pool of their own (1 running, 16 waiting, then `503`), so logins cannot hold up
+  logged-in users' requests.
 - **Lockouts.** A client address that fails 5 times in 15 minutes is refused for 15 minutes, with
-  `429` and `Retry-After`. The table of addresses holds 4,096 at most.
+  `429` and `Retry-After`. An IPv6 address counts by its /64. One check from an address runs at a
+  time, so guesses sent at once cannot slip past the count; another sent meanwhile gets `429`. The
+  table of addresses holds 4,096 at most; filling it never ends a lockout early, and while it is
+  full of addresses locked out, new ones are refused until the first lockout ends.
 - **Sessions.** A login gives a session: 32 random bytes in the cookie `fit_console_<port>` (the console's port, so that consoles
   of several fits on one host keep their logins apart), `HttpOnly`,
   `SameSite=Strict`, and `Secure` over TLS. The console keeps only its SHA-256, and ends it after
@@ -399,7 +404,7 @@ differences and their counts) and `POST /config/reconcile` (a JSON body of the c
 | Password checks at once | 2 |
 | Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
 | A password change | bcrypt's time on the console's pool, two checks at once, then one store write |
-| Failed logins | 5 an address in 15 minutes, then refused for 15 minutes; a wrong current password in a password change counts too; 4,096 addresses kept |
+| Failed logins | 5 an address (an IPv6 /64) in 15 minutes, then refused for 15 minutes, one check at a time; a wrong current password in a password change counts too; 4,096 addresses kept |
 
 ## Roles' pages
 

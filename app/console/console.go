@@ -10,8 +10,8 @@
 // show every role that runs beside it.
 //
 // Requests are served on fib's workers, and nothing here blocks one: a
-// password is checked, and an API handler's blocking work done, on the
-// console's own bounded pool, with the request retained until it answers
+// login's password is checked on a small bounded pool of its own, and an
+// API handler's blocking work done on the console's bounded pool, with the request retained until it answers
 // (rules 1 and 4). Bodies are JSON, held whole up to MaxBodyBytes (rule 7).
 package console
 
@@ -52,6 +52,13 @@ const (
 	// TaskTimeout bounds what a task may hold its request for: the
 	// request is answered 504 past it, whatever the task does after.
 	TaskTimeout = 30 * time.Second
+	// LoginWorkers is how many logins are checked at once, and LoginQueue
+	// how many more wait, on a pool of their own: logins, which anyone may
+	// send, never take the workers of logged-in users' tasks. LoginWorkers
+	// stays below login.Checks, so that a logged-in user's password check
+	// always finds a slot.
+	LoginWorkers = 1
+	LoginQueue   = 16
 )
 
 // MaxLoginBytes bounds a login's body, whatever a console's MaxBody.
@@ -158,6 +165,7 @@ type Console struct {
 	modules func() []*Module
 	pwOnly  []string // Options.PasswordRoutes
 	tasks   chan func()
+	checks  chan func() // the login checks' queue, on LoginWorkers of their own
 	limit   *limitHandler
 	stop    chan struct{}
 	workers sync.WaitGroup
@@ -211,7 +219,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		return nil, err
 	}
 	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
-		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), stop: make(chan struct{})}
+		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
 	switch {
 	case o.Log != nil:
 		c.infof, c.warnf = o.Log.Infof, o.Log.Warnf
@@ -261,7 +269,10 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	}
 	c.cookie = login.CookieName(o.Cookie, c.addr)
 	for range Workers {
-		c.workers.Go(c.work)
+		c.workers.Go(func() { c.work(c.tasks) })
+	}
+	for range LoginWorkers {
+		c.workers.Go(func() { c.work(c.checks) })
 	}
 	return c, nil
 }
@@ -305,13 +316,13 @@ func (c *Console) Stop(ctx context.Context) {
 	}
 }
 
-// work runs tasks until the console stops.
-func (c *Console) work() {
+// work runs the tasks of queue until the console stops.
+func (c *Console) work(queue chan func()) {
 	for {
 		select {
 		case <-c.stop:
 			return
-		case t := <-c.tasks:
+		case t := <-queue:
 			t()
 		}
 	}
@@ -321,25 +332,39 @@ func (c *Console) work() {
 // retained until fn returns; fn answers the request. A full pool answers
 // 503 at once, and a task still waiting for a worker after TaskTimeout is
 // dropped, its request answered 504.
-func (r *Request) Go(fn func()) {
+func (r *Request) Go(fn func()) { r.GoThen(fn, nil) }
+
+// GoThen runs fn as Go does, and then, when not nil, once fn has returned
+// or, when the pool drops fn, in its place: what a task must undo whatever
+// comes of it. then must not block; it may run on a fib worker.
+func (r *Request) GoThen(fn, then func()) { r.goOn(r.c.tasks, fn, then) }
+
+// goOn runs fn on the pool that takes queue, as GoThen says.
+func (r *Request) goOn(queue chan func(), fn, then func()) {
+	if then == nil {
+		then = func() {}
+	}
 	run := r.Context.Async(fn)
 	var once atomic.Bool
 	task := func() {
 		if once.CompareAndSwap(false, true) {
+			defer then()
 			run()
 		}
 	}
 	select {
-	case r.c.tasks <- task:
+	case queue <- task:
 	default:
 		once.Store(true)
 		run = nil
 		r.Context.Release()
+		then()
 		_ = Error(r.Context, stdhttp.StatusServiceUnavailable, "the console is busy; try again")
 		return
 	}
 	_ = time.AfterFunc(TaskTimeout, func() {
 		if once.CompareAndSwap(false, true) {
+			then()
 			_ = Error(r.Context, stdhttp.StatusGatewayTimeout, "the request took too long")
 			r.Context.Release()
 		}
@@ -570,20 +595,27 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusBadRequest, "the body must be {\"username\", \"password\"}")
 		return
 	}
+	// The attempt is admitted, one from an address at a time, before it is
+	// queued, so that every failure counts before the next guess is checked.
 	addr := clientAddr(ctx.Request)
-	if wait := c.logins.LockedOut(addr); wait > 0 {
-		ctx.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		_ = Error(ctx, stdhttp.StatusTooManyRequests, "too many failed logins from this address; try again later")
+	t, wait, busy := c.logins.Admit(addr)
+	if t == nil {
+		refuseLogin(ctx, wait, busy)
 		return
 	}
-	// bcrypt takes its time on the pool, not on the worker.
-	(&Request{Context: ctx, c: c}).Go(func() {
+	// bcrypt takes its time on the login pool, not on the worker, nor on
+	// the workers of logged-in users' tasks.
+	(&Request{Context: ctx, c: c}).goOn(c.checks, func() {
+		if wait := t.LockedOut(); wait > 0 {
+			refuseLogin(ctx, wait, false)
+			return
+		}
 		ok, err := c.logins.Check(ctx.Context(), body.Username, body.Password)
 		if err != nil {
 			return // the client left
 		}
+		t.Done(!ok)
 		if !ok {
-			c.logins.Failed(addr)
 			c.warnf("console: a failed login as %q from %s", body.Username, addr)
 			_ = Error(ctx, stdhttp.StatusUnauthorized, "the user name or password is wrong")
 			return
@@ -597,7 +629,19 @@ func (c *Console) login(ctx *fibhttp.Context) {
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 		c.infof("console: %q logged in from %s", body.Username, addr)
 		_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(&s))
-	})
+	}, func() { t.Done(false) }) // a check that did not run counts nothing
+}
+
+// refuseLogin answers 429 for a login that may not be checked for wait,
+// since its address is locked out or, when busy, another login from it is
+// being checked.
+func refuseLogin(ctx *fibhttp.Context, wait time.Duration, busy bool) {
+	ctx.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+	msg := "too many failed logins from this address; try again later"
+	if busy {
+		msg = "another login from this address is being checked; try again"
+	}
+	_ = Error(ctx, stdhttp.StatusTooManyRequests, msg)
 }
 
 func (c *Console) logout(ctx *fibhttp.Context) {
