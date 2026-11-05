@@ -173,11 +173,11 @@ func (f *fit) handler(t *testing.T) *Tokens {
 	t.Helper()
 	g := f.rt.Current()
 	defer g.Release()
-	for _, l := range g.Listeners {
-		for _, r := range l.Routes {
-			if h, ok := r.Handler.(*Tokens); ok {
-				return h
-			}
+	// A route's Handler is its middleware chain; the handler is one of the
+	// graph's modules.
+	for _, m := range g.Modules() {
+		if h, ok := m.(*Tokens); ok {
+			return h
 		}
 	}
 	t.Fatal("no media_tokens handler")

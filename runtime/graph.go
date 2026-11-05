@@ -629,6 +629,12 @@ func (g *Graph) Upstreams() []*upstream.Pool {
 	return pools
 }
 
+// Modules returns every module the graph provisioned, handlers and
+// middleware, in the order provisioned. A route's Handler is its chain,
+// wrapped, so this is where a handler's own value is found. The slice is
+// the graph's: it is not to be changed.
+func (g *Graph) Modules() []any { return g.modules }
+
 // Upstream returns the pool of the upstream named name.
 func (g *Graph) Upstream(name string) (*upstream.Pool, bool) {
 	p, ok := g.upstreams[name]
