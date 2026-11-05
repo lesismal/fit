@@ -1,50 +1,112 @@
 // Package bodycrypt encrypts the bodies of link frames with AES-256-GCM
-// under a key derived from a password both sides are configured with.
+// under keys derived from a password both sides are configured with.
 //
-// A sealed body is a random 12-byte nonce followed by the body sealed, its
-// 16-byte tag last. The frame's header is the sealing's additional data, so
-// it cannot be changed either. Package link marks a frame whose body is
-// sealed, and drops the connection of a frame that arrives unsealed or does
-// not open: a peer configured with another password, or none, gets nowhere.
+// The password's PBKDF2, the Coder, is derived once. Each link then opens
+// with both sides sending a hello of RandomSize fresh random bytes, and a
+// Session of its own: each direction has a key of its own, HKDF-SHA256 of
+// the PBKDF2 under the sender's random bytes followed by the receiver's,
+// and numbers its frames from zero, the number being the GCM nonce. A
+// sealed body is the body sealed, its 16-byte tag last; no nonce travels.
+// A frame that does not open under the next number - forged, replayed,
+// reordered, reflected back to its sender, carried over from another link,
+// or sealed under another password - fails, and package link closes the
+// link for it.
 package bodycrypt
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 )
 
 const (
 	salt      = "fit-tunnel-link-body"
 	iter      = 10000
+	info      = "fit-tunnel-link v2"
 	nonceSize = 12
 	tagSize   = 16
 )
 
-// NonceSize is how many bytes come before a sealed body, and Overhead how
-// many more a sealed body has than the plain one.
+// RandomSize is how many random bytes each side's hello carries, and
+// Overhead how many more bytes a sealed body has than the plain one.
 const (
-	NonceSize = nonceSize
-	Overhead  = nonceSize + tagSize
+	RandomSize = 16
+	Overhead   = tagSize
 )
 
-// ErrOpen is the error of a body that does not open.
-var ErrOpen = errors.New("bodycrypt: message failed to decrypt; are the passwords the same?")
+var (
+	// ErrOpen is the error of a body that does not open.
+	ErrOpen = errors.New("bodycrypt: a frame failed to decrypt: forged, replayed, reordered, or sealed under another password")
+	// ErrReflected is the error of a hello whose random bytes are the
+	// side's own: its frames sent back to it would open.
+	ErrReflected = errors.New("bodycrypt: the peer's hello is this side's own, sent back")
+)
 
-// Coder seals and opens bodies.
+// Coder is a password's PBKDF2, from which every link's keys derive.
 type Coder struct {
-	aead cipher.AEAD
+	secret []byte
 }
 
-// New is a Coder whose key is derived from password.
+// New is the Coder of password.
 func New(password string) (*Coder, error) {
 	if password == "" {
 		return nil, errors.New("bodycrypt: empty password")
 	}
-	key, err := pbkdf2.Key(sha256.New, password, []byte(salt), iter, 32)
+	secret, err := pbkdf2.Key(sha256.New, password, []byte(salt), iter, 32)
+	if err != nil {
+		return nil, err
+	}
+	return &Coder{secret: secret}, nil
+}
+
+// Random is the fresh random bytes of one side's hello.
+func Random() []byte {
+	b := make([]byte, RandomSize)
+	_, _ = rand.Read(b)
+	return b
+}
+
+// Session is the keys and counters of one link, as one side sees it. Its
+// Seals must not run at once, nor its Opens; a Seal and an Open may.
+type Session struct {
+	send, recv   cipher.AEAD
+	sendN, recvN uint64
+	sendNonce    [nonceSize]byte
+	recvNonce    [nonceSize]byte
+}
+
+// Session is the session of a link on which this side's hello carried own
+// and the peer's carried peer.
+func (cd *Coder) Session(own, peer []byte) (*Session, error) {
+	if len(own) != RandomSize || len(peer) != RandomSize {
+		return nil, errors.New("bodycrypt: a hello of the wrong length")
+	}
+	if bytes.Equal(own, peer) {
+		return nil, ErrReflected
+	}
+	send, err := cd.aead(own, peer)
+	if err != nil {
+		return nil, err
+	}
+	recv, err := cd.aead(peer, own)
+	if err != nil {
+		return nil, err
+	}
+	return &Session{send: send, recv: recv}, nil
+}
+
+// aead is the cipher of what the side whose hello carried from sends to
+// the one whose hello carried to.
+func (cd *Coder) aead(from, to []byte) (cipher.AEAD, error) {
+	s := make([]byte, 0, 2*RandomSize)
+	s = append(append(s, from...), to...)
+	key, err := hkdf.Key(sha256.New, cd.secret, s, info, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -52,33 +114,30 @@ func New(password string) (*Coder, error) {
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	return &Coder{aead: aead}, nil
+	return cipher.NewGCM(block)
 }
 
-// SealInPlace seals the body in buf, whose first NonceSize bytes are room
-// for the nonce and the rest the plain body, with header as the additional
-// data. buf must have room for Overhead-NonceSize bytes more; the sealed
-// body is returned in buf's array.
-func (cd *Coder) SealInPlace(buf, header []byte) []byte {
-	nonce := buf[:nonceSize]
-	_, _ = rand.Read(nonce)
-	sealed := cd.aead.Seal(buf[nonceSize:nonceSize], nonce, buf[nonceSize:], header)
-	return buf[:nonceSize+len(sealed)]
+// SealInPlace seals body, the next frame's, with header as the additional
+// data. body must have room for Overhead bytes more; the sealed body is
+// returned in body's array.
+func (s *Session) SealInPlace(body, header []byte) []byte {
+	binary.BigEndian.PutUint64(s.sendNonce[4:], s.sendN)
+	s.sendN++
+	return s.send.Seal(body[:0], s.sendNonce[:], body, header)
 }
 
-// OpenInPlace opens body, a sealed body, with header as the additional
-// data, and returns the plain body in body's array.
-func (cd *Coder) OpenInPlace(body, header []byte) ([]byte, error) {
+// OpenInPlace opens body, which must be the next frame's sealed body, with
+// header as the additional data, and returns the plain body in body's
+// array.
+func (s *Session) OpenInPlace(body, header []byte) ([]byte, error) {
 	if len(body) < Overhead {
 		return nil, ErrOpen
 	}
-	plain, err := cd.aead.Open(body[nonceSize:nonceSize], body[:nonceSize], body[nonceSize:], header)
+	binary.BigEndian.PutUint64(s.recvNonce[4:], s.recvN)
+	plain, err := s.recv.Open(body[:0], s.recvNonce[:], body, header)
 	if err != nil {
 		return nil, ErrOpen
 	}
+	s.recvN++
 	return plain, nil
 }

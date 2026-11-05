@@ -173,7 +173,16 @@ a peer that needs more opens a larger pool.
 - **Registration** is an HMAC-SHA256 of the password over the peer's type, name, a time and a
   nonce; the time must be within 5 minutes of the hub's clock, and a nonce is taken once.
 - **Body encryption**, with `body_password` on every side, seals each frame's body with AES-256-GCM,
-  its header authenticated too; a frame that is not sealed, or does not open, closes the link.
+  its header authenticated too. Each link opens with both sides sending fresh random bytes; each
+  direction of the link then has a key of its own, derived with HKDF from the password and both
+  sides' bytes, and numbers its frames, the number being the nonce. A frame that is not sealed, or
+  does not open as the next one, closes the link: one replayed, reordered, sent back to its sender
+  or carried over from another link, a registration among them, so an attacker on the path of a
+  `tcp://` or `ws://` link can neither repeat what went through it (a service command, a tunnel's
+  close, a change of a node's services) nor register with a node's captured registration. The
+  attacker can still see the frames' lengths and timing, and cut the link. This is the link
+  protocol's version 2: a hub, node or proxy with `body_password` closes a link to a peer of a
+  release before it, logging that the peer runs link protocol version 1, so upgrade them together.
 
 ### Flow, limits and timeouts
 

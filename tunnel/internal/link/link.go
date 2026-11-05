@@ -33,14 +33,28 @@
 // big-endian, and then the payload; the hub passes such a body on, as it
 // is, to the other end of the tunnel.
 //
-// With a body password (package bodycrypt) set on both sides, every frame's
-// body is sealed with AES-256-GCM and bit 0x80 of its kind is set:
+// With a body password (package bodycrypt) set on both sides, each side
+// first sends a hello, before any other frame and without waiting for the
+// other's:
 //
-//	body = nonce:12 bytes, sealed body, tag:16 bytes
+//	hello = header of kind 0x85, method 0, id 0; body = version:uint8
+//	        random:16 bytes
 //
-// with the header, flag included, as the additional data. A side with a
-// body password closes the connection of a frame that is not sealed or does
-// not open, and a side without one closes the connection of a sealed frame.
+// version is Version. Once a side has the other's hello, every frame it
+// sends has its body sealed with AES-256-GCM and bit 0x80 of its kind set:
+//
+//	body = sealed body, tag:16 bytes
+//
+// with the header, flag included, as the additional data, under the key of
+// its direction on this link, derived from the password and both hellos'
+// random bytes, and the frame's number in that direction, from 0, as the
+// nonce. A side with a body password closes the connection of a hello of
+// another version, of a sealed frame before the hello (a peer of before
+// Version 2, whose frames could be replayed), of a hello that is its own
+// sent back, and of a frame that is not sealed or does not open as the next
+// one: a frame replayed, reordered, reflected or carried over from another
+// link. A side without one closes the connection of a hello or sealed
+// frame.
 //
 // A frame of an unknown kind, or a length out of bounds, closes the
 // connection too. A call of a method the side does not serve is answered
@@ -89,9 +103,18 @@ const (
 	kindReply  = 2
 	kindError  = 3
 	kindNotify = 4
-	// kindSealed marks a frame whose body is sealed.
+	kindHello  = 5
+	// kindSealed marks a frame whose body is sealed, or a hello.
 	kindSealed = 0x80
 )
+
+// Version is the version of the link protocol a hello names: 2 is the
+// first with hellos, version 1 sealing every link's frames under one key.
+const Version = 2
+
+// maxBeforeHello is the most bytes a link holds of what it sent before the
+// peer's hello came: a registration, not the tunnels that come after it.
+const maxBeforeHello = MaxFrame
 
 var (
 	// ErrClosed is the error of a call on, or cut short by, a link that
@@ -104,6 +127,9 @@ var (
 
 	errUnsealed = errors.New("link: received an unencrypted frame; is a body password set on both sides?")
 	errSealed   = errors.New("link: received an encrypted frame without a body password")
+	errOld      = fmt.Errorf("link: the peer sealed a frame without a hello: it runs a fit whose link protocol is version 1, this side's is %d; upgrade it", Version)
+	errHello    = errors.New("link: a hello that is not the first frame, or is malformed")
+	errBacklog  = errors.New("link: too much sent before the peer's hello")
 )
 
 // RemoteError is a failure the other side answered a call with.
@@ -165,6 +191,17 @@ type Link struct {
 	conn   transport.Conn
 	router *Router
 	coder  *bodycrypt.Coder
+	// random is this side's hello's; recv is the session, once the peer's
+	// hello came, as the reader sees it.
+	random []byte
+	recv   *bodycrypt.Session
+
+	// smu orders sealing and sending: a frame's number is its place on
+	// the wire. Until the peer's hello, what is sent waits in held.
+	smu      sync.Mutex
+	sess     *bodycrypt.Session
+	held     [][]byte
+	heldSize int
 
 	// in is what arrived of a frame not yet whole.
 	in []byte
@@ -192,6 +229,15 @@ func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
 	// be more than the engine lets a connection queue by default.
 	if q, ok := conn.(transport.QueueLimiter); ok {
 		q.SetQueueLimit(proto.LinkQueue)
+	}
+	if coder != nil {
+		l.random = bodycrypt.Random()
+		hello := make([]byte, LengthSize+HeaderSize+1+bodycrypt.RandomSize)
+		binary.BigEndian.PutUint32(hello, uint32(len(hello)-LengthSize))
+		hello[LengthSize] = kindSealed | kindHello
+		hello[LengthSize+HeaderSize] = Version
+		copy(hello[LengthSize+HeaderSize+1:], l.random)
+		_ = conn.Send(hello)
 	}
 	return l
 }
@@ -276,7 +322,7 @@ func Decode(body []byte, v any) error {
 }
 
 // frame is a frame of kind, m and id whose body is parts, one after
-// another, sealed when the link seals bodies.
+// another, with room for the tag when the link seals bodies: send seals it.
 func (l *Link) frame(kind byte, m proto.Method, id uint32, parts ...[]byte) []byte {
 	n := 0
 	for _, p := range parts {
@@ -294,25 +340,75 @@ func (l *Link) frame(kind byte, m proto.Method, id uint32, parts ...[]byte) []by
 	header[1] = byte(m)
 	binary.BigEndian.PutUint32(header[2:], id)
 	off := head
-	if l.coder != nil {
-		off += bodycrypt.NonceSize
-	}
 	for _, p := range parts {
 		off += copy(b[off:], p)
-	}
-	if l.coder != nil {
-		body := l.coder.SealInPlace(b[head:head+bodycrypt.NonceSize+n], header)
-		b = b[:head+len(body)]
 	}
 	binary.BigEndian.PutUint32(b, uint32(len(b)-LengthSize))
 	return b
 }
 
+// send sends b, a frame made by frame: sealed under the frame's number,
+// once the peer's hello came, when the link seals bodies.
 func (l *Link) send(b []byte) error {
 	if len(b)-LengthSize > MaxFrame {
 		return fmt.Errorf("link: a frame of %d bytes is longer than %d", len(b)-LengthSize, MaxFrame)
 	}
-	return l.conn.Send(b)
+	if l.coder == nil {
+		return l.conn.Send(b)
+	}
+	l.smu.Lock()
+	if l.sess == nil {
+		if l.heldSize+len(b) > maxBeforeHello {
+			l.smu.Unlock()
+			l.fail(errBacklog)
+			return errBacklog
+		}
+		l.held = append(l.held, b)
+		l.heldSize += len(b)
+		l.smu.Unlock()
+		return nil
+	}
+	l.seal(b)
+	err := l.conn.Send(b)
+	l.smu.Unlock()
+	return err
+}
+
+// seal seals the body of b, a frame made by frame, under the next number:
+// with smu held.
+func (l *Link) seal(b []byte) {
+	const head = LengthSize + HeaderSize
+	l.sess.SealInPlace(b[head:len(b)-bodycrypt.Overhead], b[LengthSize:head])
+}
+
+// hello takes the peer's hello, body, and sends what waited for it.
+func (l *Link) hello(body []byte) error {
+	if len(body) < 1 {
+		return errHello
+	}
+	if body[0] != Version {
+		return fmt.Errorf("link: the peer's link protocol is version %d, this side's %d; run the same fit version on both sides", body[0], Version)
+	}
+	if len(body) != 1+bodycrypt.RandomSize {
+		return errHello
+	}
+	sess, err := l.coder.Session(l.random, body[1:])
+	if err != nil {
+		return err
+	}
+	l.recv = sess
+	l.smu.Lock()
+	defer l.smu.Unlock()
+	l.sess = sess
+	held := l.held
+	l.held, l.heldSize = nil, 0
+	for _, b := range held {
+		l.seal(b)
+		if err := l.conn.Send(b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Call calls m with req, encoded as Encode does, and decodes the result
@@ -445,8 +541,22 @@ func (l *Link) handle(f []byte) bool {
 	case l.coder != nil && kind&kindSealed == 0:
 		l.fail(errUnsealed)
 		return false
+	case l.coder != nil && l.recv == nil:
+		err := errOld
+		if kind == kindSealed|kindHello {
+			err = l.hello(body)
+		}
+		if err != nil {
+			l.fail(err)
+			return false
+		}
+		return true
 	case l.coder != nil:
-		plain, err := l.coder.OpenInPlace(body, header)
+		if kind == kindSealed|kindHello {
+			l.fail(errHello)
+			return false
+		}
+		plain, err := l.recv.OpenInPlace(body, header)
 		if err != nil {
 			l.fail(err)
 			return false
