@@ -1,6 +1,12 @@
 package limit
 
-import "testing"
+import (
+	"net/netip"
+	"strings"
+	"testing"
+
+	"github.com/lesismal/fit/module"
+)
 
 // TestPeerAndName checks peer of an address with a port and of a bare one,
 // and validName of names with and without characters a token may not hold.
@@ -17,5 +23,23 @@ func TestPeerAndName(t *testing.T) {
 		if got := validName(name); got != want {
 			t.Errorf("validName(%q) = %v", name, got)
 		}
+	}
+}
+
+// TestRateIPv6PrefixUnchecked checks a Rate made in Go rather than from a
+// config, which the schema's bounds did not check, refuses an ipv6_prefix out
+// of range, and that one that slipped past counts each IPv6 address apart
+// rather than all as one.
+func TestRateIPv6PrefixUnchecked(t *testing.T) {
+	for _, bits := range []int{-1, 129} {
+		err := (&Rate{Rate: 1, IPv6Prefix: bits}).Provision(&module.Context{})
+		if err == nil || !strings.Contains(err.Error(), "is not between 1 and 128") {
+			t.Errorf("ipv6_prefix %d: %v", bits, err)
+		}
+	}
+	rl := &Rate{v6bits: -1}
+	ip := netip.MustParseAddr("2001:db8::1")
+	if got := rl.client(ip); got != ip {
+		t.Errorf("client(%s) with bits -1 = %s", ip, got)
 	}
 }

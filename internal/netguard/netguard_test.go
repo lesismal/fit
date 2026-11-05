@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -177,5 +179,65 @@ func TestDial(t *testing.T) {
 	case <-rec.closed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the handler was not closed")
+	}
+}
+
+// TestDialLocalAddr checks ok is asked about the address a UDP connection
+// was opened from, and about none for a Unix socket's.
+func TestDialLocalAddr(t *testing.T) {
+	engine, err := fib.New(fib.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- engine.Run() }()
+	t.Cleanup(func() {
+		engine.Stop()
+		<-stopped
+		_ = engine.Close()
+	})
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	type dialCase struct {
+		network, addr string
+		want          netip.Addr
+	}
+	cases := []dialCase{{"udp", pc.LocalAddr().String(), netip.MustParseAddr("127.0.0.1")}}
+	if runtime.GOOS != "windows" {
+		sock := filepath.Join(t.TempDir(), "s")
+		ul, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ul.Close() })
+		cases = append(cases, dialCase{"unix", sock, netip.Addr{}})
+	}
+
+	refusal := errors.New("refused")
+	for _, tc := range cases {
+		asked := make(chan netip.Addr, 1)
+		done := make(chan error, 1)
+		if err := Dial(nil, engine, tc.network, tc.addr, 5*time.Second, newRecorder(), func(c *fib.Connection, err error) {
+			done <- err
+		}, func(_, local netip.Addr) bool {
+			asked <- local
+			return false
+		}, refusal); err != nil {
+			t.Fatalf("%s: %v", tc.network, err)
+		}
+		select {
+		case err := <-done:
+			if err != refusal {
+				t.Errorf("%s: done told %v, want the refusal", tc.network, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the dial did not finish", tc.network)
+		}
+		if got := <-asked; got != tc.want {
+			t.Errorf("%s: ok was asked about %v from, want %v", tc.network, got, tc.want)
+		}
 	}
 }

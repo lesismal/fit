@@ -46,3 +46,15 @@ func TestDenyInternal(t *testing.T) {
 		t.Fatalf("without deny_internal: %+v", got)
 	}
 }
+
+// TestDenyInternalProbe checks an http health probe of an upstream with
+// deny_internal dials as its requests do: one on loopback never reaches the
+// backend, and the backend is probed down.
+func TestDenyInternalProbe(t *testing.T) {
+	h := newHealthy(t, "h")
+	p := newPool(t, `{"addresses": [%s], "deny_internal": true, `+probeCheck+`}`, h.backend)
+	waitDown(t, p.Backends()[0], true)
+	if n := h.probes.Load(); n != 0 {
+		t.Errorf("%d probes reached the backend", n)
+	}
+}

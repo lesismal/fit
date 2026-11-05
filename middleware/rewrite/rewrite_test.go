@@ -125,6 +125,7 @@ func TestRedirect(t *testing.T) {
 		{"tab between", `{"to": "/{query}"}`, false, "/a?%09/evil.com", 302, "/%09/evil.com"},
 		{"group makes a scheme", `{"to": "$1", "regexp": "^/go/(.*)$"}`, false, "/go/https:/evil.com", 400, ""},
 		{"group makes a path", `{"to": "$1", "regexp": "^/go(/.*)$"}`, false, "/go/a:b", 302, "/a:b"},
+		{"group makes a relative path", `{"to": "$1", "regexp": "^/go/(.*)$"}`, false, "/go/page", 302, "page"},
 		{"to on another host", `{"to": "//cdn.example/$1", "regexp": "^/s/(.*)$"}`, false, "/s/x.js", 302, "//cdn.example/x.js"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

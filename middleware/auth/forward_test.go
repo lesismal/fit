@@ -245,3 +245,13 @@ func TestForwardAuthParams(t *testing.T) {
 		}
 	}
 }
+
+// TestForwardAuthAuthenticates checks forward_auth tells the graph it lets
+// a request through only once the caller is authenticated.
+func TestForwardAuthAuthenticates(t *testing.T) {
+	var m any = &ForwardAuth{}
+	a, ok := m.(module.Authenticator)
+	if !ok || !a.Authenticates() {
+		t.Errorf("forward_auth is an authenticator %v, authenticates %v; want both", ok, ok && a.Authenticates())
+	}
+}

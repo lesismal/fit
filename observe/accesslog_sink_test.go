@@ -135,3 +135,64 @@ func pdur(v time.Duration) *config.Duration {
 	return &d
 }
 func pbool(v bool) *bool { return &v }
+
+// TestAccessLogSinkClosed checks lines the file's sink refuses, closed
+// under the log, are counted dropped, and that a log whose file turns by
+// interval opens it in the log's zone.
+func TestAccessLogSinkClosed(t *testing.T) {
+	var warnings syncBuffer
+	root, err := logs.New(nil, &warnings, &warnings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs.SetDefault(root)
+	t.Cleanup(func() {
+		logs.SetDefault(nil)
+		_ = root.Close()
+	})
+	path := filepath.Join(t.TempDir(), "access.log")
+	files := logs.NewFiles()
+	l, err := NewAccessLogFiles(&config.AccessLog{
+		Output:        path,
+		FlushInterval: config.Duration(time.Hour),
+		Rotate:        &config.Rotate{Interval: config.Duration(time.Hour), Compress: pbool(false)},
+		TimeZone:      "utc",
+	}, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := files.File(path)
+	if sink == nil {
+		t.Fatal("no sink for the access log's file")
+	}
+	if err := files.Release(sink); err != nil {
+		t.Fatal(err)
+	}
+	logN(l, 2)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if w := warnings.String(); !strings.Contains(w, "access log: 2 lines dropped") {
+		t.Errorf("warnings %q, want 2 lines dropped", w)
+	}
+	if data, _ := os.ReadFile(path); len(data) != 0 {
+		t.Errorf("the closed file got %q", data)
+	}
+}
+
+// TestAccessLogSetConfigRefused checks a reload with no access log changes
+// nothing, and one with an unknown zone is refused.
+func TestAccessLogSetConfigRefused(t *testing.T) {
+	var out syncBuffer
+	l := NewAccessLogTo(&out, time.Hour, 0)
+	defer l.Close()
+	if err := l.SetConfig(nil); err != nil {
+		t.Errorf("SetConfig(nil) = %v", err)
+	}
+	if err := l.SetConfig(&config.AccessLog{TimeZone: "Mars/Olympus"}); err == nil {
+		t.Error("an unknown time zone was taken")
+	}
+	if got := l.zone(); got != time.UTC {
+		t.Errorf("the zone is %v after refused reloads, want UTC", got)
+	}
+}

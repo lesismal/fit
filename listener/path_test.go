@@ -53,6 +53,7 @@ func TestCanonicalize(t *testing.T) {
 		{"/a/../b%20c/%2F/../d", "/b c/d", "/b%20c/d", "/b%20c/d"},
 		{"/x/../a%2Fb", "/a/b", "/a%2Fb", "/a%2Fb"},
 		{"/x/..?", "/", "", "/?"},
+		{"/x/./...", "/x/...", "", "/x/..."},
 		// Refused.
 		{"/..", "", "", ""},
 		{"/../admin", "", "", ""},
@@ -88,6 +89,11 @@ func TestCanonicalize(t *testing.T) {
 	r := &stdhttp.Request{URL: u, RequestURI: "http://example.com/x/../y"}
 	if !canonicalize(r) || r.RequestURI != "http://example.com/y" {
 		t.Errorf("absolute form: %q", r.RequestURI)
+	}
+	// A path whose escaped form does not start with '/', as one built by
+	// hand with a RawPath of "%2F" may be, is refused.
+	if canonicalize(&stdhttp.Request{URL: &url.URL{Path: "/./a", RawPath: "%2F./a"}}) {
+		t.Error("an escaped path not starting with / canonicalized")
 	}
 	// Paths not to canonicalize.
 	for _, u := range []*url.URL{{Path: "*"}, {Host: "example.com:443"}, {Path: ""}} {

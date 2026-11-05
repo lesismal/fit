@@ -532,3 +532,16 @@ func TestAcquire(t *testing.T) {
 	}
 	p.Close() // more than held: nothing more happens
 }
+
+// TestStartEngineRefused checks engine settings fib refuses, which config
+// validation keeps out of a config, are reported rather than started.
+func TestStartEngineRefused(t *testing.T) {
+	engine, stop, err := StartEngineWith(&config.Engine{Workers: 1, MinWorkers: 4})
+	if err == nil {
+		stop()
+		t.Fatalf("an engine with more min_workers than workers started: %v", engine)
+	}
+	if engine != nil || stop != nil {
+		t.Errorf("a refused engine returned %v and a stop", engine)
+	}
+}
