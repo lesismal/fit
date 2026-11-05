@@ -273,6 +273,23 @@ func upgradeStatus(err error) int {
 // route's response idle and write stall timeouts. It runs in the upstream
 // client's callback, as answer does, whose hold on the request it keeps.
 func (r *relay) refused(resp *fibhttp.ClientResponse) {
+	if r.extended && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// A 2xx to an HTTP/2 or HTTP/3 extended CONNECT says the tunnel is
+		// open (RFC 8441 section 5, RFC 9220), and what follows it would
+		// reach the client as WebSocket frames, though the upstream never
+		// switched: its body, any bytes it chose. Nor may a 2xx to a
+		// CONNECT carry a length (RFC 9110 section 9.3.6). A backend that
+		// answers a handshake with a success of HTTP/1.1's has no tunnel to
+		// offer, which is the gateway's failure to the client; its 3xx, 4xx
+		// and 5xx pass on as they are. Not counted against the backend,
+		// whose plain answers serve other requests as well as ever.
+		resp.Close()
+		r.finish(false)
+		if !errors.Is(r.causeErr(), errClientGone) {
+			_ = r.c.Respond(stdhttp.StatusBadGateway, "text/plain; charset=utf-8", nil)
+		}
+		return
+	}
 	x, p := r.x, r.p
 	x.pool, x.backend, x.graph, x.stall, x.timeouts = r.pool, r.backend, p.graph, p.stall, r.pool.Timeouts()
 	// In the proxy's open exchanges before it leaves its relays, so that a

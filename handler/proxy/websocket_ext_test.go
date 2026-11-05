@@ -135,55 +135,158 @@ func TestWebSocketExtendedConnect(t *testing.T) {
 		<-b.headers
 	})
 	t.Run("h3", func(t *testing.T) {
-		engine, err := fib.New(fib.DefaultConfig())
+		w, r := extConnect(t, "https://127.0.0.1:"+h3Port(tlsAddr)+"/chat", h3Connect(t, cert))
+		echoes(t, w, r)
+		<-b.headers
+	})
+}
+
+// h3Port is the port of tlsAddr's HTTP/3 listener.
+func h3Port(tlsAddr listener.Addr) string {
+	return strconv.Itoa(tlsAddr.UDPAddr.(*net.UDPAddr).Port)
+}
+
+// h3Connect sends an extended CONNECT with fib's HTTP/3 client, which
+// trusts cert, and returns the response's status, header and a reader of
+// its body as it streams.
+func h3Connect(t *testing.T, cert *certtest.Cert) func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
+	t.Helper()
+	engine, err := fib.New(fib.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- engine.Run() }()
+	t.Cleanup(func() {
+		engine.Stop()
+		<-done
+		_ = engine.Close()
+	})
+	cfg := http3.DefaultClientConfig()
+	cfg.TLSConfig = &tls.Config{RootCAs: certtest.Pool(cert), ServerName: "a.example"}
+	cfg.StreamResponseBody = true
+	cfg.StreamUnknownLengthAtHeader = true
+	client := http3.NewClient(engine, cfg)
+	t.Cleanup(client.Close)
+	return func(req *stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
+		type answer struct {
+			resp *fibhttp.ClientResponse
+			err  error
+		}
+		answered := make(chan answer, 1)
+		br, bw := io.Pipe()
+		t.Cleanup(func() { bw.Close() })
+		client.Do(req, func(resp *fibhttp.ClientResponse, err error) {
+			if err == nil {
+				resp.OnBody(func(data []byte, fin bool, err error) {
+					_, _ = bw.Write(data)
+					if fin || err != nil {
+						bw.Close()
+					}
+				})
+			}
+			answered <- answer{resp, err}
+		})
+		select {
+		case a := <-answered:
+			if a.err != nil {
+				return 0, nil, nil, a.err
+			}
+			return a.resp.StatusCode, a.resp.Header, br, nil
+		case <-time.After(10 * time.Second):
+			return 0, nil, nil, fmt.Errorf("no answer")
+		}
+	}
+}
+
+// TestWebSocketExtendedConnectNoSwitch has an upstream answer the handshake
+// without switching. Its 2xx, which an extended CONNECT's client takes for
+// an open tunnel and its body for WebSocket frames, is a 502; a 403 passes
+// on with its body, as any refusal does. A 2xx whose body keeps coming is
+// a 502 at once, its upstream connection closed. Over h2c and h3.
+func TestWebSocketExtendedConnectNoSwitch(t *testing.T) {
+	// A server-to-client WebSocket text frame, "pwned".
+	frame := []byte{0x81, 0x05, 'p', 'w', 'n', 'e', 'd'}
+	// slowGone hears of each /slow request whose connection fit closed.
+	slowGone := make(chan struct{}, 2)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &stdhttp.Server{Handler: stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		switch r.URL.Path {
+		case "/deny":
+			w.WriteHeader(stdhttp.StatusForbidden)
+		case "/slow":
+			// A body that never ends, until fit lets go of it.
+			_, _ = w.Write(frame)
+			w.(stdhttp.Flusher).Flush()
+			select {
+			case <-r.Context().Done():
+				slowGone <- struct{}{}
+			case <-time.After(10 * time.Second):
+			}
+			return
+		}
+		_, _ = w.Write(frame)
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	cert, err := certtest.Write(t.TempDir(), "a.example", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsAddr, h2cAddr := startFitExt(t, ln.Addr().String(), cert)
+	send := func(t *testing.T, target string, do func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error)) (int, stdhttp.Header, []byte) {
+		t.Helper()
+		pr, pw := io.Pipe()
+		t.Cleanup(func() { pw.Close() })
+		req, err := stdhttp.NewRequest(stdhttp.MethodConnect, target, pr)
 		if err != nil {
 			t.Fatal(err)
 		}
-		done := make(chan error, 1)
-		go func() { done <- engine.Run() }()
-		t.Cleanup(func() {
-			engine.Stop()
-			<-done
-			_ = engine.Close()
-		})
-		cfg := http3.DefaultClientConfig()
-		cfg.TLSConfig = &tls.Config{RootCAs: certtest.Pool(cert), ServerName: "a.example"}
-		cfg.StreamResponseBody = true
-		cfg.StreamUnknownLengthAtHeader = true
-		client := http3.NewClient(engine, cfg)
-		t.Cleanup(client.Close)
-		port := strconv.Itoa(tlsAddr.UDPAddr.(*net.UDPAddr).Port)
-		w, r := extConnect(t, "https://127.0.0.1:"+port+"/chat", func(req *stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
-			type answer struct {
-				resp *fibhttp.ClientResponse
-				err  error
+		req.Header.Set(":protocol", "websocket")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		status, header, body, err := do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]byte, len(frame))
+		n, _ := io.ReadFull(body, got)
+		return status, header, got[:n]
+	}
+	check := func(t *testing.T, base string, do func() func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error)) {
+		status, header, got := send(t, base+"/chat", do())
+		if status != stdhttp.StatusBadGateway || bytes.Contains(got, []byte("pwned")) || header.Get("Content-Type") == "text/plain" {
+			t.Errorf("an upstream's 200 to the handshake: %d %v %q, want 502 without its body", status, header, got)
+		}
+		status, _, got = send(t, base+"/deny", do())
+		if status != stdhttp.StatusForbidden || !bytes.Equal(got, frame) {
+			t.Errorf("an upstream's 403 to the handshake: %d %q, want it passed on", status, got)
+		}
+		status, _, got = send(t, base+"/slow", do())
+		if status != stdhttp.StatusBadGateway || bytes.Contains(got, []byte("pwned")) {
+			t.Errorf("an upstream's 200 still sending: %d %q, want 502 without its body", status, got)
+		}
+		select {
+		case <-slowGone:
+		case <-time.After(5 * time.Second):
+			t.Error("the upstream's connection of a 200 still sending was kept")
+		}
+	}
+	t.Run("h2c", func(t *testing.T) {
+		check(t, "http://x", func() func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error) {
+			conn, err := net.DialTimeout("tcp", h2cAddr, 5*time.Second)
+			if err != nil {
+				t.Fatal(err)
 			}
-			answered := make(chan answer, 1)
-			br, bw := io.Pipe()
-			t.Cleanup(func() { bw.Close() })
-			client.Do(req, func(resp *fibhttp.ClientResponse, err error) {
-				if err == nil {
-					resp.OnBody(func(data []byte, fin bool, err error) {
-						_, _ = bw.Write(data)
-						if fin || err != nil {
-							bw.Close()
-						}
-					})
-				}
-				answered <- answer{resp, err}
-			})
-			select {
-			case a := <-answered:
-				if a.err != nil {
-					return 0, nil, nil, a.err
-				}
-				return a.resp.StatusCode, a.resp.Header, br, nil
-			case <-time.After(10 * time.Second):
-				return 0, nil, nil, fmt.Errorf("no answer")
-			}
+			return h2Connect(t, conn)
 		})
-		echoes(t, w, r)
-		<-b.headers
+	})
+	t.Run("h3", func(t *testing.T) {
+		do := h3Connect(t, cert)
+		check(t, "https://127.0.0.1:"+h3Port(tlsAddr), func() func(*stdhttp.Request) (int, stdhttp.Header, io.Reader, error) { return do })
 	})
 }
 
