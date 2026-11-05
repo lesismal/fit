@@ -7,10 +7,10 @@
 // fib's own listeners are plain TCP unless a binding asks for Multipath TCP;
 // the binds that check an address is free are plain TCP always, and the Admin
 // API is plain TCP unless admin.mptcp asks for more, so both go through this
-// package. An MPTCP listener is what the published exploit of CVE-2026-98432,
-// a use-after-free in the kernel's IPv4 TCP handshake, needs on its target.
-// Turning MPTCP off does not fix that bug, which only a patched kernel does,
-// but it keeps fit from offering more than its config asks for.
+// package. An MPTCP listener exposes the kernel's Multipath TCP code to
+// every client, attack surface beyond plain TCP's. Keeping it off where the
+// config does not ask for it fixes no kernel bug, which only a patched kernel
+// does, but it keeps fit from offering more than its config asks for.
 package nettcp
 
 import (
