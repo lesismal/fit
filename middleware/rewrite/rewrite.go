@@ -151,12 +151,30 @@ func (rd *Redirect) Wrap(next module.Handler) module.Handler {
 			}
 			to = string(rd.re.ExpandString(nil, to, c.Request.URL.Path, m))
 		}
+		location := expand(to, c.Request)
+		if !strings.HasPrefix(rd.To, "//") {
+			location = onePath(location)
+		}
 		_ = c.WriteResponse(fibhttp.Response{
 			StatusCode: rd.Status,
-			Header:     stdhttp.Header{"Location": {expand(to, c.Request)}},
+			Header:     stdhttp.Header{"Location": {location}},
 		})
 	})
 }
+
+// onePath returns location with the slashes and backslashes it starts with
+// made one slash, when there are more than one: a browser reads "//evil.com",
+// "/\evil.com" and "\\evil.com" as another host, and a group or {path} expanded from the
+// request's decoded path, as "/old/%2F%2Fevil.com" makes $1, could make one
+// so. Only a to of the config's own that starts with "//" names a host so.
+func onePath(location string) string {
+	if len(location) < 2 || !slash(location[0]) || !slash(location[1]) {
+		return location
+	}
+	return "/" + strings.TrimLeft(location, "/\\")
+}
+
+func slash(c byte) bool { return c == '/' || c == '\\' }
 
 // expand replaces the placeholders in s with r's.
 func expand(s string, r *stdhttp.Request) string {

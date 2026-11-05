@@ -113,6 +113,13 @@ func TestRedirect(t *testing.T) {
 		{"a fixed URL", `{"to": "/elsewhere", "status": 301}`, false, "/x", 301, "/elsewhere"},
 		{"regexp matched", `{"to": "/new/$1{query}", "regexp": "^/old/(.*)$"}`, false, "/old/page?x", 302, "/new/pagex"},
 		{"regexp not matched", `{"to": "/new/$1", "regexp": "^/old/(.*)$"}`, false, "/other", 200, ""},
+		// A path that would read as a host in Location, decoded from the
+		// request's, is one path still.
+		{"encoded slashes", `{"to": "/$1", "regexp": "^/old/(.*)$"}`, false, "/old/%2F%2Fevil.com", 302, "/evil.com"},
+		{"a backslash", `{"to": "/$1", "regexp": "^/old/(.*)$"}`, false, "/old/%5Cevil.com", 302, "/evil.com"},
+		{"slashes and backslashes", `{"to": "$1", "regexp": "^/old(/.*)$"}`, false, "/old/%5C/%2Fevil.com/x", 302, "/evil.com/x"},
+		{"the path placeholder", `{"to": "{path}"}`, false, "//evil.com/x", 302, "/evil.com/x"},
+		{"a network-path reference of the config's", `{"to": "//cdn.example/$1", "regexp": "^/a/(.*)$"}`, false, "/a/x", 302, "//cdn.example/x"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, err := load(t, "redirect", tt.params)
