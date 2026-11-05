@@ -44,7 +44,7 @@
     // the small tags of a port / 端口的小标记
     ['e.tag.proxy', 'PROXY', 'PROXY'], ['e.tag.h3', 'HTTP/3', 'HTTP/3'],
     ['e.tag.ondemand', 'On-demand', '按需证书'], ['e.tag.mtls', 'Client certs', '客户端证书'],
-    ['e.tag.auto', 'Auto HTTPS', '自动 HTTPS'],
+    ['e.tag.auto', 'Auto HTTPS', '自动 HTTPS'], ['e.tag.mptcp', 'MPTCP', 'MPTCP'],
     // protocols / 协议
     ['e.p.http11', 'HTTP/1.1', 'HTTP/1.1'], ['e.p.h2c', 'h2c', 'h2c'], ['e.p.h2', 'HTTP/2', 'HTTP/2'],
     ['e.p.tcp', 'TCP', 'TCP'], ['e.p.udp', 'UDP', 'UDP'], ['e.p.socks', 'SOCKS', 'SOCKS']
@@ -152,7 +152,7 @@
         out.push(navPort(draft, {
           name: name, address: l.address || '', protocols: protocols, http: servesHTTP(protocols),
           tls: l.tls, socks: l.socks || protocols.indexOf('socks') >= 0, proxyProtocol: l.proxy_protocol,
-          generated: false, bound: bound[name]
+          mptcp: l.mptcp, generated: false, bound: bound[name]
         }));
       });
       return out;
@@ -209,6 +209,7 @@
     if ((port.protocols || []).indexOf('h3') >= 0) parts.push(t('e.tag.h3'));
     if (port.tls && port.tls.on_demand) parts.push(t('e.tag.ondemand'));
     if (port.tls && port.tls.client_auth) parts.push(t('e.tag.mtls'));
+    if (port.mptcp) parts.push(t('e.tag.mptcp'));
     return parts.join(' · ');
   }
 

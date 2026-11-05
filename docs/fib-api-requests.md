@@ -75,6 +75,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A60 | Header blocks passed through a proxy as lines, both ways | done, fib branch `perf/header-blocks` (not yet on `main`) | 12 | — |
 | A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
 | A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
+| A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
 
 ## Evidence
 
@@ -1943,3 +1944,72 @@ request (-40%), p99 23.6 → 18.3 ms, peak memory 46 → 29 MiB; h2 uploads, and
 perf on fit's CPUs: `_copy_to_iter` 665k → 36k cycles a request, `kernel_init_pages` 505k → 60k,
 `_copy_from_iter` 148k → 26k; fit's cycles a request 2.95M → 1.74M. W1 (`api`) and W0 (`fixed`) over
 HTTP/1.1 at 500 in flight within noise (273k → 273k and 680k → 681k requests a second).
+
+
+## A63: Multipath TCP as a listener's option
+
+**Status.** Requested on 2026-11-05, for fit's listeners: a client whose address changes, as a phone's
+between Wi-Fi and a mobile network, keeps its connection. Done in fib's `main` at `5c0e5b9`
+(`v1.7.1-0.20261105042253-5c0e5b925fc9`), made by fit's session per
+[rule 15](rules.md#7-when-fib-falls-short); fit is on that commit ([rule 19](rules.md#9-the-fib-version)).
+fib's CI on `5c0e5b9` passed: every job green, the Windows one after a rerun, whose first attempt
+failed on a data race in `webrtc.TestMedia`, a test this change does not touch.
+
+**Problem.** Every TCP listener fit runs is a plain TCP one: the config's `listeners`, the Admin API,
+its console and the roles' consoles, streaming's RTMP and RTSP listeners, and TURN's TCP and TLS
+listeners. A TCP connection is fixed to the addresses it was made on: when a client's address changes,
+the connection breaks and what is above it — TLS and HTTP, RTMP, RTSP, TURN — starts again. Multipath
+TCP lets one connection run over several paths at once, the kernel moving it as addresses come and go,
+which is what a mobile client needs; fit's users asked to turn it on per listener, off by default
+everywhere else. fit could not offer it: fib makes every listening socket, and fit only names bindings
+(`listener/listener.go`'s two `fib.Binding` literals, `admin/server.go`, `app/console/console.go`,
+`streaming/listeners.go`, `webrtc/turn/turn.go`), while `fib.Binding` said the network, the addresses
+and the handler, and the engine its settings, but nothing of a listening socket's transport. Opening
+the sockets in fit would take the listener out of fib's event loops, pollers and prefork, and mean an
+accept loop of fit's own; [rule 1](rules.md#1-never-block-a-worker) does not allow either. The plain-TCP
+default is not merely a default: the previous change, `24dba02` ("listeners fit opens through net are
+plain TCP, never MPTCP"), settled it, after the published exploit of CVE-2026-98432 (a use-after-free
+in the kernel's IPv4 TCP handshake), because an MPTCP listener is what the exploit needs on its target;
+turning Multipath TCP off never fixed the kernel bug, which is the kernel's to fix, and an operator who
+sets `mptcp` on an unpatched kernel takes that exposure.
+
+**Evidence.** `net.ListenConfig.SetMultipathTCP(true)` gives an MPTCP listener on Linux 5.6+ with
+`net.mptcp.enabled` set, and since Go 1.24 `net.Listen` opens one wherever `GODEBUG=multipathtcp`
+allows, so the kernel's support is reachable from the net package alone; fib's bindings go through
+fib's own listening path, which had no such option, and `fib.Binding` held `Network`, `Addr`, `Addrs`
+and `Handler` with the rest the engine's, so no fit config could ask for it. On the benchmark host
+(Linux 7.0.0-38-generic, 16 CPUs, `net.mptcp.enabled`=1) a net listener that asks for it and a client
+that dials it get an end-to-end Multipath TCP connection, the pair the tests below use.
+
+**Suggested API.** `Binding.MultipathTCP bool`, between `Addrs` and `Handler` and off by default: when
+set, fib opens the binding's TCP listening sockets as `IPPROTO_MPTCP` on Linux where the kernel offers
+it, falling back to plain TCP per socket where it does not, as `net.ListenConfig.SetMultipathTCP(true)`
+does; every socket a binding makes takes it, the claim socket a spread listener uses for its port and
+the per-poller sockets and prefork children's copies too. UDP and Unix bindings are unaffected, other
+platforms listen plain TCP, and a bind, listen or `SO_REUSEPORT` error is still returned as one.
+
+**As built.** As suggested: `fib.Binding.MultipathTCP` between `Addrs` and `Handler`. A TCP binding
+with it listens with `IPPROTO_MPTCP` (262) on Linux 5.6+ where `net.mptcp.enabled` is set, on the claim
+socket a spread listener uses for its port, on every per-poller socket and on prefork children's copies,
+and falls back to plain TCP on any socket error, as `SetMultipathTCP(true)` does; a peer without
+Multipath TCP falls back in the handshake. It is off by default, so a binding is plain TCP; UDP and
+Unix bindings are unaffected; on macOS, Windows and the BSDs a binding listens plain TCP; and failures
+of bind, listen and `SO_REUSEPORT` are still returned, never swallowed.
+
+**How fit uses it.** A `mptcp` boolean on seven members: `listeners[]`, `admin`, `admin.console`, a
+role's `console` (the tunnel's and LLM feature's, `config.RoleConsole`, whose `Console()` carries it to
+its console's binding, as `admin.console`'s does), `streaming.rtmp`, `streaming.rtsp` and `webrtc.turn` (its
+`listen_tcp` and `listen_tls`). The graph's `runtime.Listener.MPTCP` reaches the two `fib.Binding`
+literals in `listener/listener.go`, and the binding's identity includes it, so a reload that changes it
+makes a new binding, a listening socket's transport being fixed once it is made; `udp` listeners and
+HTTP/3 get none, and validation refuses `mptcp` on a UDP-only listener and on a TURN server with no
+`listen_tcp` or `listen_tls`. The Admin API takes no fib binding: it listens through `internal/nettcp`
+(renamed from `internal/plaintcp`), `net.Listen` with `SetMultipathTCP` on or off exactly as the config
+asks, because Go 1.24's `net.Listen` would otherwise open a Multipath TCP listener wherever
+`GODEBUG=multipathtcp` allows. The consoles bind on the engine through `app/console`, which passes the
+console's `mptcp`. Streaming's RTMP and RTSP listener keys and TURN's static key include it, so a change
+restarts that listener, or starts a new TURN server and drains the old one. The tunnel's and LLM
+feature's own link listeners stay plain TCP: their fib bindings have the same option, and fit's config
+has no `mptcp` there yet. A client or peer without Multipath TCP falls back to plain TCP, there being
+no config to require it, and Unix sockets and UDP take none. The workbench's Engine menu tags a port
+that has it.

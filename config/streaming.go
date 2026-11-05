@@ -58,6 +58,7 @@ type Streaming struct {
 // StreamRTMP is the streaming role's RTMP listener.
 type StreamRTMP struct {
 	Listen           string   `json:"listen" fit:"required" doc:"The TCP address RTMP clients connect to, as in \":1935\". A change of any field but auth starts the listener again, closing its connections."`
+	MPTCP            bool     `json:"mptcp,omitempty" doc:"Listen the RTMP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	Auth             string   `json:"auth,omitempty" doc:"The media_auth policy a publish and a play must satisfy, by the stream's path, app/stream: credentials go in the query of the stream name or the app, as rtmp://host/live/cam?token=T or ?user=U&pass=P. A refusal is answered with NetStream.Publish.Unauthorized or NetStream.Play.Failed and the connection closed. Everyone may publish and play when left out. A change applies to the next publish and play."`
 	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"1024" doc:"The most connections at once; one more is closed as it opens. 1024 when left out or 0."`
 	HandshakeTimeout Duration `json:"handshake_timeout,omitempty" default:"\"10s\"" doc:"How long a client may take from connecting to publishing or playing. 10s when left out."`
@@ -71,6 +72,7 @@ type StreamRTMP struct {
 // StreamRTSP is the streaming role's RTSP listener.
 type StreamRTSP struct {
 	Listen         string   `json:"listen" fit:"required" doc:"The TCP address RTSP clients connect to, as in \":8554\". RTP goes interleaved on the same connection (RTP/AVP/TCP); a SETUP asking for UDP is answered 461, which ffmpeg and most players then retry over TCP. A change of any field but auth starts the listener again, closing its connections."`
+	MPTCP          bool     `json:"mptcp,omitempty" doc:"Listen the RTSP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	Auth           string   `json:"auth,omitempty" doc:"The media_auth policy ANNOUNCE and RECORD (publish) and DESCRIBE and PLAY (play) must satisfy, by the stream's path: a user with a plaintext password by Digest, a user by Basic when auth_methods offers it, or a token in the URL's query, as rtsp://host/live/cam?token=T. A refusal is 401 with the challenges, or 403. Everyone may publish and play when left out. A change applies to the next request."`
 	AuthMethods    []string `json:"auth_methods,omitempty" enum:"digest,basic" doc:"The schemes a 401 offers for users: digest, which needs a user's plaintext password, and basic, which sends the password in the clear and is the only one a password_hash user can use. [\"digest\"] when left out."`
 	Realm          string   `json:"realm,omitempty" default:"\"fit\"" doc:"The realm of the challenges, which Digest's response is computed with. fit when left out."`

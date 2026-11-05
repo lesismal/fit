@@ -250,7 +250,10 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		h = fibtls.NewServer(fibhttp.ConfigureTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}), h)
 	}
 	c.limit = newLimitHandler(h, cfg.Console().Conns())
-	if c.index, err = engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: c.limit}); err != nil {
+	// mptcp is the pages member's own, on a role's console and on
+	// admin.console alike: the login behind the binding is the same either
+	// way, only the sockets the kernel opens differ.
+	if c.index, err = engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: c.limit, MultipathTCP: cfg.MPTCP}); err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	if addrs, err := engine.BindingAddrs(c.index); err == nil && len(addrs) > 0 {

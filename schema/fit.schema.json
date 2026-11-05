@@ -191,6 +191,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "mptcp": {
+          "description": "Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths.",
+          "type": "boolean"
+        },
         "store": {
           "$ref": "#/$defs/config.Store",
           "description": "Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file."
@@ -300,6 +304,10 @@
           "description": "The most logins kept at once; one more ends the oldest. 64 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        },
+        "mptcp": {
+          "description": "Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.",
+          "type": "boolean"
         },
         "session_lifetime": {
           "default": "12h",
@@ -1421,6 +1429,10 @@
           "description": "The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\".",
           "type": "string"
         },
+        "mptcp": {
+          "description": "Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and HTTP/3 take none.",
+          "type": "boolean"
+        },
         "name": {
           "description": "A name unique among the listeners, by which routes refer to this one.",
           "type": "string"
@@ -1919,6 +1931,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "mptcp": {
+          "description": "Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.",
+          "type": "boolean"
+        },
         "session_lifetime": {
           "default": "12h",
           "description": "How long a login lasts at most, however busy. 12h when left out.",
@@ -2156,6 +2172,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "mptcp": {
+          "description": "Listen the RTMP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.",
+          "type": "boolean"
+        },
         "play_wait": {
           "description": "How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. A play of a stream without a publisher fails at once when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
@@ -2200,6 +2220,10 @@
           "description": "The most connections at once; one more is closed as it opens. 1024 when left out or 0.",
           "minimum": 0,
           "type": "integer"
+        },
+        "mptcp": {
+          "description": "Listen the RTSP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.",
+          "type": "boolean"
         },
         "play_wait": {
           "description": "How long a player may outlive its stream's publisher, waiting for the next one. A player ends with its publisher when left out.",
@@ -2465,6 +2489,10 @@
           "description": "The largest message a TCP or TLS client may send, and so what its connection buffers of one not yet whole; a connection whose next message claims more is closed. At least 2048. 8 KiB when left out or 0. A change starts a new server.",
           "minimum": 0,
           "type": "integer"
+        },
+        "mptcp": {
+          "description": "Listen listen_tcp and listen_tls with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; listen's UDP sockets have none. A change of it starts a new server and drains the old one.",
+          "type": "boolean"
         },
         "nonce_lifetime": {
           "default": "10m",

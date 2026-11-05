@@ -9,7 +9,9 @@ unless `allowed_peers` lists them, and `relay_ip` itself is reached on the relay
 or on a port `allowed_peers` names with it. Users, the secret, the peer lists, the quotas, the
 lifetimes, `user_bandwidth` and the certificates change on reload with the allocations kept; a
 change of the addresses starts a new server and drains the old one, and a change of the rest
-starts the server again.
+starts the server again. `mptcp` carries the connections of `listen_tcp` and `listen_tls` over
+Multipath TCP where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to
+plain TCP; off by default, and `listen`'s UDP sockets have none.
 
 `media` makes fit a media server, an SFU, for the [`whip`](#whip) and [`whep`](#whep) handlers:
 one UDP port, `listen`, that every PeerConnection shares, told to peers as `public_ips` behind a

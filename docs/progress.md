@@ -5596,3 +5596,65 @@ the HTTP redirect — and the per-port features out of the Listeners page.
   pages is two entries (cache zones / cached routes, streaming config / each handler's routes); the
   port's bound address and the status-failure note are in the row's title, not visible; the menu keeps
   as many ports as the config has, which is long for a config with dozens of listeners.
+
+### Multipath TCP as a listener's option — done
+
+What the user asked for: a listener may opt in to Multipath TCP, off by default, on the config's
+`listeners`, the Admin API and its console, a role's console, streaming's RTMP and RTSP listeners and
+TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain TCP.
+
+- **fib** ([A63](fib-api-requests.md#a63-multipath-tcp-as-a-listeners-option)):
+  `fib.Binding.MultipathTCP` between `Addrs` and `Handler`. A TCP binding with it listens as
+  `IPPROTO_MPTCP` (262) on Linux 5.6+ where `net.mptcp.enabled` is set, on the claim socket a spread
+  listener uses for its port, on every per-poller socket and on prefork children's copies, and falls
+  back to plain TCP per socket on any error; a peer without it falls back in the handshake. UDP and
+  Unix bindings are unaffected, other platforms listen plain TCP, and bind, listen and `SO_REUSEPORT`
+  errors are still returned. fit moved to the commit by hash ([rule 19](rules.md#9-the-fib-version)).
+- **Config** (`config/config.go`, `config/apps.go`, `config/streaming.go`, `config/webrtc.go`):
+  `mptcp` on `listeners[]`, `admin`, `admin.console`, `config.RoleConsole` (whose `Console()` carries
+  it to its console's binding, as `admin.console`'s does), `streaming.rtmp`, `streaming.rtsp` and
+  `webrtc.turn`, each with its `doc` tag and off by default; `config/validate.go` refuses it on a
+  listener that takes UDP alone and on a TURN server with neither `listen_tcp` nor `listen_tls`,
+  which have no TCP connection for it to carry.
+- **Runtime and listeners** (`runtime/graph.go`, `listener/listener.go`): `runtime.Listener.MPTCP`;
+  a listener binding's identity includes it, so a reload that changes it makes a new binding, a
+  listening socket's transport being fixed once it is made, and both `fib.Binding` literals pass it;
+  `udp` listeners and HTTP/3 pass none.
+- **Admin API and consoles** (`admin/server.go`, `admin/console.go`, `app/console/console.go`,
+  `internal/nettcp`): the Admin API listens through `internal/nettcp`, renamed from `internal/plaintcp`
+  and now `Listen(network, address, multipathTCP bool)`, so that a plain-TCP listener never takes
+  Multipath TCP from Go 1.24's `net.Listen`, which opens one wherever `GODEBUG=multipathtcp` allows;
+  the console and role consoles bind on the engine through `app/console`, which passes the console's
+  `mptcp`.
+- **Streaming and TURN** (`streaming/listeners.go`, `webrtc/turn/turn.go`): RTMP and RTSP pass it to
+  their `bindTCP` and include it in their listener keys, and TURN's static key includes it, so a change
+  restarts that listener or starts a new TURN server and drains the old one; SRT and TURN's `listen`
+  are UDP and take none.
+- **Workbench** (`app/workbench/web/gateway/engine.js`, `schema-zh.js`): the Engine menu tags a port
+  that has `mptcp` (MPTCP in both languages), and the seven schema descriptions have their Chinese.
+- **Docs**: a Multipath TCP bullet in the Listeners chapter and a sentence where the Admin API,
+  streaming and WebRTC chapters describe their listeners; the Chinese reference's Listeners, Admin,
+  Streaming and WebRTC rows and the configuration page's listeners row; A63 in both API-request
+  files; the schema and the reference, with their Chinese twin, regenerated.
+- **Tests**: fib's `go test -race -count=1 ./...` passed on macOS, with gofmt, `go vet` for
+  linux/darwin/windows/freebsd and staticcheck for linux/darwin/windows clean; fib's Linux-only tests
+  ran on the benchmark host (Linux 7.0.0-38-generic, 16 CPUs, `net.mptcp.enabled`=1, no Go there:
+  cross-compiled test binaries over ssh): `TestMultipathTCPListener` (single loop, pollers,
+  pollers+reuseport), `TestMultipathTCPDefaultIsPlainTCP`, `TestMultipathTCPAddBinding`,
+  `TestMultipathTCPClaimedPort` and `TestBindingMultipathTCPServesAPlainClient`. fit's `go test -race`
+  on the touched packages passed locally on macOS, the kernel-dependent tests skipping where MPTCP is
+  unavailable, and the Linux cross-compiled binaries of the touched packages passed on the same host:
+  `listener` (`TestListenerMPTCP`, `TestListenerReloadMPTCP`), `admin` (`TestAdminMPTCP`,
+  `TestAdminConsoleMPTCP`), `app/console` (`TestConsoleMPTCP`), `streaming` (`TestStreamingMPTCP` and
+  its `...Off` and `...Restart`), `webrtc/turn` (`TestTURNMPTCP` and its `...Off` and `...Restart`),
+  `internal/nettcp` and `internal/mptcptest`; the workbench's `TestSchemaZh` passes.
+- **Benchmark**: none; the change is off the hot path (a listener's socket protocol is chosen when it
+  is opened, and no per-connection or per-request work is added).
+- **Gaps**: the tunnel's and LLM feature's own link listeners (their hubs', nodes' and proxies', and
+  the mesh) stay plain TCP, out of this change's scope; Multipath TCP is Linux-only, a peer or client
+  without it silently falls back, and there is no config to require it; the workbench only gained an
+  Engine-menu tag, with no browser run for it; the Admin API's own listener goes through
+  `net.ListenConfig` rather than a fib binding, so its socket handling stays fit's; and the plain-TCP
+  default is the CVE-2026-98432 hardening of `24dba02`: an MPTCP listener is what the published
+  exploit of that kernel IPv4 TCP use-after-free needs on its target, so an operator who sets `mptcp`
+  on an unpatched kernel takes that exposure.

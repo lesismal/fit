@@ -125,6 +125,12 @@ type Listener struct {
 	Name      string
 	Address   string
 	Protocols []string
+	// MPTCP, when set, has the listener's TCP connections made with
+	// Multipath TCP where the kernel offers it (Linux 5.6+,
+	// net.mptcp.enabled), falling back to plain TCP where it does not; a
+	// listener without it is plain TCP, whatever GODEBUG says. Its HTTP/3,
+	// which is UDP, has none.
+	MPTCP bool
 	// Certificates picks the certificate of each TLS handshake, or is nil
 	// for a listener in the clear.
 	Certificates tlsmgr.Manager
@@ -306,7 +312,7 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	// The listeners written, or those HTTPS by default makes.
 	listeners, redirect := c.Effective()
 	for _, lc := range listeners {
-		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols, RedirectHTTPS: redirect[lc.Name],
+		l := &Listener{Name: lc.Name, Address: lc.Address, Protocols: lc.Protocols, MPTCP: lc.MPTCP, RedirectHTTPS: redirect[lc.Name],
 			MaxHeaderBytes: c.Limits.HeaderBytes(), MaxBodyBytes: c.Limits.BodyBytes()}
 		if len(l.Protocols) == 0 {
 			l.Protocols = config.DefaultProtocols

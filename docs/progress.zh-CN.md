@@ -3983,3 +3983,48 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **差距**：第三级只有链接（引擎没有自己的页面；点击端口头部只切换展开）；SOCKS/TCP/UDP 端口不显示路由条目（不提供 HTTP）；
   一个功能有两处页面时是两个条目（缓存区/缓存的路由、流媒体配置/各处理器路由）；端口的实际绑定地址与 status 读取失败提示在行的
   title 中而不可见；端口很多时菜单会很长。
+
+### 多路径 TCP 作为监听器的选项 — 已完成
+
+用户的要求：监听器可以选用多路径 TCP，默认关闭；可用的位置是配置的 `listeners`、Admin API 及其控制台、角色的控制台、
+流媒体的 RTMP 与 RTSP 监听，以及 TURN 的 TCP 与 TLS 监听；没有多路径 TCP 的对端回退到普通 TCP。
+
+- **fib**（[A63](fib-api-requests.zh-CN.md#a63多路径-tcp-作为监听器的选项)）：`fib.Binding.MultipathTCP`，位于 `Addrs` 与
+  `Handler` 之间。设置它的 TCP binding 在 Linux 5.6+ 且设置了 `net.mptcp.enabled` 处以 `IPPROTO_MPTCP`（262）监听，用于
+  spread 监听器占端口的 claim 套接字、每个 poller 的套接字与 prefork 子进程的副本，任何错误都按套接字回退到普通 TCP；
+  没有多路径 TCP 的对端在握手时回退。UDP 与 Unix binding 不受影响，其他平台监听普通 TCP，bind、listen 与 `SO_REUSEPORT`
+  的错误照旧返回。fit 已按哈希移到该提交（[规则 19](rules.zh-CN.md#九fib-版本)）。
+- **配置**（`config/config.go`、`config/apps.go`、`config/streaming.go`、`config/webrtc.go`）：`listeners[]`、`admin`、
+  `admin.console`、`config.RoleConsole`（其 `Console()` 把它带给该控制台的 binding，与 `admin.console` 的相同）、`streaming.rtmp`、
+  `streaming.rtsp` 与 `webrtc.turn` 上的 `mptcp`，各带 `doc` 标签，默认关闭；`config/validate.go` 拒绝只在 UDP 上监听的
+  监听器上的它，以及既没有 `listen_tcp` 也没有 `listen_tls` 的 TURN 服务器上的它，因为那里没有可承载它的 TCP 连接。
+- **运行图与监听器**（`runtime/graph.go`、`listener/listener.go`）：`runtime.Listener.MPTCP`；监听 binding 的身份包含它，
+  所以重载改动它时会建立新的 binding（监听套接字的传输方式一旦建立即固定），两个 `fib.Binding` 字面量都传入它；`udp` 监听器
+  与 HTTP/3 不传。
+- **Admin API 与控制台**（`admin/server.go`、`admin/console.go`、`app/console/console.go`、`internal/nettcp`）：Admin API 经
+  `internal/nettcp` 监听，该包由 `internal/plaintcp` 改名而来，现在是 `Listen(network, address, multipathTCP bool)`，使普通
+  TCP 监听不会从 Go 1.24 的 `net.Listen` 那里意外拿到多路径 TCP——后者在 `GODEBUG=multipathtcp` 允许处会打开它；控制台与
+  角色控制台经 `app/console` 绑定到引擎，由它传入控制台的 `mptcp`。
+- **流媒体与 TURN**（`streaming/listeners.go`、`webrtc/turn/turn.go`）：RTMP 与 RTSP 把它传给各自的 `bindTCP` 并计入监听
+  key，TURN 的 static key 也计入它，因此改动会重启该监听器，或启动新的 TURN 服务器并排空旧的；SRT 与 TURN 的 `listen` 是
+  UDP，不取它。
+- **workbench**（`app/workbench/web/gateway/engine.js`、`schema-zh.js`）：引擎菜单为带 `mptcp` 的端口加上标记（两种语言都是
+  MPTCP），七个 schema 描述有了中文。
+- **文档**：监听器一章新增多路径 TCP 一节，Admin API、流媒体与 WebRTC 章在描述各自监听器处各加一句；中文参考的监听器、
+  Admin API、流媒体与 WebRTC 行，以及配置页的监听器行；两个 API 请求文件中加入 A63；schema、参考及其中文版重新生成。
+- **测试**：fib 在 macOS 上 `go test -race -count=1 ./...` 通过，gofmt、linux/darwin/windows/freebsd 的 `go vet` 与
+  linux/darwin/windows 的 staticcheck 干净；fib 的 Linux-only 测试在压测机上运行（Linux 7.0.0-38-generic，16 CPU，
+  `net.mptcp.enabled`=1，机器上没有 Go：交叉编译测试二进制后经 ssh 运行）：`TestMultipathTCPListener`（单 event loop、
+  pollers、pollers+reuseport）、`TestMultipathTCPDefaultIsPlainTCP`、`TestMultipathTCPAddBinding`、
+  `TestMultipathTCPClaimedPort` 与 `TestBindingMultipathTCPServesAPlainClient`。fit 在 macOS 本地对改动的包跑
+  `go test -race` 通过，依赖内核的测试在不可用处跳过；同一压测机上运行改动的包的 Linux 交叉编译二进制也通过：
+  `listener`（`TestListenerMPTCP`、`TestListenerReloadMPTCP`）、`admin`（`TestAdminMPTCP`、`TestAdminConsoleMPTCP`）、
+  `app/console`（`TestConsoleMPTCP`）、`streaming`（`TestStreamingMPTCP` 及其 `...Off`、`...Restart`）、`webrtc/turn`
+  （`TestTURNMPTCP` 及其 `...Off`、`...Restart`）、`internal/nettcp` 与 `internal/mptcptest`；workbench 的 `TestSchemaZh`
+  通过。
+- **基准**：无；改动不在热路径上（监听套接字的协议在打开时选定，没有增加任何按连接或按请求的工作）。
+- **差距**：tunnel 与 LLM 功能自身的链路监听（各 hub、node、proxy 以及 mesh）仍为普通 TCP，不在本次范围内；多路径 TCP 仅在
+  Linux 上可用，没有它的客户端或对端会静默回退，且没有要求必须使用它的配置；workbench 只增加了引擎菜单标记，没有为它做浏览器
+  运行；Admin API 自身的监听走 `net.ListenConfig` 而不是 fib binding，其套接字处理仍由 fit 自己负责；此外，普通 TCP 的默认值
+  正是 `24dba02` 针对 CVE-2026-98432 的加固：该内核 IPv4 TCP 释放后使用漏洞的公开利用需要目标上有 MPTCP 监听，因此在未打补丁
+  的内核上开启 `mptcp` 的运维者会承担这一暴露面。

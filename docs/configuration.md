@@ -95,7 +95,7 @@ More: the [JSON reference](reference/json.md).
 
 | Part | What it is | Reference |
 | --- | --- | --- |
-| `listeners` | Addresses and protocols; made by HTTPS by default when left out | [Listeners](reference/config.md#listeners) |
+| `listeners` | Addresses and protocols; made by HTTPS by default when left out; each may opt into Multipath TCP where the kernel offers it, off by default | [Listeners](reference/config.md#listeners) |
 | `routes` | A match, middleware and a handler for each kind of request | [Routes](reference/config.md#routes) |
 | `upstreams` | Servers to proxy to, balanced and health checked | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP and UDP proxying | [Services](reference/config.md#services) |

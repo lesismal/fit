@@ -139,6 +139,13 @@ by `name`; a route that names none serves every listener.
   listener serves. `client_auth` asks clients for certificates (mutual TLS).
 - **Behind a proxy.** `proxy_protocol` takes the PROXY protocol header from the proxies it trusts,
   and serves each connection as from the client the header names.
+- **Multipath TCP.** `mptcp` carries the listener's TCP connections over Multipath TCP where the
+  kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP where it does
+  not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP, which
+  is also what the hardening after CVE-2026-98432's published exploit (`24dba02`) left, an MPTCP
+  listener being what that exploit of a use-after-free in the kernel's IPv4 TCP handshake needs on its
+  target; the kernel bug is the kernel's to fix, and setting `mptcp` on an unpatched kernel takes that
+  exposure. `udp` listeners and HTTP/3 take none, having no paths.
 
 In a .conf file:
 
@@ -221,6 +228,7 @@ In JSON:
 | `name` | string |  | Required. A name unique among the listeners, by which routes refer to this one. |
 | `address` | string |  | Required. The host and port to listen on, as in ":8080" or "127.0.0.1:8080". |
 | `protocols` | list of string: `http/1.1`, `h2c`, `h2`, `h3`, `tcp`, `udp`, `socks` |  | The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); tcp, raw TCP, whose connections the services that list the listener proxy to their upstreams; socks, a SOCKS5 and SOCKS4 forward proxy, as socks says; or udp alone, whose datagrams a service proxies. A listener that serves more than one of HTTP, tcp and socks tells them apart on its port by what a client sends first: a TLS ClientHello goes to the service whose server_names hold its name, or else, with tls, is served HTTPS, or else goes to the service without server_names; a SOCKS greeting to socks; an HTTP request, in the clear, to HTTP; and whatever else to the service without server_names, or it is closed. A client that waits for the server to speak first is closed after 10s: such a protocol needs a listener of its own. http/1.1 alone when left out, or http/1.1 and h2 with tls. |
+| `mptcp` | boolean |  | Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and HTTP/3 take none. |
 | `tls` | [object](#config-tls) |  | Serve TLS, with these certificates: the listener's HTTP is HTTPS. |
 | `socks` | [object](#config-forwardproxy) |  | Who may use the listener's socks, and where it connects them: needed with socks. It serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE. |
 | `proxy_protocol` | [object](#config-proxyprotocol) |  | Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none. |
@@ -1133,7 +1141,9 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out. Read when fit starts.
+off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
+where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
+off by default, and a Unix socket has no paths.
 
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
@@ -1141,7 +1151,8 @@ When the store does not exist yet, the rest of the file is its first content. `f
 and `fit store import` read and write it. `admin.console` serves the console, web pages behind a
 user name and password from which every part of the config but `admin` is changed, with a form
 made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
-`key_file`. See [the console and the store](../console.md) and
+`key_file`. Its `mptcp` does the same for the console's listener. See
+[the console and the store](../console.md) and
 [decision 027](../decisions/027-console-and-store.md).
 
 In a .conf file:
@@ -1211,6 +1222,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:2019"` | Where the Admin API listens: a host and port, or "unix/" and the path of a Unix socket, as in "unix//run/fit/admin.sock". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out. |
+| `mptcp` | boolean |  | Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths. |
 | `token_file` | string |  | A file holding a token that every request must carry, as "Authorization: Bearer <token>"; no token is asked for when left out. |
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
@@ -1237,6 +1249,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string | `"127.0.0.1:2020"` | The host and port the console listens on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020 when left out. |
+| `mptcp` | boolean |  | Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `cert_file` | string |  | A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS. |
 | `key_file` | string |  | A PEM file with the certificate's private key. |
 | `users` | list of [object](#config-consoleuser) |  | Required. Who may log in: at least one user. |
@@ -1630,6 +1643,7 @@ Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.n
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The host and port the pages listen on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. |
+| `mptcp` | boolean |  | Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `cert_file` | string |  | A PEM file with the pages' certificate, followed by any intermediates; with key_file, the pages are served over TLS. |
 | `key_file` | string |  | A PEM file with the certificate's private key. |
 | `users` | list of [object](#config-consoleuser) |  | Required. Who may log in: at least one user. |
@@ -2038,7 +2052,9 @@ unless `allowed_peers` lists them, and `relay_ip` itself is reached on the relay
 or on a port `allowed_peers` names with it. Users, the secret, the peer lists, the quotas, the
 lifetimes, `user_bandwidth` and the certificates change on reload with the allocations kept; a
 change of the addresses starts a new server and drains the old one, and a change of the rest
-starts the server again.
+starts the server again. `mptcp` carries the connections of `listen_tcp` and `listen_tls` over
+Multipath TCP where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to
+plain TCP; off by default, and `listen`'s UDP sockets have none.
 
 `media` makes fit a media server, an SFU, for the [`whip`](#whip) and [`whep`](#whep) handlers:
 one UDP port, `listen`, that every PeerConnection shares, told to peers as `public_ips` behind a
@@ -2204,6 +2220,7 @@ In JSON:
 | `listen` | list of string |  | Required. The UDP addresses clients reach the server at, as in ":3478", the port TURN's turn: URIs default to. A change of listen, listen_tcp or listen_tls starts a new server and drains the old one. |
 | `listen_tcp` | list of string |  | TCP addresses clients reach the server at, as in ":3478", for clients on networks that block UDP: turn:host:3478?transport=tcp. Their allocations relay UDP, and end when their connection closes. |
 | `listen_tls` | list of string |  | TLS addresses clients reach the server at, as in ":5349" or ":443", with tls's certificates, for clients that only TLS gets through for: turns:host:5349?transport=tcp. As listen_tcp otherwise. |
+| `mptcp` | boolean |  | Listen listen_tcp and listen_tls with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; listen's UDP sockets have none. A change of it starts a new server and drains the old one. |
 | `tls` | [object](#config-turntls) |  | The certificates of listen_tls, from files, as a listener's tls.certificates has them, and watched as theirs are: a change applies to the next handshake. |
 | `realm` | string |  | Required. The realm of the credentials, sent in every challenge: clients derive their key from their name, the realm and their password. A change starts a new server, ending the allocations of the old one when they share an address and draining it otherwise. |
 | `users` | list of [object](#config-turnuser) |  | The users with fixed credentials. With secret, or alone; at least one of the two. |
@@ -2500,7 +2517,10 @@ the [`stream_whip`](#stream_whip) and [`stream_whep`](#stream_whep) handlers. Th
 [`httpflv`](#httpflv) and [`hls`](#hls) handlers play the hub's streams on routes. The hub holds
 at most `max_streams` streams and `max_players` players a stream, each stream keeping its latest
 group of pictures, up to `gop_cache_bytes`, so that a new player starts at once with a picture;
-each listener bounds its connections and the time a client may be idle.
+each listener bounds its connections and the time a client may be idle. `rtmp` and `rtsp` may
+take `mptcp`, to carry their TCP connections over Multipath TCP where the kernel offers it
+(Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP; off by default. SRT is UDP,
+so it takes none.
 
 Each listener names a [`media_auth`](#media-auth) policy with `auth`: RTMP takes a token, or a
 user and password, in the query of the stream name (`rtmp://host/live/cam?token=T`); RTSP takes
@@ -2663,6 +2683,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `listen` | string |  | Required. The TCP address RTMP clients connect to, as in ":1935". A change of any field but auth starts the listener again, closing its connections. |
+| `mptcp` | boolean |  | Listen the RTMP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `auth` | string |  | The media_auth policy a publish and a play must satisfy, by the stream's path, app/stream: credentials go in the query of the stream name or the app, as rtmp://host/live/cam?token=T or ?user=U&pass=P. A refusal is answered with NetStream.Publish.Unauthorized or NetStream.Play.Failed and the connection closed. Everyone may publish and play when left out. A change applies to the next publish and play. |
 | `max_conns` | integer, 0 or more | `1024` | The most connections at once; one more is closed as it opens. 1024 when left out or 0. |
 | `handshake_timeout` | duration | `"10s"` | How long a client may take from connecting to publishing or playing. 10s when left out. |
@@ -2677,6 +2698,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `listen` | string |  | Required. The TCP address RTSP clients connect to, as in ":8554". RTP goes interleaved on the same connection (RTP/AVP/TCP); a SETUP asking for UDP is answered 461, which ffmpeg and most players then retry over TCP. A change of any field but auth starts the listener again, closing its connections. |
+| `mptcp` | boolean |  | Listen the RTSP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default. |
 | `auth` | string |  | The media_auth policy ANNOUNCE and RECORD (publish) and DESCRIBE and PLAY (play) must satisfy, by the stream's path: a user with a plaintext password by Digest, a user by Basic when auth_methods offers it, or a token in the URL's query, as rtsp://host/live/cam?token=T. A refusal is 401 with the challenges, or 403. Everyone may publish and play when left out. A change applies to the next request. |
 | `auth_methods` | list of string: `digest`, `basic` |  | The schemes a 401 offers for users: digest, which needs a user's plaintext password, and basic, which sends the password in the clear and is the only one a password_hash user can use. ["digest"] when left out. |
 | `realm` | string | `"fit"` | The realm of the challenges, which Digest's response is computed with. fit when left out. |

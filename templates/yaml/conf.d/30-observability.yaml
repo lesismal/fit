@@ -158,6 +158,12 @@
   # # string; default "127.0.0.1:2019".
   # address: "127.0.0.1:2019"
 
+  # # Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+,
+  # # net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix
+  # # socket has no paths.
+  # # boolean.
+  # mptcp: true
+
   # # A file holding a token that every request must carry, as "Authorization: Bearer <token>"; no
   # # token is asked for when left out.
   # # string.
@@ -216,6 +222,11 @@
     # # when left out.
     # # string; default "127.0.0.1:2020".
     # address: "127.0.0.1:2020"
+
+    # # Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+,
+    # # net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+    # # boolean.
+    # mptcp: true
 
     # # A PEM file with the console's certificate, followed by any intermediates; with key_file, the
     # # console is served over TLS.

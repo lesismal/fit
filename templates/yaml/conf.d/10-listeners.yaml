@@ -41,6 +41,13 @@ listeners:
     # list of: http/1.1, h2c, h2, h3, tcp, udp, socks.
     protocols: ["http/1.1", "h2c"]
 
+    # Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux
+    # 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without
+    # Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and
+    # HTTP/3 take none.
+    # boolean.
+    # mptcp: true
+
     # Serve TLS, with these certificates: the listener's HTTP is HTTPS.
     # object.
     # tls:

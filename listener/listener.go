@@ -38,7 +38,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibconf"
-	"github.com/lesismal/fit/internal/plaintcp"
+	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
@@ -86,6 +86,10 @@ type binding struct {
 	// it anew.
 	proxyTrusted l4.Trusted
 	socks        string
+	// mptcp is whether its TCP connections were bound asking for Multipath
+	// TCP; a reload that changes it binds it anew, since a listening
+	// socket's transport is fixed once it is made.
+	mptcp bool
 	// addr is where it listens: its TCP address, or for HTTP/3 alone its
 	// UDP one; udpAddr is HTTP/3's.
 	addr    net.Addr
@@ -96,14 +100,16 @@ type binding struct {
 type certs struct{ tlsmgr.Manager }
 
 // same reports whether b can serve the listener l as it is: the same name,
-// address and protocols, and TLS or not as l has it. Its certificates may
-// differ: b takes on l's when it is kept.
+// address and protocols, and TLS or not as l has it, and the same limits,
+// proxy trust, SOCKS rules and Multipath TCP choice, each of which is fixed
+// in the binding. Its certificates may differ: b takes on l's when it is
+// kept.
 func (b *binding) same(l *runtime.Listener) bool {
 	return b.name == l.Name && b.address == l.Address && slices.Equal(b.protocols, l.Protocols) &&
 		(b.certs.Load() != nil) == (l.Certificates != nil) &&
 		b.maxHeaderBytes == l.MaxHeaderBytes && b.maxBodyBytes == l.MaxBodyBytes &&
 		slices.Equal(b.proxyTrusted, l.ProxyTrusted) && b.socks == l.SOCKS.Key() &&
-		b.clientAuth == clientAuthSum(l)
+		b.clientAuth == clientAuthSum(l) && b.mptcp == l.MPTCP
 }
 
 // clientAuthSum identifies how l verifies client certificates: zero for a
@@ -217,7 +223,8 @@ const maxPortZeroBinds = 8
 // bindOnce is bind's one try.
 func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 	b := &binding{index: -1, udpIndex: -1, name: l.Name, address: l.Address, protocols: l.Protocols,
-		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key()}
+		maxHeaderBytes: l.MaxHeaderBytes, maxBodyBytes: l.MaxBodyBytes, clientAuth: clientAuthSum(l), proxyTrusted: l.ProxyTrusted, socks: l.SOCKS.Key(),
+		mptcp: l.MPTCP}
 	var tlsConfig *tls.Config
 	if l.Certificates != nil {
 		b.certs.Store(&certs{l.Certificates})
@@ -240,7 +247,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 		}
 		h := &l4Listener{dispatcher: dispatcher{rt: s.rt, name: l.Name}}
 		var err error
-		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP}); err != nil {
 			return fail(err)
 		}
 		return b, nil
@@ -299,7 +306,7 @@ func (s *Server) bindOnce(l *runtime.Listener, shared bool) (*binding, error) {
 			h = l4.AcceptProxy(l.ProxyTrusted, h)
 		}
 		var err error
-		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h}); err != nil {
+		if b.index, b.addr, err = s.addBinding(fib.Binding{Addr: l.Address, Handler: h, MultipathTCP: l.MPTCP}); err != nil {
 			return fail(err)
 		}
 		// HTTP/3 goes on the port TCP got, which is the one Alt-Svc names.
@@ -530,7 +537,7 @@ func checkFree(address string) error {
 	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
 		return nil
 	}
-	ln, err := plaintcp.Listen("tcp", address)
+	ln, err := nettcp.Listen("tcp", address, false)
 	if err != nil {
 		return err
 	}

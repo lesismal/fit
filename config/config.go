@@ -214,6 +214,7 @@ const AdminUnixPrefix = "unix/"
 // Admin is where the Admin API listens, and who may use it.
 type Admin struct {
 	Address          string   `json:"address,omitempty" default:"\"127.0.0.1:2019\"" doc:"Where the Admin API listens: a host and port, or \"unix/\" and the path of a Unix socket, as in \"unix//run/fit/admin.sock\". The host must be a loopback address or localhost unless token_file is set. 127.0.0.1:2019 when left out."`
+	MPTCP            bool     `json:"mptcp,omitempty" doc:"Listen the Admin API with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; a Unix socket has no paths."`
 	TokenFile        string   `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
 	History          int      `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
 	MaxConfigBytes   int64    `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
@@ -266,6 +267,7 @@ const (
 // Console is where the console listens, and who may log in to it.
 type Console struct {
 	Address         string        `json:"address,omitempty" default:"\"127.0.0.1:2020\"" doc:"The host and port the console listens on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear. 127.0.0.1:2020 when left out."`
+	MPTCP           bool          `json:"mptcp,omitempty" doc:"Listen the console with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	CertFile        string        `json:"cert_file,omitempty" doc:"A PEM file with the console's certificate, followed by any intermediates; with key_file, the console is served over TLS."`
 	KeyFile         string        `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
 	Users           []ConsoleUser `json:"users" fit:"required" doc:"Who may log in: at least one user."`
@@ -513,6 +515,7 @@ type Listener struct {
 	Name          string         `json:"name" fit:"required" doc:"A name unique among the listeners, by which routes refer to this one."`
 	Address       string         `json:"address" fit:"required" doc:"The host and port to listen on, as in \":8080\" or \"127.0.0.1:8080\"."`
 	Protocols     []string       `json:"protocols,omitempty" enum:"http/1.1,h2c,h2,h3,tcp,udp,socks" doc:"The protocols served: http/1.1, h2c (HTTP/2 in the clear) and, with tls, h2 (HTTP/2 over TLS, chosen through ALPN) and h3 (HTTP/3 over QUIC, on the same port in UDP, announced to HTTP/1 and HTTP/2 clients with Alt-Svc); tcp, raw TCP, whose connections the services that list the listener proxy to their upstreams; socks, a SOCKS5 and SOCKS4 forward proxy, as socks says; or udp alone, whose datagrams a service proxies. A listener that serves more than one of HTTP, tcp and socks tells them apart on its port by what a client sends first: a TLS ClientHello goes to the service whose server_names hold its name, or else, with tls, is served HTTPS, or else goes to the service without server_names; a SOCKS greeting to socks; an HTTP request, in the clear, to HTTP; and whatever else to the service without server_names, or it is closed. A client that waits for the server to speak first is closed after 10s: such a protocol needs a listener of its own. http/1.1 alone when left out, or http/1.1 and h2 with tls."`
+	MPTCP         bool           `json:"mptcp,omitempty" doc:"Listen the listener's TCP connections with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP. udp listeners and HTTP/3 take none."`
 	TLS           *TLS           `json:"tls,omitempty" doc:"Serve TLS, with these certificates: the listener's HTTP is HTTPS."`
 	SOCKS         *ForwardProxy  `json:"socks,omitempty" doc:"Who may use the listener's socks, and where it connects them: needed with socks. It serves CONNECT, without authentication, and refuses BIND and UDP ASSOCIATE."`
 	ProxyProtocol *ProxyProtocol `json:"proxy_protocol,omitempty" doc:"Take a PROXY protocol header, of version 1 or 2, at the start of each connection from a trusted address, and serve the connection as from the client it names. For listeners of tcp and of HTTP over TCP; with tls the header comes before TLS. HTTP/3 takes none."`

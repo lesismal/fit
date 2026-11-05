@@ -12,6 +12,13 @@ by `name`; a route that names none serves every listener.
   listener serves. `client_auth` asks clients for certificates (mutual TLS).
 - **Behind a proxy.** `proxy_protocol` takes the PROXY protocol header from the proxies it trusts,
   and serves each connection as from the client the header names.
+- **Multipath TCP.** `mptcp` carries the listener's TCP connections over Multipath TCP where the
+  kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP where it does
+  not; a client without Multipath TCP falls back too. Off by default: a listener is plain TCP, which
+  is also what the hardening after CVE-2026-98432's published exploit (`24dba02`) left, an MPTCP
+  listener being what that exploit of a use-after-free in the kernel's IPv4 TCP handshake needs on its
+  target; the kernel bug is the kernel's to fix, and setting `mptcp` on an unpatched kernel takes that
+  exposure. `udp` listeners and HTTP/3 take none, having no paths.
 
 ```json
 {

@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/plaintcp"
+	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/listener"
 )
 
@@ -122,7 +122,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 			return nil, err
 		}
 	}
-	ln, err := plaintcp.Listen(network, address)
+	ln, err := nettcp.Listen(network, address, a.MPTCP)
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
 	}

@@ -71,7 +71,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
 	cs.api = inner.routes()
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
-	rc := &config.RoleConsole{Address: c.Addr(), CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
+	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 	cs.c, err = console.Start(engine, console.Options{
 		Config: rc, Cookie: sessionCookie, Pages: workbench.Pages(), Logf: logf,

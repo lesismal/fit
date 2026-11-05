@@ -19,7 +19,7 @@ import (
 	"github.com/lesismal/fib/webrtc"
 
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/plaintcp"
+	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/mediaauth"
 )
@@ -39,13 +39,15 @@ func (l *tcpListener) close(engine *fib.Engine) {
 	l.limit.closeAll()
 }
 
-// bindTCP binds address to h, at most max connections at once.
-func (s *Server) bindTCP(address string, h fib.Handler, max int) (*tcpListener, error) {
+// bindTCP binds address to h, at most max connections at once, listening
+// with Multipath TCP when mptcp is set: the member's own choice, off unless
+// it asks, whatever GODEBUG says. The free-port check is always plain TCP.
+func (s *Server) bindTCP(address string, h fib.Handler, max int, mptcp bool) (*tcpListener, error) {
 	if err := checkFree("tcp", address); err != nil {
 		return nil, err
 	}
 	limit := newConnLimit(h, max)
-	i, err := s.engine.AddBinding(fib.Binding{Addr: address, Handler: limit})
+	i, err := s.engine.AddBinding(fib.Binding{Addr: address, Handler: limit, MultipathTCP: mptcp})
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", address, err)
 	}
@@ -120,7 +122,7 @@ func checkFree(network, address string) error {
 		}
 		return pc.Close()
 	}
-	ln, err := plaintcp.Listen("tcp", address)
+	ln, err := nettcp.Listen("tcp", address, false)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
@@ -146,7 +148,7 @@ func (s *Server) applyRTMP(cfg *config.StreamRTMP) error {
 				PlayWait:         c.PlayWait.Std(),
 				MaxMessageSize:   c.MessageBytes(),
 			})
-			l, err := s.bindTCP(c.Listen, srv, c.Conns())
+			l, err := s.bindTCP(c.Listen, srv, c.Conns(), c.MPTCP)
 			if err != nil {
 				return nil, err
 			}
@@ -169,7 +171,7 @@ func (s *Server) applyRTMP(cfg *config.StreamRTMP) error {
 }
 
 func rtmpKey(c *config.StreamRTMP) string {
-	return fmt.Sprintf("%q %d %s %s %s %d", c.Listen, c.Conns(), c.Handshake(), c.Idle(), c.PlayWait.Std(), c.MessageBytes())
+	return fmt.Sprintf("%q %d %s %s %s %d %v", c.Listen, c.Conns(), c.Handshake(), c.Idle(), c.PlayWait.Std(), c.MessageBytes(), c.MPTCP)
 }
 
 // rtmpPublish decides an RTMP publish by the credentials of the query of
@@ -212,7 +214,7 @@ func (s *Server) applyRTSP(cfg *config.StreamRTSP) error {
 				IdleTimeout:    c.Idle(),
 				PlayWait:       c.PlayWait.Std(),
 			})
-			l, err := s.bindTCP(c.Listen, srv, c.Conns())
+			l, err := s.bindTCP(c.Listen, srv, c.Conns(), c.MPTCP)
 			if err != nil {
 				return nil, err
 			}
@@ -235,7 +237,7 @@ func (s *Server) applyRTSP(cfg *config.StreamRTSP) error {
 }
 
 func rtspKey(c *config.StreamRTSP) string {
-	return fmt.Sprintf("%q %d %s %s %s %q %q", c.Listen, c.Conns(), c.Session(), c.Idle(), c.PlayWait.Std(), c.Methods(), c.RealmName())
+	return fmt.Sprintf("%q %d %s %s %s %q %q %v", c.Listen, c.Conns(), c.Session(), c.Idle(), c.PlayWait.Std(), c.Methods(), c.RealmName(), c.MPTCP)
 }
 
 // srtListener is the SRT listener: a UDP binding of the engine.

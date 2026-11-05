@@ -3,7 +3,9 @@ The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `
 the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
 effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise, and needs `token_file` to listen anywhere but a loopback address. It is
-off when `admin` is left out. Read when fit starts.
+off when `admin` is left out. Read when fit starts. `mptcp` has it listen over Multipath TCP
+where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
+off by default, and a Unix socket has no paths.
 
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
@@ -11,7 +13,8 @@ When the store does not exist yet, the rest of the file is its first content. `f
 and `fit store import` read and write it. `admin.console` serves the console, web pages behind a
 user name and password from which every part of the config but `admin` is changed, with a form
 made from the schema and a JSON editor; off a loopback address it needs `cert_file` and
-`key_file`. See [the console and the store](../console.md) and
+`key_file`. Its `mptcp` does the same for the console's listener. See
+[the console and the store](../console.md) and
 [decision 027](../decisions/027-console-and-store.md).
 
 ```json

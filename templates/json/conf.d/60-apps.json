@@ -40,6 +40,11 @@
         // // string; required.
         // "address": "127.0.0.1:9000",
 
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
         // // string.
@@ -179,6 +184,11 @@
         // // and key_file, so that passwords never cross a network in the clear.
         // // string; required.
         // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
 
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
@@ -428,6 +438,11 @@
         // // and key_file, so that passwords never cross a network in the clear.
         // // string; required.
         // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
 
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
@@ -742,6 +757,11 @@
         // // string; required.
         // "address": "127.0.0.1:9000",
 
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
         // // string.
@@ -906,6 +926,11 @@
         // // and key_file, so that passwords never cross a network in the clear.
         // // string; required.
         // "address": "127.0.0.1:9000",
+
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
 
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
@@ -1104,6 +1129,11 @@
         // // string; required.
         // "address": "127.0.0.1:9000",
 
+        // // Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+,
+        // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+        // // boolean.
+        // "mptcp": true,
+
         // // A PEM file with the pages' certificate, followed by any intermediates; with key_file, the
         // // pages are served over TLS.
         // // string.
@@ -1172,6 +1202,12 @@
       // // otherwise.
       // // list of string.
       // "listen_tls": [],
+
+      // // Listen listen_tcp and listen_tls with Multipath TCP where the kernel offers it (Linux 5.6+,
+      // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default; listen's
+      // // UDP sockets have none. A change of it starts a new server and drains the old one.
+      // // boolean.
+      // "mptcp": true,
 
       // // The certificates of listen_tls, from files, as a listener's tls.certificates has them, and
       // // watched as theirs are: a change applies to the next handshake.
@@ -1631,6 +1667,11 @@
       // // string; required.
       // "listen": "",
 
+      // // Listen the RTMP connections with Multipath TCP where the kernel offers it (Linux 5.6+,
+      // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+      // // boolean.
+      // "mptcp": true,
+
       // // The media_auth policy a publish and a play must satisfy, by the stream's path, app/stream:
       // // credentials go in the query of the stream name or the app, as rtmp://host/live/cam?token=T
       // // or ?user=U&pass=P. A refusal is answered with NetStream.Publish.Unauthorized or
@@ -1673,6 +1714,11 @@
       // // closing its connections.
       // // string; required.
       // "listen": "",
+
+      // // Listen the RTSP connections with Multipath TCP where the kernel offers it (Linux 5.6+,
+      // // net.mptcp.enabled), falling back to plain TCP where it does not. Off by default.
+      // // boolean.
+      // "mptcp": true,
 
       // // The media_auth policy ANNOUNCE and RECORD (publish) and DESCRIBE and PLAY (play) must
       // // satisfy, by the stream's path: a user with a plaintext password by Digest, a user by Basic

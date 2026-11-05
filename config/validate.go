@@ -116,6 +116,9 @@ func (c *Config) Validate() Errors {
 				}
 			}
 		}
+		if l.MPTCP && slices.Equal(l.networks(), []string{"udp"}) {
+			add(l.At.Field("mptcp"), "Multipath TCP is for TCP connections; this listener takes UDP alone")
+		}
 		if t := l.TLS; t != nil {
 			switch {
 			case !emptyTLS(t):
@@ -150,6 +153,12 @@ func (c *Config) Validate() Errors {
 				names[strings.ToLower(name)] = true
 			}
 		}
+	}
+
+	// Multipath TCP is for a listener's TCP connections: a TURN server with
+	// no TCP or TLS listener has none for it to apply to.
+	if w := c.WebRTC; w != nil && w.TURN != nil && w.TURN.MPTCP && len(w.TURN.ListenTCP) == 0 && len(w.TURN.ListenTLS) == 0 {
+		add(w.TURN.At.Field("mptcp"), "Multipath TCP is for TCP connections; this TURN server has no listen_tcp or listen_tls to apply it to")
 	}
 
 	// l4 holds the listeners that serve tcp or udp, which services serve,

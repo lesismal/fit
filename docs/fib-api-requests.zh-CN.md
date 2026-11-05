@@ -73,6 +73,7 @@
 | A60 | 代理两个方向都按行转发头部块 | 已完成，fib 分支 `perf/header-blocks`（尚未进入 `main`） | 12 | — |
 | A61 | 移除 RTSP 服务器的 UDP 绑定 | 已提出 | 4, 11 | I116（030） |
 | A62 | 用 splice(2) 搬运代理的 HTTP/1.1 上传 | 已完成，fib `main` 的 `60d67aa` | 12 | — |
+| A63 | 多路径 TCP 作为监听器的选项 | 已完成，fib `5c0e5b9` | — | — |
 
 ## 证据
 
@@ -1473,3 +1474,54 @@ nginx 的四个 CPU），每请求 CPU 616 → 369 µs（-40%），p99 23.6 → 
 fit 所在 CPU 上的 perf：每请求 `_copy_to_iter` 665k → 36k cycles，`kernel_init_pages` 505k → 60k，`_copy_from_iter`
 148k → 26k；fit 每请求 2.95M → 1.74M cycles。W1（`api`）与 W0（`fixed`）在 HTTP/1.1、500 并发下均在噪声以内（每秒
 273k → 273k 与 680k → 681k 请求）。
+
+
+## A63：多路径 TCP 作为监听器的选项
+
+**状态。** 2026-11-05 为 fit 的监听器提出：客户端地址变化时（如手机在 Wi-Fi 与移动网络之间切换）连接不断。已在 fib 的
+`main` 的 `5c0e5b9`（`v1.7.1-0.20261105042253-5c0e5b925fc9`）完成，由 fit 的会话按
+[规则 15](rules.zh-CN.md#七fib-满足不了时) 实现；fit 已按[规则 19](rules.zh-CN.md#九fib-版本) 移到该提交。
+fib 在 `5c0e5b9` 上的 CI 已通过：所有作业全绿，其中 Windows 作业是重跑后通过的，第一次运行失败于 `webrtc.TestMedia` 的数据竞态（该测试与本次改动无关）。
+
+**问题。** fit 运行的每个 TCP 监听都是普通 TCP：配置的 `listeners`、Admin API、它的控制台与各角色的控制台、流媒体的 RTMP 与
+RTSP 监听，以及 TURN 的 TCP 与 TLS 监听。TCP 连接固定在建立它时的地址上：客户端地址一变，连接即断，其上的协议——TLS 与
+HTTP、RTMP、RTSP、TURN——都要重新开始。多路径 TCP 让一条连接同时走多条路径，由内核随地址的增减迁移，这正是移动客户端所需；
+fit 的用户希望按监听器开启它，其余默认关闭。fit 无法提供：所有监听套接字都由 fib 创建，fit 只给出 binding
+（`listener/listener.go` 中的两个 `fib.Binding` 字面量、`admin/server.go`、`app/console/console.go`、
+`streaming/listeners.go`、`webrtc/turn/turn.go`），而 `fib.Binding` 说明的是 network、地址与 handler，引擎说明其设置，没有
+任何描述监听套接字传输方式的东西。若由 fit 自己打开套接字，监听器就脱离了 fib 的事件循环、poller 与 prefork，还需要 fit 自己的
+accept 循环；[规则 1](rules.zh-CN.md#一不阻塞-worker) 两者都不允许。普通 TCP 的默认值不只是一个默认：前一次改动
+`24dba02`（"fit 经 net 打开的监听器一律是普通 TCP，绝不使用 MPTCP"）在 CVE-2026-98432 的公开利用出现后确定了它——该漏洞是
+内核 IPv4 TCP 握手中的释放后使用，而利用它正需要目标上有 MPTCP 监听；关闭多路径 TCP 从未修复这个内核缺陷，那要由内核来修，而在
+未打补丁的内核上设置 `mptcp` 的运维者会承担这一暴露面。
+
+**依据。** 在 Linux 5.6+ 且设置了 `net.mptcp.enabled` 时，`net.ListenConfig.SetMultipathTCP(true)` 得到 MPTCP 监听；自 Go 1.24
+起，`net.Listen` 在 `GODEBUG=multipathtcp` 允许处会直接打开这种监听。可见内核的能力只靠 net 包就能用到；而 fib 的 binding 走
+fib 自己的监听路径，没有这个选项，`fib.Binding` 也只有 `Network`、`Addr`、`Addrs` 与 `Handler`，其余属于引擎，任何 fit 配置
+都无法要求它。在压测机上（Linux 7.0.0-38-generic，16 CPU，`net.mptcp.enabled`=1），要求 MPTCP 的 net 监听与同样拨号的客户端
+得到端到端的 MPTCP 连接，即下文测试所用的组合。
+
+**建议的 API。** `Binding.MultipathTCP bool`，位于 `Addrs` 与 `Handler` 之间，默认关闭：设置时，fib 在 Linux 上由内核支持处
+以 `IPPROTO_MPTCP` 打开该 binding 的 TCP 监听套接字，不支持处按套接字回退到普通 TCP，与
+`net.ListenConfig.SetMultipathTCP(true)` 相同；binding 打开的每个套接字都如此，spread 监听器用来占端口的 claim 套接字、
+各 poller 的套接字以及 prefork 子进程的副本也不例外。UDP 与 Unix binding 不受影响，其他平台仍监听普通 TCP，bind、listen 或
+`SO_REUSEPORT` 的错误照旧返回。
+
+**实际实现。** 与建议一致：`fib.Binding.MultipathTCP` 位于 `Addrs` 与 `Handler` 之间。设置它的 TCP binding 在 Linux 5.6+ 且
+设置了 `net.mptcp.enabled` 处以 `IPPROTO_MPTCP`（262）监听，用于 spread 监听器占端口的 claim 套接字、每个 poller 的套接字
+以及 prefork 子进程的副本；任何套接字错误都回退到普通 TCP，与 `SetMultipathTCP(true)` 相同；没有多路径 TCP 的对端在握手时
+回退。它默认关闭，因此 binding 就是普通 TCP；UDP 与 Unix binding 不受影响；在 macOS、Windows 与各 BSD 上 binding 监听普通
+TCP；bind、listen 与 `SO_REUSEPORT` 的失败照旧返回，绝不吞掉。
+
+**fit 的使用方式。** 七个成员上有 `mptcp` 布尔值：`listeners[]`、`admin`、`admin.console`、角色的 `console`（tunnel 与 LLM
+功能的，`config.RoleConsole`，其 `Console()` 把它带给该控制台的 binding，与 `admin.console` 的相同）、`streaming.rtmp`、
+`streaming.rtsp` 与 `webrtc.turn`（它的 `listen_tcp` 与 `listen_tls`）。运行图的 `runtime.Listener.MPTCP` 到达
+`listener/listener.go` 中的两个 `fib.Binding` 字面量；监听 binding 的身份包含它，所以重载改动它时会建立新的 binding，因为
+监听套接字的传输方式一旦建立就固定不变；`udp` 监听器与 HTTP/3 没有该功能，校验会拒绝只在 UDP 监听器上的 `mptcp`，以及没有
+`listen_tcp` 或 `listen_tls` 的 TURN 服务器上的 `mptcp`。Admin API 不用 fib 的 binding：它经 `internal/nettcp`（由
+`internal/plaintcp` 改名而来）监听，即按配置要求把 `SetMultipathTCP` 打开或关闭的 `net.Listen`，因为 Go 1.24 的 `net.Listen`
+会在 `GODEBUG=multipathtcp` 允许处直接打开多路径 TCP 监听，而 fit 只在配置要求时提供它。控制台经 `app/console` 绑定到引擎，
+由它传入控制台的 `mptcp`。流媒体 RTMP 与 RTSP 的监听 key 与 TURN 的 static key 包含它，因此改动会重启该监听器，或启动新的
+TURN 服务器并排空旧的。tunnel 与 LLM 功能自身的链路监听仍为普通 TCP：它们的 fib binding 有同样的选项，但 fit 的配置在那里
+还没有 `mptcp`。没有多路径 TCP 的客户端或对端回退到普通 TCP，也没有要求必须使用它的配置；Unix 套接字与 UDP 没有该功能。
+workbench 的引擎菜单会为带它的端口加上标记。

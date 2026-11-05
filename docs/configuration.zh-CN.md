@@ -86,7 +86,7 @@ fit 的原生格式，严格读取：未知字段、类型错误的值、重复�
 
 | 部分 | 是什么 | 参考 |
 | --- | --- | --- |
-| `listeners` | 地址和协议；不写时由默认 HTTPS 生成 | [Listeners](reference/config.md#listeners) |
+| `listeners` | 地址和协议；不写时由默认 HTTPS 生成；每个监听器可在内核支持时选用多路径 TCP（Multipath TCP），默认关闭 | [Listeners](reference/config.md#listeners) |
 | `routes` | 每类请求的匹配条件、中间件和处理器 | [Routes](reference/config.md#routes) |
 | `upstreams` | 被代理的服务器，带负载均衡和健康检查 | [Upstreams](reference/config.md#upstreams) |
 | `services` | TCP 和 UDP 代理 | [Services](reference/config.md#services) |

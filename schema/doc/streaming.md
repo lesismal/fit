@@ -6,7 +6,10 @@ the [`stream_whip`](#stream_whip) and [`stream_whep`](#stream_whep) handlers. Th
 [`httpflv`](#httpflv) and [`hls`](#hls) handlers play the hub's streams on routes. The hub holds
 at most `max_streams` streams and `max_players` players a stream, each stream keeping its latest
 group of pictures, up to `gop_cache_bytes`, so that a new player starts at once with a picture;
-each listener bounds its connections and the time a client may be idle.
+each listener bounds its connections and the time a client may be idle. `rtmp` and `rtsp` may
+take `mptcp`, to carry their TCP connections over Multipath TCP where the kernel offers it
+(Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP; off by default. SRT is UDP,
+so it takes none.
 
 Each listener names a [`media_auth`](#media-auth) policy with `auth`: RTMP takes a token, or a
 user and password, in the query of the stream name (`rtmp://host/live/cam?token=T`); RTSP takes

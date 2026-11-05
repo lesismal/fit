@@ -12,10 +12,10 @@
 // (SetLimits), the peer rules and the bandwidth (read through an atomic
 // pointer on every request) and the TLS certificates (read on every
 // handshake). A change of what fib's server is made with, its addresses,
-// realm, relay addresses, nonce secret or stream bounds, starts a new
-// server: beside the old one, which drains for the listeners' drain timeout
-// while its allocations run out, or, when the two share an address, after
-// the old one has closed.
+// realm, relay addresses, nonce secret, Multipath TCP or stream bounds,
+// starts a new server: beside the old one, which drains for the listeners'
+// drain timeout while its allocations run out, or, when the two share an
+// address, after the old one has closed.
 package turn
 
 import (
@@ -40,7 +40,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
-	"github.com/lesismal/fit/internal/plaintcp"
+	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/tlsmgr"
@@ -246,7 +246,7 @@ func (s *Server) Apply(member any) error {
 		}
 		s.cur = next
 		s.restarts.Add(1)
-		s.log.Warnf("listens on %s, relaying from %s; the server started again on the same addresses for a change of its realm, relay addresses, nonce secret or stream bounds, ending its allocations", s.cur.describe(), relayFrom(cfg))
+		s.log.Warnf("listens on %s, relaying from %s; the server started again on the same addresses for a change of its realm, relay addresses, nonce secret, Multipath TCP or stream bounds, ending its allocations", s.cur.describe(), relayFrom(cfg))
 		return nil
 	}
 	next, err := s.start(cfg, key, auth)
@@ -345,7 +345,7 @@ func (s *Server) start(cfg *config.TURNServer, key string, auth fibturn.AuthFunc
 	}
 	srv.Start(s.engine, i)
 	if len(cfg.ListenTCP) > 0 {
-		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTCP), Handler: srv.StreamHandler()})
+		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTCP), Handler: srv.StreamHandler(), MultipathTCP: cfg.MPTCP})
 		if err != nil {
 			return fail(fmt.Errorf("listen_tcp on %s: %w", strings.Join(cfg.ListenTCP, ", "), err))
 		}
@@ -356,7 +356,7 @@ func (s *Server) start(cfg *config.TURNServer, key string, auth fibturn.AuthFunc
 	}
 	if len(cfg.ListenTLS) > 0 {
 		h := fibtls.NewServer(tlsmgr.StreamConfig(s.getCertificate), srv.StreamHandler())
-		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTLS), Handler: h})
+		i, err := s.engine.AddBinding(fib.Binding{Network: "tcp", Addrs: slices.Clone(cfg.ListenTLS), Handler: h, MultipathTCP: cfg.MPTCP})
 		if err != nil {
 			return fail(fmt.Errorf("listen_tls on %s: %w", strings.Join(cfg.ListenTLS, ", "), err))
 		}
@@ -436,7 +436,7 @@ func checkFree(cfg *config.TURNServer, old *running) error {
 			}
 			return pc.Close()
 		}
-		l, err := plaintcp.Listen(network, a)
+		l, err := nettcp.Listen(network, a, false)
 		if err != nil {
 			return fmt.Errorf("listen on tcp %s: %w", a, err)
 		}
@@ -496,10 +496,12 @@ func (r *running) describe() string {
 
 // staticKey identifies what fib's server is made with: two members with
 // the same key are served by the same server, their other settings changed
-// in place.
+// in place. mptcp is in it because it is fixed when a binding is made, as
+// the addresses, realm, relay addresses, nonce secret and stream bounds
+// are: changing it needs a new server, never a setting on the old one.
 func staticKey(c *config.TURNServer) string {
-	return fmt.Sprintf("%q %q %q %q %q %q %d-%d %q %d %v", c.Listen, c.ListenTCP, c.ListenTLS, c.Realm, c.RelayIP, c.PublicIP,
-		c.PortMin, c.PortMax, c.NonceSecret, c.StreamMessage(), c.StreamIdle())
+	return fmt.Sprintf("%q %q %q %q %q %q %d-%d %q %d %v %v", c.Listen, c.ListenTCP, c.ListenTLS, c.Realm, c.RelayIP, c.PublicIP,
+		c.PortMin, c.PortMax, c.NonceSecret, c.StreamMessage(), c.StreamIdle(), c.MPTCP)
 }
 
 // limits are the lifetimes and quotas of c, which a reload changes in
@@ -736,7 +738,7 @@ func (s *Server) WriteMetrics(w observe.MetricWriter) {
 	}
 	counter("fit_turn_auth_failures_total", "Requests whose credentials failed: a wrong user, password or realm, or incomplete ones.", s.ev.authFailed.Load())
 	counter("fit_turn_peers_refused_total", "Permissions and channels refused for a peer the rules refuse: denied_peers, the default denial of internal addresses, or fit's own address on a port that is not a relayed one.", s.ev.refused[slices.Index(refusedCodes[:], 403)].Load())
-	counter("fit_turn_restarts_total", "Times a config's change of the TURN server's addresses, realm, relay addresses, nonce secret or stream bounds started a new server.", s.restarts.Load())
+	counter("fit_turn_restarts_total", "Times a config's change of the TURN server's addresses, realm, relay addresses, nonce secret, Multipath TCP or stream bounds started a new server.", s.restarts.Load())
 }
 
 func addrList(addrs []net.Addr) string {

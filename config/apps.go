@@ -41,6 +41,7 @@ func (c *Config) HasApps() bool {
 // served on the listeners' engine.
 type RoleConsole struct {
 	Address         string        `json:"address" fit:"required" doc:"The host and port the pages listen on. A host that is not a loopback address needs cert_file and key_file, so that passwords never cross a network in the clear."`
+	MPTCP           bool          `json:"mptcp,omitempty" doc:"Listen the pages with Multipath TCP where the kernel offers it (Linux 5.6+, net.mptcp.enabled), falling back to plain TCP where it does not. Off by default."`
 	CertFile        string        `json:"cert_file,omitempty" doc:"A PEM file with the pages' certificate, followed by any intermediates; with key_file, the pages are served over TLS."`
 	KeyFile         string        `json:"key_file,omitempty" doc:"A PEM file with the certificate's private key."`
 	Users           []ConsoleUser `json:"users" fit:"required" doc:"Who may log in: at least one user."`
@@ -54,7 +55,7 @@ type RoleConsole struct {
 
 // Console returns c as an admin.console, for what the two share.
 func (c *RoleConsole) Console() *Console {
-	return &Console{Address: c.Address, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
+	return &Console{Address: c.Address, MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
 }
 
