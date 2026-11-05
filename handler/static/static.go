@@ -26,6 +26,11 @@
 // removed from it. A path with a ".." segment, a NUL or a backslash is
 // refused with 400, so a request cannot name a file outside the root by its
 // path; symbolic links under the root are followed, wherever they lead. A
+// path with a segment that starts with a dot, a dotfile such as .git/config,
+// .env or .htpasswd, or a file in a dot directory, is answered 404, as a file
+// not there is, but for /.well-known/ under the root, unless dotfiles is
+// allow; the same holds for try_files candidates and index files, and
+// listings leave dotfiles out whatever dotfiles says. A
 // directory is served by its first index file, and a directory asked for
 // without a trailing slash is redirected to the path with one, as nginx and
 // Caddy do. Only GET and HEAD are served; other methods get 405.
@@ -47,6 +52,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/dotfile"
 	"github.com/lesismal/fit/internal/filepool"
 	"github.com/lesismal/fit/module"
 )
@@ -73,11 +79,13 @@ type Static struct {
 	TryFiles      []string `json:"try_files,omitempty" doc:"Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; [\"{path}\", \"{path}/\", \"/index.html\"] serves a single-page app. A directory asked for without its slash is not redirected then."`
 	Browse        bool     `json:"browse,omitempty" doc:"List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out."`
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
+	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. deny when left out."`
 
 	CheckInterval config.Duration `json:"check_interval,omitempty" default:"\"1s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out."`
 
 	root          string
 	index         []string
+	hideDotfiles  bool
 	precompressed []encoding
 	cache         cache
 	stall         time.Duration
@@ -102,9 +110,13 @@ func (s *Static) Provision(ctx *module.Context) error {
 	if s.Index == nil {
 		s.index = []string{"index.html"}
 	}
+	s.hideDotfiles = s.Dotfiles != dotfile.Allow
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)
+		}
+		if s.hideDotfiles && strings.HasPrefix(name, ".") {
+			return ctx.Errorf("index", "%q starts with a dot, which dotfiles deny hides; set dotfiles to allow to serve it", name)
 		}
 	}
 	for _, name := range s.Precompressed {
@@ -113,6 +125,9 @@ func (s *Static) Provision(ctx *module.Context) error {
 	for i, t := range s.TryFiles {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
+		}
+		if s.hideDotfiles && dotfile.Hidden(strings.ReplaceAll(t, "{path}", "/x")) {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a path with a segment starting with a dot, which dotfiles deny hides; set dotfiles to allow to serve it", t)
 		}
 	}
 	if s.StripPrefix != "" && !strings.HasPrefix(s.StripPrefix, "/") {
@@ -153,8 +168,8 @@ func (s *Static) ServeHTTP(c *fibhttp.Context) {
 		respondError(c, stdhttp.StatusNotFound)
 		return
 	}
-	if !safePath(name) {
-		respondError(c, stdhttp.StatusBadRequest)
+	if status := s.check(name); status != 0 {
+		respondError(c, status)
 		return
 	}
 	if s.serve(c, name, urlPath, nil) {
@@ -191,7 +206,7 @@ func (s *Static) serve(c *fibhttp.Context, name, urlPath string, q *queued) bool
 	requested := "/" + strings.TrimPrefix(name, "/")
 	for _, t := range s.TryFiles {
 		candidate := strings.ReplaceAll(t, "{path}", requested)
-		if !safePath(candidate) {
+		if s.check(candidate) != 0 {
 			continue
 		}
 		l := s.find(candidate, q != nil)
@@ -364,19 +379,20 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, q *que
 	}
 }
 
-// safePath reports whether name, a request path, is free of what could name a
-// file outside the root, or a different file on some systems: a ".."
-// segment, a NUL, or a backslash, which Windows takes as a separator.
-func safePath(name string) bool {
-	if strings.ContainsAny(name, "\x00\\") {
-		return false
+// check returns the status a request path, name, is refused with, in one
+// look at it, or 0 when it may be served: 400 for one that could name a file
+// outside the root, or a different file on some systems, a ".." segment, a
+// NUL or a backslash, which Windows takes as a separator; and 404 for a
+// dotfile the handler hides.
+func (s *Static) check(name string) int {
+	unsafe, hidden := dotfile.Scan(name)
+	switch {
+	case unsafe:
+		return stdhttp.StatusBadRequest
+	case hidden && s.hideDotfiles:
+		return stdhttp.StatusNotFound
 	}
-	for segment := range strings.SplitSeq(name, "/") {
-		if segment == ".." {
-			return false
-		}
-	}
-	return true
+	return 0
 }
 
 // redirectToDir redirects a request for a directory to its path with a

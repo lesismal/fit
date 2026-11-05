@@ -77,6 +77,10 @@ with the tables below.
   (`health_check`), and upstreams may come from Docker, Consul, etcd or Kubernetes (`providers`).
 - **Limits are on by default.** Connections, header and body sizes, pending bytes and every
   upstream timeout have safe defaults; `limits` and each upstream's fields change them.
+- **Dotfiles are not served.** The `static` and `fastcgi` handlers answer 404 for a path with a
+  segment starting with a dot, as `/.git/config`, `/.env` or `/.htpasswd`, as
+  `location ~ /\. { deny all; }` would, but for `/.well-known/`; `dotfiles: allow` serves them as
+  nginx does by default.
 - **Not converted**: Lua, `njs`, `map`, `geo`, `split_clients`, `mirror` (fit's proxy has a
   `mirror` of its own), `sub_filter`, mail proxying, and nginx's modules. WebAssembly plugins
   (`wasm`) and modules built in with `fit build` take the place of the extensions.

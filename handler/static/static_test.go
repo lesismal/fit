@@ -163,6 +163,11 @@ func TestTraversal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "..dots"), []byte("dots"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// It is a dotfile, though, which only dotfiles allow serves.
+	if rec := get(s, "GET", "/..dots", nil); rec.Response.StatusCode != 404 {
+		t.Errorf("/..dots: got %d %q", rec.Response.StatusCode, rec.Response.Body)
+	}
+	s = mustLoad(t, root, `, "dotfiles": "allow"`)
 	if rec := get(s, "GET", "/..dots", nil); rec.Response.StatusCode != 200 || string(rec.Response.Body) != "dots" {
 		t.Errorf("/..dots: got %d %q", rec.Response.StatusCode, rec.Response.Body)
 	}

@@ -203,7 +203,7 @@ func (c *cache) forget(full string) {
 	c.mu.Unlock()
 }
 
-// resolve looks at what name, a request path within the root that safePath
+// resolve looks at what name, a request path within the root that check
 // passed, names on disk: a file; a directory's index file or listing when
 // name ends in a slash; or a redirect for a directory without one. It runs on
 // the file pool.

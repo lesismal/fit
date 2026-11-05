@@ -413,3 +413,77 @@ func TestRecords(t *testing.T) {
 		t.Errorf("a long value's length: % x", p[:6])
 	}
 }
+
+// TestDotfiles checks that a script in a dotfile's path does not run by
+// default, with try_files or without, but under /.well-known/ and with
+// dotfiles allow, and that its path info may hold dots.
+func TestDotfiles(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"index.php", ".env", ".git/hooks/x.php", ".hidden.php"} {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, f), []byte("<?php"), 0o644)
+	}
+	app := app(t, "tcp", "127.0.0.1:0")
+	addr := app.Addr().String()
+	c := clients()["http/1.1"]
+	check := func(base, path string, status int, script string) {
+		t.Helper()
+		req, _ := stdhttp.NewRequest("GET", base+path, nil)
+		resp, body := get(t, c, req)
+		if resp.StatusCode != status || resp.Header.Get("X-Script") != script {
+			t.Errorf("%s: %d %q, want %d %q\n%s", path, resp.StatusCode, resp.Header.Get("X-Script"), status, script, body)
+		}
+	}
+	before := app.accepted.Load()
+	base := serve(t, `{"address": "`+addr+`", "root": "`+root+`"}`)
+	for _, path := range []string{"/.env", "/.git/hooks/x.php", "/.hidden.php", "/.git/hooks/x.php/a", "/a/.b/index.php"} {
+		check(base, path, 404, "")
+	}
+	if app.accepted.Load() != before {
+		t.Errorf("a dotfile's request reached the application")
+	}
+	// The application answers /.well-known/ itself: it is passed on.
+	check(base, "/.well-known/x.php", 404, "")
+	if app.accepted.Load() == before {
+		t.Errorf("/.well-known/ did not reach the application")
+	}
+	check(base, "/index.php/.env", 200, "/index.php")
+
+	base = serve(t, `{"address": "`+addr+`", "root": "`+root+`", "try_files": ["{path}", "/index.php"]}`)
+	for _, path := range []string{"/.env", "/.git/hooks/x.php", "/.hidden.php"} {
+		check(base, path, 200, "/index.php")
+	}
+
+	base = serve(t, `{"address": "`+addr+`", "root": "`+root+`", "dotfiles": "allow", "try_files": ["{path}", "/index.php"]}`)
+	// The test application knows no such script: 404 from it, not from fit.
+	check(base, "/.hidden.php", 404, "")
+	check(base, "/nothing", 200, "/index.php")
+	h := &FastCGI{SplitPath: []string{".php"}, Index: "index.php", TryFiles: []string{"{path}", "/index.php"}, Root: root, hideDotfiles: true}
+	if s, _, ok := h.try("/.hidden.php"); !ok || s != "/index.php" {
+		t.Errorf("try under deny: %q %v", s, ok)
+	}
+	h.hideDotfiles = false
+	if s, _, ok := h.try("/.hidden.php"); !ok || s != "/.hidden.php" {
+		t.Errorf("try under allow: %q %v", s, ok)
+	}
+}
+
+func TestDotfilesProvision(t *testing.T) {
+	for params, want := range map[string]string{
+		`{"address": "127.0.0.1:9000", "root": "/srv", "index": ".index.php"}`:                      `".index.php" starts with a dot`,
+		`{"address": "127.0.0.1:9000", "root": "/srv", "try_files": ["{path}", "/.app/index.php"]}`: `try_files[1]: "/.app/index.php" names a script`,
+		`{"address": "127.0.0.1:9000", "root": "/srv", "dotfiles": "no"}`:                           `"no" is not one of "deny", "allow"`,
+	} {
+		if _, err := loadHandler(t, params, nil); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", params, err)
+		}
+	}
+	for _, params := range []string{
+		`{"address": "127.0.0.1:9000", "root": "/srv", "try_files": ["{path}", "/index.php/.x", "{path}.php"]}`,
+		`{"address": "127.0.0.1:9000", "root": "/srv", "dotfiles": "allow", "index": ".index.php", "try_files": ["/.app/index.php"]}`,
+	} {
+		if _, err := loadHandler(t, params, nil); err != nil {
+			t.Errorf("%s: %v", params, err)
+		}
+	}
+}

@@ -129,6 +129,8 @@ Caddyfile 按指令顺序和匹配器为请求挑选多个处理器；fit 只挑
 
 - `rewrite` 和 `uri` 在 fit 选定路由之后才改写路径，改写后的路径不会再选别的路由。
 - `php_fastcgi` 与 `file_server` 并用时，脚本和目录交给 PHP，其余交给文件；两者都不是的路径不会转给 `index.php`。
+- 对含有以点开头的段的路径（如 `/.git/config` 或 `/.env`），`file_server` 和 `php_fastcgi` 返回 404（`/.well-known/` 除外），
+  而 Caddy 会提供它们；`static` 和 `fastcgi` 处理器的 `dotfiles: allow` 会提供它们。`hide` 不转换。
 - `templates`、`map`、`vars`、`handle_errors`、`abort` 以及 fit 没有对应物的占位符不转换，各自列出。
 
 ## Admin API

@@ -142,6 +142,9 @@ What differs:
   choose another one.
 - `php_fastcgi` beside `file_server` sends scripts and directories to PHP and the rest to the
   files; a path that is neither is not sent to `index.php`.
+- `file_server` and `php_fastcgi` answer 404 for a path with a segment starting with a dot, as
+  `/.git/config` or `/.env`, but for `/.well-known/`, where Caddy serves them; the `static` and
+  `fastcgi` handlers' `dotfiles: allow` serves them. `hide` is not converted.
 - `templates`, `map`, `vars`, `handle_errors`, `abort` and placeholders that fit has no counterpart
   for are left out, each listed.
 

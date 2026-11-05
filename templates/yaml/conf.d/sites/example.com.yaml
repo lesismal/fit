@@ -622,6 +622,13 @@ routes:
         # # list of string.
         # try_files: ["{path}", "{path}/index.php", "/index.php"]
 
+        # # Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env,
+        # # run: deny answers a request for one 404, and try_files passes over it, but /.well-known/
+        # # under the root; allow runs them as other scripts. The path info after a script is not looked
+        # # at. deny when left out.
+        # # one of: deny, allow; default "deny".
+        # dotfiles: "deny"
+
         # # More parameters for the application, set after fit's own.
         # # object of string.
         # env: {"APP_ENV": "prod"}
@@ -1127,6 +1134,14 @@ routes:
         # # says so. 10000 when left out or 0.
         # # integer, 0 or more; default 10000.
         # browse_max_entries: 10000
+
+        # # Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do,
+        # # are served: deny answers a request for one, or for anything under a dot directory, 404, as
+        # # for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and
+        # # security.txt; allow serves them as other files. Listings leave them out either way. deny
+        # # when left out.
+        # # one of: deny, allow; default "deny".
+        # dotfiles: "deny"
 
         # # How long what the handler learned of a request path, the file it names and its validators,
         # # is trusted before the disk is looked at again; a change on disk shows within it. 1s when

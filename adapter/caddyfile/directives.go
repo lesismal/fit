@@ -584,7 +584,7 @@ func (c *converter) fileServer(d *directive, args []string) (handler, []mw, bool
 				params["precompressed"] = encs
 			}
 		case "hide":
-			c.skip(e, "fit hides no files but those starting with a dot in listings")
+			c.skip(e, "fit hides no files but those whose names start with a dot, which the static handler's dotfiles deny answers 404")
 		default:
 			c.skip(e, "not converted")
 		}

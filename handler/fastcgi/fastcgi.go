@@ -11,6 +11,11 @@
 // and the whole. A request with no body and a method safe to repeat that
 // took an idle connection the application closed unanswered is sent again,
 // once, on a new one.
+//
+// A script whose path has a segment that starts with a dot, as
+// /.git/hooks/x.php or /.env, is not run: it is answered 404, and try_files
+// passes over it, but for /.well-known/ under the root, unless dotfiles is
+// allow. Its path info is the application's to read, dots and all.
 package fastcgi
 
 import (
@@ -33,6 +38,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/dotfile"
 	"github.com/lesismal/fit/internal/filepool"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/module"
@@ -65,6 +71,7 @@ type FastCGI struct {
 	SplitPath             []string          `json:"split_path,omitempty" default:"[\".php\"]" doc:"What ends a script's name in a path, the rest being PATH_INFO: \"/index.php/a/b\" runs /index.php with PATH_INFO /a/b. [\".php\"] when left out."`
 	Index                 string            `json:"index,omitempty" default:"\"index.php\"" doc:"The script a path ending in / runs; index.php when left out."`
 	TryFiles              []string          `json:"try_files,omitempty" doc:"Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; [\"{path}\", \"{path}/index.php\", \"/index.php\"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is."`
+	Dotfiles              string            `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. The path info after a script is not looked at. deny when left out."`
 	Env                   map[string]string `json:"env,omitempty" doc:"More parameters for the application, set after fit's own."`
 	MaxConns              int               `json:"max_conns,omitempty" min:"0" default:"64" doc:"The most connections to the application, each carrying one request at a time. 64 when left out or 0."`
 	MaxIdleConns          int               `json:"max_idle_conns,omitempty" min:"0" default:"16" doc:"The most idle connections kept for later requests. 16 when left out or 0."`
@@ -79,6 +86,8 @@ type FastCGI struct {
 	pool  *pool
 	graph module.Holder
 	stall time.Duration
+	// hideDotfiles is dotfiles deny.
+	hideDotfiles bool
 }
 
 // Provision checks the params and makes the connection pool.
@@ -101,9 +110,16 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 	if h.Index == "" {
 		h.Index = "index.php"
 	}
+	h.hideDotfiles = h.Dotfiles != dotfile.Allow
+	if h.hideDotfiles && strings.HasPrefix(h.Index, ".") {
+		return ctx.Errorf("index", "%q starts with a dot, which dotfiles deny hides; set dotfiles to allow to run it", h.Index)
+	}
 	for i, t := range h.TryFiles {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
+		}
+		if script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x")); h.hideDotfiles && dotfile.Hidden(script) {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a segment starting with a dot, which dotfiles deny hides; set dotfiles to allow to run it", t)
 		}
 	}
 	or := func(v *int, d int) {
@@ -173,6 +189,10 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	x := &exchange{h: h, c: c}
 	if len(h.TryFiles) == 0 {
 		x.script, x.pathInfo = h.split(c.Request.URL.Path)
+		if h.hideDotfiles && dotfile.Hidden(x.script) {
+			x.answer(stdhttp.StatusNotFound)
+			return
+		}
 		x.start()
 		return
 	}
@@ -213,7 +233,7 @@ func (h *FastCGI) split(p string) (script, info string) {
 }
 
 // try returns the script of the first of try_files whose script is a file
-// under root. It runs on the lookup pool.
+// under root, and no dotfile dotfiles deny hides. It runs on the lookup pool.
 func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
 	for _, t := range h.TryFiles {
 		candidate := path.Clean("/" + strings.ReplaceAll(t, "{path}", reqPath))
@@ -221,6 +241,9 @@ func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
 			candidate += "/"
 		}
 		s, i := h.split(candidate)
+		if h.hideDotfiles && dotfile.Hidden(s) {
+			continue
+		}
 		fi, err := os.Stat(filepath.Join(h.Root, filepath.FromSlash(path.Clean(s))))
 		if err == nil && fi.Mode().IsRegular() {
 			return s, i, true

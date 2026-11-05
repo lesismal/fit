@@ -3001,7 +3001,9 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 Answers requests from a FastCGI application, as PHP-FPM is, over a bounded pool of connections, streaming both ways.
 
 For PHP applications behind PHP-FPM, or any FastCGI application. `try_files` sends paths that are
-no script of their own to a front controller, as most PHP frameworks want.
+no script of their own to a front controller, as most PHP frameworks want. A script whose path has
+a segment that starts with a dot, as `/.git/x.php` or `/.env`, is not run but answered `404`, and
+try_files passes over it, but `/.well-known/`; `dotfiles: allow` runs it.
 
 In a .conf file:
 
@@ -3053,6 +3055,7 @@ In JSON:
 | `split_path` | list of string | `[".php"]` | What ends a script's name in a path, the rest being PATH_INFO: "/index.php/a/b" runs /index.php with PATH_INFO /a/b. [".php"] when left out. |
 | `index` | string | `"index.php"` | The script a path ending in / runs; index.php when left out. |
 | `try_files` | list of string |  | Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; ["{path}", "{path}/index.php", "/index.php"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is. |
+| `dotfiles` | string: `deny`, `allow` | `"deny"` | Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. The path info after a script is not looked at. deny when left out. |
 | `env` | object of string |  | More parameters for the application, set after fit's own. |
 | `max_conns` | integer, 0 or more | `64` | The most connections to the application, each carrying one request at a time. 64 when left out or 0. |
 | `max_idle_conns` | integer, 0 or more | `16` | The most idle connections kept for later requests. 16 when left out or 0. |
@@ -3669,7 +3672,10 @@ In JSON:
 Serves files from a directory, with directory listings, precompressed variants and small files kept in memory.
 
 Serves files from `root`, small ones from memory, with listings (`browse`), precompressed twins,
-and `try_files` for single-page apps.
+and `try_files` for single-page apps. A path with a segment that starts with a dot, as
+`/.git/config`, `/.env` or `/.htpasswd`, is answered `404`, as a file not there is, and so are
+try_files candidates of that kind, but `/.well-known/` under the root (ACME's HTTP-01 challenge,
+security.txt); `dotfiles: allow` serves them. Listings leave dotfiles out either way.
 
 In a .conf file:
 
@@ -3727,6 +3733,7 @@ In JSON:
 | `try_files` | list of string |  | Paths tried in turn for a request, as nginx's try_files: {path} stands for the request's path, and one ending in / for a directory, served by its index file. The first that exists is served, and when none does the answer is 404; ["{path}", "{path}/", "/index.html"] serves a single-page app. A directory asked for without its slash is not redirected then. |
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
+| `dotfiles` | string: `deny`, `allow` | `"deny"` | Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. deny when left out. |
 | `check_interval` | duration | `"1s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out. |
 
 <a id="http-handlers-stream_whep"></a>

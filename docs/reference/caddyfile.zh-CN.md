@@ -232,6 +232,8 @@ upstream 地址：`host:port`、`:port`（localhost）、`http://`、`https://`�
 | `precompressed [br] [zstd] [gzip]` | `precompressed`；未指定时为全部三种 |
 
 没有 `root` 时，Caddy 提供它运行所在的目录；转换器写入 `"."` 并给出提示。
+`hide` 不转换：除非处理器的 `dotfiles` 为 `allow`，fit 对名称以点开头的文件和目录返回 404（`/.well-known/` 除外），
+不隐藏其他文件。
 
 ### `php_fastcgi`
 

@@ -251,6 +251,8 @@ X-Forwarded-For, -Proto and -Host itself.
 | `precompressed [br] [zstd] [gzip]` | `precompressed`; all three when none are named |
 
 Without a `root`, Caddy serves the directory it runs in; the converter writes `"."` and says so.
+`hide` is not converted: fit answers 404 for files and directories whose names start with a dot,
+but `/.well-known/`, unless the handler's `dotfiles` is `allow`, and hides no others.
 
 ### `php_fastcgi`
 
