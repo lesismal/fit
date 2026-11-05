@@ -131,6 +131,14 @@ const (
 	AckEvery = 256 << 10
 	// MaxChunk is the most bytes one data frame carries.
 	MaxChunk = 64 << 10
+	// MaxInFlight is the most bytes of one end of a tunnel that may be
+	// unacknowledged: its Window, and the one read of its TCP connection
+	// that may spend past it before the end holds its reads, which fit's
+	// engine sizes at 64 KiB unless read_buffer_size says otherwise. An end
+	// that sends more, or acknowledges more than was sent to it, breaks
+	// the flow control that bounds what waits for every other tunnel on
+	// its links: the other end and the hub close the tunnel.
+	MaxInFlight = Window + 1<<20
 	// MaxTunnelsPerLink is the most tunnels one link carries at once: what
 	// waits on a link is bounded by the windows of its tunnels, and so by
 	// MaxTunnelsPerLink windows. A peer that needs more tunnels opens more

@@ -221,6 +221,9 @@ hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访�
 - 每种资源都有上限：hub 的 `max_links`、`max_links_per_peer`、`max_peers` 和 `max_tunnels`，每条链路
   64 条隧道，各角色的 `max_tunnels` 和 `idle_timeout`，链路和隧道上的 TCP keep-alive，握手完成后在握手
   时限内没有承载链路的 QUIC 连接会被关闭。
+- 每条隧道的流量控制都受检查，由另一端和 hub 共同检查：某一端发送超出其 4 MiB 窗口（另留 1 MiB 给用尽
+  窗口的那次读取），或确认了多于发给它的字节，它的隧道就会被关闭，免得它占满其他隧道共用的链路。服务或
+  proxy 一侧的连接无法接收到达的数据时，隧道也会关闭。
 - 页面在 fit 的登录和 Content-Security-Policy 之后。
 
 ## 测试

@@ -247,6 +247,10 @@ password; the console's own login still applies.
 - Every resource is bounded: the hub's `max_links`, `max_links_per_peer`, `max_peers` and
   `max_tunnels`, 64 tunnels a link, the roles' `max_tunnels` and `idle_timeout`, TCP keep-alive on
   links and tunnels, and a QUIC connection that carries no link closed after its handshake timeout.
+- Each tunnel's flow control is checked, by the other end and by the hub: an end that sends more than
+  its 4 MiB window allows, with 1 MiB to spare for the read that spends it, or acknowledges more
+  than it was sent, has its tunnel closed, so that it cannot fill the links other tunnels share.
+  A tunnel whose service or proxy connection fails to take what arrived closes too.
 - The pages are behind fit's logins and its Content-Security-Policy.
 
 ## Testing

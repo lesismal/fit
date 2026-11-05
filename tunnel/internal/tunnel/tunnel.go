@@ -147,13 +147,29 @@ func (e *Endpoint) remote(payload []byte) {
 	e.mu.Lock()
 	c := e.conn
 	e.mu.Unlock()
-	if c == nil || c.Send(payload) != nil {
+	if c == nil {
+		// Nothing arrives before the end has its connection, unless the
+		// other end broke the protocol; dropping it would corrupt the
+		// stream.
+		e.Close("data before the tunnel was open")
+		return
+	}
+	if err := c.Send(payload); err != nil {
+		// What the connection did not take is lost: the stream cannot go
+		// on without it.
+		e.Close("write: " + err.Error())
 		return
 	}
 	e.in.Add(int64(len(payload)))
 	e.active.Store(time.Now().UnixNano())
 	e.mu.Lock()
 	e.unacked += int64(len(payload))
+	if e.unacked > proto.MaxInFlight {
+		// The other end ignores its window.
+		e.mu.Unlock()
+		e.Close(errOverWindow)
+		return
+	}
 	if e.unacked < proto.AckEvery || e.ackWaiting {
 		e.mu.Unlock()
 		return
@@ -186,9 +202,22 @@ func (e *Endpoint) sendAck(n int64) {
 	_ = e.link.SendTunnel(proto.MethodTunnelAck, e.ID, proto.AckPayload(n))
 }
 
-// acked gives back window the other end acknowledged.
+// The reasons a tunnel closes when the other end breaks its flow control.
+const (
+	errOverWindow = "the other end sent past its window"
+	errBadAck     = "the other end acknowledged what was not sent to it"
+)
+
+// acked gives back window the other end acknowledged: some of what the end
+// sent and has not had acknowledged. An acknowledgement of more, which
+// would let the end send without bound, closes the tunnel.
 func (e *Endpoint) acked(n int64) {
 	e.mu.Lock()
+	if n <= 0 || n > proto.Window-e.window {
+		e.mu.Unlock()
+		e.Close(errBadAck)
+		return
+	}
 	e.window += n
 	e.updateHoldLocked()
 	e.mu.Unlock()

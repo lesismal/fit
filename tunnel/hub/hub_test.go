@@ -458,3 +458,75 @@ func TestRoutes(t *testing.T) {
 	}
 	waitFor(t, "b's route to go", func() bool { return len(v.s.Routes()) == 1 })
 }
+
+// An end that breaks its flow control has its tunnel closed by the hub,
+// at both ends, before what it sends past its window fills the link it
+// shares with other tunnels; the links stay, and so do the other tunnels.
+func TestRouteWindow(t *testing.T) {
+	v := newHub(t, tcpMember(""))
+	svc := proto.Service{Name: "echo", Addr: "127.0.0.1:1"}
+	n := v.dial(v.listen()).mustRegister(proto.TypeNode, "lab", svc)
+	c := v.dial(v.listen()).mustRegister(proto.TypeProxy, "me")
+	open := func(id uint32) *proto.TunnelOpenReq {
+		req := openReq(c, id, "lab", "echo")
+		if err := c.call(proto.MethodTunnelOpen, req, nil); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	closed := func(p *peer, id uint64) {
+		t.Helper()
+		for {
+			got, _, _ := proto.ParseFrame(p.wait(proto.MethodTunnelClose).body)
+			if got == id {
+				return
+			}
+		}
+	}
+
+	// An ack of nothing, or of more than was sent, from either end.
+	for i, bad := range []struct {
+		from *peer
+		n    int64
+	}{{n, proto.MaxInFlight}, {c, 1}, {n, 0}, {c, -5}} {
+		req := open(uint32(10 + i))
+		_ = bad.from.l.SendTunnel(proto.MethodTunnelAck, req.ID, proto.AckPayload(bad.n))
+		closed(c, req.ID)
+		closed(n, req.ID)
+	}
+
+	// A proxy that sends past its window: the frames past it are not
+	// passed on.
+	keep, flood := open(20), open(21)
+	chunk := make([]byte, proto.MaxChunk)
+	for sent := 0; sent <= proto.MaxInFlight; sent += len(chunk) {
+		_ = c.l.SendTunnel(proto.MethodTunnelData, flood.ID, chunk)
+	}
+	closed(c, flood.ID)
+	closed(n, flood.ID)
+	waitFor(t, "the flooded route to go", func() bool { return len(v.s.Routes()) == 1 })
+	// What an end acknowledges gives its window back: an end that keeps
+	// to it sends any amount.
+	sent := 0
+	for sent < 2*proto.MaxInFlight {
+		_ = c.l.SendTunnel(proto.MethodTunnelData, keep.ID, chunk)
+		sent += len(chunk)
+		n.wait(proto.MethodTunnelData)
+		_ = n.l.SendTunnel(proto.MethodTunnelAck, keep.ID, proto.AckPayload(int64(len(chunk))))
+	}
+	_ = c.l.SendTunnel(proto.MethodTunnelData, keep.ID, []byte("end"))
+	n.wait(proto.MethodTunnelData)
+	if r := v.s.route(keep.ID); r == nil || r.up.Load() != int64(sent+3) {
+		t.Fatalf("the kept tunnel: %+v", r)
+	}
+	if routes := v.s.Routes(); len(routes) != 1 || routes[0].ID != keep.ID {
+		t.Fatalf("routes %+v", routes)
+	}
+	select {
+	case <-c.l.Done():
+		t.Fatal("the proxy's link closed")
+	case <-n.l.Done():
+		t.Fatal("the node's link closed")
+	default:
+	}
+}

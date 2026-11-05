@@ -150,7 +150,11 @@ type Route struct {
 	Addr     string
 	Created  time.Time
 	up, down atomic.Int64
-	open     atomic.Bool
+	// upFlight and downFlight are the bytes each way the hub has passed on
+	// and the receiving end has not acknowledged, which the sending end's
+	// window bounds.
+	upFlight, downFlight atomic.Int64
+	open                 atomic.Bool
 }
 
 // listener is a listener of the config as it runs: open, or failed to open
@@ -999,7 +1003,9 @@ func (s *Hub) removeRoute(r *Route) bool {
 
 // forward passes a tunnel frame to the other end of its tunnel. What it
 // queues on the other link is bounded by the tunnel's window, which the
-// ends keep (see package tunnel).
+// ends keep (see package tunnel), and which the hub checks: an end that
+// sends past its window, or acknowledges what it was not sent, would fill
+// a link that other tunnels share, so its tunnel is closed instead.
 func (s *Hub) forward(from *link.Link, method proto.Method, body []byte) {
 	id, payload, err := proto.ParseFrame(body)
 	if err != nil {
@@ -1012,24 +1018,51 @@ func (s *Hub) forward(from *link.Link, method proto.Method, body []byte) {
 	// Each end sends on the link that carries the tunnel, and the frames
 	// go on along the other end's, in the order they came.
 	var to *link.Link
+	// sent is what the sending end has in flight, acked what the receiving
+	// end acknowledges with this frame.
+	var sent, acked *atomic.Int64
 	switch from {
 	case r.ProxyLink:
-		to = r.NodeLink
+		to, sent, acked = r.NodeLink, &r.upFlight, &r.downFlight
 		if method == proto.MethodTunnelData {
 			r.up.Add(int64(len(payload)))
 		}
 	case r.NodeLink:
-		to = r.ProxyLink
+		to, sent, acked = r.ProxyLink, &r.downFlight, &r.upFlight
 		if method == proto.MethodTunnelData {
 			r.down.Add(int64(len(payload)))
 		}
 	default:
 		return
 	}
+	switch method {
+	case proto.MethodTunnelData:
+		if sent.Add(int64(len(payload))) > proto.MaxInFlight {
+			s.breach(r, from, "sent past its window")
+			return
+		}
+	case proto.MethodTunnelAck:
+		n, err := proto.ParseAck(payload)
+		if err != nil || n <= 0 || acked.Add(-n) < 0 {
+			s.breach(r, from, "acknowledged what it was not sent")
+			return
+		}
+	}
 	_ = to.Notify(method, body)
 	if method == proto.MethodTunnelClose {
 		s.removeRoute(r)
 	}
+}
+
+// breach closes route r, one of whose ends, the one on link from, broke
+// its flow control.
+func (s *Hub) breach(r *Route, from *link.Link, what string) {
+	end := "node"
+	if from == r.ProxyLink {
+		end = "proxy"
+	}
+	s.log.Warnf("tunnel %d: the %s end %s; closing it", r.ID, end, what)
+	s.CloseRoute(r.ID, "the "+end+" end "+what)
 }
 
 // CloseRoute closes tunnel id at both ends.
