@@ -460,6 +460,21 @@ func TestOpenTunnelRefused(t *testing.T) {
 }
 
 // The tunnels a link carries are bounded, at either end.
+// readyLink is p's first link the hub may send on. The hub marks a link so
+// once its answer to the registration has gone out, which may be after the
+// registering side has read the answer: so it waits for it.
+func readyLink(t *testing.T, v *env, p *Peer) *link.Link {
+	t.Helper()
+	var l *link.Link
+	waitFor(t, "a link of "+p.info.Name+" to send on", func() bool {
+		if links := v.s.peerLinks(p); len(links) > 0 {
+			l = links[0]
+		}
+		return l != nil
+	})
+	return l
+}
+
 func TestOpenTunnelLinkFull(t *testing.T) {
 	v := newHub(t, tcpMember(""))
 	svc := proto.Service{Name: "echo", Addr: "127.0.0.1:1"}
@@ -476,13 +491,13 @@ func TestOpenTunnelLinkFull(t *testing.T) {
 		}
 		v.s.mu.Unlock()
 	}
-	proxyLink := v.s.peerLinks(v.s.peerByName(proto.TypeProxy, "me"))[0]
+	proxyLink := readyLink(t, v, v.s.peerByName(proto.TypeProxy, "me"))
 	fill(func(r *Route) { r.ProxyLink = proxyLink })
 	if err := c.call(proto.MethodTunnelOpen, openReq(c, 1, "lab", "echo"), nil); err == nil || !strings.Contains(err.Error(), "the link carries") {
 		t.Fatalf("a full proxy link: %v", err)
 	}
 	node := v.s.peerByName(proto.TypeNode, "lab")
-	nodeLink := v.s.peerLinks(node)[0]
+	nodeLink := readyLink(t, v, node)
 	fill(func(r *Route) { r.Node, r.NodeLink = node, nodeLink })
 	if err := c.call(proto.MethodTunnelOpen, openReq(c, 1, "lab", "echo"), nil); err == nil || !strings.Contains(err.Error(), "every link") {
 		t.Fatalf("a full node link: %v", err)
