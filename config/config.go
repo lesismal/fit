@@ -397,9 +397,30 @@ type AccessLog struct {
 	BufferBytes   int      `json:"buffer_bytes,omitempty" min:"0" default:"4194304" doc:"How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out."`
 	Level         string   `json:"level,omitempty" enum:"info,warn,error" default:"\"info\"" doc:"The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload."`
 	Format        string   `json:"format,omitempty" enum:"json,text,line" default:"\"json\"" doc:"How a request's line is written, with the same fields whichever: json, a JSON object; text, time, level, msg and the fields as key=value (logfmt); or line, the time and level, then the fields as key=value, as fit's own log writes lines. A request's level is its status's, as level says. json when left out. A change takes a restart."`
+	TimeZone      string   `json:"time_zone,omitempty" doc:"The zone a line's time is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. json and text wrote UTC and line local before this setting; now every format writes this zone, local when left out, and 24h turns at local midnight. A change takes effect on reload."`
+	Rotate        *Rotate  `json:"rotate,omitempty" doc:"Rotate the file output names, and remove old rotated files: the size and interval a file is rotated at, and the age, count and total size past which rotated files are removed. None when left out: the file grows without bound, as before."`
 
 	At Value `json:"-" fit:"self"`
 }
+
+// TimeZoneLocation returns the zone every line's time and every file's
+// interval uses: time_zone, or the local zone when left out.
+func (l *AccessLog) TimeZoneLocation() (*time.Location, error) {
+	if l == nil {
+		return time.Local, nil
+	}
+	return LoadTimeZone(l.TimeZone)
+}
+
+// TimeZoneName returns the name of the zone the access log writes its times
+// in, for the workbench: local when left out.
+func (l *AccessLog) TimeZoneName() string {
+	if l == nil {
+		return TimeZoneLocal
+	}
+	return TimeZoneName(l.TimeZone)
+}
+
 
 // MinStatus returns the least status of the responses whose requests the
 // access log writes, by its level.

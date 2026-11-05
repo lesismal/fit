@@ -134,6 +134,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	logs.SetDefault(root)
 	defer logs.SetDefault(nil)
 	server := root.Logger(config.LoggerServer)
+	for _, out := range c.Log.FileOutputs() {
+		if out.Rotate == nil {
+			server.Warnf("log file %s has no rotate: it will grow without bound", out.Path)
+		}
+	}
 	stdout, stderr = logWriter{server, logs.LevelInfo}, logWriter{server, logs.LevelError}
 	printWarnings(warnWriter(stderr), set)
 	data := set.JSON
@@ -172,9 +177,12 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		env.Metrics = observe.NewMetrics()
 	}
 	if c.AccessLog != nil {
-		if env.AccessLog, err = observe.NewAccessLog(c.AccessLog); err != nil {
+		if env.AccessLog, err = observe.NewAccessLogFiles(c.AccessLog, root.Files()); err != nil {
 			fmt.Fprintf(stderr, "fit run: access log: %v\n", err)
 			return 1
+		}
+		if config.IsFileOutput(c.AccessLog.Output) && c.AccessLog.Rotate == nil {
+			server.Warnf("access log file %s has no rotate: it will grow without bound", c.AccessLog.Output)
 		}
 		// Closed after the graph, so that every response finished has its
 		// line written.

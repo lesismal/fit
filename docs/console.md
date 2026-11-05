@@ -271,7 +271,7 @@ change a user made with the config version it applied.
 
 After logging in, the workbench. Its menu is one flat list of the modules the console serves: the
 config's global pages first (overview, listeners, the engine, the global settings, the whole config as
-JSON, the versions, the consistency check and the account pages), then the protocol and feature pages,
+JSON, the versions, the consistency check, the logs and the account pages), then the protocol and feature pages,
 then a module for each role running. A module's pages open under it; a module with one page is a link.
 The **Engine** entry is the running listeners seen from their ports: each port opens to the features it
 serves — its handlers, reverse and forward proxy routes, cache, streaming and WebRTC handlers, layer 4
@@ -286,6 +286,10 @@ and the language (English or Chinese) are picked at the top right. Each page has
   access log, telemetry, metrics, limits, engine, providers, and whatever else the schema holds); the
   whole config as JSON; and the versions applied (`admin.history` of them), where each came from, each
   one's text, and a button to roll back to it.
+- **Logs**: the files fit's own log and the access log write, what each rotates and keeps, the files
+  on disk with their sizes and ages, **Rotate now** and **Clean up now** (the second previewing what
+  it removes), and the forms of `log` and `access_log`, `time_zone` and `rotate` among them; Save and
+  apply is the same bar as any page's.
 - **HTTP**, **TCP/UDP**, **TLS**: the protocol pages, each with a small tag in the menu: the reverse
   proxy's routes and upstreams and the cache (HTTP), the forward proxy's routes (HTTP CONNECT), the
   layer 4 services (TCP and UDP), and TLS's certificates, HTTPS by default and ACME.

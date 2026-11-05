@@ -47,8 +47,49 @@
   # # one of: line, text, json; default "line".
   # format: "line"
 
-  # # Settings of some loggers of their own, by name (those levels lists), over level, output and
-  # # format: engine's to a file of its own, say, or access_log's as json.
+  # # The zone the time of every line is written in, and the zone a file's interval is rotated at:
+  # # local (the default), utc, or an IANA zone name such as Asia/Shanghai. So 24h turns at local
+  # # midnight by default, and at UTC midnight with utc. The zone database is embedded, so an IANA
+  # # name works in a container without zoneinfo. A change takes effect on reload.
+  # # string.
+  # time_zone: ""
+
+  # # Rotate the file log.output names, and remove old rotated files: the size and interval a file
+  # # is rotated at, and the age, count and total size past which rotated files are removed. None
+  # # when left out: the file grows without bound, as before.
+  # # object.
+  # rotate:
+    # # How large a file may grow before it is rotated: a write that would take it past this starts
+    # # a new file. 1 GiB when left out; 0 does not rotate by size.
+    # # integer, 0 or more; default 1073741824.
+    # max_bytes: 1073741824
+
+    # # How long a file is written before it is rotated, at the next period boundary of the log's
+    # # time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over
+    # # 24h that is not a whole number of days, is refused. Off when left out.
+    # # duration, as "1.5s" or "2m".
+    # interval: "10s"
+
+    # # How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0
+    # # keeps it until a count or size limit removes it.
+    # # duration, as "1.5s" or "2m"; default "720h".
+    # max_age: "720h"
+
+    # # The most rotated files kept, newest first; 0 or left out has no count limit.
+    # # integer, 0 or more.
+    # max_files: 0
+
+    # # The most the rotated files may total, the oldest removed until they fit. 1 GiB when left
+    # # out; 0 does not limit the total.
+    # # integer, 0 or more; default 1073741824.
+    # max_total_bytes: 1073741824
+
+    # # Gzip a file when it is rotated. On when left out.
+    # # boolean; default true.
+    # compress: true
+
+  # # Settings of some loggers of their own, by name (those levels lists), over level, output,
+  # # format and rotate: engine's to a file of its own, say, or access_log's as json.
   # # object of object.
   # loggers: {"engine": {"output": "/var/log/fit/engine.log", "format": "json"}}
 
@@ -81,6 +122,47 @@
   # # level says. json when left out. A change takes a restart.
   # # one of: json, text, line; default "json".
   # format: "json"
+
+  # # The zone a line's time is written in, and the zone a file's interval is rotated at: local
+  # # (the default), utc, or an IANA zone name such as Asia/Shanghai. json and text wrote UTC and
+  # # line local before this setting; now every format writes this zone, local when left out, and
+  # # 24h turns at local midnight. A change takes effect on reload.
+  # # string.
+  # time_zone: ""
+
+  # # Rotate the file output names, and remove old rotated files: the size and interval a file is
+  # # rotated at, and the age, count and total size past which rotated files are removed. None
+  # # when left out: the file grows without bound, as before.
+  # # object.
+  # rotate:
+    # # How large a file may grow before it is rotated: a write that would take it past this starts
+    # # a new file. 1 GiB when left out; 0 does not rotate by size.
+    # # integer, 0 or more; default 1073741824.
+    # max_bytes: 1073741824
+
+    # # How long a file is written before it is rotated, at the next period boundary of the log's
+    # # time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over
+    # # 24h that is not a whole number of days, is refused. Off when left out.
+    # # duration, as "1.5s" or "2m".
+    # interval: "10s"
+
+    # # How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0
+    # # keeps it until a count or size limit removes it.
+    # # duration, as "1.5s" or "2m"; default "720h".
+    # max_age: "720h"
+
+    # # The most rotated files kept, newest first; 0 or left out has no count limit.
+    # # integer, 0 or more.
+    # max_files: 0
+
+    # # The most the rotated files may total, the oldest removed until they fit. 1 GiB when left
+    # # out; 0 does not limit the total.
+    # # integer, 0 or more; default 1073741824.
+    # max_total_bytes: 1073741824
+
+    # # Gzip a file when it is rotated. On when left out.
+    # # boolean; default true.
+    # compress: true
 
 # OpenTelemetry: traces of requests, with W3C trace context sent on to upstreams, and metrics,
 # exported over OTLP/HTTP to a collector. Neither when left out. Read when fit starts: a

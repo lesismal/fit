@@ -16,8 +16,24 @@ message below its logger's level is not written. The loggers are:
 
 `level` sets every logger's level, info when left out, and `levels` sets some loggers' own. A
 change to either takes effect on reload; `output` and `format` take a restart. `loggers` gives some
-loggers settings of their own, over the log's: a `level`, an `output` and a `format`, so that the
-engine's messages, say, go to a file of their own as JSON while the rest are lines on the terminal.
+loggers settings of their own, over the log's: a `level`, an `output`, a `format` and a `rotate`, so
+that the engine's messages, say, go to a file of their own as JSON while the rest are lines on the
+terminal.
+
+`time_zone` is the zone the time of every line is written in, and the zone a file's `interval`
+turns in: `local`, the default, `utc`, or an IANA zone such as `Asia/Shanghai`. So `24h` turns at
+local midnight by default, and at UTC midnight with `"time_zone": "utc"`. A change takes effect on
+reload.
+
+`rotate` is how a file output is rotated and how its rotated files are removed; left out, the file
+is one file that grows without bound, as it was before, and fit says so at startup. `max_bytes`
+(1 GiB) and `interval` (off) decide when the file turns: a write that would pass `max_bytes`
+starts a new file, and the first write in a new period starts one too; `24h` turns at local
+midnight, `1h` on the hour. A rotated file is named after the time of the rotation in UTC, as in
+`fit.log.2026-11-05T04-00-00.000`, and gzipped when `compress` is on, the default. `max_age` (720h,
+30 days), `max_files` (none) and `max_total_bytes` (1 GiB) remove the oldest rotated files past
+them; only files the rotation made are removed, and the file being written never. Rotation and
+retention change on reload.
 
 The formats are fib's, written by fib's own `log` package, so that fit's lines and fib's look alike;
 each message carries its logger's name as `logger`:
@@ -32,8 +48,8 @@ json  {"time":"2026-10-27T10:00:00.000+08:00","level":"INFO","msg":"listening on
 `line`, a value with a line break or another control character is escaped, so that nothing a
 client sends can forge a line. Without `log`, messages at info and above are written as lines:
 debug and info ones to standard output, warn and error ones to standard error. `output` sends them
-all to one place. A message is written when it is logged: fit says little about itself, and nothing
-for each request.
+all to one place. A message is queued and written by the file's own goroutine, so that a slow disk
+never holds up the work that logged it: fit says little about itself, and nothing for each request.
 
 nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 
@@ -41,7 +57,10 @@ nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 {
   "log": {
     "level": "warn", "levels": {"tls": "info"}, "output": "/var/log/fit/fit.log", "format": "json",
-    "loggers": {"engine": {"level": "error", "output": "/var/log/fit/engine.log", "format": "line"}}
+    "time_zone": "local",
+    "rotate": {"max_bytes": 104857600, "interval": "24h", "max_age": "720h", "compress": true},
+    "loggers": {"engine": {"level": "error", "output": "/var/log/fit/engine.log", "format": "line",
+      "rotate": {"max_bytes": 104857600, "max_total_bytes": 1073741824}}}
   },
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }

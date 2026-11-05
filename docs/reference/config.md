@@ -27,7 +27,7 @@ a config against it and more.
 - [Routes](#routes): [`routes[]`](#config-route), [`routes[].match`](#config-match)
 - [Upstreams](#upstreams): [`upstreams[]`](#config-upstream), [`upstreams[].sticky_cookie`](#config-stickycookie), [`upstreams[].health_check`](#config-healthcheck)
 - [Services](#services): [`services[]`](#config-service)
-- [Log](#log): [`log`](#config-log), [`log.loggers.*`](#config-logger)
+- [Log](#log): [`log`](#config-log), [`log.rotate`](#config-rotate), [`log.loggers.*`](#config-logger)
 - [Access log](#access-log): [`access_log`](#config-accesslog)
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
@@ -711,8 +711,24 @@ message below its logger's level is not written. The loggers are:
 
 `level` sets every logger's level, info when left out, and `levels` sets some loggers' own. A
 change to either takes effect on reload; `output` and `format` take a restart. `loggers` gives some
-loggers settings of their own, over the log's: a `level`, an `output` and a `format`, so that the
-engine's messages, say, go to a file of their own as JSON while the rest are lines on the terminal.
+loggers settings of their own, over the log's: a `level`, an `output`, a `format` and a `rotate`, so
+that the engine's messages, say, go to a file of their own as JSON while the rest are lines on the
+terminal.
+
+`time_zone` is the zone the time of every line is written in, and the zone a file's `interval`
+turns in: `local`, the default, `utc`, or an IANA zone such as `Asia/Shanghai`. So `24h` turns at
+local midnight by default, and at UTC midnight with `"time_zone": "utc"`. A change takes effect on
+reload.
+
+`rotate` is how a file output is rotated and how its rotated files are removed; left out, the file
+is one file that grows without bound, as it was before, and fit says so at startup. `max_bytes`
+(1 GiB) and `interval` (off) decide when the file turns: a write that would pass `max_bytes`
+starts a new file, and the first write in a new period starts one too; `24h` turns at local
+midnight, `1h` on the hour. A rotated file is named after the time of the rotation in UTC, as in
+`fit.log.2026-11-05T04-00-00.000`, and gzipped when `compress` is on, the default. `max_age` (720h,
+30 days), `max_files` (none) and `max_total_bytes` (1 GiB) remove the oldest rotated files past
+them; only files the rotation made are removed, and the file being written never. Rotation and
+retention change on reload.
 
 The formats are fib's, written by fib's own `log` package, so that fit's lines and fib's look alike;
 each message carries its logger's name as `logger`:
@@ -727,8 +743,8 @@ json  {"time":"2026-10-27T10:00:00.000+08:00","level":"INFO","msg":"listening on
 `line`, a value with a line break or another control character is escaped, so that nothing a
 client sends can forge a line. Without `log`, messages at info and above are written as lines:
 debug and info ones to standard output, warn and error ones to standard error. `output` sends them
-all to one place. A message is written when it is logged: fit says little about itself, and nothing
-for each request.
+all to one place. A message is queued and written by the file's own goroutine, so that a slow disk
+never holds up the work that logged it: fit says little about itself, and nothing for each request.
 
 nginx's `error_log` and Caddy's global `log` convert to it (`fit adapt`).
 
@@ -740,8 +756,15 @@ log {
 	levels { tls info }
 	output /var/log/fit/fit.log
 	format json
+	time_zone local
+	rotate { max_bytes 100MiB; interval 24h; max_age 720h; compress true }
 	loggers {
-		engine { level error; output /var/log/fit/engine.log; format line }
+		engine {
+			level error
+			output /var/log/fit/engine.log
+			format line
+			rotate { max_bytes 100MiB; max_total_bytes 1GiB }
+		}
 	}
 }
 
@@ -757,11 +780,20 @@ log:
     tls: info
   output: /var/log/fit/fit.log
   format: json
+  time_zone: local
+  rotate:
+    max_bytes: 104857600
+    interval: 24h
+    max_age: 720h
+    compress: true
   loggers:
     engine:
       level: error
       output: /var/log/fit/engine.log
       format: line
+      rotate:
+        max_bytes: 104857600
+        max_total_bytes: 1073741824
 routes:
   - match:
       host:
@@ -778,7 +810,10 @@ In JSON:
 {
   "log": {
     "level": "warn", "levels": {"tls": "info"}, "output": "/var/log/fit/fit.log", "format": "json",
-    "loggers": {"engine": {"level": "error", "output": "/var/log/fit/engine.log", "format": "line"}}
+    "time_zone": "local",
+    "rotate": {"max_bytes": 104857600, "interval": "24h", "max_age": "720h", "compress": true},
+    "loggers": {"engine": {"level": "error", "output": "/var/log/fit/engine.log", "format": "line",
+      "rotate": {"max_bytes": 104857600, "max_total_bytes": 1073741824}}}
   },
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
@@ -794,7 +829,24 @@ In JSON:
 | `levels` | object of string |  | The least level of some loggers, by name, over level: server (listeners, loading and reloading configs, shutting down), admin (the Admin API), tls (certificates: ACME, OCSP, certificate files), provider (providers), telemetry (exporting over OTLP), access_log (the access log's dropped lines), plugin (wasm plugins), fastcgi (what FastCGI applications write to their stderr), llm and tunnel (their roles), webrtc (the TURN server) and engine (fib, the network engine, and whatever else writes to Go's log and log/slog). The same as loggers' level, which a logger may not have both of. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` | `"line"` | How messages are written, those of every logger loggers does not set one for, as fib writes its own: line, the time, level and message, then the attributes as key=value; text, every part as key=value (logfmt); or json, a JSON object a line. Each carries the logger's name as logger. line when left out. A change takes a restart. |
-| `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json. |
+| `time_zone` | string |  | The zone the time of every line is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. So 24h turns at local midnight by default, and at UTC midnight with utc. The zone database is embedded, so an IANA name works in a container without zoneinfo. A change takes effect on reload. |
+| `rotate` | [object](#config-rotate) |  | Rotate the file log.output names, and remove old rotated files: the size and interval a file is rotated at, and the age, count and total size past which rotated files are removed. None when left out: the file grows without bound, as before. |
+| `loggers` | object of [object](#config-logger) |  | Settings of some loggers of their own, by name (those levels lists), over level, output, format and rotate: engine's to a file of its own, say, or access_log's as json. |
+
+<a id="config-rotate"></a>
+
+### `log.rotate`
+
+Also at `log.loggers.*.rotate`, `access_log.rotate`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_bytes` | integer, 0 or more | `1073741824` | How large a file may grow before it is rotated: a write that would take it past this starts a new file. 1 GiB when left out; 0 does not rotate by size. |
+| `interval` | duration |  | How long a file is written before it is rotated, at the next period boundary of the log's time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over 24h that is not a whole number of days, is refused. Off when left out. |
+| `max_age` | duration | `"720h"` | How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0 keeps it until a count or size limit removes it. |
+| `max_files` | integer, 0 or more |  | The most rotated files kept, newest first; 0 or left out has no count limit. |
+| `max_total_bytes` | integer, 0 or more | `1073741824` | The most the rotated files may total, the oldest removed until they fit. 1 GiB when left out; 0 does not limit the total. |
+| `compress` | boolean | `true` | Gzip a file when it is rotated. On when left out. |
 
 <a id="config-logger"></a>
 
@@ -805,6 +857,7 @@ In JSON:
 | `level` | string: `debug`, `info`, `warn`, `error` |  | The least level the logger writes. A change takes effect on reload. |
 | `output` | string |  | "stdout", "stderr", or the path of a file the logger's messages are appended to. A change takes a restart. |
 | `format` | string: `line`, `text`, `json` |  | How the logger's messages are written: line, text or json, as the log's format. A change takes a restart. |
+| `rotate` | [object](#config-rotate) |  | Rotate this logger's file, when output names one of its own; the log's rotate is used when the logger writes to the log's output. The settings are the log's rotate's. |
 
 <a id="access-log"></a>
 
@@ -812,7 +865,9 @@ In JSON:
 
 A line for each request, written to standard output, standard error or a file, through a
 bounded buffer: when the output cannot keep up, lines past the buffer are dropped and counted
-rather than holding requests up. Read when fit starts, but for `level`, which a reload changes.
+rather than holding requests up. A file output is queued to a file sink of fit's own, which writes
+on a goroutine of its own, off the workers. Read when fit starts, but for `level`, `time_zone` and
+`rotate`, which a reload changes.
 
 `format` is how a line is written, with the same fields in each: `json`, the default, an object a
 line; or, as fib writes its logs, `text`, every part as key=value (logfmt), or `line`, the time and
@@ -825,7 +880,16 @@ text  time=2026-10-19T07:39:56.123Z level=INFO msg=access listener=web route=api
 line  2026-10-19 15:39:56.123 INFO  access listener=web route=api client=192.0.2.1 proto=HTTP/1.1 method=GET ...
 ```
 
-`json` and `text` write the time in UTC, `line` in local time.
+`time_zone` is the zone a line's time is written in: `local`, the default, `utc`, or an IANA zone
+such as `Asia/Shanghai`; it is also the zone the file's `interval` turns in, so `24h` turns at local
+midnight by default. Before this setting `json` and `text` wrote UTC and `line` local; now every
+format writes this zone.
+
+`rotate` rotates the file and removes its old rotated files, as `log`'s does: `max_bytes` (1 GiB)
+and `interval` (off) decide when it turns, a rotated file is named after the rotation in UTC and
+gzipped when `compress` is on, and `max_age` (720h), `max_files` (none) and `max_total_bytes` (1 GiB)
+remove the oldest rotated files. Left out, the file grows without bound, and fit says so at startup.
+The file at one path may be fit's own log's too, with the same `rotate` and `time_zone`.
 
 A request's level is its response's status: info below 400, warn for 4xx and error for 5xx.
 `level` writes the requests at that level and above: `warn` writes those answered with an error,
@@ -841,6 +905,8 @@ access_log {
 	flush_interval 1s
 	level warn
 	format line
+	time_zone local
+	rotate { max_bytes 1GiB; interval 24h; max_age 720h; compress true }
 }
 
 route { match { host example.com }; handler respond { body hello } }
@@ -854,6 +920,12 @@ access_log:
   flush_interval: 1s
   level: warn
   format: line
+  time_zone: local
+  rotate:
+    max_bytes: 1073741824
+    interval: 24h
+    max_age: 720h
+    compress: true
 routes:
   - match:
       host:
@@ -868,7 +940,8 @@ In JSON:
 
 ```json
 {
-  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s", "level": "warn", "format": "line"},
+  "access_log": {"output": "/var/log/fit/access.log", "flush_interval": "1s", "level": "warn", "format": "line",
+    "time_zone": "local", "rotate": {"max_bytes": 1073741824, "interval": "24h", "max_age": "720h", "compress": true}},
   "routes": [{"match": {"host": ["example.com"]}, "handler": {"module": "respond", "params": {"body": "hello"}}}]
 }
 ```
@@ -884,6 +957,8 @@ In JSON:
 | `buffer_bytes` | integer, 0 or more | `4194304` | How many bytes of lines may wait to be written; lines past it are dropped. 4 MiB when left out. |
 | `level` | string: `info`, `warn`, `error` | `"info"` | The least level of the requests written: a response with a status below 400 is info, a 4xx warn and a 5xx error, so warn writes the requests answered with 4xx and 5xx, and error those answered with 5xx. Every request when left out. A change takes effect on reload. |
 | `format` | string: `json`, `text`, `line` | `"json"` | How a request's line is written, with the same fields whichever: json, a JSON object; text, time, level, msg and the fields as key=value (logfmt); or line, the time and level, then the fields as key=value, as fit's own log writes lines. A request's level is its status's, as level says. json when left out. A change takes a restart. |
+| `time_zone` | string |  | The zone a line's time is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. json and text wrote UTC and line local before this setting; now every format writes this zone, local when left out, and 24h turns at local midnight. A change takes effect on reload. |
+| `rotate` | [object](#config-rotate) |  | Rotate the file output names, and remove old rotated files: the size and interval a file is rotated at, and the age, count and total size past which rotated files are removed. None when left out: the file grows without bound, as before. |
 
 <a id="telemetry"></a>
 

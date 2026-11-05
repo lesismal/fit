@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fiblog "github.com/lesismal/fib/log"
@@ -70,20 +71,40 @@ func ParseFormat(s string) fiblog.Format {
 // use.
 type Root struct {
 	stdout, stderr *output
-	// files are the files the log opened, by path, which loggers writing
-	// to the same file share.
-	files    map[string]*output
+	// files is the set of file sinks the log writes through, shared with
+	// the access log; sinks are its own, by the output path they write.
+	files    *Files
+	sinks    map[string]*File
 	levels   []slog.LevelVar // each logger's least level, by its index in config.Loggers
 	handlers []slog.Handler  // each logger's, which writes its messages
 	loggers  []Logger
+	zone     atomic.Pointer[zone]
+	closed   atomic.Bool
+}
+
+// zone is the time zone the log writes its lines and turns its files in.
+type zone struct {
+	loc  *time.Location
+	name string
+}
+
+func zoneOf(c *config.Log) (*zone, error) {
+	loc, err := c.TimeZoneLocation()
+	if err != nil {
+		return nil, err
+	}
+	name := config.TimeZoneLocal
+	if c != nil {
+		name = c.TimeZoneName()
+	}
+	return &zone{loc: loc, name: name}, nil
 }
 
 // output is a writer the loggers writing to it share, one message a Write
 // under its lock, so that their lines never interleave.
 type output struct {
-	mu   sync.Mutex
-	w    io.Writer
-	file *os.File // the file w is, when the log opened it
+	mu sync.Mutex
+	w  io.Writer
 }
 
 func (o *output) Write(p []byte) (int, error) {
@@ -92,16 +113,61 @@ func (o *output) Write(p []byte) (int, error) {
 	return o.w.Write(p)
 }
 
+// sinkWriter is where a file logger's lines go: the file sink until the log
+// is closed, and stderr after, as the log did before the sink.
+type sinkWriter struct {
+	root *Root
+	file *File
+}
+
+func (w *sinkWriter) Write(p []byte) (int, error) {
+	if w.root.closed.Load() {
+		return w.root.stderr.Write(p)
+	}
+	return w.file.Write(p)
+}
+
+// zoneHandler writes a record's time in the log's time zone, so that every
+// format of every logger writes the zone the log's time_zone names.
+type zoneHandler struct {
+	inner slog.Handler
+	loc   func() *time.Location
+}
+
+func (h zoneHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h zoneHandler) Handle(ctx context.Context, r slog.Record) error {
+	if loc := h.loc(); loc != nil {
+		r.Time = r.Time.In(loc)
+	}
+	return h.inner.Handle(ctx, r)
+}
+
+func (h zoneHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return zoneHandler{inner: h.inner.WithAttrs(attrs), loc: h.loc}
+}
+
+func (h zoneHandler) WithGroup(name string) slog.Handler {
+	return zoneHandler{inner: h.inner.WithGroup(name), loc: h.loc}
+}
+
 // New opens the log c describes, nil for the default: info and up, debug
 // and info messages to stdout and the rest to stderr, as lines.
 func New(c *config.Log, stdout, stderr io.Writer) (*Root, error) {
-	r := &Root{stdout: &output{w: stdout}, stderr: &output{w: stderr}, files: map[string]*output{},
+	z, err := zoneOf(c)
+	if err != nil {
+		return nil, err
+	}
+	r := &Root{stdout: &output{w: stdout}, stderr: &output{w: stderr}, files: NewFiles(), sinks: map[string]*File{},
 		levels: make([]slog.LevelVar, len(config.Loggers)), handlers: make([]slog.Handler, len(config.Loggers)),
 		loggers: make([]Logger, len(config.Loggers))}
+	r.zone.Store(z)
 	r.SetLevels(c)
 	for i, name := range config.Loggers {
 		r.loggers[i] = Logger{r: r, name: name, i: i}
-		h, err := r.handler(c.OutputOf(name), ParseFormat(c.FormatOf(name)), &r.levels[i])
+		h, err := r.handler(c.OutputOf(name), ParseFormat(c.FormatOf(name)), &r.levels[i], c.RotateOf(name))
 		if err != nil {
 			_ = r.Close()
 			return nil, err
@@ -112,29 +178,49 @@ func New(c *config.Log, stdout, stderr io.Writer) (*Root, error) {
 }
 
 // handler returns a handler writing to out, a config's output, in format at
-// level.
-func (r *Root) handler(out string, format fiblog.Format, level slog.Leveler) (slog.Handler, error) {
+// level, with the times in the log's zone.
+func (r *Root) handler(out string, format fiblog.Format, level slog.Leveler, rot *config.Rotate) (slog.Handler, error) {
 	newHandler := func(w io.Writer) slog.Handler {
 		return fiblog.NewHandler(fiblog.Config{Format: format, Level: level, Output: w})
 	}
+	var h slog.Handler
 	switch out {
 	case "":
-		return splitHandler{low: newHandler(r.stdout), high: newHandler(r.stderr)}, nil
+		h = splitHandler{low: newHandler(r.stdout), high: newHandler(r.stderr)}
 	case "stdout":
-		return newHandler(r.stdout), nil
+		h = newHandler(r.stdout)
 	case "stderr":
-		return newHandler(r.stderr), nil
-	}
-	o := r.files[out]
-	if o == nil {
-		f, err := os.OpenFile(out, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+		h = newHandler(r.stderr)
+	default:
+		f, err := r.sink(out, rot)
 		if err != nil {
 			return nil, err
 		}
-		o = &output{w: f, file: f}
-		r.files[out] = o
+		h = newHandler(&sinkWriter{root: r, file: f})
 	}
-	return newHandler(o), nil
+	return zoneHandler{inner: h, loc: r.currentZone}, nil
+}
+
+// sink returns the sink of a file output, opening it the first time a
+// logger writes there.
+func (r *Root) sink(path string, rot *config.Rotate) (*File, error) {
+	if f := r.sinks[path]; f != nil {
+		return f, nil
+	}
+	f, err := r.files.Open(path, rot, r.currentZone)
+	if err != nil {
+		return nil, err
+	}
+	r.sinks[path] = f
+	return f, nil
+}
+
+// currentZone returns the zone the log writes its times in.
+func (r *Root) currentZone() *time.Location {
+	if z := r.zone.Load(); z != nil {
+		return z.loc
+	}
+	return time.Local
 }
 
 // splitHandler writes the records below warn with low and the rest with
@@ -167,6 +253,39 @@ func (r *Root) SetLevels(c *config.Log) {
 	}
 }
 
+// SetConfig has the log write its lines and turn its files as c says from
+// now on: the levels, the time zone, and the rotation and retention
+// settings, all of which a reload changes in place. A file's path or a
+// logger's format still takes a restart, so they are not taken up here.
+func (r *Root) SetConfig(c *config.Log) error {
+	z, err := zoneOf(c)
+	if err != nil {
+		return err
+	}
+	r.SetLevels(c)
+	r.zone.Store(z)
+	rots := map[string]*config.Rotate{}
+	for _, out := range c.FileOutputs() {
+		rots[out.Path] = out.Rotate
+	}
+	for path, f := range r.sinks {
+		f.SetRotate(rots[path])
+	}
+	return nil
+}
+
+// Files returns the set of file sinks the log writes through, for the
+// access log, which shares them, and for the workbench.
+func (r *Root) Files() *Files { return r.files }
+
+// TimeZoneName returns the name of the zone the log writes its times in.
+func (r *Root) TimeZoneName() string {
+	if z := r.zone.Load(); z != nil {
+		return z.name
+	}
+	return config.TimeZoneLocal
+}
+
 // Logger returns the logger named name, one of config.Loggers. It panics
 // for any other name, a mistake in fit's code.
 func (r *Root) Logger(name string) *Logger {
@@ -180,16 +299,13 @@ func (r *Root) Logger(name string) *Logger {
 // Close closes the files the log opened. Messages logged after Close go to
 // stderr.
 func (r *Root) Close() error {
+	r.closed.Store(true)
 	var first error
-	for _, o := range r.files {
-		o.mu.Lock()
-		if o.file != nil {
-			if err := o.file.Close(); err != nil && first == nil {
-				first = err
-			}
-			o.w, o.file = r.stderr, nil
+	for path, f := range r.sinks {
+		if err := r.files.Release(f); err != nil && first == nil {
+			first = err
 		}
-		o.mu.Unlock()
+		delete(r.sinks, path)
 	}
 	return first
 }

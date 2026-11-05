@@ -23,6 +23,11 @@ of room.
 - [Console, logins and an encrypted store](#console-logins-and-an-encrypted-store)
 - [Agent and tunnel](#agent-and-tunnel)
 - [WebRTC](#webrtc)
+- [Media: auth, streaming and pages](#media-auth-streaming-and-pages)
+- [AI assistant in the workbench](#ai-assistant-in-the-workbench)
+- [Media library: video on demand and channels](#media-library-video-on-demand-and-channels)
+- [Cluster management](#cluster-management)
+- [Logging: files, rotation and retention](#logging-files-rotation-and-retention)
 
 ## How to work an iteration
 
@@ -104,6 +109,7 @@ should touch as few of these as it can.
 | `tunnel/...` | the tunnel's roles: `hub`, `node`, `proxy` |
 | `provider/...` | file, docker, kubernetes, consul, etcd |
 | `observe` | access logs, metrics, tracing |
+| `logs` | fit's own log: loggers, levels, and the files the log and the access log write through, rotated and kept (I155–I156) |
 | `plugin/...` | compile-time modules and WASM |
 | `adapter/...` | config adapters: friendly format, nginx |
 | `bench` | the benchmark harness, configs for nginx, Caddy, Traefik and fit, results |
@@ -113,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I155.
+Status: `todo`, `doing` or `done`. The next free iteration number is I158.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -305,6 +311,10 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I155.
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | todo |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
 | I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | todo |
+| **Logging** | | | |
+| I155 | Decision 034; the file sink: a bounded queue and a writer of its own, the log's `time_zone` (local by default, UTC or an IANA zone), rotation by size and by time, retention by age, number and total size, compression, and `log`'s file outputs and their `rotate` | I21, I82, I83 | done |
+| I156 | The access log's file through the same sink: `access_log.rotate` and `time_zone`, one sink per path, shared with `log`'s, a rotation only after the buffers are written, and the config's refusal of two settings for one path | I155 | done |
+| I157 | The workbench's Logs page: each output, its loggers and format, the files on disk with sizes and ages, the rotation and retention form, rotate now and clean up now with a preview and a confirmation, and warnings | I155, I156, I120 | done |
 
 ## M0, foundations
 
@@ -2568,3 +2578,145 @@ serves.
    `auto_sync` per group?
 6. I149 (members linking out) before or after I145–I146? Until then the tunnel reaches them.
 7. Binary upgrades (I151): in scope or not?
+
+## Logging: files, rotation and retention
+
+fit's own log and the access log both write to files, and today a file is opened once and appended to
+for as long as fit runs: nothing rotates it, nothing removes it, and changing its path or format takes
+a restart. A file therefore grows until the disk fills, operators rotate it outside fit, and the
+workbench shows neither the files nor their cost. This track gives a file output a rotation schedule
+and a retention policy, shared by the two logs: rotate by size, by time at the boundary of the log's
+time zone, or whichever comes first, compress what is rotated, and remove old files past a maximum
+age, a maximum number and a maximum total size. Each log writes the time of its lines in its own
+zone — local by default, `utc` or an IANA zone when the config says — and its files turn at that
+zone's boundaries. The workbench's Logs page shows the files, edits the settings in a form, and
+offers a rotate and a cleanup that a person runs. Decision 034 records the choices below.
+
+Principles, in the order they bind:
+
+- **One writer per file, off fib's workers.** One file sink for each output path, with a bounded queue
+  and a writer goroutine of its own, shared by every logger that writes there and by the access log.
+  A write copies its bytes and returns: a full queue refuses them and counts them, and no logger,
+  handler or request path touches the disk (rule 1). Rotation, retention and compression run on the
+  writer's goroutine and `internal/filepool`, within a timeout (rule 4).
+- **No cost on the request path.** Everything this adds runs on the writer's goroutine and its pool:
+  the enqueue, the size and time checks, a rotation, a sweep, a compression. The access log's line is
+  formatted where it is today, allocation-free, and the queue copies into pooled buffers, so a write
+  allocates nothing and takes no lock a worker waits on; the packages' benchmarks, before and after on
+  the benchmark host (rule 21), show no regression.
+- **A rotation loses nothing.** Queued lines are written to a file before it is renamed and a new one
+  opened; a line is in exactly one file, never split, dropped or written twice, however the settings
+  combine. Compression writes a temporary file and renames it, and a failure keeps the plain file.
+- **Local time by default, one clock per file.** A log's lines and its files' time rotation use its
+  `time_zone`: `local` when left out, `utc`, or an IANA zone such as `Asia/Shanghai`, which fit
+  carries (`time/tzdata`) so that a container without zoneinfo works. So `24h` turns at local midnight
+  by default and at UTC midnight with `time_zone: "utc"`, and every format of a log writes the same
+  zone. Two logs sharing a file must write the same zone and turn at the same boundary, or the config
+  is refused.
+- **Only the sink's own files.** A sweep removes only the names the sink makes from its path, and
+  never the file being written; another file in the directory is never touched.
+- **Applied where it can be.** A reload changes `time_zone`, rotation, retention and compression in
+  place, the sink keeping the file it has; a file's path or a logger's format still takes a restart,
+  and the workbench says which is which. The Consistency check (I121) stops calling `time_zone` and
+  the rotation, retention and compression that now apply live a restart-only difference.
+- **Bounded everything.** The queue's bytes, the files a sweep reads and the compressions at once have
+  limits; a slow disk costs memory up to the queue and no more, and what is dropped is counted and
+  reported.
+
+### I155 Decision 034; a file sink: rotation by size and time, retention, compression
+
+- **Do**: decision 034. Package `logs`: a file sink on a path, a queue of 1 MiB and a writer goroutine;
+  `Write` copies into a pooled buffer and enqueues, refuses and counts past the queue. Rotation, before
+  a write that would take the file past `max_bytes` — a line larger than that gets a file of its own —
+  or on the first write after a period later than the file's, periods in the log's `time_zone`,
+  whichever comes first; so `24h` turns at local midnight by default and at UTC midnight with
+  `time_zone: "utc"`. A rotated file is named `<path>.<yyyy-mm-ddThh-mm-ss.mmm>` in UTC, the time of
+  the rotation, whatever the log's zone, with `-1`, `-2` when that name is taken and `.gz` when
+  compressed by `internal/filepool` (a temporary file, renamed; a failure keeps the plain file, and a
+  sweep skips what is being compressed). Retention, swept at open, after every rotation and every ten
+  minutes: the files older than `max_age`, then those beyond `max_files`, then the oldest until the
+  rotated files total at most `max_total_bytes`; only names the sink makes, never the open file.
+  `config.Log` gains `time_zone` — `local` when left out, `utc`, or an IANA zone — and every logger's
+  lines in every format are written in it, the engine's included, through a wrapper of fib's handler
+  that puts the record's time in the zone. `config.Log` and `config.Logger` gain `rotate`: `log.rotate`
+  for `log.output`, a logger's own for an output of its own; `max_bytes` 1 GiB, `max_age` 720h and
+  `max_total_bytes` 1 GiB when left out, `compress` on, `interval` and `max_files` off, and a limit set
+  to 0 off — so `"rotate": {}` is a bounded policy and no `rotate` keeps today's single file, with a
+  line at startup saying it grows without bound. One manager (`logs.Files`, made by `fit run` and
+  handed to `logs.New`) opens one sink per path and shares it among the loggers writing there, and is
+  where a reload changes `time_zone`, rotation, retention and compression in place; a logger's output
+  path is still fixed at start.
+- **Done when**: a logger's file rotates at `max_bytes`, at each `interval` boundary and at whichever
+  comes first; with the default `time_zone` a `24h` period turns at local midnight, with
+  `time_zone: "utc"` at UTC midnight and with an IANA zone at that zone's midnight, `1h` at the top of
+  the hour in the zone, a fake clock proving each; lines of every format carry the chosen zone, the
+  engine's included; across a hundred rotations every line is in exactly one file, none split, lost or
+  duplicated, and a line larger than `max_bytes` is in a file of its own; files are removed by age, by
+  number and by total size, oldest first, the open file never, a file the sink did not write never;
+  with `compress` a rotated file is a gzip whose text is the lines, its plain file gone, its compressed
+  size what `max_total_bytes` counts, and a failed compression keeps the plain file and logs a line; a
+  full queue refuses and counts, a slow disk (filepool's hook) holds up no logger call, and drops are
+  reported once the disk catches up; a reload changes `time_zone` and every rotation, retention and
+  compression field in place, while a path or format change still warns of a restart; a restart sweeps
+  before its first line; `fit validate` refuses a negative limit, an `interval` under 1s, an unknown
+  `time_zone`, and two loggers naming one path with different `rotate`; the schema's descriptions and
+  the docs cover every field; the log's benchmark and the sink's write, before and after with benchstat
+  on the benchmark host (rule 21), show no regression and no allocation a line while the queue has
+  room, the zone costing one `Time.In` a message or a second, never a line; under the race detector.
+- **Touches**: `logs`, `internal/filepool`, `config`, `cli`, `admin`, `schema`, `docs`.
+
+### I156 The access log's file through the same sink; one file, one sink
+
+- **Do**: `access_log.rotate`, the same `config.Rotate`, and `access_log.time_zone`; `observe.AccessLog`
+  writes its batches to the sink the manager keeps for its path instead of its own file, and its
+  `Close` writes out its buffers before the sink's. Its lines are written in its `time_zone` — `local`
+  when left out, `utc`, or an IANA zone — and its file's time rotation turns at that zone's boundaries:
+  `json` and `text` used to write UTC and `line` local, and now every format follows the setting,
+  local by default. Loggers of `log` and the access log naming one path share the one sink, and a
+  config that gives a shared path two different `rotate` settings or two `time_zone`s is refused, so
+  two writers cannot rotate one file under each other. A reload updates the access log's `time_zone`,
+  rotation, retention and compression in place; its path and format still take a restart, as they do
+  now. The batches the sink refuses are counted as the lines the access log drops, as its own buffer's
+  drops are. The per-second time stamp cache stays: a chosen zone costs one conversion a second, not
+  one a line.
+- **Done when**: the access log's file rotates by size and by time and is cleaned up as fit's own
+  log's is, and no line is lost or duplicated across a rotation; with the default `time_zone` a `24h`
+  period turns at local midnight, with `utc` at UTC midnight, with an IANA zone at that zone's, a fake
+  clock proving each; `json`, `text` and `line` all write local time by default and the zone that is
+  set — `json` and `text` as RFC 3339 with its offset, `line` its wall clock — one conversion a second
+  at most; the two logs on one path write through one sink and each line is whole; `fit validate`
+  refuses one path with two different `rotate` settings or two `time_zone`s; a slow disk drops and
+  counts lines as the buffer does; a reload changes the access log's `time_zone`, rotation, retention
+  and compression without a restart; `Close` writes out what both logs buffered; the access log's
+  benchmark, before and after with benchstat on the benchmark host (rule 21), shows no significant
+  change and no more allocation a line on the request path; under the race detector.
+- **Touches**: `observe`, `logs`, `config`, `admin`, `schema`, `docs`.
+
+### I157 The workbench's Logs page
+
+- **Do**: a first-level **Logs** page: for each file output its path, the loggers writing there and the
+  format, the log's `time_zone` and the rotation and retention settings, the current and rotated files
+  with their sizes and ages, the totals, the lines dropped and the last write error; the settings
+  edited in the page's form and its `.conf`, `.yaml` and `.json` tabs, writing `log.time_zone`,
+  `log.rotate`, `log.loggers.<name>.rotate` or `access_log.time_zone` and `access_log.rotate`, and
+  applied through the one apply path as any page's edit is (I120), `time_zone`, rotation, retention and
+  compression taking effect without a restart; a warning for an output with no `rotate`, one past its
+  retention and one whose last write failed. **Rotate now** and **Clean up now**, the second previewing
+  the files it would remove and confirmed in a dialog that names them; both through the console's own
+  endpoints, behind its login and CSRF, and recorded in the `admin` logger. `GET /api/logs` lists the
+  outputs and their files, bounded; `POST /api/logs/rotate` and `POST /api/logs/cleanup` take an
+  output's `path`, and the second `dry_run`; a `path` that is not one fit opened is refused; the
+  listing is read on `internal/filepool`, at most 1,000 files an output, and its answer is bounded;
+  nothing outside the configured outputs' own names is listed or removed. Links to the `log` and
+  `access_log` pages and to Consistency (I121).
+- **Done when**: the menu shows Logs, and the page lists each output's files, sizes, ages, totals and
+  its effective zone in English and Chinese; a form edit of `max_age`, `max_files`, `max_total_bytes`,
+  `max_bytes`, `interval`, `compress` or `time_zone` applies through the page's apply path and takes
+  effect without a restart, while a path or format change says it needs one; **Rotate now** rotates and
+  the page shows the new file and the rotated one; **Clean up now** previews the files and, confirmed,
+  removes exactly them, cancelling removes nothing, and a name the sink did not make is never listed or
+  removed; a failed write, a compression failure and dropped lines are shown; an answer past the
+  listing bounds is truncated and says so; only a logged-in user with the page may act, CSRF is
+  checked, and each action is in the `admin` logger; a browser test passes in English and Chinese;
+  under the race detector where Go changes.
+- **Touches**: `app/workbench`, `admin`, `logs`, `observe`, `docs`.

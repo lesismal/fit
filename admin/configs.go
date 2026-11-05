@@ -428,14 +428,19 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 		return Result{}, nil, nil, err
 	}
 	// The runtime holds g now, and only Apply swaps graphs while fit runs,
-	// so g is still current. The levels of the logs follow the config.
+	// so g is still current. The levels, the time zone and the files'
+	// rotation of the logs follow the config.
+	var warnings []string
 	if l := cs.env.Log; l != nil {
-		l.SetLevels(c.Log)
+		if err := l.SetConfig(c.Log); err != nil {
+			warnings = append(warnings, err.Error())
+		}
 	}
 	if l := cs.env.AccessLog; l != nil {
-		l.SetLevel(c.AccessLog)
+		if err := l.SetConfig(c.AccessLog); err != nil {
+			warnings = append(warnings, err.Error())
+		}
 	}
-	var warnings []string
 	if cs.apps != nil {
 		if err := cs.apps.Apply(c); err != nil {
 			warnings = append(warnings, strings.Split(err.Error(), "\n")...)
@@ -551,6 +556,15 @@ type Effective struct {
 	// Shadowed lists what providers provided and Config leaves out,
 	// because a source before them took its name.
 	Shadowed []provider.Shadowed `json:"shadowed,omitempty"`
+}
+
+// CurrentConfig returns the config the running version loaded: the base
+// config as it was written, what providers provided merged into it. The
+// caller must not change it.
+func (cs *Configs) CurrentConfig() *config.Config {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.currentCfg
 }
 
 // Effective returns the running config as it runs.

@@ -307,6 +307,10 @@ func (c *Config) Validate() Errors {
 	if l := c.Log; l != nil {
 		checkLog(l, add)
 	}
+	if a := c.AccessLog; a != nil {
+		checkAccessLog(a, add)
+	}
+	checkLogFileSharing(c, add)
 	if e := c.Engine; e != nil && e.Workers > 0 && e.MinWorkers > e.Workers {
 		add(e.At.Field("min_workers"), "min_workers, %d, is more than workers, %d", e.MinWorkers, e.Workers)
 	}

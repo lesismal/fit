@@ -21,7 +21,7 @@ func TestAccessLogStdOutputs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if l.out != want || l.file != nil {
+		if l.out != want || l.sink != nil {
 			t.Errorf("output %q: %v", output, l.out)
 		}
 		l.Close()

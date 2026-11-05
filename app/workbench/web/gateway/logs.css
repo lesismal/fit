@@ -1,0 +1,6 @@
+/* The Logs page: one card a file output, its files and its two actions. / 日志页面：每个文件输出一张卡片，含文件与两个操作。 */
+.lg-outputs { display: flex; flex-direction: column; gap: 14px; }
+.lg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lg-path { overflow-wrap: anywhere; }
+.lg-tools { display: flex; gap: 6px; }
+.lg-sec { margin: 22px 0 8px; font-size: 1rem; }

@@ -75,7 +75,11 @@ func TestCloseError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = r.files[path].file.Close()
+	f := r.Files().File(path)
+	if f == nil {
+		t.Fatalf("no sink for %s", path)
+	}
+	_ = f.file.Close()
 	if err := r.Close(); err == nil {
 		t.Error("closing a closed file reported nothing")
 	}

@@ -42,6 +42,7 @@
 package observe
 
 import (
+	"bytes"
 	"hash/maphash"
 	"io"
 	stdhttp "net/http"
@@ -72,14 +73,14 @@ const (
 // use.
 type AccessLog struct {
 	out      io.Writer
-	file     *os.File // the file out is, when the log owns it
 	interval time.Duration
 	maxBytes int
 
 	shards []shard
 	seed   maphash.Seed
-	// stamp is the time of the last line, to the second, formatted: lines
-	// logged within the same second share it.
+	// stamp is the time of the last line, to the second, formatted in the
+	// log's zone: lines within the same second share it, and a reload that
+	// changes the zone drops it.
 	stamp atomic.Pointer[stamp]
 	// queued counts the bytes handed to the writer and not yet written.
 	// With what each shard holds, it is bounded by maxBytes; a shard adds
@@ -106,9 +107,16 @@ type AccessLog struct {
 	// written, by the config's level; a reload may change it.
 	minStatus atomic.Int32
 	// format is how lines are written: formatJSON, formatText or
-	// formatLine. localStamp is stamp in local time, for formatLine.
-	format     int
-	localStamp atomic.Pointer[localStamp]
+	// formatLine.
+	format int
+	// loc is the zone lines' times are written in, which a reload changes.
+	loc atomic.Pointer[time.Location]
+	// sink is where the lines go when output names a file: the process's
+	// file sink, which writes on a goroutine of its own, with rotation and
+	// retention; files is the set the sink belongs to, whose it was opened
+	// from.
+	sink  *logs.File
+	files *logs.Files
 }
 
 // shard is a part of the buffer, with a lock of its own. Shards are padded
@@ -144,10 +152,25 @@ func parseFormat(s string) int {
 	return formatJSON
 }
 
-// NewAccessLog opens the log c describes and starts its writer.
+// NewAccessLog opens the log c describes and starts its writer, with a set
+// of file sinks of its own; fit run uses NewAccessLogFiles instead, so that
+// fit's own log and the access log share a sink for a path.
 func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
+	return NewAccessLogFiles(c, nil)
+}
+
+// NewAccessLogFiles opens the log c describes and starts its writer, a file
+// output written through files, the set fit's own log writes through, so
+// that the two logs naming one path share one sink. A nil files opens a set
+// of the log's own.
+func NewAccessLogFiles(c *config.AccessLog, files *logs.Files) (*AccessLog, error) {
+	loc, err := c.TimeZoneLocation()
+	if err != nil {
+		return nil, err
+	}
 	l := &AccessLog{interval: c.FlushInterval.Std(), maxBytes: c.BufferBytes, format: parseFormat(c.Format),
-		log: logs.Named(config.LoggerAccessLog)}
+		files: files, log: logs.Named(config.LoggerAccessLog)}
+	l.loc.Store(loc)
 	l.SetLevel(c)
 	switch c.Output {
 	case "", "stdout":
@@ -155,11 +178,14 @@ func NewAccessLog(c *config.AccessLog) (*AccessLog, error) {
 	case "stderr":
 		l.out = os.Stderr
 	default:
-		f, err := os.OpenFile(c.Output, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+		if l.files == nil {
+			l.files = logs.NewFiles()
+		}
+		sink, err := l.files.Open(c.Output, c.Rotate, func() *time.Location { return l.zone() })
 		if err != nil {
 			return nil, err
 		}
-		l.out, l.file = f, f
+		l.sink = sink
 	}
 	l.start()
 	return l, nil
@@ -176,6 +202,7 @@ func NewAccessLogTo(w io.Writer, interval time.Duration, maxBytes int) *AccessLo
 func NewAccessLogFormatTo(w io.Writer, format string, interval time.Duration, maxBytes int) *AccessLog {
 	l := &AccessLog{out: w, interval: interval, maxBytes: maxBytes, format: parseFormat(format),
 		log: logs.Named(config.LoggerAccessLog)}
+	l.loc.Store(time.UTC)
 	l.start()
 	return l
 }
@@ -230,9 +257,17 @@ func (l *AccessLog) run() {
 	}
 }
 
-// write writes a buffer out and keeps it to fill again.
+// write writes a buffer out and keeps it to fill again. A sink that refuses
+// it, its queue full or the log closed, loses every line in it, counted as
+// the log's dropped lines.
 func (l *AccessLog) write(b []byte) {
-	_, _ = l.out.Write(b)
+	if l.sink != nil {
+		if _, err := l.sink.Write(b); err != nil {
+			l.dropped.Add(int64(bytes.Count(b, []byte{'\n'})))
+		}
+	} else {
+		_, _ = l.out.Write(b)
+	}
 	l.queued.Add(-int64(len(b)))
 	if cap(b) <= 2*flushBytes {
 		select {
@@ -284,6 +319,36 @@ func (l *AccessLog) SetLevel(c *config.AccessLog) {
 	}
 }
 
+// SetConfig has the log write its lines as c says from now on: the level,
+// the time zone, and the file's rotation and retention, all of which a
+// reload changes in place. Its output, format, flush interval and buffer
+// still take a restart, so they are not taken up here.
+func (l *AccessLog) SetConfig(c *config.AccessLog) error {
+	if c == nil {
+		return nil
+	}
+	loc, err := c.TimeZoneLocation()
+	if err != nil {
+		return err
+	}
+	l.loc.Store(loc)
+	// The stamp is the last second in the old zone.
+	l.stamp.Store(nil)
+	if l.sink != nil {
+		l.sink.SetRotate(c.Rotate)
+	}
+	l.SetLevel(c)
+	return nil
+}
+
+// zone returns the zone lines' times are written in.
+func (l *AccessLog) zone() *time.Location {
+	if loc := l.loc.Load(); loc != nil {
+		return loc
+	}
+	return time.UTC
+}
+
 // Dropped returns how many lines have been dropped since it was last
 // reported.
 func (l *AccessLog) Dropped() int64 { return l.dropped.Load() }
@@ -305,8 +370,10 @@ func (l *AccessLog) Close() error {
 	}
 	close(l.stop)
 	<-l.done
-	if l.file != nil {
-		return l.file.Close()
+	if l.sink != nil {
+		err := l.files.Release(l.sink)
+		l.sink = nil
+		return err
 	}
 	return nil
 }
@@ -613,52 +680,66 @@ func appendSeconds(b []byte, d time.Duration) []byte {
 		byte('0'+frac/100%10), byte('0'+frac/10%10), byte('0'+frac%10))
 }
 
-// stamp is a second, and its time formatted up to its fraction:
-// "2006-01-02T15:04:05.".
+// stamp is a second, and its time in the log's zone formatted up to its
+// fraction: "2006-01-02T15:04:05." in text, and the zone's offset in zone,
+// "Z" or "+08:00", the first zlen bytes.
 type stamp struct {
 	sec  int64
 	text [20]byte
+	zone [6]byte
+	zlen int8
 }
 
-// appendTime is appendTime(b, t) for a time near the last line's: the date
-// and time of day are formatted once a second, and only the milliseconds per
-// line.
+// appendTime appends t as the structured formats write it: RFC 3339 in the
+// log's zone, the date and time of day formatted once a second and only the
+// milliseconds and the zone per line.
 func (l *AccessLog) appendTime(b []byte, t time.Time) []byte {
 	sec := t.Unix()
 	s := l.stamp.Load()
 	if s == nil || s.sec != sec {
-		formatted := appendTime(nil, t)
-		if len(formatted) != len("2006-01-02T15:04:05.000Z") {
-			return append(b, formatted...)
+		lt := t.In(l.zone())
+		buf := lt.AppendFormat(nil, "2006-01-02T15:04:05.")
+		if len(buf) != len(stamp{}.text) {
+			// A year out of the usual range: format the whole time rather
+			// than keep a stamp that holds it wrongly.
+			return append(b, lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")...)
 		}
 		s = &stamp{sec: sec}
-		copy(s.text[:], formatted)
+		copy(s.text[:], buf)
+		z := lt.AppendFormat(s.zone[:0], "Z07:00")
+		if len(z) > len(s.zone) {
+			return append(b, lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")...)
+		}
+		s.zlen = int8(len(z))
 		l.stamp.Store(s)
 	}
 	ms := t.Nanosecond() / 1e6
 	b = append(b, s.text[:]...)
-	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
+	b = append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10))
+	if s.zlen == 1 {
+		return append(b, s.zone[0])
+	}
+	return append(b, s.zone[:s.zlen]...)
 }
 
-// localStamp is a second, and its local time formatted up to its fraction:
-// "2006-01-02 15:04:05.".
-type localStamp struct {
-	sec  int64
-	text []byte
-}
-
-// appendLocalTime appends t in local time as "2006-01-02 15:04:05.000", as
-// fib's line format writes it, the date and time of day formatted once a
+// appendLocalTime appends t in the log's zone as "2006-01-02 15:04:05.000",
+// as fib's line format writes it, the date and time of day formatted once a
 // second.
 func (l *AccessLog) appendLocalTime(b []byte, t time.Time) []byte {
 	sec := t.Unix()
-	s := l.localStamp.Load()
+	s := l.stamp.Load()
 	if s == nil || s.sec != sec {
-		s = &localStamp{sec: sec, text: t.Local().AppendFormat(nil, "2006-01-02 15:04:05.")}
-		l.localStamp.Store(s)
+		lt := t.In(l.zone())
+		buf := lt.AppendFormat(nil, "2006-01-02 15:04:05.")
+		if len(buf) != len(stamp{}.text) {
+			return append(b, lt.AppendFormat(b, "2006-01-02 15:04:05.000")...)
+		}
+		s = &stamp{sec: sec}
+		copy(s.text[:], buf)
+		l.stamp.Store(s)
 	}
 	ms := t.Nanosecond() / 1e6
-	b = append(b, s.text...)
+	b = append(b, s.text[:]...)
 	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10))
 }
 

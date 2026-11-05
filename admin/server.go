@@ -70,6 +70,12 @@ const VersionHeader = "Fit-Config-Version"
 //	POST   /cache/purge         remove responses a cache zone keeps, by
 //	                            URL, by tag (Cache-Tag, Surrogate-Key) or
 //	                            all: {"zone", "urls", "tags", "all"}
+//	GET    /logs                the file outputs of fit's own log and the
+//	                            access log, with their loggers, formats,
+//	                            time zones, rotation and files on disk
+//	POST   /logs/rotate         rotate one output now: {"path"}
+//	POST   /logs/cleanup        remove what retention says, or report it
+//	                            with dry_run: {"path", "dry_run"}
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //
@@ -182,6 +188,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /cache", s.cacheZones)
 	mux.HandleFunc("POST /cache/purge", s.purge)
+	mux.HandleFunc("GET /logs", s.logs)
+	mux.HandleFunc("POST /logs/rotate", s.logsRotate)
+	mux.HandleFunc("POST /logs/cleanup", s.logsCleanup)
 	return mux
 }
 

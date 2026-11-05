@@ -153,6 +153,14 @@
           "default": "stdout",
           "description": "\"stdout\", \"stderr\", or the path of a file lines are appended to; \"stdout\" when left out.",
           "type": "string"
+        },
+        "rotate": {
+          "$ref": "#/$defs/config.Rotate",
+          "description": "Rotate the file output names, and remove old rotated files: the size and interval a file is rotated at, and the age, count and total size past which rotated files are removed. None when left out: the file grows without bound, as before."
+        },
+        "time_zone": {
+          "description": "The zone a line's time is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. json and text wrote UTC and line local before this setting; now every format writes this zone, local when left out, and 24h turns at local midnight. A change takes effect on reload.",
+          "type": "string"
         }
       },
       "type": "object"
@@ -1507,11 +1515,19 @@
           "additionalProperties": {
             "$ref": "#/$defs/config.Logger"
           },
-          "description": "Settings of some loggers of their own, by name (those levels lists), over level, output and format: engine's to a file of its own, say, or access_log's as json.",
+          "description": "Settings of some loggers of their own, by name (those levels lists), over level, output, format and rotate: engine's to a file of its own, say, or access_log's as json.",
           "type": "object"
         },
         "output": {
           "description": "\"stdout\", \"stderr\", or the path of a file messages are appended to, of every logger loggers does not set one for. When left out, debug and info messages go to stdout and warn and error ones to stderr. A change takes a restart.",
+          "type": "string"
+        },
+        "rotate": {
+          "$ref": "#/$defs/config.Rotate",
+          "description": "Rotate the file log.output names, and remove old rotated files: the size and interval a file is rotated at, and the age, count and total size past which rotated files are removed. None when left out: the file grows without bound, as before."
+        },
+        "time_zone": {
+          "description": "The zone the time of every line is written in, and the zone a file's interval is rotated at: local (the default), utc, or an IANA zone name such as Asia/Shanghai. So 24h turns at local midnight by default, and at UTC midnight with utc. The zone database is embedded, so an IANA name works in a container without zoneinfo. A change takes effect on reload.",
           "type": "string"
         }
       },
@@ -1542,6 +1558,10 @@
         "output": {
           "description": "\"stdout\", \"stderr\", or the path of a file the logger's messages are appended to. A change takes a restart.",
           "type": "string"
+        },
+        "rotate": {
+          "$ref": "#/$defs/config.Rotate",
+          "description": "Rotate this logger's file, when output names one of its own; the log's rotate is used when the logger writes to the log's output. The settings are the log's rotate's."
         }
       },
       "type": "object"
@@ -1959,6 +1979,45 @@
         "address",
         "users"
       ],
+      "type": "object"
+    },
+    "config.Rotate": {
+      "additionalProperties": false,
+      "properties": {
+        "compress": {
+          "default": true,
+          "description": "Gzip a file when it is rotated. On when left out.",
+          "type": "boolean"
+        },
+        "interval": {
+          "description": "How long a file is written before it is rotated, at the next period boundary of the log's time_zone: 24h turns at midnight, 1h on the hour; a fraction of a second, or a period over 24h that is not a whole number of days, is refused. Off when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_age": {
+          "default": "720h",
+          "description": "How long a rotated file is kept after it was last written: 720h (30 days) when left out; 0 keeps it until a count or size limit removes it.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 1073741824,
+          "description": "How large a file may grow before it is rotated: a write that would take it past this starts a new file. 1 GiB when left out; 0 does not rotate by size.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_files": {
+          "description": "The most rotated files kept, newest first; 0 or left out has no count limit.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 1073741824,
+          "description": "The most the rotated files may total, the oldest removed until they fit. 1 GiB when left out; 0 does not limit the total.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "config.Route": {
