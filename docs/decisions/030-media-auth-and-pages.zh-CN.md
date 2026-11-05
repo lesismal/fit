@@ -54,7 +54,9 @@
   映射回路由。处理器按引擎找到角色，就像 `whip` 找到 `webrtc.media`；hub 属于角色，所以流在路由重载后仍然存在。
   `webrtc.media` 仍是 `whip` 和 `whep` 的 SFU，与 hub 无关：两者既不共用端口也不共用流。
 - **在各协议自己的钩子中认证。** RTMP：`OnPublish` 和 `OnPlay`，凭据在流名或 app 的查询参数中（`token`，或 `user` 和
-  `pass`）。RTSP：`OnRequest`，DESCRIBE 和 PLAY 需要 `play`，ANNOUNCE 和 RECORD 需要 `publish`，其余方法属于前者开始的会话；
+  `pass`）。RTSP：`OnRequest`，DESCRIBE 和 PLAY 需要 `play`，ANNOUNCE 和 RECORD 需要 `publish`；SETUP 需要其流（去掉 `trackID=N` 的路径）的 `play`，
+  若它指向该连接 ANNOUNCE 的流或其下的轨道，则需要该流的 `publish`；由于 fib 播放的是会话 SETUP 选定的流而不管 PLAY 的 URL，PLAY 需要该连接
+  所有 SETUP 指向的流（至多 8 个）的 `play`，fit 按连接记住它们直到连接关闭；其余方法属于前者开始的会话；
   凭据为 Digest（fit 用用户的明文密码 `Policy.Password` 检查）、`auth_methods` 提供时的 Basic，或 URL 查询参数中的 token
   （截至其后第一个 `/`，客户端在那里写轨道的 control）。fit 自己发出质询，而不用 fib 的 `Password`，因为后者要求每个请求都带
   `Authorization`，会拒绝查询参数中的 token。SRT：握手中的 `OnConnect`，`s=` 是 token，与 `u=` 一起时是密码；fit 自己的

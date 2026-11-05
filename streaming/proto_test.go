@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lesismal/fib/media/av"
+	"github.com/lesismal/fib/media/hub"
 	"github.com/lesismal/fib/media/rtc"
 	"github.com/lesismal/fib/media/rtmp"
 	"github.com/lesismal/fib/media/rtsp"
@@ -234,6 +235,43 @@ func srtDial(t *testing.T, f *fit, streamID string) error {
 	case <-time.After(waitTimeout):
 		t.Fatal("the SRT handshake did not end")
 		return nil
+	}
+}
+
+// RTSP: a SETUP is checked, so that a client with a token for one stream
+// does not SETUP another and then PLAY it under the first one's URL, which
+// fib would play the SETUP's stream for.
+func TestRTSPSetupOtherStream(t *testing.T) {
+	f := startFit(t, doc(t, allListeners))
+	tracks, _ := fixture(t, time.Second)
+	pub, err := f.role().Hub().Publish("secret", tracks, hub.PublishInfo{Protocol: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Close()
+	addr := f.addr(t, "rtsp")
+	transport := "RTP/AVP/TCP;unicast;interleaved=0-1"
+	c := dialRTSP(t, addr)
+	if code, _ := c.do("SETUP", "rtsp://"+addr+"/secret/trackID=0", "Transport", transport); code != 401 {
+		t.Fatalf("a SETUP of secret without credentials: %d", code)
+	}
+	if code, _ := c.do("SETUP", "rtsp://"+addr+"/secret?token="+viewToken+"/trackID=0", "Transport", transport); code != 403 {
+		t.Fatalf("a SETUP of secret with a token for live/*: %d", code)
+	}
+	if code, _ := c.do("PLAY", "rtsp://"+addr+"/live/cam?token="+viewToken); code != 454 {
+		t.Fatalf("a PLAY with no session set up: %d", code)
+	}
+	// alice may play anything: her SETUP of secret passes.
+	url := "rtsp://" + addr + "/secret/trackID=0"
+	_, h := c.do("SETUP", url, "Transport", transport)
+	if code, _ := c.do("SETUP", url, "Transport", transport, "Authorization", digest("alice", "alice-pw", "SETUP", url, h.Values("Www-Authenticate"))); code != 200 {
+		t.Fatalf("alice's SETUP of secret: %d", code)
+	}
+	// A Digest made for another URL is refused.
+	_, h = c.do("DESCRIBE", url)
+	other := "rtsp://" + addr + "/live/cam"
+	if code, _ := c.do("DESCRIBE", other, "Authorization", digest("alice", "alice-pw", "DESCRIBE", url, h.Values("Www-Authenticate"))); code != 401 {
+		t.Fatalf("a Digest replayed on another URL: %d", code)
 	}
 }
 

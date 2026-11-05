@@ -12,7 +12,7 @@ and WHEP. Nothing is transcoded: each protocol carries the codecs it can of the 
 | Protocol | Publish | Play | Where |
 | --- | --- | --- | --- |
 | RTMP | `rtmp://host:1935/live/cam` | the same | `streaming.rtmp` |
-| RTSP | `rtsp://host:8554/live/cam`, ANNOUNCE and RECORD | DESCRIBE and PLAY | `streaming.rtsp` |
+| RTSP | `rtsp://host:8554/live/cam`, ANNOUNCE and RECORD | DESCRIBE, SETUP and PLAY | `streaming.rtsp` |
 | SRT | stream ID `#!::r=live/cam,m=publish` | stream ID `live/cam` | `streaming.srt` |
 | WHIP and WHEP | `POST /whip/live/cam` | `POST /whep/live/cam` | the `stream_whip` and `stream_whep` handlers, on `streaming.webrtc`'s UDP port |
 | HTTP-FLV, WebSocket-FLV | — | `GET /live/cam.flv` | the `httpflv` handler |

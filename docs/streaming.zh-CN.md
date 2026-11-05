@@ -11,7 +11,7 @@ HTTP-FLV、HLS 和 WHEP 播放。不做转码：每种协议承载它能承载�
 | 协议 | 推流 | 播放 | 配置位置 |
 | --- | --- | --- | --- |
 | RTMP | `rtmp://host:1935/live/cam` | 同左 | `streaming.rtmp` |
-| RTSP | `rtsp://host:8554/live/cam`，ANNOUNCE 和 RECORD | DESCRIBE 和 PLAY | `streaming.rtsp` |
+| RTSP | `rtsp://host:8554/live/cam`，ANNOUNCE 和 RECORD | DESCRIBE、SETUP 和 PLAY | `streaming.rtsp` |
 | SRT | stream ID `#!::r=live/cam,m=publish` | stream ID `live/cam` | `streaming.srt` |
 | WHIP 和 WHEP | `POST /whip/live/cam` | `POST /whep/live/cam` | `stream_whip` 和 `stream_whep` 处理器，使用 `streaming.webrtc` 的 UDP 端口 |
 | HTTP-FLV、WebSocket-FLV | — | `GET /live/cam.flv` | `httpflv` 处理器 |

@@ -10,9 +10,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/lesismal/fib"
 	"github.com/lesismal/fib/media/rtsp"
 
 	"github.com/lesismal/fit/config"
@@ -25,22 +29,46 @@ const rtspNonceLifetime = 5 * time.Minute
 
 // rtspAuth checks RTSP requests against the listener's policy, in the RTSP
 // server's OnRequest, which fib calls on the connection's worker: DESCRIBE
-// and PLAY need play on the stream, ANNOUNCE and RECORD publish; the rest
-// belong to a session one of those began, or reveal nothing. Credentials
-// are the Authorization header's, Digest (RFC 2617 with MD5, as RTSP 1.0
-// clients speak it) or Basic, or else a token, or user and pass, in the
-// URL's query. Its nonces carry their time and a MAC of it, so that any
-// connection checks any nonce with nothing kept.
+// needs play on the stream, ANNOUNCE and RECORD publish; a SETUP needs play
+// on the stream it names, or publish on the stream the connection announced
+// when it names that stream or a track under it; and a PLAY play on its own
+// stream and on every stream the connection's SETUPs named, since fib plays
+// the stream of the session's SETUP whatever the PLAY URL says. The rest
+// belong to a session those began, or reveal nothing. Credentials are the
+// Authorization header's, Digest (RFC 2617 with MD5, as RTSP 1.0 clients
+// speak it) or Basic, or else a token, or user and pass, in the URL's query.
+// Its nonces carry their time and a MAC of it, so that any connection checks
+// any nonce with nothing kept.
 type rtspAuth struct {
 	s      *Server
 	realm  string
 	digest bool
 	basic  bool
 	secret [32]byte
+
+	// conns is what each connection has been let do, for the SETUPs and
+	// PLAYs after it; an entry goes when its connection closes. It holds at
+	// most one entry for each of the listener's connections.
+	mu    sync.Mutex
+	conns map[*rtsp.ServerConn]*rtspConnState
+}
+
+// rtspMaxSetupStreams bounds the streams a connection's SETUPs may name: a
+// player names one, and a publisher the tracks of what it announced.
+const rtspMaxSetupStreams = 8
+
+// rtspConnState is what a connection has been let do. fit sees requests
+// before fib does, not whether fib took them, so it keeps every stream the
+// connection might be on: the stream its last allowed ANNOUNCE named, and
+// every stream its allowed SETUPs named. Only the connection's worker, under
+// fib's connection lock, reads and writes it.
+type rtspConnState struct {
+	announced string
+	setups    []string
 }
 
 func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
-	a := &rtspAuth{realm: c.RealmName()}
+	a := &rtspAuth{realm: c.RealmName(), conns: make(map[*rtsp.ServerConn]*rtspConnState)}
 	for _, m := range c.Methods() {
 		switch m {
 		case "digest":
@@ -55,13 +83,41 @@ func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
 	return a, nil
 }
 
-func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {
-	var action mediaauth.Action
+// rtspHandler is the RTSP server with the connection state of its auth
+// dropped as each connection closes.
+type rtspHandler struct {
+	*rtsp.Server
+	a *rtspAuth
+}
+
+func (h *rtspHandler) OnClose(c *fib.Connection, err error) {
+	if sc, ok := c.Attachment().(*rtsp.ServerConn); ok {
+		h.a.forget(sc)
+	}
+	h.Server.OnClose(c, err)
+}
+
+// state returns the state of sc, made when create is set and it has none.
+func (a *rtspAuth) state(sc *rtsp.ServerConn, create bool) *rtspConnState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st := a.conns[sc]
+	if st == nil && create {
+		st = &rtspConnState{}
+		a.conns[sc] = st
+	}
+	return st
+}
+
+func (a *rtspAuth) forget(sc *rtsp.ServerConn) {
+	a.mu.Lock()
+	delete(a.conns, sc)
+	a.mu.Unlock()
+}
+
+func (a *rtspAuth) onRequest(sc *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {
 	switch req.Method {
-	case rtsp.MethodDescribe, rtsp.MethodPlay:
-		action = mediaauth.Play
-	case rtsp.MethodAnnounce, rtsp.MethodRecord:
-		action = mediaauth.Publish
+	case rtsp.MethodDescribe, rtsp.MethodPlay, rtsp.MethodAnnounce, rtsp.MethodRecord, rtsp.MethodSetup:
 	default:
 		return nil
 	}
@@ -78,7 +134,7 @@ func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respon
 	stale := false
 	if authz, ok := req.Header.Lookup("Authorization"); ok {
 		var good bool
-		creds, good, stale = a.verify(g.policy(), req.Method, authz, now)
+		creds, good, stale = a.verify(g.policy(), req.Method, req.URL, authz, now)
 		if !good {
 			a.s.refused(protoRTSP, mediaauth.ErrBadCredentials)
 			return a.challenge(now, stale)
@@ -86,10 +142,64 @@ func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respon
 	} else {
 		creds = mediaauth.FromQuery(query)
 	}
-	_, err := g.allow(action, path, creds)
-	if err == nil {
+	check := func(action mediaauth.Action, stream string) *rtsp.Response {
+		if _, err := g.allow(action, stream, creds); err != nil {
+			return a.refuse(now, err)
+		}
 		return nil
 	}
+	switch req.Method {
+	case rtsp.MethodDescribe:
+		return check(mediaauth.Play, path)
+	case rtsp.MethodAnnounce:
+		if resp := check(mediaauth.Publish, path); resp != nil {
+			return resp
+		}
+		a.state(sc, true).announced = path
+		return nil
+	case rtsp.MethodRecord:
+		return check(mediaauth.Publish, rtspStream(path))
+	case rtsp.MethodSetup:
+		stream := rtspStream(path)
+		st := a.state(sc, true)
+		var resp *rtsp.Response
+		if ann := st.announced; ann != "" && (stream == ann || strings.HasPrefix(stream, ann+"/")) {
+			resp = check(mediaauth.Publish, ann)
+		} else {
+			resp = check(mediaauth.Play, stream)
+		}
+		if resp != nil {
+			return resp
+		}
+		if !slices.Contains(st.setups, stream) {
+			if len(st.setups) == rtspMaxSetupStreams {
+				return &rtsp.Response{StatusCode: rtsp.StatusNotEnoughBandwidth}
+			}
+			st.setups = append(st.setups, stream)
+		}
+		return nil
+	}
+	// PLAY: fib plays the stream a SETUP chose, which may not be the
+	// one the PLAY URL names.
+	stream := rtspStream(path)
+	if resp := check(mediaauth.Play, stream); resp != nil {
+		return resp
+	}
+	if st := a.state(sc, false); st != nil {
+		for _, s := range st.setups {
+			if s == stream {
+				continue
+			}
+			if resp := check(mediaauth.Play, s); resp != nil {
+				return resp
+			}
+		}
+	}
+	return nil
+}
+
+// refuse answers a request the policy refused with err.
+func (a *rtspAuth) refuse(now time.Time, err error) *rtsp.Response {
 	a.s.refused(protoRTSP, err)
 	switch mediaauth.Status(err) {
 	case 401:
@@ -102,20 +212,52 @@ func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respon
 	return resp
 }
 
-// rtspPath returns the stream's path of an RTSP URL and its query: the
-// path without the slashes around it, and the query up to a '/', after
-// which a client resolving a control against a URL with a query writes
-// the control (rtsp://h/live/cam?token=T/trackID=0).
+// rtspPath returns the path of an RTSP URL and its credentials' query, as
+// fib's RTSP server reads them: the path without the slashes around it,
+// with a "/trackID=N" ending the query moved to it; and the query up to a
+// '/', after which a client resolving a control against a URL with a query
+// writes the control (rtsp://h/live/cam?token=T/trackID=0).
 func rtspPath(raw string) (path, query string, ok bool) {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "rtsp") && !strings.EqualFold(u.Scheme, "rtsps")) {
 		return "", "", false
 	}
-	query = u.RawQuery
+	path, query = strings.Trim(u.Path, "/"), u.RawQuery
+	if i := strings.LastIndexByte(query, '/'); i >= 0 {
+		if _, n := splitTrackID(query[i:]); n >= 0 {
+			path += query[i:]
+		}
+	}
 	if i := strings.IndexByte(query, '/'); i >= 0 {
 		query = query[:i]
 	}
-	return strings.Trim(u.Path, "/"), query, true
+	return path, query, true
+}
+
+// rtspStream is the stream of a path a SETUP, PLAY or RECORD names: the
+// path without the "trackID=N" segment fib gives its tracks as controls.
+func rtspStream(path string) string {
+	s, _ := splitTrackID(path)
+	return s
+}
+
+// splitTrackID splits a path ending in a "trackID=N" segment into the
+// stream's path and N, or reports -1 when it has none, as fib's RTSP
+// server does.
+func splitTrackID(path string) (string, int) {
+	i := strings.LastIndexByte(path, '/')
+	v, ok := strings.CutPrefix(path[i+1:], "trackID=")
+	if !ok {
+		return path, -1
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return path, -1
+	}
+	if i < 0 {
+		return "", n
+	}
+	return path[:i], n
 }
 
 // challenge is a 401 with the challenges the listener offers.
@@ -160,12 +302,13 @@ func (a *rtspAuth) nonceValid(nonce string, now time.Time) (ours, fresh bool) {
 	return true, now.Sub(at) <= rtspNonceLifetime && at.Sub(now) < time.Minute
 }
 
-// verify reads an Authorization value: Basic gives its user and password
-// to the policy as they are; Digest is checked against the plaintext
-// password of its user, and gives the user with it. good is false for
-// credentials that are not right, or of a scheme not offered; stale for a
-// Digest that would be right but for an expired nonce.
-func (a *rtspAuth) verify(p *mediaauth.Policy, method, authz string, now time.Time) (c mediaauth.Credentials, good, stale bool) {
+// verify reads the Authorization value of a request for uri: Basic gives
+// its user and password to the policy as they are; Digest is checked
+// against the plaintext password of its user, and must be for uri, so that
+// one captured is not replayed on another stream; it gives the user with
+// it. good is false for credentials that are not right, or of a scheme not
+// offered; stale for a Digest that would be right but for an expired nonce.
+func (a *rtspAuth) verify(p *mediaauth.Policy, method, uri, authz string, now time.Time) (c mediaauth.Credentials, good, stale bool) {
 	scheme, rest, _ := strings.Cut(strings.TrimSpace(authz), " ")
 	switch {
 	case strings.EqualFold(scheme, "Basic") && a.basic:
@@ -182,7 +325,7 @@ func (a *rtspAuth) verify(p *mediaauth.Policy, method, authz string, now time.Ti
 		params := parseAuthParams(rest)
 		user := params["username"]
 		ours, fresh := a.nonceValid(params["nonce"], now)
-		if !ours || params["realm"] != a.realm || user == "" {
+		if !ours || params["realm"] != a.realm || user == "" || !sameURI(params["uri"], uri) {
 			return c, false, false
 		}
 		if alg := params["algorithm"]; alg != "" && !strings.EqualFold(alg, "MD5") {
@@ -202,6 +345,36 @@ func (a *rtspAuth) verify(p *mediaauth.Policy, method, authz string, now time.Ti
 		return mediaauth.Credentials{User: user, Password: pw}, true, false
 	}
 	return c, false, false
+}
+
+// sameURI reports whether the uri of Digest credentials names the
+// Request-URI req: the same string, or the same path and query with one of
+// them absolute (RFC 7616 section 3.4.6 has the server check it; a client
+// may give either form), as fib's RTSP server has it.
+func sameURI(uri, req string) bool {
+	if uri == req {
+		return true
+	}
+	if uri == "" {
+		return false
+	}
+	return uriPathQuery(uri) == uriPathQuery(req)
+}
+
+// uriPathQuery is what follows the authority of an absolute rtsp, rtsps or
+// rtspu URL, "/" if nothing does, and any other uri as it is.
+func uriPathQuery(uri string) string {
+	scheme, rest, ok := strings.Cut(uri, "://")
+	if !ok || !strings.EqualFold(scheme, "rtsp") && !strings.EqualFold(scheme, "rtsps") && !strings.EqualFold(scheme, "rtspu") {
+		return uri
+	}
+	if i := strings.IndexAny(rest, "/?"); i >= 0 {
+		if rest[i] == '?' {
+			return "/" + rest[i:]
+		}
+		return rest[i:]
+	}
+	return "/"
 }
 
 func md5Hex(s string) string {
