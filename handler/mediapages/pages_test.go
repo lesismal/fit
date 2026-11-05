@@ -466,6 +466,27 @@ func TestRoom(t *testing.T) {
 	}
 }
 
+// A room's name has no '-': ann's grant of room1-* does not reach a room
+// room1-leads, whose member bob would publish room1-leads-bob, the stream
+// room1's member leads-bob publishes.
+func TestRoomNameScope(t *testing.T) {
+	f := startFit(t, conf(`{"auth": "live"}`))
+	for _, op := range []string{"join", "events", "chat"} {
+		method := "POST"
+		if op == "events" {
+			method = "GET"
+		}
+		resp, body := do(t, method, f.base+"/media/api/rooms/room1-leads/"+op, `{"name": "bob"}`, basic("ann", "ann-password"))
+		if resp.StatusCode != 404 || !strings.Contains(body, "not a room's name") {
+			t.Fatalf("%s of room1-leads with a grant of room1-*: %d %s", op, resp.StatusCode, body)
+		}
+	}
+	code, v := join(t, f, "room1", `{"name": "leads-bob", "publishing": true}`, basic("ann", "ann-password"))
+	if code != 200 || v["stream"] != "room1-leads-bob" {
+		t.Fatalf("leads-bob joins room1: %d %v", code, v)
+	}
+}
+
 // A member without a heartbeat leaves after member_ttl; a room with no one
 // is forgotten; max_rooms bounds the rooms.
 func TestRoomTTLAndLimits(t *testing.T) {

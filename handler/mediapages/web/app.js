@@ -28,7 +28,9 @@
   var LANG_KEY = 'fitMediaLang';
   var NAME_RE = /^[A-Za-z0-9._~-]{1,63}$/;
   var STREAM_RE = /^[A-Za-z0-9._~-]{1,128}$/;
-  var ROOM_RE = /^[A-Za-z0-9._~-]{1,64}$/;
+  // A room's name has no '-': the first '-' of a member's stream,
+  // <room>-<name>, ends the room's name.
+  var ROOM_RE = /^[A-Za-z0-9._~]{1,64}$/;
   // Retries are bounded: a failed attempt waits twice as long as the last,
   // up to MAX_BACKOFF, and a viewer gives up after VIEW_TRIES until the
   // publisher announces itself again.
@@ -49,6 +51,7 @@
       'call.room': 'Room', 'call.name': 'My name', 'call.join': 'Join', 'call.leave': 'Leave',
       'call.joined': 'In room {room} as {name}.', 'call.left': 'Left the room.', 'call.joining': 'Joining…',
       'call.badname': 'A room and a name are 1 to 64 letters, digits, ".", "_", "~" and "-".',
+      'call.badroom': 'A room is 1 to 64 letters, digits, ".", "_" and "~", without "-".',
       'call.taken': 'Someone in the room has that name already.', 'call.nopub': 'You may watch this room, not publish in it.',
       'tools.mic': 'Microphone', 'tools.cam': 'Camera', 'tools.screen': 'Screen',
       'tile.me': 'me', 'tile.micoff': 'microphone off', 'tile.nomic': 'no microphone', 'tile.camoff': 'camera off',
@@ -85,6 +88,7 @@
       'call.room': '房间', 'call.name': '我的名字', 'call.join': '加入', 'call.leave': '离开',
       'call.joined': '已以 {name} 加入房间 {room}。', 'call.left': '已离开房间。', 'call.joining': '正在加入…',
       'call.badname': '房间和名字由 1 到 64 个字母、数字、"."、"_"、"~"、"-" 组成。',
+      'call.badroom': '房间名由 1 到 64 个字母、数字、"."、"_"、"~" 组成，不能含 "-"。',
       'call.taken': '房间里已有人用这个名字。', 'call.nopub': '你可以观看这个房间，但不能在其中推流。',
       'tools.mic': '麦克风', 'tools.cam': '摄像头', 'tools.screen': '屏幕',
       'tile.me': '我', 'tile.micoff': '麦克风已关', 'tile.nomic': '没有麦克风', 'tile.camoff': '摄像头已关',
@@ -980,7 +984,7 @@
     var room = $('call-room').value.trim();
     var name = $('call-name').value.trim();
     if (!ROOM_RE.test(room) || !NAME_RE.test(name) || (room + '-' + name).length > 128) {
-      hint('call-hint', t('call.badname'), 'error');
+      hint('call-hint', t(ROOM_RE.test(room) ? 'call.badname' : 'call.badroom'), 'error');
       return;
     }
     if (needsCredentials('play')) { showLogin(t('auth.needed')); return; }

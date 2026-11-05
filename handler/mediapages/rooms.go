@@ -48,9 +48,13 @@ import (
 // it too, so that only a member can speak as itself.
 
 // roomName and memberName are what the names of rooms and members may be:
-// together, <room>-<name>, they are a stream's name of whip and whep.
+// together, <room>-<name>, they are a stream's name of whip and whep. A
+// room's name has no '-', so that the first '-' of a stream's name ends its
+// room's: a grant of team-* matches the streams of room team alone, and no
+// two rooms' members share a stream (team's leads-bob and team-leads' bob
+// would both be team-leads-bob).
 var (
-	roomName   = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,64}$`)
+	roomName   = regexp.MustCompile(`^[A-Za-z0-9._~]{1,64}$`)
 	memberName = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,63}$`)
 )
 
@@ -394,7 +398,7 @@ func (h *hub) leave(roomN, name, key string) bool {
 func (p *Pages) rooms(c *fibhttp.Context, rest string) {
 	roomN, op, _ := strings.Cut(rest, "/")
 	if !roomName.MatchString(roomN) {
-		plain(c, stdhttp.StatusNotFound, "not a room's name: 1 to 64 letters, digits, '.', '_', '~' and '-'", nil)
+		plain(c, stdhttp.StatusNotFound, "not a room's name: 1 to 64 letters, digits, '.', '_' and '~', no '-'", nil)
 		return
 	}
 	// The chat's API is not there when the chat is off.
