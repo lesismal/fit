@@ -209,6 +209,10 @@ func (h *ProxyHandler) session(c *fibhttp.Context, p *Proxy, s *proxySession, ba
 		respond(c, stdhttp.StatusBadGateway, "the session's media server is no longer in the upstream", nil)
 		return
 	}
+	if !sessionRest(rest, c.Request.URL.EscapedPath()) {
+		respond(c, stdhttp.StatusBadRequest, "not a URL of the session", nil)
+		return
+	}
 	target := s.Location + rest
 	switch {
 	case c.Request.Method == stdhttp.MethodDelete && rest == "":
@@ -223,6 +227,32 @@ func (h *ProxyHandler) session(c *fibhttp.Context, p *Proxy, s *proxySession, ba
 			h.passOnLinked(x, resp, body, err, s.Location, base)
 		})
 	}
+}
+
+// restSegment is what a segment below a session's URL may be: unreserved
+// characters alone, so that nothing in it changes the path or the query
+// once joined to the session's URL at the media server.
+var restSegment = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
+
+// sessionRest reports whether rest, what follows a session's URL in a
+// request's path, names a URL below the session's own and nothing else:
+// segments that are not empty, "." or "..", which the media server would
+// resolve to a URL outside it (POST <session>/../../secret), with no
+// character that would change the URL; and escaped, the request's path as
+// sent, has no escaped '/', '\' or '.', which decode into those.
+func sessionRest(rest, escaped string) bool {
+	if rest != "" {
+		if rest[0] != '/' {
+			return false
+		}
+		for _, seg := range strings.Split(rest[1:], "/") {
+			if seg == "." || seg == ".." || !restSegment.MatchString(seg) {
+				return false
+			}
+		}
+	}
+	lower := strings.ToLower(escaped)
+	return !strings.Contains(lower, "%2f") && !strings.Contains(lower, "%5c") && !strings.Contains(lower, "%2e")
 }
 
 // patch takes a session's PATCH: trickled candidates are answered 204 here,

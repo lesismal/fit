@@ -173,6 +173,15 @@ func startFake(t *testing.T) *fakeServer {
 // offer or an answer past max_sdp_bytes, an answer with no candidate fit
 // can relay to, and a media server that does not answer in time; and the
 // sessions that reserved room and made none give it back.
+func mustRequest(t *testing.T, method, url string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
 func TestProxySignaling(t *testing.T) {
 	fs := startFake(t)
 	f := startFit(t, proxyDoc(loopbackProxy, &fit{base: fs.URL}))
@@ -200,6 +209,22 @@ func TestProxySignaling(t *testing.T) {
 	links := resp.Header.Values("Link")
 	if len(links) != 2 || links[0] != `<stun:stun.example.com>; rel="ice-server"` || !strings.HasPrefix(links[1], "<"+loc+"/sse>;") {
 		t.Fatalf("Link %q", links)
+	}
+
+	// A URL below the session's goes to the media server below the
+	// session's URL there; dot-segments, empty segments and escaped
+	// slashes, backslashes and dots, which would reach another URL of the
+	// media server's past the session's, are refused here.
+	if resp, body := do(t, mustRequest(t, "GET", f.base+loc+"/sse")); resp.StatusCode != 200 || body != "got /res/u1/sse" {
+		t.Fatalf("GET of the session's sse: %d %q", resp.StatusCode, body)
+	}
+	for _, rest := range []string{"/../../secret", "/sse/../../../secret", "/%2e%2e/%2E%2E/secret", "/..%2fsecret", "/x%2Fy",
+		"/x%5c..%5csecret", "/./sse", "//sse", "/sse/", "/a%3fb"} {
+		for _, method := range []string{"GET", "POST", "PATCH", "DELETE"} {
+			if resp, body := do(t, mustRequest(t, method, f.base+loc+rest)); resp.StatusCode < 400 || strings.HasPrefix(body, "got ") {
+				t.Fatalf("%s %s: %d %q", method, loc+rest, resp.StatusCode, body)
+			}
+		}
 	}
 
 	// A trickle is answered here; a restart goes to the media server, and
