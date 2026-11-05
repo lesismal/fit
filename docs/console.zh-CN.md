@@ -323,7 +323,7 @@ fit check -c /etc/fit/fit.json -ca /etc/fit/admin-ca.pem -server-name admin.exam
 | 请求头 | 16 KiB，10s 内读完 |
 | 请求体 | `admin.max_config_bytes` 加 64 KiB，默认 4 MiB 加 64 KiB，30s 内读完 |
 | 写响应 | 30s；角色的流改为以每次等待浏览器的时间为界，30s |
-| 空闲连接 | 2m |
+| 空闲连接 | 发出带有效会话的请求之前 5s（登录成功也算），与 Admin API 对未认证连接一样；之后 2m，直到登出 |
 | 同时进行的密码检查 | 2 |
 | 同时进行的 Admin API 调用与角色方法 | 4 个运行、64 个等待，每个最多等待 30s；超出时 `503` |
 | 修改密码 | 在控制台的有界池上用 bcrypt，同时最多 2 次检查，之后一次 store 写入 |

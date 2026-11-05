@@ -411,7 +411,7 @@ differences and their counts) and `POST /config/reconcile` (a JSON body of the c
 | A request's header | 16 KiB, read within 10s |
 | A request's body | `admin.max_config_bytes` and 64 KiB, 4 MiB and 64 KiB by default, read within 30s |
 | Writing a response | 30s; a role's streams are bounded by each wait for the browser instead, 30s |
-| An idle connection | 2m |
+| An idle connection | 5s until it sends a request with a valid session (a login that succeeds counts), as the Admin API keeps an unauthenticated one; then 2m, until it logs out |
 | Password checks at once | 2 |
 | Admin API calls and role methods at once | 4 running, 64 waiting, each waiting at most 30s; past them `503` |
 | A password change | bcrypt's time on the console's pool, two checks at once, then one store write |

@@ -62,6 +62,21 @@ const (
 	LoginQueue   = 16
 )
 
+// How long a console keeps a connection that waits for its next request.
+// One that has not sent a request with a valid session (a login that
+// succeeds counts) is kept for UnauthIdleTimeout, as the Admin API keeps an
+// unauthenticated one, so that clients without a login cannot hold the
+// console's few connections for long; one that has is kept for IdleTimeout,
+// until it logs out.
+const (
+	IdleTimeout       = 2 * time.Minute
+	UnauthIdleTimeout = 5 * time.Second
+)
+
+// idleTimeout and unauthIdleTimeout are IdleTimeout and UnauthIdleTimeout,
+// which tests shorten; Start reads them.
+var idleTimeout, unauthIdleTimeout = IdleTimeout, UnauthIdleTimeout
+
 // MaxLoginBytes bounds a login's body, whatever a console's MaxBody.
 const MaxLoginBytes = 4 << 10
 
@@ -171,6 +186,9 @@ type Console struct {
 	stop    chan struct{}
 	workers sync.WaitGroup
 	closing sync.Once
+	// idle and unauthIdle are how long a connection is kept between
+	// requests once it has sent a valid session, and before then.
+	idle, unauthIdle time.Duration
 }
 
 type file struct {
@@ -220,6 +238,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		return nil, err
 	}
 	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
+		idle: idleTimeout, unauthIdle: unauthIdleTimeout,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
 	switch {
 	case o.Log != nil:
@@ -247,8 +266,10 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		MaxBodyBytes:      maxBody,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		WriteTimeout:      30 * time.Second,
+		// Every connection starts out unauthenticated; a request with a
+		// valid session gives its connection c.idle (see serve).
+		IdleTimeout:  c.unauthIdle,
+		WriteTimeout: 30 * time.Second,
 	}, fibhttp.HandlerFunc(c.serve))
 	if cfg.CertFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
@@ -458,6 +479,9 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusForbidden, "the request lacks the session's "+CSRFHeader+" token")
 		return
 	}
+	// A valid session: the connection is kept between requests for the
+	// console's usual idle time from now on.
+	_ = ctx.SetIdleTimeout(c.idle)
 	if s.MustChange && !c.passwordRoute(r.Method, p) {
 		_ = WriteJSON(ctx, stdhttp.StatusForbidden, mustChangeBody{Error: "change the temporary password first", MustChange: true})
 		return
@@ -627,6 +651,7 @@ func (c *Console) login(ctx *fibhttp.Context) {
 			return
 		}
 		token, s := c.logins.Start(body.Username)
+		_ = ctx.SetIdleTimeout(c.idle)
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 		c.infof("console: %q logged in from %s", body.Username, addr)
 		_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(&s))
@@ -652,6 +677,8 @@ func (c *Console) logout(ctx *fibhttp.Context) {
 		}
 	}
 	ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
+	// Logged out, the connection is an unauthenticated one again.
+	_ = ctx.SetIdleTimeout(c.unauthIdle)
 	_ = Write(ctx, stdhttp.StatusNoContent, "", nil)
 }
 

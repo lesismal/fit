@@ -2092,9 +2092,8 @@ stays.
 
 ## A67: An idle timeout for one HTTP connection
 
-**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: the consoles give a
-non-loopback client a quarter of their connections, but keep its idle connections for the console's
-usual idle time.
+**Status.** Requested on 2026-11-05, from fit's security review. Done in fib branch req/a67 at
+29d3316 (not yet on fib main).
 
 **Problem.** A console holds idle connections for two minutes. fit wants a client that has not yet
 sent a request with a session to be held for seconds, so that unauthenticated connections cannot
@@ -2107,5 +2106,19 @@ exposes no `*fib.Connection` and no per-connection idle timeout.
 **Suggested API.** `Context.SetIdleTimeout(d time.Duration)`, applying to the connection the request
 came on until it is set again, or the connection exposed on `Context`.
 
-**How fit would use it.** A console's connection starts with a short idle timeout and gets the
-console's usual one with its first request that carries a valid session.
+**As built.** As suggested: `Context.SetIdleTimeout(d time.Duration) error` stands in for
+`Config.IdleTimeout` (`ReadTimeout` when it is not set) on the connection the request came on, from
+the end of this response until a handler sets it again, whether or not the server sets any timeout;
+a `d` of zero or less gives the connection the server's back, and it reports `ErrResponseWritten`
+once the response is finished. On HTTP/1 it bounds the wait for the next request (requests
+pipelined behind the one that sets it are answered first). On HTTP/2 and HTTP/3 it is the
+connection's, set by any of its requests: it bounds how long the connection may carry no stream
+before GOAWAY, from when its last one ends; an h2c upgrade keeps what HTTP/1 set, and QUIC's
+`MaxIdleTimeout` is not changed. A `Stream` served outside fib's `http` package takes it through
+`StreamIdleTimeouter`, which `http3` implements. A request that does not call it pays one atomic
+load where the idle deadline is chosen, and no allocation.
+
+**How fit uses it.** A console serves with `IdleTimeout` 5s (`console.UnauthIdleTimeout`, as the
+Admin API keeps an unauthenticated connection), and a request that carries a valid session, or a
+login that succeeds, gives its connection the console's usual 2 minutes (`console.IdleTimeout`)
+with `SetIdleTimeout`; a logout gives it the 5s back.

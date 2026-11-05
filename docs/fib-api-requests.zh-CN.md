@@ -1584,8 +1584,7 @@ query 不参与比较，路径内部的斜杠参与。因此聚合 URL、带斜�
 
 ## A67：单个 HTTP 连接的空闲超时
 
-**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：控制台只给非环回客户端四分之一的连接位，但其空闲连接仍按
-控制台通常的空闲时间保留。
+**状态。** 2026-11-05 由 fit 的安全审查提出。已在 fib 分支 req/a67 的 29d3316 完成（尚未进入 fib main）。
 
 **问题。** 控制台保留空闲连接两分钟。fit 希望尚未发送带会话请求的客户端只被保留几秒，使未认证的连接占不满控制台为数不多
 的连接位；而 fib 的 HTTP 处理器自行设置每个连接的读截止时间，处理器拿不到连接去修改它。
@@ -1595,4 +1594,12 @@ query 不参与比较，路径内部的斜杠参与。因此聚合 URL、带斜�
 
 **建议的 API。** `Context.SetIdleTimeout(d time.Duration)`，对请求所在连接生效直到再次设置；或在 `Context` 上暴露连接。
 
-**fit 的使用方式。** 控制台的连接以较短的空闲超时开始，第一个带有效会话的请求到来后改为控制台通常的超时。
+**实际实现。** 与建议一致：`Context.SetIdleTimeout(d time.Duration) error` 在请求所在的连接上代替 `Config.IdleTimeout`
+（未设时为 `ReadTimeout`），从本次响应结束起直到某个 handler 再次设置为止，无论 server 是否设了超时都生效；`d` 为 0 或负数时
+恢复 server 的设置，响应完成后调用返回 `ErrResponseWritten`。HTTP/1 上它约束等待下一个请求的时间（排在设置它的请求之后的
+pipeline 请求照常先处理完）。HTTP/2 和 HTTP/3 上它属于整条连接，任一请求都可以设置：约束连接没有任何流、发出 GOAWAY 之前的时长，
+从最后一个流结束算起；h2c 升级保留 HTTP/1 时设的值，QUIC 的 `MaxIdleTimeout` 不变。fib `http` 包之外提供的 `Stream` 通过
+`StreamIdleTimeouter` 接收它，`http3` 已实现。不调用它的请求只在选定空闲截止时间处多一次原子读，无分配。
+
+**fit 的使用方式。** 控制台以 5s 的 `IdleTimeout` 提供服务（`console.UnauthIdleTimeout`，与 Admin API 对未认证连接一样），
+带有效会话的请求或成功的登录用 `SetIdleTimeout` 把所在连接改为控制台通常的 2 分钟（`console.IdleTimeout`）；登出后改回 5s。
