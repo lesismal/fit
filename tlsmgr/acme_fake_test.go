@@ -596,6 +596,7 @@ func TestSharedLookupFaults(t *testing.T) {
 	}
 	// A challenge's certificate that does not parse.
 	st.fault = nil
+	a.writeMarker(context.Background())
 	if err := st.Store(context.Background(), a.alpnChallengeKey("b.fit.test"), []byte("garbage")); err != nil {
 		t.Fatal(err)
 	}

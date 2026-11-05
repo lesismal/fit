@@ -33,6 +33,19 @@ challenge may reach any instance behind the load balancer, not the one that orde
   on ACME's goroutines, at most 16 at once and each within 5s, never on a fib worker (rule 1); a
   TLS-ALPN-01 handshake looks it up in `GetCertificate`, which fib runs on its handshake pool, as
   on-demand TLS does. Tokens and names that could make other keys are refused before any lookup.
+- **Looked up only while a challenge is in progress.** Requests and handshakes for challenges cost
+  an attacker nothing, so a lookup on each would hold handshake workers and flood the store. An
+  instance with a challenge under way also keeps a marker, `acme/<CA>/challenges-in-progress`,
+  holding when it runs out: two minutes on, rewritten every 30s while the challenge lasts, and left
+  to run out after. The others look a challenge up only while the marker is good, reading it at
+  most once a second; when no instance has an order under way, which is nearly always, a request
+  for a challenge gets its 404, and a handshake no certificate, without a lookup. The 16 lookup
+  slots are shared by both challenge types, a handshake past them gets no certificate at once, a
+  name looked up in vain is not looked up again for a second (up to 1024 names remembered), and
+  one client, an IPv4 address or an IPv6 /64, takes at most 4 HTTP-01 slots. The ordering instance
+  waits 1.25s after keeping an answer before it asks the CA to check it, past what any instance
+  read before the answer was there. The marker's time is compared with each instance's clock, so
+  clocks more than about 90s apart can miss a challenge.
 - **Everything else is ACME's as it was**: the lock around issuance, the second look once it is
   held, renewal times that every instance computes alike from the certificate, and the account's
   key shared under a lock of its own.

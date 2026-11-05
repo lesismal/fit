@@ -761,7 +761,7 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 			// storage off the worker, and answered then; one there is not
 			// gets a 404, not the routes.
 			c.Retain()
-			g.ACME.LookupHTTPChallenge(token, func(answer string, ok bool) {
+			g.ACME.LookupHTTPChallenge(token, c.Request.RemoteAddr, func(answer string, ok bool) {
 				defer c.Release()
 				if ok {
 					_ = c.Respond(stdhttp.StatusOK, "text/plain", []byte(answer))

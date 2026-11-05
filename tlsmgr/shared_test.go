@@ -22,11 +22,19 @@ import (
 type sharedStorage struct {
 	*FileStorage
 	hold chan struct{} // when not nil, each Load waits for it to close
+	// loads counts the loads of challenges, and markerLoads those of the
+	// marker of challenges in progress.
+	loads, markerLoads atomic.Int32
 }
 
 func (s *sharedStorage) Shared() bool { return true }
 
 func (s *sharedStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	if strings.HasSuffix(key, "/challenges-in-progress") {
+		s.markerLoads.Add(1)
+	} else {
+		s.loads.Add(1)
+	}
 	if s.hold != nil {
 		select {
 		case <-s.hold:
@@ -48,15 +56,21 @@ func sharedACME(t *testing.T, c *config.ACME, st Storage, l *logLines) *ACME {
 	return a
 }
 
-// lookup calls LookupHTTPChallenge and waits for its answer.
+// lookup calls LookupHTTPChallenge, for a client of its own, and waits for
+// its answer.
 func lookup(t *testing.T, a *ACME, token string) (string, bool) {
+	return lookupFrom(t, a, token, "192.0.2.1:4321")
+}
+
+// lookupFrom is lookup for client.
+func lookupFrom(t *testing.T, a *ACME, token, client string) (string, bool) {
 	t.Helper()
 	type answer struct {
 		s  string
 		ok bool
 	}
 	got := make(chan answer, 1)
-	a.LookupHTTPChallenge(token, func(s string, ok bool) { got <- answer{s, ok} })
+	a.LookupHTTPChallenge(token, client, func(s string, ok bool) { got <- answer{s, ok} })
 	select {
 	case r := <-got:
 		return r.s, r.ok
@@ -138,6 +152,7 @@ func TestLookupHTTPChallenge(t *testing.T) {
 
 	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
 	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	a.writeMarker(context.Background())
 	if err := st.Store(context.Background(), a.httpChallengeKey("tok_en-1"), []byte("tok_en-1.thumb")); err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +170,12 @@ func TestLookupHTTPChallenge(t *testing.T) {
 	st.hold = make(chan struct{})
 	results := make(chan bool, maxSharedLookups)
 	for range maxSharedLookups {
-		a.LookupHTTPChallenge("tok_en-1", func(_ string, ok bool) { results <- ok })
+		// No IP address, so no client's bound.
+		a.LookupHTTPChallenge("tok_en-1", "", func(_ string, ok bool) { results <- ok })
 	}
 	eventually(t, 5*time.Second, "every slot taken", func() bool { return len(a.lookups) == maxSharedLookups })
 	called := false
-	a.LookupHTTPChallenge("tok_en-1", func(_ string, ok bool) { called = !ok })
+	a.LookupHTTPChallenge("tok_en-1", "", func(_ string, ok bool) { called = !ok })
 	if !called {
 		t.Error("a lookup past the bound waited")
 	}
@@ -175,6 +191,7 @@ func TestCertsSharedALPN(t *testing.T) {
 	var l logLines
 	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
 	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	a.writeMarker(context.Background())
 	certs := NewCerts(nil, a, []string{"a.fit.test", "b.fit.test"}, false)
 	alpn := func(name string) *tls.ClientHelloInfo {
 		h := hello(name)
@@ -195,6 +212,12 @@ func TestCertsSharedALPN(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A name looked up in vain is not looked up again for missFor, which
+	// the instance with the challenge waits out before the CA checks it.
+	if _, err := certs.GetCertificate(alpn("a.fit.test")); err == nil {
+		t.Error("a name looked up in vain was looked up again at once")
+	}
+	a.now = func() time.Time { return time.Now().Add(missFor) }
 	got, err := certs.GetCertificate(alpn("A.fit.test."))
 	if err != nil || !bytes.Equal(got.Certificate[0], challenge.Certificate[0]) {
 		t.Errorf("another instance's challenge: %v", err)
@@ -210,5 +233,190 @@ func TestCertsSharedALPN(t *testing.T) {
 	}
 	if err := checkName("a.fit.test/../x"); err == nil {
 		t.Error("a name with a slash was taken")
+	}
+}
+
+// TestSharedGate floods an instance with a shared storage, while no
+// instance has a challenge in progress, with handshakes offering acme-tls/1
+// alone and requests for HTTP-01 tokens: the storage is asked for none of
+// them, only for the marker, at most once each gateFresh. Once another
+// instance marks a challenge in progress, it is looked up within gateFresh.
+func TestSharedGate(t *testing.T) {
+	var l logLines
+	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
+	c := &config.ACME{Directory: "https://127.0.0.1:1/dir"}
+	a, b := sharedACME(t, c, st, &l), sharedACME(t, c, st, &l)
+	certs := NewCerts(nil, a, nil, true)
+	h := hello("x.fit.test")
+	h.SupportedProtos = []string{ACMEALPN}
+	for i := range 1000 {
+		h.ServerName = fmt.Sprintf("r%d.fit.test", i)
+		if _, err := certs.GetCertificate(h); err == nil {
+			t.Fatal("a certificate with no challenge under way")
+		}
+		if _, ok := lookupFrom(t, a, fmt.Sprintf("tok%d", i), fmt.Sprintf("198.51.100.%d:1", i%250)); ok {
+			t.Fatal("an answer with no challenge under way")
+		}
+	}
+	if n, m := st.loads.Load(), st.markerLoads.Load(); n != 0 || m > 2 {
+		t.Errorf("%d challenges and %d markers loaded with none in progress", n, m)
+	}
+
+	// b marks a challenge in progress and keeps its answer: a, which read
+	// the marker lately, finds it once gateFresh has passed.
+	stop := b.markInProgress(context.Background())
+	defer stop()
+	if err := st.Store(context.Background(), a.httpChallengeKey("tok-b"), []byte("tok-b.thumb")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookup(t, a, "tok-b"); ok {
+		t.Error("the marker read again within gateFresh")
+	}
+	a.now = func() time.Time { return time.Now().Add(gateFresh) }
+	if answer, ok := lookup(t, a, "tok-b"); !ok || answer != "tok-b.thumb" {
+		t.Errorf("a challenge marked in progress: %q %v", answer, ok)
+	}
+	// While it is, every lookup asks the storage, within the bounds.
+	before := st.markerLoads.Load()
+	for range 10 {
+		lookup(t, a, "tok-none")
+	}
+	if st.markerLoads.Load() != before {
+		t.Error("a good marker read again")
+	}
+	// A marker that does not parse is as none.
+	if err := st.Store(context.Background(), b.markerKey(), []byte("soon")); err != nil {
+		t.Fatal(err)
+	}
+	fresh := sharedACME(t, c, st, &l)
+	if _, ok := lookup(t, fresh, "tok-b"); ok {
+		t.Error("a marker that does not parse taken as good")
+	}
+}
+
+// TestSharedALPNBound holds the shared storage while handshakes offering
+// acme-tls/1 alone look challenges up: past maxSharedLookups, a handshake
+// gets no certificate at once rather than holding a handshake worker.
+func TestSharedALPNBound(t *testing.T) {
+	var l logLines
+	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
+	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	a.writeMarker(context.Background())
+	st.hold = make(chan struct{})
+	held := make(chan *tls.Certificate, maxSharedLookups)
+	for i := range maxSharedLookups {
+		go func() { held <- a.sharedALPNChallenge(fmt.Sprintf("h%d.fit.test", i)) }()
+	}
+	eventually(t, 5*time.Second, "every slot taken", func() bool { return len(a.lookups) == maxSharedLookups })
+	done := make(chan *tls.Certificate, 1)
+	go func() { done <- a.sharedALPNChallenge("past.fit.test") }()
+	select {
+	case cert := <-done:
+		if cert != nil {
+			t.Error("a certificate past the bound")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a handshake past the bound waited for the storage")
+	}
+	close(st.hold)
+	for range maxSharedLookups {
+		<-held
+	}
+	// The names looked up in vain are not looked up again within missFor.
+	before := st.loads.Load()
+	for i := range maxSharedLookups {
+		a.sharedALPNChallenge(fmt.Sprintf("h%d.fit.test", i))
+	}
+	if st.loads.Load() != before {
+		t.Error("a name looked up in vain looked up again at once")
+	}
+	// The misses remembered are bounded.
+	for i := range maxMisses + 10 {
+		a.miss(fmt.Sprintf("m%d.fit.test", i), 0)
+	}
+	if n := len(a.gate.misses); n > maxMisses {
+		t.Errorf("%d misses remembered", n)
+	}
+}
+
+// TestSharedLookupPerClient holds the shared storage while one client asks
+// for HTTP-01 tokens: past maxClientLookups it gets a 404 at once, and the
+// slots left are another client's, the CA's among them.
+func TestSharedLookupPerClient(t *testing.T) {
+	var l logLines
+	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
+	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	a.writeMarker(context.Background())
+	if err := st.Store(context.Background(), a.httpChallengeKey("real"), []byte("real.thumb")); err != nil {
+		t.Fatal(err)
+	}
+	st.hold = make(chan struct{})
+	results := make(chan bool, maxClientLookups+1)
+	for i := range maxClientLookups {
+		// One host: ports, and the addresses of one IPv6 /64, count as one.
+		client := fmt.Sprintf("[2001:db8::%d]:%d", i+1, 1000+i)
+		a.LookupHTTPChallenge("flood", client, func(_ string, ok bool) { results <- ok })
+	}
+	eventually(t, 5*time.Second, "the client's slots taken", func() bool { return len(a.lookups) == maxClientLookups })
+	refused := false
+	a.LookupHTTPChallenge("flood", "[2001:db8::99]:1", func(_ string, ok bool) { refused = !ok })
+	if !refused || len(a.lookups) != maxClientLookups {
+		t.Error("a client past its bound looked up")
+	}
+	// Another client, whose counter is not the flooding one's.
+	other := ""
+	for i := range 256 {
+		c := fmt.Sprintf("203.0.113.%d:443", i)
+		if a.clientSlot(c) != a.clientSlot("[2001:db8::1]:1") {
+			other = c
+			break
+		}
+	}
+	ca := make(chan bool, 1)
+	a.LookupHTTPChallenge("real", other, func(answer string, ok bool) { ca <- ok && answer == "real.thumb" })
+	close(st.hold)
+	if !<-ca {
+		t.Error("another client's lookup failed")
+	}
+	for range maxClientLookups {
+		<-results
+	}
+	if a.clientSlot("not an address") != nil {
+		t.Error("a counter for no IP address")
+	}
+	if a.clientSlot("192.0.2.7") == nil || a.clientSlot("[::ffff:192.0.2.7]:1") != a.clientSlot("192.0.2.7:2") {
+		t.Error("an IPv4 client's counter")
+	}
+	eventually(t, 5*time.Second, "the counters back to zero", func() bool {
+		for i := range a.gate.clients {
+			if a.gate.clients[i].Load() != 0 {
+				return false
+			}
+		}
+		return len(a.lookups) == 0
+	})
+}
+
+// TestMarkInProgress keeps the marker while a challenge is in progress; a
+// failure to write it is reported.
+func TestMarkInProgress(t *testing.T) {
+	var l logLines
+	st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}, shared: true}
+	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := a.markInProgress(ctx)
+	data, err := st.Load(context.Background(), a.markerKey())
+	if err != nil || len(data) == 0 {
+		t.Fatalf("the marker: %q %v", data, err)
+	}
+	stop()
+	// Its context done, the refresher ends too.
+	stop = a.markInProgress(ctx)
+	cancel()
+	stop()
+	st.fault = func(op, key string) error { return errFault }
+	a.writeMarker(context.Background())
+	if l.count("keeping the marker") != 1 {
+		t.Errorf("a failed write not reported: %q", l.snapshot())
 	}
 }

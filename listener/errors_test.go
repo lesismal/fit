@@ -285,12 +285,22 @@ func TestRedirectEdges(t *testing.T) {
 }
 
 // sharedStorage is an ACME storage shared between hosts, which has the
-// answer of one HTTP-01 challenge, token "good".
-type sharedStorage struct{ *tlsmgr.FileStorage }
+// answer of one HTTP-01 challenge, token "good", and, unless idle, the
+// marker of a challenge in progress.
+type sharedStorage struct {
+	*tlsmgr.FileStorage
+	idle bool
+}
 
 func (sharedStorage) Shared() bool { return true }
 
 func (s sharedStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	if strings.HasSuffix(key, "/challenges-in-progress") {
+		if s.idle {
+			return nil, fs.ErrNotExist
+		}
+		return strconv.AppendInt(nil, time.Now().Add(time.Minute).UnixNano(), 10), nil
+	}
 	if strings.HasSuffix(key, "/http-01/good") {
 		return []byte("good.answer"), nil
 	}
@@ -301,39 +311,46 @@ func (s sharedStorage) Load(ctx context.Context, key string) ([]byte, error) {
 }
 
 // TestACMESharedChallenge answers HTTP-01 challenges another instance has
-// under way from the shared storage, and 404s for those it has not.
+// under way from the shared storage, and 404s for those it has not; while
+// no instance has one in progress, it 404s without looking.
 func TestACMESharedChallenge(t *testing.T) {
-	dir := t.TempDir()
-	acme, err := tlsmgr.NewACME(&config.ACME{Storage: dir}, sharedStorage{&tlsmgr.FileStorage{Root: dir}}, logs.Func(t.Logf))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer acme.Close()
-	c, err := config.Load([]byte(`{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+	for _, idle := range []bool{false, true} {
+		dir := t.TempDir()
+		acme, err := tlsmgr.NewACME(&config.ACME{Storage: dir}, sharedStorage{&tlsmgr.FileStorage{Root: dir}, idle}, logs.Func(t.Logf))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer acme.Close()
+		c, err := config.Load([]byte(`{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"handler": {"module": "respond", "params": {"body": "route"}}}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	g, err := runtime.Compile(c, runtime.Env{ACME: acme})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt := new(runtime.Runtime)
-	rt.Swap(g)
-	defer rt.Close()
-	d := &dispatcher{rt: rt, name: "web"}
-	for _, tt := range []struct {
-		path   string
-		status int
-		body   string
-	}{
-		{tlsmgr.ACMEChallengePrefix + "good", 200, "good.answer"},
-		{tlsmgr.ACMEChallengePrefix + "missing", 404, "404 page not found\n"},
-		{"/other", 200, "route"},
-	} {
-		rec := fibtest.Serve(d, "GET", tt.path)
-		if rec.Response.StatusCode != tt.status || string(rec.Response.Body) != tt.body {
-			t.Errorf("%s: %d %q", tt.path, rec.Response.StatusCode, rec.Response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := runtime.Compile(c, runtime.Env{ACME: acme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rt := new(runtime.Runtime)
+		rt.Swap(g)
+		defer rt.Close()
+		d := &dispatcher{rt: rt, name: "web"}
+		good, goodBody := 200, "good.answer"
+		if idle {
+			good, goodBody = 404, "404 page not found\n"
+		}
+		for _, tt := range []struct {
+			path   string
+			status int
+			body   string
+		}{
+			{tlsmgr.ACMEChallengePrefix + "good", good, goodBody},
+			{tlsmgr.ACMEChallengePrefix + "missing", 404, "404 page not found\n"},
+			{"/other", 200, "route"},
+		} {
+			rec := fibtest.Serve(d, "GET", tt.path)
+			if rec.Response.StatusCode != tt.status || string(rec.Response.Body) != tt.body {
+				t.Errorf("idle %v: %s: %d %q", idle, tt.path, rec.Response.StatusCode, rec.Response.Body)
+			}
 		}
 	}
 }

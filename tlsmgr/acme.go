@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"hash/maphash"
 	"io"
 	"io/fs"
 	"math/big"
@@ -59,12 +60,14 @@ const (
 // shared storage, one that instances on other hosts share (acme's
 // shared_storage), each challenge's answer is kept there too while it is
 // under way, so that the instance the CA reaches answers it: HTTP-01 off
-// the worker (LookupHTTPChallenge), TLS-ALPN-01 on the handshake pool.
+// the worker (LookupHTTPChallenge), TLS-ALPN-01 on the handshake pool,
+// and only while some instance has a challenge in progress (see markerTTL).
 type ACME struct {
 	storage   Storage
 	shared    bool          // storage is shared between hosts
 	closer    io.Closer     // the storage, when ACME made it from the config
 	lookups   chan struct{} // a slot for each lookup of a shared challenge under way
+	gate      sharedGate    // the challenges in progress, with a shared storage
 	directory string
 	email     string
 	caKey     string // the CA's part of the storage's keys
@@ -197,6 +200,7 @@ func newACME(c *config.ACME, storage Storage, log *logs.Logger) (*ACME, error) {
 		names:     map[string]*managed{},
 		wake:      make(chan struct{}, 1),
 	}
+	a.gate.seed = maphash.MakeSeed()
 	a.challenges = c.ChallengeTypes()
 	if c != nil && c.OnDemand != nil {
 		a.onDemand = newOnDemand(c.OnDemand)
@@ -829,6 +833,12 @@ func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string, att
 	if chal == nil {
 		return fmt.Errorf("the CA offers none of the challenges %s for %s", strings.Join(a.challenges, ", "), authz.Identifier.Value)
 	}
+	if a.shared {
+		// Before the answer is there, so that an instance that looks for
+		// it finds the marker good.
+		stop := a.markInProgress(ctx)
+		defer stop()
+	}
 	switch chal.Type {
 	case config.ChallengeHTTP01:
 		answer, err := client.HTTP01ChallengeResponse(chal.Token)
@@ -858,6 +868,17 @@ func (a *ACME) authorize(ctx context.Context, client *acme.Client, u string, att
 			key := a.alpnChallengeKey(name)
 			a.shareChallenge(ctx, key, data)
 			defer a.unshareChallenge(key)
+		}
+	}
+	if a.shared {
+		// Until no instance holds what it read of the storage before the
+		// answer was there, which the CA's check might otherwise meet.
+		t := time.NewTimer(sharedSettle())
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
 		}
 	}
 	if _, err := client.Accept(ctx, chal); err != nil {
