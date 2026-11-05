@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -201,7 +202,7 @@ func TestDialFailures(t *testing.T) {
 
 	// A bad ack. / 错误的确认。
 	url := rawServer(t, websocket.HandlerFuncs{
-		Open:    func(ws *websocket.Connection, _ *http.Request) { _ = ws.WriteBinary([]byte("challenge")) },
+		Open:    func(ws *websocket.Connection, _ *http.Request) { _ = ws.WriteBinary(make([]byte, challengeSize)) },
 		Message: func(ws *websocket.Connection, _ websocket.Opcode, _ []byte) { _ = ws.WriteBinary([]byte{9, 9}) },
 	})
 	if _, err := Dial(ctxT(t), url, DialConfig{Engine: engine}); !errors.Is(err, ErrProtocol) {
@@ -220,7 +221,7 @@ func TestDialFailures(t *testing.T) {
 	// 有挑战但没有确认：context 结束拨号，并关闭连接。
 	gone := make(chan struct{}, 1)
 	url = rawServer(t, websocket.HandlerFuncs{
-		Open:  func(ws *websocket.Connection, _ *http.Request) { _ = ws.WriteBinary([]byte("challenge")) },
+		Open:  func(ws *websocket.Connection, _ *http.Request) { _ = ws.WriteBinary(make([]byte, challengeSize)) },
 		Close: func(*websocket.Connection, uint16, string, error) { gone <- struct{}{} },
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -247,11 +248,74 @@ func TestDialFailures(t *testing.T) {
 		t.Fatalf("no challenge: %v", err)
 	}
 	ws := <-late
-	_ = ws.WriteBinary([]byte("challenge"))
+	_ = ws.WriteBinary(make([]byte, challengeSize))
 	select {
 	case <-gone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("late challenge not answered with a close")
+	}
+}
+
+// The listener proves the password too: a dialer with a password takes no listener that only acknowledges, or
+// acknowledges with a proof that is not one, and answers no challenge of another size, which could be a listener's
+// proof to be had from it. A dialer of an earlier version, which sends no nonce, still gets in, with the plain ack.
+// 监听方也要证明密码：有密码的拨号方不接受只回确认、或所附证明不成立的监听方，也不应答其他长度的挑战（那可能是想从它这里套取
+// 监听方的证明）。不发送随机数的早先版本拨号方仍可接入，得到普通确认。
+func TestMutualAuth(t *testing.T) {
+	engine := SharedEngine(t)
+	dialPW := func(url string) error {
+		c, err := Dial(ctxT(t), url, DialConfig{Engine: engine, ConnConfig: ConnConfig{Auth: Password("pw")}})
+		if c != nil {
+			c.Close()
+		}
+		return err
+	}
+	for name, ack := range map[string][]byte{
+		"a plain ack":        {ackOK},
+		"a proof of nothing": append([]byte{ackOK}, make([]byte, proofSize)...),
+	} {
+		var got []byte
+		var mu sync.Mutex
+		url := rawServer(t, websocket.HandlerFuncs{
+			Open: func(ws *websocket.Connection, _ *http.Request) { _ = ws.WriteBinary(make([]byte, challengeSize)) },
+			Message: func(ws *websocket.Connection, _ websocket.Opcode, data []byte) {
+				mu.Lock()
+				got = bytes.Clone(data)
+				mu.Unlock()
+				_ = ws.WriteBinary(ack)
+			},
+		})
+		if err := dialPW(url); !errors.Is(err, ErrAuth) {
+			t.Fatalf("an impersonating listener with %s: %v", name, err)
+		}
+		mu.Lock()
+		if len(got) != proofSize+NonceSize {
+			t.Fatalf("the dialer sent %d bytes", len(got))
+		}
+		mu.Unlock()
+	}
+	// A challenge that is a listener's proof's input. / 作为监听方证明输入的挑战。
+	url := rawServer(t, websocket.HandlerFuncs{
+		Open: func(ws *websocket.Connection, _ *http.Request) {
+			_ = ws.WriteBinary(append([]byte(listenerLabel), make([]byte, challengeSize+NonceSize)...))
+		},
+	})
+	if err := dialPW(url); !errors.Is(err, ErrProtocol) {
+		t.Fatalf("a long challenge: %v", err)
+	}
+
+	addr := Listen(t, NewHandler(ConnConfig{Auth: Password("pw")}))
+	if err := dialPW("ws://" + addr + Path); err != nil {
+		t.Fatalf("both of this version: %v", err)
+	}
+	old := authFunc(func(c []byte) ([]byte, error) { return Password("pw").Prove(c) })
+	c, err := Dial(ctxT(t), "ws://"+addr+Path, DialConfig{Engine: engine, ConnConfig: ConnConfig{Auth: old}})
+	if err != nil {
+		t.Fatalf("a dialer of an earlier version: %v", err)
+	}
+	c.Close()
+	if Password("").Mutual() || Password("pw").VerifyListener([]byte("c"), []byte("n"), nil) == nil {
+		t.Fatal("an empty password proves both ways, or a listener proved nothing")
 	}
 }
 

@@ -411,8 +411,16 @@ dial, authentication included, is bounded by 10 seconds.
 After the upgrade, before any frame:
 
 1. The listener sends a 32-byte random challenge.
-2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with the password.
-3. The listener checks it and acknowledges, or closes with code 4001.
+2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with the password, and a
+   32-byte random nonce of its own.
+3. The listener checks it and acknowledges, or closes with code 4001. Its acknowledgement carries
+   its own proof: the HMAC-SHA256, keyed with the password, of a fixed label, the challenge and
+   the dialer's nonce.
+4. The dialer checks the listener's proof, and gives up the dial when it is missing or wrong, so
+   that a listener that does not know the password, one that took over the address, gets no link.
+
+A listener still takes a dialer of an earlier version, which sends no nonce; a dialer of this
+version takes no listener of an earlier one, which proves nothing, so listeners are upgraded first.
 
 The handshake takes at most 5 seconds. A listener holds at most 256 connections that have not
 authenticated yet, from their TCP connect on, and 16 from one IP address; one more is closed as it
@@ -486,10 +494,15 @@ closed. A peer is refused when:
 - its role is not one the role links with: a hub links nodes and proxies, a node links hubs and
   proxies, a proxy links hubs and nodes;
 - on a dialed link, its role is not the one `peers[].role` names;
-- its ID is the role's own.
+- its ID is the role's own;
+- its ID is linked already under another role.
 
 A refused dialer waits at least 30 seconds, or `retry_interval` when longer, before trying again.
-What a peer may call depends on its role alone, as hello said.
+What a peer may call depends on its role alone, as hello said. A listener has one password, so a
+peer that knows it may say hello as any role the listener links with: a proxy that has a hub's
+password could join the hub as a node under an ID of its own, and a peer that knows a node's
+listen password could say hello to it as a hub and manage it when `allow_hub_manage` is on. Give a
+listener's password only to peers trusted in every role it links with.
 
 ### Pools and backoff
 

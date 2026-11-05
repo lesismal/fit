@@ -6,6 +6,32 @@ import (
 	"errors"
 )
 
+// NonceSize is the size of the nonce a dialer adds after its proof when its Authenticator is Mutual.
+// NonceSize 是 Authenticator 为 Mutual 时拨号方附在证明之后的随机数长度。
+const NonceSize = 32
+
+// Mutual is an Authenticator whose listener proves the secret too, so that a dialer does not take a listener that
+// does not know it: the dialer sends a nonce of its own after its proof, and the listener's acknowledgement carries
+// ProveListener of its challenge and that nonce, which the dialer checks with VerifyListener. A dialer whose
+// Authenticator is Mutual takes no listener that does not prove itself; a listener answers a dialer that sends no
+// nonce, as one of an earlier version does, with the plain acknowledgement.
+//
+// Mutual 是监听方也要证明密钥的 Authenticator，使拨号方不会接受不知道密钥的监听方：拨号方在证明之后附上自己的随机数，监听方
+// 的确认携带对其挑战与该随机数的 ProveListener，拨号方用 VerifyListener 校验。Authenticator 为 Mutual 的拨号方不接受无法
+// 证明自身的监听方；对于不发送随机数的拨号方（如早先版本），监听方照旧只回普通确认。
+type Mutual interface {
+	Authenticator
+	// Mutual reports whether the authenticator proves both ways (a Password does when it is not empty).
+	// Mutual 表示该认证是否双向证明（非空 Password 是）。
+	Mutual() bool
+	// ProveListener is the listener's proof for its challenge and the dialer's nonce.
+	// ProveListener 是监听方针对其挑战与拨号方随机数的证明。
+	ProveListener(challenge, nonce []byte) []byte
+	// VerifyListener checks the listener's proof (dialer side).
+	// VerifyListener 校验监听方的证明（拨号方）。
+	VerifyListener(challenge, nonce, proof []byte) error
+}
+
 // Authenticator proves and checks a connection's identity in the handshake that follows the WebSocket upgrade:
 // the listener sends a random challenge, the dialer answers with Prove, the listener checks it with Verify and
 // either acknowledges or closes the connection. Failing it fails the dial, so a reconnecting dialer backs off.
@@ -47,6 +73,28 @@ func (p Password) Prove(challenge []byte) ([]byte, error) {
 
 func (p Password) Verify(challenge, proof []byte) error {
 	if p == "" || hmac.Equal(proof, p.mac(challenge)) {
+		return nil
+	}
+	return ErrAuth
+}
+
+func (p Password) Mutual() bool { return p != "" }
+
+// listenerLabel sets the listener's proof apart from a dialer's, which is of the challenge alone: a dialer's answer
+// to a challenge never proves a listener.
+// listenerLabel 把监听方的证明与拨号方的证明（仅针对挑战）区分开：拨号方对挑战的应答永远不能充当监听方的证明。
+const listenerLabel = "fit llm wire listener\x00"
+
+func (p Password) ProveListener(challenge, nonce []byte) []byte {
+	m := hmac.New(sha256.New, []byte(p))
+	m.Write([]byte(listenerLabel))
+	m.Write(challenge)
+	m.Write(nonce)
+	return m.Sum(nil)
+}
+
+func (p Password) VerifyListener(challenge, nonce, proof []byte) error {
+	if hmac.Equal(proof, p.ProveListener(challenge, nonce)) {
 		return nil
 	}
 	return ErrAuth

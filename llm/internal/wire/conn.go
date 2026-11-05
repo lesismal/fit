@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -31,7 +32,10 @@ const (
 	DefaultMaxPendingPerIP = 16
 
 	challengeSize = 32
-	ackOK         = 0x01
+	// proofSize is the size of a Password's proof.
+	// proofSize 是 Password 证明的长度。
+	proofSize = sha256.Size
+	ackOK     = 0x01
 
 	closeAuthFailed = 4001 // the listener rejected the proof / 监听方拒绝了证明
 	closeHeartbeat  = 4002 // no frame for three ping intervals / 三个心跳周期没有收到任何帧
@@ -478,6 +482,14 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	}
 
 	var err error
+	// A dialer of this version sends a nonce after its proof, for the listener to prove the password in its ack.
+	// 本版本的拨号方在证明之后附上随机数，供监听方在确认中证明密码。
+	ack := []byte{ackOK}
+	if m, ok := s.cfg.Auth.(Mutual); ok && m.Mutual() && len(data) == proofSize+NonceSize {
+		nonce := data[proofSize:]
+		data = data[:proofSize]
+		ack = append(ack, m.ProveListener(sc.challenge, nonce)...)
+	}
 	if s.cfg.Auth != nil {
 		err = s.cfg.Auth.Verify(sc.challenge, data)
 	}
@@ -499,7 +511,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	sc.mu.Unlock()
 	// The session exists before the ack goes out, so whatever the dialer sends after it finds a session.
 	// 确认发出之前会话已建立，拨号方随后发送的任何帧都有会话处理。
-	if err := ws.WriteBinary([]byte{ackOK}); err != nil {
+	if err := ws.WriteBinary(ack); err != nil {
 		_ = ws.Close(websocket.CloseInternalError, "")
 		return
 	}
@@ -585,7 +597,14 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 		conn    *Conn
 		proved  bool
 		aborted bool
+		// challenge and nonce are what the listener proves the password for, when the authenticator is Mutual.
+		// challenge 与 nonce 是 Authenticator 为 Mutual 时监听方要为之证明密码的内容。
+		challenge, nonce []byte
 	)
+	mutual, _ := cfg.Auth.(Mutual)
+	if mutual != nil && !mutual.Mutual() {
+		mutual = nil
+	}
 	handler := websocket.HandlerFuncs{
 		Message: func(w *websocket.Connection, _ websocket.Opcode, data []byte) {
 			mu.Lock()
@@ -600,8 +619,19 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 			case !done: // the challenge / 挑战
 				var proof []byte
 				var err error
-				if cfg.Auth != nil {
+				if len(data) != challengeSize {
+					// A dialer answers only a challenge: what else a listener sends it might be a listener's proof to
+					// be had from it.
+					// 拨号方只应答挑战：监听方发来的其他内容可能是想从它这里套取监听方的证明。
+					err = fmt.Errorf("%w: a challenge of %d bytes", ErrProtocol, len(data))
+				}
+				if err == nil && cfg.Auth != nil {
 					proof, err = cfg.Auth.Prove(data)
+				}
+				if err == nil && mutual != nil {
+					challenge, nonce = bytes.Clone(data), make([]byte, NonceSize)
+					_, _ = rand.Read(nonce)
+					proof = append(proof, nonce...)
 				}
 				if err == nil {
 					err = w.WriteBinary(proof)
@@ -615,9 +645,16 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 				proved = true
 				mu.Unlock()
 			default: // the ack / 确认
-				if len(data) != 1 || data[0] != ackOK {
+				if len(data) < 1 || data[0] != ackOK || mutual == nil && len(data) != 1 {
 					settle(dialResult{err: fmt.Errorf("%w: bad handshake ack", ErrProtocol)})
 					_ = w.Close(websocket.CloseProtocolError, "")
+					return
+				}
+				if mutual != nil && mutual.VerifyListener(challenge, nonce, data[1:]) != nil {
+					// The listener does not know the password (or is of an earlier version, which proves nothing).
+					// 监听方不知道密码（或是不做证明的早先版本）。
+					settle(dialResult{err: fmt.Errorf("%w: the listener did not prove the password", ErrAuth)})
+					_ = w.Close(closeAuthFailed, "")
 					return
 				}
 				c = newConn(w, &cfg.ConnConfig, true, nil)

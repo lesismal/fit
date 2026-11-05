@@ -529,6 +529,22 @@ func (m *Mesh) unindexLocked(c *conn, id string) {
 	}
 }
 
+// roleOfLocked is the role under which a connection other than c holds id,
+// or "". m.mu is held.
+// roleOfLocked 返回 c 之外的连接持有 id 时的角色，没有则为 ""。调用方持有 m.mu。
+func (m *Mesh) roleOfLocked(id string, c *conn) string {
+	for _, o := range m.byID[id] {
+		if o == c {
+			continue
+		}
+		o.mu.Lock()
+		role := o.peer.Role
+		o.mu.Unlock()
+		return role
+	}
+	return ""
+}
+
 // register records the peer identity of c, already validated with checkPeer.
 // register 记录 c 的对端身份（已用 checkPeer 校验）。
 func (m *Mesh) register(c *conn, id model.Identity) error {
@@ -537,6 +553,13 @@ func (m *Mesh) register(c *conn, id model.Identity) error {
 		peer.Target = c.target.addr
 	}
 	m.mu.Lock()
+	// An ID is one process's: one that another connection holds under
+	// another role is someone claiming it.
+	// ID 属于一个进程：另一条连接以其他角色持有的 ID 是有人在冒用。
+	if other := m.roleOfLocked(id.ID, c); other != "" && other != id.Role {
+		m.mu.Unlock()
+		return fmt.Errorf("id %s is connected already as a %s", id.ID, other)
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()

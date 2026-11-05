@@ -123,6 +123,34 @@ func TestHelloEdges(t *testing.T) {
 	}
 }
 
+// An ID another link holds under one role is refused under another: a peer that knows the password cannot pass
+// for a node it is not by its ID; the same ID and role on another link, as a node's pool, is taken.
+// 另一条连接以某个角色持有的 ID 不能以其他角色使用：知道密码的对端无法借 ID 冒充它不是的节点；同一 ID、同一角色的另一条连接
+// （如节点的连接池）照常接受。
+func TestHelloIDConflict(t *testing.T) {
+	hub, _ := newTestMesh(t, model.RoleHub, "h1", []string{model.RoleNode, model.RoleProxy})
+	addr := freeAddr(t)
+	start(t, hub, addr)
+	ctx := ctxT(t)
+	node := model.Identity{Role: model.RoleNode, ID: "node-1", Name: "gpu"}
+	if _, err := rawPeer(t, addr, wire.Handlers{}).Call(ctx, wire.Head{Method: model.MethodHello}, hello(node)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rawPeer(t, addr, wire.Handlers{}).Call(ctx, wire.Head{Method: model.MethodHello}, hello(node)); err != nil {
+		t.Fatalf("a second link of the node: %v", err)
+	}
+	evil := rawPeer(t, addr, wire.Handlers{})
+	fake := model.Identity{Role: model.RoleProxy, ID: "node-1", Name: "gpu"}
+	if _, err := evil.Call(ctx, wire.Head{Method: model.MethodHello}, hello(fake)); codeOf(err) != model.CodeForbidden {
+		t.Fatalf("the node's ID as a proxy: %v", err)
+	}
+	for _, p := range hub.Peers() {
+		if p.ID == "node-1" && p.Role != model.RoleNode {
+			t.Fatalf("peers %+v", hub.Peers())
+		}
+	}
+}
+
 // A listener that answers the mesh's hello badly: a reply that is not an identity, a link that drops, a hello the
 // other way round, a call before the hello is done.
 // 对互联的 hello 应答不当的监听方：不是身份的应答、断开的连接、反方向的 hello、hello 完成前的调用。
