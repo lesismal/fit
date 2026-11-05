@@ -5,7 +5,8 @@
 // request path, the file it names, its index file or its compressed twins,
 // and the contents of small files, is kept in memory and trusted for
 // check_interval; a request it answers from what it knows costs no system
-// call. Anything else, a path not seen lately, a file to read, open or list,
+// call. What it keeps of request paths is bounded, to 16384 paths and 16 MiB,
+// and a path longer than 4096 bytes is not kept. Anything else, a path not seen lately, a file to read, open or list,
 // goes to a pool of goroutines of the package's own for the disk, bounded in
 // size and queue, with a timeout, and is answered from there. A file larger
 // than max_file_bytes, or one that does not fit in what is left of
@@ -128,6 +129,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.cache.entries = make(map[string]*entry)
 	s.cache.lookups = make(map[string]*lookup)
 	s.cache.maxLookups = DefaultMaxLookups
+	s.cache.maxLookupBytes = DefaultMaxLookupBytes
 	s.cache.check = s.CheckInterval.Std()
 	if s.cache.check == 0 {
 		s.cache.check = time.Second

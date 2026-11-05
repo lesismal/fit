@@ -14,24 +14,39 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 )
 
-// DefaultMaxLookups bounds the request paths the cache remembers.
-const DefaultMaxLookups = 16384
+// The bounds of what the cache remembers of request paths: how many, how
+// many bytes of paths, and the longest path it remembers. A request path is
+// up to max_header_bytes long; a client asking for paths that do not exist
+// may fill the cache, but only up to these. A longer path names no file on
+// most systems (PATH_MAX is 4096 on Linux) and is looked at on disk each
+// time.
+const (
+	DefaultMaxLookups     = 16384
+	DefaultMaxLookupBytes = 16 << 20
+	MaxLookupPath         = 4096
+)
+
+// lookupOverhead is what a lookup costs beyond the bytes of its paths: the
+// map's entry, the lookup and its FileInfo, counted at a round figure.
+const lookupOverhead = 256
 
 // cache keeps what the handler learned of request paths, and the contents
-// of small files, by path on disk. Both are bounded: lookups by count, which
-// a client asking for paths that do not exist cannot grow past, and
-// contents by bytes.
+// of small files, by path on disk. Both are bounded: lookups by count and by
+// bytes, which a client asking for paths that do not exist cannot grow
+// past, and contents by bytes.
 type cache struct {
-	maxFile    int64
-	maxBytes   int64
-	maxLookups int
+	maxFile        int64
+	maxBytes       int64
+	maxLookups     int
+	maxLookupBytes int64
 	// check is how long a lookup is trusted; 0 trusts none.
 	check time.Duration
 
-	mu      sync.RWMutex
-	lookups map[string]*lookup
-	entries map[string]*entry
-	bytes   int64
+	mu          sync.RWMutex
+	lookups     map[string]*lookup
+	lookupBytes int64
+	entries     map[string]*entry
+	bytes       int64
 }
 
 // lookup is what a request path named when it was last looked at: a file,
@@ -49,6 +64,8 @@ type lookup struct {
 	twins             []twin
 	redirect, listing bool
 	status            int
+	// size is what keeping it costs, counted when it is kept.
+	size int64
 }
 
 // twin is a file's compressed twin on disk.
@@ -82,18 +99,32 @@ func (c *cache) lookup(name string) *lookup {
 	return l
 }
 
-// keep remembers l for name, forgetting another path when the cache holds
-// as many as it may, and the contents of a file that is gone.
+// keep remembers l for name, forgetting other paths, any of them, while
+// the cache holds as many, or as many bytes, as it may. A name longer than
+// MaxLookupPath is not remembered.
 func (c *cache) keep(name string, l *lookup) {
+	if len(name) > MaxLookupPath {
+		return
+	}
+	l.size = int64(len(name)+len(l.name)+len(l.full)) + lookupOverhead
+	for _, t := range l.twins {
+		l.size += int64(len(t.full))
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.lookups[name]; !ok && len(c.lookups) >= c.maxLookups {
-		for other := range c.lookups {
-			delete(c.lookups, other)
+	if old, ok := c.lookups[name]; ok {
+		delete(c.lookups, name)
+		c.lookupBytes -= old.size
+	}
+	for other, ol := range c.lookups {
+		if len(c.lookups) < c.maxLookups && c.lookupBytes+l.size <= c.maxLookupBytes {
 			break
 		}
+		delete(c.lookups, other)
+		c.lookupBytes -= ol.size
 	}
 	c.lookups[name] = l
+	c.lookupBytes += l.size
 }
 
 // current returns the contents of the file at full, if the cache holds them

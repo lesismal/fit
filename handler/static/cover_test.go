@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestBrowseOrder(t *testing.T) {
 func TestCacheEdges(t *testing.T) {
 	root := tree(t, map[string]string{"a": "aaaa"})
 	full := filepath.Join(root, "a")
-	c := cache{entries: map[string]*entry{}, lookups: map[string]*lookup{}, maxLookups: 2, maxBytes: 6, maxFile: 6, check: time.Hour}
+	c := cache{entries: map[string]*entry{}, lookups: map[string]*lookup{}, maxLookups: 2, maxLookupBytes: 1 << 20, maxBytes: 6, maxFile: 6, check: time.Hour}
 	for _, name := range []string{"/1", "/2", "/3"} {
 		c.keep(name, &lookup{checked: time.Now()})
 	}
@@ -97,6 +98,53 @@ func TestCacheEdges(t *testing.T) {
 	info, _ = os.Stat(full)
 	if e := c.load(full, info, variant{name: "a"}); e == nil || string(e.data) != "aaaaaaaa" || c.entries[full] != nil || c.bytes != 0 {
 		t.Fatalf("too big: %v, %v, %d bytes", e, c.entries[full], c.bytes)
+	}
+}
+
+// TestLookupBounds checks that the lookup cache is bounded by bytes as well
+// as by count, and remembers no request path longer than MaxLookupPath: a
+// client asking for distinct long paths that do not exist, each up to
+// max_header_bytes, cannot make it hold more.
+func TestLookupBounds(t *testing.T) {
+	root := tree(t, map[string]string{"a": "a"})
+	s := mustLoad(t, root, "")
+	long := "/" + strings.Repeat("x", MaxLookupPath)
+	if l := s.find(long, true); l == nil || l.status == 0 {
+		t.Fatalf("find of a long path: %+v", l)
+	}
+	if len(s.cache.lookups) != 0 || s.cache.lookupBytes != 0 {
+		t.Fatalf("a path longer than %d kept: %d lookups, %d bytes", MaxLookupPath, len(s.cache.lookups), s.cache.lookupBytes)
+	}
+	if l := s.find(long[:MaxLookupPath], true); l == nil || len(s.cache.lookups) != 1 {
+		t.Fatalf("a path of %d bytes not kept: %+v", MaxLookupPath, l)
+	}
+
+	const bound = 64 << 10
+	c := cache{lookups: map[string]*lookup{}, maxLookups: 1 << 20, maxLookupBytes: bound, check: time.Hour}
+	for i := range 1000 {
+		name := "/" + strconv.Itoa(i) + strings.Repeat("y", 1000)
+		c.keep(name, &lookup{checked: time.Now(), name: name, full: "/root" + name})
+		var sum int64
+		for k, l := range c.lookups {
+			if want := int64(3*len(k)+len("/root")) + lookupOverhead; l.size != want {
+				t.Fatalf("%s counted %d bytes", k[:8], l.size)
+			}
+			sum += l.size
+		}
+		if sum != c.lookupBytes || c.lookupBytes > bound {
+			t.Fatalf("after %d: %d bytes counted, %d held, bound %d", i, c.lookupBytes, sum, bound)
+		}
+	}
+	if n := len(c.lookups); n == 0 || n > bound/1000 {
+		t.Fatalf("%d lookups kept", n)
+	}
+	// Keeping a name again replaces it, counted once.
+	name := "/again"
+	c.keep(name, &lookup{checked: time.Now()})
+	before := c.lookupBytes
+	c.keep(name, &lookup{checked: time.Now()})
+	if c.lookupBytes != before {
+		t.Fatalf("a name kept twice: %d then %d bytes", before, c.lookupBytes)
 	}
 }
 
