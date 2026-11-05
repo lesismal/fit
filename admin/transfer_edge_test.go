@@ -1,14 +1,17 @@
 package admin
 
 import (
+	"context"
 	"encoding/binary"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/config"
+	fitruntime "github.com/lesismal/fit/runtime"
 )
 
 // TestExportRequestErrors: an export whose body is not the one it takes,
@@ -134,5 +137,34 @@ func TestImportStoreBounded(t *testing.T) {
 	}
 	if resp, body := send(sealed); resp.StatusCode != 200 || f.served(t) != "v2" {
 		t.Errorf("an import after: %d %s", resp.StatusCode, body)
+	}
+}
+
+// TestTransferRunningNotObject: a running config whose data is not a JSON
+// object, which no load gives, is neither exported nor imported onto.
+func TestTransferRunningNotObject(t *testing.T) {
+	c, err := config.Load([]byte(doc("v1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := NewConfigs(new(fitruntime.Runtime), nil, fitruntime.Env{}, c, []byte(`[1]`), SourceFile, 1)
+	srv, err := Start(&config.Admin{Address: "127.0.0.1:0"}, cs, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	f := &fixture{configs: cs, admin: srv, client: &http.Client{Timeout: 10 * time.Second}, api: "http://" + srv.Addr().String()}
+	resp, body := f.send(t, "POST", "/config/export", "application/json", `{"format": "json"}`, "")
+	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(body, "the running config is not a JSON object") {
+		t.Errorf("export: %d %s", resp.StatusCode, body)
+	}
+	req, _ := http.NewRequest("POST", f.api+"/config/import?format=json", strings.NewReader(`{"routes": []}`))
+	req.Header.Set("Content-Type", "text/plain")
+	resp, body = f.do(t, req)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(body, "the running config is not a JSON object") {
+		t.Errorf("import: %d %s", resp.StatusCode, body)
+	}
+	if cs.Current().Data() == nil || string(cs.Current().Data()) != `[1]` {
+		t.Errorf("the running config changed: %s", cs.Current().Data())
 	}
 }
