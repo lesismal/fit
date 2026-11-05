@@ -62,6 +62,11 @@ type PeerConn struct {
 	// Draining: either side sent drain (wire), no new calls go here.
 	// Draining：任一方已发送 drain（wire），新调用不再发往这里。
 	Draining bool `json:"draining,omitempty"`
+	// TokenID is the token an inbound link proved, and SharedPassword whether it proved a shared password instead,
+	// which the pages warn of: it is refused from the next release.
+	// TokenID 是入站连接所证明的令牌，SharedPassword 表示它证明的是共享密码，页面会对此给出警告：下一版本起将被拒绝。
+	TokenID        string `json:"token_id,omitempty"`
+	SharedPassword bool   `json:"shared_password,omitempty"`
 	// Link is the link's traffic and latency.
 	// Link 连接的流量与延迟。
 	Link LinkStats `json:"link"`
@@ -72,6 +77,9 @@ type PeerConn struct {
 type DialReq struct {
 	Addr     string `json:"addr"`
 	Password string `json:"password,omitempty"`
+	// Token is the link token the peer's listener issued, in place of Password; one given replaces the other.
+	// Token 是对端监听方签发的连接令牌，代替 Password；给出其一即替换另一个。
+	Token string `json:"token,omitempty"`
 	// Role the peer at Addr must have; its hello is refused otherwise.
 	// Addr 处对端必须具有的角色；否则拒绝其 hello。
 	Role string `json:"role"`
@@ -98,6 +106,9 @@ type DialTarget struct {
 	Pin        string    `json:"pin,omitempty"`
 	CAFile     string    `json:"ca_file,omitempty"`
 	ServerName string    `json:"server_name,omitempty"`
+	// TokenID is the ID of the token the target is dialed with, "" for a password; the token is never returned.
+	// TokenID 是拨号该目标所用令牌的 ID，密码则为 ""；从不返回令牌本身。
+	TokenID    string    `json:"token_id,omitempty"`
 	Connected  bool      `json:"connected"`
 	Peer       *Identity `json:"peer,omitempty"`
 	Error      string    `json:"error,omitempty"`
@@ -125,6 +136,10 @@ type ListenConfig struct {
 	SelfSigned bool   `json:"self_signed,omitempty"`
 	Cert       string `json:"cert,omitempty"`
 	Key        string `json:"key,omitempty"`
+	// ClearPasswords, in a request that changes the listener, removes every password, once the peers link with
+	// tokens; it is never kept.
+	// ClearPasswords 用于修改监听的请求，在对端都改用令牌后删除全部密码；从不保留。
+	ClearPasswords bool `json:"clear_passwords,omitempty"`
 }
 
 // TLS reports whether the listener takes links over TLS.

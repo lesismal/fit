@@ -170,12 +170,16 @@ func TestRolePasswordFallback(t *testing.T) {
 	}
 }
 
-// A listener needs a password of a role it links with; the credentials merge the roles of one password.
-// 监听方需要它所连接角色之一的密码；凭据合并同一密码的角色。
+// A listener without a password of a role it links with takes tokens alone; the credentials merge the roles of one
+// password.
+// 没有其所连接角色密码的监听方只接受令牌；凭据合并同一密码的角色。
 func TestRoleCredentials(t *testing.T) {
 	h, _ := newTestMesh(t, model.RoleHub, "h1", []string{model.RoleNode, model.RoleProxy})
-	if err := h.SetListen(model.ListenConfig{Addr: freeAddr(t), HubPassword: "hp"}); err == nil {
-		t.Fatal("a hub listening for hubs alone")
+	if err := h.SetListen(model.ListenConfig{Addr: freeAddr(t), HubPassword: "hp"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.credentials(h.ListenConfig())) != 0 {
+		t.Fatal("a hub's own password is a credential")
 	}
 	got := h.credentials(model.ListenConfig{Password: "a", NodePassword: "b", ProxyPassword: "b"})
 	if len(got) != 1 || got[0].Password != "b" || strings.Join(got[0].Roles, ",") != "node,proxy" {

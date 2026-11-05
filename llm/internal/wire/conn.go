@@ -19,6 +19,8 @@ import (
 	fib "github.com/lesismal/fib"
 	fibtls "github.com/lesismal/fib/tls"
 	"github.com/lesismal/fib/websocket"
+
+	"github.com/lesismal/fit/internal/linktoken"
 )
 
 // Transport defaults.
@@ -73,6 +75,16 @@ type ConnConfig struct {
 	// Credentials 用于监听方，代替 Auth 作为其接受的密码：拨号方的证明逐一与之校验，连接的 Roles 为被证明的那个凭据的
 	// 角色，监听方用同一密码回证（见 Mutual）。证明不了任何一个则握手失败。
 	Credentials []Credential
+	// Tokens, on a listener, are the link tokens it issued, which a dialer may prove in place of a password; the
+	// connection's Roles are then TokenRoles and its Token the token's ID. A listener with Tokens takes no password
+	// but its Credentials'.
+	// Tokens 用于监听方，是其签发的连接令牌，拨号方可用以代替密码证明；此时连接的 Roles 为 TokenRoles，Token 为令牌 ID。
+	// 设置了 Tokens 的监听方只接受其 Credentials 中的密码。
+	Tokens     Tokens
+	TokenRoles []string
+	// Token, on a dialer, is the link token it proves in place of Auth, and checks the listener proves back.
+	// Token 用于拨号方，是其代替 Auth 证明的连接令牌，并校验监听方的回证。
+	Token *linktoken.Secret
 	// PingInterval: send a ping after this long without receiving a frame, close after three
 	// (0: DefaultPingInterval, < 0: off).
 	// PingInterval 这么久没收到帧就发 ping，三个周期没收到就关闭（0：DefaultPingInterval，< 0：关闭心跳）。
@@ -154,6 +166,9 @@ type Conn struct {
 	// otherwise). Set before Handlers is called.
 	// Roles 是拨号方所证明凭据的角色（监听方，使用 ConnConfig.Credentials 时；否则为 nil）。在调用 Handlers 之前设置。
 	Roles []string
+	// Token is the ID of the link token the dialer proved (listener side), "" for a password.
+	// Token 是拨号方所证明的连接令牌 ID（监听方），密码则为 ""。
+	Token string
 
 	ws  *websocket.Connection
 	cfg *ConnConfig
@@ -166,8 +181,8 @@ type Conn struct {
 	closeOnce sync.Once
 }
 
-func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request, roles []string) *Conn {
-	c := &Conn{ws: ws, cfg: cfg, Request: req, Roles: roles}
+func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request, roles []string, token string) *Conn {
+	c := &Conn{ws: ws, cfg: cfg, Request: req, Roles: roles, Token: token}
 	opts := cfg.Session
 	opts.Dialer = dialer
 	if cfg.Handlers != nil {
@@ -510,27 +525,43 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 		return
 	}
 
-	// A dialer of this version sends a nonce after its proof, for the listener to prove the password in its ack.
-	// 本版本的拨号方在证明之后附上随机数，供监听方在确认中证明密码。
-	var nonce []byte
-	if len(data) == proofSize+NonceSize {
-		nonce = data[proofSize:]
-	}
-	prover, roles, err := s.verify(sc.challenge, data, nonce != nil)
 	ack := []byte{ackOK}
-	if prover != nil && nonce != nil {
-		ack = append(ack, prover.ProveListener(sc.challenge, nonce)...)
+	var roles []string
+	var token string
+	var err error
+	if _, _, _, ok := parseTokenAnswer(data); ok {
+		// A dialer that proves a link token: the token's roles, and the listener proves it back.
+		// 证明连接令牌的拨号方：令牌的角色，监听方回证该令牌。
+		var proof []byte
+		token, proof, err = s.verifyToken(sc.challenge, data)
+		ack, roles = append(ack, proof...), s.cfg.TokenRoles
+	} else {
+		// A dialer of this version sends a nonce after its proof, for the listener to prove the password in its ack.
+		// 本版本的拨号方在证明之后附上随机数，供监听方在确认中证明密码。
+		var nonce []byte
+		if len(data) == proofSize+NonceSize {
+			nonce = data[proofSize:]
+		}
+		var prover Mutual
+		prover, roles, err = s.verify(sc.challenge, data, nonce != nil)
+		if prover != nil && nonce != nil {
+			ack = append(ack, prover.ProveListener(sc.challenge, nonce)...)
+		}
 	}
 	if err != nil {
 		if s.cfg.OnAuthFailed != nil {
 			s.cfg.OnAuthFailed(sc.req)
 		}
-		_ = ws.Close(closeAuthFailed, "authentication failed")
+		reason := "authentication failed"
+		if !errors.Is(err, ErrAuth) {
+			reason = err.Error() // the token's: unknown, or expired / 令牌的原因：未知或已过期
+		}
+		_ = ws.Close(closeAuthFailed, reason)
 		return
 	}
 	sc.timer.Stop()
 	s.tcp.authenticated(sc.tcp)
-	c = newConn(ws, &s.cfg, false, sc.req, roles)
+	c = newConn(ws, &s.cfg, false, sc.req, roles, token)
 	if tcp := sc.tcp; tcp != nil {
 		c.abort = func() { _ = tcp.Close() }
 	}
@@ -553,7 +584,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 // proves itself with (nil: it proves nothing) and the roles of the credential proven.
 // verify 校验拨号方的证明（nonced 为真时其后跟随机数），返回监听方用以证明自身的认证（nil 表示不证明）以及被证明凭据的角色。
 func (s *server) verify(challenge, data []byte, nonced bool) (Mutual, []string, error) {
-	if len(s.cfg.Credentials) > 0 {
+	if len(s.cfg.Credentials) > 0 || s.cfg.Tokens != nil {
 		if nonced {
 			data = data[:proofSize]
 		}
@@ -686,10 +717,15 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 					// 拨号方只应答挑战：监听方发来的其他内容可能是想从它这里套取监听方的证明。
 					err = fmt.Errorf("%w: a challenge of %d bytes", ErrProtocol, len(data))
 				}
-				if err == nil && cfg.Auth != nil {
+				switch {
+				case err != nil:
+				case cfg.Token != nil:
+					challenge = bytes.Clone(data)
+					proof, nonce = tokenAnswer(cfg.Token, challenge)
+				case cfg.Auth != nil:
 					proof, err = cfg.Auth.Prove(data)
 				}
-				if err == nil && mutual != nil {
+				if err == nil && mutual != nil && cfg.Token == nil {
 					challenge, nonce = bytes.Clone(data), make([]byte, NonceSize)
 					_, _ = rand.Read(nonce)
 					proof = append(proof, nonce...)
@@ -706,19 +742,24 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 				proved = true
 				mu.Unlock()
 			default: // the ack / 确认
-				if len(data) < 1 || data[0] != ackOK || mutual == nil && len(data) != 1 {
+				if len(data) < 1 || data[0] != ackOK || mutual == nil && cfg.Token == nil && len(data) != 1 {
 					settle(dialResult{err: fmt.Errorf("%w: bad handshake ack", ErrProtocol)})
 					_ = w.Close(websocket.CloseProtocolError, "")
 					return
 				}
-				if mutual != nil && mutual.VerifyListener(challenge, nonce, data[1:]) != nil {
+				if cfg.Token != nil && cfg.Token.VerifyListener(tokenTranscript(cfg.Token.ID, nonce, challenge), data[1:]) != nil {
+					settle(dialResult{err: fmt.Errorf("%w: %w", ErrAuth, ErrTokenListener)})
+					_ = w.Close(closeAuthFailed, "")
+					return
+				}
+				if cfg.Token == nil && mutual != nil && mutual.VerifyListener(challenge, nonce, data[1:]) != nil {
 					// The listener does not know the password (or is of an earlier version, which proves nothing).
 					// 监听方不知道密码（或是不做证明的早先版本）。
 					settle(dialResult{err: fmt.Errorf("%w: the listener did not prove the password", ErrAuth)})
 					_ = w.Close(closeAuthFailed, "")
 					return
 				}
-				c = newConn(w, &cfg.ConnConfig, true, nil, nil)
+				c = newConn(w, &cfg.ConnConfig, true, nil, nil, "")
 				if t := tcp.Load(); t != nil {
 					c.abort = func() { _ = t.Close() }
 				}
