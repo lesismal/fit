@@ -144,8 +144,8 @@ func TestLinkSendErrors(t *testing.T) {
 	if err := l.Notify(proto.MethodPing, func() {}); err == nil {
 		t.Error("a notify whose body does not encode went out")
 	}
-	if err := l.Call(proto.MethodPing, nil, nil, time.Second); err == nil || err.Error() != "down" {
-		t.Errorf("a call the connection refused: %v", err)
+	if err := l.Call(proto.MethodPing, nil, nil, time.Second); err == nil || err.Error() != "down" || !errors.Is(err, ErrClosed) {
+		t.Errorf("a call the connection refused: %v, want down, as ErrClosed", err)
 	}
 	l.mu.Lock()
 	n := len(l.pending)

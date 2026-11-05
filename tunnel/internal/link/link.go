@@ -132,6 +132,22 @@ var (
 	errBacklog  = errors.New("link: too much sent before the peer's hello")
 )
 
+// tooLong is the error of a frame past MaxFrame: the link stays as it was.
+type tooLong struct{ n int }
+
+func (e *tooLong) Error() string {
+	return fmt.Sprintf("link: a frame of %d bytes is longer than %d", e.n, MaxFrame)
+}
+
+// sendFailed is the error of a call whose request the link's connection
+// would not send: the connection's own, which is also ErrClosed, since only
+// a link that is gone fails a send and its close may not have been seen yet.
+type sendFailed struct{ err error }
+
+func (e *sendFailed) Error() string        { return e.err.Error() }
+func (e *sendFailed) Unwrap() error        { return e.err }
+func (e *sendFailed) Is(target error) bool { return target == ErrClosed }
+
 // RemoteError is a failure the other side answered a call with.
 type RemoteError string
 
@@ -351,7 +367,7 @@ func (l *Link) frame(kind byte, m proto.Method, id uint32, parts ...[]byte) []by
 // once the peer's hello came, when the link seals bodies.
 func (l *Link) send(b []byte) error {
 	if len(b)-LengthSize > MaxFrame {
-		return fmt.Errorf("link: a frame of %d bytes is longer than %d", len(b)-LengthSize, MaxFrame)
+		return &tooLong{n: len(b) - LengthSize}
 	}
 	if l.coder == nil {
 		return l.conn.Send(b)
@@ -434,7 +450,10 @@ func (l *Link) Call(m proto.Method, req, rsp any, timeout time.Duration) error {
 	l.mu.Unlock()
 	if err := l.send(l.frame(kindCall, m, id, body)); err != nil {
 		l.forget(id)
-		return err
+		if _, ok := err.(*tooLong); ok {
+			return err
+		}
+		return &sendFailed{err}
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
