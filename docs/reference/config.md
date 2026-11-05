@@ -1625,8 +1625,10 @@ API, Anthropic, Gemini, Azure OpenAI, Ollama, Cohere), and a `proxy` that serves
 agents of its machine or LAN, calling the models of the nodes it reaches. The roles
 link over a WebSocket mesh, each listening at `listen` and dialing its `peers`; off loopback the
 links go over TLS, the dialer checking the listener's certificate by its `pin` or its `ca_file`.
-Here the three share a machine and link over loopback. A role runs while
-its member is set; any of them, in any number of processes. What a role's pages, behind
+A dialer links with a `token` the listener's role issued, from its pages, its Admin API or
+`fit token`, which the role keeps as a hash in its `tokens`; the listener's shared passwords still
+link in this release, with a warning. Here the three share a machine and link over loopback. A role
+runs while its member is set; any of them, in any number of processes. What a role's pages, behind
 `console`, change is written back into its member, and kept in `admin.store` when there is one.
 See [the LLM feature](../llm.md).
 
@@ -1634,9 +1636,25 @@ In a .conf file:
 
 ```fit
 llm {
-	hub { listen { address 127.0.0.1:9210; password mesh-secret } }
+	hub {
+		listen { address 127.0.0.1:9210 }
+		tokens gpu-1 {
+			id fdd44d906b8e6ce2
+			hash 1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4
+			created_at 1793900000
+		}
+		tokens laptop {
+			id 5a3716dd56e5e458
+			hash 4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df
+			created_at 1793900000
+		}
+	}
 	node {
-		peers { address 127.0.0.1:9210; password mesh-secret; role hub }
+		peers {
+			address 127.0.0.1:9210
+			token fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ
+			role hub
+		}
 		models qwen3 {
 			api openai
 			base_url http://127.0.0.1:11434/v1
@@ -1649,7 +1667,11 @@ llm {
 		}
 	}
 	proxy {
-		peers { address 127.0.0.1:9210; password mesh-secret; role hub }
+		peers {
+			address 127.0.0.1:9210
+			token fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4
+			role hub
+		}
 		api { address 127.0.0.1:9300 }
 	}
 }
@@ -1662,11 +1684,19 @@ llm:
   hub:
     listen:
       address: 127.0.0.1:9210
-      password: mesh-secret
+    tokens:
+      - id: fdd44d906b8e6ce2
+        name: gpu-1
+        hash: 1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4
+        created_at: 1793900000
+      - id: 5a3716dd56e5e458
+        name: laptop
+        hash: 4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df
+        created_at: 1793900000
   node:
     peers:
       - address: 127.0.0.1:9210
-        password: mesh-secret
+        token: fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ
         role: hub
     models:
       - name: qwen3
@@ -1680,7 +1710,7 @@ llm:
   proxy:
     peers:
       - address: 127.0.0.1:9210
-        password: mesh-secret
+        token: fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4
         role: hub
     api:
       address: 127.0.0.1:9300
@@ -1692,15 +1722,19 @@ In JSON:
 {
   "llm": {
     "hub": {
-      "listen": {"address": "127.0.0.1:9210", "password": "mesh-secret"}
+      "listen": {"address": "127.0.0.1:9210"},
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "gpu-1", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4", "created_at": 1793900000},
+        {"id": "5a3716dd56e5e458", "name": "laptop", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df", "created_at": 1793900000}
+      ]
     },
     "node": {
-      "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "127.0.0.1:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ", "role": "hub"}],
       "models": [{"name": "qwen3", "api": "openai", "base_url": "http://127.0.0.1:11434/v1", "upstream": "qwen3:32b"},
         {"name": "llama3.2", "api": "ollama", "base_url": "http://127.0.0.1:11434", "upstream": "llama3.2:3b"}]
     },
     "proxy": {
-      "peers": [{"address": "127.0.0.1:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "127.0.0.1:9210", "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4", "role": "hub"}],
       "api": {"address": "127.0.0.1:9300"}
     }
   }
@@ -1927,31 +1961,44 @@ to over TLS, WebSocket over TLS (wss) or QUIC, a `node` beside the services it e
 `proxy` that forwards local ports and web proxies through a hub to a node's service, so that
 services behind NAT are reached. Nodes and proxies check the hub's certificate by `pin`, its
 fingerprint on the hub's pages, or by `ca_file`; plain `tcp` and `ws` are for the loopback, or
-need `body_password`. A role runs while its member is set; any of them, in any number of
-processes. What a role's pages, behind `console`, change is written back into its member, and
-kept in `admin.store` when there is one. See [the tunnel](../tunnel.md).
+need `body_password`. Each node and proxy registers with a `token` the hub issued, from its
+pages, its Admin API or `fit token`, which the hub keeps as a hash in its `tokens`; the shared
+`password` still registers in this release, with a warning. A role runs while its member is set;
+any of them, in any number of processes. What a role's pages, behind `console`, change is written
+back into its member, and kept in `admin.store` when there is one. See [the tunnel](../tunnel.md).
 
 In a .conf file:
 
 ```fit
 tunnel {
 	hub {
-		password a-registration-password
 		listeners { protocol wss; address :7443 }
+		tokens lab {
+			id fdd44d906b8e6ce2
+			hash 1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4
+			created_at 1793900000
+		}
+		tokens alice {
+			id 5a3716dd56e5e458
+			hash 4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df
+			created_at 1793900000
+			expires_at 1825436000
+		}
 	}
 	node {
 		name lab
 		hubs hub {
 			endpoints { address wss://hub.example.com:7443/tunnel }
-			password a-registration-password
+			token fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ
 			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
 		}
 		services ssh { address 10.0.0.5:22 }
 	}
 	proxy {
+		name alice
 		hubs hub {
 			endpoints { address wss://hub.example.com:7443/tunnel }
-			password a-registration-password
+			token fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4
 			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
 		}
 		forwards { listen 127.0.0.1:2222; node lab; service ssh }
@@ -1964,27 +2011,37 @@ In YAML:
 ```yaml
 tunnel:
   hub:
-    password: a-registration-password
     listeners:
       - protocol: wss
         address: :7443
+    tokens:
+      - id: fdd44d906b8e6ce2
+        name: lab
+        hash: 1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4
+        created_at: 1793900000
+      - id: 5a3716dd56e5e458
+        name: alice
+        hash: 4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df
+        created_at: 1793900000
+        expires_at: 1825436000
   node:
     name: lab
     hubs:
       - name: hub
         endpoints:
           - address: wss://hub.example.com:7443/tunnel
-        password: a-registration-password
+        token: fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ
         pin: 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
     services:
       - name: ssh
         address: 10.0.0.5:22
   proxy:
+    name: alice
     hubs:
       - name: hub
         endpoints:
           - address: wss://hub.example.com:7443/tunnel
-        password: a-registration-password
+        token: fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4
         pin: 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
     forwards:
       - listen: 127.0.0.1:2222
@@ -1998,17 +2055,24 @@ In JSON:
 {
   "tunnel": {
     "hub": {
-      "password": "a-registration-password",
-      "listeners": [{"protocol": "wss", "address": ":7443"}]
+      "listeners": [{"protocol": "wss", "address": ":7443"}],
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "lab", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4", "created_at": 1793900000},
+        {"id": "5a3716dd56e5e458", "name": "alice", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df", "created_at": 1793900000,
+          "expires_at": 1825436000}
+      ]
     },
     "node": {
       "name": "lab",
-      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}], "password": "a-registration-password",
+      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}],
+        "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"}],
       "services": [{"name": "ssh", "address": "10.0.0.5:22"}]
     },
     "proxy": {
-      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}], "password": "a-registration-password",
+      "name": "alice",
+      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}],
+        "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"}],
       "forwards": [{"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh"}]
     }

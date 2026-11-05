@@ -45,7 +45,10 @@
     ['tk.removed', 'Removed', '已移除'], ['tk.services_saved', 'Services saved', '服务已保存'],
     ['tk.services_saved_node', 'Services saved on the node', '服务已保存到节点'], ['tk.disconnect_q', 'Disconnect from {name}?', '断开与 {name} 的连接？'],
     ['tk.kick_q', 'Kick {name}?', '踢出 {name}？'], ['tk.close_q', 'Close tunnel {id}?', '关闭隧道 {id}？'],
-    ['tk.pool', 'Pool size', '连接池大小'], ['tk.password', 'Password', '密码'], ['tk.body_pw', 'Body AES password', '消息体 AES 密码'],
+    ['tk.pool', 'Pool size', '连接池大小'], ['tk.password', 'Shared password (deprecated)', '共享密码（已弃用）'],
+    ['tk.token', 'Token the hub issued', 'hub 签发的令牌'], ['tk.token_ph', 'fitt1.…, from the hub\'s Tokens page', 'fitt1.…，来自 hub 的“令牌”页'],
+    ['tk.token_keep', 'keep token {id}', '保留令牌 {id}'], ['tk.cred_need', 'A token, or the hub\'s password', '需要令牌或 hub 的密码'],
+    ['tk.token_note', 'A token replaces the password, and a password the token.', '令牌会替换密码，密码也会替换令牌。'], ['tk.body_pw', 'Body AES password', '消息体 AES 密码'],
     ['tk.clear_body', 'Remove the body password', '移除消息体密码'], ['tk.eps', 'Protocols, in the order they are tried', '协议（按尝试顺序）'],
     ['tk.on', 'On', '启用'], ['tk.eps_note', 'Each link dials the first protocol on, and falls back to the next when that fails.',
       '每条链路先拨号第一个启用的协议，失败时依次回退到下一个。'],
@@ -395,7 +398,8 @@
       var f = {
         name: h('input.input', { value: st ? st.name : '', placeholder: t('tk.name_opt') }),
         pool: h('input.input', { type: 'number', min: 1, max: 100, placeholder: '10', value: st && st.pool_size ? st.pool_size : '' }),
-        password: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: st && st.has_password ? t('tk.keep') : t('tk.password').toLowerCase() }),
+        token: h('input.input.mono', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: st && st.token_id ? t('tk.token_keep', { id: st.token_id }) : t('tk.token_ph') }),
+        password: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: st && st.has_password ? t('tk.keep') : t('tk.optional') }),
         body: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: st && st.has_body_password ? t('tk.keep') : t('tk.optional') }),
         clearBody: h('input', { type: 'checkbox' }),
         pin: h('input.input.mono', { value: st && (st.pin || st.quic_pin) || '', placeholder: t('tk.pin_ph'), autocomplete: 'off', spellcheck: 'false' }),
@@ -423,7 +427,8 @@
         title: st ? t('tk.hub_n', { name: st.name }) : t('tk.add_a_hub'), wide: true,
         body: h('div.form',
           h('div.form-row', UI.field(t('tk.name'), f.name), UI.field(t('tk.pool'), f.pool)),
-          h('div.form-row', UI.field(t('tk.password'), f.password), UI.field(t('tk.body_pw'), f.body)),
+          h('div.form-row', UI.field(t('tk.token'), f.token, t('tk.token_note')), UI.field(t('tk.password'), f.password)),
+          UI.field(t('tk.body_pw'), f.body),
           st && st.has_body_password ? h('label.check', f.clearBody, ' ', t('tk.clear_body')) : null,
           h('h4', t('tk.eps')),
           h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', t('tk.on')), h('th', t('tk.protocol')), h('th', t('tk.address')), h('th', ''))), tbody)),
@@ -434,12 +439,12 @@
           h('label.check', f.insecure, ' ', t('tk.insecure'))),
         actions: [{ label: t('cancel') }, {
           label: t('tk.save_connect'), kind: 'primary', onclick: function () {
-            if (!st && !f.password.value) { f.password.focus(); UI.toast(t('tk.password') + '?', 'error'); return false; }
+            if (!st && !f.password.value && !f.token.value.trim()) { f.token.focus(); UI.toast(t('tk.cred_need'), 'error'); return false; }
             var endpoints = Array.prototype.map.call(tbody.querySelectorAll('tr'), function (tr) {
               var i = tr.querySelectorAll('input');
               return { protocol: tr.getAttribute('data-proto'), address: i[1].value.trim(), enabled: i[0].checked };
             }).filter(function (e) { return e.address; });
-            var hub = { name: f.name.value.trim(), endpoints: endpoints, password: f.password.value, body_password: f.body.value,
+            var hub = { name: f.name.value.trim(), endpoints: endpoints, token: f.token.value.trim(), password: f.password.value, body_password: f.body.value,
               pool_size: +f.pool.value || 0, pin: f.pin.value.trim(), quic_insecure: f.insecure.checked };
             var p = st ? call('/api/hubs/update', { name: st.name, hub: hub, clear_body_password: f.clearBody.checked }, t('tk.hub_saved'))
               : call('/api/hubs', hub, t('tk.hub_saved'));

@@ -32,7 +32,11 @@
         'pp.tls': 'TLS', 'pp.tls_pin': 'TLS, pinned', 'pp.tls_ca': 'TLS, CA', 'pp.plain': 'plain ws (loopback only)',
         'pp.self_signed': 'TLS with a self-signed certificate this process makes', 'pp.self_signed_hint': 'Peers pin it by the fingerprint shown here; it is kept across restarts',
         'pp.cert_file': 'Certificate file', 'pp.key_file': 'Key file', 'pp.cert_hint': 'PEM files on this machine; with both, links are taken over TLS. A listener off loopback needs TLS',
-        'pp.fingerprint': 'Fingerprint (SHA-256)', 'pp.tls_self': 'TLS, self-signed', 'pp.tls_file': 'TLS, certificate file'
+        'pp.fingerprint': 'Fingerprint (SHA-256)', 'pp.tls_self': 'TLS, self-signed', 'pp.tls_file': 'TLS, certificate file',
+        'pp.token': 'Token the peer\'s listener issued', 'pp.token_hint': 'fitt1.…, from the peer\'s Links page, its Admin API or fit token; it replaces the password',
+        'pp.password_old': 'Or the shared password of the peer\'s listener (deprecated)', 'pp.cred_need': 'A token, or the peer\'s password',
+        'pp.auth': 'Credential', 'pp.auth_token': 'token {id}', 'pp.auth_password': 'shared password',
+        'pp.clear_pw': 'Remove every password: only tokens link', 'pp.tokens_only': 'tokens only'
       },
       'zh-CN': {
         'pp.self': '本进程', 'pp.listen': 'RPC 监听', 'pp.not_listening': '未监听', 'pp.listening': '监听中', 'pp.conns': '连接',
@@ -54,7 +58,11 @@
         'pp.tls': 'TLS', 'pp.tls_pin': 'TLS，固定指纹', 'pp.tls_ca': 'TLS，CA 校验', 'pp.plain': '明文 ws（仅限回环）',
         'pp.self_signed': '以本进程生成的自签名证书走 TLS', 'pp.self_signed_hint': '对端按此处显示的指纹固定它；重启后保持不变',
         'pp.cert_file': '证书文件', 'pp.key_file': '私钥文件', 'pp.cert_hint': '本机上的 PEM 文件；两者都设置时以 TLS 接受连接。非回环的监听需要 TLS',
-        'pp.fingerprint': '指纹（SHA-256）', 'pp.tls_self': 'TLS，自签名', 'pp.tls_file': 'TLS，证书文件'
+        'pp.fingerprint': '指纹（SHA-256）', 'pp.tls_self': 'TLS，自签名', 'pp.tls_file': 'TLS，证书文件',
+        'pp.token': '对端监听签发的令牌', 'pp.token_hint': 'fitt1.…，来自对端的“连接”页、Admin API 或 fit token；它会替换密码',
+        'pp.password_old': '或对端监听的共享密码（已弃用）', 'pp.cred_need': '需要令牌或对端的密码',
+        'pp.auth': '凭据', 'pp.auth_token': '令牌 {id}', 'pp.auth_password': '共享密码',
+        'pp.clear_pw': '移除全部密码：只接受令牌连接', 'pp.tokens_only': '只接受令牌'
       }
     });
 
@@ -70,8 +78,21 @@
       o = o || {};
       var call = o.call || UI.rpc;
       var selfRole = '', last = null;
-      var note = h('div'), box = h('div');
-      UI.mount(el, note, box);
+      var note = h('div'), box = h('div'), tokensEl = h('div', { style: { marginTop: '18px' } });
+      UI.mount(el, note, box, tokensEl);
+      // The listener's link tokens, and a warning while an inbound link proves a shared password.
+      // 监听方的连接令牌；仍有入站连接证明共享密码时给出警告。
+      var TP = window.TokensPanel.with(UI);
+      var tokens = TP.mount(tokensEl, {
+        list: function () { return call('/mesh/tokens/list', {}); },
+        create: function (req) { return call('/mesh/tokens/create', req); },
+        expiry: function (id, req) { return call('/mesh/tokens/expiry', Object.assign({ id: id }, req)); },
+        revoke: function (id) { return call('/mesh/tokens/revoke', { id: id }); },
+        warning: function () {
+          var who = ((last && last.conns) || []).filter(function (c) { return c.shared_password; }).map(function (c) { return c.name || c.id; });
+          return TP.passwordWarning(who.filter(function (n, i) { return who.indexOf(n) === i; }));
+        }
+      });
       // act runs an action. Its reply may be lost although it took effect (the connection it came over was replaced,
       // the peer was reconnecting, ...): on an error the current state decides, done(r) tells whether the action is
       // visible in it, and the action then resolves to that state.
@@ -85,17 +106,20 @@
       // A process connects to the other two roles only. / 进程只连接另外两种角色。
       function add() {
         var a = h('input.input', { placeholder: '192.168.1.10:9201', 'data-fill': true }), p = h('input.input', { type: 'password', autocomplete: 'new-password' });
+        var tok = h('input.input.mono', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: 'fitt1.…' });
         var role = h('select.select', ROLES.filter(function (r) { return r !== selfRole; }).map(function (r) { return h('option', { value: r }, r); }));
         var pin = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false' });
         var ca = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', placeholder: '/etc/fit/ca.pem' });
         var sn = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false' });
         UI.modal({
           title: t('pp.add_title'),
-          body: h('div.form', UI.field(t('pp.peer_role'), role, t('pp.role_hint')), UI.field(t('pp.addr'), a, t('pp.addr_hint')), UI.field(t('pp.password'), p),
+          body: h('div.form', UI.field(t('pp.peer_role'), role, t('pp.role_hint')), UI.field(t('pp.addr'), a, t('pp.addr_hint')),
+            UI.field(t('pp.token'), tok, t('pp.token_hint')), UI.field(t('pp.password_old'), p),
             UI.field(t('pp.pin'), pin, t('pp.pin_hint')), UI.field(t('pp.ca_file'), ca, t('pp.ca_file_hint')), UI.field(t('pp.server_name'), sn, t('pp.server_name_hint'))),
           actions: [{ label: t('cancel') }, {
             label: t('pp.add'), kind: 'primary', onclick: function () {
-              var req = { addr: a.value.trim(), password: p.value, role: role.value, pin: pin.value.trim(), ca_file: ca.value.trim(), server_name: sn.value.trim() };
+              if (!tok.value.trim() && !p.value) { tok.focus(); UI.toast(t('pp.cred_need'), 'error'); return false; }
+              var req = { addr: a.value.trim(), token: tok.value.trim(), password: p.value, role: role.value, pin: pin.value.trim(), ca_file: ca.value.trim(), server_name: sn.value.trim() };
               return act(call('/mesh/dial', req), function (r) {
                 return (r.targets || []).some(function (x) { return x.addr === req.addr && x.role === req.role; });
               });
@@ -110,18 +134,21 @@
         var a = h('input.input', { value: ls.addr || '', placeholder: '0.0.0.0:9101', 'data-fill': true });
         var p = h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: ls.has_password ? t('pp.listen_pw_keep') : '' });
         var ss = h('input', { type: 'checkbox', checked: !!ls.self_signed });
+        var clr = h('input', { type: 'checkbox' });
         var cf = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', value: ls.cert_file || '' });
         var kf = h('input.input.mono', { autocomplete: 'off', spellcheck: 'false', value: ls.key_file || '' });
         UI.modal({
           title: t('pp.listen_edit'),
           body: h('div.form', UI.field(t('pp.listen_addr'), a, t('pp.listen_addr_hint')), UI.field(t('pp.listen_pw'), p, t('pp.listen_pw_hint')),
+            ls.has_password ? h('label.check', clr, ' ', t('pp.clear_pw')) : null,
             h('label.check', ss, t('pp.self_signed')), h('div.field__hint', t('pp.self_signed_hint')),
             h('div.form-row', UI.field(t('pp.cert_file'), cf), UI.field(t('pp.key_file'), kf)), h('div.field__hint', t('pp.cert_hint'))),
           actions: [{ label: t('cancel') }, {
             label: t('save'), kind: 'primary', onclick: function () {
               // The TLS of the listener comes whole with the request: a self-signed certificate already made is kept.
               // 监听的 TLS 设置随请求整体提交：已生成的自签名证书会被保留。
-              var req = { addr: a.value.trim(), password: p.value, self_signed: ss.checked, cert_file: cf.value.trim(), key_file: kf.value.trim() };
+              var req = { addr: a.value.trim(), password: clr.checked ? '' : p.value, clear_passwords: clr.checked, self_signed: ss.checked,
+                cert_file: cf.value.trim(), key_file: kf.value.trim() };
               return act(call('/mesh/listen', req), function (r) { return (r.listen || {}).addr === req.addr && !(r.listen || {}).error; })
                 .then(function () { UI.toast(t('saved')); });
             }
@@ -134,12 +161,13 @@
         var tls = !ls.addr ? '—' : ls.tls ? UI.badge(t(ls.self_signed ? 'pp.tls_self' : 'pp.tls_file'), 'ok') : UI.badge(t('pp.plain'), 'warn');
         return h('div.stack',
           UI.kv([[t('pp.state'), state], [t('pp.addr'), ls.addr ? h('code', ls.addr) : '—'],
-            [t('pp.listen_pw'), ls.has_password ? t('pp.has_pw') : t('pp.no_pw')], [t('pp.tls'), tls],
+            [t('pp.listen_pw'), ls.has_password ? t('pp.has_pw') : t('pp.tokens_only')], [t('pp.tls'), tls],
             [t('pp.fingerprint'), ls.fingerprint ? h('code.small', { style: { wordBreak: 'break-all' } }, ls.fingerprint) : '—']]),
           ls.error ? h('div.callout.callout--danger', ls.error) : null);
       }
       function draw(r) {
         last = r;
+        if (!document.querySelector('.modal')) tokens.refresh();
         UI.mount(note);
         var self = r.self || {};
         selfRole = self.role || '';
@@ -149,6 +177,10 @@
           { label: t('pp.dir'), render: function (c) { return h('div.row', UI.badge(t(c.direction === 'in' ? 'pp.in' : 'pp.out')), c.draining ? UI.badge(t('pp.draining'), 'warn') : null); } },
           { label: t('pp.remote'), render: function (c) { return h('div', h('span.mono.small', c.remote), c.target ? h('div.small.muted.mono', c.target) : null); } },
           { label: t('pp.since'), render: function (c) { return h('span.small', UI.ago(c.connected_at)); } },
+          { label: t('pp.auth'), render: function (c) {
+            if (c.direction !== 'in') return h('span.muted', '—');
+            return c.shared_password ? UI.badge(t('pp.auth_password'), 'warn') : h('span.small.mono', t('pp.auth_token', { id: c.token_id }));
+          } },
           {
             label: '', cls: 'actions', render: function (c) {
               return UI.btn(t('pp.kick'), 'x', function () {
