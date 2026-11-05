@@ -382,3 +382,22 @@ func pattern(n int, seed byte) []byte {
 	}
 	return b
 }
+
+// What waited for the peer's hello goes out once it comes; a connection
+// that refuses it then fails the link with the connection's error.
+func TestSealedHeldSendFails(t *testing.T) {
+	out, in := newTap(t), newTap(t)
+	a := New(out, NewRouter(), coder(t, "pw"))
+	New(in, NewRouter(), coder(t, "pw")) // its hello is in's first frame
+	if err := a.SendTunnel(proto.MethodTunnelData, 1, []byte("held")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(sentOf(out)); n != 1 {
+		t.Fatalf("%d frames went out before the hello", n)
+	}
+	out.mu.Lock()
+	out.done = true // the connection refuses what is sent from now on
+	out.mu.Unlock()
+	a.OnData(in.frame(0)) // b's hello
+	failed(t, a, out, net.ErrClosed.Error())
+}

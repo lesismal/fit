@@ -503,3 +503,41 @@ func TestListenerRetry(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+// An address the engine closes without an error ends its connections as
+// closed; one with no connection of the listener's is no news; and past
+// MaxHandshakes an Initial is dropped without a Retry.
+func TestListenerAddressClosed(t *testing.T) {
+	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
+	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
+	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", true), 3*time.Second, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.Send([]byte("hi")) // the link's stream opens with its first bytes
+	k := s.link(t)
+	l := s.l.(*listener)
+	l.mu.Lock()
+	p := &peer{}
+	for cc := range l.conns {
+		p.conns = append(p.conns, cc)
+	}
+	l.mu.Unlock()
+	if len(p.conns) != 1 {
+		t.Fatalf("%d connections", len(p.conns))
+	}
+	l.OnClose(&fib.Connection{}, nil) // no peer: nothing to end
+	fc := &fib.Connection{}
+	fc.SetAttachment(p)
+	l.OnClose(fc, nil)
+	if err := waitSink(t, k); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("the link of a closed address ended with %v", err)
+	}
+
+	full := &listener{max: 2}
+	full.handshakes.Store(2)
+	if full.admit(nil, nil) { // nil: a Retry sent would panic
+		t.Fatal("an Initial past MaxHandshakes was admitted")
+	}
+}

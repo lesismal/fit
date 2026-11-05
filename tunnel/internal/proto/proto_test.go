@@ -3,6 +3,7 @@ package proto
 import (
 	"encoding/binary"
 	"errors"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,30 @@ func TestHubProof(t *testing.T) {
 		change(&changed)
 		if err := CheckProof(&req, &changed, "pw"); !errors.Is(err, ErrHubProof) {
 			t.Errorf("a changed answer %+v: %v", changed, err)
+		}
+	}
+}
+
+// TestVersion: a peer reports fit's version from fit's own build, or from a
+// build that has fit as a dependency, and plain "fit" from one that records
+// neither.
+func TestVersion(t *testing.T) {
+	fit := "github.com/lesismal/fit"
+	for _, tc := range []struct {
+		name string
+		info *debug.BuildInfo
+		ok   bool
+		want string
+	}{
+		{"fit itself", &debug.BuildInfo{Main: debug.Module{Path: fit, Version: "v1.7.1"}}, true, "fit v1.7.1"},
+		{"fit as a dependency", &debug.BuildInfo{Main: debug.Module{Path: "example.com/app"},
+			Deps: []*debug.Module{{Path: "example.com/other", Version: "v0.1.0"}, {Path: fit, Version: "v1.7.0"}}}, true, "fit v1.7.0"},
+		{"fit without a version", &debug.BuildInfo{Main: debug.Module{Path: fit}}, true, "fit"},
+		{"no fit", &debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}}, true, "fit"},
+		{"no build info", nil, false, "fit"},
+	} {
+		if got := version(tc.info, tc.ok); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

@@ -144,14 +144,19 @@ func TestLinkSendErrors(t *testing.T) {
 	if err := l.Notify(proto.MethodPing, func() {}); err == nil {
 		t.Error("a notify whose body does not encode went out")
 	}
-	if err := l.Call(proto.MethodPing, nil, nil, time.Second); err == nil || err.Error() != "down" || !errors.Is(err, ErrClosed) {
-		t.Errorf("a call the connection refused: %v, want down, as ErrClosed", err)
+	if err := l.Call(proto.MethodPing, nil, nil, time.Second); err == nil || err.Error() != "down" || !errors.Is(err, ErrClosed) || errors.Unwrap(err) != c.err {
+		t.Errorf("a call the connection refused: %v, want down, as ErrClosed, wrapping the connection's error", err)
 	}
 	l.mu.Lock()
 	n := len(l.pending)
 	l.mu.Unlock()
 	if n != 0 {
 		t.Errorf("%d calls left pending", n)
+	}
+	// A call too long for a frame is that, not a link gone.
+	if err := New(&loopConn{}, NewRouter(), nil).Call(proto.MethodPing, make([]byte, MaxFrame), nil, time.Second); err == nil ||
+		!strings.Contains(err.Error(), "longer than") || errors.Is(err, ErrClosed) {
+		t.Errorf("a call past MaxFrame: %v", err)
 	}
 	if err := l.SendTunnel(proto.MethodTunnelData, 1, make([]byte, MaxFrame)); err == nil || !strings.Contains(err.Error(), "longer than") {
 		t.Errorf("a frame past MaxFrame: %v", err)

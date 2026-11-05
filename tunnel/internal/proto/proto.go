@@ -30,10 +30,11 @@ import (
 
 // Version is the version every peer reports: fit's, as the build recorded
 // it.
-var Version = version()
+var Version = version(debug.ReadBuildInfo())
 
-func version() string {
-	if info, ok := debug.ReadBuildInfo(); ok {
+// version is the version a build with info reports.
+func version(info *debug.BuildInfo, ok bool) string {
+	if ok {
 		if info.Main.Path == "github.com/lesismal/fit" && info.Main.Version != "" {
 			return "fit " + info.Main.Version
 		}

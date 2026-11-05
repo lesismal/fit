@@ -334,6 +334,18 @@ func TestRegisterFails(t *testing.T) {
 	}
 }
 
+// An answer to the registration that is not one fails it, and the uplink
+// says why.
+func TestRegisterBadAnswer(t *testing.T) {
+	u := newUplink(t, &config.TunnelUplink{Endpoints: []config.TunnelEndpoint{{Address: "h:1"}}})
+	c := &replyConn{reply: "not an answer"}
+	c.l = link.New(c, u.router, nil)
+	u.register(c.l)
+	if st := u.Status(); st.State != StateFailed || !strings.HasPrefix(st.Error, "register: json: cannot unmarshal") || st.Pool != 0 {
+		t.Errorf("status %+v", st)
+	}
+}
+
 // A link registered after it closed, or after the uplink let it go, is not
 // taken.
 func TestRegisterLost(t *testing.T) {
@@ -508,5 +520,40 @@ func TestImpostorHub(t *testing.T) {
 				t.Errorf("served %d calls and notifies of the impostor", n)
 			}
 		})
+	}
+}
+
+// A guard setup gives the router still checks what a proven hub sends:
+// what it refuses is not served.
+func TestSetupGuard(t *testing.T) {
+	s := newImpostor(t, false, func(req *proto.RegisterReq) *proto.RegisterRsp {
+		rsp := &proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv"}
+		proto.Prove(req, rsp, fakePassword)
+		return rsp
+	})
+	var served, guarded atomic.Int32
+	u := New(tunneltest.Engine(t), &config.TunnelUplink{
+		Name: "srv", Password: fakePassword, PoolSize: 1,
+		Endpoints: []config.TunnelEndpoint{{Address: s.addr}},
+	}, nil, nil, info, func(_ *Uplink, r *link.Router) {
+		for _, m := range []proto.Method{proto.MethodTunnelOpen, proto.MethodNodeSetServices} {
+			r.HandleCall(m, func(*link.Link, []byte) (any, error) { served.Add(1); return "ok", nil }, true)
+		}
+		r.Guard = func(_ *link.Link, m proto.Method) error {
+			if m == proto.MethodNodeSetServices {
+				guarded.Add(1)
+				return errors.New("not here")
+			}
+			return nil
+		}
+	})
+	t.Cleanup(u.Stop)
+	u.Start()
+	errs := []error{<-s.calls, <-s.calls}
+	if errs[0] != nil || errs[1] == nil || !strings.Contains(errs[1].Error(), "not here") {
+		t.Fatalf("the tunnel's open and the services' set: %v", errs)
+	}
+	if served.Load() != 1 || guarded.Load() != 1 {
+		t.Fatalf("served %d, guarded %d", served.Load(), guarded.Load())
 	}
 }

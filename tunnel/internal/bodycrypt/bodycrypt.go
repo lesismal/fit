@@ -58,10 +58,9 @@ func New(password string) (*Coder, error) {
 	if password == "" {
 		return nil, errors.New("bodycrypt: empty password")
 	}
-	secret, err := pbkdf2.Key(sha256.New, password, []byte(salt), iter, 32)
-	if err != nil {
-		return nil, err
-	}
+	// SHA-256, a 20-byte salt and a 32-byte key are valid even in FIPS
+	// 140-only mode: the derivation cannot fail.
+	secret, _ := pbkdf2.Key(sha256.New, password, []byte(salt), iter, 32)
 	return &Coder{secret: secret}, nil
 }
 
@@ -94,26 +93,20 @@ func (cd *Coder) Session(own, peer []byte) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	recv, err := cd.aead(peer, own)
-	if err != nil {
-		return nil, err
-	}
+	// The same cipher under another key: it is made where send's was.
+	recv, _ := cd.aead(peer, own)
 	return &Session{send: send, recv: recv}, nil
 }
 
 // aead is the cipher of what the side whose hello carried from sends to
-// the one whose hello carried to.
+// the one whose hello carried to. Only GCM fails, in FIPS 140-only mode,
+// which refuses nonces it did not make; HKDF-SHA256 of a 32-byte secret to
+// a 32-byte AES-256 key cannot.
 func (cd *Coder) aead(from, to []byte) (cipher.AEAD, error) {
 	s := make([]byte, 0, 2*RandomSize)
 	s = append(append(s, from...), to...)
-	key, err := hkdf.Key(sha256.New, cd.secret, s, info, 32)
-	if err != nil {
-		return nil, err
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
+	key, _ := hkdf.Key(sha256.New, cd.secret, s, info, 32)
+	block, _ := aes.NewCipher(key)
 	return cipher.NewGCM(block)
 }
 

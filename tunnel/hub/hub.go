@@ -253,11 +253,7 @@ func (s *Hub) Apply(member any) error {
 	first := !s.started
 	next := &settings{cfg: cfg, name: cfg.HubName()}
 	if cfg.BodyPassword != "" {
-		c, err := bodycrypt.New(cfg.BodyPassword)
-		if err != nil {
-			return err
-		}
-		next.coder = c
+		next.coder, _ = bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
 	}
 	if cfg.Password != "" {
 		if old := s.settings(); old != nil && old.verifier != nil && old.verifier.Password == cfg.Password {
@@ -354,12 +350,9 @@ func (s *Hub) writeCert(certPEM, keyPEM string) {
 			if err := q.Get("cert", &have); err != nil || have != "" {
 				return err
 			}
-			if err := q.Set("cert", certPEM); err != nil {
-				return err
-			}
-			if err := q.Set("key", keyPEM); err != nil {
-				return err
-			}
+			// Strings always marshal: these Sets cannot fail.
+			_ = q.Set("cert", certPEM)
+			_ = q.Set("key", keyPEM)
 			return m.Set("quic", q)
 		})
 	}, func(_ []string, err error) {

@@ -3,6 +3,10 @@ package bodycrypt
 import (
 	"bytes"
 	"errors"
+	"flag"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -135,5 +139,36 @@ func TestSessionHellos(t *testing.T) {
 	}
 	if bytes.Equal(Random(), Random()) {
 		t.Fatal("two hellos alike")
+	}
+}
+
+// TestSessionFIPSOnly runs itself again in FIPS 140-only mode, where GCM
+// under nonces it did not make is refused: the coder still derives, and the
+// session fails with GCM's error rather than making a link it cannot seal.
+func TestSessionFIPSOnly(t *testing.T) {
+	if os.Getenv("BODYCRYPT_FIPS_CHILD") == "1" {
+		cd, err := New("pw")
+		if err != nil {
+			t.Fatalf("New in FIPS 140-only mode: %v", err)
+		}
+		s, err := cd.Session(Random(), Random())
+		if err == nil || s != nil || !strings.Contains(err.Error(), "FIPS 140-only") {
+			t.Fatalf("Session in FIPS 140-only mode: %v, %v", s, err)
+		}
+		return
+	}
+	args := []string{"-test.run=^TestSessionFIPSOnly$", "-test.count=1"}
+	if f := flag.Lookup("test.gocoverdir"); f != nil && f.Value.String() != "" {
+		// What the run covers is merged into this one's profile.
+		args = append(args, "-test.gocoverdir="+f.Value.String())
+	}
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(os.Environ(), "BODYCRYPT_FIPS_CHILD=1", "GODEBUG=fips140=only")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the FIPS 140-only run failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "PASS") {
+		t.Fatalf("the FIPS 140-only run did not pass:\n%s", out)
 	}
 }
