@@ -134,6 +134,14 @@ func startFake(t *testing.T) *fakeServer {
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/badloc"):
 			w.Header().Set("Location", ":bad")
 			w.WriteHeader(http.StatusCreated)
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/cutlong"):
+			// An answer cut short after more than fit reads at once.
+			w.Header().Set("Content-Length", "300000")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(strings.Repeat("a=x\r\n", 20000)))
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+			panic(http.ErrAbortHandler)
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/cut"):
 			// The answer is cut short.
 			w.Header().Set("Content-Length", "1000")

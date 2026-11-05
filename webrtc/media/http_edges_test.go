@@ -194,3 +194,60 @@ func TestProxyHandlerParams(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Requests and answers past the listener's stream threshold, under a
+// max_sdp_bytes above it, come in pieces: an offer is passed on whole, to
+// an endpoint deeper than a session's URL could be; one cut short reaches
+// no media server and gives its reservation back; a chunked one past the
+// limit is 413; an answer cut short is 502; and a request below a session
+// whose media server is gone is 502.
+func TestProxyStreamedBodies(t *testing.T) {
+	fs := startFake(t)
+	doc := strings.Replace(proxyDoc(loopbackProxy, &fit{base: fs.URL}), `"timeout": "1s"`, `"timeout": "1s", "max_sdp_bytes": 262144`, 1)
+	f := startFit(t, doc)
+	offer := "v=0\r\n" + strings.Repeat("a=x\r\n", 20000) // 100 KB
+
+	resp, body := post(t, f.base+"/whip/a/b/c?u=deep", "application/sdp", offer)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("a streamed offer: %d %s", resp.StatusCode, body)
+	}
+	if got, _ := fs.posted.Load().(string); got != "/whip/a/b/c?u=deep" {
+		t.Fatalf("the deep endpoint reached the media server as %q", got)
+	}
+	loc := resp.Header.Get("Location")
+	if !strings.HasPrefix(loc, "/whip/a/b/c/") {
+		t.Fatalf("Location %q", loc)
+	}
+
+	// Cut after the first pieces: nothing is posted.
+	fs.posted.Store("")
+	c, err := net.Dial("tcp", strings.TrimPrefix(f.base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(c, "POST /whip/cam?u=cut HTTP/1.1\r\nHost: x\r\nContent-Type: application/sdp\r\nContent-Length: 200000\r\n\r\n"+offer)
+	_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, _ = bufio.NewReader(c).ReadByte()
+	_ = c.Close()
+	eventually(t, "the cut offer's reservation given back", func() bool {
+		p := f.proxy()
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.reserved == 1 // the deep session's
+	})
+	if got, _ := fs.posted.Load().(string); got != "" {
+		t.Fatalf("a cut offer reached the media server as %q", got)
+	}
+
+	if resp := chunked(t, f.base+"/whip/cam?u=big", strings.Repeat(offer, 3)); resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a large chunked offer: %d", resp.StatusCode)
+	}
+	if resp, body := post(t, f.base+"/whip/cutlong", "application/sdp", "v=0\r\n"); resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("an answer cut short: %d %s", resp.StatusCode, body)
+	}
+
+	fs.Close()
+	if code := request(t, "GET", f.base+loc+"/sse"); code != http.StatusBadGateway {
+		t.Fatalf("GET below a session whose media server is gone: %d", code)
+	}
+}
