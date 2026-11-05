@@ -3,20 +3,10 @@
 package transport
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/hex"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
-	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -26,6 +16,8 @@ import (
 
 	fib "github.com/lesismal/fib"
 	fibtls "github.com/lesismal/fib/tls"
+
+	"github.com/lesismal/fit/internal/certpin"
 )
 
 // The TLS of the links: tls://host:port is the framing of tcp over TLS, and
@@ -51,55 +43,12 @@ const TLSALPN = "fit-tunnel"
 // IPs; "localhost" when none), valid for ten years, and returns it and its
 // key as PEM. Clients pin it by its Fingerprint.
 func NewSelfSigned(hosts ...string) (certPEM, keyPEM []byte, err error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(hosts) == 0 {
-		hosts = []string{"localhost"}
-	}
-	now := time.Now()
-	tmpl := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: hosts[0], Organization: []string{"fit tunnel"}},
-		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     now.AddDate(10, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	for _, h := range hosts {
-		if ip := net.ParseIP(h); ip != nil {
-			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
-		} else {
-			tmpl.DNSNames = append(tmpl.DNSNames, h)
-		}
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, nil, err
-	}
-	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	return certPEM, keyPEM, nil
+	return certpin.SelfSigned("fit tunnel", hosts...)
 }
 
 // Fingerprint is the SHA-256 of a certificate's leaf, in hex: what a pin
 // is.
-func Fingerprint(cert tls.Certificate) string {
-	if len(cert.Certificate) == 0 {
-		return ""
-	}
-	sum := sha256.Sum256(cert.Certificate[0])
-	return hex.EncodeToString(sum[:])
-}
+func Fingerprint(cert tls.Certificate) string { return certpin.Fingerprint(cert) }
 
 // ServerTLSConfig is a listener's TLS config for cert, offering alpn.
 func ServerTLSConfig(cert tls.Certificate, alpn string) *tls.Config {
@@ -130,8 +79,8 @@ type ClientOptions struct {
 
 // ParsePin is the SHA-256 a pin names, or an error.
 func ParsePin(pin string) ([]byte, error) {
-	b, err := hex.DecodeString(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pin), ":", "")))
-	if err != nil || len(b) != sha256.Size {
+	b, err := certpin.Parse(pin)
+	if err != nil {
 		return nil, fmt.Errorf("tunnel: %q is not a certificate pin: the SHA-256 of the certificate in hex, 64 digits", pin)
 	}
 	return b, nil
@@ -166,28 +115,9 @@ func ClientTLSConfig(opts ClientOptions, alpn string) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	check := func(leaf []byte) error {
-		sum := sha256.Sum256(leaf)
-		if subtle.ConstantTimeCompare(sum[:], pin) != 1 {
-			return fmt.Errorf("tunnel: the hub's certificate %x does not match the pin", sum)
-		}
-		return nil
-	}
-	// The pin stands in for the chain and name checks.
-	conf.InsecureSkipVerify = true
-	conf.VerifyPeerCertificate = func(raw [][]byte, _ [][]*x509.Certificate) error {
-		if len(raw) == 0 {
-			return errors.New("tunnel: the hub sent no certificate")
-		}
-		return check(raw[0])
-	}
-	// A resumed handshake skips VerifyPeerCertificate but not this.
-	conf.VerifyConnection = func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 {
-			return errors.New("tunnel: the hub sent no certificate")
-		}
-		return check(cs.PeerCertificates[0].Raw)
-	}
+	// The pin stands in for the chain and name checks, and is checked on a
+	// resumed handshake too.
+	certpin.Pinned(conf, pin, "tunnel: the hub")
 	return conf, nil
 }
 

@@ -109,10 +109,20 @@ func Verify(pin []byte, what string) func(raw [][]byte, _ [][]*x509.Certificate)
 // place of the chain and name checks: InsecureSkipVerify, which only turns
 // those off, with VerifyPeerCertificate checking the pin. A session cache
 // is removed, so that no handshake resumes a session, which would skip
-// VerifyPeerCertificate. what names the peer in errors.
+// VerifyPeerCertificate; and the pin is checked again in VerifyConnection,
+// which a resumed handshake runs too, so that a cache set later cannot skip
+// it. what names the peer in errors.
 func Pinned(conf *tls.Config, pin []byte, what string) {
+	verify := Verify(pin, what)
 	conf.InsecureSkipVerify = true
-	conf.VerifyPeerCertificate = Verify(pin, what)
+	conf.VerifyPeerCertificate = verify
+	conf.VerifyConnection = func(cs tls.ConnectionState) error {
+		raw := make([][]byte, len(cs.PeerCertificates))
+		for i, c := range cs.PeerCertificates {
+			raw[i] = c.Raw
+		}
+		return verify(raw, nil)
+	}
 	conf.ClientSessionCache = nil
 	conf.SessionTicketsDisabled = true
 }
