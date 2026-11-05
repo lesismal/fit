@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/provider/internal/vet"
 )
 
 const gatewayGroup = "gateway.networking.k8s.io"
@@ -181,6 +182,9 @@ type translator struct {
 	// certs are the certificate files the part names, by path: each a
 	// Secret's chain and key.
 	certs map[string][]byte
+	// vet checks each route as the merged config will, knowing the
+	// upstreams made so far.
+	vet *vet.Checker
 
 	// For the statuses: fit's Gateways, in order and by namespace/name, and
 	// the routes in the namespaces watched, as each one is being and has
@@ -193,7 +197,8 @@ type translator struct {
 
 func newTranslator(provider string, opts *config.KubernetesProvider, s *snapshot, certDir string) *translator {
 	return &translator{opts: opts, provider: provider, s: s, certDir: certDir, listeners: map[string]*fitListener{},
-		ports: map[int]string{}, upstreams: map[string]*outUpstream{}, certs: map[string][]byte{}, byKey: map[string]*gateway{}}
+		ports: map[int]string{}, upstreams: map[string]*outUpstream{}, certs: map[string][]byte{}, byKey: map[string]*gateway{},
+		vet: vet.NewChecker()}
 }
 
 // translate turns s into a part, and says why it left out what it did; see
@@ -841,7 +846,7 @@ func (t *translator) httpRoute(r *HTTPRoute) {
 				}
 				if out := t.match(fmt.Sprintf("%s: match %d", where, j), m, rule, backend, at); out != nil {
 					out.Name = name
-					t.routes = append(t.routes, out)
+					t.addRoute(fmt.Sprintf("%s: match %d", where, j), out)
 				}
 			}
 		}
@@ -941,6 +946,11 @@ func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (nam
 	case h2c && !appH2C:
 		name += ".h2c"
 	}
+	if svc.Spec.Type == "ExternalName" {
+		if err := t.externalName(ns, svc); err != nil {
+			return "", false, err
+		}
+	}
 	if _, done := t.upstreams[name]; done {
 		return name, true, nil
 	}
@@ -952,20 +962,49 @@ func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (nam
 	if proto == "TCP" && (h2c || appH2C) {
 		u.Protocol = "h2c"
 	}
-	t.upstreams[name] = u
+	t.addUpstream(u)
 	return name, true, nil
 }
 
+// addUpstream adds u to the part, for routes to send to.
+func (t *translator) addUpstream(u *outUpstream) {
+	t.upstreams[u.Name] = u
+	t.vet.Upstream(u.Name)
+}
+
+// externalName says why svc, an ExternalName Service in namespace ns, may
+// not be a backend; nil when it may. Whoever can create a Service names
+// the host, so fit sends to none unless the provider's
+// external_name_services says so, and never to a local one: fit's own
+// Admin API listens on loopback, and a cloud's metadata service on a
+// link-local address.
+func (t *translator) externalName(ns string, svc *Service) error {
+	name := svc.Spec.ExternalName
+	switch {
+	case !t.opts.ExternalNameServices:
+		return badRef("UnsupportedValue", "service %s/%s is an ExternalName Service, which the provider's external_name_services must allow", ns, svc.Metadata.Name)
+	case name != "" && !dnsName.MatchString(strings.TrimSuffix(name, ".")):
+		return badRef("UnsupportedValue", "service %s/%s: externalName %q is not a DNS name", ns, svc.Metadata.Name, name)
+	case name != "" && vet.Local(name):
+		return badRef("UnsupportedValue", "service %s/%s: externalName %q is a local address, which fit does not send to", ns, svc.Metadata.Name, name)
+	}
+	return nil
+}
+
+// dnsName is what an ExternalName's name looks like: a DNS subdomain.
+var dnsName = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
 // addresses returns where svc's port sp, of protocol proto, is reached: its
 // cluster IP, with backends cluster_ip, or else its ready endpoints; an
-// ExternalName's name.
+// ExternalName's name. Endpoints at local addresses, which the API server
+// refuses anyway, are left out.
 func (t *translator) addresses(svc *Service, sp *ServicePort, proto string) []string {
 	port := strconv.Itoa(sp.Port)
 	if svc.Spec.Type == "ExternalName" {
 		if svc.Spec.ExternalName == "" {
 			return nil
 		}
-		return []string{net.JoinHostPort(svc.Spec.ExternalName, port)}
+		return []string{net.JoinHostPort(strings.TrimSuffix(svc.Spec.ExternalName, "."), port)}
 	}
 	if t.opts.BackendMode() == config.KubernetesBackendsClusterIP && svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != "None" {
 		return []string{net.JoinHostPort(svc.Spec.ClusterIP, port)}
@@ -983,6 +1022,10 @@ func (t *translator) addresses(svc *Service, sp *ServicePort, proto string) []st
 		}
 		for _, e := range es.Endpoints {
 			if !deref(e.Conditions.Ready, true) || len(e.Addresses) == 0 {
+				continue
+			}
+			if vet.Local(e.Addresses[0]) {
+				t.problem("service %s: endpoint %s is a local address, which fit does not send to; it is left out", svc.Metadata.key(), e.Addresses[0])
 				continue
 			}
 			out = append(out, net.JoinHostPort(e.Addresses[0], strconv.Itoa(target)))
@@ -1209,6 +1252,30 @@ func (t *translator) handle(where string, out *outRoute, filters []HTTPRouteFilt
 		}
 		out.Handler, _ = json.Marshal(map[string]any{"module": "proxy", "params": proxyParams})
 	}
+}
+
+// addRoute adds out, a route of the match at where, once vet finds that
+// the merged config will take it. A route whose middleware or handler it
+// would refuse, as a header value with a line break, answers 500 instead,
+// as a rule whose filters are not valid does; one whose match it would
+// refuse is left out. Either is reported in the route's status. Otherwise
+// one tenant's value would have fit refuse the provider's whole part, and
+// hold back every change in the cluster.
+func (t *translator) addRoute(where string, out *outRoute) {
+	data, _ := json.Marshal(out)
+	err := t.vet.Route(data)
+	if err == nil {
+		t.routes = append(t.routes, out)
+		return
+	}
+	failed := *out
+	failed.Middleware, failed.Handler = nil, respond(500)
+	if data, _ = json.Marshal(&failed); t.vet.Route(data) == nil {
+		t.leftOut("%s: %v; the rule answers 500", where, err)
+		t.routes = append(t.routes, &failed)
+		return
+	}
+	t.leftOut("%s: %v; it is left out", where, err)
 }
 
 func respond(status int) json.RawMessage {

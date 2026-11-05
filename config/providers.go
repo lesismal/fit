@@ -74,6 +74,13 @@ type DockerProvider struct {
 	RefreshInterval   Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often the containers are listed again whether or not an event came, in case one was missed. 30s when left out."`
 	RequestTimeout    Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long listing the containers may take, connecting included. 10s when left out."`
 
+	// What the routes labels write may do, and where they send: whoever can
+	// start a container, or build its image, writes its labels.
+	AllowedHosts        []string `json:"allowed_hosts,omitempty" doc:"The host names the routes labels write may match: exact, as admin.example.com, or \"*.\" and a domain, for any name below it, as *.apps.example.com; \"*\" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route labels write is served until the names they may claim are listed: whoever can start a container, or build its image, writes them, and would otherwise take any host, the operator's own among them."`
+	AllowedModules      []string `json:"allowed_modules,omitempty" doc:"Handlers and middleware, by name, that the routes labels write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported."`
+	MaxPriority         int      `json:"max_priority,omitempty" doc:"The highest priority a route labels write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them."`
+	AllowLocalAddresses bool     `json:"allow_local_addresses,omitempty" doc:"Take containers whose address is a loopback, link-local or unspecified one, as that of every container on the host's network is (the host's loopback, at the port its labels name). They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there. A port published on the host, with use_published_ports, is taken either way: Docker publishes it for the container."`
+
 	At Value `json:"-" fit:"self"`
 }
 
@@ -164,6 +171,7 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 			if d.LabelPrefix != "" && !namePattern.MatchString(d.LabelPrefix) {
 				add(d.At.Field("label_prefix"), "%q is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit", d.LabelPrefix)
 			}
+			checkLabelRoutes(d.At, d.AllowedHosts, d.AllowedModules, add)
 		}
 		if c := p.Consul; c != nil {
 			checkEndpoint(c.At.Field("endpoint"), c.Endpoint, add)
@@ -171,6 +179,7 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 			if c.TagPrefix != "" && !namePattern.MatchString(c.TagPrefix) {
 				add(c.At.Field("tag_prefix"), "%q is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit", c.TagPrefix)
 			}
+			checkLabelRoutes(c.At, c.AllowedHosts, c.AllowedModules, add)
 		}
 		if c := p.ConsulKV; c != nil {
 			checkEndpoint(c.At.Field("endpoint"), c.Endpoint, add)
@@ -213,6 +222,24 @@ func checkProviders(ps []Provider, add func(Value, string, ...any)) {
 					add(in.At.Field("https_port"), "port %d serves HTTP already: HTTPS needs a port of its own", in.HTTPS())
 				}
 			}
+		}
+	}
+}
+
+// modulePattern is what a module's name looks like.
+var modulePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// checkLabelRoutes checks what the routes a Docker or Consul provider's
+// labels write may do.
+func checkLabelRoutes(at Value, hosts, modules []string, add func(Value, string, ...any)) {
+	for i, h := range hosts {
+		if h != "*" && checkHost(h) != "" {
+			add(at.Field("allowed_hosts").Index(i), "%q is not a host name, \"*.\" and a domain, or \"*\"", h)
+		}
+	}
+	for i, m := range modules {
+		if !modulePattern.MatchString(m) {
+			add(at.Field("allowed_modules").Index(i), "%q is not a module's name, as static", m)
 		}
 	}
 }
@@ -300,6 +327,13 @@ type ConsulProvider struct {
 	MaxServices     int      `json:"max_services,omitempty" min:"0" default:"1000" doc:"The most services taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0."`
 	RefreshInterval Duration `json:"refresh_interval,omitempty" default:"\"30s\"" doc:"How often the catalog is read again whether or not it changed. 30s when left out."`
 	RequestTimeout  Duration `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out."`
+
+	// What the routes tags write may do, and where they send: whoever can
+	// register a service writes its tags and its address.
+	AllowedHosts        []string `json:"allowed_hosts,omitempty" doc:"The host names the routes tags write may match: exact, as admin.example.com, or \"*.\" and a domain, for any name below it, as *.apps.example.com; \"*\" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route tags write is served until the names they may claim are listed: whoever can register a service writes them, and would otherwise take any host, the operator's own among them."`
+	AllowedModules      []string `json:"allowed_modules,omitempty" doc:"Handlers and middleware, by name, that the routes tags write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported."`
+	MaxPriority         int      `json:"max_priority,omitempty" doc:"The highest priority a route tags write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them."`
+	AllowLocalAddresses bool     `json:"allow_local_addresses,omitempty" doc:"Take instances whose address (or, when they have none, their node's) is localhost, or a loopback, link-local or unspecified address. They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there, and cloud metadata services on link-local addresses. A host name is not resolved to be checked: one that resolves to such an address is not caught."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -421,17 +455,18 @@ var controllerPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-
 // routes, and each TLSRoute, TCPRoute and UDPRoute a service, to upstreams
 // of the Services they name. With ingress, it serves Ingresses as well.
 type KubernetesProvider struct {
-	Kubeconfig      string             `json:"kubeconfig,omitempty" doc:"A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported."`
-	Context         string             `json:"context,omitempty" doc:"The kubeconfig's context to use; its current-context when left out."`
-	ControllerName  string             `json:"controller_name,omitempty" default:"\"lesismal.github.io/fit\"" doc:"The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out."`
-	Namespaces      []string           `json:"namespaces,omitempty" doc:"The namespaces whose Gateways and routes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide, Secrets of type kubernetes.io/tls among them, and to patch the status of GatewayClasses, Gateways and routes."`
-	ListenHost      string             `json:"listen_host,omitempty" doc:"The IP address Gateway listeners are bound on, each on its port; every address when left out."`
-	Backends        string             `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
-	MaxObjects      int                `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
-	RequestTimeout  Duration           `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
-	Addresses       []string           `json:"addresses,omitempty" doc:"The addresses where clients reach fit's Gateways, IP addresses or host names, written into each one's status.addresses, as clients of the Gateway API and its conformance tests read them. None are written when left out, and those there are kept."`
-	Ingress         *KubernetesIngress `json:"ingress,omitempty" doc:"Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out."`
-	CertificatesDir string             `json:"certificates_dir,omitempty" doc:"The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out."`
+	Kubeconfig           string             `json:"kubeconfig,omitempty" doc:"A kubeconfig file to reach the cluster with: its server, CA, client certificate, token or token file. When left out, the pod's service account, inside the cluster, or else $KUBECONFIG or ~/.kube/config. Exec and auth-provider plugins are not supported."`
+	Context              string             `json:"context,omitempty" doc:"The kubeconfig's context to use; its current-context when left out."`
+	ControllerName       string             `json:"controller_name,omitempty" default:"\"lesismal.github.io/fit\"" doc:"The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out."`
+	Namespaces           []string           `json:"namespaces,omitempty" doc:"The namespaces whose Gateways and routes are served; every namespace when left out. Resources are watched across the cluster either way, so fit's account needs to list and watch them cluster-wide, Secrets of type kubernetes.io/tls among them, and to patch the status of GatewayClasses, Gateways and routes."`
+	ListenHost           string             `json:"listen_host,omitempty" doc:"The IP address Gateway listeners are bound on, each on its port; every address when left out."`
+	Backends             string             `json:"backends,omitempty" enum:"endpoints,cluster_ip" default:"\"endpoints\"" doc:"Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out."`
+	MaxObjects           int                `json:"max_objects,omitempty" min:"0" default:"10000" doc:"The most objects of each kind kept: past it, the rest are left out and reported. 10000 when left out or 0."`
+	RequestTimeout       Duration           `json:"request_timeout,omitempty" default:"\"10s\"" doc:"How long each request to the API server may take, but watches, which last five minutes each. 10s when left out."`
+	Addresses            []string           `json:"addresses,omitempty" doc:"The addresses where clients reach fit's Gateways, IP addresses or host names, written into each one's status.addresses, as clients of the Gateway API and its conformance tests read them. None are written when left out, and those there are kept."`
+	Ingress              *KubernetesIngress `json:"ingress,omitempty" doc:"Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out."`
+	ExternalNameServices bool               `json:"external_name_services,omitempty" doc:"Send to the names of ExternalName Services that routes and Ingresses name as backends. Such a backend is refused when left out or false, and the route's status says so (ResolvedRefs false), since whoever can create a Service could otherwise send fit's requests to any host, fit's own Admin API on loopback among them. Even when true, names that are localhost, or loopback, link-local or unspecified addresses, are refused; a name is not resolved to be checked, so one that resolves to such an address is not caught."`
+	CertificatesDir      string             `json:"certificates_dir,omitempty" doc:"The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out."`
 
 	At Value `json:"-" fit:"self"`
 }

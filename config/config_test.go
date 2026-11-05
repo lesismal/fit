@@ -512,6 +512,16 @@ func TestValidate(t *testing.T) {
 			want: []string{"1:94: providers[0].docker.label_prefix: \"-x\" is not a valid prefix: use letters, digits, '_', '.' and '-', starting with a letter or digit"},
 		},
 		{
+			name: "what labels and tags may do",
+			doc: `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {"allowed_hosts": ["*", "*.apps.example.com", "bad host"], "allowed_modules": ["static", "Static"]}},
+  {"consul": {"allowed_hosts": ["**.x"], "allowed_modules": ["proxy"], "max_priority": 10, "allow_local_addresses": true}}]}`,
+			want: []string{
+				"1:123: providers[0].docker.allowed_hosts[2]: \"bad host\" is not a host name, \"*.\" and a domain, or \"*\"",
+				"1:166: providers[0].docker.allowed_modules[1]: \"Static\" is not a module's name, as static",
+				"2:33: providers[1].consul.allowed_hosts[0]: \"**.x\" is not a host name, \"*.\" and a domain, or \"*\"",
+			},
+		},
+		{
 			name: "two kinds in one provider",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{"docker": {}, "kubernetes": {}}]}`,
 			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes"},

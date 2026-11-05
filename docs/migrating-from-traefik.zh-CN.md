@@ -93,6 +93,19 @@ Docker 标签很相似，前缀是 `fit.` 而不是 `traefik.`：
 | `traefik.http.routers.web.middlewares=...` | `fit.routes.web.middleware=[{"module": "compress"}]`，JSON 格式 |
 | `traefik.docker.network=net` | `fit.network=net` |
 
+与 Traefik 不同，fit 对标签和 tag 的信任以 provider 的设置为限，因为能启动容器、构建镜像或注册 Consul 服务的人都能写它们：
+
+- **Host**：路由只能匹配 provider 的 `allowed_hosts` 中的 host（`"*.apps.example.com"`、`"shop.example.com"`，
+  或 `"*"` 表示任意 host 以及不限 host 的路由）。未设置时一个都不允许，因此在设置之前，标签和 tag 写出的路由都不会生效。
+- **优先级**：最高为 `max_priority`，默认 0，因此配置中优先级高于 0 的路由总是优先于它们。
+- **模块**：proxy（只能转发到容器或服务自己的 upstream），以及中间件 headers、rewrite、redirect、compress、
+  rate_limit、concurrency_limit、body_limit、basic_auth 和 circuit_breaker；`allowed_modules` 可以加入其他模块，如 `static`。
+- **地址**：使用宿主机网络的容器（地址是宿主机的 loopback），以及地址为 loopback、link-local 或未指定地址的 Consul
+  实例，除非设置了 `allow_local_addresses`，否则被排除。用 `use_published_ports` 发布到宿主机的端口始终可用。
+
+被排除的路由或容器都会记录在 fit 的日志中，其余的照常生效。Kubernetes provider 同样默认不转发到 ExternalName
+Service，除非设置了 `external_name_services`，且无论如何都不转发到 localhost、loopback 或 link-local 地址。
+
 ## 行为上的不同
 
 - **一份配置。** Traefik 把静态配置（entryPoints、providers）和动态配置（router、service、middleware）分开。fit 只有一份

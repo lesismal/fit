@@ -255,7 +255,7 @@ func nextPart(t *testing.T, ch <-chan []byte, ok func([]byte) bool) []byte {
 }
 
 func TestTranslate(t *testing.T) {
-	opts := &config.ConsulProvider{}
+	opts := &config.ConsulProvider{AllowedHosts: []string{"shop.example"}} // TestTagPolicy tests the defaults
 	services := map[string][]entry{
 		"web": {
 			inst{svc: "web", id: "web-2", node: "n2", addr: "10.0.0.3", port: 8080,

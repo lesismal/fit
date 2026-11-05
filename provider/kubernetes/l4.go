@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/lesismal/fit/provider/internal/vet"
 )
 
 // l4Route translates r, a TLSRoute, TCPRoute or UDPRoute as kind says: a
@@ -42,6 +44,12 @@ func (t *translator) l4Route(kind string, r *L4Route) {
 		name := base
 		if len(groups) > 1 {
 			name += fmt.Sprintf(".g%d", gi)
+		}
+		if len(at.hosts) > 0 {
+			if err := vet.ServerNames(at.hosts); err != nil {
+				t.leftOut("%s: %v; it is left out", where, err)
+				continue
+			}
 		}
 		t.services = append(t.services, &outService{Name: name, Listeners: at.listeners, Upstream: upstream, ServerNames: at.hosts})
 		for _, l := range at.listeners {
@@ -98,6 +106,6 @@ func (t *translator) l4Upstream(where, name string, refs []BackendRef, proto str
 			u.Weights = append(u.Weights, w)
 		}
 	}
-	t.upstreams[name] = u
+	t.addUpstream(u)
 	return name
 }

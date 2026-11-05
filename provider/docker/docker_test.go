@@ -59,7 +59,9 @@ func jsonOf(t *testing.T, s string) map[string]any {
 }
 
 func TestTranslate(t *testing.T) {
-	opts := &config.DockerProvider{}
+	// What the labels may do is widened for their routes to be taken; TestLabelPolicy
+	// tests the defaults.
+	opts := &config.DockerProvider{AllowedHosts: []string{"*"}, AllowedModules: []string{"respond"}, MaxPriority: 5}
 	cs := []container{
 		// Two replicas of a Compose service, with a route.
 		ctr("shop-web-2", map[string]string{
@@ -181,7 +183,7 @@ func TestTranslateOptions(t *testing.T) {
 	// expose_all takes every container but those enabled false, under
 	// another prefix; a container on two networks is reached on the
 	// first by name, or the one network chooses.
-	opts := &config.DockerProvider{ExposeAll: true, LabelPrefix: "app"}
+	opts := &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", AllowedHosts: []string{"*"}, AllowLocalAddresses: true}
 	part, problems := translate([]container{plain, host, two, off}, opts)
 	want := map[string]any{"plain": "10.0.0.5:80", "host": "127.0.0.1:8000", "two": "[fd00::20]:80"}
 	if got := addrs(part); !reflect.DeepEqual(got, want) || len(problems) != 0 {
@@ -193,14 +195,14 @@ func TestTranslateOptions(t *testing.T) {
 	}
 	// use_published_ports sends to the host's port, and leaves out a
 	// container whose port is not published.
-	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", UsePublishedPorts: true}
+	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", UsePublishedPorts: true, AllowedHosts: []string{"*"}}
 	part, problems = translate([]container{plain, two}, opts)
 	if got := addrs(part); !reflect.DeepEqual(got, map[string]any{"plain": "127.0.0.1:32768"}) ||
 		!reflect.DeepEqual(problems, []string{"container two: port 80 is not published on the host"}) {
 		t.Errorf("use_published_ports: %v %v", got, problems)
 	}
 	// max_containers takes the first by name.
-	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", MaxContainers: 1}
+	opts = &config.DockerProvider{ExposeAll: true, LabelPrefix: "app", MaxContainers: 1, AllowedHosts: []string{"*"}}
 	part, problems = translate([]container{plain, two}, opts)
 	if got := addrs(part); !reflect.DeepEqual(got, map[string]any{"plain": "10.0.0.5:80"}) ||
 		!reflect.DeepEqual(problems, []string{"container two: left out: max_containers, 1, are taken"}) {

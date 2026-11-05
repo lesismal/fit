@@ -94,6 +94,25 @@ Docker labels look alike, under `fit.` rather than `traefik.`:
 | `traefik.http.routers.web.middlewares=...` | `fit.routes.web.middleware=[{"module": "compress"}]`, as JSON |
 | `traefik.docker.network=net` | `fit.network=net` |
 
+Unlike Traefik, fit trusts labels and tags no further than the provider's settings say, since
+whoever can start a container, build its image or register a Consul service writes them:
+
+- **Hosts**: a route may match only the hosts in the provider's `allowed_hosts` (`"*.apps.example.com"`,
+  `"shop.example.com"`, or `"*"` for any host and routes without one). None are allowed until it is
+  set, so no route of labels or tags is served until then.
+- **Priority**: at most `max_priority`, 0 by default, so a route of the config with a priority above
+  0 always wins over them.
+- **Modules**: the proxy, to the container's or service's own upstream, and the middleware headers,
+  rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and
+  circuit_breaker; `allowed_modules` adds others, as `static`.
+- **Addresses**: a container on the host's network (the host's loopback) and a Consul instance at
+  a loopback, link-local or unspecified address are left out unless `allow_local_addresses` is set.
+  A port published on the host, with `use_published_ports`, is taken either way.
+
+Each route or container left out is reported in fit's log, and the rest are still served. The
+Kubernetes provider likewise sends to no ExternalName Service unless its `external_name_services`
+is set, and never to localhost or a loopback or link-local address.
+
 ## What works differently
 
 - **One config.** Traefik splits static configuration (entryPoints, providers) from dynamic

@@ -77,6 +77,7 @@ func TestTranslateEdges(t *testing.T) {
 		"httproute default/edge: rule 1: backend 0: x.example/Thing is not a Service",
 		"httproute default/edge: rule 2: backend 0: service default/web: a port is needed",
 		"httproute default/edge: rule 6: backend 0: service team/shop is in another namespace",
+		"httproute default/edge: rule 3: backend 0: service default/ext is an ExternalName Service, which the provider's external_name_services must allow",
 		`httproute default/edge: rule 7: match 0: path "x" does not start with '/'`,
 		`httproute default/edge: rule 7: match 1: path "x" does not start with '/'`,
 		`httproute default/edge: rule 7: match 2: path "(" is not a regular expression fit takes`,
@@ -96,10 +97,9 @@ func TestTranslateEdges(t *testing.T) {
 	for _, u := range p.Upstreams {
 		upstreams[u.Name] = u
 	}
-	if u := upstreams["default.ext.5432"]; toJSON(u.Addresses) != `["db.example.net:5432"]` {
-		t.Errorf("an ExternalName's upstream: %+v", u)
-	}
-	for _, name := range []string{"default.extnone.5432", "default.mis.80"} {
+	// ExternalName Services are not backends unless the provider says so
+	// (TestExternalName).
+	for _, name := range []string{"default.ext.5432", "default.extnone.5432", "default.mis.80"} {
 		if _, ok := upstreams[name]; ok {
 			t.Errorf("upstream %s, which has no addresses", name)
 		}

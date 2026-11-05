@@ -49,6 +49,8 @@ func translate(cs []container, opts *config.DockerProvider) (part []byte, proble
 	prefix := opts.Prefix() + "."
 	slices.SortFunc(cs, func(a, b container) int { return strings.Compare(a.name(), b.name()) })
 	groups := map[string]*labels.Group{}
+	policy := &labels.Policy{AllowedHosts: opts.AllowedHosts, AllowedModules: opts.AllowedModules,
+		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses}
 	taken := 0
 	for i := range cs {
 		c := &cs[i]
@@ -86,12 +88,29 @@ func translate(cs []container, opts *config.DockerProvider) (part []byte, proble
 			problem("%v", err)
 			continue
 		}
+		// A port published on the host is Docker's to give the container;
+		// any other local address, as the host's loopback is for a
+		// container on the host's network, could be anything of the
+		// host's, fit's Admin API among them, at the port the labels name.
+		if host, _, _ := net.SplitHostPort(addr); !opts.UsePublishedPorts && policy.Local(host) {
+			problem("its address, %s, is a local one: set the provider's allow_local_addresses to take it", addr)
+			continue
+		}
 		// The group's first container sets its labels; the group is made
 		// only once a container is taken, so one left out leaves none.
 		g := groups[name]
 		set := l
 		if g != nil {
 			set = g.Set
+		} else {
+			more, err := l.Restrict(name, policy)
+			for _, p := range more {
+				problem("%s", p)
+			}
+			if err != nil {
+				problem("%v", err)
+				continue
+			}
 		}
 		svcAddrs := map[string]string{}
 		for key, s := range set.Services {

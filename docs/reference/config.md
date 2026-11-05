@@ -2820,6 +2820,18 @@ etcd, and a Kubernetes cluster's Gateway API resources and Ingresses. What the c
 over every provider, and a provider over those after it; the Admin API's `/config/effective`
 shows the result and where each part came from. Read when fit starts.
 
+
+Whoever writes what a provider reads is trusted no further than the provider's settings say. The
+routes Docker labels and Consul tags write may match only the hosts `allowed_hosts` lists (none
+until it is set), have a priority of at most `max_priority` (0), and use only the proxy, to their
+own upstream, and the middleware headers, rewrite, redirect, compress, rate_limit,
+concurrency_limit, body_limit, basic_auth and circuit_breaker, unless `allowed_modules` names more;
+containers and instances at loopback, link-local or unspecified addresses are left out unless
+`allow_local_addresses` is set. The Kubernetes provider sends to no ExternalName Service unless
+`external_name_services` is set, and never to a local name. What a provider leaves out, it reports,
+and the rest is served: a route whose values the config would refuse is left out, or answers 500,
+rather than have the provider's whole part refused.
+
 In a .conf file:
 
 ```fit
@@ -2884,6 +2896,10 @@ In JSON:
 | `max_containers` | integer, 0 or more | `1000` | The most containers taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0. |
 | `refresh_interval` | duration | `"30s"` | How often the containers are listed again whether or not an event came, in case one was missed. 30s when left out. |
 | `request_timeout` | duration | `"10s"` | How long listing the containers may take, connecting included. 10s when left out. |
+| `allowed_hosts` | list of string |  | The host names the routes labels write may match: exact, as admin.example.com, or "*." and a domain, for any name below it, as *.apps.example.com; "*" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route labels write is served until the names they may claim are listed: whoever can start a container, or build its image, writes them, and would otherwise take any host, the operator's own among them. |
+| `allowed_modules` | list of string |  | Handlers and middleware, by name, that the routes labels write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported. |
+| `max_priority` | integer |  | The highest priority a route labels write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them. |
+| `allow_local_addresses` | boolean |  | Take containers whose address is a loopback, link-local or unspecified one, as that of every container on the host's network is (the host's loopback, at the port its labels name). They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there. A port published on the host, with use_published_ports, is taken either way: Docker publishes it for the container. |
 
 <a id="config-consulprovider"></a>
 
@@ -2902,6 +2918,10 @@ In JSON:
 | `max_services` | integer, 0 or more | `1000` | The most services taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0. |
 | `refresh_interval` | duration | `"30s"` | How often the catalog is read again whether or not it changed. 30s when left out. |
 | `request_timeout` | duration | `"10s"` | How long each request to Consul may take, connecting included, beyond the five minutes a blocking query waits for a change. 10s when left out. |
+| `allowed_hosts` | list of string |  | The host names the routes tags write may match: exact, as admin.example.com, or "*." and a domain, for any name below it, as *.apps.example.com; "*" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route tags write is served until the names they may claim are listed: whoever can register a service writes them, and would otherwise take any host, the operator's own among them. |
+| `allowed_modules` | list of string |  | Handlers and middleware, by name, that the routes tags write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported. |
+| `max_priority` | integer |  | The highest priority a route tags write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them. |
+| `allow_local_addresses` | boolean |  | Take instances whose address (or, when they have none, their node's) is localhost, or a loopback, link-local or unspecified address. They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there, and cloud metadata services on link-local addresses. A host name is not resolved to be checked: one that resolves to such an address is not caught. |
 
 <a id="config-consulkvprovider"></a>
 
@@ -2953,6 +2973,7 @@ In JSON:
 | `request_timeout` | duration | `"10s"` | How long each request to the API server may take, but watches, which last five minutes each. 10s when left out. |
 | `addresses` | list of string |  | The addresses where clients reach fit's Gateways, IP addresses or host names, written into each one's status.addresses, as clients of the Gateway API and its conformance tests read them. None are written when left out, and those there are kept. |
 | `ingress` | [object](#config-kubernetesingress) |  | Serve Ingresses too: those whose ingressClassName, or kubernetes.io/ingress.class annotation, names an IngressClass whose controller is controller_name, and those naming none when such a class is the default. Their rules are served on http_port, and on https_port for the hosts of their tls, with the certificates of its Secrets. fit's account then needs to list and watch Ingresses and IngressClasses. No Ingresses when left out. |
+| `external_name_services` | boolean |  | Send to the names of ExternalName Services that routes and Ingresses name as backends. Such a backend is refused when left out or false, and the route's status says so (ResolvedRefs false), since whoever can create a Service could otherwise send fit's requests to any host, fit's own Admin API on loopback among them. Even when true, names that are localhost, or loopback, link-local or unspecified addresses, are refused; a name is not resolved to be checked, so one that resolves to such an address is not caught. |
 | `certificates_dir` | string |  | The directory the certificates of HTTPS listeners are written to, from the Secrets they name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may read, named for the Secret and a hash of its contents. Files of that form that are no longer named are removed. A directory of fit's own in the system's temporary directory, removed when fit stops, when left out. |
 
 <a id="config-kubernetesingress"></a>

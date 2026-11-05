@@ -4088,6 +4088,37 @@ upstreams:
       # # duration, as "1.5s" or "2m"; default "10s".
       # request_timeout: "10s"
 
+      # # The host names the routes labels write may match: exact, as admin.example.com, or "*." and a
+      # # domain, for any name below it, as *.apps.example.com; "*" for any host, and routes that
+      # # match every host. A route that matches another host, or none, is left out and reported. None
+      # # when left out, so that no route labels write is served until the names they may claim are
+      # # listed: whoever can start a container, or build its image, writes them, and would otherwise
+      # # take any host, the operator's own among them.
+      # # list of string.
+      # allowed_hosts: []
+
+      # # Handlers and middleware, by name, that the routes labels write may use besides those they
+      # # may by default: the proxy handler, to their own upstream alone, and the middleware headers,
+      # # rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and
+      # # circuit_breaker. A module named here may be used with any params, the proxy to any upstream
+      # # among them; a route using another module is left out and reported.
+      # # list of string.
+      # allowed_modules: []
+
+      # # The highest priority a route labels write may have; one with a higher priority is left out
+      # # and reported. 0 when left out, so that a route of the config's with a priority above 0
+      # # always wins over them.
+      # # integer.
+      # max_priority: 0
+
+      # # Take containers whose address is a loopback, link-local or unspecified one, as that of every
+      # # container on the host's network is (the host's loopback, at the port its labels name). They
+      # # are left out and reported when left out or false, since fit's Admin API and the host's other
+      # # local services listen there. A port published on the host, with use_published_ports, is
+      # # taken either way: Docker publishes it for the container.
+      # # boolean.
+      # allow_local_addresses: true
+
     # # Routes, upstreams and services from the tags of the services in a Consul catalog, sending to
     # # their instances whose health checks pass.
     # # object.
@@ -4145,6 +4176,37 @@ upstreams:
       # # blocking query waits for a change. 10s when left out.
       # # duration, as "1.5s" or "2m"; default "10s".
       # request_timeout: "10s"
+
+      # # The host names the routes tags write may match: exact, as admin.example.com, or "*." and a
+      # # domain, for any name below it, as *.apps.example.com; "*" for any host, and routes that
+      # # match every host. A route that matches another host, or none, is left out and reported. None
+      # # when left out, so that no route tags write is served until the names they may claim are
+      # # listed: whoever can register a service writes them, and would otherwise take any host, the
+      # # operator's own among them.
+      # # list of string.
+      # allowed_hosts: []
+
+      # # Handlers and middleware, by name, that the routes tags write may use besides those they may
+      # # by default: the proxy handler, to their own upstream alone, and the middleware headers,
+      # # rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and
+      # # circuit_breaker. A module named here may be used with any params, the proxy to any upstream
+      # # among them; a route using another module is left out and reported.
+      # # list of string.
+      # allowed_modules: []
+
+      # # The highest priority a route tags write may have; one with a higher priority is left out and
+      # # reported. 0 when left out, so that a route of the config's with a priority above 0 always
+      # # wins over them.
+      # # integer.
+      # max_priority: 0
+
+      # # Take instances whose address (or, when they have none, their node's) is localhost, or a
+      # # loopback, link-local or unspecified address. They are left out and reported when left out or
+      # # false, since fit's Admin API and the host's other local services listen there, and cloud
+      # # metadata services on link-local addresses. A host name is not resolved to be checked: one
+      # # that resolves to such an address is not caught.
+      # # boolean.
+      # allow_local_addresses: true
 
     # # Listeners, routes, upstreams and services from the keys under a prefix in Consul's KV store,
     # # each holding a JSON object of them.
@@ -4321,6 +4383,15 @@ upstreams:
         # # The port the hosts of Ingresses' tls are served on over HTTPS. 443 when left out or 0.
         # # integer; default 443.
         # https_port: 443
+
+      # # Send to the names of ExternalName Services that routes and Ingresses name as backends. Such
+      # # a backend is refused when left out or false, and the route's status says so (ResolvedRefs
+      # # false), since whoever can create a Service could otherwise send fit's requests to any host,
+      # # fit's own Admin API on loopback among them. Even when true, names that are localhost, or
+      # # loopback, link-local or unspecified addresses, are refused; a name is not resolved to be
+      # # checked, so one that resolves to such an address is not caught.
+      # # boolean.
+      # external_name_services: true
 
       # # The directory the certificates of HTTPS listeners are written to, from the Secrets they
       # # name, for fit's TLS to load: each Secret's chain and key in one file only fit's user may

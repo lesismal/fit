@@ -207,7 +207,7 @@ func TestConsulProviders(t *testing.T) {
 	f, addrs := startFit(t, fmt.Sprintf(`{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "admin": {"address": "127.0.0.1:0"},
-  "providers": [{"consul": {"endpoint": %q}}, {"consul_kv": {"endpoint": %q}}]
+  "providers": [{"consul": {"endpoint": %q, "allowed_hosts": ["*"], "allow_local_addresses": true}}, {"consul_kv": {"endpoint": %q}}]
 }`, consul, consul))
 	go func() {
 		for range f.lines {

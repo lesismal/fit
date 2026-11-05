@@ -417,6 +417,24 @@
     "config.ConsulProvider": {
       "additionalProperties": false,
       "properties": {
+        "allow_local_addresses": {
+          "description": "Take instances whose address (or, when they have none, their node's) is localhost, or a loopback, link-local or unspecified address. They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there, and cloud metadata services on link-local addresses. A host name is not resolved to be checked: one that resolves to such an address is not caught.",
+          "type": "boolean"
+        },
+        "allowed_hosts": {
+          "description": "The host names the routes tags write may match: exact, as admin.example.com, or \"*.\" and a domain, for any name below it, as *.apps.example.com; \"*\" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route tags write is served until the names they may claim are listed: whoever can register a service writes them, and would otherwise take any host, the operator's own among them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_modules": {
+          "description": "Handlers and middleware, by name, that the routes tags write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "ca_file": {
           "description": "A PEM file with the CAs Consul's certificate is verified with, over https; the system's when left out.",
           "type": "string"
@@ -441,6 +459,10 @@
         "key_file": {
           "description": "A PEM file with cert_file's private key.",
           "type": "string"
+        },
+        "max_priority": {
+          "description": "The highest priority a route tags write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them.",
+          "type": "integer"
         },
         "max_services": {
           "default": 1000,
@@ -506,6 +528,24 @@
     "config.DockerProvider": {
       "additionalProperties": false,
       "properties": {
+        "allow_local_addresses": {
+          "description": "Take containers whose address is a loopback, link-local or unspecified one, as that of every container on the host's network is (the host's loopback, at the port its labels name). They are left out and reported when left out or false, since fit's Admin API and the host's other local services listen there. A port published on the host, with use_published_ports, is taken either way: Docker publishes it for the container.",
+          "type": "boolean"
+        },
+        "allowed_hosts": {
+          "description": "The host names the routes labels write may match: exact, as admin.example.com, or \"*.\" and a domain, for any name below it, as *.apps.example.com; \"*\" for any host, and routes that match every host. A route that matches another host, or none, is left out and reported. None when left out, so that no route labels write is served until the names they may claim are listed: whoever can start a container, or build its image, writes them, and would otherwise take any host, the operator's own among them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_modules": {
+          "description": "Handlers and middleware, by name, that the routes labels write may use besides those they may by default: the proxy handler, to their own upstream alone, and the middleware headers, rewrite, redirect, compress, rate_limit, concurrency_limit, body_limit, basic_auth and circuit_breaker. A module named here may be used with any params, the proxy to any upstream among them; a route using another module is left out and reported.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "endpoint": {
           "default": "unix:///var/run/docker.sock",
           "description": "Where the Docker daemon's API is: unix:// and a socket's path, or tcp:// and a host and port, as of a socket proxy, in plain HTTP. unix:///var/run/docker.sock when left out.",
@@ -524,6 +564,10 @@
           "default": 1000,
           "description": "The most containers taken; past it, the rest, by name, are left out and reported. 1000 when left out or 0.",
           "minimum": 0,
+          "type": "integer"
+        },
+        "max_priority": {
+          "description": "The highest priority a route labels write may have; one with a higher priority is left out and reported. 0 when left out, so that a route of the config's with a priority above 0 always wins over them.",
           "type": "integer"
         },
         "network": {
@@ -891,6 +935,10 @@
           "default": "lesismal.github.io/fit",
           "description": "The controllerName of the GatewayClasses whose Gateways fit serves. lesismal.github.io/fit when left out.",
           "type": "string"
+        },
+        "external_name_services": {
+          "description": "Send to the names of ExternalName Services that routes and Ingresses name as backends. Such a backend is refused when left out or false, and the route's status says so (ResolvedRefs false), since whoever can create a Service could otherwise send fit's requests to any host, fit's own Admin API on loopback among them. Even when true, names that are localhost, or loopback, link-local or unspecified addresses, are refused; a name is not resolved to be checked, so one that resolves to such an address is not caught.",
+          "type": "boolean"
         },
         "ingress": {
           "$ref": "#/$defs/config.KubernetesIngress",

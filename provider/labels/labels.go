@@ -22,6 +22,11 @@
 //	fit.services.<s>.proxy_protocol=<v1|v2>
 //
 // Other labels under the prefix are the caller's to read, or refused.
+//
+// Whoever can start a container, or register a service, writes its labels,
+// so what they may do is bounded by a Policy (see Set.Restrict): the hosts
+// their routes may match, their priority, the modules they may use, and
+// the addresses fit sends to.
 package labels
 
 import (
@@ -226,6 +231,9 @@ func (s *Service) set(field, value string) error {
 	case "server_names":
 		s.ServerNames = list(value)
 	case "proxy_protocol":
+		if value != "v1" && value != "v2" {
+			return fmt.Errorf("%q is not v1 or v2", value)
+		}
 		s.ProxyProtocol = value
 	default:
 		return fmt.Errorf("a service has no setting %q", field)
@@ -286,12 +294,7 @@ func Part(groups map[string]*Group) []byte {
 		g := groups[name]
 		out.Upstreams = append(out.Upstreams, upstream(name, g.Addrs, g.Set.Upstream))
 		for _, key := range SortedKeys(g.Set.Routes) {
-			r := *g.Set.Routes[key]
-			r.Name = name + "." + key
-			if r.Handler == nil {
-				r.Handler, _ = json.Marshal(map[string]any{"module": "proxy", "params": map[string]string{"upstream": name}})
-			}
-			out.Routes = append(out.Routes, &r)
+			out.Routes = append(out.Routes, g.Set.Routes[key].out(name, key))
 		}
 		for _, key := range SortedKeys(g.Set.Services) {
 			s := *g.Set.Services[key]
@@ -306,6 +309,17 @@ func Part(groups map[string]*Group) []byte {
 	}
 	part, _ := json.Marshal(out)
 	return part
+}
+
+// out returns the route of the source's upstream name, at key, as the part
+// has it: proxying to the upstream unless it names a handler.
+func (r *Route) out(name, key string) *Route {
+	o := *r
+	o.Name = name + "." + key
+	if o.Handler == nil {
+		o.Handler, _ = json.Marshal(map[string]any{"module": "proxy", "params": map[string]string{"upstream": name}})
+	}
+	return &o
 }
 
 // upstream is an upstream of name, sending to addrs, with the other

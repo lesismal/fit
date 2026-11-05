@@ -86,7 +86,7 @@ What it makes:
 | `gatewayClass.create`, `gatewayClass.name` | `true`, `fit` | The GatewayClass. |
 | `ingress.enabled`, `ingress.className`, `ingress.default` | `true`, `fit`, `false` | Ingresses and their class. |
 | `ingress.httpPort`, `ingress.httpsPort` | 80, 443 | The ports Ingresses are served on. |
-| `provider` | `{}` | More of the provider's settings: `namespaces`, `backends`, `addresses`, `max_objects`, `request_timeout` (see `fit schema`). |
+| `provider` | `{}` | More of the provider's settings: `namespaces`, `backends`, `addresses`, `max_objects`, `request_timeout`, `external_name_services` (see `fit schema`). |
 | `healthPort` | 9099 | The port of the probes, apart from any a Gateway uses. |
 | `config` | `{}` | A whole config in place of the chart's; keep its health listener, route and provider. |
 | `extraArgs` | `[]` | More flags for `fit run`. |
@@ -95,6 +95,15 @@ What it makes:
 The rest (`resources`, `nodeSelector`, `tolerations`, `affinity`, `podSecurityContext`,
 `securityContext`, `podAnnotations`, `serviceAccount`) are as in most charts; see
 [values.yaml](helm/fit/values.yaml).
+
+**The Admin API in the pod** listens on 127.0.0.1:2019 without a token, as fit does by default:
+only the pod itself reaches it. Routes and Ingresses are written by the cluster's tenants, so fit
+never proxies to a local address for them: it refuses ExternalName Services as backends unless
+`provider.external_name_services` is set, and even then refuses names that are localhost or
+loopback, link-local or unspecified addresses, reporting each in the route's status (ResolvedRefs
+false). A name that resolves to such an address through DNS is not caught: leave
+`external_name_services` off where tenants are not trusted, or give the Admin API a `token_file`
+through `config`.
 
 Until a release publishes the image, build it and load it into the cluster, as
 [the Kubernetes example](https://github.com/lesismal/fit-examples/blob/main/kubernetes/README.md) does with kind:

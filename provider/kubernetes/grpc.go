@@ -31,7 +31,7 @@ func (t *translator) grpcRoute(r *GRPCRoute) {
 				}
 				if out := t.grpcMatch(fmt.Sprintf("%s: match %d", where, j), m, rule, backend, at); out != nil {
 					out.Name = name
-					t.routes = append(t.routes, out)
+					t.addRoute(fmt.Sprintf("%s: match %d", where, j), out)
 				}
 			}
 		}

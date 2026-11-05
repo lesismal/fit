@@ -128,7 +128,7 @@ func TestDockerProvider(t *testing.T) {
 	f, addrs := startFit(t, `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "admin": {"address": "127.0.0.1:0"},
-  "providers": [{"docker": {"refresh_interval": "1s"}}]
+  "providers": [{"docker": {"refresh_interval": "1s", "allowed_hosts": ["*"]}}]
 }`)
 	go func() {
 		for range f.lines { // read what fit prints, so that it never waits on its stdout

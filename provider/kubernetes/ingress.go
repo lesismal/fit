@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"net/netip"
+	"github.com/lesismal/fit/router"
 	"slices"
 	"strconv"
 	"strings"
@@ -215,17 +215,19 @@ func (t *translator) ingressRoute(name string, listeners []string, om *outMatch,
 		}
 		return m
 	}
+	where := "ingress route " + name
 	switch {
 	case a.denyAll:
-		t.routes = append(t.routes, &outRoute{Name: name, Listeners: listeners, Priority: priority, Match: match(om), Handler: respond(403)})
+		t.addRoute(where, &outRoute{Name: name, Listeners: listeners, Priority: priority, Match: match(om), Handler: respond(403)})
 	case len(a.allow) > 0:
 		allowed := *om
 		allowed.RemoteIP = a.allow
-		t.routes = append(t.routes,
-			&outRoute{Name: name, Listeners: listeners, Priority: priority + 1, Match: &allowed, Middleware: mws, Handler: handler},
-			&outRoute{Name: name + ".deny", Listeners: listeners, Priority: priority, Match: match(om), Handler: respond(403)})
+		// The allowed route's match is the other's and more: vet leaves out
+		// both, or the allowed one alone, closing the Ingress.
+		t.addRoute(where, &outRoute{Name: name, Listeners: listeners, Priority: priority + 1, Match: &allowed, Middleware: mws, Handler: handler})
+		t.addRoute(where+".deny", &outRoute{Name: name + ".deny", Listeners: listeners, Priority: priority, Match: match(om), Handler: respond(403)})
 	default:
-		t.routes = append(t.routes, &outRoute{Name: name, Listeners: listeners, Priority: priority, Match: match(om), Middleware: mws, Handler: handler})
+		t.addRoute(where, &outRoute{Name: name, Listeners: listeners, Priority: priority, Match: match(om), Middleware: mws, Handler: handler})
 	}
 }
 
@@ -321,14 +323,14 @@ func (t *translator) annotations(where string, ann map[string]string) ingressAnn
 				if r == "" {
 					continue
 				}
-				if _, err := netip.ParsePrefix(r); err != nil {
-					if _, err := netip.ParseAddr(r); err != nil {
-						// A range that does not parse must not open the
-						// Ingress to everyone: it is closed instead.
-						t.problem("%s: annotation %s: %q is not an address or CIDR range; every request is refused", where, k, r)
-						a.denyAll = true
-						continue
-					}
+				// As the route's remote_ip reads it: a zone, or an IPv4
+				// range written in IPv6, would have the part refused.
+				if _, err := router.ParsePrefix(r); err != nil {
+					// A range that does not parse must not open the
+					// Ingress to everyone: it is closed instead.
+					t.problem("%s: annotation %s: %q is not an address or CIDR range; every request is refused", where, k, r)
+					a.denyAll = true
+					continue
 				}
 				a.allow = append(a.allow, r)
 			}

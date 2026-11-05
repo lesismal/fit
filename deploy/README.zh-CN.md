@@ -78,7 +78,7 @@ chart 创建的内容：
 | `gatewayClass.create`、`gatewayClass.name` | `true`、`fit` | GatewayClass。 |
 | `ingress.enabled`、`ingress.className`、`ingress.default` | `true`、`fit`、`false` | Ingress 及其 class。 |
 | `ingress.httpPort`、`ingress.httpsPort` | 80、443 | 服务 Ingress 的端口。 |
-| `provider` | `{}` | provider 的其他设置：`namespaces`、`backends`、`addresses`、`max_objects`、`request_timeout`（见 `fit schema`）。 |
+| `provider` | `{}` | provider 的其他设置：`namespaces`、`backends`、`addresses`、`max_objects`、`request_timeout`、`external_name_services`（见 `fit schema`）。 |
 | `healthPort` | 9099 | 探针端口，不能与 Gateway 使用的端口重复。 |
 | `config` | `{}` | 用一份完整配置替换 chart 生成的；请保留其中的健康检查 listener、路由和 provider。 |
 | `extraArgs` | `[]` | `fit run` 的其他参数。 |
@@ -86,6 +86,12 @@ chart 创建的内容：
 
 其余的值（`resources`、`nodeSelector`、`tolerations`、`affinity`、`podSecurityContext`、`securityContext`、
 `podAnnotations`、`serviceAccount`）与多数 chart 相同；见 [values.yaml](helm/fit/values.yaml)。
+
+**Pod 内的 Admin API** 与 fit 默认一样，在 127.0.0.1:2019 无 token 监听：只有 Pod 自己能访问。路由和 Ingress
+由集群的租户编写，因此 fit 从不为它们代理到本地地址：除非设置了 `provider.external_name_services`，否则拒绝把
+ExternalName Service 作为后端；即便设置了，也拒绝 localhost 以及 loopback、link-local 或未指定地址，并在路由的
+status 中报告（ResolvedRefs 为 false）。经 DNS 解析到这类地址的名字无法识别：租户不可信时请保持
+`external_name_services` 关闭，或通过 `config` 为 Admin API 设置 `token_file`。
 
 在正式发布镜像之前，先构建镜像并载入集群，就像 [Kubernetes 示例](https://github.com/lesismal/fit-examples/blob/main/kubernetes/README.zh-CN.md)
 用 kind 做的那样：`--set image.repository=fit --set image.tag=local`。

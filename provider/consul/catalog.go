@@ -161,6 +161,8 @@ func (s *catalogSource) Read(ctx context.Context) ([]byte, []string, error) {
 func translate(services map[string][]entry, opts *config.ConsulProvider) (part []byte, problems []string) {
 	prefix := opts.Prefix() + "."
 	groups := map[string]*labels.Group{}
+	policy := &labels.Policy{AllowedHosts: opts.AllowedHosts, AllowedModules: opts.AllowedModules,
+		MaxPriority: opts.MaxPriority, AllowLocal: opts.AllowLocalAddresses}
 	for _, svc := range labels.SortedKeys(services) {
 		es := services[svc]
 		slices.SortFunc(es, func(a, b entry) int {
@@ -208,8 +210,23 @@ func translate(services map[string][]entry, opts *config.ConsulProvider) (part [
 				problem("it has no port: tag it %sport=<port>", prefix)
 				continue
 			}
+			// Whoever registers the instance writes its address: a local
+			// one could be anything of fit's host's, its Admin API among
+			// them.
+			if policy.Local(host) {
+				problem("its address, %s, is a local one: set the provider's allow_local_addresses to take it", host)
+				continue
+			}
 			g := groups[name]
 			if g == nil {
+				more, err := l.Restrict(name, policy)
+				for _, p := range more {
+					problem("%s", p)
+				}
+				if err != nil {
+					problem("%v", err)
+					continue
+				}
 				g = &labels.Group{Set: l, SvcAddrs: map[string][]string{}}
 				groups[name] = g
 			}
