@@ -2,11 +2,13 @@ package tlsmgr
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -370,9 +372,57 @@ func TestPublicAddr(t *testing.T) {
 	// ProxyFromEnvironment reads the environment once per process, so
 	// what proxyAddrs says depends on what ran first; it must at least not
 	// name anything else.
-	for addr := range proxyAddrs() {
+	for addr := range proxyAddrs(http.ProxyFromEnvironment) {
 		if addr != "10.0.0.9:3128" && addr != "10.0.0.9:1080" {
 			t.Errorf("a proxy at %s", addr)
 		}
+	}
+}
+
+// TestProxyAddrs gives each proxy's address with its scheme's port when
+// its URL has none, and nothing for a scheme without a proxy or one that
+// cannot be read.
+func TestProxyAddrs(t *testing.T) {
+	proxies := map[string]string{"http": "socks5h://proxy.example", "https": "https://proxy.example"}
+	got := proxyAddrs(func(r *http.Request) (*url.URL, error) {
+		return url.Parse(proxies[r.URL.Scheme])
+	})
+	if len(got) != 2 || !got["proxy.example:1080"] || !got["proxy.example:443"] {
+		t.Errorf("default ports: %v", got)
+	}
+	got = proxyAddrs(func(r *http.Request) (*url.URL, error) {
+		if r.URL.Scheme == "http" {
+			return nil, nil
+		}
+		return nil, errors.New("bad proxy")
+	})
+	if len(got) != 0 {
+		t.Errorf("no proxies: %v", got)
+	}
+}
+
+// TestOCSPClientProxy: the public client dials a proxy's address whatever
+// the filter says, and refuses another address the filter does not allow.
+func TestOCSPClientProxy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	none := func(netip.Addr) bool { return false }
+	proxied := ocspClient(none, map[string]bool{u.Host: true})
+	resp, err := proxied.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("the proxy's address: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "ok" {
+		t.Errorf("the proxy's answer: %q", body)
+	}
+	proxied.CloseIdleConnections()
+	if _, err := ocspClient(none, nil).Get(srv.URL); err == nil || !strings.Contains(err.Error(), "is not public") {
+		t.Errorf("an address not allowed: %v", err)
 	}
 }

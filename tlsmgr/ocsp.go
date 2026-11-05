@@ -138,8 +138,8 @@ func newOCSP(log *logs.Logger) *OCSP {
 		sem:       make(chan struct{}, ocspWorkers),
 		wake:      make(chan struct{}, 1),
 	}
-	o.http = ocspClient(nil)
-	o.public = ocspClient(o.allowAddr)
+	o.http = ocspClient(nil, nil)
+	o.public = ocspClient(o.allowAddr, proxyAddrs(http.ProxyFromEnvironment))
 	o.ctx, o.cancel = context.WithCancel(context.Background())
 	return o
 }
@@ -154,12 +154,11 @@ func (o *OCSP) TrustRoots(roots *x509.CertPool, private bool) {
 }
 
 // ocspClient returns a client of responders that follows no redirect, and,
-// with allow, dials only addresses allow allows, but for the proxy the
-// environment sets, which the operator chose.
-func ocspClient(allow func(netip.Addr) bool) *http.Client {
+// with allow, dials only addresses allow allows, but for proxies, the
+// addresses of the proxies the environment sets, which the operator chose.
+func ocspClient(allow func(netip.Addr) bool, proxies map[string]bool) *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if allow != nil {
-		proxies := proxyAddrs()
 		direct := &net.Dialer{Timeout: ocspTimeout, KeepAlive: 30 * time.Second}
 		filtered := &net.Dialer{Timeout: ocspTimeout, KeepAlive: 30 * time.Second,
 			// Called with the address dialled, once a name is resolved,
@@ -190,12 +189,12 @@ func ocspClient(allow func(netip.Addr) bool) *http.Client {
 	}
 }
 
-// proxyAddrs returns the addresses of the proxies the environment sets for
-// http and https, as a transport dials them.
-func proxyAddrs() map[string]bool {
+// proxyAddrs returns the addresses of the proxies proxy, the environment's,
+// gives for http and https, as a transport dials them.
+func proxyAddrs(proxy func(*http.Request) (*url.URL, error)) map[string]bool {
 	addrs := map[string]bool{}
 	for _, scheme := range []string{"http", "https"} {
-		u, err := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: scheme, Host: "ocsp.invalid"}})
+		u, err := proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: "ocsp.invalid"}})
 		if err != nil || u == nil {
 			continue
 		}

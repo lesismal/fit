@@ -179,6 +179,12 @@ func TestLookupHTTPChallenge(t *testing.T) {
 	if !called {
 		t.Error("a lookup past the bound waited")
 	}
+	// One from an IP address gives its client's slot back.
+	called = false
+	a.LookupHTTPChallenge("tok_en-1", "192.0.2.7:1", func(_ string, ok bool) { called = !ok })
+	if !called || a.clientSlot("192.0.2.7:1").Load() != 0 {
+		t.Error("a client's lookup past the bound kept its slot")
+	}
 	close(st.hold)
 	for range maxSharedLookups {
 		if !<-results {
@@ -418,5 +424,22 @@ func TestMarkInProgress(t *testing.T) {
 	a.writeMarker(context.Background())
 	if l.count("keeping the marker") != 1 {
 		t.Errorf("a failed write not reported: %q", l.snapshot())
+	}
+}
+
+// TestReadGateWhileReading: while one read of the marker is under way,
+// another reads nothing and takes a challenge to be in progress.
+func TestReadGateWhileReading(t *testing.T) {
+	var l logLines
+	st := &sharedStorage{FileStorage: &FileStorage{Root: t.TempDir()}}
+	a := sharedACME(t, &config.ACME{Directory: "https://127.0.0.1:1/dir"}, st, &l)
+	a.gate.reading.Store(true)
+	if !a.readGate(context.Background()) || st.markerLoads.Load() != 0 {
+		t.Errorf("a read while another is under way: loads %d", st.markerLoads.Load())
+	}
+	a.gate.reading.Store(false)
+	// With no marker written, a read finds no challenge in progress.
+	if a.readGate(context.Background()) || st.markerLoads.Load() != 1 {
+		t.Errorf("a read of no marker: loads %d", st.markerLoads.Load())
 	}
 }

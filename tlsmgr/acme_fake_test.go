@@ -200,6 +200,32 @@ func TestFakeCASharedFaults(t *testing.T) {
 	}
 }
 
+// TestFakeCASharedCancel: an obtain whose context ends while the shared
+// challenge's answer settles gives the context's error, asks the CA to
+// check nothing, and takes the answer back out of the storage.
+func TestFakeCASharedCancel(t *testing.T) {
+	ca := newFakeCA(t)
+	var l logLines
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := &faultyStorage{Storage: &FileStorage{Root: t.TempDir()}, shared: true, fault: func(op, key string) error {
+		if op == "store" && strings.HasPrefix(key, "challenges/") {
+			cancel()
+		}
+		return nil
+	}}
+	a := fakeACME(t, ca, &config.ACME{}, st, &l)
+	if _, _, err := a.obtain(ctx, "c.fit.test", 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("obtain: %v", err)
+	}
+	if got := ca.acceptedTypes(); len(got) != 0 {
+		t.Errorf("challenges accepted: %v", got)
+	}
+	if keys, err := st.List(context.Background(), "challenges"); err != nil || len(keys) != 0 {
+		t.Errorf("challenges left in the storage: %q %v", keys, err)
+	}
+}
+
 func TestFakeCAChallengeChoice(t *testing.T) {
 	ctx := context.Background()
 	// The CA offers only the second type: it is taken.
