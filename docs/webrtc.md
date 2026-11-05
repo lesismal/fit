@@ -349,7 +349,11 @@ batch is signed with one key, its tokens are then checked against every key of t
 revoke rotates one key's secret file, so only the tokens that key signed are refused and the other
 shards carry on: a revocation is a shard's outage, not the policy's. The route's middleware
 authenticates the backend — `jwt` here — while the module checks no caller credentials itself: it is
-not the Admin API, so the backend never holds the Admin API's all-powerful token.
+not the Admin API, so the backend never holds the Admin API's all-powerful token. The route must
+therefore have `jwt`, `basic_auth`, `forward_auth` or `client_cert` (with `rate_limit` beside it as
+wanted), or the config fails: without one, whoever reached it would issue any token and revoke them
+all. `allow_no_auth: true` lets it go without, for a listener only the backend can reach, as on
+loopback.
 
 ```fit
 media_auth live {
@@ -637,7 +641,10 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   play a member's stream only once it is announced as published, so that nobody asks for a stream
   that is not there; a viewer whose request fails anyway tries again at most 6 times, waiting 1, 2,
   4, 8 and 15 seconds. A join needs `play` on `<room>-*`, announcing that one publishes `publish`
-  on `<room>-<name>`; a member's changes need the key its join was answered with.
+  on `<room>-<name>`; a member's changes need the key its join was answered with. A room's name is
+  1 to 64 letters, digits, `.`, `_` and `~`, without `-`, which a member's name may have: the first
+  `-` of a stream ends its room's name, so a grant of `team-*` reaches room `team` alone, not a room
+  `team-leads`, and no two rooms' members publish the same stream.
 - **The room chat.** A room call has a chat unless `chat` is false: text messages and small files,
   kept in memory while the room lasts, that the pages show and the room API carries; false shows
   no chat window and answers the chat's API 404. A message is sent and followed through the room
@@ -767,7 +774,11 @@ the one peer address it was opened for.
 - **The session's URL.** DELETE, PATCH, OPTIONS and any request to a URL up to three segments
   below the session's go to the media server that answered, sticky by fit's ID, not by a cookie. A
   session the media server's upstream no longer lists is answered `502`; its DELETE still frees
-  it. The endpoint's own OPTIONS goes to a media server the upstream picks.
+  it. The endpoint's own OPTIONS goes to a media server the upstream picks. A URL below the
+  session's is made of segments of letters, digits, `.`, `_`, `~` and `-`: one with a `.` or `..`
+  segment, an empty segment, another character, or an escaped `/`, `\` or `.` (`%2F`, `%5C`,
+  `%2E`) in the request's path is answered `400` and goes nowhere, since the media server would
+  resolve it to a URL outside the session's (`<session>/../../secret`) that no auth checked.
 - **PATCH.** A PATCH that only trickles candidates is answered `204` by fit: the media server
   reaches the peer through fit whatever the peer's candidates are. An ICE restart, a PATCH with an
   `a=ice-ufrag`, goes to the media server without its candidates, and the ufrag of its answer is

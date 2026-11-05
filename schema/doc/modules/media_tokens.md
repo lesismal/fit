@@ -2,9 +2,12 @@ Issues time-limited [`media_auth`](#media-auth) tokens in batches, over a route 
 calls, and revokes the tokens of one key of the policy's keyring, or of every key, by rotating their
 secrets: `POST <prefix>` takes the tokens a request wants and answers them, and
 `POST <prefix>/revoke` rotates the secret files of the keys it names. The route's middleware
-authenticates the caller — a `jwt`, `basic_auth`, `forward_auth` or `rate_limit` of the business
-backend's own — and the module checks no caller credentials itself: it is not the Admin API, so a
-backend never holds the Admin API's all-powerful token. `auth` names the policy the tokens belong
+authenticates the caller — a `jwt`, `basic_auth`, `forward_auth` or `client_cert` of the business
+backend's own, with `rate_limit` beside it as wanted — and the module checks no caller credentials
+itself: it is not the Admin API, so a backend never holds the Admin API's all-powerful token. A
+route without one of those four is a config error, since whoever reached it would issue any token
+and revoke them all; `allow_no_auth: true` lets it go without, for a listener only the backend can
+reach, as on loopback. `auth` names the policy the tokens belong
 to: it must set a single `secret_file`, or a `keys` keyring whose every key sets a `secret_file`, so
 that a revoke can rotate a file and outlive a restart; a policy with a key that has no
 `secret_file` fails the config.

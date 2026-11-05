@@ -403,7 +403,17 @@ func newRouter(routes []*Route) *router.Router[*Route] {
 
 func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	var errs config.Errors
-	m, err := module.Load(module.Handlers, rc.Handler, env)
+	// The handler is told its route's middleware, so that one that must
+	// not go without auth (media_tokens) can refuse a route without it.
+	henv := &module.Env{}
+	if env != nil {
+		e := *env
+		henv = &e
+	}
+	for _, ref := range rc.Middleware {
+		henv.RouteMiddleware = append(henv.RouteMiddleware, ref.Module)
+	}
+	m, err := module.Load(module.Handlers, rc.Handler, henv)
 	var h module.Handler
 	if err != nil {
 		errs = append(errs, config.AsErrors(err)...)

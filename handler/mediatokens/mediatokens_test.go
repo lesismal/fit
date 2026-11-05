@@ -89,9 +89,19 @@ func conf(secretFile, prefix, params string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"match": {"path": ["` + prefix + `", "` + prefix + `/*", "/elsewhere"]},
-    "handler": {"module": "media_tokens", "params": ` + params + `}}],
+    "handler": {"module": "media_tokens", "params": ` + noAuth(params) + `}}],
   "media_auth": [{"name": "live", "secret_file": "` + secretFile + `", "token_ttl": "1h"}]
 }`
+}
+
+// noAuth is params with allow_no_auth: the tests' routes have no
+// middleware, but for TestNeedsAuthMiddleware's.
+func noAuth(params string) string {
+	params = strings.TrimSpace(params)
+	if params == "{}" {
+		return `{"allow_no_auth": true}`
+	}
+	return `{"allow_no_auth": true, ` + params[1:]
 }
 
 // newSecretFile makes a file holding oldSecret, and returns its path.
@@ -400,7 +410,7 @@ func TestProvisionNeedsSecretFile(t *testing.T) {
 			`there is no media_auth policy named "nope"`},
 	} {
 		doc := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "routes": [{"handler": {"module": "media_tokens", "params": ` + tc.params + `}}],
+  "routes": [{"handler": {"module": "media_tokens", "params": ` + noAuth(tc.params) + `}}],
   "media_auth": ` + tc.mediaAuth + `}`
 		c, err := config.Load([]byte(doc))
 		if err != nil {
@@ -517,7 +527,7 @@ func ringConf(files map[string]string, prefix, params string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"match": {"path": ["` + prefix + `", "` + prefix + `/*", "/elsewhere"]},
-    "handler": {"module": "media_tokens", "params": ` + params + `}}],
+    "handler": {"module": "media_tokens", "params": ` + noAuth(params) + `}}],
   "media_auth": [{"name": "live", "keys": [` + strings.Join(keys, ",") + `], "token_ttl": "1h"}]
 }`
 }
@@ -722,7 +732,7 @@ func TestRevokeRingChoices(t *testing.T) {
 // error, since that key could not be rotated.
 func TestKeyringProvision(t *testing.T) {
 	doc := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "routes": [{"handler": {"module": "media_tokens", "params": {"auth": "live"}}}],
+  "routes": [{"handler": {"module": "media_tokens", "params": {"auth": "live", "allow_no_auth": true}}}],
   "media_auth": [{"name": "live", "keys": [
     {"key": "k1", "secret_file": "` + newSecretFile(t) + `"},
     {"key": "k2", "secret": "0123456789abcdef-inline"}]}]}`

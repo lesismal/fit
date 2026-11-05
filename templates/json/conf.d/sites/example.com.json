@@ -1019,6 +1019,13 @@
           // // one at a time on a pool of its own, never blocks a worker. 10s when left out.
           // // duration, as "1.5s" or "2m"; default "10s".
           // "revoke_timeout": "10s",
+
+          // // Lets the route go without an auth middleware (jwt, basic_auth, forward_auth or client_cert),
+          // // which it otherwise must have: for a listener only the business backend can reach, as on
+          // // loopback. Whoever reaches the route then issues any token its prefixes allow, and revokes
+          // // them all. False when left out.
+          // // boolean.
+          // "allow_no_auth": true,
         // },
       // },
     // },

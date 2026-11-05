@@ -4151,6 +4151,10 @@
     "http.handlers.media_tokens": {
       "additionalProperties": false,
       "properties": {
+        "allow_no_auth": {
+          "description": "Lets the route go without an auth middleware (jwt, basic_auth, forward_auth or client_cert), which it otherwise must have: for a listener only the business backend can reach, as on loopback. Whoever reaches the route then issues any token its prefixes allow, and revokes them all. False when left out.",
+          "type": "boolean"
+        },
         "auth": {
           "description": "The media_auth policy that signs the tokens, as whip's auth names one: it must set secret_file, or a keyring whose keys each set secret_file, so that a revoke can rotate a secret file and outlive a restart.",
           "type": "string"

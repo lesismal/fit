@@ -69,10 +69,10 @@ func TestProvisionBounds(t *testing.T) {
 		tok  *Tokens
 		want string
 	}{
-		{"too many tokens", &Tokens{Auth: "live", MaxTokens: MaxMaxTokens + 1}, "is not between 1 and 1000"},
-		{"too few tokens", &Tokens{Auth: "live", MaxTokens: -1}, "is not between 1 and 1000"},
-		{"too small a body", &Tokens{Auth: "live", MaxBodyBytes: MinMaxBodyBytes - 1}, "a body is at least 256 and at most 1048576 bytes"},
-		{"too large a body", &Tokens{Auth: "live", MaxBodyBytes: MaxMaxBodyBytes + 1}, "a body is at least 256 and at most 1048576 bytes"},
+		{"too many tokens", &Tokens{Auth: "live", AllowNoAuth: true, MaxTokens: MaxMaxTokens + 1}, "is not between 1 and 1000"},
+		{"too few tokens", &Tokens{Auth: "live", AllowNoAuth: true, MaxTokens: -1}, "is not between 1 and 1000"},
+		{"too small a body", &Tokens{Auth: "live", AllowNoAuth: true, MaxBodyBytes: MinMaxBodyBytes - 1}, "a body is at least 256 and at most 1048576 bytes"},
+		{"too large a body", &Tokens{Auth: "live", AllowNoAuth: true, MaxBodyBytes: MaxMaxBodyBytes + 1}, "a body is at least 256 and at most 1048576 bytes"},
 	} {
 		if err := provisionTokens(t, tc.tok); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", tc.what, err, tc.want)

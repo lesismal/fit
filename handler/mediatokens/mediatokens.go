@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,7 @@ type Tokens struct {
 	MaxTokens     int             `json:"max_tokens,omitempty" min:"1" max:"1000" default:"100" doc:"The most tokens one request may ask for; more is answered 400. 100 when left out."`
 	MaxBodyBytes  int             `json:"max_body_bytes,omitempty" min:"256" max:"1048576" default:"65536" doc:"The largest request body the route takes; a larger one is answered 413. 64 KiB when left out."`
 	RevokeTimeout config.Duration `json:"revoke_timeout,omitempty" default:"\"10s\"" doc:"How long a revoke may wait for the secret file's write before it is answered 504; the write, one at a time on a pool of its own, never blocks a worker. 10s when left out."`
+	AllowNoAuth   bool            `json:"allow_no_auth,omitempty" doc:"Lets the route go without an auth middleware (jwt, basic_auth, forward_auth or client_cert), which it otherwise must have: for a listener only the business backend can reach, as on loopback. Whoever reaches the route then issues any token its prefixes allow, and revokes them all. False when left out."`
 
 	prefix        string
 	auth          *mediaauth.Policy
@@ -86,8 +88,16 @@ type Tokens struct {
 // pathPrefix is what prefix may be: a path of plain segments.
 var pathPrefix = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
 
+// authMiddleware are the middleware that authenticate a request: a route
+// of media_tokens needs one of them, the handler having no auth of its own.
+var authMiddleware = []string{"jwt", "basic_auth", "forward_auth", "client_cert"}
+
 // Provision checks the params, finds the policy and starts the revoke pool.
 func (t *Tokens) Provision(ctx *module.Context) error {
+	if !t.AllowNoAuth && !slices.ContainsFunc(ctx.RouteMiddleware(), func(m string) bool { return slices.Contains(authMiddleware, m) }) {
+		return ctx.Errorf("", "media_tokens has no auth of its own: its route needs an auth middleware (%s), or allow_no_auth for a listener only the backend reaches",
+			strings.Join(authMiddleware, ", "))
+	}
 	prefix := t.Prefix
 	if prefix == "" {
 		prefix = DefaultPrefix

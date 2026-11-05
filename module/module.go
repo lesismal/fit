@@ -142,6 +142,9 @@ type Env struct {
 	Engine *fib.Engine
 	// MediaAuth are the config's media_auth policies, as written.
 	MediaAuth []config.MediaAuth
+	// RouteMiddleware are the module names of the middleware of the route
+	// whose handler is provisioned, in order; set for the handler alone.
+	RouteMiddleware []string
 }
 
 // Graph returns the hold a module takes on its config for a request that
@@ -201,6 +204,17 @@ func (c *Context) MediaAuth(name string) *config.MediaAuth {
 		}
 	}
 	return nil
+}
+
+// RouteMiddleware returns the names of the middleware of the route a
+// handler is provisioned for, in order, as "basic_auth" or "jwt", for a
+// handler that must not run without one; nil for a module outside a
+// route's handler, or a route without middleware.
+func (c *Context) RouteMiddleware() []string {
+	if c.env == nil {
+		return nil
+	}
+	return c.env.RouteMiddleware
 }
 
 // Errorf returns an error about the param named field, or about the params as
