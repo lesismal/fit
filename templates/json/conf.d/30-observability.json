@@ -268,7 +268,9 @@
     // "max_config_bytes": 4194304,
 
     // // The most connections the Admin API keeps open at once; one past it is closed as soon as it
-    // // is accepted. 16 when left out or 0.
+    // // is accepted, as is one past a client's share, a quarter of them, but for loopback clients.
+    // // Until a connection has made a request with the token (any request, without token_file), each
+    // // of its reads waits 5s at most. 16 when left out or 0.
     // // integer, 0 or more; default 16.
     // "max_conns": 16,
 
@@ -354,7 +356,8 @@
       // "max_sessions": 64,
 
       // // The most connections the console keeps open at once; one past it is closed as soon as it is
-      // // accepted. 32 when left out or 0.
+      // // accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      // // when left out or 0.
       // // integer, 0 or more; default 32.
       // "max_conns": 32,
     // },

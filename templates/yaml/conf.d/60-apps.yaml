@@ -79,7 +79,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 
@@ -216,7 +217,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 
@@ -458,7 +460,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 
@@ -760,7 +763,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 
@@ -920,7 +924,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 
@@ -1110,7 +1115,8 @@
       # max_sessions: 64
 
       # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted. 32 when left out or 0.
+      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
 

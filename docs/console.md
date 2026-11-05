@@ -198,7 +198,7 @@ Both are Admin API endpoints, which the console calls in process:
 | `session_timeout` | `30m` | How long a login lasts without a request. |
 | `session_lifetime` | `12h` | How long a login lasts at most, however busy. |
 | `max_sessions` | 64 | The most logins kept at once; one more ends the oldest. |
-| `max_conns` | 32 | The most connections open at once; one past it is closed as soon as it is accepted. |
+| `max_conns` | 32 | The most connections open at once; one past it is closed as soon as it is accepted, as is one past a client's share (a quarter of them, an IPv6 client by its /64), but for loopback clients. |
 
 **An address that is not a loopback one needs `cert_file` and `key_file`**, so that passwords never
 cross a network in the clear; `fit validate` refuses one without. On a loopback address TLS is
@@ -397,7 +397,7 @@ differences and their counts) and `POST /config/reconcile` (a JSON body of the c
 
 | | |
 | --- | --- |
-| Connections | `max_conns`, 32 |
+| Connections | `max_conns`, 32; a quarter of them for one client, but for loopback |
 | Sessions | `max_sessions`, 64, the oldest ended past it |
 | A request's header | 16 KiB, read within 10s |
 | A request's body | `admin.max_config_bytes` and 64 KiB, 4 MiB and 64 KiB by default, read within 30s |

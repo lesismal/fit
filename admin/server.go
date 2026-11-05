@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/listener"
+	"github.com/lesismal/fit/login"
 )
 
 // The Admin API's timeouts: for a request's header, its whole body, writing
@@ -30,6 +32,10 @@ var (
 	readTimeout       = time.Minute
 	writeTimeout      = time.Minute
 	idleTimeout       = time.Minute
+	// unauthTimeout bounds every read of a connection that has made no
+	// authenticated request yet: its first header, and its idle time, so
+	// that clients without the token cannot hold the connections long.
+	unauthTimeout = 5 * time.Second
 )
 
 const maxHeaderBytes = 64 << 10
@@ -140,7 +146,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		}
 	}
 	s.loopback = network == "tcp" && s.token == nil
-	s.ln = newLimitListener(ln, a.Conns())
+	s.ln = newLimitListener(ln, a.Conns(), login.NewPeers(a.Conns()), unauthTimeout)
 
 	mux := s.routes()
 	if !a.DisableDashboard {
@@ -155,6 +161,9 @@ func Start(a *config.Admin, configs *Configs, report func(Result)) (*Server, err
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    maxHeaderBytes,
 		ErrorLog:          log.New(io.Discard, "", 0),
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			return context.WithValue(ctx, connKey{}, c)
+		},
 	}
 	go func() {
 		defer close(s.done)
@@ -237,9 +246,11 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, fmt.Sprintf("the console user %q still has its temporary password: change it on the console first", user))
 			return
 		}
-		if s.token != nil && !isDashboard(r) {
+		valid := false
+		if s.token != nil {
 			got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if !ok || subtle.ConstantTimeCompare([]byte(got), s.token) != 1 {
+			valid = ok && subtle.ConstantTimeCompare([]byte(got), s.token) == 1
+			if !valid && !isDashboard(r) {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="fit admin"`)
 				writeError(w, http.StatusUnauthorized, "a valid bearer token is needed")
 				return
@@ -252,6 +263,11 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if s.loopback && !loopbackHost(r.Host) {
 			writeError(w, http.StatusForbidden, "the Host field must name a loopback host")
 			return
+		}
+		if s.token == nil || valid {
+			if c, ok := r.Context().Value(connKey{}).(*limitConn); ok {
+				c.authenticate()
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -558,14 +574,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // limitListener closes connections accepted past its limit at once, rather
-// than letting them queue.
+// than letting them queue, and those of a client past its share of them
+// (login.Peers).
 type limitListener struct {
 	net.Listener
-	slots chan struct{}
+	slots  chan struct{}
+	peers  *login.Peers
+	unauth time.Duration // the longest read a connection makes before it is authenticated
 }
 
-func newLimitListener(ln net.Listener, n int) *limitListener {
-	return &limitListener{Listener: ln, slots: make(chan struct{}, n)}
+func newLimitListener(ln net.Listener, n int, peers *login.Peers, unauth time.Duration) *limitListener {
+	return &limitListener{Listener: ln, slots: make(chan struct{}, n), peers: peers, unauth: unauth}
 }
 
 func (l *limitListener) Accept() (net.Conn, error) {
@@ -574,23 +593,69 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
+		var ip netip.Addr
+		if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
+			ip = a.AddrPort().Addr()
+		}
 		select {
 		case l.slots <- struct{}{}:
-			return &limitConn{Conn: c, release: func() { <-l.slots }}, nil
 		default:
 			_ = c.Close()
+			continue
 		}
+		if !l.peers.Open(ip) {
+			<-l.slots
+			_ = c.Close()
+			continue
+		}
+		return &limitConn{Conn: c, unauth: l.unauth, release: func() { l.peers.Close(ip); <-l.slots }}, nil
 	}
 }
 
+// connKey keys a request's connection in its context.
+type connKey struct{}
+
+// limitConn is a connection the limitListener counts. Until it has made an
+// authenticated request, no read deadline net/http sets on it lies past
+// unauth from when it is set.
 type limitConn struct {
 	net.Conn
 	once    sync.Once
 	release func()
+	unauth  time.Duration
+
+	mu     sync.Mutex
+	authed bool
+	want   time.Time // the read deadline net/http last set
 }
 
 func (c *limitConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(c.release)
 	return err
+}
+
+func (c *limitConn) SetReadDeadline(t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.want = t
+	if !c.authed {
+		if limit := time.Now().Add(c.unauth); t.IsZero() || t.After(limit) {
+			t = limit
+		}
+	}
+	return c.Conn.SetReadDeadline(t)
+}
+
+// authenticate marks the connection as having made an authenticated
+// request: the deadlines net/http sets apply as they are from then on,
+// beginning with the one it set last.
+func (c *limitConn) authenticate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.authed {
+		return
+	}
+	c.authed = true
+	_ = c.Conn.SetReadDeadline(c.want)
 }

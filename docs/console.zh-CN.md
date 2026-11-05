@@ -164,7 +164,7 @@ fit run -admin -c site.yaml -timeout 30m
 | `session_timeout` | `30m` | 没有请求时登录保持多久。 |
 | `session_lifetime` | `12h` | 无论多活跃，登录最长保持多久。 |
 | `max_sessions` | 64 | 同时保留的登录数上限；再多一个时结束最早的。 |
-| `max_conns` | 32 | 同时打开的连接数上限；超出的连接在接受后立即关闭。 |
+| `max_conns` | 32 | 同时打开的连接数上限；超出的连接在接受后立即关闭，超出单个客户端份额（四分之一，IPv6 客户端按 /64 计）的也一样，回环客户端除外。 |
 
 **非环回地址需要 `cert_file` 和 `key_file`**，使密码从不以明文穿过网络；`fit validate` 拒绝没有它们的配置。在环回地址上
 TLS 可选，例如经 SSH 隧道访问的控制台。
@@ -310,7 +310,7 @@ fit check -c /etc/fit/fit.json -fix     # 逐项选择修正，然后一起应�
 
 | | |
 | --- | --- |
-| 连接 | `max_conns`，32 |
+| 连接 | `max_conns`，32；单个客户端最多四分之一，回环客户端除外 |
 | 会话 | `max_sessions`，64，超出时结束最早的 |
 | 请求头 | 16 KiB，10s 内读完 |
 | 请求体 | `admin.max_config_bytes` 加 64 KiB，默认 4 MiB 加 64 KiB，30s 内读完 |

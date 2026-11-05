@@ -17,10 +17,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -543,5 +545,66 @@ func TestConsoleLoginQueue(t *testing.T) {
 	// A logged-in user's task still runs.
 	if code, body := b.do("POST", "/api/echo", `{"a":1}`); code != 200 {
 		t.Errorf("a logged-in user's request with the login pool full: %d %s", code, body)
+	}
+}
+
+// TestLimitHandlerPeerShare: a client other than a loopback one holds at
+// most its share of the console's connections, a quarter of them; one past
+// it is closed as it opens, and another client is still served.
+func TestLimitHandlerPeerShare(t *testing.T) {
+	engine := newEngine(t)
+	l := newLimitHandler(plainHandler{}, 8)
+	var from atomic.Value
+	from.Store(netip.MustParseAddr("203.0.113.9"))
+	l.peer = func(*fib.Connection) netip.Addr { return from.Load().(netip.Addr) }
+	i, err := engine.AddBinding(fib.Binding{Addr: "127.0.0.1:0", Handler: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrs, err := engine.BindingAddrs(i)
+	if err != nil || len(addrs) == 0 {
+		t.Fatal(addrs, err)
+	}
+	dial := func() net.Conn {
+		conn, err := net.DialTimeout("tcp", addrs[0].String(), 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		return conn
+	}
+	closed := func(conn net.Conn) bool {
+		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_, err := conn.Read(make([]byte, 1))
+		var ne net.Error
+		return err != nil && !(errors.As(err, &ne) && ne.Timeout())
+	}
+	share := l.peers.Share()
+	if share != 2 {
+		t.Fatalf("share %d, want 2", share)
+	}
+	var held []net.Conn
+	for range share {
+		held = append(held, dial())
+	}
+	for _, c := range held {
+		if closed(c) {
+			t.Fatal("a connection within the share was closed")
+		}
+	}
+	if !closed(dial()) {
+		t.Error("a connection past the client's share is open")
+	}
+	from.Store(netip.MustParseAddr("2001:db8:0:1::9")) // another client
+	if closed(dial()) {
+		t.Error("another client's connection was closed")
+	}
+	held[0].Close()
+	from.Store(netip.MustParseAddr("203.0.113.9"))
+	deadline := time.Now().Add(5 * time.Second)
+	for closed(dial()) {
+		if time.Now().After(deadline) {
+			t.Fatal("the client is not served once one of its connections went")
+		}
 	}
 }

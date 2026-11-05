@@ -1312,7 +1312,7 @@ In JSON:
 | `token_file` | string |  | A file holding a token that every request must carry, as "Authorization: Bearer <token>"; no token is asked for when left out. |
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
-| `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0. |
+| `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. Until a connection has made a request with the token (any request, without token_file), each of its reads waits 5s at most. 16 when left out or 0. |
 | `disable_dashboard` | boolean |  | Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false. |
 | `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
@@ -1342,7 +1342,7 @@ In JSON:
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
-| `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0. |
 
 <a id="config-consoleuser"></a>
 
@@ -1736,7 +1736,7 @@ Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.n
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
-| `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once; one past it is closed as soon as it is accepted. 32 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0. |
 
 <a id="config-llmlisten"></a>
 

@@ -24,6 +24,7 @@ import (
 	"mime"
 	"net"
 	stdhttp "net/http"
+	"net/netip"
 	"path"
 	"slices"
 	"strconv"
@@ -700,20 +701,24 @@ func (c *Console) serveFile(ctx *fibhttp.Context, p string) {
 	_ = Write(ctx, stdhttp.StatusOK, f.contentType, f.data)
 }
 
-// limitHandler closes the connections past max as they open, and closes
-// every one it has open when the console stops.
+// limitHandler closes the connections past max as they open, and those of
+// a client past its share of them (login.Peers), and closes every one it
+// has open when the console stops.
 type limitHandler struct {
 	fib.Handler
-	max int64
-	n   atomic.Int64
+	max   int64
+	n     atomic.Int64
+	peers *login.Peers
+	peer  func(*fib.Connection) netip.Addr // the client's address; tests replace it
 
 	mu     sync.Mutex
-	conns  map[*fib.Connection]struct{}
+	conns  map[*fib.Connection]netip.Addr // to the client's address
 	closed bool
 }
 
 func newLimitHandler(h fib.Handler, max int) *limitHandler {
-	return &limitHandler{Handler: h, max: int64(max), conns: map[*fib.Connection]struct{}{}}
+	return &limitHandler{Handler: h, max: int64(max), peers: login.NewPeers(max), conns: map[*fib.Connection]netip.Addr{},
+		peer: func(c *fib.Connection) netip.Addr { return c.RemoteAddrPort().Addr() }}
 }
 
 func (l *limitHandler) OnOpen(c *fib.Connection) {
@@ -722,24 +727,32 @@ func (l *limitHandler) OnOpen(c *fib.Connection) {
 		_ = c.Close()
 		return
 	}
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
+	ip := l.peer(c)
+	if !l.peers.Open(ip) {
 		l.n.Add(-1)
 		_ = c.Close()
 		return
 	}
-	l.conns[c] = struct{}{}
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		l.peers.Close(ip)
+		l.n.Add(-1)
+		_ = c.Close()
+		return
+	}
+	l.conns[c] = ip
 	l.mu.Unlock()
 	l.Handler.OnOpen(c)
 }
 
 func (l *limitHandler) OnClose(c *fib.Connection, err error) {
 	l.mu.Lock()
-	_, ok := l.conns[c]
+	ip, ok := l.conns[c]
 	delete(l.conns, c)
 	l.mu.Unlock()
 	if ok {
+		l.peers.Close(ip)
 		l.n.Add(-1)
 		l.Handler.OnClose(c, err)
 	}

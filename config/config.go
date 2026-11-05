@@ -218,7 +218,7 @@ type Admin struct {
 	TokenFile        string   `json:"token_file,omitempty" doc:"A file holding a token that every request must carry, as \"Authorization: Bearer <token>\"; no token is asked for when left out."`
 	History          int      `json:"history,omitempty" min:"0" default:"10" doc:"How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0."`
 	MaxConfigBytes   int64    `json:"max_config_bytes,omitempty" min:"0" default:"4194304" doc:"The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0."`
-	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted. 16 when left out or 0."`
+	MaxConns         int      `json:"max_conns,omitempty" min:"0" default:"16" doc:"The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. Until a connection has made a request with the token (any request, without token_file), each of its reads waits 5s at most. 16 when left out or 0."`
 	DisableDashboard bool     `json:"disable_dashboard,omitempty" doc:"Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false."`
 	Store            *Store   `json:"store,omitempty" doc:"Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file."`
 	Console          *Console `json:"console,omitempty" doc:"Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out."`
@@ -274,7 +274,7 @@ type Console struct {
 	SessionTimeout  Duration      `json:"session_timeout,omitempty" default:"\"30m\"" doc:"How long a login lasts without a request. 30m when left out."`
 	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`
 	MaxSessions     int           `json:"max_sessions,omitempty" min:"0" default:"64" doc:"The most logins kept at once; one more ends the oldest. 64 when left out or 0."`
-	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the console keeps open at once; one past it is closed as soon as it is accepted. 32 when left out or 0."`
+	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the console keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
