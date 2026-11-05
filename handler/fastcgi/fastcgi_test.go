@@ -459,12 +459,12 @@ func TestDotfiles(t *testing.T) {
 	check(base, "/.hidden.php", 404, "")
 	check(base, "/nothing", 200, "/index.php")
 	h := &FastCGI{SplitPath: []string{".php"}, Index: "index.php", TryFiles: []string{"{path}", "/index.php"}, Root: root, hideDotfiles: true}
-	if s, _, ok := h.try("/.hidden.php"); !ok || s != "/index.php" {
-		t.Errorf("try under deny: %q %v", s, ok)
+	if s, _, st := h.try("/.hidden.php"); st != 0 || s != "/index.php" {
+		t.Errorf("try under deny: %q %v", s, st)
 	}
 	h.hideDotfiles = false
-	if s, _, ok := h.try("/.hidden.php"); !ok || s != "/.hidden.php" {
-		t.Errorf("try under allow: %q %v", s, ok)
+	if s, _, st := h.try("/.hidden.php"); st != 0 || s != "/.hidden.php" {
+		t.Errorf("try under allow: %q %v", s, st)
 	}
 }
 

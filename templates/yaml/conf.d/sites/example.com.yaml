@@ -606,7 +606,8 @@ routes:
         # root: "/srv/www"
 
         # # What ends a script's name in a path, the rest being PATH_INFO: "/index.php/a/b" runs
-        # # /index.php with PATH_INFO /a/b. [".php"] when left out.
+        # # /index.php with PATH_INFO /a/b. A static handler on a file system that folds case serves no
+        # # file with one of these extensions, in any case. [".php"] when left out.
         # # list of string; default [".php"].
         # split_path: [".php"]
 
@@ -1091,7 +1092,10 @@ routes:
       # # files kept in memory.
       # module: "static"
       # params:
-        # # The directory files are served from.
+        # # The directory files are served from. On a file system that folds case, as Windows' and
+        # # macOS' do by default, a request whose path is not written as the names on disk are, or for a
+        # # file whose extension a fastcgi handler's split_path names, in any case, is answered 404, so
+        # # that a route matching names, as \.php$, is not passed by.
         # # string; required.
         # root: "/srv/www"
 

@@ -734,7 +734,8 @@ routes:
         # root: "/srv/www"
 
         # # What ends a script's name in a path, the rest being PATH_INFO: "/index.php/a/b" runs
-        # # /index.php with PATH_INFO /a/b. [".php"] when left out.
+        # # /index.php with PATH_INFO /a/b. A static handler on a file system that folds case serves no
+        # # file with one of these extensions, in any case. [".php"] when left out.
         # # list of string; default [".php"].
         # split_path: [".php"]
 
@@ -1219,7 +1220,10 @@ routes:
       # # files kept in memory.
       # module: "static"
       # params:
-        # # The directory files are served from.
+        # # The directory files are served from. On a file system that folds case, as Windows' and
+        # # macOS' do by default, a request whose path is not written as the names on disk are, or for a
+        # # file whose extension a fastcgi handler's split_path names, in any case, is answered 404, so
+        # # that a route matching names, as \.php$, is not passed by.
         # # string; required.
         # root: "/srv/www"
 
@@ -2023,10 +2027,12 @@ upstreams:
   # # integer, 0 or more; default 4194304.
   # max_config_bytes: 4194304
 
-  # # The most connections the Admin API keeps open at once; one past it is closed as soon as it
-  # # is accepted, as is one past a client's share, a quarter of them, but for loopback clients.
-  # # Until a connection has made a request with the token (any request, without token_file), each
-  # # of its reads waits 5s at most. 16 when left out or 0.
+  # # The most connections the Admin API keeps open at once, a quarter of them kept for those that
+  # # have made a request with the token (any request, without token_file). When they are taken, a
+  # # new connection closes the oldest of those that have not, of the client holding the most, and
+  # # is closed as it is accepted only when every one has; one past a client's share, a quarter of
+  # # them, is closed too, but for loopback clients. A connection that has not is closed 5s after
+  # # it is accepted, whatever it is doing. 16 when left out or 0.
   # # integer, 0 or more; default 16.
   # max_conns: 16
 
@@ -2108,8 +2114,10 @@ upstreams:
     # # integer, 0 or more; default 64.
     # max_sessions: 64
 
-    # # The most connections the console keeps open at once; one past it is closed as soon as it is
-    # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+    # # The most connections the console keeps open at once, a quarter of them kept for those with a
+    # # login. When they are taken, a new connection closes the oldest of those without one, of the
+    # # client holding the most, and is closed as it is accepted only when every one has a login;
+    # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
     # # when left out or 0.
     # # integer, 0 or more; default 32.
     # max_conns: 32
@@ -2406,8 +2414,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
@@ -2606,8 +2616,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
@@ -2911,8 +2923,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
@@ -3311,8 +3325,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
@@ -3491,8 +3507,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32
@@ -3695,8 +3713,10 @@ upstreams:
       # # integer, 0 or more; default 64.
       # max_sessions: 64
 
-      # # The most connections the pages keep open at once; one past it is closed as soon as it is
-      # # accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32
+      # # The most connections the pages keep open at once, a quarter of them kept for those with a
+      # # login. When they are taken, a new connection closes the oldest of those without one, of the
+      # # client holding the most, and is closed as it is accepted only when every one has a login;
+      # # one past a client's share, a quarter of them, is closed too, but for loopback clients. 32
       # # when left out or 0.
       # # integer, 0 or more; default 32.
       # max_conns: 32

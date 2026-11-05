@@ -12,6 +12,8 @@ import (
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
+
+	"github.com/lesismal/fit/internal/dotfile"
 )
 
 // The bounds of what the cache remembers of request paths: how many, how
@@ -218,6 +220,12 @@ func (s *Static) resolve(name string) *lookup {
 		l.status = statusOf(err)
 		return l
 	}
+	if s.foldCase && !onDisk(s.root, name) {
+		// Not the names on disk: a request a route that matches names, by
+		// a script's extension or a protected prefix, may have missed.
+		l.status = stdhttp.StatusNotFound
+		return l
+	}
 	if info.IsDir() {
 		if !dir {
 			l.redirect = true
@@ -227,8 +235,7 @@ func (s *Static) resolve(name string) *lookup {
 			indexFull := filepath.Join(full, index)
 			if info, err = os.Stat(indexFull); err == nil && info.Mode().IsRegular() {
 				l.name, l.full, l.info = path.Join(name, index), indexFull, info
-				s.twins(l)
-				return l
+				return s.file(l)
 			}
 		}
 		if s.Browse {
@@ -244,6 +251,22 @@ func (s *Static) resolve(name string) *lookup {
 		return l
 	}
 	l.name, l.full, l.info = name, full, info
+	return s.file(l)
+}
+
+// onDisk is dotfile.OnDisk, which tests replace to stand for a file system
+// that folds case.
+var onDisk = dotfile.OnDisk
+
+// file finishes l, a file found to serve: on a root whose file system folds
+// case, refused 404 when its extension is one a fastcgi handler runs as a
+// script's, in any case, so that a script's source is not served for a
+// request a script route missed; otherwise served, with its compressed
+// twins.
+func (s *Static) file(l *lookup) *lookup {
+	if s.foldCase && dotfile.Script(l.name) {
+		return &lookup{checked: l.checked, status: stdhttp.StatusNotFound}
+	}
 	s.twins(l)
 	return l
 }

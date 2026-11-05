@@ -48,7 +48,7 @@ type RoleConsole struct {
 	SessionTimeout  Duration      `json:"session_timeout,omitempty" default:"\"30m\"" doc:"How long a login lasts without a request. 30m when left out."`
 	SessionLifetime Duration      `json:"session_lifetime,omitempty" default:"\"12h\"" doc:"How long a login lasts at most, however busy. 12h when left out."`
 	MaxSessions     int           `json:"max_sessions,omitempty" min:"0" default:"64" doc:"The most logins kept at once; one more ends the oldest. 64 when left out or 0."`
-	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the pages keep open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0."`
+	MaxConns        int           `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most connections the pages keep open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }

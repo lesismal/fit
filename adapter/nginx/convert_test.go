@@ -76,8 +76,9 @@ func TestConversions(t *testing.T) {
 					t.Errorf("%+v", out.Listeners)
 				}
 			}},
-		{name: "locations", src: server("listen 80; location {} location a b c {} location @named {} location ~~ /x {} location ~ ( {} location ~* ^/i { return 204; } location /p { location /p/q { return 204; } return 200; }"),
-			warn: []string{"location: skipped: a location needs a path", "named locations", "an unknown location modifier ~~", "Go's regular expressions do not take it"},
+		{name: "locations", src: server("listen 80; location {} location a b c {} location @named {} location ~~ /x {} location ~ ( {} location ~* ^/i { return 204; } location ~ \\.php$ { return 204; } location /p { location /p/q { return 204; } return 200; }"),
+			warn: []string{"location: skipped: a location needs a path", "named locations", "an unknown location modifier ~~", "Go's regular expressions do not take it",
+				`location ~ \.php$: matched in any case, as (?i)\.php$`},
 			check: func(t *testing.T, out outConfig) {
 				var paths []string
 				for _, r := range out.Routes {
@@ -85,7 +86,7 @@ func TestConversions(t *testing.T) {
 						paths = append(paths, strings.Join(append(r.Match.Path, r.Match.PathRegexp...), ","))
 					}
 				}
-				if !slices.Equal(paths, []string{"(?i)^/i", "/p*", "/p/q*"}) {
+				if !slices.Equal(paths, []string{"(?i)^/i", `(?i)\.php$`, "/p*", "/p/q*"}) {
 					t.Errorf("%v", paths)
 				}
 			}},

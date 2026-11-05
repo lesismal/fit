@@ -34,6 +34,14 @@
 // directory is served by its first index file, and a directory asked for
 // without a trailing slash is redirected to the path with one, as nginx and
 // Caddy do. Only GET and HEAD are served; other methods get 405.
+//
+// On a root whose file system folds case, as Windows' and macOS' do by
+// default, which is found once when the handler is provisioned, a path not
+// written as the names on disk are, or a file whose extension a fastcgi
+// handler runs as a script's, in any case, is answered 404, so that /x.PHP,
+// which a \.php$ route misses, never serves x.php's source. Both are looked
+// at with the disk, on the file pool, and kept with what the handler knows
+// of the path; a root that does not fold case costs nothing more.
 package static
 
 import (
@@ -70,7 +78,7 @@ const (
 
 // Static serves files under a root directory.
 type Static struct {
-	Root          string   `json:"root" fit:"required" doc:"The directory files are served from."`
+	Root          string   `json:"root" fit:"required" doc:"The directory files are served from. On a file system that folds case, as Windows' and macOS' do by default, a request whose path is not written as the names on disk are, or for a file whose extension a fastcgi handler's split_path names, in any case, is answered 404, so that a route matching names, as \\.php$, is not passed by."`
 	Index         []string `json:"index,omitempty" default:"[\"index.html\"]" doc:"The files that stand for a directory, tried in order; [\"index.html\"] when left out, and none for []."`
 	StripPrefix   string   `json:"strip_prefix,omitempty" doc:"A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404."`
 	MaxFileBytes  int64    `json:"max_file_bytes,omitempty" min:"0" default:"1048576" doc:"The largest file kept in memory, in bytes; 1 MiB when left out."`
@@ -95,6 +103,13 @@ type Static struct {
 	// CON.txt: paths with such a segment are refused 400, whatever dotfiles
 	// says; see dotfile.Alias.
 	refuseAliases bool
+	// foldCase says root's file system folds case (dotfile.FoldsCase), as
+	// Windows' and macOS' do by default: a request whose path is not
+	// written as the names on disk are, or for a file whose extension a
+	// fastcgi handler runs as a script's, in any case, is answered 404, so
+	// that /x.PHP, which a \.php$ route misses, does not serve x.php's
+	// source. It is looked at when the disk is, not on a fib worker.
+	foldCase      bool
 	precompressed []encoding
 	cache         cache
 	stall         time.Duration
@@ -122,6 +137,7 @@ func (s *Static) Provision(ctx *module.Context) error {
 	s.hideDotfiles = s.Dotfiles != dotfile.Allow
 	s.hideShortNames = s.hideDotfiles && dotfile.ShortNames
 	s.refuseAliases = dotfile.Aliases
+	s.foldCase = dotfile.FoldsCase(root)
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)

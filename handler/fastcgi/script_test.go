@@ -875,15 +875,15 @@ func TestDotfilesShortNames(t *testing.T) {
 		t.Errorf("GET /index.php/GIT~1: %d %v", rec.Response.StatusCode, rec.Response.Header)
 	}
 	h.TryFiles = []string{"{path}", "/index.php"}
-	if s, _, ok := h.try("/GIT~1/x.php"); !ok || s != "/index.php" {
-		t.Errorf("try under deny: %q %v", s, ok)
+	if s, _, st := h.try("/GIT~1/x.php"); st != 0 || s != "/index.php" {
+		t.Errorf("try under deny: %q %v", s, st)
 	}
 	if a := load(`, "dotfiles": "allow"`); a.hideShortNames {
 		t.Error("allow hides short names")
 	}
 	h.hideDotfiles, h.hideShortNames = false, false
-	if s, _, ok := h.try("/GIT~1/x.php"); !ok || s != "/GIT~1/x.php" {
-		t.Errorf("try under allow: %q %v", s, ok)
+	if s, _, st := h.try("/GIT~1/x.php"); st != 0 || s != "/GIT~1/x.php" {
+		t.Errorf("try under allow: %q %v", s, st)
 	}
 	if dotfile.ShortNames {
 		if _, err := loadHandler(t, `{"address": "127.0.0.1:9000", "root": `+strconv.Quote(root)+`, "try_files": ["{path}", "/GIT~1/index.php"]}`, nil); err == nil ||
@@ -953,13 +953,13 @@ func TestWindowsAliases(t *testing.T) {
 	}
 	h.TryFiles = []string{"{path}", "/index.php"}
 	for _, p := range []string{"/a.php::$DATA", "/a.php.", "/a.php ", "/sub./y.php", "/nul.php"} {
-		if s, _, ok := h.try(p); !ok || s != "/index.php" {
-			t.Errorf("try %q: %q %v", p, s, ok)
+		if s, _, st := h.try(p); st != 0 || s != "/index.php" {
+			t.Errorf("try %q: %q %v", p, s, st)
 		}
 	}
 	h.TryFiles = []string{"{path}.", "{path}::$DATA", "/index.php"}
-	if s, _, ok := h.try("/a.php"); !ok || s != "/index.php" {
-		t.Errorf("try {path}. for /a.php: %q %v", s, ok)
+	if s, _, st := h.try("/a.php"); st != 0 || s != "/index.php" {
+		t.Errorf("try {path}. for /a.php: %q %v", s, st)
 	}
 	if dotfile.Aliases {
 		for _, extra := range []string{`, "index": "index.php."`, `, "index": "CON.php"`, `, "try_files": ["{path}::$DATA"]`, `, "try_files": ["{path}", "/NUL.php"]`} {
@@ -968,5 +968,59 @@ func TestWindowsAliases(t *testing.T) {
 				t.Errorf("%s: %v", extra, err)
 			}
 		}
+	}
+}
+
+// TestBackslash checks that a script whose path holds a backslash, which
+// Windows takes as a separator, is answered 400 on every system, whatever
+// dotfiles says, with try_files or without, and never reaches the
+// application: /a\.git\x.php would run a\.git\x.php there, and a\GIT~1\ or
+// a\CON.php pass the checks that split on / alone. A try_files entry with
+// one is refused when the config is loaded.
+func TestBackslash(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"index.php", "a/.git/x.php"} {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, f), []byte("<?php"), 0o644)
+	}
+	app := app(t, "tcp", "127.0.0.1:0")
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	load := func(extra string) *FastCGI {
+		h, err := loadHandler(t, `{"address": "`+app.Addr().String()+`", "root": `+strconv.Quote(root)+extra+`}`, &module.Env{Engine: engine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(h.Cleanup)
+		return h
+	}
+	handlers := map[string]*FastCGI{
+		"deny":            load(""),
+		"allow":           load(`, "dotfiles": "allow"`),
+		"try_files":       load(`, "try_files": ["{path}", "{path}/index.php", "/index.php"]`),
+		"try_files allow": load(`, "dotfiles": "allow", "try_files": ["{path}", "/index.php"]`),
+	}
+	before := app.accepted.Load()
+	for _, target := range []string{"/a%5C.git%5Cx.php", "/a%5CGIT~1%5C", "/a%5CCON.php", "/a%5Cb/x.php", "/x.php%00"} {
+		for name, h := range handlers {
+			if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", target, nil)); rec.Response.StatusCode != 400 {
+				t.Errorf("%s GET %s: %d, want 400", name, target, rec.Response.StatusCode)
+			}
+		}
+	}
+	if app.accepted.Load() != before {
+		t.Error("a request with a backslash reached the application")
+	}
+	// The path info after a script is the application's.
+	if rec := fibtest.ServeRequest(handlers["deny"], httptest.NewRequest("GET", "/index.php/a%5Cb", nil)); rec.Response.StatusCode != 200 ||
+		rec.Response.Header.Get("X-Script") != "/index.php" {
+		t.Errorf("GET /index.php/a%%5Cb: %d %v", rec.Response.StatusCode, rec.Response.Header)
+	}
+	if _, err := loadHandler(t, `{"address": "127.0.0.1:9000", "root": `+strconv.Quote(root)+`, "try_files": ["{path}", "/a\\b.php"]}`, nil); err == nil ||
+		!strings.Contains(err.Error(), "backslash") {
+		t.Errorf("try_files with a backslash: %v", err)
 	}
 }

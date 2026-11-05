@@ -15,7 +15,10 @@
 // A script whose path has a segment that starts with a dot, as
 // /.git/hooks/x.php or /.env, is not run: it is answered 404, and try_files
 // passes over it, but for /.well-known/ under the root, unless dotfiles is
-// allow. Its path info is the application's to read, dots and all.
+// allow. A script whose path has a ".." segment, a NUL or a backslash, which
+// Windows takes as a separator, is answered 400 on every system, with
+// try_files or without. Its path info is the application's to read, dots
+// and all.
 package fastcgi
 
 import (
@@ -68,7 +71,7 @@ const (
 type FastCGI struct {
 	Address               string            `json:"address" fit:"required" doc:"Where the application listens: a host and port, as \"127.0.0.1:9000\", or \"unix/\" and a socket's path, as \"unix//run/php/php-fpm.sock\"."`
 	Root                  string            `json:"root" fit:"required" doc:"The document root, which SCRIPT_FILENAME, DOCUMENT_ROOT and PATH_TRANSLATED are made from, as the application sees it."`
-	SplitPath             []string          `json:"split_path,omitempty" default:"[\".php\"]" doc:"What ends a script's name in a path, the rest being PATH_INFO: \"/index.php/a/b\" runs /index.php with PATH_INFO /a/b. [\".php\"] when left out."`
+	SplitPath             []string          `json:"split_path,omitempty" default:"[\".php\"]" doc:"What ends a script's name in a path, the rest being PATH_INFO: \"/index.php/a/b\" runs /index.php with PATH_INFO /a/b. A static handler on a file system that folds case serves no file with one of these extensions, in any case. [\".php\"] when left out."`
 	Index                 string            `json:"index,omitempty" default:"\"index.php\"" doc:"The script a path ending in / runs; index.php when left out."`
 	TryFiles              []string          `json:"try_files,omitempty" doc:"Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; [\"{path}\", \"{path}/index.php\", \"/index.php\"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is."`
 	Dotfiles              string            `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. On Windows deny also refuses a script with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. The path info after a script is not looked at. deny when left out."`
@@ -117,6 +120,9 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 	for i, s := range h.SplitPath {
 		h.SplitPath[i] = strings.ToLower(s)
 	}
+	// A static handler on a root this one may share, on a file system
+	// that folds case, serves none of them, in any case.
+	dotfile.AddScripts(h.SplitPath)
 	if h.Index == "" {
 		h.Index = "index.php"
 	}
@@ -134,10 +140,13 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
 		}
 		script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x"))
+		if unsafe, _ := dotfile.Scan(script); unsafe {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a \"..\" segment, a NUL or a backslash, which are refused", t)
+		}
 		if h.refuseAliases && dotfile.Alias(script) {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q names no script on Windows, which opens another file or a device for it", t)
 		}
-		if h.hides(script) {
+		if h.check(script) == stdhttp.StatusNotFound {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a segment starting with a dot, or on Windows one shaped as an 8.3 short name, which dotfiles deny hides; set dotfiles to allow to run it", t)
 		}
 	}
@@ -208,12 +217,8 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	x := &exchange{h: h, c: c}
 	if len(h.TryFiles) == 0 {
 		x.script, x.pathInfo = h.split(c.Request.URL.Path)
-		if h.refuseAliases && dotfile.Alias(x.script) {
-			x.answer(stdhttp.StatusBadRequest)
-			return
-		}
-		if h.hides(x.script) {
-			x.answer(stdhttp.StatusNotFound)
+		if status := h.check(x.script); status != 0 {
+			x.answer(status)
 			return
 		}
 		x.start()
@@ -221,9 +226,9 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	}
 	reqPath := c.Request.URL.Path
 	if !lookupPool().Submit(func() {
-		script, info, ok := h.try(reqPath)
-		if !ok {
-			x.answer(stdhttp.StatusNotFound)
+		script, info, status := h.try(reqPath)
+		if status != 0 {
+			x.answer(status)
 			return
 		}
 		x.script, x.pathInfo = script, info
@@ -233,10 +238,22 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	}
 }
 
-// hides reports whether the handler refuses to run script: a dotfile, or on
-// Windows what may be one's short name, under dotfiles deny.
-func (h *FastCGI) hides(script string) bool {
-	return h.hideDotfiles && dotfile.Hidden(script) || h.hideShortNames && dotfile.HasShortName(script)
+// check returns the status the handler refuses to run script with, in one
+// look at it (dotfile.Scan), or 0 when it may run: 400 for one that could
+// name a file outside root, or a different file on some systems, a ".."
+// segment, a NUL or a backslash, which Windows takes as a separator, on
+// every system, or on Windows a segment it opens as another file or a
+// device (x.php::$DATA, x.php., CON.php); and 404 for a dotfile under
+// dotfiles deny, or on Windows for what may be a dotfile's 8.3 short name.
+func (h *FastCGI) check(script string) int {
+	unsafe, hidden := dotfile.Scan(script)
+	switch {
+	case unsafe, h.refuseAliases && dotfile.Alias(script):
+		return stdhttp.StatusBadRequest
+	case hidden && h.hideDotfiles, h.hideShortNames && dotfile.HasShortName(script):
+		return stdhttp.StatusNotFound
+	}
+	return 0
 }
 
 // split splits a path into the script it names and its path info.
@@ -262,24 +279,30 @@ func (h *FastCGI) split(p string) (script, info string) {
 }
 
 // try returns the script of the first of try_files whose script is a file
-// under root, and no dotfile dotfiles deny hides, nor on Windows a name it
-// opens as another file or a device. It runs on the lookup pool.
-func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
+// under root and one check lets run, and 0; or the status to answer: 400
+// for a candidate with a backslash or a NUL, which only the request's path
+// can bring, on every system; 404 when none is found. Candidates check
+// refuses otherwise, dotfiles under deny, and on Windows names it opens as
+// another file or a device, are passed over. It runs on the lookup pool.
+func (h *FastCGI) try(reqPath string) (script, info string, status int) {
 	for _, t := range h.TryFiles {
 		candidate := path.Clean("/" + strings.ReplaceAll(t, "{path}", reqPath))
 		if strings.HasSuffix(t, "/") || strings.HasSuffix(reqPath, "/") && strings.HasSuffix(t, "{path}") {
 			candidate += "/"
 		}
 		s, i := h.split(candidate)
-		if h.hides(s) || h.refuseAliases && dotfile.Alias(s) {
+		if unsafe, _ := dotfile.Scan(s); unsafe {
+			return "", "", stdhttp.StatusBadRequest
+		}
+		if h.check(s) != 0 {
 			continue
 		}
 		fi, err := os.Stat(filepath.Join(h.Root, filepath.FromSlash(path.Clean(s))))
 		if err == nil && fi.Mode().IsRegular() {
-			return s, i, true
+			return s, i, 0
 		}
 	}
-	return "", "", false
+	return "", "", stdhttp.StatusNotFound
 }
 
 // exchange is a request on its way through the application.

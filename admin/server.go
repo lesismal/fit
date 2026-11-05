@@ -162,10 +162,10 @@ func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(fo
 		}
 	}
 	s.loopback = network == "tcp" && s.token == nil
-	s.ln = newLimitListener(ln, a.Conns(), login.NewPeers(a.Conns()), unauthTimeout)
+	s.ln = newLimitListener(ln, login.NewSlots(a.Conns()), unauthTimeout)
 	if certs != nil {
 		// Over the limitListener, so that a connection is counted, and its
-		// reads bounded, before its handshake.
+		// life bounded, before its handshake.
 		s.ln = tls.NewListener(s.ln, certs.serverConfig())
 	}
 
@@ -294,9 +294,15 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "the Host field must name a loopback host")
 			return
 		}
-		if s.token == nil || valid {
-			if c, ok := r.Context().Value(connKey{}).(*limitConn); ok {
+		if c, ok := r.Context().Value(connKey{}).(*limitConn); ok {
+			switch {
+			case s.token == nil || valid:
 				c.authenticate()
+			case !c.authenticated():
+				// A dashboard file asked for without the token: nothing
+				// more is taken on the connection, so that a client cannot
+				// queue requests on it to hold it.
+				w.Header().Set("Connection", "close")
 			}
 		}
 		next.ServeHTTP(w, r)
@@ -603,18 +609,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_, _ = w.Write(append(data, '\n'))
 }
 
-// limitListener closes connections accepted past its limit at once, rather
-// than letting them queue, and those of a client past its share of them
+// limitListener counts the connections it accepts (login.Slots): past its
+// limit, or past the share of it unauthenticated connections may hold, a
+// new one closes the oldest unauthenticated one and takes its place; it is
+// itself closed at once, rather than left to queue, only when every
+// connection has authenticated, or when its client already holds its share
 // (login.Peers).
 type limitListener struct {
 	net.Listener
-	slots  chan struct{}
-	peers  *login.Peers
-	unauth time.Duration // how long after its accept a connection reads before it is authenticated
+	slots  *login.Slots
+	unauth time.Duration // how long after its accept a connection is kept before it is authenticated
 }
 
-func newLimitListener(ln net.Listener, n int, peers *login.Peers, unauth time.Duration) *limitListener {
-	return &limitListener{Listener: ln, slots: make(chan struct{}, n), peers: peers, unauth: unauth}
+func newLimitListener(ln net.Listener, slots *login.Slots, unauth time.Duration) *limitListener {
+	return &limitListener{Listener: ln, slots: slots, unauth: unauth}
 }
 
 func (l *limitListener) Accept() (net.Conn, error) {
@@ -627,18 +635,17 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
 			ip = a.AddrPort().Addr()
 		}
-		select {
-		case l.slots <- struct{}{}:
-		default:
+		lc := &limitConn{Conn: c, until: time.Now().Add(l.unauth)}
+		lc.mu.Lock()
+		lc.slot = l.slots.Open(ip, func() { _ = lc.Close() })
+		if lc.slot == nil {
+			lc.mu.Unlock()
 			_ = c.Close()
 			continue
 		}
-		if !l.peers.Open(ip) {
-			<-l.slots
-			_ = c.Close()
-			continue
-		}
-		return &limitConn{Conn: c, until: time.Now().Add(l.unauth), release: func() { l.peers.Close(ip); <-l.slots }}, nil
+		lc.timer = time.AfterFunc(l.unauth, lc.expire)
+		lc.mu.Unlock()
+		return lc, nil
 	}
 }
 
@@ -646,45 +653,92 @@ func (l *limitListener) Accept() (net.Conn, error) {
 type connKey struct{}
 
 // limitConn is a connection the limitListener counts. Until it has made an
-// authenticated request, no read deadline net/http sets on it lies past
-// until, unauth after it was accepted: requests without the token, however
-// often they come, do not keep it open past then.
+// authenticated request, it is closed at until, unauth after it was
+// accepted, whatever it is doing then, and no read or write deadline
+// net/http sets on it lies past until: neither requests without the token,
+// however often they come, nor answers read slowly keep it open past then.
 type limitConn struct {
 	net.Conn
-	once    sync.Once
-	release func()
-	until   time.Time
+	once  sync.Once
+	until time.Time
 
 	mu     sync.Mutex
+	slot   *login.Slot
 	authed bool
-	want   time.Time // the read deadline net/http last set
+	closed bool
+	timer  *time.Timer // closes the connection at until unless it is authed
+	// wantRead and wantWrite are the deadlines net/http last set.
+	wantRead, wantWrite time.Time
 }
 
 func (c *limitConn) Close() error {
+	c.mu.Lock()
+	c.closed = true
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+	slot := c.slot
+	c.mu.Unlock()
 	err := c.Conn.Close()
-	c.once.Do(c.release)
+	c.once.Do(slot.Release)
 	return err
+}
+
+// expire closes the connection unless it has authenticated: its time is up.
+func (c *limitConn) expire() {
+	if !c.authenticated() {
+		_ = c.Close()
+	}
+}
+
+// bound returns t, or until when the connection has not authenticated and
+// t lies past it or is none; c.mu is held.
+func (c *limitConn) bound(t time.Time) time.Time {
+	if !c.authed && (t.IsZero() || t.After(c.until)) {
+		return c.until
+	}
+	return t
 }
 
 func (c *limitConn) SetReadDeadline(t time.Time) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.want = t
-	if !c.authed && (t.IsZero() || t.After(c.until)) {
-		t = c.until
-	}
-	return c.Conn.SetReadDeadline(t)
+	c.wantRead = t
+	return c.Conn.SetReadDeadline(c.bound(t))
+}
+
+func (c *limitConn) SetWriteDeadline(t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.wantWrite = t
+	return c.Conn.SetWriteDeadline(c.bound(t))
+}
+
+func (c *limitConn) SetDeadline(t time.Time) error {
+	return errors.Join(c.SetReadDeadline(t), c.SetWriteDeadline(t))
+}
+
+// authenticated reports whether the connection has made an authenticated
+// request.
+func (c *limitConn) authenticated() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.authed
 }
 
 // authenticate marks the connection as having made an authenticated
-// request: the deadlines net/http sets apply as they are from then on,
-// beginning with the one it set last.
+// request: it is no longer closed at until, nor for a newer connection, and
+// the deadlines net/http sets apply as they are from then on, beginning
+// with those it set last.
 func (c *limitConn) authenticate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.authed {
+	if c.authed || c.closed {
 		return
 	}
 	c.authed = true
-	_ = c.Conn.SetReadDeadline(c.want)
+	c.timer.Stop()
+	c.slot.Authenticate()
+	_ = c.Conn.SetReadDeadline(c.wantRead)
+	_ = c.Conn.SetWriteDeadline(c.wantWrite)
 }

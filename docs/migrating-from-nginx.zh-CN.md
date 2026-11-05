@@ -30,7 +30,7 @@ fit validate -c fit.conf
 | `server_name a.example *.example;` | `site a.example *.example { ... }`，或路由的 `match.host`；`*.` 代表一个标签，`**.` 代表一个或多个 |
 | `location = /x` | `match.path: ["/x"]` |
 | `location /x/` | `match.path: ["/x/*"]` |
-| `location ~ \.php$` | `match.path_regexp: ["\\.php$"]` |
+| `location ~ \.php$` | `match.path_regexp: ["(?i)\\.php$"]`：PHP 脚本的路由不区分大小写，见下文；转换器把含 `\.php` 的 `~` 正则这样写，并给出提示 |
 | `proxy_pass http://app;` 与 `upstream app { server ...; }` | `handler proxy { upstream app }`，以及 `upstream app { addresses ... }` |
 | `least_conn;`、`ip_hash;`、`hash $cookie_x;` | upstream 的 `load_balancing`：`least_conn`、`ip_hash`、带 `hash_key` 的 `cookie_hash` |
 | `server ... weight=3 max_fails=2 fail_timeout=10s;` | `weights`、`max_fails`、`fail_timeout` |
@@ -70,5 +70,10 @@ fit validate -c fit.conf
   upstream 的字段修改。
 - **不提供点文件。** `static` 和 `fastcgi` 处理器对含有以点开头的段的路径（如 `/.git/config`、`/.env` 或 `/.htpasswd`）
   返回 404，相当于 `location ~ /\. { deny all; }`，但 `/.well-known/` 除外；`dotfiles: allow` 会像 nginx 默认那样提供它们。在 Windows 上，形如 8.3 短文件名的段（如 NTFS 可能给 `.git` 的 `GIT~1`）也返回 404；无论 `dotfiles` 如何设置，Windows 会当作另一个文件或设备打开的段都返回 400：数据流（`x.php::$DATA`）、以点或空格结尾的名称（`x.php.`）以及保留设备名（`NUL`、`CON.php`）。
+  在所有系统上，`fastcgi` 对含反斜杠的脚本路径返回 400（Windows 把反斜杠当作分隔符，`/a%5C.git%5Cx.php` 会运行 `a\.git\x.php`）。
+- **扩展名的大小写。** 在不区分大小写的文件系统上（Windows 的 NTFS、macOS 的 APFS 默认如此），区分大小写的 `\.php$`
+  路由匹配不到 `/x.PHP`，而文件系统会为它打开 `x.php`。因此 PHP 路由写成 `(?i)\.php$`；同一 root 上的 `static`
+  另外对写法与磁盘上名称不一致的路径，以及扩展名（不论大小写）为 `fastcgi` 的 `split_path` 所列扩展名的文件返回 404，
+  从不以文本返回脚本源码。
 - **不转换**：Lua、`njs`、`map`、`geo`、`split_clients`、`mirror`（fit 的 proxy 有自己的 `mirror`）、`sub_filter`、
   邮件代理以及 nginx 的各种模块。WebAssembly 插件（`wasm`）和用 `fit build` 编入的模块取代这些扩展。

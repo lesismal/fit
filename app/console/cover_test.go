@@ -367,7 +367,7 @@ func TestLimitHandlerCloses(t *testing.T) {
 			t.Errorf("%s: the connection is open", name)
 		}
 		conn.Close()
-		if n := l.n.Load(); n != 0 {
+		if n := l.open(); n != 0 {
 			t.Errorf("%s: %d connections counted", name, n)
 		}
 		_ = engine.RemoveBinding(i)
@@ -579,7 +579,7 @@ func TestLimitHandlerPeerShare(t *testing.T) {
 		var ne net.Error
 		return err != nil && !(errors.As(err, &ne) && ne.Timeout())
 	}
-	share := l.peers.Share()
+	share := l.slots.Peers().Share()
 	if share != 2 {
 		t.Fatalf("share %d, want 2", share)
 	}
@@ -606,5 +606,75 @@ func TestLimitHandlerPeerShare(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the client is not served once one of its connections went")
 		}
+	}
+}
+
+// TestLimitHandlerEvicts: with its connections taken, a console closes the
+// oldest unauthenticated one for a new connection, rather than refuse it;
+// an authenticated one is kept, and a new one is refused only when every
+// connection has authenticated.
+func TestLimitHandlerEvicts(t *testing.T) {
+	engine := newEngine(t)
+	l := newLimitHandler(plainHandler{}, 4, 0) // 3 for unauthenticated ones
+	i, err := engine.AddBinding(fib.Binding{Addr: "127.0.0.1:0", Handler: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrs, err := engine.BindingAddrs(i)
+	if err != nil || len(addrs) == 0 {
+		t.Fatal(addrs, err)
+	}
+	// dial opens a connection and waits until the console holds want.
+	dial := func(want int) net.Conn {
+		conn, err := net.DialTimeout("tcp", addrs[0].String(), 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		deadline := time.Now().Add(5 * time.Second)
+		for l.open() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d connections open, want %d", l.open(), want)
+			}
+			time.Sleep(time.Millisecond)
+		}
+		return conn
+	}
+	closed := func(conn net.Conn) bool {
+		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_, err := conn.Read(make([]byte, 1))
+		var ne net.Error
+		return err != nil && !(errors.As(err, &ne) && ne.Timeout())
+	}
+	authenticateAll := func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		for _, cc := range l.conns {
+			cc.slot.Authenticate()
+		}
+	}
+	c1 := dial(1)
+	authenticateAll()
+	c2 := dial(2)
+	c3 := dial(3)
+	c4 := dial(4)
+	// Full, with 3 unauthenticated: the oldest of them, c2, goes.
+	conn, err := net.DialTimeout("tcp", addrs[0].String(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if !closed(c2) || closed(c1) || closed(c3) || closed(c4) || closed(conn) {
+		t.Fatal("not the oldest unauthenticated connection was closed")
+	}
+	authenticateAll()
+	// Every one authenticated: a new one is closed as it opens.
+	last, err := net.DialTimeout("tcp", addrs[0].String(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer last.Close()
+	if !closed(last) {
+		t.Fatal("a connection past max_conns, all authenticated, is open")
 	}
 }

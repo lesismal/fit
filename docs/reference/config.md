@@ -1237,6 +1237,14 @@ a client certificate. It is off when `admin` is left out. Read when fit starts. 
 where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
 off by default, and a Unix socket has no paths.
 
+A connection that has not made a request with the token (with no `token_file`, any request) is
+closed 5s after it is accepted, whatever it is doing, reading a request or writing an answer;
+the dashboard's files it may fetch are answered with `Connection: close`, so that requests queued
+on it do not hold it. `max_conns` keeps a quarter of the connections for those that have; when
+they are taken, a new connection closes the oldest unauthenticated one of the client holding the
+most of them, rather than being refused, so that clients that only reconnect cannot keep an admin
+out.
+
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
 When the store does not exist yet, the rest of the file is its first content. `fit store export`
@@ -1321,7 +1329,7 @@ In JSON:
 | `client_ca_file` | string |  | A PEM file with the CAs that clients' certificates must chain to: with it, every client must present a valid certificate, besides the token, before it is heard. Needs cert_file and key_file; read again when it changes, as they are. |
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
-| `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. Until a connection has made a request with the token (any request, without token_file), each of its reads waits 5s at most. 16 when left out or 0. |
+| `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once, a quarter of them kept for those that have made a request with the token (any request, without token_file). When they are taken, a new connection closes the oldest of those that have not, of the client holding the most, and is closed as it is accepted only when every one has; one past a client's share, a quarter of them, is closed too, but for loopback clients. A connection that has not is closed 5s after it is accepted, whatever it is doing. 16 when left out or 0. |
 | `disable_dashboard` | boolean |  | Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false. |
 | `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
@@ -1351,7 +1359,7 @@ In JSON:
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
-| `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most connections the console keeps open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0. |
 
 <a id="config-consoleuser"></a>
 
@@ -1747,7 +1755,7 @@ Also at `llm.node.console`, `llm.proxy.console`, `tunnel.hub.console`, `tunnel.n
 | `session_timeout` | duration | `"30m"` | How long a login lasts without a request. 30m when left out. |
 | `session_lifetime` | duration | `"12h"` | How long a login lasts at most, however busy. 12h when left out. |
 | `max_sessions` | integer, 0 or more | `64` | The most logins kept at once; one more ends the oldest. 64 when left out or 0. |
-| `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once; one past it is closed as soon as it is accepted, as is one past a client's share, a quarter of them, but for loopback clients. 32 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most connections the pages keep open at once, a quarter of them kept for those with a login. When they are taken, a new connection closes the oldest of those without one, of the client holding the most, and is closed as it is accepted only when every one has a login; one past a client's share, a quarter of them, is closed too, but for loopback clients. 32 when left out or 0. |
 
 <a id="config-llmlisten"></a>
 
@@ -3047,7 +3055,11 @@ or with another character no Windows name has; one ending in a dot or a space, w
 strips (`x.php.`); and a reserved device name, with or without an extension (`CON`, `PRN`, `AUX`,
 `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, `CONIN$`, `CONOUT$`, as `nul.php`). The path info after
 a script is not looked at. An `index` or a `try_files` entry of that kind is refused when the
-config is loaded there.
+config is loaded there. On every system, a script whose path has a backslash, which Windows takes
+as a separator (`/a%5C.git%5Cx.php` would run `a\.git\x.php` there), or a NUL, is answered `400`,
+with try_files or without, and a `try_files` entry with one is refused when the config is loaded.
+A `static` handler on a file system that folds case serves no file with a `split_path` extension,
+in any case, so a route matching `(?i)\.php$` is all a shared root needs.
 
 In a .conf file:
 
@@ -3096,7 +3108,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `address` | string |  | Required. Where the application listens: a host and port, as "127.0.0.1:9000", or "unix/" and a socket's path, as "unix//run/php/php-fpm.sock". |
 | `root` | string |  | Required. The document root, which SCRIPT_FILENAME, DOCUMENT_ROOT and PATH_TRANSLATED are made from, as the application sees it. |
-| `split_path` | list of string | `[".php"]` | What ends a script's name in a path, the rest being PATH_INFO: "/index.php/a/b" runs /index.php with PATH_INFO /a/b. [".php"] when left out. |
+| `split_path` | list of string | `[".php"]` | What ends a script's name in a path, the rest being PATH_INFO: "/index.php/a/b" runs /index.php with PATH_INFO /a/b. A static handler on a file system that folds case serves no file with one of these extensions, in any case. [".php"] when left out. |
 | `index` | string | `"index.php"` | The script a path ending in / runs; index.php when left out. |
 | `try_files` | list of string |  | Paths tried in turn, as nginx's try_files, for the script to run: {path} stands for the request's path, and the first whose script exists under root runs; ["{path}", "{path}/index.php", "/index.php"] sends what is no script of its own to the front controller, as most PHP applications want. Looked up on a pool of goroutines of its own. Left out, the path runs as it is. |
 | `dotfiles` | string: `deny`, `allow` | `"deny"` | Whether scripts whose paths have a segment starting with a dot, as /.git/x.php or /.env, run: deny answers a request for one 404, and try_files passes over it, but /.well-known/ under the root; allow runs them as other scripts. On Windows deny also refuses a script with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. The path info after a script is not looked at. deny when left out. |
@@ -3733,6 +3745,15 @@ content type or a precompressed twin chosen by the extension cannot be sidestepp
 file another way. An `index` or a `try_files` entry of that kind is refused when the config is
 loaded there.
 
+On a file system that folds case, as Windows' NTFS and macOS' APFS do by default, a route matching
+`\.php$` misses `/x.PHP`, which opens `x.php`. There, a request whose path is not written as the
+names on disk are, letter case and all (and, on Windows, not an 8.3 short name), is answered
+`404`, and so is a file whose extension a `fastcgi` handler's `split_path` names, in any case:
+`static` never serves a script's source on a root it shares with `fastcgi`. Whether `root` folds
+case is found once, when the config is loaded, and the names are checked only when the disk is
+looked at, so a request answered from what the handler knows costs nothing more; a file system
+that does not fold case costs nothing at all.
+
 In a .conf file:
 
 ```fit
@@ -3780,7 +3801,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `root` | string |  | Required. The directory files are served from. |
+| `root` | string |  | Required. The directory files are served from. On a file system that folds case, as Windows' and macOS' do by default, a request whose path is not written as the names on disk are, or for a file whose extension a fastcgi handler's split_path names, in any case, is answered 404, so that a route matching names, as \.php$, is not passed by. |
 | `index` | list of string | `["index.html"]` | The files that stand for a directory, tried in order; ["index.html"] when left out, and none for []. |
 | `strip_prefix` | string |  | A prefix removed from the request path before it is looked up under the root; a request whose path lacks it gets 404. |
 | `max_file_bytes` | integer, 0 or more | `1048576` | The largest file kept in memory, in bytes; 1 MiB when left out. |

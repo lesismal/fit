@@ -13,6 +13,14 @@ a client certificate. It is off when `admin` is left out. Read when fit starts. 
 where the kernel offers it (Linux 5.6+, with `net.mptcp.enabled`), falling back to plain TCP;
 off by default, and a Unix socket has no paths.
 
+A connection that has not made a request with the token (with no `token_file`, any request) is
+closed 5s after it is accepted, whatever it is doing, reading a request or writing an answer;
+the dashboard's files it may fetch are answered with `Connection: close`, so that requests queued
+on it do not hold it. `max_conns` keeps a quarter of the connections for those that have; when
+they are taken, a new connection closes the oldest unauthenticated one of the client holding the
+most of them, rather than being refused, so that clients that only reconnect cannot keep an admin
+out.
+
 `admin.store` keeps the config encrypted in a file of its own, the store: the file fit is started
 with then holds `admin`, and the store the rest, which fit runs from and writes on every change.
 When the store does not exist yet, the rest of the file is its first content. `fit store export`

@@ -693,11 +693,13 @@ func (c *Console) authenticated(ctx *fibhttp.Context, valid bool) {
 	if valid {
 		_ = ctx.SetIdleTimeout(c.idle)
 		if cc != nil {
-			cc.authed.Store(true)
+			// No longer closed unauthIdle after it opened, nor for a newer
+			// connection.
+			cc.slot.Authenticate()
 		}
 		return
 	}
-	if cc != nil && cc.authed.CompareAndSwap(true, false) {
+	if cc != nil && cc.slot.Unauthenticate() {
 		_ = ctx.SetIdleTimeout(c.unauthIdle)
 		cc.expire(c.unauthIdle)
 	}
@@ -749,15 +751,16 @@ func (c *Console) serveFile(ctx *fibhttp.Context, p string) {
 	_ = Write(ctx, stdhttp.StatusOK, f.contentType, f.data)
 }
 
-// limitHandler closes the connections past max as they open, and those of
-// a client past its share of them (login.Peers); closes one that has not
-// been authenticated unauth after it opened, when unauth is above 0; and
-// closes every one it has open when the console stops.
+// limitHandler counts the connections it opens (login.Slots): past max, or
+// past the share of it unauthenticated connections may hold, a new one
+// closes an unauthenticated one and takes its place, and is closed as it
+// opens only when every connection has authenticated, or when its client
+// already holds its share (login.Peers). It closes one that has not been
+// authenticated unauth after it opened, when unauth is above 0, and every
+// one it has open when the console stops.
 type limitHandler struct {
 	fib.Handler
-	max    int64
-	n      atomic.Int64
-	peers  *login.Peers
+	slots  *login.Slots
 	peer   func(*fib.Connection) netip.Addr // the client's address; tests replace it
 	unauth time.Duration
 
@@ -768,12 +771,12 @@ type limitHandler struct {
 
 // consoleConn is what a limitHandler keeps of one of its connections.
 type consoleConn struct {
-	ip netip.Addr
-	// authed is set while the connection's last request with a session,
-	// or its login, had a valid one (Console.authenticated).
-	authed atomic.Bool
-	// timer closes the connection unless it is authed by then; nil when
-	// the limitHandler's unauth is 0.
+	// slot is the connection's count; it is authenticated while the
+	// connection's last request with a session, or its login, had a valid
+	// one (Console.authenticated).
+	slot *login.Slot
+	// timer closes the connection unless it is authenticated by then; nil
+	// when the limitHandler's unauth is 0.
 	timer *time.Timer
 }
 
@@ -786,7 +789,7 @@ func (cc *consoleConn) expire(d time.Duration) {
 }
 
 func newLimitHandler(h fib.Handler, max int, unauth time.Duration) *limitHandler {
-	return &limitHandler{Handler: h, max: int64(max), peers: login.NewPeers(max), conns: map[*fib.Connection]*consoleConn{}, unauth: unauth,
+	return &limitHandler{Handler: h, slots: login.NewSlots(max), conns: map[*fib.Connection]*consoleConn{}, unauth: unauth,
 		peer: func(c *fib.Connection) netip.Addr { return c.RemoteAddrPort().Addr() }}
 }
 
@@ -801,30 +804,32 @@ func (l *limitHandler) conn(c *fib.Connection) *consoleConn {
 	return l.conns[c]
 }
 
+// open reports how many connections l holds open.
+func (l *limitHandler) open() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.conns)
+}
+
 func (l *limitHandler) OnOpen(c *fib.Connection) {
-	if l.n.Add(1) > l.max {
-		l.n.Add(-1)
-		_ = c.Close()
-		return
-	}
-	ip := l.peer(c)
-	if !l.peers.Open(ip) {
-		l.n.Add(-1)
+	// Not under l.mu: the connection closed for this one may be closed at
+	// once.
+	slot := l.slots.Open(l.peer(c), func() { _ = c.Close() })
+	if slot == nil {
 		_ = c.Close()
 		return
 	}
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
-		l.peers.Close(ip)
-		l.n.Add(-1)
+		slot.Release()
 		_ = c.Close()
 		return
 	}
-	cc := &consoleConn{ip: ip}
+	cc := &consoleConn{slot: slot}
 	if l.unauth > 0 {
 		cc.timer = time.AfterFunc(l.unauth, func() {
-			if !cc.authed.Load() {
+			if !slot.Authenticated() {
 				_ = c.Close()
 			}
 		})
@@ -843,8 +848,7 @@ func (l *limitHandler) OnClose(c *fib.Connection, err error) {
 		if cc.timer != nil {
 			cc.timer.Stop()
 		}
-		l.peers.Close(cc.ip)
-		l.n.Add(-1)
+		cc.slot.Release()
 		l.Handler.OnClose(c, err)
 	}
 }

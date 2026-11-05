@@ -597,8 +597,15 @@ func (c *converter) location(d *directive, parent *settings, info *serverInfo, o
 		}
 	case "~", "~*":
 		re := p
-		if mod == "~*" {
+		switch {
+		case mod == "~*":
 			re = "(?i)" + re
+		case strings.Contains(re, `\.php`):
+			// A file system that folds case opens x.php for /x.PHP, which
+			// a case-sensitive route misses; a static handler beside it
+			// would serve the script's source.
+			re = "(?i)" + re
+			c.warn(d.line, "location ~ %s: matched in any case, as (?i)%s, since a file system that folds case opens x.php for /x.PHP", p, p)
 		}
 		if _, err := regexp.Compile(re); err != nil {
 			c.warn(d.line, "location %s %s: skipped: Go's regular expressions do not take it: %v", mod, p, err)

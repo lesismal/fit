@@ -35,7 +35,7 @@ with the tables below.
 | `server_name a.example *.example;` | `site a.example *.example { ... }`, or a route's `match.host`; `*.` stands for one label, `**.` for one or more |
 | `location = /x` | `match.path: ["/x"]` |
 | `location /x/` | `match.path: ["/x/*"]` |
-| `location ~ \.php$` | `match.path_regexp: ["\\.php$"]` |
+| `location ~ \.php$` | `match.path_regexp: ["(?i)\\.php$"]`: a PHP route matches in any case, as below; the converter writes a `~` regexp with `\.php` so, and says so |
 | `proxy_pass http://app;` and `upstream app { server ...; }` | `handler proxy { upstream app }`, and `upstream app { addresses ... }` |
 | `least_conn;`, `ip_hash;`, `hash $cookie_x;` | the upstream's `load_balancing`: `least_conn`, `ip_hash`, `cookie_hash` with `hash_key` |
 | `server ... weight=3 max_fails=2 fail_timeout=10s;` | `weights`, `max_fails`, `fail_timeout` |
@@ -83,7 +83,15 @@ with the tables below.
   nginx does by default. On Windows they also answer 404 for a segment shaped as an 8.3 short
   name, as `GIT~1`, which NTFS may give `.git`, and 400 for one Windows opens as another file or a
   device whatever `dotfiles` says: a stream (`x.php::$DATA`), a name ending in a dot or a space
-  (`x.php.`), or a reserved device name (`NUL`, `CON.php`).
+  (`x.php.`), or a reserved device name (`NUL`, `CON.php`). On every system `fastcgi` answers 400
+  for a script whose path has a backslash, which Windows takes as a separator
+  (`/a%5C.git%5Cx.php` would run `a\.git\x.php` there).
+- **The case of an extension.** On a file system that folds case (Windows' NTFS and macOS' APFS
+  by default), a case-sensitive `\.php$` route misses `/x.PHP`, which the file system opens as
+  `x.php`. So write the PHP route as `(?i)\.php$`; and `static` on the same root answers 404
+  besides for a path not written as the names on disk are, and for a file whose extension a
+  `fastcgi` handler's `split_path` names, in any case, so a script's source is never served as
+  text.
 - **Not converted**: Lua, `njs`, `map`, `geo`, `split_clients`, `mirror` (fit's proxy has a
   `mirror` of its own), `sub_filter`, mail proxying, and nginx's modules. WebAssembly plugins
   (`wasm`) and modules built in with `fit build` take the place of the extensions.

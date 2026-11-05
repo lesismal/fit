@@ -11,7 +11,11 @@ or with another character no Windows name has; one ending in a dot or a space, w
 strips (`x.php.`); and a reserved device name, with or without an extension (`CON`, `PRN`, `AUX`,
 `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, `CONIN$`, `CONOUT$`, as `nul.php`). The path info after
 a script is not looked at. An `index` or a `try_files` entry of that kind is refused when the
-config is loaded there.
+config is loaded there. On every system, a script whose path has a backslash, which Windows takes
+as a separator (`/a%5C.git%5Cx.php` would run `a\.git\x.php` there), or a NUL, is answered `400`,
+with try_files or without, and a `try_files` entry with one is refused when the config is loaded.
+A `static` handler on a file system that folds case serves no file with a `split_path` extension,
+in any case, so a route matching `(?i)\.php$` is all a shared root needs.
 
 ```json route
 {

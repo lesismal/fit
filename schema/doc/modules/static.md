@@ -16,6 +16,15 @@ content type or a precompressed twin chosen by the extension cannot be sidestepp
 file another way. An `index` or a `try_files` entry of that kind is refused when the config is
 loaded there.
 
+On a file system that folds case, as Windows' NTFS and macOS' APFS do by default, a route matching
+`\.php$` misses `/x.PHP`, which opens `x.php`. There, a request whose path is not written as the
+names on disk are, letter case and all (and, on Windows, not an 8.3 short name), is answered
+`404`, and so is a file whose extension a `fastcgi` handler's `split_path` names, in any case:
+`static` never serves a script's source on a root it shares with `fastcgi`. Whether `root` folds
+case is found once, when the config is loaded, and the names are checked only when the disk is
+looked at, so a request answered from what the handler knows costs nothing more; a file system
+that does not fold case costs nothing at all.
+
 ```json route
 {
   "match": {"host": ["example.com"]},
