@@ -438,6 +438,9 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	for i := len(mws) - 1; i >= 0; i-- {
 		h = mws[i].Wrap(h)
 	}
+	if len(mws) > 0 {
+		h = connectionFirst(h)
+	}
 	r := &Route{Name: rc.Name, Priority: rc.Priority, Handler: h, Inline: inline}
 	if rc.Match != nil {
 		r.Hosts, r.Paths = rc.Match.Host, rc.Match.Path

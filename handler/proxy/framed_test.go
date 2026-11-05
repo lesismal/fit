@@ -144,6 +144,18 @@ func TestFramedRequestHeaderMiddleware(t *testing.T) {
 	if strings.Contains(strings.ToLower(head), "x-gone") {
 		t.Fatalf("a field the client's Connection named reached the upstream:\n%s", head)
 	}
+
+	// A client's Connection names the client's own fields, not those a
+	// middleware set: it cannot strip an identity or a secret the gateway
+	// adds. Its own field of that name is still gone, and an upgrade's
+	// names are kept for the proxy.
+	head, _ = proxyRaw(t, base, heads, "GET / HTTP/1.1\r\nHost: app.example\r\nConnection: X-Set, keep-alive, X-Gone\r\nConnection: x-set\r\nX-Gone: 1\r\nX-Set: client\r\n\r\n")
+	if !strings.Contains(head, "X-Set: by-middleware\r\n") || strings.Contains(head, "client") {
+		t.Fatalf("the client's Connection decided the middleware's field:\n%s", head)
+	}
+	if strings.Contains(strings.ToLower(head), "x-gone") {
+		t.Fatalf("a field the client's Connection named reached the upstream:\n%s", head)
+	}
 }
 
 // TestFramedFieldNames checks what outgoingFramed and responseBlock do with
