@@ -40,6 +40,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | `name` | string | 主机名 | 角色向对端显示的名称：最长 64 个字符，不含控制字符，首尾无空白。 |
 | `console` | object | 无 | 角色的 Web 页面。见[页面](#页面)。 |
 | `listen` | object | 无 | 角色接受对端连接的地方。 |
+| `tokens` | array | 无 | 角色的监听签发的令牌，对端用它连接：`{id, name, hash, created_at, expires_at, note, members}`，最多 1,024 个。由页面、Admin API 和 `fit token` 生成，不要手写。见[令牌](#令牌)。 |
 | `peers` | array | 无 | 角色拨号并保持连接的对端；最多 64 个。 |
 | `limits` | object | 默认值 | 角色连接的上限。 |
 
@@ -48,17 +49,18 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
 | `address` | string | 必填 | 角色接受连接的主机与端口，作为监听引擎上一个独立的绑定。WebSocket 路径为 `/ws`。主机为空表示监听所有地址。 |
-| `password` | string | 无 | 监听方互联的、没有自己密码的各角色共用的密码。对端需证明自己知道它；它从不在网络上传输。持有它的任何一方都可以以这些角色中的任意一个建立连接，因此应改为给每个角色设置自己的密码。 |
-| `node_password` | string | `password` | node 以 node 身份连接时证明的密码，用于 hub 或 proxy 的监听。 |
-| `proxy_password` | string | `password` | proxy 以 proxy 身份连接时证明的密码，用于 hub 或 node 的监听。 |
-| `hub_password` | string | `password` | hub 以 hub 身份连接时证明的密码，用于 node 或 proxy 的监听。 |
+| `password` | string | 无 | 已弃用，请改用[令牌](#令牌)：监听方互联的、没有自己密码的各角色共用的密码。对端需证明自己知道它；它从不在网络上传输。持有它的任何一方都可以以这些角色中的任意一个建立连接。本版本仍接受，有对端使用时连接页会给出警告；下一版本将拒绝。 |
+| `node_password` | string | `password` | 已弃用：node 以 node 身份连接时证明的密码，用于 hub 或 proxy 的监听。 |
+| `proxy_password` | string | `password` | 已弃用：proxy 以 proxy 身份连接时证明的密码，用于 hub 或 node 的监听。 |
+| `hub_password` | string | `password` | 已弃用：hub 以 hub 身份连接时证明的密码，用于 node 或 proxy 的监听。 |
 | `cert_file`、`key_file` | string | 无 | PEM 文件，包含监听出示的证书、其后的任何中间证书，以及私钥。两者都设置时以 TLS（`wss://`）接受连接，对端用其 `ca_file` 或 `pin` 校验证书。在监听启动时读取。 |
 | `self_signed` | bool | false | 以角色自己生成的自签名证书走 TLS 接受连接，用于没有 `cert_file` 的监听。角色把它写入 `cert` 与 `key`，重启后保持不变，并在连接页与日志中显示其 SHA-256 指纹：对端把它设为 `pin`。 |
 | `cert`、`key` | string | 无 | `self_signed` 生成的 PEM 证书与私钥，由角色写入。删除两者会生成新证书，所有对端都须重新固定其指纹。 |
 
-拨号方证明的密码决定它可以以哪个角色 hello（见[hello 与角色](#hello-与角色)）。监听方需要 `password`，或者至少一个
-它所互联角色的密码；两者都没有的角色不被接受。在不与某角色互联的角色的监听上设置该角色的密码（如 hub 的
-`hub_password`）是错误。一个密码被多个角色共用的监听方（只设置 `password` 时即如此）在启动时记录一条警告。
+监听方接受角色的[令牌](#令牌)，令牌可连接它所互联的任何角色的对端；在下一版本之前，它也接受自己的各个密码。拨号方
+证明的密码决定它可以以哪个角色 hello（见[hello 与角色](#hello-与角色)）；既没有自己的密码、也没有 `password` 的角色只能
+用令牌连接。没有任何密码的监听方只接受令牌，在签发令牌之前不接受任何连接，它启动时会在日志中说明这一点。在不与某角色
+互联的角色的监听上设置该角色的密码（如 hub 的 `hub_password`）是错误。一个密码被多个角色共用的监听方（只设置 `password` 时即如此）在启动时记录一条警告。
 
 监听在回环地址（`127.0.0.0/8`、`::1`、`localhost`）之外的地址上（包括主机为空）时需要 TLS：`cert_file` 与
 `key_file`，或 `self_signed`。缺少时配置被拒绝，错误信息说明需要添加什么。原因见[传输与认证](#传输与认证)。
@@ -68,7 +70,8 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
 | `address` | string | 必填 | 对端的主机与端口，即对端的 `listen.address`。主机必填，端口是数字。每个地址只出现一次。 |
-| `password` | string | 必填 | 对端监听上拨号方角色的密码：node 用对端的 `listen.node_password` 拨号，proxy 用其 `listen.proxy_password`，hub 用其 `listen.hub_password`；对端没有该角色的密码时用其 `listen.password`。 |
+| `token` | string | | 对端角色为本角色签发的令牌，`fitt1.<id>.<secret>`，由其页面、Admin API 或 `fit token create` 显示一次。`token` 与 `password` 必须设置其一，不能都设。 |
+| `password` | string | | 已弃用：对端监听上拨号方角色的密码：node 用对端的 `listen.node_password` 拨号，proxy 用其 `listen.proxy_password`，hub 用其 `listen.hub_password`；对端没有该角色的密码时用其 `listen.password`。 |
 | `role` | string | 必填 | 对端必须声明的角色：`hub`、`node` 或 `proxy`，不能是拨号方自己的角色。hub 拨 node 与 proxy，node 拨 hub 与 proxy，proxy 拨 hub 与 node。 |
 | `pin` | string | 无 | 对端监听所出示证书的 SHA-256 指纹，64 位十六进制，忽略冒号与大小写，即其连接页与日志中显示的值。连接走 TLS（`wss://`），且只连向恰好持有该证书的监听；不校验证书的名称与有效期。 |
 | `ca_file` | string | 无 | 或者一个 PEM 文件，包含对端证书须链接到的证书颁发机构的证书：连接走 TLS，证书须包含 `server_name`，或地址中的主机名。`pin` 与 `ca_file` 二选一。在设置对端时读取。 |
@@ -185,8 +188,13 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9200",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
-                 "self_signed": true},
+      "listen": {"address": ":9210", "self_signed": true},
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "gpu-1", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4",
+         "created_at": 1793900000, "members": ["node-8c1f6e2a90b34d57"]},
+        {"id": "5a3716dd56e5e458", "name": "laptop", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df",
+         "created_at": 1793900000, "expires_at": 1825436000}
+      ],
       "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
                  "retry_interval": "5s", "stream_idle": "2m"},
       "max_nodes": 1024
@@ -207,8 +215,8 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9100",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+      "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+                 "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "models": [
         {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
@@ -236,8 +244,8 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9300",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
-                 "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+      "peers": [{"address": "hub.example.net:9210", "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
+                 "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
       "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
               "first_byte_timeout": "5m", "timeout": "30m"},
       "api_keys": [
@@ -249,28 +257,35 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 }
 ```
 
-`password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 proxy 的页面上创建，不要手写。`pin` 是
+`password_hash` 用 `fit hash-password` 生成；上面的只是示例。API Key 在 proxy 的页面上创建，不要手写；hub 的
+`tokens` 也一样：其连接页、Admin API 或 `fit token create -role llm.hub -name gpu-1` 签发每个令牌，保存其哈希，并只
+显示一次令牌，供 node 或 proxy 填作对端的 `token`；`members` 由 hub 自己写入。`pin` 是
 hub 证书的指纹，hub 生成证书后在其连接页与日志中显示；上面的只是示例。
 
 ### 三个地方
 
 公网服务器 hub.example.net 上的 hub、实验室里一台 GPU 机器上的 node、办公室局域网中一台机器（192.168.1.10）上的
 proxy。node 与 proxy 都拨号连接 hub，它们自己都不需要监听，因此也都不需要公网地址。proxy 经 TLS、以其 API Key
-服务局域网中每台机器上的 agent。hub 以自己生成的证书走 TLS 接受连接；node 与 proxy 按其连接页显示的指纹固定它。
+服务局域网中每台机器上的 agent。hub 以自己生成的证书走 TLS 接受连接；node 与 proxy 按其连接页显示的指纹固定它，并各自
+用 hub 签发的令牌连接。
 
-服务器：
+服务器，只接受令牌：
 
 ```json
-{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret",
-                            "self_signed": true}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "self_signed": true}}}}
+```
+
+```sh
+fit token create -c fit.json -role llm.hub -name gpu-1    # GPU 机器的令牌，只显示一次
+fit token create -c fit.json -role llm.hub -name office   # 局域网机器的令牌
 ```
 
 GPU 机器：
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
@@ -279,8 +294,8 @@ GPU 机器：
 
 ```json
 {"llm": {"proxy": {
-  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
@@ -359,8 +374,8 @@ GPU 机器：
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub",
-             "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
+  "peers": [{"address": "hub.example.net:9210", "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
+             "role": "hub", "pin": "134daba9eaf7f4b2f15a8ca3788273bd52d0b7f6f34581a4561458814d95b0c9"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
     {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
@@ -392,8 +407,9 @@ GPU 机器：
 
 在页面上踢掉连接是唯一不写入配置的修改：它关闭连接，拨号方随后重新连接。
 
-成员中有机密：互联密码与模型的 API Key，以明文保存。普通配置文件的安全性等同于该文件本身；`admin.store` 把它们加密保存。
-proxy 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以直接使用的 Key。
+成员中有机密：对端的令牌、互联密码与模型的 API Key，以明文保存。普通配置文件的安全性等同于该文件本身；`admin.store`
+把它们加密保存。proxy 的 API Key 只保存其 SHA-256，监听方的令牌只保存不能用来连接的哈希，因此配置与存储中都没有他人能
+直接使用的 Key 或令牌。
 
 ## 互联
 
@@ -407,15 +423,25 @@ proxy 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以
 
 回环之外的连接走 TLS 1.3，由 fib 的 TLS 提供，其握手在等待时不占用 worker。拨号方校验监听方的证书：按 `pin`，即证书的
 SHA-256，以常量时间比较，代替证书链与名称的校验；或按 `ca_file`，校验到其某个证书颁发机构的证书链以及名称。两端都不恢复
-TLS 会话，所以每条连接都在完整握手中校验证书。下面的密码握手仍在 TLS 之内进行，因此连接需要两者：拨号方期望的证书，以及
-其角色的密码。
+TLS 会话，所以每条连接都在完整握手中校验证书。下面的令牌（或密码）握手仍在 TLS 之内进行，因此连接需要两者：拨号方期望
+的证书，以及监听方签发的令牌。
 
-TLS 使连接只属于建立它的两端。密码握手只在连接建立时校验一次，之后的帧不带自身的证明。在明文 `ws://` 上，占用了监听方
+TLS 使连接只属于建立它的两端。握手只在连接建立时校验一次，之后的帧不带自身的证明。在明文 `ws://` 上，占用了监听方
 地址的一方即使不知道任何密码，也可以把拨号方的握手转发给真正的监听方，然后以监听方的身份在连接上发送请求，拨号方会执行
 它们：开启了 `allow_hub_manage` 的 node 会把它们当作其 hub 的请求执行。在 TLS 上，转发方无法为固定的证书应答，经它转发的
 记录以它没有的密钥加密：它注入的内容会使连接结束。
 
-升级完成后、任何帧之前：
+升级完成后、任何帧之前，使用令牌时：
+
+1. 监听方发送 32 字节随机挑战。
+2. 拨号方发回其令牌的 ID、自己的 32 字节随机数，以及对令牌 ID、该随机数和挑战组成的记录给出的令牌证明
+   （密钥见[决定 035](decisions/035-link-tokens.zh-CN.md)）。
+3. 监听方查找该令牌，不是它签发的或已过期的令牌被拒绝，以关闭码 4001 关闭并说明原因，然后校验证明。它的确认中带有它
+   自己对同一记录给出的令牌证明，使用另一把密钥和另一方向的标签。令牌可连接监听方接受的任何角色的对端。
+4. 拨号方校验监听方的证明，缺失或不符就放弃拨号。
+
+在另一条连接上重放的证明、针对另一个随机数的证明、或发回给发送方的证明都通不过校验；监听方只保存令牌的哈希，它不能
+用来连接。使用密码时（已弃用）：
 
 1. 监听方发送 32 字节随机挑战。
 2. 拨号方以自己的密码（监听方为拨号方角色设置的密码）为密钥，对挑战计算 HMAC-SHA256，连同自己的 32 字节随机数一起发回。
@@ -441,6 +467,35 @@ TLS 使连接只属于建立它的两端。密码握手只在连接建立时校�
 
 监听方与其拨号方要一起迁移：设置了 `pin` 的拨号方连不上明文监听方，明文拨号方也连不上 TLS 监听方。同一台机器上经回环
 互联的角色无需修改。
+
+### 令牌
+
+角色的监听为每个拨号连接它的对端签发一个令牌，代替同一角色的对端共享的密码
+（[决定 035](decisions/035-link-tokens.zh-CN.md)）：
+
+- **每个令牌都是独立的凭据。** 令牌形如 `fitt1.<id>.<secret>`，即 16 位十六进制的 ID 和 256 位随机数。角色在其成员的
+  `tokens` 中保存 ID、名称、生成时间、可选的过期时间、可选的备注和一个哈希，从不保存令牌本身：令牌只在生成时显示一次。
+- **不绑定角色。** 有效的令牌可连接监听方接受的任何角色的对端；对端能调用什么取决于它 hello 时声明的角色，
+  见[hello 与角色](#hello-与角色)。
+- **绑定到成员。** 第一个用某个令牌 hello 的 ID 被绑定到该令牌，并写入令牌的 `members`，因此其他令牌不能再以这个 ID
+  hello，重启后也一样。吊销该令牌即释放它：要把对端迁移到新令牌，先签发新令牌，吊销旧令牌，再把新令牌交给该对端。
+- **过期。** 令牌可以在指定时间或一段时长（`30d`、`720h`）之后过期；过期的令牌被拒绝，其连接在过期时关闭（如果系统
+  时钟跳变，最多晚一分钟）。吊销令牌会立即关闭它的连接。
+- **三种管理方式**，每次修改都是对角色成员的一次配置编辑，像页面的修改一样生效并保存，并记录到 `admin` 日志：连接页的
+  **连接令牌**卡片（方法 `/mesh/tokens/list`、`/mesh/tokens/create`、`/mesh/tokens/expiry`、`/mesh/tokens/revoke`）；
+  Admin API，`GET /tokens/llm.hub`、`POST /tokens/llm.hub` `{name, note, ttl | expires_at}`、
+  `PATCH /tokens/llm.hub/{id}` `{ttl | expires_at}`（都不给表示永不过期）和 `DELETE /tokens/llm.hub/{id}`，`llm.node`
+  与 `llm.proxy` 同理；以及 `fit token list|create|expiry|revoke -role llm.hub`。列表给出每个令牌自 fit 启动以来的最近
+  一次使用及其来源地址、它的成员和当前使用它的连接。
+
+### 迁移到令牌
+
+本版本仍接受监听方的各个密码，与令牌并存，下一版本将拒绝。连接页显示哪些入站连接证明的是共享密码，只要还有，就给出
+警告。迁移一个角色：
+
+1. 先升级监听方的 fit：带令牌的拨号方连不上更早版本的监听方。
+2. 为每个拨号连接它的对端签发令牌，把它设为该对端的 `token`，代替其 `password`（连接页的**连接到…**表单会同时完成两者）。
+3. 警告消失后，编辑监听并勾选**移除全部密码**，从此只接受令牌连接。
 
 ### 帧、会话与流
 
@@ -490,13 +545,15 @@ inflight, req_bytes, resp_bytes, last_at}`（proxy 的 agent 的 `from` 为空�
 
 - 角色与本方相同（hub 不与 hub 互联，node 不与 node，proxy 不与 proxy）；
 - 角色不是本方互联的角色：hub 连 node 与 proxy，node 连 hub 与 proxy，proxy 连 hub 与 node；
-- 拨入的连接上，角色不是该连接所证明密码对应的角色；
+- 用密码拨入的连接上，角色不是该连接所证明密码对应的角色；
+- 用令牌拨入的连接上，其 ID 已绑定到另一个令牌（见[令牌](#令牌)）；
 - 拨出的连接上，角色不是 `peers[].role` 所声明的；
 - ID 与本方相同；
 - ID 已经以另一个角色连接着。
 
-被拒绝的拨号方至少等待 30 秒（`retry_interval` 更长时等它）再试。对端可以调用什么取决于它在 hello 中声明的角色，而该角色
-与对端证明的密码绑定：持有 hub 的 `proxy_password` 的 proxy 不能以 node 身份加入 hub；持有 node 的 `proxy_password` 时也
+被拒绝的拨号方至少等待 30 秒（`retry_interval` 更长时等它）再试。对端可以调用什么取决于它在 hello 中声明的角色。令牌不
+绑定角色：持有者可以以监听方接受的任何角色 hello，其 ID 绑定到该令牌，因此持有其他令牌的一方不能以这个 ID hello 并接走它
+的调用。使用密码时，角色与对端证明的密码绑定：持有 hub 的 `proxy_password` 的 proxy 不能以 node 身份加入 hub；持有 node 的 `proxy_password` 时也
 不能以 hub 身份向该 node hello，因此无法管理开启了 `allow_hub_manage` 的 node。hello 被拒绝的连接没有角色：它调用的任何
 方法都不会运行，一秒后连接被关闭。只设置 `listen.password`，或把某个角色的密码设得与其他角色相同，就像角色还没有各自密码
 时一样，信任其持有者担任它所对应的每个角色；只把它交给在这些角色上都可信的对端。同一种角色共用其密码：知道 hub 的
@@ -795,7 +852,9 @@ proxy 的概览页用它自己的地址与模型显示这些示例。
   `limits`。
 
 连接页设置监听与对端，也可以踢掉一条连接。它显示监听是否启用 TLS 以及其证书的指纹（拨号方固定的就是它），以及每个对端的
-监听如何校验：按指纹、按 CA 文件，或在回环地址上不校验。
+监听如何校验：按指纹、按 CA 文件，或在回环地址上不校验。它的**连接令牌**卡片签发令牌（只显示一次，供复制），列出令牌及其
+过期时间、最近使用、成员和连接，修改令牌的过期时间并吊销令牌；每条入站连接显示它所证明的令牌，或在它证明的是共享密码时
+给出警告，编辑监听时可以移除全部密码。添加对端时填写其监听签发的令牌，令牌会替换密码。
 
 流量页像 tunnel 的页面那样，把角色的连接画成分列的链路图：proxy 的 agent、proxy、它的 hub、hub 的节点与节点的模型；hub 的
 proxy、hub、它的节点与节点的模型；node 的 hub 与 proxy、node、它的模型与模型的上游。每条线带双向字节数与速率（由间隔
@@ -817,7 +876,8 @@ proxy、hub、它的节点与节点的模型；node 的 hub 与 proxy、node、�
 | `POST /api/stream<method>` | 打开一个流方法，以 SSE 应答：每帧一个数据事件，`end` 带结果，`error` 带 `{code, message}`。关闭请求即取消流。 |
 
 页面以拥有全部权限的本地调用方身份，调用与对端相同的方法，以及只有页面能调用的方法：互联的（`/mesh/peers`、
-`/mesh/status`、`/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`、`/mesh/limits/get`、`/mesh/limits/set`）；
+`/mesh/status`、`/mesh/dial`、`/mesh/undial`、`/mesh/kick`、`/mesh/listen`、`/mesh/limits/get`、`/mesh/limits/set`，
+以及令牌的 `/mesh/tokens/list`、`/mesh/tokens/create`、`/mesh/tokens/expiry`、`/mesh/tokens/revoke`）；
 hub 的节点表（`/hub/nodes`）、代管调用（`/hub/node/call`、`/hub/node/stream`）、名称（`/hub/profile/set`）与设置
 （`/hub/settings/get`、`/hub/settings/set`）；node 的设置（`/node/settings/get`、`/node/settings/set`）与上游上限
 （`/node/upstream/get`、`/node/upstream/set`）；proxy 的模型、节点、计数、Key、名称与接口（`/proxy/models`、
@@ -847,6 +907,7 @@ hub 的代管调用 90 秒。方法在角色的池（16 个 goroutine，256 个�
 | 尚未认证的连接 | 256，每个 IP 地址 16 | 固定 |
 | 方法时限 | 10s；node 或 proxy 修改配置 30s，模型检查 20s，显卡状态与设置 30s，hub 的代管调用 90s | 固定 |
 | 对端、模型、API Key | 64、256、256 | 固定 |
+| 连接令牌、每个令牌的成员 | 1,024、256 | 固定 |
 | hub 节点表中的节点 | 1024 | `max_nodes` |
 | hub 的节点列表 | `max_nodes` 个节点，每个 64 个模型、16 块显卡，4 MiB；200ms 后推送，间隔一秒，流量每 5s | 固定 |
 | 统计的路由 | 每个角色 1024 条，其余记为 `other` | 固定 |

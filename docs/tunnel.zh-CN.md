@@ -33,7 +33,10 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
   "tunnel": {
     "hub": {
       "name": "hub",
-      "password": "a-registration-password",
+      "tokens": [
+        {"id": "fdd44d906b8e6ce2", "name": "lab", "hash": "1c994a095de7b566dcce0f229b829af96d85911b6d3e786f217c77340bc36aa4"},
+        {"id": "5a3716dd56e5e458", "name": "alice", "hash": "4e6349fdb79b1b48fb57cc61b5aa9593490f288f28f722e0245c04a9df6c66df"}
+      ],
       "body_password": "a-body-password",
       "listeners": [
         {"protocol": "tls", "address": ":7000"},
@@ -61,7 +64,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
           {"address": "wss://hub.example.com:7001/tunnel"},
           {"address": "tls://hub.example.com:7000"}
         ],
-        "password": "a-registration-password",
+        "token": "fitt1.fdd44d906b8e6ce2.Hm2vJvGyTEJVh2_zzu0ZJlENz1A3IYXS2JydjHyJShQ",
         "body_password": "a-body-password",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
@@ -81,7 +84,7 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
       "hubs": [{
         "name": "hub",
         "endpoints": [{"address": "tls://hub.example.com:7000"}],
-        "password": "a-registration-password",
+        "token": "fitt1.5a3716dd56e5e458.nz51QI_A3avzPo4tagvevbtlJ-dNi-Us-k4-il9gAV4",
         "body_password": "a-body-password",
         "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
@@ -93,7 +96,9 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 }
 ```
 
-`pin` 是 hub 证书的 SHA-256 指纹，hub 的控制台上会显示，hub 生成证书时也会写入日志。之后
+`pin` 是 hub 证书的 SHA-256 指纹，hub 的控制台上会显示，hub 生成证书时也会写入日志。hub 的 `tokens`
+不要手写：hub 的“令牌”页、它的 Admin API 或 `fit token create -role tunnel.hub -name lab` 签发每个令牌，
+把它的哈希保存在那里，并只显示一次令牌本身，供节点或 proxy 填作 `token`（见[令牌](#令牌)）。之后
 `ssh -p 2222 127.0.0.1` 就连到 10.0.0.5:22。`fit validate` 检查这些成员；
 [配置参考](reference/config.zh-CN.md)列出每个字段、默认值和取值范围。
 
@@ -102,8 +107,9 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | 字段 | 默认 | 含义 |
 |------|------|------|
 | `name` | 主机名 | 告知节点和 proxy 的名字 |
-| `password` | 无：不接受任何注册 | 节点和 proxy 注册用的密码，以 HMAC 证明知道它，从不发送 |
-| `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密，从而认证每个帧；节点和 proxy 需要相同的密码 |
+| `tokens` | 无 | hub 签发的令牌，每个为 `{id, name, hash, created_at, expires_at, note, members}`，节点和 proxy 用它注册（见[令牌](#令牌)）；由页面、Admin API 和 `fit token` 生成，不要手写 |
+| `password` | 无：只接受令牌注册 | 已弃用：所有节点和 proxy 都可用来注册的密码，以 HMAC 证明知道它，从不发送。本版本仍接受，有成员使用时页面会给出警告；下一版本将拒绝 |
+| `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密，从而认证每个帧；节点和 proxy 需要相同的密码。用令牌注册的链路由令牌与它经 HKDF 派生密钥 |
 | `listeners` | 无：由页面添加 | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`；ws 或 wss 监听的路径默认为 `/tunnel`，只有它们有路径。地址不是回环地址（`127.0.0.0/8`、`::1`、`localhost`；主机留空即所有地址）的 `tcp` 或 `ws` 监听，除非设置了 `body_password`，否则会被拒绝（见[链路靠什么保护](#链路靠什么保护)）。tls、wss 或 quic 监听出示其 `cert_file` 与 `key_file` 中的证书（每次应用成员时读取），没有时出示 hub 自己的证书（见下） |
 | `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32。10 秒内没有证明知道密码的 WebSocket 会被关闭，同一 IP 地址至多有 `max_conns` 的四分之一处于这种状态 |
 | `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；进行中的握手超过 `max_handshakes` 的一半后，客户端须先以 QUIC Retry 证明自己的地址才能开始握手。`cert` 和 `key` 是 hub 自己的证书，没有 `cert_file` 的 tls、wss 和 quic 监听出示它；这样的监听需要证书而没有时，hub 生成自签名证书并写入这里；二者须同时设置 |
@@ -146,7 +152,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 |------|------|------|
 | `name` | 第一个端点的地址 | 转发和页面用来指称它的名字 |
 | `endpoints` | 必填 | `{address, disabled}`，按顺序尝试：`tls://host:port`、`wss://host:port/path`（不写端口时为 443）、`quic://host:port`；以及明文的 `host:port` 或 `tcp://`（TCP）和 `ws://host:port/path`，它们连接非回环主机时，除非设置了 `body_password`，否则会被拒绝 |
-| `password` | 必填 | hub 的密码 |
+| `token` | | hub 为本节点或 proxy 签发的令牌，`fitt1.<id>.<secret>`；`token` 与 `password` 必须设置其一，不能都设 |
+| `password` | | 已弃用：hub 的共享密码，在 hub 签发令牌之前使用 |
 | `body_password` | 无 | hub 的消息体密码（如果有） |
 | `pin` | | hub 证书的 SHA-256 指纹（与 hub 页面所示一致），tls、wss 和 quic 端点按它校验证书，取代证书链和名称校验：用于 hub 的自签名证书。旧名 `quic_pin` 仍可读取，但会给出警告 |
 | `ca_file` | | 一个 PEM 文件，包含为 hub 证书签名的 CA，取代系统根证书，并校验名称；每次拨号时读取；不能与 `pin` 同时设置 |
@@ -176,7 +183,13 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
   `cert_file` 和 `key_file` 的监听改为出示该证书，供用 `ca_file` 或系统根证书校验它的节点和 proxy 使用。节点或
   proxy 按 `pin`、`ca_file` 或系统根证书校验证书，未固定指纹时也校验名称。它们不保存 TLS 会话票据，所以每次握手
   都完整校验证书；指纹还会在握手的最后一项检查中再校验一次，恢复的会话也会执行这项检查。
-- **注册**是双向认证的。节点或 proxy 的每条链路注册时，以密码为密钥，对对端类型、名字、时间和一个新生成的
+- **用令牌注册**是双向认证的，并与链路绑定。节点或 proxy 的每条链路先调用 `challenge`，带上令牌的 ID 和
+  自己新生成的 32 字节随机数，hub 以自己新生成的随机数应答；随后链路注册时，对令牌 ID、双方的随机数以及对端
+  类型和名字组成的记录给出令牌的证明，hub 的应答携带它对同一记录和应答本身的令牌证明，使用另一把密钥和另一
+  方向的标签（密钥见[决定 035](decisions/035-link-tokens.zh-CN.md)）。在另一条链路上重放的证明、针对另一个
+  随机数的证明、或发回给发送方的证明都通不过校验；hub 只保存令牌的哈希，它不能用来注册。不接受令牌的更早版本
+  hub，会在节点或 proxy 的状态和日志中被指出需要升级。
+- **用共享密码注册**（已弃用）同样是双向认证的。节点或 proxy 的每条链路注册时，以密码为密钥，对对端类型、名字、时间和一个新生成的
   随机数做 HMAC-SHA256；时间与 hub 时钟相差不得超过 5 分钟，同一个随机数只接受一次。hub 的应答反过来证明
   hub 知道密码：以密码为密钥，在自己专用的标签下，对这次注册（含其随机数）和应答本身做的 HMAC-SHA256。
   节点或 proxy 在处理 hub 在这条链路上发来的任何内容之前先检查它，证明缺失或错误时关闭链路：不知道密码的
@@ -196,6 +209,47 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
   或反过来），所以即使攻击者让另一条链路以相反顺序得到同样的随机字节，一个节点加密的帧也永远不能在另一个
   节点上解开。攻击者仍能看到帧的长度和时间，也能切断链路。这是链路协议第 3 版：设置了 `body_password` 的
   hub、节点或 proxy 会关闭与第 2 版或第 1 版对端之间的链路，并在日志中说明双方的版本，所以请一起升级。
+  用令牌注册的链路发送第 4 版的 hello，在随机字节之后写明令牌的 ID；hub 由该令牌和消息体密码经 HKDF 为链路
+  派生密钥，不用 PBKDF2，也没有共享的盐，并拒绝用 hello 之外的另一个令牌注册。更早版本的 hub 会拒绝这样的
+  hello。
+
+### 令牌
+
+hub 为每个向它注册的节点或 proxy 签发一个令牌，代替所有成员共享的密码
+（[决定 035](decisions/035-link-tokens.zh-CN.md)）：
+
+- **每个令牌都是独立的凭据。** 令牌形如 `fitt1.<id>.<secret>`，即 16 位十六进制的 ID 和 256 位随机数。hub
+  在其成员的 `tokens` 中保存 ID、名称、生成时间、可选的过期时间、可选的备注和一个哈希，从不保存令牌本身：令牌
+  只在生成时显示一次。
+- **不绑定角色。** 任何节点或 proxy 都可以用有效的令牌注册；它能做什么取决于它的类型以及 hub 的规则
+  （`allow_proxy_services`）和节点的规则（`allow_hub_services`）。
+- **绑定到成员。** 节点或 proxy 第一次用某个令牌注册时，hub 把它的 `node/<name>` 或 `proxy/<name>` 绑定到该
+  令牌，并写入令牌的 `members`，因此其他令牌不能再以这个名字注册，重启后也一样。吊销该令牌即释放它：要把成员
+  迁移到新令牌，先签发新令牌，吊销旧令牌，再把新令牌交给该成员。
+- **过期。** 令牌可以在指定时间或一段时长（`30d`、`720h`）之后过期；过期的令牌被拒绝，hub 在其过期时关闭它的
+  链路（如果系统时钟跳变，最多晚一分钟）。吊销令牌会立即关闭它的链路。
+- **三种管理方式**，每次修改都是对 `tunnel.hub` 的一次配置编辑，像页面的修改一样生效并保存，并记录到 `admin`
+  日志：hub 的**令牌**页；Admin API，`GET /tokens/tunnel.hub`、`POST /tokens/tunnel.hub`
+  `{name, note, ttl | expires_at}`、`PATCH /tokens/tunnel.hub/{id}` `{ttl | expires_at}`（都不给表示永不过期）
+  以及 `DELETE /tokens/tunnel.hub/{id}`；以及命令行：
+
+  ```sh
+  fit token create -c fit.json -role tunnel.hub -name lab -ttl 90d   # 打印令牌，只此一次
+  fit token list   -c fit.json -role tunnel.hub                      # 过期时间、最近使用、成员、链路
+  fit token expiry -c fit.json -role tunnel.hub -id fdd44d906b8e6ce2 -never
+  fit token revoke -c fit.json -role tunnel.hub -id fdd44d906b8e6ce2
+  ```
+
+  列表给出每个令牌自 fit 启动以来的最近一次使用及其来源地址、它的成员和当前使用它的链路。
+
+### 升级：用令牌代替密码
+
+本版本仍接受共享的 `password` 注册，与令牌并存，下一版本将拒绝。hub 的状态列出用它注册的对端
+（`password_peers`），只要还有对端在用，页面就会给出警告。迁移步骤：
+
+1. 先升级 hub：带令牌的节点或 proxy 会拒绝更早版本的 hub。
+2. 为每个节点和 proxy 签发令牌，把它设为该成员的 `token`，代替其 `password`（它的 hub 编辑器会同时完成两者）。
+3. 警告消失后，移除 hub 的密码（设置页上的**移除共享密码**），从此只接受令牌注册。
 
 ### 链路靠什么保护
 
@@ -233,7 +287,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 
 每次拨号、注册和调用都有时限；链路的 TCP 连接空闲 30s 后开始探测，对端不再应答时关闭；QUIC 连接每隔
 `keep_alive` 发送 ping，`idle_timeout` 后关闭；空闲超过 `idle_timeout` 的隧道会被关闭。 hub 限制链路、
-对端和隧道的数量、每个对端的链路数、进行中的 QUIC 握手数，以及未注册链路的帧大小（64 KiB）。
+对端和隧道的数量、每个对端的链路数、进行中的 QUIC 握手数，以及未注册链路的帧大小（64 KiB）；它的令牌至多
+1,024 个，每个令牌的成员至多 256 个。
 
 ## 控制台
 
@@ -245,10 +300,12 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 `key_file`，只能监听回环地址。
 
 - **hub**：节点（含服务和延迟）与 proxy；隧道（含两个方向的字节数和整条路径的延迟）。查询节点、设置
-  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制节点和 proxy 用来固定的 hub
-  证书指纹，并查看每个监听的指纹。在这里设置
-  的服务在节点的 `allow_hub_services` 允许时写入节点自己的成员。
-- **节点**：它的 hub，以及每条链路使用的协议，可增删改；它的服务，保存后通知所有 hub；它的隧道，
+  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket，或移除共享密码；复制节点和 proxy
+  用来固定的 hub 证书指纹，并查看每个监听的指纹。**令牌**：签发令牌（只显示一次，供复制），列出令牌及其过期
+  时间、最近使用、成员和链路，修改令牌的过期时间，吊销令牌；只要还有对端用共享密码注册，概览和令牌页就会给出
+  警告。在这里设置的服务在节点的 `allow_hub_services` 允许时写入节点自己的成员。
+- **节点**：它的 hub，以及每条链路使用的协议，可增删改，每个 hub 填写它签发的令牌（令牌会替换密码），或在
+  下一版本之前仍可填写密码；它的服务，保存后通知所有 hub；它的隧道，
   可关闭。
 - **proxy**：它的 hub（编辑方式同节点）、它们的节点和服务，以及每台 hub 分担某个节点隧道的比例；
   查询节点，在 hub 的 `allow_proxy_services` 与节点的 `allow_hub_services` 都允许时经 hub 设置节点的服务；增删转发；它的隧道，可关闭；告知 hub 的 meta；以及经 Web 代理访问
@@ -281,7 +338,9 @@ hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访�
 
 `go test -race ./tunnel/...` 像 `fit run` 那样通过 fit 的配置、在真实引擎上运行这些角色：经 TCP、TLS、
 WebSocket、基于 TLS 的 WebSocket 和 QUIC 的隧道（加密与不加密消息体）、大数据量传输、慢服务和慢 proxy 、
-中途断开的连接、页面修改写回配置，以及从存储读回设置的重启。还测试了位于 hub 地址上的转接方：只转发字节的
+中途断开的连接、页面修改写回配置，以及从存储读回设置的重启。令牌在 TLS、基于 TLS 的 WebSocket、QUIC 和
+加密的 TCP 上测试：任何角色的令牌都能注册，其他令牌不能接管已绑定的成员，未知、伪造或重放的证明被拒绝，
+过期令牌的链路被关闭，吊销令牌的链路立即关闭。还测试了位于 hub 地址上的转接方：只转发字节的
 转接方无法在 tls 或 wss 上注入帧，持有自己证书的转接方无法与固定了 hub 证书指纹的节点完成握手。`test/docker/tunnel/fit-tunnel-docker.sh test` 让 hub 、节点和
 proxy 各自运行在独立容器中，设备位于只有其节点可达的网络上，通过控制台和隧道测试全部功能，然后重启
 每个实例，检查它们从各自的存储中恢复。
