@@ -399,6 +399,7 @@ func (jw *JWT) admit(c *fibhttp.Context, claims map[string]any, next module.Hand
 		e = observe.Track(c)
 	}
 	e.SetClaims(claims)
+	e.Authenticated = true
 	if sub, ok := claims["sub"].(string); ok && e.User == "" {
 		e.User = sub
 	}

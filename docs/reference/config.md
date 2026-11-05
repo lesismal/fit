@@ -4153,7 +4153,9 @@ Keeps responses by RFC 9111's rules, in memory and on disk, shared by the routes
 
 Keeps responses by RFC 9111's rules, in memory and, with `disk`, on disk, in a zone that routes
 may share; answers stale while refreshing, or when the upstream fails, if told to. Purged through
-the Admin API.
+the Admin API. A request with Authorization, or one an auth middleware before the cache let in
+(whose Authorization it may have taken out), has its response kept only when the response says
+`public`, `s-maxage` or `must-revalidate`, so that one user's is not another's.
 
 In a .conf file:
 

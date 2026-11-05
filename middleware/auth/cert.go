@@ -7,6 +7,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 )
 
 // ClientCert lets a request through only if its client sent a certificate
@@ -55,6 +56,7 @@ func (cc *ClientCert) Wrap(next module.Handler) module.Handler {
 		if UserOf(c) == "" {
 			setUser(c, subject)
 		}
+		observe.MarkAuthenticated(c)
 		next.ServeHTTP(c)
 	})
 }

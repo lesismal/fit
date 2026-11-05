@@ -27,6 +27,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 )
 
 func init() {
@@ -50,8 +51,10 @@ const (
 // everything (Vary: *), set no cookie, carry no trailers and are no larger
 // than max_entry_bytes, with a freshness lifetime from s-maxage, max-age or
 // Expires, or, for the statuses that allow one, from default_ttl or a tenth
-// of the time since Last-Modified. A request with Authorization has its
-// response kept only when it says public, s-maxage or must-revalidate.
+// of the time since Last-Modified. A request with Authorization, or one an
+// auth middleware let in (basic_auth, jwt, forward_auth, client_cert), whose
+// field it may have taken out, has its response kept only when it says
+// public, s-maxage or must-revalidate.
 //
 // A fresh response answers GET and HEAD requests, as a 304 for one whose
 // If-None-Match or If-Modified-Since it meets. A request's no-cache, max-age
@@ -431,7 +434,7 @@ func (x *miss) freshen(h stdhttp.Header) {
 			header[k] = slices.Clip(slices.Clone(v))
 		}
 	}
-	e, ok := x.m.entryOf(old.status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.authorized)
+	e, ok := x.m.entryOf(old.status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.isAuthorized())
 	if !ok {
 		x.m.store.remove(x.key)
 		return
@@ -475,7 +478,7 @@ func (x *miss) capture(status int, h stdhttp.Header) *capture {
 			header[k] = slices.Clip(slices.Clone(v))
 		}
 	}
-	e, ok := x.m.entryOf(status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.authorized)
+	e, ok := x.m.entryOf(status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.isAuthorized())
 	if !ok {
 		return nil
 	}
@@ -641,4 +644,12 @@ func hasTrailer(h stdhttp.Header) bool {
 		}
 	}
 	return false
+}
+
+// isAuthorized reports whether the request counts as one with Authorization
+// for keeping its response (RFC 9111 section 3.5): it arrived with the field,
+// or an auth middleware let it in, as one before the cache may have taken the
+// field out, or one after it may let it in by a cookie or a certificate.
+func (x *miss) isAuthorized() bool {
+	return x.authorized || observe.Authenticated(x.c)
 }

@@ -145,6 +145,7 @@ func (ba *Basic) admit(c *fibhttp.Context, user string, next module.Handler) {
 		c.Request.Header[ba.userHeader] = []string{user}
 	}
 	setUser(c, user)
+	observe.MarkAuthenticated(c)
 	next.ServeHTTP(c)
 }
 

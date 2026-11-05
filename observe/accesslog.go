@@ -391,9 +391,29 @@ type Entry struct {
 	// User is who the request was authenticated as, by Basic auth or a
 	// client certificate's subject; empty when it was not.
 	User string
+	// Authenticated says an auth middleware let the request in, whether or
+	// not it named a user: a shared cache behind it treats the request as
+	// one with Authorization (RFC 9111 section 3.5), which the middleware
+	// may have taken out.
+	Authenticated bool
 	// more is what few requests have, kept apart so that the entry of
 	// every other stays small: a token's claims, a trace.
 	more *entryMore
+}
+
+// MarkAuthenticated records that an auth middleware let c's request in.
+func MarkAuthenticated(c *fibhttp.Context) {
+	e := EntryOf(c)
+	if e == nil {
+		e = Track(c)
+	}
+	e.Authenticated = true
+}
+
+// Authenticated reports whether an auth middleware let c's request in.
+func Authenticated(c *fibhttp.Context) bool {
+	e := EntryOf(c)
+	return e != nil && e.Authenticated
 }
 
 type entryMore struct {
