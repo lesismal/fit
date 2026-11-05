@@ -123,6 +123,35 @@ func TestHelloEdges(t *testing.T) {
 	}
 }
 
+// A link that does not say hello in time is closed, and one that does is kept.
+// 未及时 hello 的连接被关闭，及时 hello 的连接保留。
+func TestHelloTimeout(t *testing.T) {
+	node, _ := newTestMesh(t, model.RoleNode, "n1", []string{model.RoleHub})
+	node.opts.Log = testLog(t)
+	node.helloWait = 200 * time.Millisecond
+	addr := freeAddr(t)
+	start(t, node, addr)
+
+	silent := rawPeer(t, addr, wire.Handlers{})
+	said := rawPeer(t, addr, wire.Handlers{})
+	if _, err := said.Call(ctxT(t), wire.Head{Method: model.MethodHello}, hello(model.Identity{Role: model.RoleHub, ID: "h1", Name: "h1"})); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-silent.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the link without a hello is still open")
+	}
+	select {
+	case <-said.Done():
+		t.Fatal("the link that said hello was closed")
+	case <-time.After(300 * time.Millisecond):
+	}
+	if ps := node.Peers(); len(ps) != 1 || ps[0].ID != "h1" {
+		t.Fatalf("peers: %+v", ps)
+	}
+}
+
 // An ID another link holds under one role is refused under another: a peer that knows the password cannot pass
 // for a node it is not by its ID; the same ID and role on another link, as a node's pool, is taken.
 // 另一条连接以某个角色持有的 ID 不能以其他角色使用：知道密码的对端无法借 ID 冒充它不是的节点；同一 ID、同一角色的另一条连接

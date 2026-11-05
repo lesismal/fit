@@ -224,6 +224,10 @@ type Mesh struct {
 	wg       sync.WaitGroup
 
 	routes *Routes
+
+	// helloWait is helloTimeout; a test may shorten it before the mesh listens.
+	// helloWait 即 helloTimeout；测试可在互联监听之前缩短它。
+	helloWait time.Duration
 }
 
 // New creates a Mesh serving the methods of router. Routes may still be added to router until Start.
@@ -240,6 +244,8 @@ func New(opts Options, router *Router) *Mesh {
 		pushes:  map[string]pushRoute{},
 		stopCh:  make(chan struct{}),
 		routes:  newRoutes(),
+
+		helloWait: helloTimeout,
 	}
 }
 
@@ -324,6 +330,7 @@ func (m *Mesh) connConfig(t *target, creds []wire.Credential) wire.ConnConfig {
 			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password)", "remote", r.RemoteAddr)
 		}
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, nil)) }
+		cfg.OnOpen = m.awaitHello
 	} else {
 		cfg.Auth = wire.Password(t.password)
 		cfg.Handlers = func(wc *wire.Conn) wire.Handlers { return m.handlers(m.connected(wc, t)) }
@@ -476,20 +483,30 @@ func (m *Mesh) connected(wc *wire.Conn, t *target) *conn {
 	m.mu.Lock()
 	m.conns[wc] = c
 	m.mu.Unlock()
-	if t == nil {
-		// Incoming: the dialer must say hello in time.
-		// 入站：拨号方须及时 hello。
-		time.AfterFunc(helloTimeout, func() {
-			c.mu.Lock()
-			stale := !c.registered && !c.closed
-			c.mu.Unlock()
-			if stale {
-				m.log(slog.LevelWarn, "mesh: closing a connection that did not say hello", "remote", c.remote)
-				wc.Close()
-			}
-		})
-	}
 	return c
+}
+
+// awaitHello closes an incoming connection whose dialer does not say hello in time. wire calls it once the
+// connection is whole: connected runs while wire still makes it, before its session exists, which the timer's
+// Close reads.
+// awaitHello 关闭未及时 hello 的入站连接。wire 在连接构造完成后调用它：connected 运行时 wire 仍在构造连接，其会话尚不
+// 存在，而定时器的 Close 会读取会话。
+func (m *Mesh) awaitHello(wc *wire.Conn) {
+	m.mu.RLock()
+	c := m.conns[wc]
+	m.mu.RUnlock()
+	if c == nil {
+		return // closed already / 已关闭
+	}
+	time.AfterFunc(m.helloWait, func() {
+		c.mu.Lock()
+		stale := !c.registered && !c.closed
+		c.mu.Unlock()
+		if stale {
+			m.log(slog.LevelWarn, "mesh: closing a connection that did not say hello", "remote", c.remote)
+			wc.Close()
+		}
+	})
 }
 
 // disconnected forgets a closed connection; err is why it closed, if known. Idempotent.
