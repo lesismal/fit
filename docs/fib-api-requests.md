@@ -2018,7 +2018,7 @@ that has it.
 ## A65: A refused protocol switch streamed back
 
 **Status.** Requested on 2026-11-05, from fit's security review. Done in fib's `main` at
-`4848eeb`; fit is on `d6f8809` (`v1.7.2-0.20261105155959-d6f880967827`). fit's stopgap, a 64 KiB bound on a body the upstream pool's client
+`4848eeb`; fit is on `v1.7.2` (`d6f8809`). fit's stopgap, a 64 KiB bound on a body the upstream pool's client
 buffers whole and a 502 for a refused upgrade past it, is gone with it.
 
 **Problem.** Any client may send `Connection: Upgrade` and `Upgrade: websocket` to a proxied route.
@@ -2056,7 +2056,7 @@ h2c handling from the stopgap stay.
 ## A66: An RTSP PLAY or RECORD bound to its session's stream
 
 **Status.** Requested on 2026-11-05, from fit's security review. Done in fib's `main` at
-`e216884`; fit is on `d6f8809` (`v1.7.2-0.20261105155959-d6f880967827`). fit's stopgap until then, from 6c4a5937: `streaming/rtspauth.go`
+`e216884`; fit is on `v1.7.2` (`d6f8809`). fit's stopgap until then, from 6c4a5937: `streaming/rtspauth.go`
 authorized SETUP, kept per connection the streams its ANNOUNCE and SETUPs named (at most 8), and
 checked a PLAY against each of them; it is gone.
 
@@ -2093,7 +2093,7 @@ stays.
 ## A67: An idle timeout for one HTTP connection
 
 **Status.** Requested on 2026-11-05, from fit's security review. Done in fib's `main` at
-`27f5c88`; fit is on `d6f8809` (`v1.7.2-0.20261105155959-d6f880967827`).
+`27f5c88`; fit is on `v1.7.2` (`d6f8809`).
 
 **Problem.** A console holds idle connections for two minutes. fit wants a client that has not yet
 sent a request with a session to be held for seconds, so that unauthenticated connections cannot
