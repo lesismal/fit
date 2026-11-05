@@ -70,7 +70,7 @@ func TestOCSPGetErrors(t *testing.T) {
 			if issuer == nil {
 				issuer = r.ca.Cert
 			}
-			_, _, err := o.get(&Staple{leaf: &leaf, issuer: issuer})
+			_, _, err := o.get(&Staple{leaf: &leaf, issuer: issuer}, o.http)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("%v, want %q", err, tt.want)
 			}

@@ -141,7 +141,8 @@ func (s *Static) Staple(o *OCSP) {
 	s.ocsp = o
 	s.staples = make([]*Staple, len(s.certs))
 	for i, c := range s.certs {
-		s.staples[i] = o.Add(c, nil)
+		// Written by whom the operator may not know: see OCSP.
+		s.staples[i] = o.add(c, nil, true)
 	}
 }
 

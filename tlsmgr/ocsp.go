@@ -10,9 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ocsp"
@@ -42,9 +46,26 @@ const (
 // Certificates are kept by their chain, with a count of their users, so that
 // the graphs a reload makes share the response of a certificate they both
 // serve, and a certificate no graph serves is dropped.
+//
+// A certificate's responder is a URL the certificate names, so a request to
+// it goes where whoever made the certificate says. For a certificate ACME
+// obtained, that is the CA the operator configured. A certificate from files
+// may have been written from what someone else gave, such as a Kubernetes
+// Secret a tenant made, so its response is fetched only when its chain
+// verifies against the system's roots (or those TrustRoots gives): a public
+// CA names its own responder, and nobody can have it name another. Such a
+// responder is not dialled at an address that is not public, loopback,
+// private, link-local or the like, unless through the proxy the environment
+// sets. No fetch follows a redirect.
 type OCSP struct {
-	http *http.Client
-	log  *logs.Logger
+	http   *http.Client // for certificates ACME obtained
+	public *http.Client // for certificates from files: public addresses only
+	log    *logs.Logger
+
+	// roots, when not nil, replaces the system's roots for certificates
+	// from files, and private allows their responders at any address.
+	roots   atomic.Pointer[x509.CertPool]
+	private atomic.Bool
 
 	// now, retryBase and retryMax are what tests change.
 	now                 func() time.Time
@@ -73,13 +94,21 @@ type Staple struct {
 	// revoked, if not nil, hears that the responder says the certificate
 	// is revoked.
 	revoked func()
+	// verified says the chain verified against the roots, which a
+	// certificate from files must before its response is fetched; set by
+	// its fetches, which are one at a time.
+	verified bool
+	// toldUnverified says that its chain not verifying was reported.
+	toldUnverified bool
 
 	// Under OCSP.mu.
-	refs     int
-	due      time.Time
-	expires  time.Time // when current's response stops being valid
-	failures int
-	running  bool
+	refs int
+	// fromFiles says every Add of it was for a certificate from files.
+	fromFiles bool
+	due       time.Time
+	expires   time.Time // when current's response stops being valid
+	failures  int
+	running   bool
 }
 
 // Certificate returns the certificate with its latest good response stapled,
@@ -101,7 +130,6 @@ func NewOCSP(log *logs.Logger) *OCSP {
 
 func newOCSP(log *logs.Logger) *OCSP {
 	o := &OCSP{
-		http:      &http.Client{Timeout: ocspTimeout},
 		log:       log,
 		now:       time.Now,
 		retryBase: defaultRetryBase,
@@ -110,8 +138,97 @@ func newOCSP(log *logs.Logger) *OCSP {
 		sem:       make(chan struct{}, ocspWorkers),
 		wake:      make(chan struct{}, 1),
 	}
+	o.http = ocspClient(nil)
+	o.public = ocspClient(o.allowAddr)
 	o.ctx, o.cancel = context.WithCancel(context.Background())
 	return o
+}
+
+// TrustRoots has o fetch the responses of certificates from files whose
+// chain verifies against roots, in place of the system's roots, and, with
+// private, from responders at any address: for an operator whose files hold
+// certificates of a CA of its own, and for tests.
+func (o *OCSP) TrustRoots(roots *x509.CertPool, private bool) {
+	o.roots.Store(roots)
+	o.private.Store(private)
+}
+
+// ocspClient returns a client of responders that follows no redirect, and,
+// with allow, dials only addresses allow allows, but for the proxy the
+// environment sets, which the operator chose.
+func ocspClient(allow func(netip.Addr) bool) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if allow != nil {
+		proxies := proxyAddrs()
+		direct := &net.Dialer{Timeout: ocspTimeout, KeepAlive: 30 * time.Second}
+		filtered := &net.Dialer{Timeout: ocspTimeout, KeepAlive: 30 * time.Second,
+			// Called with the address dialled, once a name is resolved,
+			// so that a name cannot point somewhere else.
+			Control: func(_, address string, _ syscall.RawConn) error {
+				ap, err := netip.ParseAddrPort(address)
+				if err != nil {
+					return err
+				}
+				if !allow(ap.Addr()) {
+					return fmt.Errorf("the responder's address %s is not public", ap.Addr())
+				}
+				return nil
+			}}
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if proxies[addr] {
+				return direct.DialContext(ctx, network, addr)
+			}
+			return filtered.DialContext(ctx, network, addr)
+		}
+	}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   ocspTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// proxyAddrs returns the addresses of the proxies the environment sets for
+// http and https, as a transport dials them.
+func proxyAddrs() map[string]bool {
+	addrs := map[string]bool{}
+	for _, scheme := range []string{"http", "https"} {
+		u, err := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: scheme, Host: "ocsp.invalid"}})
+		if err != nil || u == nil {
+			continue
+		}
+		port := u.Port()
+		if port == "" {
+			port = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}[u.Scheme]
+		}
+		addrs[net.JoinHostPort(u.Hostname(), port)] = true
+	}
+	return addrs
+}
+
+// allowAddr reports whether a responder of a certificate from files may be
+// dialled at addr.
+func (o *OCSP) allowAddr(addr netip.Addr) bool { return o.private.Load() || publicAddr(addr) }
+
+// nat64 is the well-known prefix of NAT64 (RFC 6052), whose addresses are
+// IPv4 addresses.
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// sharedSpace is the IPv4 space carriers share (RFC 6598), as private as
+// the private ranges.
+var sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
+
+// publicAddr reports whether addr is a public unicast address: not
+// loopback, private, link-local, multicast, unspecified or shared.
+func publicAddr(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	if nat64.Contains(addr) {
+		b := addr.As16()
+		addr = netip.AddrFrom4([4]byte(b[12:]))
+	}
+	return addr.IsGlobalUnicast() && !addr.IsPrivate() && !sharedSpace.Contains(addr)
 }
 
 func (o *OCSP) start() {
@@ -134,12 +251,18 @@ func (o *OCSP) Close() error {
 	return nil
 }
 
-// Add keeps a response for cert, which must have its Leaf set, and returns
-// its Staple; or nil when cert names no responder, or its chain has no
-// issuer to check a response against. revoked, which may be nil, hears that
-// the responder says cert is revoked; the first Add of a chain sets it.
-// Each Add is undone by a Release.
+// Add keeps a response for cert, which must have its Leaf set and come from
+// a CA the operator chose, as ACME's do, and returns its Staple; or nil when
+// cert names no responder, or its chain has no issuer to check a response
+// against. revoked, which may be nil, hears that the responder says cert is
+// revoked; the first Add of a chain sets it. Each Add is undone by a
+// Release.
 func (o *OCSP) Add(cert *tls.Certificate, revoked func()) *Staple {
+	return o.add(cert, revoked, false)
+}
+
+// add is Add, for a certificate from files with fromFiles (see OCSP).
+func (o *OCSP) add(cert *tls.Certificate, revoked func(), fromFiles bool) *Staple {
 	if cert.Leaf == nil || len(cert.Leaf.OCSPServer) == 0 || len(cert.Certificate) < 2 {
 		return nil
 	}
@@ -153,13 +276,16 @@ func (o *OCSP) Add(cert *tls.Certificate, revoked func()) *Staple {
 	defer o.mu.Unlock()
 	if s := o.staples[key]; s != nil {
 		s.refs++
+		// The chain an operator's CA issued is no less trusted for being
+		// in files too.
+		s.fromFiles = s.fromFiles && fromFiles
 		return s
 	}
 	issuer, err := x509.ParseCertificate(cert.Certificate[1])
 	if err != nil {
 		return nil
 	}
-	s := &Staple{key: key, base: cert, leaf: cert.Leaf, issuer: issuer, revoked: revoked, refs: 1, due: o.now()}
+	s := &Staple{key: key, base: cert, leaf: cert.Leaf, issuer: issuer, revoked: revoked, refs: 1, fromFiles: fromFiles, due: o.now()}
 	o.staples[key] = s
 	o.poke()
 	return s
@@ -203,7 +329,7 @@ func (o *OCSP) schedule() {
 				case o.sem <- struct{}{}:
 					s.running = true
 					o.done.Add(1)
-					go o.fetch(s)
+					go o.fetch(s, s.fromFiles)
 					continue
 				default:
 					// Every slot is taken; a fetch that ends pokes.
@@ -227,14 +353,35 @@ func (o *OCSP) schedule() {
 // fetch gets s's response, staples it if it is good, and sets when s is next
 // due: halfway through the response's validity, or, after a failure, later
 // and later.
-func (o *OCSP) fetch(s *Staple) {
+func (o *OCSP) fetch(s *Staple, fromFiles bool) {
 	defer o.done.Done()
-	resp, raw, err := o.get(s)
+	var resp *ocsp.Response
+	var raw []byte
+	var err error
+	client := o.http
+	if fromFiles {
+		client = o.public
+		if !s.verified {
+			err = o.verify(s)
+			s.verified = err == nil
+		}
+	}
+	if err == nil {
+		resp, raw, err = o.get(s, client)
+	}
 	o.mu.Lock()
 	now := o.now()
 	s.running = false
 	var revoked func()
 	switch {
+	case errors.Is(err, errUnverified):
+		// Looked at again now and then, as the roots may change; said
+		// once.
+		if !s.toldUnverified {
+			s.toldUnverified = true
+			o.log.Infof("ocsp: %s: no response stapled: %v", subject(s.leaf), err)
+		}
+		s.due = now.Add(ocspRefresh)
 	case err != nil:
 		if o.ctx.Err() != nil {
 			break
@@ -286,8 +433,28 @@ func (o *OCSP) fetch(s *Staple) {
 	}
 }
 
-// get fetches and checks s's response.
-func (o *OCSP) get(s *Staple) (*ocsp.Response, []byte, error) {
+// errUnverified is why a certificate from files gets no response.
+var errUnverified = errors.New("its chain does not verify against the trusted roots, and its responder is not asked")
+
+// verify checks that s's chain, a certificate from files, verifies against
+// the roots, for any use.
+func (o *OCSP) verify(s *Staple) error {
+	inter := x509.NewCertPool()
+	for _, der := range s.base.Certificate[1:] {
+		if c, err := x509.ParseCertificate(der); err == nil {
+			inter.AddCert(c)
+		}
+	}
+	_, err := s.leaf.Verify(x509.VerifyOptions{Roots: o.roots.Load(), Intermediates: inter,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	if err != nil {
+		return fmt.Errorf("%w (%v)", errUnverified, err)
+	}
+	return nil
+}
+
+// get fetches and checks s's response with client.
+func (o *OCSP) get(s *Staple, client *http.Client) (*ocsp.Response, []byte, error) {
 	req, err := ocsp.CreateRequest(s.leaf, s.issuer, &ocsp.RequestOptions{Hash: crypto.SHA1})
 	if err != nil {
 		return nil, nil, err
@@ -299,7 +466,7 @@ func (o *OCSP) get(s *Staple) (*ocsp.Response, []byte, error) {
 		return nil, nil, err
 	}
 	hreq.Header.Set("Content-Type", "application/ocsp-request")
-	hresp, err := o.http.Do(hreq)
+	hresp, err := client.Do(hreq)
 	if err != nil {
 		return nil, nil, err
 	}

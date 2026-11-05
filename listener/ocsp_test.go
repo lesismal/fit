@@ -45,6 +45,8 @@ func TestOCSPStapled(t *testing.T) {
 
 	o := tlsmgr.NewOCSP(nil)
 	defer o.Close()
+	// A CA of the test's own, whose responder is at a loopback address.
+	o.TrustRoots(ca.Pool(), true)
 	c, err := config.Load(fmt.Appendf(nil, `{"listeners": [{"name": "web", "address": "127.0.0.1:0",
     "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}],
   "routes": [{"handler": {"module": "respond", "params": {"body": "ok"}}}]}`, cert.CertFile, cert.KeyFile))

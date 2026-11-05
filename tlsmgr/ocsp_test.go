@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -272,6 +274,8 @@ func TestStaticStaple(t *testing.T) {
 	r := newResponder(t)
 	var l logLines
 	o := testOCSP(t, &l)
+	// The test CA's own, at a loopback address: see TestStaticStapleSSRF.
+	o.TrustRoots(r.ca.Pool(), true)
 	cert := r.issue(t, "a.fit.test")
 	other := keyCert(t, false, "b.fit.test")
 	s := NewStatic(cert, other)
@@ -289,5 +293,86 @@ func TestStaticStaple(t *testing.T) {
 	o.mu.Unlock()
 	if kept != 0 {
 		t.Error("Release left the staple")
+	}
+}
+
+// TestStaticStapleSSRF serves, from files, a certificate whoever wrote them
+// made, such as a tenant through a Kubernetes Secret, which names a
+// responder at an address inside the network: it is not asked unless the
+// chain verifies against the trusted roots, and even then not at a loopback
+// address, while ACME's certificates, from the operator's CA, are.
+func TestStaticStapleSSRF(t *testing.T) {
+	r := newResponder(t)
+	cert := r.issue(t, "a.fit.test")
+
+	// A chain no trusted root issued.
+	var l logLines
+	o := testOCSP(t, &l)
+	s := NewStatic(cert)
+	s.Staple(o)
+	eventually(t, 5*time.Second, "the chain refused", func() bool { return l.count("does not verify") == 1 })
+	if n := r.requests.Load(); n != 0 {
+		t.Errorf("the responder of a chain no trusted root issued was asked %d times", n)
+	}
+	s.Release()
+
+	// Trusted, but at a loopback address.
+	var l2 logLines
+	o2 := testOCSP(t, &l2)
+	o2.TrustRoots(r.ca.Pool(), false)
+	s2 := NewStatic(cert)
+	s2.Staple(o2)
+	eventually(t, 5*time.Second, "the address refused", func() bool { return l2.count("is not public") > 0 })
+	if n := r.requests.Load(); n != 0 {
+		t.Errorf("a responder at a loopback address was asked %d times", n)
+	}
+	// The same chain obtained by ACME is the operator's CA's.
+	st := o2.Add(cert, nil)
+	o2.mu.Lock()
+	fromFiles := st.fromFiles
+	o2.mu.Unlock()
+	if fromFiles {
+		t.Error("a chain ACME obtained still taken as from files only")
+	}
+	s2.Release()
+	o2.Release(st)
+
+	// A responder that redirects is not followed.
+	var hops atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hops.Add(1) }))
+	defer target.Close()
+	redirect := httptest.NewServer(http.RedirectHandler(target.URL, http.StatusTemporaryRedirect))
+	defer redirect.Close()
+	leaf := *cert.Leaf
+	leaf.OCSPServer = []string{redirect.URL}
+	if _, _, err := o.get(&Staple{leaf: &leaf, issuer: r.ca.Cert}, o.http); err == nil || !strings.Contains(err.Error(), "307") {
+		t.Errorf("a redirect: %v", err)
+	}
+	if hops.Load() != 0 {
+		t.Error("a redirect was followed")
+	}
+}
+
+func TestPublicAddr(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"8.8.8.8": true, "2606:4700::1111": true, "::ffff:8.8.8.8": true, "64:ff9b::808:808": true,
+		"127.0.0.1": false, "::1": false, "10.0.0.5": false, "172.16.0.1": false, "192.168.1.1": false,
+		"169.254.169.254": false, "fe80::1": false, "fd00::1": false, "0.0.0.0": false, "::": false,
+		"224.0.0.1": false, "ff02::1": false, "100.64.0.1": false, "::ffff:127.0.0.1": false,
+		"64:ff9b::a9fe:a9fe": false,
+	} {
+		if got := publicAddr(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("%s: %v", addr, got)
+		}
+	}
+	t.Setenv("HTTPS_PROXY", "http://10.0.0.9:3128")
+	t.Setenv("HTTP_PROXY", "socks5://10.0.0.9")
+	// ProxyFromEnvironment reads the environment once per process, so
+	// what proxyAddrs says depends on what ran first; it must at least not
+	// name anything else.
+	for addr := range proxyAddrs() {
+		if addr != "10.0.0.9:3128" && addr != "10.0.0.9:1080" {
+			t.Errorf("a proxy at %s", addr)
+		}
 	}
 }

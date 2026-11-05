@@ -37,5 +37,10 @@ M2 用 ACME 申请和续期证书（I29–I31）：HTTP-01 和 TLS-ALPN-01 验�
 - HTTP-01 由 fit 的 HTTP 监听器从内存应答，TLS-ALPN-01 由 `GetCertificate` 为通过 ALPN 请求 `acme-tls/1` 的客户端应答
   （I30），这需要 fib 的 TLS 在 ALPN 中提供它。
 - Let's Encrypt 已不再发布 OCSP 响应，所以 I30 的 OCSP stapling 只对其他 CA 有用。
+- 证书自己写明其 OCSP 响应者，因此 stapling 的请求发往证书制作者指定的地方。ACME 的证书来自运维者配置的 CA，照其
+  所写获取。来自文件的证书可能由他人提供的内容写成，例如租户的 Kubernetes Secret，因此只有在证书链能由系统根证书验证时
+  才获取其响应：公共 CA 写的是它自己的响应者，别人无法让它写成别的。即便如此，也不会拨向环回、私有、链路本地、共享或未
+  指定地址上的响应者（在名称解析之后，按实际拨号的地址检查），经由环境变量设置的代理时除外；任何获取都不跟随重定向。
+  来自文件、由私有 CA 签发的证书不附带 staple。
 - fit 的 `go.mod` 在 I29 引入 `golang.org/x/crypto`，`x/net`、`x/sys` 和 `x/term` 作为该模块的依赖一并出现；只构建
   `acme` 包。

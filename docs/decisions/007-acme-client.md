@@ -46,5 +46,14 @@ interface of fit's own (principle 6). The candidates, at their versions of 2026-
 - HTTP-01 is answered by fit's HTTP listeners from memory, and TLS-ALPN-01 by `GetCertificate` for
   a client that asks for `acme-tls/1` (I30), which fib's TLS has to offer through ALPN.
 - Let's Encrypt has stopped publishing OCSP responses, so I30's stapling helps with other CAs only.
+- A certificate names its own OCSP responder, so stapling sends requests where whoever made the
+  certificate says. ACME's certificates come from the CA the operator configured and are fetched
+  as they say. Certificates from files may have been written from what someone else gave, such as
+  a tenant's Kubernetes Secret, so their responses are fetched only when the chain verifies
+  against the system's roots: a public CA names its own responder, and nobody else can make it
+  name another. Even then the responder is not dialled at a loopback, private, link-local,
+  shared or unspecified address (checked on the address dialled, once its name is resolved),
+  except through the proxy the environment sets, and no fetch follows a redirect. A certificate
+  from files of a private CA is served without a staple.
 - fit's `go.mod` gains `golang.org/x/crypto` in I29, with `x/net`, `x/sys` and `x/term` as
   requirements of that module; only the `acme` package is built.
