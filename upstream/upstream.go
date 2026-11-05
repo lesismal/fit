@@ -192,12 +192,6 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	// A body of no declared length is handed over from its header, so that
 	// one that trickles, as server-sent events do, is passed on as it comes.
 	cc.StreamUnknownLengthAtHeader = true
-	// So a body the client buffers whole is never past the threshold: the
-	// one that would be is a response that cannot stream, an answer to a
-	// protocol switch that did not switch (see SendUpgrade), which fails
-	// with fibhttp.ErrResponseBodyTooLarge rather than taking up to fib's
-	// default of 64 MiB for any client that asks to switch.
-	cc.MaxResponseBodyBytes = StreamThreshold
 	cc.MaxConnsPerHost = maxConns
 	// Past max_pending waiting for a connection to an address, fib's client
 	// refuses a request at once with ErrBusy.
@@ -434,9 +428,8 @@ func (p *Pool) SendFramed(b *Backend, req *stdhttp.Request, framing fibhttp.Fram
 // protocols, as a WebSocket handshake does: on a 101 the connection leaves
 // the pool and becomes a tunnel (ClientResponse.Tunnel), which handler
 // takes. See fib's Client.StartUpgrade; the switch needs an HTTP/1.1
-// connection, so an h2c upstream fails it. Any other answer arrives whole,
-// which fib's client does not stream, so one whose body is past
-// StreamThreshold fails with fibhttp.ErrResponseBodyTooLarge.
+// connection, so an h2c upstream fails it. Any other answer is a response
+// like Send's, its body streamed past StreamThreshold.
 func (p *Pool) SendUpgrade(b *Backend, req *stdhttp.Request, handler fibhttp.TunnelHandler, callback func(*fibhttp.ClientResponse, error)) fibhttp.Call {
 	if p.client == nil {
 		callback(nil, ErrNoEngine)

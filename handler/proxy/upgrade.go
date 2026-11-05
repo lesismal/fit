@@ -28,12 +28,11 @@ import (
 // its Upgrade and Connection fields; an HTTP/2 or HTTP/3 one with an
 // extended CONNECT (RFC 8441, RFC 9220) for websocket, which goes upstream
 // as the HTTP/1.1 handshake it stands for. Any other answer the upstream
-// gives is the client's, if its body is within upstream.StreamThreshold:
-// fib's Client.StartUpgrade takes such an answer whole, never streamed, and
-// one past the threshold is answered 502 rather than buffered. A request
-// asking to switch to h2c is an offer to the hop it came over, which a
-// listener that speaks h2c takes up itself, and is proxied as the ordinary
-// request it also is.
+// gives is the client's, passed on as any response is (exchange.
+// onResponse), its body streamed back with backpressure past
+// upstream.StreamThreshold. A request asking to switch to h2c is an offer
+// to the hop it came over, which a listener that speaks h2c takes up
+// itself, and is proxied as the ordinary request it also is.
 
 // tunnelWatermark is how much may wait to go to one side of a tunnel before
 // the other side's reads are held.
@@ -89,6 +88,10 @@ type relay struct {
 	protocol string
 	extended bool
 	idle     time.Duration
+	// x is the exchange the upstream's request was built in. It holds the
+	// handshake's Call and why it was abandoned, its cause, under its
+	// callMu, and takes over an answer that does not switch (refused).
+	x *exchange
 
 	// client and up are the two tunnels, once each has switched; clientH1
 	// says the client's is a connection of its own, whose output can be
@@ -106,8 +109,6 @@ type relay struct {
 	// pool was told, and 2 once the relay finished, whichever came first.
 	tunneled atomic.Int32
 	once     sync.Once
-	cause    atomic.Pointer[error]
-	call     fibhttp.Call
 	mu       sync.Mutex
 }
 
@@ -143,7 +144,8 @@ func (p *Proxy) serveUpgrade(c *fibhttp.Context, pool *upstream.Pool, protocol s
 	h["Connection"] = []string{"Upgrade"}
 	h["Upgrade"] = []string{protocol}
 	r := &relay{p: p, c: c, pool: pool, protocol: protocol, extended: extended, idle: p.tunnelIdle,
-		clientH1: c.Request.ProtoMajor == 1}
+		clientH1: c.Request.ProtoMajor == 1, x: x}
+	x.start = time.Now()
 	r.backend = pool.Pick(c.Request)
 	// The request is held until both sides have switched, or the client has
 	// its answer; the config until the tunnel is over.
@@ -151,11 +153,10 @@ func (p *Proxy) serveUpgrade(c *fibhttp.Context, pool *upstream.Pool, protocol s
 	p.graph.Retain()
 	p.addRelay(r)
 	c.OnCancel(func(error) { r.abandon(errClientGone) })
-	call := pool.SendUpgrade(r.backend, out, (*upSide)(r), r.answer)
-	r.mu.Lock()
-	r.call = call
-	cause := r.cause.Load()
-	r.mu.Unlock()
+	x.callMu.Lock()
+	x.call = pool.SendUpgrade(r.backend, out, (*upSide)(r), r.answer)
+	call, cause := x.call, x.cause.Load()
+	x.callMu.Unlock()
 	if cause != nil {
 		call.Cancel(*cause)
 	}
@@ -164,12 +165,14 @@ func (p *Proxy) serveUpgrade(c *fibhttp.Context, pool *upstream.Pool, protocol s
 // abandon gives up the handshake for cause, or closes the tunnel once it
 // is open.
 func (r *relay) abandon(cause error) {
-	r.cause.CompareAndSwap(nil, &cause)
+	r.x.cause.CompareAndSwap(nil, &cause)
 	r.mu.Lock()
-	call, client, up := r.call, r.client, r.up
+	client, up := r.client, r.up
 	r.mu.Unlock()
 	if client == nil || up == nil {
-		call.Cancel(cause)
+		// The handshake, or the body of a refusal, which the same Call
+		// abandons.
+		r.x.cancel(r.x.gen.Load(), cause)
 		return
 	}
 	_ = client.Close()
@@ -184,32 +187,21 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	if err != nil {
 		cause := r.causeErr()
 		// A handshake the client or a drain gave up on is no failure of the
-		// backend's, nor is a refusal too large to pass on: a client that
-		// asks to switch on any large resource would otherwise take the
-		// backend out of rotation.
-		r.finish(cause == nil && !errors.Is(err, fibhttp.ErrResponseBodyTooLarge))
+		// backend's.
+		r.finish(cause == nil)
 		if !errors.Is(cause, errClientGone) {
 			_ = c.Respond(upgradeStatus(err), "text/plain; charset=utf-8", nil)
 		}
 		return
 	}
 	up := resp.Tunnel()
+	if up == nil {
+		r.refused(resp)
+		return
+	}
 	header := resp.Header.Clone()
 	removeHopByHop(header)
 	delete(header, "Content-Length")
-	if up == nil {
-		// Refused: the answer is the client's.
-		body, pooled, _ := takeBody(resp)
-		r.finish(false)
-		out := fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body}
-		if pooled {
-			// A buffer from fib's pool, given back once the response is sent.
-			_ = c.WriteResponseOwned(out)
-		} else {
-			_ = c.WriteResponse(out)
-		}
-		return
-	}
 	if r.extended {
 		delete(header, "Sec-Websocket-Accept")
 	}
@@ -252,7 +244,7 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	if r.clientH1 {
 		client.Conn().SetWriteBackpressure(false)
 	}
-	if cause := r.cause.Load(); cause != nil {
+	if cause := r.x.cause.Load(); cause != nil {
 		r.abandon(*cause)
 		return
 	}
@@ -274,12 +266,28 @@ func upgradeStatus(err error) int {
 	return stdhttp.StatusBadGateway
 }
 
-func (r *relay) causeErr() error {
-	if cause := r.cause.Load(); cause != nil {
-		return *cause
-	}
-	return nil
+// refused passes on an answer that did not switch, which is the client's:
+// the relay's exchange takes it, and what the relay holds, the backend, the
+// config and the request, and answers as it answers any request, its body,
+// however large, streamed back as the client takes it, bounded by the
+// route's response idle and write stall timeouts. It runs in the upstream
+// client's callback, as answer does, whose hold on the request it keeps.
+func (r *relay) refused(resp *fibhttp.ClientResponse) {
+	x, p := r.x, r.p
+	x.pool, x.backend, x.graph, x.stall, x.timeouts = r.pool, r.backend, p.graph, p.stall, r.pool.Timeouts()
+	// In the proxy's open exchanges before it leaves its relays, so that a
+	// drain finds it in one or the other; abandon reaches it from either,
+	// through the Call they share.
+	x.open = &p.open[rand.Uint32()%openShards]
+	x.open.add(x)
+	r.once.Do(func() { p.removeRelay(r) })
+	// The exchange's own hold, which its release gives back; answer's
+	// deferred Release gives back the relay's.
+	r.c.Retain()
+	x.onResponse(resp, nil)
 }
+
+func (r *relay) causeErr() error { return r.x.causeErr() }
 
 // checkIdle closes a tunnel that carried nothing for its idle timeout, and
 // looks again when it last carried something otherwise.

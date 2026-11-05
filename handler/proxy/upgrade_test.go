@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -101,21 +102,21 @@ func stillInRotation(t *testing.T, base string) {
 
 // TestUpgradeLargeRefusal: an upstream that answers a request asking to
 // switch with anything but 101 and a large body, as a backend that ignores
-// Upgrade does for a large file, is not buffered whole: past
-// upstream.StreamThreshold the client gets 502, fit reads no further, and
-// the backend, which did nothing wrong, stays in rotation.
+// Upgrade does for a large file, has it streamed back as any response is,
+// not buffered whole: while the client does not read, the backend's writes
+// stall at what the sockets and fit's bounded queues take, far short of the
+// body; once it reads, it gets all of it, and the backend, which did
+// nothing wrong, stays in rotation.
 func TestUpgradeLargeRefusal(t *testing.T) {
-	const large = 32 << 20
+	const piece, pieces = 64 << 10, 1024 // 64 MiB
 	for _, framing := range []string{"length", "chunked", "close"} {
 		t.Run(framing, func(t *testing.T) {
 			var written atomic.Int64
-			done := make(chan struct{}, 1)
 			b := upgradeBackend(t, func(c net.Conn, _ *stdhttp.Request) {
-				defer func() { done <- struct{}{} }()
 				head := "HTTP/1.1 200 OK\r\n"
 				switch framing {
 				case "length":
-					head += fmt.Sprintf("Content-Length: %d\r\n", large)
+					head += fmt.Sprintf("Content-Length: %d\r\n", piece*pieces)
 				case "chunked":
 					head += "Transfer-Encoding: chunked\r\n"
 				case "close":
@@ -124,35 +125,50 @@ func TestUpgradeLargeRefusal(t *testing.T) {
 				if _, err := io.WriteString(c, head+"\r\n"); err != nil {
 					return
 				}
-				piece := bytes.Repeat([]byte("x"), 64<<10)
+				data := bytes.Repeat([]byte("x"), piece)
 				if framing == "chunked" {
-					piece = append(fmt.Appendf(nil, "%x\r\n", len(piece)), append(piece, "\r\n"...)...)
+					data = append(fmt.Appendf(nil, "%x\r\n", piece), append(data, "\r\n"...)...)
 				}
-				_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				for written.Load() < large {
-					n, err := c.Write(piece)
+				_ = c.SetWriteDeadline(time.Now().Add(30 * time.Second))
+				for range pieces {
+					n, err := c.Write(data)
 					written.Add(int64(n))
 					if err != nil {
 						return
 					}
 				}
+				if framing == "chunked" {
+					_, _ = io.WriteString(c, "0\r\n\r\n")
+				}
 			})
 			base := startFit(t, upgradeConfig(""), b)
-			start := time.Now()
 			_, _, resp := upgradeRequest(t, base, "/big")
-			resp.Body.Close()
-			if resp.StatusCode != stdhttp.StatusBadGateway {
-				t.Fatalf("a large refusal: %d, want 502", resp.StatusCode)
+			defer resp.Body.Close()
+			if resp.StatusCode != stdhttp.StatusOK {
+				t.Fatalf("a large refusal: %d, want the upstream's 200", resp.StatusCode)
 			}
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the backend's connection was not closed")
+			// The client reads nothing: the backend's writes stall once the
+			// sockets' buffers and fit's queues are full, which hold a
+			// fraction of the body.
+			var stalled int64
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				before := written.Load()
+				time.Sleep(200 * time.Millisecond)
+				if after := written.Load(); after == before {
+					stalled = after
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the backend's writes did not stall: %d bytes written", written.Load())
+				}
 			}
-			// What the backend got out is what the sockets' buffers took,
-			// not the body: fit stopped reading at the threshold.
-			if n := written.Load(); n >= large {
-				t.Fatalf("the backend wrote all %d bytes in %v: fit read it all", n, time.Since(start))
+			if stalled >= piece*pieces/2 {
+				t.Fatalf("the backend wrote %d of %d bytes to a client that read none", stalled, piece*pieces)
+			}
+			n, err := io.Copy(io.Discard, resp.Body)
+			if err != nil || n != piece*pieces {
+				t.Fatalf("read %d of %d bytes: %v", n, piece*pieces, err)
 			}
 			stillInRotation(t, base)
 		})
@@ -191,10 +207,27 @@ func TestUpgradeSmallRefusalSlowClient(t *testing.T) {
 	stillInRotation(t, base)
 }
 
-// TestUpgradeRefusalCut: a refusal the upstream cuts short gets 502, and a
-// client that goes while a refusal trickles in has the upstream's
-// connection closed, counted against neither backend.
+// TestUpgradeRefusalCut: a refusal the upstream cuts short gets 502 when
+// it was small enough to arrive whole, and when it was streaming, the
+// client's response is cut short as well, its connection closed before the
+// length it announced; a client that goes while a refusal trickles in has
+// the upstream's connection closed, counted against neither backend.
 func TestUpgradeRefusalCut(t *testing.T) {
+	t.Run("upstream streamed", func(t *testing.T) {
+		b := upgradeBackend(t, func(c net.Conn, _ *stdhttp.Request) {
+			_, _ = io.WriteString(c, "HTTP/1.1 404 Not Found\r\nContent-Length: 1048576\r\n\r\n"+strings.Repeat("x", 128<<10))
+		})
+		base := startFit(t, upgradeConfig(""), b)
+		_, _, resp := upgradeRequest(t, base, "/")
+		defer resp.Body.Close()
+		if resp.StatusCode != stdhttp.StatusNotFound {
+			t.Fatalf("a streamed refusal: %d, want the upstream's 404", resp.StatusCode)
+		}
+		n, err := io.Copy(io.Discard, resp.Body)
+		if !errors.Is(err, io.ErrUnexpectedEOF) || n != 128<<10 {
+			t.Fatalf("read %d bytes, %v: want what came and the cut", n, err)
+		}
+	})
 	t.Run("upstream", func(t *testing.T) {
 		b := upgradeBackend(t, func(c net.Conn, _ *stdhttp.Request) {
 			_, _ = io.WriteString(c, "HTTP/1.1 404 Not Found\r\nContent-Length: 32768\r\n\r\n"+strings.Repeat("x", 1024))

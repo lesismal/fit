@@ -2017,9 +2017,9 @@ that has it.
 
 ## A65: A refused protocol switch streamed back
 
-**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: the upstream pool's
-client bounds a body it buffers whole at 64 KiB (`upstream.StreamThreshold`), and a refused upgrade
-past it is answered 502 (`handler/proxy/upgrade.go`).
+**Status.** Requested on 2026-11-05, from fit's security review. Done in fib branch req/a65 at
+`9c19c61` (not yet on fib main). fit's stopgap, a 64 KiB bound on a body the upstream pool's client
+buffers whole and a 502 for a refused upgrade past it, is gone with it.
 
 **Problem.** Any client may send `Connection: Upgrade` and `Upgrade: websocket` to a proxied route.
 A backend that does not switch answers as usual, often with a large body, and fib's
@@ -2032,8 +2032,26 @@ so `StreamResponseBody` and its threshold do not apply to a non-101 answer.
 **Suggested API.** `StartUpgrade` honours `StreamResponseBody` for an answer other than 101 (a 101
 has no body, so the switch is unchanged), or a `StartUpgradeStreamed` that does.
 
-**How fit would use it.** A refused upgrade goes back through the proxy's ordinary exchange, its
-body streamed with backpressure, and the 64 KiB bound and its 502 go away.
+**As built.** The first suggestion: `StartUpgrade` sends its request as `Start` does, so an answer other
+than 101 honours `StreamResponseBody`, `StreamResponseBodyThreshold` and `StreamUnknownLengthAtHeader`,
+its body read with the connection's backpressure (`StreamResponseBodyBuffer`); a 101 has no body and
+switches as before, and a client that does not stream still gets every refusal whole. No new method:
+`StartUpgrade`'s doc already called such an answer an ordinary response, a client that sets
+`StreamResponseBody` asked for large bodies to stream, and fib's only other caller,
+`http3.AltSvcClient.StartUpgrade`, passes the TCP client's behaviour on. The one change for a caller
+is that, with `StreamResponseBody` on, a large refusal's body has to be taken inside the callback, as
+any response's is.
+
+**How fit uses it.** A refused upgrade is handed to the exchange the relay built its request in:
+`relay.refused` gives it the backend, the config and a hold on the request, adds it to the proxy's open
+exchanges (so a drain cuts it short) and calls `exchange.onResponse`, the ordinary path, so a small
+refusal is written whole and a large one streamed back with `HoldBody` against the client's backlog,
+bounded by the response idle and write stall timeouts. The relay and its exchange share one `Call` and
+one cause, so a client that goes, or a drain, abandons the handshake and the refusal's body alike. The
+upstream pool's client is back to fib's default `MaxResponseBodyBytes`: with the threshold at 64 KiB
+and bodies of no declared length streamed from their header, no body it buffers whole can be larger
+than 64 KiB anyway, and the bound only ever caught refused upgrades. The pool-saturation check and the
+h2c handling from the stopgap stay.
 
 ## A66: An RTSP PLAY or RECORD bound to its session's stream
 

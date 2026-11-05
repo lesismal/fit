@@ -1529,8 +1529,8 @@ workbench 的引擎菜单会为带它的端口加上标记。
 
 ## A65：被拒绝的协议切换以流式返回
 
-**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：upstream 池的客户端把整体缓冲的 body 限制在 64 KiB
-（`upstream.StreamThreshold`），超出的被拒升级答 502（`handler/proxy/upgrade.go`）。
+**状态。** 2026-11-05 由 fit 的安全审查提出。已在 fib 分支 req/a65 的 `9c19c61` 完成（尚未进入 fib main）。fit 的临时
+做法（upstream 池的客户端把整体缓冲的 body 限制在 64 KiB，超出的被拒升级答 502）随之去掉。
 
 **问题。** 任何客户端都可以向代理路由发送 `Connection: Upgrade` 与 `Upgrade: websocket`。不切换协议的后端照常应答，
 body 往往很大，而 fib 的 `Client.StartUpgrade` 在回调前整体等待该应答，上限为 `MaxResponseBodyBytes`：按 fib 默认的
@@ -1542,7 +1542,19 @@ body 往往很大，而 fib 的 `Client.StartUpgrade` 在回调前整体等待�
 **建议的 API。** `StartUpgrade` 对 101 以外的应答遵从 `StreamResponseBody`（101 没有 body，切换不受影响），或新增这样做的
 `StartUpgradeStreamed`。
 
-**fit 的使用方式。** 被拒绝的升级经代理的普通交换返回，body 带背压流式转发，64 KiB 的限制及其 502 随之去掉。
+**实际实现。** 采用第一种建议：`StartUpgrade` 像 `Start` 一样发送请求，101 以外的应答遵从 `StreamResponseBody`、
+`StreamResponseBodyThreshold` 与 `StreamUnknownLengthAtHeader`，body 受连接的背压（`StreamResponseBodyBuffer`）读取；101
+没有 body，照旧切换；不开流式的客户端仍整体收到所有拒绝应答。没有新增方法：`StartUpgrade` 的文档本来就说这样的应答是
+普通响应，设置了 `StreamResponseBody` 的客户端本就要求大 body 流式交付，fib 里另一个调用方
+`http3.AltSvcClient.StartUpgrade` 沿用 TCP 客户端的行为。对调用方唯一的变化是：开启 `StreamResponseBody` 时，大的拒绝应答
+的 body 要像其他响应一样在回调内取走。
+
+**fit 的使用方式。** 被拒绝的升级交给 relay 构造请求时所用的 exchange：`relay.refused` 把后端、配置与对请求的持有交给它，
+把它加入代理的打开中的 exchange（drain 会截断它），再调用普通路径 `exchange.onResponse`：小的拒绝应答整体写出，大的按客户端
+积压用 `HoldBody` 带背压流式返回，受响应空闲超时与写停滞超时约束。relay 与它的 exchange 共用一个 `Call` 和一个取消原因，
+客户端离开或 drain 会同时放弃握手与拒绝应答的 body。upstream 池的客户端恢复为 fib 默认的 `MaxResponseBodyBytes`：阈值为
+64 KiB、未声明长度的 body 从响应头起就流式交付，整体缓冲的 body 本来就不会超过 64 KiB，这个上限只拦下过被拒绝的升级。
+临时做法中的池饱和检查与 h2c 处理保留。
 
 ## A66：RTSP 的 PLAY 或 RECORD 绑定到会话的流
 
