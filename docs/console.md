@@ -306,7 +306,9 @@ and the language (English or Chinese) are picked at the top right. Each page has
   HTTP-FLV, WHIP/WHEP) are set; the tunnel and LLM pages say their roles start when the config applies.
 - **Account**: the signed-in user's password, and the console users' (below).
 - **Tunnel** and **LLM**: a module for each role running, as `tunnel.hub` or `llm.node`, with the
-  role's pages.
+  role's pages; a hub's Tokens page, and the LLM roles' links page, issue and revoke the link tokens
+  their peers link with ([the tunnel](tunnel.md#tokens), [the LLM feature](llm.md#tokens)), which
+  the Admin API's `/tokens` endpoints and `fit token` manage too.
 
 The **Engine** menu is that same view in the menu, one submenu per listener port, in the order the
 config and HTTPS by default make them: a port opens to its handlers (static, respond, FastCGI, media
