@@ -109,7 +109,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I158。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I159。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -305,6 +305,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I155 | 决定 034；文件写入器：有上限的队列与自己的写 goroutine，`log` 的 `time_zone`（默认本地，可设 UTC 或 IANA 时区），按大小和时间切割，按时间、数量和总大小保留，压缩，以及 `log` 的文件输出及其 `rotate` 配置 | I21, I82, I83 | done |
 | I156 | 访问日志的文件走同一个写入器：`access_log.rotate` 与 `time_zone`，`log` 与访问日志对同一路径共用一个写入器，先写尽缓冲再切割，以及配置拒绝同一路径的两组设置 | I155 | done |
 | I157 | workbench 的日志页面：每个输出、写向它的 logger 与格式、磁盘上的文件及其大小和时间、切割与保留表单、带预览和确认的立即切割与立即清理，以及警告 | I155, I156, I120 | done |
+| **性能** | | | |
+| I158 | 让 fib v1.7.1 的 HTTP/2 请求检查开销尽可能低：fit 的 `fixed` 和 `static` 在 h2c 上回到与 fib `5c0e5b9` 噪声内的水平（2026-11-05 为 −2.4% 和 −1.7%），检查全部保留 | — | todo |
 
 ## M0 基础
 
@@ -2172,3 +2174,22 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
   说明；只有登录且可访问该页面的用户能操作，CSRF 被检查，每次操作记入 `admin` logger；中英文浏览器测试通过；涉及 Go 的
   部分在竞态检测下通过。
 - **涉及**：`app/workbench`、`admin`、`logs`、`observe`、`docs`。
+
+## 性能
+
+不属于任何功能线的吞吐与延迟工作。
+
+### I158 fib v1.7.1 的 HTTP/2 请求检查的开销
+
+- **原因**：2026-11-05 在压测机上，fib v1.7.1（安全版本）相对其前一个提交 `5c0e5b9`，使 fit 的 `fixed` 和 `static`
+  场景在 h2c 上每秒请求数分别下降 2.4% 和 1.7%（`bench/ab.sh`，5 轮，结论 SLOWER）；fit 安全轮的 A/B 中又测得同样的结果
+  （`fixed` −2.5%，`static` −1.8%）；HTTP/1.1 与 `proxy` 在噪声内。fib 的 `BenchmarkH2ServerStatic/1KB` 慢 0.99%
+  （p=0.004），`BenchmarkH2ServerGET` 慢 1%（p=0.05）。该轮中 fit 自身的改动在噪声内。可能的开销来自 fib 的 `dabe569`
+  （逐字节检查每个请求的 `:method`、`:scheme`、`:authority` 与 `:path`）和 `46af102`（每个 DATA 帧都累计整体收集的
+  body 的字节数）。
+- **做**：在 fib 中，于压测机上分别对 `5c0e5b9` 和当前提交的 `BenchmarkH2ServerGET`、`BenchmarkH2ServerStatic` 取 profile
+  并对比。让这些检查只花必要的开销：在已有的解码过程中顺带检查伪头部字段，用一张表代替现在的多次查找；对 HEADERS 帧即
+  结束的请求跳过 body 计数。所有检查都保留。然后让 fit 依赖该 fib 提交（规则 19）。
+- **完成标准**：压测机上 `bench/ab.sh -scenarios fixed,static -protocols h2c` 显示新的 fib 与 `5c0e5b9` 在噪声内；fib 的
+  微基准相对 `5c0e5b9` 没有显著退步；fib 针对这些检查的安全测试仍通过；fib 的 CI 通过，fit 已在该提交上。
+- **涉及**：fib `http`（`h2_server.go`、`h2_pseudo.go`），fit `go.mod`。

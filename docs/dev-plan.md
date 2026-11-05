@@ -119,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I158.
+Status: `todo`, `doing` or `done`. The next free iteration number is I159.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -315,6 +315,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I158.
 | I155 | Decision 034; the file sink: a bounded queue and a writer of its own, the log's `time_zone` (local by default, UTC or an IANA zone), rotation by size and by time, retention by age, number and total size, compression, and `log`'s file outputs and their `rotate` | I21, I82, I83 | done |
 | I156 | The access log's file through the same sink: `access_log.rotate` and `time_zone`, one sink per path, shared with `log`'s, a rotation only after the buffers are written, and the config's refusal of two settings for one path | I155 | done |
 | I157 | The workbench's Logs page: each output, its loggers and format, the files on disk with sizes and ages, the rotation and retention form, rotate now and clean up now with a preview and a confirmation, and warnings | I155, I156, I120 | done |
+| **Performance** | | | |
+| I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | todo |
 
 ## M0, foundations
 
@@ -2720,3 +2722,28 @@ Principles, in the order they bind:
   checked, and each action is in the `admin` logger; a browser test passes in English and Chinese;
   under the race detector where Go changes.
 - **Touches**: `app/workbench`, `admin`, `logs`, `observe`, `docs`.
+
+## Performance
+
+Work on throughput and latency that no feature track owns.
+
+### I158 The cost of fib v1.7.1's HTTP/2 request checks
+
+- **Why**: on the benchmark host on 2026-11-05, fib v1.7.1, the security release, against `5c0e5b9`,
+  the commit before it, cost fit's `fixed` and `static` scenarios over h2c 2.4% and 1.7% of their
+  requests a second (`bench/ab.sh`, 5 rounds, verdict SLOWER), and the same again in the A/B of fit's
+  security round (`fixed` −2.5%, `static` −1.8%); HTTP/1.1 and `proxy` were within noise. fib's
+  `BenchmarkH2ServerStatic/1KB` was 0.99% slower (p=0.004) and `BenchmarkH2ServerGET` 1% (p=0.05).
+  fit's own changes in that round were within noise. The likely costs are fib's `dabe569`, which checks
+  each request's `:method`, `:scheme`, `:authority` and `:path` byte by byte, and `46af102`, which counts
+  the bytes of bodies collected whole on each DATA frame.
+- **Do**: in fib, profile `BenchmarkH2ServerGET` and `BenchmarkH2ServerStatic` on the benchmark host
+  at `5c0e5b9` and at the current commit, and compare the profiles. Make the checks cost what they must
+  and no more: check the pseudo-header fields in the pass that already decodes them, with one table
+  where several lookups run now, and skip the body accounting for a request that ends with its HEADERS
+  frame. Keep every check. Then move fit to that fib commit (rule 19).
+- **Done when**: `bench/ab.sh -scenarios fixed,static -protocols h2c` on the benchmark host shows the
+  new fib within noise of `5c0e5b9`; fib's micro-benchmarks show no significant regression against
+  `5c0e5b9`; fib's security tests for these checks still pass; fib's CI passes, and fit is on that
+  commit.
+- **Touches**: fib `http` (`h2_server.go`, `h2_pseudo.go`), fit `go.mod`.
