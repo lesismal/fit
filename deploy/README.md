@@ -39,7 +39,7 @@ docker run --rm -p 8080:8080 -v "$PWD/hello.conf:/etc/fit/fit.conf:ro" fit run -
 - **The Docker provider** reads `/var/run/docker.sock`, which is root's: mount it read-only and run
   fit as root, as the Compose example does, or point the provider's `endpoint` at a socket proxy.
 - **Several platforms**: `docker buildx build --platform linux/amd64,linux/arm64 .` compiles each on
-  the builder's own platform, without emulation. `--build-arg VERSION=v0.1.0` sets what
+  the builder's own platform, without emulation. `--build-arg VERSION=v1.0.0` sets what
   `fit version` prints.
 
 A tag `v<semver>` publishes the image for linux/amd64 and linux/arm64 as
