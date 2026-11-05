@@ -149,7 +149,7 @@ func TestFileCompressRefusesDirectory(t *testing.T) {
 // removed under it lists the current file from what it wrote, and that a
 // cleanup now and the periodic sweep say the directory cannot be listed.
 func TestFileDirectoryGone(t *testing.T) {
-	engineLog(t)
+	warnings := engineLog(t)
 	dir := filepath.Join(t.TempDir(), "logs")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -184,5 +184,13 @@ func TestFileDirectoryGone(t *testing.T) {
 	info = f.Info()
 	if len(info.Files) != 0 || !strings.Contains(info.LastError, "list "+dir) {
 		t.Errorf("files %+v, last error %q; want none and the listing failed", info.Files, info.LastError)
+	}
+	// A sweep says it once. What it reads is not changed but by a reload, so
+	// the test may run it.
+	said := "open " + dir + ": "
+	before := strings.Count(warnings.String(), said)
+	f.sweep()
+	if n := strings.Count(warnings.String(), said) - before; n != 1 {
+		t.Errorf("a sweep said the listing failed %d times, want once: %s", n, warnings.String())
 	}
 }

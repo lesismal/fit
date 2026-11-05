@@ -745,11 +745,10 @@ func (f *File) retention(dryRun bool) ([]Removed, error) {
 	return remove, nil
 }
 
-// sweep runs retention on the writer's goroutine.
+// sweep runs retention on the writer's goroutine; retention says what it
+// failed at itself.
 func (f *File) sweep() {
-	if _, err := f.retention(false); err != nil {
-		f.setErr(err)
-	}
+	f.retention(false)
 }
 
 // isRotated reports whether name is one a rotation made from this file.
