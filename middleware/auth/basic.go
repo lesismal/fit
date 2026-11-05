@@ -42,6 +42,7 @@ type Basic struct {
 	key        [32]byte
 	challenge  []string // the WWW-Authenticate value
 	userHeader string   // canonical
+	userFields fieldSet // userHeader, as a client may spell it
 	graph      module.Holder
 }
 
@@ -89,6 +90,7 @@ func (ba *Basic) Provision(ctx *module.Context) error {
 			return ctx.Errorf("user_header", "%q is not a field name", ba.UserHeader)
 		}
 		ba.userHeader = stdhttp.CanonicalHeaderKey(ba.UserHeader)
+		ba.userFields = newFieldSet(ba.userHeader)
 	}
 	ba.challenge = []string{`Basic realm="` + ba.Realm + `", charset="UTF-8"`}
 	_, _ = rand.Read(ba.key[:])
@@ -145,7 +147,7 @@ func (ba *Basic) admit(c *fibhttp.Context, user string, next module.Handler) {
 		delete(c.Request.Header, "Authorization")
 	}
 	if ba.userHeader != "" {
-		dropFields(c.Request.Header, ba.userHeader)
+		ba.userFields.drop(c.Request.Header)
 		c.Request.Header[ba.userHeader] = []string{user}
 	}
 	setUser(c, user)

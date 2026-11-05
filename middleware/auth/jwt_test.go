@@ -16,6 +16,7 @@ import (
 	"math/big"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,9 +310,10 @@ func TestJWTClaimsHeaders(t *testing.T) {
 	r := bearer(sign(t, "HS256", "", k.secret, map[string]any{"sub": "alice\r\nX-Evil: 1", "roles": []string{"admin", "dev"}, "exp": exp}))
 	r.Header.Set("X-Roles", "forged")
 	r.Header.Set("X-Missing", "forged")
-	r.Header["X_roles"] = []string{"forged"}
-	r.Header["x_sub"] = []string{"forged"}
-	r.Header["X_MISSING"] = []string{"forged"}
+	// As fib's servers key them: textproto.CanonicalMIMEHeaderKey.
+	r.Header[textproto.CanonicalMIMEHeaderKey("X_roles")] = []string{"forged"}
+	r.Header[textproto.CanonicalMIMEHeaderKey("x_sub")] = []string{"forged"}
+	r.Header[textproto.CanonicalMIMEHeaderKey("X_MISSING")] = []string{"forged"}
 	rec := expectStatus(t, h, r, 200, "claims")
 	if !sawAuthenticated.Load() {
 		t.Error("a request let in with a token is not marked authenticated")

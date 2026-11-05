@@ -7,6 +7,7 @@ import (
 	"maps"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -83,10 +84,16 @@ func asCGI(h stdhttp.Header, name string) string {
 }
 
 // spellings are the fields a client might send to pass for name with an
-// application that folds - and _.
+// application that folds - and _, keyed as fib's servers key a request's
+// fields, by textproto.CanonicalMIMEHeaderKey: every name with _ for all of
+// its hyphens, in three cases, and with _ for only the first.
 func spellings(name string) []string {
 	under := strings.ReplaceAll(name, "-", "_")
-	return []string{under, strings.ToLower(under), strings.ToUpper(under)}
+	keys := []string{under, strings.ToLower(under), strings.ToUpper(under), strings.Replace(name, "-", "_", 1)}
+	for i, k := range keys {
+		keys[i] = textproto.CanonicalMIMEHeaderKey(k)
+	}
+	return keys
 }
 
 // sawAuthenticated is whether the last request the tests' handlers served
@@ -127,15 +134,37 @@ func TestAuthenticated(t *testing.T) {
 	}
 }
 
-func TestDropFields(t *testing.T) {
-	h := stdhttp.Header{"X-User": {"a"}, "X_user": {"b"}, "x_USER": {"c"}, "X_users": {"d"}, "X-Other": {"e"}, "X_other": {"f"}, "Accept": {"g"}}
-	dropFields(h, "X-User", "X-Missing")
-	want := stdhttp.Header{"X_users": {"d"}, "X-Other": {"e"}, "X_other": {"f"}, "Accept": {"g"}}
+// TestFieldSet checks that a set drops a name and every spelling of it with
+// _ a client's field could arrive keyed as, and nothing else, allocating
+// nothing; and that a name with more hyphens than it lists spellings for is
+// found by a look at the request's names.
+func TestFieldSet(t *testing.T) {
+	// Keys as fib's servers make them: textproto's canonical form.
+	key := textproto.CanonicalMIMEHeaderKey
+	fs := newFieldSet("X-User", "X-Forwarded-User", "X-Missing")
+	h := stdhttp.Header{"X-User": {"a"}, key("x_USER"): {"b"}, key("X_users"): {"d"}, "X-Other": {"e"}, key("X_other"): {"f"}, "Accept": {"g"},
+		"X-Forwarded-User": {"h"}, key("x_forwarded-user"): {"i"}, key("X-FORWARDED_USER"): {"j"}, key("X_Forwarded_User"): {"k"}}
+	fs.drop(h)
+	want := stdhttp.Header{key("X_users"): {"d"}, "X-Other": {"e"}, key("X_other"): {"f"}, "Accept": {"g"}}
 	if !maps.EqualFunc(h, want, slices.Equal) {
 		t.Errorf("got %v, want %v", h, want)
 	}
-	if allocs := testing.AllocsPerRun(100, func() { dropFields(h, "X-User") }); allocs != 0 {
+	if allocs := testing.AllocsPerRun(100, func() { fs.drop(h) }); allocs != 0 {
 		t.Errorf("%v allocations", allocs)
+	}
+	if n := len(newFieldSet("A-B-C").keys); n != 4 {
+		t.Errorf("A-B-C: %d keys, want 4", n)
+	}
+
+	long := strings.Repeat("A-", maxFieldDashes+1) + "Z"
+	ls := newFieldSet(long)
+	if len(ls.keys) != 1 || len(ls.scan) != 1 {
+		t.Fatalf("%s: keys %v, scan %v", long, ls.keys, ls.scan)
+	}
+	h = stdhttp.Header{long: {"a"}, key(strings.ReplaceAll(long, "-", "_")): {"b"}, key("A_b"): {"c"}}
+	ls.drop(h)
+	if want := (stdhttp.Header{key("A_b"): {"c"}}); !maps.EqualFunc(h, want, slices.Equal) {
+		t.Errorf("long: got %v, want %v", h, want)
 	}
 }
 

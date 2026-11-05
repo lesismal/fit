@@ -45,6 +45,7 @@ type ForwardAuth struct {
 	url            url.URL
 	requestHeaders []string // canonical
 	copyHeaders    []string // canonical
+	copyFields     fieldSet // copyHeaders, as a client may spell them
 	timeout        time.Duration
 	graph          module.Holder
 
@@ -81,6 +82,7 @@ func (fa *ForwardAuth) Provision(ctx *module.Context) error {
 			}
 		}
 	}
+	fa.copyFields = newFieldSet(fa.copyHeaders...)
 	fa.timeout = fa.Timeout.Std()
 	if fa.timeout <= 0 {
 		fa.timeout = DefaultForwardAuthTimeout
@@ -245,9 +247,7 @@ func (x *authCall) answer(resp *fibhttp.ClientResponse, err error) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		resp.Close() // a body is not wanted, and one still arriving is given up
 		h := c.Request.Header
-		if len(fa.copyHeaders) > 0 {
-			dropFields(h, fa.copyHeaders...)
-		}
+		fa.copyFields.drop(h)
 		for _, name := range fa.copyHeaders {
 			if v, ok := resp.Header[name]; ok {
 				h[name] = append([]string(nil), v...)

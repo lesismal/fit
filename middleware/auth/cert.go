@@ -20,7 +20,8 @@ type ClientCert struct {
 	Optional      bool   `json:"optional,omitempty" doc:"Let a request without a certificate through as well, unauthenticated; refused with 403 Forbidden when left out."`
 	SubjectHeader string `json:"subject_header,omitempty" doc:"A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is removed, with or without a certificate."`
 
-	subjectHeader string // canonical
+	subjectHeader string   // canonical
+	subjectFields fieldSet // subjectHeader, as a client may spell it
 }
 
 // Provision checks the field name.
@@ -30,6 +31,7 @@ func (cc *ClientCert) Provision(ctx *module.Context) error {
 			return ctx.Errorf("subject_header", "%q is not a field name", cc.SubjectHeader)
 		}
 		cc.subjectHeader = stdhttp.CanonicalHeaderKey(cc.SubjectHeader)
+		cc.subjectFields = newFieldSet(cc.subjectHeader)
 	}
 	return nil
 }
@@ -41,9 +43,7 @@ func (cc *ClientCert) Authenticates() bool { return !cc.Optional }
 // Wrap returns next behind the check.
 func (cc *ClientCert) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		if cc.subjectHeader != "" {
-			dropFields(c.Request.Header, cc.subjectHeader)
-		}
+		cc.subjectFields.drop(c.Request.Header)
 		cert := ClientCertificate(c.Request)
 		if cert == nil {
 			if !cc.Optional {

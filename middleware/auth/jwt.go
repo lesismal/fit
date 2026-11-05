@@ -56,7 +56,7 @@ type JWT struct {
 	fromName     string
 	leeway       float64
 	claimHeaders []claimHeader
-	claimFields  []string // claimHeaders' fields, which a client may not send
+	claimFields  fieldSet // claimHeaders' fields, which a client may not send
 	graph        module.Holder
 	now          func() time.Time
 	verified     tokenCache
@@ -122,9 +122,11 @@ func (jw *JWT) Provision(ctx *module.Context) error {
 		jw.claimHeaders = append(jw.claimHeaders, claimHeader{stdhttp.CanonicalHeaderKey(field), claim})
 	}
 	slices.SortFunc(jw.claimHeaders, func(a, b claimHeader) int { return strings.Compare(a.field, b.field) })
+	fields := make([]string, 0, len(jw.claimHeaders))
 	for _, ch := range jw.claimHeaders {
-		jw.claimFields = append(jw.claimFields, ch.field)
+		fields = append(fields, ch.field)
 	}
+	jw.claimFields = newFieldSet(fields...)
 	jw.leeway = jw.Leeway.Std().Seconds()
 	jw.graph = ctx.Graph()
 	jw.now = time.Now
@@ -162,9 +164,7 @@ func (jw *JWT) Authenticates() bool { return true }
 // Wrap returns next behind the check.
 func (jw *JWT) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		if len(jw.claimFields) > 0 {
-			dropFields(c.Request.Header, jw.claimFields...)
-		}
+		jw.claimFields.drop(c.Request.Header)
 		raw, ok := jw.token(c.Request)
 		if !ok {
 			jw.refuse(c, false)
