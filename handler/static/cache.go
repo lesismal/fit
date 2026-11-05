@@ -287,10 +287,8 @@ func serveMemory(c *fibhttp.Context, name string, e *entry) {
 	}
 	w := &gathered{header: make(stdhttp.Header, len(e.header)+2)}
 	copyHeader(w.header, e.header)
+	// ServeContent always sets the status.
 	stdhttp.ServeContent(w, r, name, e.modTime, bytes.NewReader(e.data))
-	if w.status == 0 {
-		w.status = stdhttp.StatusOK
-	}
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: w.header, Body: w.body.Bytes()})
 }
 

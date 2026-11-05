@@ -202,10 +202,7 @@ func (s *Server) applyRTSP(cfg *config.StreamRTSP) error {
 	}
 	start := func(c *config.StreamRTSP) func() (*tcpListener, error) {
 		return func() (*tcpListener, error) {
-			a, err := newRTSPAuth(c)
-			if err != nil {
-				return nil, err
-			}
+			a := newRTSPAuth(c)
 			a.s = s
 			srv := rtsp.NewServer(rtsp.ServerConfig{
 				Hub:            s.hub,

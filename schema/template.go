@@ -390,9 +390,6 @@ func scalarExample(f config.Field, path string, typ reflect.Type) string {
 	}
 	switch typ.Kind() {
 	case reflect.String:
-		if typ == config.DurationType {
-			return `"10s"`
-		}
 		if len(f.Enum) > 0 {
 			return strconv.Quote(f.Enum[0])
 		}
@@ -413,9 +410,6 @@ func scalarExample(f config.Field, path string, typ reflect.Type) string {
 			return strconv.FormatFloat(*f.Min, 'f', -1, 64)
 		}
 		return "0"
-	}
-	if typ == config.DurationType {
-		return `"10s"`
 	}
 	return "null"
 }

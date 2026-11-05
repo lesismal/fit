@@ -729,10 +729,8 @@ func (l *AccessLog) appendTime(b []byte, t time.Time) []byte {
 		}
 		s = &stamp{sec: sec}
 		copy(s.text[:], buf)
+		// "Z07:00" is "Z" or ±hh:mm, which zone holds.
 		z := lt.AppendFormat(s.zone[:0], "Z07:00")
-		if len(z) > len(s.zone) {
-			return lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")
-		}
 		s.zlen = int8(len(z))
 		l.stamp.Store(s)
 	}

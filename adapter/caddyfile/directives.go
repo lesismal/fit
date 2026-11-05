@@ -217,9 +217,7 @@ func (c *converter) rewrite(d *directive, to string) (map[string]any, bool) {
 	// The query is kept, so {uri} is the path's.
 	to = strings.ReplaceAll(to, "{uri}", "{path}")
 	if prefix, ok := strings.CutSuffix(to, "{path}"); ok && !strings.Contains(prefix, "{") {
-		if prefix == "" {
-			return nil, false
-		}
+		// to starts with /, so the prefix is never empty.
 		return map[string]any{"add_prefix": prefix}, true
 	}
 	if strings.Contains(to, "{") {
@@ -446,8 +444,6 @@ func (c *converter) forwardAuth(d *directive, args []string) (map[string]any, bo
 		case "header_up":
 			c.skip(e, "fit sends the request's fields to the auth service")
 		case "trusted_proxies":
-			c.skip(e, "not converted")
-		default:
 			c.skip(e, "not converted")
 		}
 	}

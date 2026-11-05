@@ -323,11 +323,8 @@ func (s *Static) queue(c *fibhttp.Context, name, urlPath string) {
 			expire()
 			return
 		}
-		if !s.serve(c, name, urlPath, q) {
-			// Only a request served without the disk is left unanswered.
-			expire()
-			return
-		}
+		// With q, serve looks at the disk and always answers.
+		s.serve(c, name, urlPath, q)
 		if q.state.Load() == queuedClaimed && !q.sending {
 			c.Release()
 		}

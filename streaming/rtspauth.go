@@ -45,7 +45,7 @@ type rtspAuth struct {
 	secret [32]byte
 }
 
-func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
+func newRTSPAuth(c *config.StreamRTSP) *rtspAuth {
 	a := &rtspAuth{realm: c.RealmName()}
 	for _, m := range c.Methods() {
 		switch m {
@@ -55,10 +55,9 @@ func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
 			a.basic = true
 		}
 	}
-	if _, err := rand.Read(a.secret[:]); err != nil {
-		return nil, err
-	}
-	return a, nil
+	// crypto/rand.Read never fails: it crashes the program instead.
+	_, _ = rand.Read(a.secret[:])
+	return a
 }
 
 func (a *rtspAuth) onRequest(sc *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {

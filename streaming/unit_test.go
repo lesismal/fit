@@ -71,11 +71,8 @@ func TestRTSPDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := newRTSPAuth(&config.StreamRTSP{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, _ := newRTSPAuth(&config.StreamRTSP{})
+	a := newRTSPAuth(&config.StreamRTSP{})
+	other := newRTSPAuth(&config.StreamRTSP{})
 	now := time.Now()
 	authz := func(nonce, extra string) string {
 		return `Digest username="alice", realm="fit", nonce="` + nonce + `", uri="rtsp://h/s", response="` +
@@ -161,7 +158,7 @@ func TestRTSPMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, _ := newRTSPAuth(&config.StreamRTSP{AuthMethods: []string{"digest", "basic"}})
+	a := newRTSPAuth(&config.StreamRTSP{AuthMethods: []string{"digest", "basic"}})
 	now := time.Now()
 	for _, authz := range []string{"Basic !!!", "Basic " + base64Std(":pw"), "Basic " + base64Std("alice"),
 		`Digest username="alice", realm="fit", nonce="short", uri="rtsp://h/s", response="x"`} {
@@ -191,10 +188,7 @@ func TestRTSPSetupAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := newRTSPAuth(&config.StreamRTSP{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newRTSPAuth(&config.StreamRTSP{})
 	a.s = &Server{}
 	a.s.auth[protoRTSP].Store(&guard{name: "x", p: p})
 	sc := new(rtsp.ServerConn)
@@ -231,6 +225,12 @@ func TestRTSPSetupAuth(t *testing.T) {
 		if got := do(c.method, c.url); got != c.want {
 			t.Errorf("%s %s: %d, want %d", c.method, c.url, got, c.want)
 		}
+	}
+
+	// A URL that is not an rtsp one is left to fib, which answers 400, with
+	// no challenge.
+	if got := do(rtsp.MethodDescribe, "http://h/secret"); got != 200 {
+		t.Errorf("DESCRIBE of an http URL: %d, want it left to fib", got)
 	}
 
 	// Requests other than these five, and a listener without a policy, are
