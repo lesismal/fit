@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -422,5 +423,19 @@ func TestAdvertise(t *testing.T) {
 	}
 	if a, b := NewID("node"), NewID("node"); a == b || !strings.HasPrefix(a, "node-") {
 		t.Fatal("NewID")
+	}
+}
+
+// TestVersion: a role announces the version its build recorded, and plain
+// "fit" when the build recorded none.
+func TestVersion(t *testing.T) {
+	if got := version(&debug.BuildInfo{Main: debug.Module{Version: "v1.7.1"}}, true); got != "fit v1.7.1" {
+		t.Fatalf("a versioned build: %q", got)
+	}
+	if got := version(&debug.BuildInfo{}, true); got != "fit" {
+		t.Fatalf("a build without a version: %q", got)
+	}
+	if got := version(nil, false); got != "fit" {
+		t.Fatalf("no build info: %q", got)
 	}
 }

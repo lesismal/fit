@@ -82,12 +82,15 @@ type Base struct {
 }
 
 // Version is the version a role announces.
-var Version = func() string {
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+var Version = version(debug.ReadBuildInfo())
+
+// version is the version a build with bi reports.
+func version(bi *debug.BuildInfo, ok bool) string {
+	if ok && bi.Main.Version != "" {
 		return "fit " + bi.Main.Version
 	}
 	return "fit"
-}()
+}
 
 // New returns the base of a role on h.
 func New(h *app.Host, spec Spec) *Base {
