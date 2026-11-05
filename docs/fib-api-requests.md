@@ -2013,3 +2013,64 @@ feature's own link listeners stay plain TCP: their fib bindings have the same op
 has no `mptcp` there yet. A client or peer without Multipath TCP falls back to plain TCP, there being
 no config to require it, and Unix sockets and UDP take none. The workbench's Engine menu tags a port
 that has it.
+
+
+## A65: A refused protocol switch streamed back
+
+**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: the upstream pool's
+client bounds a body it buffers whole at 64 KiB (`upstream.StreamThreshold`), and a refused upgrade
+past it is answered 502 (`handler/proxy/upgrade.go`).
+
+**Problem.** Any client may send `Connection: Upgrade` and `Upgrade: websocket` to a proxied route.
+A backend that does not switch answers as usual, often with a large body, and fib's
+`Client.StartUpgrade` waits for that answer whole before its callback, up to
+`MaxResponseBodyBytes`: with fib's default of 64 MiB, eight such requests held 1.3 GiB of fit's heap.
+
+**Evidence.** `StartUpgrade` calls `c.do(req, callback, true, handler)`: `whole` is fixed to true,
+so `StreamResponseBody` and its threshold do not apply to a non-101 answer.
+
+**Suggested API.** `StartUpgrade` honours `StreamResponseBody` for an answer other than 101 (a 101
+has no body, so the switch is unchanged), or a `StartUpgradeStreamed` that does.
+
+**How fit would use it.** A refused upgrade goes back through the proxy's ordinary exchange, its
+body streamed with backpressure, and the 64 KiB bound and its 502 go away.
+
+## A66: An RTSP PLAY or RECORD bound to its session's stream
+
+**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: `streaming/rtspauth.go`
+authorizes SETUP, keeps per connection the streams its ANNOUNCE and SETUPs named (at most 8), and
+checks a PLAY against each of them.
+
+**Problem.** `media/rtsp`'s server plays the stream SETUP chose (`session.path`) and never compares
+it with the PLAY's URL. An auth hook that checks each request by its own URL let a client with a token
+for stream `a` SETUP `secret/trackID=0` and PLAY `a?token=…`, and receive `secret`.
+
+**Evidence.** `server.go` subscribes in `session.afterResponse` on the path from SETUP; PLAY and
+RECORD read no path of their own.
+
+**Suggested API.** PLAY and RECORD answer `455 Method Not Valid in This State` when their stream path
+differs from the session's; and `ServerConn.SessionPath() string`, so that a hook can authorize the
+stream the session really carries.
+
+**How fit would use it.** The hook checks PLAY and RECORD on `SessionPath()` and drops its own list of
+streams per connection.
+
+## A67: An idle timeout for one HTTP connection
+
+**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: the consoles give a
+non-loopback client a quarter of their connections, but keep its idle connections for the console's
+usual idle time.
+
+**Problem.** A console holds idle connections for two minutes. fit wants a client that has not yet
+sent a request with a session to be held for seconds, so that unauthenticated connections cannot
+fill the console's few places; fib's HTTP handler sets each connection's read deadline itself, and a
+handler cannot reach the connection to change it.
+
+**Evidence.** The Admin API, on `net/http`, does this with its own `ConnState`; `fibhttp.Context`
+exposes no `*fib.Connection` and no per-connection idle timeout.
+
+**Suggested API.** `Context.SetIdleTimeout(d time.Duration)`, applying to the connection the request
+came on until it is set again, or the connection exposed on `Context`.
+
+**How fit would use it.** A console's connection starts with a short idle timeout and gets the
+console's usual one with its first request that carries a valid session.

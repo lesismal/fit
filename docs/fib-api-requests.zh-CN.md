@@ -1525,3 +1525,51 @@ TCP；bind、listen 与 `SO_REUSEPORT` 的失败照旧返回，绝不吞掉。
 TURN 服务器并排空旧的。tunnel 与 LLM 功能自身的链路监听仍为普通 TCP：它们的 fib binding 有同样的选项，但 fit 的配置在那里
 还没有 `mptcp`。没有多路径 TCP 的客户端或对端回退到普通 TCP，也没有要求必须使用它的配置；Unix 套接字与 UDP 没有该功能。
 workbench 的引擎菜单会为带它的端口加上标记。
+
+
+## A65：被拒绝的协议切换以流式返回
+
+**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：upstream 池的客户端把整体缓冲的 body 限制在 64 KiB
+（`upstream.StreamThreshold`），超出的被拒升级答 502（`handler/proxy/upgrade.go`）。
+
+**问题。** 任何客户端都可以向代理路由发送 `Connection: Upgrade` 与 `Upgrade: websocket`。不切换协议的后端照常应答，
+body 往往很大，而 fib 的 `Client.StartUpgrade` 在回调前整体等待该应答，上限为 `MaxResponseBodyBytes`：按 fib 默认的
+64 MiB，八个这样的请求就占了 fit 1.3 GiB 堆。
+
+**依据。** `StartUpgrade` 调用 `c.do(req, callback, true, handler)`：`whole` 固定为 true，所以 `StreamResponseBody` 及其
+阈值对非 101 应答不起作用。
+
+**建议的 API。** `StartUpgrade` 对 101 以外的应答遵从 `StreamResponseBody`（101 没有 body，切换不受影响），或新增这样做的
+`StartUpgradeStreamed`。
+
+**fit 的使用方式。** 被拒绝的升级经代理的普通交换返回，body 带背压流式转发，64 KiB 的限制及其 502 随之去掉。
+
+## A66：RTSP 的 PLAY 或 RECORD 绑定到会话的流
+
+**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：`streaming/rtspauth.go` 对 SETUP 授权，按连接记下其 ANNOUNCE
+与 SETUP 所指的流（最多 8 个），PLAY 须对其中每一个都有权限。
+
+**问题。** `media/rtsp` 的服务器播放 SETUP 选定的流（`session.path`），从不与 PLAY 的 URL 比较。按各请求自身 URL 授权的
+钩子因此让持有流 `a` 令牌的客户端 SETUP `secret/trackID=0` 后 PLAY `a?token=…`，收到 `secret`。
+
+**依据。** `server.go` 在 `session.afterResponse` 中按 SETUP 的路径订阅；PLAY 与 RECORD 不读取自己的路径。
+
+**建议的 API。** PLAY 与 RECORD 的流路径与会话的不同时答 `455 Method Not Valid in This State`；并提供
+`ServerConn.SessionPath() string`，让钩子对会话实际承载的流授权。
+
+**fit 的使用方式。** 钩子按 `SessionPath()` 检查 PLAY 与 RECORD，去掉按连接记录的流列表。
+
+## A67：单个 HTTP 连接的空闲超时
+
+**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：控制台只给非环回客户端四分之一的连接位，但其空闲连接仍按
+控制台通常的空闲时间保留。
+
+**问题。** 控制台保留空闲连接两分钟。fit 希望尚未发送带会话请求的客户端只被保留几秒，使未认证的连接占不满控制台为数不多
+的连接位；而 fib 的 HTTP 处理器自行设置每个连接的读截止时间，处理器拿不到连接去修改它。
+
+**依据。** 基于 `net/http` 的 Admin API 用自己的 `ConnState` 做到了这一点；`fibhttp.Context` 不暴露 `*fib.Connection`，
+也没有按连接的空闲超时。
+
+**建议的 API。** `Context.SetIdleTimeout(d time.Duration)`，对请求所在连接生效直到再次设置；或在 `Context` 上暴露连接。
+
+**fit 的使用方式。** 控制台的连接以较短的空闲超时开始，第一个带有效会话的请求到来后改为控制台通常的超时。
