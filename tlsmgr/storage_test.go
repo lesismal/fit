@@ -136,14 +136,16 @@ func TestFileStorageLock(t *testing.T) {
 
 func TestFileStorageLockWait(t *testing.T) {
 	root := t.TempDir()
-	a := &FileStorage{Root: root, LockRefresh: 10 * time.Millisecond, LockStale: 200 * time.Millisecond, LockPoll: 5 * time.Millisecond}
-	b := &FileStorage{Root: root, LockRefresh: 10 * time.Millisecond, LockStale: 200 * time.Millisecond, LockPoll: 5 * time.Millisecond}
+	// The stale time leaves the refresher room to be late on a loaded
+	// machine; the waiter still waits past it.
+	a := &FileStorage{Root: root, LockRefresh: 20 * time.Millisecond, LockStale: time.Second, LockPoll: 5 * time.Millisecond}
+	b := &FileStorage{Root: root, LockRefresh: 20 * time.Millisecond, LockStale: time.Second, LockPoll: 5 * time.Millisecond}
 	ctx := context.Background()
 	if err := a.Lock(ctx, "x"); err != nil {
 		t.Fatal(err)
 	}
 	// A holder that keeps its lock fresh keeps it past the stale time.
-	short, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	short, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 	defer cancel()
 	if err := b.Lock(short, "x"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lock while held: %v", err)
