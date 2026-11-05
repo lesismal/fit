@@ -255,6 +255,7 @@ func TestFileRetentionCountAndTotal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fs2.Release(f2)
+	waitIdle(t, f2) // the sweep at open has run, before the files are there
 	for i := range 4 {
 		n := "fit.log." + now.Add(-time.Duration(4-i)*time.Minute).UTC().Format(nameUTC)
 		if err := os.WriteFile(filepath.Join(fs2Dir, n), []byte("abcd"), 0o644); err != nil {
