@@ -653,7 +653,7 @@ type Route struct {
 // that is set must match; within a field, any one entry may.
 type Match struct {
 	Host       []string            `json:"host,omitempty" doc:"Host names, exact, or with a leading \"*.\" wildcard, which stands for one label, or a leading \"**.\" wildcard, which stands for one label or more, as the Gateway API's wildcards do."`
-	Path       []string            `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix."`
+	Path       []string            `json:"path,omitempty" doc:"Paths, exact or ending in \"*\" to match a prefix. The request's path is matched with its dot segments resolved and repeated slashes merged, \"/x/../a\" and \"//a\" as \"/a\"."`
 	PathRegexp []string            `json:"path_regexp,omitempty" doc:"Regular expressions in Go's syntax, matched against the path anywhere in it unless anchored with ^ and $."`
 	Method     []string            `json:"method,omitempty" doc:"Methods, as in \"GET\"; compared as written, since methods are case-sensitive."`
 	Header     map[string][]string `json:"header,omitempty" doc:"Headers the request must have, each with one of the values listed as the value of one of its fields, or with any value when none are listed. Names ignore case; values do not."`

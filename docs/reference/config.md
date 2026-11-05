@@ -303,6 +303,14 @@ A request no route takes is answered 404. A `match` field left out matches every
 takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`, `||`, `!` and
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
+The path is matched once it is normalized, on every protocol: dot segments are resolved as
+RFC 3986 resolves them, `%2e` counting as a dot, and repeated slashes merged, so that
+`/./admin`, `/x/../admin`, `//admin` and `/x/%2e%2e/admin` all go to the route of `/admin`; `..`
+at the root stays there. The normalized path is what the handler and the upstream get, other
+escapes kept as the client wrote them. A path whose encoded slashes (`%2F`) would make dot or
+empty segments once decoded, as `/x/..%2Fadmin` and `/%2Fadmin` do, is answered 400, as is an
+HTTP/2 or HTTP/3 `:path` with a space or a control byte.
+
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
 [Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.conf` file,
 a `site` writes the routes of its host names together: each `route` in it takes the site's hosts
@@ -436,7 +444,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `host` | list of string |  | Host names, exact, or with a leading "*." wildcard, which stands for one label, or a leading "**." wildcard, which stands for one label or more, as the Gateway API's wildcards do. |
-| `path` | list of string |  | Paths, exact or ending in "*" to match a prefix. |
+| `path` | list of string |  | Paths, exact or ending in "*" to match a prefix. The request's path is matched with its dot segments resolved and repeated slashes merged, "/x/../a" and "//a" as "/a". |
 | `path_regexp` | list of string |  | Regular expressions in Go's syntax, matched against the path anywhere in it unless anchored with ^ and $. |
 | `method` | list of string |  | Methods, as in "GET"; compared as written, since methods are case-sensitive. |
 | `header` | object of list of string |  | Headers the request must have, each with one of the values listed as the value of one of its fields, or with any value when none are listed. Names ignore case; values do not. |

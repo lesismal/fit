@@ -171,7 +171,8 @@
         // // list of string.
         // "host": ["example.com", "*.example.com"],
 
-        // // Paths, exact or ending in "*" to match a prefix.
+        // // Paths, exact or ending in "*" to match a prefix. The request's path is matched with its dot
+        // // segments resolved and repeated slashes merged, "/x/../a" and "//a" as "/a".
         // // list of string.
         // "path": ["/api/*"],
 

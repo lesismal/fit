@@ -41,6 +41,7 @@ import (
 	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
+	"github.com/lesismal/fit/router"
 	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/tlsmgr"
 )
@@ -732,7 +733,45 @@ func (d *dispatcher) announceH3() {
 
 func (d *dispatcher) setAltSvc(value string) { d.altSvc.Store(&[]string{value}) }
 
-var notFound = []byte("404 page not found\n")
+var (
+	notFound = []byte("404 page not found\n")
+	badPath  = []byte("400 Bad Request: the request's path\n")
+)
+
+// admit readies r for routing, on every protocol alike, and reports false
+// for a request to refuse with 400:
+//
+//   - its path is normalized (router.NormalizePath): routes are matched
+//     against it, and handlers and upstreams get it; RequestURI, which the
+//     access log writes and FastCGI passes on, follows it;
+//   - over HTTP/2 and HTTP/3, a :path with a space or a control byte, which
+//     an HTTP/1 request line could not carry, is refused.
+func admit(r *stdhttp.Request) bool {
+	if r.ProtoMajor >= 2 && !plainTarget(r.RequestURI) {
+		return false
+	}
+	if r.URL != nil {
+		p, raw := r.URL.Path, r.URL.RawPath
+		if !router.NormalizePath(r.URL) {
+			return false
+		}
+		if (r.URL.Path != p || r.URL.RawPath != raw) && strings.HasPrefix(r.RequestURI, "/") {
+			r.RequestURI = r.URL.RequestURI()
+		}
+	}
+	return true
+}
+
+// plainTarget reports whether a request target holds no space and no control
+// byte.
+func plainTarget(target string) bool {
+	for i := 0; i < len(target); i++ {
+		if c := target[i]; c <= ' ' || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
 
 func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	g := d.rt.Current()
@@ -741,6 +780,10 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	defer g.Release()
+	if !admit(c.Request) {
+		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badPath)
+		return
+	}
 	if g.ACME != nil && c.Request.TLS == nil && strings.HasPrefix(c.Request.URL.Path, tlsmgr.ACMEChallengePrefix) {
 		// The CA checks an HTTP-01 challenge in the clear; the answer is in
 		// memory. Without a shared storage, a token with no challenge under

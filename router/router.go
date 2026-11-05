@@ -291,7 +291,7 @@ const maxHost = 255
 // Match returns the value of the route for req, and false when no route
 // matches. Its host is req.Host, a Host header's value, in which a port, the
 // brackets of an IPv6 address, a trailing dot and case are ignored; its path
-// is req.URL.Path.
+// is req.URL.Path, which NormalizePath has normalized first.
 func (r *Router[T]) Match(req *stdhttp.Request) (T, bool) {
 	host := hostOnly(req.Host)
 	path := req.URL.Path
