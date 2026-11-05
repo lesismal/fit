@@ -857,6 +857,9 @@ func TestDotfilesShortNames(t *testing.T) {
 		t.Fatalf("hideShortNames %v", h.hideShortNames)
 	}
 	h.hideShortNames = true // as on Windows
+	// The short names alone: on Windows those written with what it strips
+	// are also aliases, refused 400 before they are looked at.
+	h.refuseAliases = false
 	before := app.accepted.Load()
 	for _, target := range []string{"/GIT~1/x.php", "/git~1/x.php", "/GIT~1./x.php", "/GIT~1%20/x.php", "/a/HTPASS~1.PHP", "/GIT~1/x.php/info"} {
 		if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", target, nil)); rec.Response.StatusCode != 404 {
@@ -886,6 +889,84 @@ func TestDotfilesShortNames(t *testing.T) {
 		if _, err := loadHandler(t, `{"address": "127.0.0.1:9000", "root": `+strconv.Quote(root)+`, "try_files": ["{path}", "/GIT~1/index.php"]}`, nil); err == nil ||
 			!strings.Contains(err.Error(), "8.3 short name") {
 			t.Errorf("try_files naming a short name: %v", err)
+		}
+	}
+}
+
+// TestWindowsAliases checks that, where the system opens a script by names
+// not its own, a script named x.php::$DATA, x.php. or as a device does not
+// run but is answered 400, and never reaches the application, nor is taken
+// by try_files, whatever dotfiles says, and that the script's own name
+// runs as before.
+func TestWindowsAliases(t *testing.T) {
+	root := t.TempDir()
+	files := []string{"index.php", "a.php", "x.txt", "sub/y.php"}
+	if !dotfile.Aliases {
+		// The aliases as names of their own, which on Windows stand for
+		// what it would open for them.
+		files = append(files, "a.php::$DATA", "a.php.", "a.php ", "sub./y.php", "nul.php")
+	}
+	for _, f := range files {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, f), []byte("<?php"), 0o644)
+	}
+	app := app(t, "tcp", "127.0.0.1:0")
+	engine, stop, err := upstream.StartEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	load := func(extra string) *FastCGI {
+		h, err := loadHandler(t, `{"address": "`+app.Addr().String()+`", "root": `+strconv.Quote(root)+extra+`}`, &module.Env{Engine: engine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(h.Cleanup)
+		return h
+	}
+	h := load("")
+	if h.refuseAliases != dotfile.Aliases {
+		t.Fatalf("refuseAliases %v", h.refuseAliases)
+	}
+	allow := load(`, "dotfiles": "allow"`)
+	h.refuseAliases, allow.refuseAliases = true, true // as on Windows
+	before := app.accepted.Load()
+	for _, target := range []string{
+		"/a.php::$DATA", "/a.php:stream", "/a.php%3A%3A$DATA/info", "/x.txt:.php", "/sub::$INDEX_ALLOCATION/y.php",
+		"/a.php.", "/a.php%20", "/a.php.%20.", "/sub./y.php", "/sub%20/y.php", "/CON.php", "/nul.php", "/sub/COM1.php", "/AUX/y.php",
+	} {
+		for name, h := range map[string]*FastCGI{"deny": h, "allow": allow} {
+			if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", target, nil)); rec.Response.StatusCode != 400 {
+				t.Errorf("%s GET %s: %d, want 400", name, target, rec.Response.StatusCode)
+			}
+		}
+	}
+	if app.accepted.Load() != before {
+		t.Error("an alias's request reached the application")
+	}
+	// The script's own name runs, and the path info after it is not looked at.
+	for target, script := range map[string]string{"/a.php": "/a.php", "/index.php": "/index.php", "/a.php/b:c./NUL": "/a.php"} {
+		if rec := fibtest.ServeRequest(h, httptest.NewRequest("GET", target, nil)); rec.Response.StatusCode != 200 ||
+			rec.Response.Header.Get("X-Script") != script {
+			t.Errorf("GET %s: %d %v", target, rec.Response.StatusCode, rec.Response.Header)
+		}
+	}
+	h.TryFiles = []string{"{path}", "/index.php"}
+	for _, p := range []string{"/a.php::$DATA", "/a.php.", "/a.php ", "/sub./y.php", "/nul.php"} {
+		if s, _, ok := h.try(p); !ok || s != "/index.php" {
+			t.Errorf("try %q: %q %v", p, s, ok)
+		}
+	}
+	h.TryFiles = []string{"{path}.", "{path}::$DATA", "/index.php"}
+	if s, _, ok := h.try("/a.php"); !ok || s != "/index.php" {
+		t.Errorf("try {path}. for /a.php: %q %v", s, ok)
+	}
+	if dotfile.Aliases {
+		for _, extra := range []string{`, "index": "index.php."`, `, "index": "CON.php"`, `, "try_files": ["{path}::$DATA"]`, `, "try_files": ["{path}", "/NUL.php"]`} {
+			if _, err := loadHandler(t, `{"address": "127.0.0.1:9000", "root": `+strconv.Quote(root)+extra+`}`, nil); err == nil ||
+				!strings.Contains(err.Error(), "Windows") {
+				t.Errorf("%s: %v", extra, err)
+			}
 		}
 	}
 }

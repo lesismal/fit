@@ -90,10 +90,15 @@ type Static struct {
 	// reachable by its 8.3 short name (.git as GIT~1): paths with a segment
 	// of that shape are hidden too; see dotfile.HasShortName.
 	hideShortNames bool
-	precompressed  []encoding
-	cache          cache
-	stall          time.Duration
-	pool           *filepool.Pool
+	// refuseAliases is set on Windows, which opens a file by names not its
+	// own, x.php::$DATA, x.php. or "x.php ", and a device for NUL or
+	// CON.txt: paths with such a segment are refused 400, whatever dotfiles
+	// says; see dotfile.Alias.
+	refuseAliases bool
+	precompressed []encoding
+	cache         cache
+	stall         time.Duration
+	pool          *filepool.Pool
 }
 
 // Provision checks the root and the index names.
@@ -116,9 +121,13 @@ func (s *Static) Provision(ctx *module.Context) error {
 	}
 	s.hideDotfiles = s.Dotfiles != dotfile.Allow
 	s.hideShortNames = s.hideDotfiles && dotfile.ShortNames
+	s.refuseAliases = dotfile.Aliases
 	for _, name := range s.index {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
 			return ctx.Errorf("index", "%q is not a file name", name)
+		}
+		if s.refuseAliases && dotfile.Alias(name) {
+			return ctx.Errorf("index", "%q is not a file name on Windows, which opens another file or a device for it", name)
 		}
 		if s.hideDotfiles && strings.HasPrefix(name, ".") {
 			return ctx.Errorf("index", "%q starts with a dot, which dotfiles deny hides; set dotfiles to allow to serve it", name)
@@ -130,6 +139,9 @@ func (s *Static) Provision(ctx *module.Context) error {
 	for i, t := range s.TryFiles {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
+		}
+		if s.refuseAliases && dotfile.Alias(strings.ReplaceAll(t, "{path}", "/x")) {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names no file on Windows, which opens another file or a device for it", t)
 		}
 		if s.check(strings.ReplaceAll(t, "{path}", "/x")) == stdhttp.StatusNotFound {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a path with a segment starting with a dot, or on Windows one shaped as an 8.3 short name, which dotfiles deny hides; set dotfiles to allow to serve it", t)
@@ -384,13 +396,14 @@ func (s *Static) sendFromDisk(c *fibhttp.Context, v variant, full string, q *que
 // check returns the status a request path, name, is refused with, in one
 // look at it, or 0 when it may be served: 400 for one that could name a file
 // outside the root, or a different file on some systems, a ".." segment, a
-// NUL or a backslash, which Windows takes as a separator; and 404 for a
-// dotfile the handler hides, or on Windows for what may be a dotfile's 8.3
-// short name.
+// NUL or a backslash, which Windows takes as a separator, or on Windows a
+// segment it opens as another file or a device (x.php::$DATA, x.php.,
+// NUL); and 404 for a dotfile the handler hides, or on Windows for what may
+// be a dotfile's 8.3 short name.
 func (s *Static) check(name string) int {
 	unsafe, hidden := dotfile.Scan(name)
 	switch {
-	case unsafe:
+	case unsafe, s.refuseAliases && dotfile.Alias(name):
 		return stdhttp.StatusBadRequest
 	case hidden && s.hideDotfiles, s.hideShortNames && dotfile.HasShortName(name):
 		return stdhttp.StatusNotFound

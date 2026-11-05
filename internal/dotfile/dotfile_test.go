@@ -1,6 +1,9 @@
 package dotfile
 
-import "testing"
+import (
+	goruntime "runtime"
+	"testing"
+)
 
 func TestScan(t *testing.T) {
 	for _, tt := range []struct {
@@ -70,6 +73,43 @@ func TestHasShortName(t *testing.T) {
 		if HasShortName(p) {
 			t.Errorf("HasShortName(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestAlias checks that the names Windows opens as another file or as a
+// device are found on every OS, in any segment, and that ordinary names,
+// those that only start like one included, are not.
+func TestAlias(t *testing.T) {
+	for _, p := range []string{
+		// Streams, and the other characters no Windows name has.
+		"/x.php::$DATA", "/x.php:stream", "/file.txt::$DATA", "/a/x.php:s:$DATA/b",
+		"/dir::$INDEX_ALLOCATION/x.php", "/c:", "/:", "/a\x01b", "/a\x1fb", "/a\"b", "/a*", "/a?", "/a<b", "/a>b", "/a|b",
+		// What Windows strips.
+		"/x.php.", "/x.php ", "/x.php. .", "/x.php .", "/dir./x.php", "/dir /x.php", "/...", "/ ", "/a/ /b",
+		// Devices, in any case, with an extension or not.
+		"/CON", "/con", "/prn", "/Aux", "/NUL", "/nul.txt", "/a/NUL.php", "/CON.tar.gz", "/COM1", "/com9.log",
+		"/LPT1", "/lpt0", "/COM0", "/COM\u00b9", "/LPT\u00b2.txt", "/lpt\u00b3", "/CONIN$", "/conout$.x",
+		"/CON /x", "/NUL .txt", "/x/AUX/y",
+	} {
+		if !Alias(p) {
+			t.Errorf("Alias(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{
+		"", "/", "//", "/./", "/..", "/a/../b", "/index.php", "/a/b.txt", "/.git/config", "/.well-known/x",
+		"/CONSOLE", "/CONTACT.html", "/console.log", "/icon.png", "/nullable", "/AUXI", "/COM10", "/LPT", "/COMA",
+		"/COM", "/LPT\u00b4", "/CONIN", "/CONOUT", "/x.CON", "/a.nul", "/GIT~1/config", "/a b/c", "/ a", "/.x",
+		"/caf\u00e9.txt", "/\u6587\u4ef6.php", "/a~b", "/a%3Ab",
+	} {
+		if Alias(p) {
+			t.Errorf("Alias(%q) = true, want false", p)
+		}
+	}
+	if n := testing.AllocsPerRun(100, func() { Alias("/assets/js/App.min.js"); Alias("/a/Nul.txt") }); n != 0 {
+		t.Errorf("Alias allocates %v times", n)
+	}
+	if Aliases != (goruntime.GOOS == "windows") {
+		t.Errorf("Aliases %v on %s", Aliases, goruntime.GOOS)
 	}
 }
 

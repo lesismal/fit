@@ -81,7 +81,9 @@ with the tables below.
   segment starting with a dot, as `/.git/config`, `/.env` or `/.htpasswd`, as
   `location ~ /\. { deny all; }` would, but for `/.well-known/`; `dotfiles: allow` serves them as
   nginx does by default. On Windows they also answer 404 for a segment shaped as an 8.3 short
-  name, as `GIT~1`, which NTFS may give `.git`.
+  name, as `GIT~1`, which NTFS may give `.git`, and 400 for one Windows opens as another file or a
+  device whatever `dotfiles` says: a stream (`x.php::$DATA`), a name ending in a dot or a space
+  (`x.php.`), or a reserved device name (`NUL`, `CON.php`).
 - **Not converted**: Lua, `njs`, `map`, `geo`, `split_clients`, `mirror` (fit's proxy has a
   `mirror` of its own), `sub_filter`, mail proxying, and nginx's modules. WebAssembly plugins
   (`wasm`) and modules built in with `fit build` take the place of the extensions.

@@ -151,6 +151,9 @@ func TestDotfilesShortNames(t *testing.T) {
 		spa = mustLoad(t, root, `, "try_files": ["{path}", "/spa/index.html"]`)
 		s.hideShortNames, spa.hideShortNames = true, true
 	}
+	// The short names alone: on Windows those written with what it strips
+	// are also aliases, refused 400 before they are looked at.
+	s.refuseAliases, spa.refuseAliases = false, false
 	for _, target := range []string{"/GIT~1/config", "/git~1/config", "/GIT~1./config", "/GIT~1%20/config", "/HTPASS~1", "/HTPASS~1::$DATA", "/GIT~1/"} {
 		got := get(s, "GET", target, nil).Response
 		if got.StatusCode != 404 || strings.Contains(string(got.Body), "[core]") || strings.Contains(string(got.Body), "u:x") {
@@ -201,5 +204,74 @@ func TestDotfilesConfig(t *testing.T) {
 	}
 	if got := get(s, "GET", "/nope", nil).Response; string(got.Body) != "app" {
 		t.Errorf("allow dot try_files: %d %q", got.StatusCode, got.Body)
+	}
+}
+
+// TestWindowsAliases checks that, where the system opens a file by names
+// not its own, a request for x.php::$DATA, x.php. or "x.php " is answered
+// 400 and never with x.php, nor is a try_files candidate or an index file
+// of that kind served, nor a device name opened, whatever dotfiles says,
+// and that the files' own names are served as before. Elsewhere such
+// names are names as others are.
+func TestWindowsAliases(t *testing.T) {
+	files := map[string]string{
+		"x.php":          "<?php secret",
+		"file.txt":       "text",
+		"sub/a.txt":      "a",
+		"spa/index.html": "spa",
+	}
+	if !dotfile.Aliases {
+		// The aliases as names of their own, which on Windows stand for
+		// what it would open for them.
+		for _, name := range []string{"x.php::$DATA", "x.php.", "x.php ", "sub./a.txt", "nul.txt", "CON.php"} {
+			files[name] = "<?php secret"
+		}
+	}
+	root := tree(t, files)
+	s := mustLoad(t, root, "")
+	if s.refuseAliases != dotfile.Aliases {
+		t.Fatalf("refuseAliases %v on %s", s.refuseAliases, goruntime.GOOS)
+	}
+	if !dotfile.Aliases {
+		// Elsewhere a colon or a trailing dot is part of a name.
+		named := tree(t, map[string]string{"a:b.txt": "colon", "c.txt.": "dot"})
+		other := mustLoad(t, named, "")
+		for target, want := range map[string]string{"/a:b.txt": "colon", "/c.txt.": "dot"} {
+			if got := get(other, "GET", target, nil).Response; got.StatusCode != 200 || string(got.Body) != want {
+				t.Errorf("GET %s off Windows: %d %q", target, got.StatusCode, got.Body)
+			}
+		}
+	}
+	spa := mustLoad(t, root, `, "try_files": ["{path}", "/spa/index.html"]`)
+	allow := mustLoad(t, root, `, "dotfiles": "allow", "precompressed": ["gzip"]`)
+	s.refuseAliases, spa.refuseAliases, allow.refuseAliases = true, true, true // as on Windows
+	for _, target := range []string{
+		"/x.php::$DATA", "/x.php:stream", "/x.php%3A%3A$DATA", "/file.txt::$DATA", "/sub::$INDEX_ALLOCATION/a.txt",
+		"/x.php.", "/x.php%20", "/x.php.%20.", "/sub./a.txt", "/sub%20/a.txt", "/x.ph%3F", "/x.php%01",
+		"/NUL", "/nul.txt", "/CON.php", "/com1", "/LPT1.txt", "/sub/AUX", "/CONIN$",
+	} {
+		for name, h := range map[string]*Static{"plain": s, "try_files": spa, "allow": allow} {
+			got := get(h, "GET", target, map[string]string{"Accept-Encoding": "gzip"}).Response
+			if got.StatusCode != 400 || strings.Contains(string(got.Body), "secret") || strings.Contains(string(got.Body), "text") {
+				t.Errorf("%s GET %s: %d %q, want 400", name, target, got.StatusCode, got.Body)
+			}
+		}
+	}
+	for target, want := range map[string]string{"/x.php": "<?php secret", "/file.txt": "text", "/sub/a.txt": "a", "/spa/": "spa"} {
+		if got := get(s, "GET", target, nil).Response; got.StatusCode != 200 || string(got.Body) != want {
+			t.Errorf("GET %s: %d %q", target, got.StatusCode, got.Body)
+		}
+	}
+	// A try_files candidate made of an alias is passed over.
+	spa.TryFiles = []string{"{path}.", "{path}::$DATA", "/spa/index.html"}
+	if got := get(spa, "GET", "/x.php", nil).Response; got.StatusCode != 200 || string(got.Body) != "spa" {
+		t.Errorf("try_files {path}. for /x.php: %d %q", got.StatusCode, got.Body)
+	}
+	if dotfile.Aliases {
+		for _, extra := range []string{`, "index": ["index.html."]`, `, "index": ["NUL"]`, `, "try_files": ["{path}::$DATA"]`, `, "try_files": ["{path}", "/CON.html"]`} {
+			if _, err := load(t, `{"root": `+quote(root)+extra+`}`); err == nil || !strings.Contains(err.Error(), "Windows") {
+				t.Errorf("%s: %v", extra, err)
+			}
+		}
 	}
 }

@@ -93,6 +93,11 @@ type FastCGI struct {
 	// short names, a dotfile's too (.git as GIT~1): scripts with a segment
 	// of that shape do not run either; see dotfile.HasShortName.
 	hideShortNames bool
+	// refuseAliases is set on Windows, where root is, and which opens a
+	// script by names not its own, x.php::$DATA, x.php. or "x.php ", and a
+	// device for NUL or CON.php: scripts with such a segment do not run,
+	// whatever dotfiles says; see dotfile.Alias.
+	refuseAliases bool
 }
 
 // Provision checks the params and makes the connection pool.
@@ -117,6 +122,10 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 	}
 	h.hideDotfiles = h.Dotfiles != dotfile.Allow
 	h.hideShortNames = h.hideDotfiles && dotfile.ShortNames
+	h.refuseAliases = dotfile.Aliases
+	if h.refuseAliases && dotfile.Alias(h.Index) {
+		return ctx.Errorf("index", "%q is not a file name on Windows, which opens another file or a device for it", h.Index)
+	}
 	if h.hideDotfiles && strings.HasPrefix(h.Index, ".") {
 		return ctx.Errorf("index", "%q starts with a dot, which dotfiles deny hides; set dotfiles to allow to run it", h.Index)
 	}
@@ -124,7 +133,11 @@ func (h *FastCGI) Provision(ctx *module.Context) error {
 		if !strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "{path}") {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q starts with neither / nor {path}", t)
 		}
-		if script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x")); h.hides(script) {
+		script, _ := h.split(strings.ReplaceAll(t, "{path}", "/x"))
+		if h.refuseAliases && dotfile.Alias(script) {
+			return ctx.Params.Field("try_files").Index(i).Errorf("%q names no script on Windows, which opens another file or a device for it", t)
+		}
+		if h.hides(script) {
 			return ctx.Params.Field("try_files").Index(i).Errorf("%q names a script with a segment starting with a dot, or on Windows one shaped as an 8.3 short name, which dotfiles deny hides; set dotfiles to allow to run it", t)
 		}
 	}
@@ -195,6 +208,10 @@ func (h *FastCGI) ServeHTTP(c *fibhttp.Context) {
 	x := &exchange{h: h, c: c}
 	if len(h.TryFiles) == 0 {
 		x.script, x.pathInfo = h.split(c.Request.URL.Path)
+		if h.refuseAliases && dotfile.Alias(x.script) {
+			x.answer(stdhttp.StatusBadRequest)
+			return
+		}
 		if h.hides(x.script) {
 			x.answer(stdhttp.StatusNotFound)
 			return
@@ -245,7 +262,8 @@ func (h *FastCGI) split(p string) (script, info string) {
 }
 
 // try returns the script of the first of try_files whose script is a file
-// under root, and no dotfile dotfiles deny hides. It runs on the lookup pool.
+// under root, and no dotfile dotfiles deny hides, nor on Windows a name it
+// opens as another file or a device. It runs on the lookup pool.
 func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
 	for _, t := range h.TryFiles {
 		candidate := path.Clean("/" + strings.ReplaceAll(t, "{path}", reqPath))
@@ -253,7 +271,7 @@ func (h *FastCGI) try(reqPath string) (script, info string, ok bool) {
 			candidate += "/"
 		}
 		s, i := h.split(candidate)
-		if h.hides(s) {
+		if h.hides(s) || h.refuseAliases && dotfile.Alias(s) {
 			continue
 		}
 		fi, err := os.Stat(filepath.Join(h.Root, filepath.FromSlash(path.Clean(s))))

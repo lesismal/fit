@@ -8,6 +8,12 @@
 // GIT~1, .htpasswd HTPASS~1, with no dot at the front to tell them by.
 // HasShortName finds paths with a segment of that shape, which the handlers
 // hide too where ShortNames says the system has them.
+//
+// Windows also opens a file by names that are not its own: with a stream
+// after a colon (x.php::$DATA, x.php:s), with dots and spaces after it,
+// which it strips (x.php., x.php%20), and it opens a device for a reserved
+// name (CON, NUL, COM1, LPT1.txt). Alias finds paths with such a segment,
+// which the handlers refuse where Aliases says the system has them.
 package dotfile
 
 import (
@@ -25,6 +31,13 @@ const WellKnown = ".well-known"
 // finds there too, deciding when they are provisioned, so that other
 // systems' requests are not looked at twice.
 const ShortNames = runtime.GOOS == "windows"
+
+// Aliases says the system opens a file by names that are not its own, and
+// devices by reserved names, as Alias finds them: on Windows. The handlers
+// that serve a directory refuse every path Alias finds there, whatever
+// their dotfiles param, deciding when they are provisioned, so that other
+// systems' requests are not looked at twice.
+const Aliases = runtime.GOOS == "windows"
 
 // Values of the handlers' dotfiles param.
 const (
@@ -134,4 +147,79 @@ func shortName(segment string) bool {
 		}
 	}
 	return true
+}
+
+// Alias reports whether a segment of p, a slash-separated request path, is
+// one Windows would not open as the file of that name, all names no file on
+// Windows can have:
+//
+//   - one with a colon, which names a stream of a file, as x.php::$DATA, the
+//     file itself, or x.php:s, or a drive, or with another character Windows
+//     refuses in a name: a control character, ", *, <, >, ? or |;
+//   - one ending in a dot or a space, which Windows strips, so that x.php.
+//     and "x.php " open x.php;
+//   - a reserved device name, CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9
+//     (and COM or LPT with a superscript 1, 2 or 3), CONIN$ or CONOUT$, in
+//     any case and with or without an extension, as nul.txt, which opens the
+//     device, not a file.
+//
+// Such a name would let a request reach a file under a name that rules on
+// its real name do not see: a script's source served as x.php::$DATA where
+// the fastcgi route matches *.php, a content type or a try_files candidate
+// chosen by an extension the file does not have. "." and ".." are left to
+// Scan.
+func Alias(p string) bool {
+	start := 0
+	for i := 0; i <= len(p); i++ {
+		if i < len(p) {
+			switch c := p[i]; {
+			case c == '/':
+			case c < ' ', c == ':', c == '"', c == '*', c == '<', c == '>', c == '?', c == '|':
+				return true
+			default:
+				continue
+			}
+		}
+		segment := p[start:i]
+		start = i + 1
+		if segment == "" || segment == "." || segment == ".." {
+			continue
+		}
+		if last := segment[len(segment)-1]; last == '.' || last == ' ' || device(segment) {
+			return true
+		}
+	}
+	return false
+}
+
+// device reports whether Windows opens a device for segment, a name with
+// no colon: one of its reserved names, before any extension and the spaces
+// before it, as CON, nul.txt or "COM1 .log".
+func device(segment string) bool {
+	base := segment
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimRight(base, " ")
+	switch len(base) {
+	case 3:
+		for _, name := range [...]string{"CON", "PRN", "AUX", "NUL"} {
+			if strings.EqualFold(base, name) {
+				return true
+			}
+		}
+	case 4, 5:
+		if !strings.EqualFold(base[:3], "COM") && !strings.EqualFold(base[:3], "LPT") {
+			return false
+		}
+		switch n := base[3:]; n {
+		case "\u00b9", "\u00b2", "\u00b3":
+			return true
+		default:
+			return len(n) == 1 && '0' <= n[0] && n[0] <= '9'
+		}
+	case 6, 7:
+		return strings.EqualFold(base, "CONIN$") || strings.EqualFold(base, "CONOUT$")
+	}
+	return false
 }
