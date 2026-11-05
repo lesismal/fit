@@ -421,7 +421,6 @@ func (l *AccessLog) TimeZoneName() string {
 	return TimeZoneName(l.TimeZone)
 }
 
-
 // MinStatus returns the least status of the responses whose requests the
 // access log writes, by its level.
 func (l *AccessLog) MinStatus() int {
