@@ -184,7 +184,7 @@ type target struct {
 	// token 是拨号该目标所用的连接令牌（代替 password），sec 为其解析结果。
 	token string
 	sec   *linktoken.Secret
-	role     string // the role the peer must have / 对端必须具有的角色
+	role  string // the role the peer must have / 对端必须具有的角色
 	// req is what the target was set with, its TLS settings among it, and tls the configuration it is dialed with
 	// (nil: plain ws://).
 	// req 是设置该目标时的请求（含其 TLS 设置），tls 为拨号所用的配置（nil 表示普通 ws://）。

@@ -100,18 +100,18 @@ func (d DialReq) TLS() bool { return d.Pin != "" || d.CAFile != "" }
 // DialTarget is a dial target and its state. The password is never returned.
 // DialTarget 连接目标及其状态。从不返回密码。
 type DialTarget struct {
-	Addr       string    `json:"addr"`
-	Role       string    `json:"role"`
-	TLS        bool      `json:"tls,omitempty"`
-	Pin        string    `json:"pin,omitempty"`
-	CAFile     string    `json:"ca_file,omitempty"`
-	ServerName string    `json:"server_name,omitempty"`
+	Addr       string `json:"addr"`
+	Role       string `json:"role"`
+	TLS        bool   `json:"tls,omitempty"`
+	Pin        string `json:"pin,omitempty"`
+	CAFile     string `json:"ca_file,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
 	// TokenID is the ID of the token the target is dialed with, "" for a password; the token is never returned.
 	// TokenID 是拨号该目标所用令牌的 ID，密码则为 ""；从不返回令牌本身。
-	TokenID    string    `json:"token_id,omitempty"`
-	Connected  bool      `json:"connected"`
-	Peer       *Identity `json:"peer,omitempty"`
-	Error      string    `json:"error,omitempty"`
+	TokenID   string    `json:"token_id,omitempty"`
+	Connected bool      `json:"connected"`
+	Peer      *Identity `json:"peer,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // ListenConfig is the rpc listener. The passwords are never returned by MethodPeers (HasPassword instead).
