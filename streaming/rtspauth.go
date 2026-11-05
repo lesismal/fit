@@ -9,14 +9,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/lesismal/fib"
 	"github.com/lesismal/fib/media/rtsp"
 
 	"github.com/lesismal/fit/config"
@@ -29,11 +27,11 @@ const rtspNonceLifetime = 5 * time.Minute
 
 // rtspAuth checks RTSP requests against the listener's policy, in the RTSP
 // server's OnRequest, which fib calls on the connection's worker: DESCRIBE
-// needs play on the stream, ANNOUNCE and RECORD publish; a SETUP needs play
-// on the stream it names, or publish on the stream the connection announced
-// when it names that stream or a track under it; and a PLAY play on its own
-// stream and on every stream the connection's SETUPs named, since fib plays
-// the stream of the session's SETUP whatever the PLAY URL says. The rest
+// needs play on the stream, ANNOUNCE publish; PLAY and RECORD need play and
+// publish on the stream of the connection's session, which fib plays or
+// records whatever their URL says (and refuses with 455 when the URL names
+// another); and a SETUP play on its stream, or with a session, which a
+// SETUP only adds a track to, play or publish on the session's. The rest
 // belong to a session those began, or reveal nothing. Credentials are the
 // Authorization header's, Digest (RFC 2617 with MD5, as RTSP 1.0 clients
 // speak it) or Basic, or else a token, or user and pass, in the URL's query.
@@ -45,30 +43,10 @@ type rtspAuth struct {
 	digest bool
 	basic  bool
 	secret [32]byte
-
-	// conns is what each connection has been let do, for the SETUPs and
-	// PLAYs after it; an entry goes when its connection closes. It holds at
-	// most one entry for each of the listener's connections.
-	mu    sync.Mutex
-	conns map[*rtsp.ServerConn]*rtspConnState
-}
-
-// rtspMaxSetupStreams bounds the streams a connection's SETUPs may name: a
-// player names one, and a publisher the tracks of what it announced.
-const rtspMaxSetupStreams = 8
-
-// rtspConnState is what a connection has been let do. fit sees requests
-// before fib does, not whether fib took them, so it keeps every stream the
-// connection might be on: the stream its last allowed ANNOUNCE named, and
-// every stream its allowed SETUPs named. Only the connection's worker, under
-// fib's connection lock, reads and writes it.
-type rtspConnState struct {
-	announced string
-	setups    []string
 }
 
 func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
-	a := &rtspAuth{realm: c.RealmName(), conns: make(map[*rtsp.ServerConn]*rtspConnState)}
+	a := &rtspAuth{realm: c.RealmName()}
 	for _, m := range c.Methods() {
 		switch m {
 		case "digest":
@@ -81,38 +59,6 @@ func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
 		return nil, err
 	}
 	return a, nil
-}
-
-// rtspHandler is the RTSP server with the connection state of its auth
-// dropped as each connection closes.
-type rtspHandler struct {
-	*rtsp.Server
-	a *rtspAuth
-}
-
-func (h *rtspHandler) OnClose(c *fib.Connection, err error) {
-	if sc, ok := c.Attachment().(*rtsp.ServerConn); ok {
-		h.a.forget(sc)
-	}
-	h.Server.OnClose(c, err)
-}
-
-// state returns the state of sc, made when create is set and it has none.
-func (a *rtspAuth) state(sc *rtsp.ServerConn, create bool) *rtspConnState {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	st := a.conns[sc]
-	if st == nil && create {
-		st = &rtspConnState{}
-		a.conns[sc] = st
-	}
-	return st
-}
-
-func (a *rtspAuth) forget(sc *rtsp.ServerConn) {
-	a.mu.Lock()
-	delete(a.conns, sc)
-	a.mu.Unlock()
 }
 
 func (a *rtspAuth) onRequest(sc *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {
@@ -148,54 +94,46 @@ func (a *rtspAuth) onRequest(sc *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respo
 		}
 		return nil
 	}
+	// session is the stream of the connection's session, which a PLAY or
+	// RECORD acts on; without one, fib answers them 454 and the URL's
+	// stream is checked.
+	session, hasSession := sc.SessionPath()
 	switch req.Method {
 	case rtsp.MethodDescribe:
 		return check(mediaauth.Play, path)
 	case rtsp.MethodAnnounce:
-		if resp := check(mediaauth.Publish, path); resp != nil {
-			return resp
+		return check(mediaauth.Publish, path)
+	case rtsp.MethodPlay:
+		if !hasSession {
+			session = rtspStream(path)
 		}
-		a.state(sc, true).announced = path
-		return nil
+		return check(mediaauth.Play, session)
 	case rtsp.MethodRecord:
-		return check(mediaauth.Publish, rtspStream(path))
-	case rtsp.MethodSetup:
-		stream := rtspStream(path)
-		st := a.state(sc, true)
-		var resp *rtsp.Response
-		if ann := st.announced; ann != "" && (stream == ann || strings.HasPrefix(stream, ann+"/")) {
-			resp = check(mediaauth.Publish, ann)
-		} else {
-			resp = check(mediaauth.Play, stream)
+		if !hasSession {
+			session = rtspStream(path)
 		}
-		if resp != nil {
-			return resp
-		}
-		if !slices.Contains(st.setups, stream) {
-			if len(st.setups) == rtspMaxSetupStreams {
-				return &rtsp.Response{StatusCode: rtsp.StatusNotEnoughBandwidth}
-			}
-			st.setups = append(st.setups, stream)
-		}
+		return check(mediaauth.Publish, session)
+	}
+	// SETUP. The first makes a session that plays the stream it names.
+	if !hasSession {
+		return check(mediaauth.Play, rtspStream(path))
+	}
+	// Later ones add a track to the session's stream, whatever they name:
+	// a player's, which its first SETUP let in, or a publisher's, which its
+	// ANNOUNCE let in. fib does not say which, and the PLAY or RECORD after
+	// them is checked for what it does.
+	_, err := g.allow(mediaauth.Play, session, creds)
+	if err == nil {
 		return nil
 	}
-	// PLAY: fib plays the stream a SETUP chose, which may not be the
-	// one the PLAY URL names.
-	stream := rtspStream(path)
-	if resp := check(mediaauth.Play, stream); resp != nil {
-		return resp
+	_, perr := g.allow(mediaauth.Publish, session, creds)
+	switch {
+	case perr == nil:
+		return nil
+	case errors.Is(perr, errRetry):
+		err = perr
 	}
-	if st := a.state(sc, false); st != nil {
-		for _, s := range st.setups {
-			if s == stream {
-				continue
-			}
-			if resp := check(mediaauth.Play, s); resp != nil {
-				return resp
-			}
-		}
-	}
-	return nil
+	return a.refuse(now, err)
 }
 
 // refuse answers a request the policy refused with err.
@@ -235,7 +173,8 @@ func rtspPath(raw string) (path, query string, ok bool) {
 }
 
 // rtspStream is the stream of a path a SETUP, PLAY or RECORD names: the
-// path without the "trackID=N" segment fib gives its tracks as controls.
+// path without the "trackID=N" segment fib gives its tracks as controls, as
+// fib compares a PLAY's or RECORD's with its session's.
 func rtspStream(path string) string {
 	s, _ := splitTrackID(path)
 	return s

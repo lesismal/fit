@@ -42,16 +42,23 @@ func dialRTSP(t *testing.T, addr string) *rtspConn {
 	return &rtspConn{t: t, c: c, r: bufio.NewReader(c)}
 }
 
-// do sends a request and returns the response's status and header.
+// do sends a request and returns the response's status and header. hdr is
+// the header's names and values, and a "Body" in it the request's body.
 func (r *rtspConn) do(method, url string, hdr ...string) (int, textproto.MIMEHeader) {
 	r.t.Helper()
 	r.cseq++
 	req := method + " " + url + " RTSP/1.0\r\nCSeq: " + strconv.Itoa(r.cseq) + "\r\n"
+	body := ""
 	for i := 0; i+1 < len(hdr); i += 2 {
+		if hdr[i] == "Body" {
+			body = hdr[i+1]
+			req += "Content-Length: " + strconv.Itoa(len(body)) + "\r\n"
+			continue
+		}
 		req += hdr[i] + ": " + hdr[i+1] + "\r\n"
 	}
 	_ = r.c.SetDeadline(time.Now().Add(waitTimeout))
-	if _, err := io.WriteString(r.c, req+"\r\n"); err != nil {
+	if _, err := io.WriteString(r.c, req+"\r\n"+body); err != nil {
 		r.t.Fatal(err)
 	}
 	tp := textproto.NewReader(r.r)
@@ -238,39 +245,84 @@ func srtDial(t *testing.T, f *fit, streamID string) error {
 	}
 }
 
-// RTSP: a SETUP is checked, so that a client with a token for one stream
-// does not SETUP another and then PLAY it under the first one's URL, which
-// fib would play the SETUP's stream for.
-func TestRTSPSetupOtherStream(t *testing.T) {
+// rtspTestSDP is an ANNOUNCE's description: H.264 and G.711.
+const rtspTestSDP = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=x\r\nt=0 0\r\n" +
+	"m=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1;sprop-parameter-sets=Z0LAHtkAoC/5cBEAAAMAAQAAAwAyDxYuSA==,aMuDyyA=\r\na=control:streamid=0\r\n" +
+	"m=audio 0 RTP/AVP 0\r\na=control:streamid=1\r\n"
+
+// RTSP: a session plays or records the stream its ANNOUNCE or first SETUP
+// named, and its PLAY and RECORD are checked on that stream, so that a
+// client with a token for one stream does not SETUP another and then PLAY it
+// under the first one's URL; fib refuses a PLAY or RECORD of another stream
+// than its session's with 455.
+func TestRTSPSessionStream(t *testing.T) {
 	f := startFit(t, doc(t, allListeners))
 	tracks, _ := fixture(t, time.Second)
-	pub, err := f.role().Hub().Publish("secret", tracks, hub.PublishInfo{Protocol: "test"})
-	if err != nil {
-		t.Fatal(err)
+	for _, p := range []string{"secret", "live/cam"} {
+		pub, err := f.role().Hub().Publish(p, tracks, hub.PublishInfo{Protocol: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pub.Close()
 	}
-	defer pub.Close()
 	addr := f.addr(t, "rtsp")
+	base := "rtsp://" + addr + "/"
 	transport := "RTP/AVP/TCP;unicast;interleaved=0-1"
+	want := func(c *rtspConn, what string, code int, method, url string, hdr ...string) textproto.MIMEHeader {
+		t.Helper()
+		got, h := c.do(method, url, hdr...)
+		if got != code {
+			t.Fatalf("%s: %s %s: %d, want %d", what, method, url, got, code)
+		}
+		return h
+	}
+
+	// SETUP is checked, as the first makes a session playing its stream.
 	c := dialRTSP(t, addr)
-	if code, _ := c.do("SETUP", "rtsp://"+addr+"/secret/trackID=0", "Transport", transport); code != 401 {
-		t.Fatalf("a SETUP of secret without credentials: %d", code)
-	}
-	if code, _ := c.do("SETUP", "rtsp://"+addr+"/secret?token="+viewToken+"/trackID=0", "Transport", transport); code != 403 {
-		t.Fatalf("a SETUP of secret with a token for live/*: %d", code)
-	}
-	if code, _ := c.do("PLAY", "rtsp://"+addr+"/live/cam?token="+viewToken); code != 454 {
-		t.Fatalf("a PLAY with no session set up: %d", code)
-	}
-	// alice may play anything: her SETUP of secret passes.
-	url := "rtsp://" + addr + "/secret/trackID=0"
-	_, h := c.do("SETUP", url, "Transport", transport)
-	if code, _ := c.do("SETUP", url, "Transport", transport, "Authorization", digest("alice", "alice-pw", "SETUP", url, h.Values("Www-Authenticate"))); code != 200 {
-		t.Fatalf("alice's SETUP of secret: %d", code)
-	}
+	want(c, "a SETUP of secret without credentials", 401, "SETUP", base+"secret/trackID=0", "Transport", transport)
+	want(c, "a SETUP of secret with a token for live/*", 403, "SETUP", base+"secret?token="+viewToken+"/trackID=0", "Transport", transport)
+	want(c, "a PLAY with no session set up", 454, "PLAY", base+"live/cam?token="+viewToken)
+
+	// alice may play anything: her session plays secret. A PLAY by anyone
+	// else is checked on secret, whatever its URL; alice's PLAY of another
+	// URL is refused by fib.
+	setup := base + "secret/trackID=0"
+	_, h := c.do("SETUP", setup, "Transport", transport)
+	challenge := h.Values("Www-Authenticate")
+	alice := func(method, url string) string { return digest("alice", "alice-pw", method, url, challenge) }
+	want(c, "alice's SETUP of secret", 200, "SETUP", setup, "Transport", transport, "Authorization", alice("SETUP", setup))
+	want(c, "the PLAY of a stream the token may play", 403, "PLAY", base+"live/cam?token="+viewToken)
+	want(c, "the PLAY of a track of it", 403, "PLAY", base+"live/cam?token="+viewToken+"/trackID=0")
+	want(c, "the PLAY of secret with the token", 403, "PLAY", base+"secret?token="+viewToken)
+	want(c, "alice's PLAY of another stream", 455, "PLAY", base+"live/cam", "Authorization", alice("PLAY", base+"live/cam"))
+	want(c, "alice's PLAY of secret", 200, "PLAY", base+"secret/", "Authorization", alice("PLAY", base+"secret/"))
+
+	// A viewer's session plays its stream, and only that.
+	v := dialRTSP(t, addr)
+	want(v, "a viewer's DESCRIBE", 200, "DESCRIBE", base+"live/cam?token="+viewToken)
+	want(v, "a viewer's SETUP", 200, "SETUP", base+"live/cam?token="+viewToken+"/trackID=0", "Transport", transport)
+	want(v, "a viewer's second SETUP", 200, "SETUP", base+"live/cam?token="+viewToken+"/trackID=1", "Transport", "RTP/AVP/TCP;unicast;interleaved=2-3")
+	want(v, "a viewer's PLAY of secret", 455, "PLAY", base+"secret?token="+viewToken)
+	want(v, "a viewer's PLAY", 200, "PLAY", base+"live/cam?token="+viewToken+"/")
+
+	// A publisher's SETUPs add tracks to the stream it announced, and need
+	// play or publish on it; its RECORD publishes that stream only, and
+	// needs publish on it.
+	p := dialRTSP(t, addr)
+	announce := base + "live/x?token=" + pubToken
+	want(p, "an ANNOUNCE", 200, "ANNOUNCE", announce, "Content-Type", "application/sdp", "Body", rtspTestSDP)
+	want(p, "a SETUP without credentials", 401, "SETUP", base+"live/x/streamid=0", "Transport", transport+";mode=record")
+	want(p, "a SETUP with an unknown token", 401, "SETUP", base+"live/x?token=unknown-token-0123456789/streamid=0", "Transport", transport+";mode=record")
+	want(p, "a publisher's SETUP", 200, "SETUP", announce+"/streamid=0", "Transport", transport+";mode=record")
+	want(p, "a SETUP with a token that may play the stream", 200, "SETUP", base+"live/x?token="+viewToken+"/streamid=1", "Transport", "RTP/AVP/TCP;unicast;interleaved=2-3;mode=record")
+	want(p, "a RECORD with a token that may only play", 403, "RECORD", base+"live/x?token="+viewToken)
+	want(p, "a RECORD of another stream", 455, "RECORD", base+"live/y?token="+pubToken)
+	want(p, "a PLAY of the announced stream", 403, "PLAY", announce)
+	want(p, "a RECORD", 200, "RECORD", announce)
+
 	// A Digest made for another URL is refused.
-	_, h = c.do("DESCRIBE", url)
-	other := "rtsp://" + addr + "/live/cam"
-	if code, _ := c.do("DESCRIBE", other, "Authorization", digest("alice", "alice-pw", "DESCRIBE", url, h.Values("Www-Authenticate"))); code != 401 {
+	_, h = c.do("DESCRIBE", setup)
+	if code, _ := c.do("DESCRIBE", base+"live/cam", "Authorization", digest("alice", "alice-pw", "DESCRIBE", setup, h.Values("Www-Authenticate"))); code != 401 {
 		t.Fatalf("a Digest replayed on another URL: %d", code)
 	}
 }

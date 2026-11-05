@@ -2,7 +2,6 @@ package streaming
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,17 +178,15 @@ func TestRTSPMalformed(t *testing.T) {
 	}
 }
 
-// The streams an RTSP connection's SETUPs name are checked, and a PLAY is
-// checked against every one of them as well as its own URL: fib plays the
-// stream a SETUP chose, whatever the PLAY URL says. A SETUP under the stream
-// the connection announced is a publisher's and needs publish on that
-// stream; should fib have refused the ANNOUNCE and play it, the PLAY after
-// it needs play on it.
+// An RTSP connection without a session: a SETUP, which makes one playing
+// the stream it names, needs play on that stream; a PLAY or RECORD, which fib
+// answers 454, is checked on its URL's stream. With a session, PLAY and
+// RECORD are checked on the session's stream (TestRTSPSessionStream).
 func TestRTSPSetupAuth(t *testing.T) {
 	const pa, view = "publish-a-play-b-token", "view-a-token-0123456"
 	p, err := mediaauth.New(&config.MediaAuth{Name: "x", Tokens: []config.MediaToken{
 		{Token: pa, Publish: []string{"a"}, Play: []string{"b"}},
-		{Token: view, Play: []string{"a", "n*"}},
+		{Token: view, Play: []string{"a"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -209,83 +206,40 @@ func TestRTSPSetupAuth(t *testing.T) {
 		}
 		return resp.StatusCode
 	}
-	cases := []struct {
-		method, url string
-		want        int
-	}{
-		// The attack: a SETUP of a stream the client may not play, then a
-		// PLAY of one it may.
-		{rtsp.MethodSetup, "rtsp://h/secret/trackID=0", 401},
-		{rtsp.MethodSetup, "rtsp://h/secret?token=" + view + "/trackID=0", 403},
-		{rtsp.MethodSetup, "rtsp://h/secret/trackID=0?token=" + view, 403},
-		{rtsp.MethodPlay, "rtsp://h/a?token=" + view, 200},
-		// A player's own stream, by track and aggregate.
-		{rtsp.MethodDescribe, "rtsp://h/a?token=" + view, 200},
-		{rtsp.MethodSetup, "rtsp://h/a?token=" + view + "/trackID=0", 200},
-		{rtsp.MethodSetup, "rtsp://h/a/trackID=1?token=" + view, 200},
-		{rtsp.MethodPlay, "rtsp://h/a?token=" + view + "/", 200},
-		{rtsp.MethodPlay, "rtsp://h/b?token=" + pa, 403}, // a was set up
-		{rtsp.MethodPlay, "rtsp://h/a/trackID=0?token=" + view, 200},
-	}
-	for _, c := range cases {
-		if got := do(c.method, c.url); got != c.want {
-			t.Errorf("%s %s: %d, want %d", c.method, c.url, got, c.want)
-		}
-	}
-	if st := a.state(sc, false); st == nil || len(st.setups) != 1 || st.setups[0] != "a" {
-		t.Fatalf("setups: %+v", st)
-	}
-
-	// A publisher: ANNOUNCE and SETUPs under it need publish, not play.
-	a.forget(sc)
-	pub := new(rtsp.ServerConn)
-	sc = pub
 	for _, c := range []struct {
 		method, url string
 		want        int
 	}{
+		// The attack's SETUP: a stream the client may not play.
+		{rtsp.MethodSetup, "rtsp://h/secret/trackID=0", 401},
+		{rtsp.MethodSetup, "rtsp://h/secret?token=" + view + "/trackID=0", 403},
+		{rtsp.MethodSetup, "rtsp://h/secret/trackID=0?token=" + view, 403},
+		// A player's own stream, by track.
+		{rtsp.MethodDescribe, "rtsp://h/a?token=" + view, 200},
+		{rtsp.MethodSetup, "rtsp://h/a?token=" + view + "/trackID=0", 200},
+		{rtsp.MethodSetup, "rtsp://h/a/trackID=1?token=" + view, 200},
+		// Publish alone is not play: without a session a SETUP plays.
+		{rtsp.MethodSetup, "rtsp://h/a?token=" + pa + "/trackID=0", 403},
 		{rtsp.MethodAnnounce, "rtsp://h/a?token=" + view, 403},
-		{rtsp.MethodSetup, "rtsp://h/a?token=" + pa + "/trackID=0", 403}, // nothing announced: play on a
 		{rtsp.MethodAnnounce, "rtsp://h/a?token=" + pa, 200},
-		{rtsp.MethodSetup, "rtsp://h/a?token=" + pa + "/streamid=0", 200},
-		{rtsp.MethodSetup, "rtsp://h/a/streamid=1?token=" + pa, 200},
-		{rtsp.MethodSetup, "rtsp://h/a/trackID=0?token=" + view, 403}, // publish on a
+		// No session: the URL's stream.
+		{rtsp.MethodPlay, "rtsp://h/a?token=" + view + "/", 200},
+		{rtsp.MethodPlay, "rtsp://h/b/trackID=0?token=" + view, 403},
 		{rtsp.MethodRecord, "rtsp://h/a?token=" + pa, 200},
-		// Should fib have refused the ANNOUNCE and played a for the
-		// SETUP, a PLAY of b needs play on a too.
-		{rtsp.MethodPlay, "rtsp://h/b?token=" + pa, 403},
+		{rtsp.MethodRecord, "rtsp://h/a?token=" + view, 403},
 	} {
 		if got := do(c.method, c.url); got != c.want {
 			t.Errorf("%s %s: %d, want %d", c.method, c.url, got, c.want)
 		}
 	}
 
-	// The streams a connection's SETUPs name are bounded.
-	sc = new(rtsp.ServerConn)
-	for i := range rtspMaxSetupStreams {
-		if got := do(rtsp.MethodSetup, "rtsp://h/n"+strconv.Itoa(i)+"/trackID=0?token="+view); got != 200 {
-			t.Fatalf("SETUP %d: %d", i, got)
-		}
-	}
-	if got := do(rtsp.MethodSetup, "rtsp://h/n0/trackID=1?token="+view); got != 200 {
-		t.Fatalf("a SETUP of a stream already set up: %d", got)
-	}
-	if got := do(rtsp.MethodSetup, "rtsp://h/n-more/trackID=0?token="+view); got != rtsp.StatusNotEnoughBandwidth {
-		t.Fatalf("a SETUP past the bound: %d", got)
-	}
-
-	// Closed connections leave nothing behind; requests other than these
-	// five, and a listener without a policy, are not checked.
-	a.forget(sc)
-	a.forget(pub)
-	if len(a.conns) != 0 {
-		t.Fatalf("%d connections kept", len(a.conns))
-	}
+	// Requests other than these five, and a listener without a policy, are
+	// not checked.
 	if do(rtsp.MethodTeardown, "rtsp://h/secret") != 200 || do(rtsp.MethodOptions, "*") != 200 {
 		t.Fatal("TEARDOWN or OPTIONS checked")
 	}
 	a.s.auth[protoRTSP].Store(nil)
-	if do(rtsp.MethodSetup, "rtsp://h/secret/trackID=0") != 200 || len(a.conns) != 0 {
+	if do(rtsp.MethodSetup, "rtsp://h/secret/trackID=0") != 200 {
 		t.Fatal("a listener without a policy")
 	}
 }

@@ -79,11 +79,11 @@ pages).
   hub: they share neither a port nor streams.
 - **Auth in each protocol's own hook.** RTMP: `OnPublish` and `OnPlay`, the credentials in the
   query of the stream name or the app (`token`, or `user` and `pass`). RTSP: `OnRequest`, DESCRIBE
-  and PLAY needing `play` and ANNOUNCE and RECORD `publish`; a SETUP needs `play` on its stream
-  (the path without its `trackID=N`), or `publish` on the stream the connection announced when it
-  names that stream or a track under it; and since fib plays the stream of the session's SETUP
-  whatever the PLAY URL says, a PLAY needs `play` on every stream the connection's SETUPs named
-  (at most 8), which fit keeps per connection until it closes; the other methods belong to a
+  needing `play` and ANNOUNCE `publish` on their URL's stream; PLAY `play` and RECORD `publish` on
+  the stream of the connection's session (`ServerConn.SessionPath`, fib request A66), which fib
+  plays or records whatever their URL says and refuses with 455 when it names another; a SETUP
+  `play` on its stream (the path without its `trackID=N`), or with a session, which a SETUP only
+  adds a track to, `play` or `publish` on the session's stream; the other methods belong to a
   session those began; credentials are Digest, checked by fit against a user's plaintext
   password (`Policy.Password`), Basic when `auth_methods` offers it, or a token in the URL's query,
   up to the first `/` after it, where clients write the track's control. fit answers the

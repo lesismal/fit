@@ -1558,8 +1558,9 @@ body 往往很大，而 fib 的 `Client.StartUpgrade` 在回调前整体等待�
 
 ## A66：RTSP 的 PLAY 或 RECORD 绑定到会话的流
 
-**状态。** 2026-11-05 由 fit 的安全审查提出。fit 的临时做法：`streaming/rtspauth.go` 对 SETUP 授权，按连接记下其 ANNOUNCE
-与 SETUP 所指的流（最多 8 个），PLAY 须对其中每一个都有权限。
+**状态。** 2026-11-05 由 fit 的安全审查提出。已在 fib 分支 req/a66 的 5760dfc 完成（尚未进入 fib main）。在此之前 fit 的临时做法
+（6c4a5937）：`streaming/rtspauth.go` 对 SETUP 授权，按连接记下其 ANNOUNCE 与 SETUP 所指的流（最多 8 个），PLAY 须对其中每一个
+都有权限；现已去掉。
 
 **问题。** `media/rtsp` 的服务器播放 SETUP 选定的流（`session.path`），从不与 PLAY 的 URL 比较。按各请求自身 URL 授权的
 钩子因此让持有流 `a` 令牌的客户端 SETUP `secret/trackID=0` 后 PLAY `a?token=…`，收到 `secret`。
@@ -1569,7 +1570,17 @@ body 往往很大，而 fib 的 `Client.StartUpgrade` 在回调前整体等待�
 **建议的 API。** PLAY 与 RECORD 的流路径与会话的不同时答 `455 Method Not Valid in This State`；并提供
 `ServerConn.SessionPath() string`，让钩子对会话实际承载的流授权。
 
-**fit 的使用方式。** 钩子按 `SessionPath()` 检查 PLAY 与 RECORD，去掉按连接记录的流列表。
+**实现情况。** PLAY 与 RECORD 的 URL 指向的流与会话的不同时，在 `OnRequest` 之后答 `455 Method Not Valid in This State`。URL
+的流按 SETUP 的方式得出：去掉首尾斜杠的路径，query 末尾的 `/trackID=N` 移到路径上，再去掉末尾的 `trackID=N` 段；主机、端口和
+query 不参与比较，路径内部的斜杠参与。因此聚合 URL、带斜杠的 Content-Base、track 的 URL，以及 ffmpeg 带 query 的写法
+（`rtsp://h/s?token=T/`、`rtsp://h/s?token=T/trackID=0`）照常播放，录制方 RECORD 其 ANNOUNCE 的 URL；RECORD 某个 track 的 URL
+（`rec/streamid=0`）会被拒绝，没有客户端这样发。`ServerConn.SessionPath() (string, bool)` 返回会话的流，没有会话时返回 false
+（流的路径可以为空，只靠 `""` 无法区分）；它与 `User()` 一样是原子的。已用 ffmpeg 9.0 经 TCP 和 UDP 推流、播放验证。
+
+**fit 的使用方式。** `rtspAuth.onRequest` 按 `SessionPath()` 检查 PLAY（play）与 RECORD（publish），没有会话时（fib 会答 454）
+检查 URL 的流。没有会话时的 SETUP 会建立播放其所指流的会话，需要该流的 play；已有会话时 SETUP 只给会话的流加一个 track，
+需要会话的流的 play 或 publish（fib 不说明会话是播放还是录制，其后的 PLAY 或 RECORD 会按其所做的事检查）。按连接记录的流
+列表、其 8 个的上限以及为清理它而包装的 `OnClose` 已去掉；Digest 的 `uri` 检查保留。
 
 ## A67：单个 HTTP 连接的空闲超时
 

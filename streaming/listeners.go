@@ -214,7 +214,7 @@ func (s *Server) applyRTSP(cfg *config.StreamRTSP) error {
 				IdleTimeout:    c.Idle(),
 				PlayWait:       c.PlayWait.Std(),
 			})
-			l, err := s.bindTCP(c.Listen, &rtspHandler{Server: srv, a: a}, c.Conns(), c.MPTCP)
+			l, err := s.bindTCP(c.Listen, srv, c.Conns(), c.MPTCP)
 			if err != nil {
 				return nil, err
 			}

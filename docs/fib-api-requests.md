@@ -2055,9 +2055,10 @@ h2c handling from the stopgap stay.
 
 ## A66: An RTSP PLAY or RECORD bound to its session's stream
 
-**Status.** Requested on 2026-11-05, from fit's security review. fit's stopgap: `streaming/rtspauth.go`
-authorizes SETUP, keeps per connection the streams its ANNOUNCE and SETUPs named (at most 8), and
-checks a PLAY against each of them.
+**Status.** Requested on 2026-11-05, from fit's security review. Done in fib branch req/a66 at
+5760dfc (not yet on fib main). fit's stopgap until then, from 6c4a5937: `streaming/rtspauth.go`
+authorized SETUP, kept per connection the streams its ANNOUNCE and SETUPs named (at most 8), and
+checked a PLAY against each of them; it is gone.
 
 **Problem.** `media/rtsp`'s server plays the stream SETUP chose (`session.path`) and never compares
 it with the PLAY's URL. An auth hook that checks each request by its own URL let a client with a token
@@ -2070,8 +2071,24 @@ RECORD read no path of their own.
 differs from the session's; and `ServerConn.SessionPath() string`, so that a hook can authorize the
 stream the session really carries.
 
-**How fit would use it.** The hook checks PLAY and RECORD on `SessionPath()` and drops its own list of
-streams per connection.
+**As built.** PLAY and RECORD answer `455 Method Not Valid in This State`, after `OnRequest` has run,
+when their URL names another stream than the session's. The URL's stream is derived as SETUP derives
+it: the path without the slashes around it, a `/trackID=N` ending the query moved to the path, then a
+trailing `trackID=N` segment taken off; host, port and query do not count, and slashes inside the
+path do. So the aggregate URL, the Content-Base with its slash, a track's URL, and ffmpeg's forms
+with a query (`rtsp://h/s?token=T/`, `rtsp://h/s?token=T/trackID=0`) still play, and a recorder
+RECORDs the URL it announced; a RECORD of a track's URL (`rec/streamid=0`) is refused, as no client
+sends one. `ServerConn.SessionPath() (string, bool)` returns the session's stream, and false without
+a session (a stream's path may be empty, so `""` alone could not say); it is atomic, as `User()` is.
+Checked against ffmpeg 9.0 publishing and playing over TCP and UDP.
+
+**How fit uses it.** `rtspAuth.onRequest` checks PLAY (play) and RECORD (publish) on `SessionPath()`,
+or on the URL's stream without a session, which fib answers 454. A SETUP without a session, which
+makes one playing the stream it names, needs play on that stream; with a session, which a SETUP only
+adds a track to, play or publish on the session's stream (fib does not say whether the session plays
+or records, and the PLAY or RECORD after it is checked for what it does). The per-connection list of
+streams, its bound of 8 and the `OnClose` wrapper that dropped it are gone; the Digest `uri` check
+stays.
 
 ## A67: An idle timeout for one HTTP connection
 
