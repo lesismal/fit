@@ -702,13 +702,13 @@ func (l *AccessLog) appendTime(b []byte, t time.Time) []byte {
 		if len(buf) != len(stamp{}.text) {
 			// A year out of the usual range: format the whole time rather
 			// than keep a stamp that holds it wrongly.
-			return append(b, lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")...)
+			return lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")
 		}
 		s = &stamp{sec: sec}
 		copy(s.text[:], buf)
 		z := lt.AppendFormat(s.zone[:0], "Z07:00")
 		if len(z) > len(s.zone) {
-			return append(b, lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")...)
+			return lt.AppendFormat(b, "2006-01-02T15:04:05.000Z07:00")
 		}
 		s.zlen = int8(len(z))
 		l.stamp.Store(s)
@@ -732,7 +732,7 @@ func (l *AccessLog) appendLocalTime(b []byte, t time.Time) []byte {
 		lt := t.In(l.zone())
 		buf := lt.AppendFormat(nil, "2006-01-02 15:04:05.")
 		if len(buf) != len(stamp{}.text) {
-			return append(b, lt.AppendFormat(b, "2006-01-02 15:04:05.000")...)
+			return lt.AppendFormat(b, "2006-01-02 15:04:05.000")
 		}
 		s = &stamp{sec: sec}
 		copy(s.text[:], buf)

@@ -437,6 +437,17 @@ func TestLogTime(t *testing.T) {
 		if got, want := string(l.appendTime(nil, tm)), string(appendTime(nil, tm)); got != want {
 			t.Errorf("%v: %s, want %s", tm, got, want)
 		}
+		// After what the line already holds, the time is appended once, the
+		// fallback for a year out of range included.
+		if got, want := string(l.appendTime([]byte("ts="), tm)), "ts="+string(appendTime(nil, tm)); got != want {
+			t.Errorf("%v after a prefix: %s, want %s", tm, got, want)
+		}
+		// A log writes one format, so its stamp is the one format's: the
+		// line format's time is checked on a log of its own.
+		ll := &AccessLog{}
+		if got, want := string(ll.appendLocalTime([]byte("ts="), tm)), "ts="+tm.In(ll.zone()).Format("2006-01-02 15:04:05.000"); got != want {
+			t.Errorf("%v local after a prefix: %s, want %s", tm, got, want)
+		}
 	}
 }
 
