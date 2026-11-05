@@ -27,6 +27,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 )
 
 func init() {
@@ -50,8 +51,10 @@ const (
 // everything (Vary: *), set no cookie, carry no trailers and are no larger
 // than max_entry_bytes, with a freshness lifetime from s-maxage, max-age or
 // Expires, or, for the statuses that allow one, from default_ttl or a tenth
-// of the time since Last-Modified. A request with Authorization has its
-// response kept only when it says public, s-maxage or must-revalidate.
+// of the time since Last-Modified. A request with Authorization, or one an
+// auth middleware or check let in (which may have removed Authorization, or
+// read a cookie), has its response kept only when it says public, s-maxage
+// or must-revalidate.
 //
 // A fresh response answers GET and HEAD requests, as a 304 for one whose
 // If-None-Match or If-Modified-Since it meets. A request's no-cache, max-age
@@ -161,7 +164,7 @@ func (m *Cache) serve(c *fibhttp.Context, next module.Handler) {
 		}
 		if status == fwdStale && !e.noStale && e.staleFor(now, e.swr) {
 			m.hit(c, e, e.age(now), "stale-while-revalidate")
-			m.revalidate(key, e, r, next)
+			m.revalidate(key, e, r, authorized(c), next)
 			return
 		}
 		x.status, x.stale = status, e
@@ -194,7 +197,7 @@ func (m *Cache) serve(c *fibhttp.Context, next module.Handler) {
 			// 304 freshens the response, and a failure may be answered with
 			// it, as stale-if-error allows.
 			m.wait(f, x, next)
-			m.refetch(f, r, s, next, false)
+			m.refetch(f, r, authorized(c), s, next, false)
 			return
 		}
 		x.fetch = f
@@ -230,7 +233,7 @@ func (x *miss) forward(next module.Handler) {
 		return
 	}
 	x.storable = r.Method == stdhttp.MethodGet && !x.req.noStore
-	_, x.authorized = r.Header["Authorization"]
+	x.authorized = authorized(c)
 	// The hooks run in the reverse of this order: the header's first.
 	c.OnBodyFilter(x.filter)
 	c.OnHeader(x.header)
@@ -295,7 +298,7 @@ func (m *Cache) fromDisk(c *fibhttp.Context, next module.Handler, d *disk, de *d
 		m.store.put(x.key, e)
 		if stale {
 			m.hit(c, e, e.age(clock()), "stale-while-revalidate")
-			m.revalidate(x.key, e, c.Request, next)
+			m.revalidate(x.key, e, c.Request, authorized(c), next)
 		} else {
 			m.hit(c, e, e.age(clock()), "disk")
 		}
@@ -390,8 +393,9 @@ type miss struct {
 	// the 304 it is answered with is for it.
 	stale *entry
 	// storable is false when the request rules out keeping its response,
-	// authorized when it carries Authorization, and ranged when it asked for
-	// a range.
+	// authorized when it carries Authorization or was authenticated as it
+	// came to the cache (more may be learnt later: see shared), and ranged
+	// when it asked for a range.
 	storable, authorized, ranged bool
 	// req are the request's directives.
 	req directives
@@ -399,6 +403,22 @@ type miss struct {
 	// for the same response, which ends once the response is kept or known
 	// not to be.
 	fetch *fetch
+}
+
+// shared reports whether the response may be kept for others as a request
+// without Authorization's: the request neither carried one nor was let in by
+// an auth middleware or check, before the cache or, as one in the handler
+// may, since it came by.
+func (x *miss) shared() bool {
+	return !x.authorized && !observe.Authenticated(x.c)
+}
+
+// authorized reports whether the request c serves carries Authorization or
+// was authenticated by middleware before the cache, which RFC 9111 section
+// 3.5 treats alike: a response to it is kept only if it says it may be.
+func authorized(c *fibhttp.Context) bool {
+	_, ok := c.Request.Header["Authorization"]
+	return ok || observe.Authenticated(c)
 }
 
 // header runs as the response's header is settled: it says what the cache
@@ -431,7 +451,7 @@ func (x *miss) freshen(h stdhttp.Header) {
 			header[k] = slices.Clip(slices.Clone(v))
 		}
 	}
-	e, ok := x.m.entryOf(old.status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.authorized)
+	e, ok := x.m.entryOf(old.status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), !x.shared())
 	if !ok {
 		x.m.store.remove(x.key)
 		return
@@ -475,7 +495,7 @@ func (x *miss) capture(status int, h stdhttp.Header) *capture {
 			header[k] = slices.Clip(slices.Clone(v))
 		}
 	}
-	e, ok := x.m.entryOf(status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), x.authorized)
+	e, ok := x.m.entryOf(status, header, x.c.Request.Header, x.requestTime, h.Get("Age"), !x.shared())
 	if !ok {
 		return nil
 	}

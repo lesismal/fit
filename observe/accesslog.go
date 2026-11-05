@@ -391,6 +391,11 @@ type Entry struct {
 	// User is who the request was authenticated as, by Basic auth or a
 	// client certificate's subject; empty when it was not.
 	User string
+	// Authenticated says an auth middleware or check let the request in on
+	// credentials it carried, whether it named a user or not. A shared cache
+	// treats such a request as it does one with Authorization (RFC 9111
+	// section 3.5), which the middleware may have removed.
+	Authenticated bool
 	// more is what few requests have, kept apart so that the entry of
 	// every other stays small: a token's claims, a trace.
 	more *entryMore
@@ -447,6 +452,24 @@ func TrackTraced(c *fibhttp.Context, tc Trace) *Entry {
 	te.Entry.more = &te.more
 	c.SetValue(&te.Entry)
 	return &te.Entry
+}
+
+// Authenticate records that the request c serves was let in on credentials
+// it carried, giving it an entry if it has none, and returns the entry.
+func Authenticate(c *fibhttp.Context) *Entry {
+	e := EntryOf(c)
+	if e == nil {
+		e = Track(c)
+	}
+	e.Authenticated = true
+	return e
+}
+
+// Authenticated reports whether Authenticate was called for the request c
+// serves.
+func Authenticated(c *fibhttp.Context) bool {
+	e := EntryOf(c)
+	return e != nil && e.Authenticated
 }
 
 // EntryOf returns the entry of the request c serves, or nil when the request

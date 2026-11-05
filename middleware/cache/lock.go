@@ -178,9 +178,10 @@ func (w *waiter) release() {
 
 // refetch fetches key's response again with a request of the cache's own,
 // made from the client's request r, revalidating stale with its validators,
-// and ends f with how it went. It runs next on this goroutine, which must
+// and ends f with how it went. authorized says r was, as authorized has it:
+// an auth middleware before the cache may have removed its Authorization. It runs next on this goroutine, which must
 // not block, and returns once next has: the response comes later.
-func (m *Cache) refetch(f *fetch, r *stdhttp.Request, stale *entry, next module.Handler, background bool) {
+func (m *Cache) refetch(f *fetch, r *stdhttp.Request, authorized bool, stale *entry, next module.Handler, background bool) {
 	req := r.Clone(context.Background())
 	for _, field := range [...]string{"Range", "If-Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since", "Cache-Control", "Pragma"} {
 		delete(req.Header, field)
@@ -196,7 +197,9 @@ func (m *Cache) refetch(f *fetch, r *stdhttp.Request, stale *entry, next module.
 	req.Method, req.Body, req.ContentLength = stdhttp.MethodGet, stdhttp.NoBody, 0
 	s := &fetchStream{m: m, f: f, background: background}
 	c := fibhttp.NewStreamContext(nil, req, s)
-	_, authorized := req.Header["Authorization"]
+	if _, ok := req.Header["Authorization"]; ok {
+		authorized = true
+	}
 	x := &miss{m: m, c: c, key: f.key, requestTime: clock(), status: fwdStale, stale: stale,
 		storable: true, authorized: authorized, req: directives{maxAge: -1, sMaxAge: -1, maxStale: -1, minFresh: -1}}
 	c.OnBodyFilter(x.filter)
@@ -261,7 +264,7 @@ func (s *fetchStream) RequestEnded() {
 // revalidate refreshes e, key's stale response, which r's request was just
 // answered with, by a fetch of the cache's own that nothing waits for,
 // unless one is under way or the zone makes as many as it may.
-func (m *Cache) revalidate(key string, e *entry, r *stdhttp.Request, next module.Handler) {
+func (m *Cache) revalidate(key string, e *entry, r *stdhttp.Request, authorized bool, next module.Handler) {
 	f, first := m.store.lock(key, clock(), 2*m.LockTimeout.Std())
 	if !first {
 		return
@@ -276,5 +279,5 @@ func (m *Cache) revalidate(key string, e *entry, r *stdhttp.Request, next module
 		m.store.finish(f, fetchResult{failed: true})
 		return
 	}
-	m.refetch(f, r, e, next, true)
+	m.refetch(f, r, authorized, e, next, true)
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/upstream"
 )
 
@@ -248,6 +249,7 @@ func (x *authCall) answer(resp *fibhttp.ClientResponse, err error) {
 				h[name] = append([]string(nil), v...)
 			}
 		}
+		observe.Authenticate(c)
 		x.next.ServeHTTP(c)
 		return
 	}

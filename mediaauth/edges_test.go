@@ -174,8 +174,21 @@ func TestGuardNamesTheUser(t *testing.T) {
 			_ = c.Respond(201, "text/plain", []byte("ok"))
 		})
 	}), r)
-	if rec.Response.StatusCode != 201 || subject != "token:cam" || e.User != "token:cam" {
-		t.Fatalf("a guarded request: %d %q, the entry's user %q", rec.Response.StatusCode, subject, e.User)
+	if rec.Response.StatusCode != 201 || subject != "token:cam" || e.User != "token:cam" || !e.Authenticated {
+		t.Fatalf("a guarded request: %d %q, the entry's user %q, authenticated %v", rec.Response.StatusCode, subject, e.User, e.Authenticated)
+	}
+
+	// A request with no entry gets one, so that a cache in front of the
+	// handler knows the response is the user's.
+	var authenticated bool
+	fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
+		p.Guard(c, Publish, "live/x", func(string) {
+			authenticated = observe.Authenticated(c)
+			_ = c.Respond(201, "text/plain", []byte("ok"))
+		})
+	}), r)
+	if !authenticated {
+		t.Fatal("a guarded request without an entry is not marked authenticated")
 	}
 }
 

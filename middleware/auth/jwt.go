@@ -397,10 +397,7 @@ func (jw *JWT) audienceHolds(aud any) bool {
 
 // admit lets the request through with its claims.
 func (jw *JWT) admit(c *fibhttp.Context, claims map[string]any, next module.Handler) {
-	e := observe.EntryOf(c)
-	if e == nil {
-		e = observe.Track(c)
-	}
+	e := observe.Authenticate(c)
 	e.SetClaims(claims)
 	if sub, ok := claims["sub"].(string); ok && e.User == "" {
 		e.User = sub

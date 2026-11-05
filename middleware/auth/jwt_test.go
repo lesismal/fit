@@ -27,6 +27,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/internal/fibtest"
+	"github.com/lesismal/fit/observe"
 )
 
 // testKeys are one key of each kind, made once: RSA keys take a while.
@@ -158,6 +159,7 @@ func jsonList(list []string) string {
 // claimsEcho answers with the request's claims and user.
 var claimsEcho = fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 	b, _ := json.Marshal(ClaimsOf(c))
+	sawAuthenticated.Store(observe.Authenticated(c))
 	_ = c.Respond(200, "text/plain", []byte("user="+UserOf(c)+" claims="+string(b)+" x-sub="+asCGI(c.Request.Header, "X-Sub")+" x-roles="+asCGI(c.Request.Header, "X-Roles")))
 })
 
@@ -311,6 +313,9 @@ func TestJWTClaimsHeaders(t *testing.T) {
 	r.Header["x_sub"] = []string{"forged"}
 	r.Header["X_MISSING"] = []string{"forged"}
 	rec := expectStatus(t, h, r, 200, "claims")
+	if !sawAuthenticated.Load() {
+		t.Error("a request let in with a token is not marked authenticated")
+	}
 	if v := asCGI(r.Header, "X-Missing"); v != "" {
 		t.Errorf("the client's field kept for a missing claim: %q", v)
 	}

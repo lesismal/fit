@@ -18,6 +18,7 @@ import (
 	"github.com/lesismal/fit/config"
 	_ "github.com/lesismal/fit/handler/respond"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
 )
 
@@ -30,6 +31,7 @@ type fieldsHandler struct{}
 
 func (fieldsHandler) ServeHTTP(c *fibhttp.Context) {
 	h := c.Request.Header
+	sawAuthenticated.Store(observe.Authenticated(c))
 	_ = c.Respond(200, "text/plain", []byte("user="+asCGI(h, "X-Auth-User")+" seen="+asCGI(h, "X-Auth-Seen")))
 }
 
@@ -124,8 +126,8 @@ func TestForwardAuth(t *testing.T) {
 	got, err := fetch(t, ctx, "POST", base+"/p?q=1", "Bearer good", "X-Custom", "c", "Host", "x")
 	host := strings.TrimPrefix(base, "http://")
 	want := "user=alice seen=GET /check?app=1 POST http " + host + " /p?q=1 127.0.0.1 c"
-	if err != nil || got.code != 200 || got.body != want {
-		t.Errorf("allowed: %v %d %q, want %q", err, got.code, got.body, want)
+	if err != nil || got.code != 200 || got.body != want || !sawAuthenticated.Load() {
+		t.Errorf("allowed: %v %d %q, authenticated %v, want %q, authenticated", err, got.code, got.body, sawAuthenticated.Load(), want)
 	}
 
 	// Fields the client sends in copy_headers' names are not believed.

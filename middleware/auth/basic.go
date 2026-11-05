@@ -166,11 +166,7 @@ var unauthorized = []byte("Unauthorized\n")
 
 // setUser records who the request was authenticated as.
 func setUser(c *fibhttp.Context, user string) {
-	e := observe.EntryOf(c)
-	if e == nil {
-		e = observe.Track(c)
-	}
-	e.User = user
+	observe.Authenticate(c).User = user
 }
 
 // UserOf returns who the request c serves was authenticated as, by

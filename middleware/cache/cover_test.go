@@ -211,10 +211,10 @@ func TestWaitEnded(t *testing.T) {
 	// the zone's background fetches.
 	e := &entry{status: 200, header: stdhttp.Header{}, lifetime: time.Minute, responseTime: clock()}
 	r := httptest.NewRequest("GET", "http://example.com/b", nil)
-	m.revalidate("http://example.com/b", e, r, origin)
+	m.revalidate("http://example.com/b", e, r, false, origin)
 	m.store.put("http://example.com/b", e)
 	m.store.background.Store(maxBackground)
-	m.revalidate("http://example.com/b", e, r, origin)
+	m.revalidate("http://example.com/b", e, r, false, origin)
 	if m.store.background.Load() != maxBackground {
 		t.Errorf("%d background fetches", m.store.background.Load())
 	}

@@ -124,9 +124,7 @@ func finish(c *fibhttp.Context, subject string, err error, next func(string)) {
 		return
 	}
 	if subject != "" {
-		if e := observe.EntryOf(c); e != nil {
-			e.User = subject
-		}
+		observe.Authenticate(c).User = subject
 	}
 	next(subject)
 }

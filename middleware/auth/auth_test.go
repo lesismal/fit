@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibtest"
 	"github.com/lesismal/fit/module"
+	"github.com/lesismal/fit/observe"
 )
 
 func load(t testing.TB, name, params string) (module.Middleware, error) {
@@ -85,6 +87,44 @@ func asCGI(h stdhttp.Header, name string) string {
 func spellings(name string) []string {
 	under := strings.ReplaceAll(name, "-", "_")
 	return []string{under, strings.ToLower(under), strings.ToUpper(under)}
+}
+
+// sawAuthenticated is whether the last request the tests' handlers served
+// was marked authenticated.
+var sawAuthenticated atomic.Bool
+
+// TestAuthenticated checks that each middleware that lets a request in on
+// its credentials says so, for a cache after it, and that one that lets it
+// in without any does not.
+func TestAuthenticated(t *testing.T) {
+	var authenticated bool
+	probe := fibhttp.HandlerFunc(func(c *fibhttp.Context) {
+		authenticated = observe.Authenticated(c)
+		_ = c.Respond(204, "", nil)
+	})
+	cert := &x509.Certificate{Subject: pkix.Name{CommonName: "alice"}}
+	ba := mustLoad[*Basic](t, "basic_auth", `{"users": [{"username": "bob", "password_hash": "`+hash(t, "pw")+`"}]}`).Wrap(probe)
+	cc := mustLoad[*ClientCert](t, "client_cert", `{"optional": true}`).Wrap(probe)
+	both := mustLoad[*Basic](t, "basic_auth", `{"users": [{"username": "bob", "password_hash": "`+hash(t, "pw")+`"}]}`).Wrap(
+		mustLoad[*ClientCert](t, "client_cert", `{}`).Wrap(probe))
+	withBoth := tlsRequest(cert, true)
+	withBoth.SetBasicAuth("bob", "pw")
+	for _, tt := range []struct {
+		name string
+		h    fibhttp.Handler
+		r    *stdhttp.Request
+		want bool
+	}{
+		{"basic_auth", ba, basicRequest("bob", "pw"), true},
+		{"client_cert", cc, tlsRequest(cert, true), true},
+		{"client_cert, none", cc, tlsRequest(nil, false), false},
+		{"both", both, withBoth, true},
+	} {
+		authenticated = false
+		if rec := fibtest.ServeRequest(tt.h, tt.r); rec.Response.StatusCode != 204 || authenticated != tt.want {
+			t.Errorf("%s: %d, authenticated %v", tt.name, rec.Response.StatusCode, authenticated)
+		}
+	}
 }
 
 func TestDropFields(t *testing.T) {

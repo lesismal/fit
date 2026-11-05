@@ -94,7 +94,7 @@ func TestRevalidateUnderWay(t *testing.T) {
 		t.Fatal("not first")
 	}
 	var n atomic.Int64
-	m.revalidate("k", &entry{}, httptest.NewRequest("GET", "http://example.com/k", nil), answering(nil, "", &n))
+	m.revalidate("k", &entry{}, httptest.NewRequest("GET", "http://example.com/k", nil), false, answering(nil, "", &n))
 	m.store.finish(f, fetchResult{status: 200})
 	if n.Load() != 0 || m.store.background.Load() != 0 {
 		t.Errorf("%d fetches, %d in the background", n.Load(), m.store.background.Load())
