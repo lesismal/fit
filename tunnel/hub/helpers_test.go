@@ -285,7 +285,11 @@ func (p *peer) register(typ, name, password string, services ...proto.Service) e
 	p.mu.Unlock()
 	req := proto.RegisterReq{Info: info}
 	proto.Sign(&req, password)
-	return p.l.Call(proto.MethodRegister, &req, &p.rsp, 5*time.Second)
+	if err := p.l.Call(proto.MethodRegister, &req, &p.rsp, 5*time.Second); err != nil {
+		return err
+	}
+	// Every answer the hub gives proves it knows the password.
+	return proto.CheckProof(&req, &p.rsp, password)
 }
 
 // mustRegister registers p, which must succeed.

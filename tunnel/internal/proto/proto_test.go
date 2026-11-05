@@ -2,6 +2,7 @@ package proto
 
 import (
 	"encoding/binary"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -134,5 +135,61 @@ func TestFrames(t *testing.T) {
 	}
 	if _, err := ParseAck(make([]byte, 7)); err == nil {
 		t.Fatal("a short ack parsed")
+	}
+}
+
+// A hub's proof is taken for the registration it answers, under the
+// password, and for nothing else: not without the password, not the
+// registration's own MAC sent back, not another registration's proof, not
+// an answer changed.
+func TestHubProof(t *testing.T) {
+	req := RegisterReq{Info: Info{Name: "lab", Type: TypeNode}}
+	Sign(&req, "pw")
+	rsp := RegisterRsp{Peer: 1, Conn: 2, Index: 3, Hub: "hub"}
+	if err := CheckProof(&req, &rsp, "pw"); !errors.Is(err, ErrOldHub) || !strings.Contains(err.Error(), "upgrade") || !strings.Contains(err.Error(), Version) {
+		t.Errorf("no proof: %v", err)
+	}
+	Prove(&req, &rsp, "pw")
+	if err := CheckProof(&req, &rsp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckProof(&req, &rsp, "other"); !errors.Is(err, ErrHubProof) {
+		t.Errorf("another password: %v", err)
+	}
+
+	wrong := rsp
+	Prove(&req, &wrong, "guess")
+	if err := CheckProof(&req, &wrong, "pw"); !errors.Is(err, ErrHubProof) {
+		t.Errorf("a hub without the password: %v", err)
+	}
+	reflected := rsp
+	reflected.Proof = req.MAC
+	if err := CheckProof(&req, &reflected, "pw"); !errors.Is(err, ErrHubProof) {
+		t.Errorf("the registration's MAC sent back: %v", err)
+	}
+	// Nor is a proof a registration's MAC, for the hub to take.
+	as := req
+	as.MAC = rsp.Proof
+	if err := (&Verifier{Password: "pw"}).Verify(&as); err == nil {
+		t.Error("a proof was taken as a registration's MAC")
+	}
+
+	// Another link's registration, with a nonce of its own.
+	other := RegisterReq{Info: req.Info}
+	Sign(&other, "pw")
+	if err := CheckProof(&other, &rsp, "pw"); !errors.Is(err, ErrHubProof) {
+		t.Errorf("a proof replayed onto another registration: %v", err)
+	}
+	for _, change := range []func(*RegisterRsp){
+		func(r *RegisterRsp) { r.Peer++ },
+		func(r *RegisterRsp) { r.Conn++ },
+		func(r *RegisterRsp) { r.Index++ },
+		func(r *RegisterRsp) { r.Hub = "hub2" },
+	} {
+		changed := rsp
+		change(&changed)
+		if err := CheckProof(&req, &changed, "pw"); !errors.Is(err, ErrHubProof) {
+			t.Errorf("a changed answer %+v: %v", changed, err)
+		}
 	}
 }

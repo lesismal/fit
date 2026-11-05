@@ -1,6 +1,8 @@
 // Package uplink is a node's or proxy's connection to a tunnel hub: a
 // pool of links that keep dialing until they connect, register each time
-// they connect, and dial again once they lose the hub. The uplink pings
+// they connect, and dial again once they lose the hub. A link serves
+// nothing the hub sends until the hub's answer to its registration has
+// proven the hub knows the password. The uplink pings
 // the hub to measure the link, over the registered link the hub
 // numbered lowest. Each tunnel goes over one link of the pool throughout, so
 // its frames keep their order, and closes when that link loses the hub.
@@ -178,9 +180,29 @@ func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log 
 	if setup != nil {
 		setup(u, r)
 	}
+	// The hub's calls and notifies, a kick and a tunnel's frames among
+	// them, are served on a link only once the answer to its registration
+	// has proven the hub: one that does not know the password, at an
+	// address taken over, opens no tunnel and sets no service.
+	guard := r.Guard
+	r.Guard = func(l *link.Link, m proto.Method) error {
+		if _, ok := l.Value().(hubProven); !ok {
+			return errUnproven
+		}
+		if guard != nil {
+			return guard(l, m)
+		}
+		return nil
+	}
 	u.router = r
 	return u
 }
+
+// hubProven is the value of a link whose registration's answer proved
+// the hub.
+type hubProven struct{}
+
+var errUnproven = errors.New("tunnel: the hub has not proven itself on this link yet")
 
 // Start dials the pool's links to the hub, each of which goes on dialing
 // until it connects, and again whenever it loses the hub, until the
@@ -264,12 +286,27 @@ func (u *Uplink) dial() (*link.Link, error) {
 var ErrStopped = errors.New("tunnel: uplink stopped")
 
 // register authenticates and registers on l, which has just connected,
-// and closes it if that fails.
+// and has the hub's answer prove the hub knows the password too; it closes
+// l if either fails.
 func (u *Uplink) register(l *link.Link) {
 	req := proto.RegisterReq{Info: u.info()}
 	proto.Sign(&req, u.Config.Password)
 	var rsp proto.RegisterRsp
-	if err := l.Call(proto.MethodRegister, &req, &rsp, u.Config.Call()); err != nil {
+	// The answer is checked where the link is read, so that the frames the
+	// hub sends after it are served once it has proven the hub, and none
+	// is served on a link whose answer did not.
+	check := func(body []byte) error {
+		var got proto.RegisterRsp
+		if err := link.Decode(body, &got); err != nil {
+			return err
+		}
+		if err := proto.CheckProof(&req, &got, u.Config.Password); err != nil {
+			return err
+		}
+		l.SetValue(hubProven{})
+		return nil
+	}
+	if err := l.CallChecked(proto.MethodRegister, &req, &rsp, u.Config.Call(), check); err != nil {
 		u.fail("register: "+err.Error(), false)
 		u.log.Warnf("hub %s: registering failed: %v", u.Name, err)
 		_ = l.Close()

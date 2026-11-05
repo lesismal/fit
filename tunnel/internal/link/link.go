@@ -201,6 +201,22 @@ type reply struct {
 	err  error
 }
 
+// waiter is a call waiting for its answer, and what checks the answer
+// before any frame after it is served.
+type waiter struct {
+	ch    chan reply
+	check func(body []byte) error
+}
+
+// Then is the result of a CallFunc that has more to do once the answer is
+// sent: After runs after Rsp has been sent as the answer, or failed to be,
+// so that a frame the side sends from then on reaches the caller after
+// the answer.
+type Then struct {
+	Rsp   any
+	After func()
+}
+
 // Link is one connection's session: it frames what is sent, and serves or
 // answers the frames that arrive. It is the connection's transport.Handler.
 type Link struct {
@@ -228,7 +244,7 @@ type Link struct {
 
 	mu      sync.Mutex
 	seq     uint32
-	pending map[uint32]chan reply
+	pending map[uint32]waiter
 	closed  bool
 	failing bool
 	err     error
@@ -239,7 +255,7 @@ type Link struct {
 // New is the link on conn, serving what router does, with bodies sealed by
 // coder unless it is nil.
 func New(conn transport.Conn, router *Router, coder *bodycrypt.Coder) *Link {
-	l := &Link{conn: conn, router: router, coder: coder, pending: map[uint32]chan reply{}, done: make(chan struct{})}
+	l := &Link{conn: conn, router: router, coder: coder, pending: map[uint32]waiter{}, done: make(chan struct{})}
 	l.maxFrame.Store(MaxFrame)
 	// What waits on a link is bounded by its tunnels' windows, which may
 	// be more than the engine lets a connection queue by default.
@@ -430,6 +446,14 @@ func (l *Link) hello(body []byte) error {
 // Call calls m with req, encoded as Encode does, and decodes the result
 // into rsp as Decode does; it fails after timeout.
 func (l *Link) Call(m proto.Method, req, rsp any, timeout time.Duration) error {
+	return l.CallChecked(m, req, rsp, timeout, nil)
+}
+
+// CallChecked is Call whose result check, unless nil, checks where the
+// link is read, before any frame that came after it is served: an error
+// fails the call with it and closes the link. check must not block, and
+// body is valid only until it returns.
+func (l *Link) CallChecked(m proto.Method, req, rsp any, timeout time.Duration, check func(body []byte) error) error {
 	body, err := Encode(req)
 	if err != nil {
 		return err
@@ -446,7 +470,7 @@ func (l *Link) Call(m proto.Method, req, rsp any, timeout time.Duration) error {
 		l.seq++
 	}
 	id := l.seq
-	l.pending[id] = ch
+	l.pending[id] = waiter{ch: ch, check: check}
 	l.mu.Unlock()
 	if err := l.send(l.frame(kindCall, m, id, body)); err != nil {
 		l.forget(id)
@@ -508,6 +532,20 @@ func (l *Link) answer(m proto.Method, id uint32, rsp any, err error) {
 		}
 	}
 	_ = l.send(l.frame(kindError, m, id, []byte(err.Error())))
+}
+
+// answerThen answers call id with what a CallFunc returned, and runs its
+// After once the answer is sent.
+func (l *Link) answerThen(m proto.Method, id uint32, rsp any, err error) {
+	t, ok := rsp.(*Then)
+	if !ok {
+		l.answer(m, id, rsp, err)
+		return
+	}
+	l.answer(m, id, t.Rsp, err)
+	if t.After != nil {
+		t.After()
+	}
 }
 
 // OnData parses the frames that arrived and serves them.
@@ -591,15 +629,21 @@ func (l *Link) handle(f []byte) bool {
 	switch kind {
 	case kindReply, kindError:
 		l.mu.Lock()
-		ch := l.pending[id]
+		w, ok := l.pending[id]
 		delete(l.pending, id)
 		l.mu.Unlock()
-		if ch != nil {
+		if ok {
 			r := reply{body: append([]byte(nil), body...)}
 			if kind == kindError {
 				r = reply{err: RemoteError(body)}
+			} else if w.check != nil {
+				if err := w.check(body); err != nil {
+					w.ch <- reply{err: err}
+					l.fail(err)
+					return false
+				}
 			}
-			ch <- r
+			w.ch <- r
 		}
 	case kindCall:
 		l.serveCall(m, id, body)
@@ -626,7 +670,7 @@ func (l *Link) serveCall(m proto.Method, id uint32, body []byte) {
 	}
 	if rt.inline {
 		rsp, err := rt.call(l, body)
-		l.answer(m, id, rsp, err)
+		l.answerThen(m, id, rsp, err)
 		return
 	}
 	if !l.goAsync() {
@@ -637,7 +681,7 @@ func (l *Link) serveCall(m proto.Method, id uint32, body []byte) {
 	go func() {
 		defer l.async.Add(-1)
 		rsp, err := rt.call(l, body)
-		l.answer(m, id, rsp, err)
+		l.answerThen(m, id, rsp, err)
 	}()
 }
 
@@ -702,11 +746,11 @@ func (l *Link) OnClose(err error) {
 	}
 	err = l.err
 	pending := l.pending
-	l.pending = map[uint32]chan reply{}
+	l.pending = map[uint32]waiter{}
 	cerr := l.closedErrLocked()
 	l.mu.Unlock()
-	for _, ch := range pending {
-		ch <- reply{err: cerr}
+	for _, w := range pending {
+		w.ch <- reply{err: cerr}
 	}
 	close(l.done)
 	if l.router.OnClose != nil {

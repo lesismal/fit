@@ -194,15 +194,22 @@ func newHub(t *testing.T, e *fib.Engine) *hub {
 	s := &hub{t: t, links: make(chan *link.Link, 16), updates: make(chan proto.Info, 16)}
 	r := link.NewRouter()
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
+		var req proto.RegisterReq
+		if err := link.Decode(body, &req); err != nil {
+			return nil, err
+		}
 		s.mu.Lock()
 		s.conn++
 		rsp := &proto.RegisterRsp{Peer: 1, Conn: s.conn, Hub: "fake"}
 		s.mu.Unlock()
-		select {
-		case s.links <- l:
-		default:
-		}
-		return rsp, nil
+		proto.Prove(&req, rsp, "pw")
+		// The tests call the node over the link once the answer has gone.
+		return &link.Then{Rsp: rsp, After: func() {
+			select {
+			case s.links <- l:
+			default:
+			}
+		}}, nil
 	}, false)
 	r.HandleCall(proto.MethodPing, func(*link.Link, []byte) (any, error) { return &proto.PingRsp{}, nil }, true)
 	r.HandleCall(proto.MethodUpdate, func(_ *link.Link, body []byte) (any, error) {

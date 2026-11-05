@@ -59,8 +59,10 @@ type Method uint8
 // a node, and the tunnel methods, which go both ways.
 const (
 	// MethodRegister authenticates a node or proxy and registers it:
-	// RegisterReq answered with RegisterRsp. It must be the first call on a
-	// connection; the hub refuses every other one until it succeeds.
+	// RegisterReq answered with RegisterRsp, whose Proof authenticates the
+	// hub in turn. It must be the first call on a connection; the hub
+	// refuses every other one until it succeeds, and the node or proxy
+	// serves no call of the hub until the answer has proven the hub.
 	// Every connection of a peer's pool registers, and the hub takes the
 	// connections of one type and name, from however many processes, for
 	// one peer.
@@ -211,6 +213,13 @@ type RegisterRsp struct {
 	Index int `json:"index"`
 	// Hub is the hub's name.
 	Hub string `json:"hub"`
+	// Proof is how the hub proves it knows the password: the HMAC-SHA256,
+	// keyed with it, of the registration it answers, whose nonce is fresh
+	// for each link, and of this answer; see Prove. A node or proxy
+	// refuses an answer without it, or with a wrong one, and closes the
+	// link before it serves any call of the hub. A hub of before it sends
+	// none.
+	Proof string `json:"proof,omitempty"`
 }
 
 // NodeView is a node as the hub lists it to proxies.
@@ -338,6 +347,52 @@ func mac(req *RegisterReq, password string) string {
 	h := hmac.New(sha256.New, []byte(password))
 	h.Write([]byte(req.Info.Type + "\n" + req.Info.Name + "\n" + strconv.FormatInt(req.Time, 10) + "\n" + req.Nonce))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// proofLabel starts what a hub's proof is over. A registration's MAC is
+// over a message that starts with the peer's type, "node" or "proxy", so
+// no proof is a registration's MAC, nor a registration's MAC a proof: a
+// node's own registration sent back to it does not prove a hub.
+const proofLabel = "fit tunnel hub proof v1"
+
+func proof(req *RegisterReq, rsp *RegisterRsp, password string) string {
+	h := hmac.New(sha256.New, []byte(password))
+	var b []byte
+	for _, f := range []string{proofLabel, req.Info.Type, req.Info.Name, strconv.FormatInt(req.Time, 10), req.Nonce, req.MAC,
+		strconv.FormatUint(uint64(rsp.Peer), 10), strconv.FormatUint(uint64(rsp.Conn), 10), strconv.Itoa(rsp.Index), rsp.Hub} {
+		// Each field after its length, so that no two answers' fields run
+		// together into the same bytes.
+		b = binary.BigEndian.AppendUint32(b, uint32(len(f)))
+		b = append(b, f...)
+	}
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Prove fills in rsp's Proof, the hub's answer to req, for password.
+func Prove(req *RegisterReq, rsp *RegisterRsp, password string) {
+	rsp.Proof = proof(req, rsp, password)
+}
+
+// ErrOldHub is the error of a registration answered without a proof: by a
+// hub of a fit from before hubs proved themselves, or by one that is not
+// the hub and does not know how.
+var ErrOldHub = fmt.Errorf("tunnel: the hub runs a fit without hub authentication, older than this side's %s; upgrade it", Version)
+
+// ErrHubProof is the error of a registration answered with a wrong proof:
+// by something that is not the hub, or a hub whose password differs.
+var ErrHubProof = errors.New("tunnel: the hub did not prove it knows the password: it is not the hub, or its password differs")
+
+// CheckProof checks that rsp, the answer to req, proves its hub knows
+// password.
+func CheckProof(req *RegisterReq, rsp *RegisterRsp, password string) error {
+	if rsp.Proof == "" {
+		return ErrOldHub
+	}
+	if !hmac.Equal([]byte(proof(req, rsp, password)), []byte(rsp.Proof)) {
+		return ErrHubProof
+	}
+	return nil
 }
 
 // Verifier checks registrations against a password, and refuses a nonce it

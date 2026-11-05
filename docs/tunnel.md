@@ -173,8 +173,22 @@ a peer that needs more opens a larger pool.
 - **QUIC** links run on a UDP binding of the same engine, with fib's QUIC, TLS 1.3 and the ALPN
   `fit-tunnel`. A hub makes a self-signed certificate when a quic listener needs one and keeps it in
   its member, so its fingerprint, which nodes and proxies pin, outlives a restart.
-- **Registration** is an HMAC-SHA256 of the password over the peer's type, name, a time and a
-  nonce; the time must be within 5 minutes of the hub's clock, and a nonce is taken once.
+- **Registration** is mutual. Each link of a node or proxy registers with an HMAC-SHA256 of the
+  password over the peer's type, name, a time and a fresh random nonce; the time must be within
+  5 minutes of the hub's clock, and a nonce is taken once. The hub's answer proves the hub knows
+  the password in turn: an HMAC-SHA256 of the password over that registration, its nonce
+  included, and over the answer, under a label of its own. The node or proxy checks it before it
+  serves anything the hub sends on the link, and closes the link when the proof is missing or
+  wrong: an answer without the password, the link's own registration sent back, or an answer
+  replayed from another link. So a hub at a taken-over address (DNS or IP) that does not know
+  the password opens no tunnel through a node and sets none of its services, even on a `tcp://`
+  or `ws://` endpoint without `body_password`. What the proof cannot stop is an attacker on the
+  path who relays a link to the real hub and then changes the frames that pass; `body_password`,
+  or a quic endpoint, stops that too.
+  **Upgrade hubs first.** A hub of this release takes the nodes and proxies of earlier ones, but
+  a node or proxy of this release refuses a hub of an earlier release, which sends no proof:
+  its status and log say that the hub runs a fit without hub authentication, older than this
+  side's version, and to upgrade it.
 - **Body encryption**, with `body_password` on every side, seals each frame's body with AES-256-GCM,
   its header authenticated too. Each link opens with both sides sending fresh random bytes; each
   direction of the link then has a key of its own, derived with HKDF from the password and both

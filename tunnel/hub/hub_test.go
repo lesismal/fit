@@ -235,6 +235,51 @@ func TestRegisterClosed(t *testing.T) {
 	}
 }
 
+// A registration's answer proves the hub, and the hub sends nothing else on
+// the link until the answer has gone, since the peer serves nothing before
+// it; a kick reaches the link even so.
+func TestRegisterAnswerFirst(t *testing.T) {
+	v := newHub(t, tcpMember(""))
+	l := link.New(fakeConn{}, v.s.router, nil)
+	req := proto.RegisterReq{Info: proto.NewInfo("lab", proto.TypeNode)}
+	proto.Sign(&req, "pw")
+	body, _ := link.Encode(&req)
+	got, err := v.s.register(l, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	then, ok := got.(*link.Then)
+	if !ok {
+		t.Fatalf("answered %T", got)
+	}
+	if err := proto.CheckProof(&req, then.Rsp.(*proto.RegisterRsp), "pw"); err != nil {
+		t.Fatal(err)
+	}
+	peer := v.s.peerByName(proto.TypeNode, "lab")
+	if peer == nil {
+		t.Fatal("not registered")
+	}
+	if links := v.s.peerLinks(peer); len(links) != 0 {
+		t.Fatalf("%d links to send on before the answer", len(links))
+	}
+	if err := v.s.call(peer, proto.MethodNodeInfo, nil, nil); !errors.Is(err, errGone) {
+		t.Fatalf("called before the answer: %v", err)
+	}
+	if nodes := v.s.nodeList(0).Nodes; len(nodes) != 1 {
+		t.Fatalf("nodes %+v", nodes)
+	}
+	v.s.mu.Lock()
+	all := peer.allLinksLocked()
+	v.s.mu.Unlock()
+	if len(all) != 1 || all[0] != l {
+		t.Fatalf("all links %v", all)
+	}
+	then.After()
+	if links := v.s.peerLinks(peer); len(links) != 1 || links[0] != l {
+		t.Fatalf("links after the answer %v", links)
+	}
+}
+
 // Updates and pings that do not decode, and an update that renames.
 func TestUpdatePing(t *testing.T) {
 	v := newHub(t, tcpMember(""))

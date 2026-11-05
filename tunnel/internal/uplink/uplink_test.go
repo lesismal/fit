@@ -19,6 +19,9 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
+// fakePassword is the fake hub's password.
+const fakePassword = "p"
+
 // fakeHub registers every link that asks, numbering them, and answers
 // pings, or fails them while failPings is set.
 type fakeHub struct {
@@ -32,10 +35,15 @@ func newFakeHub(t *testing.T) *fakeHub {
 	t.Helper()
 	s := &fakeHub{links: make(chan *link.Link, 16)}
 	r := link.NewRouter()
-	r.HandleCall(proto.MethodRegister, func(l *link.Link, _ []byte) (any, error) {
+	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
+		var req proto.RegisterReq
+		if err := link.Decode(body, &req); err != nil {
+			return nil, err
+		}
 		n := s.conns.Add(1)
-		s.links <- l
-		return &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Hub: "srv"}, nil
+		rsp := &proto.RegisterRsp{Peer: 7, Conn: n, Index: int(n - 1), Hub: "srv"}
+		proto.Prove(&req, rsp, fakePassword)
+		return &link.Then{Rsp: rsp, After: func() { s.links <- l }}, nil
 	}, true)
 	r.HandleCall(proto.MethodPing, func(*link.Link, []byte) (any, error) {
 		if s.failPings.Load() {
@@ -176,7 +184,7 @@ func TestUplink(t *testing.T) {
 // links that carry as many as they may.
 func TestNextTunnelID(t *testing.T) {
 	s := newFakeHub(t)
-	u := newUplink(t, &config.TunnelUplink{PoolSize: 2, Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
+	u := newUplink(t, &config.TunnelUplink{Password: fakePassword, PoolSize: 2, Endpoints: []config.TunnelEndpoint{{Address: s.addr}}})
 	var links []*link.Link
 	for range 2 {
 		l, err := u.dial()
@@ -288,6 +296,11 @@ type replyConn struct {
 func (c *replyConn) Send(b []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if rsp, ok := c.reply.(*proto.RegisterRsp); ok {
+		var req proto.RegisterReq
+		_ = json.Unmarshal(b[link.LengthSize+link.HeaderSize:], &req)
+		proto.Prove(&req, rsp, "")
+	}
 	body, _ := json.Marshal(c.reply)
 	f := make([]byte, link.LengthSize+link.HeaderSize, link.LengthSize+link.HeaderSize+len(body))
 	binary.BigEndian.PutUint32(f, uint32(link.HeaderSize+len(body)))
@@ -334,5 +347,166 @@ func TestRegisterLost(t *testing.T) {
 	u.register(c2.l)
 	if st := u.Status(); st.Pool != 0 || st.State != StateConnecting {
 		t.Errorf("status %+v", st)
+	}
+}
+
+// impostor is a hub at an address that answers each registration as answer
+// says, or cuts the link without answering when answer returns nil, and
+// kicks the node and calls it as a hub would, to open a tunnel and set its
+// services: right after its answer, or before it when before is set.
+type impostor struct {
+	addr  string
+	regs  atomic.Int32
+	calls chan error
+}
+
+func newImpostor(t *testing.T, before bool, answer func(req *proto.RegisterReq) *proto.RegisterRsp) *impostor {
+	t.Helper()
+	s := &impostor{calls: make(chan error, 64)}
+	attack := func(l *link.Link, wait bool) {
+		_ = l.Notify(proto.MethodKick, "impostor")
+		calls := func() {
+			s.calls <- l.Call(proto.MethodTunnelOpen, &proto.TunnelOpenReq{ID: 1, Service: "db"}, nil, 5*time.Second)
+			s.calls <- l.Call(proto.MethodNodeSetServices, []proto.Service{{Name: "x", Addr: "10.0.0.1:6379"}}, nil, 5*time.Second)
+		}
+		if wait {
+			calls()
+		} else {
+			go calls()
+		}
+	}
+	r := link.NewRouter()
+	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
+		var req proto.RegisterReq
+		if err := link.Decode(body, &req); err != nil {
+			return nil, err
+		}
+		s.regs.Add(1)
+		if before {
+			attack(l, true)
+		}
+		rsp := answer(&req)
+		if rsp == nil {
+			_ = l.Close()
+			return nil, link.ErrClosed
+		}
+		return &link.Then{Rsp: rsp, After: func() {
+			// Sent right behind the answer, before the node could have
+			// looked at it from another goroutine.
+			if !before {
+				attack(l, false)
+			}
+		}}, nil
+	}, false)
+	ln, err := transport.Listen(tunneltest.Engine(t), "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler {
+		return link.New(c, r, nil)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	s.addr = ln.URL()
+	return s
+}
+
+// A node serves nothing of a hub that has not proven the password in its
+// answer to the registration: one without it, one of a fit before hubs
+// proved themselves, one that sends the node's own MAC back, one that
+// replays a real hub's answer to another link, one that cuts the link
+// before it answers. It closes the link at once and says why. A hub that
+// proves it is served.
+func TestImpostorHub(t *testing.T) {
+	// A real hub's answer to an earlier registration of the node, as an
+	// attacker on its path might have kept.
+	old := proto.RegisterReq{Info: info()}
+	proto.Sign(&old, fakePassword)
+	kept := proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv"}
+	proto.Prove(&old, &kept, fakePassword)
+
+	honest := func(req *proto.RegisterReq) *proto.RegisterRsp {
+		rsp := &proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv"}
+		proto.Prove(req, rsp, fakePassword)
+		return rsp
+	}
+	for _, c := range []struct {
+		name   string
+		before bool
+		answer func(req *proto.RegisterReq) *proto.RegisterRsp
+		err    string
+	}{
+		{"honest", false, honest, ""},
+		// What a hub sends before its answer is not served, even when the
+		// answer proves it.
+		{"calls before the answer", true, honest, ""},
+		{"no password", false, func(req *proto.RegisterReq) *proto.RegisterRsp {
+			rsp := &proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv"}
+			proto.Prove(req, rsp, "guess")
+			return rsp
+		}, proto.ErrHubProof.Error()},
+		{"old hub", false, func(*proto.RegisterReq) *proto.RegisterRsp {
+			return &proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv"}
+		}, "the hub runs a fit without hub authentication, older than this side's fit"},
+		{"reflected", false, func(req *proto.RegisterReq) *proto.RegisterRsp {
+			return &proto.RegisterRsp{Peer: 1, Conn: 1, Hub: "srv", Proof: req.MAC}
+		}, proto.ErrHubProof.Error()},
+		{"replayed", false, func(*proto.RegisterReq) *proto.RegisterRsp {
+			rsp := kept
+			return &rsp
+		}, proto.ErrHubProof.Error()},
+		{"cut", false, func(*proto.RegisterReq) *proto.RegisterRsp { return nil }, "link: closed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newImpostor(t, c.before, c.answer)
+			var served atomic.Int32
+			u := New(tunneltest.Engine(t), &config.TunnelUplink{
+				Name: "srv", Password: fakePassword, PoolSize: 1,
+				RetryInterval: config.Duration(20 * time.Millisecond),
+				Endpoints:     []config.TunnelEndpoint{{Address: s.addr}},
+			}, nil, nil, info, func(_ *Uplink, r *link.Router) {
+				for _, m := range []proto.Method{proto.MethodTunnelOpen, proto.MethodNodeSetServices} {
+					r.HandleCall(m, func(*link.Link, []byte) (any, error) { served.Add(1); return "ok", nil }, true)
+				}
+				// In place of the uplink's, to count it.
+				r.HandleNotify(proto.MethodKick, func(*link.Link, []byte) { served.Add(1) }, true)
+			})
+			t.Cleanup(u.Stop)
+			u.Start()
+			if c.before {
+				for range 2 {
+					if err := <-s.calls; err == nil || !strings.Contains(err.Error(), "not proven") {
+						t.Errorf("a call before the answer: %v", err)
+					}
+				}
+				waitFor(t, "the registration", func() bool { return u.Status().State == StateRegistered })
+				if n := served.Load(); n != 0 {
+					t.Errorf("served %d calls and notifies before the answer", n)
+				}
+				return
+			}
+			if c.err == "" {
+				waitFor(t, "the kick and the calls", func() bool { return served.Load() == 3 })
+				for range 2 {
+					if err := <-s.calls; err != nil {
+						t.Error(err)
+					}
+				}
+				return
+			}
+			// Each link the node opens is refused, and it dials again.
+			waitFor(t, "a second registration", func() bool { return s.regs.Load() >= 2 })
+			if st := u.Status(); st.State != StateFailed || !strings.Contains(st.Error, c.err) || st.Pool != 0 {
+				t.Errorf("status %+v", st)
+			}
+			if c.name != "cut" {
+				for range 2 {
+					if err := <-s.calls; err == nil {
+						t.Error("a call of the impostor was answered")
+					}
+				}
+			}
+			if n := served.Load(); n != 0 {
+				t.Errorf("served %d calls and notifies of the impostor", n)
+			}
+		})
 	}
 }

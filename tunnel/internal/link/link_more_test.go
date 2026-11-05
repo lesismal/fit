@@ -301,3 +301,129 @@ func TestLinkStrayReply(t *testing.T) {
 		t.Errorf("err %v", l.Err())
 	}
 }
+
+// recConn is a transport.Conn that keeps what is sent.
+type recConn struct {
+	loopConn
+	sentMu sync.Mutex
+	sent   [][]byte
+}
+
+func (c *recConn) Send(b []byte) error {
+	c.sentMu.Lock()
+	c.sent = append(c.sent, append([]byte(nil), b...))
+	c.sentMu.Unlock()
+	return nil
+}
+
+func (c *recConn) frames() [][]byte {
+	c.sentMu.Lock()
+	defer c.sentMu.Unlock()
+	return append([][]byte(nil), c.sent...)
+}
+
+// A checked call's answer is checked before the frames after it are
+// served: one the check refuses fails the call, closes the link, and
+// nothing after it is served; one it takes lets them be.
+func TestLinkCallChecked(t *testing.T) {
+	for _, refuse := range []bool{true, false} {
+		r := NewRouter()
+		served := make(chan string, 4)
+		r.HandleNotify(proto.MethodKick, func(_ *Link, body []byte) { served <- string(body) }, true)
+		c := &recConn{}
+		l := New(c, r, nil)
+		var checked []byte
+		done := make(chan error, 1)
+		go func() {
+			var got string
+			done <- l.CallChecked(proto.MethodPing, "q", &got, 5*time.Second, func(body []byte) error {
+				checked = append([]byte(nil), body...)
+				// The frames after the answer wait for the check.
+				select {
+				case s := <-served:
+					t.Errorf("%q served before the check", s)
+				default:
+				}
+				if refuse {
+					return errors.New("bad proof")
+				}
+				return nil
+			})
+		}()
+		waitSent(t, c, 1)
+		// The answer and a notify after it, read at once.
+		in := append(rawFrame(kindReply, proto.MethodPing, 1, []byte("answer")), rawFrame(kindNotify, proto.MethodKick, 0, []byte("after"))...)
+		l.OnData(in)
+		err := <-done
+		if string(checked) != "answer" {
+			t.Errorf("checked %q", checked)
+		}
+		if refuse {
+			if err == nil || err.Error() != "bad proof" {
+				t.Errorf("refused: %v", err)
+			}
+			// What arrives afterwards is not served either.
+			l.OnData(rawFrame(kindNotify, proto.MethodKick, 0, []byte("later")))
+			select {
+			case s := <-served:
+				t.Errorf("%q served after a refused answer", s)
+			default:
+			}
+			if c.closed != 1 || !strings.Contains(l.Err().Error(), "bad proof") {
+				t.Errorf("closed %d, err %v", c.closed, l.Err())
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("taken: %v", err)
+		}
+		if s := <-served; s != "after" {
+			t.Errorf("served %q", s)
+		}
+	}
+}
+
+// waitSent waits for c to have sent n frames.
+func waitSent(t *testing.T, c *recConn, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(c.frames()) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("sent %d frames, not %d", len(c.frames()), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A Then's After runs once its answer is sent, inline or not, and after an
+// error answer too.
+func TestLinkThen(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		r := NewRouter()
+		c := &recConn{}
+		after := make(chan int, 2)
+		r.HandleCall(proto.MethodPing, func(l *Link, body []byte) (any, error) {
+			then := &Then{Rsp: "r", After: func() { after <- len(c.frames()) }}
+			if string(body) == "fail" {
+				return then, errors.New("no")
+			}
+			return then, nil
+		}, inline)
+		l := New(c, r, nil)
+		l.OnData(rawFrame(kindCall, proto.MethodPing, 1, nil))
+		if n := <-after; n != 1 {
+			t.Errorf("inline %v: After ran with %d frames sent", inline, n)
+		}
+		f := c.frames()[0]
+		if f[LengthSize] != kindReply || string(f[LengthSize+HeaderSize:]) != "r" {
+			t.Errorf("inline %v: answer %q", inline, f)
+		}
+		l.OnData(rawFrame(kindCall, proto.MethodPing, 2, []byte("fail")))
+		if n := <-after; n != 2 {
+			t.Errorf("inline %v: After of a failure ran with %d frames sent", inline, n)
+		}
+		if f := c.frames()[1]; f[LengthSize] != kindError || string(f[LengthSize+HeaderSize:]) != "no" {
+			t.Errorf("inline %v: failure %q", inline, f)
+		}
+	}
+}

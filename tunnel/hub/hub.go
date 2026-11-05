@@ -85,6 +85,11 @@ type Conn struct {
 	// Index is the link's place among its peer's.
 	Index int
 	Peer  *Peer
+	// ready is set, under the hub's lock, once the answer to the link's
+	// registration has been sent: until then the hub sends nothing else
+	// on it, since the peer serves nothing before the answer proves the
+	// hub.
+	ready bool
 }
 
 // Peer is a registered node or proxy.
@@ -665,10 +670,18 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	if created {
 		s.log.Infof("%s %q registered from %s as peer %d", req.Info.Type, req.Info.Name, c.RemoteAddr(), peer.ID)
 	}
-	if created && req.Info.Type == proto.TypeNode {
-		defer s.broadcastNodes()
-	}
-	return &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Hub: set.name}, nil
+	rsp := &proto.RegisterRsp{Peer: peer.ID, Conn: conn.ID, Index: conn.Index, Hub: set.name}
+	proto.Prove(&req, rsp, set.verifier.Password)
+	// The link carries the hub's calls, tunnels and node lists only once
+	// the answer has gone before them.
+	return &link.Then{Rsp: rsp, After: func() {
+		s.mu.Lock()
+		conn.ready = true
+		s.mu.Unlock()
+		if created && req.Info.Type == proto.TypeNode {
+			s.broadcastNodes()
+		}
+	}}, nil
 }
 
 func (s *Hub) update(c *link.Link, body []byte) (any, error) {
@@ -774,15 +787,19 @@ func closeRoutes(routes []*Route, peer *Peer, reason string) {
 	}
 }
 
-// kick tells peer why and closes its links.
+// kick tells peer why and closes its links, those whose registration is
+// still being answered too.
 func (s *Hub) kick(peer *Peer, reason string) {
-	for _, l := range s.peerLinks(peer) {
+	s.mu.Lock()
+	links := peer.allLinksLocked()
+	s.mu.Unlock()
+	for _, l := range links {
 		_ = l.Notify(proto.MethodKick, reason)
 		l.CloseAfterSend()
 	}
 }
 
-// peerLinks is peer's links, by their places.
+// peerLinks is peer's links the hub may send on, by their places.
 func (s *Hub) peerLinks(peer *Peer) []*link.Link {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -800,9 +817,22 @@ func (p *Peer) placesLocked() []int {
 	return places
 }
 
-// linksLocked is the peer's links, by their places. Callers hold the
-// hub's lock.
+// linksLocked is the peer's links the hub may send on, those whose
+// registration has been answered, by their places. Callers hold the hub's
+// lock.
 func (p *Peer) linksLocked() []*link.Link {
+	out := make([]*link.Link, 0, len(p.links))
+	for _, l := range p.allLinksLocked() {
+		if c := connOf(l); c != nil && c.ready {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// allLinksLocked is the peer's links, by their places. Callers hold the
+// hub's lock.
+func (p *Peer) allLinksLocked() []*link.Link {
 	places := p.placesLocked()
 	out := make([]*link.Link, len(places))
 	for k, i := range places {
