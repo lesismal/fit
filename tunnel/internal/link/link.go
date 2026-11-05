@@ -46,9 +46,10 @@
 //	body = sealed body, tag:16 bytes
 //
 // with the header, flag included, as the additional data, under the key of
-// its direction on this link, derived from the password and both hellos'
-// random bytes, and the frame's number in that direction, from 0, as the
-// nonce. A side with a body password closes the connection of a hello of
+// its direction on this link, derived from the password, both hellos'
+// random bytes and which side dialed (see package bodycrypt), and the
+// frame's number in that direction, from 0, as the nonce. The side that
+// dialed has the Coder's Dialer. A side with a body password closes the connection of a hello of
 // another version, of a sealed frame before the hello (a peer of before
 // Version 2, whose frames could be replayed), of a hello that is its own
 // sent back, and of a frame that is not sealed or does not open as the next
@@ -108,9 +109,11 @@ const (
 	kindSealed = 0x80
 )
 
-// Version is the version of the link protocol a hello names: 2 is the
-// first with hellos, version 1 sealing every link's frames under one key.
-const Version = 2
+// Version is the version of the link protocol a hello names: 2 was the
+// first with hellos, version 1 sealing every link's frames under one key,
+// and 3 names the direction, dialer to listener or back, in each key, so
+// that its peers and version 2's tell each other apart at the hello.
+const Version = 3
 
 // maxBeforeHello is the most bytes a link holds of what it sent before the
 // peer's hello came: a registration, not the tunnels that come after it.

@@ -4,13 +4,17 @@
 // The password's PBKDF2, the Coder, is derived once. Each link then opens
 // with both sides sending a hello of RandomSize fresh random bytes, and a
 // Session of its own: each direction has a key of its own, HKDF-SHA256 of
-// the PBKDF2 under the sender's random bytes followed by the receiver's,
-// and numbers its frames from zero, the number being the GCM nonce. A
-// sealed body is the body sealed, its 16-byte tag last; no nonce travels.
-// A frame that does not open under the next number - forged, replayed,
-// reordered, reflected back to its sender, carried over from another link,
-// or sealed under another password - fails, and package link closes the
-// link for it.
+// the PBKDF2 under the dialer's random bytes followed by the listener's,
+// with the direction, dialer to listener or listener to dialer, in the
+// HKDF info; it numbers its frames from zero, the number being the GCM
+// nonce. A sealed body is the body sealed, its 16-byte tag last; no nonce
+// travels. A frame that does not open under the next number - forged,
+// replayed, reordered, reflected back to its sender, carried over from
+// another link in either direction, or sealed under another password -
+// fails, and package link closes the link for it. That the direction is
+// named, and not only the order of the random bytes, is what keeps a frame
+// a dialer sealed from opening at another dialer whose link an attacker on
+// the path gave the same two random bytes the other way round.
 package bodycrypt
 
 import (
@@ -26,11 +30,13 @@ import (
 )
 
 const (
-	salt      = "fit-tunnel-link-body"
-	iter      = 10000
-	info      = "fit-tunnel-link v2"
-	nonceSize = 12
-	tagSize   = 16
+	salt = "fit-tunnel-link-body"
+	iter = 10000
+	// The HKDF info of each direction's key.
+	infoToListener = "fit-tunnel-link v3 dialer to listener"
+	infoToDialer   = "fit-tunnel-link v3 listener to dialer"
+	nonceSize      = 12
+	tagSize        = 16
 )
 
 // RandomSize is how many random bytes each side's hello carries, and
@@ -48,10 +54,17 @@ var (
 	ErrReflected = errors.New("bodycrypt: the peer's hello is this side's own, sent back")
 )
 
-// Coder is a password's PBKDF2, from which every link's keys derive.
+// Coder is a password's PBKDF2, from which every link's keys derive, for
+// the side of the links that listened (New's) or dialed (Dialer's).
 type Coder struct {
 	secret []byte
+	dialer bool
 }
+
+// Dialer is the Coder of the same password for the side that dialed the
+// links. Both sides of a link must not be of the same side: their keys
+// would not match, and the link fails at its first sealed frame.
+func (cd *Coder) Dialer() *Coder { return &Coder{secret: cd.secret, dialer: true} }
 
 // New is the Coder of password.
 func New(password string) (*Coder, error) {
@@ -89,22 +102,28 @@ func (cd *Coder) Session(own, peer []byte) (*Session, error) {
 	if bytes.Equal(own, peer) {
 		return nil, ErrReflected
 	}
-	send, err := cd.aead(own, peer)
+	dialer, listener := peer, own
+	sendInfo, recvInfo := infoToDialer, infoToListener
+	if cd.dialer {
+		dialer, listener = own, peer
+		sendInfo, recvInfo = infoToListener, infoToDialer
+	}
+	send, err := cd.aead(dialer, listener, sendInfo)
 	if err != nil {
 		return nil, err
 	}
 	// The same cipher under another key: it is made where send's was.
-	recv, _ := cd.aead(peer, own)
+	recv, _ := cd.aead(dialer, listener, recvInfo)
 	return &Session{send: send, recv: recv}, nil
 }
 
-// aead is the cipher of what the side whose hello carried from sends to
-// the one whose hello carried to. Only GCM fails, in FIPS 140-only mode,
-// which refuses nonces it did not make; HKDF-SHA256 of a 32-byte secret to
-// a 32-byte AES-256 key cannot.
-func (cd *Coder) aead(from, to []byte) (cipher.AEAD, error) {
+// aead is the cipher of one direction, info, of the link on which the
+// dialer's hello carried dialer and the listener's listener. Only GCM
+// fails, in FIPS 140-only mode, which refuses nonces it did not make;
+// HKDF-SHA256 of a 32-byte secret to a 32-byte AES-256 key cannot.
+func (cd *Coder) aead(dialer, listener []byte, info string) (cipher.AEAD, error) {
 	s := make([]byte, 0, 2*RandomSize)
-	s = append(append(s, from...), to...)
+	s = append(append(s, dialer...), listener...)
 	key, _ := hkdf.Key(sha256.New, cd.secret, s, info, 32)
 	block, _ := aes.NewCipher(key)
 	return cipher.NewGCM(block)

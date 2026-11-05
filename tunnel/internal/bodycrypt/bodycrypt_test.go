@@ -29,7 +29,7 @@ func sessions(t *testing.T, pa, pb string) (*Session, *Session) {
 		t.Fatal(err)
 	}
 	ra, rb := Random(), Random()
-	a, err := ca.Session(ra, rb)
+	a, err := ca.Dialer().Session(ra, rb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +103,50 @@ func TestOpenRefuses(t *testing.T) {
 		_, b2 := sessions(t, "pw", "pw")
 		if _, err := open(b2, seal(a, []byte("x"), header), header); err != ErrOpen {
 			t.Fatalf("another link: %v", err)
+		}
+	})
+	// An attacker on the path of two links gives each the other's random
+	// bytes the other way round, so that both have the same two: a frame
+	// one dialer sealed still does not open at the other dialer, nor one
+	// a listener sealed at the other listener.
+	t.Run("crossed links", func(t *testing.T) {
+		cd, err := New("pw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		x, y := Random(), Random()
+		d1, _ := cd.Dialer().Session(x, y)
+		d2, _ := cd.Dialer().Session(y, x)
+		l1, _ := cd.Session(y, x)
+		l2, _ := cd.Session(x, y)
+		if _, err := open(d2, seal(d1, []byte("x"), header), header); err != ErrOpen {
+			t.Fatalf("a dialer's frame at another dialer: %v", err)
+		}
+		if _, err := open(l2, seal(l1, []byte("x"), header), header); err != ErrOpen {
+			t.Fatalf("a listener's frame at another listener: %v", err)
+		}
+		// Each link's own two sides still agree.
+		d1, _ = cd.Dialer().Session(x, y)
+		d2, _ = cd.Dialer().Session(y, x)
+		l1, _ = cd.Session(y, x)
+		l2, _ = cd.Session(x, y)
+		if got, err := open(l1, seal(d1, []byte("x"), header), header); err != nil || string(got) != "x" {
+			t.Fatalf("d1 to l1: %q, %v", got, err)
+		}
+		if got, err := open(d2, seal(l2, []byte("y"), header), header); err != nil || string(got) != "y" {
+			t.Fatalf("l2 to d2: %q, %v", got, err)
+		}
+	})
+	t.Run("both sides listeners", func(t *testing.T) {
+		cd, err := New("pw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		x, y := Random(), Random()
+		a, _ := cd.Session(x, y)
+		b, _ := cd.Session(y, x)
+		if _, err := open(b, seal(a, []byte("x"), header), header); err != ErrOpen {
+			t.Fatalf("two listeners: %v", err)
 		}
 	})
 	t.Run("another password", func(t *testing.T) {

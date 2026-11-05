@@ -165,7 +165,9 @@ type Uplink struct {
 func New(engine *fib.Engine, cfg *config.TunnelUplink, limit *tunnel.Limit, log *logs.Logger, info func() proto.Info, setup func(u *Uplink, r *link.Router)) *Uplink {
 	u := &Uplink{Name: cfg.HubName(), Config: cfg, Tunnels: tunnel.NewTable(limit), engine: engine, log: log, info: info, pool: map[*link.Link]string{}, conns: map[*link.Link]proto.RegisterRsp{}, state: StateConnecting, stop: make(chan struct{})}
 	if cfg.BodyPassword != "" {
-		u.coder, _ = bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
+		// The uplink dials its links: the hub listens.
+		cd, _ := bodycrypt.New(cfg.BodyPassword) // fails only for an empty password
+		u.coder = cd.Dialer()
 	}
 	r := link.NewRouter()
 	r.Log = log

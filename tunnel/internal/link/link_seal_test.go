@@ -86,7 +86,7 @@ func (w *tap) RemoteAddr() net.Addr { return nil }
 func tapped(t *testing.T, ra, rb *Router, password string) (a, b *Link, ab, ba *tap) {
 	t.Helper()
 	ab, ba = newTap(t), newTap(t)
-	a = New(ab, ra, coder(t, password))
+	a = New(ab, ra, coder(t, password).Dialer())
 	b = New(ba, rb, coder(t, password))
 	ab.run(b)
 	ba.run(a)
@@ -160,7 +160,7 @@ func TestSealedReorder(t *testing.T) {
 		}
 		return [][]byte{b, held}
 	}
-	a := New(ab, NewRouter(), coder(t, "pw"))
+	a := New(ab, NewRouter(), coder(t, "pw").Dialer())
 	b := New(ba, rb, coder(t, "pw"))
 	ab.run(b)
 	ba.run(a)
@@ -246,7 +246,9 @@ func TestSealedVersions(t *testing.T) {
 		want   string
 	}{
 		{"version 1", [][]byte{rawFrame(kindSealed|kindCall, proto.MethodRegister, 1, make([]byte, 40))}, true, "version 1"},
-		{"version 3", [][]byte{hello(append([]byte{3}, bodycrypt.Random()...))}, true, "version 3"},
+		// Version 2 keyed each direction by the order of the hellos alone.
+		{"version 2", [][]byte{hello(append([]byte{2}, bodycrypt.Random()...))}, true, "version 2, this side's 3"},
+		{"version 4", [][]byte{hello(append([]byte{4}, bodycrypt.Random()...))}, true, "version 4"},
 		{"empty hello", [][]byte{hello(nil)}, true, "malformed"},
 		{"short hello", [][]byte{hello([]byte{Version, 1, 2})}, true, "malformed"},
 		{"second hello", [][]byte{hello(append([]byte{Version}, bodycrypt.Random()...)), hello(append([]byte{Version}, bodycrypt.Random()...))}, true, "malformed"},
@@ -387,7 +389,7 @@ func pattern(n int, seed byte) []byte {
 // that refuses it then fails the link with the connection's error.
 func TestSealedHeldSendFails(t *testing.T) {
 	out, in := newTap(t), newTap(t)
-	a := New(out, NewRouter(), coder(t, "pw"))
+	a := New(out, NewRouter(), coder(t, "pw").Dialer())
 	New(in, NewRouter(), coder(t, "pw")) // its hello is in's first frame
 	if err := a.SendTunnel(proto.MethodTunnelData, 1, []byte("held")); err != nil {
 		t.Fatal(err)

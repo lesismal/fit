@@ -29,12 +29,20 @@ func pair(t *testing.T, ra, rb *Router, ca, cb *bodycrypt.Coder) (*Link, *Link) 
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	var a *Link
-	if _, err := transport.Dial(e, l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler { a = New(c, ra, ca); return a }); err != nil {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler { a = New(c, ra, dialerOf(ca)); return a }); err != nil {
 		t.Fatal(err)
 	}
 	b := <-bs
 	t.Cleanup(func() { a.Close(); b.Close() })
 	return a, b
+}
+
+// dialerOf is c for the side that dials, or nil.
+func dialerOf(c *bodycrypt.Coder) *bodycrypt.Coder {
+	if c == nil {
+		return nil
+	}
+	return c.Dialer()
 }
 
 func coder(t *testing.T, password string) *bodycrypt.Coder {
