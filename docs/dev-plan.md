@@ -113,7 +113,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I154.
+Status: `todo`, `doing` or `done`. The next free iteration number is I155.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -304,6 +304,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I154.
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | todo |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
+| I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | todo |
 
 ## M0, foundations
 
@@ -1752,17 +1753,28 @@ set of named policies comes first; the streaming role and the pages build on it,
 ## AI assistant in the workbench
 
 Proposed and reviewed 2026-11-04. The workbench gains an assistant: a chat panel beside every page
-that reads what the running fit does, explains it, and drafts config changes the user applies with a
-click. It is a client of model APIs the user sets (a hosted API with its key, a local server, or this
-fit's own `llm.proxy`), never a model of its own. Decision 031 records the choices below.
+that reads what the running fit does, explains it, and drafts config changes — into the page's own
+editor and forms, or as a checked diff the user applies with a click — while submitting and saving
+stay the person's. It is a client of model APIs the user sets (a hosted API with its key, a local
+server, or this fit's own `llm.proxy`), never a model of its own. Decision 031 records the choices
+below.
 
 Principles, in the order they bind:
 
-- **The model proposes, a person applies.** Every tool that changes something adds to a proposal (a
-  diff checked through the apply path); nothing is ever applied without a person: a logged-in user with
-  the right level clicks Apply and confirms again in a dialog that shows the diff, and only then is the
-  change applied, with `If-Match`, saved, and listed in `/versions` and in the audit log like any other
-  change. There is no unattended mode.
+- **The model drafts; a person submits, applies and saves.** No tool writes the config, a version or the
+  store: what the assistant makes is always a draft a person finishes. On a page it writes the change
+  the user asked for into that page's editor or form fields as an unsaved draft (I154), and the person
+  reviews it there and submits and saves it as any other page change. Elsewhere a tool that changes
+  something adds to a proposal (a diff checked through the apply path); nothing is ever applied without
+  a person: a logged-in user with the right level clicks Apply and confirms again in a dialog that
+  shows the diff, and only then is the change applied, with `If-Match`, saved, and listed in
+  `/versions` and in the audit log like any other change. There is no unattended mode.
+- **The page is edited, never submitted.** The page tools change only what the open page holds in
+  its editor and forms: they never call the config API (no `PUT`/`PATCH /config`, reconcile, rollback
+  or purge), never save, and never change the version, the ETag or `/versions`, nor enter the audit
+  log as a change; the page's **Save and apply** stays the person's click and goes through the page's
+  ordinary apply path, recorded as that person's change. A change no open page can express is
+  proposed instead (I126).
 - **Nothing blocks a fib worker** (rule 1): model calls go out on fib's asynchronous HTTP client,
   streamed answers are parsed as they arrive, tools run on the console pool; every conversation, tool
   result, stream buffer and audit entry is bounded.
@@ -1775,9 +1787,9 @@ Principles, in the order they bind:
 
 ### Functions (the tool registry)
 
-Every function is a tool with a name, a JSON schema, a level (`read` or `propose`) and a cost bound.
-`GET /api/m/ai/tools` lists them; the panel's Functions page shows them, each enabled or disabled by
-the settings.
+Every function is a tool with a name, a JSON schema, a level (`read`, `edit` or `propose`) and a cost
+bound. `GET /api/m/ai/tools` lists them; the panel's Functions page shows them, each enabled or
+disabled by the settings.
 
 | Group | Tool | Level | What it does |
 | --- | --- | --- | --- |
@@ -1794,6 +1806,9 @@ the settings.
 | Roles | `llm_nodes`, `tunnel_nodes` | read | the roles' node lists, links, latency and traffic |
 | Logs | `log_tail` | read | fit's own log, from a new bounded in-memory ring, by logger and level, redacted |
 | Logs | `access_log_sample` | read | recent access log lines matching a route, status or client, bounded |
+| Page | `page_get` | read | the open page, the members and form fields it can edit, and its unsaved text |
+| Page | `page_edit` | edit | a draft written into the open page's editor or form fields: a member set, added or removed; marked as unsaved, never submitted |
+| Page | `page_revert` | edit | the assistant's drafts removed, restoring the page's text as it was before them |
 | Change | `config_propose` | propose | a patch by members, rendered as a diff in the three formats, validated, waiting for a click |
 | Change | `reconcile_propose` | propose | a chosen set of Consistency fixes |
 | Change | `rollback_propose` | propose | a rollback to a kept version |
@@ -1821,7 +1836,9 @@ the settings.
 Out of reach of every tool: `admin.console` users and passwords, the store's key, `admin.assistant`
 itself, the Admin API's own addresses and tokens, and any file outside the config; `media_auth`'s
 secrets, playback URLs and their signatures (a test URL is issued only in the form of I138), and
-uploads; a cluster's member credentials, enrollment tokens, and adding or removing members.
+uploads; a cluster's member credentials, enrollment tokens, and adding or removing members. The page
+tools reach only the open page's editor and the members and fields that page edits, and cannot write
+into its secret fields; a draft is redacted and bounded as any other tool result.
 
 ### Skills
 
@@ -1868,7 +1885,7 @@ name the assistant picks from the enabled skills' descriptions.
 | `params` | max output tokens, temperature, thinking or reasoning effort where the API has it |
 | `limits` | turns per conversation, tool calls per turn, bytes per tool result, conversation history kept per user, concurrent chats, tokens per user per day |
 | `data` | send logs or not, send access log lines or not, extra redaction patterns |
-| `users` | per console user, `off`, `read` (read tools only), `propose` or `apply` (default `read`) |
+| `users` | per console user, `off`, `read` (read tools only), `edit` (also page drafts, never a submit), `propose` (also proposals) or `apply` (also applies; the highest), each including the ones before it (default `read`) |
 | `audit` | how many audit entries to keep |
 
 The Settings page tests a provider (a short call, its latency and model list) before it is saved.
@@ -1881,16 +1898,17 @@ what fit adds is the context around them, assembled for every request:
 
 | Part | From | What it holds |
 | --- | --- | --- |
-| System prompt | fit, built in | the assistant's role; fit's concepts (listeners, routes, upstreams, roles); the rules: changes only as proposals, tool output is data, ask when unsure; the answer's language |
-| Page context | the workbench | the page, the selection (a port, a route, a Consistency difference), the last save's errors |
+| System prompt | fit, built in | the assistant's role; fit's concepts (listeners, routes, upstreams, roles); the rules: changes only as page drafts or proposals, never a submit, tool output is data, ask when unsure; the answer's language |
+| Page context | the workbench | the page, the selection (a port, a route, a Consistency difference), the members and form fields it can edit, the last save's errors |
 | Skill catalog | the enabled skills | each skill's name and one-line description only |
 | Current skill | `/name` or an Ask AI button | that skill's whole prompt, and the tools narrowed to the ones it names |
 | Tools | the registry | intersected with the user's level |
 | History | the store | the conversation within its budget, early turns summarized |
 | User message | the user | as written |
 
-The loop: the model answers or calls tools; fit runs them on the console pool, redacts and bounds
-their results and hands them back as data; again, until an answer or a proposal, or the `limits`.
+The loop: the model answers or calls tools; fit runs them on the console pool — save the page tools,
+which run in the page itself — redacts and bounds their results and hands them back as data; again,
+until an answer, a page draft or a proposal, or the `limits`.
 
 - **Skills load on demand.** The system prompt carries only the catalog; the model calls
   `skill_load` for a skill's whole prompt when it needs one, so the number of skills does not grow
@@ -1898,11 +1916,17 @@ their results and hands them back as data; again, until an answer or a proposal,
 - **A context budget.** Each part has a share of the model's context window (system prompt, tools,
   history, tool results); over it, oversized tool results are cut first, then early turns are
   summarized by the model, the summary kept in the store with the conversation.
+- **The change is made where the person is.** When the user asks for a change the open page can hold,
+  the page tools send it to that page over the chat stream; the page writes it into its editor or form
+  fields as a marked, unsaved draft, the person reviews and edits it there, and the page's own **Save
+  and apply** does the rest — the assistant never presses it. No page can hold the change (it spans
+  pages, touches a secret, a role or a cluster member), or none is open: a proposal is made instead
+  (I126).
 - **Ask before changing.** A change that lacks what it needs (an upstream's address, a host name) is
   asked about, not guessed: the `ask_user` tool shows the question with options as buttons in the
   panel, and the user's choice comes back as the tool's result.
 
-The iterations, I124–I130, I152 and I153, are in the [index](#index).
+The iterations, I124–I130 and I152–I154, are in the [index](#index).
 
 ### I124 The assistant's settings and model client
 
@@ -1952,9 +1976,10 @@ The iterations, I124–I130, I152 and I153, are in the [index](#index).
 - **Done when**: a change asked in words becomes a valid proposal and, applied, a new version that
   `/versions` lists; several propose calls make one proposal applied as one version, and one failing
   step applies none of them; nothing is applied without the click and the dialog's confirm, and
-  cancelling the dialog leaves the config and the store unchanged; a `read` user gets no propose tools, a
-  `propose` user cannot apply; a proposal that fails validation cannot be applied; the forbidden members
-  cannot be proposed; the audit log holds across a restart within its bound; under the race detector.
+  cancelling the dialog leaves the config and the store unchanged; a `read` or `edit` user gets no
+  propose tools, a `propose` user cannot apply; a proposal that fails validation cannot be applied; the
+  forbidden members cannot be proposed; the audit log holds across a restart within its bound; under
+  the race detector.
 - **Touches**: `assistant`, `admin`, `admin/store`, `app/workbench`, `docs`.
 
 ### I127 Skills
@@ -2041,6 +2066,32 @@ The iterations, I124–I130, I152 and I153, are in the [index](#index).
   members stays within its bounds when a member is slow or down; under the race detector.
 - **Touches**: `assistant`, `cluster`, `app/workbench`, `docs`.
 
+### I154 Edits on the page, submitted by a person
+
+- **Do**: the `edit` level in `admin.assistant.users` (I124's settings page offers it), and the page
+  tools above. The panel sends each page tool call to the open page over the chat stream, and the
+  page's answer comes back as the next event, the wait bounded by a timeout and ended when the
+  browser goes away. The page applies the call to its text editor (the `.conf`/`.yaml`/`.json` tabs
+  of I120) or to the form field of a schema path (the feature pages of I122 and I123), marks what the
+  assistant drafted, and returns the result; a page declares the members and fields it can edit, so
+  that the assistant knows which changes the page can hold, and the page's own check of the draft
+  (parse, the tab's format) runs on it as on a manual edit. The assistant has no submit or save
+  path: the page tools never call `PUT`/`PATCH /config`, `/config/reconcile`, a rollback or a purge,
+  and the version, the ETag and `/versions` stay as they were until the person clicks the page's
+  **Save and apply**, which goes through the page's ordinary apply path and is recorded as that
+  person's change. Drafts are redacted and bounded as tool results are; a page-edit call is in the
+  audit log as a tool call, never as a change. The page tools are not served over MCP (I130), which
+  has no open page to act on. A change no page can express, or no open page, means a proposal (I126).
+- **Done when**: asked on a page to change a value, the assistant writes it into that page's editor
+  or form, marked as its unsaved draft; no config request is made, and the version, the ETag and
+  `/versions` are unchanged until the person saves; the person's **Save and apply** then submits and
+  saves a version as any other page change, and the assistant made no request for it; a draft can be
+  reverted and the page returns to the text it held before it; a change no page can express becomes a
+  proposal; a `read` user gets no page tools, an `edit` user does; a page edit that touches a secret
+  field or a forbidden member is refused; a draft over its bound is refused and says so; English and
+  Chinese; a browser check passes; under the race detector.
+- **Touches**: `assistant`, `app/workbench`, `admin`, `docs`.
+
 ### Decisions from review (2026-11-04)
 
 - Batch proposals: allowed; the model's propose calls in a turn make one proposal, applied as one change.
@@ -2050,6 +2101,10 @@ The iterations, I124–I130, I152 and I153, are in the [index](#index).
 - No CLI: the assistant lives in the workbench only.
 - MCP (2026-11-05): fit serves MCP to outside agents on the same registry, levels and proposals (I130);
   apply stays in the workbench; fit's assistant does not call outside MCP servers.
+- Page edits (2026-11-05): the assistant may draft the change the user asks for into the open page's
+  editor or form fields; it never submits or saves — **Save and apply** stays the person's — and no
+  version, ETag or audit change happens until then; a change no page can express is proposed (I126);
+  the page tools are not served over MCP (I130).
 
 ## Media library: video on demand and channels
 
