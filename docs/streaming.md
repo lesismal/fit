@@ -78,6 +78,17 @@ A refusal is each protocol's: RTMP's `NetStream.Publish.Unauthorized` or `NetStr
 the connection then closed; RTSP's `401` with the challenges, or `403`; SRT's handshake rejected
 with `1401` (unauthorized) or `1403` (forbidden); HTTP's `401` with a `Bearer` challenge, or `403`.
 
+RTSP checks what a session plays or records, not the URLs of its requests: fib's server sets a
+session up for the stream a SETUP's URL names, described before or not, and PLAY and RECORD act on
+that session whatever their URLs say. So DESCRIBE and ANNOUNCE are checked on their URLs' streams,
+and the stream of the session as fib has it when its tracks are looked up (at DESCRIBE, and at a
+SETUP of a stream no DESCRIBE on the connection described), when it plays (PLAY) and when it
+records (RECORD), each time with the credentials of that request; a refused SETUP or RECORD is
+`403`, and a refused PLAY is answered and its connection closed, nothing sent. Players keep the
+token as they do: the `Content-Base` of the DESCRIBE, which SETUP and PLAY are sent to, has the
+DESCRIBE's query, and a Digest or Basic client sends its `Authorization` on every request. A
+Digest's `uri` must be the request's URL, as RFC 2617 has it.
+
 An HLS playlist fetched with `?token=` names its media playlist, segments and parts with the token
 too, so that a player that sends no header, as Safari and ffmpeg, plays on; every request of HLS is
 checked. A token in a query is never logged: the access log writes it as `REDACTED`.

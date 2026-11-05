@@ -122,6 +122,12 @@ type Server struct {
 	srt     *srtListener
 	webrtc  *rtcListener
 
+	// rtspReqs is the credentials of the request each RTSP connection is
+	// being served, by the connection's address, for the hub's hooks: an
+	// *rtspRequest, left by rtspAuth.onRequest and forgotten as the
+	// connection closes.
+	rtspReqs sync.Map
+
 	m meters
 }
 
@@ -207,6 +213,7 @@ func (s *Server) Apply(member any) error {
 			MaxSubscribersPerStream: cfg.Players(),
 			OnPublish:               s.onPublish,
 			OnUnpublish:             s.onUnpublish,
+			OnSubscribe:             s.onSubscribe,
 		})
 		s.hubKey = key
 		s.cur.Store(&current{hub: s.hub})
@@ -301,8 +308,23 @@ func (s *Server) stopAll() {
 }
 
 func (s *Server) onPublish(path string, info hub.PublishInfo) error {
+	if info.Protocol == "rtsp" {
+		// RECORD, of the stream ANNOUNCE named.
+		if err := s.rtspAllow(mediaauth.Publish, path, info.Remote); err != nil {
+			return err
+		}
+	}
 	s.m.published.Add(1)
 	s.log.Infof("%s published over %s from %s", path, info.Protocol, info.Remote)
+	return nil
+}
+
+// onSubscribe checks the streams RTSP sessions play; the other protocols
+// are checked before they subscribe.
+func (s *Server) onSubscribe(path string, info hub.SubscribeInfo) error {
+	if info.Protocol == "rtsp" {
+		return s.rtspAllow(mediaauth.Play, path, info.Remote)
+	}
 	return nil
 }
 

@@ -9,10 +9,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/lesismal/fib"
 	"github.com/lesismal/fib/media/rtsp"
 
 	"github.com/lesismal/fit/config"
@@ -25,12 +27,25 @@ const rtspNonceLifetime = 5 * time.Minute
 
 // rtspAuth checks RTSP requests against the listener's policy, in the RTSP
 // server's OnRequest, which fib calls on the connection's worker: DESCRIBE
-// and PLAY need play on the stream, ANNOUNCE and RECORD publish; the rest
-// belong to a session one of those began, or reveal nothing. Credentials
-// are the Authorization header's, Digest (RFC 2617 with MD5, as RTSP 1.0
-// clients speak it) or Basic, or else a token, or user and pass, in the
-// URL's query. Its nonces carry their time and a MAC of it, so that any
-// connection checks any nonce with nothing kept.
+// needs play on the stream, ANNOUNCE publish. What a session plays or
+// records is not the URL of its PLAY or RECORD, nor always of its SETUP:
+// fib's server keeps one session on a connection, made by the first SETUP
+// for the stream that SETUP's URL names (its track control taken off),
+// whether or not a DESCRIBE described it, or by ANNOUNCE; PLAY and RECORD
+// then act on that session, whatever their URLs say. OnRequest cannot see
+// the session, so its stream is checked where fib hands it to the hub, by
+// the path fib has: the hub's OnSubscribe at DESCRIBE, at a SETUP of a
+// stream no DESCRIBE on the connection described, and at PLAY, and its
+// OnPublish at RECORD (Server.rtspAllow). Those hooks run on the
+// connection's worker within the request, after OnRequest, which leaves
+// them the request's credentials under the connection's address
+// (Server.rtspReqs).
+//
+// Credentials are the Authorization header's, Digest (RFC 2617 with MD5,
+// as RTSP 1.0 clients speak it, its uri the request's) or Basic, or else a
+// token, or user and pass, in the URL's query. Its nonces carry their time
+// and a MAC of it, so that any connection checks any nonce with nothing
+// kept.
 type rtspAuth struct {
 	s      *Server
 	realm  string
@@ -55,13 +70,15 @@ func newRTSPAuth(c *config.StreamRTSP) (*rtspAuth, error) {
 	return a, nil
 }
 
-func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {
+func (a *rtspAuth) onRequest(sc *rtsp.ServerConn, req *rtsp.Request) *rtsp.Response {
 	var action mediaauth.Action
 	switch req.Method {
-	case rtsp.MethodDescribe, rtsp.MethodPlay:
+	case rtsp.MethodDescribe:
 		action = mediaauth.Play
-	case rtsp.MethodAnnounce, rtsp.MethodRecord:
+	case rtsp.MethodAnnounce:
 		action = mediaauth.Publish
+	case rtsp.MethodSetup, rtsp.MethodPlay, rtsp.MethodRecord:
+		// The hub's hooks check the session's stream.
 	default:
 		return nil
 	}
@@ -75,16 +92,22 @@ func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respon
 	}
 	now := time.Now()
 	var creds mediaauth.Credentials
-	stale := false
 	if authz, ok := req.Header.Lookup("Authorization"); ok {
-		var good bool
-		creds, good, stale = a.verify(g.policy(), req.Method, authz, now)
+		var good, stale bool
+		creds, good, stale = a.verify(g.policy(), req.Method, req.URL, authz, now)
 		if !good {
 			a.s.refused(protoRTSP, mediaauth.ErrBadCredentials)
 			return a.challenge(now, stale)
 		}
 	} else {
 		creds = mediaauth.FromQuery(query)
+	}
+	// Every request leaves its own credentials, none included, so that no
+	// request is let in on an earlier one's.
+	c := sc.Conn()
+	a.s.rtspReqs.Store(c.RemoteAddrPort(), &rtspRequest{c: c, creds: creds})
+	if action == 0 {
+		return nil
 	}
 	_, err := g.allow(action, path, creds)
 	if err == nil {
@@ -100,6 +123,50 @@ func (a *rtspAuth) onRequest(_ *rtsp.ServerConn, req *rtsp.Request) *rtsp.Respon
 	resp := &rtsp.Response{StatusCode: rtsp.StatusServiceUnavailable}
 	resp.Header.Add("Retry-After", "1")
 	return resp
+}
+
+// rtspRequest is the credentials of the request an RTSP connection is
+// being served, for the hub's hooks.
+type rtspRequest struct {
+	c     *fib.Connection
+	creds mediaauth.Credentials
+}
+
+// rtspAllow is the hub's check of the stream an RTSP session plays or
+// records, by its path as fib's server has it, with the credentials the
+// request being served on the client's connection, from remote, gave
+// OnRequest: none when it gave none. fib answers a refusal with 403, or at
+// PLAY, whose subscription starts once its response has gone, by closing
+// the connection.
+func (s *Server) rtspAllow(a mediaauth.Action, path string, remote netip.AddrPort) error {
+	g := s.auth[protoRTSP].Load()
+	if g == nil || g.name == "" {
+		return nil
+	}
+	var creds mediaauth.Credentials
+	if r, ok := s.rtspReqs.Load(remote); ok {
+		creds = r.(*rtspRequest).creds
+	}
+	if _, err := g.allow(a, path, creds); err != nil {
+		s.refused(protoRTSP, err)
+		return err
+	}
+	return nil
+}
+
+// rtspHandler is the RTSP server, forgetting a connection's credentials as
+// it closes.
+type rtspHandler struct {
+	*rtsp.Server
+	s *Server
+}
+
+func (h rtspHandler) OnClose(c *fib.Connection, err error) {
+	h.Server.OnClose(c, err)
+	key := c.RemoteAddrPort()
+	if r, ok := h.s.rtspReqs.Load(key); ok && r.(*rtspRequest).c == c {
+		h.s.rtspReqs.CompareAndDelete(key, r)
+	}
 }
 
 // rtspPath returns the stream's path of an RTSP URL and its query: the
@@ -162,10 +229,12 @@ func (a *rtspAuth) nonceValid(nonce string, now time.Time) (ours, fresh bool) {
 
 // verify reads an Authorization value: Basic gives its user and password
 // to the policy as they are; Digest is checked against the plaintext
-// password of its user, and gives the user with it. good is false for
+// password of its user, its uri the request's as RFC 2617 has it, so that
+// a response computed for one URL is not taken for another's, and gives
+// the user with it. good is false for
 // credentials that are not right, or of a scheme not offered; stale for a
 // Digest that would be right but for an expired nonce.
-func (a *rtspAuth) verify(p *mediaauth.Policy, method, authz string, now time.Time) (c mediaauth.Credentials, good, stale bool) {
+func (a *rtspAuth) verify(p *mediaauth.Policy, method, uri, authz string, now time.Time) (c mediaauth.Credentials, good, stale bool) {
 	scheme, rest, _ := strings.Cut(strings.TrimSpace(authz), " ")
 	switch {
 	case strings.EqualFold(scheme, "Basic") && a.basic:
@@ -182,7 +251,7 @@ func (a *rtspAuth) verify(p *mediaauth.Policy, method, authz string, now time.Ti
 		params := parseAuthParams(rest)
 		user := params["username"]
 		ours, fresh := a.nonceValid(params["nonce"], now)
-		if !ours || params["realm"] != a.realm || user == "" {
+		if !ours || params["realm"] != a.realm || user == "" || params["uri"] != uri {
 			return c, false, false
 		}
 		if alg := params["algorithm"]; alg != "" && !strings.EqualFold(alg, "MD5") {

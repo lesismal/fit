@@ -70,26 +70,30 @@ func TestRTSPDigest(t *testing.T) {
 		return `Digest username="alice", realm="fit", nonce="` + nonce + `", uri="rtsp://h/s", response="` +
 			digestResponse("alice", "fit", "pw", "DESCRIBE", "rtsp://h/s", nonce, "", "", "") + `"` + extra
 	}
-	if c, good, _ := a.verify(p, "DESCRIBE", authz(a.nonce(now), ""), now); !good || c.User != "alice" || c.Password != "pw" {
+	if c, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", authz(a.nonce(now), ""), now); !good || c.User != "alice" || c.Password != "pw" {
 		t.Fatalf("a right Digest: %+v %v", c, good)
 	}
-	if _, good, _ := a.verify(p, "DESCRIBE", authz(other.nonce(now), ""), now); good {
+	if _, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", authz(other.nonce(now), ""), now); good {
 		t.Fatal("another listener's nonce")
 	}
-	if _, good, stale := a.verify(p, "DESCRIBE", authz(a.nonce(now.Add(-time.Hour)), ""), now); good || !stale {
+	// A response computed for one URL is not taken for another's.
+	if _, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/secret", authz(a.nonce(now), ""), now); good {
+		t.Fatal("a Digest of another URI")
+	}
+	if _, good, stale := a.verify(p, "DESCRIBE", "rtsp://h/s", authz(a.nonce(now.Add(-time.Hour)), ""), now); good || !stale {
 		t.Fatal("an old nonce")
 	}
-	if _, good, _ := a.verify(p, "DESCRIBE", authz(a.nonce(now), ", algorithm=SHA-256"), now); good {
+	if _, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", authz(a.nonce(now), ", algorithm=SHA-256"), now); good {
 		t.Fatal("another algorithm")
 	}
-	if _, good, _ := a.verify(p, "DESCRIBE", "Basic YWxpY2U6cHc=", now); good {
+	if _, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", "Basic YWxpY2U6cHc=", now); good {
 		t.Fatal("Basic, not offered")
 	}
 	// qop=auth, as most clients answer.
 	nonce := a.nonce(now)
 	resp := digestResponse("alice", "fit", "pw", "PLAY", "rtsp://h/s", nonce, "auth", "00000001", "abc")
 	qop := `Digest username="alice", realm="fit", nonce="` + nonce + `", uri="rtsp://h/s", qop=auth, nc=00000001, cnonce="abc", response="` + resp + `"`
-	if _, good, _ := a.verify(p, "PLAY", qop, now); !good {
+	if _, good, _ := a.verify(p, "PLAY", "rtsp://h/s", qop, now); !good {
 		t.Fatal("qop=auth")
 	}
 	if ch := a.challenge(now, true); ch.StatusCode != 401 || !strings.Contains(ch.Header.Get("WWW-Authenticate"), "stale=TRUE") {
@@ -142,11 +146,11 @@ func TestRTSPMalformed(t *testing.T) {
 	now := time.Now()
 	for _, authz := range []string{"Basic !!!", "Basic " + base64Std(":pw"), "Basic " + base64Std("alice"),
 		`Digest username="alice", realm="fit", nonce="short", uri="rtsp://h/s", response="x"`} {
-		if _, good, _ := a.verify(p, "DESCRIBE", authz, now); good {
+		if _, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", authz, now); good {
 			t.Errorf("%s was right", authz)
 		}
 	}
-	if c, good, _ := a.verify(p, "DESCRIBE", "Basic "+base64Std("alice:pw"), now); !good || c.User != "alice" {
+	if c, good, _ := a.verify(p, "DESCRIBE", "rtsp://h/s", "Basic "+base64Std("alice:pw"), now); !good || c.User != "alice" {
 		t.Fatalf("a right Basic: %+v %v", c, good)
 	}
 	m := parseAuthParams(`a="x\"y", b=2, c`)

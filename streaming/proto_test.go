@@ -44,13 +44,22 @@ func dialRTSP(t *testing.T, addr string) *rtspConn {
 // do sends a request and returns the response's status and header.
 func (r *rtspConn) do(method, url string, hdr ...string) (int, textproto.MIMEHeader) {
 	r.t.Helper()
+	return r.doBody(method, url, "", hdr...)
+}
+
+// doBody is do with a body.
+func (r *rtspConn) doBody(method, url, body string, hdr ...string) (int, textproto.MIMEHeader) {
+	r.t.Helper()
 	r.cseq++
 	req := method + " " + url + " RTSP/1.0\r\nCSeq: " + strconv.Itoa(r.cseq) + "\r\n"
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req += hdr[i] + ": " + hdr[i+1] + "\r\n"
 	}
+	if body != "" {
+		req += "Content-Length: " + strconv.Itoa(len(body)) + "\r\n"
+	}
 	_ = r.c.SetDeadline(time.Now().Add(waitTimeout))
-	if _, err := io.WriteString(r.c, req+"\r\n"); err != nil {
+	if _, err := io.WriteString(r.c, req+"\r\n"+body); err != nil {
 		r.t.Fatal(err)
 	}
 	tp := textproto.NewReader(r.r)
@@ -207,6 +216,110 @@ func TestRTSPAuth(t *testing.T) {
 }
 
 func base64Std(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// RTSP: what a session plays or records is checked by its own stream, not
+// by the URLs of its requests. fib's server sets a session up for the
+// stream a SETUP's URL names, described or not, and PLAY plays that
+// session whatever its URL: a SETUP of a stream the client may not play is
+// refused, so that a PLAY of a URL its token may play cannot play it; a
+// PLAY or RECORD without credentials is refused even of a session set up
+// with them.
+func TestRTSPSessionStream(t *testing.T) {
+	f := startFit(t, doc(t, allListeners))
+	e := startEngine(t)
+	for _, p := range []string{"live/a", "live/secret"} {
+		if _, err := publishRTMP(t, e, "rtmp://"+f.addr(t, "rtmp")+"/"+p+"?token="+pubToken, 20*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		f.waitLive(t, p)
+	}
+	addr := f.addr(t, "rtsp")
+	base := "rtsp://" + addr + "/"
+	tcp := []string{"Transport", "RTP/AVP/TCP;unicast;interleaved=0-1"}
+
+	// The attack: SETUP of live/secret without credentials, then PLAY of
+	// live/a, which the token may play, in that session.
+	c := dialRTSP(t, addr)
+	code, h := c.do("SETUP", base+"live/secret/trackID=0", tcp...)
+	if code != 403 {
+		t.Fatalf("a SETUP of live/secret without credentials: %d", code)
+	}
+	sess, _, _ := strings.Cut(h.Get("Session"), ";")
+	if code, _ := c.do("PLAY", base+"live/a?token="+viewAToken, "Session", sess); code != 454 {
+		t.Fatalf("a PLAY of live/a in the session of live/secret: %d", code)
+	}
+	// The same after a DESCRIBE of live/a, the token on the SETUP, in its
+	// query before or after the control.
+	c = dialRTSP(t, addr)
+	if code, _ := c.do("DESCRIBE", base+"live/a?token="+viewAToken); code != 200 {
+		t.Fatalf("a DESCRIBE of live/a with its token: %d", code)
+	}
+	for _, u := range []string{base + "live/secret/trackID=0?token=" + viewAToken, base + "live/secret?token=" + viewAToken + "/trackID=0"} {
+		if code, _ := c.do("SETUP", u, tcp...); code != 403 {
+			t.Fatalf("a SETUP of %s: %d", u, code)
+		}
+	}
+	if code, _ := c.do("PLAY", base+"live/a?token="+viewAToken); code != 454 {
+		t.Fatalf("a PLAY with no session: %d", code)
+	}
+
+	// The token plays live/a as players do, by the Content-Base.
+	play := func(withToken bool) (*rtspConn, int) {
+		c := dialRTSP(t, addr)
+		code, h := c.do("DESCRIBE", base+"live/a?token="+viewAToken)
+		cb := h.Get("Content-Base")
+		if code != 200 || cb == "" {
+			t.Fatalf("DESCRIBE: %d %q", code, cb)
+		}
+		code, h = c.do("SETUP", cb+"trackID=0", tcp...)
+		sess, _, _ := strings.Cut(h.Get("Session"), ";")
+		if code != 200 || sess == "" {
+			t.Fatalf("SETUP: %d", code)
+		}
+		u := cb
+		if !withToken {
+			u = base + "live/a"
+		}
+		code, _ = c.do("PLAY", u, "Session", sess)
+		return c, code
+	}
+	c, code = play(true)
+	if code != 200 {
+		t.Fatalf("PLAY: %d", code)
+	}
+	if b, err := c.r.ReadByte(); err != nil || b != '$' {
+		t.Fatalf("no RTP after PLAY: %v %q", err, b)
+	}
+	// A PLAY without credentials: the session's stream is checked as its
+	// subscription starts, after the 200, and the connection closed.
+	c, _ = play(false)
+	if n, err := io.Copy(io.Discard, c.r); err != nil || n != 0 {
+		t.Fatalf("a PLAY without credentials got %d bytes: %v", n, err)
+	}
+
+	// RECORD publishes the session ANNOUNCE made, checked with RECORD's
+	// credentials.
+	c = dialRTSP(t, addr)
+	sdp := "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=x\r\nc=IN IP4 0.0.0.0\r\nt=0 0\r\n" +
+		"m=audio 0 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\na=control:streamid=0\r\n"
+	if code, _ := c.doBody("ANNOUNCE", base+"live/rec?token="+pubToken, sdp, "Content-Type", "application/sdp"); code != 200 {
+		t.Fatalf("ANNOUNCE: %d", code)
+	}
+	code, h = c.do("SETUP", base+"live/rec?token="+pubToken+"/streamid=0", "Transport", "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record")
+	sess, _, _ = strings.Cut(h.Get("Session"), ";")
+	if code != 200 {
+		t.Fatalf("SETUP to record: %d", code)
+	}
+	if code, _ := c.do("RECORD", base+"live/rec", "Session", sess); code != 403 {
+		t.Fatalf("a RECORD without credentials: %d", code)
+	}
+	if code, _ := c.do("RECORD", base+"live/rec?token="+viewToken, "Session", sess); code != 403 {
+		t.Fatalf("a RECORD with a token that may only play: %d", code)
+	}
+	if code, _ := c.do("RECORD", base+"live/rec?token="+pubToken, "Session", sess); code != 200 {
+		t.Fatalf("a RECORD with the token: %d", code)
+	}
+}
 
 // srtDial dials the SRT listener with streamID, and returns nil once
 // connected or the reason it was rejected.

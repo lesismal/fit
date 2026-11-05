@@ -33,6 +33,8 @@ const waitTimeout = 15 * time.Second
 const (
 	pubToken  = "publisher-token-0123456789"
 	viewToken = "viewer-token-0123456789"
+	// viewAToken may play live/a alone.
+	viewAToken = "viewer-a-token-0123456789"
 )
 
 // fit is fit running a config with the streaming role, as fit runs it: the
@@ -127,7 +129,8 @@ func livePolicy(t *testing.T) string {
 	}
 	return `{"name": "live", "secret": "a-secret-of-sixteen-bytes",
 	  "tokens": [{"name": "pub", "token": "` + pubToken + `", "publish": ["live/*"]},
-	             {"name": "view", "token": "` + viewToken + `", "play": ["live/*"]}],
+	             {"name": "view", "token": "` + viewToken + `", "play": ["live/*"]},
+	             {"name": "view-a", "token": "` + viewAToken + `", "play": ["live/a"]}],
 	  "users": [{"name": "alice", "password": "alice-pw", "publish": ["live/alice"], "play": ["*"]},
 	            {"name": "bob", "password_hash": "` + string(h) + `", "publish": ["live/bob"], "play": ["*"]}]}`
 }

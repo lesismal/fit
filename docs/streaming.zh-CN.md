@@ -72,6 +72,14 @@ GOP（从最后一个关键帧开始），最多 `gop_cache_bytes`，使新的�
 拒绝的方式按各协议：RTMP 返回 `NetStream.Publish.Unauthorized` 或 `NetStream.Play.Failed` 后关闭连接；RTSP 返回带质询的
 `401`，或 `403`；SRT 以 `1401`（未认证）或 `1403`（禁止）拒绝握手；HTTP 返回带 `Bearer` 质询的 `401`，或 `403`。
 
+RTSP 检查的是会话播放或录制的流，而不是各请求的 URL：fib 的服务器按 SETUP 的 URL 所指的流建立会话，无论之前是否
+DESCRIBE 过它，而 PLAY 和 RECORD 作用于这个会话，不管它们的 URL 写的是什么。所以 DESCRIBE 和 ANNOUNCE 按其 URL 的流
+检查，而会话的流按 fib 所持有的路径，在查找其轨道时（DESCRIBE，以及 SETUP 一路该连接上没有 DESCRIBE 过的流时）、
+播放时（PLAY）和录制时（RECORD）检查，每次都用该请求的凭据；被拒绝的 SETUP 或 RECORD 应答 `403`，被拒绝的 PLAY
+应答后关闭连接，不发送任何数据。播放器照常携带 token：DESCRIBE 的 `Content-Base` 带有 DESCRIBE 的查询参数，SETUP 和
+PLAY 都发往它；Digest 或 Basic 客户端在每个请求上都发送 `Authorization`。Digest 的 `uri` 必须是请求的 URL，如 RFC 2617
+所规定。
+
 用 `?token=` 获取的 HLS 播放列表，其中的媒体播放列表、分片和 part 也都带上该 token，使不发送请求头的播放器（如 Safari
 和 ffmpeg）能继续播放；HLS 的每个请求都会检查。查询参数中的 token 不会被记录：访问日志把它写成 `REDACTED`。
 
