@@ -254,13 +254,19 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	if copied {
 		header = make(stdhttp.Header, len(r.Header)+4)
 	}
+	// HTTP/2 and HTTP/3 refuse only NUL, CR and LF in a value; the other
+	// control bytes, which HTTP/1's grammar has no room for (RFC 9110 section
+	// 5.5) and an upstream may read differently, are refused here before the
+	// request goes on as HTTP/1. fib checked an HTTP/1 request's as it parsed
+	// them.
+	checkValues := r.ProtoMajor >= 2
 	for key, values := range r.Header {
 		// A pseudo-header the server kept, as an extended CONNECT's
 		// :protocol, is not sent: the upstream's request has its own
 		// framing. The body's length is the request's own, and the client
 		// answers 100 Continue itself, when the body is asked for.
 		drop := strings.HasPrefix(key, ":") || isHopByHop(key) || key == "Content-Length" || key == "Expect"
-		if !drop && !validToken(key) {
+		if !drop && (!validToken(key) || checkValues && !plainValues(values)) {
 			return false
 		}
 		switch {
@@ -843,4 +849,16 @@ func removeConnectionToken(h stdhttp.Header, name string) {
 	default:
 		delete(h, textproto.CanonicalMIMEHeaderKey(name))
 	}
+}
+
+// plainValues reports whether values hold no control byte but a tab.
+func plainValues(values []string) bool {
+	for _, v := range values {
+		for i := 0; i < len(v); i++ {
+			if c := v[i]; c < ' ' && c != '\t' || c == 0x7f {
+				return false
+			}
+		}
+	}
+	return true
 }

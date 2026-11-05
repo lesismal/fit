@@ -548,3 +548,19 @@ func TestRetryBodyGone(t *testing.T) {
 		t.Error("sent again")
 	}
 }
+
+// TestControlBytesH2: a value with a control byte other than a tab, which
+// HTTP/2 and HTTP/3 let through, is refused before the request goes on as
+// HTTP/1; a tab, and bytes past ASCII, are not.
+func TestControlBytesH2(t *testing.T) {
+	for value, ok := range map[string]bool{"a\tb": true, "caf\xc3\xa9": true, "a\x01b": false, "a\x7fb": false, "a\x0bb": false, "\x1b[31m": false} {
+		for _, major := range []int{2, 3} {
+			r := httptest.NewRequest(stdhttp.MethodGet, "http://example.com/", nil)
+			r.ProtoMajor = major
+			r.Header["X-Value"] = []string{"plain", value}
+			if got := (&Proxy{}).outgoing(fibhttp.NewStreamContext(nil, r, nil), &exchange{}); got != ok {
+				t.Errorf("HTTP/%d %q: outgoing %v, want %v", major, value, got, ok)
+			}
+		}
+	}
+}
