@@ -38,6 +38,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibconf"
+	"github.com/lesismal/fit/internal/plaintcp"
 	"github.com/lesismal/fit/l4"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
@@ -529,7 +530,7 @@ func checkFree(address string) error {
 	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
 		return nil
 	}
-	ln, err := net.Listen("tcp", address)
+	ln, err := plaintcp.Listen("tcp", address)
 	if err != nil {
 		return err
 	}

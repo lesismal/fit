@@ -40,6 +40,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/plaintcp"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/tlsmgr"
@@ -435,7 +436,7 @@ func checkFree(cfg *config.TURNServer, old *running) error {
 			}
 			return pc.Close()
 		}
-		l, err := net.Listen(network, a)
+		l, err := plaintcp.Listen(network, a)
 		if err != nil {
 			return fmt.Errorf("listen on tcp %s: %w", a, err)
 		}

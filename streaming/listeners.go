@@ -19,6 +19,7 @@ import (
 	"github.com/lesismal/fib/webrtc"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/plaintcp"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/mediaauth"
 )
@@ -119,7 +120,7 @@ func checkFree(network, address string) error {
 		}
 		return pc.Close()
 	}
-	ln, err := net.Listen("tcp", address)
+	ln, err := plaintcp.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
