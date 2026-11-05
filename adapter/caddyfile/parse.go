@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/lesismal/fit/adapter"
 )
 
 // token is a word of a Caddyfile: a bare word, a quoted string, a heredoc,
@@ -210,6 +212,8 @@ type parser struct {
 	pos      int
 	snippets map[string][]token
 	imports  int
+	// bytes counts the bytes of the tokens snippets' imports have made.
+	bytes    int
 	warnings []string
 }
 
@@ -306,18 +310,40 @@ func (p *parser) expand(toks []token, depth int) ([]token, error) {
 		args = args[1:]
 		sub := make([]token, len(body))
 		for k, b := range body {
+			// {args[:]} in snippets that import each other doubles what
+			// they hold at each import, so the bytes are bounded as the
+			// tokens are, and counted before a token grows past them.
+			over := false
+			grown := len(b.text)
 			b.text = snippetArg.ReplaceAllStringFunc(b.text, func(m string) string {
+				if over {
+					return ""
+				}
 				g := snippetArg.FindStringSubmatch(m)
 				n := g[1] + g[2]
+				var r string
 				if n == ":" {
-					return strings.Join(args, " ")
+					size := len(args)
+					for _, a := range args {
+						size += len(a)
+					}
+					if p.bytes+grown+size > adapter.MaxBytes {
+						over = true
+						return ""
+					}
+					r = strings.Join(args, " ")
+				} else if idx, _ := strconv.Atoi(n); idx < len(args) {
+					r = args[idx]
 				}
-				idx, _ := strconv.Atoi(n)
-				if idx < len(args) {
-					return args[idx]
+				if grown += len(r); p.bytes+grown > adapter.MaxBytes {
+					over = true
+					return ""
 				}
-				return ""
+				return r
 			})
+			if p.bytes += len(b.text); over || p.bytes > adapter.MaxBytes {
+				return nil, fmt.Errorf("line %d: more than %d bytes once snippets are imported", t.line, adapter.MaxBytes)
+			}
 			sub[k] = b
 		}
 		if len(sub) > 0 {

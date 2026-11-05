@@ -964,6 +964,9 @@ func TestConvertErrors(t *testing.T) {
 		{"import of nothing", ":80 {\n import\n}\n", "import names no snippet"},
 		{"too many imports", "(s) {\n header X 1\n}\n:80 {\n" + strings.Repeat(" import s\n", maxImports+1) + "}\n", "more than 1000 imports"},
 		{"too many tokens imported", "(s) {\n" + strings.Repeat("x ", 1000) + "\n}\n:80 {\n" + strings.Repeat(" import s\n", 201) + "}\n", "once snippets are imported"},
+		// 1.5KB whose {args[:]} grow eightfold at each of nine imports:
+		// gigabytes, unless the bytes are bounded as the tokens are.
+		{"too many bytes imported", argsBomb(), "bytes once snippets are imported"},
 		{"a block in the global options", "{\n {\n }\n}\n", "a block with no directive before it"},
 		{"a block in a site", "a {\n {\n }\n}\n", "a block with no directive before it"},
 		{"a block in a directive", ":80 {\n route {\n  {\n  }\n }\n}\n", "a block with no directive before it"},
@@ -1092,4 +1095,17 @@ func TestMatchHelpers(t *testing.T) {
 	if _, ok := size("ten"); ok {
 		t.Error("not a size")
 	}
+}
+
+// argsBomb is a Caddyfile of about 1.5KB whose snippets import each other
+// nine deep, each passing on its {args[:]} eight times over.
+func argsBomb() string {
+	var b strings.Builder
+	b.WriteString("(a0) {\n header X {args[:]}\n}\n")
+	eight := strings.TrimSpace(strings.Repeat("{args[:]} ", 8))
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&b, "(a%d) {\n import a%d %s\n}\n", i, i-1, eight)
+	}
+	b.WriteString(":80 {\n import a9 " + strings.Repeat("x", 1000) + "\n}\n")
+	return b.String()
 }
