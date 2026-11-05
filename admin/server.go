@@ -85,6 +85,11 @@ const VersionHeader = "Fit-Config-Version"
 //	POST   /logs/rotate         rotate one output now: {"path"}
 //	POST   /logs/cleanup        remove what retention says, or report it
 //	                            with dry_run: {"path", "dry_run"}
+//	GET    /tokens              the link tokens of every role that issues
+//	                            them (tunnel.hub, llm.*); /tokens/{role}
+//	                            one role's; POST issues one, PATCH
+//	                            /tokens/{role}/{id} changes its expiry,
+//	                            DELETE revokes it (see tokens.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //
@@ -227,6 +232,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /logs", s.logs)
 	mux.HandleFunc("POST /logs/rotate", s.logsRotate)
 	mux.HandleFunc("POST /logs/cleanup", s.logsCleanup)
+	mux.HandleFunc("GET /tokens", s.listAllTokens)
+	mux.HandleFunc("GET /tokens/{role}", s.listTokens)
+	mux.HandleFunc("POST /tokens/{role}", s.issueToken)
+	mux.HandleFunc("PATCH /tokens/{role}/{id}", s.tokenExpiry)
+	mux.HandleFunc("DELETE /tokens/{role}/{id}", s.revokeToken)
 	return mux
 }
 
