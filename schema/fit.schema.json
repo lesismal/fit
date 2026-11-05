@@ -3899,6 +3899,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "underscores_in_headers": {
+          "description": "Pass on request fields whose names hold an underscore, as X_User, as HTTP_ parameters. Left out, they are dropped, as nginx drops them: X_User and X-User would both be HTTP_X_USER, and a client could put its own in place of one a middleware set.",
+          "type": "boolean"
         }
       },
       "required": [

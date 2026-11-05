@@ -2993,7 +2993,10 @@ A route's `handler` answers its requests: one of these, named by `module`, with 
 Answers requests from a FastCGI application, as PHP-FPM is, over a bounded pool of connections, streaming both ways.
 
 For PHP applications behind PHP-FPM, or any FastCGI application. `try_files` sends paths that are
-no script of their own to a front controller, as most PHP frameworks want.
+no script of their own to a front controller, as most PHP frameworks want. Request fields whose
+names hold an underscore are not passed on, as nginx leaves them out: `X_User` would be
+`HTTP_X_USER` as `X-User` is, and stand in for one a middleware set; `underscores_in_headers`
+passes them on.
 
 In a .conf file:
 
@@ -3054,6 +3057,7 @@ In JSON:
 | `response_idle_timeout` | duration | `"60s"` | How long the application may go silent in the middle of a response; 60s when left out. |
 | `timeout` | duration | `"10m"` | The most a whole exchange may take; 10m when left out. |
 | `idle_timeout` | duration | `"60s"` | How long an idle connection is kept; 60s when left out. |
+| `underscores_in_headers` | boolean |  | Pass on request fields whose names hold an underscore, as X_User, as HTTP_ parameters. Left out, they are dropped, as nginx drops them: X_User and X-User would both be HTTP_X_USER, and a client could put its own in place of one a middleware set. |
 | `max_header_bytes` | integer, 0 or more | `65536` | The most bytes the response's CGI header may take; past it the request is answered 502. 64 KiB when left out or 0. |
 
 <a id="http-handlers-forward_proxy"></a>

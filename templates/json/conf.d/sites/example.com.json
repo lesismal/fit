@@ -692,6 +692,12 @@
           // // duration, as "1.5s" or "2m"; default "60s".
           // "idle_timeout": "60s",
 
+          // // Pass on request fields whose names hold an underscore, as X_User, as HTTP_ parameters. Left
+          // // out, they are dropped, as nginx drops them: X_User and X-User would both be HTTP_X_USER, and
+          // // a client could put its own in place of one a middleware set.
+          // // boolean.
+          // "underscores_in_headers": true,
+
           // // The most bytes the response's CGI header may take; past it the request is answered 502. 64
           // // KiB when left out or 0.
           // // integer, 0 or more; default 65536.

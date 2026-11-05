@@ -501,6 +501,7 @@ window.FitSchemaZh = {
 "The most bytes a request's body may have.": "请求体可有的最大字节数。",
 "The most bytes a second relayed for one username each way, to peers and from them, with a second's worth of burst; datagrams past it are dropped. 2 MiB when left out or 0.": "同一用户名每个方向每秒中继的最大字节数，即发往对端和来自对端的，附带一秒量的突发；超出的数据报被丢弃。不设置或为 0 时为 2 MiB。",
 "The most bytes of spans waiting to be exported, besides the batch being sent; spans past it are dropped and counted. 4 MiB when left out or 0.": "除正在发送的批次外，等待导出的 span 的最大字节数；超出的 span 被丢弃并计数。不设置或为 0 时为 4 MiB。",
+"Pass on request fields whose names hold an underscore, as X_User, as HTTP_ parameters. Left out, they are dropped, as nginx drops them: X_User and X-User would both be HTTP_X_USER, and a client could put its own in place of one a middleware set.": "把名字含下划线的请求字段（如 X_User）作为 HTTP_ 参数传给应用。不设置时丢弃它们，与 nginx 相同：X_User 和 X-User 都会成为 HTTP_X_USER，客户端可借此顶替中间件设置的字段。",
 "The most bytes the response's CGI header may take; past it the request is answered 502. 64 KiB when left out or 0.": "响应的 CGI 头部可占的最大字节数；超过则请求得到 502。不设置或为 0 时为 64 KiB。",
 "The most bytes the zone keeps in memory, bodies, fields and keys counted; past it the least recently used responses go. 128 MiB when left out or 0. Caches of one zone take the size of the last one loaded.": "该区域在内存中保留的最大字节数，计入响应体、字段和键；超过则最近最少使用的响应被移除。不设置或为 0 时为 128 MiB。同一区域的多个缓存取最后加载的大小。",
 "The most bytes the zone keeps on disk; past it the least recently used responses go. 1 GiB when left out or 0.": "该区域在磁盘上保留的最大字节数；超过则最近最少使用的响应被移除。不设置或为 0 时为 1 GiB。",

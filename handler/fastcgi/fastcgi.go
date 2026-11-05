@@ -74,6 +74,7 @@ type FastCGI struct {
 	ResponseIdleTimeout   config.Duration   `json:"response_idle_timeout,omitempty" default:"\"60s\"" doc:"How long the application may go silent in the middle of a response; 60s when left out."`
 	Timeout               config.Duration   `json:"timeout,omitempty" default:"\"10m\"" doc:"The most a whole exchange may take; 10m when left out."`
 	IdleTimeout           config.Duration   `json:"idle_timeout,omitempty" default:"\"60s\"" doc:"How long an idle connection is kept; 60s when left out."`
+	UnderscoresInHeaders  bool              `json:"underscores_in_headers,omitempty" doc:"Pass on request fields whose names hold an underscore, as X_User, as HTTP_ parameters. Left out, they are dropped, as nginx drops them: X_User and X-User would both be HTTP_X_USER, and a client could put its own in place of one a middleware set."`
 	MaxHeaderBytes        int               `json:"max_header_bytes,omitempty" min:"0" default:"65536" doc:"The most bytes the response's CGI header may take; past it the request is answered 502. 64 KiB when left out or 0."`
 
 	pool  *pool

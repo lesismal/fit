@@ -60,8 +60,9 @@ func app(t *testing.T, network, addr string) *countingListener {
 				for _, k := range []string{"SCRIPT_FILENAME", "PATH_TRANSLATED", "DOCUMENT_ROOT", "REQUEST_SCHEME", "REDIRECT_STATUS", "APP_ENV"} {
 					fmt.Fprintf(w, "%s=%s\n", k, env[k])
 				}
-				fmt.Fprintf(w, "QUERY=%s\nMETHOD=%s\nURI=%s\nX_TEST=%s\nPROXY=%s\nREMOTE=%v\n",
-					r.URL.RawQuery, r.Method, r.URL.RequestURI(), r.Header.Get("X-Test"), r.Header.Get("Proxy"), r.RemoteAddr != "")
+				fmt.Fprintf(w, "QUERY=%s\nMETHOD=%s\nURI=%s\nX_TEST=%s\nPROXY=%s\nREMOTE=%v\nX_USER=%s\n",
+					r.URL.RawQuery, r.Method, r.URL.RequestURI(), r.Header.Get("X-Test"), r.Header.Get("Proxy"), r.RemoteAddr != "",
+					strings.Join(r.Header["X-User"], ","))
 			case "/echo.php":
 				body, _ := io.ReadAll(r.Body)
 				sum := sha256.Sum256(body)
@@ -168,6 +169,39 @@ func TestParams(t *testing.T) {
 		}
 		if resp.StatusCode != 200 || resp.Header.Get("X-Script") != "/env.php" {
 			t.Errorf("%s: %d %v", proto, resp.StatusCode, resp.Header)
+		}
+	}
+}
+
+// TestUnderscoreHeaders checks that a field whose name holds '_' does not
+// reach the application, as nginx leaves it out: X_User would be HTTP_X_USER
+// as X-User is, and take the place of an X-User an auth middleware set.
+func TestUnderscoreHeaders(t *testing.T) {
+	cl := app(t, "tcp", "127.0.0.1:0")
+	for _, tc := range []struct {
+		params string
+		header map[string]string
+		want   string
+	}{
+		{``, map[string]string{"X_User": "evil"}, "X_USER=\n"},
+		{``, map[string]string{"X-User": "alice", "X_User": "evil"}, "X_USER=alice\n"},
+		{`, "underscores_in_headers": false`, map[string]string{"X-User": "alice", "x_user": "evil"}, "X_USER=alice\n"},
+		{`, "underscores_in_headers": true`, map[string]string{"X_User": "evil"}, "X_USER=evil\n"},
+	} {
+		base := serve(t, `{"address": "`+cl.Addr().String()+`", "root": "/srv/www"`+tc.params+`}`)
+		for proto, c := range clients() {
+			// Several times, since the header map's order would let either
+			// field win some of the time.
+			for range 8 {
+				req, _ := stdhttp.NewRequest("GET", base+"/env.php", nil)
+				for k, v := range tc.header {
+					req.Header[k] = []string{v}
+				}
+				_, body := get(t, c, req)
+				if !strings.Contains(body, tc.want) {
+					t.Fatalf("%s %s %v: no %q in\n%s", proto, tc.params, tc.header, tc.want, body)
+				}
+			}
 		}
 	}
 }
