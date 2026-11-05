@@ -665,7 +665,9 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   sent only the room's latest state once it has taken the last, and is cut off past the timeout.
   The chat is bounded too: at most 64 messages a room, text and files together, the oldest dropped;
   at most 64 MiB of file bytes across the handler's rooms, past which the oldest file messages go,
-  their download then 404; and a watcher that cannot take a message at once queues at most 256
+  their download then 404; an upload is refused before its body is read when it names no member,
+  is larger than that or `max_file_bytes`, or does not fit in the 64 MiB the uploads under way in
+  the process may hold together (503, `Retry-After: 1`); and a watcher that cannot take a message at once queues at most 256
   events or 1 MiB, past which its stream ends, EventSource reconnecting and the history refilling
   it. Messages and file data are immutable once stored, and go with their room. Rooms belong to
   the handler's prefix on the engine and survive reloads; an event stream of a config swapped out

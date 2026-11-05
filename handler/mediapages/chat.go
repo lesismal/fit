@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -23,7 +24,7 @@ import (
 //
 // Everything is bounded: a text by max_message_bytes, a file by
 // max_file_bytes, a room by chatHistory messages, a hub's file bytes by
-// chatFileBytes, and what a watcher that does not take its events holds by
+// chatFileBytes, the uploads under way by chatUploadBytes, and what a watcher that does not take its events holds by
 // maxWatcherQueueEvents and maxWatcherQueueBytes, past which its stream is
 // cut. Nothing blocks a worker: the upload's body is gathered with readBody,
 // a download writes the stored slice with WriteResponse, and the hub's work
@@ -50,6 +51,30 @@ const (
 // is a package variable so that tests can lower it; adding a file past it
 // drops the oldest file messages, whose download then 404s.
 var chatFileBytes int64 = 64 << 20
+
+// chatUploadBytes is the most bytes of uploads under way that the process
+// holds at once, across every media_pages handler: an upload reserves its
+// Content-Length, or max_file_bytes without one, before its body is read,
+// and one that does not fit is answered 503. It is a package variable so
+// that tests can lower it.
+var chatUploadBytes int64 = 64 << 20
+
+// uploading is the bytes uploads under way have reserved.
+var uploading atomic.Int64
+
+// reserveUpload reserves n bytes of chatUploadBytes, reporting whether they
+// fit.
+func reserveUpload(n int64) bool {
+	for {
+		cur := uploading.Load()
+		if cur+n > chatUploadBytes {
+			return false
+		}
+		if uploading.CompareAndSwap(cur, cur+n) {
+			return true
+		}
+	}
+}
 
 // chatError is a chat request refused.
 type chatError struct {
@@ -162,6 +187,13 @@ func (h *hub) chat(roomN, name, key, text string) (*message, *chatError) {
 	h.mu.Unlock()
 	broadcastMessage(ws, msg)
 	return msg, nil
+}
+
+// isMember reports whether name and key are a member of room roomN.
+func (h *hub) isMember(roomN, name, key string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return chatMemberLocked(h.roomLocked(roomN, false), name, key) != nil
 }
 
 // file adds a file message from the member its name and key belong to. Adding
@@ -325,7 +357,12 @@ func (p *Pages) chat(c *fibhttp.Context, roomN string) {
 
 // upload answers a file message: the body is the file, its name is the file
 // query parameter, and it is from the member X-Fit-Member and
-// X-Fit-Room-Key name.
+// X-Fit-Room-Key name. Before a byte of the body is read, the member must be
+// one, the file must fit max_file_bytes and what the hub keeps by its
+// Content-Length, and its bytes must fit in chatUploadBytes, so that a
+// client that is no member, or many uploading at once, cannot make the
+// process hold their bodies; the member is checked again once it is all
+// here.
 func (p *Pages) upload(c *fibhttp.Context, roomN string) {
 	set := p.hub.set.Load()
 	name := sanitizeFileName(c.Request.URL.Query().Get("file"))
@@ -345,13 +382,73 @@ func (p *Pages) upload(c *fibhttp.Context, roomN string) {
 	if _, _, err := mime.ParseMediaType(ctype); err != nil {
 		ctype = "application/octet-stream"
 	}
-	readBodyN(c, set.maxFile, func(body []byte) {
+	if !p.hub.isMember(roomN, member, key) {
+		plain(c, errNoChatMember.status, errNoChatMember.msg, nil)
+		return
+	}
+	n := c.Request.ContentLength
+	if n < 0 {
+		n = set.maxFile
+	}
+	switch {
+	case n > set.maxFile:
+		plain(c, stdhttp.StatusRequestEntityTooLarge, "the body is too large", nil)
+		return
+	case n > chatFileBytes:
+		plain(c, errChatFull.status, errChatFull.msg, nil)
+		return
+	case !reserveUpload(n):
+		plain(c, stdhttp.StatusServiceUnavailable, "too many files are being uploaded; try again", stdhttp.Header{"Retry-After": {"1"}})
+		return
+	}
+	readUpload(c, n, func(body []byte) {
 		msg, e := p.hub.file(roomN, member, key, name, ctype, body)
 		if e != nil {
 			plain(c, e.status, e.msg, nil)
 			return
 		}
 		writeJSONBytes(c, stdhttp.StatusOK, msg.js, nil)
+	})
+}
+
+// readUpload gathers an upload's body of at most reserved bytes, which
+// reserveUpload reserved, calls done with it, and gives the reservation
+// back once the body is done with, read whole or not. The buffer never
+// grows past reserved: one of the Content-Length is made at once, and
+// without one it doubles up to reserved.
+func readUpload(c *fibhttp.Context, reserved int64, done func([]byte)) {
+	var buf []byte
+	if c.Request.ContentLength > 0 {
+		buf = make([]byte, 0, reserved)
+	}
+	finished := false
+	c.OnBody(func(data []byte, fin bool, err error) {
+		if finished {
+			return
+		}
+		if err != nil {
+			finished = true
+			uploading.Add(-reserved)
+			return
+		}
+		need := int64(len(buf)) + int64(len(data))
+		if need > reserved {
+			finished = true
+			uploading.Add(-reserved)
+			plain(c, stdhttp.StatusRequestEntityTooLarge, "the body is too large", nil)
+			return
+		}
+		if need > int64(cap(buf)) {
+			nb := make([]byte, len(buf), min(max(2*int64(cap(buf)), need, 64<<10), reserved))
+			copy(nb, buf)
+			buf = nb
+		}
+		buf = append(buf, data...)
+		if fin {
+			finished = true
+			done(buf)
+			uploading.Add(-reserved)
+		}
 	})
 }
 

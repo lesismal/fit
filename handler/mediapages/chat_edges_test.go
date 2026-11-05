@@ -1,6 +1,7 @@
 package mediapages
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/module"
 )
 
@@ -238,5 +240,97 @@ func TestStreamedBodies(t *testing.T) {
 	}
 	if got := fileBytesOf(t, h); got != 0 {
 		t.Fatalf("a broken upload stored %d bytes", got)
+	}
+}
+
+// openUpload starts an upload of a file of size bytes on a connection of its
+// own, sends sent bytes of it, and leaves the rest to come.
+func openUpload(t *testing.T, f *fit, room, hdr string, size, sent int) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(f.base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(waitTimeout))
+	head := fmt.Sprintf("POST /media/api/rooms/%s/files?file=a.bin HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n%s\r\n", room, size, hdr)
+	if _, err := conn.Write([]byte(head + strings.Repeat("f", sent))); err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+// statusLine reads the status line the server answers on conn.
+func statusLine(t *testing.T, conn net.Conn) string {
+	t.Helper()
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("no answer: %v", err)
+	}
+	return strings.TrimSpace(line)
+}
+
+// An upload is refused before its body is read: from no member, past what
+// the hub keeps, or past the bytes uploads under way may hold together,
+// which an upload cut midway gives back.
+func TestUploadRefusedBeforeBody(t *testing.T) {
+	oldUp := chatUploadBytes
+	chatUploadBytes = 3 << 20 / 2
+	t.Cleanup(func() { chatUploadBytes = oldUp })
+	f := startFit(t, conf(`{"max_file_bytes": 1048576}`))
+	h := hubOf(t, f)
+	ann := joinKey(t, f, "r", "ann", nil)
+	member := "X-Fit-Member: ann\r\nX-Fit-Room-Key: " + ann + "\r\n"
+
+	// A made-up member is told so once the listener hands the request on,
+	// at its stream threshold, without sending the rest of the 1 MiB.
+	sent := int(listener.StreamThreshold)
+	if got := statusLine(t, openUpload(t, f, "r", "X-Fit-Member: ann\r\nX-Fit-Room-Key: made-up\r\n", 1<<20, sent)); !strings.HasPrefix(got, "HTTP/1.1 404") {
+		t.Fatalf("an upload from no member: %q", got)
+	}
+	if got := statusLine(t, openUpload(t, f, "r", member, 1<<20+1, sent)); !strings.HasPrefix(got, "HTTP/1.1 413") {
+		t.Fatalf("an upload past max_file_bytes: %q", got)
+	}
+	if n := uploading.Load(); n != 0 {
+		t.Fatalf("refused uploads hold %d bytes", n)
+	}
+
+	// One slow upload holds its megabyte; a second one does not fit.
+	slow := openUpload(t, f, "r", member, 1<<20, sent)
+	deadline := time.Now().Add(waitTimeout)
+	for uploading.Load() != 1<<20 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the slow upload holds %d bytes", uploading.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := statusLine(t, openUpload(t, f, "r", member, 1<<20, sent)); !strings.HasPrefix(got, "HTTP/1.1 503") {
+		t.Fatalf("an upload past chatUploadBytes: %q", got)
+	}
+	// Cut midway, it gives its bytes back, and stores nothing.
+	_ = slow.Close()
+	for uploading.Load() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("a cut upload still holds %d bytes", uploading.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := fileBytesOf(t, h); got != 0 {
+		t.Fatalf("a cut upload stored %d bytes", got)
+	}
+	// A whole one, with or without a Content-Length, is stored, and gives
+	// its bytes back.
+	if resp, m := postFile(t, f, "r", "ann", ann, "a.txt", "text/plain", strings.Repeat("a", 200<<10), nil); resp.StatusCode != 200 || m.File == nil {
+		t.Fatalf("an upload: %d %+v", resp.StatusCode, m)
+	}
+	out := rawPost(t, f, "/media/api/rooms/r/files?file=b.bin", member+"Connection: close\r\n", []string{strings.Repeat("b", 70<<10), strings.Repeat("b", 70<<10)}, "0\r\n\r\n")
+	if !strings.HasPrefix(out, "HTTP/1.1 200") {
+		t.Fatalf("a chunked upload: %q", out)
+	}
+	if got := fileBytesOf(t, h); got != 200<<10+140<<10 {
+		t.Fatalf("stored %d bytes", got)
+	}
+	if n := uploading.Load(); n != 0 {
+		t.Fatalf("finished uploads hold %d bytes", n)
 	}
 }
