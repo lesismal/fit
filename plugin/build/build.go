@@ -52,6 +52,9 @@ func ParseModule(s string) (Module, error) {
 	switch {
 	case m.Path == "" || strings.ContainsAny(m.Path, " \t"):
 		return m, fmt.Errorf("-with %q: no module path", s)
+	case strings.HasPrefix(m.Path, "-") || strings.HasPrefix(m.Version, "-"):
+		// The go command would read it as a flag of its own.
+		return m, fmt.Errorf("-with %q: a module path or version starts with '-'", s)
 	case m.Dir != "" && m.Version != "":
 		return m, fmt.Errorf("-with %s: a version and a directory both", m.Path)
 	}
@@ -183,6 +186,9 @@ func Build(ctx context.Context, o Options) error {
 		return err
 	}
 	require := func(m Module) error {
+		if strings.HasPrefix(m.Path, "-") || strings.HasPrefix(m.Version, "-") {
+			return fmt.Errorf("module %q: a path or version starting with '-' would be a flag of the go command's", m.Path)
+		}
 		if m.Dir != "" {
 			abs, err := filepath.Abs(m.Dir)
 			if err != nil {

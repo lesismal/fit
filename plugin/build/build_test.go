@@ -28,7 +28,9 @@ func TestParseModule(t *testing.T) {
 			t.Errorf("%s: %+v %v", in, got, err)
 		}
 	}
-	for _, in := range []string{"", "@v1", "=dir", "example.com/m@v1=dir", "a b"} {
+	for _, in := range []string{"", "@v1", "=dir", "example.com/m@v1=dir", "a b",
+		// Flags of the go command's, as go get would read them.
+		"-modfile=/tmp/x", "-toolexec=/bin/sh", "example.com/m@-x"} {
 		if _, err := ParseModule(in); err == nil {
 			t.Errorf("%q: no error", in)
 		}
