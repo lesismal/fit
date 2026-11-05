@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">09 / Operations</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">Change config without a restart</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">Every change takes one path: build the whole new graph first, and swap only once it works.</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="75" cy="198" r="17" fill="#EAF0FF"/>
+<text x="75" y="203" font-family="PingFang SC" font-size="12" font-weight="600" fill="#2F6BFF" text-anchor="middle">1</text>
+<line x1="98" y1="198" x2="246" y2="198" stroke="#CBD6E8" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="102" y="194" font-family="PingFang SC" font-size="13" font-weight="600" fill="#0B1220">Validate</text>
+<text x="102" y="214" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">fit validate or the schema</text>
+<text x="102" y="229" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">fails: nothing changes.</text>
+<circle cx="292" cy="198" r="17" fill="#EAF0FF"/>
+<text x="292" y="203" font-family="PingFang SC" font-size="12" font-weight="600" fill="#2F6BFF" text-anchor="middle">2</text>
+<line x1="315" y1="198" x2="463" y2="198" stroke="#CBD6E8" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="319" y="194" font-family="PingFang SC" font-size="13" font-weight="600" fill="#0B1220">Provision</text>
+<text x="319" y="214" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">certs, health checks and</text>
+<text x="319" y="229" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">pools are all ready.</text>
+<circle cx="509" cy="198" r="17" fill="#EAF0FF"/>
+<text x="509" y="203" font-family="PingFang SC" font-size="12" font-weight="600" fill="#2F6BFF" text-anchor="middle">3</text>
+<line x1="532" y1="198" x2="680" y2="198" stroke="#CBD6E8" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="536" y="194" font-family="PingFang SC" font-size="13" font-weight="600" fill="#0B1220">Atomic swap</text>
+<text x="536" y="214" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">one pointer; new requests</text>
+<text x="536" y="229" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">take the new graph.</text>
+<circle cx="726" cy="198" r="17" fill="#EAF0FF"/>
+<text x="726" y="203" font-family="PingFang SC" font-size="12" font-weight="600" fill="#2F6BFF" text-anchor="middle">4</text>
+<text x="753" y="194" font-family="PingFang SC" font-size="13" font-weight="600" fill="#0B1220">Drain</text>
+<text x="753" y="214" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">in-flight requests finish,</text>
+<text x="753" y="229" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">then the graph is freed.</text>
+<rect x="56" y="282" width="848" height="54" rx="8" fill="#F1F5FF" stroke="#D6E2FF" stroke-width="1"/>
+<text x="76" y="315" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#2A3D5C">2,000 hot swaps / 6 seconds / 8 concurrent clients: about 337,000 requests and 32 long downloads, zero failures.</text>
+<rect x="56" y="356" width="266" height="120" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="78" y="384" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Admin API</text>
+<text x="78" y="404" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">GET / PUT / PATCH / DELETE /config; ETag</text>
+<text x="78" y="419" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">against lost updates; versions and rollback;</text>
+<text x="78" y="434" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">/config/effective shows the live config and</text>
+<text x="78" y="449" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">where each part came from.</text>
+<rect x="347" y="356" width="266" height="120" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="369" y="384" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Encrypted store</text>
+<text x="369" y="404" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">The config is encrypted in admin.store</text>
+<text x="369" y="419" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">(Argon2id + XChaCha20-Poly1305); fit store</text>
+<text x="369" y="434" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">export / import moves it.</text>
+<rect x="638" y="356" width="266" height="120" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="660" y="384" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Web console</text>
+<text x="660" y="404" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">Every setting editable behind a login, all</text>
+<text x="660" y="419" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">pages in one workbench; saved back to the</text>
+<text x="660" y="434" font-family="PingFang SC" font-size="10" font-weight="400" fill="#3B4A61">store through the same validation.</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · a reverse proxy, load balancer and API gateway built on fib</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">10 / 16</text>
+</svg>

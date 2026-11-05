@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">06 / Traffic policy</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">Policy, not scripts</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">Load balancing, health checks, resilience and admission are config fields — not Lua or plugins bolted on.</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="172" width="424" height="136" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="190" width="4" height="100" rx="2" fill="#2F6BFF"/>
+<text x="84" y="212" font-family="PingFang SC" font-size="15" font-weight="600" fill="#0B1220">Load balancing</text>
+<rect x="203.55" y="195" width="65.7" height="20" rx="10.0" fill="#EAF0FF"/><text x="212.55" y="209" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#2F6BFF">9 policies</text>
+<text x="84" y="242" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">Round robin · weighted · least connections · random · P2C ·</text>
+<text x="84" y="259" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">consistent hash by IP / URI / header / cookie · sticky cookie</text>
+<rect x="480" y="172" width="424" height="136" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="480" y="190" width="4" height="100" rx="2" fill="#0FA97A"/>
+<text x="508" y="212" font-family="PingFang SC" font-size="15" font-weight="600" fill="#0B1220">Health checks</text>
+<rect x="619.75" y="195" width="93.2" height="20" rx="10.0" fill="#E6F7F1"/><text x="628.75" y="209" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#0FA97A">active + passive</text>
+<text x="508" y="242" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">Active HTTP / TCP probes; passive max_fails and fail_timeout; a</text>
+<text x="508" y="259" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">failing backend leaves rotation and returns on its own.</text>
+<rect x="56" y="324" width="424" height="136" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="342" width="4" height="100" rx="2" fill="#C2740A"/>
+<text x="84" y="364" font-family="PingFang SC" font-size="15" font-weight="600" fill="#0B1220">Resilience</text>
+<rect x="175.65" y="347" width="138.7" height="20" rx="10.0" fill="#FDF3E3"/><text x="184.65" y="361" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#C2740A">retry · breaker · timeouts</text>
+<text x="84" y="394" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">Retries within a budget, a circuit breaker, connect / response / idle</text>
+<text x="84" y="411" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">timeouts; weighted mirroring and failover.</text>
+<rect x="480" y="324" width="424" height="136" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="480" y="342" width="4" height="100" rx="2" fill="#D93654"/>
+<text x="508" y="364" font-family="PingFang SC" font-size="15" font-weight="600" fill="#0B1220">Admission</text>
+<rect x="591.85" y="347" width="133.7" height="20" rx="10.0" fill="#FCE9ED"/><text x="600.85" y="361" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#D93654">rate · concurrency · size</text>
+<text x="508" y="394" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">Rate limits by client IP, header or route; concurrency caps, body and</text>
+<text x="508" y="411" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">connection limits, write-stall timeouts.</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · a reverse proxy, load balancer and API gateway built on fib</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">07 / 16</text>
+</svg>

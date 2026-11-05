@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#0A1020"/>
+<rect width="960" height="540" fill="#0A1020"/>
+<circle cx="770" cy="182" r="128" fill="#0E1730" opacity="0.55"/>
+<circle cx="770" cy="182" r="128" fill="none" stroke="#243554" stroke-width="1" opacity="0.8"/>
+<circle cx="770" cy="182" r="94" fill="none" stroke="#243554" stroke-width="1" opacity="0.8"/>
+<circle cx="770" cy="182" r="60" fill="none" stroke="#243554" stroke-width="1" opacity="0.8"/>
+<circle cx="770.0" cy="54.0" r="4" fill="#4D8DFF"/>
+<circle cx="880.9" cy="118.0" r="4" fill="#22D3EE"/>
+<circle cx="880.9" cy="246.0" r="4" fill="#4D8DFF"/>
+<circle cx="770.0" cy="310.0" r="4" fill="#0FA97A"/>
+<circle cx="659.1" cy="246.0" r="4" fill="#22D3EE"/>
+<circle cx="659.1" cy="118.0" r="4" fill="#D97706"/>
+<circle cx="770" cy="182" r="46" fill="#121C33" stroke="#2F6BFF" stroke-width="1.5"/>
+<text x="770" y="181" font-family="PingFang SC" font-size="21" font-weight="600" fill="#EAF1FF" text-anchor="middle">fib</text>
+<text x="770" y="200" font-family="PingFang SC" font-size="8.5" font-weight="400" fill="#7E92B4" text-anchor="middle">engine</text>
+<text x="72" y="92" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#4D8DFF">APACHE-2.0 · GO · FIB ENGINE</text>
+<text x="66" y="196" font-family="PingFang SC" font-size="96" font-weight="700" fill="#FFFFFF">fit</text>
+<rect x="74" y="212" width="56" height="4" rx="2" fill="#2F6BFF"/>
+<text x="72" y="250" font-family="PingFang SC" font-size="17" font-weight="400" fill="#C9D5EA">基于 fib 的反向代理、负载均衡与 API 网关</text>
+<text x="72" y="284" font-family="PingFang SC" font-size="12" font-weight="400" fill="#8C9DBB">小响应吞吐对齐 nginx，默认安全学 Caddy，概念模型学 Traefik；</text>
+<text x="72" y="304" font-family="PingFang SC" font-size="12" font-weight="400" fill="#8C9DBB">再补上它们都没有的 WebRTC、内建控制台、tunnel 与 LLM 共享。</text>
+<line x1="72" y1="324" x2="904" y2="324" stroke="#22304C" stroke-width="1"/>
+<circle cx="75" cy="354" r="2.8" fill="#4D8DFF"/>
+<text x="86" y="358" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">反向代理与负载均衡</text>
+<text x="86" y="375" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">9 种策略 · 主动与被动健康检查</text>
+<circle cx="352" cy="354" r="2.8" fill="#22D3EE"/>
+<text x="363" y="358" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">TLS 终结与自动 HTTPS</text>
+<text x="363" y="375" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">ACME 签发 · OCSP · mTLS · SNI</text>
+<circle cx="629" cy="354" r="2.8" fill="#0FA97A"/>
+<text x="640" y="358" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">静态文件与响应缓存</text>
+<text x="640" y="375" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">sendfile · 内存 + 磁盘两级缓存</text>
+<circle cx="75" cy="408" r="2.8" fill="#4D8DFF"/>
+<text x="86" y="412" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">API 网关治理</text>
+<text x="86" y="429" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">认证 · 限流 · 熔断 · 重写</text>
+<circle cx="352" cy="408" r="2.8" fill="#22D3EE"/>
+<text x="363" y="412" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">配置热更新，不重启</text>
+<text x="363" y="429" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">Admin API 原子换图，不中断在途请求</text>
+<circle cx="629" cy="408" r="2.8" fill="#0FA97A"/>
+<text x="640" y="412" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">Web 管理控制台</text>
+<text x="640" y="429" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">登录改全部配置 · 加密 store</text>
+<circle cx="75" cy="462" r="2.8" fill="#4D8DFF"/>
+<text x="86" y="466" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">WebRTC 与流媒体</text>
+<text x="86" y="483" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">TURN · WHIP/WHEP · 媒体服务器代理</text>
+<circle cx="352" cy="462" r="2.8" fill="#22D3EE"/>
+<text x="363" y="466" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">tunnel 与 LLM 共享</text>
+<text x="363" y="483" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">访问 NAT 后的服务 · 多机共享模型</text>
+<circle cx="629" cy="462" r="2.8" fill="#0FA97A"/>
+<text x="640" y="466" font-family="PingFang SC" font-size="12" font-weight="600" fill="#E9EFFA">多协议单端口</text>
+<text x="640" y="483" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#8296B8">HTTP · TLS · gRPC · SOCKS 按首字节分流</text>
+<text x="72" y="516" font-family="PingFang SC" font-size="10" font-weight="400" fill="#4F6182">github.com/lesismal/fit</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="10" font-weight="400" fill="#4F6182" text-anchor="end">v1.0.0 · Apache-2.0 · 2026.11</text>
+</svg>

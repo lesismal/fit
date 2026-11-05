@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">08 / Configuration</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">One strict config, three syntaxes</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">The same fields in every format, each typed and documented; a decode error names its path and position.</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="172" width="430" height="276" rx="10" fill="#0A1020" stroke="#1B2740" stroke-width="1"/>
+<text x="76" y="198" font-family="Menlo" font-size="9.5" font-weight="500" fill="#7E92B4">hello.conf</text>
+<circle cx="466" cy="194" r="2.6" fill="#2A3A5C"/>
+<circle cx="454" cy="194" r="2.6" fill="#2A3A5C"/>
+<circle cx="442" cy="194" r="2.6" fill="#2A3A5C"/>
+<line x1="56" y1="210" x2="486" y2="210" stroke="#1B2740" stroke-width="1"/>
+<text x="76" y="216" font-family="Menlo" font-size="10.5" font-weight="400" fill="#6FA8FF" xml:space="preserve">listener</text>
+<text x="126.4" y="216" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve"> web </text>
+<text x="157.9" y="216" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">{</text>
+<text x="76" y="232.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve">    address</text>
+<text x="145.3" y="232.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#7EE3B0" xml:space="preserve"> :8080</text>
+<text x="76" y="249" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve">    protocols</text>
+<text x="157.9" y="249" font-family="Menlo" font-size="10.5" font-weight="400" fill="#7EE3B0" xml:space="preserve"> http/1.1 h2c</text>
+<text x="76" y="265.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">}</text>
+<text x="76" y="298.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#6FA8FF" xml:space="preserve">route</text>
+<text x="107.5" y="298.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve"> hello </text>
+<text x="151.6" y="298.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">{</text>
+<text x="76" y="315" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve">    match </text>
+<text x="139" y="315" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">{</text>
+<text x="76" y="331.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve">        path</text>
+<text x="151.6" y="331.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#7EE3B0" xml:space="preserve"> /hello</text>
+<text x="76" y="348" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">    }</text>
+<text x="76" y="364.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#6FA8FF" xml:space="preserve">    handler</text>
+<text x="145.3" y="364.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve"> respond </text>
+<text x="202" y="364.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">{</text>
+<text x="76" y="381" font-family="Menlo" font-size="10.5" font-weight="400" fill="#C7D3E8" xml:space="preserve">        body</text>
+<text x="151.6" y="381" font-family="Menlo" font-size="10.5" font-weight="400" fill="#7EE3B0" xml:space="preserve"> "hello from fit\n"</text>
+<text x="76" y="397.5" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">    }</text>
+<text x="76" y="414" font-family="Menlo" font-size="10.5" font-weight="400" fill="#5D6F92" xml:space="preserve">}</text>
+<rect x="510" y="176" width="45.8" height="22" rx="11.0" fill="#2F6BFF"/><text x="521" y="191.4" font-family="PingFang SC" font-size="10" font-weight="500" fill="#FFFFFF">.conf</text>
+<rect x="563.8" y="176" width="47.2" height="22" rx="11.0" fill="#EAF0FF"/><text x="574.8" y="191.4" font-family="PingFang SC" font-size="10" font-weight="500" fill="#2F6BFF">YAML</text>
+<rect x="619" y="176" width="47.2" height="22" rx="11.0" fill="#EAF0FF"/><text x="630" y="191.4" font-family="PingFang SC" font-size="10" font-weight="500" fill="#2F6BFF">JSON</text>
+<text x="510" y="236" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Strict decoding</text>
+<text x="510" y="256" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">Unknown fields and wrong types fail with a path and a position; fit validate</text>
+<text x="510" y="271.5" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">checks without starting the server.</text>
+<text x="510" y="294" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">One schema</text>
+<text x="510" y="314" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">fit schema prints the JSON Schema that editor hints and the runtime check</text>
+<text x="510" y="329.5" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">share.</text>
+<text x="510" y="352" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Split it up</text>
+<text x="510" y="372" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">fit run -c base.conf -c conf.d merges files and directories in order.</text>
+<text x="510" y="410" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220">Migrate</text>
+<text x="510" y="430" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">fit adapt converts between .conf, YAML and JSON, reads nginx configs and</text>
+<text x="510" y="445.5" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#3B4A61">Caddyfiles, and lists what it could not convert.</text>
+<line x1="56" y1="474" x2="904" y2="474" stroke="#E3E9F2"/>
+<text x="56" y="496" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#6B7A90">SIGHUP or -watch reloads: listeners on unchanged addresses stay as they are; a bad config keeps the running one.</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · a reverse proxy, load balancer and API gateway built on fib</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">09 / 16</text>
+</svg>

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">13 / 现状</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">M0–M5 与 1.0 的迭代全部完成</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">每个里程碑都满足自己的退出标准；外部安全审计是 1.0 之前唯一的外部事项。</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="80" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">98.0%</text>
+<text x="80" y="266" font-family="PingFang SC" font-size="12" font-weight="600" fill="#0B1220">覆盖率门槛</text>
+<text x="80" y="288" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#6B7A90">race + fuzz 进 CI 门禁</text>
+<rect x="271" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="295" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">1,564</text>
+<text x="295" y="266" font-family="PingFang SC" font-size="12" font-weight="600" fill="#0B1220">测试函数</text>
+<text x="295" y="288" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#6B7A90">另有 11 个 fuzz 目标</text>
+<rect x="486" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="510" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">56</text>
+<text x="510" y="266" font-family="PingFang SC" font-size="12" font-weight="600" fill="#0B1220">可运行示例</text>
+<text x="510" y="288" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#6B7A90">三种格式各一份</text>
+<rect x="701" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="725" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">22</text>
+<text x="725" y="266" font-family="PingFang SC" font-size="12" font-weight="600" fill="#0B1220">内置模块</text>
+<text x="725" y="288" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#6B7A90">8 handler + 14 middleware</text>
+<rect x="56" y="348" width="87.2" height="24" rx="12.0" fill="#EDF1F7"/><text x="68" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">4 个 provider</text>
+<rect x="152.2" y="348" width="62.6" height="24" rx="12.0" fill="#EDF1F7"/><text x="164.2" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">9 个角色</text>
+<rect x="223.8" y="348" width="81.3" height="24" rx="12.0" fill="#EDF1F7"/><text x="235.8" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">16.4 万行 Go</text>
+<rect x="314.1" y="348" width="102.4" height="24" rx="12.0" fill="#EDF1F7"/><text x="326.1" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">21.1 MB 单二进制</text>
+<rect x="425.5" y="348" width="74.5" height="24" rx="12.0" fill="#EDF1F7"/><text x="437.5" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">Apache-2.0</text>
+<rect x="56" y="392" width="848" height="72" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="82" cy="420" r="4" fill="#0FA97A"/>
+<text x="94" y="424" font-family="PingFang SC" font-size="10" font-weight="600" fill="#6B7A90">已完成</text>
+<text x="82" y="444" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#0B1220">M0–M5 与 1.0 迭代全部完成</text>
+<circle cx="365" cy="420" r="4" fill="#C2740A"/>
+<text x="377" y="424" font-family="PingFang SC" font-size="10" font-weight="600" fill="#6B7A90">待办</text>
+<text x="365" y="444" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#0B1220">1.0 的外部安全审计（代码之外）</text>
+<circle cx="648" cy="420" r="4" fill="#2F6BFF"/>
+<text x="660" y="424" font-family="PingFang SC" font-size="10" font-weight="600" fill="#6B7A90">进行中</text>
+<text x="648" y="444" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#0B1220">P2P 与 VPN（fib 的 WebRTC/TURN 已就位）</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · 基于 fib 的反向代理、负载均衡与 API 网关</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">14 / 16</text>
+</svg>

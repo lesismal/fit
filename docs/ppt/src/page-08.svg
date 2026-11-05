@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">07 / 基准</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">在 nginx 的主场上与它打平</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">固定响应、HTTP/1.1、500 在途：fit 671,426 rps / p99 0.87 ms，nginx 668,401 rps / p99 2.09 ms。</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<text x="56" y="182" font-family="PingFang SC" font-size="10" font-weight="600" fill="#6B7A90">吞吐 · 请求/秒</text>
+<text x="120" y="215" font-family="PingFang SC" font-size="12" font-weight="600" fill="#0B1220" text-anchor="end">fit</text>
+<rect x="132" y="198" width="292.3" height="26" rx="4" fill="#2F6BFF"/>
+<text x="432.268" y="216" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#0B1220">671,426</text>
+<text x="120" y="259" font-family="PingFang SC" font-size="12" font-weight="400" fill="#6B7A90" text-anchor="end">nginx</text>
+<rect x="132" y="242" width="291.0" height="26" rx="4" fill="#AFC0DA"/>
+<text x="430.951" y="260" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#6B7A90">668,401</text>
+<text x="120" y="303" font-family="PingFang SC" font-size="12" font-weight="400" fill="#6B7A90" text-anchor="end">Envoy</text>
+<rect x="132" y="286" width="113.5" height="26" rx="4" fill="#C9D5E7"/>
+<text x="253.482" y="304" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#6B7A90">260,701</text>
+<text x="120" y="347" font-family="PingFang SC" font-size="12" font-weight="400" fill="#6B7A90" text-anchor="end">Caddy</text>
+<rect x="132" y="330" width="111.8" height="26" rx="4" fill="#C9D5E7"/>
+<text x="251.844" y="348" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#6B7A90">256,938</text>
+<text x="132" y="392" font-family="PingFang SC" font-size="10" font-weight="400" fill="#6B7A90">p99：fit 0.87 ms · nginx 2.09 ms · Envoy 2.32 ms · Caddy 9.81 ms</text>
+<rect x="500" y="172" width="404" height="232" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="520" y="198" font-family="PingFang SC" font-size="10" font-weight="600" fill="#6B7A90">更多读数</text>
+<text x="520" y="226" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#6B7A90">h2c 400×25</text>
+<text x="884" y="226" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220" text-anchor="end">3,450,552</text>
+<text x="884" y="242" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6" text-anchor="end">nginx 488,523</text>
+<line x1="520" y1="252" x2="884" y2="252" stroke="#EDF1F7" stroke-width="1"/>
+<text x="520" y="272" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#6B7A90">site HTTPS/1.1</text>
+<text x="884" y="272" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220" text-anchor="end">98,552</text>
+<text x="884" y="288" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6" text-anchor="end">nginx 81,462（+21%）</text>
+<line x1="520" y1="298" x2="884" y2="298" stroke="#EDF1F7" stroke-width="1"/>
+<text x="520" y="318" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#6B7A90">proxy-download 1 MiB</text>
+<text x="884" y="318" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220" text-anchor="end">14,411</text>
+<text x="884" y="334" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6" text-anchor="end">nginx 5,105</text>
+<line x1="520" y1="344" x2="884" y2="344" stroke="#EDF1F7" stroke-width="1"/>
+<text x="520" y="364" font-family="PingFang SC" font-size="10.5" font-weight="400" fill="#6B7A90">40,000 空闲 TLS 内存</text>
+<text x="884" y="364" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#0B1220" text-anchor="end">475 MiB</text>
+<text x="884" y="380" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6" text-anchor="end">nginx 1,305 MiB</text>
+<text x="56" y="428" font-family="PingFang SC" font-size="9" font-weight="400" fill="#A6B3C6">环境：AMD Ryzen 7 7800X3D（16 CPU）· Ubuntu 24.04 · nginx 1.31.4 / Caddy 2.10.2 / Traefik 3.5.0；</text>
+<text x="56" y="444" font-family="PingFang SC" font-size="9" font-weight="400" fill="#A6B3C6">单机回环，服务器 6 CPU，压测机 Linux host 网络；数据：bench/results/plan-2026-10-30。</text>
+<text x="56" y="466" font-family="PingFang SC" font-size="9" font-weight="500" fill="#C2740A">诚实读数：代理到后端的 API 场景仍在 nginx 的 66–78%，40k 空闲连接吞吐也低于 nginx。</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · 基于 fib 的反向代理、负载均衡与 API 网关</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">08 / 16</text>
+</svg>

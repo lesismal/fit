@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">01 / 背景</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">三者的长处，恰好是另一方的短处</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">nginx、Caddy、Traefik 各自把一件事做到极致，也各自留下了明显的缺口。</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="172" width="266" height="268" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="83" cy="210" r="5" fill="#0891B2"/>
+<text x="98" y="218" font-family="PingFang SC" font-size="20" font-weight="600" fill="#0B1220">nginx</text>
+<text x="98" y="236" font-family="PingFang SC" font-size="9" font-weight="500" fill="#6B7A90">NGINX · 2004 · C</text>
+<line x1="80" y1="252" x2="298" y2="252" stroke="#E3E9F2" stroke-width="1"/>
+<text x="80" y="274" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#0FA97A">强项</text>
+<circle cx="83" cy="288" r="2.4" fill="#0FA97A"/>
+<text x="94" y="292" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">事件循环与回调模型</text>
+<circle cx="83" cy="308" r="2.4" fill="#0FA97A"/>
+<text x="94" y="312" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">静态文件与缓存最强</text>
+<circle cx="83" cy="328" r="2.4" fill="#0FA97A"/>
+<text x="94" y="332" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">空闲连接占用极低</text>
+<text x="80" y="366" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#D93654">缺口</text>
+<circle cx="83" cy="380" r="2.4" fill="#D93654"/>
+<text x="94" y="384" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">配置是自研 DSL，难校验</text>
+<circle cx="83" cy="400" r="2.4" fill="#D93654"/>
+<text x="94" y="404" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">改配置要 reload 进程</text>
+<circle cx="83" cy="420" r="2.4" fill="#D93654"/>
+<text x="94" y="424" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">自动 HTTPS 等能力要 Plus</text>
+<rect x="347" y="172" width="266" height="268" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="374" cy="210" r="5" fill="#2F6BFF"/>
+<text x="389" y="218" font-family="PingFang SC" font-size="20" font-weight="600" fill="#0B1220">Caddy</text>
+<text x="389" y="236" font-family="PingFang SC" font-size="9" font-weight="500" fill="#6B7A90">CADDY · 2015 · GO</text>
+<line x1="371" y1="252" x2="589" y2="252" stroke="#E3E9F2" stroke-width="1"/>
+<text x="371" y="274" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#0FA97A">强项</text>
+<circle cx="374" cy="288" r="2.4" fill="#0FA97A"/>
+<text x="385" y="292" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">默认 HTTPS，开箱即用</text>
+<circle cx="374" cy="308" r="2.4" fill="#0FA97A"/>
+<text x="385" y="312" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">严格可编程的 JSON 配置</text>
+<circle cx="374" cy="328" r="2.4" fill="#0FA97A"/>
+<text x="385" y="332" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">原子替换的 Admin API</text>
+<text x="371" y="366" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#D93654">缺口</text>
+<circle cx="374" cy="380" r="2.4" fill="#D93654"/>
+<text x="385" y="384" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">每连接一个 goroutine</text>
+<circle cx="374" cy="400" r="2.4" fill="#D93654"/>
+<text x="385" y="404" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">高并发下内存与 GC 开销大</text>
+<circle cx="374" cy="420" r="2.4" fill="#D93654"/>
+<text x="385" y="424" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">缓存、限流、四层靠插件</text>
+<rect x="638" y="172" width="266" height="268" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="665" cy="210" r="5" fill="#7C5CFC"/>
+<text x="680" y="218" font-family="PingFang SC" font-size="20" font-weight="600" fill="#0B1220">Traefik</text>
+<text x="680" y="236" font-family="PingFang SC" font-size="9" font-weight="500" fill="#6B7A90">TRAEFIK · 2016 · GO</text>
+<line x1="662" y1="252" x2="880" y2="252" stroke="#E3E9F2" stroke-width="1"/>
+<text x="662" y="274" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#0FA97A">强项</text>
+<circle cx="665" cy="288" r="2.4" fill="#0FA97A"/>
+<text x="676" y="292" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">provider 驱动，容器与 K8s 原生</text>
+<circle cx="665" cy="308" r="2.4" fill="#0FA97A"/>
+<text x="676" y="312" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">内置面板、指标与追踪</text>
+<circle cx="665" cy="328" r="2.4" fill="#0FA97A"/>
+<text x="676" y="332" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#22304A">清晰的四层概念模型</text>
+<text x="662" y="366" font-family="PingFang SC" font-size="9.5" font-weight="600" fill="#D93654">缺口</text>
+<circle cx="665" cy="380" r="2.4" fill="#D93654"/>
+<text x="676" y="384" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">通常是三者中最慢、最重</text>
+<circle cx="665" cy="400" r="2.4" fill="#D93654"/>
+<text x="676" y="404" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">不是 Web 服务器：无静态文件</text>
+<circle cx="665" cy="420" r="2.4" fill="#D93654"/>
+<text x="676" y="424" font-family="PingFang SC" font-size="11.5" font-weight="400" fill="#3B4A61">没有内置响应缓存</text>
+<rect x="56" y="456" width="848" height="42" rx="8" fill="#0B1220"/>
+<text x="76" y="483" font-family="PingFang SC" font-size="12.5" font-weight="600" fill="#6FA8FF">fit 的选择：</text>
+<text x="160" y="483" font-family="PingFang SC" font-size="12.5" font-weight="400" fill="#C9D5EA">把三者最擅长的部分放进同一套数据面，再用 fib 补上它们共同的短板。</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · 基于 fib 的反向代理、负载均衡与 API 网关</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">02 / 16</text>
+</svg>

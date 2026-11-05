@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">11 / 同一引擎上的其它角色</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">网关之外，还是媒体服务器、隧道与模型网关</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">不用再部署第二套服务：这些角色与网关共用 listener、配置与热重载。</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="176" width="848" height="84" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="190" width="4" height="56" rx="2" fill="#0891B2"/>
+<text x="84" y="214" font-family="PingFang SC" font-size="19" font-weight="600" fill="#0B1220">WebRTC</text>
+<text x="84" y="234" font-family="PingFang SC" font-size="7.5" font-weight="600" fill="#6B7A90">WEBRTC · MEDIA</text>
+<text x="280" y="208" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">TURN 服务器（UDP / TCP / TLS）+ 以 fit 为媒体服务器的 WHIP / WHEP + 单 UDP 端口代理其它媒体服务器。</text>
+<rect x="280" y="232" width="40.7" height="19" rx="9.5" fill="#F1F5F9"/><text x="289" y="245.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0891B2">TURN</text>
+<rect x="327.68" y="232" width="73.7" height="19" rx="9.5" fill="#F1F5F9"/><text x="336.68" y="245.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0891B2">WHIP / WHEP</text>
+<rect x="408.39" y="232" width="74.5" height="19" rx="9.5" fill="#F1F5F9"/><text x="417.39" y="245.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0891B2">webrtc_proxy</text>
+<rect x="56" y="268" width="848" height="84" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="282" width="4" height="56" rx="2" fill="#2F6BFF"/>
+<text x="84" y="306" font-family="PingFang SC" font-size="19" font-weight="600" fill="#0B1220">tunnel</text>
+<text x="84" y="326" font-family="PingFang SC" font-size="7.5" font-weight="600" fill="#6B7A90">TUNNEL · REACH BEHIND NAT</text>
+<text x="280" y="300" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">hub / node / proxy 三角色，走 TCP、WebSocket 或 QUIC 链路，把 NAT 后的服务安全暴露到边缘。</text>
+<rect x="280" y="324" width="35.0" height="19" rx="9.5" fill="#F1F5F9"/><text x="289" y="337.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#2F6BFF">TCP</text>
+<rect x="322.01" y="324" width="62.1" height="19" rx="9.5" fill="#F1F5F9"/><text x="331.01" y="337.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#2F6BFF">WebSocket</text>
+<rect x="391.11" y="324" width="40.7" height="19" rx="9.5" fill="#F1F5F9"/><text x="400.11" y="337.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#2F6BFF">QUIC</text>
+<rect x="56" y="360" width="848" height="84" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="374" width="4" height="56" rx="2" fill="#0FA97A"/>
+<text x="84" y="398" font-family="PingFang SC" font-size="19" font-weight="600" fill="#0B1220">LLM</text>
+<text x="84" y="418" font-family="PingFang SC" font-size="7.5" font-weight="600" fill="#6B7A90">LLM · SHARE MODELS</text>
+<text x="280" y="392" font-family="PingFang SC" font-size="11" font-weight="400" fill="#3B4A61">hub / node / proxy 在机器间共享模型，向 agent 提供 OpenAI、Anthropic、Gemini、Ollama、Cohere 兼容接口。</text>
+<rect x="280" y="416" width="69.8" height="19" rx="9.5" fill="#F1F5F9"/><text x="289" y="429.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0FA97A">OpenAI 兼容</text>
+<rect x="356.75" y="416" width="61.1" height="19" rx="9.5" fill="#F1F5F9"/><text x="365.75" y="429.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0FA97A">Anthropic</text>
+<rect x="424.86" y="416" width="47.1" height="19" rx="9.5" fill="#F1F5F9"/><text x="433.86" y="429.3" font-family="PingFang SC" font-size="9" font-weight="500" fill="#0FA97A">Ollama</text>
+<text x="56" y="486" font-family="PingFang SC" font-size="11" font-weight="400" fill="#6B7A90">一条配置、一个二进制、一套引擎；控制台里按角色分别开关。</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · 基于 fib 的反向代理、负载均衡与 API 网关</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">12 / 16</text>
+</svg>

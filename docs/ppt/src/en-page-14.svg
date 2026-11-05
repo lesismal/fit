@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+<rect width="960" height="540" fill="#F7F9FC"/>
+<rect x="56" y="42" width="18" height="3" rx="1.5" fill="#2F6BFF"/>
+<text x="82" y="52" font-family="PingFang SC" font-size="10.5" font-weight="500" fill="#6B7A90">13 / Status</text>
+<text x="56" y="96" font-family="PingFang SC" font-size="32" font-weight="600" fill="#0B1220">Every milestone through 1.0 is done</text>
+<text x="56" y="126" font-family="PingFang SC" font-size="14" font-weight="400" fill="#3B4A61">Each milestone met its exit criteria; the external security audit is the only thing left before 1.0.</text>
+<line x1="56" y1="150" x2="904" y2="150" stroke="#E3E9F2" stroke-width="1"/>
+<rect x="56" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="80" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">98.0%</text>
+<text x="80" y="266" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#0B1220">coverage floor</text>
+<text x="80" y="288" font-family="PingFang SC" font-size="9" font-weight="400" fill="#6B7A90">race + fuzz gate CI</text>
+<rect x="271" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="295" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">1,564</text>
+<text x="295" y="266" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#0B1220">test functions</text>
+<text x="295" y="288" font-family="PingFang SC" font-size="9" font-weight="400" fill="#6B7A90">plus 11 fuzz targets</text>
+<rect x="486" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="510" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">56</text>
+<text x="510" y="266" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#0B1220">runnable examples</text>
+<text x="510" y="288" font-family="PingFang SC" font-size="9" font-weight="400" fill="#6B7A90">every feature, three formats</text>
+<rect x="701" y="172" width="200" height="152" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<text x="725" y="234" font-family="PingFang SC" font-size="38" font-weight="700" fill="#2F6BFF">22</text>
+<text x="725" y="266" font-family="PingFang SC" font-size="11.5" font-weight="600" fill="#0B1220">built-in modules</text>
+<text x="725" y="288" font-family="PingFang SC" font-size="9" font-weight="400" fill="#6B7A90">8 handlers + 14 middleware</text>
+<rect x="56" y="348" width="79.4" height="24" rx="12.0" fill="#EDF1F7"/><text x="68" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">4 providers</text>
+<rect x="144.4" y="348" width="58.6" height="24" rx="12.0" fill="#EDF1F7"/><text x="156.4" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">9 roles</text>
+<rect x="212" y="348" width="102.9" height="24" rx="12.0" fill="#EDF1F7"/><text x="224" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">164k lines of Go</text>
+<rect x="323.9" y="348" width="93.6" height="24" rx="12.0" fill="#EDF1F7"/><text x="335.9" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">21.1 MB binary</text>
+<rect x="426.5" y="348" width="74.5" height="24" rx="12.0" fill="#EDF1F7"/><text x="438.5" y="364.8" font-family="PingFang SC" font-size="10" font-weight="500" fill="#46536B">Apache-2.0</text>
+<rect x="56" y="392" width="848" height="72" rx="10" fill="#FFFFFF" stroke="#E3E9F2" stroke-width="1"/>
+<circle cx="82" cy="420" r="4" fill="#0FA97A"/>
+<text x="94" y="424" font-family="PingFang SC" font-size="8.5" font-weight="600" fill="#6B7A90">DONE</text>
+<text x="82" y="444" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#0B1220">M0–M5 and every 1.0 iteration</text>
+<circle cx="365" cy="420" r="4" fill="#C2740A"/>
+<text x="377" y="424" font-family="PingFang SC" font-size="8.5" font-weight="600" fill="#6B7A90">TO DO</text>
+<text x="365" y="444" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#0B1220">1.0's external security audit (outside the code)</text>
+<circle cx="648" cy="420" r="4" fill="#2F6BFF"/>
+<text x="660" y="424" font-family="PingFang SC" font-size="8.5" font-weight="600" fill="#6B7A90">IN PROGRESS</text>
+<text x="648" y="444" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#0B1220">P2P and VPN (fib's WebRTC/TURN is in place)</text>
+<text x="56" y="516" font-family="PingFang SC" font-size="9.5" font-weight="400" fill="#A6B3C6">fit · a reverse proxy, load balancer and API gateway built on fib</text>
+<text x="904" y="516" font-family="PingFang SC" font-size="9.5" font-weight="500" fill="#A6B3C6" text-anchor="end">14 / 16</text>
+</svg>
