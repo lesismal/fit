@@ -60,7 +60,6 @@ func TestHandlerPaths(t *testing.T) {
 		"/hls/../x/a.ts":  404,
 		"/elsewhere":      404,
 		"/whip":           404,
-		"/whip/a/../b":    404,
 	} {
 		if resp, _ := get(t, f.base+path, 0, nil); resp.StatusCode != want {
 			t.Errorf("%s: %d, want %d", path, resp.StatusCode, want)

@@ -12,6 +12,16 @@ A request no route takes is answered 404. A `match` field left out matches every
 takes exact paths and prefixes ending in `*`; `expr` combines matchers with `&&`, `||`, `!` and
 parentheses, as in `Host("a.example") && (PathPrefix("/api/") || Method("POST"))`.
 
+The path is made canonical before any route sees it, and the route's middleware and handler get
+the same one: the path a proxy forwards, forward_auth's `X-Forwarded-Uri`, a FastCGI script's
+`REQUEST_URI` and the access log's. Its dot-segments are removed (`/a/./b/../c` is `/a/c`, `%2E`
+counting as `.`), and repeated slashes are one (`//a` is `/a`), so `/x/../admin` takes the routes
+of `/admin`. A path whose `..` climbs above `/` is answered 400. `%2F` and `%5C` stay as they
+came, inside their segment, but a path in which one, decoded, makes an empty or dot-segment
+(`/a%2F..%2Fadmin`, `/%2Fadmin`), and one with such a segment around a `\`, is answered 400.
+Case and `;` are kept as they are, as nginx keeps them: a backend that matches paths without case,
+or drops `;` parameters (`/admin;x`), should be guarded by routes that do too.
+
 The middleware and handler of a route are modules, named by `module`, with their `params`; the
 [Handlers](#handlers) and [Middleware](#middleware) chapters list every one. In a `.conf` file,
 a `site` writes the routes of its host names together: each `route` in it takes the site's hosts

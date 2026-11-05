@@ -732,7 +732,10 @@ func (d *dispatcher) announceH3() {
 
 func (d *dispatcher) setAltSvc(value string) { d.altSvc.Store(&[]string{value}) }
 
-var notFound = []byte("404 page not found\n")
+var (
+	notFound       = []byte("404 page not found\n")
+	badRequestPath = []byte("400 bad request path\n")
+)
 
 func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	g := d.rt.Current()
@@ -741,7 +744,10 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	defer g.Release()
-	if g.ACME != nil && c.Request.TLS == nil && strings.HasPrefix(c.Request.URL.Path, tlsmgr.ACMEChallengePrefix) {
+	// The routes, the ACME challenges and every handler go by the
+	// canonical path; a path that has none is answered 400 below.
+	badPath := !canonicalize(c.Request)
+	if !badPath && g.ACME != nil && c.Request.TLS == nil && strings.HasPrefix(c.Request.URL.Path, tlsmgr.ACMEChallengePrefix) {
 		// The CA checks an HTTP-01 challenge in the clear; the answer is in
 		// memory. Without a shared storage, a token with no challenge under
 		// way goes to the routes.
@@ -774,7 +780,9 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	redirect := 0
 	if l := d.listener(g); l != nil {
 		redirect = l.RedirectHTTPS
-		route, _ = l.Router.Match(c.Request)
+		if !badPath {
+			route, _ = l.Router.Match(c.Request)
+		}
 		metrics = l.RequestMetrics(route)
 	}
 	// inline is the metrics of a request answered before its handler
@@ -802,6 +810,8 @@ func (d *dispatcher) ServeHTTP(c *fibhttp.Context) {
 	switch {
 	case route != nil:
 		route.Handler.ServeHTTP(c)
+	case badPath:
+		_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badRequestPath)
 	case redirect != 0:
 		redirectHTTPS(c, redirect)
 	default:
