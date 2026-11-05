@@ -12,6 +12,7 @@ package store
 
 import (
 	"bytes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -70,10 +71,14 @@ type Params struct {
 var DefaultParams = Params{Time: 3, MemoryKiB: 64 << 10, Threads: 4}
 
 // The bounds on what a store's header may ask for, so that a file made to
-// be expensive cannot make fit spend more than this deriving its key.
+// be expensive cannot make fit spend more than this deriving its key: four
+// times DefaultParams' memory and passes at most, and as many threads. A
+// header asking for less than DefaultParams is refused too, so that a file
+// made cheap cannot make the store's next write as cheap to guess at.
 const (
-	maxTime      = 16
-	maxMemoryKiB = 1 << 20 // 1 GiB
+	maxTime      = 12
+	maxMemoryKiB = 256 << 10 // 256 MiB
+	maxThreads   = 16
 )
 
 // MaxBytes is the largest store opened.
@@ -95,10 +100,7 @@ type Store struct {
 	password string // for a file another store wrote, with a salt of its own
 	params   Params
 	salt     [saltLen]byte
-	aead     interface {
-		Seal(dst, nonce, plaintext, additionalData []byte) []byte
-		Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error)
-	}
+	aead     cipher.AEAD
 	// data is the base config last read or written, and users the console
 	// users kept beside it; SetUsers seals data again with new users, and
 	// Write keeps the old ones.
@@ -140,7 +142,7 @@ func Create(path, password string) (*Store, error) {
 	if _, err := rand.Read(s.salt[:]); err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
-	s.derive()
+	s.aead = derive(password, s.salt, s.params)
 	return s, nil
 }
 
@@ -160,17 +162,19 @@ func (s *Store) Read() ([]byte, error) {
 
 // open opens file, a store's whole file, deriving its key unless it is the
 // one s has, and returns what it holds: the base config, the users being
-// remembered in s.
+// remembered in s. The header's settings, salt and key become the store's,
+// which its next Write seals with, only once the file has opened with them:
+// a header changed by someone without the password changes nothing.
 func (s *Store) open(file []byte) ([]byte, error) {
 	h, err := parseHeader(s.path, file)
 	if err != nil {
 		return nil, err
 	}
-	if s.aead == nil || h.params != s.params || h.salt != s.salt {
-		s.params, s.salt = h.params, h.salt
-		s.derive()
+	aead := s.aead
+	if aead == nil || h.params != s.params || h.salt != s.salt {
+		aead = derive(s.password, h.salt, h.params)
 	}
-	plaintext, err := s.aead.Open(nil, file[saltOffset+saltLen:headerLen], file[headerLen:], file[:headerLen])
+	plaintext, err := aead.Open(nil, file[saltOffset+saltLen:headerLen], file[headerLen:], file[:headerLen])
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrOpen, s.path)
 	}
@@ -178,6 +182,7 @@ func (s *Store) open(file []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.params, s.salt, s.aead = h.params, h.salt, aead
 	s.data, s.users = data, users
 	return data, nil
 }
@@ -255,17 +260,21 @@ func parseHeader(path string, file []byte) (h header, err error) {
 	}
 	h.version = b[0]
 	h.params = Params{Time: binary.BigEndian.Uint32(b[2:]), MemoryKiB: binary.BigEndian.Uint32(b[6:]), Threads: b[10]}
-	if h.params.Time == 0 || h.params.Time > maxTime || h.params.Threads == 0 || h.params.MemoryKiB < 8*uint32(h.params.Threads) || h.params.MemoryKiB > maxMemoryKiB {
-		return h, fmt.Errorf("store: %s asks for Argon2id time %d, %d KiB and %d threads, past what fit takes", path, h.params.Time, h.params.MemoryKiB, h.params.Threads)
+	if p := h.params; p.Time < DefaultParams.Time || p.MemoryKiB < DefaultParams.MemoryKiB || p.Threads == 0 || p.MemoryKiB < 8*uint32(p.Threads) ||
+		p.Time > maxTime || p.MemoryKiB > maxMemoryKiB || p.Threads > maxThreads {
+		return h, fmt.Errorf("store: %s asks for Argon2id time %d, %d KiB and %d threads, which fit does not take: from time %d and %d KiB to time %d, %d KiB and %d threads",
+			path, p.Time, p.MemoryKiB, p.Threads, DefaultParams.Time, DefaultParams.MemoryKiB, maxTime, maxMemoryKiB, maxThreads)
 	}
 	copy(h.salt[:], file[saltOffset:])
 	return h, nil
 }
 
-func (s *Store) derive() {
-	key := argon2.IDKey([]byte(s.password), s.salt[:], s.params.Time, s.params.MemoryKiB, s.params.Threads, chacha20poly1305.KeySize)
-	s.aead, _ = chacha20poly1305.NewX(key) // the key is the right size
+// derive returns the AEAD of the key password gives with salt and params.
+func derive(password string, salt [saltLen]byte, params Params) cipher.AEAD {
+	key := argon2.IDKey([]byte(password), salt[:], params.Time, params.MemoryKiB, params.Threads, chacha20poly1305.KeySize)
+	aead, _ := chacha20poly1305.NewX(key) // the key is the right size
 	clear(key)
+	return aead
 }
 
 // Path returns the store's file.
