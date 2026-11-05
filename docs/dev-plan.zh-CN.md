@@ -109,7 +109,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 
 ## 索引
 
-状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I160。
+状态：`todo`、`doing` 或 `done`。下一个可用的迭代编号是 I162。
 
 | ID | 迭代 | 依赖 | 状态 |
 | --- | --- | --- | --- |
@@ -309,6 +309,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I158 | 让 fib v1.7.1 的 HTTP/2 请求检查开销尽可能低：fit 的 `fixed` 和 `static` 在 h2c 上回到与 fib `5c0e5b9` 噪声内的水平（2026-11-05 为 −2.4% 和 −1.7%），检查全部保留 | — | todo |
 | **Agent 与隧道（续）** | | | |
 | I159 | 为隧道与 LLM 功能的 mesh 派发 token：监听方生成、列出、设置过期与吊销 token，任何角色都可用 token 代替共享密码，每个 token 是独立凭据，可设有效期；对端无需知道长期密码，没有对所有部署都通用的猜测表，也不会因为知道某个角色的密码就能冒充另一个成员 | I106, I113 | todo |
+| I160 | 隧道与 LLM mesh 的 TLS（2026-11-06 审查所得）：链路的证书选项与地址分开传递，地址中的任何内容都不能覆盖 pin；非 loopback 时拒绝 `quic_insecure`；没有 store 时自签证书在重启后保留；LLM 监听的证书文件变化时重新加载 | I159 | todo |
+| I161 | Admin API 与控制台的未认证连接，以及 Windows 与大小写不敏感文件系统上的文件名（2026-11-06 审查所得）：写与读同样受限，为已认证客户端保留连接位；fastcgi 像 static 一样拒绝反斜杠；换了大小写的扩展名不会以源码形式返回 | — | todo |
 
 ## M0 基础
 
@@ -2202,6 +2204,48 @@ fit 自身的日志和访问日志都会写文件，而今天的文件只打开�
   过期与吊销在页面、Admin API 和 CLI 中都可用并有日志；token 密钥只显示一次、只以哈希保存；握手证明绑定双方 nonce 与方向，
   反射或重放的证明被拒绝；共享密码仍能连接并给出警告；中英文文档说明 token 与升级方法；在竞态检测下通过。
 - **涉及**：`tunnel/...`、`llm/...`、`config`、`admin`、`app`、`cli`、`schema`、`docs`。
+
+### I160 审查后的隧道与 LLM mesh 的 TLS
+
+- **原因**：对 2026-11-06 新增 TLS（fit `3622aee1`、`6bd2c39c`、`fc685c08`）的独立审查确认证书固定与握手本身没有问题，但发现：
+  - **端点地址中的片段可以覆盖其 pin（Medium）。** `checkTunnelEndpoint`（`config/tunnel.go`）拒绝地址带查询串，却不拒绝
+    `#fragment`；`uplink.Dials` 以字符串方式在地址后拼接 `?pin=…`，而 `TLSClientConfig` 以及 quic 与 ws 的拨号都在第一个 `?`
+    处切分，这个 `?` 可能位于片段中。于是在配置了 hub 真实 pin 的情况下，`tls://hub:7000#?pin=<其他>&` 会连到另一张证书；
+    `quic://hub:7000#?insecure=1&` 会关闭 quic 的校验；`#?ca=/path&` 会替换 CA；`tls://hub:443#?x=` 会丢掉 pin 而改用系统根证书。
+    hub 与 node 的页面会原样传递端点地址（`EndpointReq.address()`），因此能填写端点或把端点交给运维粘贴的人都能利用。已在
+    tls、wss 与 quic 上证实。
+  - **非 loopback 时接受 `quic_insecure`（Low）**，这正是新规则对 tcp 与 ws 所拒绝的“hub 未经认证”的情形。
+  - **不算缺陷，但一并修复：** 没有 `admin.store` 时，hub 的自签证书每次启动都重新生成，对端的 pin 因此失效；LLM 监听的
+    `cert_file` 只在启动时读取，磁盘上轮换的密钥需要重启才生效。
+- **做**：把链路的证书选项（pin、CA、insecure）以 `ClientOptions` 传给传输层的 Dial，不再放进地址；用 `net/url` 构造与解析拨号
+  URL；在校验与页面 API 中拒绝端点地址里的片段、userinfo、`?` 或 `#`；非 loopback 且未设置 `body_password` 时拒绝
+  `quic_insecure`；没有 store 时把自签证书保存在配置目录（0600）；LLM 监听的证书文件变化时重新加载，与隧道 hub 的监听一致。
+- **完成标准**：审查中 tls、wss 与 quic 的片段攻击在校验中被拒绝，且直接交给 Dial 时也无法改变 hub 证书的校验方式；
+  非 loopback 的 `quic_insecure` 被拒绝并给出清楚的错误；没有 store 的 hub 重启后指纹不变；LLM 监听无需重启即可使用轮换的
+  证书；中英文文档说明这些；在竞态检测下通过。
+- **涉及**：`config`、`tunnel/internal/transport/...`、`tunnel/internal/uplink`、`tunnel/hub`、`tunnel/node`、`llm/...`、`docs`。
+
+### I161 审查后的未认证连接与文件名
+
+- **原因**：同一次审查还发现：
+  - **Admin API 的限制只覆盖读（Medium）。** `limitConn` 把读截止时间限制在 accept + `unauthTimeout`（`admin/server.go`），但
+    net/http 的写截止时间仍是 `writeTimeout`，且每读到一个流水线请求就重新设置一次；不带 token 的客户端流水线发出约 70 个
+    dashboard 请求、每分钟只读几个字节，就能占住一个连接位约 70 分钟（已证实为限制的 49 倍）。
+  - **限制的是单个连接的寿命，不是攻击者的份额（Medium，设计）。** 每 4.9 秒重连一次的客户端，从少数几个地址或从不计入的
+    loopback，仍能几乎一直占满 Admin API 或控制台的连接位。
+  - **fastcgi 不拒绝反斜杠（Medium，Windows）。** 它只用按 `/` 切分的 `Hidden`、`HasShortName` 与 `Alias` 检查脚本，没有用
+    `dotfile.Scan`；于是 `/a%5C.git%5Cx.php` 会执行 `root\a\.git\x.php`，`a\GIT~1\` 与 `a\CON.php` 也能通过。已通过 HTTP 证实。
+  - **换了大小写的扩展名会以源码返回（Medium，Windows NTFS 与 macOS APFS）。** 区分大小写的 `\.php$` 路由匹配不到
+    `/x.PHP`，请求落到共享根目录的 `static`，打开 `x.php`：以文本返回 PHP 源码。nginx 迁移文档正是这样映射
+    `location ~ \.php$` 的。
+- **做**：未认证的 Admin API 连接在 accept + `unauthTimeout` 时无论在做什么都关闭（与控制台的定时器一样），写截止时间同样受限；
+  dashboard 对未认证连接的应答带 `Connection: close`；连接位满时关闭最早的未认证连接，而不是拒绝新连接，并为已认证连接保留
+  一部分 `max_conns`，Admin API 与控制台都如此。fastcgi 使用 `dotfile.Scan`，对反斜杠答 400，普通路径与 `try_files` 都如此。
+  在大小写不敏感的文件系统上，`static` 拒绝扩展名在任意大小写下与 fastcgi `split_path` 扩展名相同、或名字与磁盘上不一致的请求；
+  迁移文档改用 `(?i)\.php$`。
+- **完成标准**：审查中的流水线客户端在限制时间到时被关闭；不断重连的攻击者无法把已认证的管理员挡在外面；反斜杠路径在所有
+  系统上都被 fastcgi 拒绝；在 Windows 与 macOS 上，共享根目录下的 `/x.PHP` 不会返回源码；在竞态检测下通过。
+- **涉及**：`admin`、`app/console`、`handler/fastcgi`、`handler/static`、`internal/dotfile`、`docs`。
 
 ## 性能
 

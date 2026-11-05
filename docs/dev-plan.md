@@ -119,7 +119,7 @@ should touch as few of these as it can.
 
 ## Index
 
-Status: `todo`, `doing` or `done`. The next free iteration number is I160.
+Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 
 | ID | Iteration | Depends on | Status |
 | --- | --- | --- | --- |
@@ -319,6 +319,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I160.
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | todo |
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | todo |
+| I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | todo |
+| I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | todo |
 
 ## M0, foundations
 
@@ -2765,6 +2767,67 @@ Principles, in the order they bind:
   the shared password still links, with a warning; the docs (English and Chinese) explain tokens and
   the upgrade; under the race detector.
 - **Touches**: `tunnel/...`, `llm/...`, `config`, `admin`, `app`, `cli`, `schema`, `docs`.
+
+### I160 The tunnel's and the LLM mesh's TLS, after review
+
+- **Why**: an independent review of the TLS added on 2026-11-06 (fit `3622aee1`, `6bd2c39c`,
+  `fc685c08`) found the pinning and handshakes sound, but:
+  - **A fragment in an endpoint's address overrides its pin (Medium).** `checkTunnelEndpoint`
+    (`config/tunnel.go`) refuses a query in the address but not a `#fragment`; `uplink.Dials` appends
+    `?pin=…` to the address as a string, and `TLSClientConfig`, quic's and ws's dials cut it at the
+    first `?`, which may be inside the fragment. So `tls://hub:7000#?pin=<other>&`, with the hub's real
+    pin configured, opens to the other certificate; `quic://hub:7000#?insecure=1&` turns quic's check
+    off; `#?ca=/path&` swaps the CAs; and `tls://hub:443#?x=` drops the pin for the system roots. The
+    hub's and node's pages pass an endpoint's address through (`EndpointReq.address()`), so whoever
+    writes an endpoint, or hands an operator one to paste, can use it. Proven on tls, wss and quic.
+  - **`quic_insecure` is accepted off loopback (Low)**, the unauthenticated-hub case the new rule
+    refuses for tcp and ws.
+  - **Not flaws, but to fix with them:** without `admin.store` a hub's self-signed certificate is
+    made anew at each start, which breaks its peers' pins; an LLM listener's `cert_file` is read only
+    when it starts, so a key rotated on disk needs a restart.
+- **Do**: pass a link's certificate options (pin, CAs, insecure) to the transports' Dial as
+  `ClientOptions`, never in the address; build and parse dial URLs with `net/url`; refuse a fragment,
+  userinfo, `?` or `#` in an endpoint's address in validation and in the pages' API; refuse
+  `quic_insecure` off loopback unless `body_password` is set; keep a self-signed certificate in the
+  config's directory (0600) when there is no store; reload an LLM listener's certificate when its
+  files change, as the tunnel hub's listeners do.
+- **Done when**: the review's fragment attacks on tls, wss and quic fail validation and, given to Dial
+  directly, cannot change how the hub's certificate is checked; `quic_insecure` off loopback is refused
+  with a clear error; a hub without a store keeps its fingerprint across restarts; an LLM listener picks
+  up a rotated certificate without a restart; the docs (English and Chinese) say so; under the race
+  detector.
+- **Touches**: `config`, `tunnel/internal/transport/...`, `tunnel/internal/uplink`, `tunnel/hub`,
+  `tunnel/node`, `llm/...`, `docs`.
+
+### I161 Unauthenticated connections and file names, after review
+
+- **Why**: the same review found:
+  - **The Admin API's bound covers reads only (Medium).** `limitConn` caps read deadlines at
+    accept + `unauthTimeout` (`admin/server.go`), but net/http's write deadline stays `writeTimeout` and
+    is set again for each pipelined request; a tokenless client that pipelines ~70 dashboard requests
+    and reads a few bytes a minute holds a slot about 70 minutes (proven at 49 times the bound).
+  - **The bound limits a connection's life, not an attacker's share (Medium, design).** A client that
+    reconnects every 4.9s, from a few addresses or from loopback, which is not counted, still holds
+    nearly every slot of the Admin API or a console.
+  - **fastcgi does not refuse a backslash (Medium, Windows).** It checks scripts with `Hidden`,
+    `HasShortName` and `Alias`, which split on `/` only, and not with `dotfile.Scan`; so
+    `/a%5C.git%5Cx.php` runs `root\a\.git\x.php`, and `a\GIT~1\` and `a\CON.php` pass too. Proven
+    over HTTP.
+  - **An extension in another case is served as source (Medium, Windows NTFS and macOS APFS).** A
+    case-sensitive `\.php$` route misses `/x.PHP`, which falls through to `static` on a shared root and
+    opens `x.php`: the PHP source, as text. The nginx migration doc maps `location ~ \.php$` that way.
+- **Do**: close an unauthenticated Admin API connection at accept + `unauthTimeout` whatever it is
+  doing, as the console's timer does, and cap its write deadline too; send `Connection: close` on the
+  dashboard's answers to an unauthenticated connection; when the slots are full, close the oldest
+  unauthenticated connection rather than refuse the new one, and keep a share of `max_conns` for
+  authenticated ones, for the Admin API and the consoles. fastcgi uses `dotfile.Scan` and answers 400
+  on a backslash, in its plain path and in `try_files`. On a case-insensitive file system, `static`
+  refuses a request whose extension matches fastcgi's `split_path` extension in any case, or whose name
+  differs from the name on disk; the migration docs use `(?i)\.php$`.
+- **Done when**: the review's pipelining client is closed at the bound; a reconnecting attacker cannot
+  keep an authenticated admin out; the backslash paths are refused by fastcgi on every OS; `/x.PHP` on
+  a shared root does not serve source on Windows or macOS; under the race detector.
+- **Touches**: `admin`, `app/console`, `handler/fastcgi`, `handler/static`, `internal/dotfile`, `docs`.
 
 ## Performance
 
