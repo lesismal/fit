@@ -228,7 +228,7 @@ func TestServerIdleConn(t *testing.T) {
 // timeout takes the default.
 func TestClientRefusesStream(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", true), 0, func(c transport.Conn) transport.Handler { return newSink(c, false) })
+	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 0, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,12 +289,12 @@ func TestMaxConns(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{MaxConns: 1}, false)
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
 	e := tunneltest.Engine(t)
-	c, err := transport.Dial(e, DialURL(s.hostport(t), "", true), 5*time.Second, open)
+	c, err := transport.Dial(e, DialURL(s.hostport(t), "", "", true), 5*time.Second, open)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if _, err := transport.Dial(e, DialURL(s.hostport(t), "", true), 300*time.Millisecond, open); err == nil {
+	if _, err := transport.Dial(e, DialURL(s.hostport(t), "", "", true), 300*time.Millisecond, open); err == nil {
 		t.Error("a connection past MaxConns was let in")
 	}
 }
@@ -497,7 +497,7 @@ func TestListenerRetry(t *testing.T) {
 		t.Fatalf("%d of 8 Initials answered with a Retry", retries)
 	}
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", true), 3*time.Second, open)
+	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 3*time.Second, open)
 	if err != nil {
 		t.Fatalf("a real client: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestListenerRetry(t *testing.T) {
 func TestListenerAddressClosed(t *testing.T) {
 	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{}, false)
 	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
-	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", true), 3*time.Second, open)
+	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", "", true), 3*time.Second, open)
 	if err != nil {
 		t.Fatal(err)
 	}

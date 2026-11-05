@@ -1,15 +1,21 @@
 //go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || windows
 
 // Package ws is the WebSocket transport of the tunnel's links, for networks
-// that let only HTTP through. Importing it registers the scheme ws:
-// ws://host:port/path, both to dial and to listen on.
+// that let only HTTP through. Importing it registers the schemes ws,
+// ws://host:port/path, and wss, the same over TLS (fib's, package fib/tls),
+// both to dial and to listen on. A wss listener presents the certificate
+// transport.ListenOptions gives it, and a wss dial checks the hub's as the
+// query of its address says (see package transport): wss://host:port/path?pin=...
+// The query is not sent to the hub.
 //
 // It is a fib.Layer below the link rather than a WebSocket handler beside
 // it: once the opening handshake is done, every send of the connection goes
 // out as binary frames, and the payloads of the frames that arrive go to the
 // wrapped handler as if they had been read off a plain TCP connection. A
 // link is a byte stream, so where its frames fall in WebSocket frames does
-// not matter.
+// not matter. Over TLS the connection's layer is TLS's, and the frames go
+// through it: the link sends through the frames itself
+// (transport.FibHandlerVia).
 package ws
 
 import (
@@ -17,6 +23,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -30,40 +37,59 @@ import (
 
 	fib "github.com/lesismal/fib"
 	"github.com/lesismal/fib/bufferpool"
+	fibtls "github.com/lesismal/fib/tls"
 	"github.com/lesismal/fib/websocket"
 	"github.com/lesismal/fit/tunnel/internal/transport"
 )
 
 func init() {
 	transport.Register("ws", wsTransport{})
-	// wss is not supported, which the transport says better than an
-	// unknown scheme would.
 	transport.Register("wss", wsTransport{})
 }
 
-// wsTransport dials and listens on ws:// URLs.
+// ALPN is the TLS application protocol of wss: HTTP/1.1, which carries the
+// opening handshake, so that a wss link may pass a TLS-terminating HTTP
+// proxy.
+const ALPN = "http/1.1"
+
+// wsTransport dials and listens on ws:// and wss:// URLs.
 type wsTransport struct{}
 
 func (wsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, open transport.OpenFunc) (transport.Conn, error) {
-	dial, err := Dialer(engine, addr, timeout, transport.FibHandler(open))
+	dial, err := dialer(engine, addr, timeout, func(out fib.Layer) fib.Handler {
+		if out == nil {
+			return transport.FibHandler(open)
+		}
+		return transport.FibHandlerVia(open, func(*fib.Connection) fib.Layer { return out })
+	})
 	if err != nil {
 		return nil, err
 	}
 	return transport.DialFib(dial)
 }
 
-// Listen serves WebSockets on the host and port of addr, a ws:// URL, at
-// its path; a URL without a path takes any.
-func (wsTransport) Listen(engine *fib.Engine, addr string, _ transport.ListenOptions, open transport.OpenFunc) (transport.Listener, error) {
+// Listen serves WebSockets on the host and port of addr, a ws:// or wss://
+// URL, at its path; a URL without a path takes any. A wss listener presents
+// o's certificate.
+func (wsTransport) Listen(engine *fib.Engine, addr string, o transport.ListenOptions, open transport.OpenFunc) (transport.Listener, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "ws" {
-		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
-	}
 	path := u.Path
-	return transport.ListenFib(engine, u.Host, NewServer(transport.FibHandler(open), path), func(hostport string) string { return "ws://" + hostport + path })
+	switch u.Scheme {
+	case "ws":
+		return transport.ListenFib(engine, u.Host, NewServer(transport.FibHandler(open), path), func(hostport string) string { return "ws://" + hostport + path })
+	case "wss":
+		if o.Cert == nil {
+			return nil, errors.New("wss: a listener needs a certificate")
+		}
+		s := &Server{path: path, tls: true}
+		s.inner = transport.FibHandlerVia(open, s.framesOf)
+		h := fibtls.NewServer(transport.ServerTLSConfig(*o.Cert, ALPN), s)
+		return transport.ListenFib(engine, u.Host, h, func(hostport string) string { return "wss://" + hostport + path })
+	}
+	return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 }
 
 const (
@@ -91,12 +117,42 @@ func acceptKey(key string) string {
 
 // frames is the layer of one connection: it frames what is sent, masked when
 // the connection is a client's. A send longer than maxFrame takes several
-// frames, and mu keeps another send's from landing between them.
+// frames, and mu keeps another send's from landing between them. Over TLS,
+// under is TLS's layer, which the frames go out through; otherwise they go
+// straight to the socket.
 type frames struct {
 	c      *fib.Connection
+	under  fib.Layer
 	client bool
 	mu     sync.Mutex
 	closed bool
+}
+
+// raw sends b, a buffer of package bufferpool, below the frames.
+func (f *frames) raw(b []byte) error {
+	if f.under != nil {
+		err := f.under.Send(b, nil)
+		bufferpool.Put(b)
+		return err
+	}
+	return f.c.SendRawPooled(b)
+}
+
+// rawCopy sends b below the frames, copying it.
+func (f *frames) rawCopy(b []byte) error {
+	if f.under != nil {
+		return f.under.Send(b, nil)
+	}
+	return f.c.SendRaw(b)
+}
+
+// closeRaw closes the connection once what was sent has gone out.
+func (f *frames) closeRaw() {
+	if f.under != nil {
+		f.under.CloseAfterSend()
+		return
+	}
+	f.c.CloseAfterSendRaw()
 }
 
 func (f *frames) Send(first, second []byte) error {
@@ -119,7 +175,7 @@ func (f *frames) Send(first, second []byte) error {
 		if f.client {
 			mask(b[len(head):], head[len(head)-4:])
 		}
-		if err := f.c.SendRawPooled(b); err != nil {
+		if err := f.raw(b); err != nil {
 			return err
 		}
 	}
@@ -128,7 +184,7 @@ func (f *frames) Send(first, second []byte) error {
 
 func (f *frames) CloseAfterSend() {
 	f.sendControl(websocket.Close, []byte{0x03, 0xe8}) // 1000, normal closure
-	f.c.CloseAfterSendRaw()
+	f.closeRaw()
 }
 
 // sendControl sends a control frame, nothing after a Close.
@@ -144,7 +200,7 @@ func (f *frames) sendControl(op websocket.Opcode, payload []byte) {
 	if f.client {
 		mask(b[len(head):], head[len(head)-4:])
 	}
-	_ = f.c.SendRaw(b)
+	_ = f.rawCopy(b)
 }
 
 // frameHead is the head of a final frame of op with n bytes of payload,
@@ -196,7 +252,7 @@ func deliver(f *frames, parser *websocket.Parser, inner fib.Handler, data []byte
 			f.sendControl(websocket.Pong, ev.Payload)
 		case websocket.Close:
 			f.sendControl(websocket.Close, ev.Payload)
-			f.c.CloseAfterSendRaw()
+			f.closeRaw()
 			return
 		}
 	}
@@ -206,7 +262,18 @@ func deliver(f *frames, parser *websocket.Parser, inner fib.Handler, data []byte
 type Server struct {
 	inner fib.Handler
 	path  string
+	// tls says that the connections run TLS, whose layer the frames go
+	// through.
+	tls   bool
 	conns sync.Map // *fib.Connection -> *serverConn
+}
+
+// framesOf is the frames of c, which the link sends through over TLS.
+func (s *Server) framesOf(c *fib.Connection) fib.Layer {
+	if v, ok := s.conns.Load(c); ok {
+		return &v.(*serverConn).frames
+	}
+	return nil
 }
 
 // NewServer wraps inner for clients that open WebSockets on path; an empty
@@ -225,7 +292,11 @@ type serverConn struct {
 
 func (s *Server) OnOpen(c *fib.Connection) {
 	sc := &serverConn{frames: frames{c: c}}
-	c.SetLayer(&sc.frames)
+	if s.tls {
+		sc.under = c.Layer()
+	} else {
+		c.SetLayer(&sc.frames)
+	}
 	s.conns.Store(c, sc)
 	sc.timer = time.AfterFunc(HandshakeTimeout, func() { c.CloseWithError(errTimeout) })
 }
@@ -265,8 +336,8 @@ func (s *Server) OnData(c *fib.Connection, data []byte) {
 // switched protocols.
 func (s *Server) handshake(sc *serverConn, head []byte) bool {
 	fail := func(status int) bool {
-		_ = sc.c.SendRaw([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", status, stdhttp.StatusText(status))))
-		sc.c.CloseAfterSendRaw()
+		_ = sc.rawCopy([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", status, stdhttp.StatusText(status))))
+		sc.closeRaw()
 		return false
 	}
 	req, err := stdhttp.ReadRequest(bufio.NewReader(bytes.NewReader(head)))
@@ -281,7 +352,7 @@ func (s *Server) handshake(sc *serverConn, head []byte) bool {
 		!headerHas(req.Header, "Upgrade", "websocket") || req.Header.Get("Sec-WebSocket-Version") != "13" || key == "" {
 		return fail(stdhttp.StatusBadRequest)
 	}
-	_ = sc.c.SendRaw([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n"))
+	_ = sc.rawCopy([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n"))
 	return true
 }
 
@@ -314,12 +385,38 @@ func (s *Server) OnClose(c *fib.Connection, err error) {
 // and hands the connection to handler once the server has switched
 // protocols; done is told the connection then, or why there is none.
 func Dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme != "ws" {
+		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
+	}
+	return dialer(engine, rawURL, timeout, func(fib.Layer) fib.Handler { return handler })
+}
+
+// dialer is a dial that opens a WebSocket to rawURL, a ws:// or wss:// URL,
+// on engine, and hands the connection to the handler handler makes once the
+// server has switched protocols. Over TLS, handler is given the layer to
+// send through; otherwise nil, and the frames are the connection's layer.
+func dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler func(out fib.Layer) fib.Handler) (func(done func(*fib.Connection, error)) error, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "ws" {
-		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// is", u.Scheme)
+	var conf *tls.Config
+	switch u.Scheme {
+	case "ws":
+	case "wss":
+		if u.Port() == "" {
+			u.Host = net.JoinHostPort(u.Hostname(), "443")
+		}
+		// The query says how the hub's certificate is checked, and is
+		// not the hub's to see.
+		hostURL := *u
+		hostURL.Path, hostURL.RawPath = "", ""
+		if _, conf, err = transport.TLSClientConfig(hostURL.String(), ALPN, false); err != nil {
+			return nil, err
+		}
+		u.RawQuery = ""
+	default:
+		return nil, fmt.Errorf("ws: unsupported scheme %q, only ws:// and wss:// are", u.Scheme)
 	}
 	addr := u.Host
 	if u.Port() == "" {
@@ -331,18 +428,24 @@ func Dialer(engine *fib.Engine, rawURL string, timeout time.Duration, handler fi
 		_, _ = rand.Read(k[:])
 		key := base64.StdEncoding.EncodeToString(k[:])
 		cc := &clientConn{
-			inner:  handler,
 			done:   done,
 			accept: acceptKey(key),
 			req: []byte("GET " + path + " HTTP/1.1\r\nHost: " + u.Host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
 				"Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\nUser-Agent: fit\r\n\r\n"),
 			timeout: timeout,
+			tls:     conf != nil,
 		}
-		return engine.DialWithHandler("tcp", addr, timeout, cc, func(_ *fib.Connection, err error) {
+		failed := func(_ *fib.Connection, err error) {
 			if err != nil {
 				cc.finish(nil, err)
 			}
-		})
+		}
+		if conf == nil {
+			cc.inner = handler(nil)
+			return engine.DialWithHandler("tcp", addr, timeout, cc, failed)
+		}
+		cc.inner = handler(&cc.frames)
+		return fibtls.DialWithOptions(engine, "tcp", addr, timeout, conf, fibtls.DialOptions{HandshakeTimeout: timeout}, cc, failed)
 	}, nil
 }
 
@@ -355,6 +458,9 @@ type clientConn struct {
 	req     []byte
 	accept  string
 	timeout time.Duration
+	// tls says that the connection runs TLS, whose layer the frames go
+	// through.
+	tls bool
 
 	head     []byte
 	open     bool
@@ -369,13 +475,17 @@ func (cc *clientConn) finish(c *fib.Connection, err error) {
 
 func (cc *clientConn) OnOpen(c *fib.Connection) {
 	cc.c, cc.client = c, true
-	c.SetLayer(&cc.frames)
+	if cc.tls {
+		cc.under = c.Layer()
+	} else {
+		c.SetLayer(&cc.frames)
+	}
 	timeout := cc.timeout
 	if timeout <= 0 {
 		timeout = HandshakeTimeout
 	}
 	cc.timer = time.AfterFunc(timeout, func() { c.CloseWithError(errTimeout) })
-	_ = c.SendRaw(cc.req)
+	_ = cc.rawCopy(cc.req)
 }
 
 func (cc *clientConn) OnData(c *fib.Connection, data []byte) {

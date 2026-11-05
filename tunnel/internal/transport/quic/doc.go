@@ -12,8 +12,9 @@
 // "fit-tunnel" (ALPN).
 //
 // A dialer says how it checks the server's certificate in the address's
-// query: pin=SHA-256 of the certificate (see Fingerprint), or insecure=1 to
-// take any, for tests; without either, the system's roots check it. A
+// query, as package transport says: pin=SHA-256 of the certificate (see
+// Fingerprint), ca=a PEM file of CAs, or insecure=1 to take any, for tests;
+// without any, the system's roots check it. A
 // listener presents the certificate transport.ListenOptions gives it; the
 // tunnel's server keeps a self-signed one in its config.
 //

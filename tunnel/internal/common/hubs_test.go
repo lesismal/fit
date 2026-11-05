@@ -19,6 +19,9 @@ func TestEndpointAddress(t *testing.T) {
 		{EndpointReq{Protocol: config.TunnelWS, Address: "h:1"}, "ws://h:1" + config.DefaultTunnelWSPath},
 		{EndpointReq{Protocol: config.TunnelWS, Address: "h:1/tun"}, "ws://h:1/tun"},
 		{EndpointReq{Protocol: config.TunnelQUIC, Address: "h:1"}, "quic://h:1"},
+		{EndpointReq{Protocol: config.TunnelTLS, Address: "h:1"}, "tls://h:1"},
+		{EndpointReq{Protocol: config.TunnelWSS, Address: "h:1"}, "wss://h:1" + config.DefaultTunnelWSPath},
+		{EndpointReq{Protocol: config.TunnelWSS, Address: "h:1/tun"}, "wss://h:1/tun"},
 		{EndpointReq{Protocol: "tcp", Address: " h:1 "}, "h:1"},
 	} {
 		if got := c.e.address(); got != c.want {
@@ -39,7 +42,7 @@ func hubs(t *testing.T, m Member) []map[string]any {
 func TestEditHub(t *testing.T) {
 	m := Member{}
 	ep := []EndpointReq{{Protocol: "tcp", Address: "h:1", Enabled: true}, {Protocol: config.TunnelQUIC, Address: "h:2"}}
-	if err := EditHub(m, "", HubReq{Name: " a ", Endpoints: ep, Password: "pw", BodyPassword: "bp", PoolSize: 2, QUICPin: " pin ", QUICInsecure: true}, false); err != nil {
+	if err := EditHub(m, "", HubReq{Name: " a ", Endpoints: ep, Password: "pw", BodyPassword: "bp", PoolSize: 2, Pin: " pin ", QUICInsecure: true}, false); err != nil {
 		t.Fatal(err)
 	}
 	// A hub named by its first address, beside it.
@@ -47,7 +50,7 @@ func TestEditHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hubs(t, m)
-	if len(got) != 2 || got[0]["name"] != "a" || got[0]["body_password"] != "bp" || got[0]["quic_pin"] != "pin" ||
+	if len(got) != 2 || got[0]["name"] != "a" || got[0]["body_password"] != "bp" || got[0]["pin"] != "pin" ||
 		got[0]["quic_insecure"] != true || got[0]["pool_size"] != float64(2) {
 		t.Fatalf("%v", got)
 	}
@@ -56,20 +59,31 @@ func TestEditHub(t *testing.T) {
 	}
 
 	// A change keeps the passwords left empty, and what the pages do not
-	// show; clearBody drops the body password.
+	// show; clearBody drops the body password. A quic_pin, pin's old name,
+	// gives way to pin.
 	var raw []json.RawMessage
 	_ = m.Get("hubs", &raw)
 	var first map[string]any
 	_ = json.Unmarshal(raw[0], &first)
 	first["dial_timeout"] = "3s"
+	first["ca_file"] = "/etc/ca.pem"
+	first["quic_pin"] = "old"
 	raw[0], _ = json.Marshal(first)
 	_ = m.Set("hubs", raw)
 	if err := EditHub(m, "a", HubReq{Name: "a", Endpoints: ep[:1]}, false); err != nil {
 		t.Fatal(err)
 	}
 	got = hubs(t, m)
-	if got[0]["password"] != "pw" || got[0]["body_password"] != "bp" || got[0]["dial_timeout"] != "3s" || got[0]["pool_size"] != nil {
+	if got[0]["password"] != "pw" || got[0]["body_password"] != "bp" || got[0]["dial_timeout"] != "3s" || got[0]["pool_size"] != nil ||
+		got[0]["ca_file"] != "/etc/ca.pem" || got[0]["quic_pin"] != nil {
 		t.Fatalf("kept %v", got[0])
+	}
+	// The pages of an earlier release send the pin as quic_pin.
+	if err := EditHub(m, "a", HubReq{Name: "a", Endpoints: ep[:1], QUICPin: "old"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got = hubs(t, m); got[0]["pin"] != "old" {
+		t.Fatalf("quic_pin: %v", got[0])
 	}
 	if err := EditHub(m, "a", HubReq{Name: "b", Endpoints: ep[:1]}, true); err != nil {
 		t.Fatal(err)

@@ -49,8 +49,11 @@
     ['tk.clear_body', 'Remove the body password', '移除消息体密码'], ['tk.eps', 'Protocols, in the order they are tried', '协议（按尝试顺序）'],
     ['tk.on', 'On', '启用'], ['tk.eps_note', 'Each link dials the first protocol on, and falls back to the next when that fails.',
       '每条链路先拨号第一个启用的协议，失败时依次回退到下一个。'],
-    ['tk.pin', 'QUIC certificate pin (SHA-256)', 'QUIC 证书指纹（SHA-256）'], ['tk.pin_ph', 'from the hub\'s page', '取自 hub 页面'],
-    ['tk.insecure', 'Accept any QUIC certificate (testing only)', '接受任意 QUIC 证书（仅用于测试）'],
+    ['tk.pin', 'Hub certificate pin (SHA-256), for WSS, TLS and QUIC', 'Hub 证书指纹（SHA-256），用于 WSS、TLS 与 QUIC'], ['tk.pin_ph', 'from the hub\'s page', '取自 hub 页面'],
+    ['tk.insecure', 'Accept any QUIC certificate (testing only: anyone on the path could read and change the links)', '接受任意 QUIC 证书（仅用于测试：路径上的任何人都能读取和篡改链路）'],
+    ['tk.eps_secure', 'WSS, TLS and QUIC check the hub\'s certificate by the pin. TCP and WebSocket carry the links in the clear: to a host that is not a loopback one they need the body password.',
+      'WSS、TLS 与 QUIC 按指纹校验 hub 的证书。TCP 与 WebSocket 明文传输链路：连接非回环主机时须设置消息体密码。'],
+    ['tk.ca_file', 'Checked against the CAs in {file}, set in the config.', '按配置中设置的 {file} 内的 CA 校验。'],
     ['tk.keep', '•••••••• leave blank to keep', '•••••••• 留空则保持不变'], ['tk.name_opt', 'name (optional)', '名称（可选）'],
     ['tk.optional', 'optional', '可选'], ['tk.move_up', 'Up', '上移'], ['tk.move_down', 'Down', '下移'], ['tk.no_services', 'No services', '没有服务'],
     ['tk.map', 'Tunnel map', '隧道全景'], ['tk.path', 'Tunnel path', '隧道链路'], ['tk.all_tunnels', 'All tunnels', '全部隧道'],
@@ -71,7 +74,7 @@
   UI.addI18n({ 'en': en, 'zh-CN': zh });
 
   // ---- Formatting / 格式化 ----
-  var PROTO_NAMES = { tcp: 'TCP', ws: 'WebSocket', quic: 'QUIC' };
+  var PROTO_NAMES = { tcp: 'TCP', tls: 'TLS', ws: 'WebSocket', wss: 'WSS', quic: 'QUIC' };
   function bytes(n) {
     n = +n || 0;
     return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KiB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MiB' : (n / 1073741824).toFixed(2) + ' GiB';
@@ -111,7 +114,7 @@
   // protoOf is the protocol of an address, host:port being TCP. / 地址的协议，host:port 即 TCP。
   function protoOf(a) { var m = String(a || '').match(/^([a-z0-9]+):\/\//i); return m ? m[1].toLowerCase() : 'tcp'; }
   function protoName(p) { return PROTO_NAMES[p] || p; }
-  function protoBadge(p) { return UI.badge(protoName(p), p === 'quic' ? 'primary' : p === 'ws' ? 'info' : ''); }
+  function protoBadge(p) { return UI.badge(protoName(p), p === 'quic' || p === 'tls' || p === 'wss' ? 'primary' : p === 'ws' ? 'info' : ''); }
   // stateBadge is an uplink's state, with its error under it. / 上联的状态，其下为错误信息。
   function stateBadge(state, error) {
     var kind = state === 'registered' ? 'ok' : state === 'failed' ? 'danger' : state === 'connecting' ? 'warn' : '';
@@ -384,10 +387,10 @@
     }
 
     // hubEditor edits hub st (an uplink's status) or adds one when st is null: its name, pool, passwords, its
-    // endpoints by protocol in the order they are tried, and the QUIC pin. Passwords never come back: an empty one
-    // keeps the one set. / 编辑 hub st（上联状态），st 为 null 时添加：名称、连接池、密码、按尝试顺序排列的各协议地址与
-    // QUIC 指纹。密码不会返回：留空则保持原值。
-    var EP_HINT = { tcp: 'host:7000', ws: 'ws://host:7001/tunnel', quic: 'quic://host:7443' };
+    // endpoints by protocol in the order they are tried, and the pin of the hub's certificate. Passwords never come
+    // back: an empty one keeps the one set. / 编辑 hub st（上联状态），st 为 null 时添加：名称、连接池、密码、按尝试顺序
+    // 排列的各协议地址与 hub 证书指纹。密码不会返回：留空则保持原值。
+    var EP_HINT = { tcp: '127.0.0.1:7000', tls: 'tls://host:7000', ws: 'ws://127.0.0.1:7001/tunnel', wss: 'wss://host:7001/tunnel', quic: 'quic://host:7443' };
     function hubEditor(st, onSaved) {
       var f = {
         name: h('input.input', { value: st ? st.name : '', placeholder: t('tk.name_opt') }),
@@ -395,11 +398,11 @@
         password: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: st && st.has_password ? t('tk.keep') : t('tk.password').toLowerCase() }),
         body: h('input.input', { type: 'password', autocomplete: 'new-password', placeholder: st && st.has_body_password ? t('tk.keep') : t('tk.optional') }),
         clearBody: h('input', { type: 'checkbox' }),
-        pin: h('input.input.mono', { value: st && st.quic_pin || '', placeholder: t('tk.pin_ph'), autocomplete: 'off', spellcheck: 'false' }),
+        pin: h('input.input.mono', { value: st && (st.pin || st.quic_pin) || '', placeholder: t('tk.pin_ph'), autocomplete: 'off', spellcheck: 'false' }),
         insecure: h('input', { type: 'checkbox', checked: !!(st && st.quic_insecure) })
       };
       var eps = ((st && st.endpoints) || []).slice();
-      ['quic', 'ws', 'tcp'].forEach(function (p) { if (!eps.some(function (e) { return e.protocol === p; })) eps.push({ protocol: p, address: '', enabled: false }); });
+      ['wss', 'tls', 'quic', 'ws', 'tcp'].forEach(function (p) { if (!eps.some(function (e) { return e.protocol === p; })) eps.push({ protocol: p, address: '', enabled: false }); });
       var tbody = h('tbody');
       eps.forEach(function (e) {
         var tr = h('tr', { 'data-proto': e.protocol },
@@ -425,7 +428,9 @@
           h('h4', t('tk.eps')),
           h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', t('tk.on')), h('th', t('tk.protocol')), h('th', t('tk.address')), h('th', ''))), tbody)),
           h('div.small.muted', t('tk.eps_note')),
+          h('div.small.muted', t('tk.eps_secure')),
           UI.field(t('tk.pin'), f.pin),
+          st && st.ca_file ? h('div.small.muted', t('tk.ca_file', { file: st.ca_file })) : null,
           h('label.check', f.insecure, ' ', t('tk.insecure'))),
         actions: [{ label: t('cancel') }, {
           label: t('tk.save_connect'), kind: 'primary', onclick: function () {
@@ -435,7 +440,7 @@
               return { protocol: tr.getAttribute('data-proto'), address: i[1].value.trim(), enabled: i[0].checked };
             }).filter(function (e) { return e.address; });
             var hub = { name: f.name.value.trim(), endpoints: endpoints, password: f.password.value, body_password: f.body.value,
-              pool_size: +f.pool.value || 0, quic_pin: f.pin.value.trim(), quic_insecure: f.insecure.checked };
+              pool_size: +f.pool.value || 0, pin: f.pin.value.trim(), quic_insecure: f.insecure.checked };
             var p = st ? call('/api/hubs/update', { name: st.name, hub: hub, clear_body_password: f.clearBody.checked }, t('tk.hub_saved'))
               : call('/api/hubs', hub, t('tk.hub_saved'));
             return keepOpen(p.then(function (ok) { if (ok && onSaved) onSaved(); return ok; }));

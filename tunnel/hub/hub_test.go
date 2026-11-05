@@ -2,11 +2,15 @@ package hub
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
+	"github.com/lesismal/fit/tunnel/internal/transport"
 )
 
 // tcpMember is a hub member with the password pw, listening over TCP on
@@ -619,4 +624,81 @@ func TestRouteWindow(t *testing.T) {
 		t.Fatal("the node's link closed")
 	default:
 	}
+}
+
+// tls and wss listeners present the hub's certificate, made and kept as a
+// quic listener's is; a listener with cert_file presents its own, read
+// again at each Apply, and one whose files do not load is shown with why.
+func TestListenerCerts(t *testing.T) {
+	v := newHub(t, `{"password": "pw", "listeners": [{"protocol": "wss", "address": "127.0.0.1:0"}, {"protocol": "tls", "address": "127.0.0.1:0"}]}`)
+	if err := v.waitEdit(); err != nil || !strings.Contains(v.current(), "BEGIN CERTIFICATE") {
+		t.Fatalf("the certificate kept: %v %s", err, v.current())
+	}
+	st := v.s.Status()
+	if st.Fingerprint == "" || st.QUICFingerprint != st.Fingerprint || len(st.Listeners) != 2 {
+		t.Fatalf("status %+v", st)
+	}
+	for _, l := range st.Listeners {
+		if l.Error != "" || l.Fingerprint != st.Fingerprint || l.OwnCert || !strings.HasPrefix(l.URL, l.Protocol+"://") {
+			t.Fatalf("listener %+v", l)
+		}
+	}
+	// A listener's own certificate, from its files.
+	dir := t.TempDir()
+	certFile, keyFile := filepath.Join(dir, "c.pem"), filepath.Join(dir, "k.pem")
+	write := func() string {
+		c, k, err := transport.NewSelfSigned("127.0.0.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(certFile, c, 0o600)
+		_ = os.WriteFile(keyFile, k, 0o600)
+		cert, _ := tls.X509KeyPair(c, k)
+		return transport.Fingerprint(cert)
+	}
+	fp := write()
+	cert, key := hubCertOf(t, v.current())
+	own := fmt.Sprintf(`{"password": "pw", "quic": {"cert": %q, "key": %q}, "listeners": [{"protocol": "wss", "address": "127.0.0.1:0"}, {"protocol": "tls", "address": "127.0.0.1:0", "cert_file": %q, "key_file": %q}]}`,
+		cert, key, certFile, keyFile)
+	if err := v.apply(own); err != nil {
+		t.Fatal(err)
+	}
+	st = v.s.Status()
+	wssURL := st.Listeners[0].URL
+	if l := st.Listeners[1]; l.Error != "" || l.Fingerprint != fp || !l.OwnCert || st.Listeners[0].Fingerprint != st.Fingerprint {
+		t.Fatalf("listeners %+v", st.Listeners)
+	}
+	// A new certificate in the files opens the listener anew; the other
+	// stays.
+	fp2 := write()
+	if err := v.apply(own); err != nil {
+		t.Fatal(err)
+	}
+	st = v.s.Status()
+	if st.Listeners[1].Fingerprint != fp2 || st.Listeners[0].URL != wssURL {
+		t.Fatalf("listeners %+v", st.Listeners)
+	}
+	_ = os.Remove(keyFile)
+	if err := v.apply(own); err == nil || !strings.Contains(err.Error(), "the certificate") {
+		t.Fatalf("a listener whose key is gone: %v", err)
+	}
+	if st = v.s.Status(); st.Listeners[1].Error == "" || st.Listeners[1].URL != "" {
+		t.Fatalf("listeners %+v", st.Listeners)
+	}
+}
+
+// hubCertOf is the hub's certificate and key in member, as the hub wrote
+// them.
+func hubCertOf(t *testing.T, member string) (string, string) {
+	t.Helper()
+	var m struct {
+		QUIC struct {
+			Cert string `json:"cert"`
+			Key  string `json:"key"`
+		} `json:"quic"`
+	}
+	if err := json.Unmarshal([]byte(member), &m); err != nil || m.QUIC.Key == "" {
+		t.Fatalf("the certificate in %s: %v", member, err)
+	}
+	return m.QUIC.Cert, m.QUIC.Key
 }

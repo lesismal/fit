@@ -72,13 +72,17 @@ type RouteView struct {
 }
 
 // ListenerView is a listener as the pages show it: its settings, the URL
-// peers dial when it is open, and why it is not.
+// peers dial when it is open, and why it is not; a tls, wss or quic one's
+// certificate by its fingerprint, and whether it is the listener's own
+// (cert_file) rather than the hub's.
 type ListenerView struct {
-	Protocol string `json:"protocol"`
-	Address  string `json:"address"`
-	Path     string `json:"path,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Protocol    string `json:"protocol"`
+	Address     string `json:"address"`
+	Path        string `json:"path,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	OwnCert     bool   `json:"own_cert,omitempty"`
 }
 
 // SettingsView is the settings the pages change besides the listeners, the
@@ -92,18 +96,21 @@ type SettingsView struct {
 
 // Status is the hub's state, as the pages show it.
 type Status struct {
-	Name            string         `json:"name"`
-	Version         string         `json:"version"`
-	Listen          []string       `json:"listen"`
-	Listeners       []ListenerView `json:"listeners"`
-	Settings        SettingsView   `json:"settings"`
-	Socket          string         `json:"socket,omitempty"`
-	QUICFingerprint string         `json:"quic_fingerprint"`
-	BodyEncrypted   bool           `json:"body_encrypted"`
-	Started         time.Time      `json:"started"`
-	Links           int            `json:"links"`
-	Peers           []PeerView     `json:"peers"`
-	Tunnels         []RouteView    `json:"tunnels"`
+	Name      string         `json:"name"`
+	Version   string         `json:"version"`
+	Listen    []string       `json:"listen"`
+	Listeners []ListenerView `json:"listeners"`
+	Settings  SettingsView   `json:"settings"`
+	Socket    string         `json:"socket,omitempty"`
+	// Fingerprint is the hub's certificate's, which its tls, wss and quic
+	// listeners without cert_file present; QUICFingerprint is its old name.
+	Fingerprint     string      `json:"fingerprint"`
+	QUICFingerprint string      `json:"quic_fingerprint"`
+	BodyEncrypted   bool        `json:"body_encrypted"`
+	Started         time.Time   `json:"started"`
+	Links           int         `json:"links"`
+	Peers           []PeerView  `json:"peers"`
+	Tunnels         []RouteView `json:"tunnels"`
 }
 
 // Status is the hub's state.
@@ -111,14 +118,14 @@ func (s *Hub) Status() Status {
 	set := s.settings()
 	cfg := set.cfg
 	st := Status{Name: set.name, Version: proto.Version, Listen: []string{}, Listeners: []ListenerView{}, Socket: s.SocketAddr(),
-		QUICFingerprint: s.Fingerprint(), BodyEncrypted: cfg.BodyPassword != "", Started: s.since, Peers: []PeerView{}, Tunnels: []RouteView{},
+		Fingerprint: s.Fingerprint(), QUICFingerprint: s.Fingerprint(), BodyEncrypted: cfg.BodyPassword != "", Started: s.since, Peers: []PeerView{}, Tunnels: []RouteView{},
 		Settings: SettingsView{HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}}
 	if cs := cfg.ConsoleSocket; cs != nil {
 		st.Settings.SocketAddress, st.Settings.HasSocketPassword = cs.Address, cs.Password != ""
 	}
 	s.lmu.Lock()
 	for _, l := range s.listeners {
-		v := ListenerView{Protocol: l.cfg.Protocol, Address: l.cfg.Address, Path: l.cfg.Path, Error: l.err}
+		v := ListenerView{Protocol: l.cfg.Protocol, Address: l.cfg.Address, Path: l.cfg.Path, Error: l.err, Fingerprint: l.fp, OwnCert: l.cfg.CertFile != ""}
 		if l.l != nil {
 			v.URL = l.l.URL()
 			st.Listen = append(st.Listen, v.URL)
@@ -159,7 +166,7 @@ type listenerReq struct {
 
 func (l listenerReq) listener() config.TunnelListener {
 	tl := config.TunnelListener{Protocol: strings.TrimSpace(l.Protocol), Address: strings.TrimSpace(l.Address), Path: strings.TrimSpace(l.Path)}
-	if tl.Protocol != config.TunnelWS || tl.Path == config.DefaultTunnelWSPath {
+	if !tl.IsWS() || tl.Path == config.DefaultTunnelWSPath {
 		tl.Path = ""
 	}
 	if tl.Path != "" && !strings.HasPrefix(tl.Path, "/") {
@@ -223,6 +230,11 @@ func (s *Hub) api(api *console.API) {
 				}
 				if old.Key() != l.Key() && slices.ContainsFunc(ls, func(have config.TunnelListener) bool { return have.Key() == l.Key() }) {
 					return nil, common.BadRequest("a listener on " + l.URL() + " exists")
+				}
+				// The pages do not show a listener's certificate files: an
+				// edit keeps them where the protocol still takes them.
+				if config.TunnelTakesTLS(l.Protocol) {
+					l.CertFile, l.KeyFile = ls[i].CertFile, ls[i].KeyFile
 				}
 				ls[i] = l
 				return ls, nil

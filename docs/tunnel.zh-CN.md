@@ -36,8 +36,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
       "password": "a-registration-password",
       "body_password": "a-body-password",
       "listeners": [
-        {"protocol": "tcp", "address": ":7000"},
-        {"protocol": "ws", "address": ":7001"},
+        {"protocol": "tls", "address": ":7000"},
+        {"protocol": "wss", "address": ":7001"},
         {"protocol": "quic", "address": ":7443"}
       ],
       "console": {
@@ -58,12 +58,12 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
         "name": "hub",
         "endpoints": [
           {"address": "quic://hub.example.com:7443"},
-          {"address": "ws://hub.example.com:7001/tunnel"},
-          {"address": "hub.example.com:7000"}
+          {"address": "wss://hub.example.com:7001/tunnel"},
+          {"address": "tls://hub.example.com:7000"}
         ],
         "password": "a-registration-password",
         "body_password": "a-body-password",
-        "quic_pin": "hub 控制台上显示的指纹"
+        "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
       "services": [
         {"name": "ssh", "address": "10.0.0.5:22", "description": "实验室的网关"}
@@ -80,9 +80,10 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
       "name": "alice",
       "hubs": [{
         "name": "hub",
-        "endpoints": [{"address": "hub.example.com:7000"}],
+        "endpoints": [{"address": "tls://hub.example.com:7000"}],
         "password": "a-registration-password",
-        "body_password": "a-body-password"
+        "body_password": "a-body-password",
+        "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"
       }],
       "forwards": [
         {"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh"}
@@ -92,7 +93,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 }
 ```
 
-之后 `ssh -p 2222 127.0.0.1` 就连到 10.0.0.5:22。`fit validate` 检查这些成员；
+`pin` 是 hub 证书的 SHA-256 指纹，hub 的控制台上会显示，hub 生成证书时也会写入日志。之后
+`ssh -p 2222 127.0.0.1` 就连到 10.0.0.5:22。`fit validate` 检查这些成员；
 [配置参考](reference/config.zh-CN.md)列出每个字段、默认值和取值范围。
 
 ### tunnel.hub
@@ -101,10 +103,10 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 |------|------|------|
 | `name` | 主机名 | 告知节点和 proxy 的名字 |
 | `password` | 无：不接受任何注册 | 节点和 proxy 注册用的密码，以 HMAC 证明知道它，从不发送 |
-| `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密；节点和 proxy 需要相同的密码 |
-| `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/tunnel`，只有 ws 监听有路径 |
+| `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密，从而认证每个帧；节点和 proxy 需要相同的密码 |
+| `listeners` | 无：由页面添加 | `{protocol: tls\|wss\|quic\|tcp\|ws, address, path, cert_file, key_file}`；ws 或 wss 监听的路径默认为 `/tunnel`，只有它们有路径。地址不是回环地址（`127.0.0.0/8`、`::1`、`localhost`；主机留空即所有地址）的 `tcp` 或 `ws` 监听，除非设置了 `body_password`，否则会被拒绝（见[链路靠什么保护](#链路靠什么保护)）。tls、wss 或 quic 监听出示其 `cert_file` 与 `key_file` 中的证书（每次应用成员时读取），没有时出示 hub 自己的证书（见下） |
 | `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32。10 秒内没有证明知道密码的 WebSocket 会被关闭，同一 IP 地址至多有 `max_conns` 的四分之一处于这种状态 |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；进行中的握手超过 `max_handshakes` 的一半后，客户端须先以 QUIC Retry 证明自己的地址才能开始握手；有 quic 监听而没有证书时，hub 生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；进行中的握手超过 `max_handshakes` 的一半后，客户端须先以 QUIC Retry 证明自己的地址才能开始握手。`cert` 和 `key` 是 hub 自己的证书，没有 `cert_file` 的 tls、wss 和 quic 监听出示它；这样的监听需要证书而没有时，hub 生成自签名证书并写入这里；二者须同时设置 |
 | `register_timeout` | 10s | 一条链路注册的时限 |
 | `call_timeout` | 15s | 节点应答的时限：打开隧道、列出或设置服务 |
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | hub 保有资源的上限 |
@@ -143,10 +145,12 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | 字段 | 默认 | 含义 |
 |------|------|------|
 | `name` | 第一个端点的地址 | 转发和页面用来指称它的名字 |
-| `endpoints` | 必填 | `{address, disabled}`，按顺序尝试：`host:port` 或 `tcp://` 为 TCP，`ws://host:port/path`，`quic://host:port` |
+| `endpoints` | 必填 | `{address, disabled}`，按顺序尝试：`tls://host:port`、`wss://host:port/path`（不写端口时为 443）、`quic://host:port`；以及明文的 `host:port` 或 `tcp://`（TCP）和 `ws://host:port/path`，它们连接非回环主机时，除非设置了 `body_password`，否则会被拒绝 |
 | `password` | 必填 | hub 的密码 |
 | `body_password` | 无 | hub 的消息体密码（如果有） |
-| `quic_pin`、`quic_insecure` | | quic 端点如何检查 hub 证书：按 hub 页面上显示的 SHA-256 指纹，或不检查（仅用于测试）；两者都不设时用系统根证书 |
+| `pin` | | hub 证书的 SHA-256 指纹（与 hub 页面所示一致），tls、wss 和 quic 端点按它校验证书，取代证书链和名称校验：用于 hub 的自签名证书。旧名 `quic_pin` 仍可读取，但会给出警告 |
+| `ca_file` | | 一个 PEM 文件，包含为 hub 证书签名的 CA，取代系统根证书，并校验名称；每次拨号时读取；不能与 `pin` 同时设置 |
+| `quic_insecure` | false | quic 端点接受任意证书：路径上的任何人都能读取和篡改链路。仅用于测试；tls 和 wss 没有这样的开关 |
 | `pool_size` | 10，最多 100 | 承载隧道的链路数 |
 | `dial_timeout` | 5s | 链路拨号的时限 |
 | `call_timeout` | 10s | hub 应答注册或调用的时限 |
@@ -160,28 +164,65 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 都是同一个对端。每条隧道始终走一条链路，使它的帧保持顺序；新隧道走承载隧道最少的链路，每条链路最多
 承载 64 条，需要更多隧道的对端用更大的连接池。
 
-- **TCP** 和 **WebSocket** 链路是引擎上的连接。WebSocket 链路用于只放行 HTTP 的网络，例如经 nginx 的
-  `proxy_pass` 加 `Upgrade`；没有 `wss://`，所以请设置 `body_password`。
-- **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。有 quic 监听
-  需要证书时，hub 生成自签名证书并保存在它的成员里，所以节点和 proxy 固定的指纹在重启后不变。
+- **TLS** 链路（`tls://`）是引擎上的 TCP 连接，链路的帧之下是 fib 的 TLS 1.3（`fib/tls` 包），ALPN 为
+  `fit-tunnel`。**WebSocket** 链路（`wss://`，以及明文的 `ws://`）用于只放行 HTTP(S) 的网络：wss 链路是
+  ALPN 为 `http/1.1` 的 TLS 1.3，其上是一个 WebSocket，用二进制帧承载链路；经 nginx 时需要 `proxy_pass`
+  加 `Upgrade`，自己终止 TLS 的代理需要用 `ca_file` 或系统根证书校验它的证书，并且代理之后的部分需要
+  `body_password`。**TCP** 链路（`tcp://`）是明文的帧。握手运行在 fib 的状态机上，证书校验运行在 fib 的握手池
+  上，从不占用 worker。
+- **QUIC** 链路运行在同一个引擎的 UDP 绑定上，使用 fib 的 QUIC、TLS 1.3 和 ALPN `fit-tunnel`。
+- **hub 的证书。** 有 tls、wss 或 quic 监听需要证书时，hub 生成自签名证书并保存在它的成员里（`quic.cert`、
+  `quic.key`），所以节点和 proxy 固定的指纹在重启后不变；它的控制台显示这个指纹，以及每个监听的指纹。设置了
+  `cert_file` 和 `key_file` 的监听改为出示该证书，供用 `ca_file` 或系统根证书校验它的节点和 proxy 使用。节点或
+  proxy 按 `pin`、`ca_file` 或系统根证书校验证书，未固定指纹时也校验名称。它们不保存 TLS 会话票据，所以每次握手
+  都完整校验证书；指纹还会在握手的最后一项检查中再校验一次，恢复的会话也会执行这项检查。
 - **注册**是双向认证的。节点或 proxy 的每条链路注册时，以密码为密钥，对对端类型、名字、时间和一个新生成的
   随机数做 HMAC-SHA256；时间与 hub 时钟相差不得超过 5 分钟，同一个随机数只接受一次。hub 的应答反过来证明
   hub 知道密码：以密码为密钥，在自己专用的标签下，对这次注册（含其随机数）和应答本身做的 HMAC-SHA256。
   节点或 proxy 在处理 hub 在这条链路上发来的任何内容之前先检查它，证明缺失或错误时关闭链路：不知道密码的
-  应答、把这条链路自己的注册原样发回的应答、从另一条链路搬来重放的应答都是如此。所以接管了 hub 地址（DNS
-  或 IP）却不知道密码的一方，即使节点使用未设置 `body_password` 的 `tcp://` 或 `ws://` 端点，也无法经节点
-  打开隧道，也无法修改它的服务。这个证明挡不住的是位于路径上、把链路转接到真正 hub 后再篡改途经帧的攻击者；
-  `body_password` 或 quic 端点可以挡住这种攻击。
+  应答、把这条链路自己的注册原样发回的应答、从另一条链路搬来重放的应答都是如此。这个证明只在注册时做一次，
+  并不覆盖之后的帧。在未设置 `body_password` 的
+  明文 `tcp://` 或 `ws://` 上，接管了 hub 地址（DNS 或 IP）的攻击者可以把节点的注册转给真正的 hub、再把带证明的
+  应答转回来，然后向节点发送它自己的任意帧：打开到节点服务的隧道、设置节点的服务、踢出节点。所以这样的链路
+  在非回环地址上会被拒绝（见[链路靠什么保护](#链路靠什么保护)）。
   **请先升级 hub。** 本版本的 hub 接受更早版本的节点和 proxy，但本版本的节点或 proxy 会拒绝更早版本的
   hub（它不发送证明）：状态和日志会说明该 hub 运行的 fit 没有 hub 认证、早于本端的版本，需要升级。
 - **消息体加密**：各方都设置 `body_password` 时，每个帧的消息体用 AES-256-GCM 加密，帧头也参与认证。
   每条链路建立时双方各发送一段新的随机字节；链路的每个方向各有自己的密钥，由密码和双方的随机字节经 HKDF
   派生，并为自己的帧编号，编号即 nonce。未加密的帧，或不能作为下一帧解开的帧，都会关闭链路：被重放、
   被调换顺序、被发回发送方或从另一条链路搬过来的帧（包括注册帧）都是如此。所以位于 `tcp://` 或 `ws://`
-  链路路径上的攻击者既不能重复链路上传过的内容（发给服务的命令、隧道的关闭、对节点服务的修改），也不能用
-  截获的节点注册帧冒充该节点注册。攻击者仍能看到帧的长度和时间，也能切断链路。这是链路协议第 2 版：
-  设置了 `body_password` 的 hub、节点或 proxy 会关闭与更早版本对端之间的链路，并在日志中说明对端使用的是
-  链路协议第 1 版，所以请一起升级。
+  链路路径上的攻击者既不能伪造帧，也不能重复链路上传过的内容（发给服务的命令、隧道的关闭、对节点服务的
+  修改），也不能用截获的节点注册帧冒充该节点注册。除了双方的随机字节，密钥还包含方向（拨号方到监听方，
+  或反过来），所以即使攻击者让另一条链路以相反顺序得到同样的随机字节，一个节点加密的帧也永远不能在另一个
+  节点上解开。攻击者仍能看到帧的长度和时间，也能切断链路。这是链路协议第 3 版：设置了 `body_password` 的
+  hub、节点或 proxy 会关闭与第 2 版或第 1 版对端之间的链路，并在日志中说明双方的版本，所以请一起升级。
+
+### 链路靠什么保护
+
+| 端点 | hub 的身份由什么证明 | 注册之后的帧 | 路径上或 hub 地址上的攻击者能做什么 |
+|------|----------------------|--------------|--------------------------------------|
+| 设置了 `pin` 或 `ca_file` 的 `tls://`、`wss://`、`quic://` | 它的证书（TLS 1.3），以及注册的证明 | 由 TLS 认证并加密 | 切断链路，看到时间和大小 |
+| 两者都没设置的 `tls://`、`wss://`、`quic://` | 按系统根证书校验的证书：适用于持有公共 CA 证书的 hub | 同上 | 同上，只要系统信任的 CA 没有为 hub 的名字签发别的证书 |
+| 设置了 `body_password` 的 `tcp://`、`ws://` | 注册的证明，以及用密码加密的每个帧 | 每帧都经认证，消息体加密（AES-256-GCM）；伪造、重放、调换顺序和跨链路的帧会关闭链路 | 同上，还能看到帧的类型和帧头 |
+| 设置了 `quic_insecure` 的 `quic://` | 只有一次注册的证明 | 不经认证 | 读取每个帧，并通过转接发送它自己的帧：仅用于测试 |
+| 未设置 `body_password` 的 `tcp://`、`ws://` | 只有一次注册的证明 | 不经认证，明文 | 读取每个帧，并通过转接发送它自己的帧：除非 hub 地址是回环地址，否则会被拒绝 |
+
+没有 hub 私钥的转接方，无法与固定了 hub 证书指纹、或按 CA 校验证书的节点完成 TLS 握手：节点在握手中关闭
+连接，说明证书与指纹不符，转接方既看不到注册，也看不到之后的任何内容。只转发字节的转接方无法修改它们：
+转接方写入的第一个 TLS 记录就会让 TLS 关闭链路。
+
+### 升级：链路必须是 TLS，或经过加密（不兼容的变更）
+
+本版本拒绝只靠注册来认证的链路：
+
+- `tcp` 或 `ws` 监听位于非回环地址、又没有 `body_password` 的 hub 不再能加载；`tcp://`、`host:port` 或
+  `ws://` 端点指向非回环主机、又没有 `body_password` 的节点或 proxy 也一样。`fit validate` 会指出每一处以及
+  该设置什么。把它们改为 `tls` 或 `wss` 监听（hub 会生成证书并显示其指纹）和带 `pin` 的 `tls://` 或 `wss://`
+  端点，或改为 `quic://`；或者在 hub 以及每个节点和 proxy 上设置 `body_password`。hub 可以暂时同时提供两者：
+  先添加 tls 或 wss 监听，迁移节点和 proxy，再移除旧的监听。
+- `quic_pin` 改名为 `pin`，除 quic 端点外也校验 tls 和 wss 端点。旧名仍可加载，但会给出警告；页面写入 `pin`。
+- 设置 `body_password` 时链路协议为第 3 版，其密钥包含方向：更早版本与本版本的 hub、节点或 proxy 会互相拒绝
+  对方的加密链路，并各自在日志中记录双方的版本。请一起升级。
 
 ### 流控、上限与超时
 
@@ -204,7 +245,8 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 `key_file`，只能监听回环地址。
 
 - **hub**：节点（含服务和延迟）与 proxy；隧道（含两个方向的字节数和整条路径的延迟）。查询节点、设置
-  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制 QUIC 证书指纹。在这里设置
+  它的服务、踢出对端、关闭隧道。增删改监听；设置密码和控制台 WebSocket；复制节点和 proxy 用来固定的 hub
+  证书指纹，并查看每个监听的指纹。在这里设置
   的服务在节点的 `allow_hub_services` 允许时写入节点自己的成员。
 - **节点**：它的 hub，以及每条链路使用的协议，可增删改；它的服务，保存后通知所有 hub；它的隧道，
   可关闭。
@@ -237,8 +279,9 @@ hub 的控制台在无法直接访问的地方，可以经加密 WebSocket 访�
 
 ## 测试
 
-`go test -race ./tunnel/...` 像 `fit run` 那样通过 fit 的配置、在真实引擎上运行这些角色：经 TCP、
-WebSocket 和 QUIC 的隧道（加密与不加密消息体）、大数据量传输、慢服务和慢 proxy 、中途断开的连接、页面修改
-写回配置，以及从存储读回设置的重启。`test/docker/tunnel/fit-tunnel-docker.sh test` 让 hub 、节点和
+`go test -race ./tunnel/...` 像 `fit run` 那样通过 fit 的配置、在真实引擎上运行这些角色：经 TCP、TLS、
+WebSocket、基于 TLS 的 WebSocket 和 QUIC 的隧道（加密与不加密消息体）、大数据量传输、慢服务和慢 proxy 、
+中途断开的连接、页面修改写回配置，以及从存储读回设置的重启。还测试了位于 hub 地址上的转接方：只转发字节的
+转接方无法在 tls 或 wss 上注入帧，持有自己证书的转接方无法与固定了 hub 证书指纹的节点完成握手。`test/docker/tunnel/fit-tunnel-docker.sh test` 让 hub 、节点和
 proxy 各自运行在独立容器中，设备位于只有其节点可达的网络上，通过控制台和隧道测试全部功能，然后重启
 每个实例，检查它们从各自的存储中恢复。

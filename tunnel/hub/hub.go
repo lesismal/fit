@@ -1,6 +1,7 @@
 // Package hub is the tunnel's hub role, tunnel.hub in fit's
-// config. Nodes and proxies link to its listeners, over
-// TCP, WebSocket or QUIC, and register with its password, every link of
+// config. Nodes and proxies link to its listeners, over TLS, WebSocket
+// over TLS or QUIC (or TCP and WebSocket in the clear, on the loopback or
+// with a body password), and register with its password, every link of
 // each one's pool; the links of one type and name, from however many
 // processes, are one peer, numbered as Unix file descriptors are. The
 // hub routes each tunnel a proxy opens to the node it names, and passes
@@ -40,10 +41,10 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/link"
 	"github.com/lesismal/fit/tunnel/internal/proto"
 	"github.com/lesismal/fit/tunnel/internal/transport"
-	"github.com/lesismal/fit/tunnel/internal/transport/quic"
 	"github.com/lesismal/fit/tunnel/internal/wscrypt"
 
-	// Nodes and proxies may link over WebSocket.
+	// Nodes and proxies may link over QUIC and WebSocket.
+	_ "github.com/lesismal/fit/tunnel/internal/transport/quic"
 	_ "github.com/lesismal/fit/tunnel/internal/transport/ws"
 )
 
@@ -168,7 +169,8 @@ type Route struct {
 // with err.
 type listener struct {
 	cfg config.TunnelListener
-	// fp is the certificate a quic listener presents, by fingerprint.
+	// fp is the certificate a tls, wss or quic listener presents, by
+	// fingerprint.
 	fp  string
 	l   transport.Listener
 	err string
@@ -192,8 +194,8 @@ type Hub struct {
 	fp        string
 	console   *common.Console
 	socket    *socket
-	// generated is a certificate made for quic listeners, until the config
-	// has it.
+	// generated is a certificate made for the tls, wss and quic
+	// listeners, until the config has it.
 	generated [2]string
 
 	// lmu guards what Status reads of what amu guards.
@@ -298,17 +300,24 @@ func (s *Hub) Apply(member any) error {
 	return errors.Join(errs...)
 }
 
-// applyCert sets the certificate of the quic listeners: the config's, or,
-// when a quic listener needs one and the config has none, one made here,
-// which it returns as PEM to be written into the config.
+// needsHubCert reports whether l presents the hub's own certificate: a
+// tls, wss or quic listener without cert_file.
+func needsHubCert(l config.TunnelListener) bool {
+	return config.TunnelTakesTLS(l.Protocol) && l.CertFile == ""
+}
+
+// applyCert sets the hub's certificate, which the tls, wss and quic
+// listeners without cert_file present: the config's, or, when such a
+// listener needs one and the config has none, one made here, which it
+// returns as PEM to be written into the config.
 func (s *Hub) applyCert(cfg *config.TunnelHub) (persist []string, err error) {
 	certPEM, keyPEM := "", ""
 	if cfg.QUIC != nil {
 		certPEM, keyPEM = cfg.QUIC.Cert, cfg.QUIC.Key
 	}
-	if certPEM == "" && slices.ContainsFunc(cfg.Listeners, func(l config.TunnelListener) bool { return l.Protocol == config.TunnelQUIC }) {
+	if certPEM == "" && slices.ContainsFunc(cfg.Listeners, needsHubCert) {
 		if s.generated[0] == "" {
-			c, k, err := quic.NewSelfSigned("localhost", cfg.HubName())
+			c, k, err := transport.NewSelfSigned("localhost", cfg.HubName())
 			if err != nil {
 				return nil, err
 			}
@@ -328,17 +337,17 @@ func (s *Hub) applyCert(cfg *config.TunnelHub) (persist []string, err error) {
 	}
 	cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
 	if err != nil {
-		return nil, fmt.Errorf("quic: %w", err)
+		return nil, fmt.Errorf("the hub's certificate: %w", err)
 	}
 	s.lmu.Lock()
-	s.cert, s.certPEM, s.fp = &cert, certPEM, quic.Fingerprint(cert)
+	s.cert, s.certPEM, s.fp = &cert, certPEM, transport.Fingerprint(cert)
 	s.lmu.Unlock()
 	return persist, nil
 }
 
-// writeCert writes a certificate made for the quic listeners into the
-// config, so that it outlives a restart and its fingerprint stays the one
-// nodes and proxies pinned.
+// writeCert writes a certificate made for the listeners into the config,
+// so that it outlives a restart and its fingerprint stays the one nodes
+// and proxies pinned.
 func (s *Hub) writeCert(certPEM, keyPEM string) {
 	s.h.Edit(func(cur []byte) ([]byte, error) {
 		return common.EditJSON(cur, func(m common.Member) error {
@@ -357,10 +366,10 @@ func (s *Hub) writeCert(certPEM, keyPEM string) {
 		})
 	}, func(_ []string, err error) {
 		if err != nil {
-			s.log.Warnf("keeping the quic certificate in the config: %v", err)
+			s.log.Warnf("keeping the hub's certificate in the config: %v", err)
 			return
 		}
-		s.log.Infof("made a quic certificate, kept in the config: fingerprint %s", s.Fingerprint())
+		s.log.Infof("made the hub's certificate, kept in the config under quic: fingerprint %s", s.Fingerprint())
 	})
 }
 
@@ -368,11 +377,34 @@ func (s *Hub) writeCert(certPEM, keyPEM string) {
 // leaves out; the rest stay open. It returns why each that failed did.
 func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 	s.lmu.Lock()
-	fp := s.fp
-	cert := s.cert
+	hubFP := s.fp
+	hubCert := s.cert
 	s.lmu.Unlock()
-	key := func(l config.TunnelListener) string {
-		if l.Protocol == config.TunnelQUIC {
+	// The certificate each listener presents, and its fingerprint: the
+	// hub's, or its own files', which are read now.
+	type certOf struct {
+		cert *tls.Certificate
+		fp   string
+		err  error
+	}
+	certs := make([]certOf, len(want))
+	for i, lc := range want {
+		switch {
+		case !config.TunnelTakesTLS(lc.Protocol):
+		case lc.CertFile == "":
+			certs[i] = certOf{cert: hubCert, fp: hubFP}
+		default:
+			c, err := tls.LoadX509KeyPair(lc.CertFile, lc.KeyFile)
+			if err != nil {
+				certs[i].err = fmt.Errorf("the certificate: %w", err)
+				continue
+			}
+			certs[i] = certOf{cert: &c, fp: transport.Fingerprint(c)}
+		}
+	}
+	// A listener with TLS whose certificate changed opens anew.
+	key := func(l config.TunnelListener, fp string) string {
+		if config.TunnelTakesTLS(l.Protocol) {
 			return l.Key() + " " + fp
 		}
 		return l.Key()
@@ -380,16 +412,12 @@ func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 	have := map[string]*listener{}
 	for _, l := range s.listeners {
 		if l.l != nil {
-			k := l.cfg.Key()
-			if l.cfg.Protocol == config.TunnelQUIC {
-				k += " " + l.fp
-			}
-			have[k] = l
+			have[key(l.cfg, l.fp)] = l
 		}
 	}
 	keep := map[*listener]bool{}
-	for _, lc := range want {
-		if l := have[key(lc)]; l != nil {
+	for i, lc := range want {
+		if l := have[key(lc, certs[i].fp)]; l != nil && certs[i].err == nil {
 			keep[l] = true
 		}
 	}
@@ -403,15 +431,22 @@ func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 	}
 	var errs []error
 	next := make([]*listener, 0, len(want))
-	for _, lc := range want {
-		if l := have[key(lc)]; l != nil {
+	for i, lc := range want {
+		if l := have[key(lc, certs[i].fp)]; l != nil && keep[l] {
 			l.cfg = lc
 			next = append(next, l)
 			continue
 		}
-		l := &listener{cfg: lc, fp: fp}
+		l := &listener{cfg: lc, fp: certs[i].fp}
+		if err := certs[i].err; err != nil {
+			l.err = err.Error()
+			errs = append(errs, fmt.Errorf("listener %s: %w", lc.URL(), err))
+			s.log.Warnf("listener %s: %v", lc.URL(), err)
+			next = append(next, l)
+			continue
+		}
 		q := s.settings().cfg.QUIC
-		o := transport.ListenOptions{Cert: cert, Log: s.log,
+		o := transport.ListenOptions{Cert: certs[i].cert, Log: s.log,
 			QUIC: transport.QUIC{IdleTimeout: q.Idle(), KeepAlive: q.Ping(), HandshakeTimeout: q.Handshake(), MaxHandshakes: q.Handshakes(), MaxConns: s.settings().cfg.Links()}}
 		tl, err := transport.Listen(s.h.Engine, lc.URL(), o, s.accept)
 		if err != nil {
@@ -430,8 +465,9 @@ func (s *Hub) applyListeners(want []config.TunnelListener) []error {
 	return errs
 }
 
-// Fingerprint is the SHA-256 of the certificate the quic listeners
-// present, which nodes and proxies pin, or "" without one.
+// Fingerprint is the SHA-256 of the hub's certificate, which its tls, wss
+// and quic listeners without cert_file present and nodes and proxies pin,
+// or "" without one.
 func (s *Hub) Fingerprint() string {
 	s.lmu.Lock()
 	defer s.lmu.Unlock()

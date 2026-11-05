@@ -4,8 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,14 +16,12 @@ import (
 )
 
 // DialURL is the quic:// address of hostport with how to check its
-// certificate: pinned to the fingerprint pin, or, if insecure, not checked.
-func DialURL(hostport, pin string, insecure bool) string {
+// certificate: pinned to the fingerprint pin, or by the CAs of caFile, or,
+// if insecure, not checked.
+func DialURL(hostport, pin, caFile string, insecure bool) string {
 	u := Scheme + "://" + hostport
-	switch {
-	case pin != "":
-		u += "?pin=" + url.QueryEscape(pin)
-	case insecure:
-		u += "?insecure=1"
+	if q := transport.ClientQuery(pin, caFile, insecure); q != "" {
+		u += "?" + q
 	}
 	return u
 }
@@ -38,12 +34,11 @@ func splitQuery(addr string) (string, ClientOptions, error) {
 		return "", ClientOptions{}, err
 	}
 	_, query, _ := strings.Cut(addr, "?")
-	q, err := url.ParseQuery(query)
+	opts, err := transport.ParseClientQuery(query)
 	if err != nil {
 		return "", ClientOptions{}, err
 	}
-	insecure, _ := strconv.ParseBool(q.Get("insecure"))
-	return hostport, ClientOptions{PinSHA256: q.Get("pin"), InsecureSkipVerify: insecure}, nil
+	return hostport, opts, nil
 }
 
 // ErrDialTimeout is the error of a dial whose handshake took too long.

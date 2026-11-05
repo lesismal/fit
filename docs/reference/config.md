@@ -1903,9 +1903,11 @@ Also at `llm.node.limits`, `llm.proxy.limits`.
 ## Tunnel
 
 The tunnel's roles, run beside the gateway on its engine: a `hub` that nodes and proxies link
-to over TCP, WebSocket or QUIC, a `node` beside the services it exposes, and a `proxy` that
-forwards local ports and web proxies through a hub to a node's service, so that services
-behind NAT are reached. A role runs while its member is set; any of them, in any number of
+to over TLS, WebSocket over TLS (wss) or QUIC, a `node` beside the services it exposes, and a
+`proxy` that forwards local ports and web proxies through a hub to a node's service, so that
+services behind NAT are reached. Nodes and proxies check the hub's certificate by `pin`, its
+fingerprint on the hub's pages, or by `ca_file`; plain `tcp` and `ws` are for the loopback, or
+need `body_password`. A role runs while its member is set; any of them, in any number of
 processes. What a role's pages, behind `console`, change is written back into its member, and
 kept in `admin.store` when there is one. See [the tunnel](../tunnel.md).
 
@@ -1915,20 +1917,22 @@ In a .conf file:
 tunnel {
 	hub {
 		password a-registration-password
-		listeners { protocol tcp; address :7000 }
+		listeners { protocol wss; address :7443 }
 	}
 	node {
 		name lab
 		hubs hub {
-			endpoints { address 127.0.0.1:7000 }
+			endpoints { address wss://hub.example.com:7443/tunnel }
 			password a-registration-password
+			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
 		}
 		services ssh { address 10.0.0.5:22 }
 	}
 	proxy {
 		hubs hub {
-			endpoints { address 127.0.0.1:7000 }
+			endpoints { address wss://hub.example.com:7443/tunnel }
 			password a-registration-password
+			pin 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
 		}
 		forwards { listen 127.0.0.1:2222; node lab; service ssh }
 	}
@@ -1942,15 +1946,16 @@ tunnel:
   hub:
     password: a-registration-password
     listeners:
-      - protocol: tcp
-        address: :7000
+      - protocol: wss
+        address: :7443
   node:
     name: lab
     hubs:
       - name: hub
         endpoints:
-          - address: 127.0.0.1:7000
+          - address: wss://hub.example.com:7443/tunnel
         password: a-registration-password
+        pin: 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
     services:
       - name: ssh
         address: 10.0.0.5:22
@@ -1958,8 +1963,9 @@ tunnel:
     hubs:
       - name: hub
         endpoints:
-          - address: 127.0.0.1:7000
+          - address: wss://hub.example.com:7443/tunnel
         password: a-registration-password
+        pin: 02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261
     forwards:
       - listen: 127.0.0.1:2222
         node: lab
@@ -1973,15 +1979,17 @@ In JSON:
   "tunnel": {
     "hub": {
       "password": "a-registration-password",
-      "listeners": [{"protocol": "tcp", "address": ":7000"}]
+      "listeners": [{"protocol": "wss", "address": ":7443"}]
     },
     "node": {
       "name": "lab",
-      "hubs": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
+      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}], "password": "a-registration-password",
+        "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"}],
       "services": [{"name": "ssh", "address": "10.0.0.5:22"}]
     },
     "proxy": {
-      "hubs": [{"name": "hub", "endpoints": [{"address": "127.0.0.1:7000"}], "password": "a-registration-password"}],
+      "hubs": [{"name": "hub", "endpoints": [{"address": "wss://hub.example.com:7443/tunnel"}], "password": "a-registration-password",
+        "pin": "02e5420d38831f019c363d82b2d7ee2ff7db1a143401587e3b9a92f0011e8261"}],
       "forwards": [{"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh"}]
     }
   }
@@ -2006,10 +2014,10 @@ In JSON:
 | --- | --- | --- | --- |
 | `name` | string |  | The name the hub tells the nodes and proxies that register. The host's name when left out. |
 | `password` | string |  | The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out. |
-| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes. |
-| `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them. |
+| `body_password` | string |  | When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. It applies to the links that open after it changes. |
+| `listeners` | list of [object](#config-tunnellistener) |  | Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them. |
 | `console_socket` | [object](#config-tunnelconsolesocket) |  | An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out. |
-| `quic` | [object](#config-tunnelhubquic) |  | The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set. |
+| `quic` | [object](#config-tunnelhubquic) |  | The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set. |
 | `register_timeout` | duration | `"10s"` | How long a link may take to register once it is open; it is closed past it. 10s when left out. |
 | `call_timeout` | duration | `"15s"` | How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out. |
 | `max_links` | integer, 0 or more | `1024` | The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0. |
@@ -2027,9 +2035,11 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `protocol` | string: `tcp`, `ws`, `quic` |  | Required. The protocol: tcp, a WebSocket (ws), for networks that let only HTTP through, or quic, over UDP. |
+| `protocol` | string: `tcp`, `tls`, `ws`, `wss`, `quic` |  | Required. The protocol: tls, TCP over TLS; wss, a WebSocket over TLS, for networks that let only HTTPS through; quic, over UDP; or tcp and ws, the same in the clear, which only a loopback address, or a hub with body_password, may take. |
 | `address` | string |  | Required. The host and port it listens on, as in ":7000"; an empty host is every address. |
-| `path` | string | `"/tunnel"` | A ws listener's path. /tunnel when left out. |
+| `path` | string | `"/tunnel"` | A ws or wss listener's path. /tunnel when left out. |
+| `cert_file` | string |  | A tls, wss or quic listener's certificate: a PEM file with it, followed by any intermediates, for nodes and proxies that check it with ca_file or the system's roots; with key_file. Read when the hub's member is applied. The hub's own certificate, in quic, when left out. |
+| `key_file` | string |  | The PEM private key of cert_file. |
 
 <a id="config-tunnelconsolesocket"></a>
 
@@ -2047,7 +2057,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cert` | string |  | The PEM certificate the quic listeners present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a quic listener needs one and none is set. |
+| `cert` | string |  | The PEM certificate the tls, wss and quic listeners without cert_file present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a listener needs one and none is set. |
 | `key` | string |  | The PEM private key of cert. |
 | `idle_timeout` | duration | `"30s"` | How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out. |
 | `keep_alive` | duration | `"10s"` | How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out. |
@@ -2081,9 +2091,11 @@ Also at `tunnel.proxy.hubs[]`.
 | `name` | string |  | The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out. |
 | `endpoints` | list of [object](#config-tunnelendpoint) |  | Required. The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails. |
 | `password` | string |  | Required. The hub's password. |
-| `body_password` | string |  | The hub's body_password, when it has one. |
-| `quic_pin` | string |  | The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots. |
-| `quic_insecure` | boolean |  | Take any QUIC certificate, for tests only. |
+| `body_password` | string |  | The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a loopback one needs it. |
+| `pin` | string |  | The SHA-256 fingerprint of the hub's certificate, as its pages show it, which tls://, wss:// and quic:// endpoints check the certificate against, in place of the chain and name checks: for a hub with a self-signed certificate. Without it or ca_file, the certificate is checked against the system's roots. |
+| `quic_pin` |  |  | Deprecated: renamed `pin`; the old name goes in config version 2. |
+| `ca_file` | string |  | A PEM file of the CAs that sign the hub's certificate, which tls://, wss:// and quic:// endpoints check it against, its name too, in place of the system's roots. Read at each dial. Not with pin. |
+| `quic_insecure` | boolean |  | Take any QUIC certificate, which lets anyone on the path read and change what the quic links carry: for tests only. |
 | `pool_size` | integer, 0 to 100 | `10` | How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left out or 0. |
 | `dial_timeout` | duration | `"5s"` | How long a link's dial may take. 5s when left out. |
 | `call_timeout` | duration | `"10s"` | How long the hub may take to answer a registration or a call. 10s when left out. |
@@ -2097,7 +2109,7 @@ Also at `tunnel.proxy.hubs[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string |  | Required. The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC. |
+| `address` | string |  | Required. The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password, host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear. |
 | `disabled` | boolean |  | Leave the endpoint out of the dials, keeping it for later. |
 
 <a id="config-tunnelservice"></a>

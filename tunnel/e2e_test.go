@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/observe"
 	"github.com/lesismal/fit/runtime"
+	"github.com/lesismal/fit/tunnel/internal/transport"
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 
 	_ "github.com/lesismal/fit/tunnel/hub"
@@ -229,6 +231,7 @@ type hubStatus struct {
 	Listeners []struct {
 		Protocol, Address, URL, Error string
 	} `json:"listeners"`
+	Fingerprint     string `json:"fingerprint"`
 	QUICFingerprint string `json:"quic_fingerprint"`
 	Socket          string `json:"socket"`
 	Peers           []struct {
@@ -294,14 +297,32 @@ type hubOpts struct {
 	bodyPassword string
 }
 
+// hubCert is the hub's certificate of a test, as PEM, and its fingerprint,
+// which the nodes and proxies of tls and wss pin.
+var hubCert = sync.OnceValues(func() ([2]string, string) {
+	c, k, err := transport.NewSelfSigned("localhost", "127.0.0.1")
+	if err != nil {
+		panic(err)
+	}
+	cert, err := tls.X509KeyPair(c, k)
+	if err != nil {
+		panic(err)
+	}
+	return [2]string{string(c), string(k)}, transport.Fingerprint(cert)
+})
+
 // uplinkJSON is a hub member of a node or proxy, to url.
 func uplinkJSON(url, password, body string) string {
 	extra := ""
 	if body != "" {
 		extra = fmt.Sprintf(`, "body_password": %q`, body)
 	}
-	if strings.HasPrefix(url, "quic://") {
+	switch {
+	case strings.HasPrefix(url, "quic://"):
 		extra += `, "quic_insecure": true`
+	case strings.HasPrefix(url, "tls://"), strings.HasPrefix(url, "wss://"):
+		_, pin := hubCert()
+		extra += fmt.Sprintf(`, "pin": %q`, pin)
 	}
 	return fmt.Sprintf(`{"name": "hub", "endpoints": [{"address": %q}], "password": %q, "pool_size": 2, "retry_interval": "100ms", "ping_interval": "500ms"%s}`, url, password, extra)
 }
@@ -319,9 +340,12 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	case "quic":
 		listen = freeUDPAddr(t)
 		h.url = "quic://" + listen
-	case "ws":
+	case "ws", "wss":
 		listen = freeAddr(t)
-		h.url = "ws://" + listen + "/tunnel"
+		h.url = o.protocol + "://" + listen + "/tunnel"
+	case "tls":
+		listen = freeAddr(t)
+		h.url = "tls://" + listen
 	default:
 		listen = freeAddr(t)
 		h.url = listen
@@ -329,6 +353,10 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	body := ""
 	if o.bodyPassword != "" {
 		body = fmt.Sprintf(`, "body_password": %q`, o.bodyPassword)
+	}
+	if o.protocol == "tls" || o.protocol == "wss" {
+		pem, _ := hubCert()
+		body += fmt.Sprintf(`, "quic": {"cert": %q, "key": %q}`, pem[0], pem[1])
 	}
 	doc := fmt.Sprintf(`{"tunnel": {
  "hub": {"name": "hub", "password": "pw"%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
@@ -387,7 +415,7 @@ func echoOnce(t *testing.T, addr, msg string) {
 }
 
 func TestTunnel(t *testing.T) {
-	for _, o := range []hubOpts{{protocol: "tcp"}, {protocol: "ws"}, {protocol: "quic"}, {protocol: "tcp", bodyPassword: "aes"}} {
+	for _, o := range []hubOpts{{protocol: "tcp"}, {protocol: "ws"}, {protocol: "quic"}, {protocol: "tls"}, {protocol: "wss"}, {protocol: "tcp", bodyPassword: "aes"}, {protocol: "wss", bodyPassword: "aes"}} {
 		name := o.protocol
 		if o.bodyPassword != "" {
 			name += "+body"
@@ -665,7 +693,7 @@ func TestHubPages(t *testing.T) {
 	}
 	// The node moves to the quic listener, pinned to the certificate.
 	h.node.post("/api/hubs/update", map[string]any{"name": "hub", "hub": map[string]any{
-		"name": "hub", "endpoints": []map[string]any{{"protocol": "quic", "address": udp, "enabled": true}}, "quic_pin": st.QUICFingerprint, "pool_size": 2}})
+		"name": "hub", "endpoints": []map[string]any{{"protocol": "quic", "address": udp, "enabled": true}}, "pin": st.Fingerprint, "pool_size": 2}})
 	if m := string(h.proc.member("tunnel", "node", "hubs")); !strings.Contains(m, "quic://"+udp) || !strings.Contains(m, `"password":"pw"`) || !strings.Contains(m, "retry_interval") {
 		t.Fatalf("the node's hubs in the config: %s", m)
 	}
@@ -675,6 +703,42 @@ func TestHubPages(t *testing.T) {
 		return len(ns.Hubs) == 1 && ns.Hubs[0].State == "registered"
 	})
 	echoOnce(t, h.echoListen, "over quic")
+
+	// A wss listener presents the same certificate, and the node moves to
+	// it, pinned the same; a pin that is not the hub's certificate's
+	// leaves the node unregistered, saying why.
+	wss := freeAddr(t)
+	h.hub.post("/api/listeners", map[string]string{"protocol": "wss", "address": wss})
+	h.hub.status(&st)
+	for _, l := range st.Listeners {
+		if l.Protocol == "wss" && (l.Error != "" || !strings.HasPrefix(l.URL, "wss://")) {
+			t.Fatalf("listener %+v", l)
+		}
+	}
+	wrong := strings.Repeat("0", 64)
+	h.node.post("/api/hubs/update", map[string]any{"name": "hub", "hub": map[string]any{
+		"name": "hub", "endpoints": []map[string]any{{"protocol": "wss", "address": wss, "enabled": true}}, "pin": wrong, "pool_size": 2}})
+	waitFor(t, "the node refusing the hub's certificate", func() bool {
+		var ns nodeStatus
+		h.node.status(&ns)
+		return len(ns.Hubs) == 1 && ns.Hubs[0].State != "registered" && strings.Contains(ns.Hubs[0].Error, "does not match the pin")
+	})
+	h.node.post("/api/hubs/update", map[string]any{"name": "hub", "hub": map[string]any{
+		"name": "hub", "endpoints": []map[string]any{{"protocol": "wss", "address": wss, "enabled": true}}, "pin": st.Fingerprint, "pool_size": 2}})
+	if m := string(h.proc.member("tunnel", "node", "hubs")); !strings.Contains(m, "wss://"+wss+"/tunnel") || !strings.Contains(m, st.Fingerprint) {
+		t.Fatalf("the node's hubs in the config: %s", m)
+	}
+	waitFor(t, "the node over wss", func() bool {
+		var ns nodeStatus
+		h.node.status(&ns)
+		return len(ns.Hubs) == 1 && ns.Hubs[0].State == "registered"
+	})
+	echoOnce(t, h.echoListen, "over wss")
+
+	// A tcp listener off the loopback, without body_password, is refused.
+	if code, body := h.hub.do("POST", "/api/listeners", map[string]string{"protocol": "tcp", "address": ":0"}, nil); code == 200 || !strings.Contains(body, "not a loopback address") {
+		t.Fatalf("a bare tcp listener on every address: %d %s", code, body)
+	}
 
 	// A listener that cannot listen is shown with why.
 	busy, err := net.Listen("tcp", "127.0.0.1:0")

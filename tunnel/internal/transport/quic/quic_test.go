@@ -87,7 +87,7 @@ func newFixture(t *testing.T, echo bool) *fixture {
 
 func (f *fixture) url() string {
 	hostport, _ := ParseURL(f.l.URL())
-	return DialURL(hostport, f.pin, false)
+	return DialURL(hostport, f.pin, "", false)
 }
 
 func (f *fixture) dial(t *testing.T) (transport.Conn, *sink) {
@@ -220,9 +220,9 @@ func TestListenerClose(t *testing.T) {
 func TestPinMismatch(t *testing.T) {
 	f := newFixture(t, true)
 	hostport, _ := ParseURL(f.l.URL())
-	other := DialURL(hostport, "00"+f.pin[2:], false)
+	other := DialURL(hostport, "00"+f.pin[2:], "", false)
 	if f.pin[:2] == "00" {
-		other = DialURL(hostport, "11"+f.pin[2:], false)
+		other = DialURL(hostport, "11"+f.pin[2:], "", false)
 	}
 	_, err := transport.Dial(tunneltest.Engine(t), other, 5*time.Second, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err == nil {
@@ -238,7 +238,7 @@ func TestDialTimeout(t *testing.T) {
 	}
 	defer pc.Close() // takes the datagrams, answers none
 	start := time.Now()
-	_, err = transport.Dial(tunneltest.Engine(t), DialURL(pc.LocalAddr().String(), "", true), 300*time.Millisecond, func(c transport.Conn) transport.Handler { return newSink(c, false) })
+	_, err = transport.Dial(tunneltest.Engine(t), DialURL(pc.LocalAddr().String(), "", "", true), 300*time.Millisecond, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err == nil {
 		t.Fatal("the dial worked")
 	}

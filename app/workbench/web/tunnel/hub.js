@@ -1,9 +1,9 @@
 // The tunnel hub's module: overview, the nodes and proxies linked to it, its tunnels (with the tunnel map and each
-// tunnel's path), its listeners and its settings (passwords, the console socket, the QUIC certificate). What it
+// tunnel's path), its listeners and its settings (passwords, the console socket, the hub's certificate). What it
 // changes is written into tunnel.hub in fit's config. Needs ui.js and tunnel/shared.js.
 //
 // 隧道 hub 模块：概览、连到本 hub 的节点与 proxy、隧道（含隧道全景图与每条隧道的链路）、监听与设置（各密码、控制台
-// WebSocket、QUIC 证书）。所做修改写入 fit 配置的 tunnel.hub。依赖 ui.js 与 tunnel/shared.js。
+// WebSocket、hub 证书）。所做修改写入 fit 配置的 tunnel.hub。依赖 ui.js 与 tunnel/shared.js。
 (function () {
   'use strict';
   // [key, en, zh] / [键, 英文, 中文]
@@ -24,6 +24,9 @@
     ['remove_listener_q', 'Remove the listener on {addr}?', '移除 {addr} 上的监听？'],
     ['listeners_note', 'Changes apply at once, without a restart. Removing a QUIC listener closes the links it carries; other listeners\' links stay open until they close.',
       '修改立即生效，无需重启。移除 QUIC 监听会关闭其上的链路；其他监听上的链路保持到自行关闭。'],
+    ['listeners_tls', 'TLS, WSS and QUIC listeners authenticate the hub to nodes and proxies that pin its certificate. TCP and WS carry the links in the clear: off a loopback address they need the body password.',
+      'TLS、WSS 与 QUIC 监听向固定了本 hub 证书指纹的节点和 proxy 证明 hub 的身份。TCP 与 WS 明文传输链路：用于非回环地址时须设置消息体密码。'],
+    ['own_cert', 'its own certificate', '自有证书'],
     ['set.title', 'Passwords and console socket', '密码与控制台 WebSocket'], ['set.password', 'Registration password', '注册密码'],
     ['set.body', 'Body AES password', '消息体 AES 密码'], ['set.clear_body', 'Remove the body password', '移除消息体密码'],
     ['set.socket_pw', 'Console socket password', '控制台 WebSocket 密码'], ['set.clear_socket', 'Remove it, using the registration password', '移除它，改用注册密码'],
@@ -33,9 +36,9 @@
     ['set.note', 'Applied at once. Registered peers stay linked; a new body password applies to the links opened from now on.',
       '立即生效。已注册的对端保持连接；新的消息体密码只用于此后新建的链路。'],
     ['set.save', 'Save settings', '保存设置'], ['set.saved', 'Settings saved', '设置已保存'],
-    ['quic.title', 'QUIC certificate', 'QUIC 证书'], ['quic.fp', 'Fingerprint (SHA-256)', '指纹（SHA-256）'],
-    ['quic.note', 'Nodes and proxies pin this fingerprint for the hub\'s QUIC listeners.', '节点和 proxy 用此指纹固定本 hub QUIC 监听的证书。'],
-    ['quic.none', 'Made, and written into the config, when a QUIC listener is added.', '添加 QUIC 监听时生成，并写入配置。']
+    ['quic.title', 'Hub certificate', 'Hub 证书'], ['quic.fp', 'Fingerprint (SHA-256)', '指纹（SHA-256）'],
+    ['quic.note', 'Nodes and proxies pin this fingerprint, as their hub\'s certificate pin, for the hub\'s TLS, WSS and QUIC listeners.', '节点和 proxy 把此指纹填作 hub 的证书指纹，用以固定本 hub 的 TLS、WSS 与 QUIC 监听的证书。'],
+    ['quic.none', 'Made, and written into the config, when a TLS, WSS or QUIC listener is added.', '添加 TLS、WSS 或 QUIC 监听时生成，并写入配置。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });
@@ -273,16 +276,17 @@
       // ---- Listeners / 监听 ----
       function listenerKey(l) { return { protocol: l.protocol, address: l.address, path: l.path || '' }; }
       function editListener(l, reload) {
-        var proto = h('select.select', ['tcp', 'ws', 'quic'].map(function (p) { return h('option', { value: p, selected: l && l.protocol === p }, K.protoName(p)); }));
+        var proto = h('select.select', ['wss', 'tls', 'quic', 'ws', 'tcp'].map(function (p) { return h('option', { value: p, selected: l ? l.protocol === p : p === 'wss' }, K.protoName(p)); }));
         var addr = h('input.input.mono', { value: l ? l.address : '', placeholder: ':7000', 'data-fill': true });
         var path = h('input.input.mono', { value: l ? l.path || '' : '', placeholder: '/tunnel', 'data-fill': true });
         var pathRow = UI.field(t('path'), path);
-        function sync() { pathRow.hidden = proto.value !== 'ws'; }
+        function sync() { pathRow.hidden = proto.value !== 'ws' && proto.value !== 'wss'; }
         proto.addEventListener('change', sync);
         sync();
         UI.modal({
           title: l ? t('edit_listener') : t('add_listener'),
-          body: h('div.form', h('div.form-row', UI.field(t('tk.protocol'), proto), UI.field(t('tk.addr_hp'), addr)), pathRow),
+          body: h('div.form', h('div.form-row', UI.field(t('tk.protocol'), proto), UI.field(t('tk.addr_hp'), addr)), pathRow,
+            h('div.small.muted', t('listeners_tls'))),
           actions: [{ label: t('cancel') }, {
             label: t('save'), kind: 'primary', onclick: function () {
               if (!addr.value.trim()) { addr.focus(); return false; }
@@ -301,13 +305,14 @@
       function listenersPage(el) {
         var box = h('div'), load;
         var add = UI.btn(t('add_listener'), 'plus', function () { editListener(null, load); }, 'primary sm');
-        UI.mount(el, h('div.stack', K.configNote('hub'), UI.card(t('nav.listeners'), box, add, true), h('div.callout', UI.icon('info'), ' ', t('listeners_note'))));
+        UI.mount(el, h('div.stack', K.configNote('hub'), UI.card(t('nav.listeners'), box, add, true), h('div.callout', UI.icon('info'), ' ', t('listeners_note'), ' ', t('listeners_tls'))));
         load = poll(function () {
           UI.mount(box, UI.table([
             { label: t('tk.protocol'), render: function (l) { return K.protoBadge(l.protocol); } },
             { label: t('tk.address'), render: function (l) { return h('span.mono', l.address); } },
             { label: t('path'), render: function (l) { return l.path ? h('span.mono', l.path) : ''; } },
             { label: t('peers_dial'), render: function (l) { return l.error ? h('span', UI.badge(t('tk.st.failed'), 'danger', true), h('div.small', l.error)) : h('span.mono', l.url); } },
+            { label: t('quic.fp'), render: function (l) { return l.fingerprint ? h('span', l.own_cert ? UI.badge(t('own_cert'), 'info') : null, h('div.small.mono', { style: { overflowWrap: 'anywhere' } }, l.fingerprint)) : ''; } },
             { label: '', cls: 'actions', render: function (l) {
               return h('div.btn-row', { style: { justifyContent: 'flex-end' } },
                 UI.btn(t('tk.edit'), 'edit', function () { editListener(l, load); }, 'ghost sm'),
@@ -351,10 +356,11 @@
           UI.field(t('set.socket_addr'), f.socketAddr),
           h('div.small.muted', t('set.note')),
           h('div.btn-row', save)));
-          if (st.quic_fingerprint) {
+          var fp = st.fingerprint || st.quic_fingerprint;
+          if (fp) {
             UI.mount(quic, h('div.stack',
-              UI.field(t('quic.fp'), h('div.row', { style: { flexWrap: 'nowrap' } }, h('code', { style: { overflowWrap: 'anywhere' } }, st.quic_fingerprint),
-                UI.btn(t('copy'), 'copy', function () { UI.copy(st.quic_fingerprint); }, 'sm'))),
+              UI.field(t('quic.fp'), h('div.row', { style: { flexWrap: 'nowrap' } }, h('code', { style: { overflowWrap: 'anywhere' } }, fp),
+                UI.btn(t('copy'), 'copy', function () { UI.copy(fp); }, 'sm'))),
               h('div.small.muted', t('quic.note'))));
           } else UI.mount(quic, UI.empty(t('quic.none'), 'lock'));
         }

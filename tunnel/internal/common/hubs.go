@@ -16,8 +16,10 @@ type HubReq struct {
 	Password     string        `json:"password"`
 	BodyPassword string        `json:"body_password"`
 	PoolSize     int           `json:"pool_size"`
-	QUICPin      string        `json:"quic_pin"`
+	Pin          string        `json:"pin"`
 	QUICInsecure bool          `json:"quic_insecure"`
+	// QUICPin is Pin's old name, taken when Pin is empty.
+	QUICPin string `json:"quic_pin"`
 }
 
 // EndpointReq is one of a hub's addresses, as the pages send it.
@@ -34,13 +36,13 @@ func (e EndpointReq) address() string {
 		return a
 	}
 	switch e.Protocol {
-	case config.TunnelWS:
+	case config.TunnelWS, config.TunnelWSS:
 		if !strings.Contains(a, "/") {
 			a += config.DefaultTunnelWSPath
 		}
-		return "ws://" + a
-	case config.TunnelQUIC:
-		return "quic://" + a
+		return e.Protocol + "://" + a
+	case config.TunnelQUIC, config.TunnelTLS:
+		return e.Protocol + "://" + a
 	}
 	return a
 }
@@ -120,7 +122,13 @@ func EditHub(m Member, name string, req HubReq, clearBody bool) error {
 	if err := set("pool_size", req.PoolSize); err != nil {
 		return err
 	}
-	if err := set("quic_pin", strings.TrimSpace(req.QUICPin)); err != nil {
+	// pin was quic_pin.
+	delete(u, "quic_pin")
+	pin := req.Pin
+	if pin == "" {
+		pin = req.QUICPin
+	}
+	if err := set("pin", strings.TrimSpace(pin)); err != nil {
 		return err
 	}
 	if err := set("quic_insecure", req.QUICInsecure); err != nil {

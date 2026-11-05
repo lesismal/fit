@@ -193,7 +193,7 @@ registered() { is "$(get "$1" "$2" /api/status | jq -r --arg s "$3" '.hubs[] | s
 
 hub_json() { # NAME HOST FINGERPRINT
 	jq -n -c --arg n "$1" --arg h "$2" --arg fp "$3" --arg pw "$HUB_PASSWORD" --arg body "$BODY_PASSWORD" '{
-		name: $n, password: $pw, body_password: $body, pool_size: 2, quic_pin: $fp,
+		name: $n, password: $pw, body_password: $body, pool_size: 2, pin: $fp,
 		endpoints: [
 			{protocol: "quic", address: "\($h):7443", enabled: true},
 			{protocol: "ws", address: "ws://\($h):7001/tunnel", enabled: true},
@@ -535,7 +535,7 @@ t_fallback() {
 t_uplink_edit() {
 	section "hubs edited on nodes and proxies / 在节点和 proxy 上编辑 hub"
 	check "alice edits hub-2: QUIC off, passwords left empty are kept" post "$ALICE" alice /api/hubs/update \
-		"$(jq -n -c --arg fp "$(cat "$STATE/fp-hub-2")" '{name: "hub-2", hub: {name: "hub-2", password: "", pool_size: 3, quic_pin: $fp, endpoints: [
+		"$(jq -n -c --arg fp "$(cat "$STATE/fp-hub-2")" '{name: "hub-2", hub: {name: "hub-2", password: "", pool_size: 3, pin: $fp, endpoints: [
 			{protocol: "quic", address: "hub-2:7443", enabled: false}, {protocol: "ws", address: "ws://hub-2:7001/tunnel", enabled: true}, {protocol: "tcp", address: "hub-2:7000", enabled: true}]}}')"
 	check "  … alice → hub-2 over WebSocket, pool of 3" eventually 40 protos_are "$ALICE" alice hub-2 "ws:3"
 	check "  … tunnels through hub-2 work" eventually 20 http_has alice 7307 "device dev-lab"
@@ -543,7 +543,7 @@ t_uplink_edit() {
 		"$(jq -n -c --argjson s "$(hub_json hub-2 hub-2 "$(cat "$STATE/fp-hub-2")")" '{name: "hub-2", hub: ($s | .password = "" | .body_password = "")}')"
 	check "  … over QUIC again" eventually 40 protos_are "$ALICE" alice hub-2 "quic:2"
 	check "lab adds a hub with a wrong QUIC pin and nothing else" post "$LAB" lab /api/hubs \
-		"$(jq -n -c --arg pw "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "badpin", password: $pw, body_password: $b, pool_size: 1, quic_pin: ("00" * 32), endpoints: [{protocol: "quic", address: "hub-1:7443", enabled: true}]}')"
+		"$(jq -n -c --arg pw "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "badpin", password: $pw, body_password: $b, pool_size: 1, pin: ("00" * 32), endpoints: [{protocol: "quic", address: "hub-1:7443", enabled: true}]}')"
 	check "  … it fails on the pin" eventually 30 t "get '$LAB' lab /api/status | jq -e '.hubs[] | select(.name == \"badpin\") | .state != \"registered\" and (.error // \"\" | test(\"pin|certificate\"; \"i\"))'"
 	check "lab removes it" post "$LAB" lab /api/hubs/delete '{"name":"badpin"}'
 	check "removing an unknown hub is refused" refused "$LAB" lab /api/hubs/delete '{"name":"nope"}'
@@ -582,7 +582,7 @@ t_peers() {
 	check "no body password where the hub has one: never registers" t "sleep 5; get '$con' tester /api/status | jq -e '.hubs[0].state != \"registered\"'"
 	stop_peer
 
-	run_peer intruder "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "hub", endpoints: [{address: "quic://hub-1:7443"}], password: $p, body_password: $b, quic_pin: ("0" * 64)}')"
+	run_peer intruder "$(jq -n -c --arg p "$HUB_PASSWORD" --arg b "$BODY_PASSWORD" '{name: "hub", endpoints: [{address: "quic://hub-1:7443"}], password: $p, body_password: $b, pin: ("0" * 64)}')"
 	check "a wrong QUIC pin: refused" eventually 20 uplink_error "pin|certificate"
 	stop_peer
 

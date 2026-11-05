@@ -6,7 +6,8 @@
 // business; a transport only moves the bytes.
 //
 // An address names its transport by its scheme: tcp://host:port, or plain
-// host:port, is TCP; ws://host:port/path is a WebSocket (package
+// host:port, is TCP; tls://host:port is the same over TLS (tls.go);
+// ws://host:port/path is a WebSocket, and wss:// one over TLS (package
 // transport/ws); quic://host:port is a stream of a QUIC connection on a UDP
 // binding of the engine (package transport/quic). A transport registers its
 // scheme in an init function, and is linked in with a blank import.
@@ -110,7 +111,7 @@ type Listener interface {
 
 var (
 	mu         sync.RWMutex
-	transports = map[string]Transport{"tcp": tcpTransport{}}
+	transports = map[string]Transport{"tcp": tcpTransport{}, "tls": tlsTransport{}}
 )
 
 // Register makes t the transport of addresses of scheme.
@@ -175,21 +176,39 @@ func Listen(engine *fib.Engine, addr string, o ListenOptions, open OpenFunc) (Li
 type fibConn struct {
 	c *fib.Connection
 	h Handler
+	// out, when set, is the layer what is sent goes through, in place of
+	// the connection's own: a WebSocket's frames over TLS, whose layer the
+	// connection keeps.
+	out fib.Layer
 }
 
-func (f *fibConn) Send(b []byte) error { return f.c.SendOwned(b) }
+func (f *fibConn) Send(b []byte) error {
+	if f.out != nil {
+		return f.out.Send(b, nil)
+	}
+	return f.c.SendOwned(b)
+}
 
 // SetQueueLimit sets what the connection may have queued for its socket;
 // past it, the connection closes.
 func (f *fibConn) SetQueueLimit(n int64) { f.c.SetWriteQueueLimit(n) }
 func (f *fibConn) Close() error          { return f.c.Close() }
-func (f *fibConn) CloseAfterSend()       { f.c.CloseAfterSend() }
-func (f *fibConn) LocalAddr() net.Addr   { return f.c.LocalAddr() }
-func (f *fibConn) RemoteAddr() net.Addr  { return f.c.RemoteAddr() }
-func (f *fibConn) String() string        { return fmt.Sprintf("fib %v", f.c.RemoteAddr()) }
+func (f *fibConn) CloseAfterSend() {
+	if f.out != nil {
+		f.out.CloseAfterSend()
+		return
+	}
+	f.c.CloseAfterSend()
+}
+func (f *fibConn) LocalAddr() net.Addr  { return f.c.LocalAddr() }
+func (f *fibConn) RemoteAddr() net.Addr { return f.c.RemoteAddr() }
+func (f *fibConn) String() string       { return fmt.Sprintf("fib %v", f.c.RemoteAddr()) }
 
 // fibHandler is the fib.Handler of FibHandler.
-type fibHandler struct{ open OpenFunc }
+type fibHandler struct {
+	open OpenFunc
+	out  func(*fib.Connection) fib.Layer
+}
 
 // FibHandler is a fib.Handler that makes a Conn of each fib connection as
 // it opens and hands it to open. It keeps the Conn as the connection's
@@ -199,6 +218,13 @@ type fibHandler struct{ open OpenFunc }
 // its own write backlog: a link that stopped reading for that could wait on
 // its peer doing the same, and would stall every tunnel it carries.
 func FibHandler(open OpenFunc) fib.Handler { return fibHandler{open: open} }
+
+// FibHandlerVia is FibHandler for connections whose Conns send through the
+// layer out gives each as it opens, rather than through the connection's
+// own layer.
+func FibHandlerVia(open OpenFunc, out func(*fib.Connection) fib.Layer) fib.Handler {
+	return fibHandler{open: open, out: out}
+}
 
 // KeepAlive is how the TCP connections of links and tunnels find a peer
 // that is gone without closing them: probed after Idle of quiet, every
@@ -211,6 +237,9 @@ func (h fibHandler) OnOpen(c *fib.Connection) {
 	c.SetWriteBackpressure(false)
 	_ = c.SetKeepAliveConfig(KeepAlive)
 	fc := &fibConn{c: c}
+	if h.out != nil {
+		fc.out = h.out(c)
+	}
 	c.SetAttachment(fc)
 	if fc.h = h.open(fc); fc.h == nil {
 		_ = c.Close()

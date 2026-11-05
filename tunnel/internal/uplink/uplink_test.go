@@ -33,6 +33,13 @@ type fakeHub struct {
 
 func newFakeHub(t *testing.T) *fakeHub {
 	t.Helper()
+	return newFakeHubOn(t, "127.0.0.1:0", transport.ListenOptions{})
+}
+
+// newFakeHubOn is a fakeHub listening on addr, with the certificate o
+// gives a listener with TLS.
+func newFakeHubOn(t *testing.T, addr string, o transport.ListenOptions) *fakeHub {
+	t.Helper()
 	s := &fakeHub{links: make(chan *link.Link, 16)}
 	r := link.NewRouter()
 	r.HandleCall(proto.MethodRegister, func(l *link.Link, body []byte) (any, error) {
@@ -52,7 +59,7 @@ func newFakeHub(t *testing.T) *fakeHub {
 		return &proto.PingRsp{}, nil
 	}, true)
 	r.HandleCall(proto.MethodNodes, func(*link.Link, []byte) (any, error) { return []string{"a"}, nil }, true)
-	l, err := transport.Listen(tunneltest.Engine(t), "127.0.0.1:0", transport.ListenOptions{}, func(c transport.Conn) transport.Handler {
+	l, err := transport.Listen(tunneltest.Engine(t), addr, o, func(c transport.Conn) transport.Handler {
 		return link.New(c, r, nil)
 	})
 	if err != nil {
@@ -96,20 +103,37 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 func TestDials(t *testing.T) {
-	cfg := &config.TunnelUplink{QUICPin: "ab", Endpoints: []config.TunnelEndpoint{
+	cfg := &config.TunnelUplink{Pin: "ab", Endpoints: []config.TunnelEndpoint{
 		{Address: "h:1", Disabled: true},
 		{Address: ""},
 		{Address: "quic://h:2"},
 		{Address: "ws://h:3/x"},
+		{Address: "tls://h:4"},
+		{Address: "wss://h:5/x"},
 	}}
 	got := Dials(cfg)
-	if len(got) != 2 || got[0] != "quic://h:2?pin=ab" || got[1] != "ws://h:3/x" {
+	if len(got) != 4 || got[0] != "quic://h:2?pin=ab" || got[1] != "ws://h:3/x" || got[2] != "tls://h:4?pin=ab" || got[3] != "wss://h:5/x?pin=ab" {
+		t.Errorf("dials %q", got)
+	}
+	// By CAs: a quic endpoint may also take any certificate, for tests,
+	// and tls and wss may not.
+	ca := &config.TunnelUplink{CAFile: "/c a.pem", QUICInsecure: true, Endpoints: []config.TunnelEndpoint{{Address: "tls://h:4"}, {Address: "quic://h:2"}}}
+	if got := Dials(ca); len(got) != 2 || got[0] != "tls://h:4?ca=%2Fc+a.pem" || got[1] != "quic://h:2?ca=%2Fc+a.pem" {
+		t.Errorf("dials %q", got)
+	}
+	insecure := &config.TunnelUplink{QUICInsecure: true, Endpoints: []config.TunnelEndpoint{{Address: "wss://h:5/x"}, {Address: "quic://h:2"}}}
+	if got := Dials(insecure); len(got) != 2 || got[0] != "wss://h:5/x" || got[1] != "quic://h:2?insecure=1" {
 		t.Errorf("dials %q", got)
 	}
 	other := *cfg
 	if !Same(cfg, &other) {
 		t.Error("a copy is not the same uplink")
 	}
+	other.CAFile = "x"
+	if Same(cfg, &other) {
+		t.Error("another ca_file is the same uplink")
+	}
+	other.CAFile = ""
 	other.Endpoints = append([]config.TunnelEndpoint(nil), cfg.Endpoints...)
 	other.Endpoints[0].Disabled = false
 	if Same(cfg, &other) {

@@ -34,12 +34,13 @@ import (
 
 	"github.com/lesismal/fit/tunnel/internal/transport/quic"
 
-	// Hubs may be reached over WebSocket.
+	// Hubs may be reached over WebSocket, in the clear or over TLS.
 	_ "github.com/lesismal/fit/tunnel/internal/transport/ws"
 )
 
 // Dials is the addresses a link tries, in order: the endpoints not
-// disabled, a quic one's with how its certificate is checked.
+// disabled, a tls, wss or quic one's with how the hub's certificate is
+// checked, in its query.
 func Dials(cfg *config.TunnelUplink) []string {
 	var out []string
 	for _, e := range cfg.Endpoints {
@@ -47,8 +48,13 @@ func Dials(cfg *config.TunnelUplink) []string {
 			continue
 		}
 		u := e.Address
-		if e.Protocol() == config.TunnelQUIC {
-			u = quic.DialURL(strings.TrimPrefix(u, "quic://"), cfg.QUICPin, cfg.QUICInsecure)
+		switch e.Protocol() {
+		case config.TunnelQUIC:
+			u = quic.DialURL(strings.TrimPrefix(u, "quic://"), cfg.Pin, cfg.CAFile, cfg.QUICInsecure)
+		case config.TunnelTLS, config.TunnelWSS:
+			if q := transport.ClientQuery(cfg.Pin, cfg.CAFile, false); q != "" {
+				u += "?" + q
+			}
 		}
 		out = append(out, u)
 	}
@@ -59,7 +65,7 @@ func Dials(cfg *config.TunnelUplink) []string {
 // a to b keeps its links: everything but its name, which the role keys it
 // by, is compared.
 func Same(a, b *config.TunnelUplink) bool {
-	return a.Password == b.Password && a.BodyPassword == b.BodyPassword && a.QUICPin == b.QUICPin &&
+	return a.Password == b.Password && a.BodyPassword == b.BodyPassword && a.Pin == b.Pin && a.CAFile == b.CAFile &&
 		a.QUICInsecure == b.QUICInsecure && a.Pool() == b.Pool() && a.Dial() == b.Dial() && a.Call() == b.Call() &&
 		a.Retry() == b.Retry() && a.Ping() == b.Ping() && a.PingWait() == b.PingWait() &&
 		slices.EqualFunc(a.Endpoints, b.Endpoints, func(x, y config.TunnelEndpoint) bool {
@@ -99,11 +105,12 @@ type Status struct {
 	// protocol each one took, and Protos how many took each.
 	Links  []LinkStatus   `json:"links"`
 	Protos map[string]int `json:"protos"`
-	// Endpoints, QUICPin and QUICInsecure are the settings, for the web
-	// page to edit, and HasPassword and HasBodyPassword whether the
+	// Endpoints, Pin, CAFile and QUICInsecure are the settings, for the
+	// web page to edit, and HasPassword and HasBodyPassword whether the
 	// passwords are set, which the page does not get.
 	Endpoints       []EndpointView `json:"endpoints"`
-	QUICPin         string         `json:"quic_pin,omitempty"`
+	Pin             string         `json:"pin,omitempty"`
+	CAFile          string         `json:"ca_file,omitempty"`
 	QUICInsecure    bool           `json:"quic_insecure,omitempty"`
 	HasPassword     bool           `json:"has_password"`
 	HasBodyPassword bool           `json:"has_body_password"`
@@ -513,7 +520,7 @@ func (u *Uplink) Status() Status {
 	defer u.mu.Unlock()
 	cfg := u.Config
 	st := Status{Name: u.Name, State: u.state, Error: u.lastErr, Hub: u.hub, Since: u.since, Tunnels: u.Tunnels.Len(), RTT: u.rtt.Stats(), BodyEncrypted: cfg.BodyPassword != "", PoolSize: cfg.Pool(), Places: []int{},
-		Links: []LinkStatus{}, Protos: map[string]int{}, Endpoints: []EndpointView{}, QUICPin: cfg.QUICPin, QUICInsecure: cfg.QUICInsecure, HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}
+		Links: []LinkStatus{}, Protos: map[string]int{}, Endpoints: []EndpointView{}, Pin: cfg.Pin, CAFile: cfg.CAFile, QUICInsecure: cfg.QUICInsecure, HasPassword: cfg.Password != "", HasBodyPassword: cfg.BodyPassword != ""}
 	for _, e := range cfg.Endpoints {
 		st.Endpoints = append(st.Endpoints, EndpointView{Protocol: e.Protocol(), Address: e.Address, Enabled: !e.Disabled})
 	}

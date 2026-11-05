@@ -10,17 +10,56 @@ import (
 // The tunnel's members load as strictly as the rest of the config, and are
 // checked beyond decoding.
 func TestConfig(t *testing.T) {
-	up := `{"endpoints": [{"address": "hub.example:7000"}], "password": "pw"}`
+	pin := strings.Repeat("ab", 32)
+	up := `{"endpoints": [{"address": "wss://hub.example/tunnel"}, {"address": "tls://hub.example:7000"}, {"address": "quic://hub.example:7443"}], "password": "pw", "pin": "` + pin + `"}`
+	bare := func(address, extra string) string {
+		return `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "` + address + `"}], "password": "pw"` + extra + `}]}}}`
+	}
+	listener := func(protocol, address, extra string) string {
+		return `{"tunnel": {"hub": {"password": "pw"` + extra + `, "listeners": [{"protocol": "` + protocol + `", "address": "` + address + `"}]}}}`
+	}
 	for _, tc := range []struct {
 		name, doc, want string
 	}{
-		{"a hub", `{"tunnel": {"hub": {"password": "pw", "listeners": [{"protocol": "tcp", "address": ":7000"}, {"protocol": "ws", "address": ":7001"}, {"protocol": "quic", "address": ":7000"}]}}}`, ""},
+		{"a hub", `{"tunnel": {"hub": {"password": "pw", "listeners": [{"protocol": "tls", "address": ":7000"}, {"protocol": "wss", "address": ":7001", "path": "/t"}, {"protocol": "quic", "address": ":7000"}]}}}`, ""},
+		{"a hub in the clear with body_password", `{"tunnel": {"hub": {"password": "pw", "body_password": "b", "listeners": [{"protocol": "tcp", "address": ":7000"}, {"protocol": "ws", "address": ":7001"}]}}}`, ""},
+		{"a listener's own certificate", `{"tunnel": {"hub": {"listeners": [{"protocol": "wss", "address": ":7001", "cert_file": "c.pem", "key_file": "k.pem"}]}}}`, ""},
+
+		// Off the loopback, tcp and ws carry the links unauthenticated
+		// after registration; on it, and with body_password, they may.
+		{"tcp on every address", listener("tcp", ":7000", ""), "a tcp listener on \":7000\", which is not a loopback address"},
+		{"ws on a public address", listener("ws", "0.0.0.0:7001", ""), "use tls or wss"},
+		{"tcp on IPv6's every address", listener("tcp", "[::]:7000", ""), "or set the hub's body_password"},
+		{"tcp on the loopback", listener("tcp", "127.0.0.1:7000", ""), ""},
+		{"ws on the loopback", listener("ws", "127.8.0.1:7000", ""), ""},
+		{"tcp on IPv6's loopback", listener("tcp", "[::1]:7000", ""), ""},
+		{"tcp on localhost", listener("tcp", "localhost:7000", ""), ""},
+		{"tcp with body_password", listener("tcp", ":7000", `, "body_password": "b"`), ""},
+		{"a tcp endpoint", bare("hub.example:7000", ""), "carries the links in the clear and unauthenticated: use tls:// or wss:// with pin"},
+		{"a tcp:// endpoint", bare("tcp://10.0.0.1:7000", ""), "use tls:// or wss://"},
+		{"a ws endpoint", bare("ws://hub.example/tunnel", ""), "or set body_password"},
+		{"a disabled bare endpoint", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "h:1", "disabled": true}, {"address": "tls://h:2"}], "password": "pw"}]}}}`, "\"h:1\", whose host is not a loopback one"},
+		{"a tcp endpoint on the loopback", bare("127.0.0.1:7000", ""), ""},
+		{"a ws endpoint on localhost", bare("ws://localhost:7001/tunnel", ""), ""},
+		{"a tcp endpoint on IPv6's loopback", bare("tcp://[::1]:7000", ""), ""},
+		{"a tcp endpoint with body_password", bare("hub.example:7000", `, "body_password": "b"`), ""},
+		{"a tls endpoint", bare("tls://hub.example:7000", ""), ""},
+		{"a tls endpoint with a path", bare("tls://hub.example:7000/x", ""), "has a path"},
+		{"a tls endpoint without a port", bare("tls://hub.example", ""), "not a tls:// URL"},
+		{"a pin in the address", bare("wss://hub.example/t?pin=ab", ""), "has a query"},
+		{"a bad pin", bare("tls://hub.example:7000", `, "pin": "abcd"`), "not a certificate pin"},
+		{"a pin with colons", bare("tls://hub.example:7000", `, "pin": "`+strings.TrimSuffix(strings.Repeat("AB:", 32), ":")+`"`), ""},
+		{"pin and ca_file", bare("tls://hub.example:7000", `, "pin": "`+pin+`", "ca_file": "ca.pem"`), "set one"},
+		{"quic_pin, pin's old name", bare("quic://hub.example:7443", `, "quic_pin": "`+pin+`"`), ""},
+		{"quic_pin and pin", bare("quic://hub.example:7443", `, "quic_pin": "`+pin+`", "pin": "`+pin+`"`), "old name"},
+		{"a certificate on tcp", `{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": "127.0.0.1:7000", "cert_file": "c", "key_file": "k"}]}}}`, "only a tls, wss or quic listener"},
+		{"half a listener's certificate", `{"tunnel": {"hub": {"listeners": [{"protocol": "tls", "address": ":7000", "cert_file": "c"}]}}}`, "cert_file and key_file go together"},
 		{"a node", `{"tunnel": {"node": {"hubs": [` + up + `], "services": [{"name": "ssh", "address": "10.0.0.5:22"}]}}}`, ""},
-		{"a proxy", `{"tunnel": {"proxy": {"hubs": [` + up + `], "forwards": [{"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh", "hub": "hub.example:7000"}]}}}`, ""},
+		{"a proxy", `{"tunnel": {"proxy": {"hubs": [` + up + `], "forwards": [{"listen": "127.0.0.1:2222", "node": "lab", "service": "ssh", "hub": "wss://hub.example/tunnel"}]}}}`, ""},
 		{"camelCase", `{"tunnel": {"hub": {"linkWsAddr": ":7001"}}}`, "unknown field"},
 		{"an unknown protocol", `{"tunnel": {"hub": {"listeners": [{"protocol": "udp", "address": ":7000"}]}}}`, "listeners[0].protocol"},
 		{"two listeners on one address", `{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": ":7000"}, {"protocol": "ws", "address": ":7000"}]}}}`, "listens on :7000 already"},
-		{"a path on tcp", `{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": ":7000", "path": "/x"}]}}}`, "only a ws listener"},
+		{"a path on tcp", `{"tunnel": {"hub": {"listeners": [{"protocol": "tcp", "address": ":7000", "path": "/x"}]}}}`, "only a ws or wss listener"},
 		{"a socket without a console", `{"tunnel": {"hub": {"password": "pw", "console_socket": {"address": ":7002"}}}}`, "lacks"},
 		{"half a certificate", `{"tunnel": {"hub": {"quic": {"cert": "x"}}}}`, "cert and key go together"},
 		{"a bad certificate", `{"tunnel": {"hub": {"quic": {"cert": "x", "key": "y"}}}}`, "do not load"},

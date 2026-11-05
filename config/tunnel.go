@@ -2,7 +2,9 @@ package config
 
 import (
 	"crypto/tls"
+	"encoding/hex"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -14,12 +16,21 @@ import (
 // the services it exposes, and a proxy that forwards local ports and web
 // proxies through a hub to them; see docs/tunnel.md.
 
-// The protocols a tunnel listener or endpoint may take.
+// The protocols a tunnel listener or endpoint may take: tcp and ws in the
+// clear, tls and wss the same over TLS, and quic.
 const (
 	TunnelTCP  = "tcp"
+	TunnelTLS  = "tls"
 	TunnelWS   = "ws"
+	TunnelWSS  = "wss"
 	TunnelQUIC = "quic"
 )
+
+// TunnelTakesTLS reports whether a tunnel protocol runs TLS: tls, wss and
+// quic.
+func TunnelTakesTLS(protocol string) bool {
+	return protocol == TunnelTLS || protocol == TunnelWSS || protocol == TunnelQUIC
+}
 
 // The defaults of the tunnel's roles.
 const (
@@ -57,10 +68,10 @@ var (
 type TunnelHub struct {
 	Name                 string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
 	Password             string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
-	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
-	Listeners            []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
+	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one: each frame is authenticated, so a tcp or ws listener on an address that is not a loopback one is allowed only with it. It applies to the links that open after it changes."`
+	Listeners            []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. A tcp or ws listener on an address that is not a loopback one needs body_password: use tls, wss or quic there. None when left out: the console's pages add them."`
 	ConsoleSocket        *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
-	QUIC                 *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
+	QUIC                 *TunnelHubQUIC       `json:"quic,omitempty" doc:"The hub's certificate, which its tls, wss and quic listeners present unless they have cert_file, and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a listener needs one and none is set."`
 	RegisterTimeout      Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
 	CallTimeout          Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
 	MaxLinks             int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
@@ -77,9 +88,11 @@ type TunnelHub struct {
 
 // TunnelListener is where nodes and proxies link to a hub.
 type TunnelListener struct {
-	Protocol string `json:"protocol" fit:"required" enum:"tcp,ws,quic" doc:"The protocol: tcp, a WebSocket (ws), for networks that let only HTTP through, or quic, over UDP."`
+	Protocol string `json:"protocol" fit:"required" enum:"tcp,tls,ws,wss,quic" doc:"The protocol: tls, TCP over TLS; wss, a WebSocket over TLS, for networks that let only HTTPS through; quic, over UDP; or tcp and ws, the same in the clear, which only a loopback address, or a hub with body_password, may take."`
 	Address  string `json:"address" fit:"required" doc:"The host and port it listens on, as in \":7000\"; an empty host is every address."`
-	Path     string `json:"path,omitempty" default:"\"/tunnel\"" doc:"A ws listener's path. /tunnel when left out."`
+	Path     string `json:"path,omitempty" default:"\"/tunnel\"" doc:"A ws or wss listener's path. /tunnel when left out."`
+	CertFile string `json:"cert_file,omitempty" doc:"A tls, wss or quic listener's certificate: a PEM file with it, followed by any intermediates, for nodes and proxies that check it with ca_file or the system's roots; with key_file. Read when the hub's member is applied. The hub's own certificate, in quic, when left out."`
+	KeyFile  string `json:"key_file,omitempty" doc:"The PEM private key of cert_file."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -96,7 +109,7 @@ type TunnelConsoleSocket struct {
 
 // TunnelHubQUIC is the QUIC of a hub's quic listeners.
 type TunnelHubQUIC struct {
-	Cert             string   `json:"cert,omitempty" doc:"The PEM certificate the quic listeners present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a quic listener needs one and none is set."`
+	Cert             string   `json:"cert,omitempty" doc:"The PEM certificate the tls, wss and quic listeners without cert_file present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a listener needs one and none is set."`
 	Key              string   `json:"key,omitempty" doc:"The PEM private key of cert."`
 	IdleTimeout      Duration `json:"idle_timeout,omitempty" default:"\"30s\"" doc:"How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out."`
 	KeepAlive        Duration `json:"keep_alive,omitempty" default:"\"10s\"" doc:"How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out."`
@@ -173,9 +186,10 @@ type TunnelUplink struct {
 	Name          string           `json:"name,omitempty" doc:"The hub's name here, which forwards and the pages name it by. The first endpoint's address when left out."`
 	Endpoints     []TunnelEndpoint `json:"endpoints" fit:"required" doc:"The hub's addresses, in the order each link tries them: it dials the first one not disabled, and the next when that fails."`
 	Password      string           `json:"password" fit:"required" doc:"The hub's password."`
-	BodyPassword  string           `json:"body_password,omitempty" doc:"The hub's body_password, when it has one."`
-	QUICPin       string           `json:"quic_pin,omitempty" doc:"The SHA-256 fingerprint of the hub's QUIC certificate, as its pages show it, which a quic endpoint checks the certificate against. Without it, or quic_insecure, the certificate is checked against the system's roots."`
-	QUICInsecure  bool             `json:"quic_insecure,omitempty" doc:"Take any QUIC certificate, for tests only."`
+	BodyPassword  string           `json:"body_password,omitempty" doc:"The hub's body_password, when it has one. A tcp:// or ws:// endpoint whose host is not a loopback one needs it."`
+	Pin           string           `json:"pin,omitempty" renamed:"quic_pin" doc:"The SHA-256 fingerprint of the hub's certificate, as its pages show it, which tls://, wss:// and quic:// endpoints check the certificate against, in place of the chain and name checks: for a hub with a self-signed certificate. Without it or ca_file, the certificate is checked against the system's roots."`
+	CAFile        string           `json:"ca_file,omitempty" doc:"A PEM file of the CAs that sign the hub's certificate, which tls://, wss:// and quic:// endpoints check it against, its name too, in place of the system's roots. Read at each dial. Not with pin."`
+	QUICInsecure  bool             `json:"quic_insecure,omitempty" doc:"Take any QUIC certificate, which lets anyone on the path read and change what the quic links carry: for tests only."`
 	PoolSize      int              `json:"pool_size,omitempty" min:"0" max:"100" default:"10" doc:"How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left out or 0."`
 	DialTimeout   Duration         `json:"dial_timeout,omitempty" default:"\"5s\"" doc:"How long a link's dial may take. 5s when left out."`
 	CallTimeout   Duration         `json:"call_timeout,omitempty" default:"\"10s\"" doc:"How long the hub may take to answer a registration or a call. 10s when left out."`
@@ -188,7 +202,7 @@ type TunnelUplink struct {
 
 // TunnelEndpoint is one address of a hub.
 type TunnelEndpoint struct {
-	Address  string `json:"address" fit:"required" doc:"The hub's address: host:port or tcp://host:port for TCP, ws://host:port/path for a WebSocket, quic://host:port for QUIC."`
+	Address  string `json:"address" fit:"required" doc:"The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password, host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear."`
 	Disabled bool   `json:"disabled,omitempty" doc:"Leave the endpoint out of the dials, keeping it for later."`
 
 	At Value `json:"-" fit:"self"`
@@ -273,18 +287,22 @@ func (q *TunnelHubQUIC) Handshakes() int {
 }
 
 // URL returns the address the listener is dialed on, its scheme naming its
-// protocol: host:port for tcp, ws://host:port/path, quic://host:port.
+// protocol: host:port for tcp, ws://host:port/path, wss://host:port/path,
+// tls://host:port, quic://host:port.
 func (l TunnelListener) URL() string {
 	switch l.Protocol {
 	case TunnelTCP:
 		return l.Address
-	case TunnelWS:
-		return "ws://" + l.Address + l.WSPath()
+	case TunnelWS, TunnelWSS:
+		return l.Protocol + "://" + l.Address + l.WSPath()
 	}
 	return l.Protocol + "://" + l.Address
 }
 
-// WSPath returns a ws listener's path, its default when left out.
+// IsWS reports whether the listener serves WebSockets: ws or wss.
+func (l TunnelListener) IsWS() bool { return l.Protocol == TunnelWS || l.Protocol == TunnelWSS }
+
+// WSPath returns a ws or wss listener's path, its default when left out.
 func (l TunnelListener) WSPath() string {
 	if l.Path == "" {
 		return DefaultTunnelWSPath
@@ -295,10 +313,11 @@ func (l TunnelListener) WSPath() string {
 // Key returns what tells listeners apart: two with the same key are the
 // same listener.
 func (l TunnelListener) Key() string {
-	if l.Protocol == TunnelWS {
-		return l.Protocol + " " + l.Address + " " + l.WSPath()
+	k := l.Protocol + " " + l.Address
+	if l.IsWS() {
+		k += " " + l.WSPath()
 	}
-	return l.Protocol + " " + l.Address
+	return k
 }
 
 // The settings of a node, their defaults when left out.
@@ -354,6 +373,34 @@ func (u *TunnelUplink) HubName() string {
 	return ""
 }
 func (u *TunnelUplink) Pool() int { return int(orDefault(int64(u.PoolSize), DefaultTunnelPoolSize)) }
+
+// Bare reports whether an endpoint at address would carry the uplink's
+// links unauthenticated past registration: tcp or ws to a host that is not
+// a loopback one, without body_password.
+func (u *TunnelUplink) Bare(address string) bool {
+	if u.BodyPassword != "" {
+		return false
+	}
+	switch p := (TunnelEndpoint{Address: address}).Protocol(); p {
+	case TunnelTCP:
+		host, _, err := net.SplitHostPort(strings.TrimPrefix(address, "tcp://"))
+		return err != nil || !TunnelLoopback(host)
+	case TunnelWS:
+		u, err := url.Parse(address)
+		return err != nil || !TunnelLoopback(u.Hostname())
+	}
+	return false
+}
+
+// TunnelLoopback reports whether host, a name or IP address, is a loopback
+// one: localhost, 127.0.0.0/8 or ::1. An empty host, every address, is not.
+func TunnelLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	return err == nil && ip.Unmap().IsLoopback()
+}
 func (u *TunnelUplink) Dial() time.Duration {
 	return time.Duration(orDefault(int64(u.DialTimeout), int64(DefaultTunnelDialTimeout)))
 }
@@ -388,16 +435,29 @@ func checkTunnelEndpoint(address string) string {
 		if host, port, err := net.SplitHostPort(hostport); err != nil || host == "" || port == "" || port == "0" {
 			return "\"" + address + "\" is not a host and port to dial, as in \"hub.example:7000\""
 		}
-	case TunnelWS, TunnelQUIC:
+	case TunnelWS, TunnelWSS, TunnelTLS, TunnelQUIC:
 		u, err := url.Parse(address)
-		if err != nil || u.Hostname() == "" || p == TunnelQUIC && u.Port() == "" {
+		needsPort := p == TunnelQUIC || p == TunnelTLS
+		if err != nil || u.Hostname() == "" || needsPort && u.Port() == "" {
 			return "\"" + address + "\" is not a " + p + ":// URL with a host and port"
 		}
-		if p == TunnelQUIC && u.Path != "" && u.Path != "/" {
-			return "\"" + address + "\" has a path, which a quic:// address does not"
+		if needsPort && u.Path != "" && u.Path != "/" {
+			return "\"" + address + "\" has a path, which a " + p + ":// address does not"
+		}
+		if u.RawQuery != "" {
+			return "\"" + address + "\" has a query: the hub's certificate is checked by pin or ca_file"
 		}
 	default:
-		return "\"" + address + "\" has the scheme " + p + ": use host:port, ws:// or quic://"
+		return "\"" + address + "\" has the scheme " + p + ": use tls://, wss://, quic://, or host:port and ws:// with body_password"
+	}
+	return ""
+}
+
+// checkTunnelPin returns what is wrong with a certificate pin, or "".
+func checkTunnelPin(pin string) string {
+	b, err := hex.DecodeString(strings.ReplaceAll(pin, ":", ""))
+	if err != nil || len(b) != 32 {
+		return "\"" + pin + "\" is not a certificate pin: the SHA-256 of the hub's certificate in hex, 64 digits, as its pages show it"
 	}
 	return ""
 }
@@ -457,12 +517,27 @@ func checkTunnelHub(s *TunnelHub, add func(Value, string, ...any)) {
 			add(at.Field("address"), "%s", msg)
 		}
 		switch {
-		case l.Path != "" && l.Protocol != TunnelWS:
-			add(at.Field("path"), "only a ws listener has a path")
+		case l.Path != "" && !l.IsWS():
+			add(at.Field("path"), "only a ws or wss listener has a path")
 		case l.Path != "" && !strings.HasPrefix(l.Path, "/"):
 			add(at.Field("path"), "%q does not start with '/'", l.Path)
 		}
-		// tcp and ws listen on TCP, quic on UDP; port 0 picks a free one.
+		switch {
+		case (l.CertFile != "" || l.KeyFile != "") && !TunnelTakesTLS(l.Protocol):
+			add(at.Field("cert_file"), "only a tls, wss or quic listener has a certificate")
+		case (l.CertFile == "") != (l.KeyFile == ""):
+			add(at, "cert_file and key_file go together")
+		}
+		// tcp and ws carry the frames after registration unauthenticated
+		// but for body_password: anyone who takes the hub's address could
+		// relay a node's registration and then send it what it likes.
+		if (l.Protocol == TunnelTCP || l.Protocol == TunnelWS) && s.BodyPassword == "" {
+			if host, _, err := net.SplitHostPort(l.Address); err == nil && !TunnelLoopback(host) {
+				add(at.Field("protocol"), "a %s listener on %q, which is not a loopback address, carries the links in the clear and unauthenticated: use tls or wss, with the hub's certificate pinned by the nodes and proxies, or quic; or set the hub's body_password", l.Protocol, l.Address)
+			}
+		}
+		// tcp, tls, ws and wss listen on TCP, quic on UDP; port 0 picks a
+		// free one.
 		network := "tcp"
 		if l.Protocol == TunnelQUIC {
 			network = "udp"
@@ -527,6 +602,19 @@ func checkTunnelUplinks(ups []TunnelUplink, at Value, add func(Value, string, ..
 		}
 		if u.Password == "" {
 			add(uat.Field("password"), "the password is empty")
+		}
+		for j, e := range u.Endpoints {
+			if checkTunnelEndpoint(e.Address) == "" && u.Bare(e.Address) {
+				add(uat.Field("endpoints").Index(j).Field("address"), "%q, whose host is not a loopback one, carries the links in the clear and unauthenticated: use tls:// or wss:// with pin (the fingerprint on the hub's pages) or ca_file, or quic://; or set body_password, as the hub has", e.Address)
+			}
+		}
+		switch {
+		case u.Pin != "" && u.CAFile != "":
+			add(uat.Field("ca_file"), "pin and ca_file both check the hub's certificate: set one")
+		case u.Pin != "":
+			if msg := checkTunnelPin(u.Pin); msg != "" {
+				add(uat.Field("pin"), "%s", msg)
+			}
 		}
 	}
 }
