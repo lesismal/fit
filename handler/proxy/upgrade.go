@@ -28,7 +28,12 @@ import (
 // its Upgrade and Connection fields; an HTTP/2 or HTTP/3 one with an
 // extended CONNECT (RFC 8441, RFC 9220) for websocket, which goes upstream
 // as the HTTP/1.1 handshake it stands for. Any other answer the upstream
-// gives is the client's.
+// gives is the client's, if its body is within upstream.StreamThreshold:
+// fib's Client.StartUpgrade takes such an answer whole, never streamed, and
+// one past the threshold is answered 502 rather than buffered. A request
+// asking to switch to h2c is an offer to the hop it came over, which a
+// listener that speaks h2c takes up itself, and is proxied as the ordinary
+// request it also is.
 
 // tunnelWatermark is how much may wait to go to one side of a tunnel before
 // the other side's reads are held.
@@ -53,8 +58,9 @@ func upgradeProtocol(r *stdhttp.Request) (protocol string, extended bool) {
 		return "", false
 	}
 	for _, value := range r.Header["Upgrade"] {
-		if name, _, _ := strings.Cut(value, ","); strings.TrimSpace(name) != "" {
-			return strings.TrimSpace(name), false
+		name, _, _ := strings.Cut(value, ",")
+		if name = strings.TrimSpace(name); name != "" && !strings.EqualFold(name, "h2c") {
+			return name, false
 		}
 	}
 	return "", false
@@ -110,6 +116,11 @@ func (p *Proxy) serveUpgrade(c *fibhttp.Context, pool *upstream.Pool, protocol s
 	if extended && !strings.EqualFold(protocol, "websocket") {
 		// Only a WebSocket has an HTTP/1.1 handshake to stand for it.
 		_ = c.Respond(stdhttp.StatusNotImplemented, "text/plain; charset=utf-8", []byte("501 Not Implemented\n"))
+		return
+	}
+	if pool.Saturated() {
+		// Turned away before anything is built for it, as any request is.
+		p.busy(c)
 		return
 	}
 	x := &exchange{c: c, own: true}
@@ -173,8 +184,10 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	if err != nil {
 		cause := r.causeErr()
 		// A handshake the client or a drain gave up on is no failure of the
-		// backend's.
-		r.finish(cause == nil)
+		// backend's, nor is a refusal too large to pass on: a client that
+		// asks to switch on any large resource would otherwise take the
+		// backend out of rotation.
+		r.finish(cause == nil && !errors.Is(err, fibhttp.ErrResponseBodyTooLarge))
 		if !errors.Is(cause, errClientGone) {
 			_ = c.Respond(upgradeStatus(err), "text/plain; charset=utf-8", nil)
 		}
@@ -186,9 +199,15 @@ func (r *relay) answer(resp *fibhttp.ClientResponse, err error) {
 	delete(header, "Content-Length")
 	if up == nil {
 		// Refused: the answer is the client's.
-		body, _, _ := takeBody(resp)
+		body, pooled, _ := takeBody(resp)
 		r.finish(false)
-		_ = c.WriteResponse(fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body})
+		out := fibhttp.Response{StatusCode: resp.StatusCode, Header: header, Body: body}
+		if pooled {
+			// A buffer from fib's pool, given back once the response is sent.
+			_ = c.WriteResponseOwned(out)
+		} else {
+			_ = c.WriteResponse(out)
+		}
 		return
 	}
 	if r.extended {
