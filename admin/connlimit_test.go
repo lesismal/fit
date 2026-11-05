@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -139,6 +140,7 @@ func TestUnauthenticatedTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		return resp.StatusCode
 	}
@@ -171,4 +173,88 @@ func TestUnauthenticatedTimeout(t *testing.T) {
 	if s := get(authed, br, "Authorization: Bearer s3cret\r\n"); s != 200 {
 		t.Errorf("again on the kept connection: %d", s)
 	}
+}
+
+// TestUnauthenticatedBoundFromAccept: a client without the token cannot keep
+// a connection past unauthTimeout from its accept by asking again before
+// each wait runs out, neither with requests answered 401, which close the
+// connection at once, nor with the token-less dashboard pages; while one
+// that sends the token within that time is kept past it, as long as
+// idleTimeout.
+func TestUnauthenticatedBoundFromAccept(t *testing.T) {
+	old := unauthTimeout
+	unauthTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { unauthTimeout = old })
+	file := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(file, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := start(t, doc("v1"), &config.Admin{TokenFile: file})
+	addr := f.admin.Addr().String()
+	dial := func() (net.Conn, *bufio.Reader) {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.Close() })
+		return c, bufio.NewReader(c)
+	}
+	// get sends GET path with header lines extra, and returns its status,
+	// or 0 once the server has closed the connection.
+	get := func(c net.Conn, br *bufio.Reader, path, extra string) int {
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: localhost\r\n%s\r\n", path, extra); err != nil {
+			return 0
+		}
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			return 0
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	t.Run("401", func(t *testing.T) {
+		c, br := dial()
+		if s := get(c, br, "/status", ""); s != http.StatusUnauthorized {
+			t.Fatalf("without the token: %d", s)
+		}
+		time.Sleep(unauthTimeout / 3)
+		if s := get(c, br, "/status", ""); s != 0 {
+			t.Fatalf("the connection was kept after a 401: %d", s)
+		}
+	})
+	t.Run("dashboard", func(t *testing.T) {
+		c, br := dial()
+		begin := time.Now()
+		for time.Since(begin) < 10*unauthTimeout {
+			s := get(c, br, "/dashboard/", "")
+			if s == 0 {
+				if held := time.Since(begin); held > 3*unauthTimeout {
+					t.Fatalf("closed only after %v", held)
+				}
+				return
+			}
+			if s != http.StatusOK {
+				t.Fatalf("GET /dashboard/: %d", s)
+			}
+			time.Sleep(unauthTimeout / 3)
+		}
+		t.Fatalf("a connection without the token was kept %v, asking every %v", time.Since(begin), unauthTimeout/3)
+	})
+	t.Run("authenticated late", func(t *testing.T) {
+		c, br := dial()
+		if s := get(c, br, "/dashboard/", ""); s != http.StatusOK {
+			t.Fatalf("GET /dashboard/: %d", s)
+		}
+		time.Sleep(unauthTimeout / 3)
+		if s := get(c, br, "/status", "Authorization: Bearer s3cret\r\n"); s != http.StatusOK {
+			t.Fatalf("with the token: %d", s)
+		}
+		time.Sleep(2 * unauthTimeout)
+		if s := get(c, br, "/dashboard/", ""); s != http.StatusOK {
+			t.Fatalf("an authenticated connection was not kept past the bound: %d", s)
+		}
+	})
 }

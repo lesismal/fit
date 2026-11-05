@@ -33,9 +33,11 @@ var (
 	readTimeout       = time.Minute
 	writeTimeout      = time.Minute
 	idleTimeout       = time.Minute
-	// unauthTimeout bounds every read of a connection that has made no
-	// authenticated request yet: its first header, and its idle time, so
-	// that clients without the token cannot hold the connections long.
+	// unauthTimeout is how long after it is accepted a connection that has
+	// made no authenticated request yet may still read: its handshake, its
+	// requests, and its idle time between them all fall within it, so that
+	// clients without the token cannot hold the connections long, however
+	// often they ask.
 	unauthTimeout = 5 * time.Second
 )
 
@@ -277,6 +279,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			valid = ok && subtle.ConstantTimeCompare([]byte(got), s.token) == 1
 			if !valid && !isDashboard(r) {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="fit admin"`)
+				// Nothing more is taken on a connection that asks without
+				// the token: it is not kept for another try.
+				w.Header().Set("Connection", "close")
 				writeError(w, http.StatusUnauthorized, "a valid bearer token is needed")
 				return
 			}
@@ -605,7 +610,7 @@ type limitListener struct {
 	net.Listener
 	slots  chan struct{}
 	peers  *login.Peers
-	unauth time.Duration // the longest read a connection makes before it is authenticated
+	unauth time.Duration // how long after its accept a connection reads before it is authenticated
 }
 
 func newLimitListener(ln net.Listener, n int, peers *login.Peers, unauth time.Duration) *limitListener {
@@ -633,7 +638,7 @@ func (l *limitListener) Accept() (net.Conn, error) {
 			_ = c.Close()
 			continue
 		}
-		return &limitConn{Conn: c, unauth: l.unauth, release: func() { l.peers.Close(ip); <-l.slots }}, nil
+		return &limitConn{Conn: c, until: time.Now().Add(l.unauth), release: func() { l.peers.Close(ip); <-l.slots }}, nil
 	}
 }
 
@@ -642,12 +647,13 @@ type connKey struct{}
 
 // limitConn is a connection the limitListener counts. Until it has made an
 // authenticated request, no read deadline net/http sets on it lies past
-// unauth from when it is set.
+// until, unauth after it was accepted: requests without the token, however
+// often they come, do not keep it open past then.
 type limitConn struct {
 	net.Conn
 	once    sync.Once
 	release func()
-	unauth  time.Duration
+	until   time.Time
 
 	mu     sync.Mutex
 	authed bool
@@ -664,10 +670,8 @@ func (c *limitConn) SetReadDeadline(t time.Time) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.want = t
-	if !c.authed {
-		if limit := time.Now().Add(c.unauth); t.IsZero() || t.After(limit) {
-			t = limit
-		}
+	if !c.authed && (t.IsZero() || t.After(c.until)) {
+		t = c.until
 	}
 	return c.Conn.SetReadDeadline(t)
 }
