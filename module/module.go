@@ -111,6 +111,16 @@ type Unwrapped interface {
 	Unwrapped()
 }
 
+// Admitter is implemented by a handler that takes out of a request what its
+// client may not send on, as the proxy takes forwarding fields from a client
+// it does not trust, and must do so before any middleware runs, so that what
+// middleware sets in their place is kept. Admit is called on each request of
+// a route whose handler has middleware, before the first; a handler with no
+// middleware, told so by Unwrapped, does it itself.
+type Admitter interface {
+	Admit(c *fibhttp.Context)
+}
+
 // Holder is a hold on the config a module belongs to: a module whose
 // requests outlive its handler's return takes one for each with Retain, and
 // gives it back with Release when the request is over, so that the config

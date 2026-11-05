@@ -10,12 +10,15 @@
 // host_header says otherwise.
 //
 // The proxy tells the upstream who the client is with X-Forwarded-For,
-// X-Forwarded-Proto, X-Forwarded-Host and Forwarded (RFC 7239). What a
-// client sends in those fields is believed only when the client's address is
-// in trusted_proxies: then the proxy adds the client to X-Forwarded-For and
-// Forwarded and keeps X-Forwarded-Proto and X-Forwarded-Host; otherwise it
-// replaces all four with what it sees itself. No proxy is trusted by
-// default, so a client cannot pass itself off as another.
+// X-Forwarded-Proto, X-Forwarded-Host, Forwarded (RFC 7239) and X-Real-IP.
+// What a client sends in those fields is believed only when the client's
+// address is in trusted_proxies: then the proxy adds the client to
+// X-Forwarded-For and Forwarded and keeps X-Forwarded-Proto,
+// X-Forwarded-Host and X-Real-IP; otherwise it replaces all five with what it
+// sees itself, and drops the X-Forwarded-Port, -Prefix, -Ssl, -Server and
+// -Scheme the client sent, which other proxies set and fit does not (a
+// middleware may still set them). No proxy is trusted by default, so a
+// client cannot pass itself off as another.
 //
 // Over HTTP/1, a route whose proxy no middleware wraps passes the request's
 // header on as the lines it arrived in, edited as above, and the response's
@@ -64,7 +67,7 @@ type Proxy struct {
 	Upstreams         []Split         `json:"upstreams,omitempty" doc:"Upstreams requests are spread over at random by weight, as a canary release does, in place of upstream."`
 	Failover          string          `json:"failover,omitempty" doc:"An upstream that takes the requests when none of the chosen upstream's backends is in rotation, for failing or for its health checks, and one of its own is."`
 	Mirror            *Mirror         `json:"mirror,omitempty" doc:"Send a copy of a share of the requests whose bodies arrive whole (64KB at most) to another upstream, and drop its answers. At most 256 copies are under way at once; past that, requests are not copied. The requests themselves do not wait for their copies."`
-	TrustedProxies    []string        `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-* and Forwarded fields are believed. None when left out."`
+	TrustedProxies    []string        `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of this one, whose X-Forwarded-*, X-Real-IP and Forwarded fields are believed; those of any other client are replaced or dropped. None when left out."`
 	HostHeader        string          `json:"host_header,omitempty" doc:"The Host header sent upstream; the client's when left out."`
 	Retry             *Retry          `json:"retry,omitempty" doc:"Send a request that failed again, to the backend the upstream picks next: one whose connection could not be made, whatever its method, and, for GET, HEAD, OPTIONS, TRACE, PUT and DELETE, one that failed before its response began or was answered with a status of statuses. A request whose body streams (past 64KB, or still arriving) is never sent again. No retries when left out."`
 	TunnelIdleTimeout config.Duration `json:"tunnel_idle_timeout,omitempty" default:"\"10m\"" doc:"How long a tunnel, as a WebSocket the proxy has joined to its upstream is, may carry nothing either way before it is closed; 10m when left out."`
@@ -361,6 +364,7 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 	}
 	if ip != "" {
 		dst = appendField(dst, "X-Forwarded-For: ", ip)
+		dst = appendField(dst, "X-Real-IP: ", ip)
 	}
 	dst = appendField(dst, "X-Forwarded-Proto: ", proto)
 	dst = appendField(dst, "X-Forwarded-Host: ", r.Host)
@@ -397,7 +401,7 @@ func (p *Proxy) outgoingFramed(c *fibhttp.Context, x *exchange, block string) bo
 // forwardingRoom is what outgoingFramed's buffer has room for past the
 // client's lines, besides three copies of the host and the traceparent: the
 // forwarding fields' names and an address, as most requests need.
-const forwardingRoom = 160
+const forwardingRoom = 192
 
 // What outgoingFramed does with a field of the client's request.
 const (
@@ -432,7 +436,7 @@ func framedRequestField(name string) int {
 			return fieldReadAgain
 		}
 	case 9:
-		if strings.EqualFold(name, "Forwarded") {
+		if strings.EqualFold(name, "Forwarded") || strings.EqualFold(name, "X-Real-Ip") {
 			return fieldDrop
 		}
 	case 10:
@@ -444,11 +448,12 @@ func framedRequestField(name string) int {
 			return fieldDrop
 		}
 	case 15:
-		if strings.EqualFold(name, "X-Forwarded-For") {
+		if strings.EqualFold(name, "X-Forwarded-For") || strings.EqualFold(name, "X-Forwarded-Ssl") {
 			return fieldDrop
 		}
 	case 16:
-		if strings.EqualFold(name, "Proxy-Connection") || strings.EqualFold(name, "X-Forwarded-Host") {
+		if strings.EqualFold(name, "Proxy-Connection") || strings.EqualFold(name, "X-Forwarded-Host") ||
+			strings.EqualFold(name, "X-Forwarded-Port") {
 			return fieldDrop
 		}
 	case 17:
@@ -456,7 +461,8 @@ func framedRequestField(name string) int {
 			return fieldDrop
 		}
 	case 18:
-		if strings.EqualFold(name, "Proxy-Authenticate") {
+		if strings.EqualFold(name, "Proxy-Authenticate") || strings.EqualFold(name, "X-Forwarded-Server") ||
+			strings.EqualFold(name, "X-Forwarded-Prefix") || strings.EqualFold(name, "X-Forwarded-Scheme") {
 			return fieldDrop
 		}
 	case 19:
@@ -648,6 +654,14 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *excha
 	if !trusted || len(header["X-Forwarded-Host"]) == 0 {
 		header["X-Forwarded-Host"] = field(2, r.Host)
 	}
+	if !trusted && p.unwrapped {
+		// With middleware, Admit took the client's out before it ran.
+		removeUntrusted(header)
+	}
+	if _, ok := header["X-Real-Ip"]; !ok && ip != "" {
+		// The client's, from a trusted proxy, or one a middleware set, stays.
+		header["X-Real-Ip"] = field(4, ip)
+	}
 
 	// The bytes are x's and are not written again, so the string may be
 	// made of them without a copy.
@@ -657,6 +671,29 @@ func (p *Proxy) setForwarded(c *fibhttp.Context, header stdhttp.Header, x *excha
 		header["Forwarded"] = field(3, strings.Join(prior, ", ")+", "+element)
 	} else {
 		header["Forwarded"] = field(3, element)
+	}
+}
+
+// untrustedFields are the forwarding fields other proxies set and fit does
+// not, which an upstream may believe as it believes X-Forwarded-For: a
+// client not in trusted_proxies may not send them on. X-Real-IP is set to
+// the client's address in its place.
+var untrustedFields = [...]string{"X-Real-Ip", "X-Forwarded-Port", "X-Forwarded-Prefix", "X-Forwarded-Ssl",
+	"X-Forwarded-Server", "X-Forwarded-Scheme"}
+
+// removeUntrusted deletes untrustedFields from h.
+func removeUntrusted(h stdhttp.Header) {
+	for _, name := range untrustedFields {
+		delete(h, name)
+	}
+}
+
+// Admit takes out of the request of a client not in trusted_proxies the
+// forwarding fields fit does not set (untrustedFields), before the route's
+// middleware runs: those a middleware sets go on.
+func (p *Proxy) Admit(c *fibhttp.Context) {
+	if ip, _ := clientAddr(c.Request.RemoteAddr); !p.isTrusted(ip) {
+		removeUntrusted(c.Request.Header)
 	}
 }
 

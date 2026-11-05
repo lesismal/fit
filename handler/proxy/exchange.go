@@ -320,7 +320,7 @@ type exchange struct {
 // header, one allocation for all of them.
 type headerFields struct {
 	// forwarded are the forwarding fields' values.
-	forwarded [4]string
+	forwarded [5]string
 	// element holds the Forwarded element's bytes, when they fit.
 	element [96]byte
 	// traceparent is the value of the field naming the request's span, when

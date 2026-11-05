@@ -690,7 +690,7 @@ func (c *converter) reverseProxy(d *directive, args []string) (handler, []mw, bo
 						}
 					}
 				case strings.HasPrefix(f, "x-forwarded-") || f == "x-real-ip" && len(e.args) == 2 && e.args[1] == "{remote_host}":
-					c.warn(e.line, "header_up %s: skipped: fit's proxy sets X-Forwarded-For, -Proto and -Host itself", e.args[0])
+					c.warn(e.line, "header_up %s: skipped: fit's proxy sets X-Forwarded-For, -Proto, -Host and X-Real-IP itself", e.args[0])
 				default:
 					reqOps = append(reqOps, e.args)
 					reqLines = append(reqLines, e.line)

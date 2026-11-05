@@ -220,7 +220,7 @@ upstream 地址：`host:port`、`:port`（localhost）、`http://`、`https://`�
 | `transport http { keepalive <d>\|off; keepalive_idle_conns; max_conns_per_host }` | `idle_timeout`、`max_idle_conns`、`max_conns` |
 | `flush_interval`、`buffer_requests` 等 | 无需转换：fit 双向流式转发 |
 
-`header_up X-Forwarded-*` 和 `X-Real-IP {remote_host}` 被跳过：fit 的代理自己设置 X-Forwarded-For、-Proto 和 -Host。
+`header_up X-Forwarded-*` 和 `X-Real-IP {remote_host}` 被跳过：fit 的代理自己设置 X-Forwarded-For、-Proto、-Host 和 X-Real-IP。
 
 ### `file_server`
 

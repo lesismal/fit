@@ -113,7 +113,7 @@ func TestConversions(t *testing.T) {
 					t.Errorf("%+v", mw)
 				}
 			}},
-		{name: "proxies", src: "http {\n upstream up { server 10.0.0.1:81; }\n server { listen 80;\n location /a { proxy_set_header X; proxy_set_header X-Env $foo; proxy_pass; }\n location /b { proxy_pass unix:/sock; }\n location ~ ^/c { proxy_pass http://up/x/; }\n location /d { proxy_pass http://h.test:81; proxy_connect_timeout 5s; proxy_read_timeout 1m; proxy_set_header Connection upgrade; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header Host $host; }\n location /e { proxy_pass http://h.test:81/; }\n }\n}\n",
+		{name: "proxies", src: "http {\n upstream up { server 10.0.0.1:81; }\n server { listen 80;\n location /a { proxy_set_header X; proxy_set_header X-Env $foo; proxy_pass; }\n location /b { proxy_pass unix:/sock; }\n location ~ ^/c { proxy_pass http://up/x/; }\n location /d { proxy_pass http://h.test:81; proxy_connect_timeout 5s; proxy_read_timeout 1m; proxy_set_header Connection upgrade; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header Host $host; }\n location /e { proxy_pass http://h.test:81/; }\n }\n}\n",
 			warn: []string{"proxy_set_header: skipped: proxy_set_header takes a field and a value", "proxy_set_header: skipped: its value has variables",
 				"proxy_pass: skipped: proxy_pass takes one URL", "proxy_pass: skipped: fit proxies to http:// and https:// upstreams",
 				"proxy_pass http://up/x/: the URI is not converted in a location of ~"},

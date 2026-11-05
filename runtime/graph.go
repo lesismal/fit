@@ -21,6 +21,7 @@ import (
 	"time"
 
 	fib "github.com/lesismal/fib"
+	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
@@ -435,8 +436,12 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	if u, ok := h.(module.Unwrapped); ok && len(mws) == 0 {
 		u.Unwrapped()
 	}
+	a, admits := h.(module.Admitter)
 	for i := len(mws) - 1; i >= 0; i-- {
 		h = mws[i].Wrap(h)
+	}
+	if admits && len(mws) > 0 {
+		h = admitted{a, h}
 	}
 	r := &Route{Name: rc.Name, Priority: rc.Priority, Handler: h, Inline: inline}
 	if rc.Match != nil {
@@ -652,4 +657,16 @@ func (g *Graph) Release() {
 	case n < 0:
 		panic("runtime: graph released more times than retained")
 	}
+}
+
+// admitted is a route's handler chain, its middleware and handler, with the
+// handler's Admit run before the first middleware.
+type admitted struct {
+	a    module.Admitter
+	next module.Handler
+}
+
+func (h admitted) ServeHTTP(c *fibhttp.Context) {
+	h.a.Admit(c)
+	h.next.ServeHTTP(c)
 }

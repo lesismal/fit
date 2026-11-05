@@ -885,8 +885,9 @@ func (c *converter) proxySetHeader(s *settings, d *directive) {
 	case name == "connection" || name == "upgrade":
 		// fit's proxy joins WebSockets and other upgrades itself.
 	case (name == "x-forwarded-for" && value == "$proxy_add_x_forwarded_for") || (name == "x-forwarded-proto" && value == "$scheme") ||
-		(name == "x-forwarded-host" && (value == "$host" || value == "$http_host")):
-		// fit's proxy sets X-Forwarded-For, -Proto and -Host itself.
+		(name == "x-forwarded-host" && (value == "$host" || value == "$http_host")) ||
+		(name == "x-real-ip" && value == "$remote_addr"):
+		// fit's proxy sets X-Forwarded-For, -Proto, -Host and X-Real-IP itself.
 	case strings.Contains(value, "$"):
 		c.skip(d, "its value has variables, which fit does not expand")
 	default:

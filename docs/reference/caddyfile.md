@@ -239,7 +239,7 @@ same addresses and options share one upstream, named for its first address
 | `flush_interval`, `buffer_requests` and the like | nothing: fit streams both ways |
 
 `header_up X-Forwarded-*` and `X-Real-IP {remote_host}` are left out: fit's proxy sets
-X-Forwarded-For, -Proto and -Host itself.
+X-Forwarded-For, -Proto, -Host and X-Real-IP itself.
 
 ### `file_server`
 

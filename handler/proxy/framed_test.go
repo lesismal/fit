@@ -107,7 +107,7 @@ func TestFramedRequestHeader(t *testing.T) {
 		"x-forwarded-for: 203.0.113.9\r\nForwarded: for=203.0.113.9\r\nX-Forwarded-Host: evil\r\nx-multi: 1\r\n"+
 		"Aa-Last: 2\r\nx-multi: 2\r\ncontent-length: 3\r\n\r\nabc")
 	want := "POST /p?q=1 HTTP/1.1\r\nHost: app.example\r\nContent-Length: 3\r\nzz-first: 1\r\nx-multi: 1\r\n" +
-		"Aa-Last: 2\r\nx-multi: 2\r\nX-Forwarded-For: 127.0.0.1\r\nX-Forwarded-Proto: http\r\n" +
+		"Aa-Last: 2\r\nx-multi: 2\r\nX-Forwarded-For: 127.0.0.1\r\nX-Real-IP: 127.0.0.1\r\nX-Forwarded-Proto: http\r\n" +
 		"X-Forwarded-Host: app.example\r\nForwarded: for=127.0.0.1;host=app.example;proto=http\r\n\r\n"
 	if head != want {
 		t.Fatalf("the upstream saw\n%q\nwant\n%q", head, want)

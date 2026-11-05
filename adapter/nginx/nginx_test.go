@@ -55,7 +55,7 @@ func TestSamples(t *testing.T) {
 		routes int
 		warned []int
 	}{
-		{"proxy.conf", 3, []int{25, 36}},
+		{"proxy.conf", 3, []int{25}},
 		{"static.conf", 6, nil},
 		{"full.conf", 3, []int{1, 2, 4, 6, 11, 12, 13, 14, 15, 16, 17, 28, 33, 47, 51, 55}},
 	} {
