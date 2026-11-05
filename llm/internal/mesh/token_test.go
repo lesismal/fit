@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,8 +39,8 @@ func dialToken(t *testing.T, m *Mesh, sec linktoken.Secret, id model.Identity) (
 func TestMeshTokens(t *testing.T) {
 	a, b := linktoken.New(), linktoken.New()
 	hub, _ := newTestMesh(t, model.RoleHub, "h1", []string{model.RoleNode, model.RoleProxy})
-	var bound []string
-	hub.Tokens().OnBind = func(tok, member string) { bound = append(bound, tok+" "+member) }
+	var bound atomic.Int32
+	hub.Tokens().OnBind = func(string, string) { bound.Add(1) }
 	hub.Tokens().Set([]config.LinkToken{tokenRec(a, 0), tokenRec(b, 0)})
 	if err := hub.SetListen(model.ListenConfig{Addr: freeAddr(t)}); err != nil {
 		t.Fatal(err)
@@ -64,8 +65,8 @@ func TestMeshTokens(t *testing.T) {
 	if _, err := dialToken(t, hub, a, model.Identity{Role: model.RoleProxy, ID: "p1"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(bound) != 2 {
-		t.Fatalf("bound %v", bound)
+	if bound.Load() != 2 {
+		t.Fatalf("bound %d", bound.Load())
 	}
 	// Another token cannot say hello as n1.
 	if _, err := dialToken(t, hub, b, model.Identity{Role: model.RoleNode, ID: "n1"}); codeOf(err) != model.CodeForbidden ||
