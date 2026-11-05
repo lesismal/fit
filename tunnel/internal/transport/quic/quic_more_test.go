@@ -469,3 +469,37 @@ func TestConnBasics(t *testing.T) {
 		t.Error("found a connection of no ID")
 	}
 }
+
+// Initials from addresses that never answer, which cost their sender
+// nothing, cannot take every handshake: past half of MaxHandshakes, an
+// Initial without a token is answered with a Retry and holds nothing, and a
+// real client, which answers its Retry, still gets in.
+func TestListenerRetry(t *testing.T) {
+	s := listenWith(t, "quic://127.0.0.1:0", transport.QUIC{MaxHandshakes: 2}, false)
+	retries := 0
+	for i := range 8 {
+		pc, err := net.Dial("udp", s.hostport(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Close()
+		cid := []byte{9, 9, 9, 9, 9, 9, 9, byte(i)}
+		if _, err := pc.Write(longHeader(fq.Version1, 0, cid, 1200)); err != nil {
+			t.Fatal(err)
+		}
+		_ = pc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		b := make([]byte, 2048)
+		if n, err := pc.Read(b); err == nil && n > 0 && b[0]&0xf0 == 0xf0 {
+			retries++
+		}
+	}
+	if retries < 6 {
+		t.Fatalf("%d of 8 Initials answered with a Retry", retries)
+	}
+	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
+	c, err := transport.Dial(tunneltest.Engine(t), DialURL(s.hostport(t), "", true), 3*time.Second, open)
+	if err != nil {
+		t.Fatalf("a real client: %v", err)
+	}
+	_ = c.Close()
+}

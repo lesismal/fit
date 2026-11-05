@@ -103,11 +103,12 @@ fit 配置里的三个角色，运行在监听器的 fib 引擎上，可以和�
 | `password` | 无：不接受任何注册 | 节点和 proxy 注册用的密码，以 HMAC 证明知道它，从不发送 |
 | `body_password` | 无 | 对每个帧的消息体做 AES-256-GCM 加密；节点和 proxy 需要相同的密码 |
 | `listeners` | 无：由页面添加 | `{protocol: tcp\|ws\|quic, address, path}`；ws 监听的路径默认为 `/tunnel`，只有 ws 监听有路径 |
-| `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32 |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；有 quic 监听而没有证书时，hub 生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
+| `console_socket` | 无 | `{address, password, max_conns}`：经加密 WebSocket 的控制台，供 proxy 的 `web_proxies` 使用，任何路径都应答；需要 `console`，不设密码时用 hub 的密码，`max_conns` 默认 32。10 秒内没有证明知道密码的 WebSocket 会被关闭，同一 IP 地址至多有 `max_conns` 的四分之一处于这种状态 |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`，不设时为 30s、10s、10s 和 64；进行中的握手超过 `max_handshakes` 的一半后，客户端须先以 QUIC Retry 证明自己的地址才能开始握手；有 quic 监听而没有证书时，hub 生成自签名证书并写入这里；`cert` 和 `key` 须同时设置 |
 | `register_timeout` | 10s | 一条链路注册的时限 |
 | `call_timeout` | 15s | 节点应答的时限：打开隧道、列出或设置服务 |
 | `max_links`、`max_links_per_peer`、`max_peers`、`max_tunnels` | 1024、128、1024、16384 | hub 保有资源的上限 |
+| `max_unregistered`、`max_unregistered_per_ip` | 256、32 | 尚未注册的已打开链路，总数与来自同一 IP 地址的数量；超出任一项的链路在打开时即被关闭，其节点或 proxy 在 `retry_interval` 之后重连 |
 | `allow_proxy_services` | false | 允许已注册的 proxy 经 hub 设置节点的服务（proxy 的页面这样做）；开启后任何持有密码的 proxy 都可以。节点仍须开启自己的 `allow_hub_services` 才接受 |
 | `console` | 无 | hub 的页面（见[控制台](#控制台)） |
 

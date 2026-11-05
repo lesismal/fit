@@ -27,6 +27,8 @@ const (
 	DefaultTunnelWSPath          = "/tunnel"
 	DefaultTunnelPoolSize        = 10
 	DefaultTunnelMaxLinks        = 1024
+	DefaultTunnelMaxUnregistered = 256
+	DefaultTunnelMaxUnregPerIP   = 32
 	DefaultTunnelMaxLinksPerPeer = 128
 	DefaultTunnelMaxPeers        = 1024
 	DefaultTunnelHubTunnels      = 16384
@@ -53,20 +55,22 @@ var (
 
 // TunnelHub is the tunnel's hub role.
 type TunnelHub struct {
-	Name               string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
-	Password           string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
-	BodyPassword       string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
-	Listeners          []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
-	ConsoleSocket      *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
-	QUIC               *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
-	RegisterTimeout    Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
-	CallTimeout        Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
-	MaxLinks           int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
-	MaxLinksPerPeer    int                  `json:"max_links_per_peer,omitempty" min:"0" default:"128" doc:"The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0."`
-	MaxPeers           int                  `json:"max_peers,omitempty" min:"0" default:"1024" doc:"The most nodes and proxies registered at once. 1024 when left out or 0."`
-	MaxTunnels         int                  `json:"max_tunnels,omitempty" min:"0" default:"16384" doc:"The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0."`
-	AllowProxyServices bool                 `json:"allow_proxy_services,omitempty" doc:"Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services."`
-	Console            *RoleConsole         `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
+	Name                 string               `json:"name,omitempty" doc:"The name the hub tells the nodes and proxies that register. The host's name when left out."`
+	Password             string               `json:"password,omitempty" doc:"The password nodes and proxies register with, which they prove they know without sending it. The hub refuses every registration while it is left out."`
+	BodyPassword         string               `json:"body_password,omitempty" doc:"When set, the body of every frame on the links is encrypted with AES-256-GCM under a key made from it, and nodes and proxies need the same one. It applies to the links that open after it changes."`
+	Listeners            []TunnelListener     `json:"listeners,omitempty" doc:"Where nodes and proxies link to the hub, each over its protocol. None when left out: the console's pages add them."`
+	ConsoleSocket        *TunnelConsoleSocket `json:"console_socket,omitempty" doc:"An encrypted WebSocket that carries the hub's console pages to the web_proxies of proxies that cannot reach them otherwise. Needs console. None when left out."`
+	QUIC                 *TunnelHubQUIC       `json:"quic,omitempty" doc:"The certificate and the connections of the quic listeners. The hub makes a self-signed certificate and writes it here when a quic listener needs one and none is set."`
+	RegisterTimeout      Duration             `json:"register_timeout,omitempty" default:"\"10s\"" doc:"How long a link may take to register once it is open; it is closed past it. 10s when left out."`
+	CallTimeout          Duration             `json:"call_timeout,omitempty" default:"\"15s\"" doc:"How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out."`
+	MaxLinks             int                  `json:"max_links,omitempty" min:"0" default:"1024" doc:"The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0."`
+	MaxUnregistered      int                  `json:"max_unregistered,omitempty" min:"0" default:"256" doc:"The most links open at once that have not registered yet, which anyone who reaches a listener can open; one past it is closed as soon as it opens, so that they cannot take every link from the nodes and proxies that register. 256 when left out or 0."`
+	MaxUnregisteredPerIP int                  `json:"max_unregistered_per_ip,omitempty" min:"0" default:"32" doc:"The most links from one IP address open at once that have not registered yet; one past it is closed as soon as it opens, and its node or proxy links again after its retry_interval. 32 when left out or 0."`
+	MaxLinksPerPeer      int                  `json:"max_links_per_peer,omitempty" min:"0" default:"128" doc:"The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0."`
+	MaxPeers             int                  `json:"max_peers,omitempty" min:"0" default:"1024" doc:"The most nodes and proxies registered at once. 1024 when left out or 0."`
+	MaxTunnels           int                  `json:"max_tunnels,omitempty" min:"0" default:"16384" doc:"The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0."`
+	AllowProxyServices   bool                 `json:"allow_proxy_services,omitempty" doc:"Let registered proxies set nodes' services through the hub, as a proxy's pages do; a node takes them only with its allow_hub_services. Every proxy that has the password could then do it. Off when left out: only the hub's own pages ask nodes to change their services."`
+	Console              *RoleConsole         `json:"console,omitempty" doc:"The hub's web pages; none when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -85,7 +89,7 @@ type TunnelListener struct {
 type TunnelConsoleSocket struct {
 	Address  string `json:"address" fit:"required" doc:"The host and port the WebSocket listens on; it answers on any path."`
 	Password string `json:"password,omitempty" doc:"The password the WebSocket's messages are encrypted with, which a proxy's web_proxy needs. The hub's password when left out."`
-	MaxConns int    `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most WebSockets open at once; one past it is closed as soon as it opens. 32 when left out or 0."`
+	MaxConns int    `json:"max_conns,omitempty" min:"0" default:"32" doc:"The most WebSockets open at once; one past it is closed as soon as it opens. A WebSocket that has not proven the password, with a message it seals, is closed after 10s, and one IP address may have a quarter of them open that have not. 32 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -97,7 +101,7 @@ type TunnelHubQUIC struct {
 	IdleTimeout      Duration `json:"idle_timeout,omitempty" default:"\"30s\"" doc:"How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out."`
 	KeepAlive        Duration `json:"keep_alive,omitempty" default:"\"10s\"" doc:"How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out."`
 	HandshakeTimeout Duration `json:"handshake_timeout,omitempty" default:"\"10s\"" doc:"How long a QUIC handshake may take. 10s when left out."`
-	MaxHandshakes    int      `json:"max_handshakes,omitempty" min:"0" default:"64" doc:"The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. 64 when left out or 0."`
+	MaxHandshakes    int      `json:"max_handshakes,omitempty" min:"0" default:"64" doc:"The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. Past half of them, a client proves its address with a Retry first, so that Initials from forged addresses hold at most half. 64 when left out or 0."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -213,6 +217,12 @@ func (s *TunnelHub) Call() time.Duration {
 	return time.Duration(orDefault(int64(s.CallTimeout), int64(DefaultTunnelHubCall)))
 }
 func (s *TunnelHub) Links() int { return int(orDefault(int64(s.MaxLinks), DefaultTunnelMaxLinks)) }
+func (s *TunnelHub) Unregistered() int {
+	return int(orDefault(int64(s.MaxUnregistered), DefaultTunnelMaxUnregistered))
+}
+func (s *TunnelHub) UnregisteredPerIP() int {
+	return int(orDefault(int64(s.MaxUnregisteredPerIP), DefaultTunnelMaxUnregPerIP))
+}
 func (s *TunnelHub) LinksPerPeer() int {
 	return int(orDefault(int64(s.MaxLinksPerPeer), DefaultTunnelMaxLinksPerPeer))
 }

@@ -2760,7 +2760,7 @@
         },
         "max_conns": {
           "default": 32,
-          "description": "The most WebSockets open at once; one past it is closed as soon as it opens. 32 when left out or 0.",
+          "description": "The most WebSockets open at once; one past it is closed as soon as it opens. A WebSocket that has not proven the password, with a message it seals, is closed after 10s, and one IP address may have a quarter of them open that have not. 32 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         },
@@ -2874,6 +2874,18 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_unregistered": {
+          "default": 256,
+          "description": "The most links open at once that have not registered yet, which anyone who reaches a listener can open; one past it is closed as soon as it opens, so that they cannot take every link from the nodes and proxies that register. 256 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_unregistered_per_ip": {
+          "default": 32,
+          "description": "The most links from one IP address open at once that have not registered yet; one past it is closed as soon as it opens, and its node or proxy links again after its retry_interval. 32 when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "name": {
           "description": "The name the hub tells the nodes and proxies that register. The host's name when left out.",
           "type": "string"
@@ -2926,7 +2938,7 @@
         },
         "max_handshakes": {
           "default": 64,
-          "description": "The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. 64 when left out or 0.",
+          "description": "The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. Past half of them, a client proves its address with a Retry first, so that Initials from forged addresses hold at most half. 64 when left out or 0.",
           "minimum": 0,
           "type": "integer"
         }

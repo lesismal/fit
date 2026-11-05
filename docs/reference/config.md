@@ -1991,6 +1991,8 @@ In JSON:
 | `register_timeout` | duration | `"10s"` | How long a link may take to register once it is open; it is closed past it. 10s when left out. |
 | `call_timeout` | duration | `"15s"` | How long a node may take to answer the hub: to open a tunnel, or to list or set its services. 15s when left out. |
 | `max_links` | integer, 0 or more | `1024` | The most links the hub keeps open at once, registered or not; one past it is closed as soon as it opens. 1024 when left out or 0. |
+| `max_unregistered` | integer, 0 or more | `256` | The most links open at once that have not registered yet, which anyone who reaches a listener can open; one past it is closed as soon as it opens, so that they cannot take every link from the nodes and proxies that register. 256 when left out or 0. |
+| `max_unregistered_per_ip` | integer, 0 or more | `32` | The most links from one IP address open at once that have not registered yet; one past it is closed as soon as it opens, and its node or proxy links again after its retry_interval. 32 when left out or 0. |
 | `max_links_per_peer` | integer, 0 or more | `128` | The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0. |
 | `max_peers` | integer, 0 or more | `1024` | The most nodes and proxies registered at once. 1024 when left out or 0. |
 | `max_tunnels` | integer, 0 or more | `16384` | The most tunnels the hub passes at once; a proxy's request for one more is refused. 16384 when left out or 0. |
@@ -2015,7 +2017,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The host and port the WebSocket listens on; it answers on any path. |
 | `password` | string |  | The password the WebSocket's messages are encrypted with, which a proxy's web_proxy needs. The hub's password when left out. |
-| `max_conns` | integer, 0 or more | `32` | The most WebSockets open at once; one past it is closed as soon as it opens. 32 when left out or 0. |
+| `max_conns` | integer, 0 or more | `32` | The most WebSockets open at once; one past it is closed as soon as it opens. A WebSocket that has not proven the password, with a message it seals, is closed after 10s, and one IP address may have a quarter of them open that have not. 32 when left out or 0. |
 
 <a id="config-tunnelhubquic"></a>
 
@@ -2028,7 +2030,7 @@ In JSON:
 | `idle_timeout` | duration | `"30s"` | How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out. |
 | `keep_alive` | duration | `"10s"` | How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out. |
 | `handshake_timeout` | duration | `"10s"` | How long a QUIC handshake may take. 10s when left out. |
-| `max_handshakes` | integer, 0 or more | `64` | The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. 64 when left out or 0. |
+| `max_handshakes` | integer, 0 or more | `64` | The most QUIC handshakes under way at once; a new connection past it is dropped, and its proxy tries again. Past half of them, a client proves its address with a Retry first, so that Initials from forged addresses hold at most half. 64 when left out or 0. |
 
 <a id="config-tunnelnode"></a>
 

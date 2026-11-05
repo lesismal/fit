@@ -2,6 +2,7 @@ package hub
 
 import (
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,18 @@ const sealChunk = 64 << 10
 // socketDialTimeout bounds the connect to the console.
 const socketDialTimeout = 5 * time.Second
 
+// socketAuthTimeout is how long a WebSocket may take to prove it knows the
+// password, with a first message that opens, before it is closed: until
+// then anyone who reaches the address could hold its place.
+var socketAuthTimeout = 10 * time.Second
+
+// unauthPerIP is the most WebSockets from one IP address that may be open
+// at once and not have proven the password: a share of max_conns, so that
+// one address cannot hold every place.
+func unauthPerIP(conns int64) int64 {
+	return max(1, conns/4)
+}
+
 // socket is the console socket's binding.
 type socket struct {
 	address string
@@ -53,7 +66,7 @@ func (s *Hub) applySocket(cfg *config.TunnelConsoleSocket) error {
 	if cfg == nil {
 		return nil
 	}
-	h := &socketHandler{s: s, conns: map[*fib.Connection]*proxy{}}
+	h := &socketHandler{s: s, conns: map[*fib.Connection]*proxy{}, unauth: map[netip.Addr]int{}}
 	h.max.Store(int64(cfg.Conns()))
 	i, err := s.h.Engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: ws.NewServer(h, "")})
 	if err != nil {
@@ -85,6 +98,9 @@ type socketHandler struct {
 	mu     sync.Mutex
 	conns  map[*fib.Connection]*proxy
 	closed bool
+	// unauth counts, by IP address, the WebSockets that have not proven
+	// the password.
+	unauth map[netip.Addr]int
 }
 
 // proxy is one WebSocket and its connection to the console.
@@ -94,6 +110,12 @@ type proxy struct {
 	wsGate *common.Gate
 	hello  []byte
 	secret wscrypt.Secret
+	// ip is where the WebSocket came from; it counts in the handler's
+	// unauth until the WebSocket proves the password or closes, under the
+	// handler's lock.
+	ip      netip.Addr
+	counted bool
+	timer   *time.Timer
 
 	mu      sync.Mutex
 	sess    *wscrypt.Session
@@ -106,16 +128,45 @@ type proxy struct {
 
 func (h *socketHandler) OnOpen(c *fib.Connection) {
 	set := h.s.settings()
+	ip := addrIP(c.RemoteAddr())
 	h.mu.Lock()
-	if h.closed || int64(len(h.conns)) >= h.max.Load() || set.secret == nil {
+	conns := h.max.Load()
+	if h.closed || int64(len(h.conns)) >= conns || set.secret == nil || int64(h.unauth[ip]) >= unauthPerIP(conns) {
 		h.mu.Unlock()
 		_ = c.Close()
 		return
 	}
-	p := &proxy{h: h, ws: c, wsGate: common.NewGate(c), hello: wscrypt.Hello(), secret: set.secret}
+	p := &proxy{h: h, ws: c, wsGate: common.NewGate(c), hello: wscrypt.Hello(), secret: set.secret, ip: ip, counted: true}
 	h.conns[c] = p
+	h.unauth[ip]++
+	// Set under the lock, so that authed and close find it.
+	p.timer = time.AfterFunc(socketAuthTimeout, func() {
+		h.mu.Lock()
+		waiting := p.counted
+		h.mu.Unlock()
+		if waiting {
+			h.s.log.Warnf("console socket: %s did not prove the password in %v", c.RemoteAddr(), socketAuthTimeout)
+			_ = c.Close()
+		}
+	})
 	h.mu.Unlock()
 	_ = c.Send(p.hello)
+}
+
+// uncount takes p off the WebSockets that have not proven the password.
+func (h *socketHandler) uncount(p *proxy) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !p.counted {
+		return
+	}
+	p.counted = false
+	p.timer.Stop()
+	if h.unauth[p.ip] <= 1 {
+		delete(h.unauth, p.ip)
+	} else {
+		h.unauth[p.ip]--
+	}
 }
 
 func (h *socketHandler) get(c *fib.Connection) *proxy {
@@ -138,6 +189,7 @@ func (h *socketHandler) OnClose(c *fib.Connection, _ error) {
 	delete(h.conns, c)
 	h.mu.Unlock()
 	if p != nil {
+		h.uncount(p)
 		p.close()
 	}
 }
@@ -178,6 +230,13 @@ func (p *proxy) message(data []byte) {
 		p.mu.Unlock()
 		p.h.s.log.Warnf("console socket: a message from %s failed to decrypt; is the password right?", p.ws.RemoteAddr())
 		_ = p.ws.Close()
+		return
+	}
+	// A message that opens proves the password.
+	p.h.uncount(p)
+	if len(plain) == 0 {
+		// A proof alone, which a web proxy sends after its hello.
+		p.mu.Unlock()
 		return
 	}
 	if up := p.up; up != nil {

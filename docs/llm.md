@@ -414,7 +414,10 @@ After the upgrade, before any frame:
 2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with the password.
 3. The listener checks it and acknowledges, or closes with code 4001.
 
-The handshake takes at most 5 seconds. The password never crosses the network, and a recorded
+The handshake takes at most 5 seconds. A listener holds at most 256 connections that have not
+authenticated yet, from their TCP connect on, and 16 from one IP address; one more is closed as it
+opens, so that connections that never authenticate cannot take the places of those that do. The
+password never crosses the network, and a recorded
 proof cannot be replayed. A wrong password fails the dial, and the dialer backs off. The mesh is
 plain `ws://`: what crosses it after the handshake, prompts and responses included, is not
 encrypted, so links between machines belong on a private network or a tunnel.
@@ -893,6 +896,7 @@ Every bound has a default; a config that sets none is bounded.
 | Frame | 16 MiB | fixed |
 | Pushes waiting per link | 1024, then the link closes | fixed |
 | Dial, handshake, hello | 10s, 5s, 15s | fixed |
+| Links not authenticated yet | 256, 16 per IP address | fixed |
 | Method timeout | 10s; 30s for a node's or proxy's config change, 20s for a model check, 30s for GPU status and settings, 90s for a hub's managed call | fixed |
 | Peers, models, API keys | 64, 256, 256 | fixed |
 | Nodes in a hub's table | 1024 | `max_nodes` |

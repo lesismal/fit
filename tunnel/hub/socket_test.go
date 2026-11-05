@@ -167,3 +167,66 @@ func TestConsoleAddr(t *testing.T) {
 		}
 	}
 }
+
+// WebSockets that do not prove the password cannot hold the socket's
+// places: each is closed past socketAuthTimeout, and one address has at
+// most a quarter of max_conns of them open. One that proves it, with an
+// empty message as a web proxy sends, stays, and frees its address's
+// place.
+func TestSocketUnauthenticated(t *testing.T) {
+	old := socketAuthTimeout
+	socketAuthTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { socketAuthTimeout = old })
+	sock := freeAddr(t)
+	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": %q, "password": "s", "max_conns": 8}}`,
+		consoleJSON("127.0.0.1:0"), sock))
+	count := func() int {
+		h := v.s.socket.h
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.conns)
+	}
+	// Two of eight from one address; the third closes at once.
+	silent := v.dialSocket(sock)
+	hello := v.dialSocket(sock)
+	silent.next()
+	hello.next()
+	_ = hello.c.Send(wscrypt.Hello())
+	waitFor(t, "two WebSockets", func() bool { return count() == 2 })
+	third := &wsProxy{t: t, msgs: make(chan []byte, 1), done: make(chan struct{})}
+	if c, err := transport.Dial(v.e, "ws://"+sock+"/", 5*time.Second, func(transport.Conn) transport.Handler { return third }); err == nil {
+		third.waitClosed()
+		_ = c.Close()
+	}
+	// Neither proves the password: both close.
+	silent.waitClosed()
+	hello.waitClosed()
+
+	// A proof keeps a WebSocket past the timeout, and frees its place.
+	w := v.dialSocket(sock)
+	sess := w.session("s")
+	_ = w.c.Send(sess.Seal(nil))
+	waitFor(t, "the proof to count", func() bool {
+		h := v.s.socket.h
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.unauth) == 0 && len(h.conns) == 1
+	})
+	a, b := v.dialSocket(sock), v.dialSocket(sock)
+	a.next()
+	b.next()
+	time.Sleep(2 * socketAuthTimeout)
+	select {
+	case <-w.done:
+		t.Fatal("a WebSocket that proved the password closed")
+	default:
+	}
+	a.waitClosed()
+	b.waitClosed()
+	// The proof was not passed to the console: it carries a request still.
+	_ = w.c.Send(sess.Seal([]byte("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")))
+	plain, err := sess.Open(w.next())
+	if err != nil || !bytes.HasPrefix(plain, []byte("HTTP/1.1 200")) {
+		t.Fatalf("%.100q, %v", plain, err)
+	}
+}

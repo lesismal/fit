@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +23,12 @@ const (
 	DefaultPingInterval = 10 * time.Second
 	DefaultSlowTimeout  = 30 * time.Second
 	HandshakeTimeout    = 5 * time.Second
+	// DefaultMaxPending and DefaultMaxPendingPerIP bound the connections a
+	// listener holds that have not authenticated yet: in all, and from one
+	// IP address.
+	// DefaultMaxPending 与 DefaultMaxPendingPerIP 限制监听方持有的尚未认证的连接：总数，以及来自同一 IP 地址的数量。
+	DefaultMaxPending      = 256
+	DefaultMaxPendingPerIP = 16
 
 	challengeSize = 32
 	ackOK         = 0x01
@@ -67,6 +75,14 @@ type ConnConfig struct {
 	// closed with ErrRefused at the dialer.
 	// MaxConns 监听方同时持有的连接数上限，含握手中的连接（≤ 0：不限制）；超出的连接被关闭，拨号方得到 ErrRefused。
 	MaxConns int
+	// MaxPending caps the connections a listener holds that have not authenticated yet, from their TCP connect to
+	// their proof, and MaxPendingPerIP those of one IP address (≤ 0: DefaultMaxPending, DefaultMaxPendingPerIP).
+	// Anyone who reaches the listener can open them; one more is closed as it opens, so that they cannot hold
+	// every place MaxConns leaves for the peers that know the password.
+	// MaxPending 监听方持有的尚未认证的连接（从 TCP 连接建立到证明通过）的上限，MaxPendingPerIP 为同一 IP 地址的上限
+	// （≤ 0：DefaultMaxPending、DefaultMaxPendingPerIP）。任何能连到监听方的人都能打开这类连接；超出的连接在打开时即被关闭，
+	// 使它们无法占满 MaxConns 留给知道密码的对端的位置。
+	MaxPending, MaxPendingPerIP int
 	// Accept, if set, vets each new connection on the listener before the handshake; an error closes it with
 	// ErrRefused at the dialer (e.g. while shutting down).
 	// Accept 如已设置，在握手之前审查监听方的每条新连接；返回错误则关闭连接，拨号方得到 ErrRefused（例如正在下线时）。
@@ -274,10 +290,18 @@ type tcpConns struct {
 	fib.Handler
 	byAddr sync.Map // remote address → *fib.Connection / 对端地址 → *fib.Connection
 	closed atomic.Bool
+
+	// The connections that have not authenticated, by IP address, at most
+	// maxPending in all and maxPerIP from one address.
+	// 尚未认证的连接，按 IP 地址计数，总数至多 maxPending，同一地址至多 maxPerIP。
+	maxPending, maxPerIP int
+	pmu                  sync.Mutex
+	pending              map[*fib.Connection]netip.Addr
+	pendingIP            map[netip.Addr]int
 }
 
 func (t *tcpConns) OnOpen(c *fib.Connection) {
-	if t.closed.Load() {
+	if t.closed.Load() || !t.hold(c) {
 		_ = c.Close()
 		return
 	}
@@ -291,7 +315,61 @@ func (t *tcpConns) OnClose(c *fib.Connection, err error) {
 	if a := c.RemoteAddr(); a != nil {
 		t.byAddr.CompareAndDelete(a.String(), c)
 	}
+	t.authenticated(c)
 	t.Handler.OnClose(c, err)
+}
+
+// hold counts c among the connections that have not authenticated, unless
+// there are as many as the listener holds, in all or from c's address.
+// hold 将 c 计入尚未认证的连接，除非总数或来自 c 的地址的数量已达上限。
+func (t *tcpConns) hold(c *fib.Connection) bool {
+	ip := remoteIP(c.RemoteAddr())
+	t.pmu.Lock()
+	defer t.pmu.Unlock()
+	if len(t.pending) >= t.maxPending || t.pendingIP[ip] >= t.maxPerIP {
+		return false
+	}
+	t.pending[c] = ip
+	t.pendingIP[ip]++
+	return true
+}
+
+// authenticated takes c off the connections that have not authenticated: it
+// has, or it closed.
+// authenticated 将 c 移出尚未认证的连接：它已通过认证，或已关闭。
+func (t *tcpConns) authenticated(c *fib.Connection) {
+	if c == nil {
+		return
+	}
+	t.pmu.Lock()
+	defer t.pmu.Unlock()
+	ip, ok := t.pending[c]
+	if !ok {
+		return
+	}
+	delete(t.pending, c)
+	if t.pendingIP[ip] <= 1 {
+		delete(t.pendingIP, ip)
+	} else {
+		t.pendingIP[ip]--
+	}
+}
+
+// remoteIP is the IP address of a, or the zero Addr.
+// remoteIP 返回 a 的 IP 地址，或零值 Addr。
+func remoteIP(a net.Addr) netip.Addr {
+	if t, ok := a.(*net.TCPAddr); ok {
+		ip, _ := netip.AddrFromSlice(t.IP)
+		return ip.Unmap()
+	}
+	if a == nil {
+		return netip.Addr{}
+	}
+	ap, err := netip.ParseAddrPort(a.String())
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr().Unmap()
 }
 
 func (t *tcpConns) OnShutdown(c *fib.Connection) {
@@ -345,7 +423,14 @@ func NewHandler(cfg ConnConfig) Listener {
 		Open:    s.open,
 		Message: s.message,
 		Close:   s.close,
-	})}
+	}), maxPending: cfg.MaxPending, maxPerIP: cfg.MaxPendingPerIP,
+		pending: map[*fib.Connection]netip.Addr{}, pendingIP: map[netip.Addr]int{}}
+	if s.tcp.maxPending <= 0 {
+		s.tcp.maxPending = DefaultMaxPending
+	}
+	if s.tcp.maxPerIP <= 0 {
+		s.tcp.maxPerIP = DefaultMaxPendingPerIP
+	}
 	return Listener{s.tcp}
 }
 
@@ -404,6 +489,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 		return
 	}
 	sc.timer.Stop()
+	s.tcp.authenticated(sc.tcp)
 	c = newConn(ws, &s.cfg, false, sc.req)
 	if tcp := sc.tcp; tcp != nil {
 		c.abort = func() { _ = tcp.Close() }

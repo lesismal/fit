@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
+	"net"
+	"net/netip"
 	"slices"
 	"sort"
 	"sync"
@@ -193,16 +195,20 @@ type Hub struct {
 	lmu        sync.Mutex
 	socketAddr string
 
-	mu       sync.Mutex
-	links    map[*link.Link]struct{}
-	nextID   uint32
-	nextConn uint32
-	peers    map[*link.Link]*Peer
-	byName   map[string]*Peer
-	byID     map[uint32]*Peer
-	routes   map[uint64]*Route
-	since    time.Time
-	closing  bool
+	mu    sync.Mutex
+	links map[*link.Link]struct{}
+	// unregistered is the links that have not registered yet, by the IP
+	// address each came from, and unregIP how many there are of each.
+	unregistered map[*link.Link]netip.Addr
+	unregIP      map[netip.Addr]int
+	nextID       uint32
+	nextConn     uint32
+	peers        map[*link.Link]*Peer
+	byName       map[string]*Peer
+	byID         map[uint32]*Peer
+	routes       map[uint64]*Route
+	since        time.Time
+	closing      bool
 
 	// epoch and nodesVersion number the node lists the hub sends: see
 	// proto.NodeList.
@@ -212,7 +218,8 @@ type Hub struct {
 
 // New returns the role, which its first Apply starts.
 func New(h *app.Host) *Hub {
-	s := &Hub{h: h, log: h.Log, links: map[*link.Link]struct{}{}, peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
+	s := &Hub{h: h, log: h.Log, links: map[*link.Link]struct{}{}, unregistered: map[*link.Link]netip.Addr{}, unregIP: map[netip.Addr]int{},
+		peers: map[*link.Link]*Peer{}, byName: map[string]*Peer{},
 		byID: map[uint32]*Peer{}, routes: map[uint64]*Route{}, since: time.Now(), epoch: rand.Uint64() | 1}
 	s.router = s.newRouter()
 	s.console = common.NewConsole(h.Engine, "tunnel.hub", h.Log, s.api)
@@ -467,6 +474,40 @@ func (s *Hub) stopAll() {
 	s.console.Stop(context.Background())
 }
 
+// addrIP is the IP address of a, or the zero Addr.
+func addrIP(a net.Addr) netip.Addr {
+	switch a := a.(type) {
+	case *net.TCPAddr:
+		ip, _ := netip.AddrFromSlice(a.IP)
+		return ip.Unmap()
+	case *net.UDPAddr:
+		ip, _ := netip.AddrFromSlice(a.IP)
+		return ip.Unmap()
+	case nil:
+		return netip.Addr{}
+	}
+	ap, err := netip.ParseAddrPort(a.String())
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr().Unmap()
+}
+
+// registeredLocked takes l off the links that have not registered. Callers
+// hold mu.
+func (s *Hub) registeredLocked(l *link.Link) {
+	ip, ok := s.unregistered[l]
+	if !ok {
+		return
+	}
+	delete(s.unregistered, l)
+	if s.unregIP[ip] <= 1 {
+		delete(s.unregIP, ip)
+	} else {
+		s.unregIP[ip]--
+	}
+}
+
 func connOf(c *link.Link) *Conn {
 	conn, _ := c.Value().(*Conn)
 	return conn
@@ -485,17 +526,25 @@ var (
 )
 
 // accept serves a link a node or proxy opened, which must register within
-// register_timeout; past max_links it is closed at once.
+// register_timeout; past max_links, max_unregistered, or
+// max_unregistered_per_ip of the links from its address that have not
+// registered, it is closed at once. Anyone who reaches a listener can open
+// links that do not register: these bounds keep them from holding every
+// place the nodes and proxies need.
 func (s *Hub) accept(c transport.Conn) transport.Handler {
 	set := s.settings()
-	l := link.New(c, s.router, set.coder)
-	l.SetMaxFrame(unregisteredFrame)
+	ip := addrIP(c.RemoteAddr())
 	s.mu.Lock()
-	if s.closing || len(s.links) >= set.cfg.Links() {
+	if s.closing || len(s.links) >= set.cfg.Links() || len(s.unregistered) >= set.cfg.Unregistered() ||
+		s.unregIP[ip] >= set.cfg.UnregisteredPerIP() {
 		s.mu.Unlock()
 		return nil
 	}
+	l := link.New(c, s.router, set.coder)
+	l.SetMaxFrame(unregisteredFrame)
 	s.links[l] = struct{}{}
+	s.unregistered[l] = ip
+	s.unregIP[ip]++
 	s.mu.Unlock()
 	time.AfterFunc(set.cfg.Register(), func() {
 		if peerOf(l) == nil {
@@ -610,6 +659,7 @@ func (s *Hub) register(c *link.Link, body []byte) (any, error) {
 	c.SetValue(conn)
 	peer.links[conn.Index] = c
 	s.peers[c] = peer
+	s.registeredLocked(c)
 	s.mu.Unlock()
 	c.SetMaxFrame(link.MaxFrame)
 	if created {
@@ -665,6 +715,7 @@ func (s *Hub) ping(c *link.Link, body []byte) (any, error) {
 func (s *Hub) disconnected(c *link.Link) {
 	s.mu.Lock()
 	delete(s.links, c)
+	s.registeredLocked(c)
 	peer := s.peers[c]
 	if peer == nil {
 		s.mu.Unlock()

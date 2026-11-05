@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -314,5 +315,54 @@ func TestSlowConnection(t *testing.T) {
 	case <-gone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the peer still holds the connection")
+	}
+}
+
+// Connections that never authenticate, which anyone who reaches the listener can open, cannot hold every place:
+// past MaxPendingPerIP from one address they close as they open, while authenticated connections do not count.
+// 从不认证的连接（任何能连到监听方的人都能打开）无法占满所有位置：来自同一地址的这类连接超过 MaxPendingPerIP 后在打开时即被关闭，
+// 而已认证的连接不计入。
+func TestPendingPerIP(t *testing.T) {
+	ts := startServer(t, wire.ConnConfig{Auth: wire.Password("pw"), MaxPendingPerIP: 2})
+	url := "ws://" + ts.addr + "/ws"
+	// An authenticated connection does not count.
+	if _, err := dial(t, url, wire.DialConfig{ConnConfig: wire.ConnConfig{Auth: wire.Password("pw")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-ts.opened
+	idle := make([]net.Conn, 2)
+	for i := range idle {
+		c, err := net.Dial("tcp", ts.addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		idle[i] = c
+	}
+	// The listener has seen both before the next one comes.
+	time.Sleep(100 * time.Millisecond)
+	c, err := net.Dial("tcp", ts.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if n, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatalf("a third connection that has not authenticated was kept: read %d", n)
+	}
+	if _, err := dial(t, url, wire.DialConfig{ConnConfig: wire.ConnConfig{Auth: wire.Password("pw")}}); err == nil {
+		t.Fatal("a connection past MaxPendingPerIP was let in")
+	}
+	// One that closes gives its place back.
+	_ = idle[0].Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := dial(t, url, wire.DialConfig{ConnConfig: wire.ConnConfig{Auth: wire.Password("pw")}}); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the place of a closed connection was not given back")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

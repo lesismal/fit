@@ -219,6 +219,10 @@ func TestProxyConnSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The proof of the password comes first: an empty message.
+	if got, err := srv.Open(readN(t, wsPeer, 16)); err != nil || len(got) != 0 {
+		t.Fatalf("the proof: %q, %v", got, err)
+	}
 	for _, want := range []string{"early", "later"} {
 		got, err := srv.Open(readN(t, wsPeer, len(want)+16))
 		if err != nil || string(got) != want {

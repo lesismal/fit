@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -137,6 +139,49 @@ func TestUnregisteredLinks(t *testing.T) {
 	q := v.dial(v.listen())
 	q.waitClosed()
 	p.waitClosed()
+}
+
+// Links that do not register cannot take every place: past
+// max_unregistered_per_ip from one address, or max_unregistered in all, a
+// link closes as it opens, while max_links has room; one that registers
+// frees its place, and registered links never count.
+func TestUnregisteredLimits(t *testing.T) {
+	for _, extra := range []string{`, "max_unregistered_per_ip": 2`, `, "max_unregistered": 2`} {
+		v := newHub(t, tcpMember(extra))
+		idle := []*peer{v.dial(v.listen()), v.dial(v.listen())}
+		waitFor(t, "the idle links to count", func() bool { return v.s.Status().Links == 2 })
+		v.dial(v.listen()).waitClosed()
+		// A registration frees its link's place.
+		idle[0].mustRegister(proto.TypeNode, "lab")
+		late := v.dial(v.listen())
+		late.mustRegister(proto.TypeProxy, "me")
+		// The idle link, closing, frees its own.
+		_ = idle[1].l.Close()
+		waitFor(t, "the idle link to go", func() bool { return v.s.Status().Links == 2 })
+		v.dial(v.listen()).mustRegister(proto.TypeProxy, "other")
+		v.s.mu.Lock()
+		n, ips := len(v.s.unregistered), len(v.s.unregIP)
+		v.s.mu.Unlock()
+		if n != 0 || ips != 0 {
+			t.Fatalf("%s: %d unregistered links, %d addresses", extra, n, ips)
+		}
+	}
+}
+
+func TestAddrIP(t *testing.T) {
+	want := netip.MustParseAddr("10.0.0.1")
+	for _, a := range []net.Addr{
+		&net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 1},
+		&net.UDPAddr{IP: net.ParseIP("::ffff:10.0.0.1"), Port: 1},
+		&net.UnixAddr{Name: "10.0.0.1:5", Net: "unix"},
+	} {
+		if got := addrIP(a); got != want {
+			t.Errorf("%v: %v", a, got)
+		}
+	}
+	if addrIP(nil).IsValid() || addrIP(&net.UnixAddr{Name: "/tmp/x"}).IsValid() {
+		t.Error("an address with no IP")
+	}
 }
 
 // Registrations the hub refuses.

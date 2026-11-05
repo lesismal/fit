@@ -108,11 +108,12 @@ Then `ssh -p 2222 127.0.0.1` reaches 10.0.0.5:22. `fit validate` checks the memb
 | `password` | none: no registration is taken | what nodes and proxies register with, proven with an HMAC, never sent |
 | `body_password` | none | AES-256-GCM on every frame's body; nodes and proxies need the same |
 | `listeners` | none: the pages add them | `{protocol: tcp\|ws\|quic, address, path}`; a ws listener's path is `/tunnel` by default, and only a ws listener has one |
-| `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32 |
-| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; the hub makes a self-signed certificate and writes it here when a quic listener needs one; `cert` and `key` go together |
+| `console_socket` | none | `{address, password, max_conns}`: the console over an encrypted WebSocket, for proxies' `web_proxies`, answering on any path; it needs `console`, its password is the hub's when left out, and `max_conns` is 32. A WebSocket that has not proven the password within 10s is closed, and one IP address may have a quarter of `max_conns` open that have not |
+| `quic` | | `{cert, key, idle_timeout, keep_alive, handshake_timeout, max_handshakes}`, 30s, 10s, 10s and 64 when left out; past half of `max_handshakes`, a client proves its address with a QUIC Retry before its handshake starts; the hub makes a self-signed certificate and writes it here when a quic listener needs one; `cert` and `key` go together |
 | `register_timeout` | 10s | how long a link may take to register |
 | `call_timeout` | 15s | how long a node may take to answer: to open a tunnel, list or set its services |
 | `max_links`, `max_links_per_peer`, `max_peers`, `max_tunnels` | 1024, 128, 1024, 16384 | the bounds of what the hub keeps |
+| `max_unregistered`, `max_unregistered_per_ip` | 256, 32 | the links open that have not registered yet, in all and from one IP address; one past either closes as it opens, and its node or proxy links again after its `retry_interval` |
 | `allow_proxy_services` | false | let registered proxies set nodes' services through the hub, as a proxy's pages do; every proxy with the password could then. A node still takes them only with its `allow_hub_services` |
 | `console` | none | the hub's pages (see [Consoles](#consoles)) |
 

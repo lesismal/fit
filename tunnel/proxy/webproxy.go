@@ -264,6 +264,9 @@ func (h *proxyWS) OnData(c *fib.Connection, data []byte) {
 		}
 		pc.sess = sess
 		_ = c.Send(hello)
+		// An empty message proves the password at once, so that the hub
+		// keeps the WebSocket while the browser sends nothing yet.
+		_ = c.Send(sess.Seal(nil))
 		pending := pc.pending
 		pc.pending = nil
 		for _, b := range pending {

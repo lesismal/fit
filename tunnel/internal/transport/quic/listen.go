@@ -75,6 +75,13 @@ func (relay) Listen(engine *fib.Engine, addr string, o transport.ListenOptions, 
 	l.config.TLSConfig = tc
 	l.resetKey = fq.NewResetKey()
 	l.config.ResetKey = &l.resetKey
+	// Past half the handshakes it takes, a client proves its address with
+	// a Retry before it gets one (see admit); the key also lets Accept
+	// take the token the client brings back. The tunnel's clients keep no
+	// NEW_TOKEN tokens, so none are sent.
+	l.tokenKey = fq.NewTokenKey()
+	l.config.TokenKey = l.tokenKey
+	l.config.DisableNewTokens = true
 	if server := fibtls.NewQUICServer(tc); server != nil {
 		l.config.NewTLS = func(bool, *tls.Config) fq.TLSConn { return server.NewConn() }
 	}
@@ -98,6 +105,7 @@ type listener struct {
 	// its link's stream once its handshake is over.
 	handshakes atomic.Int64
 	max        int64
+	tokenKey   *fq.TokenKey
 	maxConns   int
 	streamWait time.Duration
 
@@ -174,9 +182,9 @@ func (l *listener) OnData(c *fib.Connection, d []byte) {
 	l.mu.Lock()
 	closed := l.closed || len(l.conns) >= l.maxConns
 	l.mu.Unlock()
-	if closed || c.ShuttingDown() || l.handshakes.Load() >= l.max {
+	if closed || c.ShuttingDown() || !l.admit(c, d) {
 		// The client sends its Initial again, and is let in once a
-		// handshake is over.
+		// handshake is over, or answers the Retry admit sent.
 		bufferpool.Put(d)
 		return
 	}
@@ -226,6 +234,32 @@ func (l *listener) OnData(c *fib.Connection, d []byte) {
 	}
 	l.conns[qcConn] = struct{}{}
 	l.mu.Unlock()
+}
+
+// admit reports whether the client Initial in d, from c's address, may
+// start a handshake. Past max handshakes it may not. Past half of them, one
+// whose token does not prove the client's address is answered with a Retry
+// instead: Initials from forged addresses, which cost their sender nothing,
+// then hold at most half the handshakes, and a client that answers its
+// Retry gets one of the rest.
+func (l *listener) admit(c *fib.Connection, d []byte) bool {
+	n := l.handshakes.Load()
+	if n >= l.max {
+		return false
+	}
+	if n < l.max/2 {
+		return true
+	}
+	status, kind := l.tokenKey.CheckToken(d, c.RemoteAddr())
+	if status == fq.TokenValid || status == fq.TokenInvalid && kind == fq.TokenKindRetry {
+		// A good token, or a bad Retry token, which Accept answers with
+		// INVALID_TOKEN.
+		return true
+	}
+	if retry := l.tokenKey.Retry(d, c.RemoteAddr()); retry != nil {
+		_ = c.Send(retry)
+	}
+	return false
 }
 
 // OnClose ends the connections of an address the engine closed.
