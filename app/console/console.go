@@ -62,12 +62,14 @@ const (
 	LoginQueue   = 16
 )
 
-// How long a console keeps a connection that waits for its next request.
-// One that has not sent a request with a valid session (a login that
-// succeeds counts) is kept for UnauthIdleTimeout, as the Admin API keeps an
-// unauthenticated one, so that clients without a login cannot hold the
-// console's few connections for long; one that has is kept for IdleTimeout,
-// until it logs out.
+// How long a console keeps a connection. One that has not sent a request
+// with a valid session (a login that succeeds counts) is closed
+// UnauthIdleTimeout after it was opened, whatever it sends meanwhile, as the
+// Admin API closes an unauthenticated one, so that clients without a login
+// cannot hold the console's few connections for long. One that has is kept
+// for IdleTimeout between requests, until it logs out or makes an API
+// request without a valid session, its own having ended; it is then closed
+// UnauthIdleTimeout later unless a valid session comes first.
 const (
 	IdleTimeout       = 2 * time.Minute
 	UnauthIdleTimeout = 5 * time.Second
@@ -263,8 +265,9 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		MaxBodyBytes:      maxBody,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		// Every connection starts out unauthenticated; a request with a
-		// valid session gives its connection c.idle (see serve).
+		// Every connection starts out unauthenticated, closed c.unauthIdle
+		// after it opens (limitHandler); a request with a valid session
+		// gives its connection c.idle (see authenticated).
 		IdleTimeout:  c.unauthIdle,
 		WriteTimeout: 30 * time.Second,
 	}, fibhttp.HandlerFunc(c.serve))
@@ -276,7 +279,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 		c.secure = true
 		h = fibtls.NewServer(fibhttp.ConfigureTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}), h)
 	}
-	c.limit = newLimitHandler(h, cfg.Console().Conns())
+	c.limit = newLimitHandler(h, cfg.Console().Conns(), c.unauthIdle)
 	// mptcp is the pages member's own, on a role's console and on
 	// admin.console alike: the login behind the binding is the same either
 	// way, only the sockets the kernel opens differ.
@@ -470,6 +473,7 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 	}
 	s := c.lookup(r)
 	if s == nil {
+		c.authenticated(ctx, false)
 		_ = Error(ctx, stdhttp.StatusUnauthorized, "log in first")
 		return
 	}
@@ -477,9 +481,7 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		_ = Error(ctx, stdhttp.StatusForbidden, "the request lacks the session's "+CSRFHeader+" token")
 		return
 	}
-	// A valid session: the connection is kept between requests for the
-	// console's usual idle time from now on.
-	_ = ctx.SetIdleTimeout(c.idle)
+	c.authenticated(ctx, true)
 	if s.MustChange && !c.passwordRoute(r.Method, p) {
 		_ = WriteJSON(ctx, stdhttp.StatusForbidden, mustChangeBody{Error: "change the temporary password first", MustChange: true})
 		return
@@ -649,7 +651,7 @@ func (c *Console) login(ctx *fibhttp.Context) {
 			return
 		}
 		token, s := c.logins.Start(body.Username)
-		_ = ctx.SetIdleTimeout(c.idle)
+		c.authenticated(ctx, true)
 		ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: token, Path: "/", HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 		c.infof("console: %q logged in from %s", body.Username, addr)
 		_ = WriteJSON(ctx, stdhttp.StatusOK, newSessionBody(&s))
@@ -676,8 +678,29 @@ func (c *Console) logout(ctx *fibhttp.Context) {
 	}
 	ctx.Header().Add("Set-Cookie", (&stdhttp.Cookie{Name: c.cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: c.secure, SameSite: stdhttp.SameSiteStrictMode}).String())
 	// Logged out, the connection is an unauthenticated one again.
-	_ = ctx.SetIdleTimeout(c.unauthIdle)
+	c.authenticated(ctx, false)
 	_ = Write(ctx, stdhttp.StatusNoContent, "", nil)
+}
+
+// authenticated records whether the request ctx carries came with a valid
+// session. One that did keeps its connection for the console's usual idle
+// time from now on. One that did not, on a connection a session had kept,
+// whose session has ended since, puts the connection back on the rule for
+// unauthenticated ones: kept unauthIdle between requests, and closed
+// unauthIdle from now unless a request with a valid session comes first.
+func (c *Console) authenticated(ctx *fibhttp.Context, valid bool) {
+	cc := c.limit.conn(ctx.Conn)
+	if valid {
+		_ = ctx.SetIdleTimeout(c.idle)
+		if cc != nil {
+			cc.authed.Store(true)
+		}
+		return
+	}
+	if cc != nil && cc.authed.CompareAndSwap(true, false) {
+		_ = ctx.SetIdleTimeout(c.unauthIdle)
+		cc.expire(c.unauthIdle)
+	}
 }
 
 func clientAddr(r *stdhttp.Request) string {
@@ -727,23 +750,55 @@ func (c *Console) serveFile(ctx *fibhttp.Context, p string) {
 }
 
 // limitHandler closes the connections past max as they open, and those of
-// a client past its share of them (login.Peers), and closes every one it
-// has open when the console stops.
+// a client past its share of them (login.Peers); closes one that has not
+// been authenticated unauth after it opened, when unauth is above 0; and
+// closes every one it has open when the console stops.
 type limitHandler struct {
 	fib.Handler
-	max   int64
-	n     atomic.Int64
-	peers *login.Peers
-	peer  func(*fib.Connection) netip.Addr // the client's address; tests replace it
+	max    int64
+	n      atomic.Int64
+	peers  *login.Peers
+	peer   func(*fib.Connection) netip.Addr // the client's address; tests replace it
+	unauth time.Duration
 
 	mu     sync.Mutex
-	conns  map[*fib.Connection]netip.Addr // to the client's address
+	conns  map[*fib.Connection]*consoleConn
 	closed bool
 }
 
-func newLimitHandler(h fib.Handler, max int) *limitHandler {
-	return &limitHandler{Handler: h, max: int64(max), peers: login.NewPeers(max), conns: map[*fib.Connection]netip.Addr{},
+// consoleConn is what a limitHandler keeps of one of its connections.
+type consoleConn struct {
+	ip netip.Addr
+	// authed is set while the connection's last request with a session,
+	// or its login, had a valid one (Console.authenticated).
+	authed atomic.Bool
+	// timer closes the connection unless it is authed by then; nil when
+	// the limitHandler's unauth is 0.
+	timer *time.Timer
+}
+
+// expire closes the connection d from now unless it is authenticated by
+// then.
+func (cc *consoleConn) expire(d time.Duration) {
+	if cc.timer != nil {
+		cc.timer.Reset(d)
+	}
+}
+
+func newLimitHandler(h fib.Handler, max int, unauth time.Duration) *limitHandler {
+	return &limitHandler{Handler: h, max: int64(max), peers: login.NewPeers(max), conns: map[*fib.Connection]*consoleConn{}, unauth: unauth,
 		peer: func(c *fib.Connection) netip.Addr { return c.RemoteAddrPort().Addr() }}
+}
+
+// conn returns what l keeps of c, or nil if c is not one of its open
+// connections.
+func (l *limitHandler) conn(c *fib.Connection) *consoleConn {
+	if c == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.conns[c]
 }
 
 func (l *limitHandler) OnOpen(c *fib.Connection) {
@@ -766,18 +821,29 @@ func (l *limitHandler) OnOpen(c *fib.Connection) {
 		_ = c.Close()
 		return
 	}
-	l.conns[c] = ip
+	cc := &consoleConn{ip: ip}
+	if l.unauth > 0 {
+		cc.timer = time.AfterFunc(l.unauth, func() {
+			if !cc.authed.Load() {
+				_ = c.Close()
+			}
+		})
+	}
+	l.conns[c] = cc
 	l.mu.Unlock()
 	l.Handler.OnOpen(c)
 }
 
 func (l *limitHandler) OnClose(c *fib.Connection, err error) {
 	l.mu.Lock()
-	ip, ok := l.conns[c]
+	cc, ok := l.conns[c]
 	delete(l.conns, c)
 	l.mu.Unlock()
 	if ok {
-		l.peers.Close(ip)
+		if cc.timer != nil {
+			cc.timer.Stop()
+		}
+		l.peers.Close(cc.ip)
 		l.n.Add(-1)
 		l.Handler.OnClose(c, err)
 	}

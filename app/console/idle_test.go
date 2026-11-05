@@ -143,3 +143,92 @@ func TestConsoleIdleTimeouts(t *testing.T) {
 		ic.closesWithin(idle / 2)
 	})
 }
+
+// keepsAsking sends GET path, with header lines extra, every gap until the
+// console closes the connection, and returns how long after start that
+// was; it fails the test if the connection is still open after limit.
+func (ic *idleConn) keepsAsking(start time.Time, gap, limit time.Duration, path string, extra ...string) time.Duration {
+	ic.t.Helper()
+	var b strings.Builder
+	b.WriteString("GET " + path + " HTTP/1.1\r\nHost: test\r\n")
+	for _, h := range extra {
+		b.WriteString(h + "\r\n")
+	}
+	b.WriteString("\r\n")
+	for time.Since(start) < limit {
+		_ = ic.conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.WriteString(ic.conn, b.String()); err != nil {
+			return time.Since(start)
+		}
+		resp, err := http.ReadResponse(ic.r, &http.Request{Method: "GET"})
+		if err != nil {
+			return time.Since(start)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		time.Sleep(gap)
+	}
+	ic.t.Fatalf("the connection is still open %v on, asked every %v", time.Since(start), gap)
+	return 0
+}
+
+// TestConsoleUnauthBoundFromOpen: a connection without a valid session is
+// closed unauthIdleTimeout after it opened however often it asks, so that
+// requests just inside each idle wait do not hold it; and one whose
+// session has ended since it was kept for it is closed unauthIdleTimeout
+// after the request that found the session gone, however often it asks.
+func TestConsoleUnauthBoundFromOpen(t *testing.T) {
+	const unauth, idle = 300 * time.Millisecond, 5 * time.Second
+	defer func(i, u time.Duration) { idleTimeout, unauthIdleTimeout = i, u }(idleTimeout, unauthIdleTimeout)
+	idleTimeout, unauthIdleTimeout = idle, unauth
+	c, err := Start(newEngine(t), options(t, discardLog(t), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Stop(t.Context()) })
+
+	for _, path := range []string{"/", "/api/session"} {
+		t.Run("without a session "+path, func(t *testing.T) {
+			start := time.Now()
+			ic := dialIdle(t, c)
+			if held := ic.keepsAsking(start, unauth/3, 10*unauth, path); held > 3*unauth {
+				t.Errorf("closed only after %v", held)
+			}
+		})
+	}
+
+	t.Run("session ended", func(t *testing.T) {
+		ic := dialIdle(t, c)
+		resp := ic.do("POST", "/api/login", `{"username":"admin","password":"secret"}`)
+		if resp.StatusCode != 200 {
+			t.Fatalf("login: %d", resp.StatusCode)
+		}
+		var token string
+		for _, ck := range resp.Cookies() {
+			if ck.Name == c.cookie {
+				token = ck.Value
+			}
+		}
+		if token == "" {
+			t.Fatal("no session cookie")
+		}
+		cookie := "Cookie: " + c.cookie + "=" + token
+		// Kept past the bound by its session.
+		time.Sleep(2 * unauth)
+		if resp := ic.do("GET", "/api/session", "", cookie); resp.StatusCode != 200 {
+			t.Fatalf("GET /api/session: %d", resp.StatusCode)
+		}
+		// The session ends elsewhere (another tab's logout, a revocation,
+		// its expiry); the next request finds it gone.
+		if _, ok := c.logins.End(token); !ok {
+			t.Fatal("no session to end")
+		}
+		start := time.Now()
+		if resp := ic.do("GET", "/api/session", "", cookie); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET /api/session with the ended session: %d", resp.StatusCode)
+		}
+		if held := ic.keepsAsking(start, unauth/3, 10*unauth, "/"); held > 3*unauth {
+			t.Errorf("closed only after %v", held)
+		}
+	})
+}

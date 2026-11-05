@@ -330,14 +330,14 @@ func (h *fullHandler) OnEngineClose(*fib.Connection) { h.closes++ }
 
 func TestLimitHandlerPassesOn(t *testing.T) {
 	full := &fullHandler{}
-	l := newLimitHandler(full, 1)
+	l := newLimitHandler(full, 1, 0)
 	l.OnShutdown(nil)
 	l.OnEngineClose(nil)
 	if full.shutdowns != 1 || full.closes != 1 {
 		t.Errorf("passed on %d shutdowns, %d closes", full.shutdowns, full.closes)
 	}
 	// A handler without them is not called.
-	l = newLimitHandler(plainHandler{}, 1)
+	l = newLimitHandler(plainHandler{}, 1, 0)
 	l.OnShutdown(nil)
 	l.OnEngineClose(nil)
 }
@@ -346,8 +346,8 @@ func TestLimitHandlerPassesOn(t *testing.T) {
 // connection, and one closed already, and checks each closes what opens.
 func TestLimitHandlerCloses(t *testing.T) {
 	engine := newEngine(t)
-	none := newLimitHandler(plainHandler{}, 0)
-	closed := newLimitHandler(plainHandler{}, 8)
+	none := newLimitHandler(plainHandler{}, 0, 0)
+	closed := newLimitHandler(plainHandler{}, 8, 0)
 	closed.closeAll()
 	for name, l := range map[string]*limitHandler{"past max": none, "closed": closed} {
 		i, err := engine.AddBinding(fib.Binding{Addr: "127.0.0.1:0", Handler: l})
@@ -553,7 +553,7 @@ func TestConsoleLoginQueue(t *testing.T) {
 // it is closed as it opens, and another client is still served.
 func TestLimitHandlerPeerShare(t *testing.T) {
 	engine := newEngine(t)
-	l := newLimitHandler(plainHandler{}, 8)
+	l := newLimitHandler(plainHandler{}, 8, 0)
 	var from atomic.Value
 	from.Store(netip.MustParseAddr("203.0.113.9"))
 	l.peer = func(*fib.Connection) netip.Addr { return from.Load().(netip.Addr) }
