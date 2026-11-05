@@ -286,7 +286,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I158.
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | todo |
 | **Media library** | | | |
-| I131 | Decision 032; fib A63, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | todo |
+| I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | todo |
 | I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | todo |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
@@ -2149,7 +2149,7 @@ keeps the reads behind one interface so that it can be added).
 
 ### I131 Decision 032; an MP4 reader in fib
 
-- **Do**: decision 032. Ask fib for A63 in [fib-api-requests.md](fib-api-requests.md): a reader of
+- **Do**: decision 032. Ask fib for A64 in [fib-api-requests.md](fib-api-requests.md): a reader of
   MP4 files that are not fragmented (ISO BMFF), in fib's `media/fmp4` or a new `media/mp4`, which
   parses `moov` (`stts`, `ctts`, `stss`, `stsc`, `stsz`/`stz2`, `stco`/`co64`, edit lists) through
   an `io.ReaderAt` without reading the whole file, finds a `moov` at the end as well as at the

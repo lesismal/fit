@@ -276,7 +276,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I129 | 迁移与审查：`migrate` 与 `security-review` 端到端，在固定配置集上评估 | I127 | todo |
 | I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | todo |
 | **媒体库** | | | |
-| I131 | 决定 032；fib A63，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | todo |
+| I131 | 决定 032；fib A64，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | todo |
 | I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | todo |
 | I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | todo |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
@@ -1790,7 +1790,7 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 
 ### I131 决定 032；fib 中的 MP4 读取器
 
-- **做**：决定 032。在 [fib-api-requests.md](fib-api-requests.zh-CN.md) 中向 fib 提出 A63：非分片 MP4（ISO BMFF）文件的读取器，放在
+- **做**：决定 032。在 [fib-api-requests.md](fib-api-requests.zh-CN.md) 中向 fib 提出 A64：非分片 MP4（ISO BMFF）文件的读取器，放在
   fib 的 `media/fmp4` 或新的 `media/mp4` 中；通过 `io.ReaderAt` 解析 `moov`（`stts`、`ctts`、`stss`、`stsc`、`stsz`/`stz2`、
   `stco`/`co64`、编辑列表），不读整个文件；`moov` 在文件尾部也能找到；像 `media/av` 那样给出每条轨道的编码配置；按时间和关键帧查找样本；
   样本表以紧凑形式保存，构建前即可知道其大小；做模糊测试。fib 加入后 fit 升级到该提交。
