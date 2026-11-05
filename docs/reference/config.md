@@ -1756,7 +1756,10 @@ Also at `llm.node.listen`, `llm.proxy.listen`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address. |
-| `password` | string |  | Required. The password peers prove they know when they link; it never crosses the network. |
+| `password` | string |  | The password of every role the listener links with that has no password of its own: peers prove they know it when they link, and it never crosses the network. Whoever holds it may link as any of those roles, so give each role its own instead. None when left out. |
+| `node_password` | string |  | The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out. |
+| `proxy_password` | string |  | The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out. |
+| `hub_password` | string |  | The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out. |
 
 <a id="config-llmpeer"></a>
 
@@ -1767,7 +1770,7 @@ Also at `llm.node.peers[]`, `llm.proxy.peers[]`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `address` | string |  | Required. The peer's host and port, as its listen.address says. |
-| `password` | string |  | Required. The peer's listen.password. |
+| `password` | string |  | Required. The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role. |
 | `role` | string: `hub`, `node`, `proxy` |  | Required. The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own. |
 
 <a id="config-llmlimits"></a>

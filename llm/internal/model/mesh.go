@@ -87,15 +87,47 @@ type DialTarget struct {
 	Error     string    `json:"error,omitempty"`
 }
 
-// ListenConfig is the rpc listener. The password is never returned by MethodPeers (HasPassword instead).
-// ListenConfig rpc 监听。MethodPeers 从不返回密码（改为 HasPassword）。
+// ListenConfig is the rpc listener. The passwords are never returned by MethodPeers (HasPassword instead).
+// A dialer's role is decided by the password it proves: NodePassword, ProxyPassword and HubPassword are those of a
+// node, a proxy and a hub, and Password is that of every role without one of its own. A role whose password is the
+// same as another's may be taken by whoever holds it.
+// ListenConfig rpc 监听。MethodPeers 从不返回密码（改为 HasPassword）。拨号方的角色由它所证明的密码决定：NodePassword、
+// ProxyPassword 与 HubPassword 分别是节点、代理与中心的密码，Password 是没有自己密码的各角色共用的密码。与其他角色密码相同
+// 的角色可被持有该密码的任何一方担任。
 type ListenConfig struct {
-	Addr     string `json:"addr"`               // empty: not listening / 为空表示不监听
-	Password string `json:"password,omitempty"` // required when Addr is set / 设置 Addr 时必填
+	Addr          string `json:"addr"`                     // empty: not listening / 为空表示不监听
+	Password      string `json:"password,omitempty"`       // the roles without their own / 没有自己密码的角色共用
+	NodePassword  string `json:"node_password,omitempty"`  // a node's / 节点的
+	ProxyPassword string `json:"proxy_password,omitempty"` // a proxy's / 代理的
+	HubPassword   string `json:"hub_password,omitempty"`   // a hub's / 中心的
 }
 
-// ListenReq changes the rpc listener; an empty Password keeps the current one.
-// ListenReq 修改 rpc 监听；Password 为空表示保留当前密码。
+// PasswordFor is the password a dialer of role proves: the role's own, or Password.
+// PasswordFor 是 role 角色的拨号方要证明的密码：该角色自己的，或 Password。
+func (l ListenConfig) PasswordFor(role string) string {
+	own := ""
+	switch role {
+	case RoleNode:
+		own = l.NodePassword
+	case RoleProxy:
+		own = l.ProxyPassword
+	case RoleHub:
+		own = l.HubPassword
+	}
+	if own != "" {
+		return own
+	}
+	return l.Password
+}
+
+// HasPassword reports whether any password is set.
+// HasPassword 表示是否设置了任一密码。
+func (l ListenConfig) HasPassword() bool {
+	return l.Password != "" || l.NodePassword != "" || l.ProxyPassword != "" || l.HubPassword != ""
+}
+
+// ListenReq changes the rpc listener; an empty password keeps the current one.
+// ListenReq 修改 rpc 监听；密码为空表示保留当前密码。
 type ListenReq = ListenConfig
 
 // ListenState is the listener as shown on the console.

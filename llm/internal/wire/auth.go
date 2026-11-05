@@ -99,3 +99,26 @@ func (p Password) VerifyListener(challenge, nonce, proof []byte) error {
 	}
 	return ErrAuth
 }
+
+// Credential is one password a listener takes, and the roles a dialer that proves it may take: Roles is opaque to
+// wire, which hands it to the layer above as the connection's Roles.
+// Credential 是监听方接受的一个密码，以及证明它的拨号方可担任的角色：Roles 对 wire 不透明，wire 把它作为连接的 Roles
+// 交给上层。
+type Credential struct {
+	Password Password
+	Roles    []string
+}
+
+// match checks proof against every credential, without stopping at the first that matches, and returns the first
+// one it proves, or nil. Their passwords are distinct and not empty (the caller merges the roles of a password).
+// match 用每个凭据校验 proof（不在第一个匹配处停下），返回第一个被证明的凭据，没有则为 nil。各凭据的密码互不相同且非空
+// （调用方合并同一密码的角色）。
+func match(creds []Credential, challenge, proof []byte) *Credential {
+	var found *Credential
+	for i := range creds {
+		if creds[i].Password != "" && hmac.Equal(proof, creds[i].Password.mac(challenge)) && found == nil {
+			found = &creds[i]
+		}
+	}
+	return found
+}

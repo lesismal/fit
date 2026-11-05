@@ -110,11 +110,20 @@ func RegisterAdmin(r *Router, m *Mesh, edit Editor) {
 				s.Listen = nil
 				return nil
 			}
-			if cfg.Password == "" && s.Listen != nil {
-				cfg.Password = s.Listen.Password
+			// An empty password keeps the current one, each role's apart.
+			if l := s.Listen; l != nil {
+				keep := func(v *string, cur string) {
+					if *v == "" {
+						*v = cur
+					}
+				}
+				keep(&cfg.Password, l.Password)
+				keep(&cfg.NodePassword, l.NodePassword)
+				keep(&cfg.ProxyPassword, l.ProxyPassword)
+				keep(&cfg.HubPassword, l.HubPassword)
 			}
-			if cfg.Password == "" {
-				return BadRequest("a listener needs a password")
+			if len(m.credentials(cfg)) == 0 {
+				return BadRequest("a listener needs a password for a role it links with")
 			}
 			c := cfg
 			s.Listen = &c

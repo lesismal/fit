@@ -2418,9 +2418,26 @@ upstreams:
       # # string; required.
       # address: "127.0.0.1:9000"
 
-      # # The password peers prove they know when they link; it never crosses the network.
-      # # string; required.
+      # # The password of every role the listener links with that has no password of its own: peers
+      # # prove they know it when they link, and it never crosses the network. Whoever holds it may
+      # # link as any of those roles, so give each role its own instead. None when left out.
+      # # string.
       # password: ""
+
+      # # The password nodes prove to link as a node, on a hub's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # node_password: ""
+
+      # # The password proxies prove to link as a proxy, on a hub's or a node's listener; password
+      # # when left out.
+      # # string.
+      # proxy_password: ""
+
+      # # The password hubs prove to link as a hub, on a node's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # hub_password: ""
 
     # # The nodes and proxies the hub dials. Its pages change them.
     # # list of object.
@@ -2430,7 +2447,9 @@ upstreams:
         # # string; required.
         # address: "127.0.0.1:9000"
 
-        # # The peer's listen.password.
+        # # The password of the dialing role on the peer's listener: a node dials with the peer's
+        # # listen.node_password, a proxy with its listen.proxy_password, a hub with its
+        # # listen.hub_password, or with its listen.password when it has none for the role.
         # # string; required.
         # password: ""
 
@@ -2556,9 +2575,26 @@ upstreams:
       # # string; required.
       # address: "127.0.0.1:9000"
 
-      # # The password peers prove they know when they link; it never crosses the network.
-      # # string; required.
+      # # The password of every role the listener links with that has no password of its own: peers
+      # # prove they know it when they link, and it never crosses the network. Whoever holds it may
+      # # link as any of those roles, so give each role its own instead. None when left out.
+      # # string.
       # password: ""
+
+      # # The password nodes prove to link as a node, on a hub's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # node_password: ""
+
+      # # The password proxies prove to link as a proxy, on a hub's or a node's listener; password
+      # # when left out.
+      # # string.
+      # proxy_password: ""
+
+      # # The password hubs prove to link as a hub, on a node's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # hub_password: ""
 
     # # The hubs and proxies the node dials. Its pages change them.
     # # list of object.
@@ -2568,7 +2604,9 @@ upstreams:
         # # string; required.
         # address: "127.0.0.1:9000"
 
-        # # The peer's listen.password.
+        # # The password of the dialing role on the peer's listener: a node dials with the peer's
+        # # listen.node_password, a proxy with its listen.proxy_password, a hub with its
+        # # listen.hub_password, or with its listen.password when it has none for the role.
         # # string; required.
         # password: ""
 
@@ -2799,9 +2837,26 @@ upstreams:
       # # string; required.
       # address: "127.0.0.1:9000"
 
-      # # The password peers prove they know when they link; it never crosses the network.
-      # # string; required.
+      # # The password of every role the listener links with that has no password of its own: peers
+      # # prove they know it when they link, and it never crosses the network. Whoever holds it may
+      # # link as any of those roles, so give each role its own instead. None when left out.
+      # # string.
       # password: ""
+
+      # # The password nodes prove to link as a node, on a hub's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # node_password: ""
+
+      # # The password proxies prove to link as a proxy, on a hub's or a node's listener; password
+      # # when left out.
+      # # string.
+      # proxy_password: ""
+
+      # # The password hubs prove to link as a hub, on a node's or a proxy's listener; password when
+      # # left out.
+      # # string.
+      # hub_password: ""
 
     # # The hubs and nodes the proxy dials. Its pages change them.
     # # list of object.
@@ -2811,7 +2866,9 @@ upstreams:
         # # string; required.
         # address: "127.0.0.1:9000"
 
-        # # The peer's listen.password.
+        # # The password of the dialing role on the peer's listener: a node dials with the peer's
+        # # listen.node_password, a proxy with its listen.proxy_password, a hub with its
+        # # listen.hub_password, or with its listen.password when it has none for the role.
         # # string; required.
         # password: ""
 

@@ -152,8 +152,11 @@ type conn struct {
 	id     int64
 	dir    string
 	remote string
-	target *target       // outbound only / 仅出站
-	ready  chan struct{} // closed once the hello completed / hello 完成后关闭
+	target *target // outbound only / 仅出站
+	// roles are the roles an inbound connection may say hello as: those of the password its dialer proved.
+	// roles 是入站连接可以 hello 的角色：其拨号方所证明密码的角色。
+	roles []string
+	ready chan struct{} // closed once the hello completed / hello 完成后关闭
 
 	mu         sync.Mutex
 	registered bool
@@ -298,9 +301,10 @@ func (m *Mesh) OnPush(method string, roles []string, fn PushFunc) {
 }
 
 // connConfig is the wire configuration of a connection: t is the dial target of an outbound one; an inbound one
-// (t == nil) is checked with the listener's password.
-// connConfig 连接的 wire 配置：出站连接的 t 为其连接目标；入站连接（t == nil）用监听密码校验。
-func (m *Mesh) connConfig(t *target, password string) wire.ConnConfig {
+// (t == nil) is checked with the listener's credentials, which decide the roles it may say hello as.
+// connConfig 连接的 wire 配置：出站连接的 t 为其连接目标；入站连接（t == nil）用监听方的凭据校验，凭据决定它可以以哪些角色
+// hello。
+func (m *Mesh) connConfig(t *target, creds []wire.Credential) wire.ConnConfig {
 	cfg := wire.ConnConfig{
 		Session:      wire.Options{StreamIdle: m.o().StreamIdle, MaxInbound: m.o().MaxInflight},
 		PingInterval: m.o().PingInterval,
@@ -315,7 +319,7 @@ func (m *Mesh) connConfig(t *target, password string) wire.ConnConfig {
 			}
 			return nil
 		}
-		cfg.Auth = wire.Password(password)
+		cfg.Credentials = creds
 		cfg.OnAuthFailed = func(r *http.Request) {
 			m.log(slog.LevelWarn, "mesh: authentication failed (wrong password)", "remote", r.RemoteAddr)
 		}
@@ -464,7 +468,8 @@ func (m *Mesh) stopped() bool {
 // connected records a new authenticated connection (called by wire before any frame of it is handled).
 // connected 记录一条新的已认证连接（由 wire 在处理该连接的任何帧之前调用）。
 func (m *Mesh) connected(wc *wire.Conn, t *target) *conn {
-	c := &conn{wc: wc, id: m.nextConn.Add(1), dir: "in", remote: wc.RemoteAddr(), target: t, ready: make(chan struct{})}
+	c := &conn{wc: wc, id: m.nextConn.Add(1), dir: "in", remote: wc.RemoteAddr(), target: t, roles: wc.Roles,
+		ready: make(chan struct{})}
 	if t != nil {
 		c.dir, c.remote = "out", t.addr
 	}
@@ -613,6 +618,12 @@ func (m *Mesh) handleHello(c *conn, payload []byte) ([]byte, error) {
 		return nil, BadRequest("bad hello")
 	}
 	err := m.checkPeer(id)
+	if err == nil && !slices.Contains(c.roles, id.Role) {
+		// The password the dialer proved is not the role's: a proxy that holds a node's password does not say hello as a
+		// node.
+		// 拨号方证明的密码不是该角色的：持有节点密码的代理不能以节点身份 hello。
+		err = fmt.Errorf("role %s: the password this link proved is not the %s password of this listener", id.Role, id.Role)
+	}
 	if err == nil {
 		err = m.register(c, id)
 	}

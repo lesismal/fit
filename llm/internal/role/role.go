@@ -196,7 +196,7 @@ func (b *Base) Apply(c Common) error {
 		SlowTimeout: l.Slow(), RetryInterval: l.Retry(), StreamIdle: l.Idle()})
 	var listen model.ListenConfig
 	if c.Listen != nil {
-		listen = model.ListenConfig{Addr: c.Listen.Address, Password: c.Listen.Password}
+		listen = listenConfig(c.Listen)
 	}
 	peers := make([]model.DialReq, 0, len(c.Peers))
 	for _, p := range c.Peers {
@@ -359,7 +359,8 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 			if err := json.Unmarshal(raw, &l); err != nil {
 				return err
 			}
-			s.Listen = &model.ListenConfig{Addr: l.Address, Password: l.Password}
+			lc := listenConfig(&l)
+			s.Listen = &lc
 		}
 		if raw, ok := m["peers"]; ok {
 			var ps []config.LLMPeer
@@ -376,7 +377,14 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 		if s.Listen == nil {
 			delete(m, "listen")
 		} else {
-			m["listen"], _ = json.Marshal(map[string]string{"address": s.Listen.Addr, "password": s.Listen.Password})
+			l := map[string]string{"address": s.Listen.Addr}
+			for k, v := range map[string]string{"password": s.Listen.Password, "node_password": s.Listen.NodePassword,
+				"proxy_password": s.Listen.ProxyPassword, "hub_password": s.Listen.HubPassword} {
+				if v != "" {
+					l[k] = v
+				}
+			}
+			m["listen"], _ = json.Marshal(l)
 		}
 		peers := make([]map[string]string, 0, len(s.Peers))
 		for _, p := range s.Peers {
@@ -384,6 +392,12 @@ func (b *Base) EditMesh(ctx context.Context, fn func(s *mesh.Settings) error) er
 		}
 		return Set(m, "peers", peers)
 	})
+}
+
+// listenConfig is the mesh's listener of l.
+func listenConfig(l *config.LLMListen) model.ListenConfig {
+	return model.ListenConfig{Addr: l.Address, Password: l.Password, NodePassword: l.NodePassword,
+		ProxyPassword: l.ProxyPassword, HubPassword: l.HubPassword}
 }
 
 // SetName writes the name into the config.

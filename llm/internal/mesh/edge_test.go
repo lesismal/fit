@@ -333,7 +333,8 @@ func TestRouterEdges(t *testing.T) {
 // Dial and listen settings that are refused, dials stopped while they run, and a mesh used after Stop.
 // 被拒绝的拨号与监听设置、运行中被停止的拨号，以及 Stop 之后使用的互联。
 func TestLifecycleEdges(t *testing.T) {
-	noEngine := New(Options{Self: func() model.Identity { return model.Identity{Role: model.RoleHub, ID: "h0"} }}, NewRouter())
+	noEngine := New(Options{Self: func() model.Identity { return model.Identity{Role: model.RoleHub, ID: "h0"} },
+		AcceptRoles: []string{model.RoleNode}}, NewRouter())
 	if err := noEngine.SetListen(model.ListenConfig{Addr: "127.0.0.1:0", Password: "pw"}); err == nil || noEngine.Listen().Error == "" {
 		t.Fatalf("listened without an engine: %v", err)
 	}

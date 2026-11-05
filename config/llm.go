@@ -12,8 +12,9 @@ import (
 
 // The LLM feature's roles link over a mesh of WebSocket connections: each role may
 // listen for links and dial any number of peers, which authenticate with a
-// shared password (HMAC challenge-response; the password never crosses the
-// wire). What their pages change is written back into their members here.
+// password (HMAC challenge-response, both ways; the password never crosses
+// the wire) that a listener may set per role. What their pages change is
+// written back into their members here.
 // See docs/llm.md.
 
 // The bounds of the LLM feature's members.
@@ -49,9 +50,17 @@ var (
 )
 
 // LLMListen is where a role takes links from its peers.
+//
+// The password a dialer proves decides the role it may link as: a role's own
+// password (node_password, proxy_password, hub_password) or, for a role
+// without one, password. A password shared by several roles lets whoever
+// holds it link as any of them.
 type LLMListen struct {
-	Address  string `json:"address" fit:"required" doc:"The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address."`
-	Password string `json:"password" fit:"required" doc:"The password peers prove they know when they link; it never crosses the network."`
+	Address       string `json:"address" fit:"required" doc:"The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address."`
+	Password      string `json:"password,omitempty" doc:"The password of every role the listener links with that has no password of its own: peers prove they know it when they link, and it never crosses the network. Whoever holds it may link as any of those roles, so give each role its own instead. None when left out."`
+	NodePassword  string `json:"node_password,omitempty" doc:"The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out."`
+	ProxyPassword string `json:"proxy_password,omitempty" doc:"The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out."`
+	HubPassword   string `json:"hub_password,omitempty" doc:"The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -60,7 +69,7 @@ type LLMListen struct {
 // backoff whenever the link is lost.
 type LLMPeer struct {
 	Address  string `json:"address" fit:"required" doc:"The peer's host and port, as its listen.address says."`
-	Password string `json:"password" fit:"required" doc:"The peer's listen.password."`
+	Password string `json:"password" fit:"required" doc:"The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role."`
 	Role     string `json:"role" fit:"required" enum:"hub,node,proxy" doc:"The role the peer must announce; a link to a peer of another role is refused. Never the dialing role's own."`
 
 	At Value `json:"-" fit:"self"`
@@ -370,8 +379,20 @@ func checkLLMMesh(role string, at Value, id, name string, listen *LLMListen, pee
 		if _, msg := checkAddress(l.Address); msg != "" {
 			add(l.At.Field("address"), "%s", msg)
 		}
-		if l.Password == "" {
-			add(l.At.Field("password"), "a listener needs a password")
+		// A role's own password is only for a role the listener links with.
+		accept := LLMPeerRoles(role)
+		var fields []string
+		own := false
+		for _, f := range []struct{ role, v string }{{"node", l.NodePassword}, {"proxy", l.ProxyPassword}, {"hub", l.HubPassword}} {
+			if slices.Contains(accept, f.role) {
+				fields = append(fields, f.role+"_password")
+				own = own || f.v != ""
+			} else if f.v != "" {
+				add(l.At.Field(f.role+"_password"), "a %s takes no links from %ss", role, f.role)
+			}
+		}
+		if l.Password == "" && !own {
+			add(l.At.Field("password"), "a listener needs a password: password, or a role's own, %s", strings.Join(fields, " or "))
 		}
 	}
 	if len(peers) > MaxLLMPeers {

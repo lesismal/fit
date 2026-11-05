@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -340,6 +341,23 @@ func TestEditMesh(t *testing.T) {
 	}
 	if m := ed.member(); m["listen"] == nil || m["peers"] != nil {
 		t.Fatalf("member = %v", m)
+	}
+	// The roles' own passwords are read and written with the listener.
+	ed.mu.Lock()
+	ed.cur = []byte(`{"listen":{"address":"127.0.0.1:1","hub_password":"h","proxy_password":"x"}}`)
+	ed.mu.Unlock()
+	if err := b.EditMesh(context.Background(), func(s *mesh.Settings) error {
+		if s.Listen == nil || s.Listen.HubPassword != "h" || s.Listen.ProxyPassword != "x" || s.Listen.Password != "" {
+			return fmt.Errorf("listen %+v", s.Listen)
+		}
+		s.Listen.Addr, s.Listen.Password = "127.0.0.1:3", "p"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := ed.member()["listen"].(map[string]any); l["hub_password"] != "h" || l["proxy_password"] != "x" || l["password"] != "p" ||
+		l["node_password"] != nil || l["address"] != "127.0.0.1:3" {
+		t.Fatalf("listen = %v", l)
 	}
 	// Members that do not decode, and fn's error.
 	boom := errors.New("boom")

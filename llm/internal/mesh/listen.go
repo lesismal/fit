@@ -3,7 +3,9 @@ package mesh
 import (
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/lesismal/fib"
 
@@ -17,7 +19,8 @@ const WSPath = wire.Path
 // SetListen replaces the listener: the current one stops (its binding is
 // removed and its inbound links closed; their dialers link again) and, unless
 // cfg.Addr is empty, a new one starts as a binding of its own on the
-// engine, serving only WSPath. A non-empty Addr needs a Password. The new
+// engine, serving only WSPath. A non-empty Addr needs a password for at
+// least one role the mesh accepts (see credentials). The new
 // configuration is kept even when it cannot bind: the error is returned and
 // shown in Listen().Error, and the role runs without a listener until it is
 // fixed. Setting what already runs, with the same limits, does nothing.
@@ -28,8 +31,8 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 			return err
 		}
 		cfg.Addr = addr
-		if cfg.Password == "" {
-			return BadRequest("a listener needs a password")
+		if len(m.credentials(cfg)) == 0 {
+			return BadRequest("a listener needs a password for a role it links with")
 		}
 	}
 	m.lmu.Lock()
@@ -52,7 +55,8 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		m.lerr = "no engine to listen on"
 		return Errorf(model.CodeInternal, "%s", m.lerr)
 	}
-	l := wire.NewHandler(m.connConfig(nil, cfg.Password))
+	creds := m.credentials(cfg)
+	l := wire.NewHandler(m.connConfig(nil, creds))
 	i, err := m.opts.Engine.AddBinding(fib.Binding{Addr: cfg.Addr, Handler: l})
 	if err != nil {
 		m.lerr = "listen " + cfg.Addr + ": " + err.Error()
@@ -63,7 +67,33 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 		m.laddr = addrs[0].String()
 	}
 	m.log(slog.LevelInfo, "mesh listening", "addr", m.laddr, "path", WSPath)
+	for _, c := range creds {
+		if len(c.Roles) > 1 {
+			m.log(slog.LevelWarn, "mesh: the listener takes one password from several roles: whoever holds it may link as any of them; give each role a password of its own",
+				"addr", m.laddr, "roles", strings.Join(c.Roles, ","))
+		}
+	}
 	return nil
+}
+
+// credentials are the passwords a listener of cfg takes, one per distinct
+// password, each with the roles the mesh accepts whose password it is (see
+// model.ListenConfig.PasswordFor); a role without one is not taken.
+func (m *Mesh) credentials(cfg model.ListenConfig) []wire.Credential {
+	var out []wire.Credential
+	for _, role := range m.opts.AcceptRoles {
+		pw := cfg.PasswordFor(role)
+		if pw == "" || role == model.RoleLocal {
+			continue
+		}
+		i := slices.IndexFunc(out, func(c wire.Credential) bool { return string(c.Password) == pw })
+		if i < 0 {
+			out = append(out, wire.Credential{Password: wire.Password(pw)})
+			i = len(out) - 1
+		}
+		out[i].Roles = append(out[i].Roles, role)
+	}
+	return out
 }
 
 func sameLimits(a, b Options) bool {
@@ -103,7 +133,7 @@ func (m *Mesh) ListenAddr() string {
 func (m *Mesh) Listen() model.ListenState {
 	m.lmu.Lock()
 	defer m.lmu.Unlock()
-	return model.ListenState{Addr: m.lcfg.Addr, HasPassword: m.lcfg.Password != "", Error: m.lerr}
+	return model.ListenState{Addr: m.lcfg.Addr, HasPassword: m.lcfg.HasPassword(), Error: m.lerr}
 }
 
 // ValidateAddr checks and normalizes a host:port address; the host may be

@@ -153,6 +153,10 @@ func TestRegisterAdmin(t *testing.T) {
 	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: "127.0.0.1:9"}); code != model.CodeBadRequest {
 		t.Fatalf("listen without password: code %d", code)
 	}
+	// A node takes no nodes: a node's password alone is none. / 节点不接受节点：只有节点的密码等于没有密码。
+	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: "127.0.0.1:9", NodePassword: "x"}); code != model.CodeBadRequest {
+		t.Fatalf("listen with a node's password alone: code %d", code)
+	}
 	if _, code := invoke(local, model.MethodUndial, model.UndialReq{Addr: "127.0.0.1:9"}); code != model.CodeNotFound {
 		t.Fatalf("undial unknown: code %d", code)
 	}
@@ -191,6 +195,18 @@ func TestRegisterAdmin(t *testing.T) {
 		t.Fatalf("saved %+v", saved)
 	}
 	mu.Unlock()
+	// A role's own password is set and kept apart from password. / 角色自己的密码与 password 分别设置与保留。
+	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: addr2, HubPassword: "hubpw"}); code != model.CodeOK {
+		t.Fatalf("listen with a hub password: code %d", code)
+	}
+	if _, code := invoke(local, model.MethodListen, model.ListenReq{Addr: addr2}); code != model.CodeOK {
+		t.Fatalf("listen keeping the passwords: code %d", code)
+	}
+	mu.Lock()
+	if saved.n != 5 || saved.listen != (model.ListenConfig{Addr: addr2, Password: "lpw", HubPassword: "hubpw"}) {
+		t.Fatalf("saved %+v", saved)
+	}
+	mu.Unlock()
 	if _, code := invoke(local, model.MethodUndial, model.UndialReq{Addr: hubAddr}); code != model.CodeOK {
 		t.Fatalf("undial: code %d", code)
 	}
@@ -199,7 +215,7 @@ func TestRegisterAdmin(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if saved.n != 5 || len(saved.dials) != 0 || saved.listen != (model.ListenConfig{}) {
+	if saved.n != 7 || len(saved.dials) != 0 || saved.listen != (model.ListenConfig{}) {
 		t.Fatalf("saved %+v", saved)
 	}
 }

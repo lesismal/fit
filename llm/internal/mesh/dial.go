@@ -129,7 +129,7 @@ func (m *Mesh) dial(t *target) (*conn, error) {
 		case <-ctx.Done():
 		}
 	}()
-	wc, err := wire.Dial(ctx, "ws://"+t.addr+WSPath, wire.DialConfig{ConnConfig: m.connConfig(t, ""), Engine: m.opts.Engine})
+	wc, err := wire.Dial(ctx, "ws://"+t.addr+WSPath, wire.DialConfig{ConnConfig: m.connConfig(t, nil), Engine: m.opts.Engine})
 	if err != nil {
 		return nil, err
 	}

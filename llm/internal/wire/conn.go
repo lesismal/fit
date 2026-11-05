@@ -64,6 +64,12 @@ type ConnConfig struct {
 	// Auth runs the post-upgrade handshake; nil accepts / proves nothing.
 	// Auth 执行升级之后的握手；为 nil 时不做认证。
 	Auth Authenticator
+	// Credentials, on a listener, are the passwords it takes in place of Auth: a dialer's proof is checked against
+	// each, the connection's Roles are those of the one it proves, and the listener proves that same password back
+	// (see Mutual). A proof of none of them fails the handshake.
+	// Credentials 用于监听方，代替 Auth 作为其接受的密码：拨号方的证明逐一与之校验，连接的 Roles 为被证明的那个凭据的
+	// 角色，监听方用同一密码回证（见 Mutual）。证明不了任何一个则握手失败。
+	Credentials []Credential
 	// PingInterval: send a ping after this long without receiving a frame, close after three
 	// (0: DefaultPingInterval, < 0: off).
 	// PingInterval 这么久没收到帧就发 ping，三个周期没收到就关闭（0：DefaultPingInterval，< 0：关闭心跳）。
@@ -134,6 +140,10 @@ type Conn struct {
 	// Request is the upgrade request (listener side).
 	// Request 是升级请求（监听方）。
 	Request *http.Request
+	// Roles are the roles of the credential the dialer proved (listener side, with ConnConfig.Credentials; nil
+	// otherwise). Set before Handlers is called.
+	// Roles 是拨号方所证明凭据的角色（监听方，使用 ConnConfig.Credentials 时；否则为 nil）。在调用 Handlers 之前设置。
+	Roles []string
 
 	ws  *websocket.Connection
 	cfg *ConnConfig
@@ -146,8 +156,8 @@ type Conn struct {
 	closeOnce sync.Once
 }
 
-func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request) *Conn {
-	c := &Conn{ws: ws, cfg: cfg, Request: req}
+func newConn(ws *websocket.Connection, cfg *ConnConfig, dialer bool, req *http.Request, roles []string) *Conn {
+	c := &Conn{ws: ws, cfg: cfg, Request: req, Roles: roles}
 	opts := cfg.Session
 	opts.Dialer = dialer
 	if cfg.Handlers != nil {
@@ -481,17 +491,16 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 		return
 	}
 
-	var err error
 	// A dialer of this version sends a nonce after its proof, for the listener to prove the password in its ack.
 	// 本版本的拨号方在证明之后附上随机数，供监听方在确认中证明密码。
-	ack := []byte{ackOK}
-	if m, ok := s.cfg.Auth.(Mutual); ok && m.Mutual() && len(data) == proofSize+NonceSize {
-		nonce := data[proofSize:]
-		data = data[:proofSize]
-		ack = append(ack, m.ProveListener(sc.challenge, nonce)...)
+	var nonce []byte
+	if len(data) == proofSize+NonceSize {
+		nonce = data[proofSize:]
 	}
-	if s.cfg.Auth != nil {
-		err = s.cfg.Auth.Verify(sc.challenge, data)
+	prover, roles, err := s.verify(sc.challenge, data, nonce != nil)
+	ack := []byte{ackOK}
+	if prover != nil && nonce != nil {
+		ack = append(ack, prover.ProveListener(sc.challenge, nonce)...)
 	}
 	if err != nil {
 		if s.cfg.OnAuthFailed != nil {
@@ -502,7 +511,7 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	}
 	sc.timer.Stop()
 	s.tcp.authenticated(sc.tcp)
-	c = newConn(ws, &s.cfg, false, sc.req)
+	c = newConn(ws, &s.cfg, false, sc.req, roles)
 	if tcp := sc.tcp; tcp != nil {
 		c.abort = func() { _ = tcp.Close() }
 	}
@@ -519,6 +528,34 @@ func (s *server) message(ws *websocket.Connection, _ websocket.Opcode, data []by
 	if s.cfg.OnOpen != nil {
 		s.cfg.OnOpen(c)
 	}
+}
+
+// verify checks a dialer's proof, followed by its nonce when nonced is set, and returns the authenticator the listener
+// proves itself with (nil: it proves nothing) and the roles of the credential proven.
+// verify 校验拨号方的证明（nonced 为真时其后跟随机数），返回监听方用以证明自身的认证（nil 表示不证明）以及被证明凭据的角色。
+func (s *server) verify(challenge, data []byte, nonced bool) (Mutual, []string, error) {
+	if len(s.cfg.Credentials) > 0 {
+		if nonced {
+			data = data[:proofSize]
+		}
+		cred := match(s.cfg.Credentials, challenge, data)
+		if cred == nil {
+			return nil, nil, ErrAuth
+		}
+		return cred.Password, cred.Roles, nil
+	}
+	m, _ := s.cfg.Auth.(Mutual)
+	if m == nil || !m.Mutual() {
+		m = nil
+	} else if nonced {
+		data = data[:proofSize]
+	}
+	if s.cfg.Auth != nil {
+		if err := s.cfg.Auth.Verify(challenge, data); err != nil {
+			return nil, nil, err
+		}
+	}
+	return m, nil, nil
 }
 
 func (s *server) close(ws *websocket.Connection, _ uint16, _ string, err error) {
@@ -657,7 +694,7 @@ func Dial(ctx context.Context, url string, cfg DialConfig) (*Conn, error) {
 					_ = w.Close(closeAuthFailed, "")
 					return
 				}
-				c = newConn(w, &cfg.ConnConfig, true, nil)
+				c = newConn(w, &cfg.ConnConfig, true, nil, nil)
 				if t := tcp.Load(); t != nil {
 					c.abort = func() { _ = t.Close() }
 				}

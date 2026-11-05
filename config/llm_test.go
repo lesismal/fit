@@ -18,14 +18,15 @@ func TestLLMMembers(t *testing.T) {
 				{"name": "z", "api": "azure_openai", "base_url": "https://r.openai.azure.com", "api_version": "2024-10-21"}],
 			"settings": {"allow_hub_manage": true, "gpu_sudo": false, "refresh_interval": "10s", "job_timeout": "2h"},
 			"proxy": {"timeout": "10m", "max_inflight": 8}},
-		"proxy": {"api": {"address": "127.0.0.1:9300"}, "console": {"address": "127.0.0.1:9301", "users": [{"username": "a", "password_hash": ` + hash + `}]},
+		"proxy": {"listen": {"address": ":9201", "hub_password": "h", "node_password": "n"}, "api": {"address": "127.0.0.1:9300"}, "console": {"address": "127.0.0.1:9301", "users": [{"username": "a", "password_hash": ` + hash + `}]},
 			"api_keys": [{"id": "0123456789abcdef", "name": "k", "prefix": "ah-xxxxxxx", "hash": "` + strings.Repeat("a", 64) + `"}]}}}`
 	c, err := Load([]byte(good))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.LLM.Node.Settings.Sudo() || c.LLM.Node.Settings.Job().String() != "2h0m0s" || c.LLM.Node.Proxy.Inflight() != 8 ||
-		c.LLM.Node.Proxy.Idle() != DefaultLLMIdleTimeout.Std() || c.LLM.Hub.Nodes() != 10 || c.LLM.Proxy.API.Body() != DefaultLLMMaxBodyBytes {
+		c.LLM.Node.Proxy.Idle() != DefaultLLMIdleTimeout.Std() || c.LLM.Hub.Nodes() != 10 || c.LLM.Proxy.API.Body() != DefaultLLMMaxBodyBytes ||
+		c.LLM.Proxy.Listen.HubPassword != "h" || c.LLM.Proxy.Listen.NodePassword != "n" || c.LLM.Proxy.Listen.Password != "" {
 		t.Fatalf("%+v", c.LLM)
 	}
 	for _, bad := range []struct{ doc, want string }{

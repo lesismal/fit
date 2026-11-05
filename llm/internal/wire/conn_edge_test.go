@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -316,6 +317,48 @@ func TestMutualAuth(t *testing.T) {
 	c.Close()
 	if Password("").Mutual() || Password("pw").VerifyListener([]byte("c"), []byte("n"), nil) == nil {
 		t.Fatal("an empty password proves both ways, or a listener proved nothing")
+	}
+}
+
+// A listener with credentials takes a dialer that proves any of them, gives the connection the roles of the one it
+// proved, and proves that same password back: a dialer of each password links (its own check of the listener's
+// proof passes), with its roles, and so does one of an earlier version; a password of none fails.
+// 带凭据的监听方接受证明其中任一凭据的拨号方，连接得到被证明凭据的角色，并用同一密码回证：每个密码的拨号方都能连上（其对监听方
+// 证明的校验通过），带着各自的角色，早先版本的拨号方也一样；不属于任何凭据的密码失败。
+func TestCredentials(t *testing.T) {
+	engine := SharedEngine(t)
+	opened := make(chan []string, 4)
+	addr := Listen(t, NewHandler(ConnConfig{
+		Credentials: []Credential{{Password: "np", Roles: []string{"node"}}, {Password: "pp", Roles: []string{"proxy", "hub"}}},
+		OnOpen:      func(c *Conn) { opened <- c.Roles },
+	}))
+	url := "ws://" + addr + Path
+	dial := func(auth Authenticator) error {
+		c, err := Dial(ctxT(t), url, DialConfig{Engine: engine, ConnConfig: ConnConfig{Auth: auth}})
+		if c != nil {
+			c.Close()
+		}
+		return err
+	}
+	for _, tc := range []struct {
+		auth Authenticator
+		want string
+	}{
+		{Password("np"), "node"},
+		{Password("pp"), "proxy,hub"},
+		{authFunc(func(c []byte) ([]byte, error) { return Password("np").Prove(c) }), "node"}, // no nonce / 不带随机数
+	} {
+		if err := dial(tc.auth); err != nil {
+			t.Fatalf("%v: %v", tc.want, err)
+		}
+		if got := strings.Join(<-opened, ","); got != tc.want {
+			t.Fatalf("roles %q, want %q", got, tc.want)
+		}
+	}
+	for _, pw := range []Password{"other", ""} {
+		if err := dial(pw); !errors.Is(err, ErrAuth) {
+			t.Fatalf("password %q: %v", pw, err)
+		}
 	}
 }
 

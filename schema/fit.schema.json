@@ -1048,14 +1048,25 @@
           "description": "The host and port the role takes links on, as a binding of its own on the listeners' engine; the WebSocket path is /ws. An empty host listens on every address.",
           "type": "string"
         },
+        "hub_password": {
+          "description": "The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out.",
+          "type": "string"
+        },
+        "node_password": {
+          "description": "The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out.",
+          "type": "string"
+        },
         "password": {
-          "description": "The password peers prove they know when they link; it never crosses the network.",
+          "description": "The password of every role the listener links with that has no password of its own: peers prove they know it when they link, and it never crosses the network. Whoever holds it may link as any of those roles, so give each role its own instead. None when left out.",
+          "type": "string"
+        },
+        "proxy_password": {
+          "description": "The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out.",
           "type": "string"
         }
       },
       "required": [
-        "address",
-        "password"
+        "address"
       ],
       "type": "object"
     },
@@ -1249,7 +1260,7 @@
           "type": "string"
         },
         "password": {
-          "description": "The peer's listen.password.",
+          "description": "The password of the dialing role on the peer's listener: a node dials with the peer's listen.node_password, a proxy with its listen.proxy_password, a hub with its listen.hub_password, or with its listen.password when it has none for the role.",
           "type": "string"
         },
         "role": {

@@ -32,6 +32,10 @@ func TestLLMChecks(t *testing.T) {
 	for _, bad := range []struct{ doc, want string }{
 		{`{"llm": {"hub": {"id": "a b"}}}`, "the ID is up to 128 characters"},
 		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": ""}}}}`, "a listener needs a password"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200"}}}}`, "node_password or proxy_password"},
+		{`{"llm": {"hub": {"listen": {"address": ":9200", "password": "p", "hub_password": "h"}}}}`, "a hub takes no links from hubs"},
+		{`{"llm": {"node": {"listen": {"address": ":9200", "node_password": "n"}}}}`, "a node takes no links from nodes"},
+		{`{"llm": {"proxy": {"listen": {"address": ":9200", "proxy_password": "x"}}}}`, "a listener needs a password"},
 		{`{"llm": {"node": {"peers": [` + strings.Join(peers, ",") + `]}}}`, "at most 64 peers"},
 		{`{"llm": {"hub": {"peers": [{"address": "h:1", "password": "", "role": "node"}]}}}`, "a peer needs its password"},
 		{`{"llm": {"hub": {"limits": {"ping_interval": "10ms"}}}}`, "ping_interval"},

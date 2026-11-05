@@ -48,14 +48,21 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
 | `address` | string | 必填 | 角色接受连接的主机与端口，作为监听引擎上一个独立的绑定。WebSocket 路径为 `/ws`。主机为空表示监听所有地址。 |
-| `password` | string | 必填 | 对端需证明自己知道的密码。它从不在网络上传输。 |
+| `password` | string | 无 | 监听方互联的、没有自己密码的各角色共用的密码。对端需证明自己知道它；它从不在网络上传输。持有它的任何一方都可以以这些角色中的任意一个建立连接，因此应改为给每个角色设置自己的密码。 |
+| `node_password` | string | `password` | node 以 node 身份连接时证明的密码，用于 hub 或 proxy 的监听。 |
+| `proxy_password` | string | `password` | proxy 以 proxy 身份连接时证明的密码，用于 hub 或 node 的监听。 |
+| `hub_password` | string | `password` | hub 以 hub 身份连接时证明的密码，用于 node 或 proxy 的监听。 |
+
+拨号方证明的密码决定它可以以哪个角色 hello（见[hello 与角色](#hello-与角色)）。监听方需要 `password`，或者至少一个
+它所互联角色的密码；两者都没有的角色不被接受。在不与某角色互联的角色的监听上设置该角色的密码（如 hub 的
+`hub_password`）是错误。一个密码被多个角色共用的监听方（只设置 `password` 时即如此）在启动时记录一条警告。
 
 `peers[]`：
 
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
 | `address` | string | 必填 | 对端的主机与端口，即对端的 `listen.address`。主机必填，端口是数字。每个地址只出现一次。 |
-| `password` | string | 必填 | 对端的 `listen.password`。 |
+| `password` | string | 必填 | 对端监听上拨号方角色的密码：node 用对端的 `listen.node_password` 拨号，proxy 用其 `listen.proxy_password`，hub 用其 `listen.hub_password`；对端没有该角色的密码时用其 `listen.password`。 |
 | `role` | string | 必填 | 对端必须声明的角色：`hub`、`node` 或 `proxy`，不能是拨号方自己的角色。hub 拨 node 与 proxy，node 拨 hub 与 proxy，proxy 拨 hub 与 node。 |
 
 `limits`：
@@ -166,7 +173,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9200",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "listen": {"address": ":9210", "password": "mesh-secret"},
+      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"},
       "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
                  "retry_interval": "5s", "stream_idle": "2m"},
       "max_nodes": 1024
@@ -187,7 +194,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9100",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
       "models": [
         {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
@@ -215,7 +222,7 @@ node 的 HTTP 客户端在 fit 自身上游连接池所用的上游引擎上拨�
         "address": "127.0.0.1:9300",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
       "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
               "first_byte_timeout": "5m", "timeout": "30m"},
       "api_keys": [
@@ -238,14 +245,14 @@ proxy。node 与 proxy 都拨号连接 hub，它们自己都不需要监听，�
 服务器：
 
 ```json
-{"llm": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"}}}}
 ```
 
 GPU 机器：
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
@@ -254,7 +261,7 @@ GPU 机器：
 
 ```json
 {"llm": {"proxy": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
@@ -332,7 +339,7 @@ GPU 机器：
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
     {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
@@ -379,9 +386,9 @@ proxy 的 API Key 只保存其 SHA-256，因此配置与存储中都没有可以
 升级完成后、任何帧之前：
 
 1. 监听方发送 32 字节随机挑战。
-2. 拨号方以密码为密钥，对挑战计算 HMAC-SHA256，连同自己的 32 字节随机数一起发回。
-3. 监听方校验通过后回确认，否则以关闭码 4001 关闭。确认中带有它自己的证明：以密码为密钥，对一个固定标签、挑战与拨号方
-   随机数计算的 HMAC-SHA256。
+2. 拨号方以自己的密码（监听方为拨号方角色设置的密码）为密钥，对挑战计算 HMAC-SHA256，连同自己的 32 字节随机数一起发回。
+3. 监听方逐一用自己的各个密码校验，通过后回确认，一个都证明不了时以关闭码 4001 关闭。被证明的密码决定该连接可以以哪些
+   角色 hello。确认中带有它自己的证明：以同一密码为密钥，对一个固定标签、挑战与拨号方随机数计算的 HMAC-SHA256。
 4. 拨号方校验监听方的证明，缺失或不符就放弃拨号，使不知道密码的监听方（例如占用了该地址的）得不到连接。
 
 监听方仍接受不发送随机数的早先版本拨号方；本版本的拨号方不接受不做证明的早先版本监听方，所以应先升级监听方。
@@ -438,13 +445,17 @@ inflight, req_bytes, resp_bytes, last_at}`（proxy 的 agent 的 `from` 为空�
 
 - 角色与本方相同（hub 不与 hub 互联，node 不与 node，proxy 不与 proxy）；
 - 角色不是本方互联的角色：hub 连 node 与 proxy，node 连 hub 与 proxy，proxy 连 hub 与 node；
+- 拨入的连接上，角色不是该连接所证明密码对应的角色；
 - 拨出的连接上，角色不是 `peers[].role` 所声明的；
 - ID 与本方相同；
 - ID 已经以另一个角色连接着。
 
-被拒绝的拨号方至少等待 30 秒（`retry_interval` 更长时等它）再试。对端可以调用什么只取决于它在 hello 中声明的角色。监听方只有一个密码，所以知道它的对端可以用监听方互联的任何角色
-hello：持有 hub 密码的 proxy 可以用自己的 ID 以 node 身份加入 hub，而知道节点监听密码的对端可以以 hub 身份在
-`allow_hub_manage` 开启时管理该节点。只把监听方的密码交给在它互联的每种角色上都可信的对端。
+被拒绝的拨号方至少等待 30 秒（`retry_interval` 更长时等它）再试。对端可以调用什么取决于它在 hello 中声明的角色，而该角色
+与对端证明的密码绑定：持有 hub 的 `proxy_password` 的 proxy 不能以 node 身份加入 hub；持有 node 的 `proxy_password` 时也
+不能以 hub 身份向该 node hello，因此无法管理开启了 `allow_hub_manage` 的 node。hello 被拒绝的连接没有角色：它调用的任何
+方法都不会运行，一秒后连接被关闭。只设置 `listen.password`，或把某个角色的密码设得与其他角色相同，就像角色还没有各自密码
+时一样，信任其持有者担任它所对应的每个角色；只把它交给在这些角色上都可信的对端。同一种角色共用其密码：知道 hub 的
+`node_password` 的 node，若占用了该 hub 的地址，可以对拨号到该地址的其他 node 冒充该 hub。
 
 ### 连接池与退避
 

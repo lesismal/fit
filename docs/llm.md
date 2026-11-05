@@ -60,14 +60,23 @@ examples are JSON; the same fields work in a .conf or YAML config. The
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `address` | string | required | The host and port the role takes links on, as a binding of its own on the listeners' engine. The WebSocket path is `/ws`. An empty host listens on every address. |
-| `password` | string | required | The password peers prove they know. It never crosses the network. |
+| `password` | string | none | The password of every role the listener links with that has no password of its own. Peers prove they know it; it never crosses the network. Whoever holds it may link as any of those roles, so give each role its own instead. |
+| `node_password` | string | `password` | The password nodes prove to link as a node, on a hub's or a proxy's listener. |
+| `proxy_password` | string | `password` | The password proxies prove to link as a proxy, on a hub's or a node's listener. |
+| `hub_password` | string | `password` | The password hubs prove to link as a hub, on a node's or a proxy's listener. |
+
+The password a dialer proves decides the role it may say hello as (see
+[Hello and roles](#hello-and-roles)). A listener needs `password`, or the password of at least one
+role it links with; a role with neither is not taken. A role's own password on a listener of a role
+that does not link with it (`hub_password` on a hub's) is an error. A listener that takes one
+password from more than one role, as `password` alone does, logs a warning when it starts.
 
 `peers[]`:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `address` | string | required | The peer's host and port, as its `listen.address` says. The host is required and the port is a number. Each address appears once. |
-| `password` | string | required | The peer's `listen.password`. |
+| `password` | string | required | The password of the dialing role on the peer's listener: a node dials with the peer's `listen.node_password`, a proxy with its `listen.proxy_password`, a hub with its `listen.hub_password`, or with its `listen.password` when it has none for the role. |
 | `role` | string | required | The role the peer must announce: `hub`, `node` or `proxy`, never the dialing role's own. A hub dials nodes and proxies, a node dials hubs and proxies, a proxy dials hubs and nodes. |
 
 `limits`:
@@ -178,7 +187,7 @@ The fields every role has, and:
         "address": "127.0.0.1:9200",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "listen": {"address": ":9210", "password": "mesh-secret"},
+      "listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"},
       "limits": {"max_conns": 1024, "max_inflight": 1024, "ping_interval": "15s", "slow_timeout": "30s",
                  "retry_interval": "5s", "stream_idle": "2m"},
       "max_nodes": 1024
@@ -199,7 +208,7 @@ The fields every role has, and:
         "address": "127.0.0.1:9100",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
       "models": [
         {"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B",
          "max_inflight": 4},
@@ -227,7 +236,7 @@ The fields every role has, and:
         "address": "127.0.0.1:9300",
         "users": [{"username": "admin", "password_hash": "$2a$10$sKGBAOOCI4p4WWJcVCuAH.ivT8pNy2DFbs6pd8xmtNEZ/5L1SeLvm"}]
       },
-      "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+      "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
       "api": {"address": "127.0.0.1:9301", "max_body_bytes": 33554432, "max_conns": 256, "max_inflight": 256,
               "first_byte_timeout": "5m", "timeout": "30m"},
       "api_keys": [
@@ -252,14 +261,14 @@ machine of the LAN, over TLS, with its API keys.
 The server:
 
 ```json
-{"llm": {"hub": {"listen": {"address": ":9210", "password": "mesh-secret"}}}}
+{"llm": {"hub": {"listen": {"address": ":9210", "node_password": "node-secret", "proxy_password": "proxy-secret"}}}}
 ```
 
 The GPU machine:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
   "models": [{"name": "qwen3-32b", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "Qwen/Qwen3-32B"}]
 }}}
 ```
@@ -268,7 +277,7 @@ The LAN machine:
 
 ```json
 {"llm": {"proxy": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "proxy-secret", "role": "hub"}],
   "api": {"address": "192.168.1.10:9301", "cert_file": "/etc/fit/lan.crt", "key_file": "/etc/fit/lan.key"}
 }}}
 ```
@@ -356,7 +365,7 @@ A node serving one model of each:
 
 ```json
 {"llm": {"node": {
-  "peers": [{"address": "hub.example.net:9210", "password": "mesh-secret", "role": "hub"}],
+  "peers": [{"address": "hub.example.net:9210", "password": "node-secret", "role": "hub"}],
   "models": [
     {"name": "deepseek-chat", "api": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..."},
     {"name": "whisper", "api": "openai", "base_url": "http://127.0.0.1:8000/v1", "upstream": "openai/whisper-large-v3"},
@@ -411,11 +420,12 @@ dial, authentication included, is bounded by 10 seconds.
 After the upgrade, before any frame:
 
 1. The listener sends a 32-byte random challenge.
-2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with the password, and a
-   32-byte random nonce of its own.
-3. The listener checks it and acknowledges, or closes with code 4001. Its acknowledgement carries
-   its own proof: the HMAC-SHA256, keyed with the password, of a fixed label, the challenge and
-   the dialer's nonce.
+2. The dialer answers with the HMAC-SHA256 of the challenge, keyed with its password (the one the
+   listener has for the dialer's role), and a 32-byte random nonce of its own.
+3. The listener checks it against each of its passwords and acknowledges, or closes with code 4001
+   when it proves none. The password proven decides the roles the link may say hello as. Its
+   acknowledgement carries its own proof: the HMAC-SHA256, keyed with that same password, of a
+   fixed label, the challenge and the dialer's nonce.
 4. The dialer checks the listener's proof, and gives up the dial when it is missing or wrong, so
    that a listener that does not know the password, one that took over the address, gets no link.
 
@@ -493,16 +503,21 @@ closed. A peer is refused when:
 - its role is the role's own (hubs never link to hubs, nodes to nodes, proxies to proxies);
 - its role is not one the role links with: a hub links nodes and proxies, a node links hubs and
   proxies, a proxy links hubs and nodes;
+- on a link it dialed in, its role is not one whose password the link proved;
 - on a dialed link, its role is not the one `peers[].role` names;
 - its ID is the role's own;
 - its ID is linked already under another role.
 
 A refused dialer waits at least 30 seconds, or `retry_interval` when longer, before trying again.
-What a peer may call depends on its role alone, as hello said. A listener has one password, so a
-peer that knows it may say hello as any role the listener links with: a proxy that has a hub's
-password could join the hub as a node under an ID of its own, and a peer that knows a node's
-listen password could say hello to it as a hub and manage it when `allow_hub_manage` is on. Give a
-listener's password only to peers trusted in every role it links with.
+What a peer may call depends on its role, as hello said, and the role is bound to the password the
+peer proved: a proxy that holds a hub's `proxy_password` cannot join it as a node, nor say hello to
+a node as a hub when it holds the node's `proxy_password`, so it cannot manage a node that has
+`allow_hub_manage` on. A refused hello leaves the link without a role: nothing it calls runs, and it
+is closed a second later. `listen.password` alone, or a role's password set the same as
+another's, trusts its holder in every role it is the password of, as before roles had passwords of
+their own; give it only to peers trusted in all of them. The roles of one kind share their password:
+a node that knows a hub's `node_password` could pose as that hub to nodes that dial it if it took
+over the hub's address.
 
 ### Pools and backoff
 
