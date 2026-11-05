@@ -2,6 +2,7 @@ package uplink
 
 import (
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -51,10 +52,14 @@ func TestTokenHubProof(t *testing.T) {
 	}{
 		{"wrong proof", hex.EncodeToString(linktoken.Nonce()), "did not prove it issued the token"},
 		{"bad nonce", "zz", "nonce"},
+		{"refused", "", "boom"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := link.NewRouter()
 			r.HandleCall(proto.MethodChallenge, func(*link.Link, []byte) (any, error) {
+				if tc.nonce == "" {
+					return nil, errors.New("boom")
+				}
 				return &proto.ChallengeRsp{Nonce: tc.nonce}, nil
 			}, true)
 			r.HandleCall(proto.MethodRegister, func(*link.Link, []byte) (any, error) {

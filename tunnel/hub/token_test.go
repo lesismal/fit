@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/linktoken"
 	"github.com/lesismal/fit/tunnel/internal/bodycrypt"
 	"github.com/lesismal/fit/tunnel/internal/link"
@@ -285,5 +284,3 @@ func TestTokenPages(t *testing.T) {
 		t.Fatal("the password stayed")
 	}
 }
-
-var _ = config.LinkToken{}

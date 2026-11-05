@@ -233,6 +233,19 @@ func TestRegistry(t *testing.T) {
 	}
 }
 
+// Tokens of one name list by ID.
+func TestRegistryListOrder(t *testing.T) {
+	r := &Registry{}
+	defer r.Stop()
+	_, a := rec("same", 0)
+	_, b := rec("same", 0)
+	r.Set([]config.LinkToken{a, b})
+	l := r.List()
+	if len(l) != 2 || l[0].ID > l[1].ID {
+		t.Fatalf("list %+v", l)
+	}
+}
+
 func TestRegistryFull(t *testing.T) {
 	r := &Registry{}
 	defer r.Stop()

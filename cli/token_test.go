@@ -141,6 +141,9 @@ func TestTokenUsage(t *testing.T) {
 			t.Errorf("%v: %d %q, want %d %q", tc.args, code, errOut, tc.code, tc.want)
 		}
 	}
+	if expiryText(0) != "never expires" {
+		t.Fatal(expiryText(0))
+	}
 	var out bytes.Buffer
 	printTokenList(&out, nil)
 	if !strings.Contains(out.String(), "no role") {
