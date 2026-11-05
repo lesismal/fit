@@ -34,7 +34,7 @@ func init() {
 type Basic struct {
 	Realm                string `json:"realm,omitempty" default:"\"fit\"" doc:"The realm the browser shows when it asks for a user and password; fit when left out."`
 	Users                []User `json:"users" fit:"required" doc:"The users allowed in, with their passwords' bcrypt hashes."`
-	UserHeader           string `json:"user_header,omitempty" doc:"A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent is replaced."`
+	UserHeader           string `json:"user_header,omitempty" doc:"A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is replaced."`
 	ForwardAuthorization bool   `json:"forward_authorization,omitempty" doc:"Leave the Authorization field, with the password, on the request the handler sees; it is removed when left out."`
 
 	accounts   map[string]*account
@@ -142,6 +142,7 @@ func (ba *Basic) admit(c *fibhttp.Context, user string, next module.Handler) {
 		delete(c.Request.Header, "Authorization")
 	}
 	if ba.userHeader != "" {
+		dropFields(c.Request.Header, ba.userHeader)
 		c.Request.Header[ba.userHeader] = []string{user}
 	}
 	setUser(c, user)

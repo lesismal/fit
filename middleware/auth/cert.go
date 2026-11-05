@@ -17,7 +17,7 @@ import (
 // before it.
 type ClientCert struct {
 	Optional      bool   `json:"optional,omitempty" doc:"Let a request without a certificate through as well, unauthenticated; refused with 403 Forbidden when left out."`
-	SubjectHeader string `json:"subject_header,omitempty" doc:"A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent is removed, with or without a certificate."`
+	SubjectHeader string `json:"subject_header,omitempty" doc:"A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is removed, with or without a certificate."`
 
 	subjectHeader string // canonical
 }
@@ -37,7 +37,7 @@ func (cc *ClientCert) Provision(ctx *module.Context) error {
 func (cc *ClientCert) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 		if cc.subjectHeader != "" {
-			delete(c.Request.Header, cc.subjectHeader)
+			dropFields(c.Request.Header, cc.subjectHeader)
 		}
 		cert := ClientCertificate(c.Request)
 		if cert == nil {

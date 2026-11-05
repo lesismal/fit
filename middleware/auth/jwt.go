@@ -47,7 +47,7 @@ type JWT struct {
 	Audience            []string          `json:"audience,omitempty" doc:"Audiences of which a token's aud must name one; any when left out."`
 	Leeway              config.Duration   `json:"leeway,omitempty" doc:"How far exp and nbf may be off, for clocks that differ; none when left out."`
 	TokenFrom           string            `json:"token_from,omitempty" default:"\"header\"" doc:"Where the token is: header, after Bearer in the Authorization field; header:Name, the whole of that field; cookie:name; or query:name. header when left out."`
-	ClaimsHeaders       map[string]string `json:"claims_headers,omitempty" doc:"Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim."`
+	ClaimsHeaders       map[string]string `json:"claims_headers,omitempty" doc:"Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent, also spelled with _ for -, are removed, with or without the claim."`
 
 	keys         *keySet // without a JWK set
 	jwks         *jwks
@@ -56,6 +56,7 @@ type JWT struct {
 	fromName     string
 	leeway       float64
 	claimHeaders []claimHeader
+	claimFields  []string // claimHeaders' fields, which a client may not send
 	graph        module.Holder
 	now          func() time.Time
 	verified     tokenCache
@@ -121,6 +122,9 @@ func (jw *JWT) Provision(ctx *module.Context) error {
 		jw.claimHeaders = append(jw.claimHeaders, claimHeader{stdhttp.CanonicalHeaderKey(field), claim})
 	}
 	slices.SortFunc(jw.claimHeaders, func(a, b claimHeader) int { return strings.Compare(a.field, b.field) })
+	for _, ch := range jw.claimHeaders {
+		jw.claimFields = append(jw.claimFields, ch.field)
+	}
 	jw.leeway = jw.Leeway.Std().Seconds()
 	jw.graph = ctx.Graph()
 	jw.now = time.Now
@@ -155,9 +159,8 @@ func readSmall(path string) ([]byte, error) {
 // Wrap returns next behind the check.
 func (jw *JWT) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		h := c.Request.Header
-		for _, ch := range jw.claimHeaders {
-			delete(h, ch.field)
+		if len(jw.claimFields) > 0 {
+			dropFields(c.Request.Header, jw.claimFields...)
 		}
 		raw, ok := jw.token(c.Request)
 		if !ok {

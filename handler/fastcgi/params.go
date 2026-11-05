@@ -11,8 +11,15 @@ import (
 // params encodes the request's CGI/1.1 parameters, as PHP and other
 // FastCGI applications read them: what the request is, the script it runs
 // and its path info under the root, who sent it and to where, and each of
-// its fields as HTTP_ and its name, but Proxy (httpoxy) and the ones CGI
-// has names of its own for; then the config's env.
+// its fields as HTTP_ and its name, but Proxy (httpoxy), the ones CGI has
+// names of its own for, and those with _ in their names; then the config's
+// env.
+//
+// A field with _ is dropped, as nginx drops it by default
+// (underscores_in_headers off): CGI names fold - into _, so a client's
+// X_User would reach the application as HTTP_X_USER, the very parameter of
+// the X-User an auth middleware set, and which of the two the application
+// read would be up to the order they came in.
 func (x *exchange) params() []byte {
 	r, h := x.c.Request, x.h
 	scheme, port := "http", "80"
@@ -73,6 +80,9 @@ func (x *exchange) params() []byte {
 	for name, values := range r.Header {
 		switch name {
 		case "Proxy", "Content-Type", "Content-Length":
+			continue
+		}
+		if strings.IndexByte(name, '_') >= 0 {
 			continue
 		}
 		key := "HTTP_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))

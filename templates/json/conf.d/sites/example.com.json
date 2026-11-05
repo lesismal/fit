@@ -102,7 +102,7 @@
             // ],
 
             // // A request field to set to the user's name for the handler, and the upstream a proxy sends
-            // // the request to; any the client sent is replaced.
+            // // the request to; any the client sent, also spelled with _ for -, is replaced.
             // // string.
             // "user_header": "X-User",
 
@@ -258,8 +258,8 @@
             // "optional": true,
 
             // // A request field to set to the certificate's subject, as in "CN=alice,O=Example", for the
-            // // handler and the upstream a proxy sends the request to; any the client sent is removed, with
-            // // or without a certificate.
+            // // handler and the upstream a proxy sends the request to; any the client sent, also spelled
+            // // with _ for -, is removed, with or without a certificate.
             // // string.
             // "subject_header": "X-Client-Subject",
           // },
@@ -323,8 +323,8 @@
             // "request_headers": ["Cookie", "Authorization"],
 
             // // Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy
-            // // sends it to. Any of these the client sent are removed, so that it cannot pass them off as
-            // // the auth service's.
+            // // sends it to. Any of these the client sent, also spelled with _ for -, are removed, so that
+            // // it cannot pass them off as the auth service's.
             // // list of string.
             // "copy_headers": ["Remote-User", "Remote-Groups"],
 
@@ -422,7 +422,8 @@
             // "token_from": "header",
 
             // // Request fields to set to claims, as {"X-User": "sub"}: a string as it is, anything else as
-            // // JSON. Any of these fields the client sent are removed, with or without the claim.
+            // // JSON. Any of these fields the client sent, also spelled with _ for -, are removed, with or
+            // // without the claim.
             // // object of string.
             // "claims_headers": {"X-User": "sub"},
           // },

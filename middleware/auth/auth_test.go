@@ -4,8 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"maps"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,9 +61,43 @@ func hash(t testing.TB, password string) string {
 // the middleware set or left.
 var echo = fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 	h := c.Request.Header
-	_ = c.Respond(200, "text/plain", []byte("user="+UserOf(c)+" x-user="+h.Get("X-User")+
-		" x-subject="+h.Get("X-Subject")+" authorization="+h.Get("Authorization")))
+	_ = c.Respond(200, "text/plain", []byte("user="+UserOf(c)+" x-user="+asCGI(h, "X-User")+
+		" x-subject="+asCGI(h, "X-Subject")+" authorization="+h.Get("Authorization")))
 })
+
+// asCGI is what an application behind CGI or FastCGI, which folds - and _
+// into one, could read as the field name of h: the values of every field
+// that folds to it, in order, as the order it would see them in is not
+// known.
+func asCGI(h stdhttp.Header, name string) string {
+	var values []string
+	for key, v := range h {
+		if sameField(key, name) {
+			values = append(values, v...)
+		}
+	}
+	slices.Sort(values)
+	return strings.Join(values, ",")
+}
+
+// spellings are the fields a client might send to pass for name with an
+// application that folds - and _.
+func spellings(name string) []string {
+	under := strings.ReplaceAll(name, "-", "_")
+	return []string{under, strings.ToLower(under), strings.ToUpper(under)}
+}
+
+func TestDropFields(t *testing.T) {
+	h := stdhttp.Header{"X-User": {"a"}, "X_user": {"b"}, "x_USER": {"c"}, "X_users": {"d"}, "X-Other": {"e"}, "X_other": {"f"}, "Accept": {"g"}}
+	dropFields(h, "X-User", "X-Missing")
+	want := stdhttp.Header{"X_users": {"d"}, "X-Other": {"e"}, "X_other": {"f"}, "Accept": {"g"}}
+	if !maps.EqualFunc(h, want, slices.Equal) {
+		t.Errorf("got %v, want %v", h, want)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { dropFields(h, "X-User") }); allocs != 0 {
+		t.Errorf("%v allocations", allocs)
+	}
+}
 
 func basicRequest(user, password string) *stdhttp.Request {
 	r := httptest.NewRequest("GET", "/", nil)
@@ -119,6 +155,14 @@ func TestBasic(t *testing.T) {
 	r.Header.Add("X-User", "alice")
 	if rec := fibtest.ServeRequest(h, r); !strings.Contains(string(rec.Response.Body), " x-user=bob ") {
 		t.Errorf("the client's own field kept: %q", rec.Response.Body)
+	}
+	// Nor in a spelling an application behind CGI reads as the same field.
+	for _, name := range spellings("X-User") {
+		r = basicRequest("bob", "builder")
+		r.Header[name] = []string{"alice"}
+		if rec := fibtest.ServeRequest(h, r); !strings.Contains(string(rec.Response.Body), " x-user=bob ") {
+			t.Errorf("%s: the client's own field kept: %q", name, rec.Response.Body)
+		}
 	}
 }
 
@@ -239,6 +283,9 @@ func TestClientCert(t *testing.T) {
 		{"optional, verified", optional, tlsRequest(cert, true), 200, "user=CN=alice,O=Example x-user= x-subject=CN=alice,O=Example authorization="},
 	} {
 		tt.r.Header.Set("X-Subject", "CN=forged")
+		for _, name := range spellings("X-Subject") {
+			tt.r.Header[name] = []string{"CN=forged"}
+		}
 		rec := fibtest.ServeRequest(tt.h, tt.r)
 		if rec.Response.StatusCode != tt.code || string(rec.Response.Body) != tt.body {
 			t.Errorf("%s: %d %q, want %d %q", tt.name, rec.Response.StatusCode, rec.Response.Body, tt.code, tt.body)

@@ -4729,7 +4729,7 @@
           "type": "string"
         },
         "user_header": {
-          "description": "A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent is replaced.",
+          "description": "A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is replaced.",
           "type": "string"
         },
         "users": {
@@ -4889,7 +4889,7 @@
           "type": "boolean"
         },
         "subject_header": {
-          "description": "A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent is removed, with or without a certificate.",
+          "description": "A request field to set to the certificate's subject, as in \"CN=alice,O=Example\", for the handler and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is removed, with or without a certificate.",
           "type": "string"
         }
       },
@@ -4970,7 +4970,7 @@
       "additionalProperties": false,
       "properties": {
         "copy_headers": {
-          "description": "Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent are removed, so that it cannot pass them off as the auth service's.",
+          "description": "Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent, also spelled with _ for -, are removed, so that it cannot pass them off as the auth service's.",
           "items": {
             "type": "string"
           },
@@ -5054,7 +5054,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim.",
+          "description": "Request fields to set to claims, as {\"X-User\": \"sub\"}: a string as it is, anything else as JSON. Any of these fields the client sent, also spelled with _ for -, are removed, with or without the claim.",
           "type": "object"
         },
         "hmac_secret_file": {

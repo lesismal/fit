@@ -37,7 +37,7 @@ type ForwardAuth struct {
 	Upstream       string          `json:"upstream" fit:"required" doc:"The name of the upstream the auth service is."`
 	URI            string          `json:"uri,omitempty" default:"\"/\"" doc:"The path, and query, of the request sent to the auth service; / when left out."`
 	RequestHeaders []string        `json:"request_headers,omitempty" doc:"The request's fields sent to the auth service; all but the hop-by-hop ones and those of the body when left out."`
-	CopyHeaders    []string        `json:"copy_headers,omitempty" doc:"Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent are removed, so that it cannot pass them off as the auth service's."`
+	CopyHeaders    []string        `json:"copy_headers,omitempty" doc:"Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent, also spelled with _ for -, are removed, so that it cannot pass them off as the auth service's."`
 	Timeout        config.Duration `json:"timeout,omitempty" default:"\"10s\"" doc:"How long to wait for the auth service's answer, after which the request is answered 504 Gateway Timeout; 10s when left out. A service that cannot be reached is answered 502 Bad Gateway."`
 
 	pool           *upstream.Pool
@@ -240,8 +240,10 @@ func (x *authCall) answer(resp *fibhttp.ClientResponse, err error) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		resp.Close() // a body is not wanted, and one still arriving is given up
 		h := c.Request.Header
+		if len(fa.copyHeaders) > 0 {
+			dropFields(h, fa.copyHeaders...)
+		}
 		for _, name := range fa.copyHeaders {
-			delete(h, name)
 			if v, ok := resp.Header[name]; ok {
 				h[name] = append([]string(nil), v...)
 			}

@@ -158,7 +158,7 @@ func jsonList(list []string) string {
 // claimsEcho answers with the request's claims and user.
 var claimsEcho = fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 	b, _ := json.Marshal(ClaimsOf(c))
-	_ = c.Respond(200, "text/plain", []byte("user="+UserOf(c)+" claims="+string(b)+" x-sub="+c.Request.Header.Get("X-Sub")+" x-roles="+c.Request.Header.Get("X-Roles")))
+	_ = c.Respond(200, "text/plain", []byte("user="+UserOf(c)+" claims="+string(b)+" x-sub="+asCGI(c.Request.Header, "X-Sub")+" x-roles="+asCGI(c.Request.Header, "X-Roles")))
 })
 
 func bearer(token string) *stdhttp.Request {
@@ -307,7 +307,13 @@ func TestJWTClaimsHeaders(t *testing.T) {
 	r := bearer(sign(t, "HS256", "", k.secret, map[string]any{"sub": "alice\r\nX-Evil: 1", "roles": []string{"admin", "dev"}, "exp": exp}))
 	r.Header.Set("X-Roles", "forged")
 	r.Header.Set("X-Missing", "forged")
+	r.Header["X_roles"] = []string{"forged"}
+	r.Header["x_sub"] = []string{"forged"}
+	r.Header["X_MISSING"] = []string{"forged"}
 	rec := expectStatus(t, h, r, 200, "claims")
+	if v := asCGI(r.Header, "X-Missing"); v != "" {
+		t.Errorf("the client's field kept for a missing claim: %q", v)
+	}
 	want := fmt.Sprintf(`user=alice`+"\r\n"+`X-Evil: 1 claims={"exp":%d,"roles":["admin","dev"],"sub":"alice\r\nX-Evil: 1"} x-sub=alice??X-Evil: 1 x-roles=["admin","dev"]`, exp)
 	if string(rec.Response.Body) != want {
 		t.Errorf("got  %q\nwant %q", rec.Response.Body, want)

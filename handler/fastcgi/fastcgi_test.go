@@ -169,6 +169,15 @@ func TestParams(t *testing.T) {
 		if resp.StatusCode != 200 || resp.Header.Get("X-Script") != "/env.php" {
 			t.Errorf("%s: %d %v", proto, resp.StatusCode, resp.Header)
 		}
+
+		// A field with _ in its name would be HTTP_X_TEST as well, passing
+		// for the X-Test an auth middleware set: it is not sent.
+		req, _ = stdhttp.NewRequest("GET", base+"/env.php", nil)
+		req.Header["X_Test"] = []string{"forged"}
+		req.Header["x_test"] = []string{"forged"}
+		if _, body := get(t, c, req); !strings.Contains(body, "X_TEST=\n") {
+			t.Errorf("%s: a field with _ reached the application:\n%s", proto, body)
+		}
 	}
 }
 

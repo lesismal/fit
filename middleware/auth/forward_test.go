@@ -30,7 +30,7 @@ type fieldsHandler struct{}
 
 func (fieldsHandler) ServeHTTP(c *fibhttp.Context) {
 	h := c.Request.Header
-	_ = c.Respond(200, "text/plain", []byte("user="+h.Get("X-Auth-User")+" seen="+h.Get("X-Auth-Seen")))
+	_ = c.Respond(200, "text/plain", []byte("user="+asCGI(h, "X-Auth-User")+" seen="+asCGI(h, "X-Auth-Seen")))
 }
 
 // authService is an auth service for forward_auth's tests, which answers by
@@ -132,6 +132,13 @@ func TestForwardAuth(t *testing.T) {
 	got, err = fetch(t, ctx, "GET", base+"/p", "Bearer nouser", "X-Auth-User", "mallory")
 	if err != nil || got.code != 200 || got.body != "user= seen=" {
 		t.Errorf("allowed with no user: %v %d %q", err, got.code, got.body)
+	}
+	// Nor in a spelling an application behind CGI reads as the same field.
+	for _, name := range spellings("X-Auth-User") {
+		got, err = fetch(t, ctx, "GET", base+"/p", "Bearer nouser", name, "mallory")
+		if err != nil || got.code != 200 || got.body != "user= seen=" {
+			t.Errorf("%s: allowed with no user: %v %d %q", name, err, got.code, got.body)
+		}
 	}
 
 	got, err = fetch(t, ctx, "GET", base+"/p", "Bearer bad")

@@ -4079,7 +4079,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `realm` | string | `"fit"` | The realm the browser shows when it asks for a user and password; fit when left out. |
 | `users` | list of [object](#auth-user) |  | Required. The users allowed in, with their passwords' bcrypt hashes. |
-| `user_header` | string |  | A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent is replaced. |
+| `user_header` | string |  | A request field to set to the user's name for the handler, and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is replaced. |
 | `forward_authorization` | boolean |  | Leave the Authorization field, with the password, on the request the handler sees; it is removed when left out. |
 
 <a id="auth-user"></a>
@@ -4337,7 +4337,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `optional` | boolean |  | Let a request without a certificate through as well, unauthenticated; refused with 403 Forbidden when left out. |
-| `subject_header` | string |  | A request field to set to the certificate's subject, as in "CN=alice,O=Example", for the handler and the upstream a proxy sends the request to; any the client sent is removed, with or without a certificate. |
+| `subject_header` | string |  | A request field to set to the certificate's subject, as in "CN=alice,O=Example", for the handler and the upstream a proxy sends the request to; any the client sent, also spelled with _ for -, is removed, with or without a certificate. |
 
 <a id="http-middleware-compress"></a>
 
@@ -4490,7 +4490,7 @@ In JSON:
 | `upstream` | string |  | Required. The name of the upstream the auth service is. |
 | `uri` | string | `"/"` | The path, and query, of the request sent to the auth service; / when left out. |
 | `request_headers` | list of string |  | The request's fields sent to the auth service; all but the hop-by-hop ones and those of the body when left out. |
-| `copy_headers` | list of string |  | Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent are removed, so that it cannot pass them off as the auth service's. |
+| `copy_headers` | list of string |  | Fields copied from a 2xx answer onto the request, for the handler and the upstream a proxy sends it to. Any of these the client sent, also spelled with _ for -, are removed, so that it cannot pass them off as the auth service's. |
 | `timeout` | duration | `"10s"` | How long to wait for the auth service's answer, after which the request is answered 504 Gateway Timeout; 10s when left out. A service that cannot be reached is answered 502 Bad Gateway. |
 
 <a id="http-middleware-headers"></a>
@@ -4638,7 +4638,7 @@ In JSON:
 | `audience` | list of string |  | Audiences of which a token's aud must name one; any when left out. |
 | `leeway` | duration |  | How far exp and nbf may be off, for clocks that differ; none when left out. |
 | `token_from` | string | `"header"` | Where the token is: header, after Bearer in the Authorization field; header:Name, the whole of that field; cookie:name; or query:name. header when left out. |
-| `claims_headers` | object of string |  | Request fields to set to claims, as {"X-User": "sub"}: a string as it is, anything else as JSON. Any of these fields the client sent are removed, with or without the claim. |
+| `claims_headers` | object of string |  | Request fields to set to claims, as {"X-User": "sub"}: a string as it is, anything else as JSON. Any of these fields the client sent, also spelled with _ for -, are removed, with or without the claim. |
 
 <a id="http-middleware-rate_limit"></a>
 
