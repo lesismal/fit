@@ -40,6 +40,7 @@ type Rate struct {
 	Burst          int      `json:"burst,omitempty" min:"0" doc:"How many requests a key may make at once, after it has been idle: the bucket's size. The rate, rounded up, when left out."`
 	Key            string   `json:"key,omitempty" default:"\"ip\"" doc:"What requests are counted by: ip, the client's address; route, every request of the route together; or header:Name, a header's value, with a request without it counted by ip. ip when left out."`
 	TrustedProxies []string `json:"trusted_proxies,omitempty" doc:"The addresses (\"10.0.0.1\") and networks (\"10.0.0.0/8\") of proxies in front of fit: for a request that comes from one, the client's address is the last in X-Forwarded-For that is not one of them. None when left out, and the client is the connection's peer."`
+	IPv6Prefix     int      `json:"ipv6_prefix,omitempty" min:"0" max:"128" default:"64" doc:"How many leading bits of an IPv6 client address name the client with key ip: a host is given a /64 to pick its addresses from, so counting each address apart would let it make a fresh key with each request. 64 when left out or 0; 128 counts each address apart."`
 	MaxKeys        int      `json:"max_keys,omitempty" min:"0" default:"100000" doc:"The most keys kept at once, which bounds the memory the buckets take: under 100 bytes each, and up to 128 more for a header; 100000 when left out or 0."`
 	Status         int      `json:"status,omitempty" default:"429" doc:"The status of a request refused; 429 when left out."`
 
@@ -48,6 +49,7 @@ type Rate struct {
 	header   string // canonical, with key header:Name
 	perRoute bool
 	trusted  []netip.Prefix
+	v6bits   int // IPv6Prefix, or its default
 }
 
 // shards is how many shards the buckets are kept in.
@@ -119,6 +121,14 @@ func (rl *Rate) Provision(ctx *module.Context) error {
 		}
 		rl.trusted = append(rl.trusted, p)
 	}
+	switch {
+	case rl.IPv6Prefix == 0:
+		rl.v6bits = 64
+	case rl.IPv6Prefix < 0 || rl.IPv6Prefix > 128:
+		return ctx.Errorf("ipv6_prefix", "%d is not between 1 and 128", rl.IPv6Prefix)
+	default:
+		rl.v6bits = rl.IPv6Prefix
+	}
 	if rl.Status == 0 {
 		rl.Status = stdhttp.StatusTooManyRequests
 	} else if rl.Status < 400 || rl.Status > 599 {
@@ -170,7 +180,20 @@ func (rl *Rate) key(r *stdhttp.Request) bucketKey {
 			return bucketKey{s: v[0]}
 		}
 	}
-	return bucketKey{addr: clientIP(r, rl.trusted)}
+	return bucketKey{addr: rl.client(clientIP(r, rl.trusted))}
+}
+
+// client returns what ip is counted by: an IPv4 address as it is, an IPv6
+// one by its first v6bits bits.
+func (rl *Rate) client(ip netip.Addr) netip.Addr {
+	if !ip.Is6() || rl.v6bits >= 128 {
+		return ip
+	}
+	p, err := ip.Prefix(rl.v6bits)
+	if err != nil {
+		return ip
+	}
+	return p.Addr()
 }
 
 // take takes a token from key's bucket at now, in nanoseconds. When there is

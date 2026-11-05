@@ -525,6 +525,7 @@ window.FitSchemaZh = {
 "The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0.": "目录列表读取并显示的最大条目数；条目更多的目录只列出一部分，并会注明。不设置或为 0 时为 10000。",
 "The most events one wait of an event loop collects; the rest wait for the next. 1024 when left out or 0.": "事件循环一次等待所收集的最大事件数；其余的等下一次。不设置或为 0 时为 1024。",
 "The most idle connections kept for later requests. 16 when left out or 0.": "为后续请求保留的最大空闲连接数。不设置或为 0 时为 16。",
+"How many leading bits of an IPv6 client address name the client with key ip: a host is given a /64 to pick its addresses from, so counting each address apart would let it make a fresh key with each request. 64 when left out or 0; 128 counts each address apart.": "key 为 ip 时，用 IPv6 客户端地址的前多少位来认定一个客户端：一台主机会分到一个 /64，从中任选地址，若每个地址分开计数，它每个请求都能换一个新键。不写或为 0 时为 64；128 表示每个地址分开计数。",
 "The most keys kept at once, which bounds the memory the buckets take: under 100 bytes each, and up to 128 more for a header; 100000 when left out or 0.": "同时保留的最大键数，它限制桶所占的内存：每个不到 100 字节，带头部的最多再加 128；不设置或为 0 时为 100000。",
 "The most keys taken; past it, the rest, by key, are left out and reported. 1000 when left out or 0.": "所取的最大键数；超出的其余键按键名被忽略并报告。不设置或为 0 时为 1000。",
 "The most links one node or proxy may register, from however many processes of the same name. 128 when left out or 0.": "一个节点或代理可注册的最大链路数，无论来自多少个同名进程。不设置或为 0 时为 128。",

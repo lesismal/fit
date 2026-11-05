@@ -4710,6 +4710,7 @@ In JSON:
 | `burst` | integer, 0 or more |  | How many requests a key may make at once, after it has been idle: the bucket's size. The rate, rounded up, when left out. |
 | `key` | string | `"ip"` | What requests are counted by: ip, the client's address; route, every request of the route together; or header:Name, a header's value, with a request without it counted by ip. ip when left out. |
 | `trusted_proxies` | list of string |  | The addresses ("10.0.0.1") and networks ("10.0.0.0/8") of proxies in front of fit: for a request that comes from one, the client's address is the last in X-Forwarded-For that is not one of them. None when left out, and the client is the connection's peer. |
+| `ipv6_prefix` | integer, 0 to 128 | `64` | How many leading bits of an IPv6 client address name the client with key ip: a host is given a /64 to pick its addresses from, so counting each address apart would let it make a fresh key with each request. 64 when left out or 0; 128 counts each address apart. |
 | `max_keys` | integer, 0 or more | `100000` | The most keys kept at once, which bounds the memory the buckets take: under 100 bytes each, and up to 128 more for a header; 100000 when left out or 0. |
 | `status` | integer | `429` | The status of a request refused; 429 when left out. |
 

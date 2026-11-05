@@ -5,6 +5,7 @@ import (
 	stdhttp "net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -250,11 +251,64 @@ func TestRateAllocs(t *testing.T) {
 	for _, r := range []*stdhttp.Request{
 		request("192.0.2.1:1"),
 		request("10.0.0.1:1", "X-Forwarded-For", "198.51.100.1, 10.0.0.2"),
+		request("[2001:db8::1]:1"),
 	} {
 		rl.buckets.take(rl.key(r), rl.clock())
 		if n := testing.AllocsPerRun(100, func() { rl.buckets.take(rl.key(r), rl.clock()) }); n != 0 {
 			t.Errorf("%s: %v allocations", r.RemoteAddr, n)
 		}
+	}
+}
+
+// TestRateIPv6Prefix: a client rotating through the addresses of its /64
+// shares one bucket, and does not push other clients' buckets out; 128
+// counts each address apart.
+func TestRateIPv6Prefix(t *testing.T) {
+	rl := mustLoad[*Rate](t, "rate_limit", `{"rate": 1, "burst": 2, "max_keys": 64}`)
+	h := rl.Wrap(ok)
+	var clk fakeClock
+	rl.clock = clk.clock
+	status := func(h module.Handler, r *stdhttp.Request) int { return fibtest.ServeRequest(h, r).Response.StatusCode }
+	keys := func() int {
+		n := 0
+		for i := range rl.buckets.shards {
+			n += len(rl.buckets.shards[i].m)
+		}
+		return n
+	}
+	codes := []int{}
+	for i := range 200 {
+		codes = append(codes, status(h, request(fmt.Sprintf("[2001:db8:0:1::%x]:1", i+1))))
+	}
+	if codes[0] != 200 || codes[1] != 200 || slices.Contains(codes[2:], 200) {
+		t.Errorf("rotating through a /64: %v", codes)
+	}
+	if s := status(h, request("[2001:db8:0:2::1]:1")); s != 200 {
+		t.Errorf("another /64: %d", s)
+	}
+	if n := keys(); n != 2 {
+		t.Errorf("%d keys kept, want 2", n)
+	}
+	if s := status(h, request("[::ffff:192.0.2.1]:1")); s != 200 {
+		t.Errorf("an IPv4-mapped address: %d", s)
+	}
+
+	each := mustLoad[*Rate](t, "rate_limit", `{"rate": 1, "burst": 1, "ipv6_prefix": 128}`)
+	each.clock = clk.clock
+	h = each.Wrap(ok)
+	for i := range 3 {
+		if s := status(h, request(fmt.Sprintf("[2001:db8::%x]:1", i+1))); s != 200 {
+			t.Errorf("ipv6_prefix 128, address %d: %d", i, s)
+		}
+	}
+	wide := mustLoad[*Rate](t, "rate_limit", `{"rate": 1, "burst": 1, "ipv6_prefix": 48}`)
+	wide.clock = clk.clock
+	h = wide.Wrap(ok)
+	if s := status(h, request("[2001:db8:0:1::1]:1")); s != 200 {
+		t.Errorf("ipv6_prefix 48: %d", s)
+	}
+	if s := status(h, request("[2001:db8:0:2::1]:1")); s != 429 {
+		t.Errorf("ipv6_prefix 48, another /64 of the /48: %d", s)
 	}
 }
 
@@ -266,6 +320,7 @@ func TestParamErrors(t *testing.T) {
 		{"rate_limit", `{"rate": 1, "trusted_proxies": ["x"]}`, `"x" is not an IP address or a CIDR prefix`},
 		{"rate_limit", `{"rate": 1, "status": 200}`, "200 is not an error status"},
 		{"rate_limit", `{"rate": 1, "burst": -1}`, "burst"},
+		{"rate_limit", `{"rate": 1, "ipv6_prefix": 129}`, "ipv6_prefix"},
 		{"concurrency_limit", `{}`, "max"},
 		{"concurrency_limit", `{"max": 0}`, "max"},
 		{"concurrency_limit", `{"max": 1, "status": 302}`, "302 is not an error status"},

@@ -5118,6 +5118,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "ipv6_prefix": {
+          "default": 64,
+          "description": "How many leading bits of an IPv6 client address name the client with key ip: a host is given a /64 to pick its addresses from, so counting each address apart would let it make a fresh key with each request. 64 when left out or 0; 128 counts each address apart.",
+          "maximum": 128,
+          "minimum": 0,
+          "type": "integer"
+        },
         "key": {
           "default": "ip",
           "description": "What requests are counted by: ip, the client's address; route, every request of the route together; or header:Name, a header's value, with a request without it counted by ip. ip when left out.",
