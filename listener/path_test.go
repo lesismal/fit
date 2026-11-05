@@ -119,3 +119,27 @@ func TestAdmit(t *testing.T) {
 		t.Errorf("absolute form: %q %q", r.URL.Path, r.RequestURI)
 	}
 }
+
+func TestAdmitConnectionNamed(t *testing.T) {
+	h := stdhttp.Header{"Connection": {"Upgrade, x-a,  , keep-alive", "TE, HTTP2-Settings"}, "Upgrade": {"websocket"},
+		"X-A": {"1"}, "Http2-Settings": {"x"}, "Te": {"trailers"}, "Keep-Alive": {"5"}, "X-B": {"2"}}
+	r := &stdhttp.Request{ProtoMajor: 1, RequestURI: "/", URL: &url.URL{Path: "/"}, Header: h}
+	if !admit(r) {
+		t.Fatal("refused")
+	}
+	for _, name := range []string{"Connection", "Upgrade", "Te", "Keep-Alive", "X-B"} {
+		if _, ok := h[name]; !ok {
+			t.Errorf("%s removed", name)
+		}
+	}
+	for _, name := range []string{"X-A", "Http2-Settings"} {
+		if _, ok := h[name]; ok {
+			t.Errorf("%s kept", name)
+		}
+	}
+	if n := testing.AllocsPerRun(100, func() {
+		removeConnectionNamed(stdhttp.Header{}, []string{"keep-alive, Upgrade"})
+	}); n > 1 {
+		t.Errorf("removeConnectionNamed allocates %v times", n)
+	}
+}

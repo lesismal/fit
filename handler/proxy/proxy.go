@@ -234,7 +234,6 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 	// the exchange, which may serve the next request while the client's
 	// header is still read.
 	x.fields = new(headerFields)
-	connection := r.Header["Connection"]
 	header := r.Header
 	_, expect := r.Header["Expect"]
 	_, trailer := r.Header["Trailer"]
@@ -258,7 +257,10 @@ func (p *Proxy) outgoing(c *fibhttp.Context, x *exchange) bool {
 			header[key] = values
 		}
 	}
-	removeConnectionNamed(header, connection)
+	// The fields the client's Connection named were removed as the request
+	// arrived, before any middleware ran (the listener's admit); removed
+	// here, they would take with them those a middleware has set since, as
+	// an auth middleware's user field.
 	if _, ok := header["User-Agent"]; !ok {
 		// Present and empty: no client adds its own, and none is sent.
 		header["User-Agent"] = []string{}

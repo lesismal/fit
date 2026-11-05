@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	stdhttp "net/http"
+	"net/textproto"
 	"slices"
 	"strconv"
 	"strings"
@@ -745,7 +746,13 @@ var (
 //     against it, and handlers and upstreams get it; RequestURI, which the
 //     access log writes and FastCGI passes on, follows it;
 //   - over HTTP/2 and HTTP/3, a :path with a space or a control byte, which
-//     an HTTP/1 request line could not carry, is refused.
+//     an HTTP/1 request line could not carry, is refused;
+//   - the fields the client's Connection field names are removed, before any
+//     middleware runs, as Go's ReverseProxy removes them before its Rewrite:
+//     a client can drop only fields it sent itself, not ones a middleware
+//     sets later, as an auth middleware's user field. Connection, Upgrade and
+//     the other hop-by-hop fields stay for the handler, which drops them
+//     itself.
 func admit(r *stdhttp.Request) bool {
 	if r.ProtoMajor >= 2 && !plainTarget(r.RequestURI) {
 		return false
@@ -759,7 +766,40 @@ func admit(r *stdhttp.Request) bool {
 			r.RequestURI = r.URL.RequestURI()
 		}
 	}
+	if connection := r.Header["Connection"]; len(connection) > 0 {
+		removeConnectionNamed(r.Header, connection)
+	}
 	return true
+}
+
+// removeConnectionNamed deletes from h the fields that connection, a
+// Connection field's values, names, but the hop-by-hop ones. The usual
+// "keep-alive", "close" and "Upgrade" are looked through without allocating.
+func removeConnectionNamed(h stdhttp.Header, connection []string) {
+	for _, value := range connection {
+		for value != "" {
+			var name string
+			name, value, _ = strings.Cut(value, ",")
+			if name = textproto.TrimString(name); name != "" && !hopByHop(name) {
+				delete(h, textproto.CanonicalMIMEHeaderKey(name))
+			}
+		}
+	}
+}
+
+// hopByHopFields are the hop-by-hop fields (RFC 9110 section 7.6.1), those
+// older clients send, and Connection's options that name no field.
+var hopByHopFields = [...]string{"close", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+	"proxy-connection", "te", "trailer", "transfer-encoding", "upgrade"}
+
+// hopByHop reports whether name, in any case, is one of hopByHopFields.
+func hopByHop(name string) bool {
+	for _, f := range hopByHopFields {
+		if strings.EqualFold(name, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // plainTarget reports whether a request target holds no space and no control
