@@ -673,8 +673,11 @@ routes:
 
         # # The destinations the proxy connects to: host names, "*.example.com" for every name below
         # # example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves
-        # # to. Every destination deny does not hold when left out; others are answered 403, or 502 for
-        # # a host name whose address decides.
+        # # to. Every destination deny does not hold when left out, but for loopback, link-local
+        # # (169.254.169.254, the metadata service of most clouds, among them), unspecified and
+        # # multicast addresses and the host's own, which are refused unless a range here lies inside
+        # # theirs, as "127.0.0.0/8" does and "0.0.0.0/0" does not, or, for the host's own, names that
+        # # address alone; others are answered 403, or 502 for a host name whose address decides.
         # # list of string.
         # allow: ["*.example.com", "10.1.0.0/16"]
 

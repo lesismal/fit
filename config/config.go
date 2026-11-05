@@ -547,7 +547,7 @@ type Listener struct {
 // where it may connect them to.
 type ForwardProxy struct {
 	Clients        []string `json:"clients" fit:"required" doc:"The addresses and CIDR ranges of the clients that may use the proxy, as \"10.0.0.0/8\"; others are refused."`
-	Allow          []string `json:"allow,omitempty" doc:"The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out."`
+	Allow          []string `json:"allow,omitempty" doc:"The destinations the proxy connects to: host names, \"*.example.com\" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, but for loopback, link-local (169.254.169.254, the metadata service of most clouds, among them), unspecified and multicast addresses and the host's own, which are refused unless a range here lies inside theirs, as \"127.0.0.0/8\" does and \"0.0.0.0/0\" does not, or, for the host's own, names that address alone."`
 	Deny           []string `json:"deny,omitempty" doc:"Destinations refused, written as in allow, whatever allow holds: a host name that resolves to an address deny holds is refused once it is connected, before anything is sent."`
 	Ports          []int    `json:"ports,omitempty" doc:"The destination ports allowed; any when left out."`
 	ConnectTimeout Duration `json:"connect_timeout,omitempty" default:"\"10s\"" doc:"How long resolving and connecting to a destination may take. 10s when left out."`

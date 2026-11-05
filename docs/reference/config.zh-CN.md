@@ -45,7 +45,7 @@ fit 实际接受的配置脱节；每一章的说明和示例来自 `schema/doc`
 | `static` | 提供目录中的文件，目录列表、预压缩文件、`try_files` |
 | `respond` | 固定的状态码、头部和响应体 |
 | `fastcgi` | FastCGI 应用，如 PHP-FPM |
-| `forward_proxy` | HTTP CONNECT 正向代理 |
+| `forward_proxy` | HTTP CONNECT 正向代理；不论 `allow` 写了什么，环回、链路本地（含云元数据服务 `169.254.169.254`）、未指定和组播地址以及本机自己的地址都被拒绝，除非 `allow` 用落在其范围之内的范围（如 `127.0.0.0/8`，`0.0.0.0/0` 不算）或单独写出的本机地址点名它们；监听器的 `socks` 相同 |
 | `basic_auth` | 用户名和密码（bcrypt） |
 | `body_limit` | 限制请求体大小 |
 | `cache` | HTTP 缓存，内存和磁盘两级 |

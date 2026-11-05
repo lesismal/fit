@@ -112,6 +112,14 @@ func TestSOCKS(t *testing.T) {
 			t.Errorf("%s: reply %d, want 2", dest, code)
 		}
 	}
+	// With allow and deny left out, loopback is refused, by address and by
+	// a name that resolves to it: what the Admin API listens on by default.
+	f = startFit(t, socksConfig(`{"clients": ["127.0.0.1"]}`))
+	for _, dest := range []string{target, "localhost:" + port, "169.254.169.254:80"} {
+		if code := socksConnect(t, f.dial(0), dest, 1); code != 2 {
+			t.Errorf("%s with no rules: reply %d, want 2", dest, code)
+		}
+	}
 	// A client the rules do not name.
 	f = startFit(t, socksConfig(`{"clients": ["10.0.0.0/8"]}`))
 	if code := socksConnect(t, f.dial(0), target, 1); code != 2 {
@@ -123,7 +131,7 @@ func TestSOCKS(t *testing.T) {
 // timeout.
 func TestSOCKSIdleTimeout(t *testing.T) {
 	target := backend(t, echo)
-	f := startFit(t, socksConfig(`{"clients": ["127.0.0.1"], "idle_timeout": "300ms"}`))
+	f := startFit(t, socksConfig(`{"clients": ["127.0.0.1"], "allow": ["127.0.0.0/8"], "idle_timeout": "300ms"}`))
 	c := f.dial(0)
 	if code := socksConnect(t, c, target, 1); code != 0 {
 		t.Fatalf("reply %d", code)
@@ -141,7 +149,7 @@ func TestSniffClear(t *testing.T) {
 	target := backend(t, echo)
 	f := startFit(t, fmt.Sprintf(`{
   "listeners": [{"name": "one", "address": "127.0.0.1:0", "protocols": ["http/1.1", "h2c", "tcp", "socks"],
-    "socks": {"clients": ["127.0.0.1"]}}],
+    "socks": {"clients": ["127.0.0.1"], "allow": ["127.0.0.0/8"]}}],
   "upstreams": [{"name": "a", "addresses": [%q]}, {"name": "f", "addresses": [%q]}],
   "services": [
     {"name": "a", "listeners": ["one"], "upstream": "a", "server_names": ["a.example.com"]},

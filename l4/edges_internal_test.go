@@ -70,11 +70,12 @@ func TestServiceName(t *testing.T) {
 }
 
 // TestRulesNamesOnly decides destinations by rules of names alone: an
-// allowed name needs no address check, another is refused, as Dial refuses
-// it without dialing.
+// allowed name still has its address checked against the default refusal
+// of internal addresses, another is refused, as Dial refuses it without
+// dialing.
 func TestRulesNamesOnly(t *testing.T) {
 	r := NewRules(&config.ForwardProxy{Clients: []string{"0.0.0.0/0"}, Allow: []string{"example.com"}})
-	for dest, want := range map[string]verdict{"example.com:443": allowed, "other.example:443": refused} {
+	for dest, want := range map[string]verdict{"example.com:443": resolvedAllowed, "other.example:443": refused} {
 		if got := r.dest(dest); got != want {
 			t.Errorf("dest(%q) = %d, want %d", dest, got, want)
 		}

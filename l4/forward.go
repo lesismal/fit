@@ -7,13 +7,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	fib "github.com/lesismal/fib"
 	"github.com/lesismal/fib/socks"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/netguard"
 	"github.com/lesismal/fit/router"
 )
 
@@ -125,14 +125,16 @@ type verdict uint8
 
 const (
 	refused verdict = iota
-	// allowed lets the dial go on.
+	// allowed lets the dial go on: only whether the address is the host's
+	// own is left to decide once it is connected.
 	allowed
 	// unresolved lets the dial go on, but the address a host name resolves
 	// to still decides: a deny range may hold it, or only an allow range
 	// may allow it.
 	unresolved
 	// resolvedAllowed is unresolved for a name allow holds, which only
-	// deny's ranges may still refuse.
+	// deny's ranges and the default refusal of internal addresses may still
+	// refuse.
 	resolvedAllowed
 )
 
@@ -154,7 +156,8 @@ func (r *Rules) dest(hostport string) verdict {
 		}
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
-		if a.Zone() != "" || r.deny.addr(a) || !r.allow.empty() && !r.allow.addr(a) {
+		if a.Zone() != "" || r.deny.addr(a) || !r.allow.empty() && !r.allow.addr(a) ||
+			netguard.Refused(a, netip.Addr{}, r.allow.nets) {
 			return refused
 		}
 		return allowed
@@ -164,9 +167,6 @@ func (r *Rules) dest(hostport string) verdict {
 		return refused
 	}
 	if r.allow.empty() || r.allow.name(host) {
-		if r.deny.nets == nil {
-			return allowed
-		}
 		return resolvedAllowed
 	}
 	if r.allow.nets == nil {
@@ -175,59 +175,32 @@ func (r *Rules) dest(hostport string) verdict {
 	return unresolved
 }
 
-// resolved decides the address a host name resolved to.
-func (r *Rules) resolved(v verdict, a netip.Addr) bool {
-	return !r.deny.addr(a) && (v == resolvedAllowed || r.allow.addr(a))
+// resolved decides the address remote a destination was connected to, from
+// local, by the verdict v of its name: deny's ranges, allow's for a name
+// allow does not hold, and, whatever v, the default refusal of loopback,
+// link-local, unspecified and multicast addresses and of the host's own,
+// which only an allow range naming them lifts.
+func (r *Rules) resolved(v verdict, remote, local netip.Addr) bool {
+	remote = remote.Unmap()
+	if v != allowed && (r.deny.addr(remote) || v != resolvedAllowed && !r.allow.addr(remote)) {
+		return false
+	}
+	return !netguard.Refused(remote, local, r.allow.nets)
 }
 
-// Dial is a socks.DialFunc that dials only what the rules allow: a host name
-// whose address they refuse is closed as soon as it is connected, before
-// handler hears of it, and done is told ErrRefused.
+// Dial is a socks.DialFunc that dials only what the rules allow: a
+// destination whose address they refuse, a host name's once resolved or
+// the host's own, is closed as soon as it is connected, before handler
+// hears of it, and done is told ErrRefused.
 func (r *Rules) Dial(engine *fib.Engine, network, addr string, timeout time.Duration,
 	handler fib.Handler, done func(*fib.Connection, error)) error {
 	v := r.dest(addr)
-	switch v {
-	case refused:
+	if v == refused {
 		return ErrRefused
-	case allowed:
-		return engine.DialWithHandler(network, addr, timeout, handler, done)
 	}
-	h := &checked{Handler: handler, r: r, v: v}
-	return engine.DialWithHandler(network, addr, timeout, h, func(c *fib.Connection, err error) {
-		if err == nil && h.refused.Load() {
-			c, err = nil, ErrRefused
-		}
-		done(c, err)
-	})
-}
-
-// checked is the handler of a dial whose address the rules still decide.
-type checked struct {
-	fib.Handler
-	r       *Rules
-	v       verdict
-	refused atomic.Bool
-}
-
-func (h *checked) OnOpen(c *fib.Connection) {
-	if !h.r.resolved(h.v, c.RemoteAddrPort().Addr()) {
-		h.refused.Store(true)
-		_ = c.Close()
-		return
-	}
-	h.Handler.OnOpen(c)
-}
-
-func (h *checked) OnData(c *fib.Connection, data []byte) {
-	if !h.refused.Load() {
-		h.Handler.OnData(c, data)
-	}
-}
-
-func (h *checked) OnClose(c *fib.Connection, err error) {
-	if !h.refused.Load() {
-		h.Handler.OnClose(c, err)
-	}
+	return netguard.Dial(nil, engine, network, addr, timeout, handler, done, func(remote, local netip.Addr) bool {
+		return r.resolved(v, remote, local)
+	}, ErrRefused)
 }
 
 // errCommand refuses the SOCKS commands fit does not serve.

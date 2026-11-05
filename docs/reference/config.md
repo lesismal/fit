@@ -271,7 +271,7 @@ Also at `webrtc.turn.tls.certificates[]`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `clients` | list of string |  | Required. The addresses and CIDR ranges of the clients that may use the proxy, as "10.0.0.0/8"; others are refused. |
-| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out. |
+| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, but for loopback, link-local (169.254.169.254, the metadata service of most clouds, among them), unspecified and multicast addresses and the host's own, which are refused unless a range here lies inside theirs, as "127.0.0.0/8" does and "0.0.0.0/0" does not, or, for the host's own, names that address alone. |
 | `deny` | list of string |  | Destinations refused, written as in allow, whatever allow holds: a host name that resolves to an address deny holds is refused once it is connected, before anything is sent. |
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take. 10s when left out. |
@@ -3067,6 +3067,15 @@ A forward proxy for HTTP CONNECT, with access rules for clients and destinations
 An HTTP CONNECT proxy for the clients `clients` lists, to the destinations `allow` and `deny`
 permit; a listener's `socks` does the same for SOCKS5.
 
+Whatever `allow` holds, loopback, link-local (`169.254.169.254`, the metadata service of most clouds,
+among them), unspecified and multicast addresses, and the addresses of the host fit runs on, are
+refused unless `allow` names them: a client would otherwise reach the Admin API on `127.0.0.1:2019`
+and every other service the host keeps to itself. A host name is decided by the address it was
+connected to, before anything is sent. `allow` names such an address with a range inside its own,
+`127.0.0.0/8` or `169.254.169.254` say, not with a wider one such as `0.0.0.0/0`, and names one of the
+host's own addresses by writing that address alone. To reach them as well as everything else, list
+the wide ranges too: `"allow": ["0.0.0.0/0", "::/0", "127.0.0.0/8"]`.
+
 In a .conf file:
 
 ```fit
@@ -3109,7 +3118,7 @@ In JSON:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `clients` | list of string |  | Required. The addresses and CIDR ranges of the clients that may use the proxy, as "10.0.0.0/8"; others are answered 403. |
-| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out; others are answered 403, or 502 for a host name whose address decides. |
+| `allow` | list of string |  | The destinations the proxy connects to: host names, "*.example.com" for every name below example.com, IP addresses and CIDR ranges, which also hold the address a host name resolves to. Every destination deny does not hold when left out, but for loopback, link-local (169.254.169.254, the metadata service of most clouds, among them), unspecified and multicast addresses and the host's own, which are refused unless a range here lies inside theirs, as "127.0.0.0/8" does and "0.0.0.0/0" does not, or, for the host's own, names that address alone; others are answered 403, or 502 for a host name whose address decides. |
 | `deny` | list of string |  | Destinations refused, written as in allow, whatever allow holds. |
 | `ports` | list of integer |  | The destination ports allowed; any when left out. |
 | `connect_timeout` | duration | `"10s"` | How long resolving and connecting to a destination may take; past it the request is answered 504. 10s when left out. |

@@ -38,7 +38,7 @@ func TestRulesDest(t *testing.T) {
 		}
 	}
 	for addr, want := range map[string]bool{"192.0.2.9": true, "192.0.2.66": false, "198.51.100.1": false} {
-		if got := r.resolved(unresolved, netip.MustParseAddr(addr)); got != want {
+		if got := r.resolved(unresolved, netip.MustParseAddr(addr), netip.Addr{}); got != want {
 			t.Errorf("resolved(%s) = %v", addr, got)
 		}
 	}
@@ -56,10 +56,71 @@ func TestRulesDest(t *testing.T) {
 			t.Errorf("open: dest(%q) = %d, want %d", dest, got, want)
 		}
 	}
-	if open.resolved(resolvedAllowed, netip.MustParseAddr("127.0.0.1")) || !open.resolved(resolvedAllowed, netip.MustParseAddr("10.0.0.1")) {
+	if open.resolved(resolvedAllowed, netip.MustParseAddr("127.0.0.1"), netip.Addr{}) ||
+		!open.resolved(resolvedAllowed, netip.MustParseAddr("10.0.0.1"), netip.Addr{}) {
 		t.Error("open: resolved addresses decided wrongly")
 	}
 	if NewRules(&config.ForwardProxy{Clients: []string{"0.0.0.0/0"}}).Key() == open.Key() || (*Rules)(nil).Key() != "" {
 		t.Error("keys of different rules agree")
+	}
+}
+
+// TestRulesInternal refuses, with allow and deny left out, what a client
+// would reach the gateway's host or the cloud's metadata service through:
+// the Admin API on 127.0.0.1:2019 among them, by address, by a name that
+// resolves there and by the host's own address; an allow range inside one
+// of those ranges lets it through, and a wider one does not.
+func TestRulesInternal(t *testing.T) {
+	open := NewRules(&config.ForwardProxy{Clients: []string{"0.0.0.0/0"}})
+	for _, dest := range []string{"127.0.0.1:2019", "[::1]:2019", "[::ffff:127.0.0.1]:2019", "0.0.0.0:2019", "[::]:2019",
+		"169.254.169.254:80", "[fe80::1]:80", "224.0.0.1:80", "[ff02::1]:80", "100.100.100.200:80", "[fd00:ec2::254]:80"} {
+		if got := open.dest(dest); got != refused {
+			t.Errorf("dest(%q) = %d, want refused", dest, got)
+		}
+	}
+	for _, dest := range []string{"10.0.0.1:443", "192.0.2.1:443", "[2001:db8::1]:443"} {
+		if got := open.dest(dest); got != allowed {
+			t.Errorf("dest(%q) = %d, want allowed", dest, got)
+		}
+	}
+	self := netip.MustParseAddr("10.0.0.5")
+	for _, tc := range []struct {
+		remote, local string
+		want          bool
+	}{
+		{"127.0.0.1", "127.0.0.1", false},             // localhost resolved
+		{"::ffff:169.254.169.254", "10.0.0.5", false}, // a metadata name resolved
+		{"10.0.0.5", "10.0.0.5", false},               // the host's own address
+		{"10.0.0.6", "10.0.0.5", true},
+		{"192.0.2.1", "", true},
+	} {
+		local := netip.Addr{}
+		if tc.local != "" {
+			local = netip.MustParseAddr(tc.local)
+		}
+		for _, v := range []verdict{allowed, resolvedAllowed} {
+			if got := open.resolved(v, netip.MustParseAddr(tc.remote), local); got != tc.want {
+				t.Errorf("resolved(%d, %s from %s) = %v, want %v", v, tc.remote, tc.local, got, tc.want)
+			}
+		}
+	}
+
+	// An allow range inside an internal range, or the host's address
+	// alone, lets it through; one wider does not.
+	optIn := NewRules(&config.ForwardProxy{Clients: []string{"0.0.0.0/0"},
+		Allow: []string{"0.0.0.0/0", "::/0", "127.0.0.0/8", "169.254.169.254", "10.0.0.5"}})
+	for dest, want := range map[string]verdict{"127.0.0.1:2019": allowed, "169.254.169.254:80": allowed,
+		"169.254.1.1:80": refused, "[::1]:2019": refused, "0.0.0.0:80": refused, "example.com:443": unresolved} {
+		if got := optIn.dest(dest); got != want {
+			t.Errorf("opted in: dest(%q) = %d, want %d", dest, got, want)
+		}
+	}
+	if !optIn.resolved(unresolved, netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("127.0.0.1")) ||
+		!optIn.resolved(allowed, self, self) || optIn.resolved(unresolved, netip.MustParseAddr("::1"), netip.Addr{}) {
+		t.Error("opted in: resolved addresses decided wrongly")
+	}
+	wide := NewRules(&config.ForwardProxy{Clients: []string{"0.0.0.0/0"}, Allow: []string{"10.0.0.0/8"}})
+	if wide.resolved(unresolved, self, self) || !wide.resolved(unresolved, netip.MustParseAddr("10.0.0.6"), self) {
+		t.Error("a wide allow range lets the host's own address through, or refuses another")
 	}
 }

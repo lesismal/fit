@@ -127,6 +127,17 @@ func TestConnect(t *testing.T) {
 			t.Errorf("%s: %d, want %d", dest, status, want)
 		}
 	}
+	// With allow and deny left out, loopback and link-local are refused, by
+	// address and by a name that resolves there: the Admin API, on
+	// 127.0.0.1:2019 by default, and the cloud's metadata service among
+	// them.
+	proxy = serve(t, `{"clients": ["127.0.0.1"]}`)
+	for dest, want := range map[string]int{target: 403, "[::ffff:127.0.0.1]:" + port: 403, "169.254.169.254:80": 403,
+		"0.0.0.0:" + port: 403, "localhost:" + port: 502} {
+		if _, _, status := connect(t, proxy, dest); status != want {
+			t.Errorf("%s with no rules: %d, want %d", dest, status, want)
+		}
+	}
 	proxy = serve(t, `{"clients": ["10.0.0.0/8"]}`)
 	if _, _, status := connect(t, proxy, target); status != 403 {
 		t.Errorf("a client not allowed: %d", status)
@@ -136,7 +147,7 @@ func TestConnect(t *testing.T) {
 // TestConnectH2C tunnels a CONNECT on an h2c stream.
 func TestConnectH2C(t *testing.T) {
 	target := echo(t)
-	proxy := serve(t, `{"clients": ["127.0.0.1"]}`)
+	proxy := serve(t, `{"clients": ["127.0.0.1"], "allow": ["127.0.0.0/8"]}`)
 	tr := &stdhttp.Transport{Protocols: new(stdhttp.Protocols)}
 	tr.Protocols.SetUnencryptedHTTP2(true)
 	t.Cleanup(tr.CloseIdleConnections)
@@ -162,7 +173,7 @@ func TestConnectH2C(t *testing.T) {
 // timeout.
 func TestConnectIdleTimeout(t *testing.T) {
 	target := echo(t)
-	proxy := serve(t, `{"clients": ["127.0.0.1"], "idle_timeout": "300ms"}`)
+	proxy := serve(t, `{"clients": ["127.0.0.1"], "allow": ["127.0.0.0/8"], "idle_timeout": "300ms"}`)
 	c, r, status := connect(t, proxy, target)
 	if status != 200 {
 		t.Fatalf("%d", status)
