@@ -37,6 +37,21 @@ const (
 	// maxRotatedNames bounds the names a sweep deletes at once, so that a
 	// directory of files the sink did not make cannot hold it long.
 	maxRotatedNames = 10000
+	// maxBackupNames bounds the names a rotation tries, the time's and its
+	// -1, -2 and so on, before it gives up and keeps writing the file.
+	maxBackupNames = 1000
+	// rotateRetry is how long a size or interval rotation that failed waits
+	// before it is tried again, so that a name that cannot be made does not
+	// cost every write a try and a warning.
+	rotateRetry = time.Minute
+	// fileMode is the mode a log file is created with: its owner writes it,
+	// its group may read it, and others may not, since access logs hold
+	// addresses, URLs and user names. A file already there keeps its mode, a
+	// file a rotation starts takes the mode of the one it replaces, and a
+	// compressed file the mode of the file it compresses.
+	fileMode os.FileMode = 0o640
+	// appendFlags open a log file to be appended to, created when missing.
+	appendFlags = os.O_WRONLY | os.O_APPEND | os.O_CREATE
 )
 
 // ErrClosed is returned by a write to a file sink that was closed.
@@ -259,6 +274,8 @@ type File struct {
 	file        *os.File
 	size        int64
 	periodStart time.Time
+	// retryAt is when a size or interval rotation that failed is tried again.
+	retryAt time.Time
 	// closeErr is what closing the file failed with; the writer sets it
 	// before done is closed.
 	closeErr error
@@ -289,14 +306,16 @@ func openFile(fs *Files, path string, rot *rotate, zone func() *time.Location) (
 		done:        make(chan struct{}),
 	}
 	f.rot.Store(rot)
-	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	fh, info, err := openRegular(path, appendFlags, fileMode)
 	if err != nil {
 		return nil, err
 	}
-	f.file = fh
-	if info, err := fh.Stat(); err == nil {
-		f.size = info.Size()
+	if mode, ok := othersMayWrite(f.dir); ok {
+		Named(config.LoggerEngine).Warnf("log %s: its directory %s is writable by users other than its owner (%v); "+
+			"fit does not follow links there, but such a user can still remove or rename the log's files", path, f.dir, mode)
 	}
+	f.file = fh
+	f.size = info.Size()
 	if rot != nil && rot.interval > 0 {
 		f.periodStart = periodStart(fs.now(), rot.interval, zone())
 	}
@@ -390,7 +409,7 @@ func (f *File) writeBuffer(b []byte) {
 // needRotate reports whether a write of n bytes rotates the file.
 func (f *File) needRotate(n int, now time.Time) bool {
 	rot := f.rot.Load()
-	if rot == nil {
+	if rot == nil || now.Before(f.retryAt) {
 		return false
 	}
 	if rot.maxBytes > 0 && f.size > 0 && f.size+int64(n) > rot.maxBytes {
@@ -410,44 +429,65 @@ func (f *File) needRotate(n int, now time.Time) bool {
 }
 
 // rotate renames the open file out of the way, starts a new one and, when
-// asked, compresses the old one in the background.
-func (f *File) rotate(now time.Time) {
+// asked, compresses the old one in the background. A rotation that fails
+// keeps the file it has, says why, and is not tried again by size or
+// interval for rotateRetry.
+func (f *File) rotate(now time.Time) error {
 	if f.file == nil {
-		return
+		return nil
 	}
 	rot := f.rot.Load()
 	if rot == nil {
-		return
+		return nil
 	}
 	if f.size == 0 {
 		// Nothing to rotate yet: the period starts again here.
 		if rot.interval > 0 {
 			f.periodStart = periodStart(now, rot.interval, f.zone())
 		}
-		return
+		return nil
+	}
+	backup, err := f.backupName(now)
+	if err != nil {
+		err = fmt.Errorf("rotate %s: %w", f.path, err)
+		f.setErr(err)
+		f.retryAt = now.Add(rotateRetry)
+		return err
+	}
+	// The file as it is held: the new file takes its mode, and the
+	// compression reads this file and no other that a name may lead to.
+	held, statErr := f.file.Stat()
+	perm := fileMode
+	if statErr == nil {
+		perm = held.Mode().Perm()
 	}
 	if err := f.file.Close(); err != nil {
 		f.setErr(fmt.Errorf("rotate %s: %w", f.path, err))
 	}
 	f.file = nil
-	backup := f.backupName(now)
 	if err := os.Rename(f.path, backup); err != nil {
-		f.setErr(fmt.Errorf("rotate %s: %w", f.path, err))
+		err = fmt.Errorf("rotate %s: %w", f.path, err)
+		f.setErr(err)
+		f.retryAt = now.Add(rotateRetry)
 		// Keep appending to the file that could not be renamed.
-		if fh, e := f.open(); e != nil {
+		if fh, _, e := openRegular(f.path, appendFlags, perm); e != nil {
 			f.setErr(e)
 		} else {
 			f.file = fh
 		}
-		return
+		return err
 	}
 	if rot.compress {
-		f.startCompress(backup)
+		if statErr != nil {
+			f.setErr(fmt.Errorf("compress %s: %w", backup, statErr))
+		} else {
+			f.startCompress(backup, held)
+		}
 	}
-	fh, err := f.open()
+	fh, _, err := openRegular(f.path, appendFlags, perm)
 	if err != nil {
 		f.setErr(err)
-		return
+		return err
 	}
 	f.file = fh
 	f.statusMu.Lock()
@@ -458,30 +498,64 @@ func (f *File) rotate(now time.Time) {
 		f.periodStart = periodStart(now, rot.interval, f.zone())
 	}
 	f.retention(false)
+	return nil
 }
 
 // backupName returns the name the current file is renamed to: the path, a
-// dot and the time in UTC, with -1, -2 and so on when the name is taken.
-func (f *File) backupName(now time.Time) string {
+// dot and the time in UTC, with -1, -2 and so on when the name is taken. It
+// fails when a name cannot be looked up, too long for the file system or in
+// a directory it may not read, and when maxBackupNames names are taken.
+func (f *File) backupName(now time.Time) (string, error) {
 	stamp := now.UTC().Format("2006-01-02T15-04-05.000")
-	name := filepath.Join(f.dir, f.base+"."+stamp)
-	for i := 1; ; i++ {
-		if _, err := os.Lstat(name); os.IsNotExist(err) {
-			if _, err := os.Lstat(name + ".gz"); os.IsNotExist(err) {
-				return name
-			}
+	for i := 0; i < maxBackupNames; i++ {
+		name := filepath.Join(f.dir, f.base+"."+stamp)
+		if i > 0 {
+			name += "-" + itoa(i)
 		}
-		name = filepath.Join(f.dir, f.base+"."+stamp+"-"+itoa(i))
+		free, err := nameFree(name)
+		if err != nil {
+			return "", err
+		}
+		if free {
+			return name, nil
+		}
 	}
+	return "", fmt.Errorf("the %d names after %s.%s are taken", maxBackupNames, f.base, stamp)
 }
 
-// open opens the file a sink writes again, readable as it is appended to.
-func (f *File) open() (*os.File, error) {
-	fh, err := os.OpenFile(f.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", f.path, err)
+// nameFree reports whether neither a rotated file nor what its compression
+// writes is at name.
+func nameFree(name string) (bool, error) {
+	for _, n := range [...]string{name, name + ".gz", name + ".gz.tmp"} {
+		_, err := os.Lstat(n)
+		if err == nil {
+			return false, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
 	}
-	return fh, nil
+	return true, nil
+}
+
+// openRegular opens path with flag, creating it with perm when flag says so,
+// never through a symbolic link at its last element, and only when it is a
+// regular file with no other hard link, so that no name planted in the log's
+// directory can lead fit to write, truncate or read another file.
+func openRegular(path string, flag int, perm os.FileMode) (*os.File, os.FileInfo, error) {
+	fh, err := openNoFollow(path, flag, perm)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := fh.Stat()
+	if err == nil {
+		err = checkFile(fi)
+	}
+	if err != nil {
+		fh.Close()
+		return nil, nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	return fh, fi, nil
 }
 
 // closeFile closes the file; the queue is empty by then.
@@ -547,8 +621,7 @@ func (f *File) rotateNow() error {
 // rotateNowOnWriter is the rotation a control runs, after the queue is
 // written out.
 func (f *File) rotateNowOnWriter() error {
-	f.rotate(f.now())
-	return nil
+	return f.rotate(f.now())
 }
 
 // cleanupNow removes what retention says on the writer's goroutine.
@@ -693,12 +766,12 @@ func (f *File) isCompressing(name string) bool {
 }
 
 // startCompress gzips a rotated file on the file pool, keeping the plain
-// file when it fails.
-func (f *File) startCompress(name string) {
+// file when it fails. held is the file as the writer held it.
+func (f *File) startCompress(name string, held os.FileInfo) {
 	f.mu.Lock()
 	f.compressing[name] = true
 	f.mu.Unlock()
-	run := func() { f.compress(name) }
+	run := func() { f.compress(name, held) }
 	expire := func() {
 		f.setErr(fmt.Errorf("compress %s: the file pool is busy; the file is kept as it is", name))
 		f.finishCompress(name)
@@ -715,27 +788,38 @@ func (f *File) finishCompress(name string) {
 	f.mu.Unlock()
 }
 
-// compress writes name's gzip to name.gz and removes the plain file.
-func (f *File) compress(name string) {
+// compress writes name's gzip to name.gz and removes the plain file. It
+// reads name only when it is still the file the writer held, held, and
+// writes only a file it creates, so that a link or another file put at
+// either name is neither read nor written through; the plain file is kept
+// otherwise. The gzip takes held's mode.
+func (f *File) compress(name string, held os.FileInfo) {
 	defer f.finishCompress(name)
-	in, err := os.Open(name)
+	in, fi, err := openRegular(name, os.O_RDONLY, 0)
+	if err == nil && !os.SameFile(fi, held) {
+		in.Close()
+		err = errors.New("the name no longer holds the file rotated")
+	}
 	if err != nil {
 		f.setErr(fmt.Errorf("compress %s: %w", name, err))
 		return
 	}
 	tmp := name + ".gz.tmp"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	// O_EXCL: a new file or none. One already there, a link included, is
+	// not written through, and the plain file is kept.
+	out, err := openNoFollow(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		in.Close()
 		f.setErr(fmt.Errorf("compress %s: %w", name, err))
 		return
 	}
+	modeErr := out.Chmod(held.Mode().Perm())
 	gz := gzip.NewWriter(out)
 	_, cpErr := io.Copy(gz, in)
 	gzErr := gz.Close()
 	outErr := out.Close()
 	inErr := in.Close()
-	if err := errors.Join(cpErr, gzErr, outErr, inErr); err != nil {
+	if err := errors.Join(modeErr, cpErr, gzErr, outErr, inErr); err != nil {
 		os.Remove(tmp)
 		f.setErr(fmt.Errorf("compress %s: %w", name, err))
 		return
