@@ -78,6 +78,7 @@ route api {
 | Consul KV、etcd | `consul_kv`、`etcd`：键中存放 listener、路由、upstream 和 service 的 JSON 对象 |
 | Kubernetes Gateway API | `kubernetes`，服务其 GatewayClass 下的 Gateway 及其 HTTPRoute、GRPCRoute、TLSRoute、TCPRoute 和 UDPRoute |
 | Kubernetes Ingress | `kubernetes` 的 `ingress`，用于 fit 的 IngressClass |
+| Kubernetes `allowExternalNameServices` | `kubernetes` 的 `allow_external_name_services`，与 Traefik 一样默认关闭；即使打开，ExternalName 本身是或解析为环回、链路本地（云元数据）、未指定或组播地址，或本机自己地址的后端也会被拒绝 |
 | Kubernetes CRD（IngressRoute） | 不支持：请改用 Gateway API |
 
 配置文件中写的内容优先于所有 provider，列在前面的 provider 优先于后面的；Admin API 的 `/config/effective` 展示合并结果及

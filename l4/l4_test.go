@@ -499,3 +499,29 @@ func BenchmarkTCPProxy(b *testing.B) {
 		})
 	}
 }
+
+// TestTCPDenyInternal closes a TCP service's client, with nothing passed
+// either way, when the upstream's deny_internal refuses its address, as it
+// does for the upstreams of ExternalName Services: the connection to the
+// upstream is closed as soon as it opens, before anything is sent on it.
+func TestTCPDenyInternal(t *testing.T) {
+	got := make(chan int64, 4)
+	target := backend(t, func(c net.Conn) {
+		_, _ = c.Write([]byte("admin"))
+		n, _ := io.Copy(io.Discard, c)
+		got <- n
+	})
+	doc := strings.Replace(tcpConfig("", target), `"addresses"`, `"deny_internal": true, "max_fails": 0, "addresses"`, 1)
+	f := startFit(t, doc)
+	c := f.dial(0)
+	_, _ = c.Write([]byte("PUT /config HTTP/1.1\r\n\r\n"))
+	expectClosed(t, c, 5*time.Second)
+	select {
+	case n := <-got:
+		if n != 0 {
+			t.Fatalf("the upstream got %d bytes", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the upstream's connection was not closed")
+	}
+}

@@ -79,6 +79,7 @@ not there: a host with a leading `*.` (one label) or `**.` (one or more) covers 
 | Consul KV, etcd | `consul_kv`, `etcd`: keys holding JSON objects of listeners, routes, upstreams and services |
 | Kubernetes Gateway API | `kubernetes`, which serves the Gateways of its GatewayClasses and their HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes and UDPRoutes |
 | Kubernetes Ingress | `kubernetes`'s `ingress`, for fit's IngressClasses |
+| Kubernetes `allowExternalNameServices` | `kubernetes`'s `allow_external_name_services`, off by default as in Traefik; even on, a backend whose ExternalName is, or resolves to, a loopback, link-local (cloud metadata), unspecified or multicast address, or the host's own, is refused |
 | Kubernetes CRDs (IngressRoute) | not there: use the Gateway API |
 
 What the config file writes wins over every provider, and a provider over those listed after it;

@@ -266,6 +266,15 @@
       # # string.
       # listen_host: "0.0.0.0"
 
+      # # Send requests to the backends of ExternalName Services, to the host name each names,
+      # # refusing one that is loopback, link-local (169.254.169.254, the metadata service of most
+      # # clouds, among them), unspecified or multicast, by address or by the address the name
+      # # resolves to, or the host's own: whoever may create a Service could otherwise point a route
+      # # at fit's Admin API or the cloud's metadata service. Off when left out: a backend that is an
+      # # ExternalName Service is not resolved, and its route says so in its status.
+      # # boolean.
+      # allow_external_name_services: true
+
       # # Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices,
       # # balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when
       # # left out.

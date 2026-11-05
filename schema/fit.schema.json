@@ -870,6 +870,10 @@
           },
           "type": "array"
         },
+        "allow_external_name_services": {
+          "description": "Send requests to the backends of ExternalName Services, to the host name each names, refusing one that is loopback, link-local (169.254.169.254, the metadata service of most clouds, among them), unspecified or multicast, by address or by the address the name resolves to, or the host's own: whoever may create a Service could otherwise point a route at fit's Admin API or the cloud's metadata service. Off when left out: a backend that is an ExternalName Service is not resolved, and its route says so in its status.",
+          "type": "boolean"
+        },
         "backends": {
           "default": "endpoints",
           "description": "Where requests to a Service go: endpoints, to its ready endpoints from its EndpointSlices, balanced by fit; or cluster_ip, to its cluster IP, balanced by the cluster. endpoints when left out.",
@@ -3210,6 +3214,10 @@
           "description": "How long opening a connection may take; 10s when left out. A request whose connect times out gets 504.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "deny_internal": {
+          "description": "Refuse to connect where an address, or the address its host name resolves to, is loopback, link-local (169.254.169.254, the metadata service of most clouds, among them), unspecified, multicast or the host's own, decided once each connection is open and before anything is sent on it; a request refused so gets 502, as one whose connect fails. For addresses others choose: the Kubernetes provider sets it on the upstreams of ExternalName Services. Off when left out.",
+          "type": "boolean"
         },
         "fail_timeout": {
           "default": "10s",

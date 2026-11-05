@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/netip"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/netguard"
 )
 
 const gatewayGroup = "gateway.networking.k8s.io"
@@ -88,6 +90,9 @@ type (
 		Addresses []string `json:"addresses"`
 		Weights   []int    `json:"weights,omitempty"`
 		Protocol  string   `json:"protocol,omitempty"`
+		// DenyInternal is set for an ExternalName Service, whose name
+		// whoever may create the Service chooses.
+		DenyInternal bool `json:"deny_internal,omitempty"`
 	}
 	outService struct {
 		Name        string   `json:"name"`
@@ -933,6 +938,12 @@ func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (nam
 	if sp == nil {
 		return "", false, badRef("BackendNotFound", "service %s/%s has no %s port %d", ns, ref.Name, proto, *ref.Port)
 	}
+	external := svc.Spec.Type == "ExternalName"
+	if external {
+		if err := t.externalName(ns, svc); err != nil {
+			return "", false, err
+		}
+	}
 	name = fmt.Sprintf("%s.%s.%d", ns, ref.Name, sp.Port)
 	appH2C := deref(sp.AppProtocol, "") == "kubernetes.io/h2c"
 	switch {
@@ -948,12 +959,35 @@ func (t *translator) upstream(ref BackendObjectRef, proto string, h2c bool) (nam
 	if len(addrs) == 0 {
 		return name, false, nil
 	}
-	u := &outUpstream{Name: name, Addresses: addrs}
+	u := &outUpstream{Name: name, Addresses: addrs, DenyInternal: external}
 	if proto == "TCP" && (h2c || appH2C) {
 		u.Protocol = "h2c"
 	}
 	t.upstreams[name] = u
 	return name, true, nil
+}
+
+// externalName refuses the ExternalName Service svc, of namespace ns, as a
+// backend unless allow_external_name_services lets such Services through,
+// and, even then, one whose name is a loopback, link-local, unspecified or
+// multicast address, or localhost. Whoever may create a Service chooses
+// its name: a route to it would otherwise reach fit's Admin API, on
+// 127.0.0.1:2019 by default, or the cloud's metadata service. A name that
+// resolves to such an address, or to the host's own, is refused by its
+// upstream's deny_internal, when it is connected to, so that DNS cannot
+// change the answer between a check here and the dial.
+func (t *translator) externalName(ns string, svc *Service) error {
+	if !t.opts.AllowExternalName {
+		return badRef("UnsupportedValue", "service %s/%s is an ExternalName Service, which allow_external_name_services must allow", ns, svc.Metadata.Name)
+	}
+	host := strings.ToLower(strings.TrimSuffix(svc.Spec.ExternalName, "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return badRef("UnsupportedValue", "service %s/%s: ExternalName %q is this host", ns, svc.Metadata.Name, svc.Spec.ExternalName)
+	}
+	if a, err := netip.ParseAddr(host); err == nil && (a.Zone() != "" || netguard.Refused(a, netip.Addr{}, nil)) {
+		return badRef("UnsupportedValue", "service %s/%s: ExternalName %q is a loopback, link-local, unspecified or multicast address", ns, svc.Metadata.Name, svc.Spec.ExternalName)
+	}
+	return nil
 }
 
 // addresses returns where svc's port sp, of protocol proto, is reached: its

@@ -248,7 +248,7 @@ func (r *relay) dial() {
 	if r.udp {
 		network = "udp"
 	}
-	if err := s.engine.DialWithHandler(network, r.backend.Address, s.pool.ConnectTimeout(), (*upSide)(r), r.dialed); err != nil {
+	if err := s.pool.Dial(s.engine, network, r.backend.Address, s.pool.ConnectTimeout(), (*upSide)(r), r.dialed); err != nil {
 		r.dialed(nil, err)
 	}
 }

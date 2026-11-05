@@ -2,6 +2,8 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +14,8 @@ import (
 // TestTranslateEdges translates what the API allows and fit leaves out or
 // refuses: listeners, backends, matches and filters it cannot serve, a
 // GRPCRoute and a TLSRoute on listeners of several host names, and
-// backends of ExternalName Services.
+// backends of ExternalName Services, which allow_external_name_services
+// being off refuses.
 func TestTranslateEdges(t *testing.T) {
 	w := base(t)
 	w.gateways = append(w.gateways, obj[Gateway](t, `{"metadata": {"namespace": "default", "name": "edge", "creationTimestamp": "2026-01-05T00:00:00Z"},
@@ -76,6 +79,8 @@ func TestTranslateEdges(t *testing.T) {
 		"httproute default/edge: rule 0: backend 0: filters on a backend are not supported yet",
 		"httproute default/edge: rule 1: backend 0: x.example/Thing is not a Service",
 		"httproute default/edge: rule 2: backend 0: service default/web: a port is needed",
+		"httproute default/edge: rule 3: backend 0: service default/ext is an ExternalName Service, which allow_external_name_services must allow",
+		"httproute default/edge: rule 4: backend 0: service default/extnone is an ExternalName Service",
 		"httproute default/edge: rule 6: backend 0: service team/shop is in another namespace",
 		`httproute default/edge: rule 7: match 0: path "x" does not start with '/'`,
 		`httproute default/edge: rule 7: match 1: path "x" does not start with '/'`,
@@ -96,10 +101,7 @@ func TestTranslateEdges(t *testing.T) {
 	for _, u := range p.Upstreams {
 		upstreams[u.Name] = u
 	}
-	if u := upstreams["default.ext.5432"]; toJSON(u.Addresses) != `["db.example.net:5432"]` {
-		t.Errorf("an ExternalName's upstream: %+v", u)
-	}
-	for _, name := range []string{"default.extnone.5432", "default.mis.80"} {
+	for _, name := range []string{"default.ext.5432", "default.extnone.5432", "default.mis.80"} {
 		if _, ok := upstreams[name]; ok {
 			t.Errorf("upstream %s, which has no addresses", name)
 		}
@@ -235,5 +237,59 @@ func TestStatusEdges(t *testing.T) {
 	gs, _ := out["gateways default/gw"]["status"].(map[string]any)
 	if got := toJSON(gs["addresses"]); got != `[{"type":"IPAddress","value":"192.0.2.1"},{"type":"Hostname","value":"lb.example.com"}]` {
 		t.Errorf("addresses: %s", got)
+	}
+}
+
+// TestExternalName serves ExternalName Services with
+// allow_external_name_services: one of a host name, as an upstream that
+// refuses internal addresses once connected, since the name may resolve to
+// one; and refuses those of loopback, link-local, unspecified and
+// multicast addresses and localhost, which would reach the Admin API on
+// 127.0.0.1:2019 or the cloud's metadata service. One with no name has no
+// addresses.
+func TestExternalName(t *testing.T) {
+	w := base(t)
+	names := map[string]string{"ext": "db.example.net.", "loop": "127.0.0.1", "loop6": "::1", "mapped": "::ffff:127.0.0.1",
+		"meta": "169.254.169.254", "any": "0.0.0.0", "lh": "localhost", "lhsub": "admin.LOCALHOST.", "extnone": ""}
+	var rules []string
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		w.services = append(w.services, obj[Service](t, `{"metadata": {"namespace": "default", "name": "`+name+`"}, "spec": {"type": "ExternalName", "externalName": "`+names[name]+`", "ports": [{"port": 2019}]}}`))
+		rules = append(rules, `{"matches": [{"path": {"value": "/`+name+`"}}], "backendRefs": [{"name": "`+name+`", "port": 2019}]}`)
+	}
+	w.routes = []*HTTPRoute{obj[HTTPRoute](t, `{"metadata": {"namespace": "default", "name": "ext", "creationTimestamp": "2026-01-01T00:00:00Z"}, "spec": {
+  "parentRefs": [{"name": "gw", "sectionName": "http"}], "rules": [`+strings.Join(rules, ", ")+`]}}`)}
+	tr := newTranslator("k8s", &config.KubernetesProvider{AllowExternalName: true}, w.snapshot(), "/certs")
+	data := tr.run()
+	var p part
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("%v: %s", err, data)
+	}
+	checkPart(t, data)
+	upstreams := map[string]outUpstream{}
+	for _, u := range p.Upstreams {
+		upstreams[u.Name] = u
+	}
+	if u := upstreams["default.ext.2019"]; toJSON(u.Addresses) != `["db.example.net.:2019"]` || !u.DenyInternal {
+		t.Errorf("an ExternalName's upstream: %+v", u)
+	}
+	for name, host := range names {
+		if name == "ext" {
+			continue
+		}
+		if u, ok := upstreams["default."+name+".2019"]; ok {
+			t.Errorf("ExternalName %q has an upstream: %+v", host, u)
+		}
+		if name == "extnone" {
+			continue
+		}
+		want := "is a loopback, link-local, unspecified or multicast address"
+		if strings.Contains(strings.ToLower(host), "localhost") {
+			want = "is this host"
+		}
+		if !slices.ContainsFunc(tr.problems, func(p string) bool {
+			return strings.Contains(p, "service default/"+name+": ") && strings.Contains(p, want)
+		}) {
+			t.Errorf("ExternalName %q: no problem %q in:\n%s", host, want, strings.Join(tr.problems, "\n"))
+		}
 	}
 }

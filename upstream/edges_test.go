@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	fib "github.com/lesismal/fib"
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
@@ -78,7 +79,7 @@ func TestProberEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pr := newProber(engine, c, "http", nil, []*Backend{{Address: "127.0.0.1:1", Weight: 1}})
+	pr := newProber(engine, c, "http", nil, []*Backend{{Address: "127.0.0.1:1", Weight: 1}}, (*fib.Engine).DialWithHandler)
 	pr.jitter = 0
 	if d := pr.spread(); d != 0 {
 		t.Fatalf("spread %v without jitter", d)

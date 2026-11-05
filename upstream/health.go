@@ -14,6 +14,7 @@ import (
 	fibhttp "github.com/lesismal/fib/http"
 
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/netguard"
 )
 
 // prober runs an upstream's active health check: a probe of each backend
@@ -25,7 +26,8 @@ import (
 type prober struct {
 	check  *config.HealthCheck
 	engine *fib.Engine
-	client *fibhttp.Client // for http probes; nil for tcp
+	dial   netguard.DialFunc // the pool's Dial, for tcp probes
+	client *fibhttp.Client   // for http probes; nil for tcp
 	scheme string
 
 	interval, timeout, jitter time.Duration
@@ -50,9 +52,9 @@ type probeTarget struct {
 
 // newProber returns the prober of a pool's backends, sending http probes
 // with the pool's TLS settings and protocol. Start starts it.
-func newProber(engine *fib.Engine, c *config.Upstream, scheme string, tlsConfig *tls.Config, backends []*Backend) *prober {
+func newProber(engine *fib.Engine, c *config.Upstream, scheme string, tlsConfig *tls.Config, backends []*Backend, dial netguard.DialFunc) *prober {
 	h := c.HealthCheck
-	pr := &prober{check: h, engine: engine, scheme: scheme, interval: h.Every(), timeout: h.Wait(), jitter: h.Spread(),
+	pr := &prober{check: h, engine: engine, dial: dial, scheme: scheme, interval: h.Every(), timeout: h.Wait(), jitter: h.Spread(),
 		fails: h.FailsNeeded(), passes: h.PassesNeeded()}
 	if h.Type != config.HealthTCP {
 		cc := fibhttp.DefaultClientConfig()
@@ -73,6 +75,9 @@ func newProber(engine *fib.Engine, c *config.Upstream, scheme string, tlsConfig 
 		cc.MaxResponseHeaderBytes = 64 << 10
 		cc.TLSConfig = tlsConfig
 		cc.UnencryptedHTTP2 = c.Protocol == config.ProtocolH2C
+		if c.DenyInternal {
+			cc.Dial = dial
+		}
 		pr.client = fibhttp.NewClient(engine, cc)
 	}
 	path := h.Path
@@ -150,7 +155,7 @@ func (pr *prober) probe(i int, t *probeTarget) {
 
 // probeTCP passes once a connection to t opens, and closes it at once.
 func (pr *prober) probeTCP(t *probeTarget, done func(bool)) {
-	err := pr.engine.DialWithHandler("tcp", t.address, pr.timeout, discard{}, func(c *fib.Connection, err error) {
+	err := pr.dial(pr.engine, "tcp", t.address, pr.timeout, discard{}, func(c *fib.Connection, err error) {
 		if c != nil {
 			_ = c.Close()
 		}

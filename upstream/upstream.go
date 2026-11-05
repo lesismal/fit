@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"errors"
 	stdhttp "net/http"
+	"net/netip"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/internal/fibconf"
+	"github.com/lesismal/fit/internal/netguard"
 	"github.com/lesismal/fit/observe"
 )
 
@@ -63,6 +65,10 @@ var ErrClosed = errors.New("upstream: the pool is closed")
 // answers it with 503, and it counts against no backend's health.
 var ErrBusy = fibhttp.ErrTooManyPending
 
+// ErrInternal is how a connection to an address deny_internal refuses
+// fails: the proxy answers it with 502, as a connect that failed.
+var ErrInternal = errors.New("upstream: the address is loopback, link-local, unspecified, multicast or the host's own, which deny_internal refuses")
+
 // Pool sends requests to an upstream's addresses, over connections it keeps.
 // It is safe for concurrent use.
 type Pool struct {
@@ -77,6 +83,9 @@ type Pool struct {
 	// connect bounds opening a connection, for the pool's client and for
 	// what dials the addresses itself, as a TCP service does.
 	connect time.Duration
+	// denyInternal refuses connections to internal addresses; see
+	// config.Upstream.DenyInternal.
+	denyInternal bool
 	// maxFails failures within failTimeout take a backend out of rotation
 	// for failTimeout.
 	maxFails    int
@@ -118,6 +127,7 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	}}
 	p.users.Store(1)
 	p.connect = orDefault(c.ConnectTimeout.Std(), DefaultConnectTimeout)
+	p.denyInternal = c.DenyInternal
 	for i, addr := range c.Addresses {
 		weight := 1
 		if i < len(c.Weights) {
@@ -211,9 +221,12 @@ func New(engine *fib.Engine, c *config.Upstream) (*Pool, error) {
 	// bounds the connections.
 	cc.UnencryptedHTTP2 = c.Protocol == "h2c"
 	cc.TLSConfig = tlsConfig
+	if p.denyInternal {
+		cc.Dial = p.Dial
+	}
 	p.client = fibhttp.NewClient(engine, cc)
 	if c.HealthCheck != nil {
-		p.prober = newProber(engine, c, p.scheme, tlsConfig, p.backends)
+		p.prober = newProber(engine, c, p.scheme, tlsConfig, p.backends, p.Dial)
 		p.prober.start()
 	}
 	return p, nil
@@ -237,6 +250,23 @@ func orDefault(d, def time.Duration) time.Duration {
 // ConnectTimeout returns how long opening a connection to one of the
 // upstream's addresses may take.
 func (p *Pool) ConnectTimeout() time.Duration { return p.connect }
+
+// Dial opens a connection to one of the upstream's addresses, as
+// engine.DialWithHandler does, for what dials them itself, as a TCP service
+// does. With deny_internal, a connection to an internal address is closed
+// as soon as it is open, before handler hears of it, and done is told
+// ErrInternal.
+func (p *Pool) Dial(engine *fib.Engine, network, addr string, timeout time.Duration,
+	handler fib.Handler, done func(*fib.Connection, error)) error {
+	if !p.denyInternal {
+		return engine.DialWithHandler(network, addr, timeout, handler, done)
+	}
+	return netguard.Dial(nil, engine, network, addr, timeout, handler, done, external, ErrInternal)
+}
+
+// external reports whether a connection to remote, from local, goes to an
+// address deny_internal lets through.
+func external(remote, local netip.Addr) bool { return !netguard.Refused(remote, local, nil) }
 
 // Timeouts returns the upstream's response timeouts.
 func (p *Pool) Timeouts() Timeouts { return p.timeouts }
