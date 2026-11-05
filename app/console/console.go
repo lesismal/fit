@@ -233,10 +233,7 @@ func (a *API) HandlePrefix(method, prefix string, h Handler) {
 // with its own bound on connections.
 func Start(engine *fib.Engine, o Options) (*Console, error) {
 	cfg := o.Config
-	logins, err := login.New(login.OptionsOf(cfg.Console()))
-	if err != nil {
-		return nil, err
-	}
+	logins := login.New(login.OptionsOf(cfg.Console()))
 	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes,
 		idle: idleTimeout, unauthIdle: unauthIdleTimeout,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
@@ -283,6 +280,7 @@ func Start(engine *fib.Engine, o Options) (*Console, error) {
 	// mptcp is the pages member's own, on a role's console and on
 	// admin.console alike: the login behind the binding is the same either
 	// way, only the sockets the kernel opens differ.
+	var err error
 	if c.index, err = engine.AddBinding(fib.Binding{Addr: cfg.Address, Handler: c.limit, MultipathTCP: cfg.MPTCP}); err != nil {
 		return nil, fmt.Errorf("console: %w", err)
 	}

@@ -738,14 +738,9 @@ func (a *ACME) accountSigner(ctx context.Context) (crypto.Signer, error) {
 	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("loading the account key: %w", err)
 	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
+	// A P-256 key: making and marshalling it cannot fail.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKCS8PrivateKey(key)
 	if err := a.storage.Store(ctx, a.accountKey(), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
 		return nil, fmt.Errorf("storing the account key: %w", err)
 	}
@@ -775,10 +770,8 @@ func (a *ACME) obtain(ctx context.Context, name string, attempt int) (*tls.Certi
 	if order.URI == "" {
 		order.URI = uri
 	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
+	// A P-256 key: making and marshalling it cannot fail.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{name}}, key)
 	if err != nil {
 		return nil, nil, err
@@ -787,10 +780,7 @@ func (a *ACME) obtain(ctx context.Context, name string, attempt int) (*tls.Certi
 	if err != nil {
 		return nil, nil, fmt.Errorf("finalizing the order: %w", err)
 	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, nil, err
-	}
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
 	var data []byte
 	for _, der := range chain {
 		data = append(data, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)

@@ -248,11 +248,9 @@ func (cs *Console) accountPassword(r *console.Request) {
 			cs.failedPassword(r, addr)
 			return
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-		if err != nil {
-			_ = console.Error(r.Context, http.StatusInternalServerError, "hashing the password: "+err.Error())
-			return
-		}
+		// passwordProblem kept it to bcrypt's 72 bytes: hashing it cannot
+		// fail.
+		hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 		if err := cs.savePassword(user, string(hash)); err != nil {
 			_ = console.Error(r.Context, http.StatusInternalServerError, "saving the password: "+err.Error())
 			return
@@ -295,11 +293,9 @@ func (cs *Console) userPassword(r *console.Request) {
 	}
 	caller, target := r.User, body.Username
 	r.Go(func() {
-		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-		if err != nil {
-			_ = console.Error(r.Context, http.StatusInternalServerError, "hashing the password: "+err.Error())
-			return
-		}
+		// passwordProblem kept it to bcrypt's 72 bytes: hashing it cannot
+		// fail.
+		hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 		if err := cs.savePassword(target, string(hash)); err != nil {
 			_ = console.Error(r.Context, http.StatusInternalServerError, "saving the password: "+err.Error())
 			return

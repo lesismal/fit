@@ -15,7 +15,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"fmt"
 	"net"
 	"net/netip"
 	"slices"
@@ -96,7 +95,7 @@ type failures struct {
 }
 
 // New returns the logins o describes, with no session yet.
-func New(o Options) (*Logins, error) {
+func New(o Options) *Logins {
 	l := &Logins{
 		users: map[string][]byte{}, temp: map[string]time.Time{}, idle: o.Idle, lifetime: o.Lifetime, max: max(o.MaxSessions, 1),
 		now: time.Now, checks: make(chan struct{}, Checks),
@@ -109,12 +108,11 @@ func New(o Options) (*Logins, error) {
 			cost = n
 		}
 	}
-	// An unknown name costs what a known one does.
-	var err error
-	if l.dummy, err = bcrypt.GenerateFromPassword([]byte(rand.Text()), cost); err != nil {
-		return nil, fmt.Errorf("login: %w", err)
-	}
-	return l, nil
+	// An unknown name costs what a known one does. The cost is bcrypt's
+	// default or one read from a hash, so valid, and the password short:
+	// hashing it cannot fail.
+	l.dummy, _ = bcrypt.GenerateFromPassword([]byte(rand.Text()), cost)
+	return l
 }
 
 // SetClock replaces the clock, for tests.

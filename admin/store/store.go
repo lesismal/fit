@@ -144,9 +144,7 @@ func Create(path, password string) (*Store, error) {
 		return nil, errors.New("store: the password is empty")
 	}
 	s := &Store{path: path, password: password, params: DefaultParams}
-	if _, err := rand.Read(s.salt[:]); err != nil {
-		return nil, fmt.Errorf("store: %w", err)
-	}
+	_, _ = rand.Read(s.salt[:]) // never fails: it crashes the program instead
 	s.derive()
 	return s, nil
 }
@@ -215,10 +213,7 @@ func encode(data []byte, users []User) ([]byte, error) {
 	b.WriteString(`{"config":`)
 	b.Write(data)
 	if len(users) > 0 {
-		u, err := json.Marshal(users)
-		if err != nil {
-			return nil, fmt.Errorf("store: the users: %w", err)
-		}
+		u, _ := json.Marshal(users) // strings only: it cannot fail
 		b.WriteString(`,"users":`)
 		b.Write(u)
 	}

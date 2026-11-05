@@ -533,9 +533,7 @@ func printApplied(stdout, stderr io.Writer, r admin.Result) {
 // admin.console set, as -admin asks, and the default console user, whose
 // password is temporary, when the config names no user.
 func withDefaultAdmin(std []byte) ([]byte, string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(admin.DefaultConsolePassword), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, "", err
-	}
+	// A short password at the default cost: hashing it cannot fail.
+	hash, _ := bcrypt.GenerateFromPassword([]byte(admin.DefaultConsolePassword), bcrypt.DefaultCost)
 	return admin.WithDefaultConsole(std, string(hash))
 }

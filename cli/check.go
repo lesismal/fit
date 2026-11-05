@@ -272,12 +272,10 @@ var errCheckChanged = errors.New("the running config changed since the check, so
 // reconcile sends the fixes chosen to POST /config/reconcile, with etag as
 // the config they were chosen from.
 func (api *checkAPI) reconcile(etag string, fixes []checkFix) (*checkApplied, error) {
-	body, err := json.Marshal(struct {
+	// Strings only: marshalling them cannot fail.
+	body, _ := json.Marshal(struct {
 		Fixes []checkFix `json:"fixes"`
 	}{fixes})
-	if err != nil {
-		return nil, err
-	}
 	data, status, err := api.do(http.MethodPost, "/config/reconcile", body, etag)
 	if err != nil {
 		return nil, err

@@ -15,11 +15,8 @@ import (
 func newLogins(t *testing.T) (*Logins, *time.Time) {
 	t.Helper()
 	hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
-	l, err := New(Options{Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}},
+	l := New(Options{Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}},
 		Idle: time.Minute, Lifetime: time.Hour, MaxSessions: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now()
 	l.SetClock(func() time.Time { return now })
 	return l, &now
@@ -163,11 +160,8 @@ func TestUsersAndPasswords(t *testing.T) {
 // kept; an empty token keeps none.
 func TestEndUserSessions(t *testing.T) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
-	l, err := New(Options{Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}},
+	l := New(Options{Users: []config.ConsoleUser{{Username: "admin", PasswordHash: string(hash)}},
 		Idle: time.Minute, Lifetime: time.Hour, MaxSessions: 8})
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now()
 	l.SetClock(func() time.Time { return now })
 	l.SetPassword("bob", hash)
