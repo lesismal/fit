@@ -609,8 +609,11 @@
             // // integer; default 302.
             // "status": 302,
 
-            // // A regular expression in Go's syntax that the path must match for the request to be
-            // // redirected; the rest go on to the handler. Every request is redirected when left out.
+            // // A regular expression in Go's syntax that the path, as escaped ("/a%20b", "/a%2Fb"), must
+            // // match for the request to be redirected; the rest go on to the handler. Every request is
+            // // redirected when left out. A URL made from the request that would leave the site, which to
+            // // does not, is answered 400: one that starts with "//" or "/\", and, when to starts with a
+            // // group ($1), one with a scheme.
             // // string.
             // "regexp": "^/old/(.*)$",
           // },

@@ -20,7 +20,7 @@ func init() {
 
 // Rewrite changes the request's path: it strips a prefix, replaces what a
 // regular expression matches, and adds a prefix, in that order. The route
-// has already been picked by the path as the client sent it; the handler,
+// has already been picked by the request's canonical path; the handler,
 // and the upstream a proxy sends the request to, get the new one.
 type Rewrite struct {
 	StripPrefix []string `json:"strip_prefix,omitempty" doc:"Prefixes to take off the path: the first that the path starts with, at a segment boundary, is removed, and what is left starts with '/'. \"/api\" makes \"/api/users\" \"/users\" and \"/api\" \"/\", and leaves \"/apix\" alone."`
@@ -112,9 +112,12 @@ func cutSegments(p, prefix string) (string, bool) {
 type Redirect struct {
 	To     string `json:"to" fit:"required" doc:"Where to: a URL or a path, in which {scheme}, {host} (with its port, as the client sent it), {path}, {query} (without the '?') and {uri} (the path and query) stand for the request's, and, with regexp, $1 or ${name} for its groups, as in \"https://{host}{uri}\" or \"/new/$1\"."`
 	Status int    `json:"status,omitempty" default:"302" doc:"The status: 301 and 308 are permanent, 302, 303 and 307 temporary; 307 and 308 keep the method and body. 302 when left out."`
-	Regexp string `json:"regexp,omitempty" doc:"A regular expression in Go's syntax that the path must match for the request to be redirected; the rest go on to the handler. Every request is redirected when left out."`
+	Regexp string `json:"regexp,omitempty" doc:"A regular expression in Go's syntax that the path, as escaped (\"/a%20b\", \"/a%2Fb\"), must match for the request to be redirected; the rest go on to the handler. Every request is redirected when left out. A URL made from the request that would leave the site, which to does not, is answered 400: one that starts with \"//\" or \"/\\\", and, when to starts with a group ($1), one with a scheme."`
 
 	re *regexp.Regexp
+	// offSite is whether To itself starts with "//" or "/\", a URL on
+	// another host, which the request's parts may then follow.
+	offSite bool
 }
 
 // Provision checks the params.
@@ -129,6 +132,7 @@ func (rd *Redirect) Provision(ctx *module.Context) error {
 	if strings.ContainsAny(rd.To, "\r\n\x00") {
 		return ctx.Errorf("to", "the URL holds a line break or NUL")
 	}
+	rd.offSite = otherHost(rd.To)
 	if rd.Regexp != "" {
 		re, err := regexp.Compile(rd.Regexp)
 		if err != nil {
@@ -144,18 +148,63 @@ func (rd *Redirect) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 		to := rd.To
 		if rd.re != nil {
-			m := rd.re.FindStringSubmatchIndex(c.Request.URL.Path)
+			// The groups are taken from the path as escaped, so that what
+			// the client wrote encoded, as "%5C" or "%2F", stays so in the
+			// URL.
+			p := c.Request.URL.EscapedPath()
+			m := rd.re.FindStringSubmatchIndex(p)
 			if m == nil {
 				next.ServeHTTP(c)
 				return
 			}
-			to = string(rd.re.ExpandString(nil, to, c.Request.URL.Path, m))
+			to = string(rd.re.ExpandString(nil, to, p, m))
+		}
+		location := expand(to, c.Request)
+		if !rd.offSite && (otherHost(location) || strings.HasPrefix(rd.To, "$") && hasScheme(location)) {
+			// The request's parts made a URL on another host: an open
+			// redirect.
+			_ = c.Respond(stdhttp.StatusBadRequest, "text/plain; charset=utf-8", badTarget)
+			return
 		}
 		_ = c.WriteResponse(fibhttp.Response{
 			StatusCode: rd.Status,
-			Header:     stdhttp.Header{"Location": {expand(to, c.Request)}},
+			Header:     stdhttp.Header{"Location": {location}},
 		})
 	})
+}
+
+var badTarget = []byte("400 bad redirect target\n")
+
+// otherHost reports whether a browser takes the URL u for one on another
+// host with the same scheme: one that starts with two slashes, either of
+// which may be a '\\', as browsers take it for '/', after the spaces and
+// controls they skip.
+func otherHost(u string) bool {
+	n := 0
+	for i := 0; i < len(u) && n < 2; i++ {
+		switch c := u[i]; {
+		case c == '\t' || c == '\n' || c == '\r' || n == 0 && c <= ' ':
+		case c == '/' || c == '\\':
+			n++
+		default:
+			return false
+		}
+	}
+	return n == 2
+}
+
+// hasScheme reports whether the URL u starts with a scheme, a ':' coming
+// before any '/', '?' or '#'.
+func hasScheme(u string) bool {
+	for i := 0; i < len(u); i++ {
+		switch u[i] {
+		case ':':
+			return true
+		case '/', '?', '#':
+			return false
+		}
+	}
+	return false
 }
 
 // expand replaces the placeholders in s with r's.

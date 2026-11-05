@@ -113,6 +113,19 @@ func TestRedirect(t *testing.T) {
 		{"a fixed URL", `{"to": "/elsewhere", "status": 301}`, false, "/x", 301, "/elsewhere"},
 		{"regexp matched", `{"to": "/new/$1{query}", "regexp": "^/old/(.*)$"}`, false, "/old/page?x", 302, "/new/pagex"},
 		{"regexp not matched", `{"to": "/new/$1", "regexp": "^/old/(.*)$"}`, false, "/other", 200, ""},
+		{"groups stay escaped", `{"to": "/new/$1", "regexp": "^/old/(.*)$"}`, false, "/old/a%20b%2Fc", 302, "/new/a%20b%2Fc"},
+		{"regexp matches escaped", `{"to": "/new", "regexp": "^/a%20b$"}`, false, "/a%20b", 302, "/new"},
+		// Open redirects: what the client sent makes a URL on another host.
+		{"group makes //", `{"to": "/$1", "regexp": "^/go/(.*)$"}`, false, "/go//evil.com", 400, ""},
+		{"group makes /backslash", `{"to": "/$1", "regexp": "^/go/(.*)$"}`, false, "/go/%5Cevil.com", 302, "/%5Cevil.com"},
+		{"raw backslash", `{"to": "/$1", "regexp": "^/go/(.*)$"}`, false, `/go/\evil.com`, 302, "/%5Cevil.com"},
+		{"path makes //", `{"to": "{path}"}`, false, "//evil.com/x", 400, ""},
+		{"query makes //", `{"to": "/{query}"}`, false, "/a?/evil.com", 400, ""},
+		{"query makes /backslash", `{"to": "/{query}"}`, false, `/a?\evil.com`, 400, ""},
+		{"tab between", `{"to": "/{query}"}`, false, "/a?%09/evil.com", 302, "/%09/evil.com"},
+		{"group makes a scheme", `{"to": "$1", "regexp": "^/go/(.*)$"}`, false, "/go/https:/evil.com", 400, ""},
+		{"group makes a path", `{"to": "$1", "regexp": "^/go(/.*)$"}`, false, "/go/a:b", 302, "/a:b"},
+		{"to on another host", `{"to": "//cdn.example/$1", "regexp": "^/s/(.*)$"}`, false, "/s/x.js", 302, "//cdn.example/x.js"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, err := load(t, "redirect", tt.params)
@@ -128,6 +141,17 @@ func TestRedirect(t *testing.T) {
 				t.Errorf("got %d %q, want %d %q", res.StatusCode, res.Header.Get("Location"), tt.status, tt.location)
 			}
 		})
+	}
+}
+
+func TestOtherHost(t *testing.T) {
+	for u, want := range map[string]bool{
+		"//a": true, `/\a`: true, `\\a`: true, `\/a`: true, " //a": true, "/\t/a": true, "\x01/\n/a": true,
+		"/a": false, "/": false, "": false, "a//b": false, "/ /a": false, "https://a": false,
+	} {
+		if got := otherHost(u); got != want {
+			t.Errorf("otherHost(%q) = %v", u, got)
+		}
 	}
 }
 

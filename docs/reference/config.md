@@ -4747,7 +4747,7 @@ In JSON:
 | --- | --- | --- | --- |
 | `to` | string |  | Required. Where to: a URL or a path, in which {scheme}, {host} (with its port, as the client sent it), {path}, {query} (without the '?') and {uri} (the path and query) stand for the request's, and, with regexp, $1 or ${name} for its groups, as in "https://{host}{uri}" or "/new/$1". |
 | `status` | integer | `302` | The status: 301 and 308 are permanent, 302, 303 and 307 temporary; 307 and 308 keep the method and body. 302 when left out. |
-| `regexp` | string |  | A regular expression in Go's syntax that the path must match for the request to be redirected; the rest go on to the handler. Every request is redirected when left out. |
+| `regexp` | string |  | A regular expression in Go's syntax that the path, as escaped ("/a%20b", "/a%2Fb"), must match for the request to be redirected; the rest go on to the handler. Every request is redirected when left out. A URL made from the request that would leave the site, which to does not, is answered 400: one that starts with "//" or "/\", and, when to starts with a group ($1), one with a scheme. |
 
 <a id="http-middleware-rewrite"></a>
 
