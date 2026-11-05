@@ -44,7 +44,7 @@ type ProxyHandler struct {
 	MediaAddrs  map[string]string `json:"media_addrs,omitempty" doc:"The address fit relays a media server's peers to, by the media server's address in the upstream, as {\"10.0.0.2:8080\": \"10.0.0.2:8189\"}, or an IP alone, which takes the port of its answer's candidate. When left out, the answer's first host candidate, or server-reflexive one, IPv4 first."`
 	Timeout     config.Duration   `json:"timeout,omitempty" default:"\"10s\"" doc:"The most a request may take, from its last byte to the media server's answer read whole; past it, it is answered 504. 10s when left out."`
 	MaxSDPBytes int               `json:"max_sdp_bytes,omitempty" min:"0" default:"32768" doc:"The largest request and answer passed on, an offer and an answer among them; a larger request is answered 413, and a larger answer 502. 32 KiB when left out or 0."`
-	Auth        string            `json:"auth,omitempty" doc:"The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow."`
+	Auth        string            `json:"auth,omitempty" doc:"The media_auth policy an offer must satisfy before it is sent to a media server: its credentials need action on the stream, the last segment of the POST's path, which must then be 1 to 128 letters, digits, '.', '_', '~' and '-', decoded, or the offer is answered 400. Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed on without credentials, its ID being the capability; the request's Authorization goes on to the media server as it came. Everyone may when left out, as the route's middleware allow."`
 	Action      string            `json:"action,omitempty" enum:"publish,play" doc:"What an offer asks of auth: publish for a WHIP endpoint, play for a WHEP one. Required with auth."`
 
 	auth    *mediaauth.Policy
@@ -98,14 +98,16 @@ func (h *ProxyHandler) Provision(ctx *module.Context) error {
 
 // ServeHTTP proxies an endpoint's POST and OPTIONS to a media server the
 // upstream picks, and a session's requests, its URL or a URL below it, to
-// the one that answered it.
+// the one that answered it. Paths go on escaped as they came, so that the
+// media server sees the path fit read, and auth checked: a decoded '?' or
+// '#' does not cut it short.
 func (h *ProxyHandler) ServeHTTP(c *fibhttp.Context) {
 	p := LookupProxy(h.engine)
 	if p == nil {
 		respond(c, stdhttp.StatusServiceUnavailable, "webrtc.proxy is not running", nil)
 		return
 	}
-	path := c.Request.URL.Path
+	path := c.Request.URL.EscapedPath()
 	if s, base, rest := sessionIn(p, path); s != nil {
 		h.session(c, p, s, base, rest)
 		return
@@ -113,11 +115,19 @@ func (h *ProxyHandler) ServeHTTP(c *fibhttp.Context) {
 	switch c.Request.Method {
 	case stdhttp.MethodPost:
 		endpoint := strings.TrimSuffix(path, "/")
-		h.auth.Guard(c, h.action, endpoint[strings.LastIndexByte(endpoint, '/')+1:], func(string) {
+		stream, err := url.PathUnescape(endpoint[strings.LastIndexByte(endpoint, '/')+1:])
+		if h.auth != nil && (err != nil || !streamName.MatchString(stream)) {
+			// A name no media server of fit's takes, nor a policy names
+			// but by a wildcard: refused before it is checked, so that a
+			// name that reads one way here and another there is not.
+			respond(c, stdhttp.StatusBadRequest, "the stream's name is 1 to 128 letters, digits, '.', '_', '~' and '-'", nil)
+			return
+		}
+		h.auth.Guard(c, h.action, stream, func(string) {
 			h.offer(c, p, endpoint)
 		})
 	case stdhttp.MethodOptions:
-		h.forward(c, h.pool.Pick(c.Request), c.Request.URL.Path, nil, h.passOn)
+		h.forward(c, h.pool.Pick(c.Request), path, nil, h.passOn)
 	default:
 		if sessionID.MatchString(path[strings.LastIndexByte(path, '/')+1:]) {
 			respond(c, stdhttp.StatusNotFound, "no such session", nil)
@@ -127,7 +137,8 @@ func (h *ProxyHandler) ServeHTTP(c *fibhttp.Context) {
 	}
 }
 
-// sessionIn finds a session's ID among the last segments of path: base is
+// sessionIn finds a session's ID among the last segments of path, the
+// request's escaped path: base is
 // the session's URL in fit, and rest what follows it.
 func sessionIn(p *Proxy, path string) (s *proxySession, base, rest string) {
 	end := len(path)
@@ -160,7 +171,7 @@ func (h *ProxyHandler) offer(c *fibhttp.Context, p *Proxy, endpoint string) {
 		return
 	}
 	b := h.pool.Pick(c.Request)
-	h.forward(c, b, c.Request.URL.Path, stripCandidates, func(x *exchange, resp *stdhttp.Response, body []byte, err error) {
+	h.forward(c, b, c.Request.URL.EscapedPath(), stripCandidates, func(x *exchange, resp *stdhttp.Response, body []byte, err error) {
 		if err != nil || resp.StatusCode != stdhttp.StatusCreated {
 			p.Unreserve()
 			h.passOn(x, resp, body, err)
@@ -424,7 +435,8 @@ type exchange struct {
 	doneOnce sync.Once
 }
 
-// forward sends the request c serves to b, at path, its body edited by
+// forward sends the request c serves to b, at path, escaped and maybe with
+// a query (a session's Location's), its body edited by
 // edit when not nil, and hands finish the response or the error, edit's
 // among them. b was picked for it.
 func (h *ProxyHandler) forward(c *fibhttp.Context, b *upstream.Backend, path string, edit func([]byte) ([]byte, error),

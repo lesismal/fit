@@ -1425,10 +1425,12 @@
           // "max_sdp_bytes": 32768,
 
           // // The media_auth policy an offer must satisfy before it is sent to a media server: its
-          // // credentials need action on the stream, the last segment of the POST's path. Missing or bad
-          // // credentials are answered 401 with a Bearer challenge, others 403. A session's URL is passed
-          // // on without credentials, its ID being the capability; the request's Authorization goes on to
-          // // the media server as it came. Everyone may when left out, as the route's middleware allow.
+          // // credentials need action on the stream, the last segment of the POST's path, which must then
+          // // be 1 to 128 letters, digits, '.', '_', '~' and '-', decoded, or the offer is answered 400.
+          // // Missing or bad credentials are answered 401 with a Bearer challenge, others 403. A session's
+          // // URL is passed on without credentials, its ID being the capability; the request's
+          // // Authorization goes on to the media server as it came. Everyone may when left out, as the
+          // // route's middleware allow.
           // // string.
           // "auth": "",
 

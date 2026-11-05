@@ -103,6 +103,8 @@ func freeUDPPort(t *testing.T) string {
 type fakeServer struct {
 	*httptest.Server
 	patches, deletes atomic.Int64
+	// posted is the escaped path and query of the last POST.
+	posted atomic.Value
 }
 
 const fakeAnswer = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\n" +
@@ -117,6 +119,9 @@ func startFake(t *testing.T) *fakeServer {
 	fs := &fakeServer{}
 	fs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		if r.Method == "POST" {
+			fs.posted.Store(r.URL.RequestURI())
+		}
 		switch {
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/slow"):
 			time.Sleep(3 * time.Second)
@@ -321,5 +326,52 @@ func TestRewriteSDPOnlyUDPRTP(t *testing.T) {
 	}
 	if want := netip.MustParseAddrPort("203.0.113.9:5002"); creds[0].Media != want {
 		t.Fatalf("relayed to %v, want %v", creds[0].Media, want)
+	}
+}
+
+// An offer's path goes on escaped as it came: an escaped '?' or '#' in the
+// stream's name does not cut the path short. With auth, a stream's name
+// that no media server of fit's takes is refused before it is checked, so
+// that secret%23-guest, which *-guest matches, does not publish secret.
+func TestProxyEscapedPath(t *testing.T) {
+	fs := startFake(t)
+	f := startFit(t, proxyDoc(loopbackProxy, &fit{base: fs.URL}))
+	for i, path := range []string{"/whip/a%3Fb", "/whip/a%23b", "/whip/a%2Fb"} {
+		query := "?u=e" + strconv.Itoa(i)
+		resp, body := post(t, f.base+path+query, "application/sdp", "v=0\r\n")
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, body)
+		}
+		if got, _ := fs.posted.Load().(string); got != path+query {
+			t.Fatalf("%s reached the media server as %q", path, got)
+		}
+		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, path+"/") {
+			t.Fatalf("%s: Location %q", path, loc)
+		}
+	}
+
+	const guest = "guest-token-0123456789"
+	g := startFit(t, `{
+  "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+  "media_auth": [{"name": "g", "tokens": [{"token": "`+guest+`", "publish": ["*-guest"]}]}],
+  "upstreams": [{"name": "media", "addresses": ["`+strings.TrimPrefix(fs.URL, "http://")+`"]}],
+  "routes": [{"match": {"path": ["/whip/*"]}, "handler": {"module": "webrtc_proxy", "params": {"upstream": "media", "timeout": "1s", "auth": "g", "action": "publish"}}}],
+  "webrtc": {"proxy": `+loopbackProxy+`}
+}`)
+	fs.posted.Store("")
+	for _, path := range []string{"/whip/secret%23-guest", "/whip/secret%3F-guest", "/whip/a%2Fb-guest", "/whip/s%20p-guest"} {
+		resp, _ := postSDP(t, g.base+path+"?u=g1", "v=0\r\n", bearer(guest))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: %d", path, resp.StatusCode)
+		}
+		if got, _ := fs.posted.Load().(string); got != "" {
+			t.Fatalf("%s reached the media server as %q", path, got)
+		}
+	}
+	if resp, body := postSDP(t, g.base+"/whip/cam-guest?u=g2", "v=0\r\n", bearer(guest)); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("cam-guest: %d %s", resp.StatusCode, body)
+	}
+	if got, _ := fs.posted.Load().(string); got != "/whip/cam-guest?u=g2" {
+		t.Fatalf("cam-guest reached the media server as %q", got)
 	}
 }
