@@ -96,6 +96,9 @@ func (ba *Basic) Provision(ctx *module.Context) error {
 	return nil
 }
 
+// Authenticates reports true: every request must bring a user's password.
+func (ba *Basic) Authenticates() bool { return true }
+
 // Wrap returns next behind the check.
 func (ba *Basic) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {

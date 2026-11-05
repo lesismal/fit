@@ -111,6 +111,25 @@ type Unwrapped interface {
 	Unwrapped()
 }
 
+// Authenticator is implemented by a middleware that lets a request through
+// only once it has authenticated the caller, as jwt and basic_auth do.
+// Authenticates reports whether it does so as configured: one that lets
+// some requests through unauthenticated, as client_cert with optional,
+// reports false.
+type Authenticator interface {
+	Authenticates() bool
+}
+
+// NeedsAuthentication is implemented by a handler that must serve only
+// callers a middleware of its route has authenticated, as media_tokens,
+// which hands out credentials and checks none itself. A route whose handler
+// implements it, without a middleware that is an Authenticator and
+// Authenticates, is refused when it is compiled, so that a route left
+// without one fails closed rather than serving anyone.
+type NeedsAuthentication interface {
+	NeedsAuthentication()
+}
+
 // Holder is a hold on the config a module belongs to: a module whose
 // requests outlive its handler's return takes one for each with Retain, and
 // gives it back with Release when the request is over, so that the config

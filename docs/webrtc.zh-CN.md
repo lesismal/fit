@@ -418,8 +418,9 @@ with urllib.request.urlopen(req) as resp:
   `max_ttl` 仍然限制它们。
 - **文件保留新 secret，因此重启后吊销仍然有效**，重启会重新读取它们；应用配置也会重新读取，所以只轮换某个文件再重载
   也能吊销那个分片。
-- **路由的中间件认证业务后端**——上面的 `jwt`，或 `basic_auth`、`forward_auth` 或 `rate_limit`；处理器不检查任何调用方
-  凭据，也不涉及 Admin API。路由必须匹配处理器的 `prefix` 及其下路径：该前缀之外的请求返回 404。
+- **路由的中间件认证业务后端**——上面的 `jwt`，或 `basic_auth`、`forward_auth`、不带 `optional` 的 `client_cert`；处理器
+  不检查任何调用方凭据，也不涉及 Admin API。没有其中之一的 `media_tokens` 路由在应用配置时即被拒绝，而不是把 token 和
+  吊销交给任何人；`rate_limit` 只限制调用次数，不认证任何人。路由必须匹配处理器的 `prefix` 及其下路径：该前缀之外的请求返回 404。
 
 其参数和应答见 [`media_tokens` 一章](reference/config.md#http-handlers-media_tokens)。
 

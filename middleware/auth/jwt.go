@@ -156,6 +156,9 @@ func readSmall(path string) ([]byte, error) {
 	return data, err
 }
 
+// Authenticates reports true: every request must bring a valid token.
+func (jw *JWT) Authenticates() bool { return true }
+
 // Wrap returns next behind the check.
 func (jw *JWT) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {

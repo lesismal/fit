@@ -109,6 +109,10 @@ func (fa *ForwardAuth) Drain() {
 	}
 }
 
+// Authenticates reports true: every request is let through only when the
+// auth service says so.
+func (fa *ForwardAuth) Authenticates() bool { return true }
+
 // Wrap returns next behind the check.
 func (fa *ForwardAuth) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {

@@ -276,9 +276,13 @@ func (t *templater) handlerRoutes() []*tnode {
 		if info.Name() == "respond" {
 			continue
 		}
+		doc := []string{"A route whose handler is " + info.Name() + ", with every one of its params."}
+		if _, ok := info.New().(module.NeedsAuthentication); ok {
+			doc = append(doc, "Its route must also have a middleware that authenticates the caller, jwt, basic_auth,",
+				"forward_auth or client_cert without optional: without one the config is refused.")
+		}
 		out = append(out, &tnode{isObject: true, children: []*tnode{
-			{name: "name", scalar: strconv.Quote(info.Name() + "-example"), active: true,
-				doc: []string{"A route whose handler is " + info.Name() + ", with every one of its params."}},
+			{name: "name", scalar: strconv.Quote(info.Name() + "-example"), active: true, doc: doc},
 			{name: "handler", isObject: true, active: true, children: t.moduleRef(module.Handlers, info.Name(), "")},
 		}})
 	}

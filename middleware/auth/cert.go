@@ -34,6 +34,10 @@ func (cc *ClientCert) Provision(ctx *module.Context) error {
 	return nil
 }
 
+// Authenticates reports whether every request must bring a certificate: not
+// with optional.
+func (cc *ClientCert) Authenticates() bool { return !cc.Optional }
+
 // Wrap returns next behind the check.
 func (cc *ClientCert) Wrap(next module.Handler) module.Handler {
 	return fibhttp.HandlerFunc(func(c *fibhttp.Context) {

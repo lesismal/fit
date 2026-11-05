@@ -89,7 +89,7 @@ func conf(secretFile, prefix, params string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"match": {"path": ["` + prefix + `", "` + prefix + `/*", "/elsewhere"]},
-    "handler": {"module": "media_tokens", "params": ` + params + `}}],
+    "middleware": [{"module": "test_authenticated"}], "handler": {"module": "media_tokens", "params": ` + params + `}}],
   "media_auth": [{"name": "live", "secret_file": "` + secretFile + `", "token_ttl": "1h"}]
 }`
 }
@@ -400,7 +400,7 @@ func TestProvisionNeedsSecretFile(t *testing.T) {
 			`there is no media_auth policy named "nope"`},
 	} {
 		doc := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "routes": [{"handler": {"module": "media_tokens", "params": ` + tc.params + `}}],
+  "routes": [{"middleware": [{"module": "test_authenticated"}], "handler": {"module": "media_tokens", "params": ` + tc.params + `}}],
   "media_auth": ` + tc.mediaAuth + `}`
 		c, err := config.Load([]byte(doc))
 		if err != nil {
@@ -517,7 +517,7 @@ func ringConf(files map[string]string, prefix, params string) string {
 	return `{
   "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
   "routes": [{"match": {"path": ["` + prefix + `", "` + prefix + `/*", "/elsewhere"]},
-    "handler": {"module": "media_tokens", "params": ` + params + `}}],
+    "middleware": [{"module": "test_authenticated"}], "handler": {"module": "media_tokens", "params": ` + params + `}}],
   "media_auth": [{"name": "live", "keys": [` + strings.Join(keys, ",") + `], "token_ttl": "1h"}]
 }`
 }
@@ -722,7 +722,7 @@ func TestRevokeRingChoices(t *testing.T) {
 // error, since that key could not be rotated.
 func TestKeyringProvision(t *testing.T) {
 	doc := `{"listeners": [{"name": "web", "address": "127.0.0.1:0"}],
-  "routes": [{"handler": {"module": "media_tokens", "params": {"auth": "live"}}}],
+  "routes": [{"middleware": [{"module": "test_authenticated"}], "handler": {"module": "media_tokens", "params": {"auth": "live"}}}],
   "media_auth": [{"name": "live", "keys": [
     {"key": "k1", "secret_file": "` + newSecretFile(t) + `"},
     {"key": "k2", "secret": "0123456789abcdef-inline"}]}]}`

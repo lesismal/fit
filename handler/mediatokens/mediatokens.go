@@ -148,6 +148,12 @@ func (t *Tokens) Provision(ctx *module.Context) error {
 	return nil
 }
 
+// NeedsAuthentication marks the handler as one whose route must
+// authenticate its callers: it checks no caller credentials itself, and
+// whoever reaches it may sign tokens for any stream its prefixes allow, or
+// rotate the policy's secrets.
+func (t *Tokens) NeedsAuthentication() {}
+
 // Cleanup stops the revoke pool: its worker ends once the write it holds is
 // done and the queue is empty.
 func (t *Tokens) Cleanup() {

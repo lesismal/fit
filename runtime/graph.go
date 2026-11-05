@@ -392,6 +392,13 @@ func Compile(c *config.Config, env Env) (*Graph, error) {
 	return g, nil
 }
 
+// authenticates reports whether m lets a request through only once it has
+// authenticated the caller.
+func authenticates(m module.Middleware) bool {
+	a, ok := m.(module.Authenticator)
+	return ok && a.Authenticates()
+}
+
 // newRouter builds the router for a listener's routes.
 func newRouter(routes []*Route) *router.Router[*Route] {
 	rs := make([]router.Route[*Route], len(routes))
@@ -429,6 +436,10 @@ func (g *Graph) compileRoute(rc config.Route, env *module.Env) (*Route, error) {
 	}
 	if len(errs) > 0 {
 		return nil, errs
+	}
+	if _, ok := h.(module.NeedsAuthentication); ok && !slices.ContainsFunc(mws, authenticates) {
+		return nil, rc.Handler.At.Field("module").Errorf("%s.%s serves only callers its route authenticates: the route needs a middleware that does, jwt, basic_auth, forward_auth, or client_cert without optional",
+			module.Handlers, rc.Handler.Module)
 	}
 	_, inline := h.(module.Inline)
 	inline = inline && len(mws) == 0

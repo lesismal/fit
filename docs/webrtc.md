@@ -475,8 +475,10 @@ or `json.dumps({"all": True})` as the Python request's data; the answer names ev
   outlives a restart; a config apply re-reads them too, so rotating a file and reloading revokes
   that shard as well.
 - **The route's middleware authenticates the business backend** — `jwt` above, or `basic_auth`,
-  `forward_auth` or `rate_limit`; the handler checks no caller credentials, and the Admin API is not
-  involved. The route must match the handler's `prefix` and what is below it: a request outside it
+  `forward_auth`, or `client_cert` without `optional`; the handler checks no caller credentials, and
+  the Admin API is not involved. A `media_tokens` route without one of these is refused when the
+  config is applied, rather than handing tokens, and revokes, to anyone; `rate_limit` bounds the
+  calls but authenticates no one. The route must match the handler's `prefix` and what is below it: a request outside it
   is 404.
 
 Its params and answers are in the [`media_tokens` chapter](reference/config.md#http-handlers-media_tokens).

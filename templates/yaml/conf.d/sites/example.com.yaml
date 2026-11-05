@@ -930,6 +930,8 @@ routes:
         # stall_timeout: "30s"
   # -
     # # A route whose handler is media_tokens, with every one of its params.
+    # # Its route must also have a middleware that authenticates the caller, jwt, basic_auth,
+    # # forward_auth or client_cert without optional: without one the config is refused.
     # name: "media_tokens-example"
     # handler:
       # # Issues time-limited media_auth tokens in batches, for a route a business backend calls, and

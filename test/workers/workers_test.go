@@ -172,7 +172,10 @@ func cases(e *env) []tc {
 		// A path outside the batch endpoint's prefix is 404, answered
 		// inline; a revoke's write on its pool is handler/mediatokens'
 		// TestRevoke, TestRevokePoolIsBusy and TestRevokeTimeout.
-		{module: "media_tokens", handler: `{"module": "media_tokens", "params": {"auth": "live"}}`, status: 404, inline: true},
+		// Its route must authenticate the caller: jwt here, which checks
+		// an HMAC token at once.
+		{module: "media_tokens", middleware: jwt.middleware, header: jwt.header,
+			handler: `{"module": "media_tokens", "params": {"auth": "live"}}`, status: 404, inline: true},
 		{module: "test_late", handler: lateHandler, status: 200},
 	}
 }
