@@ -94,6 +94,12 @@ const VersionHeader = "Fit-Config-Version"
 //	                            /media/library/{name} one library, with a
 //	                            page of its items; .../items/{id} one item;
 //	                            POST .../rescan scans it again (medialib.go)
+//	GET    /streaming/channels  the streaming role's channels: what each
+//	                            plays and what comes next; POST
+//	                            /streaming/channels/{name} starts, stops
+//	                            or skips one; /streaming/push the push
+//	                            targets, POST .../{name} starts, stops or
+//	                            restarts one (channels.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
 //
@@ -245,6 +251,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /media/library/{name}", s.libraryPage)
 	mux.HandleFunc("GET /media/library/{name}/items/{id...}", s.libraryItem)
 	mux.HandleFunc("POST /media/library/{name}/rescan", s.rescan)
+	mux.HandleFunc("GET /streaming/channels", s.listChannels)
+	mux.HandleFunc("GET /streaming/channels/{name...}", s.getChannel)
+	mux.HandleFunc("POST /streaming/channels/{name...}", s.channelAction)
+	mux.HandleFunc("GET /streaming/push", s.listPush)
+	mux.HandleFunc("POST /streaming/push/{name...}", s.pushAction)
 	return mux
 }
 
