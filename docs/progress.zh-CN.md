@@ -4333,3 +4333,19 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   由单独的 CI 任务运行；证明页面工具不会提供；MCP 页在浏览器中以中英文检查过。
 - **缺口**：没有手工试用 Claude Code（`claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"`）；
   参考资源只有英文；没有变更通知。实现时所做的决策在计划的 I130 一节，待审查。
+
+
+### I128 在工作所在处问 AI — 已完成
+
+- **Ask AI**（`app/workbench/web/ai/ask.js`）：`FitAI.askButton(spec)` 与 `FitAI.ask(spec)` 在新对话中打开面板，带上技能、其输入、作为
+  页面选中内容的提问对象，以及用用户语言写的问题，并立即发送（`useSkill` 新增的 `send`）；技能被禁用时不带技能并注明；没有 `ai` 模块
+  或级别为 `off` 时没有按钮。
+- **入口**：保存的问题、失败的保存与无法解析的原始标签页用 `explain`（输入 `error`，只涉及一个成员时带 `path`；每个问题前后带行号的
+  内容，密钥脱敏，或问题路径处的草稿值），每个表单字段也用 `explain`（输入 `path`，即其 schema 路径）；每个 Consistency 差异用
+  `drift-explain`（输入 `difference`）；每个 Engine 端口与路由条目、Routes 的每条路由、有后端宕机的上游（Overview、Upstreams）、刷新
+  之间 Overview 错误计数的突增，以及 LLM 与隧道链路图用 `diagnose`。菜单节点与条目接受 `ask`（`core/workbench.js`）。
+- **文档**：控制台文档中的“在页面上问 AI”，中英文。
+- **测试**：竞态检测下的 `make test-changed`；`TestAskSkills` 保证每个入口都对应内置技能及其输入；在浏览器中对脚本化模型以中英文验证：
+  每个入口的第一次回答都用到了其技能、输入与选中内容；`off` 级别用户或没有 `admin.assistant` 时没有按钮。
+- **缺口**：浏览器中没有点过 drift 行（与 info 行同一路径）；`schema_describe` 无法解析模块 params 的路径；`llm_nodes` 与
+  `tunnel_nodes` 不存在，链路图只靠发送的快照；突增只看错误计数。实现时所做的决策在计划的 I128 一节，待审查。

@@ -282,7 +282,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | done |
 | I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | done |
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | done |
-| I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
+| I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | done |
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | done |
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | done |
 | **Media library** | | | |
@@ -2150,6 +2150,34 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   them; the buttons are absent when the assistant is off or the user's level is `off`; English and
   Chinese; the bundle's tests and a browser check pass.
 - **Touches**: `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Sent at once**: a click sends the question, shown as the user's message, so one click gives an
+   answer about the thing. Alternative: prefill and wait for Enter, a model call fewer a click.
+2. **The link maps** use `diagnose`, on the selected box or line or else the whole map, the map as
+   drawn sent as the selection. Alternatives: `explain`; `llm-mesh-setup` or `tunnel-setup`, which
+   propose config.
+3. **A metrics spike** is an error counter rising between two Overview refreshes (failed requests
+   an upstream, refused connections, failed reloads), listed for 60s, as fit keeps no metric
+   history. Alternatives: thresholds; a metrics page with history.
+4. **An Engine route** is each port entry that lists routes, and each route on the Routes page, as
+   the Engine menu has no rows of single routes.
+5. **Consistency info rows** get a button too, with a question of their own, still `drift-explain`.
+6. **A difference's values are not sent**: `drift-explain` reads them, redacted, with
+   `consistency_check`.
+7. **A save error's text**: about four numbered lines each side of each problem's line, lines that set
+   secrets redacted on the page as by the server, or the draft's values at the problems' paths for a
+   forms save; at most 20 problems. Alternative: the whole text, cut.
+8. **A form field's input `path`** is its schema path (indexes and keys dropped); the indexed path goes
+   in the selection.
+9. **The context checkbox**: an Ask AI click turns the panel's "send this page" back on, so the
+   selection goes with the question.
+10. **The tunnel's path dialog** closes on Ask AI, so the panel shows.
+11. **Icons or labels**: icons on form fields, route and upstream chips and menu rows (named on hover
+    or focus); a labelled "Ask AI" on callouts, Consistency rows and map cards.
+12. **The page's bounds**: strings 1,500 characters, lists 40 items, the selection 8 KiB, under the
+    server's 16 KiB page context.
 
 ### I129 Migration and review
 

@@ -6106,3 +6106,27 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"`); the reference resources are
   English only; no change notifications. The decisions made are in the plan's I130 section, pending
   review.
+
+
+### I128 Ask AI where the work is — done
+
+- **Ask AI** (`app/workbench/web/ai/ask.js`): `FitAI.askButton(spec)` and `FitAI.ask(spec)` open the
+  panel on a new conversation with a skill, its inputs, the thing asked about as the page's
+  selection, and a question in the user's language, sent at once (`useSkill`'s new `send`); a
+  disabled skill is left out and said so; no button without the module `ai` or for level `off`.
+- **Entries**: `explain` on a save's problems, a failed save and a raw tab that does not parse (input
+  `error`, `path` when one member; the numbered lines around each problem, secrets redacted, or the
+  draft's values at the paths) and on every form field (input `path`, its schema path);
+  `drift-explain` on each Consistency difference (input `difference`); `diagnose` on each Engine port
+  and route entry, each route of Routes, an upstream with backends down (Overview, Upstreams), an
+  Overview error-counter spike between refreshes, and the LLM and tunnel link maps. Menu nodes and
+  entries take `ask` (`core/workbench.js`).
+- **Docs**: "Ask AI on the pages" in the console docs, English and Chinese.
+- **Tests**: `make test-changed` under the race detector; `TestAskSkills` holds every entry to a
+  built-in skill and its inputs; in a browser against a scripted model, English and Chinese: each
+  entry's first answer used its skill, inputs and selection; no buttons for a user at `off` or
+  without `admin.assistant`.
+- **Gaps**: no drift row was clicked in the browser (the same path as info rows); `schema_describe`
+  cannot resolve module params' paths; the link maps rely on the snapshot sent, as `llm_nodes` and
+  `tunnel_nodes` do not exist; spikes are error counters only. The decisions made are in the plan's
+  I128 section, pending review.
