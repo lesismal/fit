@@ -61,12 +61,18 @@ async function play(item, container) {
   const r = { item, container, url };
   let expires = 0;
   if (signed) {
-    r.unsignedStatus = (await fetch(url)).status;
-    const resp = await fetch('/sign?ttl=' + ttl + 's&path=' + encodeURIComponent(new URL(url).pathname));
-    const s = await resp.json();
-    url = s.urls[0];
-    expires = s.expires;
-    r.url = url.replace(/sig=[^&]*/, 'sig=REDACTED');
+    try {
+      r.unsignedStatus = (await fetch(url)).status;
+      const resp = await fetch('/sign?ttl=' + ttl + 's&path=' + encodeURIComponent(new URL(url).pathname));
+      const s = await resp.json();
+      url = s.urls[0];
+      expires = s.expires;
+      r.url = url.replace(/sig=[^&]*/, 'sig=REDACTED');
+    } catch (e) {
+      r.errors = ['signing: ' + e];
+      r.ok = false;
+      return r;
+    }
   }
   const { codecs, supported, missing } = await codecsOf(url);
   r.codecs = codecs;

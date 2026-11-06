@@ -72,7 +72,7 @@ func guardURL(p *Policy, path, resource string, setup func(*stdhttp.Request)) pl
 	out.entry = &observe.Entry{}
 	out.rec = fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
 		c.SetValue(out.entry)
-		p.GuardResource(c, "vod/films/a", resource, func(a Access) {
+		p.GuardResource(c, "vod/films/a", resource, cors, func(a Access) {
 			out.access, out.called = a, true
 			_ = c.Respond(200, "text/plain", []byte("ok"))
 		})
@@ -93,10 +93,14 @@ func signed(t *testing.T, p *Policy, resource string, v Viewer, exp time.Time, k
 // refusedFor checks that pl was refused 403 for reason.
 func refusedFor(t *testing.T, what string, pl played, reason string) {
 	t.Helper()
-	if pl.called || pl.rec.Response.StatusCode != 403 || !strings.Contains(string(pl.rec.Response.Body), "refused: "+reason) {
-		t.Fatalf("%s: %d %q, want 403 for %s", what, pl.rec.Response.StatusCode, pl.rec.Response.Body, reason)
+	if pl.called || pl.rec.Response.StatusCode != 403 || !strings.Contains(string(pl.rec.Response.Body), "refused: "+reason) ||
+		pl.rec.Response.Header.Get("Access-Control-Allow-Origin") != cors {
+		t.Fatalf("%s: %d %q %v, want 403 for %s", what, pl.rec.Response.StatusCode, pl.rec.Response.Body, pl.rec.Response.Header, reason)
 	}
 }
+
+// cors is the handler's CORS origin the refusals carry.
+const cors = "https://site.example"
 
 func allowed(t *testing.T, what string, pl played) {
 	t.Helper()

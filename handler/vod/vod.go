@@ -226,7 +226,7 @@ func (v *VOD) ServeHTTP(c *fibhttp.Context) {
 	// The item's resource, as a signed URL is signed for: the path up to
 	// and with the '/' after its ID.
 	resource := r.URL.Path[:len(v.prefix)+i+1]
-	v.auth.GuardResource(c, "vod/"+v.Library+"/"+id, resource, func(a mediaauth.Access) { v.serve(c, l, it, nm, a) })
+	v.auth.GuardResource(c, "vod/"+v.Library+"/"+id, resource, v.CORS, func(a mediaauth.Access) { v.serve(c, l, it, nm, a) })
 }
 
 // personal returns a playlist's header, h, for the viewer whose access a

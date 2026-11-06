@@ -116,10 +116,12 @@ func redact(uri string) string {
 // by REDACTED in the request's RequestURI, as a token is, so that the
 // access log never holds it; and, with url_signing's cookie, a request with
 // the cookie GrantCookie is let in by a grant of it that holds. Any other
-// request is checked as Guard checks it. next gets what let the request in,
+// request is checked as Guard checks it. A refusal carries cors, the
+// handler's own, as Access-Control-Allow-Origin when it is not empty, so
+// that a player on another origin sees why. next gets what let the request in,
 // for the playlists it serves to hand on; it is called before
 // GuardResource returns but for a bcrypt check, as Guard's.
-func (p *Policy) GuardResource(c *fibhttp.Context, stream, resource string, next func(Access)) {
+func (p *Policy) GuardResource(c *fibhttp.Context, stream, resource, cors string, next func(Access)) {
 	r := c.Request
 	if p == nil {
 		next(Access{req: r})
@@ -131,29 +133,29 @@ func (p *Policy) GuardResource(c *fibhttp.Context, stream, resource string, next
 			Redact(r)
 			var g grant
 			if !g.parse(r.URL.RawQuery) {
-				p.refuseURL(c, urlErrors[reasonSignature])
+				p.refuseURL(c, urlErrors[reasonSignature], cors)
 				return
 			}
-			p.letIn(c, st, resource, &g, next)
+			p.letIn(c, st, resource, cors, &g, next)
 			return
 		}
-		if st.url.cookie && p.cookieGrant(c, st, resource, next) {
+		if st.url.cookie && p.cookieGrant(c, st, resource, cors, next) {
 			return
 		}
 	}
-	p.Guard(c, Play, stream, func(subject string) { next(Access{Subject: subject, p: p, req: r}) })
+	p.guard(c, Play, stream, cors, func(subject string) { next(Access{Subject: subject, p: p, req: r}) })
 }
 
 // letIn checks g, from the query of c's request or a cookie, against
 // resource, and lets the request in, or refuses it.
-func (p *Policy) letIn(c *fibhttp.Context, st *state, resource string, g *grant, next func(Access)) {
+func (p *Policy) letIn(c *fibhttp.Context, st *state, resource, cors string, g *grant, next func(Access)) {
 	t := now()
 	k, err := st.verify(c.Request, resource, g, t)
 	if err == nil && g.sid != "" {
 		err = p.sess.touch(g.sub, g.sid, resource, c.Request.RemoteAddr, g.exp, t, st.url)
 	}
 	if err != nil {
-		p.refuseURL(c, err)
+		p.refuseURL(c, err, cors)
 		return
 	}
 	observe.Authenticate(c).User = g.sub
@@ -165,7 +167,7 @@ func (p *Policy) letIn(c *fibhttp.Context, st *state, resource string, g *grant,
 // cookie, or none that holds while it carries other credentials, goes on
 // to Guard; one whose cookies all fail, with nothing else, is refused for
 // the last one's reason.
-func (p *Policy) cookieGrant(c *fibhttp.Context, st *state, resource string, next func(Access)) bool {
+func (p *Policy) cookieGrant(c *fibhttp.Context, st *state, resource, cors string, next func(Access)) bool {
 	r := c.Request
 	var last error
 	t := now()
@@ -186,21 +188,21 @@ func (p *Policy) cookieGrant(c *fibhttp.Context, st *state, resource string, nex
 				last = err
 				continue
 			}
-			p.letIn(c, st, resource, &g, next)
+			p.letIn(c, st, resource, cors, &g, next)
 			return true
 		}
 	}
 	if last == nil || r.Header.Get("Authorization") != "" || strings.Contains(r.URL.RawQuery, "token=") {
 		return false
 	}
-	p.refuseURL(c, last)
+	p.refuseURL(c, last, cors)
 	return true
 }
 
 // refuseURL counts a refused URL and answers it.
-func (p *Policy) refuseURL(c *fibhttp.Context, err error) {
+func (p *Policy) refuseURL(c *fibhttp.Context, err error, cors string) {
 	p.countRefusal(err)
-	WriteError(c, err)
+	writeError(c, err, cors)
 }
 
 // FromQuery returns the credentials of a URL's query, for protocols that
@@ -224,6 +226,12 @@ func FromQuery(query string) Credentials {
 // retained, and next is then called there; otherwise next is called before
 // Guard returns. A nil policy calls next at once with "".
 func (p *Policy) Guard(c *fibhttp.Context, a Action, stream string, next func(subject string)) {
+	p.guard(c, a, stream, "", next)
+}
+
+// guard is Guard, its refusals sent with cors as Access-Control-Allow-Origin
+// when it is not empty, so that a player on another origin reads them.
+func (p *Policy) guard(c *fibhttp.Context, a Action, stream, cors string, next func(subject string)) {
 	if p == nil {
 		next("")
 		return
@@ -231,7 +239,7 @@ func (p *Policy) Guard(c *fibhttp.Context, a Action, stream string, next func(su
 	creds := FromHTTP(c.Request)
 	subject, err := p.Allow(a, stream, creds)
 	if !errors.Is(err, ErrPending) {
-		finish(c, subject, err, next)
+		finish(c, subject, err, cors, next)
 		return
 	}
 	var result struct {
@@ -242,7 +250,7 @@ func (p *Policy) Guard(c *fibhttp.Context, a Action, stream string, next func(su
 		if c.Err() != nil {
 			return // the client has gone
 		}
-		finish(c, result.subject, result.err, next)
+		finish(c, result.subject, result.err, cors, next)
 	})
 	p.Check(a, stream, creds, func(subject string, err error) {
 		result.subject, result.err = subject, err
@@ -250,9 +258,9 @@ func (p *Policy) Guard(c *fibhttp.Context, a Action, stream string, next func(su
 	})
 }
 
-func finish(c *fibhttp.Context, subject string, err error, next func(string)) {
+func finish(c *fibhttp.Context, subject string, err error, cors string, next func(string)) {
 	if err != nil {
-		WriteError(c, err)
+		writeError(c, err, cors)
 		return
 	}
 	if subject != "" {
@@ -271,9 +279,16 @@ var (
 // WriteError answers a request a check refused, with the status Status
 // gives for err and a plain text message: a 401 with a WWW-Authenticate
 // challenge for a bearer token, a 403, or a 503 with Retry-After.
-func WriteError(c *fibhttp.Context, err error) {
+func WriteError(c *fibhttp.Context, err error) { writeError(c, err, "") }
+
+// writeError is WriteError with cors, when not empty, as the response's
+// Access-Control-Allow-Origin.
+func writeError(c *fibhttp.Context, err error, cors string) {
 	status := Status(err)
 	hdr := stdhttp.Header{"Content-Type": {"text/plain; charset=utf-8"}}
+	if cors != "" {
+		hdr["Access-Control-Allow-Origin"] = []string{cors}
+	}
 	var msg string
 	var ue *URLError
 	switch {

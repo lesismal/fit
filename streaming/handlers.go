@@ -136,7 +136,7 @@ func (f *HTTPFLV) ServeHTTP(c *fibhttp.Context) {
 	// The stream's resource, as a signed URL is signed for: /live/cam/ for
 	// /live/cam.flv, as mediaauth.ResourceOf has it.
 	resource := strings.TrimSuffix(c.Request.URL.Path, ".flv") + "/"
-	f.b.auth.GuardResource(c, stream, resource, func(mediaauth.Access) { f.handler(hb).ServeHTTP(c) })
+	f.b.auth.GuardResource(c, stream, resource, f.CORS, func(mediaauth.Access) { f.handler(hb).ServeHTTP(c) })
 }
 
 func (f *HTTPFLV) stream(p string) (string, bool) {
@@ -328,7 +328,7 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 	// The stream's resource, as a signed URL is signed for: the path up to
 	// the playlist's or segment's name.
 	resource := c.Request.URL.Path[:len(h.b.prefix)+i+1]
-	h.b.auth.GuardResource(c, stream, resource, func(a mediaauth.Access) {
+	h.b.auth.GuardResource(c, stream, resource, h.CORS, func(a mediaauth.Access) {
 		if strings.HasSuffix(name, ".m3u8") {
 			// A live stream's grant lives play_grace past its URL.
 			if query, cookie := a.PassOn(0); query != "" || cookie != "" {

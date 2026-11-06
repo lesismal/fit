@@ -54,7 +54,7 @@ func check(p *mediaauth.Policy, u, remote string) int {
 	r := httptest.NewRequest("GET", pu.RequestURI(), nil)
 	r.RemoteAddr = remote
 	rec := fibtest.ServeRequest(fibhttp.HandlerFunc(func(c *fibhttp.Context) {
-		p.GuardResource(c, "x", res, func(mediaauth.Access) { _ = c.Respond(200, "text/plain", nil) })
+		p.GuardResource(c, "x", res, "", func(mediaauth.Access) { _ = c.Respond(200, "text/plain", nil) })
 	}), r)
 	return rec.Response.StatusCode
 }
