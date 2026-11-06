@@ -283,8 +283,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | done |
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | done |
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
-| I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
-| I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | todo |
+| I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | done |
+| I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | done |
 | **Media library** | | | |
 | I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | todo |
 | I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
@@ -2163,6 +2163,37 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   environment, never in CI by default.
 - **Touches**: `assistant`, `adapter`, `cli`, `docs`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The evaluator** is test code in package `assistant` (`eval_test.go` and its helpers), run by
+   `make assistant-eval` as `go test -run '^TestAssistantEval$'`, reusing the console's and the Admin
+   API's fixtures and adding no untested code. Alternatives: a CLI command; a package of its own.
+2. **No CLI command**, though the plan's Touches name `cli`: the plan names only `make
+   assistant-eval`, and `fit adapt` already prints its warnings with their lines. Alternative: `fit
+   assistant eval`, for users to test their own model.
+3. **Unconverted items** are an optional `unconverted` list on `config_propose` (100 items of 500
+   bytes), kept with the step and shown with the proposal. Alternative: in the answer's text only.
+4. **Findings** are lines of a fixed format (severity, member, fix), parsed leniently (numbered,
+   bracketed, Chinese). Alternative: a findings tool or event.
+5. **"Keeps the routes"** means: apply the proposal, compile it, send each case's requests through the
+   real `Router.Match`, and check the upstream, handler, redirect, refusal or text. Alternative:
+   compare JSON shapes.
+6. **Files the config names that are not here**: in the eval only, a missing `*_file` stands for a
+   generated certificate and a static `root` for a temporary directory.
+7. **`ask_user` in a run** is answered with its first option, at most three times.
+8. **A live run exits non-zero** when a case fails, the report still printed.
+9. **`config_get` of an unset member** answers `null` (a comment in `.conf` and YAML).
+10. **A selector is not a secret**: only a member named `key` whose value is `ip`, `route` or
+    `header:<token>`; `hash_key` and every other `key` stay secret.
+11. **nginx's `auth_basic` fails closed**: its routes answer 401 until a `basic_auth` with users
+    replaces it; `return` locations still answer first, and `auth_basic off` reopens one.
+    Alternative: warn only, leaving the content public as before.
+12. **Lua in nginx**: `*_by_lua_block` blocks are skipped and reported with their line; braces in Lua
+    strings, comments and long brackets are skipped. Alternative: refuse configs with Lua.
+13. **The live run's settings**: level `apply`, 40 tool calls, 64 KiB a tool result, 16,384 output
+    tokens, so a whole config fits one proposal.
+14. **`llm_proxy` is refused as `FIT_EVAL_KIND`**, pointing to `openai_compatible` at the proxy.
+
 ### I130 An MCP server on the tool registry
 
 - **Do**: `admin.assistant.mcp`, off by default: an MCP server (Streamable HTTP, POST and SSE) at
@@ -2184,6 +2215,43 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   the bounds hold against a slow client, a large request and a cut stream; English and Chinese; under the
   race detector.
 - **Touches**: `assistant`, `admin`, `admin/store`, `app/console`, `app/workbench`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Protocol revisions**: 2026-07-28 and 2025-03-26 to 2025-11-25 on one endpoint, as the newest
+   revision changed the transport and clients such as Claude Code may still open sessions.
+   Alternatives: the newest only; the older ones only.
+2. **Where the settings live**: `mcp` is a member of the assistant's settings, in the store once the
+   Settings page saves, edited through `PUT /api/m/ai/settings`. Alternative: a member read at a
+   restart only.
+3. **Token levels**: `read` or `propose`; `edit` adds only page tools, which are not served. A
+   `propose` token needs a user at `propose` or `apply`, the user's level applied again at each call.
+4. **Token storage**: a 256-bit secret kept as a SHA-256 (no bcrypt, as the secret has full entropy),
+   found by ID, compared in constant time; without a store, until a restart; tokens expired over 7
+   days are dropped at the next write. Alternatives: bcrypt; no tokens without a store.
+5. **Who sees whose tokens**: one's own; an `apply` user sees and revokes everyone's. Tokens may be
+   made while MCP is off.
+6. **Addresses**: a token's list narrows the server's `allow`, never widens it; a caller off the list
+   gets 403 before its token is checked.
+7. **A session past the limit** ends the one used least recently, as clients rarely send DELETE; idle
+   ones end after `session_idle_timeout`.
+8. **Requests at once** past the limit answer 429, not a queue; a token's propose calls run one at a
+   time, its reads do not.
+9. **The proposal's conversation**: one a token, `MCP: <name>`, made again if dropped; one busy in the
+   panel refuses MCP propose calls.
+10. **Audit**: a new kind `tool` for each `tools/call`, `resources/read` and `prompts/get`, outcome `ok`
+    or `error`; list calls are not logged; one bound with the rest.
+11. **Answers**: SSE for `tools/call` only, JSON for the rest; batches refused (400); unknown methods
+    404 in the new revision and 200 in the old, as each says; GET 405.
+12. **Caching**: lists carry `ttlMs: 0` and `cacheScope: "private"`; no `listChanged`.
+13. **A resource** is at most 1 MiB, cut with a note.
+14. **Defaults**: 10 tokens a user, 90 days at most (3650 the ceiling), 4 sessions, 1h idle, 1 MiB a
+    request, 4 at once, 120 a minute.
+15. **Docs as resources**: the generated config reference, whole and by chapter (English only); other
+    docs are not in the binary.
+16. **The SDK's test** is a module of its own (`test/mcpsdk`) that builds fit with `go build -C ../..`
+    and never imports it, so fit's dependencies do not grow; its own CI job runs it.
+17. **A clock stepping back** costs the per-minute counter no budget.
 
 ### I152 The assistant's media library tools and skills
 

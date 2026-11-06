@@ -4299,3 +4299,37 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   与密钥。
 - **缺口**：两个防御性分支没有覆盖；放回 `[redacted]` 值时，没有名字的数组元素按位置匹配（I126 的检查也是如此）；map 条目的字段
   标记落在其容器上。实现时所做的决策在计划的 I154 一节，待审查。
+
+
+### I129 迁移与审查 — 已完成
+
+- **`migrate`**（`assistant/skills/migrate.md`）：nginx 与 Caddyfile 文本先经 `adapt_convert`，转换器留下的部分由模型转换；Traefik YAML
+  与 Docker 标签由模型按 prompt 中的对应关系转换。结果合并进运行中的配置（保留 listener、路由与上游，复用同地址的 listener，重名的改名，
+  不写 `admin` 与密钥），成为一个提案；`config_propose` 接受 `unconverted`，在面板与提案页中与 diff 一起显示。
+- **`security-review`**：每行一条发现，含严重程度、成员与修复，最严重的在前，按检查清单（控制台可从任何地方访问、没有重定向的明文 HTTP、
+  即将到期的证书、可选的客户端证书、指向内网或元数据地址的路由、没有认证的管理路由、缺少正文与速率限制、信任所有人的
+  `trusted_proxies`、目录列表与点文件、过长的超时、写在配置中的密钥）；为可以修复的提出步骤。
+- **评估**（`assistant/testdata/eval`）：五个迁移（两个 nginx、一个 Caddyfile、Traefik YAML 与标签），每个在提案应用后把请求送进编译后的
+  配置检查路由，并检查必须列为未转换的项；两个埋了 12 个问题的配置。CI 用记录的回答运行（5/5、2/2）；`make assistant-eval` 用 `FIT_EVAL_*`
+  指定的模型运行，从不在 CI 中；`FIT_EVAL_RECORD=1` 记录实际运行。
+- **顺带修复**：`config_get` 读取未设置的成员会使调用失败（现返回 `null`）；rate_limit 的 `key: ip` 被当作密钥；nginx 转换器遇到 OpenResty
+  Lua 块会失败（现跳过并报告），并把 `auth_basic` 保护的位置开放给所有人（现回答 401，直到用 `basic_auth` 取代）。
+- **测试**：竞态检测下的 `make test-changed`；`assistant` 覆盖率 98.8%，`adapter/nginx` 99.8%；评估器自身的测试会让该失败的失败。
+- **缺口**：还没有用真实模型运行（记录的回答按模型的形式手写；以 `FIT_EVAL_RECORD=1` 实际运行后替换）；没有 CLI 命令。实现时所做的
+  决策在计划的 I129 一节，待审查。
+
+### I130 基于工具注册表的 MCP 服务器 — 已完成
+
+- **`admin.assistant.mcp`**（默认关闭）在控制台地址的 `/mcp` 上以 Streamable HTTP 提供服务，支持协议修订版 2026-07-28（无状态，请求头与
+  请求体核对，`server/discover`）与 2025-03-26 至 2025-11-25（以 `initialize` 打开会话）；`tools/call` 以 SSE 应答，流被切断即取消调用
+  （包 `assistant/mcp`、`assistant/external.go`、`console.Options.Endpoints`）。
+- **提供的内容**：注册表中在 fit 内运行的工具（不含 `ask_user` 与页面工具）、作为 prompt 的已启用技能，以及作为资源的配置、状态、版本、
+  schema 与配置参考，像发给模型时一样脱敏并受限。
+- **令牌**：在新的 助手 → MCP 页创建，只显示一次，以 SHA-256 哈希保存在 store 的 `assistant.mcp` 中，在该页吊销；令牌的级别是自身级别
+  （`read` 或 `propose`）并受其用户级别限制，每次请求都检查。提议调用加入令牌唯一的待处理提案，位于其用户的对话 `MCP: <令牌名>`
+  中，只在 workbench 中应用。每个令牌都有限制（`allow`，默认 loopback，以及令牌自身的地址；会话数；请求字节数；并发与每分钟请求数；
+  每次调用 30 秒）；每次调用都以来源 `mcp` 与令牌名记入审计日志。
+- **测试**：竞态检测下的 `make test-changed`（83 个包）；仅用于测试的模块 `test/mcpsdk` 用官方 Go MCP SDK v1.8.0 以两种协议驱动 fit，
+  由单独的 CI 任务运行；证明页面工具不会提供；MCP 页在浏览器中以中英文检查过。
+- **缺口**：没有手工试用 Claude Code（`claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"`）；
+  参考资源只有英文；没有变更通知。实现时所做的决策在计划的 I130 一节，待审查。

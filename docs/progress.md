@@ -6054,3 +6054,55 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: two defensive branches are not covered; elements of an array without names are matched
   by position when `[redacted]` values are put back (I126's guard does the same); a map entry's field
   marks its container. The decisions made are in the plan's I154 section, pending review.
+
+
+### I129 Migration and review — done
+
+- **`migrate`** (`assistant/skills/migrate.md`): nginx and Caddyfile text go through `adapt_convert`
+  first and the model converts what the converter left; Traefik YAML and Docker labels are converted
+  by the model by a mapping in the prompt. The result is merged into the running config (listeners,
+  routes and upstreams kept, a listener on the same address reused, clashing names renamed, no
+  `admin` and no secret written) as one proposal; `config_propose` takes `unconverted`, shown with the
+  diff in the panel and on the Proposals page.
+- **`security-review`**: findings one a line, severity, member and fix, the most severe first, over a
+  checklist (the console reachable from everywhere, plain HTTP without a redirect, certificates near
+  expiry, optional client certificates, routes to internal or metadata addresses, admin routes
+  without auth, missing body and rate limits, `trusted_proxies` trusting everyone, listings and
+  dotfiles, long timeouts, inline secrets); it proposes the fixes it may.
+- **The evaluation** (`assistant/testdata/eval`): five migrations (two nginx, a Caddyfile, Traefik YAML
+  and labels), each checked by routing its requests through the compiled config after its proposal
+  is applied, and the items it must name as unconverted; two configs with 12 planted problems. CI
+  runs them against recorded answers (5/5, 2/2); `make assistant-eval` against a model set by
+  `FIT_EVAL_*`, never in CI; `FIT_EVAL_RECORD=1` records a live run.
+- **Fixed on the way**: `config_get` of an unset member failed the call (now `null`); rate_limit's
+  `key: ip` was taken for a secret; the nginx converter failed on OpenResty Lua blocks (now skipped and
+  reported) and served `auth_basic` locations to anyone (now 401 until a `basic_auth` replaces it).
+- **Tests**: `make test-changed` under the race detector; `assistant` at 98.8%, `adapter/nginx` at
+  99.8%; the evaluator's own tests fail what they should.
+- **Gaps**: no run against a real model yet (the recorded answers are written in a model's shape; a
+  live run with `FIT_EVAL_RECORD=1` replaces them); no CLI command. The decisions made are in the
+  plan's I129 section, pending review.
+
+### I130 An MCP server on the tool registry — done
+
+- **`admin.assistant.mcp`** (off by default) serves `/mcp` on the console's address over Streamable
+  HTTP, for the protocol's revision 2026-07-28 (stateless, headers checked against the body,
+  `server/discover`) and the revisions 2025-03-26 to 2025-11-25 (sessions opened with `initialize`);
+  `tools/call` answers as SSE and a cut stream cancels the call (package `assistant/mcp`,
+  `assistant/external.go`, `console.Options.Endpoints`).
+- **What it serves**: the registry's tools that run in fit (not `ask_user` nor the page tools), the
+  enabled skills as prompts, and the config, status, versions, schema and config reference as
+  resources, redacted and bounded as for the model.
+- **Tokens**: made on the new Assistant → MCP page, shown once, kept as SHA-256 hashes in the store's
+  `assistant.mcp`, revoked there; a token's level is its own (`read` or `propose`) within its user's,
+  checked on every request. A propose call adds to the token's one pending proposal, in its user's
+  conversation `MCP: <token name>`, applied only in the workbench. Each token is bounded (`allow`,
+  loopback by default, and its own addresses; sessions; request bytes; requests at once and a
+  minute; 30s a call); every call is in the audit log with source `mcp` and the token's name.
+- **Tests**: `make test-changed` under the race detector (83 packages); `test/mcpsdk`, a test-only
+  module, drives fit with the official Go MCP SDK v1.8.0 in both eras, in a CI job of its own; the
+  page tools are proven absent; the MCP page checked in a browser in English and Chinese.
+- **Gaps**: Claude Code was not tried by hand (`claude mcp add --transport http fit
+  http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"`); the reference resources are
+  English only; no change notifications. The decisions made are in the plan's I130 section, pending
+  review.
