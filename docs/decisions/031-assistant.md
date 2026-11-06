@@ -74,12 +74,37 @@ workers.
   `limits` bound the conversations, tool calls and results, `data` what of the logs may be sent,
   `users` and `default_level` (off, read, edit, propose, apply) what each console user may do.
 
+- **The agent loop (I125)** runs in fit, not in the browser: a chat is one request,
+  `POST /api/m/ai/chat`, answered as SSE, during which fit calls the model, runs the tools it asks
+  for and calls it again, until an answer, a question to the user or a limit. The context is
+  assembled for every call: the system prompt (role, concepts, rules, the answer's language), the
+  page the browser is on, the skill catalog (empty until I127), and the history within the model's
+  window: the tools' early results cut first, then the early turns summarized by the model, the
+  summary kept with the conversation. The user's words are sent as written.
+- **The tool registry** (`assistant.Registry`): each tool has a name, a group, a JSON Schema, the
+  least level it needs, an optional bound below `max_tool_result_bytes`, and where it runs. The read
+  tools run on the console's pool (four workers, the console's own) against the Admin API's handlers
+  called in process, as the workbench's pages call them, each within 30 seconds; `ask_user` ends the
+  stream with its question, and the choice comes back as the call's result with the next request.
+  Every result is redacted (keys, hashes, tokens, private keys, the providers' keys, `data.redact`)
+  with the members no tool reads left out, cut to its bound with a note, and fenced as data.
+- **fit's own log keeps a ring** of its latest 1000 messages, each at most 2 KiB, for `log_tail`;
+  `access_log_sample` reads the end of the access log's file instead of adding a copy of every
+  request's line on the hot path.
+- **Conversations live in the store**, a section per user (`assistant.chats.<hash>`), written by one
+  saver goroutine of the assistant's, so that a chat never waits on the store's disk; without a store
+  they are kept in memory until fit restarts.
+
 ## Consequences
 
-- The workbench's menu has the module Assistant when `admin.assistant` is set, with its Settings
-  page; the chat panel comes with I125.
-- `GET /api/m/ai/settings`, `PUT /api/m/ai/settings` and `POST /api/m/ai/providers/test` are the
-  console's, behind its login and CSRF token, as every module's API is.
+- The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions
+  and Settings pages, and every page's top bar has the chat panel's button.
+- `GET /api/m/ai/settings`, `PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`,
+  `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `GET /api/m/ai/tools`,
+  `GET /api/m/ai/conversations` and `GET`/`DELETE /api/m/ai/conversations/{id}` are the console's,
+  behind its login and CSRF token, as every module's API is.
+- A chat holds one of the console's connections for as long as it streams, and the tools take the
+  console pool's workers for as long as they run; `max_concurrent_chats` (4) keeps both few.
 - A store saved by a fit with the assistant's settings is version 3; an older fit cannot open it.
   That is the price of keeping keys encrypted with the config.
 - The model client opens its own connections on the listeners' engine, up to 8 per host, at most

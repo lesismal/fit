@@ -468,6 +468,53 @@ its path, `409` without a store, `412` when the version is stale) and
 `POST /api/m/ai/providers/test` (`{"provider", "key", "model", "models_only"}`; four at once, past
 them `429`; a browser that leaves cancels the test's call).
 
+### The chat panel
+
+Every page's top bar has the assistant's button, unless the user's level is `off`: it opens the
+chat panel beside the page. A message goes to the default model with the page shown as context (its
+module, page and title, what the page has selected, and the text selected on it, unless **Send this
+page as context** is unticked), and the answer streams in: Markdown drawn as it comes, each tool
+call a folded row with its arguments and its result, an `ask_user` question a row of buttons whose
+choice goes back to the model. **Stop** ends an answer, keeping what it came to; **Retry** answers
+the last message again; the head picks a conversation, starts a new one or deletes one.
+
+The assistant reads, and never changes anything itself: the tools it calls (the **Functions** page
+lists them, with the level each needs and whether it is enabled) read the config, the schema, the
+versions, the status, the metrics, the upstreams' health, the Consistency check, the certificates,
+the cache, fit's own log and the access log, check a config as `fit validate` does, convert nginx or
+Caddyfile text, and ask the user. They run on the console's pool, through the Admin API in process,
+each within 30 seconds. Every result is redacted before the model sees it (keys, password hashes,
+tokens, private keys, the providers' keys, `data.redact`'s patterns, and the members no tool reads:
+`admin.assistant`, `admin.console.users`, `admin.store`, `admin.address` and `admin.token_file`), cut
+to `limits.max_tool_result_bytes` with a note saying so, and fenced as data, which the system prompt
+tells the model never to take as instructions. `log_tail` needs `data.send_logs` and reads the last
+1000 messages fit's log keeps in memory; `access_log_sample` needs `data.send_access_log` and reads
+the end of the access log's file. The user's words go to the model as written.
+
+**Limits.** `max_tool_calls` bounds the tools one message's answer may call (past it the calls fail
+and the answer ends), `max_turns` the messages of a conversation (past it, start a new one),
+`max_concurrent_chats` the answers made at once (past it `429`), `max_tokens_per_day` one user's
+tokens a day (past it `429`, or the answer under way ends), `max_tool_result_bytes` a tool's result,
+`max_stream_bytes` a model answer, and `max_conversations` the conversations kept per user (one more
+removes the oldest). A conversation that outgrows its model's window (the model's `context`, 32768
+tokens when left out) has its tools' early results cut, then its early turns summarized by the
+model; the summary is kept with the conversation and sent in their place.
+
+**Conversations** are kept per user, with admin.store in its section `assistant.chats.<hash of the
+user>`, encrypted with the rest of the store, across restarts, each at most 512 KiB and a user's at
+most 8 MiB together; without a store they last until fit restarts. A user sees only their own.
+
+The endpoints are `POST /api/m/ai/chat` (`{"conversation", "message" | "retry": true | "answer":
+{"id", "choice"}, "page", "lang"}`; answered as SSE: `data:` events of type `start`, `text`,
+`thinking`, `tool_call`, `tool_result`, `ask`, `usage` and `summary`, then `event: end` with
+`{"type": "done", "reason"}` (`answer`, `ask`, `max_tool_calls`, `max_tokens_per_day`, `stopped`)
+or `event: error` with `{"message"}`; `403` for a user whose level is `off`, `404` for a
+conversation that is not, `409` without a model, for a conversation answering already or at its
+turns, `429` past the chats at once or the day's tokens), `POST /api/m/ai/chat/stop`
+(`{"conversation"}`), `GET /api/m/ai/conversations`, `GET` and `DELETE
+/api/m/ai/conversations/{id}`, and `GET /api/m/ai/tools` (the user's level, the model, and every
+tool with its level, group, schema and whether this user may call it).
+
 ## Roles' pages
 
 The [LLM feature](llm.md)'s and the [tunnel](tunnel.md)'s roles can also have pages of their own,
@@ -486,4 +533,6 @@ The pages are plain HTML, CSS and JavaScript in `app/workbench/web`, embedded in
 served from memory, with nothing fetched from elsewhere. `core/` holds the library every module uses
 (`ui.js`, `ui.css`) and the workbench (`workbench.js`); each module is a script that registers itself
 with `WB.module`, naming the server module whose API it calls, its place in the menu and its pages.
-A module shows when the console serving the page serves its server module.
+A module shows when the console serving the page serves its server module. A module may also put a tool in
+every page's top bar (`topbar`, as the assistant's button), and a page may say what it has selected
+with `WB.select`, which `WB.page` hands the assistant's panel with the page shown.

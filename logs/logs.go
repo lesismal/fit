@@ -13,7 +13,9 @@
 //
 // A message is written at once, by the goroutine that logs it: fit logs
 // about starting, reloading, certificates and providers, not about each
-// request, so there are few, and none on a worker's hot path.
+// request, so there are few, and none on a worker's hot path. The latest
+// RingSize messages written are kept in memory as well, each cut to
+// RingMessageBytes, for the workbench's assistant to read (Recent).
 package logs
 
 import (

@@ -10,6 +10,13 @@
 // and never handed back: the pages see whether one is set, and its last
 // four characters. See docs/decisions/031-assistant.md.
 //
+// A chat (POST /api/chat) is a loop between the model and the tools of the
+// Registry, streamed to the browser as SSE: the context is built for each
+// call (prompt.go), the tools run on the console's pool against the Admin
+// API in process (tools_read.go), each result redacted, bounded and fenced
+// as data (redact.go), within the settings' limits (chat.go); the user's
+// conversations are kept in the store (conversations.go).
+//
 // The endpoints run on fib's workers and never block one: what reads or
 // writes files goes to the console's pool, and a model call is started on
 // fib's asynchronous client and answered from its callback.
