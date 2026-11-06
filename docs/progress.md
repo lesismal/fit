@@ -6206,3 +6206,28 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   browser; cached segments are written from memory, not by sendfile (the 23% behind nginx); `v<i>`
   follows the catalog's order; a file's first video and audio tracks only, no MP3; BANDWIDTH is the
   average; no metrics of the cache. The decisions made are in the plan's I133 section, pending review.
+
+
+### I134 Channels: files played as live streams, and pushed out — done
+
+- **Channels** (`streaming.channels`, package `streaming/channels`): a `media_library`'s items played
+  into the hub as a live stream, in order, shuffled, looped, or on a schedule of start times
+  (`HH:MM[:SS]`, weekdays, or a date) in a time zone, paced by the samples' times on fit's timers,
+  samples read on the library's file pool. Times run on from item to item; an item whose tracks differ
+  sets new tracks, a discontinuity in HLS. Every egress of the streaming role serves a channel under
+  its `auth` (RTMP, RTSP, SRT, HTTP-FLV, HLS, WHEP). A reload changes channels in place from the next
+  item.
+- **Push** (`streaming.push`, and a channel's `push`): any stream of the hub relayed to RTMP, RTMPS or
+  SRT servers by fib's clients, reconnecting with backoff, URLs redacted wherever shown or logged.
+- **Admin API**: `GET /streaming/channels`, `/streaming/channels/{name}`, `POST` with `start`, `stop` or
+  `skip`; `GET /streaming/push`, `POST /streaming/push/{name}` with `start`, `stop` or `restart`;
+  metrics a channel and a target; `docs/channels.md` in English and Chinese.
+- **Tests**: `make test-changed` under the race detector; with a fake clock, pacing, items back to back,
+  schedules on time, cut-ins and joins, reloads, skips and push backoff; a channel through every egress
+  in process, without a gap over a frame for items encoded alike; pushes to fit and to another fit,
+  restarted. On the benchmark host (`test/docker/channels/e2e.sh`): ffprobe on six egresses with
+  continuous times, hls.js in Chromium through discontinuities, MediaMTX restarted and found again over
+  RTMP and SRT.
+- **Gaps**: an item whose tracks differ is shifted 120–135 ms by fib's egresses (A68, being added to
+  fib); a codec change between items makes RTSP players drop and is not renegotiated over WHEP. The
+  decisions made are in the plan's I134 section, pending review.

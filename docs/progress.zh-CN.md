@@ -4403,3 +4403,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **缺口**：未检查 Safari 自带播放器（步骤见 `test/docker/vod/e2e.sh`），也未在浏览器中检查 H.265；缓存的分段从内存写出而非 sendfile
   （与 nginx 差 23% 的原因）；`v<i>` 的编号随目录顺序；只用文件的第一条视频与音频轨道，不提供 MP3；BANDWIDTH 是平均值；缓存没有指标。
   实现时所做的决策在计划的 I133 一节，待审查。
+
+
+### I134 频道：把文件作为直播播放并推出 — 已完成
+
+- **频道**（`streaming.channels`，包 `streaming/channels`）：把 `media_library` 的条目作为直播流播放到 hub 中，按顺序、随机、循环，或按
+  某个时区的开始时间表（`HH:MM[:SS]`、星期几或日期），由 fit 的定时器按样本时间推进，样本在库的文件池上读取。时间在条目之间连续；轨道
+  不同的条目会设置新轨道，在 HLS 中为一个不连续点。流媒体角色的每个出口都在其 `auth` 下提供频道（RTMP、RTSP、SRT、HTTP-FLV、HLS、
+  WHEP）。重载从下一个条目起原地修改频道。
+- **推流**（`streaming.push` 以及频道的 `push`）：用 fib 的客户端把 hub 中的任何流转推到 RTMP、RTMPS 或 SRT 服务器，退避重连，URL 在所有
+  显示与日志中都被脱敏。
+- **Admin API**：`GET /streaming/channels`、`/streaming/channels/{name}`，`POST` 带 `start`、`stop` 或 `skip`；`GET /streaming/push`、
+  `POST /streaming/push/{name}` 带 `start`、`stop` 或 `restart`；每个频道与目标的指标；中英文的 `docs/channels.md`。
+- **测试**：竞态检测下的 `make test-changed`；用假时钟测试推进、条目衔接、按时开始的时间表、插入与加入、重载、跳过与推流退避；频道在进程内
+  经过每个出口，编码相同的条目之间没有超过一帧的间隙；推流到 fit 与另一个重启过的 fit。在基准机上（`test/docker/channels/e2e.sh`）：
+  ffprobe 读取六个出口且时间连续，Chromium 中的 hls.js 跨不连续点播放，MediaMTX 重启后 RTMP 与 SRT 都重新连上。
+- **缺口**：轨道不同的条目会被 fib 的出口平移 120–135 ms（A68，正在加入 fib）；条目之间换编解码器时 RTSP 播放器会断开，WHEP 不会重新
+  协商。实现时所做的决策在计划的 I134 一节，待审查。
