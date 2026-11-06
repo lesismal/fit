@@ -111,19 +111,32 @@ func TestDials(t *testing.T) {
 		{Address: "tls://h:4"},
 		{Address: "wss://h:5/x"},
 	}}
+	// The addresses are the endpoints', with nothing added: how the hub's
+	// certificate is checked goes to the dial beside them.
 	got := Dials(cfg)
-	if len(got) != 4 || got[0] != "quic://h:2?pin=ab" || got[1] != "ws://h:3/x" || got[2] != "tls://h:4?pin=ab" || got[3] != "wss://h:5/x?pin=ab" {
+	if len(got) != 4 || got[0] != "quic://h:2" || got[1] != "ws://h:3/x" || got[2] != "tls://h:4" || got[3] != "wss://h:5/x" {
 		t.Errorf("dials %q", got)
 	}
-	// By CAs: a quic endpoint may also take any certificate, for tests,
-	// and tls and wss may not.
-	ca := &config.TunnelUplink{CAFile: "/c a.pem", QUICInsecure: true, Endpoints: []config.TunnelEndpoint{{Address: "tls://h:4"}, {Address: "quic://h:2"}}}
-	if got := Dials(ca); len(got) != 2 || got[0] != "tls://h:4?ca=%2Fc+a.pem" || got[1] != "quic://h:2?ca=%2Fc+a.pem" {
-		t.Errorf("dials %q", got)
+	for _, a := range got {
+		if o := CheckBy(cfg, a); o != (transport.ClientOptions{PinSHA256: "ab"}) {
+			t.Errorf("%s: %+v", a, o)
+		}
 	}
-	insecure := &config.TunnelUplink{QUICInsecure: true, Endpoints: []config.TunnelEndpoint{{Address: "wss://h:5/x"}, {Address: "quic://h:2"}}}
-	if got := Dials(insecure); len(got) != 2 || got[0] != "wss://h:5/x" || got[1] != "quic://h:2?insecure=1" {
-		t.Errorf("dials %q", got)
+	// By CAs: the CAs win over quic_insecure.
+	ca := &config.TunnelUplink{CAFile: "/c a.pem", QUICInsecure: true}
+	if o := CheckBy(ca, "quic://h:2"); o != (transport.ClientOptions{CAFile: "/c a.pem"}) {
+		t.Errorf("%+v", o)
+	}
+	// A quic endpoint may take any certificate, for tests; tls and wss may
+	// not.
+	insecure := &config.TunnelUplink{QUICInsecure: true}
+	if o := CheckBy(insecure, "quic://h:2"); o != (transport.ClientOptions{InsecureSkipVerify: true}) {
+		t.Errorf("%+v", o)
+	}
+	for _, a := range []string{"wss://h:5/x", "tls://h:4"} {
+		if o := CheckBy(insecure, a); o != (transport.ClientOptions{}) {
+			t.Errorf("%s: %+v", a, o)
+		}
 	}
 	other := *cfg
 	if !Same(cfg, &other) {

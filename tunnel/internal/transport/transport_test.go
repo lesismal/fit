@@ -61,7 +61,7 @@ func TestScheme(t *testing.T) {
 
 func TestUnsupportedScheme(t *testing.T) {
 	e := tunneltest.Engine(t)
-	if _, err := Dial(e, "nope://h:1", time.Second, nil); err == nil || !strings.Contains(err.Error(), "unsupported scheme") {
+	if _, err := Dial(e, "nope://h:1", time.Second, ClientOptions{}, nil); err == nil || !strings.Contains(err.Error(), "unsupported scheme") {
 		t.Errorf("dial: %v", err)
 	}
 	if _, err := Listen(e, "nope://h:1", ListenOptions{}, nil); err == nil || !strings.Contains(err.Error(), "unsupported scheme") {
@@ -83,7 +83,7 @@ func TestTCP(t *testing.T) {
 		t.Errorf("URL of a listener on every address: %q", l.URL())
 	}
 	rc := newRecorder()
-	c, err := Dial(e, "tcp://"+l.URL(), 5*time.Second, func(Conn) Handler { return rc })
+	c, err := Dial(e, "tcp://"+l.URL(), 5*time.Second, ClientOptions{}, func(Conn) Handler { return rc })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestOpenRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	if _, err := Dial(e, l.URL(), 5*time.Second, func(Conn) Handler { return nil }); !errors.Is(err, ErrClosedOpening) {
+	if _, err := Dial(e, l.URL(), 5*time.Second, ClientOptions{}, func(Conn) Handler { return nil }); !errors.Is(err, ErrClosedOpening) {
 		t.Errorf("dial: %v", err)
 	}
 }
@@ -137,7 +137,7 @@ func TestDialErrors(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
-	if _, err := Dial(e, addr, 2*time.Second, func(Conn) Handler { return newRecorder() }); err == nil {
+	if _, err := Dial(e, addr, 2*time.Second, ClientOptions{}, func(Conn) Handler { return newRecorder() }); err == nil {
 		t.Error("a dial to a closed port worked")
 	}
 	want := errors.New("no dial")

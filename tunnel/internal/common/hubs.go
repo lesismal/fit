@@ -31,22 +31,30 @@ type EndpointReq struct {
 	Enabled  bool   `json:"enabled"`
 }
 
-// address is the endpoint's address with its scheme: host:port for tcp.
-func (e EndpointReq) address() string {
+// address is the endpoint's address with its scheme: host:port for tcp;
+// "" for none. An address the config would refuse is refused here, one with
+// a query, a fragment or a user among them: nothing in an address says how
+// the hub's certificate is checked.
+func (e EndpointReq) address() (string, error) {
 	a := strings.TrimSpace(e.Address)
-	if a == "" || strings.Contains(a, "://") {
-		return a
+	if a == "" {
+		return "", nil
 	}
-	switch e.Protocol {
-	case config.TunnelWS, config.TunnelWSS:
-		if !strings.Contains(a, "/") {
-			a += config.DefaultTunnelWSPath
+	if !strings.Contains(a, "://") {
+		switch e.Protocol {
+		case config.TunnelWS, config.TunnelWSS:
+			if !strings.Contains(a, "/") {
+				a += config.DefaultTunnelWSPath
+			}
+			a = e.Protocol + "://" + a
+		case config.TunnelQUIC, config.TunnelTLS:
+			a = e.Protocol + "://" + a
 		}
-		return e.Protocol + "://" + a
-	case config.TunnelQUIC, config.TunnelTLS:
-		return e.Protocol + "://" + a
 	}
-	return a
+	if msg := config.CheckTunnelEndpoint(a); msg != "" {
+		return "", BadRequest(msg)
+	}
+	return a, nil
 }
 
 // uplinkName is an uplink's name as config.TunnelUplink.HubName has it,
@@ -90,7 +98,11 @@ func EditHub(m Member, name string, req HubReq, clearBody bool) error {
 	}
 	var eps []map[string]any
 	for _, e := range req.Endpoints {
-		if a := e.address(); a != "" {
+		a, err := e.address()
+		if err != nil {
+			return err
+		}
+		if a != "" {
 			ep := map[string]any{"address": a}
 			if !e.Enabled {
 				ep["disabled"] = true

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,16 +21,19 @@ import (
 
 // The TLS of the links: tls://host:port is the framing of tcp over TLS, and
 // wss:// (package transport/ws) and quic:// run TLS too. A listener presents
-// the certificate ListenOptions gives it; a dialer checks the hub's by what
-// the address's query says:
+// the certificate ListenOptions gives it; a dialer checks the hub's as the
+// ClientOptions given to Dial say:
 //
-//	pin=SHA-256 of the certificate (see Fingerprint), which stands in for
-//	    the chain and name checks: for a self-signed hub
-//	ca=a PEM file of the CAs that sign the hub's certificate, in place of
-//	    the system's roots; the name is checked
-//	insecure=1, quic only: any certificate, for tests
+//	PinSHA256, the SHA-256 of the certificate (see Fingerprint), which
+//	    stands in for the chain and name checks: for a self-signed hub
+//	CAFile, a PEM file of the CAs that sign the hub's certificate, in place
+//	    of the system's roots; the name is checked
+//	InsecureSkipVerify, quic only: any certificate, for tests
 //
-// and without any of them by the system's roots and the name. A client keeps
+// and without any of them by the system's roots and the name. The options
+// are never read from the address, which ParseURL refuses with a query or a
+// fragment, so that no address can change how a certificate is checked: one
+// a page or an operator was handed included. A client keeps
 // no session tickets, so every handshake is a full one that checks the
 // certificate; the pin is checked again in VerifyConnection, which a resumed
 // handshake runs too, so a session cache added later cannot skip it.
@@ -121,61 +123,43 @@ func ClientTLSConfig(opts ClientOptions, alpn string) (*tls.Config, error) {
 	return conf, nil
 }
 
-// ClientQuery is the query of a dial's address that says how it checks the
-// hub's certificate: pinned to pin, or by the CAs of caFile, or, if
-// insecure, not at all; "" for the system's roots.
-func ClientQuery(pin, caFile string, insecure bool) string {
+// CheckBy is how a link checks the hub's certificate, of a hub's settings:
+// pinned to pin, or else by the CAs of caFile, or else, if insecure, not at
+// all; the zero ClientOptions, the system's roots, without any of them.
+func CheckBy(pin, caFile string, insecure bool) ClientOptions {
 	switch {
 	case pin != "":
-		return "pin=" + url.QueryEscape(pin)
+		return ClientOptions{PinSHA256: pin}
 	case caFile != "":
-		return "ca=" + url.QueryEscape(caFile)
-	case insecure:
-		return "insecure=1"
+		return ClientOptions{CAFile: caFile}
 	}
-	return ""
+	return ClientOptions{InsecureSkipVerify: insecure}
 }
 
-// ParseClientQuery is the ClientOptions of a dial address's query.
-func ParseClientQuery(query string) (ClientOptions, error) {
-	q, err := url.ParseQuery(query)
-	if err != nil {
-		return ClientOptions{}, err
-	}
-	insecure, _ := strconv.ParseBool(q.Get("insecure"))
-	return ClientOptions{PinSHA256: q.Get("pin"), CAFile: q.Get("ca"), InsecureSkipVerify: insecure}, nil
-}
-
-// TLSClientConfig is the client TLS config of a dial to addr, a URL whose
-// query says how the hub's certificate is checked, offering alpn; insecure
-// says whether addr may take any certificate. It returns the host and port
-// to dial.
-func TLSClientConfig(addr, alpn string, insecure bool) (string, *tls.Config, error) {
-	base, query, _ := strings.Cut(addr, "?")
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || u.Port() == "" {
-		return "", nil, fmt.Errorf("tunnel: %q is not a URL with a host and port", base)
-	}
-	opts, err := ParseClientQuery(query)
-	if err != nil {
-		return "", nil, err
-	}
+// TLSClientConfig is the client TLS config of a dial to u, an address
+// ParseURL took, checking the hub's certificate as opts says, offering
+// alpn; insecure says whether u's scheme may take any certificate. The name
+// checked is opts.ServerName, or u's host.
+func TLSClientConfig(u *url.URL, opts ClientOptions, alpn string, insecure bool) (*tls.Config, error) {
 	if opts.InsecureSkipVerify && !insecure {
-		return "", nil, fmt.Errorf("tunnel: %s:// takes no insecure: pin the hub's certificate, or name its CAs", u.Scheme)
+		return nil, fmt.Errorf("tunnel: %s:// takes no insecure: pin the hub's certificate, or name its CAs", u.Scheme)
 	}
-	opts.ServerName = u.Hostname()
-	conf, err := ClientTLSConfig(opts, alpn)
-	if err != nil {
-		return "", nil, err
+	if opts.ServerName == "" {
+		opts.ServerName = u.Hostname()
 	}
-	return u.Host, conf, nil
+	return ClientTLSConfig(opts, alpn)
 }
 
 // tlsTransport is the framing of tcp over TLS: tls://host:port.
 type tlsTransport struct{}
 
-func (tlsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, open OpenFunc) (Conn, error) {
-	hostport, conf, err := TLSClientConfig(addr, TLSALPN, false)
+func (tlsTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, opts ClientOptions, open OpenFunc) (Conn, error) {
+	u, err := HostURL(addr, "tls")
+	if err != nil {
+		return nil, err
+	}
+	hostport := u.Host
+	conf, err := TLSClientConfig(u, opts, TLSALPN, false)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +179,7 @@ func (tlsTransport) Listen(engine *fib.Engine, addr string, o ListenOptions, ope
 	if o.Cert == nil {
 		return nil, errors.New("tls: a listener needs a certificate")
 	}
-	hostport, _, _ := strings.Cut(strings.TrimPrefix(addr, "tls://"), "?")
+	hostport := strings.TrimPrefix(addr, "tls://")
 	h := fibtls.NewServer(ServerTLSConfig(*o.Cert, TLSALPN), FibHandler(open))
 	return ListenFib(engine, hostport, h, func(hp string) string { return "tls://" + hp })
 }

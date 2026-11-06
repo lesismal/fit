@@ -47,6 +47,31 @@ func TestConfig(t *testing.T) {
 		{"a tls endpoint with a path", bare("tls://hub.example:7000/x", ""), "has a path"},
 		{"a tls endpoint without a port", bare("tls://hub.example", ""), "not a tls:// URL"},
 		{"a pin in the address", bare("wss://hub.example/t?pin=ab", ""), "has a query"},
+
+		// The review's attacks: a fragment that would have overridden the
+		// pin, turned quic's check off, swapped the CAs, or dropped the
+		// pin; and a user. The hub's real pin is configured each time.
+		{"a pin in a tls fragment", bare("tls://hub.example:7000#?pin="+strings.Repeat("cd", 32)+"&", `, "pin": "`+pin+`"`), "has a query, a fragment or a user"},
+		{"insecure in a quic fragment", bare("quic://hub.example:7000#?insecure=1&", `, "pin": "`+pin+`"`), "a fragment"},
+		{"a CA file in a wss fragment", bare("wss://hub.example/tunnel#?ca=/tmp/evil.pem&", `, "pin": "`+pin+`"`), "a fragment"},
+		{"an empty query in a fragment", bare("tls://hub.example:443#?x=", `, "pin": "`+pin+`"`), "a fragment"},
+		{"a bare fragment", bare("tls://hub.example:443#", `, "pin": "`+pin+`"`), "a fragment"},
+		{"an empty query", bare("tls://hub.example:443?", `, "pin": "`+pin+`"`), "a query"},
+		{"a user", bare("tls://u:p@hub.example:443", `, "pin": "`+pin+`"`), "a user"},
+		{"a fragment on tcp", bare("127.0.0.1:7000#x", ""), "a fragment"},
+		{"a tcp port that is not one", bare("127.0.0.1:x", ""), "not a host and port"},
+		{"a tcp endpoint with a path", bare("tcp://127.0.0.1:7000/x", ""), "not a host and port"},
+
+		// quic_insecure off the loopback is refused as tcp is, unless
+		// body_password, pin or ca_file.
+		{"quic_insecure off the loopback", bare("quic://hub.example:7443", `, "quic_insecure": true`), "quic_insecure takes any certificate"},
+		{"quic_insecure on the loopback", bare("quic://127.0.0.1:7443", `, "quic_insecure": true`), ""},
+		{"quic_insecure on localhost", bare("quic://localhost:7443", `, "quic_insecure": true`), ""},
+		{"quic_insecure with body_password", bare("quic://hub.example:7443", `, "quic_insecure": true, "body_password": "b"`), ""},
+		{"quic_insecure under a pin", bare("quic://hub.example:7443", `, "quic_insecure": true, "pin": "`+pin+`"`), ""},
+		{"quic_insecure beside tls", bare("tls://hub.example:7443", `, "quic_insecure": true`), ""},
+		{"quic_insecure with a bad quic endpoint", bare("quic://hub.example", `, "quic_insecure": true`), "not a quic:// URL"},
+		{"quic_insecure past a loopback endpoint", `{"tunnel": {"node": {"hubs": [{"endpoints": [{"address": "quic://127.0.0.1:1"}, {"address": "quic://[::1]:2"}, {"address": "quic://hub.example:3", "disabled": true}], "password": "pw", "quic_insecure": true}]}}}`, "\"quic://hub.example:3\", whose host is not a loopback one"},
 		{"a bad pin", bare("tls://hub.example:7000", `, "pin": "abcd"`), "not a certificate pin"},
 		{"a pin with colons", bare("tls://hub.example:7000", `, "pin": "`+strings.TrimSuffix(strings.Repeat("AB:", 32), ":")+`"`), ""},
 		{"pin and ca_file", bare("tls://hub.example:7000", `, "pin": "`+pin+`", "ca_file": "ca.pem"`), "set one"},

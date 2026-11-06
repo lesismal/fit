@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,15 +86,18 @@ func newFixture(t *testing.T, echo bool) *fixture {
 	return f
 }
 
-func (f *fixture) url() string {
-	hostport, _ := ParseURL(f.l.URL())
-	return DialURL(hostport, f.pin, "", false)
-}
+// insecureOpts takes any certificate.
+var insecureOpts = transport.ClientOptions{InsecureSkipVerify: true}
+
+func (f *fixture) url() string { return f.l.URL() }
+
+// opts pins the listener's certificate.
+func (f *fixture) opts() transport.ClientOptions { return transport.ClientOptions{PinSHA256: f.pin} }
 
 func (f *fixture) dial(t *testing.T) (transport.Conn, *sink) {
 	t.Helper()
 	var s *sink
-	c, err := transport.Dial(tunneltest.Engine(t), f.url(), 5*time.Second, func(c transport.Conn) transport.Handler {
+	c, err := transport.Dial(tunneltest.Engine(t), f.url(), 5*time.Second, f.opts(), func(c transport.Conn) transport.Handler {
 		s = newSink(c, false)
 		return s
 	})
@@ -219,14 +223,49 @@ func TestListenerClose(t *testing.T) {
 
 func TestPinMismatch(t *testing.T) {
 	f := newFixture(t, true)
-	hostport, _ := ParseURL(f.l.URL())
-	other := DialURL(hostport, "00"+f.pin[2:], "", false)
+	other := "00" + f.pin[2:]
 	if f.pin[:2] == "00" {
-		other = DialURL(hostport, "11"+f.pin[2:], "", false)
+		other = "11" + f.pin[2:]
 	}
-	_, err := transport.Dial(tunneltest.Engine(t), other, 5*time.Second, func(c transport.Conn) transport.Handler { return newSink(c, false) })
+	_, err := transport.Dial(tunneltest.Engine(t), f.url(), 5*time.Second, transport.ClientOptions{PinSHA256: other}, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err == nil {
 		t.Fatal("a certificate that does not match the pin was taken")
+	}
+}
+
+// The review's attacks on quic://: an address whose fragment would have
+// turned the certificate check off, overridden the pin or swapped the CAs.
+// Dial refuses each before it sends a datagram; with the address alone,
+// the pin the options give refuses a certificate that is not the hub's.
+func TestAddressCannotChangeTheCheck(t *testing.T) {
+	f := newFixture(t, true)
+	other := "00" + f.pin[2:]
+	if f.pin[:2] == "00" {
+		other = "11" + f.pin[2:]
+	}
+	e := tunneltest.Engine(t)
+	open := func(c transport.Conn) transport.Handler { return newSink(c, false) }
+	for _, attack := range []string{
+		f.url() + "#?insecure=1&",
+		f.url() + "#?pin=" + f.pin + "&",
+		f.url() + "#?ca=/etc/ssl/cert.pem&",
+		f.url() + "#?x=",
+		f.url() + "?insecure=1",
+		"quic://u@" + strings.TrimPrefix(f.url(), "quic://"),
+	} {
+		_, err := transport.Dial(e, attack, 5*time.Second, transport.ClientOptions{PinSHA256: other}, open)
+		if err == nil || !strings.Contains(err.Error(), "which an address does not") {
+			t.Errorf("%q: %v", attack, err)
+		}
+	}
+	f.mu.Lock()
+	n := len(f.srv)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Fatal("an attack's address was dialed")
+	}
+	if _, err := transport.Dial(e, f.url(), 5*time.Second, transport.ClientOptions{PinSHA256: other}, open); err == nil {
+		t.Fatal("a pin that is not the listener's took its certificate")
 	}
 }
 
@@ -238,7 +277,7 @@ func TestDialTimeout(t *testing.T) {
 	}
 	defer pc.Close() // takes the datagrams, answers none
 	start := time.Now()
-	_, err = transport.Dial(tunneltest.Engine(t), DialURL(pc.LocalAddr().String(), "", "", true), 300*time.Millisecond, func(c transport.Conn) transport.Handler { return newSink(c, false) })
+	_, err = transport.Dial(tunneltest.Engine(t), "quic://"+pc.LocalAddr().String(), 300*time.Millisecond, insecureOpts, func(c transport.Conn) transport.Handler { return newSink(c, false) })
 	if err == nil {
 		t.Fatal("the dial worked")
 	}
@@ -257,7 +296,11 @@ func TestParseURL(t *testing.T) {
 	}{
 		{"quic://example.com:4433", "example.com:4433", true},
 		{"quic://[::1]:4433/", "[::1]:4433", true},
-		{"quic://example.com:4433?pin=ab", "example.com:4433", true},
+		{"quic://example.com:4433?pin=ab", "", false},
+		{"quic://example.com:4433#?insecure=1", "", false},
+		{"quic://u@example.com:4433", "", false},
+		{"quic://:4433", ":4433", true},
+		{"quic://%zz:4433", "", false},
 		{"127.0.0.1:4433", "127.0.0.1:4433", true},
 		{"ws://example.com:80", "", false},
 		{"quic://example.com", "", false},

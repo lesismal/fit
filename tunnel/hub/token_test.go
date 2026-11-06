@@ -200,7 +200,7 @@ func TestTokenSealed(t *testing.T) {
 			cd = pc.Dialer()
 		}
 		p := &peer{t: t, notes: make(chan note, 16)}
-		if _, err := transport.Dial(v.e, v.listen(), 5*time.Second, func(c transport.Conn) transport.Handler {
+		if _, err := transport.Dial(v.e, v.listen(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
 			p.l = link.New(c, link.NewRouter(), cd)
 			return p.l
 		}); err != nil {

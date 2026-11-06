@@ -46,6 +46,7 @@ type env struct {
 	t *testing.T
 	e *fib.Engine
 	s *Hub
+	m *app.Manager
 
 	mu sync.Mutex
 	// member is the hub's member of the config as JSON, which edits
@@ -62,7 +63,7 @@ func newEnv(t *testing.T) *env {
 	if err := m.Apply(&config.Config{}); err != nil {
 		t.Fatal(err)
 	}
-	v.s = New(<-hosts)
+	v.s, v.m = New(<-hosts), m
 	t.Cleanup(func() {
 		v.s.Stop(context.Background())
 		m.Stop(context.Background())
@@ -266,7 +267,7 @@ func (v *env) dial(addr string) *peer {
 			}
 		}, true)
 	}
-	if _, err := transport.Dial(v.e, addr, 5*time.Second, func(c transport.Conn) transport.Handler {
+	if _, err := transport.Dial(v.e, addr, 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler {
 		p.l = link.New(c, r, nil)
 		return p.l
 	}); err != nil {

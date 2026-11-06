@@ -303,7 +303,7 @@ func TestSealedCutMidHandshake(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	var a *Link
-	if _, err := transport.Dial(e, ln.URL(), 5*time.Second, func(c transport.Conn) transport.Handler { a = New(c, NewRouter(), coder(t, "pw")); return a }); err != nil {
+	if _, err := transport.Dial(e, ln.URL(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler { a = New(c, NewRouter(), coder(t, "pw")); return a }); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()

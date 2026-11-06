@@ -34,33 +34,31 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/transport"
 	"github.com/lesismal/fit/tunnel/internal/tunnel"
 
-	"github.com/lesismal/fit/tunnel/internal/transport/quic"
+	_ "github.com/lesismal/fit/tunnel/internal/transport/quic"
 
 	// Hubs may be reached over WebSocket, in the clear or over TLS.
 	_ "github.com/lesismal/fit/tunnel/internal/transport/ws"
 )
 
 // Dials is the addresses a link tries, in order: the endpoints not
-// disabled, a tls, wss or quic one's with how the hub's certificate is
-// checked, in its query.
+// disabled. How a tls, wss or quic one checks the hub's certificate is
+// CheckBy's, given to the dial beside the address, never added to it.
 func Dials(cfg *config.TunnelUplink) []string {
 	var out []string
 	for _, e := range cfg.Endpoints {
 		if e.Disabled || e.Address == "" {
 			continue
 		}
-		u := e.Address
-		switch e.Protocol() {
-		case config.TunnelQUIC:
-			u = quic.DialURL(strings.TrimPrefix(u, "quic://"), cfg.Pin, cfg.CAFile, cfg.QUICInsecure)
-		case config.TunnelTLS, config.TunnelWSS:
-			if q := transport.ClientQuery(cfg.Pin, cfg.CAFile, false); q != "" {
-				u += "?" + q
-			}
-		}
-		out = append(out, u)
+		out = append(out, e.Address)
 	}
 	return out
+}
+
+// CheckBy is how a link to addr checks the hub's certificate: pinned to
+// cfg's pin, or by its ca_file's CAs, or, for quic with quic_insecure, not
+// at all; tcp and ws ignore it.
+func CheckBy(cfg *config.TunnelUplink, addr string) transport.ClientOptions {
+	return transport.CheckBy(cfg.Pin, cfg.CAFile, cfg.QUICInsecure && transport.Scheme(addr) == config.TunnelQUIC)
 }
 
 // Same reports whether a and b are the same uplink, so that one moved from
@@ -277,13 +275,12 @@ func (u *Uplink) dial() (*link.Link, error) {
 	var errs []string
 	for _, addr := range dials {
 		var l *link.Link
-		_, err := transport.Dial(u.engine, addr, u.Config.Dial(), func(c transport.Conn) transport.Handler {
+		_, err := transport.Dial(u.engine, addr, u.Config.Dial(), CheckBy(u.Config, addr), func(c transport.Conn) transport.Handler {
 			l = link.New(c, u.router, u.coder)
 			return l
 		})
-		shown, _, _ := strings.Cut(addr, "?")
 		if err != nil {
-			errs = append(errs, shown+": "+err.Error())
+			errs = append(errs, addr+": "+err.Error())
 			select {
 			case <-u.stop:
 				return nil, ErrStopped
@@ -297,9 +294,9 @@ func (u *Uplink) dial() (*link.Link, error) {
 			_ = l.Close()
 			return nil, ErrStopped
 		}
-		u.pool[l] = shown
+		u.pool[l] = addr
 		if len(errs) > 0 {
-			u.log.Infof("hub %s: fell back to %s, after %s", u.Name, shown, strings.Join(errs, "; "))
+			u.log.Infof("hub %s: fell back to %s, after %s", u.Name, addr, strings.Join(errs, "; "))
 		}
 		return l, nil
 	}
@@ -580,7 +577,7 @@ func (u *Uplink) Status() Status {
 		st.Endpoints = append(st.Endpoints, EndpointView{Protocol: e.Protocol(), Address: e.Address, Enabled: !e.Disabled})
 	}
 	if d := Dials(cfg); len(d) > 0 {
-		st.Addr, _, _ = strings.Cut(d[0], "?")
+		st.Addr = d[0]
 	}
 	for i, c := range u.linksLocked() {
 		rsp := u.conns[c]

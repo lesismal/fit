@@ -29,7 +29,7 @@ func pair(t *testing.T, ra, rb *Router, ca, cb *bodycrypt.Coder) (*Link, *Link) 
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	var a *Link
-	if _, err := transport.Dial(e, l.URL(), 5*time.Second, func(c transport.Conn) transport.Handler { a = New(c, ra, dialerOf(ca)); return a }); err != nil {
+	if _, err := transport.Dial(e, l.URL(), 5*time.Second, transport.ClientOptions{}, func(c transport.Conn) transport.Handler { a = New(c, ra, dialerOf(ca)); return a }); err != nil {
 		t.Fatal(err)
 	}
 	b := <-bs

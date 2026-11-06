@@ -12,6 +12,11 @@
 // binding of the engine (package transport/quic). A transport registers its
 // scheme in an init function, and is linked in with a blank import.
 //
+// An address is only where to dial: how a tls, wss or quic dial checks the
+// hub's certificate is the ClientOptions given to Dial beside it, never part
+// of the address, which is parsed with net/url and refused with a user, a
+// query or a fragment (see ParseURL).
+//
 // Every transport serves its connections on the engine: their handlers run
 // on fib's workers, or on the goroutine that feeds a QUIC connection its
 // datagrams, and must not block. Dial waits for the connection, and is for
@@ -23,6 +28,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -73,8 +80,9 @@ type OpenFunc func(Conn) Handler
 type Transport interface {
 	// Dial connects to addr, the whole address with its scheme, calls
 	// open once the connection is open, and returns the connection; it
-	// gives up after timeout.
-	Dial(engine *fib.Engine, addr string, timeout time.Duration, open OpenFunc) (Conn, error)
+	// gives up after timeout. A transport with TLS checks the hub's
+	// certificate as opts says; one without ignores opts.
+	Dial(engine *fib.Engine, addr string, timeout time.Duration, opts ClientOptions, open OpenFunc) (Conn, error)
 	// Listen accepts connections on addr and calls open for each.
 	Listen(engine *fib.Engine, addr string, o ListenOptions, open OpenFunc) (Listener, error)
 }
@@ -154,13 +162,79 @@ func lookup(addr string) (Transport, error) {
 	return t, nil
 }
 
-// Dial connects to addr over the transport of its scheme.
-func Dial(engine *fib.Engine, addr string, timeout time.Duration, open OpenFunc) (Conn, error) {
+// Dial connects to addr over the transport of its scheme, a tls, wss or
+// quic one checking the hub's certificate as opts says.
+func Dial(engine *fib.Engine, addr string, timeout time.Duration, opts ClientOptions, open OpenFunc) (Conn, error) {
 	t, err := lookup(addr)
 	if err != nil {
 		return nil, err
 	}
-	return t.Dial(engine, addr, timeout, open)
+	return t.Dial(engine, addr, timeout, opts, open)
+}
+
+// ParseURL parses addr, an address with a scheme, with net/url, and refuses
+// one that is not only where to dial or listen: one with a user, a query or
+// a fragment, or without a host. Nothing in an address says how a
+// certificate is checked, so that no part of one can change that.
+func ParseURL(addr string) (*url.URL, error) {
+	u, err := url.Parse(addr)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("tunnel: %q is not a URL: %w", addr, err)
+	case u.User != nil:
+		return nil, fmt.Errorf("tunnel: %q has a user, which an address does not", addr)
+	case strings.ContainsAny(addr, "?#"):
+		return nil, fmt.Errorf("tunnel: %q has a query or a fragment, which an address does not: the hub's certificate is checked by pin or ca_file", addr)
+	case u.Opaque != "" || u.Hostname() == "":
+		return nil, fmt.Errorf("tunnel: %q is not a URL with a host", addr)
+	}
+	return u, nil
+}
+
+// HostURL is addr, a scheme:// address of a host and port and no path, as
+// ParseURL takes it.
+func HostURL(addr, scheme string) (*url.URL, error) {
+	u, err := ParseURL(addr)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != scheme {
+		return nil, fmt.Errorf("tunnel: %q is not a %s:// address", addr, scheme)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return nil, fmt.Errorf("tunnel: %q has a path, which a %s:// address does not", addr, scheme)
+	}
+	if err := checkPort(addr, u.Port()); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// HostPort is the host and port of addr: plain host:port, or a scheme://
+// address HostURL takes.
+func HostPort(addr, scheme string) (string, error) {
+	if IsURL(addr) {
+		u, err := HostURL(addr, scheme)
+		if err != nil {
+			return "", err
+		}
+		return u.Host, nil
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || strings.ContainsAny(addr, "/?#@") {
+		return "", fmt.Errorf("tunnel: %q is not a host and port", addr)
+	}
+	if err := checkPort(addr, port); err != nil {
+		return "", err
+	}
+	return addr, nil
+}
+
+func checkPort(addr, port string) error {
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return fmt.Errorf("tunnel: %q has no port, or one that is not a number", addr)
+	}
+	return nil
 }
 
 // Listen listens on addr over the transport of its scheme.
@@ -333,10 +407,13 @@ func Dialable(engine *fib.Engine, i int) string {
 // tcpTransport is plain TCP on fib's engine.
 type tcpTransport struct{}
 
-func (tcpTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, open OpenFunc) (Conn, error) {
-	addr = strings.TrimPrefix(addr, "tcp://")
+func (tcpTransport) Dial(engine *fib.Engine, addr string, timeout time.Duration, _ ClientOptions, open OpenFunc) (Conn, error) {
+	hostport, err := HostPort(addr, "tcp")
+	if err != nil {
+		return nil, err
+	}
 	return DialFib(func(done func(*fib.Connection, error)) error {
-		return engine.DialWithHandler("tcp", addr, timeout, FibHandler(open), done)
+		return engine.DialWithHandler("tcp", hostport, timeout, FibHandler(open), done)
 	})
 }
 
