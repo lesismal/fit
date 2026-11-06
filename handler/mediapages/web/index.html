@@ -19,6 +19,7 @@
     <a class="tab" href="call" data-nav="call" data-i18n="nav.call">Call</a>
     <a class="tab" href="publish" data-nav="publish" data-i18n="nav.publish">Publish</a>
     <a class="tab" href="play" data-nav="play" data-i18n="nav.play">Play</a>
+    <a class="tab" href="library" data-nav="library" data-i18n="nav.library" id="nav-library" hidden>Library</a>
   </nav>
   <span class="spacer"></span>
   <span class="badge" id="who" hidden></span>
@@ -44,6 +45,9 @@
         <div class="card__body"><h3 data-i18n="nav.play">Play</h3><p class="muted" data-i18n="home.play">Play a stream with WHEP, or HLS where the browser plays it.</p></div>
       </a>
     </div>
+    <a class="card card--link" href="library" data-nav="library" id="home-library" hidden>
+      <div class="card__body"><h3 data-i18n="nav.library">Library</h3><p class="muted" data-i18n="home.library">Films and episodes on demand, and channels that play them as live streams.</p></div>
+    </a>
     <div class="card">
       <div class="card__head"><h3 data-i18n="home.server">This server</h3></div>
       <div class="card__body"><dl class="kv" id="home-info"></dl></div>
@@ -137,6 +141,38 @@
       <div class="card__head"><h3 data-i18n="links.title">The stream's URLs</h3></div>
       <div class="card__body"><dl class="kv" id="play-links"></dl></div>
     </div>
+  </section>
+
+  <section id="view-library" class="view" hidden>
+    <div class="card">
+      <div class="card__body">
+        <form class="form-row" id="lib-form" autocomplete="off" role="search">
+          <label class="field"><span class="field__label" data-i18n="lib.search">Search</span><input class="input" id="lib-q" type="search" maxlength="128"></label>
+          <div class="field field--end"><div class="btn-row">
+            <button class="btn btn--primary" id="lib-go" type="submit" data-i18n="lib.go">Search</button>
+          </div></div>
+        </form>
+        <p class="hint" id="lib-hint"></p>
+      </div>
+    </div>
+    <div class="card" id="lib-channels-card" hidden>
+      <div class="card__head"><h3 data-i18n="lib.channels">Channels</h3></div>
+      <div class="card__body"><div class="shelf" id="lib-channels"></div></div>
+    </div>
+    <div id="lib-shelves" class="view"></div>
+  </section>
+
+  <section id="view-watch" class="view" hidden>
+    <div class="watch-head">
+      <a class="btn btn--sm btn--ghost" href="library" data-nav="library" data-i18n="watch.back">Back to the library</a>
+      <h2 id="watch-title"></h2>
+      <span class="badge" id="watch-state"></span>
+    </div>
+    <div class="stage stage--play"><div class="tile tile--watch"><video id="watch-video" controls playsinline></video></div></div>
+    <div class="btn-row">
+      <button class="btn btn--primary" id="watch-again" type="button" data-i18n="watch.again" hidden>Play again</button>
+    </div>
+    <p class="hint" id="watch-hint"></p>
   </section>
 </main>
 

@@ -26,6 +26,8 @@ type settings struct {
 	tableBytes       int64
 	workers, queue   int
 	timeout          time.Duration
+	// keys are those of encrypted HLS, nil without a secret.
+	keys *Keys
 }
 
 // root is a root of a library: as the config writes it, and absolute.
@@ -40,6 +42,11 @@ func compile(c *config.MediaLibrary) (*settings, error) {
 	if len(c.Roots) == 0 {
 		return nil, fmt.Errorf("no roots")
 	}
+	keys, err := KeysOf(c)
+	if err != nil {
+		return nil, err
+	}
+	s.keys = keys
 	for _, r := range c.Roots {
 		abs, err := filepath.Abs(r)
 		if err != nil || strings.TrimSpace(r) == "" {

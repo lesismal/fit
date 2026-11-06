@@ -50,6 +50,8 @@ type MediaLibrary struct {
 	FileWorkers      int      `json:"file_workers,omitempty" min:"0" doc:"The goroutines of the library's file pool, which probe, read sample tables and read the files' bytes, so that no fib worker waits on the disk: all the disk is asked to do at once. 4 a CPU, and at least 16, when left out or 0."`
 	FileQueue        int      `json:"file_queue,omitempty" min:"0" default:"4096" doc:"The most jobs that wait for the file pool; one more is refused, as a request answered 503. 4096 when left out or 0."`
 	FileTimeout      Duration `json:"file_timeout,omitempty" default:"\"10s\"" doc:"How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out."`
+	Secret           string   `json:"secret,omitempty" doc:"The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted."`
+	SecretFile       string   `json:"secret_file,omitempty" doc:"A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -108,6 +110,10 @@ func (m *MediaLibrary) Queue() int {
 func (m *MediaLibrary) Timeout() time.Duration {
 	return durationOr(m.FileTimeout, DefaultMediaFileTimeout)
 }
+
+// Encryptable reports whether the library has a secret to derive the keys
+// of encrypted HLS from.
+func (m *MediaLibrary) Encryptable() bool { return m.Secret != "" || m.SecretFile != "" }
 
 // MediaLibraryNamed returns the library of c named name, or nil.
 func (c *Config) MediaLibraryNamed(name string) *MediaLibrary {
@@ -181,6 +187,12 @@ func (c *Config) checkMediaLibrary(add func(Value, string, ...any)) {
 					add(m.At.Field(f.name).Index(j), "%q is not a pattern: names and *, ? and [...] as path.Match takes them, and ** for any run of directories, split at '/', not starting with one", p)
 				}
 			}
+		}
+		switch {
+		case m.Secret != "" && m.SecretFile != "":
+			add(m.At.Field("secret_file"), "set secret or secret_file, one of the two")
+		case m.Secret != "" && len(m.Secret) < MinMediaSecret:
+			add(m.At.Field("secret"), "the secret is %d bytes: use at least %d", len(m.Secret), MinMediaSecret)
 		}
 		if d := m.ScanInterval.Std(); d != 0 && d < MinMediaScanInterval {
 			add(m.At.Field("scan_interval"), "scan_interval is %s: at least %s", d, MinMediaScanInterval)

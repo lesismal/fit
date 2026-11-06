@@ -6260,3 +6260,87 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: sessions are counted by each fit alone; RTMP, RTSP, SRT and WHEP take no signed URLs;
   Safari's player was not tried again by hand. The decisions made are in the plan's I135 section,
   pending review.
+
+
+### I136 Encrypted segments — done
+
+- **`encrypt`** on `vod` and on a channel's HLS (with `key_rotation`, 10 by default): AES-128
+  (`METHOD=AES-128`) for fMP4 and MPEG-TS, keys derived from the library's new `secret` or
+  `secret_file` (`medialib.Keys`), one an item, or a channel's session and period; segments encrypted on
+  the file pool before they are cached, within the cache's bound; a key served only to a grant or
+  token for its resource, `private, no-store`; init sections, subtitles and posters clear; an
+  encrypting `vod` serves no clear file.
+- **Channels**: a stopgap in fit's `hls` handler until fib request A69 lets fib's Muxer encrypt: each
+  segment copied and encrypted once on the library's pool, cached within `max_bytes`, playlists
+  rewritten, no Low-Latency HLS parts. A69 is being added to fib.
+- **Tests**: `make test-changed` under the race detector; on the benchmark host, ffmpeg plays every
+  encrypted item frame for frame and hls.js plays them through signed URLs (`TestInteropEncrypted`,
+  `test/docker/vod`), ffprobe and hls.js play encrypted channels across key rotations and
+  discontinuities (`TestChannelInterop`); segments alone do not decode; a key is refused without a
+  grant (401) and with another resource's (403).
+- **Cost** (benchmark host, one core): AES-128-CBC at 1.24 GiB/s, 0.79 ms a 1 MiB segment; building a
+  test library's segment +24 µs with fMP4 and +48 µs with MPEG-TS; a cached segment nothing more.
+- **Gaps**: subtitles are clear; the channel stopgap's busy-pool and client-left paths have no test of
+  their own; Safari's player not tried by hand. The decisions made are in the plan's I136 section,
+  pending review.
+
+## Static files follow the disk
+
+### fib filewatch; check_interval 5s, 0 for every request — done
+
+- **The gap** (found 2026-11-06): `handler/static` told a file by size and modification time only, so a
+  file replaced by one of the same size and time (`rsync -t`, `cp -p`, `tar x`, reproducible builds)
+  was served from memory as it was, for good; a change showed only after `check_interval` (1s), which
+  could not be set to 0.
+- **fib** (`3ac534d`): a public `filewatch` package. `filewatch.Watcher` is the inotify watch
+  `http.FileCache` had to itself, now watching every directory on the way from the root (a renamed
+  directory is a `Dir` event, its old watches dropped), the directories of symbolic links on the way to
+  the root (a deploy's `current` pointed elsewhere is `All`), and a swapped link to a directory under
+  the root. `filewatch.Stamp` adds the status change time and device to size, mtime and inode.
+  `FileCacheConfig.CheckInterval` (5s by default, negative for every request) bounds what a watch
+  misses, and replaces the stat on every request off Linux.
+- **fit**: fib bumped to that commit. `check_interval` is 5s when left out, and `0` looks at the disk for
+  every request with no watch, so that the next response after a replacement is the new file. On
+  Linux the handler watches the root with `filewatch`; an event drops the lookups that depend on what
+  it names, through an index (the path, its compressed twins, the entries of a directory whose index
+  file or listing was found, and everything under a directory that went), and a lookup resolved while
+  an event came is not kept. Contents are served while the file's stamp is the one they were read
+  with. `Cleanup` closes the watch.
+- **Tests**: on Linux under `-race`, a same-stamp replacement, a file created and removed, an index file
+  that comes before another, a directory swapped, a root link swapped, each seen at once with
+  `check_interval` 1h; with no watch, the same-stamp replacement past the interval and at once with 0;
+  what each kind of event drops.
+- **Decisions pending review**:
+  1. The ETag stays mtime and size, as nginx makes it: a file replaced with the same size and time
+     keeps its ETag, so a client revalidating its old copy is answered 304. Adding the inode or change
+     time would make ETags differ between machines serving the same files.
+  2. Watched lookups still expire at `check_interval`, a bound on what inotify cannot see (writes on a
+     network file system by another machine, a symbolic link under the root to a file elsewhere).
+  3. No `watch: false` parameter: `check_interval: 0` turns the watch off, and the interval bounds the
+     rest.
+  4. fib's `FileCache` off Linux now trusts a file for 5s rather than stat it on every request; a
+     negative `CheckInterval` keeps the old behaviour.
+  5. Windows has no inode or change time; the stamp takes the creation time, which NTFS tunneling may
+     carry over to a file renamed into another's place, so a same-size, same-time replacement there is
+     not told apart at all: size and times are all it has, whatever `check_interval` is.
+  6. On a root that folds case, an event names the file as written on disk, and a lookup by another
+     case waits for the interval. inotify roots that fold case are rare.
+
+
+### I137 A video site, end to end — done
+
+- **fit-examples `video-site`**: a media library played by `vod` and as a channel, `media_tokens` on the
+  loopback behind `basic_auth`, a small Go API that logs viewers in and asks `/media-tokens/urls` for
+  URLs bound to each viewer's opaque ID and address, and a page playing them with hls.js.
+- **`media_pages`** gains `libraries`, `vod` and `channels`: a library page (`<prefix>/library`) of what
+  the logged-in user may play, and a player page (`<prefix>/watch`) that plays it with hls.js through a
+  URL the pages sign (`api/play`), stopping and offering to play again once refused; hls.js 1.5.20
+  (Apache-2.0) vendored with its license at `<prefix>/vendor/hls.min.js`. `mediaauth` gains `Whois`
+  and `ViewerAddr`.
+- **Docs**: "A video site" in `docs/media-library.md`, English and Chinese; decision 032's I137 entry.
+- **Tests**: listing, filtering by permission, paging and search, a bcrypt login, signed and expired
+  URLs, channels; `test/docker/videosite` on the benchmark host's Docker: headless Chromium logs in to
+  the example's API, plays a film and the channel, seeks, and is refused once a URL and its grant
+  expire, on the site's page and on the library and player pages: 16 checks of 16.
+- **Gaps**: Safari's own player not tested; `/media/play` still plays HLS natively only. The decisions
+  made are in the plan's I137 section, pending review.

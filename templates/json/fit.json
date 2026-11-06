@@ -997,7 +997,8 @@
       // "handler": {
         // // Serves fit's media pages under a prefix: an index with a login, a room call, publish and
         // // play pages over WHIP and WHEP, and the room API through which the members of a call announce
-        // // their microphone and camera.
+        // // their microphone and camera; with libraries or channels, a library page and a player page
+        // // that plays with hls.js through playback URLs signed for the viewer.
         // "module": "media_pages",
         // "params": {
           // // The path the pages are served under, which the route must match with what is below it, as
@@ -1131,6 +1132,29 @@
           // // is cut off. 30s when left out.
           // // duration, as "1.5s" or "2m"; default "30s".
           // "stall_timeout": "30s",
+
+          // // The media_library names whose items the library page lists, at most 16: those the viewer may
+          // // play, play on vod/<library>/<id> under auth, that can be served, with their posters,
+          // // searched and paged; the player page plays one with hls.js, vendored in the binary. With the
+          // // auth policy's url_signing, and playing not public, the player plays through a playback URL
+          // // the pages sign for the viewer, its address and a session of its own, good for url_signing's
+          // // ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the
+          // // login's cookie lets in. None when left out: no library page.
+          // // list of string.
+          // "libraries": [],
+
+          // // The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing
+          // // for its library's name and {id} for its ID: a path on this server or an http or https URL,
+          // // ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its
+          // // extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix.
+          // // string; default "/vod/{library}/{id}/index.m3u8".
+          // "vod": "/vod/{library}/{id}/index.m3u8",
+
+          // // List the streaming role's channels on the library page too, those the viewer may play, with
+          // // what each plays now and next, played from hls, which must be set, through a playback URL
+          // // signed for the viewer as an item's is. Off when left out.
+          // // boolean.
+          // "channels": true,
         // },
       // },
     // },
@@ -1369,10 +1393,16 @@
           // "dotfiles": "deny",
 
           // // How long what the handler learned of a request path, the file it names and its validators,
-          // // is trusted before the disk is looked at again; a change on disk shows within it. 1s when
-          // // left out.
-          // // duration, as "1.5s" or "2m"; default "1s".
-          // "check_interval": "1s",
+          // // is trusted before the disk is looked at again. On Linux a watch of the directories under the
+          // // root reports a change within moments, a file written, replaced or removed, a directory
+          // // renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what
+          // // it cannot see, as a write another machine makes on a network file system; elsewhere a change
+          // // shows within it. A file is told by its size, modification and status change times and inode,
+          // // so one replaced by another of the same size and modification time is seen too. 0 looks at
+          // // the disk for every request, with no watch, so that a response always carries the file as it
+          // // is on disk then. 5s when left out.
+          // // duration, as "1.5s" or "2m"; default "5s".
+          // "check_interval": "5s",
         // },
       // },
     // },
@@ -1495,6 +1525,15 @@
           // // pool; past it the answer is 503. 30s when left out.
           // // duration, as "1.5s" or "2m"; default "30s".
           // "timeout": "30s",
+
+          // // Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under
+          // // a key of its own derived from the library's secret, which the media playlists name as
+          // // aes.key in the item's directory and the handler serves only to a request auth lets play that
+          // // item: segments copied, as a CDN keeps them, do not play without it. The files themselves are
+          // // then not served; initialization sections, subtitles and posters stay clear. Needs auth and
+          // // the library's secret or secret_file. Off when left out.
+          // // boolean.
+          // "encrypt": true,
         // },
       // },
     // },
@@ -5357,6 +5396,20 @@
             // "connect_timeout": "10s",
           // },
         // ],
+
+        // // Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike,
+        // // under a key derived from the library's secret, which the hls handler serves only to a
+        // // request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not
+        // // play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not
+        // // served for it. The other egresses play the channel as before, under their auth. Off when
+        // // left out.
+        // // boolean.
+        // "encrypt": true,
+
+        // // With encrypt, how many segments one key encrypts before the next takes over, so that a key
+        // // handed out opens a few segments only. 10 when left out or 0.
+        // // integer, 0 to 100000; default 10.
+        // "key_rotation": 10,
       // },
     // ],
 
@@ -5497,6 +5550,20 @@
       // // 10s when left out.
       // // duration, as "1.5s" or "2m"; default "10s".
       // "file_timeout": "10s",
+
+      // // The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for
+      // // each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation
+      // // segments. Changing it changes every key, so that segments encrypted before, kept by a CDN,
+      // // no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of
+      // // the library can be encrypted.
+      // // string.
+      // "secret": "",
+
+      // // A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time
+      // // the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one
+      // // of the two. None when left out.
+      // // string.
+      // "secret_file": "",
     // },
   // ],
 

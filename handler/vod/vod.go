@@ -8,7 +8,10 @@
 // renditions, with its audio files and subtitles as groups; a media
 // playlist of each, of fragmented MP4 segments, or MPEG-TS for older
 // players; the segments, cut at keyframes near segment_duration; and the
-// files themselves, with Range. names.go lists them.
+// files themselves, with Range. names.go lists them. With encrypt, the
+// segments are encrypted with AES-128 under the item's key, derived from
+// the library's secret (medialib.Keys), as they are built on the pool, and
+// the key, aes.key, is served to whoever auth lets play the item.
 //
 // Nothing here blocks a fib worker. A playlist is cut from the sample
 // tables the library reads on its file pool, a segment's samples are read
@@ -74,6 +77,7 @@ type VOD struct {
 	CacheControl    string          `json:"cache_control,omitempty" doc:"Sent as Cache-Control with every playlist, segment, subtitle and file, so that a CDN keeps them, as \"public, max-age=86400\": they change only when their file does, which their ETag and Last-Modified say. None when left out."`
 	CORS            string          `json:"cors,omitempty" doc:"Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out."`
 	Timeout         config.Duration `json:"timeout,omitempty" default:"\"30s\"" doc:"How long a request may wait for what it needs to be read and built on the library's file pool; past it the answer is 503. 30s when left out."`
+	Encrypt         bool            `json:"encrypt,omitempty" doc:"Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under a key of its own derived from the library's secret, which the media playlists name as aes.key in the item's directory and the handler serves only to a request auth lets play that item: segments copied, as a CDN keeps them, do not play without it. The files themselves are then not served; initialization sections, subtitles and posters stay clear. Needs auth and the library's secret or secret_file. Off when left out."`
 
 	engine    *fib.Engine
 	prefix    string
@@ -84,6 +88,9 @@ type VOD struct {
 	graph     module.Holder
 	lib       atomic.Pointer[medialib.Library]
 	st        *store
+	// keys are the library's keys of encrypted HLS, with encrypt; nil
+	// without.
+	keys *medialib.Keys
 }
 
 // Provision checks the params and takes the shared store of its params.
@@ -109,6 +116,19 @@ func (v *VOD) Provision(ctx *module.Context) error {
 		return err
 	}
 	v.auth = p
+	if v.Encrypt {
+		if p == nil {
+			return ctx.Errorf("encrypt", "encrypt needs auth: the key is served only to a request its policy lets play the item")
+		}
+		keys, err := medialib.KeysOf(ctx.MediaLibrary(v.Library))
+		if err != nil {
+			return ctx.Errorf("library", "media_library %q's %s", v.Library, err)
+		}
+		if keys == nil {
+			return ctx.Errorf("encrypt", "encrypt needs a key: set media_library %q's secret or secret_file", v.Library)
+		}
+		v.keys = keys
+	}
 	v.container = fmp4C
 	if v.Container == "ts" {
 		v.container = tsC
@@ -140,7 +160,7 @@ func (v *VOD) Provision(ctx *module.Context) error {
 	}
 	v.engine, v.stall, v.graph = ctx.Engine(), ctx.WriteStallTimeout(), ctx.Graph()
 	v.st = takeStore(storeKey{engine: v.engine, library: v.Library, segDur: d, segBytes: segBytes, cacheBytes: cacheBytes,
-		cacheControl: v.CacheControl, cors: v.CORS})
+		cacheControl: v.CacheControl, cors: v.CORS, keyID: v.keys.ID()}, v.keys)
 	return nil
 }
 
@@ -277,7 +297,7 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 		case kindInit:
 			v.serveInit(c, r, nm)
 		default:
-			v.serveSegment(c, l, r, nm)
+			v.serveSegment(c, l, it.ID, r, nm)
 		}
 	case kindSubtitles, kindVTT:
 		if nm.i >= len(it.Subtitles) || it.Subtitles[nm.i].Error != "" {
@@ -291,7 +311,17 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 			return
 		}
 		v.serveVTT(c, l, it.Subtitles[nm.i])
+	case kindKey:
+		if v.keys == nil {
+			v.respond(c, stdhttp.StatusNotFound, "the item is not encrypted")
+			return
+		}
+		v.serveKey(c, it)
 	case kindFile:
+		if v.keys != nil {
+			v.respond(c, stdhttp.StatusNotFound, "the files of an encrypted item are not served")
+			return
+		}
 		list := it.Renditions
 		if nm.audio {
 			list = it.Audio
@@ -462,7 +492,7 @@ func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Re
 		}
 	}
 	render := func(p *plan) *blob {
-		return &blob{data: renderMedia(p, nm.audio, nm.i, nm.c, query), header: v.st.header(hls.PlaylistContentType, "", r.ModTime), modTime: r.ModTime}
+		return &blob{data: renderMedia(p, nm.audio, nm.i, nm.c, query, v.keys != nil), header: v.st.header(hls.PlaylistContentType, "", r.ModTime), modTime: r.ModTime}
 	}
 	if p, ok := v.st.cache.peek(ckey{file: idOf(&r.File), what: whatPlan}); ok {
 		b := render(p.(*plan))
@@ -514,8 +544,8 @@ func (v *VOD) serveInit(c *fibhttp.Context, r *medialib.Rendition, nm name) {
 	v.sendBlob(c, in)
 }
 
-// serveSegment serves segment nm.n of r.
-func (v *VOD) serveSegment(c *fibhttp.Context, l *medialib.Library, r *medialib.Rendition, nm name) {
+// serveSegment serves segment nm.n of r, of the item whose ID is id.
+func (v *VOD) serveSegment(c *fibhttp.Context, l *medialib.Library, id string, r *medialib.Rendition, nm name) {
 	if _, ok := tracksOf(r, nm.c); !ok {
 		v.respond(c, stdhttp.StatusNotFound, "the file has no track "+nm.c.String()+" carries")
 		return
@@ -535,7 +565,7 @@ func (v *VOD) serveSegment(c *fibhttp.Context, l *medialib.Library, r *medialib.
 			w.answer(func() { v.respond(c, stdhttp.StatusNotFound, "no such segment") })
 			return
 		}
-		v.st.segment(l, r, p, nm.n, nm.c, func(b *blob, err error) { w.blob(&r.File, b, err) })
+		v.st.segment(l, id, r, p, nm.n, nm.c, func(b *blob, err error) { w.blob(&r.File, b, err) })
 	})
 }
 
@@ -566,6 +596,17 @@ func (v *VOD) serveVTT(c *fibhttp.Context, l *medialib.Library, s *medialib.Subt
 		bl, _ := b.(*blob)
 		w.blob(&f, bl, err)
 	})
+}
+
+// serveKey serves the AES-128 key of it, to a request auth let in for it,
+// which no cache may keep.
+func (v *VOD) serveKey(c *fibhttp.Context, it *medialib.Item) {
+	key := v.keys.Key(medialib.KeyItem, it.ID, 0)
+	h := stdhttp.Header{"Content-Type": {"application/octet-stream"}, "Cache-Control": {"private, no-store"}}
+	if v.CORS != "" {
+		h["Access-Control-Allow-Origin"] = []string{v.CORS}
+	}
+	_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: h, Body: key[:]})
 }
 
 // serveFile sends f as it is, with Range, from the library's pool.
@@ -619,6 +660,9 @@ type storeKey struct {
 	segDur               time.Duration
 	segBytes, cacheBytes int64
 	cacheControl, cors   string
+	// keyID is the ID of the keys segments are encrypted with, "" for
+	// none: a new secret makes a new store, with nothing kept of the old.
+	keyID string
 }
 
 // store is the cache of the handlers of one storeKey, kept across reloads
@@ -628,8 +672,11 @@ type store struct {
 	refs  int // under storesMu
 	cache *cache
 	// tag tells what the store's params make apart in ETags: segments cut
-	// by one segment_duration differ from those of another.
+	// by one segment_duration differ from those of another, and segments
+	// encrypted from clear ones and under another key.
 	tag string
+	// keys encrypt the store's segments, nil for none.
+	keys *medialib.Keys
 	// requests and sent count what the store's handlers served (stats.go).
 	requests, sent atomic.Uint64
 }
@@ -639,14 +686,17 @@ var (
 	stores   = map[storeKey]*store{}
 )
 
-func takeStore(k storeKey) *store {
+func takeStore(k storeKey, keys *medialib.Keys) *store {
 	storesMu.Lock()
 	defer storesMu.Unlock()
 	st := stores[k]
 	if st == nil {
 		h := fnv.New32a()
 		fmt.Fprintf(h, "%d %d %d", segmentFormat, k.segDur, k.segBytes)
-		st = &store{key: k, cache: newCache(k.cacheBytes), tag: strconv.FormatUint(uint64(h.Sum32()), 36)}
+		if k.keyID != "" {
+			fmt.Fprintf(h, " aes-128 %s", k.keyID)
+		}
+		st = &store{key: k, cache: newCache(k.cacheBytes), tag: strconv.FormatUint(uint64(h.Sum32()), 36), keys: keys}
 		stores[k] = st
 	}
 	st.refs++
@@ -802,10 +852,12 @@ func tables(l *medialib.Library, r *medialib.Rendition, vi, ai int, fn func(vt, 
 }
 
 // segment gets segment n of p, r's plan, in container c, from the cache or
-// built on l's pool, and calls fn with it, or with the error.
-func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n int, c container, fn func(*blob, error)) {
+// built on l's pool, and calls fn with it, or with the error. id is the ID
+// of r's item, whose key encrypts it when the store encrypts.
+func (st *store) segment(l *medialib.Library, id string, r *medialib.Rendition, p *plan, n int, c container, fn func(*blob, error)) {
 	k := ckey{file: idOf(&r.File), what: whatSegment, c: c, n: int32(n)}
-	// The samples are read into one buffer and muxed into another.
+	// The samples are read into one buffer and muxed into another, which
+	// encryption pads in place.
 	reserve := 2*int64(p.segs[n].bytes) + 64<<10
 	file := r.File
 	st.cache.get(k, func(j job) {
@@ -827,7 +879,7 @@ func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n 
 					j.done(nil, 0, errFull)
 					return
 				}
-				data, err := st.build(l, &file, r, p, n, c, src)
+				data, err := st.build(l, &file, id, p, n, c, src)
 				if err != nil {
 					j.done(nil, 0, err)
 					return
@@ -849,8 +901,9 @@ func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n 
 	})
 }
 
-// build reads and muxes segment n of p on the pool. It blocks.
-func (st *store) build(l *medialib.Library, f *medialib.File, r *medialib.Rendition, p *plan, n int, c container, src *source) ([]byte, error) {
+// build reads and muxes segment n of p on the pool, and encrypts it under
+// the key of item id when the store encrypts. It blocks.
+func (st *store) build(l *medialib.Library, f *medialib.File, id string, p *plan, n int, c container, src *source) ([]byte, error) {
 	var in *initSection
 	if c == fmp4C {
 		var err error
@@ -863,8 +916,14 @@ func (st *store) build(l *medialib.Library, f *medialib.File, r *medialib.Rendit
 		return nil, err
 	}
 	defer h.Close()
+	var data []byte
 	if c == fmp4C {
-		return buildFMP4(h, p, n, src, in)
+		data, err = buildFMP4(h, p, n, src, in)
+	} else {
+		data, err = buildTS(h, p, n, src)
 	}
-	return buildTS(h, p, n, src)
+	if err != nil || st.keys == nil {
+		return data, err
+	}
+	return medialib.Encrypt(st.keys.Key(medialib.KeyItem, id, 0), uint64(n), data), nil
 }

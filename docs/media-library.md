@@ -183,6 +183,7 @@ An item's URLs are its ID's path after `prefix`, `/vod/<library>/` unless set, a
 | `s0.m3u8`, `s0.vtt` | subtitle 0's playlist, and the subtitle as WebVTT |
 | `v0.mp4`, `a0.m4a` | the file itself, of its own extension, with `Range`, for downloads and plain players |
 | `poster.jpg` | the item's poster, of its own extension |
+| `aes.key` | with `encrypt`, the AES-128 key of the item's segments ([encrypted segments](#encrypted-segments)) |
 
 So `/vod/films/films/bbb/index.m3u8` plays the item `films/bbb`. The multivariant playlist lists
 the renditions as variants, with `BANDWIDTH` and `AVERAGE-BANDWIDTH` (the file's bytes over its
@@ -233,8 +234,7 @@ answered 304 and ranges of a segment 206. `cache_control` is sent with each, as
 `token` query parameter or the `fit_media_token` cookie. A playlist fetched with `?token=` names
 what it lists with the token too, so that Safari and ffmpeg, which send no header, play on.
 With the policy's `url_signing`, a [signed URL](#playback-urls-that-expire) of the item plays too.
-Encrypted segments come later in the
-[development plan](dev-plan.md#media-library-video-on-demand-and-channels).
+With `encrypt`, the segments are [encrypted](#encrypted-segments).
 
 ## Playback URLs that expire
 
@@ -314,6 +314,130 @@ at once the URLs and grants that key signed, and only those; rotating a single s
 
 **Never in a log.** A request's `token` and `sig` are replaced by `REDACTED` in the URI the access
 log writes, however it is answered, and a grant in a cookie is never logged.
+
+## Encrypted segments
+
+With `encrypt`, a `vod` handler encrypts every segment it serves with AES-128, `METHOD=AES-128` of
+RFC 8216: fMP4 and MPEG-TS alike, the whole segment in CBC mode with PKCS#7 padding, its IV its
+number in the media playlist. A channel's `encrypt` does the same for its HLS
+([channels](channels.md#encrypted-hls)). It needs the library's `secret` or `secret_file`, and the
+handler's `auth`:
+
+```json
+{
+  "media_library": [{"name": "films", "roots": ["/srv/films"], "secret_file": "/etc/fit/films-secret"}],
+  "routes": [{"match": {"path": ["/vod/films/*"]},
+              "handler": {"module": "vod", "params": {"library": "films", "auth": "site", "encrypt": true,
+                                                      "cache_control": "public, max-age=86400"}}}]
+}
+```
+
+Each item has a key of its own, which its media playlists name as `aes.key` in the item's directory,
+after the initialization section, so that the initialization section stays clear:
+
+```
+#EXT-X-MAP:URI="v0.init.mp4?exp=...&g=1&sig=..."
+#EXT-X-KEY:METHOD=AES-128,URI="aes.key?exp=...&g=1&sig=..."
+```
+
+**The keys** are not stored: each is derived from the library's secret (16 bytes or more) with
+HMAC-SHA256, under a key of the library's own, from the item's ID, or a channel's name and key
+period; so every fit with the same secret serves the same segments, and the keys open nothing of
+another library, nor any of `media_auth`'s tokens. The secret never reaches a log. Changing it
+changes every key, and the segments' ETags: segments a CDN kept from before no longer play under
+the new keys, so purge them, or wait for their `max-age`.
+
+**Who gets a key.** `aes.key` lies under the item's resource, so a request for it is checked as
+every other is: by the grant the playlist handed on from a [signed URL](#playback-urls-that-expire),
+or by a token, Basic or the cookie, with `play` on the item. Without credentials it is answered 401;
+with a grant of another item, 403. It goes out with `Cache-Control: private, no-store`, whatever
+`cache_control` says, so that no CDN keeps it.
+
+**What it buys.** Segments a CDN keeps, or anyone copies, decode only with the key, which fit hands
+only to a viewer the site's API let in, while the grant lives. It is not DRM: a viewer let in has the
+key, as their player must. The files themselves (`v0.mp4`) are clear, so an encrypting handler does
+not serve them; posters, subtitles and initialization sections stay clear.
+
+**The cost.** A segment is encrypted once, on the library's file pool, as it is built, in place, and
+kept encrypted; the cache serves it as it serves a clear one. On the benchmark host (Ryzen 7 7800X3D,
+one core) AES-128-CBC runs at 1.24 GiB/s: a 1 MiB segment, 4s of 2 Mbit/s, takes 0.79 ms more to
+build, a 4 MiB one 3.2 ms; the test library's small segments took 24 µs (fMP4) and 48 µs (MPEG-TS)
+more, 153 µs to 177 µs and 174 µs to 222 µs, its key's derivation included.
+
+## A video site
+
+All of it together: a site whose films are a media library, played on demand and as a channel, by
+the viewers the site's own API lets in, through URLs that expire. fit-examples'
+[video-site](https://github.com/lesismal/fit-examples/tree/main/video-site) is such a site, whole,
+with a script that makes films for it with ffmpeg; this is how its parts fit.
+
+```fit
+media_library films { roots /srv/media/films }
+
+media_auth site {
+	secret_file /etc/fit/site-secret
+	users staff { password_hash $2a$10$...; play * }
+	url_signing { ttl 2m; play_grace 30m; max_sessions 2; on_limit end_oldest }
+}
+
+streaming {
+	channels { name tv/films; library films; items films/testcard films/bars }
+}
+
+upstream site-api { addresses 127.0.0.1:8090 }
+
+route vod { match { path /vod/* }; handler vod { library films; auth site } }
+route channels { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
+route tokens {
+	match { path /media-tokens /media-tokens/*; remote_ip 127.0.0.1/32 ::1/128 }
+	middleware basic_auth { users { username site-api; password_hash $2a$10$... } }
+	handler media_tokens { auth site; url_prefixes /vod/films/ /hls/tv/; max_ttl 1h }
+}
+route api { match { path /api/* }; handler proxy { upstream site-api } }
+route staff {
+	match { path /media /media/* }
+	handler media_pages { auth site; login true; libraries films; channels true; hls /hls/{stream}/index.m3u8 }
+}
+route site { priority -1; handler static { root /srv/site } }
+```
+
+**The site's API decides who watches.** The viewers are the site's, in its own database; fit holds
+none of them. The API logs a viewer in with its own session, and when the viewer asks to play a
+title, asks `media_tokens` for a URL of it, `POST /media-tokens/urls` with the viewer's opaque ID as
+the subject, the address the viewer comes from (the last `X-Forwarded-For` fit's proxy added) and a
+short `ttl`, and hands the page the URL it gets back. `media_tokens` is the only route that signs: it
+takes requests from the loopback alone (`remote_ip`) and behind `basic_auth` (or `jwt`, or
+`forward_auth`), so that only the API reaches it. The example's API is some 300 lines of Go with
+the standard library and bcrypt; the call that matters is this one:
+
+```go
+body, _ := json.Marshal(map[string]any{"subject": viewer.ID, "address": addr, "ttl": "2m",
+	"paths": []string{"/vod/films/" + id + "/index.m3u8"}})
+req, _ := http.NewRequest("POST", "http://127.0.0.1:8080/media-tokens/urls", bytes.NewReader(body))
+req.SetBasicAuth("site-api", password)
+// 200: {"subject": ..., "session": ..., "expires": ..., "urls": ["/vod/films/films/testcard/index.m3u8?exp=...&sig=..."]}
+```
+
+**The page plays it.** The site's page gives hls.js the URL; hls.js 1.5.20 (Apache-2.0) comes with
+fit, served by `media_pages` at `<prefix>/vendor/hls.min.js` with its license beside it, for any
+page of the same site to load. Safari plays the URL itself. The URL dies after its `ttl`; the
+player plays on, to the film's end and through pauses and seeks, on the grant its playlists handed
+it; a channel's grant lives `play_grace` past the URL. Once both are refused (403), the page asks the
+API for a new URL, which it gives the viewer only while the viewer is still logged in and allowed.
+A viewer with more players than `max_sessions` ends its first one.
+
+**fit's own pages for the staff.** `media_pages` with `libraries` and `channels` gains a library page,
+`<prefix>/library`, and a player page, `<prefix>/watch`, behind the policy's login: the library lists
+the items and channels the logged-in user may play (`play` on `vod/<library>/<id>`, or on the
+channel), with their posters, searched and paged; the player plays one with hls.js through a URL
+the pages sign for that user, its address and a session of its own, through `api/play`. The
+policy's `users` are fit's own, for the staff, apart from the site's viewers. The
+[config reference](reference/config.md#http-handlers-media_pages) lists the fields.
+
+**Tested end to end.** `test/docker/videosite/e2e.sh` runs the example in a Linux container, its
+films made by its script: headless Chromium logs in to the example's API, plays a film and the
+channel through the URLs it issues, seeks, and is refused once a URL and its grant expire; and does
+the same on the library and player pages.
 
 ## Metrics
 

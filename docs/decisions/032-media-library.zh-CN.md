@@ -63,8 +63,13 @@
   服务器的 DRM 不做。
 - **I137–I139**：一个视频网站示例、工作台中覆盖以上全部的页面，以及在工作台中管理文件（可续传的上传在文件池上写入
   临时文件，完整后改名就位）。
-- **I138，hls.js 随工作台提供**：hls.js 1.5.20（Apache-2.0，许可证文件随附）放在工作台的 `vendor/` 中，供预览播放器使用，
-  仅在首次需要时加载；`workbench.HLSJS()` 把同一份文件提供给其他播放 HLS 的页面，fit 中只保留一份。控制台的
+- **I137，一个视频网站**：示例（fit-examples 的 `video-site`）是一个媒体库、`vod` 和一个频道、只在本机且受
+  `basic_auth` 保护的 `media_tokens`，以及一个约 300 行的 Go API：它让网站自己的观众登录，并为每个观众申请签名地址。
+  `media_pages` 多出片库和播放页面，在策略的登录之后，播放地址由页面为登录用户签名（`api/play`）。hls.js 1.5.20
+  （Apache-2.0）连同许可证随 fit 提供，取自 npm 包并核对其 shasum，以 `<prefix>/vendor/hls.min.js` 提供，网站的页面
+  也可以使用；它没有 Go 依赖，按规则 14 记录在这里。
+- **I138，hls.js 随工作台提供**：工作台的预览播放器使用同一份 hls.js，仅在首次需要时加载。fit 只保留一份，放在工作台的
+  `web/vendor` 中并附许可证：`workbench.HLSJS()` 把它交给 `media_pages`，由其在自己的 `vendor/` 路径下提供。控制台的
   Content-Security-Policy 只为提供 `vod` 与 `hls` 路由的监听放开 `connect-src`、`img-src` 与 `media-src`（含 `blob:`），
   不开放 `worker-src`，播放器因此不使用 worker。
 

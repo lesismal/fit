@@ -156,6 +156,7 @@ route films {
 | `s0.m3u8`、`s0.vtt` | 字幕 0 的播放列表，以及 WebVTT 形式的字幕 |
 | `v0.mp4`、`a0.m4a` | 文件本身，扩展名不变，支持 `Range`，供下载和普通播放器使用 |
 | `poster.jpg` | 条目的海报，扩展名不变 |
+| `aes.key` | 设置 `encrypt` 时，条目分片的 AES-128 密钥（[加密分片](#加密分片)） |
 
 所以 `/vod/films/films/bbb/index.m3u8` 播放条目 `films/bbb`。多变体播放列表把各版本列为变体，带 `BANDWIDTH` 与
 `AVERAGE-BANDWIDTH`（文件字节数除以时长）、`CODECS` 和 `RESOLUTION`；条目的音频文件列为一个音频组，各版本自带的音频
@@ -191,7 +192,7 @@ Opus；MPEG-TS 承载除 AV1 外的同样编码，因此 AV1 的版本不出现�
 **谁可以播放。** `auth` 指定一个 [`media_auth`](reference/config.md#media-auth) 策略，每个请求都必须满足它对流
 `vod/<library>/<id>`（如 `vod/films/films/*`）的 `play`：bearer token、Basic、`token` 查询参数或 `fit_media_token`
 cookie。以 `?token=` 取得的播放列表，其列出的内容也带上该 token，使不发送请求头的 Safari 和 ffmpeg 能继续播放。策略设置了
-`url_signing` 时，该条目的[签名 URL](#会过期的播放地址) 也可播放。加密分片在[开发计划](dev-plan.zh-CN.md)的后续迭代中加入。
+`url_signing` 时，该条目的[签名 URL](#会过期的播放地址) 也可播放。设置 `encrypt` 时分片[加密](#加密分片)。
 
 ## 会过期的播放地址
 
@@ -257,6 +258,111 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 
 **绝不进入日志。** 无论请求如何应答，访问日志写出的 URI 中请求的 `token` 和 `sig` 都被替换为 `REDACTED`；cookie 中的授权
 从不记录。
+
+## 加密分片
+
+设置 `encrypt` 后，`vod` 处理器用 AES-128（RFC 8216 的 `METHOD=AES-128`）加密它提供的每个分片：fMP4 与 MPEG-TS
+都一样，整个分片以 CBC 模式加 PKCS#7 填充加密，IV 为分片在媒体播放列表中的序号。频道的 `encrypt` 对其 HLS 做同样的事
+（[频道](channels.zh-CN.md#加密的-hls)）。它需要媒体库的 `secret` 或 `secret_file`，以及处理器的 `auth`：
+
+```json
+{
+  "media_library": [{"name": "films", "roots": ["/srv/films"], "secret_file": "/etc/fit/films-secret"}],
+  "routes": [{"match": {"path": ["/vod/films/*"]},
+              "handler": {"module": "vod", "params": {"library": "films", "auth": "site", "encrypt": true,
+                                                      "cache_control": "public, max-age=86400"}}}]
+}
+```
+
+每个条目有自己的密钥，其媒体播放列表把它命名为条目目录中的 `aes.key`，放在初始化段之后，使初始化段保持明文：
+
+```
+#EXT-X-MAP:URI="v0.init.mp4?exp=...&g=1&sig=..."
+#EXT-X-KEY:METHOD=AES-128,URI="aes.key?exp=...&g=1&sig=..."
+```
+
+**密钥**不存储：每把都由媒体库的密钥（至少 16 字节）用 HMAC-SHA256、在媒体库自己的派生密钥下，从条目 ID（或频道名与
+密钥周期）派生；因此密钥相同的每个 fit 提供同样的分片，而这些密钥打不开别的媒体库的任何内容，也打不开 `media_auth`
+的任何 token。密钥从不进入日志。改变它会改变每一把密钥以及分片的 ETag：CDN 此前保存的分片在新密钥下无法再播放，
+请清除它们，或等它们的 `max-age` 过去。
+
+**谁能拿到密钥。** `aes.key` 位于条目的资源之下，因此对它的请求与其他请求一样检查：凭播放列表从[签名 URL](#会过期的播放地址)
+传下来的授权，或凭对该条目有 `play` 的 token、Basic 或 cookie。没有凭据时回答 401；持另一条目的授权时回答 403。它总是带着
+`Cache-Control: private, no-store` 发出，不论 `cache_control` 如何，使任何 CDN 都不保存它。
+
+**它带来什么。** CDN 保存的、或任何人复制的分片，只有用密钥才能解码，而 fit 只把密钥交给网站 API 放行的观众，并且只在
+授权有效期内。它不是 DRM：被放行的观众拥有密钥，正如其播放器必须拥有一样。文件本身（`v0.mp4`）是明文，所以加密的处理器
+不提供它们；海报、字幕和初始化段保持明文。
+
+**开销。** 分片在构建时于媒体库的文件池上原地加密一次，并以加密后的形式保留；缓存提供它与提供明文分片无异。在基准主机
+（Ryzen 7 7800X3D，单核）上 AES-128-CBC 为 1.24 GiB/s：1 MiB 的分片（2 Mbit/s 的 4 秒）构建多花 0.79 ms，4 MiB 的
+多花 3.2 ms；测试媒体库的小分片多花 24 µs（fMP4）和 48 µs（MPEG-TS），由 153 µs 到 177 µs、由 174 µs 到 222 µs，
+包括其密钥的派生。
+
+## 一个视频网站
+
+把以上全部合在一起：一个网站，它的影片是一个媒体库，以点播和频道两种方式播放，只给网站自己的 API 放行的观众看，经由会
+过期的 URL。fit-examples 的 [video-site](https://github.com/lesismal/fit-examples/tree/main/video-site) 就是这样一个完整的网站，
+附带用 ffmpeg 为它生成影片的脚本；下面说明它的各部分如何配合。
+
+```fit
+media_library films { roots /srv/media/films }
+
+media_auth site {
+	secret_file /etc/fit/site-secret
+	users staff { password_hash $2a$10$...; play * }
+	url_signing { ttl 2m; play_grace 30m; max_sessions 2; on_limit end_oldest }
+}
+
+streaming {
+	channels { name tv/films; library films; items films/testcard films/bars }
+}
+
+upstream site-api { addresses 127.0.0.1:8090 }
+
+route vod { match { path /vod/* }; handler vod { library films; auth site } }
+route channels { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
+route tokens {
+	match { path /media-tokens /media-tokens/*; remote_ip 127.0.0.1/32 ::1/128 }
+	middleware basic_auth { users { username site-api; password_hash $2a$10$... } }
+	handler media_tokens { auth site; url_prefixes /vod/films/ /hls/tv/; max_ttl 1h }
+}
+route api { match { path /api/* }; handler proxy { upstream site-api } }
+route staff {
+	match { path /media /media/* }
+	handler media_pages { auth site; login true; libraries films; channels true; hls /hls/{stream}/index.m3u8 }
+}
+route site { priority -1; handler static { root /srv/site } }
+```
+
+**由网站的 API 决定谁能观看。** 观众属于网站，存在它自己的数据库里；fit 一个也不保存。API 用自己的会话让观众登录；观众
+要播放某个节目时，API 向 `media_tokens` 申请它的 URL：`POST /media-tokens/urls`，以观众的不透明 ID 为主体，带上观众的来源
+地址（fit 的 proxy 追加的最后一个 `X-Forwarded-For`）和一个较短的 `ttl`，再把得到的 URL 交给页面。`media_tokens` 是唯一能
+签名的路由：它只接受来自本机（`remote_ip`）且通过 `basic_auth`（或 `jwt`、`forward_auth`）的请求，因此只有 API 能访问它。
+示例的 API 约 300 行 Go，只用标准库和 bcrypt；关键的调用是这一个：
+
+```go
+body, _ := json.Marshal(map[string]any{"subject": viewer.ID, "address": addr, "ttl": "2m",
+	"paths": []string{"/vod/films/" + id + "/index.m3u8"}})
+req, _ := http.NewRequest("POST", "http://127.0.0.1:8080/media-tokens/urls", bytes.NewReader(body))
+req.SetBasicAuth("site-api", password)
+// 200: {"subject": ..., "session": ..., "expires": ..., "urls": ["/vod/films/films/testcard/index.m3u8?exp=...&sig=..."]}
+```
+
+**页面播放它。** 网站的页面把 URL 交给 hls.js；hls.js 1.5.20（Apache-2.0）随 fit 提供，由 `media_pages` 提供，位于
+`<prefix>/vendor/hls.min.js`，许可证在其旁边，同一网站的任何页面都可以加载。Safari 自己就能播放这个 URL。URL 在其 `ttl`
+后失效；播放器凭播放列表交给它的授权继续播放，直到影片结束，暂停和拖动也不受影响；频道的授权在 URL 过期后存活
+`play_grace`。两者都被拒绝（403）后，页面向 API 申请新的 URL，只有观众仍在登录且仍被允许时 API 才会给出。一个观众的播放器
+超过 `max_sessions` 时，最早的那个被结束。
+
+**fit 给工作人员的页面。** 设置了 `libraries` 和 `channels` 的 `media_pages` 多出一个片库页面 `<prefix>/library` 和一个播放
+页面 `<prefix>/watch`，都在策略的登录之后：片库列出登录用户可以播放的条目和频道（对 `vod/<library>/<id>` 或频道名有
+`play` 权限），带海报，可搜索、分页；播放页面通过 `api/play` 取得为该用户、其地址和一个独立会话签名的 URL，用 hls.js 播放。
+策略的 `users` 是 fit 自己的用户，供工作人员使用，与网站的观众无关。[配置参考](reference/config.md#http-handlers-media_pages)
+列出了各字段。
+
+**端到端测试。** `test/docker/videosite/e2e.sh` 在 Linux 容器中运行这个示例，影片由它的脚本生成：无头 Chromium 登录示例的
+API，经由 API 发放的 URL 播放一部影片和频道，拖动进度，并在 URL 及其授权过期后被拒绝；在片库和播放页面上也做同样的事。
 
 ## 指标
 

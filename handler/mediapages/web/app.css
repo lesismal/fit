@@ -170,6 +170,20 @@ p { margin: 6px 0 0; }
   .chat__log { height: min(38vh, 320px); max-height: 320px; }
 }
 
+/* The library: shelves of posters, and the player */
+.card__head--row { display: flex; align-items: center; gap: 10px; }
+.shelf { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.poster { display: flex; flex-direction: column; gap: 6px; color: var(--text); min-width: 0; }
+.poster__art { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius-sm); overflow: hidden; background: var(--accent-grad); display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 700; }
+.poster__art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.poster__art--live { background: var(--stage); }
+.poster__title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poster__meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poster:hover .poster__title { color: var(--primary); }
+.shelf__more { margin-top: 12px; }
+.watch-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tile--watch video { object-fit: contain; }
+
 /* Login dialog and toast */
 .dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 22px; width: min(380px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }
 .dialog::backdrop { background: rgba(10, 12, 20, .45); }

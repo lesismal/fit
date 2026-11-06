@@ -3207,6 +3207,8 @@ In JSON:
 | `read_ahead` | duration | `"3s"` | How much of the items is read ahead of what is sent, on the library's file pool, so that a slow disk does not stall the channel and the next item follows the last without a gap. 500ms to 1m. 3s when left out. |
 | `max_buffer_bytes` | integer, 0 or more | `16777216` | The most bytes read ahead and not yet sent, whatever read_ahead says, at least 1 MiB; a sample larger than it ends its item. 16 MiB when left out or 0. |
 | `push` | list of [object](#config-streampush) |  | Outside servers the channel is relayed to, as streaming's push names them, their stream being the channel's. |
+| `encrypt` | boolean |  | Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, under a key derived from the library's secret, which the hls handler serves only to a request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not served for it. The other egresses play the channel as before, under their auth. Off when left out. |
+| `key_rotation` | integer, 0 to 100000 | `10` | With encrypt, how many segments one key encrypts before the next takes over, so that a key handed out opens a few segments only. 10 when left out or 0. |
 
 <a id="config-channelslot"></a>
 
@@ -3361,6 +3363,8 @@ In JSON:
 | `file_workers` | integer, 0 or more |  | The goroutines of the library's file pool, which probe, read sample tables and read the files' bytes, so that no fib worker waits on the disk: all the disk is asked to do at once. 4 a CPU, and at least 16, when left out or 0. |
 | `file_queue` | integer, 0 or more | `4096` | The most jobs that wait for the file pool; one more is refused, as a request answered 503. 4096 when left out or 0. |
 | `file_timeout` | duration | `"10s"` | How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out. |
+| `secret` | string |  | The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted. |
+| `secret_file` | string |  | A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out. |
 
 <a id="providers"></a>
 
@@ -3803,7 +3807,7 @@ In JSON:
 
 ### `media_pages`
 
-Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera.
+Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera; with libraries or channels, a library page and a player page that plays with hls.js through playback URLs signed for the viewer.
 
 Serves fit's own media pages under `prefix` (`/media`), embedded in the binary, with no script or
 style from elsewhere: an index, a room call (`call`) with a chat of text messages and small files,
@@ -3834,6 +3838,21 @@ watchers a room, `max_message_bytes`, `member_ttl` and `stall_timeout`. The page
 sit behind the route's middleware as well, as `basic_auth` or `forward_auth`. The route must match
 the prefix and what is below it. See [WebRTC](../webrtc.md#the-media-pages).
 
+With `libraries`, the [media libraries](#media-library) named, or `channels`, the streaming role's
+[channels](../channels.md), the pages gain a library page (`library`) and a player page (`watch`),
+behind the policy's login: the library page lists, through `api/library` and
+`api/library/<name>` (`offset`, `limit`, `q`), the items and channels the viewer may play (`play` on
+`vod/<library>/<id>`, or on the channel's name), with their posters, and the player page plays one
+with hls.js, vendored in the binary with its license (Apache-2.0) under `vendor/`, or with the
+browser's own HLS where there are no Media Source Extensions. It asks `api/play` for the URL: with
+the policy's [`url_signing`](../media-library.md#playback-urls-that-expire), and playing not public,
+a playback URL signed for the viewer, its address and a session of its own, good for `url_signing`'s
+`ttl`, whose playlists hand the player the grant it plays on; otherwise the plain URL, which the
+login's cookie lets in. A refused URL stops the player, which offers to play again. An item plays
+from `vod`, `/vod/{library}/{id}/index.m3u8` unless set, the [`vod`](#http-handlers-vod) handler's
+own prefix; a channel from `hls`, which `channels` needs. See
+[the media library](../media-library.md#a-video-site).
+
 In a .conf file:
 
 ```fit
@@ -3849,6 +3868,9 @@ route {
 		chat true
 		max_file_bytes 5MiB
 		hls /hls/{stream}/index.m3u8
+		libraries films
+		vod /vod/{library}/{id}/index.m3u8
+		channels true
 		links RTMP { url rtmp://{host}/live/{stream}?token={token} }
 	}
 }
@@ -3873,6 +3895,10 @@ handler:
     chat: true
     max_file_bytes: 5242880
     hls: /hls/{stream}/index.m3u8
+    libraries:
+      - films
+    vod: /vod/{library}/{id}/index.m3u8
+    channels: true
     links:
       - name: RTMP
         url: rtmp://{host}/live/{stream}?token={token}
@@ -3888,6 +3914,7 @@ In JSON:
     "pages": true, "mic_default": false, "cam_default": false,
     "chat": true, "max_file_bytes": 5242880,
     "hls": "/hls/{stream}/index.m3u8",
+    "libraries": ["films"], "vod": "/vod/{library}/{id}/index.m3u8", "channels": true,
     "links": [{"name": "RTMP", "url": "rtmp://{host}/live/{stream}?token={token}"}]
   }}
 }
@@ -3914,6 +3941,9 @@ In JSON:
 | `max_file_bytes` | integer, 1024 to 33554432 | `5242880` | The largest file a member may send in a room's chat, in bytes; a larger one is answered 413, and the page refuses it before sending. 5 MiB (5242880) when left out. |
 | `member_ttl` | duration | `"30s"` | How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out. |
 | `stall_timeout` | duration | `"30s"` | How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out. |
+| `libraries` | list of string |  | The media_library names whose items the library page lists, at most 16: those the viewer may play, play on vod/<library>/<id> under auth, that can be served, with their posters, searched and paged; the player page plays one with hls.js, vendored in the binary. With the auth policy's url_signing, and playing not public, the player plays through a playback URL the pages sign for the viewer, its address and a session of its own, good for url_signing's ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the login's cookie lets in. None when left out: no library page. |
+| `vod` | string | `"/vod/{library}/{id}/index.m3u8"` | The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing for its library's name and {id} for its ID: a path on this server or an http or https URL, ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix. |
+| `channels` | boolean |  | List the streaming role's channels on the library page too, those the viewer may play, with what each plays now and next, played from hls, which must be set, through a playback URL signed for the viewer as an item's is. Off when left out. |
 
 <a id="mediapages-link"></a>
 
@@ -4318,7 +4348,7 @@ In JSON:
 | `browse` | boolean |  | List a directory that has no index file, rather than answering 404. Files whose names start with a dot are left out. |
 | `browse_max_entries` | integer, 0 or more | `10000` | The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0. |
 | `dotfiles` | string: `deny`, `allow` | `"deny"` | Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out. |
-| `check_interval` | duration | `"1s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out. |
+| `check_interval` | duration | `"5s"` | How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what it cannot see, as a write another machine makes on a network file system; elsewhere a change shows within it. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then. 5s when left out. |
 
 <a id="http-handlers-stream_whep"></a>
 
@@ -4487,6 +4517,7 @@ In JSON:
 | `cache_control` | string |  | Sent as Cache-Control with every playlist, segment, subtitle and file, so that a CDN keeps them, as "public, max-age=86400": they change only when their file does, which their ETag and Last-Modified say. None when left out. |
 | `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
 | `timeout` | duration | `"30s"` | How long a request may wait for what it needs to be read and built on the library's file pool; past it the answer is 503. 30s when left out. |
+| `encrypt` | boolean |  | Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under a key of its own derived from the library's secret, which the media playlists name as aes.key in the item's directory and the handler serves only to a request auth lets play that item: segments copied, as a CDN keeps them, do not play without it. The files themselves are then not served; initialization sections, subtitles and posters stay clear. Needs auth and the library's secret or secret_file. Off when left out. |
 
 <a id="http-handlers-webrtc_proxy"></a>
 

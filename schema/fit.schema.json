@@ -2327,6 +2327,14 @@
           "description": "How often the roots are scanned again, at least 10s; a scan also runs when the library is made, when the config changes its roots, patterns or bounds, and on the Admin API's POST /media/library/<name>/rescan. A file whose size and time are unchanged is not probed again. 10m when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
+        },
+        "secret": {
+          "description": "The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted.",
+          "type": "string"
+        },
+        "secret_file": {
+          "description": "A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out.",
+          "type": "string"
         }
       },
       "required": [
@@ -2845,12 +2853,23 @@
     "config.StreamChannel": {
       "additionalProperties": false,
       "properties": {
+        "encrypt": {
+          "description": "Encrypts the channel's HLS segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, under a key derived from the library's secret, which the hls handler serves only to a request its auth lets play the channel; so that segments copied, as a CDN keeps them, do not play without it. Needs the library's secret or secret_file. Low-Latency HLS parts are not served for it. The other egresses play the channel as before, under their auth. Off when left out.",
+          "type": "boolean"
+        },
         "items": {
           "description": "The IDs of the library's items the channel plays, in this order unless order is shuffle, and again from the first when loop is on; between the schedule's slots too. An item the library does not hold, or cannot serve, is skipped. At most 10000.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "key_rotation": {
+          "default": 10,
+          "description": "With encrypt, how many segments one key encrypts before the next takes over, so that a key handed out opens a few segments only. 10 when left out or 0.",
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
         },
         "library": {
           "description": "The media_library the channel's items are of.",
@@ -4981,6 +5000,10 @@
           "description": "Whether a member's camera is on when it joins a call in the pages: off when left out, for the member to switch on, and a publisher sends a frame with its name while it is off, so a switch never renegotiates. The URL's cam=0 or cam=1 overrides it.",
           "type": "boolean"
         },
+        "channels": {
+          "description": "List the streaming role's channels on the library page too, those the viewer may play, with what each plays now and next, played from hls, which must be set, through a playback URL signed for the viewer as an item's is. Off when left out.",
+          "type": "boolean"
+        },
         "chat": {
           "default": true,
           "description": "Whether a room call has a chat: the pages show it, and the room API carries the members' text messages and small files between them. False answers the chat's API 404 and shows no chat window. True when left out.",
@@ -4994,6 +5017,13 @@
           "description": "STUN and TURN servers the pages' PeerConnections use, as a browser's iceServers. None when left out: fit's media server is an ICE lite agent that browsers reach directly, and tells them of its own ICE servers in its answers' Link headers.",
           "items": {
             "$ref": "#/$defs/config.ICEServer"
+          },
+          "type": "array"
+        },
+        "libraries": {
+          "description": "The media_library names whose items the library page lists, at most 16: those the viewer may play, play on vod/<library>/<id> under auth, that can be served, with their posters, searched and paged; the player page plays one with hls.js, vendored in the binary. With the auth policy's url_signing, and playing not public, the player plays through a playback URL the pages sign for the viewer, its address and a session of its own, good for url_signing's ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the login's cookie lets in. None when left out: no library page.",
+          "items": {
+            "type": "string"
           },
           "type": "array"
         },
@@ -5063,6 +5093,11 @@
         },
         "title": {
           "description": "The pages' title; fit media when left out.",
+          "type": "string"
+        },
+        "vod": {
+          "default": "/vod/{library}/{id}/index.m3u8",
+          "description": "The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing for its library's name and {id} for its ID: a path on this server or an http or https URL, ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix.",
           "type": "string"
         },
         "whep": {
@@ -5231,8 +5266,8 @@
           "type": "integer"
         },
         "check_interval": {
-          "default": "1s",
-          "description": "How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again; a change on disk shows within it. 1s when left out.",
+          "default": "5s",
+          "description": "How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what it cannot see, as a write another machine makes on a network file system; elsewhere a change shows within it. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then. 5s when left out.",
           "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
           "type": "string"
         },
@@ -5359,6 +5394,10 @@
         "cors": {
           "description": "Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out.",
           "type": "string"
+        },
+        "encrypt": {
+          "description": "Encrypts the segments with AES-128 (METHOD=AES-128), fMP4 and MPEG-TS alike, each item under a key of its own derived from the library's secret, which the media playlists name as aes.key in the item's directory and the handler serves only to a request auth lets play that item: segments copied, as a CDN keeps them, do not play without it. The files themselves are then not served; initialization sections, subtitles and posters stay clear. Needs auth and the library's secret or secret_file. Off when left out.",
+          "type": "boolean"
         },
         "library": {
           "description": "The media_library whose items are served.",

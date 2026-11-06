@@ -281,8 +281,8 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | done |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | done |
 | I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | done |
-| I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | todo |
-| I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | todo |
+| I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | done |
+| I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | done |
 | I138 | workbench 的媒体库页面：菜单条目、配置页面、带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥与当前会话、指标 | I135, I123 | todo |
 | I139 | 在 workbench 中管理媒体文件：断点续传上传、重命名、移动、删除与 sidecar，有上限并需确认 | I138 | todo |
 | **集群管理** | | | |
@@ -2142,6 +2142,23 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
   每个分片的开销。
 - **涉及**：`handler/vod`、`streaming`、`medialib`、`schema`、`docs`。
 
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **加密需要 `auth`**：`vod` 的 `encrypt` 要求它，没有 `auth` 的 `hls` 处理器不提供频道密钥（403），因为公开的密钥什么也保护不了。
+2. **每个条目一个密钥，IV 为分段序号**，不写出：条目的各版本共用密钥与同一序号的 IV，只泄露它们的首块是否相同。备选：每个版本一个密钥；
+   每个分段写出 IV，需要每个分段一个密钥标签。
+3. **init 保持明文**：影片播放列表中密钥在 `#EXT-X-MAP` 之后，频道播放列表在之后的 MAP 前写 `METHOD=NONE`。备选：init 也加密，并写出 IV。
+4. **密钥的名字**：条目为 `aes.key`，频道为 `key-<session>-<epoch>.key`。
+5. **密钥由派生得到，从不保存**：以库从其 `secret` 派生的密钥计算 HMAC-SHA256（覆盖类型、资源与周期），取前 16 字节；同一 secret 的多个
+   fit 提供相同的分段；更换 secret 会改变所有密钥与 ETag，CDN 中的旧副本必须清除（已写入文档）。
+6. **频道的密钥包含 Muxer 的会话**，重启后绝不会重用密钥与 IV；密钥只提供到下一个分段的周期，观众无法提前取得之后的密钥。
+7. **加密的 `vod` 不提供明文文件**（404），因为下载会使加密失效；字幕与海报保持明文。
+8. **频道只加密 HLS**；RTMP、RTSP、SRT、HTTP-FLV、WHEP 与推流在各自的 `auth` 下保持明文。
+9. **加密频道不提供低延迟 HLS**（去掉其标签，part 回答 404），因为在 fib 之外无法加密 part。
+10. **频道加密是 fit 中的临时方案**，直到 fib 请求 A69 让 fib 的 Muxer 能够加密：每个分段复制一次并在库的池上加密一次，在处理器的
+    `max_bytes` 内缓存，重写播放列表。备选：A69 之前不提供加密频道。
+11. **`key_rotation`** 默认 10 个分段（最多 100,000），没有 `encrypt` 时无意义。
+
 ### I137 影视站端到端
 
 - **做**：[fit-examples](https://github.com/lesismal/fit-examples) 中的示例：一个媒体库、`vod` 和频道路由、置于路由中间件之后供影视站 API
@@ -2150,6 +2167,26 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 - **完成标准**：在 Linux 的 Docker 中，无头 Chromium 登录示例 API，经其签发的 URL 播放一部电影和一个频道、拖动进度，并在 URL 及其授权过期
   后被拒绝；`TestChapterExamples` 和 schema 描述覆盖新字段。
 - **涉及**：`handler/mediapages`、`schema`、`docs`、`test/docker`、fit-examples。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **新字段**：`libraries` 为列表，`vod` 为含 `{library}` 与 `{id}` 的 URL 模板，`channels` 为开关且需要 `hls`。备选：每个处理器一个库；
+   从配置的路由读取 `vod`。
+2. **播放页自己签名**，经策略的 `url_signing` 而不是 `media_tokens`，因此不需要额外的凭据；主体是用户名，因为这些用户是 fit 自己的员工；
+   每个 URL 绑定请求者的地址，每次播放一个新会话，有效期为 `url_signing` 的 `ttl`；没有 `url_signing` 时用普通 URL 加登录 cookie。备选：
+   不绑定地址；哈希后的主体。
+3. **列表经过过滤**，只显示观众可以播放的内容，其余隐藏。备选：全部列出，播放时拒绝。
+4. **上限**：16 个库，每页 60 个条目（最多 500），最多列出 1,000 个频道，页面对尚未扫描的库最多重试 30 次。
+5. **hls.js 1.5.20**，与测试框架相同的版本，原样收入（包括 `sourceMappingURL` 行），页面开启时一直提供，同一站点的页面（如示例的页面）都能
+   加载。
+6. **该依赖** 作为决定 032 中的 I137 条目记录，而不是单独的决定。
+7. **示例的 API** 放在 fit-examples 的根模块中，使 CI 的 `go vet ./...` 覆盖它；`golang.org/x/crypto` 成为那里的直接依赖。备选：嵌套模块。
+8. **提交了占位的 secret**（`video-site/secret`，“replace-me”），因为 `media_tokens` 需要 `secret_file`；注释说明要替换。
+9. **示例的有效期**：URL 2 分钟，`play_grace` 30 分钟，`max_sessions` 2 且 `end_oldest`；观众 alice 与 bob，员工 `staff`，口令与其他示例
+   一样是 `example-password`。
+10. **端到端测试** 放在 fit 中（`test/docker/videosite`），以 `EXAMPLES` 接收 fit-examples 的检出，用 Python 标准库经
+    `--remote-debugging-pipe` 驱动 Chromium，并通过修改示例的 `fit.conf` 缩短有效期，那几行改变时会明确失败。
+11. **导出 `mediaauth.Whois` 与 `ViewerAddr`**，而不是把 token 与地址的逻辑复制到 `mediapages`。
 
 ### I138 workbench 的媒体库页面
 

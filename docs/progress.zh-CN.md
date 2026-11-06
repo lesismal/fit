@@ -4440,3 +4440,63 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   不变（6.13 到 6.03 µs，6.77 到 6.92 µs，不显著），签名请求 7.63 µs。
 - **缺口**：会话按每个 fit 各自计数；RTMP、RTSP、SRT 与 WHEP 不接受签名 URL；没有再次手工试用 Safari 的播放器。实现时所做的决策在计划的
   I135 一节，待审查。
+
+
+### I136 加密分段 — 已完成
+
+- **`vod` 与频道 HLS 上的 `encrypt`**（以及默认 10 的 `key_rotation`）：fMP4 与 MPEG-TS 的 AES-128（`METHOD=AES-128`），密钥由库新增的
+  `secret` 或 `secret_file` 派生（`medialib.Keys`），每个条目一个，或每个频道会话与周期一个；分段在缓存之前于文件池上加密，受缓存上限
+  限制；密钥只提供给持有该资源授权或 token 的请求，`private, no-store`；init、字幕与海报保持明文；加密的 `vod` 不提供明文文件。
+- **频道**：在 fib 请求 A69 让 fib 的 Muxer 能够加密之前，fit 的 `hls` 处理器中的临时方案：每个分段复制一次并在库的池上加密一次，在
+  `max_bytes` 内缓存，重写播放列表，不提供低延迟 HLS 的 part。A69 正在加入 fib。
+- **测试**：竞态检测下的 `make test-changed`；在基准机上，ffmpeg 逐帧播放每个加密条目，hls.js 经签名 URL 播放它们（`TestInteropEncrypted`、
+  `test/docker/vod`），ffprobe 与 hls.js 跨密钥轮换与不连续点播放加密频道（`TestChannelInterop`）；单独取得的分段无法解码；没有授权时
+  密钥被拒（401），持其他资源的授权时也被拒（403）。
+- **开销**（基准机，单核）：AES-128-CBC 1.24 GiB/s，1 MiB 分段 0.79 ms；测试库的分段构建 fMP4 增加 24 µs，MPEG-TS 增加 48 µs；缓存的分段
+  没有额外开销。
+- **缺口**：字幕为明文；频道临时方案的池满与客户端离开路径没有专门的测试；没有手工试用 Safari 的播放器。实现时所做的决策在计划的 I136
+  一节，待审查。
+
+## 静态文件跟随磁盘
+
+### fib filewatch；check_interval 默认 5s，0 表示每个请求 — 完成
+
+- **问题**（2026-11-06 发现）：`handler/static` 只凭大小和修改时间识别文件，所以被大小、时间都相同的文件替换后
+  （`rsync -t`、`cp -p`、`tar x`、可复现构建）会一直从内存返回旧内容；变化要等 `check_interval`（1s）后才体现，
+  而且无法设为 0。
+- **fib**（`3ac534d`）：公开的 `filewatch` 包。`filewatch.Watcher` 就是原先 `http.FileCache` 自用的 inotify 监听，
+  现在监听从根目录到文件的每一级目录（目录改名是 `Dir` 事件，旧的监听随之去掉）、根目录路径上软链接所在的目录
+  （部署时 `current` 改指向是 `All`），以及根目录下指向目录的软链接被替换。`filewatch.Stamp` 在大小、mtime、inode
+  之外加上状态变更时间和设备号。`FileCacheConfig.CheckInterval`（默认 5s，负数表示每个请求）限定监听看不到的变化，
+  并取代了非 Linux 平台上每个请求一次的 stat。
+- **fit**：fib 升级到该提交。`check_interval` 不设置时为 5s，设为 `0` 时每个请求都查看磁盘、不做监听，替换后的下一个
+  响应就是新文件。Linux 上处理器用 `filewatch` 监听根目录；事件通过索引只丢弃依赖它所指路径的 lookup（路径本身、
+  预压缩版本、找到了 index 文件或列表的目录的条目、消失的目录下的一切），解析期间来了事件的 lookup 不保留。文件内容
+  只在文件的 stamp 与读入时相同时从内存返回。`Cleanup` 关闭监听。
+- **测试**：Linux `-race` 下，`check_interval` 为 1h 时，同 stamp 替换、文件创建与删除、优先级更高的 index 文件出现、
+  目录被替换、根目录软链接被替换都立即可见；无监听时，同 stamp 替换在间隔后可见，设为 0 时立即可见；各类事件丢弃
+  的内容。
+- **待审查的决策**：
+  1. ETag 仍和 nginx 一样由 mtime 和大小生成：大小、时间都相同的替换后 ETag 不变，客户端带条件请求验证旧副本时会得到
+     304。加入 inode 或 change time 会让提供同一批文件的多台机器 ETag 不同。
+  2. 被监听的 lookup 仍在 `check_interval` 到期，作为 inotify 看不到的变化的上限（另一台机器在网络文件系统上的写入、
+     根目录下指向别处文件的软链接）。
+  3. 不提供 `watch: false` 参数：`check_interval: 0` 关闭监听，其余由间隔限定。
+  4. fib 的 `FileCache` 在非 Linux 平台上改为信任文件 5s，不再每个请求 stat；`CheckInterval` 设为负数保持旧行为。
+  5. Windows 没有 inode 和 change time；stamp 取创建时间，而 NTFS tunneling 可能把它带给改名到别的文件位置上的文件，
+     所以那里大小、时间都相同的替换无法识别：它只有大小和时间可比。
+  6. 根目录所在文件系统大小写不敏感时，事件按磁盘上的写法给出文件名，用别的大小写请求的 lookup 要等间隔到期。
+     大小写不敏感的 inotify 根目录很少见。
+
+
+### I137 影视站端到端 — 已完成
+
+- **fit-examples 的 `video-site`**：由 `vod` 点播并作为频道播放的媒体库，位于 loopback 且在 `basic_auth` 之后的 `media_tokens`，一个登录观众并
+  向 `/media-tokens/urls` 申请绑定观众不透明 ID 与地址的 URL 的小型 Go API，以及用 hls.js 播放它们的页面。
+- **`media_pages`** 新增 `libraries`、`vod` 与 `channels`：库页面（`<prefix>/library`）列出登录用户可以播放的内容，播放页面（`<prefix>/watch`）
+  经页面签名的 URL（`api/play`）用 hls.js 播放，被拒绝时停止并提供重新播放；hls.js 1.5.20（Apache-2.0）连同许可证收入，位于
+  `<prefix>/vendor/hls.min.js`。`mediaauth` 新增 `Whois` 与 `ViewerAddr`。
+- **文档**：`docs/media-library.md` 中的“影视站”一节，中英文；决定 032 的 I137 条目。
+- **测试**：列表、按权限过滤、分页与搜索、bcrypt 登录、签名与过期的 URL、频道；基准机 Docker 中的 `test/docker/videosite`：无头 Chromium
+  登录示例的 API，播放一部影片与频道并跳转，URL 与授权过期后被拒绝，在站点页面以及库与播放页面上都如此：16 项检查全部通过。
+- **缺口**：未测试 Safari 自带的播放器；`/media/play` 仍只用原生方式播放 HLS。实现时所做的决策在计划的 I137 一节，待审查。

@@ -1688,3 +1688,51 @@ writer 从上一个的 `End()`（最大者）开始；`media/rtsp` 的播放器�
 
 **fit 的使用方式。** fit 无需改动：`streaming/channels` 在条目的轨道与上一个不同时调用 `SetTracks`，其时间戳本已按轨道连续，
 各出口届时原样转发即可。`TestChannelInterop` 与 `TestChannelEgresses` 中对这类条目 0.2s 的容差可收紧到一帧。
+
+## A69：加密的 HLS 分片
+
+**状态。** 2026-11-06 由 I136（加密分片）提出。尚未实现：I136 的会话无法修改 fib。在此期间，fit 在其 `hls` 处理器中自行加密
+频道的分片（`streaming/hlsenc.go`），并遵守全部规则：复制 Muxer 切出的每个分片，在频道所属媒体库的文件池上为所有观众加密一次，
+在处理器的 `max_bytes` 之内保留，并在媒体播放列表中改写出密钥标签。fib 实现后，这一临时方案即移除。
+
+**问题。** `media/hls` 不加密任何内容（其文档写明："Left out: ... and encryption"）。以 RFC 8216 第 4.3.2.4 节的 AES-128
+（`METHOD=AES-128`）提供加密的直播流，需要媒体播放列表在开头和每次换密钥处带上 `#EXT-X-KEY` 标签，并避开 `#EXT-X-MAP`
+（在它之前的密钥也会加密初始化段），每个分片用当时的密钥、以其媒体序号为 IV 加密。`SegmentWriter` 两者都做不到：它既不知道
+是哪路流，也不知道分片的 msn，播放列表又由 Muxer 写出。于是 fit 在 Muxer 之外复制并加密每个分片（每个分片多保留一份），
+并在 worker 上为每个请求解析、改写 Muxer 渲染的每个播放列表。部分分片（低延迟 HLS）它根本无法加密，因为部分分片的字节是其
+分片的一段切片。
+
+**依据。** fit 的 `streaming/hlsenc.go`：`withKeys` 逐行改写每个媒体播放列表；`serveEncrypted` 自行回答 `seg-*` 名称，取自
+`Muxer.File`，在池上加密一份副本并缓存；`keyServed` 在提供密钥前渲染整个播放列表以得知会话和最后的 msn；低延迟 HLS 的标签被
+去掉，部分分片被拒绝。
+
+**建议的 API。**
+
+```go
+// Encryption encrypts a Muxer's segments with AES-128 (RFC 8216 section 4.3.2.4).
+type Encryption struct {
+	// Rotation is how many segments one key encrypts; 0 for one key.
+	Rotation int
+	// Key returns the key of epoch (msn / Rotation) of the Muxer whose
+	// session is session, and the URI the playlist names it by, relative
+	// to the playlist. Called on the publisher's goroutine, once an epoch.
+	Key func(session string, epoch uint64) (key [16]byte, uri string)
+}
+
+// in Config:
+	// Encryption, when not nil, encrypts every segment as it completes, each
+	// part too, with an IV of its msn (a part's, its own explicit IV), and
+	// writes #EXT-X-KEY, after any #EXT-X-MAP, wherever the key changes.
+	Encryption *Encryption
+
+// in HandlerConfig:
+	// Encrypt returns the Encryption of the stream at path, nil for none:
+	// asked once a Muxer starts.
+	Encrypt func(path string) *Encryption
+```
+
+以及 `Muxer.Session()`、`Muxer.Next()`（正在切的分片的 msn），使密钥服务无需渲染播放列表即可检查密钥的会话和周期。
+
+**fit 的使用方式。** `hls` 处理器的 `HandlerConfig.Encrypt` 对设置了 `encrypt` 的频道返回一个按其 `key_rotation` 的 `Encryption`，
+其 `Key` 由媒体库的密钥（`medialib.Keys`）派生密钥，并命名为 `key-<session>-<epoch>.key`；密钥 URI 照旧回答，用 `Session` 与
+`Next` 检查。`withKeys`、加密分片的缓存和副本都可移除；加密频道的部分分片得以提供。

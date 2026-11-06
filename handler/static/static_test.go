@@ -28,6 +28,8 @@ func load(t *testing.T, params string) (*Static, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Before the test's directories go, which the watch would report.
+	t.Cleanup(m.(*Static).Cleanup)
 	return m.(*Static), nil
 }
 

@@ -87,12 +87,19 @@ What each iteration decides:
 - **I137–I139**: an example video site, the workbench's pages for all of it, and files managed from
   the workbench (resumable uploads written to a temporary file on the file pool and renamed into
   place).
-- **I138, hls.js in the workbench**: hls.js 1.5.20 (Apache-2.0, its license beside it) is vendored in
-  the workbench's `vendor/` for the preview player, and loaded only when a player first needs it;
-  `workbench.HLSJS()` hands the same file to any other page that plays HLS, so fit keeps one copy.
-  The console's Content-Security-Policy opens `connect-src`, `img-src` and `media-src` (with `blob:`)
-  to the listeners serving `vod` and `hls` routes alone, and no `worker-src`, so the player runs
-  without a worker.
+- **I137, a video site**: the example (fit-examples' `video-site`) is a library, `vod` and a
+  channel, `media_tokens` on the loopback behind `basic_auth`, and an API of some 300 lines of Go
+  that logs the site's own viewers in and asks for a URL signed for each. `media_pages` gains a
+  library and a player page behind the policy's login, which sign their URLs for the logged-in user
+  (`api/play`). hls.js 1.5.20 (Apache-2.0) is vendored with its license, taken from its npm package
+  and checked against its shasum, served at `<prefix>/vendor/hls.min.js` for the site's page as
+  well; it is no Go dependency, and is recorded here by rule 14.
+- **I138, hls.js in the workbench**: the workbench's preview player plays with the same hls.js,
+  loaded only when a player first needs it. fit keeps one copy, in the workbench's `web/vendor`
+  with its license: `workbench.HLSJS()` hands it to `media_pages`, which serves it at its own
+  `vendor/` path. The console's Content-Security-Policy opens `connect-src`, `img-src` and
+  `media-src` (with `blob:`) to the listeners serving `vod` and `hls` routes alone, and no
+  `worker-src`, so the player runs without a worker.
 
 ## Rejected
 
