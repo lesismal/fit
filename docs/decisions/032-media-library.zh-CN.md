@@ -72,6 +72,13 @@
   `web/vendor` 中并附许可证：`workbench.HLSJS()` 把它交给 `media_pages`，由其在自己的 `vendor/` 路径下提供。控制台的
   Content-Security-Policy 只为提供 `vod` 与 `hls` 路由的监听放开 `connect-src`、`img-src` 与 `media-src`（含 `blob:`），
   不开放 `worker-src`，播放器因此不使用 worker。
+- **I139，在工作台中管理文件**：上传按 tus 的方式续传（`POST` 开始、在 `Upload-Offset` 处 `PATCH`、`HEAD` 续传），
+  写入媒体库的 `upload_dir`，受 `max_upload_bytes`、`max_uploads` 与 `min_free_bytes` 限制；控制台把 `PATCH` 的请求体
+  随到随交给文件池（fib 的 `StreamRequestBodyAtHeader`、`OnBody`、`HoldBody` 与 `LimitBody`），写入在重启后仍保留的
+  临时文件，完整后改名就位。改名、移动、删除与 sidecar 编辑作用于条目及其全部文件，在文件池上一次一个地进行，从不写到
+  根目录之外；对被频道引用或播放、或有观众正在播放的条目的修改，除非强制否则拒绝，工作台因此会先给出警告；每次修改都
+  写入助手的审计日志。没有实现完整的 tus 服务器（其 `Upload-Metadata`、`Tus-Resumable` 与各扩展）：工作台和脚本只需要
+  这三个调用。
 
 ## 否决的方案
 

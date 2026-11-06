@@ -3365,6 +3365,11 @@ In JSON:
 | `file_timeout` | duration | `"10s"` | How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out. |
 | `secret` | string |  | The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted. |
 | `secret_file` | string |  | A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out. |
+| `upload_dir` | string |  | A directory inside one of the roots, or a root itself, that files uploaded from the workbench, or the Admin API's /media/library/<name>/uploads, are written into: in pieces, resumable after a cut connection, to a temporary file named .fit-upload-*, renamed into place once whole and probed by the scan that follows. Made when missing. None when left out: no uploads; the files of the library are still renamed, moved and deleted from the workbench. |
+| `max_upload_bytes` | integer, 0 or more | `34359738368` | The largest file uploaded; a larger one is refused 413 before any of it is written. 32 GiB when left out or 0. |
+| `max_uploads` | integer, 0 to 1024 | `4` | The most uploads under way at once, begun and not yet whole; one more is refused 429 until one ends, or is cancelled, or expires. 4 when left out or 0. |
+| `min_free_bytes` | integer, 0 or more | `1073741824` | The disk space left free beside the uploads under way: an upload whose bytes, with those of the others still to come, would leave less free on upload_dir's disk is refused 507 before any of it is written. 1 GiB when left out or 0. |
+| `upload_expiry` | duration | `"24h"` | How long an upload not written to is kept before it is given up and its temporary file removed, at the next scan; at least 1m. An upload is kept across restarts until then. 24h when left out. |
 
 <a id="providers"></a>
 

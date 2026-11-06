@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,6 +55,42 @@ func (c *Catalog) Item(id string) *Item {
 	return c.byID[id]
 }
 
+// without returns a copy of c without the items of ids.
+func (c *Catalog) without(ids []string) *Catalog {
+	out := *c
+	out.Items = make([]*Item, 0, len(c.Items))
+	out.byID = make(map[string]*Item, len(c.byID))
+	for _, it := range c.Items {
+		if slices.Contains(ids, it.ID) {
+			out.Bytes -= it.bytes
+			continue
+		}
+		out.Items = append(out.Items, it)
+		out.byID[it.ID] = it
+	}
+	return &out
+}
+
+// files returns the files of it: its renditions, audio, subtitles, poster
+// and sidecar.
+func (it *Item) files() []*File {
+	var out []*File
+	for _, list := range [][]*Rendition{it.Renditions, it.Audio} {
+		for _, r := range list {
+			out = append(out, &r.File)
+		}
+	}
+	for _, s := range it.Subtitles {
+		out = append(out, &s.File)
+	}
+	for _, f := range []*File{it.Poster, it.Sidecar} {
+		if f != nil {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // File is a file of a library: where it is and its size and time when it
 // was scanned. A file found changed when it is opened is refused with
 // ErrChanged.
@@ -97,6 +134,7 @@ type Item struct {
 	Error string
 
 	bytes int64
+	named bool // its ID is its sidecar's
 }
 
 // Rendition is a media file of an item, probed.
@@ -224,6 +262,10 @@ func ValidID(id string) bool {
 	}
 	return true
 }
+
+// PathID returns the ID an item at rel, a slash path under its root
+// without its extension, has when its sidecar names none.
+func PathID(rel string) string { return pathID(rel) }
 
 // pathID returns the ID of an item at rel, a slash path under its root: rel
 // itself when it is an ID, and otherwise rel with every run of what an ID

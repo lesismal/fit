@@ -155,6 +155,88 @@ endpoints, as `Fit-Console-User` and `Fit-Console-Host`; its pages may load imag
 the listeners of the `vod` and `hls` routes. The URLs these endpoints answer are sent with
 `Cache-Control: no-store` and never logged.
 
+## Managing files
+
+A library's files are managed from the workbench's media library pages, or the Admin API below:
+uploaded into `upload_dir`, renamed, moved between folders of their root, deleted, and their
+sidecars edited. Each change runs on the library's file pool, never on a fib worker, one at a time;
+the item leaves the catalog, and its sample tables and what `vod` keeps of it, at once, and a scan
+lists it again as it now is.
+
+```fit
+media_library films {
+	roots /srv/media/films
+	upload_dir /srv/media/films/incoming
+	max_upload_bytes 64GiB
+	max_uploads 4
+	min_free_bytes 10GiB
+	upload_expiry 48h
+}
+```
+
+**Uploads** are resumable, in the manner of tus: `POST` begins one with its path under `upload_dir`
+and its size, `PATCH` writes a body at `Upload-Offset`, and `HEAD` (or `GET`) says where the upload is
+at, so that a client whose connection was cut asks and goes on from there. The workbench sends a
+file in pieces of 8 MiB and resumes by itself; an upload left by a closed page, or by a restart, is
+resumed by picking its file again. A body is written as it arrives: the console streams it to the
+file pool, 512 KiB at a time, holding the connection's reads while a piece is written, so an upload
+of any size takes a bounded buffer. The bytes go to a temporary file in `upload_dir`, named
+`.fit-upload-<id>.part` beside a `.json` that keeps the upload across restarts, both skipped by
+scans; once whole, the file is synced and renamed into place, and the scan that follows probes it.
+
+| Bound | Default | Refused with |
+| --- | --- | --- |
+| `max_upload_bytes` | 32 GiB | 413 before anything is written; a body longer than the upload gives the upload up, its file removed |
+| `max_uploads` | 4 under way | 429 |
+| `min_free_bytes` | 1 GiB | 507, when the upload and those under way would leave less free on the disk; a disk found full gives the upload up |
+| `upload_expiry` | 24h | an upload not written to for that long is given up at the next scan |
+
+A path must be names of letters and the like: no `..`, no backslash, colon or other character
+Windows refuses, no name that starts with `.` or ends with `.` or a space, no device name such as
+`CON`; and of a kind the library looks at (a media file, subtitle, picture or sidecar). A file there
+already, or being uploaded, is refused 409. Nothing is written out of the roots: the directory of
+each file written must lie inside its root once its symbolic links are resolved, whatever
+`follow_symlinks` says.
+
+**Rename, move and delete** act on an item and every file of it. A rename gives the files named
+after the item (`bbb.mp4`, `bbb.720p.mp4`, `bbb.en.srt`, `bbb.jpg`, `bbb.json`) the new name and
+writes the sidecar again where it names one of them; a move takes every file, keeping its path under
+the item's directory, so that what the sidecar names stays named; a delete removes them all. The item
+keeps its ID when its sidecar names one, and otherwise takes the ID of its new path. A change finds
+each file as the catalog has it, or is refused 409 (rescan first); a rename or move that fails part
+way moves back what it moved.
+
+**A sidecar** is written whole, through a temporary file renamed over it, after the same checks a
+scan makes (its size, every file it names there and of its kind, an ID no other item has); with the
+time of the sidecar it was edited from, one written since is refused 409.
+
+**What plays an item** is asked first: the channels whose list or schedule names it, those playing it
+now or next, and the playback sessions playing it (known where its `vod` route signs URLs). A rename,
+move or delete of an item in use, and a sidecar that changes its ID, are refused 409 with that, unless
+`force` is set; the workbench says what uses it in its confirm, and sets `force` when you go on.
+
+Every change, an upload begun, given up or finished included, is made by a logged-in user with the
+session's CSRF token, and written to the assistant's audit log (kind `media`, source `workbench`)
+when the console runs the assistant.
+
+| Method and path | What it does |
+| --- | --- |
+| `GET /media/library/<name>/uploads` | the uploads under way: `id`, `path` (under the root), `size`, `offset`, `user`, `created`, `updated`, `busy` |
+| `POST /media/library/<name>/uploads` | `{"path", "size"}`, `path` under `upload_dir`: `201` with the upload and `Location`, `Upload-Offset` and `Upload-Length` |
+| `HEAD`, `GET /media/library/<name>/uploads/<id>` | the upload, its offset in `Upload-Offset` |
+| `PATCH /media/library/<name>/uploads/<id>` | the body written at `Upload-Offset`: `200` with the upload, `complete` once whole; `409` with `Upload-Offset` at another offset, or while another write runs |
+| `DELETE /media/library/<name>/uploads/<id>` | the upload given up, its file removed |
+| `GET /media/library/<name>/dirs?root=` | the directories of a root (the first without `root`), at most 2000: where an item may move |
+| `GET /media/library/<name>/usage?item=` | what plays the item: `channels`, `playing`, `sessions`, `sessions_counted`, `in_use` |
+| `POST /media/library/<name>/rename` | `{"item", "name", "force"}`: the change, with the item's `id` after it |
+| `POST /media/library/<name>/move` | `{"item", "dir", "force"}`, `dir` under the item's root, `""` for the root |
+| `POST /media/library/<name>/delete` | `{"item", "force"}` |
+| `GET /media/library/<name>/sidecar?item=` | the item's sidecar, or a draft of what its names group, `exists`, `path`, `modified`, and the files it may name |
+| `PUT /media/library/<name>/sidecar` | `{"item", "sidecar", "modified", "force"}` |
+
+On the console, an upload's `PATCH` streams; on the Admin API's own server, its body must arrive
+within the server's read timeout, a minute, so send pieces that do.
+
 ## Video on demand
 
 The `vod` handler serves a library's items over HLS (RFC 8216), cut from the files as they are

@@ -29,6 +29,16 @@ const (
 	defaultMediaFileWorkersPerCPU = 4
 )
 
+// The defaults and bounds of a MediaLibrary's uploads.
+const (
+	DefaultMediaMaxUploadBytes = 32 << 30
+	DefaultMediaMaxUploads     = 4
+	DefaultMediaMinFreeBytes   = 1 << 30
+	DefaultMediaUploadExpiry   = 24 * time.Hour
+	// MinMediaUploadExpiry is the shortest upload_expiry may be.
+	MinMediaUploadExpiry = time.Minute
+)
+
 // MediaLibrary is a named library of media files: directories scanned into a
 // catalog of items, each a title with its renditions, audio, subtitles and
 // poster, which the media handlers serve. See
@@ -52,6 +62,11 @@ type MediaLibrary struct {
 	FileTimeout      Duration `json:"file_timeout,omitempty" default:"\"10s\"" doc:"How long a job may wait for the file pool before it is given up, as a request answered 503. 10s when left out."`
 	Secret           string   `json:"secret,omitempty" doc:"The secret, at least 16 bytes, the AES-128 keys of encrypted HLS are derived from: a key for each item of vod with encrypt, and for each channel with encrypt, rotated every key_rotation segments. Changing it changes every key, so that segments encrypted before, kept by a CDN, no longer play: purge them. Or secret_file, one of the two. None when left out: nothing of the library can be encrypted."`
 	SecretFile       string   `json:"secret_file,omitempty" doc:"A file holding the secret the AES-128 keys of encrypted HLS are derived from, read each time the config is applied. At least 16 bytes, its line breaks at the end aside. Or secret, one of the two. None when left out."`
+	UploadDir        string   `json:"upload_dir,omitempty" doc:"A directory inside one of the roots, or a root itself, that files uploaded from the workbench, or the Admin API's /media/library/<name>/uploads, are written into: in pieces, resumable after a cut connection, to a temporary file named .fit-upload-*, renamed into place once whole and probed by the scan that follows. Made when missing. None when left out: no uploads; the files of the library are still renamed, moved and deleted from the workbench."`
+	MaxUploadBytes   int64    `json:"max_upload_bytes,omitempty" min:"0" default:"34359738368" doc:"The largest file uploaded; a larger one is refused 413 before any of it is written. 32 GiB when left out or 0."`
+	MaxUploads       int      `json:"max_uploads,omitempty" min:"0" max:"1024" default:"4" doc:"The most uploads under way at once, begun and not yet whole; one more is refused 429 until one ends, or is cancelled, or expires. 4 when left out or 0."`
+	MinFreeBytes     int64    `json:"min_free_bytes,omitempty" min:"0" default:"1073741824" doc:"The disk space left free beside the uploads under way: an upload whose bytes, with those of the others still to come, would leave less free on upload_dir's disk is refused 507 before any of it is written. 1 GiB when left out or 0."`
+	UploadExpiry     Duration `json:"upload_expiry,omitempty" default:"\"24h\"" doc:"How long an upload not written to is kept before it is given up and its temporary file removed, at the next scan; at least 1m. An upload is kept across restarts until then. 24h when left out."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -109,6 +124,26 @@ func (m *MediaLibrary) Queue() int {
 // Timeout returns file_timeout, or its default.
 func (m *MediaLibrary) Timeout() time.Duration {
 	return durationOr(m.FileTimeout, DefaultMediaFileTimeout)
+}
+
+// UploadBytes returns max_upload_bytes, or its default.
+func (m *MediaLibrary) UploadBytes() int64 {
+	return orDefault(m.MaxUploadBytes, DefaultMediaMaxUploadBytes)
+}
+
+// Uploads returns max_uploads, or its default.
+func (m *MediaLibrary) Uploads() int {
+	return int(orDefault(int64(m.MaxUploads), DefaultMediaMaxUploads))
+}
+
+// FreeBytes returns min_free_bytes, or its default.
+func (m *MediaLibrary) FreeBytes() int64 {
+	return orDefault(m.MinFreeBytes, DefaultMediaMinFreeBytes)
+}
+
+// Expiry returns upload_expiry, or its default.
+func (m *MediaLibrary) Expiry() time.Duration {
+	return durationOr(m.UploadExpiry, DefaultMediaUploadExpiry)
 }
 
 // Encryptable reports whether the library has a secret to derive the keys
@@ -193,6 +228,15 @@ func (c *Config) checkMediaLibrary(add func(Value, string, ...any)) {
 			add(m.At.Field("secret_file"), "set secret or secret_file, one of the two")
 		case m.Secret != "" && len(m.Secret) < MinMediaSecret:
 			add(m.At.Field("secret"), "the secret is %d bytes: use at least %d", len(m.Secret), MinMediaSecret)
+		}
+		if d := m.UploadExpiry.Std(); d != 0 && d < MinMediaUploadExpiry {
+			add(m.At.Field("upload_expiry"), "upload_expiry is %s: at least %s", d, MinMediaUploadExpiry)
+		}
+		if m.UploadDir != "" {
+			dir, err := filepath.Abs(filepath.Clean(m.UploadDir))
+			if err != nil || strings.TrimSpace(m.UploadDir) == "" || !slices.ContainsFunc(clean, func(r string) bool { return r != "" && (r == dir || within(r, dir)) }) {
+				add(m.At.Field("upload_dir"), "%q is not inside a root of the library: uploads are written into one of its roots", m.UploadDir)
+			}
 		}
 		if d := m.ScanInterval.Std(); d != 0 && d < MinMediaScanInterval {
 			add(m.At.Field("scan_interval"), "scan_interval is %s: at least %s", d, MinMediaScanInterval)

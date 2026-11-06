@@ -129,6 +129,74 @@ ID 由字母、数字、`.`、`_`、`~` 和 `-` 组成的若干段以 `/` 连接
 工作台的控制台把登录的用户和浏览器访问的主机以 `Fit-Console-User` 和 `Fit-Console-Host` 传给这些端点；它的页面可以从
 `vod` 和 `hls` 路由的监听器加载图片和媒体。这些端点返回的地址带 `Cache-Control: no-store` 发送，且从不写入日志。
 
+## 管理文件
+
+媒体库的文件可以在工作台的媒体库页面或下面的 Admin API 中管理：上传到 `upload_dir`、改名、在其根目录的文件夹之间移动、
+删除，以及编辑 sidecar。每次修改都在媒体库的文件池上运行，从不占用 fib 的 worker，一次一个；条目立即离开目录，其样本表
+以及 `vod` 为它保留的内容也一并丢弃，随后的扫描再按其现状列出。
+
+```fit
+media_library films {
+	roots /srv/media/films
+	upload_dir /srv/media/films/incoming
+	max_upload_bytes 64GiB
+	max_uploads 4
+	min_free_bytes 10GiB
+	upload_expiry 48h
+}
+```
+
+**上传**可续传，方式与 tus 相同：`POST` 以 `upload_dir` 下的路径和大小开始一次上传，`PATCH` 在 `Upload-Offset` 处写入
+请求体，`HEAD`（或 `GET`）告诉上传进行到哪里，连接中断的客户端查询后从那里继续。工作台把文件按 8 MiB 分块发送并自动
+续传；页面关闭或重启留下的上传，重新选择其文件即可继续。请求体随到随写：控制台把它流式交给文件池，每次 512 KiB，写入
+期间暂停读取该连接，因此任意大小的上传只占用有上限的缓冲。字节写入 `upload_dir` 中名为 `.fit-upload-<id>.part` 的临时
+文件，旁边的 `.json` 让上传在重启后仍然保留，扫描会跳过这两个文件；文件完整后先同步再改名就位，随后的扫描探测它。
+
+| 上限 | 默认值 | 拒绝方式 |
+| --- | --- | --- |
+| `max_upload_bytes` | 32 GiB | 在写入任何内容之前以 413 拒绝；请求体超过上传大小时放弃该上传并删除其文件 |
+| `max_uploads` | 进行中 4 个 | 429 |
+| `min_free_bytes` | 1 GiB | 这次上传与进行中的上传会使磁盘空闲空间少于此值时以 507 拒绝；写入时发现磁盘已满则放弃该上传 |
+| `upload_expiry` | 24h | 这么久未被写入的上传在下次扫描时放弃 |
+
+路径须由普通名称组成：不含 `..`、反斜杠、冒号或其他 Windows 不接受的字符，名称不以 `.` 开头、不以 `.` 或空格结尾，
+不是 `CON` 之类的设备名；并且是媒体库会查看的文件类型（媒体文件、字幕、图片或 sidecar）。已有文件或正在上传的路径以
+409 拒绝。不会写到根目录之外：无论 `follow_symlinks` 如何设置，每个写入文件所在的目录在解析符号链接之后都必须位于其
+根目录之内。
+
+**改名、移动和删除**作用于条目及其全部文件。改名把以条目命名的文件（`bbb.mp4`、`bbb.720p.mp4`、`bbb.en.srt`、
+`bbb.jpg`、`bbb.json`）改为新名称，并在 sidecar 引用了其中某个文件时重写 sidecar；移动带走全部文件，保持它们在条目目录下
+的相对路径，sidecar 引用的文件因此仍然有效；删除则全部删除。sidecar 指定了 ID 的条目保持其 ID，否则取新路径对应的 ID。
+修改时每个文件都须与目录中记录的一致，否则以 409 拒绝（请先重新扫描）；改名或移动中途失败时，已移动的文件会被移回。
+
+**sidecar** 经临时文件整体写入后改名覆盖，写入前做与扫描相同的检查（大小、引用的每个文件存在且类型正确、ID 不与其他条目
+重复）；带上编辑所依据的 sidecar 的时间时，此后被改写过的 sidecar 以 409 拒绝。
+
+**先查询谁在播放条目**：列表或排期引用它的频道、正在播放或即将播放它的频道，以及正在播放它的会话（在其 `vod` 路由签名
+URL 时可知）。对使用中的条目改名、移动或删除，以及改变其 ID 的 sidecar，会以 409 拒绝并附上使用情况，除非设置了
+`force`；工作台在确认框中说明使用情况，继续时设置 `force`。
+
+每次修改（包括上传的开始、放弃与完成）都由已登录用户带会话的 CSRF 令牌发起，并在控制台运行助手时写入助手的审计日志
+（类型 `media`，来源 `workbench`）。
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `GET /media/library/<name>/uploads` | 进行中的上传：`id`、`path`（根目录下）、`size`、`offset`、`user`、`created`、`updated`、`busy` |
+| `POST /media/library/<name>/uploads` | `{"path", "size"}`，`path` 在 `upload_dir` 之下：返回 `201`、上传信息以及 `Location`、`Upload-Offset` 和 `Upload-Length` |
+| `HEAD`、`GET /media/library/<name>/uploads/<id>` | 上传信息，偏移量在 `Upload-Offset` 中 |
+| `PATCH /media/library/<name>/uploads/<id>` | 在 `Upload-Offset` 处写入请求体：返回 `200` 和上传信息，完整时 `complete` 为 true；偏移量不对或另一次写入未结束时返回带 `Upload-Offset` 的 `409` |
+| `DELETE /media/library/<name>/uploads/<id>` | 放弃上传并删除其文件 |
+| `GET /media/library/<name>/dirs?root=` | 某个根目录（未给 `root` 时为第一个）下的目录，最多 2000 个：条目可移动到的位置 |
+| `GET /media/library/<name>/usage?item=` | 谁在播放条目：`channels`、`playing`、`sessions`、`sessions_counted`、`in_use` |
+| `POST /media/library/<name>/rename` | `{"item", "name", "force"}`：返回修改内容及条目修改后的 `id` |
+| `POST /media/library/<name>/move` | `{"item", "dir", "force"}`，`dir` 在条目的根目录之下，`""` 表示根目录 |
+| `POST /media/library/<name>/delete` | `{"item", "force"}` |
+| `GET /media/library/<name>/sidecar?item=` | 条目的 sidecar，或按文件名分组得到的草稿，以及 `exists`、`path`、`modified` 和可引用的文件 |
+| `PUT /media/library/<name>/sidecar` | `{"item", "sidecar", "modified", "force"}` |
+
+在控制台上，上传的 `PATCH` 以流式处理；在 Admin API 自己的服务器上，请求体须在服务器的读取超时（一分钟）内到达，因此
+请发送能在一分钟内传完的分块。
+
 ## 点播
 
 `vod` 处理器以 HLS（RFC 8216）提供媒体库的条目，按文件存储的原样切分：采样原样放进分片，从不重新解码或编码。

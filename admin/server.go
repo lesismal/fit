@@ -24,6 +24,7 @@ import (
 	"github.com/lesismal/fit/internal/nettcp"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/login"
+	"github.com/lesismal/fit/medialib"
 )
 
 // The Admin API's timeouts: for a request's header, its whole body, writing
@@ -93,7 +94,10 @@ const VersionHeader = "Fit-Config-Version"
 //	GET    /media/library       the media libraries and their scans;
 //	                            /media/library/{name} one library, with a
 //	                            page of its items; .../items/{id} one item;
-//	                            POST .../rescan scans it again (medialib.go)
+//	                            POST .../rescan scans it again (medialib.go);
+//	                            .../uploads resumable uploads, and
+//	                            .../rename, move, delete and sidecar
+//	                            changes of its files (mediafiles.go)
 //	POST   /media/preview       a short-lived URL of an item or a channel,
 //	                            signed for the console's user; GET
 //	                            /media/auth the media_auth policies, with
@@ -140,6 +144,9 @@ type Server struct {
 	loopback bool   // a TCP address without a token: the Host field must name a loopback host
 	maxBody  int64
 	source   string // what the configs this server applies are from
+	// audit, when not nil, writes the changes of media files to the
+	// assistant's audit log: the console's server sets it.
+	audit auditFunc
 
 	ln   net.Listener
 	srv  *http.Server
@@ -265,6 +272,18 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /media/library/{name}", s.libraryPage)
 	mux.HandleFunc("GET /media/library/{name}/items/{id...}", s.libraryItem)
 	mux.HandleFunc("POST /media/library/{name}/rescan", s.rescan)
+	mux.HandleFunc("GET /media/library/{name}/uploads", s.listUploads)
+	mux.HandleFunc("POST /media/library/{name}/uploads", s.createUpload)
+	mux.HandleFunc("GET /media/library/{name}/uploads/{id}", s.getUpload)
+	mux.HandleFunc("PATCH /media/library/{name}/uploads/{id}", s.patchUpload)
+	mux.HandleFunc("DELETE /media/library/{name}/uploads/{id}", s.cancelUpload)
+	mux.HandleFunc("GET /media/library/{name}/dirs", s.libraryDirs)
+	mux.HandleFunc("GET /media/library/{name}/usage", s.itemUsage)
+	mux.HandleFunc("POST /media/library/{name}/rename", s.changeItem(medialib.OpRename))
+	mux.HandleFunc("POST /media/library/{name}/move", s.changeItem(medialib.OpMove))
+	mux.HandleFunc("POST /media/library/{name}/delete", s.changeItem(medialib.OpDelete))
+	mux.HandleFunc("GET /media/library/{name}/sidecar", s.getSidecar)
+	mux.HandleFunc("PUT /media/library/{name}/sidecar", s.putSidecar)
 	mux.HandleFunc("POST /media/preview", s.preview)
 	mux.HandleFunc("GET /media/auth", s.mediaAuth)
 	mux.HandleFunc("GET /media/auth/{policy}/sessions", s.authSessions)

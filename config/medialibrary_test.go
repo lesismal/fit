@@ -22,6 +22,15 @@ func TestMediaLibrary(t *testing.T) {
 		m.Workers() != max(16, 4*goruntime.GOMAXPROCS(0)) || m.Queue() != DefaultMediaFileQueue || m.Timeout() != DefaultMediaFileTimeout {
 		t.Fatalf("%+v", m)
 	}
+	if m.UploadBytes() != DefaultMediaMaxUploadBytes || m.Uploads() != DefaultMediaMaxUploads || m.FreeBytes() != DefaultMediaMinFreeBytes ||
+		m.Expiry() != DefaultMediaUploadExpiry {
+		t.Errorf("upload defaults: %+v", m)
+	}
+	for _, ok := range []string{`"/a"`, `"/a/up"`, `"/b/x/../up"`} {
+		if _, err := Load([]byte(head + `[{"name": "a", "roots": ["/a", "/b"], "upload_dir": ` + ok + `, "max_uploads": 2, "upload_expiry": "1h"}]}`)); err != nil {
+			t.Errorf("upload_dir %s: %v", ok, err)
+		}
+	}
 	if m.Encryptable() || !(&MediaLibrary{SecretFile: "/s"}).Encryptable() || !(&MediaLibrary{Secret: "s"}).Encryptable() {
 		t.Error("Encryptable")
 	}
@@ -46,6 +55,11 @@ func TestMediaLibrary(t *testing.T) {
 		{`[{"name": "a", "roots": ["/a"], "max_sidecar_bytes": 2000000}]`, "greater than the maximum"},
 		{`[{"name": "a", "roots": ["/a"], "secret": "0123456789abcdef", "secret_file": "/s"}]`, "one of the two"},
 		{`[{"name": "a", "roots": ["/a"], "secret": "short"}]`, "use at least 16"},
+		{`[{"name": "a", "roots": ["/a"], "upload_expiry": "1s"}]`, "at least 1m"},
+		{`[{"name": "a", "roots": ["/a"], "upload_dir": "/b/up"}]`, "is not inside a root"},
+		{`[{"name": "a", "roots": ["/a"], "upload_dir": "/ab"}]`, "is not inside a root"},
+		{`[{"name": "a", "roots": ["/a"], "upload_dir": " "}]`, "is not inside a root"},
+		{`[{"name": "a", "roots": ["/a"], "max_uploads": 2000}]`, "greater than the maximum"},
 	} {
 		_, err := Load([]byte(head + bad.doc + `}`))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {

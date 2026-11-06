@@ -21,6 +21,10 @@ const (
 	AuditApply = "apply"
 	// AuditDiscard is a proposal discarded.
 	AuditDiscard = "discard"
+	// AuditMedia is a change of a media library's files from the
+	// workbench (I139): an upload, a rename, a move, a delete or a
+	// sidecar written, its call the change and its arguments.
+	AuditMedia = "media"
 )
 
 // The outcomes of an apply, beside a chat's, which are its reasons
@@ -36,6 +40,10 @@ const (
 
 // The sources of an entry: the panel's; I130's MCP server adds its own.
 const SourcePanel = "panel"
+
+// SourceWorkbench is the source of what a user changed on the workbench's
+// own pages, outside the assistant: a media library's files (I139).
+const SourceWorkbench = "workbench"
 
 // The bounds of an entry, so that the log's bound in entries bounds its
 // bytes too.

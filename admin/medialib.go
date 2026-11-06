@@ -38,17 +38,21 @@ func (s *Server) library(w http.ResponseWriter, r *http.Request) *medialib.Libra
 
 // librarySummary is a library as GET /media/library lists it.
 type librarySummary struct {
-	Name         string              `json:"name"`
-	Roots        []string            `json:"roots"`
-	Status       medialib.Status     `json:"status"`
-	Scanned      time.Time           `json:"scanned,omitzero"`
-	Items        int                 `json:"items"`
-	Errors       int                 `json:"errors"`
-	Problems     int                 `json:"problems"`
-	Truncated    string              `json:"truncated,omitempty"`
-	Bytes        int64               `json:"bytes"`
-	Pool         medialib.PoolStats  `json:"pool"`
-	Tables       medialib.TableStats `json:"tables"`
+	Name      string              `json:"name"`
+	Roots     []string            `json:"roots"`
+	Status    medialib.Status     `json:"status"`
+	Scanned   time.Time           `json:"scanned,omitzero"`
+	Items     int                 `json:"items"`
+	Errors    int                 `json:"errors"`
+	Problems  int                 `json:"problems"`
+	Truncated string              `json:"truncated,omitempty"`
+	Bytes     int64               `json:"bytes"`
+	Pool      medialib.PoolStats  `json:"pool"`
+	Tables    medialib.TableStats `json:"tables"`
+	// Upload is the library's upload_dir and its bounds, nil without one,
+	// and Uploads the uploads under way.
+	Upload       *medialib.UploadSettings `json:"upload,omitempty"`
+	Uploads      int                      `json:"uploads"`
 	problemsList []medialib.Problem
 }
 
@@ -62,7 +66,7 @@ func summarize(l *medialib.Library) librarySummary {
 	}
 	return librarySummary{Name: l.Name(), Roots: l.Roots(), Status: l.Status(), Scanned: cat.Scanned, Items: len(cat.Items), Errors: errs,
 		Problems: len(cat.Problems) + cat.MoreProblems, Truncated: cat.Truncated, Bytes: cat.Bytes,
-		Pool: l.Pool().Stats(), Tables: l.Tables(), problemsList: cat.Problems}
+		Pool: l.Pool().Stats(), Tables: l.Tables(), Upload: l.UploadSettings(), Uploads: len(l.Uploads()), problemsList: cat.Problems}
 }
 
 // libraries answers GET /media/library.
