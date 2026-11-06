@@ -308,7 +308,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | todo |
 | I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
 | **AI assistant, continued** | | | |
-| I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | todo |
+| I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
 | I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | done |
 | **Logging** | | | |
@@ -2292,6 +2292,35 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   signature or playback URL reaches a recorded request; subjects reach it hashed unless allowed;
   a delete proposal for a file a channel plays names the channel; under the race detector.
 - **Touches**: `assistant`, `admin`, `medialib`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Media steps are actions** that join a config change of any kind, as purges do, applied after the
+   config in order and before the purges, a failing one making the outcome `partial`. Alternative: a
+   proposal of media steps only, which would block "rename the file and change the channel's list" in
+   one change.
+2. **What was shown is confirmed** by `media_tag`, a digest of in use, the channels listing or playing
+   the item, and whether viewers play it; a mismatch answers 412 and offers the proposal again, and
+   `force` goes only for what was shown in use. The tag leaves out a channel's now and next and the
+   viewers' count, which change every second. Alternative: always force.
+3. **`admin.assistant.data.send_subjects`**, off by default, beside `send_logs` and `send_access_log`;
+   otherwise subjects go as `subject-` and 16 hex digits of an HMAC under a key made at each start,
+   stable while fit runs; the propose tools take either form. Alternative: a key kept in the store, so
+   that hashes outlive a restart (sessions do not).
+4. **Addresses and session IDs go as they are**, as the plan lists sessions by resource and address.
+   Alternative: hash addresses too.
+5. **A push target's `url` is a secret** in `config_get`, proposals and page drafts: `config_get` passed
+   the stream key to the model before.
+6. **MCP serves the media tools** within a token's level; proposals are applied only in the workbench.
+7. **Sessions ended or gone** before an apply are dropped from a session-end step with a warning; the
+   step is refused only when none still plays.
+8. **Key rotation** only for keys in a `secret_file`; a key written in the config is refused, for the
+   person to change; no skill rotates keys.
+9. **The skills' tools**: `library-health` may propose rescans and file changes but is told never to
+   delete unless asked; `playback-troubleshoot` may propose ending sessions; `vod-setup` and
+   `channel-scheduler` have the page tools too.
+10. **`library-health` carries the ffmpeg commands itself**, as `scripts/` has no preparation script.
+11. **`TestChatSummarizes`'s window** grew from 3,600 to 5,600 tokens with the tools and prompt.
 
 ### I153 The assistant across a cluster
 

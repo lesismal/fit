@@ -6411,3 +6411,27 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   by its one-minute read timeout; sessions are known only under `url_signing`; changes through the
   token-only Admin API are not in the audit log. The decisions made are in the plan's I139 section,
   pending review.
+
+
+### I152 The assistant's media library tools and skills — done
+
+- **Tools**: `media_library_search`, `media_item_get` (with what uses the item), `channels_status` and
+  `playback_sessions` read through the Admin API in process; `media_scan_propose`,
+  `media_session_end_propose`, `media_key_rotate_propose` and `media_file_propose` propose. Media steps
+  are actions: they join a config change of any kind, as purges do, run after it in order through the
+  media endpoints as the person who applies (audited once, as that person's `media` entry), and only
+  on Apply and the confirm. A file step shows what uses the item (channels naming or playing it,
+  viewers) in the tool's result, the card and the dialog; the apply sends back `media_tag`, and a
+  mismatch offers the proposal again (412); `force` goes only for what was shown in use.
+- **Redaction**: signed playback URLs (and `sig=` and `fit_media_grant=` values) never reach the model;
+  a push target's `url`, which holds the stream key, is a secret everywhere, where `config_get` passed
+  it before; subjects go hashed unless `admin.assistant.data.send_subjects` allows them.
+- **Skills**: `vod-setup`, `channel-scheduler`, `library-health` and `playback-troubleshoot`; the media
+  pages' Ask AI runs the last three (an item's probe error, a push target in error, the 403s by reason).
+  The media tools are served over MCP within a token's level.
+- **Tests**: each skill on a fixed library against a scripted model; no key, signature, playback URL or
+  plain subject in a request; a delete proposal naming the playing channel; an end-to-end apply on a
+  real library writing `media.delete` as the user; under the race detector; checked in a browser.
+- **Gaps**: subjects are hashed in tool data only, not in log lines or a page's selection; the
+  `media.*` audit entries of an assistant's apply say source `workbench`. The decisions made are in the
+  plan's I152 section, pending review.

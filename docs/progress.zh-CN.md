@@ -4541,3 +4541,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   （`TestUploadGB`，以 `FIT_UPLOAD_GB` 运行）。
 - **缺口**：中途失败的删除无法回滚；直接发到 Admin API 的 PATCH 受其一分钟读超时限制；只有 `url_signing` 下才知道会话；只用 token 经
   Admin API 的修改不进审计日志。实现时所做的决策在计划的 I139 一节，待审查。
+
+
+### I152 助手的媒体库工具与技能 — 已完成
+
+- **工具**：经进程内 Admin API 读取的 `media_library_search`、`media_item_get`（含谁在使用该条目）、`channels_status` 与 `playback_sessions`；
+  提议的 `media_scan_propose`、`media_session_end_propose`、`media_key_rotate_propose` 与 `media_file_propose`。媒体步骤是动作：像缓存清除一样可与
+  任何类配置修改同在，在配置之后按顺序以应用者的身份经媒体端点执行（只审计一次，记为该用户的 `media` 条目），且只在 Apply 与确认之后执行。
+  文件步骤在工具结果、提案卡片与对话框中显示谁在使用该条目（列出或正在播放它的频道、观众）；应用时回传 `media_tag`，不一致时重新提供提案
+  （412）；只对显示为在用的条目发送 `force`。
+- **脱敏**：签名的播放 URL（以及 `sig=` 与 `fit_media_grant=` 的值）从不发给模型；含推流密钥的推流目标 `url` 处处作为密钥，此前 `config_get`
+  会把它发出去；除非 `admin.assistant.data.send_subjects` 允许，主体以哈希发送。
+- **技能**：`vod-setup`、`channel-scheduler`、`library-health` 与 `playback-troubleshoot`；媒体页面的 Ask AI 运行后三个（条目的探测错误、出错的
+  推流目标、按原因的 403）。媒体工具在 token 的级别内经 MCP 提供。
+- **测试**：每个技能在固定的库上对脚本化模型运行；请求中没有密钥、签名、播放 URL 或明文主体；删除提案会指出正在播放的频道；在真实的库上
+  端到端应用并以该用户写入 `media.delete`；竞态检测下；在浏览器中检查过。
+- **缺口**：主体只在工具数据中哈希，日志行或页面选中的内容中不会；助手应用时的 `media.*` 审计条目来源为 `workbench`。实现时所做的决策在
+  计划的 I152 一节，待审查。
