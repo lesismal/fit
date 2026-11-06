@@ -1,0 +1,42 @@
+/* Cluster → Metrics, Logs and Certificates (I150, insight.js), and the Overview's sparklines. The rest is core/ui.css and
+   cluster/cluster.css. / 集群 → 指标、日志与证书（I150，insight.js），以及概览中的迷你走势图。其余样式在 core/ui.css 与
+   cluster/cluster.css 中。 */
+
+/* Charts: lines over a time axis, the values under the pointer. / 图表：时间轴上的折线，指针处的数值。 */
+.ci-chartbox { display: flex; flex-direction: column; gap: 6px; }
+.ci-wrap { position: relative; }
+.ci-chart { width: 100%; height: auto; display: block; }
+.ci-grid { stroke: var(--border); stroke-width: 1; }
+.ci-axis { fill: var(--muted); font-size: 11px; font-family: var(--font); }
+.ci-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.ci-cursor { stroke: var(--border-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.ci-tip { position: absolute; top: 4px; min-width: 160px; max-width: 260px; padding: 6px 8px; background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: var(--radius-xs); box-shadow: var(--shadow); font-size: 12px; pointer-events: none; z-index: 2; }
+.ci-tip__row { display: grid; grid-template-columns: 10px 1fr auto; gap: 6px; align-items: center; }
+.ci-tip__row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.ci-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-2); }
+.ci-legend__item { display: inline-flex; align-items: center; gap: 5px; }
+.ci-spark { display: inline-block; vertical-align: middle; color: var(--primary); }
+.ci-sparkslot { display: inline-block; vertical-align: middle; margin-left: 6px; min-width: 84px; height: 22px; }
+
+/* Logs: the members chosen, and the lines merged by time. / 日志：所选成员与按时间合并的日志行。 */
+.ci-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.ci-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--border-2); border-radius: 999px;
+  border-left: 4px solid var(--ci-colour, var(--border-2)); font-size: 13px; cursor: pointer; background: var(--surface); }
+.ci-log { max-height: 60vh; overflow: auto; background: var(--console-bg); color: var(--console-text); border-radius: var(--radius-sm);
+  padding: 8px 10px; font-family: var(--mono); font-size: 12px; }
+.ci-log .empty { color: var(--console-text); }
+.ci-line-row { display: grid; grid-template-columns: max-content max-content max-content max-content 1fr; gap: 8px; align-items: baseline; padding: 1px 0; }
+.ci-time { opacity: .7; }
+.ci-node { font-weight: 600; }
+.ci-logger { opacity: .75; }
+.ci-msg { white-space: pre-wrap; word-break: break-word; }
+.ci-names { overflow-wrap: anywhere; min-width: 10em; }
+.ci-nowrap { white-space: nowrap; }
+.ci-serial { display: inline-block; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+@media (max-width: 720px) {
+  .ci-line-row { grid-template-columns: max-content 1fr; }
+  .ci-line-row .ci-logger, .ci-line-row .badge { display: none; }
+  .ci-line-row .ci-msg { grid-column: 1 / -1; }
+}

@@ -8,7 +8,8 @@
 // progress batch by batch and the history. Drift and alerts (I147, alerts.js): members out of sync with their diffs and
 // a Fix that plans a rollout, the alert rules, webhooks, alerts and silences, and the menu's badge while alerts fire.
 // Users and audit (I148, users.js): the users' roles and the audit log; every page is drawn once the user's roles are
-// read, and shows only what they allow (FitCluster.can*).
+// read, and shows only what they allow (FitCluster.can*). Metrics, Logs and Certificates (I150, insight.js): the series
+// the manager keeps per member and group, the members' logs merged by time, and the certificate inventory.
 //
 // 集群菜单（I142）：工作台的一级入口，在控制台提供模块 cluster 时显示（设置了 admin.cluster 的 fit，即其他 fit 的管理端）：
 // 概览，各成员的状态；节点，添加、测试、信任、编辑与删除成员；以及成员页 #/cluster/node/<name>，两者都可打开。页面在
@@ -17,6 +18,7 @@
 // （#/cluster/group/<name>），以及覆盖全部成员的同一页面（#/cluster/ops）。发布（I146，rollouts.js）：规划、策略、逐批进度与历史。
 // 漂移与告警（I147，alerts.js）：未同步的成员及其差异、规划发布的“修复”，告警规则、Webhook、告警与静默，以及告警触发时菜单上的徽标。
 // 用户与审计（I148，users.js）：用户的角色与审计日志；每个页面在读取用户角色后绘制，只显示角色允许的内容（FitCluster.can*）。
+// 指标、日志与证书（I150，insight.js）：管理端按成员与分组保存的序列、按时间合并的成员日志，以及证书清单。
 (function () {
   'use strict';
   var FC = window.FitCluster;
@@ -25,7 +27,10 @@
     nav: [{ id: 'overview', icon: 'dashboard', label: 'n.overview' }, { id: 'nodes', icon: 'server', label: 'n.nodes' },
       { id: 'groups', icon: 'cube', label: 'n.groups' }, { id: 'templates', icon: 'layers', label: 'n.templates' },
       { id: 'rollouts', icon: 'send', label: 'n.rollouts' }, { id: 'alerts', icon: 'alert', label: 'n.alerts' },
-      { id: 'users', icon: 'users', label: 'n.users' }],
+      { id: 'users', icon: 'users', label: 'n.users' },
+      // Metrics, logs and certificates across the members (I150, insight.js). / 跨成员的指标、日志与证书（I150，insight.js）。
+      { id: 'metrics', icon: 'activity', label: 'n.metrics' }, { id: 'logs', icon: 'log', label: 'n.logs' },
+      { id: 'certificates', icon: 'shield', label: 'n.certs' }],
     // The count of alerts firing, on the menu's row (I147). / 菜单行上正在触发的告警数（I147）。
     badge: function () { return FC.alertBadge(); },
     boot: function (UI) { FC.alertsBoot(UI); },
@@ -65,7 +70,11 @@
         'alerts/:tab': function (p) { FC.pages.alerts(UI, sh, p); },
         // Users and audit (I148, users.js). / 用户与审计（I148，users.js）。
         users: function () { FC.pages.users(UI, sh, 'users'); },
-        audit: function () { FC.pages.users(UI, sh, 'audit'); }
+        audit: function () { FC.pages.users(UI, sh, 'audit'); },
+        // Metrics, logs and certificates (I150, insight.js). / 指标、日志与证书（I150，insight.js）。
+        metrics: function () { FC.pages.metrics(UI, sh); },
+        logs: function () { FC.pages.logs(UI, sh); },
+        certificates: function () { FC.pages.certificates(UI, sh); }
       };
       Object.keys(routes).forEach(function (k) { routes[k] = gated(routes[k]); });
       return { routes: routes, fallback: 'overview' };
