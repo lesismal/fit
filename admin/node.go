@@ -308,7 +308,7 @@ type nodeBody struct {
 // capabilities lists what this fit's Admin API offers, sorted.
 func (cs *Configs) capabilities() []string {
 	caps := []string{CapNode, CapIfMatch, CapDryRun, CapText, CapEffective, CapDrift, CapVersions, CapTransfer,
-		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia, CapSchema}
+		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia, CapSchema, CapManaged}
 	if cs.Sealer() != nil {
 		caps = append(caps, CapStore)
 	}

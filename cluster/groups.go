@@ -404,6 +404,9 @@ func (m *Manager) UpdateGroup(user, name string, in *GroupInput) (GroupView, err
 		}
 		changed := groupChanges(&d.Groups[i], &g)
 		d.Groups[i] = g
+		if g.Name != name {
+			renameGroupInTemplates(d, name, g.Name)
+		}
 		out = viewIn(d, &g)
 		return AuditEntry{Action: ActionGroupUpdate, Group: name, Detail: changed}, nil
 	})
@@ -421,6 +424,7 @@ func (m *Manager) RemoveGroup(user, name string) error {
 			return AuditEntry{}, errNoGroup(name)
 		}
 		d.Groups = slices.Delete(d.Groups, i, i+1)
+		renameGroupInTemplates(d, name, "")
 		return AuditEntry{Action: ActionGroupRemove, Group: name}, nil
 	})
 	if err == nil {

@@ -84,6 +84,10 @@ const DryRunHeader = "Fit-Dry-Run"
 //	GET    /node                this fit: its node ID, host name, versions,
 //	                            start, running config, roles, the schema's
 //	                            digest and the API's capabilities (node.go)
+//	GET    /node/managed        the parts of the config a manager of many
+//	                            fits owns, each with whether it changed here
+//	                            since; PUT keeps a manager's record of them,
+//	                            DELETE forgets it (managed.go)
 //	GET    /status              what fit is doing now: listeners,
 //	                            connections, upstreams and their backends'
 //	                            health, certificates
@@ -280,6 +284,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /node", s.node)
+	mux.HandleFunc("GET /node/managed", s.getManaged)
+	mux.HandleFunc("PUT /node/managed", s.putManaged)
+	mux.HandleFunc("DELETE /node/managed", s.deleteManaged)
 	mux.HandleFunc("GET /schema", s.schemaHandler)
 	mux.HandleFunc("GET /cache", s.cacheZones)
 	mux.HandleFunc("POST /cache/purge", s.purge)
