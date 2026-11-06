@@ -54,14 +54,17 @@ type Tool struct {
 	// MaxBytes, when not 0, bounds its result below the settings'
 	// max_tool_result_bytes.
 	MaxBytes int64
-	// Kind says where a call runs: KindPool, or KindAsk.
+	// Kind says where a call runs: KindPool, KindAsk, or KindPage (the
+	// open page, I154).
 	Kind string
 	// Enabled, when not nil, says whether the settings let it run, and why
 	// not: log_tail needs data.send_logs. A tool not enabled is not offered.
 	Enabled func(s *config.Assistant) (ok bool, why string)
 	// Run runs a call of a KindPool tool, on the console's pool, and returns
 	// its result for the model: text or JSON, redacted and bounded after.
-	// An error is handed back to the model as the call's failure.
+	// An error is handed back to the model as the call's failure. For a
+	// KindPage tool it is optional: it checks the call, on the pool, and
+	// returns the arguments the page gets.
 	Run func(c *Call) (string, error)
 }
 
@@ -82,6 +85,9 @@ type Call struct {
 	Emit func(Event)
 	// Skill is the skill the chat runs, when one (I127).
 	Skill string
+	// Page is the page the browser is on, as the panel sent it: what a
+	// page tool's check reads the page's editable members from (I154).
+	Page *PageContext
 
 	a *Assistant
 	// expired is set once the call's result was given up on, past its

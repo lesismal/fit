@@ -26,8 +26,12 @@
 //   topbar(UI, shell) optional: called each time the shell is built; what it returns goes in the top bar beside the
 //           preferences, on every page, and shell is the shell's root, for a panel beside the pages (the assistant's).
 //
-// WB.page() is the page shown, as a panel sends it for context: {module, page, title, crumb, hash, selection}, where
-// selection is what the page last gave WB.select(value) (a port, a route, a difference), cleared when the page changes.
+// WB.page() is the page shown, as a panel sends it for context: {module, page, title, crumb, hash, selection, editable},
+// where selection is what the page last gave WB.select(value) (a port, a route, a difference), cleared when the page
+// changes, and editable what the page's editor declares (I154). A page that edits the config registers its editor
+// with WB.editor({describe() → {members, formats, tab, unsaved, assistant_draft}, call(name, args) → Promise}),
+// cleared when the page changes too; WB.pageTool(name, args) hands it the assistant's page tools' calls (page_get,
+// page_edit, page_revert), which draft into the page and never submit or save it.
 //
 // workbench：先登录，左侧菜单的第一级即各模块（网关的全局页、账户页面、各协议与功能模块、隧道与 LLM 各角色），第二级为模块的
 // 页面，右侧为所选页面。控制台提供某服务端模块时（GET /api/workbench 列出）才显示该模块：admin.console 提供配置本身的
@@ -35,7 +39,8 @@
 // nav 也可为函数（菜单重建时再次调用，其标签为模块自己取好的文字）；条目可为指向其他模块页面的外链，或带 kids 的可折叠节点，
 // 其子项为第三级链接。boot 在外框构建完成后调用一次。topbar 在每次构建外框时调用，返回的元素放在顶栏中（每个页面都有），
 // shell 为外框根元素，供页面旁的面板（助手）使用。WB.page() 返回当前页面（面板作为上下文发送），WB.select(value) 记录页面的
-// 选中项，切换页面时清除。
+// 选中项，切换页面时清除。编辑配置的页面用 WB.editor({describe, call}) 登记其编辑器（切换页面时清除），WB.page() 的 editable
+// 即其声明；WB.pageTool(name, args) 把助手页面工具的调用（page_get、page_edit、page_revert）交给它：只在页面上起草，从不提交或保存。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -101,16 +106,27 @@
   var refresh = function () { return Promise.resolve(); };
   // selection is what the page shown says is selected. / 当前页面声明的选中项。
   var selection = null;
+  // editor is the editor the page shown registered, for the assistant's page tools. / 当前页面登记的编辑器，供助手的页面工具使用。
+  var editor = null;
   window.WB = {
     // page returns the page shown, for a panel's context. / 返回当前页面，供面板作为上下文。
     page: function () {
+      var editable;
+      try { editable = editor && editor.describe ? editor.describe() || undefined : undefined; } catch (e) { editable = undefined; }
       return {
         module: shownPage.module, page: shownPage.navId, title: titleEl ? titleEl.textContent : '',
-        crumb: crumbEl ? crumbEl.textContent : '', hash: location.hash, selection: selection
+        crumb: crumbEl ? crumbEl.textContent : '', hash: location.hash, selection: selection, editable: editable
       };
     },
     // select records what the page shown has selected. / 记录当前页面的选中项。
     select: function (v) { selection = v == null ? null : v; },
+    // editor registers the page's editor, or none. / 登记页面的编辑器（null 表示没有）。
+    editor: function (ed) { editor = ed || null; },
+    // pageTool runs a page tool's call on the page's editor: a Promise of its result. / 在页面编辑器上执行页面工具的调用。
+    pageTool: function (name, args) {
+      if (!editor || !editor.call) return Promise.reject(new Error('the page shown edits no config: it holds no draft'));
+      try { return Promise.resolve(editor.call(name, args || {})); } catch (e) { return Promise.reject(e); }
+    },
     // refresh reads the modules served again and rebuilds the menu when they changed, as after a config that starts
     // or stops a role. / 重新读取所提供的模块，变化时重建菜单（如启动或停止角色的配置之后）。
     refresh: function () { return refresh(); },
@@ -414,6 +430,7 @@
     UI.stopTimers();
     UI.closeModals();
     selection = null;
+    editor = null;
     root.classList.remove('nav-open');
     markLinks();
     var path = location.hash.replace(/^#\/?/, '').split('?')[0];

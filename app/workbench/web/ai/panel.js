@@ -11,7 +11,10 @@
 // by typing /name at the start of the message, which shows the enabled skills that match: the chip above the composer
 // says which the conversation runs, its × stops it, and the message goes with "skill" when the chip changed it. A skill
 // the assistant loads itself (skill_load) comes as the event skill and sets the chip. FitAI.useSkill(name, {message,
-// inputs}) opens the panel on a new conversation with a skill picked, for the pages' Ask AI buttons (I128).
+// inputs}) opens the panel on a new conversation with a skill picked, for the pages' Ask AI buttons (I128). The page's
+// editor, when it has one (WB.editor), goes with the page as editable; a page tool's call (I154) comes as the event
+// page_call, is run on the page shown (WB.pageTool), which drafts into its editor and forms and never saves, and its
+// answer goes back with POST /api/chat/page as the call's result.
 //
 // 助手的对话面板：控制台提供 ai 模块且用户级别不是 off 时，每个页面的顶栏都有一个按钮，点开后面板显示在页面旁。消息连同当前
 // 页面（WB.page）与页面上选中的文字作为上下文发往 POST /api/chat，回答以 SSE 事件流回（text、thinking、tool_call、
@@ -22,7 +25,9 @@
 // 输入框上方，带“应用”（会再弹出含完整差异的对话框确认）与“丢弃”（ai/proposals.js）。技能（I127）可用“技能”按钮选择，或在
 // 消息开头输入 /name，面板会列出匹配的已启用技能：输入框上方的标签显示对话运行的技能，点 × 停止使用；标签有变化时消息带上 "skill"。
 // 助手自行加载的技能（skill_load）以 skill 事件到达并更新标签。FitAI.useSkill(name, {message, inputs}) 以选好的技能打开面板并新建
-// 对话，供各页面的“问 AI”按钮使用（I128）。
+// 对话，供各页面的“问 AI”按钮使用（I128）。页面有编辑器时（WB.editor），其声明作为 editable 随页面发送；页面工具的调用
+// （I154）以 page_call 事件到达，在当前页面上执行（WB.pageTool）：只起草到页面的编辑器与表单、从不保存，其应答经
+// POST /api/chat/page 作为该调用的结果返回。
 (function () {
   'use strict';
 
@@ -43,7 +48,9 @@
       'p.notKept': 'Without admin.store, conversations last until fit restarts.', 'p.copy': 'Copy', 'p.you': 'You',
       'p.step': 'Added to the proposal — {tool}: {summary}',
       'p.skills': 'Skills', 'p.skillsHint': 'Pick a skill, or type /name at the start of a message', 'p.noSkill': 'No skill: the assistant picks one when it fits',
-      'p.clearSkill': 'Stop using this skill', 'p.skillLoaded': 'The assistant loaded the skill {skill}.', 'p.noMatch': 'No enabled skill matches.'
+      'p.clearSkill': 'Stop using this skill', 'p.skillLoaded': 'The assistant loaded the skill {skill}.', 'p.noMatch': 'No enabled skill matches.',
+      'p.onPage': 'on the page…', 'p.drafted': 'Drafted on the page, not saved: review it there, then Save and apply — or revert it.',
+      'p.reverted': 'The assistant\'s draft was taken off the page.'
     },
     'zh-CN': {
       'p.open': '助手', 'p.close': '关闭助手', 'p.new': '新对话', 'p.delete': '删除此对话',
@@ -61,7 +68,9 @@
       'p.notKept': '未配置 admin.store：对话只保留到 fit 重启。', 'p.copy': '复制', 'p.you': '你',
       'p.step': '已加入提案 — {tool}：{summary}',
       'p.skills': '技能', 'p.skillsHint': '选择一个技能，或在消息开头输入 /name', 'p.noSkill': '未选技能：合适时助手会自行选择',
-      'p.clearSkill': '停止使用此技能', 'p.skillLoaded': '助手加载了技能 {skill}。', 'p.noMatch': '没有匹配的已启用技能。'
+      'p.clearSkill': '停止使用此技能', 'p.skillLoaded': '助手加载了技能 {skill}。', 'p.noMatch': '没有匹配的已启用技能。',
+      'p.onPage': '在页面上执行…', 'p.drafted': '已起草到页面上，尚未保存：请在页面上检查，然后“保存并应用”，或撤回。',
+      'p.reverted': '已从页面上撤回助手的草稿。'
     }
   }, 'ai');
 
@@ -444,6 +453,8 @@
           tools[id] = { status: status, res: res, d: d };
           scrollDown();
         },
+        // onPage marks a page tool's call as running on the page. / 标记页面工具的调用正在页面上执行。
+        onPage: function (id) { if (tools[id]) tools[id].status.textContent = t('p.onPage'); },
         result: function (id, name, content, isErr, cut) {
           var x = tools[id];
           if (!x) { T.tool(id, name, '{}'); x = tools[id]; }
@@ -519,7 +530,24 @@
         var s = window.getSelection();
         if (s && s.rangeCount && !box.contains(s.anchorNode)) sel = String(s).slice(0, 4000);
       } catch (e) { /* none / 无 */ }
-      return { module: p.module, page: p.page, title: p.title, selection: p.selection || undefined, text: sel || undefined };
+      return { module: p.module, page: p.page, title: p.title, selection: p.selection || undefined, text: sel || undefined,
+        editable: p.editable || undefined };
+    }
+    // pageCall runs a page tool's call on the page shown and sends its answer back; the chat waits for it.
+    // pageCall 在当前页面上执行页面工具的调用并回传其应答；对话会等待它。
+    function pageCall(T, ev) {
+      var conv = st.conv;
+      T.onPage(ev.id);
+      var run = window.WB && WB.pageTool ? WB.pageTool(ev.name, ev.arguments || {}) : Promise.reject(new Error('the workbench has no page tools'));
+      run.then(function (res) {
+        if (ev.name === 'page_edit' && res && res.drafted) T.note(t('p.drafted'), 'ok');
+        if (ev.name === 'page_revert' && res && res.reverted) T.note(t('p.reverted'));
+        return { conversation: conv, id: ev.id, result: res == null ? {} : res };
+      }, function (e) {
+        return { conversation: conv, id: ev.id, error: (e && e.message) || String(e) };
+      }).then(function (body) {
+        return UI.api('POST', '/api/chat/page', body);
+      }).catch(function () { /* the chat's own timeout ends the wait / 由对话自身的超时结束等待 */ });
     }
     function submit() {
       var msg = input.value.trim();
@@ -578,6 +606,7 @@
           case 'thinking': T.think(ev.text); break;
           case 'tool_call': T.tool(ev.id, ev.name, ev.arguments); break;
           case 'tool_result': T.result(ev.id, ev.name, ev.content, ev.error, ev.cut); break;
+          case 'page_call': pageCall(T, ev); break;
           case 'ask': T.ask(ev, true); break;
           case 'usage': footer(ev.today); break;
           case 'summary': T.note(t('p.summary')); break;

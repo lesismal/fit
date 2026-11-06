@@ -51,7 +51,9 @@ func (c *chat) notOffered(sk *Skill, tools []*Tool) []string {
 			continue
 		}
 		why := st.Why
-		if why == "" {
+		if t := c.a.registry.Tool(st.Name); why == "" && t != nil && t.Kind == KindPage && len(c.base) > 0 {
+			why = "no open page edits the config"
+		} else if why == "" {
 			why = "the model calls no tools"
 		}
 		out = append(out, st.Name+" ("+why+")")

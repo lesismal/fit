@@ -396,7 +396,7 @@ token（超出时 `429`，或正在进行的回答结束），`max_tool_result_b
 每个对话最多 512 KiB，每个用户合计最多 8 MiB；没有 store 时只保留到 fit 重启。用户只能看到自己的对话。
 
 端点为 `POST /api/m/ai/chat`（`{"conversation", "message" | "retry": true | "answer": {"id", "choice"}, "page", "lang"}`；
-以 SSE 应答：类型为 `start`、`text`、`thinking`、`tool_call`、`tool_result`、`ask`、`usage`、`summary` 与 `proposal` 的 `data:` 事件，
+以 SSE 应答：类型为 `start`、`text`、`thinking`、`tool_call`、`tool_result`、`ask`、`usage`、`summary`、`proposal` 与 `page_call` 的 `data:` 事件，
 最后是带 `{"type": "done", "reason"}`（`answer`、`ask`、`max_tool_calls`、`max_tokens_per_day`、`stopped`）的 `event: end`，
 或带 `{"message"}` 的 `event: error`；级别为 `off` 的用户 `403`，对话不存在 `404`，没有模型、对话正在回答或已达轮数时 `409`，
 超出同时回答数或当天 token 时 `429`）、`POST /api/m/ai/chat/stop`（`{"conversation"}`）、`GET /api/m/ai/conversations`、
@@ -439,6 +439,34 @@ schema 及本用户能否调用）。
 检查未通过或 Admin API 拒绝时 `422`）、`POST /api/m/ai/proposals/{conversation}/discard`（`{"id", "user"}`）以及
 `GET /api/m/ai/audit`（`?user=`、`?conversation=`、`?kind=` 为 `chat`、`apply` 或 `discard`、`?before=` 某条记录的 `seq`、
 `?limit=` 最多 500；最新的在前）。
+
+### 页面上的草稿
+
+级别为 `edit` 及以上的用户所要求的修改，会在其所在之处起草：在编辑配置的页面上（网关与系统中带表单及 `.conf`、`.yaml`、
+`.json` 标签页的页面，以及各功能页面），助手把修改写入页面的表单或文本标签页，作为未保存的草稿；由人在页面上检查并点击
+**保存并应用**，经页面通常的应用流程提交，记为此人的修改。助手从不点击它。
+
+页面工具：`page_get`（级别 `read`）读取页面当前的内容（含未保存的修改）：其所编辑成员在草稿中的值（已脱敏）、当前标签页、
+无法解析的文本以及上次保存的问题。`page_edit`（级别 `edit`）为页面所编辑的成员起草修改：整体设置成员（`members`，`null`
+表示删除）、按 JSON 指针的操作（`ops`：`add`、`replace`、`remove`），或以页面某个标签页格式（`format` 为 `conf`、`yaml` 或
+`json`）书写的本页部分（`text`），并附页面上显示的 `summary`。`page_revert`（级别 `edit`）撤回助手的草稿，回到首次起草之前
+的内容；若人在此之后改过页面则被拒绝，此时由页面自己的 **撤回助手的草稿**（会先确认）或 **放弃修改** 完成。
+
+页面声明它所编辑的内容，面板将其作为 `editable`（`{"members", "formats", "tab", "unsaved", "assistant_draft"}`）随页面发送；
+只有当前页面声明了编辑器时才提供页面工具，MCP 没有打开的页面，从不提供。草稿交给页面之前，fit 先在控制台线程池上检查：
+它设置的每个成员都是页面所编辑的，都不在 `admin` 中，不写入任何密钥字段（模型看到的 `[redacted]` 值可以抄回，页面会放回
+该处原有的值），文本按其格式可以解析，参数最多 256 KiB；未通过的草稿会被拒绝并说明原因，不会到达页面。页面无法容纳的修改
+（其他成员、密钥、`admin`、角色自己的设置）改为提案；级别低于 `propose` 时，则加以描述，由人在编辑它的页面上完成。
+
+页面随后像应用人工修改一样把草稿写入共享草稿，对文本运行它自己的检查（`POST /config/parse`，与手工输入的文本相同），标出
+修改的字段，在表单上方显示带 **撤回助手的草稿** 的提示，在顶栏 **有未保存的修改** 旁显示 **助手草稿** 徽标，并以其修改的
+内容应答。页面工具从不调用 `PUT` 或 `PATCH /config`、`/config/text`、reconcile、回滚或缓存清除，也不保存：在人保存之前，
+版本、ETag 与 **版本** 列表保持不变，审计日志把页面工具的调用记为对话中的工具调用，从不记为一次修改。保存、放弃或重新读取
+配置都会结束草稿的标记。
+
+页面工具的调用以流中的 `page_call` 事件到达面板（`{"id", "name", "arguments"}`，参数为 fit 检查后的内容）；面板在当前页面上
+执行，并以 `POST /api/m/ai/chat/page`（`{"conversation", "id", "result" | "error"}`；对话未在等待该调用时 `409`）应答，其结果
+与其他工具的结果一样脱敏并受限。对话最多等待应答 30 秒，浏览器离开时即停止等待。
 
 ### 技能
 

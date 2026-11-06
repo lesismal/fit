@@ -19,7 +19,8 @@ import (
 
 // The types of a chat stream's events. Each is an SSE message whose data is
 // an Event; the last is the SSE event "end", an Event of type done, or, when
-// the chat failed, the SSE event "error" with {"message"}.
+// the chat failed, the SSE event "error" with {"message"}. EventPageCall
+// (pagetools.go) is a page tool's call for the open page.
 const (
 	EventStart      = "start"       // the conversation and model: Conversation, Title, Model, and the Skill it runs
 	EventText       = "text"        // a piece of the answer: Text
@@ -272,8 +273,10 @@ func (a *Assistant) begin(r *console.Request, body chatBody, s *config.Assistant
 		}
 	}
 	if useTools {
-		c.base = a.registry.For(level, s)
+		// The page tools only while the page shown edits the config.
+		c.base = withPage(a.registry.For(level, s), body.Page)
 	}
+	c.pageCtx = body.Page
 	c.tools = c.base
 	if sk != nil {
 		c.skill, c.tools = sk, narrow(c.base, sk)
@@ -434,6 +437,7 @@ type chat struct {
 	catalog []CatalogEntry
 	red     *redactor
 	page    []byte
+	pageCtx *PageContext // the page as the panel sent it, for the page tools
 	lang    string
 	conv    *Conversation
 	u       *userChats
@@ -462,6 +466,8 @@ type chat struct {
 	// the proposal its propose tools left, with the members it changes.
 	audit    []AuditCall
 	proposal *AuditProposal
+	// wait is the page tool's call waiting on the page's answer.
+	wait *pageWait
 }
 
 // open starts the stream: its header and first event, and the ping.
@@ -591,6 +597,7 @@ func (c *chat) finish(reason, errMsg string) {
 	c.partial.Reset()
 	calls, prop, skill := c.audit, c.proposal, c.skillNameLocked()
 	c.mu.Unlock()
+	c.endWait()
 	c.cancel()
 	if len(calls) > 0 {
 		outcome := reason
@@ -660,7 +667,8 @@ func (c *chat) request() (req *model.Request, fold int) {
 	c.mu.Lock()
 	sk, tools, inputs := c.skill, c.tools, c.inputs
 	c.mu.Unlock()
-	parts := promptParts{level: c.level, lang: c.lang, page: c.page, summary: summary, proposal: c.red.text(state)}
+	parts := promptParts{level: c.level, lang: c.lang, page: c.page, summary: summary, proposal: c.red.text(state),
+		pageGet: hasTool(tools, ToolPageGet), pageEdit: hasTool(tools, ToolPageEdit)}
 	switch {
 	case sk != nil:
 		parts.skill = &skillPart{skill: sk, inputs: c.red.inputsJSON(inputs), tools: toolNames(tools), not: c.notOffered(sk, tools)}
@@ -834,6 +842,11 @@ func (c *chat) runCalls(calls []model.ToolCall, i int, ask *model.ToolCall) {
 				continue
 			}
 			ask = &calls[i]
+		case t.Kind == KindPage:
+			c.calls.Add(1)
+			next := i + 1
+			c.runPage(t, tc, func() { c.runCalls(calls, next, ask) })
+			return
 		default:
 			c.calls.Add(1)
 			next := i + 1

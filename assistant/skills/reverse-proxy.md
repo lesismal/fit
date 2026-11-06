@@ -4,7 +4,7 @@ title: Reverse proxy
 title_zh: 反向代理
 description: Sets up an upstream pool with health checks, load balancing, timeouts and retries, and the route that proxies to it.
 description_zh: 配置上游池：健康检查、负载均衡、超时与重试，以及代理到它的路由。
-tools: [config_get, schema_describe, config_validate, upstream_health, status_get, metrics_query, config_propose]
+tools: [config_get, schema_describe, config_validate, upstream_health, status_get, metrics_query, config_propose, page_get, page_edit, page_revert]
 inputs:
   - name: upstream
     description: The pool's name, to change one that exists or name a new one.
@@ -35,3 +35,8 @@ You set up or tune a pool of backends that a route proxies to.
 6. Say what the pool does when a backend fails, in two or three lines.
 
 Without the propose tools, show the config text instead.
+
+When the page the person is on edits every member the change touches (page_context's `editable.members`)
+and `page_edit` is offered, draft the change there instead: `page_get` first, then `page_edit` with the same
+operations, and say it waits on the page for the person's Save and apply. A change that touches a member the
+page does not edit is proposed, or shown as text, as above.
