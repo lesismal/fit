@@ -220,13 +220,13 @@ func (v *VOD) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	if v.auth == nil {
-		v.serve(c, l, it, nm, &mediaauth.Access{})
+		v.serve(c, l, it, nm, mediaauth.Access{})
 		return
 	}
 	// The item's resource, as a signed URL is signed for: the path up to
 	// and with the '/' after its ID.
 	resource := r.URL.Path[:len(v.prefix)+i+1]
-	v.auth.GuardResource(c, "vod/"+v.Library+"/"+id, resource, func(a mediaauth.Access) { v.serve(c, l, it, nm, &a) })
+	v.auth.GuardResource(c, "vod/"+v.Library+"/"+id, resource, func(a mediaauth.Access) { v.serve(c, l, it, nm, a) })
 }
 
 // personal returns a playlist's header, h, for the viewer whose access a
@@ -249,7 +249,7 @@ func personal(h stdhttp.Header, a *mediaauth.Access, setCookie string) stdhttp.H
 }
 
 // serve serves nm of item it to the request a let in.
-func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, nm name, a *mediaauth.Access) {
+func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, nm name, a mediaauth.Access) {
 	switch nm.kind {
 	case kindMaster:
 		con := nm.c
@@ -262,7 +262,7 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 			v.respond(c, stdhttp.StatusNotFound, "no rendition of the item is carried in "+con.String())
 			return
 		}
-		serveBlob(c, &blob{data: b, header: personal(v.st.header(hls.PlaylistContentType, "", it.ModTime), a, cookie), modTime: it.ModTime})
+		serveBlob(c, &blob{data: b, header: personal(v.st.header(hls.PlaylistContentType, "", it.ModTime), &a, cookie), modTime: it.ModTime})
 	case kindMedia, kindInit, kindSegment:
 		r := v.rendition(it, nm)
 		if r == nil {
@@ -271,7 +271,8 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 		}
 		switch nm.kind {
 		case kindMedia:
-			v.serveMedia(c, l, r, nm, a)
+			acc := a // escapes with the playlist's callbacks, here alone
+			v.serveMedia(c, l, r, nm, &acc)
 		case kindInit:
 			v.serveInit(c, r, nm)
 		default:
@@ -285,7 +286,7 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 		if nm.kind == kindSubtitles {
 			query, cookie := a.PassOn(it.Duration)
 			serveBlob(c, &blob{data: renderSubtitles(nm.i, it.Duration, query),
-				header: personal(v.st.header(hls.PlaylistContentType, "", it.Subtitles[nm.i].ModTime), a, cookie), modTime: it.Subtitles[nm.i].ModTime})
+				header: personal(v.st.header(hls.PlaylistContentType, "", it.Subtitles[nm.i].ModTime), &a, cookie), modTime: it.Subtitles[nm.i].ModTime})
 			return
 		}
 		v.serveVTT(c, l, it.Subtitles[nm.i])

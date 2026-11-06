@@ -8,7 +8,14 @@
   audio and subtitle tracks. What it found is POSTed, as JSON, to the
   collector that served the page (collector.py), which prints it and exits.
 
-    player.html?base=<the vod prefix URL>&items=films/bbb,clips/av1&containers=fmp4,ts
+    player.html?base=<the vod prefix URL>&items=films/bbb,clips/av1&containers=fmp4,ts[&signed=1]
+
+  With signed=1 each item plays through a playback URL that expires
+  (url_signing), which the collector, standing for the site's API, gets from
+  fit's media_tokens with a short ttl: the playlist without it must be 401;
+  after two seconds played the page waits for the URL to expire, checks that
+  the playlist is then 403, and seeks and plays on, on the grant the
+  playlists handed on.
 
   An item whose codecs this browser's Media Source Extensions do not take
   (H.265 in a Chromium without a hardware decoder) is reported as skipped.
@@ -21,6 +28,10 @@ const q = new URLSearchParams(location.search);
 const base = q.get('base');
 const items = (q.get('items') || '').split(',').filter(Boolean);
 const containers = (q.get('containers') || 'fmp4,ts').split(',');
+const signed = q.get('signed') === '1';
+// The URL's lifetime: long enough for the playlist to be fetched, short
+// enough to expire while the item plays.
+const ttl = 8;
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,8 +57,17 @@ async function codecsOf(url) {
 }
 
 async function play(item, container) {
-  const url = `${base}${item}/index.${container}.m3u8`;
+  let url = `${base}${item}/index.${container}.m3u8`;
   const r = { item, container, url };
+  let expires = 0;
+  if (signed) {
+    r.unsignedStatus = (await fetch(url)).status;
+    const resp = await fetch('/sign?ttl=' + ttl + 's&path=' + encodeURIComponent(new URL(url).pathname));
+    const s = await resp.json();
+    url = s.urls[0];
+    expires = s.expires;
+    r.url = url.replace(/sig=[^&]*/, 'sig=REDACTED');
+  }
   const { codecs, supported, missing } = await codecsOf(url);
   r.codecs = codecs;
   if (missing) {
@@ -75,6 +95,11 @@ async function play(item, container) {
     r.width = v.videoWidth;
     r.height = v.videoHeight;
     r.duration = v.duration;
+    if (signed) {
+      // The URL expires; the player goes on on its grant.
+      await waitFor(() => Date.now() > expires * 1000 + 1000, (ttl + 5) * 1000, 'the URL to expire');
+      r.expiredStatus = (await fetch(url)).status;
+    }
     const target = Math.round(v.duration * 0.6 * 10) / 10;
     v.currentTime = target;
     await waitFor(() => !v.seeking || errors.length, 15000, 'the seek');
@@ -93,7 +118,8 @@ async function play(item, container) {
     v.load();
   }
   r.errors = errors;
-  r.ok = errors.length === 0 && Math.abs(r.seekLanded - r.seekTo) < 0.5;
+  r.ok = errors.length === 0 && Math.abs(r.seekLanded - r.seekTo) < 0.5 &&
+    (!signed || r.unsignedStatus === 401 && r.expiredStatus === 403);
   return r;
 }
 
