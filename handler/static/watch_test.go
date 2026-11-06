@@ -246,3 +246,40 @@ func TestCleanupStopsTheWatch(t *testing.T) {
 		t.Fatal("the watch still watches after Cleanup")
 	}
 }
+
+// Under a watch a path is trusted past check_interval, until the watch
+// reports a change; a file that is a symbolic link, whose target's changes
+// the watch does not see, is looked at again once the interval passes.
+func TestWatchedNeedsNoCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symbolic links need privileges on Windows")
+	}
+	root := tree(t, map[string]string{"a.txt": "a"})
+	target := filepath.Join(t.TempDir(), "t.txt")
+	if err := os.WriteFile(target, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	s := mustLoad(t, root, `, "check_interval": "50ms"`)
+	if s.watch == nil {
+		t.Skip("no watch here")
+	}
+	a := s.find("/a.txt", true)
+	link := s.find("/link.txt", true)
+	if !a.watched || link.watched {
+		t.Fatalf("watched: a.txt %v, link.txt %v", a.watched, link.watched)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := s.find("/a.txt", false); got != a {
+		t.Fatal("a watched path was not trusted past check_interval")
+	}
+	if got := s.find("/link.txt", false); got != nil {
+		t.Fatal("a symbolic link was trusted past check_interval")
+	}
+	if err := os.WriteFile(target, []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, s, "/link.txt", "two")
+}

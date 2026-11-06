@@ -6314,8 +6314,10 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   1. The ETag stays mtime and size, as nginx makes it: a file replaced with the same size and time
      keeps its ETag, so a client revalidating its old copy is answered 304. Adding the inode or change
      time would make ETags differ between machines serving the same files.
-  2. Watched lookups still expire at `check_interval`, a bound on what inotify cannot see (writes on a
-     network file system by another machine, a symbolic link under the root to a file elsewhere).
+  2. ~~Watched lookups still expire at `check_interval`.~~ Ruled by the user the same day: under a
+     watch nothing is looked at again until it reports a change (fib `08e6f0a`, and here). The
+     interval is for other systems and for a file that is a symbolic link; a network file system's
+     writes from other machines need `check_interval: 0`.
   3. No `watch: false` parameter: `check_interval: 0` turns the watch off, and the interval bounds the
      rest.
   4. fib's `FileCache` off Linux now trusts a file for 5s rather than stat it on every request; a
