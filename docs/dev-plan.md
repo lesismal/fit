@@ -319,7 +319,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I158 | fib v1.7.1's HTTP/2 request checks made as cheap as they can be: fit's `fixed` and `static` over h2c back within noise of fib `5c0e5b9` (−2.4% and −1.7% on 2026-11-05), the checks kept | — | done |
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | done |
-| I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | todo |
+| I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | done |
 | I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 
 ## M0, foundations
@@ -2825,6 +2825,32 @@ Principles, in the order they bind:
   detector.
 - **Touches**: `config`, `tunnel/internal/transport/...`, `tunnel/internal/uplink`, `tunnel/hub`,
   `tunnel/node`, `llm/...`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **`quic_insecure` beside `pin` or `ca_file`** loads off loopback: the pin or the CAs decide the
+   check, so it does nothing there. Alternative: refuse it with any quic endpoint off loopback.
+2. **Disabled endpoints count** for the `quic_insecure` check, as for plain tcp and ws endpoints.
+3. **The kept certificate's file**: `<config path without extension>.<role id>.pem` beside the
+   first `-c` path, or `<dir>/fit.<role id>.pem` for a config directory; nothing for stdin or with a
+   store. Alternatives: a fixed name; a state directory of its own.
+4. **Without a store, only the file** holds the certificate, not the running config, which then
+   matches the file on disk. Alternative: both.
+5. **A kept file with no certificate in it** fails the Apply and is left alone, so the hub does
+   not start, rather than make a new certificate and change the pin silently.
+6. **A kept file that cannot be written** (a read-only mount) falls back to the old behaviour, with
+   a warning that the certificate changes at the next start. Alternative: refuse to start.
+7. **LLM `self_signed` listeners too** keep their certificate the same way (`fit.llm.<role>.pem`),
+   though the plan named the hub only.
+8. **An LLM listener's rotated certificate is swapped in place**: open links and calls survive, at
+   the cost of fib's handshake-pool hop for `GetCertificate` on listeners with `cert_file`.
+   Alternative: reopen the listener, as the tunnel hub does, which cuts every inbound link.
+9. **A reload whose files fail to load** is logged, not returned, and `-watch-certs` tries again
+   when they change.
+10. **Files are watched through `-watch-certs`** (`app.Info.CertFiles` into the runtime graph), not
+    a watcher a role; the tunnel hub's listener files, read only on Apply until now, are watched too.
+11. **The pages' API runs the whole `config.CheckTunnelEndpoint`**, answering 400 with the config's
+    message.
 
 ### I161 Unauthenticated connections and file names, after review
 
