@@ -174,6 +174,9 @@ func start(t *testing.T, s string, st *memStore, opts ...any) *fixture {
 		if tools, ok := op.([]*assistant.Tool); ok {
 			ao.Tools = append(ao.Tools, tools...)
 		}
+		if cl, ok := op.(assistant.Cluster); ok {
+			ao.Cluster = cl
+		}
 	}
 	var err error
 	if f.a, err = assistant.New(ao); err != nil {

@@ -107,6 +107,8 @@ type promptParts struct {
 	summary, proposal string
 	// pageGet and pageEdit say the page tools are offered (I154).
 	pageGet, pageEdit bool
+	// cluster says this fit is a manager of other fits (I153).
+	cluster bool
 }
 
 // skillPart is the current skill as the system prompt carries it: its
@@ -135,6 +137,9 @@ func systemPrompt(p promptParts) string {
 	}
 	if levelRank(p.level) >= levelRank(config.AssistantPropose) {
 		b.WriteString(proposePrompt)
+	}
+	if p.cluster {
+		b.WriteString("\n\n" + clusterNote())
 	}
 	writePage(&b, p)
 	if p.proposal != "" {

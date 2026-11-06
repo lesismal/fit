@@ -148,7 +148,7 @@ func TestBuiltinSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := NewRegistry()
-	for _, tool := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools()) {
+	for _, tool := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools(), clusterTools(nil)) {
 		if err := reg.Add(tool); err != nil {
 			t.Fatal(err)
 		}

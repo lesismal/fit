@@ -83,6 +83,10 @@ type ExternalResult struct {
 	Proposal     string
 	Revision     int
 	Conversation string
+	// Link is the workbench's link (#/cluster/...) of the rollout plan or
+	// operation a cluster propose tool made (I153), which a person starts
+	// there.
+	Link string
 }
 
 // CallTool runs the tool name for x with args, a JSON object, on the
@@ -130,7 +134,9 @@ func (a *Assistant) CallTool(ctx context.Context, x External, name string, args 
 		expired = new(atomic.Bool)
 	}
 	c := &Call{Context: ctx, Args: args, User: x.User, Level: x.Level, Settings: s, a: a, expired: expired}
-	if t.Level == config.AssistantPropose {
+	// A cluster propose tool makes a rollout plan or an operation of the
+	// manager's, not a step of a proposal: it needs no conversation.
+	if t.Level == config.AssistantPropose && !clusterPropose(name) {
 		id, err := a.ensureConversation(x.User, x.Conversation, x.Title)
 		if err != nil {
 			return fail(err.Error())
@@ -141,6 +147,7 @@ func (a *Assistant) CallTool(ctx context.Context, x External, name string, args 
 			res.Proposal, res.Revision = p.ID, p.Revision
 		}
 	}
+	c.linked = func(link string) { res.Link = link }
 	out, err := t.Run(c)
 	if err != nil {
 		return fail("error: " + err.Error())

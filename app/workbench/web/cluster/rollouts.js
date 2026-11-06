@@ -37,7 +37,21 @@
       '同时最多 {n} 个发布处于规划或进行中；规划后 {min} 分钟内未启动即过期。'],
     // Kinds / 类型
     ['ro.kind', 'What to roll out', '发布内容'], ['ro.k.template', 'A template\'s change', '模板的修改'], ['ro.k.sync', 'A sync with the templates', '与模板同步'],
-    ['ro.k.copy', 'Parts copied from a member', '从成员复制部分配置'],
+    ['ro.k.copy', 'Parts copied from a member', '从成员复制部分配置'], ['ro.k.patch', 'Parts written here', '在此填写的部分配置'],
+    ['ro.k.patch.hint', 'Top-level members whole, and routes, upstreams, listeners and services by name, put on the members picked or a group\'s as written: config no template owns. A secret written as [secret] keeps each member\'s own.',
+      '把顶层成员（整体）以及按名称的路由、上游、监听与服务按所写内容放到所选成员或分组成员上：不属于任何模板的配置。写作 [secret] 的密钥保留各成员自己的值。'],
+    ['ro.config', 'Config (JSON)', '配置（JSON）'], ['ro.draft', 'A draft of the template\'s config (JSON), optional', '模板配置的草稿（JSON，可选）'],
+    ['ro.draft.hint', 'Planned on its members without saving the template; starting the rollout saves it, which a cluster-wide admin may. Empty: the template as it is.',
+      '在其成员上规划而不保存模板；启动发布时保存模板（需要集群范围的管理员）。留空：按模板现状。'],
+    ['ro.badjson', 'The config is not a JSON object.', '配置不是 JSON 对象。'],
+    ['ro.nodes.patch', 'The members it changes; none picked: the group\'s.', '要修改的成员；未选择时：分组的成员。'],
+    ['ro.from.patch', 'a patch of {p}', '修改 {p}'], ['ro.from.draft', 'a draft of the template {t}', '模板 {t} 的草稿'],
+    ['ro.byai', 'planned by the assistant for {p}', '由助手为 {p} 规划'],
+    ['ro.byai.started', 'planned by the assistant for {p}, started by {s}', '由助手为 {p} 规划，{s} 启动'],
+    ['ro.cfg.draft', 'The template\'s draft, saved as the template when the rollout starts', '模板的草稿，在发布启动时保存为模板'],
+    ['ro.cfg.patch', 'The parts the patch puts on the members', '此次修改放到成员上的部分'],
+    ['ro.suggested', 'The strategy is the one suggested by the assistant; change it as you see fit.', '策略为助手建议的策略，可按需修改。'],
+    ['ro.confirm.draft', 'Starting it first saves the draft as the template {t}, as your change, then applies it.', '启动时先以你的名义把草稿保存为模板 {t}，然后应用。'],
     ['ro.k.template.hint', 'Every member of the template\'s groups (or those picked) gets its desired config: its own with the parts its templates own taken from them.',
       '模板所在分组的每个成员（或所选成员）获得其期望配置：自身配置中由模板拥有的部分替换为模板给出的值。'],
     ['ro.k.sync.hint', 'The members picked, a group\'s, or every member, each brought in sync with all its templates.',
@@ -133,8 +147,9 @@
   // what says what a rollout changes. / 描述发布的内容。
   function what(UI, r) {
     var t = UI.t;
-    if (r.kind === 'template') return t('ro.from.tpl', { t: r.template });
+    if (r.kind === 'template') return t(r.config ? 'ro.from.draft' : 'ro.from.tpl', { t: r.template });
     if (r.kind === 'copy') return t('ro.from.copy', { p: (r.paths || []).join(', '), f: r.from });
+    if (r.kind === 'patch') return t('ro.from.patch', { p: Object.keys(r.config || {}).join(', ') }) + (r.group ? ' · ' + r.group : '');
     return t('ro.from.sync') + (r.group ? ' · ' + r.group : '');
   }
   function countBadges(UI, r) {
@@ -190,7 +205,7 @@
       var groups = ((res[1].body && res[1].body.groups) || []).map(function (g) { return g.name; });
       var tpls = ((res[2].body && res[2].body.templates) || []).map(function (x) { return x.name; });
       // A copy applies config of no template: an admin's (I148). / 复制应用的不是模板中的配置：需要管理员（I148）。
-      var kinds = FC.canAny('admin') ? ['template', 'sync', 'copy'] : ['template', 'sync'];
+      var kinds = FC.canAny('admin') ? ['template', 'sync', 'copy', 'patch'] : ['template', 'sync'];
       var kind = h('select.select', { name: 'rollout-kind' }, kinds.map(function (k) {
         return h('option', { value: k, selected: (q.kind || 'template') === k }, t('ro.k.' + k));
       }));
@@ -208,6 +223,11 @@
         return h('label.cl-chip.tp-pick', c, ' ', n);
       }));
       var desc = h('input.input', { name: 'rollout-description', autocomplete: 'off', maxlength: 512 });
+      // A patch's parts, and a template's draft (I153). / 修改的部分配置，以及模板的草稿（I153）。
+      var cfgText = h('textarea.textarea.textarea--code', { name: 'rollout-config', rows: 6, spellcheck: 'false', placeholder: '{"log": {"level": "debug"}}' });
+      var fCfg = UI.field(t('ro.config'), cfgText);
+      var fCfgHint = h('span.field__hint');
+      fCfg.appendChild(fCfgHint);
       var err = h('div.callout.callout--danger', { hidden: true });
       var fTpl = UI.field(t('ro.template'), tpl), fGroup = UI.field(t('ro.group'), group), fFrom = UI.field(t('ro.from'), from);
       var nodesHint = h('span.field__hint');
@@ -217,6 +237,9 @@
         kindHint.textContent = t('ro.k.' + k + '.hint');
         nodesHint.textContent = t('ro.nodes.' + k);
         fTpl.hidden = k !== 'template'; fFrom.hidden = fPaths.hidden = k !== 'copy'; fGroup.hidden = k === 'template';
+        fCfg.hidden = k !== 'patch' && !(k === 'template' && FC.canCluster('admin'));
+        fCfg.querySelector('.field__label').textContent = t(k === 'patch' ? 'ro.config' : 'ro.draft');
+        fCfgHint.textContent = k === 'patch' ? '' : t('ro.draft.hint');
       }
       kind.addEventListener('change', sync);
       sync();
@@ -231,12 +254,16 @@
           sel = sel.filter(function (n) { return n !== from.value; });
         }
         if (sel.length) req.nodes = sel; else if (req.kind !== 'template' && group.value) req.group = group.value;
+        if (!fCfg.hidden && cfgText.value.trim()) {
+          try { req.config = JSON.parse(cfgText.value); } catch (e) { req.config = null; }
+          if (!req.config || typeof req.config !== 'object' || Array.isArray(req.config)) { err.textContent = t('ro.badjson'); err.hidden = false; return; }
+        }
         UI.busy(plan, FC.call(UI, 'POST', '/api/rollouts', req).then(function (r) {
           location.hash = '#/cluster/rollout/' + encodeURIComponent(r.body.id);
         }, function (e) { err.textContent = e.message; err.hidden = false; }));
       }, 'primary');
       UI.mount(box, UI.card(t('ro.new'), h('div.stack.cl-form',
-        h('label.field', h('span.field__label', t('ro.kind')), kind, kindHint), fTpl, fFrom, fPaths, fGroup, fNodes, UI.field(t('ro.desc'), desc),
+        h('label.field', h('span.field__label', t('ro.kind')), kind, kindHint), fTpl, fFrom, fPaths, fCfg, fGroup, fNodes, UI.field(t('ro.desc'), desc),
         err, h('div.btn-row', plan))));
     }, function (e) { UI.mount(box, h('div.callout.callout--danger', e.message)); });
   };
@@ -289,7 +316,7 @@
   }
 
   // ---- The strategy form / 策略表单 ----
-  function strategyForm(UI, n) {
+  function strategyForm(UI, n, sug) {
     var h = UI.h, t = UI.t;
     function num(name, v, min) { return h('input.input.input--sm', { name: name, type: 'number', min: min || 0, step: 1, value: v == null ? '' : v }); }
     var mode = h('select.select', { name: 'rollout-mode' }, ['all', 'rolling', 'canary'].map(function (m) {
@@ -309,9 +336,18 @@
       fBatch.hidden = m === 'all'; fPause.hidden = m === 'all'; fCanary.hidden = m !== 'canary';
       fWin.hidden = fMin.hidden = ratio.value === '';
     }
+    // The strategy the assistant suggested, when it planned the rollout (I153). / 助手规划时建议的策略（I153）。
+    if (sug) {
+      var g = sug.gate || {};
+      mode.value = sug.mode || mode.value;
+      if (sug.batch_percent) { size.value = sug.batch_percent; unit.value = 'pct'; } else if (sug.batch_size) size.value = sug.batch_size;
+      pause.value = (sug.pause_ms || 0) / 1000; canary.value = sug.canary || 1; onfail.value = sug.on_failure || 'batch';
+      wait.value = (g.wait_ms || 0) / 1000;
+      if (g.max_5xx_ratio) { ratio.value = g.max_5xx_ratio * 100; win.value = (g.window_ms || 30000) / 1000; min.value = g.min_requests || 20; }
+    }
     mode.addEventListener('change', sync); ratio.addEventListener('input', sync);
     sync();
-    var el = h('div.stack.cl-form',
+    var el = h('div.stack.cl-form', sug ? h('div.callout.callout--info.small', t('ro.suggested')) : null,
       h('div.form-row', UI.field(t('ro.mode'), mode), fCanary), h('div.form-row', fBatch, fPause),
       h('div.small.muted', t('ro.gate.hint')),
       h('div.form-row', UI.field(t('ro.gate.wait'), wait), UI.field(t('ro.gate.ratio'), ratio, t('ro.gate.ratio.hint')), fWin, fMin),
@@ -362,7 +398,8 @@
     // steers says whether the user may steer r: an operator of each member, an admin of each for a copy (I148).
     // steers 判断用户能否操作 r：需要在每个成员上是操作员，复制则需要管理员（I148）。
     function steers() {
-      return FC.canAll(r.kind === 'copy' ? 'admin' : 'operator', (r.members || []).map(function (x) { return x.node; }));
+      if (r.kind === 'template' && r.config && r.state === 'planned' && !FC.canCluster('admin')) return false;
+      return FC.canAll(r.kind === 'copy' || r.kind === 'patch' ? 'admin' : 'operator', (r.members || []).map(function (x) { return x.node; }));
     }
     function controls() {
       var s = r.state, btns = [];
@@ -379,11 +416,13 @@
     }
     function drawHead() {
       var by = r.started_by ? t('ro.by', { p: r.planned_by, s: r.started_by }) : t('ro.byplan', { p: r.planned_by });
+      if (r.source === 'assistant') by = r.started_by ? t('ro.byai.started', { p: r.planned_by, s: r.started_by }) : t('ro.byai', { p: r.planned_by });
+      var cfg = r.config ? h('details.tp-el', h('summary', t(r.kind === 'patch' ? 'ro.cfg.patch' : 'ro.cfg.draft')), h('pre.cl-mono', pretty(r.config))) : null;
       UI.mount(head, UI.card(what(UI, r), h('div.stack',
         r.description ? h('div', r.description) : null,
         h('div.btn-row', stateBadge(UI, r.state), countBadges(UI, r), h('span.small.muted', by + ' · ' + FC.when(r.created))),
         r.reason ? h('div.callout.callout--' + (r.state === 'failed' ? 'danger' : r.state === 'done' ? 'ok' : 'warn') + '.small', h('b', t('ro.reason') + ': '), r.reason) : null,
-        r.next_at ? h('div.small.muted', t('ro.next', { at: FC.when(r.next_at) })) : null), controls()));
+        r.next_at ? h('div.small.muted', t('ro.next', { at: FC.when(r.next_at) })) : null, cfg), controls()));
     }
     function memberCard(x, plan) {
       var ready = x.status === 'ready';
@@ -404,7 +443,7 @@
     function drawPlan() {
       var ms = r.members || [];
       var ready = ms.filter(function (x) { return x.status === 'ready'; });
-      if (!form) form = strategyForm(UI, ready.length);
+      if (!form) form = strategyForm(UI, ready.length, r.suggested);
       var start = UI.btn(t('ro.start'), 'send', confirmStart, 'primary');
       start.disabled = !ready.length;
       var discard = UI.btn(t('ro.discard'), 'trash', function () {
@@ -426,6 +465,7 @@
       UI.modal({
         title: t('ro.confirm.title'), wide: true,
         body: h('div.stack', h('div', t('ro.confirm.note', { n: names.length, b: bs.length })),
+          r.kind === 'template' && r.config ? h('div.callout.callout--warn.small', t('ro.confirm.draft', { t: r.template })) : null,
           h('ol.tp-list', bs.map(function (b, i) {
             return h('li', t('ro.confirm.batch', { n: i + 1 }), b.canary ? ' (' + t('ro.confirm.canary') + ')' : '', ': ', b.nodes.join(', '));
           })),
@@ -447,7 +487,9 @@
         var title = h('span', t('ro.confirm.batch', { n: i + 1 }), b.canary ? ' (' + t('ro.confirm.canary') + ')' : '', ' ',
           UI.badge(t('ro.b.' + b.state), BATCH_KIND[b.state] || '', true));
         var gateAt = b.state === 'gating' && b.gate_at ? h('span.small.muted', t('ro.gate.at', { at: FC.when(b.gate_at) })) : null;
-        return UI.card(title, h('div.stack', b.nodes.map(function (n) { return memberCard(byName[n], false); })), gateAt);
+        // A failed batch asks the assistant why, and how to go on (I153, askai.js). / 失败的批次可询问助手原因与后续（I153，askai.js）。
+        var ask = FC.askBatch ? FC.askBatch(UI, r, b) : null;
+        return UI.card(title, h('div.stack', b.nodes.map(function (n) { return memberCard(byName[n], false); })), gateAt || ask ? h('span.btn-row', gateAt, ask) : null);
       });
       var others = (r.members || []).filter(function (x) { return !listed[x.node]; });
       UI.mount(body, h('div.stack', UI.card(t('ro.progress'), h('div.stack', cards)),

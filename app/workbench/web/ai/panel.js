@@ -479,6 +479,10 @@
           x.res.textContent = pretty(content);
           x.status.textContent = isErr ? t('p.failed') : cut ? t('p.cut') : '';
           x.d.classList.toggle('is-error', !!isErr);
+          // A rollout plan or an operation a cluster propose tool made, linked to where it starts (ai/plans.js, I153).
+          // 集群提案工具生成的发布规划或操作，链接到启动之处（ai/plans.js，I153）。
+          var card = window.FitAI && FitAI.resultCard ? FitAI.resultCard(UI, name, content, isErr) : null;
+          if (card) x.d.parentNode.insertBefore(card, x.d.nextSibling);
         },
         ask: function (ev, live) {
           T.flush();

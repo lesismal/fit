@@ -249,6 +249,9 @@
       rl.disabled = !!ro;
       out.push(rl, h('a.small', { href: UI.targetURL(n.node, '#/sys.check/check') }, t('dr.openchk')));
     }
+    // Ask AI about its drift (I153, askai.js). / 就其漂移“问 AI”（I153，askai.js）。
+    var ask = FC.askDrift ? FC.askDrift(UI, n) : null;
+    if (ask) out.push(ask);
     return h('span.btn-row', out);
   }
   // fix plans a sync rollout of names, once confirmed, and opens its plan. / 确认后为 names 规划同步发布并打开其规划。

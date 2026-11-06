@@ -358,7 +358,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		// does more for a user than the user may.
 		var extras admin.ConsoleExtras
 		if manager != nil {
-			extras = admin.ConsoleExtras{Gate: manager.ConsoleGate, AssistantCap: manager.AssistantCap}
+			extras = admin.ConsoleExtras{Gate: manager.ConsoleGate, AssistantCap: manager.AssistantCap, Cluster: manager.Assistant()}
 		}
 		console, err = admin.StartConsoleWith(s.Engine(), c.Admin.Console, c.Admin, configs, modules, func(r admin.Result) {
 			printApplied(stdout, stderr, r)

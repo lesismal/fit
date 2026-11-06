@@ -667,7 +667,7 @@ func (c *chat) request() (req *model.Request, fold int) {
 	c.mu.Lock()
 	sk, tools, inputs := c.skill, c.tools, c.inputs
 	c.mu.Unlock()
-	parts := promptParts{level: c.level, lang: c.lang, page: c.page, summary: summary, proposal: c.red.text(state),
+	parts := promptParts{level: c.level, lang: c.lang, page: c.page, summary: summary, proposal: c.red.text(state), cluster: c.a.o.Cluster != nil,
 		pageGet: hasTool(tools, ToolPageGet), pageEdit: hasTool(tools, ToolPageEdit)}
 	switch {
 	case sk != nil:

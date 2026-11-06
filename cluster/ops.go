@@ -221,47 +221,11 @@ func newOpID() string {
 // max_concurrency members at once, each with the calls' timeouts; the
 // operation and each member's outcome go to the audit log once it ends.
 func (m *Manager) StartOp(user string, req *OpRequest) (Op, error) {
-	if !slices.Contains(Ops, req.Op) {
-		return Op{}, fieldErr("op", "%q is not an operation: %s", req.Op, strings.Join(Ops, ", "))
-	}
-	if req.Op == OpPurge {
-		if err := req.Purge.check(); err != nil {
-			return Op{}, err
-		}
-	} else if req.Purge != nil {
-		return Op{}, fieldErr("purge", "only a purge takes purge")
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	switch {
-	case m.closed:
-		return Op{}, errClosed
-	case m.readOnly != "":
-		// An operation is recorded in the audit log, which a read-only
-		// document cannot keep.
-		return Op{}, errReadOnly(m.readOnly)
-	}
-	names, err := m.targetsLocked(req)
+	names, err := m.checkOpLocked(user, req)
 	if err != nil {
 		return Op{}, err
-	}
-	if err := m.allowLocked(user, Need{Role: RoleOperator, Nodes: names}); err != nil {
-		return Op{}, err
-	}
-	if m.ops.busy == nil {
-		m.ops.busy = map[string]string{}
-	}
-	var taken []string
-	for _, name := range names {
-		if id := m.ops.busy[name]; id != "" {
-			taken = append(taken, name+" ("+id+")")
-		}
-	}
-	if len(taken) > 0 {
-		return Op{}, errConflict("an operation runs on " + strings.Join(taken, ", ") + " already: wait for it to end")
-	}
-	if m.ops.running >= MaxRunningOps {
-		return Op{}, errBusy(fmt.Sprintf("%d operations run already; try again once one ends", MaxRunningOps))
 	}
 	op := &Op{ID: newOpID(), Op: req.Op, Group: req.Group, User: user, Purge: req.Purge, Started: m.now().UTC(),
 		Outcomes: make([]Outcome, len(names))}
@@ -278,6 +242,54 @@ func (m *Manager) StartOp(user string, req *OpRequest) (Op, error) {
 	go m.runOp(op)
 	m.logf("cluster: %q started the operation %s %s on %s", user, op.ID, op.Op, strings.Join(names, ", "))
 	return out, nil
+}
+
+// checkOpLocked checks the operation req as user would start it now, and
+// returns the names of the members it runs on, sorted: what StartOp
+// starts, and what the assistant's cluster_op_propose (I153) proposes.
+// m.mu is held.
+func (m *Manager) checkOpLocked(user string, req *OpRequest) ([]string, error) {
+	if !slices.Contains(Ops, req.Op) {
+		return nil, fieldErr("op", "%q is not an operation: %s", req.Op, strings.Join(Ops, ", "))
+	}
+	if req.Op == OpPurge {
+		if err := req.Purge.check(); err != nil {
+			return nil, err
+		}
+	} else if req.Purge != nil {
+		return nil, fieldErr("purge", "only a purge takes purge")
+	}
+	switch {
+	case m.closed:
+		return nil, errClosed
+	case m.readOnly != "":
+		// An operation is recorded in the audit log, which a read-only
+		// document cannot keep.
+		return nil, errReadOnly(m.readOnly)
+	}
+	names, err := m.targetsLocked(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.allowLocked(user, Need{Role: RoleOperator, Nodes: names}); err != nil {
+		return nil, err
+	}
+	if m.ops.busy == nil {
+		m.ops.busy = map[string]string{}
+	}
+	var taken []string
+	for _, name := range names {
+		if id := m.ops.busy[name]; id != "" {
+			taken = append(taken, name+" ("+id+")")
+		}
+	}
+	if len(taken) > 0 {
+		return nil, errConflict("an operation runs on " + strings.Join(taken, ", ") + " already: wait for it to end")
+	}
+	if m.ops.running >= MaxRunningOps {
+		return nil, errBusy(fmt.Sprintf("%d operations run already; try again once one ends", MaxRunningOps))
+	}
+	return names, nil
 }
 
 // targetsLocked returns the names of the members req runs on, sorted.

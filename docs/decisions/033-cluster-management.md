@@ -772,6 +772,46 @@ Decided while building I150 (2026-11-07):
      unlike the Templates page's reads.
 145. **Charts are inline SVG of the workbench's own**, a categorical palette by member name, colours
      set through the CSSOM (the console's CSP refuses inline style attributes); no chart library.
+Decided while building I153 (2026-11-07):
+
+146. **The assistant reaches the manager through an interface** of plain types (`assistant.Cluster`,
+     implemented by `Manager.Assistant()`), so that `assistant` and `cluster` import neither the
+     other, and each side is tested with a fake of the other. Alternatives: the tools in `cluster`
+     (which would import `assistant`), or in `assistant` importing `cluster`.
+147. **A change asked in words needs two new rollouts**: a **patch** (`kind: patch` with `config`,
+     parts as a template's, without variables), config no template owns, an admin's of each member
+     as a copy is; and a **template's draft** (`kind: template` with `config`), each member rendered
+     with the draft and nothing saved until the start, which saves the template as the person
+     starting it (a cluster-wide admin) and refuses a template changed or removed since the plan. A
+     start that saved the draft and then went no further does not save it again. Alternatives: only
+     templates (a new template for any change), or saving the template at the plan.
+148. **A secret in a patch or a draft** is the template's or each member's own, written as `[secret]`
+     (the assistant's `[redacted]` goes as it); a member that has none there is not ready.
+149. **An operation is never started by a tool**: `cluster_op_propose` checks it as `StartOp` would
+     (now `checkOpLocked`, shared) and links `#/cluster/ops?op=&members=&purge=` (or a group's page),
+     which opens with the members picked and its confirm dialog filled in. Alternative: operations
+     kept as proposed in the manager, started from a list.
+150. **A plan carries who made it and what it suggests**: `source: assistant` and `suggested`, the
+     strategy the assistant proposes, which the start form fills itself with. Alternative: the
+     strategy in the description.
+151. **The assistant waits for its plan** up to 20 seconds, so that the model reads each member's diff
+     and dry run; a plan still planning says so and goes on.
+152. **A read across members is bounded by the call**: at most `max_concurrency` members at once,
+     the whole within 20 seconds (inside the chat's 30-second tool bound); members not answered are
+     reported `timeout`, the others read; their last poll's state is `cluster_members`'s.
+153. **What `member` reaches**: GET of the config, effective config, check, versions, status, metrics,
+     cache, node, schema and the media and streaming reads, and POST of the text conversions; never
+     a write, the tokens or the logs' files. A member of another fit version is noted in the result.
+154. **Lists answer what the endpoints answer**: any role reads members, templates and rollouts;
+     `cluster_metrics`, `cluster_certs` and `member` need a role on each member read.
+155. **I150's insight serves the tools**: `cluster_log_tail` is I150's merged tail (16 members, 50
+     lines a member by default, gated by `data.send_logs` as `log_tail` is), waited for 20 seconds at
+     most; `cluster_certs` is I150's inventory as polled, reading no member; `cluster_metrics` reads
+     the members' counters now and adds I150's series of the last 12 polls.
+156. **The pages**: Ask AI on the Overview's bar (the members shown) and on each member card
+     (`fleet-health`), on a rollout's failed or rolled-back batch (`rollout-planner`), and on each
+     drifting member of the Drift page (`cluster-drift`); the New rollout form gains **Parts written
+     here** (a patch) and a template's draft, an admin's.
 
 Open questions of the plan, answered as proposed until reviewed:
 

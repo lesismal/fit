@@ -61,6 +61,9 @@ func TestBuiltinSkillsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sk := range list {
+		if slices.Contains(clusterSkills, sk.Name) {
+			continue // a manager's: TestClusterSkillsRun
+		}
 		t.Run(sk.Name, func(t *testing.T) {
 			run, ok := skillRuns[sk.Name]
 			if !ok {

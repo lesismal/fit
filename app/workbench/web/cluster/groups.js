@@ -278,17 +278,22 @@
   // ---- Operations / 操作 ----
   // purgeForm is a purge's fields; its value() is the purge's params, or null with the form's error shown.
   // purgeForm 为清除缓存的字段；value() 返回参数，出错时显示错误并返回 null。
-  function purgeForm(UI) {
+  function purgeForm(UI, init) {
     var h = UI.h, t = UI.t;
+    init = init || {};
     var zone = h('input.input', { name: 'purge-zone', autocomplete: 'off', spellcheck: 'false', placeholder: 'site' });
     var keys = h('textarea.textarea.cl-mono', { name: 'purge-keys', rows: 2, spellcheck: 'false', placeholder: 'https://example.com/index.html' });
     var prefixes = h('textarea.textarea.cl-mono', { name: 'purge-prefixes', rows: 2, spellcheck: 'false', placeholder: 'https://example.com/img/' });
     var tags = h('input.input.cl-mono', { name: 'purge-tags', autocomplete: 'off', spellcheck: 'false', placeholder: 'product-42' });
     var all = h('input', { type: 'checkbox', name: 'purge-all' });
+    // A purge proposed by the assistant comes filled in (I153). / 助手提议的清除预先填好（I153）。
+    zone.value = init.zone || ''; keys.value = (init.keys || []).join('\n'); prefixes.value = (init.prefixes || []).join('\n');
+    tags.value = (init.tags || []).join(', '); all.checked = !!init.all;
     var err = h('div.callout.callout--danger', { hidden: true });
     var rest = h('div.stack', UI.field(t('op.keys'), keys, t('op.keys.hint')), UI.field(t('op.prefixes'), prefixes, t('op.prefixes.hint')),
       UI.field(t('op.tags'), tags, t('op.tags.hint')));
     all.addEventListener('change', function () { rest.hidden = all.checked; });
+    rest.hidden = all.checked;
     return {
       node: h('div.stack', UI.field(t('op.zone'), zone, t('op.zone.hint')), h('label.row.cl-check', all, h('span', t('op.purgeall'))), rest, err),
       value: function () {
@@ -307,10 +312,10 @@
 
   // confirmOp asks a person to confirm op on the members named, with a purge's form: a Promise of the operation
   // started, or null. / confirmOp 列出成员请人确认操作（清除缓存时带表单）：返回已开始的操作或 null 的 Promise。
-  function confirmOp(UI, op, names, group) {
+  function confirmOp(UI, op, names, group, purgeInit) {
     var h = UI.h, t = UI.t;
     return new Promise(function (resolve) {
-      var done = false, purge = op === 'purge' ? purgeForm(UI) : null;
+      var done = false, purge = op === 'purge' ? purgeForm(UI, purgeInit) : null;
       UI.modal({
         title: t('op.title', { op: t('op.' + op), n: names.length }), wide: !!purge,
         body: h('div.stack', h('div.small', t('op.' + op + '.what')),
@@ -389,6 +394,22 @@
     UI.mount(list, h('div.row', h('span.spinner'), h('span.muted', t('loading'))));
     UI.mount(sh.tools, UI.btn(t('refresh'), 'refresh', function () { read(); }, 'ghost sm'));
     var g = null, etag = '', states = [], picked = null, readOnly = '', following = '';
+    // An operation proposed by the assistant (cluster_op_propose, I153) opens this page with ?op=&members=[&purge=]: the
+    // members are picked and its confirm opens, filled in; nothing runs before the person's own confirm.
+    // 助手提议的操作（cluster_op_propose，I153）以 ?op=&members=[&purge=] 打开本页：选中这些成员并打开预填的确认对话框；
+    // 在本人确认之前不会执行任何操作。
+    var proposed = (function () {
+      var i = location.hash.indexOf('?'), q = {};
+      if (i < 0) return null;
+      location.hash.slice(i + 1).split('&').forEach(function (p) {
+        var j = p.indexOf('=');
+        if (j > 0) q[decodeURIComponent(p.slice(0, j))] = decodeURIComponent(p.slice(j + 1).replace(/\+/g, ' '));
+      });
+      if (!q.op || OPS.every(function (o) { return o[0] !== q.op; })) return null;
+      var purge = null;
+      if (q.purge) { try { purge = JSON.parse(q.purge); } catch (e) { purge = null; } }
+      return { op: q.op, members: (q.members || '').split(',').filter(Boolean), purge: purge };
+    })();
 
     function names() { return states.map(function (s) { return s.name; }); }
     function selected() { return names().filter(function (n) { return picked[n]; }); }
@@ -458,10 +479,10 @@
         } }
       ], states), null, true));
     }
-    function run(op) {
+    function run(op, purgeInit) {
       var sel = selected();
       if (!sel.length) return;
-      confirmOp(UI, op, sel, group).then(function (started) {
+      confirmOp(UI, op, sel, group, purgeInit).then(function (started) {
         if (!started) return;
         showOp(started.id);
       });
@@ -504,9 +525,18 @@
         if (!document.body.contains(el)) return;
         states = ss;
         // Every member is selected at first; one that joins later is too. / 起初选中全部成员；之后加入的成员也选中。
-        if (!picked) picked = {};
+        if (!picked) {
+          picked = {};
+          if (proposed) states.forEach(function (s) { picked[s.name] = proposed.members.indexOf(s.name) >= 0 && FC.canOn('operator', s.name); });
+        }
         states.forEach(function (s) { if (!(s.name in picked)) picked[s.name] = FC.canOn('operator', s.name); });
         drawInfo(); drawList(); drawBar();
+        if (proposed && !readOnly && FC.canAny('operator')) {
+          var p = proposed;
+          proposed = null;
+          try { history.replaceState(null, '', location.hash.split('?')[0]); } catch (e) { /* ignore / 忽略 */ }
+          run(p.op, p.purge);
+        }
       }, function (e) {
         if (!document.body.contains(el) || e.status === 401) return;
         UI.mount(list, e.status === 404 ? UI.empty(t('gr.notfound', { name: group }), 'cube') : h0(UI, e));

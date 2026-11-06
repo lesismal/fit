@@ -571,6 +571,9 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 | **媒体库**条目页上的探测错误 | `library-health` | `library`、`item` | 媒体库、条目、文件及其错误 |
 | **频道**页上出错的推流目标 | `channel-scheduler` | `channel`：目标属于频道时为该频道 | 该目标：名称、流、频道、协议、服务器（从不含推流密钥）、状态、错误、连接与失败次数 |
 | **播放 URL** 与**指标**页上被拒绝（403）的策略 URL | `playback-troubleshoot` | `policy`、`status`：`403` | 该策略及其按原因统计的拒绝 |
+| 管理端的**集群 → 概览**：集群（所示成员）与每张成员卡片 | `fleet-health` | `group`（所筛选的分组）；或 `member` | 成员状态摘要：状态、错误、版本、漂移、最近到期的证书、不可用后端 |
+| 发布页上失败的批次 | `rollout-planner` | `rollout`、`batch`，及其 `group` 或 `template` | 发布的类型、状态、原因与策略，以及该批成员的健康检查与错误 |
+| **集群 → 漂移与告警**上漂移的成员 | `cluster-drift` | `member` | 其与模板的同步及一致性检查的计数 |
 | LLM 角色的链路图，隧道的全景图与链路 | `diagnose` | — | 选中的方框或连线，以及所绘制的图：方框及其信息，连线的延迟、调用、错误与速率（隧道图会先关闭，以便看到面板） |
 
 只有面板出现的地方才有这些按钮：控制台提供 `ai` 模块，且用户级别不是 `off`。没有该模块时不创建按钮，级别为 `off` 的用户
@@ -619,6 +622,14 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 播放列表或节目表及其推流目标，并排查推流目标失败的原因；`library-health` 找出探测错误、缺失的码率版本或字幕以及播放器无法播放的
 编码，并给出用 ffmpeg 处理文件的步骤；`playback-troubleshoot` 根据按原因统计的 403、会话上限、授权、缓存与文件池找出观众被拒或
 卡顿的原因，并可提议结束会话。媒体页面上的 **问 AI** 按钮会运行它们（见上表）。
+
+### 跨集群
+
+在管理其他 fit 的管理端（`admin.cluster`）上，助手还会读取集群并提议跨成员的修改（I153）：工具 `cluster_members`、`cluster_templates`、
+`cluster_rollouts`、`cluster_metrics`、`cluster_certs` 与 `cluster_log_tail`，读取 Admin API 的读取工具上的 `member` 参数，以及 `rollout_propose`、
+`cluster_op_propose` 与 `drift_fix_propose`：它们生成发布规划或经检查的操作，由人在集群页面上以其自身的确认启动，从不是对话提案的步骤。
+用户在管理端上的角色与助手的级别都会检查，取更窄的；成员的凭据不会到达模型。技能 `fleet-health`、`rollout-planner` 与 `cluster-drift`
+只在管理端上提供。见[管理端上的助手](cluster.zh-CN.md#管理端上的助手)。
 
 ### 迁移与安全审查
 

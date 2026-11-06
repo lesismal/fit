@@ -158,7 +158,8 @@ func (s *Server) instructions() string {
 	return "fit is a web server, reverse proxy and gateway. These tools read what this fit runs (its config, status, metrics, upstreams' health, logs, certificates) and check configs; " +
 		"the resources are its config, status, kept versions, schema and reference; the prompts are its assistant's skills. " +
 		"Secrets are redacted as [redacted]. With a token whose level is propose, the *_propose tools add steps to the token's one pending proposal; " +
-		"no tool applies it: a person applies it in fit's workbench (" + s.proposalsURL() + "), after a second confirm."
+		"no tool applies it: a person applies it in fit's workbench (" + s.proposalsURL() + "), after a second confirm. " +
+		"On a manager of other fits, rollout_propose, cluster_op_propose and drift_fix_propose make a rollout plan or a checked operation instead, which a person starts on the workbench's Cluster pages."
 }
 
 func (s *Server) proposalsURL() string {
@@ -699,6 +700,11 @@ func (x *exchange) callTool() {
 			content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf(
 				"The proposal %s (revision %d) waits in fit's workbench: %s. No tool applies it: a person whose level is apply applies it there, after a second confirm.",
 				res.Proposal, res.Revision, x.s.proposalsURL())})
+		}
+		if res.Link != "" && !res.Error {
+			content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf(
+				"It waits in fit's workbench: %s/%s. No tool starts it: a person whose role on the members allows it starts it there, with its own confirm.",
+				strings.TrimSuffix(x.s.o.URL(), "/"), res.Link)})
 		}
 		tc.end(x.result(map[string]any{"content": content, "isError": res.Error}, false))
 	}

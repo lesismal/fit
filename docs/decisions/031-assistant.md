@@ -176,6 +176,21 @@ workers.
   `channel-scheduler`, `library-health` and `playback-troubleshoot` use them, and the media pages'
   Ask AI buttons run the last three.
 
+- **The assistant across a cluster (I153).** On a manager (`admin.cluster`), the console hands the
+  assistant the manager's `Assistant()` (`Options.Cluster`, an interface of plain types, so that
+  neither package imports the other). The tools `cluster_members`, `cluster_templates`,
+  `cluster_rollouts`, `cluster_metrics`, `cluster_certs` and `cluster_log_tail` read it; the read tools that read the
+  Admin API take `member`, which reads that member through the manager's session (a fixed list of
+  reads, never a write); `rollout_propose`, `cluster_op_propose` and `drift_fix_propose` make a
+  rollout plan (a template as it is or a draft of it, a sync, a patch, a copy) or a checked
+  operation, which a person starts on the Cluster pages with that page's confirm. They are not steps
+  of the conversation's proposal, Apply never starts them, and over MCP their answer gives the
+  workbench's link. Every call acts as the user: the manager's roles are checked by the manager, the
+  assistant's level by the registry (already capped by the roles), the narrower winning. A read
+  across members waits 20 seconds at most and reports members slow or down; a member's credentials
+  never reach a result. The skills `fleet-health`, `rollout-planner` and `cluster-drift` are offered
+  on a manager only, and the Cluster pages ask them (the Overview, a failed batch, a drifting member).
+
 ## Consequences
 
 - The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions,

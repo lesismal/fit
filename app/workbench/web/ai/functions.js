@@ -16,7 +16,7 @@
       '助手可以调用的工具。每个工具都在控制台的线程池上、经进程内的 Admin API 读取本 fit 的运行情况；每个结果都会脱敏并受大小限制。没有任何工具会写入配置、版本或 store：页面工具只在打开的页面上起草，由你自己保存；提案工具只向提案加入步骤，由级别为 apply 的人再次确认后应用。'],
     ['fn.name', 'Tool', '工具'], ['fn.needs', 'Level', '级别'], ['fn.state', 'State', '状态'], ['fn.what', 'What it does', '作用'],
     ['fn.on', 'enabled', '已启用'], ['fn.off', 'disabled', '未启用'], ['fn.schema', 'Arguments', '参数'],
-    ['g.config', 'Config', '配置'], ['g.runtime', 'Runtime', '运行时'], ['g.roles', 'Roles', '角色'], ['g.media', 'Media', '媒体'], ['g.logs', 'Logs', '日志'],
+    ['g.config', 'Config', '配置'], ['g.runtime', 'Runtime', '运行时'], ['g.roles', 'Roles', '角色'], ['g.media', 'Media', '媒体'], ['g.cluster', 'Cluster', '集群'], ['g.logs', 'Logs', '日志'],
     ['g.page', 'Page', '页面'], ['g.change', 'Change', '变更'], ['g.convert', 'Convert', '转换'], ['g.agent', 'Agent', '代理'],
     ['why.data.send_logs is off', 'off: data.send_logs is not set', '未启用：未设置 data.send_logs'],
     ['why.data.send_access_log is off', 'off: data.send_access_log is not set', '未启用：未设置 data.send_access_log'],
@@ -56,7 +56,21 @@
     ['t.media_scan_propose', 'Adds a rescan of a library to the proposal.', '向提案加入一次媒体库重新扫描。'],
     ['t.media_session_end_propose', 'Adds the end of playback sessions to the proposal, by subject and session.', '向提案加入结束播放会话（按主体与会话）。'],
     ['t.media_key_rotate_propose', 'Adds the rotation of a media_auth key, or all, to the proposal; the new secret is never shown.', '向提案加入 media_auth 某个或全部密钥的轮换；新密钥从不显示。'],
-    ['t.media_file_propose', 'Adds a rename, move, delete or sidecar edit of a library\'s files to the proposal, with what plays them now.', '向提案加入媒体库文件的重命名、移动、删除或 sidecar 编辑，并附上当前播放它们的频道与观众。']
+    ['t.media_file_propose', 'Adds a rename, move, delete or sidecar edit of a library\'s files to the proposal, with what plays them now.', '向提案加入媒体库文件的重命名、移动、删除或 sidecar 编辑，并附上当前播放它们的频道与观众。'],
+    ['t.cluster_members', 'This manager\'s members as last polled: health, versions, config version, drift, sync, certificates, alerts; by group, label or status.',
+      '本管理端成员的最近轮询状态：健康、版本、配置版本、漂移、同步、证书与告警；可按分组、标签或状态筛选。'],
+    ['t.cluster_templates', 'The templates, their parts, variables and groups, and each member\'s sync with them.', '模板及其拥有的部分、变量与分组，以及各成员与模板的同步状态。'],
+    ['t.cluster_rollouts', 'Rollouts planned, running and past, batch by batch with each member\'s result, and the latest operations.', '已规划、进行中与过去的发布（逐批及各成员结果），以及最近的操作。'],
+    ['t.cluster_metrics', 'Each member\'s requests, connections, reloads and backends down, read now, and their sums by group; a slow or down member is reported, not waited for.',
+      '各成员当前读取的请求、连接、重载与不可用后端，以及按分组的汇总；慢或离线的成员只报告、不等待。'],
+    ['t.cluster_certs', 'The certificate inventory across the members, as polled, the one that expires first first.', '各成员证书清单（按轮询读取），最先过期的在前。'],
+    ['t.cluster_log_tail', 'The latest lines of up to 16 members\' own logs, merged by time; a slow or down member is reported, not waited for.', '最多 16 个成员自身日志的最新行，按时间合并；慢或离线的成员只报告、不等待。'],
+    ['t.rollout_propose', 'Plans a change across members as a rollout (a template\'s draft, a sync, a patch or a copy): each member\'s diff and dry run; a person starts it on the Rollouts page.',
+      '把跨成员的修改规划为一次发布（模板草稿、同步、修改或复制）：各成员的差异与试运行；由人在发布页启动。'],
+    ['t.cluster_op_propose', 'Checks an operation on many members (reload, rollback, check, purge, test) without starting it, and links the operations page filled in.',
+      '检查对多个成员的操作（重载、回滚、检查、清除缓存、测试）但不启动，并链接到预填的操作页。'],
+    ['t.drift_fix_propose', 'Plans the fix of members\' drift: a sync rollout, or a reload for a consistency difference; started by a person.',
+      '规划成员漂移的修复：同步发布，或针对一致性差异的重载；由人启动。']
   ];
   var en = {}, zh = {};
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });

@@ -218,7 +218,12 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 
 - **模板的修改**：模板所在分组的每个成员（或所选成员）获得其期望配置，即自身配置中由模板拥有的部分替换为模板给出的值；
 - **同步**：所选成员、某个分组的成员或全部成员，各自与其所有模板同步；
-- **复制**：把一个成员当前配置的若干部分（顶层成员整体，`routes[api]` 等命名列表的元素按名称）连同密钥复制到其他成员。
+- **复制**：把一个成员当前配置的若干部分（顶层成员整体，`routes[api]` 等命名列表的元素按名称）连同密钥复制到其他成员；
+- **修改**（I153）：请求中写出的若干部分（`config`，与模板的部分相同，不含变量）按所写内容放到所选成员或某个分组的成员上：
+  不属于任何模板的配置，因此与复制一样需要在每个成员上是管理员；写作 `[secret]` 的密钥保留各成员自己的值，在该处没有密钥的成员未就绪；
+- **模板的草稿**（I153）：带 `config` 的模板发布，`config` 为模板修改后的完整配置。每个成员按以草稿代替该模板渲染，且不保存任何内容：
+  **启动**时以启动者的名义把草稿保存为模板（启动者须为集群范围的管理员，模板归其管理），然后应用；规划之后模板被修改或删除时拒绝启动。
+  写作 `[secret]` 的密钥保留模板中的值。
 
 **规划。** 规划会读取每个成员（`GET /node` 获取其能力，`GET /config` 及其 ETag），生成期望配置及其逐部分的差异（密钥已隐藏），
 并由成员通过自己的试运行检查（带 `If-Match` 的 `PUT /config?dry_run=1`）：完整走一遍应用路径，编译并加载，但不应用。成员为
@@ -254,7 +259,7 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 配置的哈希与检查结果；发布结束后丢弃配置与差异的值。审计日志记录每次规划、启动、暂停、继续、金丝雀后继续、中止、回滚与结束，结束时
 附每个成员的结果。
 
-**页面**位于**发布**下：历史（最新在前）与**新建发布**；新发布的表单（内容、模板、分组或成员、复制的部分）；发布页：规划完成时显示
+**页面**位于**发布**下：历史（最新在前）与**新建发布**；新发布的表单（内容、模板、分组或成员、复制的部分、修改的配置、模板的草稿）；发布页：规划完成时显示
 每个成员的状态、并排的修改、试运行错误（链接到成员页、其自身页面与渲染结果）、排除成员的复选框、策略表单，以及**启动发布**（其对话框
 列出各批次与每个成员的差异）；启动后逐批显示进度，每个成员的状态、版本与检查结果（发现的 5xx 比例与不一致，以及失败原因），并提供
 **暂停**、**继续**、**继续发布**、**中止**与**回滚**。模板页有**发布**按钮，成员的渲染结果页有**同步此节点**。
@@ -322,6 +327,44 @@ Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己
 成员，并排显示每个未同步部分在成员上与模板中的值）、**修复**、**修复全部未同步**、**手动规划**（预填的新建发布表单）与**重新加载**；
 **告警**，计数、正在触发的告警（带**静默**）、等待中的与过去的告警；**规则**，添加、编辑与删除；**Webhook**，其发送情况、**测试**、
 编辑与删除；**静默**，当前与过去的静默，添加与结束。有未静默的告警触发时，集群菜单上显示其数量，有严重告警时为红色。
+## 管理端上的助手
+
+在控制台运行[助手](console.zh-CN.md#助手)（`admin.assistant`）的管理端上，助手以提问用户的身份读取集群并提议跨成员的修改（I153）：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `cluster_members` | `read` | 每个成员最近一次轮询的状态（状态、错误、版本、配置版本、漂移、与模板的同步、最近到期的证书与剩余天数、连接、重载、不可用后端、正在触发的告警），可按分组、标签选择器或状态筛选 |
+| `cluster_templates` | `read` | 模板及其部分、变量与成员，以及同步的成员数；单个模板的完整内容及各成员的部分 |
+| `cluster_rollouts` | `read` | 最近 20 次发布（逐批及各成员结果）与最近 10 次操作；单次发布的完整内容及其修改 |
+| `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总，附最近 12 次轮询的[序列](#指标日志与证书) |
+| `cluster_certs` | `read` | 各成员轮询读到的证书清单，最先到期的在前，可限定天数 |
+| `cluster_log_tail` | `read` | 最多 16 个成员自身日志的最新行，按时间合并，可按日志器、级别与文本筛选，默认每个成员 50 行；与 `log_tail` 一样在 `data.send_logs` 打开时提供 |
+| `member` 参数 | `read` | `config_get`、`versions_diff`、`status_get`、`metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones` 与媒体工具改为经管理端与该成员的会话读取该成员，而非管理端自身 |
+| `rollout_propose` | `propose` | 发布的规划：模板（现状或草稿）、同步、修改或复制，并建议策略 |
+| `cluster_op_propose` | `propose` | 检查一次操作（重载、回滚、检查、清除缓存、测试），但不启动 |
+| `drift_fix_propose` | `propose` | 为未同步或冲突的成员规划同步发布，为一致性检查有差异的成员检查一次重载 |
+
+**助手不应用任何内容。** 提案工具生成发布规划，显示在发布页上（各成员的差异与试运行，标为助手为该用户规划，启动表单中预填其建议的策略），
+或检查一次操作并链接到预填的操作页（`#/cluster/ops?op=&members=&purge=` 或分组页），其确认对话框随之打开：由人在该页以其自身的确认启动。
+它们都不是对话提案的步骤，面板的“应用”从不启动它们；面板在工具结果下绘制带链接的卡片。经 MCP 生成的规划会返回工作台的链接。
+
+**角色与级别。** 每次调用都以用户身份进行，并像各接口一样由管理端的角色检查：读取需要任意处的角色，读取某个成员自身需要该成员上的角色；
+模板发布或同步需要在每个成员上是操作员，修改或复制需要在每个成员上是管理员，模板草稿需要集群范围的管理员；操作需要在每个成员上是操作员。
+助手的级别（I126）同样检查，并受角色限制（集群范围管理员保持原级别，任意处的操作员最多 `propose`，其他人 `read`）：取两者中更窄的，
+因此操作员永远无法提议修改模板，级别为 `read` 的用户没有提案工具。
+
+**限制。** 跨成员的读取（`cluster_metrics`、`cluster_log_tail`）同时最多调用 `max_concurrency` 个成员，每个在 `timeout` 内，整体在 20 秒内返回：
+慢或离线的成员连同其问题一起报告，其余照常读取。经 `member` 读取成员最多等待 20 秒；规划等待其成员试运行的时间相同，仍在规划时会说明。
+经 `member` 只能读取：配置、版本、状态、指标、一致性检查、缓存、节点、schema 以及媒体与推流的读取（`GET`），和文本转换；从不写入，
+也不读取令牌或日志文件。运行其他 fit 版本的成员会注明。
+
+**密钥。** 成员的密码、令牌或会话都不会出现在工具结果中：管理端不返回它们，成员的错误会去掉其自身的凭据，每个结果都像其他工具一样脱敏。
+助手从不写入密钥：按 `[redacted]` 复制的值以 `[secret]` 发送，保留原处的密钥；写出的密钥会被拒绝。
+
+**技能**：`fleet-health` 汇总读取成员，指出哪些宕机、版本落后、漂移或证书即将过期；`rollout-planner` 以金丝雀、分批、健康检查与回滚
+规划对分组的修改，并解释失败的批次；`cluster-drift` 解释每个成员的漂移并规划修复。它们只在管理端上提供。**问 AI** 位于概览（集群，以及每张成员卡片）、
+发布中失败的批次，以及漂移页上漂移的成员。
+
 ## 用户、角色与审计日志
 
 管理端的控制台用户在集群上有**角色**，分为集群范围和按分组：
@@ -515,10 +558,10 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `GET desired/<member>` | 立即读取的成员：其同步状态、`config` 与 `desired`，密钥已隐藏 |
 | `POST compare` | `{"a", "b"}`：两个成员的配置，`{"a", "b", "parts"}`，每一方为 `{"node", "config_etag", "config"}`，每个部分为 `{"path", "state", "a", "b"}`，`state` 为 `same`、`differs`、`only_a` 或 `only_b` |
 | `POST import` | `{"node"}`：成员配置的各部分，`{"node", "config_etag", "parts"}`，每项为 `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
-| `POST rollouts` | 规划发布：`{"kind", "template", "group", "nodes", "from", "paths", "description"}`，`kind` 为 `template`、`sync` 或 `copy`；返回 `202` 与规划中的发布；字段错误 `400` 附 `{"field", "error"}`，模板、分组或成员不存在 `404`，规划或进行中的超过 4 个 `429` |
+| `POST rollouts` | 规划发布：`{"kind", "template", "group", "nodes", "from", "paths", "config", "description"}`，`kind` 为 `template`、`sync`、`copy` 或 `patch`；`config` 为修改的部分或模板的草稿（I153）；返回 `202` 与规划中的发布；字段错误 `400` 附 `{"field", "error"}`，模板、分组或成员不存在 `404`，规划或进行中的超过 4 个 `429` |
 | `GET rollouts` | 保存的发布，最新在前，不含差异的值：`{"max_active", "plan_ttl_ms", "read_only", "rollouts"}` |
-| `GET rollouts/<id>` | 一次发布：`{"id", "kind", "template", "group", "from", "paths", "description", "planned_by", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`；`state` 为 `planning`、`planned`、`running`、`paused`、`waiting`、`rolling_back`、`done`、`failed`、`aborted`、`rolled_back` 或 `expired`；成员为 `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`，修改为 `{"path", "state", "sync", "reason", "template", "have", "want"}`（密钥已隐藏），检查结果为 `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`；从不包含配置 |
-| `POST rollouts/<id>/start` | 启动规划：`{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`；成员被其他发布或操作占用时 `409` |
+| `GET rollouts/<id>` | 一次发布：`{"id", "kind", "template", "group", "from", "paths", "config", "template_base", "description", "planned_by", "source", "suggested", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`；`state` 为 `planning`、`planned`、`running`、`paused`、`waiting`、`rolling_back`、`done`、`failed`、`aborted`、`rolled_back` 或 `expired`；成员为 `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`，修改为 `{"path", "state", "sync", "reason", "template", "have", "want"}`（密钥已隐藏），检查结果为 `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`；从不包含成员的配置，其自身的 `config` 在发布结束前保留、密钥显示为 `[secret]`；助手为 `planned_by` 规划的发布 `source` 为 `assistant`，`suggested` 为其建议的策略 |
+| `POST rollouts/<id>/start` | 启动规划：`{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`；模板的草稿先保存为模板（需要集群范围的管理员）；成员被其他发布或操作占用，或规划之后模板被修改时 `409` |
 | `POST rollouts/<id>/pause`、`resume`、`go`、`abort`、`rollback` | 操控发布；状态不允许时 `409` |
 | `DELETE rollouts/<id>` | 放弃规划 |
 | `GET drift` | 各成员的漂移：`{"interval_ms", "read_only", "nodes"}`，每个为 `{"node", "status", "groups", "managed", "templates", "consistency", "drifted", "fixable"}`，`templates` 为其不含部分值的同步状态，`consistency` 为其检查的计数 |

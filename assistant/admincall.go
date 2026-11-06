@@ -63,6 +63,11 @@ const ConsoleUserHeader = "Fit-Console-User"
 // apiAs is api as the console's user, when not "": a proposal's media
 // steps are applied as the person who applies it.
 func (a *Assistant) apiAs(ctx context.Context, user, method, path, ctype, ifMatch string, body []byte) (*apiAnswer, error) {
+	// A read tool's call with a member argument reads that member, through
+	// the manager (tools_cluster.go).
+	if t, _ := ctx.Value(memberKey{}).(*memberTarget); t != nil {
+		return a.memberAPI(ctx, t, method, path, body)
+	}
 	if a.o.API == nil {
 		return nil, errNoAPI
 	}
