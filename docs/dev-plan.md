@@ -286,7 +286,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | done |
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | done |
 | **Media library** | | | |
-| I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | todo |
+| I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | done |
 | I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | todo |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
@@ -2418,6 +2418,33 @@ keeps the reads behind one interface so that it can be added).
   the back, with B-frames and edit lists, and every sample's times, offset and size match
   ffprobe's; a sample table's memory is within its bound; fuzzing the reader finds no panic.
 - **Touches**: `docs/decisions` (032), `docs/fib-api-requests.md`, fib's `media`, `go.mod`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Where the reader lives**: a new fib package `media/mp4`, using an exported
+   `fmp4.ParseSampleEntry`, as `fmp4` reads fragments held as bytes and this reads a file through a
+   `ReaderAt` and keeps tables; codecs are read in one place. Alternatives: inside `media/fmp4`; an
+   internal package shared by both.
+2. **The reader holds no file**: `Open` keeps no reference; `ReadTable(r)` and `ReadSample(r, …)` take
+   it, so fit's file pool may close and open files again. Alternative: `File` holds the reader.
+3. **The compact table**: `stts` and `ctts` run-length coded (`ctts` a sample when that is smaller),
+   16-bit sizes for `stz2`, an offset and first sample a chunk; about 8.4 bytes a sample with
+   B-frames. Alternative: an entry of 24 bytes or more a sample, faster and three times the memory.
+4. **Edit lists**: the shift is the leading empty edits less the first playing edit's media time,
+   which matches ffprobe on every fixture; the end trim and later edits are kept, not applied.
+   Alternative: every edit applied.
+5. **Times are the file's ticks**: `DTS` and `PTS` as ffprobe gives them with `-ignore_editlist`;
+   `Table.Time` applies the edit list; `MinCTS` is given rather than shifting DTS.
+6. **Strict and lenient**: tables that miss samples, chunks outside the file and fragmented files are
+   refused; a short `ctts`, an unsorted or out-of-range `stss` and signed `ctts` v0 are read as
+   players read them.
+7. **`SeekKeyframe` searches by PTS**, keyframes presented in decode order, as for every codec fib
+   carries.
+8. **Limits are constants** (`MaxTracks`, `MaxBoxes` and the rest), not options.
+9. **Fixtures**: seven small checked-in files (129 KB with their ffprobe output, made by
+   `media/mp4/testdata/gen.sh`), and longer files in `media/interop`'s `TestMP4` in CI.
+10. **fib CI's fuzz job** gains `media/mp4:FuzzOpen` only; the other media fuzz targets were never in
+    it, and were left so.
 
 ### I132 Media libraries
 

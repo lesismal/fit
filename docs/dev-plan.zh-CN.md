@@ -276,7 +276,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I129 | 迁移与审查：`migrate` 与 `security-review` 端到端，在固定配置集上评估 | I127 | done |
 | I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | done |
 | **媒体库** | | | |
-| I131 | 决定 032；fib A64，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | todo |
+| I131 | 决定 032；fib A64，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | done |
 | I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | todo |
 | I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | todo |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
@@ -1973,6 +1973,25 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 - **完成标准**：fib 的测试读取 ffmpeg 生成的各编码组合文件，`moov` 在头部和尾部、带 B 帧和编辑列表，每个样本的时间、偏移和大小都与
   ffprobe 一致；样本表内存在其上限内；对读取器的模糊测试没有 panic。
 - **涉及**：`docs/decisions`（032）、`docs/fib-api-requests.md`、fib 的 `media`、`go.mod`。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **读取器放在哪里**：fib 的新包 `media/mp4`，使用导出的 `fmp4.ParseSampleEntry`；`fmp4` 读取内存中的分片字节，而这里通过 `ReaderAt`
+   读取文件并保存样本表；编解码器在一处解析。备选：放进 `media/fmp4`；两者共用的内部包。
+2. **读取器不持有文件**：`Open` 不保存引用；`ReadTable(r)` 与 `ReadSample(r, …)` 接收读取器，使 fit 的文件池可以关闭并重新打开文件。
+   备选：`File` 持有读取器。
+3. **紧凑的样本表**：`stts` 与 `ctts` 游程编码（逐样本更小时 `ctts` 逐样本存），`stz2` 用 16 位大小，每个 chunk 一个偏移与首样本；带
+   B 帧时约每样本 8.4 字节。备选：每样本 24 字节以上的条目，更快但内存为三倍。
+4. **编辑列表**：偏移为开头的空编辑减去第一个播放编辑的媒体时间，所有测试文件都与 ffprobe 一致；末尾裁剪与之后的编辑保留但不应用。
+   备选：应用全部编辑。
+5. **时间是文件的 tick**：`DTS` 与 `PTS` 与 ffprobe 加 `-ignore_editlist` 时相同；`Table.Time` 应用编辑列表；给出 `MinCTS` 而不是平移 DTS。
+6. **严格与宽松**：缺样本的表、文件之外的 chunk 与分片文件被拒绝；过短的 `ctts`、未排序或越界的 `stss` 与有符号的 `ctts` v0 按播放器
+   的方式读取。
+7. **`SeekKeyframe` 按 PTS 查找**，假定关键帧按解码顺序呈现，fib 支持的所有编解码器都是如此。
+8. **上限是常量**（`MaxTracks`、`MaxBoxes` 等），不是选项。
+9. **测试文件**：七个小文件入库（连同 ffprobe 输出共 129 KB，由 `media/mp4/testdata/gen.sh` 生成），较长的文件由 CI 中 `media/interop`
+   的 `TestMP4` 检查。
+10. **fib CI 的 fuzz 任务** 只加入 `media/mp4:FuzzOpen`；其他媒体 fuzz 目标原本就不在其中，保持不变。
 
 ### I132 媒体库
 
