@@ -109,6 +109,8 @@ type Manager struct {
 	pass passHub
 	// tpl is the members' sync states against the templates (sync.go).
 	tpl tplState
+	// ro is the rollouts (rollouts.go).
+	ro rolloutsState
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -145,6 +147,8 @@ func New(o Options) (*Manager, error) {
 		o.Logf("cluster: %s", m.readOnly)
 	}
 	m.doc = doc
+	m.loadRollouts(doc.Rollouts)
+	m.doc.Rollouts = nil
 	m.compileGroups(true)
 	for _, mem := range doc.Members {
 		if err := mem.check(); err != nil {
@@ -192,6 +196,7 @@ func (m *Manager) Close() {
 		// so do the reads of members' sync states.
 		m.waitOps(closeWait)
 		m.waitSyncs(closeWait)
+		m.waitRollouts(closeWait)
 		ended := make(chan struct{})
 		go func() { wg.Wait(); close(ended) }()
 		select {
@@ -357,6 +362,7 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 		d.Groups[i] = d.Groups[i].clone()
 	}
 	d.Audit = slices.Clone(d.Audit)
+	d.Rollouts = m.storedRolloutsLocked()
 	m.mu.Unlock()
 	entry, err := fn(&d)
 	if err != nil {
@@ -370,6 +376,7 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	d.Rollouts = nil // kept in m.ro
 	m.doc = d
 	m.rev++
 	m.compileGroups(false)
@@ -558,6 +565,7 @@ func (m *Manager) routes(api *console.API) {
 	m.linkRoutes(api)
 	m.groupRoutes(api)
 	m.opRoutes(api)
+	m.rolloutRoutes(api)
 	m.passRoutes(api)
 	m.templateRoutes(api)
 }
@@ -610,7 +618,7 @@ func (m *Manager) answer(r *console.Request, status int, v any, err error) {
 		_ = r.JSON(status, v)
 	case errors.As(err, &fe):
 		_ = r.JSON(400, fe)
-	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)):
+	case errors.As(err, &nf), errors.As(err, new(errNoGroup)), errors.As(err, new(errNoTemplate)), errors.As(err, new(errNoRollout)):
 		_ = console.Error(r.Context, 404, err.Error())
 	case errors.As(err, new(errBusy)):
 		_ = console.Error(r.Context, 429, err.Error())

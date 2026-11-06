@@ -707,6 +707,7 @@ func (m *Manager) appendAudit(entries []AuditEntry) error {
 	// Every writer holds wmu and replaces the document, never changing
 	// its slices in place: this copy is read alone.
 	d := m.doc
+	d.Rollouts = m.storedRolloutsLocked()
 	m.mu.Unlock()
 	d.Audit = append(slices.Clone(d.Audit), entries...)
 	if n := len(d.Audit) - MaxAudit; n > 0 {
@@ -717,6 +718,7 @@ func (m *Manager) appendAudit(entries []AuditEntry) error {
 		return fmt.Errorf("saving the members: %w", err)
 	}
 	m.mu.Lock()
+	d.Rollouts = nil // kept in m.ro
 	m.doc = d
 	m.mu.Unlock()
 	return nil

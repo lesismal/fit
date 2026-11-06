@@ -60,6 +60,9 @@ type cluster struct {
 	c       *http.Client
 	csrf    string
 	answers []string
+	// names are the containers, for their logs: the manager and m1 to m3
+	// when empty.
+	names []string
 }
 
 func (k *cluster) docker(args ...string) string {
@@ -90,7 +93,11 @@ func (k *cluster) run(name string, publish ...string) {
 
 func (k *cluster) logs() string {
 	var b strings.Builder
-	for _, n := range []string{"manager", "m1", "m2", "m3"} {
+	names := k.names
+	if len(names) == 0 {
+		names = []string{"manager", "m1", "m2", "m3"}
+	}
+	for _, n := range names {
 		out, _ := exec.Command("docker", "logs", k.prefix+n).CombinedOutput()
 		fmt.Fprintf(&b, "== %s\n%s\n", n, out)
 	}

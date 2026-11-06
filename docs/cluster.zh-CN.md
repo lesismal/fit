@@ -11,6 +11,7 @@
 - [分组与操作](#分组与操作)
 - [成员自己的页面：节点切换器](#成员自己的页面节点切换器)
 - [模板：分组共享的配置](#模板分组共享的配置)
+- [发布：分阶段应用的修改](#发布分阶段应用的修改)
 - [如何访问成员](#如何访问成员)
 - [管理端读取什么，以及可能出现的问题](#管理端读取什么以及可能出现的问题)
 - [API](#api)
@@ -208,6 +209,53 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 - **从节点导入**：逐部分读取成员的配置（列表中未命名的元素、`admin` 与 `schema_version` 不能选择），把选中的部分创建为模板，
   并关联到选中的分组。关联到其来源成员时，该成员即为已同步。
 
+## 发布：分阶段应用的修改
+
+**发布**把一次修改应用到多个成员，每次一批，每批检查通过后才进行下一批。它可以来自：
+
+- **模板的修改**：模板所在分组的每个成员（或所选成员）获得其期望配置，即自身配置中由模板拥有的部分替换为模板给出的值；
+- **同步**：所选成员、某个分组的成员或全部成员，各自与其所有模板同步；
+- **复制**：把一个成员当前配置的若干部分（顶层成员整体，`routes[api]` 等命名列表的元素按名称）连同密钥复制到其他成员。
+
+**规划。** 规划会读取每个成员（`GET /node` 获取其能力，`GET /config` 及其 ETag），生成期望配置及其逐部分的差异（密钥已隐藏），
+并由成员通过自己的试运行检查（带 `If-Match` 的 `PUT /config?dry_run=1`）：完整走一遍应用路径，编译并加载，但不应用。成员为
+**就绪**、**无需修改**或**未就绪**并说明原因：成员的试运行拒绝了该配置（每个错误附其 JSON 指针）、无法读取、其模板无法为其渲染、
+它是早于发布功能的 fit（必须列出 `config.if_match`、`config.dry_run` 与 `config.versions`）、它被另一个发布或操作占用，或规划保存
+的配置与差异会超过 8 MiB。规划在管理端的 store 中（加密）逐字节保存每个就绪成员的期望配置、其所基于的 ETag、当时运行的版本，以及
+成员试运行给出的新配置 ETag。规划后一小时内未启动即过期；同时最多 4 个发布处于规划或进行中。
+
+**策略**在启动时选择：
+
+| 策略 | 作用 |
+| --- | --- |
+| `all` | 全部成员为一批 |
+| `rolling` | 每批 `batch_size` 个成员，或成员的 `batch_percent`，批次之间暂停 `pause_ms` |
+| `canary` | 第一批为 `canary` 个成员（按名称排在最前）；其检查通过后发布**等待**人确认继续；之后其余成员按滚动方式分批，或一次全部 |
+
+启动时可以排除成员。每个成员通过自己带 `If-Match`（规划时读到的 ETag）的 `PUT /config` 获得期望配置：规划后被修改的成员应答
+`412`，被**跳过**，绝不覆盖。应答丢失的应用由成员的 `GET /node` 判断：运行的 ETag 正是试运行给出的，即已应用。
+
+**健康检查**在每批应用后 `wait_ms`（默认 5 秒）进行，检查每个已应用的成员：可达；运行的是发布所应用的配置（其配置的 ETag），即重新
+加载成功并保持；其一致性检查（`GET /config/check`）发现的不一致不多于发布前；设置了 `max_5xx_ratio` 时，批次之后 `window_ms` 内
+5xx 应答的比例不超过它，自应答达到 `min_requests` 起判断（取自成员 `GET /status` 的 `requests`，成员配置设置了 `metrics` 时才统计；
+批次中有不统计请求的成员时，在应用任何内容之前即失败）。应用被拒绝同样视为检查失败。检查失败会**停止发布**并回滚该批，或所有已应用
+的成员（`on_failure: all`），每个成员通过自己带 `If-Match`（发布所应用配置的 ETag）的 `POST /rollback/{n}` 回到之前运行的版本：之后
+被修改过的成员保持不变，并说明原因。
+
+**操控。** **暂停**在当前批次之后生效；**继续**从该处继续；**继续发布**用于金丝雀之后；**中止**在正在应用的成员之后停止（缩短检查的
+等待），保留已应用的内容；**回滚**在发布暂停、等待或结束后，回滚此发布应用过的每个成员。每个成员同时只有一个发布或操作：发布从启动
+到结束占用其成员，期间对这些成员的操作与其他发布都会被拒绝。发布进行中管理端重启后，发布显示为**在停止处暂停**；继续后，正在应用的
+成员由其 ETag 判断是否已应用，然后进行检查。
+
+**保存。** 发布保存在管理端的 store 中，保留最近 50 个，每个都含规划、策略、批次以及每个成员的结果、版本（之前、应用、回滚）、所得
+配置的哈希与检查结果；发布结束后丢弃配置与差异的值。审计日志记录每次规划、启动、暂停、继续、金丝雀后继续、中止、回滚与结束，结束时
+附每个成员的结果。
+
+**页面**位于**发布**下：历史（最新在前）与**新建发布**；新发布的表单（内容、模板、分组或成员、复制的部分）；发布页：规划完成时显示
+每个成员的状态、并排的修改、试运行错误（链接到成员页、其自身页面与渲染结果）、排除成员的复选框、策略表单，以及**启动发布**（其对话框
+列出各批次与每个成员的差异）；启动后逐批显示进度，每个成员的状态、版本与检查结果（发现的 5xx 比例与不一致，以及失败原因），并提供
+**暂停**、**继续**、**继续发布**、**中止**与**回滚**。模板页有**发布**按钮，成员的渲染结果页有**同步此节点**。
+
 ## 如何访问成员
 
 成员是管理端能访问到的 fit，访问方式有三种：
@@ -291,6 +339,12 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `GET desired/<member>` | 立即读取的成员：其同步状态、`config` 与 `desired`，密钥已隐藏 |
 | `POST compare` | `{"a", "b"}`：两个成员的配置，`{"a", "b", "parts"}`，每一方为 `{"node", "config_etag", "config"}`，每个部分为 `{"path", "state", "a", "b"}`，`state` 为 `same`、`differs`、`only_a` 或 `only_b` |
 | `POST import` | `{"node"}`：成员配置的各部分，`{"node", "config_etag", "parts"}`，每项为 `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
+| `POST rollouts` | 规划发布：`{"kind", "template", "group", "nodes", "from", "paths", "description"}`，`kind` 为 `template`、`sync` 或 `copy`；返回 `202` 与规划中的发布；字段错误 `400` 附 `{"field", "error"}`，模板、分组或成员不存在 `404`，规划或进行中的超过 4 个 `429` |
+| `GET rollouts` | 保存的发布，最新在前，不含差异的值：`{"max_active", "plan_ttl_ms", "read_only", "rollouts"}` |
+| `GET rollouts/<id>` | 一次发布：`{"id", "kind", "template", "group", "from", "paths", "description", "planned_by", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`；`state` 为 `planning`、`planned`、`running`、`paused`、`waiting`、`rolling_back`、`done`、`failed`、`aborted`、`rolled_back` 或 `expired`；成员为 `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`，修改为 `{"path", "state", "sync", "reason", "template", "have", "want"}`（密钥已隐藏），检查结果为 `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`；从不包含配置 |
+| `POST rollouts/<id>/start` | 启动规划：`{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`；成员被其他发布或操作占用时 `409` |
+| `POST rollouts/<id>/pause`、`resume`、`go`、`abort`、`rollback` | 操控发布；状态不允许时 `409` |
+| `DELETE rollouts/<id>` | 放弃规划 |
 | `POST text/render?format=` | 把模板配置（JSON）写成 `conf`、`yaml` 或 `json` 文本 |
 | `POST text/parse?format=` | 把这种文本读成 JSON，出错时 `400` 附错误 |
 

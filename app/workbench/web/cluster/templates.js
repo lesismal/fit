@@ -12,7 +12,8 @@
 // #/cluster/rendered/<member>, a member's config beside its desired config (GET /api/m/cluster/desired/<member>);
 // #/cluster/compare, two members' configs side by side, part by part (POST /api/m/cluster/compare). Nothing here
 // applies anything to a member: reading a sync state tells the member what the manager owns there (its
-// PUT /node/managed), which its own pages mark; rollouts (I146) apply. Needs shared.js; before cluster.js.
+// PUT /node/managed), which its own pages mark; rollouts (I146, rollouts.js) apply, opened by Roll out on a template's
+// page and Sync this node on a rendered result. Needs shared.js; before cluster.js.
 //
 // 集群 → 模板（I145）：管理端在模板所关联分组的成员上拥有的配置。模板是 fit 配置的片段：其顶层成员整体拥有（log、
 // media_auth 等），listeners、routes、services、upstreams 的元素按名称逐个拥有；字符串可使用变量 ${node.name}、
@@ -538,7 +539,9 @@
           h('div.card__body.stack', syncSummary(UI, ms), partsTable(UI, ms, only)));
         }), (res.pending || []).length ? h('div.callout.callout--warn', t('tp.pending') + ' ' + res.pending.join(', ')) : null);
       }
-      UI.mount(sync, UI.card(t('tp.sync'), h('div.stack', h('div.small.muted', t('tp.read.note')), rows), readBtn));
+      // Roll out the template's change (I146). / 发布模板的修改（I146）。
+      var roll = h('a.btn.btn--primary.btn--sm', { href: '#/cluster/newrollout?kind=template&template=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.rollout'));
+      UI.mount(sync, UI.card(t('tp.sync'), h('div.stack', h('div.small.muted', t('tp.read.note')), rows), h('span.btn-row', readBtn, roll)));
     }
 
     function read() {
@@ -577,7 +580,8 @@
           d.config ? UI.card(t('tp.rendered'), sideBySide(UI, t('rd.current'), pretty(d.config), t('rd.desired'), pretty(d.desired)), null, true) : null));
       }, function (e) { UI.mount(box, h('div.callout.callout--danger', e.message)); });
     }
-    UI.mount(sh.tools, UI.btn(t('refresh'), 'refresh', read, 'ghost sm'));
+    UI.mount(sh.tools, h('a.btn.btn--ghost.btn--sm', { href: '#/cluster/newrollout?kind=sync&nodes=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.syncthis')),
+      UI.btn(t('refresh'), 'refresh', read, 'ghost sm'));
     read();
   };
 
@@ -664,4 +668,5 @@
 
   FC.importTemplate = importDialog;
   FC.diffRows = diffRows;
+  FC.sideBySide = sideBySide;
 })();
