@@ -29,6 +29,7 @@ const (
 	EventAsk        = "ask"         // ask_user's question: ID, Question, Options
 	EventUsage      = "usage"       // a model call's tokens: Usage, and Today, the user's today
 	EventSummary    = "summary"     // the early turns were summarized, up to Folded
+	EventProposal   = "proposal"    // a step joined the conversation's proposal: ID, Revision, Name (the tool), Text (its summary)
 	EventDone       = "done"        // the end: Reason
 )
 
@@ -60,6 +61,7 @@ type Event struct {
 	Title        string          `json:"title,omitempty"`
 	Model        string          `json:"model,omitempty"`
 	Folded       int             `json:"folded,omitempty"`
+	Revision     int             `json:"revision,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 }
 
@@ -359,12 +361,18 @@ type chat struct {
 	calls      atomic.Int32
 	limited    atomic.Bool
 
+	skill string // the skill the chat runs (I127)
+
 	mu      sync.Mutex
 	ended   bool
 	call    *model.Call
 	waiting bool
 	ping    *time.Timer
 	partial strings.Builder // the answer streaming in
+	// audit is the tools called, for the chat's audit entry, and proposal
+	// the proposal its propose tools left, with the members it changes.
+	audit    []AuditCall
+	proposal *AuditProposal
 }
 
 // open starts the stream: its header and first event, and the ping.
@@ -492,8 +500,17 @@ func (c *chat) finish(reason, errMsg string) {
 	}
 	partial := c.partial.String()
 	c.partial.Reset()
+	calls, prop := c.audit, c.proposal
 	c.mu.Unlock()
 	c.cancel()
+	if len(calls) > 0 {
+		outcome := reason
+		if errMsg != "" {
+			outcome = ReasonError
+		}
+		c.a.Audit(AuditEntry{User: c.user, Kind: AuditChat, Conversation: c.conv.ID, Skill: c.skill, Calls: calls, Proposal: prop,
+			Outcome: outcome, Detail: errMsg})
+	}
 
 	a := c.a
 	a.chats.mu.Lock()
@@ -549,8 +566,9 @@ func (c *chat) request() (req *model.Request, fold int) {
 	c.a.chats.mu.Lock()
 	msgs := slices.Clone(c.conv.Messages)
 	from, summary := c.conv.Folded, c.conv.Summary
+	state := proposalState(c.conv.Proposal, c.conv.ProposalNote)
 	c.a.chats.mu.Unlock()
-	req = &model.Request{Model: c.model, System: systemPrompt(c.level, c.lang, c.page, c.catalog, summary),
+	req = &model.Request{Model: c.model, System: systemPrompt(c.level, c.lang, c.page, c.catalog, summary, c.red.text(state)),
 		MaxTokens: c.s.Params.MaxOutput(), Thinking: c.s.Params.ThinkingLevel()}
 	if c.s.Params != nil {
 		req.Temperature = c.s.Params.Temperature
@@ -689,6 +707,12 @@ func (c *chat) runCalls(calls []model.ToolCall, i int, ask *model.ToolCall) {
 		case int(c.calls.Load()) >= c.s.Limits.ToolCalls():
 			c.limited.Store(true)
 			c.result(t, tc, fmt.Sprintf("error: not run: the answer reached its limit of %d tool calls", c.s.Limits.ToolCalls()), true)
+		case !c.allowedNow(t):
+			// The user's level, checked on every call against the
+			// settings in use now, which a save may have changed.
+			s := c.a.Settings()
+			_, why := t.Allowed(s.Level(c.user), s)
+			c.result(t, tc, "error: not run: "+c.user+"'s level is "+s.Level(c.user)+" now, and the tool "+why, true)
 		case t.Kind == KindAsk:
 			c.calls.Add(1)
 			if _, err := parseAsk(tc.Arguments); err != nil || ask != nil {
@@ -725,12 +749,28 @@ func (c *chat) runCalls(calls []model.ToolCall, i int, ask *model.ToolCall) {
 	}
 }
 
+// allowedNow reports whether the user may call t under the settings in use
+// now.
+func (c *chat) allowedNow(t *Tool) bool {
+	s := c.a.Settings()
+	ok, _ := t.Allowed(s.Level(c.user), s)
+	return ok
+}
+
+// setProposal keeps what a propose tool left of the conversation's
+// proposal, for the chat's audit entry.
+func (c *chat) setProposal(p *Proposal, changed []string) {
+	c.mu.Lock()
+	c.proposal = auditOf(p, changed)
+	c.mu.Unlock()
+}
+
 // runPool runs a call of t on the console's pool, within toolTimeout, and
 // then next.
 func (c *chat) runPool(t *Tool, tc model.ToolCall, next func()) {
-	call := &Call{Context: c.ctx, Args: tc.Arguments, User: c.user, Level: c.level, Settings: c.s, Conversation: c.conv.ID,
-		Emit: c.emit, a: c.a}
 	var done atomic.Bool
+	call := &Call{Context: c.ctx, Args: tc.Arguments, User: c.user, Level: c.level, Settings: c.s, Conversation: c.conv.ID,
+		Emit: c.emit, Skill: c.skill, a: c.a, expired: &done, proposed: c.setProposal}
 	var timer atomic.Pointer[time.Timer]
 	deliver := func(out string, err error) {
 		if !done.CompareAndSwap(false, true) {
@@ -774,6 +814,9 @@ func (c *chat) result(t *Tool, tc model.ToolCall, out string, isErr bool) {
 		limit = t.MaxBytes
 	}
 	out, cut := cutText(c.red.text(out), int(limit))
+	c.mu.Lock()
+	c.audit = append(c.audit, auditCall(c.red, tc, isErr))
+	c.mu.Unlock()
 	c.appendMsg(Msg{Message: model.Message{Role: model.RoleTool, Content: out, ToolCallID: tc.ID, ToolName: tc.Name, IsError: isErr},
 		At: nowMs(), Cut: cut})
 	c.emit(Event{Type: EventToolResult, ID: tc.ID, Name: tc.Name, Content: out, Error: isErr, Cut: cut})

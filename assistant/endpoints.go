@@ -136,8 +136,13 @@ func (a *Assistant) conversationHandler(r *console.Request) {
 				return
 			}
 			u.convs = slices.DeleteFunc(u.convs, func(x *Conversation) bool { return x == c })
+			p := c.Proposal
 			a.chats.mu.Unlock()
 			a.saveChats(user)
+			if p != nil {
+				a.Audit(AuditEntry{User: user, Kind: AuditDiscard, Conversation: id, Proposal: auditOf(p, nil), Outcome: OutcomeDiscarded,
+					Detail: "deleted with its conversation"})
+			}
 			_ = r.JSON(200, map[string]any{"deleted": id})
 			return
 		}

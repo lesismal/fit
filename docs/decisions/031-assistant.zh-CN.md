@@ -61,13 +61,23 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   日志文件的末尾，而不在热路径上为每个请求的日志行另存一份。
 - **对话保存在 store 中**，每个用户一个分区（`assistant.chats.<哈希>`），由助手自己的一个保存协程写入，因此对话从不等待 store
   的磁盘；没有 store 时保存在内存中，直到 fit 重启。
+- **提案（I126）** 随对话保存：提案工具（`config_propose`、`reconcile_propose`、`rollback_propose`、`cache_purge_propose`）
+  只加入步骤，每个步骤都与其他步骤一起在运行中的配置上检查，并记录检查时的 ETag 与版本。配置步骤只能是一种，各经自己的
+  端点作为一次变更应用：补丁合并为一次 `PUT /config/text?members=`，一致性修复为一次 `POST /config/reconcile`，回滚为一次
+  `POST /rollback/{n}`；缓存清除在其后执行。提案不能触及 `admin`，也不能写入密钥（`[redacted]` 只能写回原位，并恢复为原值）。
+  只有级别为 `apply` 的用户在点击“应用”并在显示完整差异的对话框中再次确认后才会应用，带 `If-Match` 与所确认的修订号；过期的
+  提案被拒绝并在新版本上重新提供。每次工具调用与每次应用都按当时的设置检查用户级别。
+- **审计日志（I126）** 记录每次调用了工具的回答，以及每次应用、拒绝、重新提供与丢弃：用户、时间、来源、对话、技能、调用（已
+  脱敏并截断）、提案的步骤、结果与版本；最多 `limits.max_audit_entries` 条，保存在 store 的 `assistant.audit` 段中。
 
 ## 影响
 
 - 设置了 `admin.assistant` 时，workbench 的菜单中有“助手”模块及其功能页与设置页，每个页面的顶栏都有对话面板的按钮。
 - `GET /api/m/ai/settings`、`PUT /api/m/ai/settings`、`POST /api/m/ai/providers/test`、`POST /api/m/ai/chat`、
   `POST /api/m/ai/chat/stop`、`GET /api/m/ai/tools`、`GET /api/m/ai/conversations` 与 `GET`/`DELETE /api/m/ai/conversations/{id}`
-  属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌。
+  属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌；I126 加入 `GET /api/m/ai/proposals`、
+  `GET /api/m/ai/proposals/{conversation}`、其 `POST .../apply` 与 `POST .../discard`，以及 `GET /api/m/ai/audit`，菜单中加入
+  提案页与审计日志页。
 - 一次对话在流式输出期间占用控制台的一个连接，工具在运行期间占用控制台线程池的工作线程；`max_concurrent_chats`（4）使两者
   都保持很少。
 - 保存了助手设置的 fit 写出的 store 为版本 3，旧版 fit 无法打开。这是把密钥与配置一同加密保存的代价。

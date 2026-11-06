@@ -506,7 +506,7 @@ most 8 MiB together; without a store they last until fit restarts. A user sees o
 
 The endpoints are `POST /api/m/ai/chat` (`{"conversation", "message" | "retry": true | "answer":
 {"id", "choice"}, "page", "lang"}`; answered as SSE: `data:` events of type `start`, `text`,
-`thinking`, `tool_call`, `tool_result`, `ask`, `usage` and `summary`, then `event: end` with
+`thinking`, `tool_call`, `tool_result`, `ask`, `usage`, `summary` and `proposal`, then `event: end` with
 `{"type": "done", "reason"}` (`answer`, `ask`, `max_tool_calls`, `max_tokens_per_day`, `stopped`)
 or `event: error` with `{"message"}`; `403` for a user whose level is `off`, `404` for a
 conversation that is not, `409` without a model, for a conversation answering already or at its
@@ -514,6 +514,60 @@ turns, `429` past the chats at once or the day's tokens), `POST /api/m/ai/chat/s
 (`{"conversation"}`), `GET /api/m/ai/conversations`, `GET` and `DELETE
 /api/m/ai/conversations/{id}`, and `GET /api/m/ai/tools` (the user's level, the model, and every
 tool with its level, group, schema and whether this user may call it).
+
+### Proposals, levels and the audit log
+
+**Levels.** `admin.assistant.users` gives each console user a level, `default_level` the others':
+`off` (no panel), `read` (the read tools), `edit` (also the open page's drafts, I154), `propose`
+(also the propose tools) and `apply` (also applies proposals), each including the ones before it.
+A tool is offered to the model only when the user's level reaches its own, and every call is
+checked again against the settings in use when it runs, so that a level lowered on the Settings
+page stops the next call of a chat under way.
+
+**Proposals.** With `propose` or `apply`, the assistant changes nothing either: its propose tools add
+steps to the conversation's one pending proposal. `config_propose` changes members, whole
+(`members`, `null` removing one) or by operations at JSON pointers (`ops`: `add`, `replace`,
+`remove`); `reconcile_propose` picks Consistency fixes by difference and action;
+`rollback_propose` applies a kept version again; `cache_purge_propose` purges a zone by URL, by tag
+or all. Each step is checked with the others on the running config, as `fit validate` checks it,
+and the proposal keeps the ETag and version it was checked on; a step that is wrong in itself is
+refused and not added, while one that leaves the whole invalid is kept, with the errors, for the
+next step to mend. A proposal's config steps are of one kind: patches, merged and applied as one
+`PUT /config/text?members=` of the top-level members they change; reconcile fixes, applied
+together as one `POST /config/reconcile`; or one rollback, `POST /rollback/{n}`. Purges go with any
+of them and run after the config. No step may touch `admin` (its members are out of every tool's
+reach, and it changes only when fit restarts), nor write a secret: a value the model saw as
+`[redacted]` may be written back only where the config has it, and is then the config's own again.
+At most 32 steps and 256 KiB of arguments.
+
+The panel shows the pending proposal above the composer: its steps, the members it changes, whether
+it checks, its diff in `.conf`, `.yaml` and `.json` (redacted), **Review and apply…** and
+**Discard**. Apply opens a dialog with the whole diff; only its **Apply** applies, as the user, with
+`If-Match` the ETag shown and the revision confirmed: one new version, the console's, saved to the
+store and listed in **Versions**, then the purges. Cancelling the dialog sends nothing. When the
+config changed since the proposal was checked, the apply is refused and the proposal is moved to
+the new version and offered again, to be reviewed and confirmed anew; a change the Admin API
+refuses applies nothing, and the proposal stays with the reason, which the model is told too. Only
+a user whose level is `apply` applies; `propose` users' proposals wait for one, who sees every
+user's pending proposals on the **Proposals** page.
+
+**The audit log** keeps what the assistant did: each answer that called tools (its calls, redacted
+and cut, the proposal it left and how it ended) and each apply, refusal, offer again and discard,
+with the user, the time, the conversation, the skill, the proposal's steps and the version made.
+It holds `limits.max_audit_entries` (1000) entries, kept in the store's section `assistant.audit`
+across restarts, and is read on the **Audit log** page.
+
+The endpoints are `GET /api/m/ai/proposals` (the pending proposals: the user's, and every user's for
+one whose level is `apply`), `GET /api/m/ai/proposals/{conversation}` (`?user=` for another's: the
+proposal checked on the running config, with `revision`, `etag`, `stale`, `steps` and each step's
+error, `changed`, `diff` by format, `valid`, `errors`, `can_apply`), `POST
+/api/m/ai/proposals/{conversation}/apply` (`{"id", "revision", "etag", "user"}`; `200` with
+`outcome` `applied` or `partial`, the `version` and the purges; `403` below `apply`; `409` for a
+revision not the proposal's or a conversation answering; `412` when stale, with the proposal
+offered again; `422` when it does not check or the Admin API refused it), `POST
+/api/m/ai/proposals/{conversation}/discard` (`{"id", "user"}`) and `GET /api/m/ai/audit`
+(`?user=`, `?conversation=`, `?kind=` `chat`, `apply` or `discard`, `?before=` an entry's `seq`,
+`?limit=` up to 500; the latest first).
 
 ## Roles' pages
 

@@ -94,15 +94,32 @@ workers.
 - **Conversations live in the store**, a section per user (`assistant.chats.<hash>`), written by one
   saver goroutine of the assistant's, so that a chat never waits on the store's disk; without a store
   they are kept in memory until fit restarts.
+- **Proposals (I126)** are kept with their conversation: the propose tools (`config_propose`,
+  `reconcile_propose`, `rollback_propose`, `cache_purge_propose`) only add steps, each checked with
+  the others on the running config, the proposal keeping the ETag and version it was checked on.
+  Its config steps are of one kind, each kind applied as one change through its own endpoint:
+  patches merged into one `PUT /config/text?members=`, Consistency fixes in one
+  `POST /config/reconcile`, a rollback as `POST /rollback/{n}`; cache purges run after. No proposal
+  touches `admin` or writes a secret (`[redacted]` goes back only where it was, and is the config's
+  value again). It is applied only by a user whose level is `apply`, after the Apply click and a
+  second confirm in a dialog with the whole diff, with `If-Match` and the revision confirmed; a stale
+  one is refused and offered again on the new version. The user's level is checked, against the
+  settings in use, on every tool call and every apply.
+- **The audit log (I126)** keeps each answer that called tools and each apply, refusal, offer again
+  and discard: the user, the time, the source, the conversation, the skill, the calls (redacted and
+  cut), the proposal's steps, the outcome and the version; `limits.max_audit_entries` of them, in the
+  store's section `assistant.audit`.
 
 ## Consequences
 
-- The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions
-  and Settings pages, and every page's top bar has the chat panel's button.
+- The workbench's menu has the module Assistant when `admin.assistant` is set, with its Functions,
+  Proposals, Audit log and Settings pages, and every page's top bar has the chat panel's button.
 - `GET /api/m/ai/settings`, `PUT /api/m/ai/settings`, `POST /api/m/ai/providers/test`,
   `POST /api/m/ai/chat`, `POST /api/m/ai/chat/stop`, `GET /api/m/ai/tools`,
-  `GET /api/m/ai/conversations` and `GET`/`DELETE /api/m/ai/conversations/{id}` are the console's,
-  behind its login and CSRF token, as every module's API is.
+  `GET /api/m/ai/conversations`, `GET`/`DELETE /api/m/ai/conversations/{id}`, and, from I126,
+  `GET /api/m/ai/proposals`, `GET /api/m/ai/proposals/{conversation}`, its `POST .../apply` and
+  `POST .../discard`, and `GET /api/m/ai/audit` are the console's, behind its login and CSRF token,
+  as every module's API is.
 - A chat holds one of the console's connections for as long as it streams, and the tools take the
   console pool's workers for as long as they run; `max_concurrent_chats` (4) keeps both few.
 - A store saved by a fit with the assistant's settings is version 3; an older fit cannot open it.
