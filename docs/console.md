@@ -309,6 +309,39 @@ and the language (English or Chinese) are picked at the top right. Each page has
   `media_auth`, `webrtc`, `tunnel` and `llm` members, each on a page of its own instead of under Global,
   with a tag naming what it is. The streaming page points at the routes where its handlers (HLS,
   HTTP-FLV, WHIP/WHEP) are set; the tunnel and LLM pages say their roles start when the config applies.
+- **Media library** (tagged VOD / channels), beside Streaming and Media auth: the
+  [media library](media-library.md) track's pages. **Libraries** lists each library's items from the
+  Admin API, searched, filtered by codec, resolution and problems, and paged, with the scan's state and
+  a **Rescan** that shows its progress; an item's page has its renditions and their tracks, codecs,
+  audio files, subtitles, poster and sidecar, the error a file failed to probe with, and a **Preview**:
+  hls.js plays the item through a URL the workbench signs for the user signed in
+  (`POST /media/preview`, subject `workbench:<user>`, good for two minutes; a public route plays
+  unsigned, a policy without `url_signing` gets a short-lived token), and stops, saying why, at the
+  first refusal — an ended session or a rotated key stops it at once. **Channels** edits each channel
+  of `streaming.channels` as a timeline: the playlist, items dragged in from the library or added with
+  +, reordered by dragging; the schedule, its slots on a day in the channel's time zone (an item
+  dropped on the day starts there) and in a list; loop, shuffle, the time zone and the rendition —
+  edits of the draft that **Save and apply** applies from the channel's next item on; with what plays
+  now and next and its position, **Start**, **Stop**, **Skip** and **Play now**, a preview, and every
+  push target's state, last error, bytes, bit rate and actions. **Playback URLs** is a policy's
+  `url_signing`: a test URL issued as `media_tokens`' `/urls` issues one (through one of its routes,
+  whose `url_prefixes`, `max_ttl` and `url_base` apply, or the policy's bounds), shown and played and
+  never kept; the keys by name, where each is kept and its age, never a secret, each rotated (or all)
+  after a confirm, its file rewritten as the `media_tokens` revoke does — a key kept inline in the
+  config is rotated by editing it; the refusals by reason; and the playback sessions, paged and
+  filtered by subject, each with its subject's count against `max_sessions`, each endable after a
+  confirm. **Metrics** counts, every two seconds, each library's items, file pool and sample tables
+  (bytes and hit rate), each `vod` handler's viewers, requests and bytes a second and segment cache,
+  each policy's sessions and 403s by reason, and each channel's state, players and push targets
+  (`GET /media/stats`, beside fit's `/metrics`). The config pages are **Library config**
+  (`media_library`), **VOD routes** (the routes whose handler is `vod`; the raw tabs hold every
+  route), **Channels config** (`streaming.channels` and `streaming.push`; the raw tabs hold
+  `streaming`) and **URL signing** (each policy's `url_signing`; the raw tabs hold `media_auth`); a
+  save's problems at those members link here, whichever page saved. The preview needs the route's
+  `cors` (the page says so when it is missing), as the console's origin is not the listener's; the
+  console's Content-Security-Policy lets its pages reach the listeners that serve `vod` and `hls`
+  routes, and nothing else. hls.js (1.5.20, Apache-2.0) is vendored in the workbench and loaded only
+  when a player first needs it.
 - **Account**: the signed-in user's password, and the console users' (below).
 - **Tunnel** and **LLM**: a module for each role running, as `tunnel.hub` or `llm.node`, with the
   role's pages; a hub's Tokens page, and the LLM roles' links page, issue and revoke the link tokens
@@ -319,11 +352,13 @@ The **Engine** menu is that same view in the menu, one submenu per listener port
 config and HTTPS by default make them: a port opens to its handlers (static, respond, FastCGI, media
 tokens, media pages — each linking to the routes page filtered to it), its reverse-proxy and
 forward-proxy routes, its cache (the zones page and the routes page) and other middleware, the
-streaming handlers (the streaming page and each handler's filtered routes), the WebRTC handlers (the
-WebRTC page and their routes), its layer 4 services, SOCKS, TLS certificates, ACME, HTTPS by default and
+streaming handlers (the streaming page, each handler's filtered routes, its `vod` routes and the
+channels its HLS, HTTP-FLV or WHEP routes play), the WebRTC handlers (the WebRTC page and their routes),
+its layer 4 services, SOCKS, TLS certificates, ACME, HTTPS by default and
 the redirect to it, and finally a link to the listener form. The bound address is shown beside the
 written one (and the ports HTTPS by default made when the config writes none), and the port's line
-carries its tags: PROXY protocol, HTTP/3, on-demand and client certificates. The Listeners page edits
+carries its tags: PROXY protocol, HTTP/3, on-demand and client certificates, and VOD when it serves
+`vod` routes. The Listeners page edits
 the listeners themselves and says the features are in the Engine menu. A link to a handler's routes
 opens the routes page filtered to that handler.
 
@@ -700,6 +735,9 @@ user's message, as if typed.
 | Each route of **Reverse proxy → Routes** | `diagnose` | `route`: its name | its match, handler, upstream, listeners and middleware |
 | An upstream with backends down, on the **Overview** and **Reverse proxy → Upstreams** | `diagnose` | `route`: the routes that proxy to it | its backends: address, up, probed down, in flight, succeeded, failed |
 | A spike on the **Overview**: an error counter that rose between two refreshes (requests failed on an upstream, connections refused, reloads failed), listed for a minute | `diagnose` | `route`, for an upstream's | the counter, by how much it rose and in how many seconds, its total, and the upstream's backends |
+| An item's probe error on its **Media library** page | `explain` | `error`: the error | the library, the item and the file |
+| A push target in error on the **Channels** page | `diagnose` | — | the target: name, stream, channel, protocol, server (never its stream key), state, error, connects and failures |
+| A policy's URLs refused 403, on **Playback URLs** and **Metrics** | `diagnose` | `status`: `403` | the policy and its refusals by reason |
 | The LLM roles' link map, and the tunnel's map and paths | `diagnose` | — | the box or line selected, and the map as drawn: boxes with their facts, lines with latency, calls, errors and rates (the tunnel's diagram is closed, so the panel shows) |
 
 The buttons show only where the panel does: the console serves the module `ai` and the user's level

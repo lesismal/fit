@@ -15,7 +15,8 @@ import (
 //	GET  /media/library                    every library, with its scans' status
 //	GET  /media/library/{name}             one library: its status, problems and
 //	                                       items, paged (offset, limit) and
-//	                                       filtered (q, codec, error)
+//	                                       filtered (q, codec, error,
+//	                                       min_height, max_height)
 //	GET  /media/library/{name}/items/{id}  one item, whole
 //	POST /media/library/{name}/rescan      scan the library again, at once
 
@@ -155,6 +156,20 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 		}
 		*p.to = n
 	}
+	minHeight, maxHeight := -1, -1
+	for _, p := range []struct {
+		name string
+		to   *int
+	}{{"min_height", &minHeight}, {"max_height", &maxHeight}} {
+		if v := q.Get(p.name); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				writeError(w, http.StatusBadRequest, p.name+" is not a number of 0 or more")
+				return
+			}
+			*p.to = n
+		}
+	}
 	text, codec := strings.ToLower(q.Get("q")), q.Get("codec")
 	var wantErr *bool
 	if v := q.Get("error"); v != "" {
@@ -176,6 +191,8 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 		case codec != "" && !slices.Contains(is.Codecs, codec):
 			continue
 		case wantErr != nil && is.Problems != *wantErr:
+			continue
+		case minHeight >= 0 && is.Height < minHeight, maxHeight >= 0 && is.Height > maxHeight:
 			continue
 		}
 		if matched >= offset && len(items) < limit {

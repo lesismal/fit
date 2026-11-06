@@ -11,6 +11,8 @@
 //                                        tabs that edit that part of the draft (without them, a read-only page)
 //   C.section(name, opts) → node         the form of a top-level member; opts for arrays: {filter(item), make(),
 //                                        chips(item) → nodes, addLabel, empty}
+//   C.subsection(path, opts) → node      the form of a member below the top level, at an error path such as
+//                                        streaming.channels or media_auth[0].url_signing (I138)
 //   C.place(fn(path, draft) → hash)      where a problem's path is edited, for its link
 //
 // A page with opts.members registers its editor with WB.editor (I154), for the assistant's page tools: page_get reads
@@ -1620,6 +1622,33 @@
     return h('div.stack', opts.noDoc || !s.description ? null : h('div.callout', UI.icon('info'), ' ', doc(s.description)), body);
   }
 
+  // subsection returns the form of a member below the top level, at an error path as streaming.channels or
+  // media_auth[1].url_signing (I138): the control of its schema at its place in the draft, so that its fields' paths,
+  // errors and focus are the config's own; opts as section's for a list. The member is made when it is missing and
+  // the page asks for it with opts.make; otherwise a missing object is offered as Set, as a nested field is.
+  // subsection 返回顶层以下某成员的表单（I138），路径按错误路径书写，如 streaming.channels 或 media_auth[1].url_signing：
+  // 在草稿中该位置以其 schema 绘制控件，字段的路径、错误与定位都与配置一致；列表的 opts 同 section。
+  function subsection(path, opts) {
+    opts = opts || {};
+    var s = { type: 'object', properties: rootProps() }, slot = rootSlot(), at = '';
+    pathTokens(path).forEach(function (k) {
+      s = resolve(s);
+      s = typeof k === 'number' ? resolve(s.items || {}) : resolve((s.properties || {})[k] || {});
+      at = join(at, k);
+      slot = child(slot, k, at);
+    });
+    var body;
+    if (kind(s) === 'array') {
+      var o = {};
+      Object.keys(opts).forEach(function (k) { o[k] = opts[k]; });
+      o.top = true;
+      body = h('div', { 'data-path': at }, arrayControl(s, slot, o));
+    } else {
+      body = h('section.card', { 'data-path': at }, h('div.card__body', control(s, slot, false)));
+    }
+    return h('div.stack', opts.noDoc || !s.description ? null : h('div.callout', UI.icon('info'), ' ', doc(s.description)), body);
+  }
+
   // certTable lists the certificates of /status, for the overview and the TLS pages. / 列出 /status 中的证书，供概览与 TLS 页面使用。
   function certTable(UI, list) {
     return UI.table([
@@ -1645,7 +1674,7 @@
   };
   var api = {
     ensure: function () { return ensure(); },
-    page: page, section: section, redraw: redraw, changed: changed, save: save, discard: discard, reload: reload, rollback: rollback,
+    page: page, section: section, subsection: subsection, redraw: redraw, changed: changed, save: save, discard: discard, reload: reload, rollback: rollback,
     place: function (fn) { S.places.push(fn); },
     // exportDialog(members, fmt) and importDialog(members): the whole config without members. / 无 members 时为整个配置。
     exportDialog: function (members, fmt) { exportDialog(members, fmt); }, importDialog: function (members) { importDialog(members); },

@@ -38,6 +38,7 @@ import (
 
 	fibhttp "github.com/lesismal/fib/http"
 
+	"github.com/lesismal/fit/app/workbench"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/mediaauth"
 	"github.com/lesismal/fit/module"
@@ -339,16 +340,18 @@ func (p *Pages) buildAssets(origins []string) error {
 	index = bytes.ReplaceAll(index, []byte("{{base}}"), []byte(p.prefix+"/"))
 	index = bytes.ReplaceAll(index, []byte("{{title}}"), []byte(orDefault(p.Title, "fit media")))
 	add("index.html", "text/html; charset=utf-8", index)
-	// hls.js, which the player page plays HLS with, is vendored in
-	// web/vendor with its license (Apache-2.0), served beside it.
-	for _, f := range []struct{ name, ctype string }{{"app.js", "text/javascript; charset=utf-8"}, {"app.css", "text/css; charset=utf-8"},
-		{"vendor/hls.min.js", "text/javascript; charset=utf-8"}, {"vendor/hls.js-LICENSE.txt", "text/plain; charset=utf-8"}} {
+	for _, f := range []struct{ name, ctype string }{{"app.js", "text/javascript; charset=utf-8"}, {"app.css", "text/css; charset=utf-8"}} {
 		b, err := fs.ReadFile(files, f.name)
 		if err != nil {
 			return err
 		}
 		add(f.name, f.ctype, b)
 	}
+	// hls.js, which the player page plays HLS with, with its license
+	// (Apache-2.0): fit's one copy, vendored in the workbench.
+	script, license := workbench.HLSJS()
+	add("vendor/hls.min.js", "text/javascript; charset=utf-8", script)
+	add("vendor/hls.js-LICENSE.txt", "text/plain; charset=utf-8", license)
 	return nil
 }
 

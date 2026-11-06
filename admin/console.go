@@ -61,6 +61,11 @@ type Console struct {
 	// mcp is the assistant's MCP server, at /mcp, which answers only while
 	// the assistant's settings have mcp; nil without the assistant.
 	mcp *mcp.Server
+	// origins is what the pages' Content-Security-Policy adds for the
+	// media routes a preview plays from (media.go), read again while
+	// reading is set.
+	origins atomic.Pointer[mediaOrigins]
+	reading atomic.Bool
 }
 
 // StartConsole serves the console c describes on engine, for configs, whose
@@ -78,6 +83,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs := &Console{schema: sch, logf: logf, configs: configs}
+	cs.origins.Store(configs.loadOrigins())
 	// The logins exist once the console is started, which may serve /mcp
 	// at once.
 	var logins atomic.Pointer[login.Logins]
@@ -132,6 +138,8 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		// A session whose password is temporary reads who it is and
 		// changes it, and does nothing else.
 		PasswordRoutes: []string{"GET /api/m/" + AdminModule + "/users", "POST /api/m/" + AdminModule + "/account/password"},
+		// The media routes' listeners, which a preview plays from.
+		Sources: cs.sources,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
@@ -201,6 +209,10 @@ func (cs *Console) proxy(r *console.Request) {
 	}
 	req.URL.RawQuery = r.Request.URL.RawQuery
 	req.Header = r.Request.Header.Clone()
+	// Who asks, and the host the browser addressed, for the URLs the media
+	// pages are handed (media.go); never what the client sent as them.
+	req.Header.Set(ConsoleUserHeader, r.User)
+	req.Header.Set(ConsoleHostHeader, r.Request.Host)
 	req.RemoteAddr = r.Request.RemoteAddr
 	r.Go(func() {
 		w := &recorder{header: http.Header{}, status: http.StatusOK}

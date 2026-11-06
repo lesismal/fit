@@ -91,10 +91,15 @@ What each iteration decides:
   channel, `media_tokens` on the loopback behind `basic_auth`, and an API of some 300 lines of Go
   that logs the site's own viewers in and asks for a URL signed for each. `media_pages` gains a
   library and a player page behind the policy's login, which sign their URLs for the logged-in user
-  (`api/play`). hls.js 1.5.20 (Apache-2.0) is vendored with its license in `media_pages`'
-  `web/vendor`, taken from its npm package and checked against its shasum, served at
-  `<prefix>/vendor/hls.min.js` for the site's page as well; it is no Go dependency, and is recorded
-  here by rule 14.
+  (`api/play`). hls.js 1.5.20 (Apache-2.0) is vendored with its license, taken from its npm package
+  and checked against its shasum, served at `<prefix>/vendor/hls.min.js` for the site's page as
+  well; it is no Go dependency, and is recorded here by rule 14.
+- **I138, hls.js in the workbench**: the workbench's preview player plays with the same hls.js,
+  loaded only when a player first needs it. fit keeps one copy, in the workbench's `web/vendor`
+  with its license: `workbench.HLSJS()` hands it to `media_pages`, which serves it at its own
+  `vendor/` path. The console's Content-Security-Policy opens `connect-src`, `img-src` and
+  `media-src` (with `blob:`) to the listeners serving `vod` and `hls` routes alone, and no
+  `worker-src`, so the player runs without a worker.
 
 ## Rejected
 

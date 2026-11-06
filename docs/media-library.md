@@ -136,12 +136,24 @@ reload leaves out is removed: its scan stops, and what holds it is refused.
 | Method and path | What it answers |
 | --- | --- |
 | `GET /media/library` | every library: its roots, its scans' status, items and items with errors, problems, catalog bytes, file pool and sample tables |
-| `GET /media/library/<name>` | the same of one library, its problems, and a page of its items: `offset`, `limit` (100, at most 1000), `q` (in the ID or title), `codec` (`h264`, `aac`, ...), `error` (`true` for items with a file in error) |
+| `GET /media/library/<name>` | the same of one library, its problems, and a page of its items: `offset`, `limit` (100, at most 1000), `q` (in the ID or title), `codec` (`h264`, `aac`, ...), `error` (`true` for items with a file in error), `min_height` and `max_height` (the height of the item's largest rendition) |
 | `GET /media/library/<name>/items/<id>` | the item whole: its renditions with their tracks, codecs (RFC 6381), sizes, durations and bitrates, its audio, subtitles, poster and sidecar, and its errors |
 | `POST /media/library/<name>/rescan` | `202`, a scan asked for at once: `queued` is false when one was waiting already |
+| `POST /media/preview` | `{"library", "item"}` or `{"channel"}`: a URL of the item's (channel's) playlist, and of its poster, on the listener of the first `vod` (`hls`) route that serves it, good for two minutes: signed for the subject `workbench:<console user>` in a new session with the route's `url_signing` (`signed: "url"`), with a token of its `auth` (`"token"`), or as it is (`"public"`); with `expires`, `subject`, `session`, `route` and `cors`. 404 for a library, item, channel or route not found, 503 for a library not loaded yet |
+| `GET /media/auth` | every `media_auth` policy: its `url_signing` as it runs, its keys (their names, which is the default, whether a file keeps the secret and when it was written; never a secret nor a path), its playback sessions and their subjects, the URLs refused by reason, and the `media_tokens` routes that sign with it |
+| `GET /media/auth/<policy>/sessions` | a page of the policy's playback sessions, by subject and start: `offset`, `limit` (100, at most 1000), `subject` and `resource` (a prefix); with `total`, `matched`, `max_sessions` and the sessions playing of each subject on the page |
+| `POST /media/auth/<policy>/sessions/end` | `{"subject", "id"}`: ends the session, whose next request is refused 403; 404 when it is not playing |
+| `POST /media/auth/<policy>/rotate` | `{"key": "k1"}`, `{"all": true}`, or `{}` for a single secret: a new secret written to each one's `secret_file` and used at once, as `media_tokens`' revoke does; answers the keys rotated (`[""]` for the single secret) and `since`. 409 for a secret written in the config |
+| `POST /media/auth/<policy>/urls` | `{"subject", "path", "address", "ttl", "route"}`: a test URL in a new session, as `media_tokens`' `/urls` signs it; with `route`, that `media_tokens` route's `url_prefixes`, `max_ttl` and `url_base` apply, and without, a `ttl` of at most an hour and the listener of the `vod` or `hls` route that serves the path |
+| `GET /media/stats` | the libraries' items, file pools and sample tables; what the `vod` handlers served and their caches; each policy's sessions, refusals and the 50 resources with most sessions; each channel's state, its hub's subscribers and push targets |
 
 The status says whether a scan runs or waits, when the last one started and ended, the files it
 looked at, the media files it probes and has probed, and those it reused.
+
+The workbench's console passes the user logged in and the host the browser addressed to these
+endpoints, as `Fit-Console-User` and `Fit-Console-Host`; its pages may load images and media from
+the listeners of the `vod` and `hls` routes. The URLs these endpoints answer are sent with
+`Cache-Control: no-store` and never logged.
 
 ## Video on demand
 
@@ -407,7 +419,7 @@ req.SetBasicAuth("site-api", password)
 ```
 
 **The page plays it.** The site's page gives hls.js the URL; hls.js 1.5.20 (Apache-2.0) comes with
-fit, vendored in `media_pages`, at `<prefix>/vendor/hls.min.js` with its license beside it, for any
+fit, served by `media_pages` at `<prefix>/vendor/hls.min.js` with its license beside it, for any
 page of the same site to load. Safari plays the URL itself. The URL dies after its `ttl`; the
 player plays on, to the film's end and through pauses and seeks, on the grant its playlists handed
 it; a channel's grant lives `play_grace` past the URL. Once both are refused (403), the page asks the
@@ -431,6 +443,9 @@ the same on the library and player pages.
 
 `fit_media_library_items` (by `state`, ok or error), `fit_media_library_catalog_bytes`,
 `fit_media_library_scans_total`, `fit_media_library_probes_total` (by `result`),
-`fit_media_library_table_bytes`, `fit_media_library_pool_jobs` (queued, busy) and
-`fit_media_library_pool_refused_total` (refused, expired), each by `library`, on the Admin API's
-`/metrics`.
+`fit_media_library_table_bytes`, `fit_media_library_table_lookups_total` (hit, miss),
+`fit_media_library_pool_jobs` (queued, busy) and `fit_media_library_pool_refused_total` (refused,
+expired), each by `library`, on the Admin API's `/metrics`. The `vod` handlers add
+`fit_vod_requests_total`, `fit_vod_sent_bytes_total`, `fit_vod_cache_lookups_total` (hit, miss)
+and `fit_vod_cache_bytes`, by `library`; `media_auth` adds `fit_media_auth_url_refused_total` (by
+`policy` and `reason`) and `fit_media_auth_sessions` (by `policy`).

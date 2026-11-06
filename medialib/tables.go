@@ -38,17 +38,24 @@ type tables struct {
 	used int64
 	m    map[tableKey]*table
 	lru  list.List // of *table, the most recently used at the front
+	// hits counts the calls of Table that found their table kept, and
+	// misses those that did not: the table read from the file, a read
+	// under way waited for, or the call refused.
+	hits, misses uint64
 }
 
 func (ts *tables) init(max int64) {
 	ts.max, ts.m = max, map[tableKey]*table{}
 }
 
-// TableStats is what a library's sample tables take.
+// TableStats is what a library's sample tables take, and how often a table
+// asked for was kept (Hits) or not (Misses).
 type TableStats struct {
-	Tables int   `json:"tables"`
-	Bytes  int64 `json:"bytes"`
-	Max    int64 `json:"max"`
+	Tables int    `json:"tables"`
+	Bytes  int64  `json:"bytes"`
+	Max    int64  `json:"max"`
+	Hits   uint64 `json:"hits"`
+	Misses uint64 `json:"misses"`
 }
 
 // Tables returns what the library's sample tables take.
@@ -56,7 +63,7 @@ func (l *Library) Tables() TableStats {
 	ts := &l.tables
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	return TableStats{Tables: ts.lru.Len(), Bytes: ts.used, Max: ts.max}
+	return TableStats{Tables: ts.lru.Len(), Bytes: ts.used, Max: ts.max, Hits: ts.hits, Misses: ts.misses}
 }
 
 // Table gets the sample table of the track at index track of the
@@ -84,11 +91,13 @@ func (l *Library) Table(r *Rendition, track int, fn func(*mp4.Table, error)) {
 	ts.mu.Lock()
 	if e := ts.m[key]; e != nil {
 		if e.t != nil {
+			ts.hits++
 			ts.lru.MoveToFront(e.elem)
 			ts.mu.Unlock()
 			fn(e.t, nil)
 			return
 		}
+		ts.misses++
 		if len(e.waiters) >= maxTableWaiters {
 			ts.mu.Unlock()
 			fn(nil, ErrBusy)
@@ -98,6 +107,7 @@ func (l *Library) Table(r *Rendition, track int, fn func(*mp4.Table, error)) {
 		ts.mu.Unlock()
 		return
 	}
+	ts.misses++
 	need := t.TableBytes()
 	if need > ts.max {
 		ts.mu.Unlock()
