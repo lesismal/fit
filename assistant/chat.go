@@ -145,7 +145,7 @@ func (a *Assistant) chatHandler(r *console.Request) {
 		return
 	}
 	s := a.Settings()
-	level := s.Level(r.User)
+	level := a.Level(s, r.User)
 	modes := 0
 	for _, on := range []bool{body.Message != nil, body.Retry, body.Answer != nil} {
 		if on {
@@ -830,8 +830,8 @@ func (c *chat) runCalls(calls []model.ToolCall, i int, ask *model.ToolCall) {
 			// The user's level, checked on every call against the
 			// settings in use now, which a save may have changed.
 			s := c.a.Settings()
-			_, why := t.Allowed(s.Level(c.user), s)
-			c.result(t, tc, "error: not run: "+c.user+"'s level is "+s.Level(c.user)+" now, and the tool "+why, true)
+			_, why := t.Allowed(c.a.Level(s, c.user), s)
+			c.result(t, tc, "error: not run: "+c.user+"'s level is "+c.a.Level(s, c.user)+" now, and the tool "+why, true)
 		case t.Kind == KindAsk:
 			c.calls.Add(1)
 			if _, err := parseAsk(tc.Arguments); err != nil || ask != nil {
@@ -877,7 +877,7 @@ func (c *chat) runCalls(calls []model.ToolCall, i int, ask *model.ToolCall) {
 // now.
 func (c *chat) allowedNow(t *Tool) bool {
 	s := c.a.Settings()
-	ok, _ := t.Allowed(s.Level(c.user), s)
+	ok, _ := t.Allowed(c.a.Level(s, c.user), s)
 	return ok
 }
 

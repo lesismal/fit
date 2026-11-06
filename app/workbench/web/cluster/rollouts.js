@@ -155,6 +155,7 @@
         var b = r.body || {}, list = b.rollouts || [];
         var add = h('a.btn.btn--primary', { href: '#/cluster/newrollout' }, UI.icon('plus'), t('ro.new'));
         if (b.read_only) { add = UI.btn(t('ro.new'), 'plus', null, 'primary'); add.disabled = true; }
+        if (!FC.canAny('operator')) add = null; // a rollout is an operator's at least (I148) / 发布至少需要操作员（I148）
         UI.mount(head, add, h('span.small.muted', t('ro.max', { n: b.max_active, min: Math.round((b.plan_ttl_ms || 0) / 60000) })));
         UI.mount(body, h('div.stack', b.read_only ? h('div.callout.callout--warn', t('readonly', { why: b.read_only })) : null,
           list.length ? UI.card(t('ro.history'), UI.table([
@@ -188,7 +189,9 @@
       var names = res[0].nodes.map(function (n) { return n.name; }).sort();
       var groups = ((res[1].body && res[1].body.groups) || []).map(function (g) { return g.name; });
       var tpls = ((res[2].body && res[2].body.templates) || []).map(function (x) { return x.name; });
-      var kind = h('select.select', { name: 'rollout-kind' }, ['template', 'sync', 'copy'].map(function (k) {
+      // A copy applies config of no template: an admin's (I148). / 复制应用的不是模板中的配置：需要管理员（I148）。
+      var kinds = FC.canAny('admin') ? ['template', 'sync', 'copy'] : ['template', 'sync'];
+      var kind = h('select.select', { name: 'rollout-kind' }, kinds.map(function (k) {
         return h('option', { value: k, selected: (q.kind || 'template') === k }, t('ro.k.' + k));
       }));
       var kindHint = h('span.field__hint');
@@ -356,8 +359,14 @@
       if (!ask) return go();
       UI.confirm(ask, t('ro.' + (action === 'pause' ? 'pause.btn' : action)), danger).then(function (yes) { if (yes) go(); });
     }
+    // steers says whether the user may steer r: an operator of each member, an admin of each for a copy (I148).
+    // steers 判断用户能否操作 r：需要在每个成员上是操作员，复制则需要管理员（I148）。
+    function steers() {
+      return FC.canAll(r.kind === 'copy' ? 'admin' : 'operator', (r.members || []).map(function (x) { return x.node; }));
+    }
     function controls() {
       var s = r.state, btns = [];
+      if (!steers()) return null;
       if (s === 'running') btns.push(UI.btn(t('ro.pause.btn'), 'stop', function () { act('pause'); }, 'ghost sm'));
       if (s === 'paused') btns.push(UI.btn(t('ro.resume'), 'play', function () { act('resume'); }, 'primary sm'));
       if (s === 'waiting') btns.push(UI.btn(t('ro.go'), 'forward', function () { act('go'); }, 'primary sm'));
@@ -406,7 +415,7 @@
       }, 'ghost');
       UI.mount(body, h('div.stack',
         UI.card(t('ro.plan.title'), h('div.stack', ready.length ? null : UI.empty(t('ro.none.ready'), 'info'), ms.map(function (x) { return memberCard(x, true); }))),
-        ready.length ? UI.card(t('ro.strategy'), h('div.stack', form.el, h('div.btn-row', start, discard))) : h('div.btn-row', discard)));
+        !steers() ? null : ready.length ? UI.card(t('ro.strategy'), h('div.stack', form.el, h('div.btn-row', start, discard))) : h('div.btn-row', discard)));
     }
     function confirmStart() {
       var s = form.value();

@@ -20,7 +20,7 @@ func TestClusterDefaults(t *testing.T) {
 
 func TestClusterErrors(t *testing.T) {
 	const store = `"store": {"path": "/x", "password": "p"}`
-	ok := `{"admin": {` + store + `, ` + assistantConsole + `, "cluster": {"poll_interval": "5s", "max_nodes": 10}}}`
+	ok := `{"admin": {` + store + `, ` + assistantConsole + `, "cluster": {"poll_interval": "5s", "max_nodes": 10, "admins": ["ada"]}}}`
 	if _, err := Load([]byte(ok)); err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +46,10 @@ func TestClusterErrors(t *testing.T) {
 		{"member token twice", `{"admin": {"cluster_member": {"manager": "wss://m:1/cluster/link", "fingerprint": "` + strings.Repeat("AB:", 31) + `AB", "token": "x", "token_file": "/t"}}}`,
 			[]string{"cluster_member.token: token and token_file are two places for one token"}},
 		{"member required", `{"admin": {"cluster_member": {}}}`, []string{"cluster_member.manager"}},
+		{"admins", `{"admin": {` + store + `, ` + assistantConsole + `, "cluster": {"admins": ["", "nobody", "nobody"]}}}`,
+			[]string{"admin.cluster.admins[0]: an admin is a console user's name", "admins[1]: \"nobody\" is not a console user", "admins[2]: \"nobody\" is named twice"}},
+		{"too many admins", `{"admin": {` + store + `, ` + assistantConsole + `, "cluster": {"admins": [` + strings.TrimSuffix(strings.Repeat(`"a",`, MaxClusterAdmins+1), ",") + `]}}}`,
+			[]string{"admins: 65 admins, more than 64"}},
 	} {
 		_, err := Load([]byte(tc.doc))
 		if err == nil {

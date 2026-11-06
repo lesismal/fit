@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"sync"
+	"time"
 
 	"github.com/lesismal/fit/app/console"
 )
@@ -18,12 +19,38 @@ type TestResult struct {
 	MustChangePassword bool      `json:"must_change_password,omitempty"`
 }
 
+// testAudit is a test's audit entry: the member, kept or a draft, how it is
+// reached, and how the test went.
+func testAudit(at time.Time, user string, mem *Member, draft bool, res *TestResult) AuditEntry {
+	what := "the member as kept"
+	if draft {
+		what = "a draft: " + describe(mem)
+	}
+	e := AuditEntry{At: at, User: user, Action: ActionTest, Node: mem.Name, Outcome: AuditOK, Detail: clip(what, 512)}
+	if !res.OK {
+		e.Outcome = AuditFailed
+		if res.Error != nil {
+			e.Detail = clip(what+"; "+res.Error.Kind+": "+res.Error.Message, 512)
+		}
+	}
+	return e
+}
+
 // testSaved answers POST /api/nodes/<name>/test: the member as kept, or, when
 // the body holds one, as the body would change it, not saved.
 func (m *Manager) testSaved(r *console.Request, name string) {
 	in, err := unmarshalInput(r.Context.Body())
 	if err != nil {
 		_ = console.Error(r.Context, 400, "the body is not the JSON expected: "+err.Error())
+		return
+	}
+	// A test of the member as kept is an operation, which an operator
+	// runs too; one of a draft is the member's form, an admin's.
+	need := Need{Role: RoleOperator, Nodes: []string{name}}
+	if in != nil {
+		need.Role = RoleAdmin
+	}
+	if !m.allow(r, need) {
 		return
 	}
 	m.mu.Lock()
@@ -51,7 +78,7 @@ func (m *Manager) testSaved(r *console.Request, name string) {
 		m.answer(r, 0, nil, err)
 		return
 	}
-	m.test(r, &mem, func(res *TestResult) {
+	m.test(r, &mem, in != nil, func(res *TestResult) {
 		// The kept credentials worked: the poller need not wait out a
 		// backoff a refused login set.
 		if res.OK && n != nil && sameLink(&n.spec, &mem) {
@@ -72,13 +99,29 @@ func (m *Manager) testDraft(r *console.Request) {
 		m.answer(r, 0, nil, err)
 		return
 	}
-	m.test(r, &mem, nil)
+	if err := m.allowDraft(r.User, &mem); err != nil {
+		m.answer(r, 0, nil, err)
+		return
+	}
+	m.test(r, &mem, true, nil)
+}
+
+// allowDraft checks that user is an admin of mem, a member not saved, by
+// the groups it would be in.
+func (m *Manager) allowDraft(user string, mem *Member) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if roleRank(rolesIn(&m.doc, m.admins, user).on(m.groupsOf(mem))) < roleRank(RoleAdmin) {
+		return &ErrForbidden{User: user, Role: RoleAdmin, Nodes: []string{mem.Name}}
+	}
+	return nil
 }
 
 // test tests mem on connections of its own, answering r once the test is
-// over, and then calls after, when not nil, with the result. A browser that
-// leaves abandons the test.
-func (m *Manager) test(r *console.Request, mem *Member, after func(*TestResult)) {
+// over, and then calls after, when not nil, with the result, which the
+// audit log records, draft saying whether mem is the member as kept. A
+// browser that leaves abandons the test.
+func (m *Manager) test(r *console.Request, mem *Member, draft bool, after func(*TestResult)) {
 	select {
 	case m.tests <- struct{}{}:
 	default:
@@ -93,6 +136,7 @@ func (m *Manager) test(r *console.Request, mem *Member, after func(*TestResult))
 			if after != nil {
 				after(res)
 			}
+			m.record(testAudit(m.now().UTC(), r.User, mem, draft, res))
 			_ = r.JSON(200, res)
 			r.Context.Release()
 			n.shutdown(func() { <-m.tests })

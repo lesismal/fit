@@ -28,8 +28,15 @@ const Section = "cluster"
 // written over: the manager is then read-only.
 //
 // Version 2 (I149) added the members that link out to the manager: a
-// member's link, and the link listener's certificate.
-const DocVersion = 2
+// member's link, and the link listener's certificate. Version 3 (I148)
+// added the users' roles; a document without roles is still written as
+// version 2, which an earlier fit of that version reads and writes, and
+// one with roles as 3, which such a fit leaves read-only rather than drop
+// the roles and let every user do everything.
+const DocVersion = 3
+
+// docVersionNoRoles is the version a document without roles is written as.
+const docVersionNoRoles = 2
 
 // The ways a manager reaches a member.
 const (
@@ -444,6 +451,25 @@ type AuditEntry struct {
 	// Op is an operation's ID, and Outcomes how it went on each member.
 	Op       string         `json:"op,omitempty"`
 	Outcomes []AuditOutcome `json:"outcomes,omitempty"`
+	// Nodes are the members it acted on beside Node and its outcomes'
+	// (I148): a rollout's.
+	Nodes []string `json:"nodes,omitempty"`
+	// Outcome is how it went: AuditOK, AuditFailed, AuditPartial,
+	// AuditUnknown or AuditNotSent; a rollout's end, the state it ended in.
+	Outcome string `json:"outcome,omitempty"`
+	// Diff is what changed, a unified diff: of a member (its credentials
+	// as set or not), a group, a template (its secrets masked), the roles,
+	// or a rollout's parts per member; at most MaxAuditDiff bytes, and
+	// Clipped when cut. Digest is the SHA-256 of the whole diff, or of
+	// the body a write through the node switcher sent, which is not kept.
+	Diff    string `json:"diff,omitempty"`
+	Clipped bool   `json:"clipped,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+	// Before and After are the versions before and after: the manager's
+	// document's revision ("r12") for a change of its own, a member's
+	// config version for a write through the node switcher.
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
 }
 
 // AuditOutcome is how an operation went on one member: its status, done or
@@ -453,6 +479,11 @@ type AuditOutcome struct {
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Before and After are the member's config versions before and after
+	// (I148), when known; Digest the hash of the config it was given.
+	Before uint64 `json:"before,omitempty"`
+	After  uint64 `json:"after,omitempty"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // The actions an AuditEntry records.
@@ -480,6 +511,11 @@ type document struct {
 	// LinkCert is the link listener's certificate and key, PEM, made once
 	// and kept, so that the members' pins of it stay good.
 	LinkCert *linkCert `json:"link_cert,omitempty"`
+	// Access is the users' roles (I148); nil until they are first set.
+	Access *Access `json:"access,omitempty"`
+	// Revision counts the changes of the document (I148), which the
+	// audit log names as the versions before and after a change.
+	Revision uint64 `json:"revision,omitempty"`
 }
 
 // linkCert is a certificate and its key, PEM.
@@ -502,10 +538,14 @@ func readDocument(data []byte) (d document, newer bool, err error) {
 	return d, d.Version > DocVersion, nil
 }
 
-// marshal returns d as the store keeps it, as version DocVersion.
+// marshal returns d as the store keeps it: as version DocVersion with
+// roles, and docVersionNoRoles without.
 func (d *document) marshal() []byte {
 	out := *d
-	out.Version = DocVersion
+	out.Version = docVersionNoRoles
+	if out.Access != nil {
+		out.Version = DocVersion
+	}
 	if out.Groups == nil {
 		out.Groups = []Group{}
 	}

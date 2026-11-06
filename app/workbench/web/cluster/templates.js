@@ -332,6 +332,9 @@
       }
       var imp = UI.btn(t('tp.import'), 'download', function () { importDialog(UI); }, 'ghost');
       imp.disabled = !!data.readOnly;
+      // Templates are changed by a cluster-wide admin only (I148). / 只有集群范围的管理员才能修改模板（I148）。
+      var admin = FC.canCluster('admin');
+      if (!admin) addBtn = imp = null;
       UI.mount(head, h('span.btn-row', addBtn, imp, h('a.btn.btn--ghost', { href: '#/cluster/compare' }, UI.icon('swap'), t('tp.compare'))),
         h('span.small.muted', t('tp.count', { n: data.templates.length, max: data.max })));
       var parts = [];
@@ -349,6 +352,7 @@
         { label: t('tp.parts'), render: function (tp) { return h('div.cl-chips', tp.parts.map(function (p) { return h('span.cl-chip', p.path); })); } },
         { label: t('tp.members'), render: function (tp) { return counts(tp.nodes); } },
         { label: '', cls: 'actions', render: function (tp) {
+          if (!admin) return null;
           var rb = UI.btn(t('delete'), 'trash', function () { remove(tp); }, 'ghost sm');
           rb.title = t('delete') + ' ' + tp.name;
           rb.disabled = !!data.readOnly;
@@ -520,7 +524,7 @@
             field('order', t('tp.order'), orderIn, t('tp.order.hint'))),
           field('groups', t('tp.groups'), groupsBox, t('tp.groups.hint')),
           h('div.field', h('span.field__label', t('tp.config')), h('span.field__hint', t('tp.config.hint')), tabs, cfgBox, fields.config = h('span.field__hint.cl-err', { hidden: true })),
-          h('div.btn-row', saveBtn))),
+          FC.canCluster('admin') ? h('div.btn-row', saveBtn) : null)),
         info.length ? h('div.tp-info', info) : null));
     }
 
@@ -540,7 +544,8 @@
         }), (res.pending || []).length ? h('div.callout.callout--warn', t('tp.pending') + ' ' + res.pending.join(', ')) : null);
       }
       // Roll out the template's change (I146). / 发布模板的修改（I146）。
-      var roll = h('a.btn.btn--primary.btn--sm', { href: '#/cluster/newrollout?kind=template&template=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.rollout'));
+      // A template's rollout is an operator's, on each of its members (I148). / 模板的发布需要在其每个成员上是操作员（I148）。
+      var roll = FC.canAll('operator', tp.nodes) ? h('a.btn.btn--primary.btn--sm', { href: '#/cluster/newrollout?kind=template&template=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.rollout')) : null;
       UI.mount(sync, UI.card(t('tp.sync'), h('div.stack', h('div.small.muted', t('tp.read.note')), rows), h('span.btn-row', readBtn, roll)));
     }
 
@@ -580,7 +585,7 @@
           d.config ? UI.card(t('tp.rendered'), sideBySide(UI, t('rd.current'), pretty(d.config), t('rd.desired'), pretty(d.desired)), null, true) : null));
       }, function (e) { UI.mount(box, h('div.callout.callout--danger', e.message)); });
     }
-    UI.mount(sh.tools, h('a.btn.btn--ghost.btn--sm', { href: '#/cluster/newrollout?kind=sync&nodes=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.syncthis')),
+    UI.mount(sh.tools, FC.canOn('operator', name) ? h('a.btn.btn--ghost.btn--sm', { href: '#/cluster/newrollout?kind=sync&nodes=' + encodeURIComponent(name) }, UI.icon('send'), t('ro.syncthis')) : null,
       UI.btn(t('refresh'), 'refresh', read, 'ghost sm'));
     read();
   };

@@ -553,6 +553,9 @@ func (m *Manager) TemplateByName(name string) (TemplateView, bool) {
 func (m *Manager) AddTemplate(user string, in *TemplateInput) (TemplateView, error) {
 	var out TemplateView
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		t, err := in.template(nil, m.now().UTC())
 		if err != nil {
 			return AuditEntry{}, err
@@ -565,7 +568,9 @@ func (m *Manager) AddTemplate(user string, in *TemplateInput) (TemplateView, err
 		}
 		d.Templates = append(slices.Clone(d.Templates), t)
 		out = templateViewIn(d, &t)
-		return AuditEntry{Action: ActionTemplateAdd, Template: t.Name, Detail: describeTemplate(&out)}, nil
+		e := AuditEntry{Action: ActionTemplateAdd, Template: t.Name, Detail: describeTemplate(&out), Nodes: out.Nodes}
+		e.setDiff("", templateText(d, &t), "none", t.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q added the template %q", user, out.Name)
@@ -578,6 +583,9 @@ func (m *Manager) AddTemplate(user string, in *TemplateInput) (TemplateView, err
 func (m *Manager) UpdateTemplate(user, name string, in *TemplateInput) (TemplateView, error) {
 	var out TemplateView
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		i := templateIndex(d, name)
 		if i < 0 {
 			return AuditEntry{}, errNoTemplate(name)
@@ -592,11 +600,13 @@ func (m *Manager) UpdateTemplate(user, name string, in *TemplateInput) (Template
 		if t.Name != name && templateIndex(d, t.Name) >= 0 {
 			return AuditEntry{}, errConflict("a template is already named " + strconv.Quote(t.Name))
 		}
-		changed := templateChanges(&d.Templates[i], &t)
+		changed, before := templateChanges(&d.Templates[i], &t), templateText(d, &d.Templates[i])
 		d.Templates = slices.Clone(d.Templates)
 		d.Templates[i] = t
 		out = templateViewIn(d, &t)
-		return AuditEntry{Action: ActionTemplateUpdate, Template: name, Detail: changed}, nil
+		e := AuditEntry{Action: ActionTemplateUpdate, Template: name, Detail: changed, Nodes: out.Nodes}
+		e.setDiff(before, templateText(d, &t), name, t.Name)
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q changed the template %q", user, name)
@@ -608,12 +618,17 @@ func (m *Manager) UpdateTemplate(user, name string, in *TemplateInput) (Template
 // it gave them; the manager no longer owns it there.
 func (m *Manager) RemoveTemplate(user, name string) error {
 	err := m.change(user, func(d *document) (AuditEntry, error) {
+		if err := m.allowCluster(d, user); err != nil {
+			return AuditEntry{}, err
+		}
 		i := templateIndex(d, name)
 		if i < 0 {
 			return AuditEntry{}, errNoTemplate(name)
 		}
+		e := AuditEntry{Action: ActionTemplateRemove, Template: name, Nodes: templateViewIn(d, &d.Templates[i]).Nodes}
+		e.setDiff(templateText(d, &d.Templates[i]), "", name, "none")
 		d.Templates = slices.Delete(slices.Clone(d.Templates), i, i+1)
-		return AuditEntry{Action: ActionTemplateRemove, Template: name}, nil
+		return e, nil
 	})
 	if err == nil {
 		m.logf("cluster: %q removed the template %q", user, name)

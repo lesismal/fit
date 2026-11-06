@@ -55,7 +55,7 @@ type mcpView struct {
 func (s *Server) view(user string) mcpView {
 	set := s.a.Settings()
 	m := set.MCP
-	level := set.Level(user)
+	level := s.a.Level(set, user)
 	all := level == config.AssistantApply
 	allow := []string{}
 	if m != nil {
@@ -69,7 +69,7 @@ func (s *Server) view(user string) mcpView {
 	now := s.now().UnixMilli()
 	for _, t := range s.tokens.view(user, all) {
 		v.Tokens = append(v.Tokens, tokenView{ID: t.ID, User: t.User, Name: t.Name, Level: t.Level, Created: t.Created, Expires: t.Expires,
-			Expired: t.expired(now), Allow: t.Allow, LastUsed: t.LastUsed, LastAddr: t.LastAddr, Effective: effective(t.Level, set.Level(t.User))})
+			Expired: t.expired(now), Allow: t.Allow, LastUsed: t.LastUsed, LastAddr: t.LastAddr, Effective: effective(t.Level, s.a.Level(set, t.User))})
 	}
 	return v
 }
@@ -91,7 +91,7 @@ func (s *Server) create(r *console.Request) {
 		return
 	}
 	set := s.a.Settings()
-	level := set.Level(r.User)
+	level := s.a.Level(set, r.User)
 	if msg := n.check(set.MCP); msg != "" {
 		_ = console.Error(r.Context, 400, msg)
 		return
@@ -127,7 +127,7 @@ func (s *Server) create(r *console.Request) {
 // and its next request is refused.
 func (s *Server) revoke(r *console.Request) {
 	id := strings.TrimPrefix(r.Path, "/api/mcp/tokens/")
-	anyone := s.a.Settings().Level(r.User) == config.AssistantApply
+	anyone := s.a.Level(s.a.Settings(), r.User) == config.AssistantApply
 	user := r.User
 	r.Go(func() {
 		t := s.tokens.remove(id, user, anyone)

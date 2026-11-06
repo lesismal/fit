@@ -704,6 +704,13 @@
     "config.Cluster": {
       "additionalProperties": false,
       "properties": {
+        "admins": {
+          "description": "Console users (admin.console.users) who are the cluster's admins whatever roles the Users and audit page gives: the way back in when no admin is left. Once this or a role is set, a console user does on the cluster what its roles let it, and only a cluster-wide admin changes this manager's own config; until then, every console user is a cluster-wide admin. Changed at a restart, as all of admin is.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "link_address": {
           "description": "Where members that link out to the manager reach it, as \":7444\" or \"0.0.0.0:7444\": a WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps in the store, which each member pins when it enrolls. Members behind NAT, or with no port open, link here with the config line Add by enrollment gives, and are managed through their link as the others are over HTTP. Off when left out: no member can enroll.",
           "type": "string"

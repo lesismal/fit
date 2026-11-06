@@ -126,8 +126,11 @@ type Outcome struct {
 // from), the differences a check found, how many keys a purge removed, and
 // who answered a test.
 type OpResult struct {
-	Version    uint64 `json:"version,omitempty"`
-	From       uint64 `json:"from,omitempty"`
+	Version uint64 `json:"version,omitempty"`
+	From    uint64 `json:"from,omitempty"`
+	// Previous is the version the member ran before a reload or a
+	// rollback, as last read (I148).
+	Previous   uint64 `json:"previous,omitempty"`
 	Drift      *Drift `json:"drift,omitempty"`
 	Purged     *int   `json:"purged,omitempty"`
 	LatencyMs  int64  `json:"latency_ms,omitempty"`
@@ -240,6 +243,9 @@ func (m *Manager) StartOp(user string, req *OpRequest) (Op, error) {
 	}
 	names, err := m.targetsLocked(req)
 	if err != nil {
+		return Op{}, err
+	}
+	if err := m.allowLocked(user, Need{Role: RoleOperator, Nodes: names}); err != nil {
 		return Op{}, err
 	}
 	if m.ops.busy == nil {
@@ -456,8 +462,12 @@ func (op *Op) audit() AuditEntry {
 		if o.Error != nil {
 			a.Error = clip(o.Error.Kind+": "+o.Error.Message, maxAuditError)
 		}
+		if res := o.Result; res != nil && (op.Op == OpReload || op.Op == OpRollback) {
+			a.Before, a.After = res.Previous, res.Version
+		}
 		e.Outcomes = append(e.Outcomes, a)
 	}
+	e.Outcome = opOutcome(e.Outcomes, func(s string) bool { return s == OutcomeDone })
 	return e
 }
 
@@ -495,9 +505,13 @@ func clip(s string, n int) string {
 
 // auditSize is about what e takes in the store.
 func auditSize(e *AuditEntry) int {
-	n := 96 + len(e.User) + len(e.Action) + len(e.Node) + len(e.Group) + len(e.Detail) + len(e.Op) + len(e.Rollout) + len(e.Template)
+	n := 96 + len(e.User) + len(e.Action) + len(e.Node) + len(e.Group) + len(e.Detail) + len(e.Op) + len(e.Rollout) + len(e.Template) +
+		len(e.Outcome) + len(e.Diff) + len(e.Digest) + len(e.Before) + len(e.After)
 	for _, o := range e.Outcomes {
-		n += 48 + len(o.Node) + len(o.Status) + len(o.Detail) + len(o.Error)
+		n += 96 + len(o.Node) + len(o.Status) + len(o.Detail) + len(o.Error) + len(o.Digest)
+	}
+	for _, x := range e.Nodes {
+		n += 3 + len(x)
 	}
 	return n
 }
@@ -675,13 +689,31 @@ func appliedDetail(what string, a *applied) string {
 // opReload applies the member's running config again.
 func (m *Manager) opReload(name string, done func(*OpResult, string, *Problem)) {
 	var a applied
+	before := m.polledVersion(name)
 	m.call(name, "POST", "/reload", nil, nil, &a, func(_ *Reply, prob *Problem) {
 		if prob != nil {
 			done(nil, "", prob)
 			return
 		}
-		done(&OpResult{Version: a.Version}, appliedDetail("reloaded", &a), nil)
+		done(&OpResult{Version: a.Version, Previous: before}, appliedDetail("reloaded", &a), nil)
 	})
+}
+
+// polledVersion is the config version the member name ran when last
+// polled, 0 when not known.
+func (m *Manager) polledVersion(name string) uint64 {
+	m.mu.Lock()
+	n := m.nodes[name]
+	m.mu.Unlock()
+	if n == nil {
+		return 0
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if c := n.state.Config; c != nil {
+		return c.Version
+	}
+	return 0
 }
 
 // versionsAnswer is a member's GET /versions.
@@ -736,7 +768,7 @@ func (m *Manager) opRollback(name string, done func(*OpResult, string, *Problem)
 				done(nil, "", prob)
 				return
 			}
-			done(&OpResult{Version: a.Version, From: to}, appliedDetail("rolled back to version "+strconv.FormatUint(to, 10)+",", &a), nil)
+			done(&OpResult{Version: a.Version, From: to, Previous: vs.Current}, appliedDetail("rolled back to version "+strconv.FormatUint(to, 10)+",", &a), nil)
 		})
 	})
 }
@@ -789,9 +821,9 @@ type opsBody struct {
 	Ops []Op `json:"ops"`
 }
 
-func (m *Manager) opRoutes(api *console.API) {
+func (m *Manager) opRoutes(api *router) {
 	api.Handle("GET", "/api/ops", func(r *console.Request) { _ = r.JSON(200, opsBody{Ops: m.Ops()}) })
-	api.Handle("POST", "/api/ops", m.startOp)
+	api.Checked("POST", "/api/ops", m.startOp)
 	api.HandlePrefix("GET", "/api/ops/", func(r *console.Request) {
 		id := strings.TrimPrefix(r.Path, "/api/ops/")
 		op, ok := m.OpByID(id)

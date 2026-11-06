@@ -472,6 +472,14 @@ func TestRolloutRolling(t *testing.T) {
 			if e.Action == ActionRolloutEnd && (len(e.Outcomes) != 5 || !strings.Contains(e.Outcomes[0].Detail, "applied as version 2")) {
 				t.Errorf("%+v", e)
 			}
+			// I148: the end's outcome and each member's versions; the
+			// start's diff of what it applies, its digest and members.
+			if e.Action == ActionRolloutEnd && (e.Outcome != RolloutDone || e.Outcomes[0].After != 2 || e.Outcomes[0].Before == 0 || e.Outcomes[0].Digest == "") {
+				t.Errorf("%+v", e)
+			}
+			if e.Action == ActionRolloutStart && (len(e.Nodes) != 5 || e.Diff == "" || !strings.HasPrefix(e.Digest, "sha256:") || len(e.Outcomes) != 5) {
+				t.Errorf("%+v", e)
+			}
 		}
 	}
 	if strings.Join(acts, ",") != "rollout.plan,rollout.start,rollout.end" {

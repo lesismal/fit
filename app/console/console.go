@@ -144,6 +144,13 @@ type Options struct {
 	// that is not let in is answered at once, and its connection closed
 	// rather than its body read.
 	StreamBody func(r *stdhttp.Request) bool
+	// Gate, when not nil, is asked about every API request of a logged-in
+	// user once its session and CSRF token are checked, before it reaches
+	// its endpoint: it returns "" to let it through, or why it is refused,
+	// answered 403. It is called on a fib worker and must not block. A
+	// manager of other fits bounds by it what each user changes of the
+	// manager itself (cluster's ConsoleGate).
+	Gate func(user, method, path, query string) string
 }
 
 // MaxStreamedBody bounds a body StreamBody picks, whatever its handler's
@@ -219,8 +226,9 @@ type Console struct {
 	modules func() []*Module
 	pwOnly  []string           // Options.PasswordRoutes
 	ends    map[string]Handler // Options.Endpoints
-	// sources is Options.Sources.
+	// sources is Options.Sources, gate Options.Gate.
 	sources func(r *stdhttp.Request) []string
+	gate    func(user, method, path, query string) string
 	tasks   chan func()
 	checks  chan func() // the login checks' queue, on LoginWorkers of their own
 	limit   *limitHandler
@@ -275,7 +283,7 @@ func (a *API) HandlePrefix(method, prefix string, h Handler) {
 func Start(engine *fib.Engine, o Options) (*Console, error) {
 	cfg := o.Config
 	logins := login.New(login.OptionsOf(cfg.Console()))
-	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes, ends: o.Endpoints, sources: o.Sources,
+	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes, ends: o.Endpoints, sources: o.Sources, gate: o.Gate,
 		idle: idleTimeout, unauthIdle: unauthIdleTimeout,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
 	switch {
@@ -565,6 +573,12 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 	if s.MustChange && !c.passwordRoute(r.Method, p) {
 		_ = WriteJSON(ctx, stdhttp.StatusForbidden, mustChangeBody{Error: "change the temporary password first", MustChange: true})
 		return
+	}
+	if c.gate != nil {
+		if why := c.gate(s.User, r.Method, p, r.URL.RawQuery); why != "" {
+			_ = Error(ctx, stdhttp.StatusForbidden, why)
+			return
+		}
 	}
 	if r.Method == stdhttp.MethodGet {
 		switch p {

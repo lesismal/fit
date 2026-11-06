@@ -174,7 +174,7 @@ func (a *Assistant) viewProposal(ctx context.Context, user, conv string, p *Prop
 // viewFrom returns p as viewer sees it, b being p checked on the running
 // config. A diff that cannot be rendered says why in its place.
 func (a *Assistant) viewFrom(ctx context.Context, user, conv string, p *Proposal, viewer string, b *built) *ProposalView {
-	level, red := a.Settings().Level(viewer), b.red
+	level, red := a.Level(a.Settings(), viewer), b.red
 	v := &ProposalView{ID: p.ID, User: user, Conversation: conv, Revision: p.Revision, Created: p.Created, Updated: p.Updated,
 		BaseVersion: p.BaseVersion, BaseETag: p.BaseETag, Version: b.cur.version, ETag: b.cur.etag, Stale: b.kind != "" && p.BaseETag != b.cur.etag,
 		Kind: b.kind, Changed: b.changed, Diff: map[string]string{}, Valid: b.valid, Errors: b.errors, Fixes: b.fixes, Rollback: b.rollback,
@@ -265,7 +265,7 @@ func (a *Assistant) proposalsHandler(r *console.Request) {
 	r.Go(func() {
 		s := a.Settings()
 		users := []string{viewer}
-		if s.Level(viewer) == config.AssistantApply && a.o.Console != nil {
+		if a.Level(s, viewer) == config.AssistantApply && a.o.Console != nil {
 			for _, u := range a.o.Console.Users {
 				if u.Username != viewer {
 					users = append(users, u.Username)
@@ -288,7 +288,7 @@ func (a *Assistant) proposalsHandler(r *console.Request) {
 		}
 		a.chats.mu.Unlock()
 		slices.SortFunc(list, func(x, y pendingView) int { return int(y.Updated - x.Updated) })
-		_ = r.JSON(200, map[string]any{"proposals": list, "level": s.Level(viewer)})
+		_ = r.JSON(200, map[string]any{"proposals": list, "level": a.Level(s, viewer)})
 	})
 }
 
@@ -298,7 +298,7 @@ func (a *Assistant) owner(viewer, named string) (string, bool) {
 	if named == "" || named == viewer {
 		return viewer, true
 	}
-	return named, a.Settings().Level(viewer) == config.AssistantApply
+	return named, a.Level(a.Settings(), viewer) == config.AssistantApply
 }
 
 // proposalHandler answers GET /api/proposals/{conversation} (?user= for
@@ -420,7 +420,7 @@ func (a *Assistant) apply(r *console.Request, viewer, user, conv string, body pr
 		a.Audit(entry)
 		_ = r.JSON(status, applyResult{Outcome: outcome, Error: msg, Proposal: v})
 	}
-	if level := a.Settings().Level(viewer); level != config.AssistantApply {
+	if level := a.Level(a.Settings(), viewer); level != config.AssistantApply {
 		p := a.pending(r, user, conv, body.ID)
 		if p != nil {
 			refuse(403, OutcomeRefused, fmt.Sprintf("%s's level is %s: only a user whose level is apply applies a proposal", viewer, level), p, nil)
@@ -588,7 +588,7 @@ func (a *Assistant) applyConfig(ctx context.Context, b *built) (*applied, error)
 // discard answers POST /api/proposals/{conversation}/discard: the
 // proposal is dropped, and nothing else changes.
 func (a *Assistant) discard(r *console.Request, viewer, user, conv string, body proposalBody) {
-	if a.Settings().Level(viewer) == config.AssistantOff {
+	if a.Level(a.Settings(), viewer) == config.AssistantOff {
 		_ = console.Error(r.Context, 403, "the assistant is off for "+viewer)
 		return
 	}

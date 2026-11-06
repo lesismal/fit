@@ -231,8 +231,10 @@
     }
     function draw() {
       if (!data || !document.body.contains(el)) return;
-      var addBtn = UI.btn(t('gr.add'), 'plus', function () { groupForm(UI, { etag: data.etag, reload: read, then: read }); }, 'primary');
-      addBtn.disabled = !!data.readOnly || data.groups.length >= data.maxGroups;
+      // Groups decide roles: only a cluster-wide admin changes them (I148). / 分组决定角色：只有集群范围的管理员才能修改（I148）。
+      var admin = FC.canCluster('admin');
+      var addBtn = admin ? UI.btn(t('gr.add'), 'plus', function () { groupForm(UI, { etag: data.etag, reload: read, then: read }); }, 'primary') : null;
+      if (addBtn) addBtn.disabled = !!data.readOnly || data.groups.length >= data.maxGroups;
       UI.mount(head, h('span.btn-row', addBtn, h('a.btn.btn--ghost', { href: '#/cluster/ops' }, UI.icon('play'), t('gr.anyops'))),
         h('span.small.muted', t('gr.count', { n: data.groups.length, max: data.maxGroups })));
       var parts = [];
@@ -250,6 +252,7 @@
         { label: t('gr.now'), render: function (g) { return stateCounts(UI, g.nodes || [], states); } },
         { label: t('gr.vars'), cls: 'num', render: function (g) { return String(Object.keys(g.variables || {}).length); } },
         { label: '', cls: 'actions', render: function (g) {
+          if (!admin) return null;
           var eb = UI.btn(t('edit'), 'edit', function () { edit(g); }, 'ghost sm'), rb = UI.btn(t('delete'), 'trash', function () { remove(g); }, 'ghost sm');
           eb.title = t('edit') + ' ' + g.name; rb.title = t('delete') + ' ' + g.name;
           eb.disabled = rb.disabled = !!data.readOnly;
@@ -402,6 +405,7 @@
         ]),
         (g.missing || []).length ? h('div.small.cl-warn', t('gr.missing', { names: g.missing.join(', ') })) : null),
         h('span.btn-row', (function () {
+          if (!FC.canCluster('admin')) return null;
           var b = UI.btn(t('edit'), 'edit', function () {
             groupForm(UI, { group: g, etag: etag, reload: read, then: function (saved) {
               if (saved && saved.name && saved.name !== group) location.hash = '#/cluster/group/' + encodeURIComponent(saved.name); else read();
@@ -413,6 +417,8 @@
     }
     function byName() { var m = {}; states.forEach(function (s) { m[s.name] = s; }); return m; }
     function drawBar() {
+      // Operations are an operator's, on each member picked (I148). / 操作需要在所选的每个成员上是操作员（I148）。
+      if (!FC.canAny('operator')) { UI.clear(bar); return; }
       var sel = selected();
       var btns = OPS.map(function (o) {
         var b = UI.btn(t('op.' + o[0]), o[1], function () { run(o[0]); }, o[0] === 'rollback' || o[0] === 'purge' ? 'ghost sm' : 'ghost sm');
@@ -429,10 +435,10 @@
       }
       var allBox = h('input', { type: 'checkbox', 'aria-label': t('op.selectall'), checked: selected().length === states.length });
       allBox.indeterminate = selected().length > 0 && selected().length < states.length;
-      allBox.addEventListener('change', function () { states.forEach(function (s) { picked[s.name] = allBox.checked; }); drawList(); drawBar(); });
+      allBox.addEventListener('change', function () { states.forEach(function (s) { picked[s.name] = allBox.checked && FC.canOn('operator', s.name); }); drawList(); drawBar(); });
       UI.mount(list, UI.card(null, UI.table([
         { label: allBox, cls: 'cl-pick', render: function (s) {
-          var b = h('input', { type: 'checkbox', checked: !!picked[s.name], 'aria-label': t('op.select') + ' ' + s.name });
+          var b = h('input', { type: 'checkbox', checked: !!picked[s.name], 'aria-label': t('op.select') + ' ' + s.name, disabled: !FC.canOn('operator', s.name) });
           b.addEventListener('change', function () { picked[s.name] = b.checked; drawList(); drawBar(); });
           return b;
         } },
@@ -499,7 +505,7 @@
         states = ss;
         // Every member is selected at first; one that joins later is too. / 起初选中全部成员；之后加入的成员也选中。
         if (!picked) picked = {};
-        states.forEach(function (s) { if (!(s.name in picked)) picked[s.name] = true; });
+        states.forEach(function (s) { if (!(s.name in picked)) picked[s.name] = FC.canOn('operator', s.name); });
         drawInfo(); drawList(); drawBar();
       }, function (e) {
         if (!document.body.contains(el) || e.status === 401) return;

@@ -349,9 +349,16 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		if manager != nil {
 			modules = func() []*appconsole.Module { return append([]*appconsole.Module{manager.Module()}, apps.Modules()...) }
 		}
-		console, err = admin.StartConsole(s.Engine(), c.Admin.Console, c.Admin, configs, modules, func(r admin.Result) {
+		// A manager's users do what their roles let them (I148): the
+		// console asks it about each request, and the assistant never
+		// does more for a user than the user may.
+		var extras admin.ConsoleExtras
+		if manager != nil {
+			extras = admin.ConsoleExtras{Gate: manager.ConsoleGate, AssistantCap: manager.AssistantCap}
+		}
+		console, err = admin.StartConsoleWith(s.Engine(), c.Admin.Console, c.Admin, configs, modules, func(r admin.Result) {
 			printApplied(stdout, stderr, r)
-		}, adminLog.Infof)
+		}, adminLog.Infof, extras)
 		if err != nil {
 			fmt.Fprintf(stderr, "fit run: %v\n", err)
 			_ = as.Shutdown(context.Background())
@@ -359,6 +366,9 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			return 1
 		}
 		adminLog.Infof("console on %s", console.URL())
+		if manager != nil {
+			manager.SetConsole(console.Users, console.AssistantLevel)
+		}
 	}
 	// A member of a manager's that links out to it, admin.cluster_member:
 	// the manager reaches the Admin API, in process, over the link.

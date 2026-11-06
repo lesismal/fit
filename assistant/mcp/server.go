@@ -248,7 +248,7 @@ func (s *Server) Serve(r *console.Request) {
 		reply(r, 403, errorOf(nil, codeServer, "the MCP token "+tok.Name+" is not used from "+addr.String(), nil))
 		return
 	}
-	level := effective(tok.Level, set.Level(tok.User))
+	level := effective(tok.Level, s.a.Level(set, tok.User))
 	if level == config.AssistantOff {
 		r.Authenticated(false, "")
 		reply(r, 403, errorOf(nil, codeServer, "the assistant is off for "+tok.User, nil))

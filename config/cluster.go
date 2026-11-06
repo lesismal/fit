@@ -3,6 +3,7 @@ package config
 import (
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ type Cluster struct {
 	MaxResponseBytes int64    `json:"max_response_bytes,omitempty" min:"0" max:"67108864" default:"4194304" doc:"The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least."`
 	LinkAddress      string   `json:"link_address,omitempty" doc:"Where members that link out to the manager reach it, as \":7444\" or \"0.0.0.0:7444\": a WebSocket listener over TLS, with a self-signed certificate the manager makes once and keeps in the store, which each member pins when it enrolls. Members behind NAT, or with no port open, link here with the config line Add by enrollment gives, and are managed through their link as the others are over HTTP. Off when left out: no member can enroll."`
 	LinkURL          string   `json:"link_url,omitempty" doc:"The URL members reach link_address at, as \"wss://manager.example.com:7444/cluster/link\", which the config line Add by enrollment gives names; when left out, the host the page was opened at and link_address's port. Only a wss URL."`
+	Admins           []string `json:"admins,omitempty" doc:"Console users (admin.console.users) who are the cluster's admins whatever roles the Users and audit page gives: the way back in when no admin is left. Once this or a role is set, a console user does on the cluster what its roles let it, and only a cluster-wide admin changes this manager's own config; until then, every console user is a cluster-wide admin. Changed at a restart, as all of admin is."`
 
 	At Value `json:"-" fit:"self"`
 }
@@ -107,12 +109,39 @@ func checkCluster(a *Admin, add func(Value, string, ...any)) {
 			add(c.At.Field("link_address"), "%q is not a host and a port, as \":7444\"", c.LinkAddress)
 		}
 	}
+	checkClusterAdmins(a, add)
 	if c.LinkURL != "" {
 		if msg := CheckClusterLinkURL(c.LinkURL); msg != "" {
 			add(c.At.Field("link_url"), "%s", msg)
 		} else if c.LinkAddress == "" {
 			add(c.At.Field("link_url"), "link_url names where members reach link_address: set link_address too")
 		}
+	}
+}
+
+// MaxClusterAdmins bounds admin.cluster.admins.
+const MaxClusterAdmins = 64
+
+// checkClusterAdmins checks admin.cluster.admins: console users, each named
+// once.
+func checkClusterAdmins(a *Admin, add func(Value, string, ...any)) {
+	c := a.Cluster
+	if len(c.Admins) > MaxClusterAdmins {
+		add(c.At.Field("admins"), "%d admins, more than %d", len(c.Admins), MaxClusterAdmins)
+		return
+	}
+	seen := map[string]bool{}
+	for i, name := range c.Admins {
+		at := c.At.Field("admins").Index(i)
+		switch {
+		case name == "":
+			add(at, "an admin is a console user's name")
+		case seen[name]:
+			add(at, "%q is named twice", name)
+		case a.Console != nil && !slices.ContainsFunc(a.Console.Users, func(u ConsoleUser) bool { return u.Username == name }):
+			add(at, "%q is not a console user (admin.console.users)", name)
+		}
+		seen[name] = true
 	}
 }
 

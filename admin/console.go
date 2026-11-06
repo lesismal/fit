@@ -76,6 +76,23 @@ type Console struct {
 // config the console applies; logf, when not nil, says who logged in, who
 // failed to, and what each user changed.
 func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, configs *Configs, modules func() []*console.Module, report func(Result), logf func(format string, args ...any)) (*Console, error) {
+	return StartConsoleWith(engine, c, a, configs, modules, report, logf, ConsoleExtras{})
+}
+
+// ConsoleExtras are what a console of a manager of other fits (cluster)
+// adds: the check of each request beside the modules' own, and the bound
+// on the assistant's levels.
+type ConsoleExtras struct {
+	// Gate is app/console's Options.Gate.
+	Gate func(user, method, path, query string) string
+	// AssistantCap, when not nil, is the highest level of the
+	// assistant's a user has, whatever admin.assistant gives
+	// (assistant's Options.LevelCap).
+	AssistantCap func(user string) string
+}
+
+// StartConsoleWith is StartConsole with x.
+func StartConsoleWith(engine *fib.Engine, c *config.Console, a *config.Admin, configs *Configs, modules func() []*console.Module, report func(Result), logf func(format string, args ...any), x ConsoleExtras) (*Console, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -95,7 +112,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf,
 			// The tools read through the Admin API's endpoints, in process,
 			// as the workbench's pages do; they change nothing.
-			API: cs.api, Schema: sch, SchemaZh: workbench.SchemaZh, Validate: validateConfig}
+			API: cs.api, Schema: sch, SchemaZh: workbench.SchemaZh, Validate: validateConfig, LevelCap: x.AssistantCap}
 		if st := configs.Sealer(); st != nil {
 			o.Store = st
 		}
@@ -148,6 +165,7 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		Sources: cs.sources,
 		// An upload's pieces stream to the library's file pool.
 		StreamBody: uploadPatch,
+		Gate:       x.Gate,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("console: %w", err)
@@ -190,6 +208,18 @@ func (cs *Console) routes(api *console.API) {
 	api.Handle("POST", "/api/users/password", cs.userPassword)
 	api.HandlePrefix("PATCH", "/api/media/library/", cs.uploadChunk)
 	api.HandlePrefix("", "/api/", cs.proxy)
+}
+
+// Users returns the console's users, by name.
+func (cs *Console) Users() []string { return cs.logins.Users() }
+
+// AssistantLevel returns user's level of the assistant's as admin.assistant
+// gives it, before any bound; "" without the assistant.
+func (cs *Console) AssistantLevel(user string) string {
+	if cs.ai == nil {
+		return ""
+	}
+	return cs.ai.Settings().Level(user)
 }
 
 // Addr returns the address the console listens on.

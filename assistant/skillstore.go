@@ -280,7 +280,7 @@ const skillChangeLevel = config.AssistantApply
 // enabled or not, with the tools each names as this user may call them.
 func (a *Assistant) skillsHandler(r *console.Request) {
 	s := a.Settings()
-	level := s.Level(r.User)
+	level := a.Level(s, r.User)
 	snap := a.skillSnapshot()
 	list := []skillView{}
 	for _, b := range snap.builtin {
@@ -363,7 +363,7 @@ func (a *Assistant) answerSkill(r *console.Request, status int, msg, name, did s
 	s := a.Settings()
 	snap := a.skillSnapshot()
 	if sk, _, _ := snap.find(name); sk != nil {
-		_ = r.JSON(200, a.skillViewOf(snap, sk, s.Level(r.User), s, true))
+		_ = r.JSON(200, a.skillViewOf(snap, sk, a.Level(s, r.User), s, true))
 		return
 	}
 	_ = r.JSON(200, map[string]string{"deleted": name})
@@ -371,7 +371,7 @@ func (a *Assistant) answerSkill(r *console.Request, status int, msg, name, did s
 
 // mayChangeSkills answers 403 to a user whose level does not change skills.
 func (a *Assistant) mayChangeSkills(r *console.Request) bool {
-	if level := a.Settings().Level(r.User); levelRank(level) < levelRank(skillChangeLevel) {
+	if level := a.Level(a.Settings(), r.User); levelRank(level) < levelRank(skillChangeLevel) {
 		_ = console.Error(r.Context, 403, "changing the skills needs the level "+skillChangeLevel+"; "+r.User+"'s is "+level)
 		return false
 	}
@@ -393,7 +393,7 @@ func (a *Assistant) skillHandler(r *console.Request) {
 			_ = console.Error(r.Context, 404, "no skill "+name)
 			return
 		}
-		_ = r.JSON(200, a.skillViewOf(snap, sk, s.Level(r.User), s, true))
+		_ = r.JSON(200, a.skillViewOf(snap, sk, a.Level(s, r.User), s, true))
 	case method == "PUT" && action == "":
 		if !a.mayChangeSkills(r) {
 			return
