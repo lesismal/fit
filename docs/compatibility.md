@@ -91,9 +91,10 @@ These were renamed for 1.0, so that every size in bytes ends in `_bytes` and eve
 | `GET /config/effective` | The config merged with what providers provide, and where each part came from |
 | `GET /versions`, `GET /versions/{n}` | The configs applied and kept, and one of them |
 | `POST /rollback/{n}` | Apply a kept config again, as a new version |
+| `POST /reload` | Apply the running config again, as a new version, loading again what it loads from files |
 | `GET /status` | The listeners, connections, upstreams and their health, and certificates |
 | `GET /metrics` | Metrics in Prometheus's text format |
-| `GET /cache`, `POST /cache/purge` | The cache's zones, and purges by URL, tag or zone |
+| `GET /cache`, `POST /cache/purge` | The cache's zones, and purges by URL, URL prefix, tag or zone |
 | `GET /tokens`, `GET`, `POST /tokens/{role}`, `PATCH`, `DELETE /tokens/{role}/{id}` | The link tokens the tunnel hub's and the LLM roles' listeners issue: list, issue, change the expiry of, revoke |
 | `GET /media/library`, `GET /media/library/{name}`, `GET /media/library/{name}/items/{id}`, `POST /media/library/{name}/rescan` | The media libraries: their scans, a page of a library's items, an item, and a rescan |
 | `GET`, `POST /media/library/{name}/uploads`, `HEAD`, `GET`, `PATCH`, `DELETE /media/library/{name}/uploads/{id}`, `GET /media/library/{name}/dirs`, `GET /media/library/{name}/usage`, `POST /media/library/{name}/rename`, `move`, `delete`, `GET`, `PUT /media/library/{name}/sidecar` | A library's files: resumable uploads, rename, move and delete, what plays an item, and its sidecar |

@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140, I141 and I142; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I144 and I149 built; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -142,6 +142,18 @@ What I149 adds, members behind NAT linking out ([members behind NAT](../cluster.
   as the others, through one transport abstraction. A member removed, or enrolled again, has its
   link revoked and forgets its credential. The document's version is 2.
 
+What I144 adds, groups and operations on many ([groups and operations](../cluster.md#groups-and-operations)):
+
+- **Groups** in the document's `groups`: a label selector, members by name, or both, with a
+  description and variables for I145; who is in a group is decided when asked, from the members'
+  labels then, and every member's state says its groups. `GET/POST/PUT/DELETE
+  /api/m/cluster/groups[/<name>]` and `POST select`, a selection previewed.
+- **Operations** on a group's members or a selection (`POST /api/m/cluster/ops`, followed at
+  `GET ops/<id>`): reload, roll back, check, purge, test, each member's answered apart, recorded in
+  the audit log with each member's outcome.
+- **On every fit, for them**: `POST /reload` (`config.reload`), the running config applied again;
+  `POST /cache/purge` takes `prefixes` (`cache.prefix`).
+
 ## Pending review
 
 Decided while building I140 (2026-11-06); each stands until the user rules on it.
@@ -268,6 +280,49 @@ Decided while building I149 (2026-11-06):
 42. **fib's WebSocket connection gives neither its connection nor backpressure** (fib requests A52,
     A53): the listener keeps its connections by remote address, as the LLM mesh does, and the
     link's queues are bounded by its calls in flight and their sizes.
+
+Decided while building I144 (2026-11-06):
+
+43. **Who is in a group is computed, never kept**: the members its selector matches now, and those
+    it names, whichever labels they have (a union). A label changed moves a member at once.
+44. **The selector is Kubernetes' equality-based one, with `!key`**: `key=value` (`==`),
+    `key!=value`, `key`, `!key`; no set-based terms (`in`, `notin`); the empty selector selects no
+    one. The overview's label filter takes the same. Alternative: set-based terms too.
+45. **A name kept for a member not there is listed as missing**, not refused; a member renamed is
+    renamed in the groups that name it, and one removed is taken out of them. Operations skip
+    missing names.
+46. **Variables are plain strings**, 64 at most, names of letters, digits and `_`, values of 4 KiB
+    at most, shown as written; secrets belong to templates (I145). Alternative: typed values.
+47. **Groups stay in the document's version 2**, whose `groups` an I149 fit keeps as found; one
+    ETag covers members and groups. Bounds: 256 groups, a selector of 1 KiB and 32 terms, members by
+    name up to `max_nodes`.
+48. **Reload is a new Admin API endpoint, `POST /reload`**, which applies the running config again
+    (as the certificate watcher and the reconcile's `reapply` do), not SIGHUP's re-read of the files
+    or the store: a member reached through its API may hold changes its files do not, which a
+    re-read would drop. Takes `If-Match` and `?dry_run=1`; listed as `config.reload`. A member
+    without it is reported unsupported; there is no fallback through `GET /config` and `POST /load`.
+49. **Roll back goes to the latest version whose ETag is not the running one's**, so a reload in
+    between is not taken for a step; with `If-Match` on the running ETag. No version can be chosen,
+    since each member's history differs.
+50. **Purge by prefix is a member-side change**: `prefixes` in `POST /cache/purge`, absolute URLs
+    whose host is compared in lower case, found by going through the zone's keys under each shard's
+    and the disk index's lock, as clearing does; listed as `cache.prefix`. Operations also purge
+    by tag and all.
+51. **Operations run asynchronously**: `202` and a page that follows them; each on a goroutine of
+    its own, as the poller, starting at most `max_concurrency` members' calls at once; 4 at once;
+    a member in one operation at a time (`409`); the last 32 kept in memory. Alternatives: a
+    synchronous answer (minutes for many members), or the poller's own bound shared.
+52. **The audit entry of an operation** has the operation's ID, its group and each member's
+    status, detail and error (clipped to 256 bytes); the audit log is bounded by about 2 MiB as
+    well as by 1000 entries. A manager whose document is read-only runs no operation (`409`).
+53. **Test reaches the member as operations do**, through `Manager.Call` and the node's session,
+    not on connections of its own as the Nodes page's Test.
+54. **Two new kinds of problem**: `refused` (the member answered the operation with an error) and
+    `no_earlier_config`.
+55. **The pages**: Groups in the menu; a group's page holds its members with a box each (all
+    selected at first), the operations bar, the latest results and the recent operations;
+    `#/cluster/ops` is the same over every member, for a selection that is no group. No cancel of
+    an operation under way.
 
 Open questions of the plan, answered as proposed until reviewed:
 

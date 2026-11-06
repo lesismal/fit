@@ -300,12 +300,12 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | done |
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
-| I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | todo |
+| I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
-| I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | todo |
+| I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
 | I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
@@ -3158,6 +3158,36 @@ also in decision 033 as its items 20–27):
   group; each operation confirmed in a dialog naming the members, and its results per member.
 - **Touches**: `cluster`, `app/workbench`, `docs`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 43–55):
+
+1. **Membership is computed, never stored**: a selector's matches and the members named, from the
+   labels as they are.
+2. **Selectors** are Kubernetes' equality terms and `!k`, without `in` or `notin`; an empty selector
+   selects no one.
+3. **A name without a member is kept and shown missing**, not refused; renames follow, a removal takes
+   the name out, operations skip it.
+4. **Variables are plain strings**: 64 at most, names of letters, digits and `_`, values of 4 KiB, not
+   secret; typed or secret values are I145's templates'.
+5. **No new document version**: groups stay in version 2, whose `groups` an I149 fit keeps; members
+   and groups share one ETag.
+6. **"Reload" applies the running config again** (a new `POST /reload`, `config.reload`), not SIGHUP's
+   reading of files or the store, which would drop what the manager changed by the API; no fallback
+   for older members.
+7. **Rollback goes to the latest kept version whose ETag differs** from the running one's, with
+   `If-Match`, so a reload between does not count as a step back; no choice of version.
+8. **Purge by prefix is new on the member** (`prefixes` in `POST /cache/purge`, `cache.prefix`):
+   absolute URLs, the host in lower case, keys scanned under the shard and disk-index locks as a full
+   clear scans them; operations also purge by tag and all.
+9. **Operations are asynchronous** (202, followed by the page), with bounds of their own: 4 at once,
+   one a member, 32 kept.
+10. **Audit entries** hold each member's outcome (errors cut to 256 bytes) within a log of about 2 MiB;
+    a read-only manager refuses operations (409), as it could not audit them.
+11. **The test operation goes through `Manager.Call`**, on the node's session.
+12. **New problem kinds** `refused` and `no_earlier_config`, so pages show no misleading hint.
+13. **The pages**: Groups in the menu, a group's page that is its operations page, `#/cluster/ops` for
+    any selection, every member selected at first, no cancel.
+
 ### I145 Templates: config shared by a group
 
 - **Do**: a template owns paths in the config: whole members (`media_auth`, `tls`, `log`), and
@@ -3241,6 +3271,37 @@ also in decision 033 as its items 20–27):
 - **Pages**: Nodes gains **Add by enrollment**: a token made with its lifetime and the config line
   to paste on the member, and the member shown as linked or waiting.
 - **Touches**: `cluster`, `config`, `admin`, `app/workbench`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 28–42):
+
+1. **Links land on a listener of their own** (`link_address`), not on the console, whose 32
+   connections, a quarter a client address, would cap the members behind one NAT.
+2. **The manager's link certificate** is self-signed, kept in the store, never renewed, and pinned by
+   the config line, so no CA is needed.
+3. **Tokens and credentials** are `internal/linktoken` secrets of their own prefixes (`fite1.`,
+   `fitc1.`), kept as hashes and proved both ways under the label `fit cluster link v1`.
+4. **A member is added when its token is made**, shown as waiting; the token is spent before the
+   credential reaches the member. Alternative: an enrollment in two steps the member acknowledges.
+5. **The link carries the Admin API in process**, with its token's authority, without the dashboard or
+   pprof, and refused while a console password is temporary; the member needs no console.
+   Alternative: the member forwarding to its own console or Admin API over loopback.
+6. **The member keeps its credential** in its store or beside its config (`fit.cluster-member`, 0600),
+   used only for the same fingerprint; another token in its config enrolls it again.
+7. **Final refusals stop the member** (used, expired, unknown, a bad proof, revoked; the last three also
+   forget the credential) until a new token and a restart; `busy` and `replaced` retry.
+8. **`admin.cluster_member` is read at start only**, as the rest of `admin`.
+9. **Bounds**: pings every 15s, dead after 45s, backoff from 1s to a minute with jitter, a handshake of
+   10s, 16 calls a link, 2 workers and 16 queued on the member, request bodies within
+   `max_response_bytes`.
+10. **The document is version 2**, so an older manager cannot drop links by writing over it.
+11. **Tokens live 24 hours** by default, from a minute to 30 days.
+12. **One link a credential**: a newer link replaces the older, so two fits sharing one take turns.
+13. **`Manager.Call`** is the one way to call a member (HTTP or link), for I143 on.
+14. **I142's pages** changed in a few lines beside its extension points, which did not cover access
+    `link` in the columns and the edit form.
+15. **fib's WebSocket gaps** (A52, a forced close; A53, send backpressure) have stopgaps as the LLM mesh's:
+    connections found by remote address, queues bounded by calls in flight times their size.
 
 ### I150 Metrics, logs and certificates across the cluster
 

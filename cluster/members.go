@@ -434,7 +434,21 @@ type AuditEntry struct {
 	User   string    `json:"user"`
 	Action string    `json:"action"`
 	Node   string    `json:"node,omitempty"`
-	Detail string    `json:"detail,omitempty"`
+	// Group is the group changed, or the group an operation ran on.
+	Group  string `json:"group,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Op is an operation's ID, and Outcomes how it went on each member.
+	Op       string         `json:"op,omitempty"`
+	Outcomes []AuditOutcome `json:"outcomes,omitempty"`
+}
+
+// AuditOutcome is how an operation went on one member: its status, done or
+// failed, what it did, and why it failed, bounded.
+type AuditOutcome struct {
+	Node   string `json:"node"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // The actions an AuditEntry records.
@@ -448,12 +462,13 @@ const (
 	ActionEnrolled    = "node.enrolled"
 )
 
-// document is the store's section: the members, and what I144 to I148 keep
-// beside them, which this version keeps as it finds it.
+// document is the store's section: the members, the groups (I144), and
+// what I145 to I148 keep beside them, which this version keeps as it finds
+// it.
 type document struct {
 	Version   int               `json:"version"`
 	Members   []Member          `json:"members"`
-	Groups    []json.RawMessage `json:"groups"`
+	Groups    []Group           `json:"groups"`
 	Templates []json.RawMessage `json:"templates"`
 	Rollouts  []json.RawMessage `json:"rollouts"`
 	Audit     []AuditEntry      `json:"audit"`
@@ -486,7 +501,10 @@ func readDocument(data []byte) (d document, newer bool, err error) {
 func (d *document) marshal() []byte {
 	out := *d
 	out.Version = DocVersion
-	for _, p := range []*[]json.RawMessage{&out.Groups, &out.Templates, &out.Rollouts} {
+	if out.Groups == nil {
+		out.Groups = []Group{}
+	}
+	for _, p := range []*[]json.RawMessage{&out.Templates, &out.Rollouts} {
 		if *p == nil {
 			*p = []json.RawMessage{}
 		}

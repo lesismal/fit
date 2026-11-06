@@ -47,10 +47,20 @@ func TestCachePurge(t *testing.T) {
 	if status, got := purge(`{"tags": ["t"]}`); status != 200 || got != `{"purged":2}`+"\n" {
 		t.Errorf("by tag: %d %s", status, got)
 	}
+	fetch("/img/a")
+	fetch("/img/b")
+	fetch("/other")
+	if status, got := purge(`{"zone": "admin", "prefixes": ["` + site + `/img/"]}`); status != 200 || got != `{"purged":2}`+"\n" {
+		t.Errorf("by prefix: %d %s", status, got)
+	}
+	if cs := fetch("/other"); !strings.HasPrefix(cs, "fit; hit") {
+		t.Errorf("/other after the purge of /img/: %q", cs)
+	}
 	for body, want := range map[string]int{
 		`{"zone": "nothing", "all": true}`: 404,
 		`{"zone": "admin"}`:                400,
 		`{"urls": ["/relative"]}`:          400,
+		`{"prefixes": ["img/"]}`:           400,
 		`not json`:                         400,
 	} {
 		if status, got := purge(body); status != want {

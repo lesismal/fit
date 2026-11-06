@@ -94,6 +94,10 @@ type Manager struct {
 	rev      uint64
 	nodes    map[string]*node
 	closed   bool
+	// groups are the document's groups, their selectors parsed.
+	groups []compiled
+	// ops are the operations on members (ops.go).
+	ops opsState
 
 	// link is the members that link out to the manager: the listener
 	// they link to, and their links.
@@ -136,6 +140,7 @@ func New(o Options) (*Manager, error) {
 		o.Logf("cluster: %s", m.readOnly)
 	}
 	m.doc = doc
+	m.compileGroups(true)
 	for _, mem := range doc.Members {
 		if err := mem.check(); err != nil {
 			o.Logf("cluster: the member %q kept in the store is not polled: %v", mem.Name, err)
@@ -178,6 +183,8 @@ func (m *Manager) Close() {
 			wg.Add(1)
 			n.shutdown(wg.Done)
 		}
+		// The operations under way hear their calls abandoned, and end.
+		m.waitOps(closeWait)
 		ended := make(chan struct{})
 		go func() { wg.Wait(); close(ended) }()
 		select {
@@ -307,11 +314,12 @@ func (m *Manager) stateLocked(mem *Member) State {
 		if mem.Access == AccessLink {
 			st.Link = m.linkStateOf(mem)
 		}
+		st.Groups = m.groupsOf(mem)
 		return st
 	}
 	// A member kept in the store that does not check is never polled.
 	v := mem.View()
-	return State{Name: mem.Name, Labels: v.Labels, URL: mem.URL, Access: mem.Access, Status: StatusError,
+	return State{Name: mem.Name, Labels: v.Labels, Groups: m.groupsOf(mem), URL: mem.URL, Access: mem.Access, Status: StatusError,
 		Error: &Problem{Kind: KindBadAnswer, Message: "the member kept in the store is not valid: edit it"}}
 }
 
@@ -337,6 +345,10 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 	for i := range d.Members {
 		d.Members[i] = d.Members[i].clone()
 	}
+	d.Groups = slices.Clone(d.Groups)
+	for i := range d.Groups {
+		d.Groups[i] = d.Groups[i].clone()
+	}
 	d.Audit = slices.Clone(d.Audit)
 	m.mu.Unlock()
 	entry, err := fn(&d)
@@ -344,10 +356,7 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 		return err
 	}
 	entry.At, entry.User = m.now().UTC(), user
-	d.Audit = append(d.Audit, entry)
-	if n := len(d.Audit) - MaxAudit; n > 0 {
-		d.Audit = slices.Delete(d.Audit, 0, n)
-	}
+	d.Audit = trimAudit(append(d.Audit, entry))
 	d.Version = DocVersion
 	if err := m.o.Store.SetSection(Section, d.marshal()); err != nil {
 		return fmt.Errorf("saving the members: %w", err)
@@ -356,6 +365,7 @@ func (m *Manager) change(user string, fn func(d *document) (AuditEntry, error)) 
 	defer m.mu.Unlock()
 	m.doc = d
 	m.rev++
+	m.compileGroups(false)
 	if !m.closed {
 		m.sync()
 	}
@@ -421,6 +431,9 @@ func (m *Manager) Update(user, name string, in *Input) (MemberView, error) {
 		}
 		changed := changes(&d.Members[i], &mem)
 		d.Members[i] = mem
+		if mem.Name != name {
+			renameMember(d, name, mem.Name)
+		}
 		out = mem.View()
 		return AuditEntry{Action: ActionUpdate, Node: name, Detail: changed}, nil
 	})
@@ -438,6 +451,7 @@ func (m *Manager) Remove(user, name string) error {
 			return AuditEntry{}, errNotFound(name)
 		}
 		d.Members = slices.Delete(d.Members, i, i+1)
+		renameMember(d, name, "")
 		return AuditEntry{Action: ActionRemove, Node: name}, nil
 	})
 	if err == nil {
@@ -531,6 +545,8 @@ func (m *Manager) routes(api *console.API) {
 	api.Handle("GET", "/api/state", m.state)
 	api.Handle("GET", "/api/audit", func(r *console.Request) { _ = r.JSON(200, map[string]any{"entries": m.Audit()}) })
 	m.linkRoutes(api)
+	m.groupRoutes(api)
+	m.opRoutes(api)
 	m.passRoutes(api)
 }
 
@@ -582,8 +598,10 @@ func (m *Manager) answer(r *console.Request, status int, v any, err error) {
 		_ = r.JSON(status, v)
 	case errors.As(err, &fe):
 		_ = r.JSON(400, fe)
-	case errors.As(err, &nf):
+	case errors.As(err, &nf), errors.As(err, new(errNoGroup)):
 		_ = console.Error(r.Context, 404, err.Error())
+	case errors.As(err, new(errBusy)):
+		_ = console.Error(r.Context, 429, err.Error())
 	case errors.As(err, &cf), errors.As(err, &ro):
 		_ = console.Error(r.Context, 409, err.Error())
 	default:

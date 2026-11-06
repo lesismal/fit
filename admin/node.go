@@ -75,8 +75,12 @@ const (
 	// CapStatus: GET /status, and CapMetrics GET /metrics.
 	CapStatus  = "status"
 	CapMetrics = "metrics"
+	// CapReload: POST /reload.
+	CapReload = "config.reload"
 	// CapCache: GET /cache and POST /cache/purge.
 	CapCache = "cache"
+	// CapCachePrefix: POST /cache/purge takes "prefixes".
+	CapCachePrefix = "cache.prefix"
 	// CapLogs: GET /logs, POST /logs/rotate and /logs/cleanup.
 	CapLogs = "logs"
 	// CapTokens: the link tokens, /tokens.
@@ -304,7 +308,7 @@ type nodeBody struct {
 // capabilities lists what this fit's Admin API offers, sorted.
 func (cs *Configs) capabilities() []string {
 	caps := []string{CapNode, CapIfMatch, CapDryRun, CapText, CapEffective, CapDrift, CapVersions, CapTransfer,
-		CapStatus, CapMetrics, CapCache, CapLogs, CapTokens, CapMedia, CapSchema}
+		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia, CapSchema}
 	if cs.Sealer() != nil {
 		caps = append(caps, CapStore)
 	}

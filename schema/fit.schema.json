@@ -714,7 +714,7 @@
         },
         "max_concurrency": {
           "default": 8,
-          "description": "The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0.",
+          "description": "The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. Each operation on many members (reload, rollback, check, purge, test) calls at most this many of them at once too. 8 when left out or 0.",
           "maximum": 256,
           "minimum": 0,
           "type": "integer"

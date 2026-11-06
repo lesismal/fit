@@ -6564,3 +6564,48 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: Ask AI was not clicked (no assistant on the test manager); a read and a poll that both find
   no session may both log in. The decisions made are in the plan's I142 section and decision 033,
   pending review.
+
+
+### I149 Members behind NAT, linking out — done
+
+- **The manager**: `admin.cluster.link_address` (and `link_url`) serves a WebSocket-over-TLS link
+  listener whose self-signed certificate is kept in the store; Nodes, **Add by enrollment**, makes a
+  `link` member and a one-use token (`fite1.`), and shows the `admin.cluster_member` line to paste on
+  the member (the manager's URL, its certificate's fingerprint, the token).
+- **The member** dials out on fib's WebSocket client, pins the certificate, proves the token by
+  `internal/linktoken`'s handshake for a credential of its own (`fitc1.`, a hash on the manager, kept in
+  its store or `fit.cluster-member`), and links again with backoff, pinging every 15s and closing after
+  45s of silence. A member removed on the manager is revoked and forgets its credential.
+- **Over the link** the manager reaches the member's Admin API in process (`admin.LinkAPI`): the poller,
+  tests, the member's reads and the new `Manager.Call` (I143's pass-through) go through one transport
+  for HTTP and links. The state shows `link` and the failure kind `not_linked`; rows show Linked or
+  Waiting, with New token.
+- **Tests**: enrollment; polls and calls over the link; a manager's restart; a network cut and a silent
+  drop; used, expired and replaced tokens; pins; bounds; two real fits in `cli`; under the race
+  detector; the pages checked in a browser in both languages.
+- **Gaps**: stopgaps for fib's WebSocket A52 and A53 (already requested); a member that cannot keep its
+  credential after its token was spent needs a new token. The decisions made are in the plan's I149
+  section and decision 033, pending review.
+
+
+### I144 Resource groups and operations on many — done
+
+- **Groups** in the manager's document: a label selector (`k=v`, `k!=v`, `k`, `!k`), members by name, or
+  both; a description; variables for I145; membership computed from the labels as they are and listed
+  in every member's state; `/api/m/cluster/groups[/<name>]`, `POST select`.
+- **Operations** on a group or a selection (`POST /api/m/cluster/ops`, 202, followed at `ops/<id>`):
+  reload (the Admin API's new `POST /reload`, `config.reload`), rollback to the latest version of
+  another ETag (with `If-Match`), check, cache purge by key, prefix, tag or all (`prefixes` new in
+  `POST /cache/purge`, `cache.prefix`) and test; each on a goroutine of its own, `max_concurrency`
+  members at once through `Manager.Call`; 4 operations at once, one a member; each member's outcome
+  reported and audited.
+- **Workbench**: Cluster, Groups (the list; a group's form with a live preview and its variables; a
+  group's page with its members' states, check boxes and an operations bar; dialogs naming the members;
+  each member's result as it comes; recent operations; `#/cluster/ops` for any selection); the overview
+  filters by group. Checked in a browser in both languages against three members and one down.
+- **Tests**: selectors; a label change moving members in and out; five members with one down, four done
+  and one failed with its error; a purge reaching every member's zone; a real manager and member in
+  `cli`; prefix purges in memory and on disk; under the race detector.
+- **Gaps**: an operation cannot be cancelled; no rollback to a chosen version; no `in` or `notin`; older
+  members fail reload and prefix purge as `unsupported`. The decisions made are in the plan's I144
+  section and decision 033, pending review.

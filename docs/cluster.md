@@ -10,6 +10,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 
 - [Running a manager](#running-a-manager)
 - [The Cluster pages](#the-cluster-pages)
+- [Groups and operations](#groups-and-operations)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -59,8 +60,9 @@ wrote is shown and never written over: the manager is then read-only, and its pa
 
 ## The Cluster pages
 
-The workbench shows **Cluster** in its left menu when `admin.cluster` is set, with two pages and a
-page per member, in English and Chinese.
+The workbench shows **Cluster** in its left menu when `admin.cluster` is set, with **Overview**,
+**Nodes** and **Groups** ([groups and operations](#groups-and-operations)), a page per member and a
+page per group, in English and Chinese.
 
 **Overview** is every member's state as the manager last read it, as cards or as a table: its state
 coloured (green up, amber error, red down, grey not read yet) with how long it has been so and why,
@@ -68,8 +70,9 @@ fit's version, the running config's version, the drift its consistency check cou
 certificate that expires first and in how many days, its connections and upstream backends down,
 and the latency of its `GET /node`. A member that is down keeps what it last answered, said to be
 from then. The tiles count the members by state and filter by it when clicked; the filter takes a
-text (a name or URL), a label selector (`env=prod, region, tier!=db`: every term must hold, `key`
-alone for a label that is there) and a state, and sorts by state (the worst first), name, latency,
+text (a name or URL), a label selector (`env=prod, region, tier!=db, !canary`: every term must
+hold, `key` alone for a label that is there, `!key` for one that is not), a group (its members as
+the manager has them now) and a state, and sorts by state (the worst first), name, latency,
 certificate expiry, drift, connections or fit version. The filter is kept in the page's URL, so a
 label clicked anywhere opens the overview filtered by it. The page is read again as often as the
 manager polls, 2 to 10 seconds apart. A member in trouble says what is wrong and what to do, with
@@ -103,6 +106,51 @@ upstreams and each backend's state and counts, the certificates it serves with t
 configs it keeps (versions) and its consistency check. Each part says its own problem when the
 member cannot be read, and none is asked of a member that is not up. Opening the member's own
 config pages from the manager is the node switcher's, planned next (I143).
+
+## Groups and operations
+
+A **group** (a resource group) is a set of members: those whose labels its **label selector**
+matches, those it names, or both. A member is in any number of groups, and a group follows its
+members: a member whose labels change moves into or out of the groups whose selectors it then
+matches, at once; a member a group names keeps its place when renamed and leaves when removed; a
+name kept for a member not added yet is listed as missing until one is. The selector is
+Kubernetes' equality-based one: terms separated by commas, `key=value` (or `key==value`),
+`key!=value` (which a member without the label meets), `key` (the label is there) or `!key` (it is
+not), every one of which must hold; an empty selector selects no one, for a group of names alone.
+A group also has a description and **variables**, names and values the templates attached to it
+will use (I145); they are not secrets, and are shown as written.
+
+**Groups** lists the groups, with their selectors, the members they name (those missing in amber),
+how many members they have now, counted by state, and how many variables. **Add a group** opens a
+form whose preview shows the members its selector and names select as they are typed, and the names
+that are no member's; a selector or a variable refused is said under its field. **Edit** and
+**Delete** (which asks first, and leaves the members as they are) change it, sent with the
+document's ETag as a member's change is.
+
+**A group's page** shows its selector, members by name, variables and members' states, a box
+before each member to select it (every member at first), and the **operations bar**:
+
+| Operation | On each member selected | Needs (capability) |
+| --- | --- | --- |
+| **Reload** | applies its running config again, as a new version, so that what it loads from files (certificates, keys, token files) is loaded again: `POST /reload` | `config.reload` |
+| **Roll back** | applies again its previous config: the latest version it keeps whose ETag is not the running one's (so a reload, the same config again, is not a step back), with `If-Match` on the running one, so that a config changed meanwhile is not rolled over: `GET /versions`, then `POST /rollback/{n}` | `config.versions` |
+| **Check** | runs its consistency check, saying how many differences it found: `GET /config/check` | `config.check` |
+| **Purge cache** | removes what its cache keeps in a zone (or every zone): by key (the absolute URLs requests name), by prefix (every URL starting with one, `https://example.com/img/`), by tag, or all: `POST /cache/purge` | `cache`, and `cache.prefix` for prefixes |
+| **Test** | reads its `GET /node` as the manager reaches it, saying how long it took | — |
+
+Each operation is confirmed in a dialog that names the members it runs on (a purge's with its
+zone, keys, prefixes and tags). It then runs on the manager, at most `max_concurrency` members at
+once, each call bounded by `timeout`; the page follows it member by member, waiting, running, done
+with what it did (the version applied, the differences found, the keys purged) or failed with why:
+the member down, its credentials refused, a capability it does not list (a fit older than the
+operation), a config it refused, a zone it has not, nothing earlier to roll back to. The recent
+operations close the page, each opening its results again. **Operations on any members** on the
+Groups page is the same page over every member, for a selection that is no group.
+
+An operation and each member's outcome (its status, what it did, its error) go to the manager's
+audit log once it ends. The manager keeps the last 32 operations in memory, with their outcomes;
+at most 4 run at once, and a member already in one is not given another until it ends. Only a
+manager that can write its document runs operations, since it could not audit them otherwise.
 
 ## How members are reached
 
@@ -184,9 +232,19 @@ pages above use nothing else:
 | `POST enroll` | adds a member that links out: `{"name", "labels", "ttl", "url"}`; `201` with `{"node", "token", "expires", "config", "config_line"}`, the token shown this once; `409` without `link_address` |
 | `POST nodes/<name>/enroll` | a new enrollment token for a linked member: `{"ttl", "url"}`, the same answer |
 | `GET state` | every member's state: `{"interval_ms", "timeout_ms", "read_only", "nodes"}` |
-| `GET audit` | the manager's changes: who, when, which member, what changed (credentials by name only) |
+| `GET audit` | the manager's changes: who, when, which member or group, what changed (credentials by name only); an operation with its `op` ID and each member's `outcomes` |
+| `GET groups` | the groups, `{"version", "max_groups", "read_only", "groups"}`, with the document's `ETag`; each group `{"name", "description", "selector", "members", "variables", "created", "updated", "nodes", "missing"}`, `nodes` the members in it now and `missing` the names no member has |
+| `POST groups` | adds a group: `{"name", "description", "selector", "members", "variables"}`; `201`; `400` with `{"field", "error"}`, `409` for a name taken or 256 groups |
+| `GET groups/<name>` | the group and its members' `states` |
+| `PUT groups/<name>` | replaces it, a new `name` renaming it |
+| `DELETE groups/<name>` | removes it; its members stay |
+| `POST select` | the members a selector and names select now, without a group: `{"selector", "members"}` answered `{"nodes", "missing"}` |
+| `POST ops` | starts an operation: `{"op", "group", "members", "purge"}`, `op` one of `reload`, `rollback`, `check`, `purge`, `test`; on the group's members, on `members`, or on `members` of the group; `purge` is `{"zone", "keys", "prefixes", "tags", "all"}`; `202` with the operation; `409` when a member is in another operation, `429` when 4 run |
+| `GET ops` | the operations kept, the latest first |
+| `GET ops/<id>` | an operation: `{"id", "op", "group", "user", "purge", "started", "ended", "finished", "counts", "outcomes"}`, each outcome `{"node", "status", "detail", "error", "result", "started", "ended", "took_ms"}`, `status` `pending`, `running`, `done` or `failed`, `error` a problem as a state's |
 
-A change sent with `If-Match` and an ETag that is no longer the members' is refused `412`. At most
+A change sent with `If-Match` and an ETag that is no longer the document's (its members and groups)
+is refused `412`. At most
 4 tests and 8 reads run at once; one more is `429`. The reads pass on those four GETs of a member
 and nothing else, never a write; a member that does not list a read's capability (`status`,
 `config.versions`, `config.check`) is not asked for it. No answer, page or log line holds a

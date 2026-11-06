@@ -152,8 +152,10 @@ type checkAnswer struct {
 type State struct {
 	Name   string            `json:"name"`
 	Labels map[string]string `json:"labels"`
-	URL    string            `json:"url"`
-	Access string            `json:"access"`
+	// Groups are the names of the groups the member is in.
+	Groups []string `json:"groups"`
+	URL    string   `json:"url"`
+	Access string   `json:"access"`
 	// Status is StatusUp, StatusDown, StatusError or StatusUnknown, and
 	// Since when it became that.
 	Status string    `json:"status"`

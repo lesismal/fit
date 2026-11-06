@@ -80,9 +80,10 @@ fit.json:12:40: routes[0].middleware[0].params.max_size: deprecated: renamed "ma
 | `GET /config/effective` | 与 provider 提供的内容合并后的配置，以及每部分的来源 |
 | `GET /versions`、`GET /versions/{n}` | 已应用并保留的配置，以及其中一份 |
 | `POST /rollback/{n}` | 把保留的配置作为新版本再次应用 |
+| `POST /reload` | 把运行中的配置作为新版本再次应用，重新加载其从文件读取的内容 |
 | `GET /status` | listener、连接、上游及其健康状态、证书 |
 | `GET /metrics` | Prometheus 文本格式的指标 |
-| `GET /cache`、`POST /cache/purge` | 缓存的 zone，以及按 URL、标签或 zone 清除 |
+| `GET /cache`、`POST /cache/purge` | 缓存的 zone，以及按 URL、URL 前缀、标签或 zone 清除 |
 | `GET /tokens`，`/tokens/{role}` 上的 `GET`、`POST`，`/tokens/{role}/{id}` 上的 `PATCH`、`DELETE` | 隧道 hub 与 LLM 各角色的监听签发的连接令牌：列出、签发、修改过期时间、吊销 |
 | `GET /media/library`、`GET /media/library/{name}`、`GET /media/library/{name}/items/{id}`、`POST /media/library/{name}/rescan` | 媒体库：其扫描、一个媒体库的一页条目、一个条目，以及重新扫描 |
 | `GET`、`POST /media/library/{name}/uploads`，`HEAD`、`GET`、`PATCH`、`DELETE /media/library/{name}/uploads/{id}`，`GET /media/library/{name}/dirs`，`GET /media/library/{name}/usage`，`POST /media/library/{name}/rename`、`move`、`delete`，`GET`、`PUT /media/library/{name}/sidecar` | 媒体库的文件：可续传的上传、改名、移动与删除、谁在播放条目，以及其 sidecar |

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +68,29 @@ type fakeMember struct {
 
 	inflight, maxInflight atomic.Int64
 	requests              atomic.Int64
+
+	// hist is the configs applied, the latest last, which /reload,
+	// /rollback and /versions use; purges are the bodies of /cache/purge;
+	// zones the cache zones it has; opFail answers the operations' writes
+	// with that status.
+	hist   []fakeVersion
+	purges []string
+	zones  []string
+	opFail int
+}
+
+// fakeVersion is a config a fake member applied.
+type fakeVersion struct {
+	n    int
+	etag string
+}
+
+// current returns the version running and its ETag; f.mu is held.
+func (f *fakeMember) current() fakeVersion {
+	if len(f.hist) == 0 {
+		f.hist = []fakeVersion{{6, `"a"`}, {7, `"abc"`}}
+	}
+	return f.hist[len(f.hist)-1]
 }
 
 func newFakeMember(t *testing.T, tlsOn bool) *fakeMember {
@@ -119,7 +143,7 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 	caps, nodeStatus, loginStatus, noCSRF, expired, reject, logoutDelay, noRoles := f.caps, f.nodeStatus, f.loginStatus, f.noCSRF, f.expired, f.reject, f.logoutDelay, f.noRoles
 	f.mu.Unlock()
 	if caps == nil {
-		caps = []string{"config.check", "config.versions", "console", "node", "status"}
+		caps = []string{"cache", "cache.prefix", "config.check", "config.reload", "config.versions", "console", "node", "status"}
 	}
 	var roles any = []string{}
 	if noRoles {
@@ -213,6 +237,9 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"id":`))
 		return
 	}
+	if f.serveOps(w, r, path) {
+		return
+	}
 	switch path {
 	case "/node":
 		if noNode {
@@ -240,10 +267,14 @@ func (f *fakeMember) serve(w http.ResponseWriter, r *http.Request) {
 			},
 			"pad": strings.Repeat("x", pad)})
 	case "/versions":
-		_ = json.NewEncoder(w).Encode(map[string]any{"current": 7, "versions": []any{
-			map[string]any{"version": 6, "applied": "2026-11-05T00:00:00Z", "source": "file", "bytes": 10, "etag": `"a"`},
-			map[string]any{"version": 7, "applied": "2026-11-06T00:00:01Z", "source": "console", "bytes": 12, "etag": `"abc"`},
-		}})
+		f.mu.Lock()
+		cur := f.current()
+		var vs []any
+		for _, v := range f.hist {
+			vs = append(vs, map[string]any{"version": v.n, "applied": "2026-11-05T00:00:00Z", "source": "console", "bytes": 10, "etag": v.etag})
+		}
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"current": cur.n, "versions": vs})
 	case "/config/check":
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": 7, "checked_at": "2026-11-06T00:00:02Z", "summary": map[string]any{"drift": 2, "info": 1}})
 	default:
@@ -483,4 +514,59 @@ func newFakeMemberAt(t *testing.T, addr string) *fakeMember {
 	f.srv.Start()
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+// serveOps answers the writes operations make: POST /reload, /rollback/{n}
+// and /cache/purge; false for another path.
+func (f *fakeMember) serveOps(w http.ResponseWriter, r *http.Request, path string) bool {
+	if r.Method != "POST" || path != "/reload" && path != "/cache/purge" && !strings.HasPrefix(path, "/rollback/") {
+		return false
+	}
+	body, _ := io.ReadAll(r.Body)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.opFail == http.StatusTeapot {
+		w.WriteHeader(f.opFail)
+		return true
+	}
+	if f.opFail != 0 {
+		w.WriteHeader(f.opFail)
+		_, _ = w.Write([]byte(`{"error":"the config was not applied; the running config stays","errors":[{"path":"/routes/0","message":"no"},{"message":"two"}]}`))
+		return true
+	}
+	cur := f.current()
+	switch {
+	case path == "/reload":
+		f.hist = append(f.hist, fakeVersion{cur.n + 1, cur.etag})
+		fmt.Fprintf(w, `{"version":%d,"etag":%q}`, cur.n+1, cur.etag)
+	case path == "/cache/purge":
+		var b struct {
+			Zone string
+		}
+		_ = json.Unmarshal(body, &b)
+		if b.Zone != "" && !slices.Contains(f.zones, b.Zone) {
+			w.WriteHeader(404)
+			fmt.Fprintf(w, `{"error":"no cache uses the zone \"%s\""}`, b.Zone)
+			return true
+		}
+		f.purges = append(f.purges, string(body))
+		_, _ = w.Write([]byte(`{"purged":3}`))
+	default:
+		n, _ := strconv.Atoi(strings.TrimPrefix(path, "/rollback/"))
+		if im := r.Header.Get("If-Match"); im != "" && im != cur.etag {
+			w.WriteHeader(412)
+			_, _ = w.Write([]byte(`{"error":"the config has changed since the ETag given in If-Match"}`))
+			return true
+		}
+		for _, v := range f.hist {
+			if v.n == n {
+				f.hist = append(f.hist, fakeVersion{cur.n + 1, v.etag})
+				fmt.Fprintf(w, `{"version":%d,"etag":%q,"warnings":["w"]}`, cur.n+1, v.etag)
+				return true
+			}
+		}
+		w.WriteHeader(404)
+		_, _ = w.Write([]byte(`{"error":"version is not kept"}`))
+	}
+	return true
 }

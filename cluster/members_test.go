@@ -115,9 +115,9 @@ func TestDocument(t *testing.T) {
 	if d, newer, err := readDocument([]byte(`{"version":1,"members":[]}`)); newer || err != nil || !strings.Contains(string(d.marshal()), `"version":2`) {
 		t.Error("version 1", newer, err)
 	}
-	// What a later iteration keeps is kept as it is.
-	d, _, _ = readDocument([]byte(`{"version":1,"groups":[{"name":"g"}],"templates":[1],"rollouts":[true]}`))
-	if got := string(d.marshal()); !strings.Contains(got, `"groups":[{"name":"g"}]`) || !strings.Contains(got, `"rollouts":[true]`) || !strings.Contains(got, `"members":[]`) {
+	// What a later iteration keeps is kept as it is; groups are I144's.
+	d, _, _ = readDocument([]byte(`{"version":1,"groups":[{"name":"g","selector":"a"}],"templates":[1],"rollouts":[true]}`))
+	if got := string(d.marshal()); !strings.Contains(got, `"groups":[{"name":"g","selector":"a",`) || !strings.Contains(got, `"templates":[1]`) || !strings.Contains(got, `"rollouts":[true]`) || !strings.Contains(got, `"members":[]`) {
 		t.Errorf("%s", got)
 	}
 }
@@ -161,7 +161,8 @@ func TestHelpers(t *testing.T) {
 // TestCapabilities keeps the capabilities the poller looks for those the
 // member's Admin API lists.
 func TestCapabilities(t *testing.T) {
-	if capStatus != admin.CapStatus || capCheck != admin.CapDrift {
+	if capStatus != admin.CapStatus || capCheck != admin.CapDrift || capReload != admin.CapReload || capVersions != admin.CapVersions ||
+		capCache != admin.CapCache || capCachePrefix != admin.CapCachePrefix {
 		t.Error("the capabilities differ from package admin's")
 	}
 }

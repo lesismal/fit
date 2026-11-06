@@ -341,3 +341,32 @@ func TestRollback(t *testing.T) {
 		t.Fatalf("GET /versions: %s", out)
 	}
 }
+
+// TestReload applies the running config again through POST /reload: a new
+// version of the same config, from where the base config came; with a
+// stale If-Match it is refused, and a dry run applies nothing.
+func TestReload(t *testing.T) {
+	f := start(t, doc("v1"), &config.Admin{})
+	cur := f.configs.Current()
+	resp, body := f.send(t, "POST", "/reload", "", "", "")
+	if resp.StatusCode != 200 || resp.Header.Get(VersionHeader) != "2" || !strings.Contains(body, `"version":2`) || f.served(t) != "v1" {
+		t.Fatalf("reload: %d %s", resp.StatusCode, body)
+	}
+	now := f.configs.Current()
+	if now.ETag != cur.ETag || now.Source != SourceAdmin || now.baseSource != SourceFile {
+		t.Errorf("%+v from %s", now, now.baseSource)
+	}
+	if resp, body := f.send(t, "POST", "/reload", "", "", `"stale"`); resp.StatusCode != 412 {
+		t.Errorf("a stale If-Match: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := f.send(t, "POST", "/reload?dry_run=1", "", "", now.ETag); resp.StatusCode != 200 || resp.Header.Get(DryRunHeader) != "1" ||
+		!strings.Contains(body, `"unchanged":true`) || f.configs.Current().Number != 2 {
+		t.Errorf("a dry run: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := f.send(t, "POST", "/reload?dry_run=x", "", "", ""); resp.StatusCode != 400 {
+		t.Errorf("a bad dry_run: %d", resp.StatusCode)
+	}
+	if _, got := f.get(t, "/node"); !strings.Contains(got, `"config.reload"`) || !strings.Contains(got, `"cache.prefix"`) {
+		t.Errorf("the capabilities: %s", got)
+	}
+}
