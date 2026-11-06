@@ -48,7 +48,6 @@ func (c *Config) Validate() Errors {
 			listeners[l.Name] = true
 		}
 	}
-	addresses := map[string]string{}
 	for _, l := range c.Listeners {
 		switch {
 		case !namePattern.MatchString(l.Name):
@@ -58,22 +57,9 @@ func (c *Config) Validate() Errors {
 		}
 		listeners[l.Name] = true
 
-		if port, msg := checkAddress(l.Address); msg != "" {
+		// Two listeners on one address are checkBinds', with the roles'.
+		if _, msg := checkAddress(l.Address); msg != "" {
 			add(l.At.Field("address"), "%s", msg)
-		} else {
-			// A TCP port and a UDP one of the same number do not clash, so
-			// a tcp listener and a udp one, or HTTP and HTTP/3, may share
-			// an address.
-			for _, network := range l.networks() {
-				key := network + " " + l.Address
-				if other, ok := addresses[key]; ok {
-					add(l.At.Field("address"), "listener %q already listens on %s", other, l.Address)
-					break
-				} else if port != 0 {
-					// Port 0 picks a free port, so two of them do not clash.
-					addresses[key] = l.Name
-				}
-			}
 		}
 
 		seen := map[string]bool{}
@@ -271,6 +257,7 @@ func (c *Config) Validate() Errors {
 	c.checkStreaming(add)
 	c.checkChannels(add)
 	c.checkMediaLibrary(add)
+	c.checkBinds(add)
 
 	if a := c.ACME; a != nil {
 		if a.Directory != "" {

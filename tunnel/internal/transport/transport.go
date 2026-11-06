@@ -36,6 +36,7 @@ import (
 
 	fib "github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/logs"
 )
 
@@ -372,6 +373,9 @@ type FibListener struct {
 // ListenFib adds a binding to engine on addr, served by handler, whose URL
 // format makes of the host:port it can be dialed on.
 func ListenFib(engine *fib.Engine, addr string, handler fib.Handler, format func(hostport string) string) (*FibListener, error) {
+	if err := bindcheck.Free("tcp", addr); err != nil {
+		return nil, err
+	}
 	i, err := engine.AddBinding(fib.Binding{Addr: addr, Handler: handler})
 	if err != nil {
 		return nil, err

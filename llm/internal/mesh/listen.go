@@ -10,6 +10,7 @@ import (
 
 	"github.com/lesismal/fib"
 
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/llm/internal/model"
 	"github.com/lesismal/fit/llm/internal/wire"
 )
@@ -78,6 +79,10 @@ func (m *Mesh) SetListen(cfg model.ListenConfig) error {
 	wc := m.connConfig(nil, creds)
 	wc.TLS = tc
 	l := wire.NewHandler(wc)
+	if err := bindcheck.Free("tcp", cfg.Addr); err != nil {
+		m.lerr = err.Error()
+		return Errorf(model.CodeInternal, "%s", m.lerr)
+	}
 	i, err := m.opts.Engine.AddBinding(fib.Binding{Addr: cfg.Addr, Handler: l})
 	if err != nil {
 		m.lerr = "listen " + cfg.Addr + ": " + err.Error()

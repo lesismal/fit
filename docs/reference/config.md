@@ -151,6 +151,11 @@ by `name`; a route that names none serves every listener.
   listener being what that exploit of a use-after-free in the kernel's IPv4 TCP handshake needs on its
   target; the kernel bug is the kernel's to fix, and setting `mptcp` on an unpatched kernel takes that
   exposure. `udp` listeners and HTTP/3 take none, having no paths.
+- **One address, one server.** Two listeners may not listen on one address and transport, nor a
+  listener and any other part of the config that listens: the Admin API, a console, a role's
+  links listener or API, a tunnel forward, a streaming or WebRTC port. `:443`, `0.0.0.0:443` and
+  `[::]:443` are one address, which takes in `127.0.0.1:443`. A listener also fails to bind an
+  address another process holds. See [one address, one server](../configuration.md#one-address-one-server).
 
 In a .conf file:
 

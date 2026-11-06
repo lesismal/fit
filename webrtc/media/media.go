@@ -44,6 +44,7 @@ import (
 
 	"github.com/lesismal/fit/app"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/internal/bindcheck"
 	"github.com/lesismal/fit/logs"
 	"github.com/lesismal/fit/observe"
 )
@@ -338,20 +339,9 @@ func closeMux(log *logs.Logger, r *running) {
 	}
 }
 
-// checkFree fails when another socket holds address: fib binds UDP with
-// SO_REUSEPORT, and the kernel would let it share another process's port,
-// splitting its peers between two servers. A plain bind, which a reuseport
-// socket refuses, tells. Port 0 picks a free port.
-func checkFree(address string) error {
-	if _, port, err := net.SplitHostPort(address); err == nil && port == "0" {
-		return nil
-	}
-	pc, err := net.ListenPacket("udp", address)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", address, err)
-	}
-	return pc.Close()
-}
+// checkFree fails when another socket holds UDP address: see package
+// bindcheck.
+func checkFree(address string) error { return bindcheck.Free("udp", address) }
 
 // staticKey identifies what the Mux is made with.
 func staticKey(c *config.WebRTCMedia) string {

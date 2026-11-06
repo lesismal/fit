@@ -150,6 +150,27 @@ fit validate -c fit.yaml -c conf.d
 经 Admin API 向运行中的 fit 申请一个由其[隧道 hub](tunnel.zh-CN.md#令牌)或 [LLM 角色](llm.zh-CN.md#令牌)签发的连接
 令牌，并打印它，只此一次；`fit token list`、`expiry` 和 `revoke` 列出令牌及其最近使用、修改某个令牌的过期时间、吊销某个令牌。
 
+## 一个地址，一个服务器
+
+fib 的引擎以 SO_REUSEPORT 监听，让每个事件循环各在自己的套接字上接受连接；这样内核也会让同一用户的第二个服务器
+无错误地监听同一地址，并把连接分给两者。fit 不让这种情况发生：
+
+- **在配置中。** 加载配置时（`fit validate`、`fit run`、重载、Admin API 或角色的页面），两处在同一地址和同一传输上
+  监听的配置会被拒绝，错误中写明两者：两个监听器；监听器与 Admin API 或 `admin.console`；角色的页面、链路监听器或
+  API（`llm`）；隧道 hub 的监听器和 `console_socket`，隧道 proxy 的转发和网页代理；流媒体的 RTMP、RTSP、SRT 和
+  WebRTC 端口；TURN 服务器的 `listen`、`listen_tcp` 和 `listen_tls`，`webrtc.media` 和 `webrtc.proxy`。
+  `:8080`、`0.0.0.0:8080` 和 `[::]:8080` 是同一个地址，即所有地址，也包含 `127.0.0.1:8080`；`localhost` 即
+  `127.0.0.1`。同一号码的 TCP 端口和 UDP 端口不冲突，所以 HTTP 和 HTTP/3 可共用一个端口；由内核挑选的 0 端口
+  从不冲突。
+
+  ```text
+  tunnel.proxy.web_proxies[0].listen: listener "web" listens on TCP :8080 already, the same address as 0.0.0.0:8080; two servers on one address would share its connections, so give one of them another port
+  ```
+
+- **绑定时。** 每个监听器和角色在绑定之前，先以普通绑定检查是否有其他套接字占着它的地址（已在那里的套接字会拒绝
+  这种绑定）：别的进程的，或之后被某个角色的页面改到那里的。若有，它以 `TCP 127.0.0.1:8080 is taken: another
+  process, or another part of fit, listens there` 失败，配置的其余部分照常运行，与任何无法绑定的地址一样。
+
 ## 修改运行中的配置
 
 无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当某个文件变化、目录中加入或移除文件，都会重新应用配置。

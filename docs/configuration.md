@@ -169,6 +169,32 @@ bearer token; a running fit with the same secret takes it until it expires. `fit
 [tunnel hub](tunnel.md#tokens) or [LLM role](llm.md#tokens) issues, and prints it, once; `fit token
 list`, `expiry` and `revoke` list the tokens with their last use, change one's expiry and revoke one.
 
+## One address, one server
+
+fib's engines listen with SO_REUSEPORT, so that each of their event loops accepts connections on a
+socket of its own; the kernel would then let a second server of the same user listen on the same
+address without an error, and split the connections between the two. fit does not let that happen:
+
+- **In the config.** Loading a config, with `fit validate`, `fit run`, a reload, the Admin API or a
+  role's pages, refuses two parts of it that listen on one address and transport, and the error
+  names both: two listeners; a listener and the Admin API or `admin.console`; a role's pages,
+  links listener or API (`llm`); a tunnel hub's listeners and `console_socket`, a tunnel proxy's
+  forwards and web proxies; streaming's RTMP, RTSP, SRT and WebRTC ports; the TURN server's
+  `listen`, `listen_tcp` and `listen_tls`, `webrtc.media` and `webrtc.proxy`. `:8080`,
+  `0.0.0.0:8080` and `[::]:8080` are one address, every address, which takes in `127.0.0.1:8080`
+  as well; `localhost` is `127.0.0.1`. A TCP port and a UDP port of the same number do not clash,
+  so HTTP and HTTP/3 share one, and port 0, which the kernel picks, never clashes.
+
+  ```text
+  tunnel.proxy.web_proxies[0].listen: listener "web" listens on TCP :8080 already, the same address as 0.0.0.0:8080; two servers on one address would share its connections, so give one of them another port
+  ```
+
+- **When it binds.** Each listener and role checks, just before it binds, that no other socket
+  holds its address, with a plain bind that a socket already there refuses: another process's, or
+  one a role's pages moved there since. It fails with `TCP 127.0.0.1:8080 is taken: another
+  process, or another part of fit, listens there`, and the rest of the config runs, as for any
+  address that cannot be bound.
+
 ## Changing a running config
 
 `fit run` applies its config files again on SIGHUP, or with `-watch` each time one changes, or a

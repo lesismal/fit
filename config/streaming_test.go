@@ -38,9 +38,9 @@ func TestStreaming(t *testing.T) {
 		{doc(`{"rtsp": {"listen": ":8554", "auth": "nope"}}`), `no media_auth policy named "nope"`},
 		{doc(`{"srt": {"listen": ":8890", "auth": "nope"}}`), `no media_auth policy named "nope"`},
 		{doc(`{"rtmp": {"listen": "1935"}}`), "not a host and port"},
-		{doc(`{"rtmp": {"listen": ":1935"}, "rtsp": {"listen": ":1935"}}`), "rtmp listens on :1935 already"},
-		{doc(`{"srt": {"listen": ":9000"}, "webrtc": {"listen": ":9000"}}`), "srt listens on :9000 already"},
-		{doc(`{"webrtc": {"listen": "0.0.0.0:8189"}}`), "webrtc.media listens on 0.0.0.0:8189 already"},
+		{doc(`{"rtmp": {"listen": ":1935"}, "rtsp": {"listen": ":1935"}}`), "streaming.rtmp listens on TCP :1935 already"},
+		{doc(`{"srt": {"listen": ":9000"}, "webrtc": {"listen": ":9000"}}`), "streaming.srt listens on UDP :9000 already"},
+		{doc(`{"webrtc": {"listen": "0.0.0.0:8189"}}`), "streaming.webrtc listens on UDP 0.0.0.0:8189 already, the same address as :8189"},
 		{doc(`{"rtsp": {"listen": ":8554", "auth_methods": ["digest", "digest"]}}`), "listed twice"},
 		{doc(`{"rtsp": {"listen": ":8554", "auth_methods": ["ntlm"]}}`), "ntlm"},
 		{doc(`{"rtsp": {"listen": ":8554", "realm": "a\"b"}}`), "double quote"},
@@ -54,8 +54,5 @@ func TestStreaming(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
 			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)
 		}
-	}
-	if !samePort(":1", "127.0.0.1:1") || samePort(":0", ":0") || samePort("a:1", "b:1") || samePort("x", ":1") {
-		t.Fatal("samePort")
 	}
 }
