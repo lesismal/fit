@@ -187,6 +187,12 @@ func WriteMetrics(w observe.MetricWriter, libs []*Library) {
 	for _, l := range libs {
 		w.Sample("fit_media_library_table_bytes", float64(l.Tables().Bytes), "library", l.name)
 	}
+	w.Family("fit_media_library_table_lookups_total", "counter", "Sample tables a library was asked for, by whether it kept the table (hit) or not (miss): read from the file, a read under way waited for, or refused.")
+	for _, l := range libs {
+		ts := l.Tables()
+		w.Sample("fit_media_library_table_lookups_total", float64(ts.Hits), "library", l.name, "result", "hit")
+		w.Sample("fit_media_library_table_lookups_total", float64(ts.Misses), "library", l.name, "result", "miss")
+	}
 	w.Family("fit_media_library_pool_jobs", "gauge", "Jobs of a library's file pool, by whether they wait (queued) or run (busy).")
 	for _, l := range libs {
 		st := l.Pool().Stats()

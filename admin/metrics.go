@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"runtime/metrics"
 
+	"github.com/lesismal/fit/handler/vod"
 	"github.com/lesismal/fit/observe"
 )
 
@@ -31,7 +32,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 // WriteMetrics appends fit's metrics, in Prometheus's text format, to b:
 // requests by listener and route; upstreams and their backends; the
 // listeners' connections; config reloads; certificates; the access log; the
-// roles' own, as the TURN server's; and a few of the Go runtime's.
+// roles' own, as the TURN server's; the vod handlers'; and a few of the Go
+// runtime's.
 func (cs *Configs) WriteMetrics(b []byte) []byte {
 	w := &observe.TextWriter{B: b}
 	cs.WriteMetricsTo(w)
@@ -151,6 +153,7 @@ func (cs *Configs) WriteMetricsTo(w observe.MetricWriter) {
 	if apps != nil {
 		apps.WriteMetrics(w)
 	}
+	vod.WriteMetrics(w, cs.env.Engine)
 
 	samples := make([]metrics.Sample, len(goMetrics))
 	for i, m := range goMetrics {

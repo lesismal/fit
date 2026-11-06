@@ -75,6 +75,9 @@ type cache struct {
 	// cat is the catalog last seen; a new one drops what it lacks. It is
 	// read on every request, without the lock.
 	cat atomic.Pointer[medialib.Catalog]
+	// hits counts the lookups that found what they asked for built, and
+	// misses those that built it or waited for it to be built (stats.go).
+	hits, misses atomic.Uint64
 }
 
 func newCache(max int64) *cache { return &cache{max: max, m: map[ckey]*entry{}} }
@@ -84,6 +87,7 @@ func (c *cache) peek(k ckey) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if e := c.m[k]; e != nil && e.elem != nil {
+		c.hits.Add(1)
 		c.lru.MoveToFront(e.elem)
 		return e.val, true
 	}
@@ -102,11 +106,13 @@ func (c *cache) get(k ckey, build func(j job), fn func(any, error)) {
 	c.mu.Lock()
 	if e := c.m[k]; e != nil {
 		if e.elem != nil {
+			c.hits.Add(1)
 			c.lru.MoveToFront(e.elem)
 			c.mu.Unlock()
 			fn(e.val, nil)
 			return
 		}
+		c.misses.Add(1)
 		if len(e.waiters) >= maxWaiters {
 			c.mu.Unlock()
 			fn(nil, errWaiters)
@@ -116,6 +122,7 @@ func (c *cache) get(k ckey, build func(j job), fn func(any, error)) {
 		c.mu.Unlock()
 		return
 	}
+	c.misses.Add(1)
 	if !c.room(entryBytes) {
 		c.mu.Unlock()
 		fn(nil, errFull)

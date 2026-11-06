@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +84,43 @@ func TestMediaLibrary(t *testing.T) {
 		bbb["problems"] != false || strings.Join(toStrings(bbb["codecs"]), ",") != "h264,aac" {
 		t.Errorf("bbb: %v", bbb)
 	}
-	for _, bad := range []string{"offset=-1", "limit=0", "limit=1001", "offset=x", "error=maybe"} {
+	// min_height and max_height filter on an item's largest rendition.
+	heights := map[string]float64{}
+	for _, it := range decode("/media/library/films", 200)["page"].([]any) {
+		m := it.(map[string]any)
+		h, _ := m["height"].(float64)
+		heights[m["id"].(string)] = h
+	}
+	h := heights["films/bbb"]
+	if h == 0 {
+		t.Fatalf("heights: %v", heights)
+	}
+	for _, c := range []struct {
+		query string
+		keep  func(float64) bool
+	}{
+		{"min_height=" + strconv.Itoa(int(h)), func(x float64) bool { return x >= h }},
+		{"max_height=" + strconv.Itoa(int(h)-1), func(x float64) bool { return x <= h-1 }},
+		{"min_height=" + strconv.Itoa(int(h)) + "&max_height=" + strconv.Itoa(int(h)), func(x float64) bool { return x == h }},
+		{"min_height=0", func(float64) bool { return true }},
+	} {
+		var want []string
+		for id, x := range heights {
+			if c.keep(x) {
+				want = append(want, id)
+			}
+		}
+		got := strings.Fields(ids("/media/library/films?" + c.query))
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", c.query, got, want)
+		}
+	}
+	if got := ids("/media/library/films?max_height=" + strconv.Itoa(int(h)-1)); strings.Contains(got, "films/bbb") {
+		t.Errorf("max_height below bbb's: %s", got)
+	}
+	for _, bad := range []string{"offset=-1", "limit=0", "limit=1001", "offset=x", "error=maybe", "min_height=-1", "max_height=x", "min_height=1.5"} {
 		decode("/media/library/films?"+bad, 400)
 	}
 

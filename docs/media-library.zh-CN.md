@@ -113,11 +113,21 @@ ID 由字母、数字、`.`、`_`、`~` 和 `-` 组成的若干段以 `/` 连接
 | 方法和路径 | 返回什么 |
 | --- | --- |
 | `GET /media/library` | 所有媒体库：根目录、扫描状态、条目数和有错误的条目数、问题、目录字节数、文件池和样本表 |
-| `GET /media/library/<name>` | 一个媒体库的上述内容、其问题，以及一页条目：`offset`、`limit`（100，最多 1000）、`q`（在 ID 或标题中查找）、`codec`（`h264`、`aac` 等）、`error`（`true` 表示有文件出错的条目） |
+| `GET /media/library/<name>` | 一个媒体库的上述内容、其问题，以及一页条目：`offset`、`limit`（100，最多 1000）、`q`（在 ID 或标题中查找）、`codec`（`h264`、`aac` 等）、`error`（`true` 表示有文件出错的条目）、`min_height` 和 `max_height`（条目最大版本的高度） |
 | `GET /media/library/<name>/items/<id>` | 完整的条目：各版本及其轨道、编解码器（RFC 6381）、大小、时长和码率，音轨、字幕、海报和 sidecar，以及错误 |
 | `POST /media/library/<name>/rescan` | `202`，立即请求一次扫描：已有一次在等待时 `queued` 为 false |
+| `POST /media/preview` | `{"library", "item"}` 或 `{"channel"}`：条目（频道）播放列表及其海报的地址，位于服务它的第一个 `vod`（`hls`）路由的监听器上，两分钟内有效：路由的策略有 `url_signing` 时为主体 `workbench:<控制台用户>` 在新会话中签名（`signed: "url"`），否则带其 `auth` 签发的令牌（`"token"`），或原样（`"public"`）；另有 `expires`、`subject`、`session`、`route` 和 `cors`。找不到媒体库、条目、频道或路由时 404，媒体库尚未加载时 503 |
+| `GET /media/auth` | 所有 `media_auth` 策略：运行中的 `url_signing`、密钥（名称、哪个是默认、是否由文件保存密钥及其写入时间；从不给出密钥或路径）、播放会话及其主体、按原因统计的被拒地址，以及用它签名的 `media_tokens` 路由 |
+| `GET /media/auth/<policy>/sessions` | 策略的一页播放会话，按主体和开始时间排序：`offset`、`limit`（100，最多 1000）、`subject` 和 `resource`（前缀）；另有 `total`、`matched`、`max_sessions`，以及本页每个主体正在播放的会话数 |
+| `POST /media/auth/<policy>/sessions/end` | `{"subject", "id"}`：结束该会话，其下一个请求被以 403 拒绝；会话不在播放时 404 |
+| `POST /media/auth/<policy>/rotate` | `{"key": "k1"}`、`{"all": true}`，单一密钥时为 `{}`：像 `media_tokens` 的 revoke 那样，把新密钥写入各自的 `secret_file` 并立即启用；返回轮换的密钥（单一密钥为 `[""]`）和 `since`。写在配置里的密钥返回 409 |
+| `POST /media/auth/<policy>/urls` | `{"subject", "path", "address", "ttl", "route"}`：像 `media_tokens` 的 `/urls` 那样，在新会话中签发一个测试地址；有 `route` 时套用该 `media_tokens` 路由的 `url_prefixes`、`max_ttl` 和 `url_base`，没有时 `ttl` 最多一小时，地址落在服务该路径的 `vod` 或 `hls` 路由的监听器上 |
+| `GET /media/stats` | 各媒体库的条目、文件池和样本表；`vod` 处理器的服务量及其缓存；每个策略的会话、拒绝次数和会话最多的 50 个资源；每个频道的状态、其 hub 订阅者数和推流目标 |
 
 状态说明是否有扫描在运行或等待、上次扫描的开始和结束时间、查看的文件数、需要探测和已探测的媒体文件数，以及复用的文件数。
+
+工作台的控制台把登录的用户和浏览器访问的主机以 `Fit-Console-User` 和 `Fit-Console-Host` 传给这些端点；它的页面可以从
+`vod` 和 `hls` 路由的监听器加载图片和媒体。这些端点返回的地址带 `Cache-Control: no-store` 发送，且从不写入日志。
 
 ## 点播
 
@@ -251,5 +261,8 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 ## 指标
 
 `fit_media_library_items`（按 `state`，ok 或 error）、`fit_media_library_catalog_bytes`、`fit_media_library_scans_total`、
-`fit_media_library_probes_total`（按 `result`）、`fit_media_library_table_bytes`、`fit_media_library_pool_jobs`（queued、busy）
-和 `fit_media_library_pool_refused_total`（refused、expired），均按 `library` 区分，见 Admin API 的 `/metrics`。
+`fit_media_library_probes_total`（按 `result`）、`fit_media_library_table_bytes`、`fit_media_library_table_lookups_total`（hit、miss）、
+`fit_media_library_pool_jobs`（queued、busy）和 `fit_media_library_pool_refused_total`（refused、expired），均按 `library`
+区分，见 Admin API 的 `/metrics`。`vod` 处理器另有 `fit_vod_requests_total`、`fit_vod_sent_bytes_total`、
+`fit_vod_cache_lookups_total`（hit、miss）和 `fit_vod_cache_bytes`，按 `library` 区分；`media_auth` 另有
+`fit_media_auth_url_refused_total`（按 `policy` 和 `reason`）和 `fit_media_auth_sessions`（按 `policy`）。

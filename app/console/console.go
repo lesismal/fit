@@ -124,6 +124,14 @@ type Options struct {
 	// may call beside GET /api/session, GET /api/workbench and the logout;
 	// every other answers 403 until the password changes.
 	PasswordRoutes []string
+	// Sources, when not nil, returns origins beyond the console's own, as
+	// "http://192.168.1.5:9401", whose images and media the pages may load
+	// and fetch: the media routes a preview plays from. When it returns
+	// any, a response's Content-Security-Policy adds them to img-src and
+	// connect-src, and adds media-src 'self' blob: and them. It is called
+	// for every response, on a fib worker: it must not block, and what it
+	// returns must be origins alone, which the policy holds as they are.
+	Sources func(r *stdhttp.Request) []string
 }
 
 // Module is an API a console serves under /api/m/<ID>/: a role's, made once
@@ -190,6 +198,8 @@ type Console struct {
 	modules func() []*Module
 	pwOnly  []string           // Options.PasswordRoutes
 	ends    map[string]Handler // Options.Endpoints
+	// sources is Options.Sources.
+	sources func(r *stdhttp.Request) []string
 	tasks   chan func()
 	checks  chan func() // the login checks' queue, on LoginWorkers of their own
 	limit   *limitHandler
@@ -244,7 +254,7 @@ func (a *API) HandlePrefix(method, prefix string, h Handler) {
 func Start(engine *fib.Engine, o Options) (*Console, error) {
 	cfg := o.Config
 	logins := login.New(login.OptionsOf(cfg.Console()))
-	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes, ends: o.Endpoints,
+	c := &Console{engine: engine, index: -1, cookie: o.Cookie, logins: logins, modules: o.Modules, pwOnly: o.PasswordRoutes, ends: o.Endpoints, sources: o.Sources,
 		idle: idleTimeout, unauthIdle: unauthIdleTimeout,
 		files: map[string]file{}, routes: routeTable{exact: map[string]Handler{}}, tasks: make(chan func(), Queue), checks: make(chan func(), LoginQueue), stop: make(chan struct{})}
 	switch {
@@ -479,7 +489,7 @@ func (r *Request) JSON(status int, v any) error { return WriteJSON(r.Context, st
 // serve answers every request.
 func (c *Console) serve(ctx *fibhttp.Context) {
 	h := ctx.Header()
-	h.Set("Content-Security-Policy", csp)
+	h.Set("Content-Security-Policy", c.policy(ctx.Request))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
@@ -552,6 +562,23 @@ func (c *Console) serve(ctx *fibhttp.Context) {
 		return
 	}
 	hd(&Request{Context: ctx, User: s.User, Path: rel, c: c})
+}
+
+// policy returns the Content-Security-Policy of the response to r: csp,
+// or, with origins from Options.Sources, csp with them added to img-src and
+// connect-src, and media-src for them, the console's own and blob:, which
+// a player's MediaSource plays from.
+func (c *Console) policy(r *stdhttp.Request) string {
+	if c.sources == nil {
+		return csp
+	}
+	origins := c.sources(r)
+	if len(origins) == 0 {
+		return csp
+	}
+	more := strings.Join(origins, " ")
+	return "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: " + more + "; connect-src 'self' " + more +
+		"; media-src 'self' blob: " + more + "; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 }
 
 // workbenchBody is what GET /api/workbench answers: who is logged in, and

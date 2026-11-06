@@ -85,6 +85,7 @@ fit.json:12:40: routes[0].middleware[0].params.max_size: deprecated: renamed "ma
 | `GET /cache`、`POST /cache/purge` | 缓存的 zone，以及按 URL、标签或 zone 清除 |
 | `GET /tokens`，`/tokens/{role}` 上的 `GET`、`POST`，`/tokens/{role}/{id}` 上的 `PATCH`、`DELETE` | 隧道 hub 与 LLM 各角色的监听签发的连接令牌：列出、签发、修改过期时间、吊销 |
 | `GET /media/library`、`GET /media/library/{name}`、`GET /media/library/{name}/items/{id}`、`POST /media/library/{name}/rescan` | 媒体库：其扫描、一个媒体库的一页条目、一个条目，以及重新扫描 |
+| `POST /media/preview`、`GET /media/auth`、`GET /media/auth/{policy}/sessions`、`POST /media/auth/{policy}/sessions/end`、`POST /media/auth/{policy}/rotate`、`POST /media/auth/{policy}/urls`、`GET /media/stats` | 工作台的媒体页面：预览的短时地址，media_auth 策略及其密钥和播放会话，结束会话，轮换密钥，测试地址，以及媒体库、vod 处理器、策略和频道的统计 |
 | `GET /streaming/channels`，`/streaming/channels/{name}` 上的 `GET`、`POST`，`GET /streaming/push`，`POST /streaming/push/{name}` | 流媒体角色的频道与推流目标：各自在播放或做什么，以及启动、停止、跳过或重启 |
 | `GET /dashboard/` | 给人看的仪表盘（不覆盖） |
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	stdhttp "net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	fibhttp "github.com/lesismal/fib/http"
@@ -21,16 +22,20 @@ import (
 // for the disk or for the client. It reports whether SendFile took the
 // response over, calling done once it has; otherwise the response is
 // complete, and done is not called. It runs on the file pool.
-func sendFile(c *fibhttp.Context, f *os.File, name string, modTime time.Time, stall time.Duration, done func()) bool {
+func sendFile(c *fibhttp.Context, f *os.File, name string, modTime time.Time, stall time.Duration, sent *atomic.Uint64, done func()) bool {
 	w := &rangeWriter{c: c, src: &offsetFile{f: f}}
 	stdhttp.ServeContent(w, c.Request, name, modTime, w.src)
 	if !w.taken {
 		// HEAD, 304, 412, 416: no body, or ServeContent's short one.
 		if len(w.small) > 0 {
+			sent.Add(uint64(len(w.small)))
 			_, _ = c.Write(w.small)
 		}
 		return false
 	}
+	// What is handed to SendFile is counted, whether or not the client
+	// takes all of it.
+	sent.Add(uint64(w.n))
 	c.SendFileStall(f, w.offset, w.n, stall, func(error) { done() })
 	return true
 }
@@ -106,14 +111,15 @@ func (o *offsetFile) Seek(offset int64, whence int) (int64, error) {
 
 // serveBlob answers with b: as it is, with the header it keeps, for a
 // request without conditions or a range, and otherwise as ServeContent
-// answers it.
-func serveBlob(c *fibhttp.Context, b *blob) {
+// answers it. It returns the bytes of the body it handed to the
+// connection.
+func serveBlob(c *fibhttp.Context, b *blob) int {
 	r := c.Request
 	if !hasConditions(r) {
 		// The header is shared by every response b goes out in; fib does
 		// not change a header it is handed.
 		_ = c.WriteResponse(fibhttp.Response{StatusCode: stdhttp.StatusOK, Header: b.header, Body: b.data})
-		return
+		return len(b.data)
 	}
 	w := &gathered{header: make(stdhttp.Header, len(b.header)+2)}
 	for k, v := range b.header {
@@ -121,6 +127,7 @@ func serveBlob(c *fibhttp.Context, b *blob) {
 	}
 	stdhttp.ServeContent(w, r, "", b.modTime, bytes.NewReader(b.data))
 	_ = c.WriteResponse(fibhttp.Response{StatusCode: w.status, Header: w.header, Body: w.body.Bytes()})
+	return w.body.Len()
 }
 
 // hasConditions reports whether r asks for anything but the whole

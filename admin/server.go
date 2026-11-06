@@ -94,6 +94,15 @@ const VersionHeader = "Fit-Config-Version"
 //	                            /media/library/{name} one library, with a
 //	                            page of its items; .../items/{id} one item;
 //	                            POST .../rescan scans it again (medialib.go)
+//	POST   /media/preview       a short-lived URL of an item or a channel,
+//	                            signed for the console's user; GET
+//	                            /media/auth the media_auth policies, with
+//	                            .../{policy}/sessions a page of their
+//	                            playback sessions, POST .../sessions/end
+//	                            ending one, .../rotate rotating keys and
+//	                            .../urls a test URL; GET /media/stats what
+//	                            the libraries, vod handlers, policies and
+//	                            channels counted (media.go)
 //	GET    /streaming/channels  the streaming role's channels: what each
 //	                            plays and what comes next; POST
 //	                            /streaming/channels/{name} starts, stops
@@ -256,6 +265,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /media/library/{name}", s.libraryPage)
 	mux.HandleFunc("GET /media/library/{name}/items/{id...}", s.libraryItem)
 	mux.HandleFunc("POST /media/library/{name}/rescan", s.rescan)
+	mux.HandleFunc("POST /media/preview", s.preview)
+	mux.HandleFunc("GET /media/auth", s.mediaAuth)
+	mux.HandleFunc("GET /media/auth/{policy}/sessions", s.authSessions)
+	mux.HandleFunc("POST /media/auth/{policy}/sessions/end", s.endSession)
+	mux.HandleFunc("POST /media/auth/{policy}/rotate", s.rotateKeys)
+	mux.HandleFunc("POST /media/auth/{policy}/urls", s.testURL)
+	mux.HandleFunc("GET /media/stats", s.mediaStats)
 	mux.HandleFunc("GET /streaming/channels", s.listChannels)
 	mux.HandleFunc("GET /streaming/channels/{name...}", s.getChannel)
 	mux.HandleFunc("POST /streaming/channels/{name...}", s.channelAction)

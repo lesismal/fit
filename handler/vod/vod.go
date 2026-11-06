@@ -185,6 +185,7 @@ func (v *VOD) library() *medialib.Library {
 // ServeHTTP serves what the path names of an item.
 func (v *VOD) ServeHTTP(c *fibhttp.Context) {
 	r := c.Request
+	v.st.requests.Add(1)
 	// Whatever the answer, the access log holds no token or signature.
 	mediaauth.Redact(r)
 	if r.Method != stdhttp.MethodGet && r.Method != stdhttp.MethodHead {
@@ -262,7 +263,7 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 			v.respond(c, stdhttp.StatusNotFound, "no rendition of the item is carried in "+con.String())
 			return
 		}
-		serveBlob(c, &blob{data: b, header: personal(v.st.header(hls.PlaylistContentType, "", it.ModTime), &a, cookie), modTime: it.ModTime})
+		v.sendBlob(c, &blob{data: b, header: personal(v.st.header(hls.PlaylistContentType, "", it.ModTime), &a, cookie), modTime: it.ModTime})
 	case kindMedia, kindInit, kindSegment:
 		r := v.rendition(it, nm)
 		if r == nil {
@@ -285,7 +286,7 @@ func (v *VOD) serve(c *fibhttp.Context, l *medialib.Library, it *medialib.Item, 
 		}
 		if nm.kind == kindSubtitles {
 			query, cookie := a.PassOn(it.Duration)
-			serveBlob(c, &blob{data: renderSubtitles(nm.i, it.Duration, query),
+			v.sendBlob(c, &blob{data: renderSubtitles(nm.i, it.Duration, query),
 				header: personal(v.st.header(hls.PlaylistContentType, "", it.Subtitles[nm.i].ModTime), &a, cookie), modTime: it.Subtitles[nm.i].ModTime})
 			return
 		}
@@ -433,7 +434,7 @@ func (w *waiter) blob(f *medialib.File, b *blob, err error) {
 			w.v.fail(w.c, f, err)
 			return
 		}
-		serveBlob(w.c, b)
+		w.v.sendBlob(w.c, b)
 	})
 }
 
@@ -456,7 +457,7 @@ func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Re
 	lk := ckey{file: idOf(&r.File), what: whatList, c: nm.c}
 	if query == "" {
 		if b, ok := v.st.cache.peek(lk); ok {
-			serveBlob(c, own(b.(*blob)))
+			v.sendBlob(c, own(b.(*blob)))
 			return
 		}
 	}
@@ -468,7 +469,7 @@ func (v *VOD) serveMedia(c *fibhttp.Context, l *medialib.Library, r *medialib.Re
 		if query == "" {
 			v.st.cache.put(lk, b, int64(len(b.data)))
 		}
-		serveBlob(c, own(b))
+		v.sendBlob(c, own(b))
 		return
 	}
 	w := v.wait(c)
@@ -510,7 +511,7 @@ func (v *VOD) serveInit(c *fibhttp.Context, r *medialib.Rendition, nm name) {
 		v.fail(c, &r.File, err)
 		return
 	}
-	serveBlob(c, in)
+	v.sendBlob(c, in)
 }
 
 // serveSegment serves segment nm.n of r.
@@ -521,7 +522,7 @@ func (v *VOD) serveSegment(c *fibhttp.Context, l *medialib.Library, r *medialib.
 	}
 	sk := ckey{file: idOf(&r.File), what: whatSegment, c: nm.c, n: int32(nm.n)}
 	if b, ok := v.st.cache.peek(sk); ok {
-		serveBlob(c, b.(*blob))
+		v.sendBlob(c, b.(*blob))
 		return
 	}
 	w := v.wait(c)
@@ -542,7 +543,7 @@ func (v *VOD) serveSegment(c *fibhttp.Context, l *medialib.Library, r *medialib.
 func (v *VOD) serveVTT(c *fibhttp.Context, l *medialib.Library, s *medialib.Subtitle) {
 	k := ckey{file: idOf(&s.File), what: whatVTT}
 	if b, ok := v.st.cache.peek(k); ok {
-		serveBlob(c, b.(*blob))
+		v.sendBlob(c, b.(*blob))
 		return
 	}
 	w := v.wait(c)
@@ -593,7 +594,7 @@ func (v *VOD) serveFile(c *fibhttp.Context, l *medialib.Library, f *medialib.Fil
 			// 9110 allows.
 			c.Request.Header.Del("Range")
 		}
-		if !sendFile(c, h.File(), path.Base(file.Path), file.ModTime, v.stall, func() { h.Close(); w.release() }) {
+		if !sendFile(c, h.File(), path.Base(file.Path), file.ModTime, v.stall, &v.st.sent, func() { h.Close(); w.release() }) {
 			h.Close()
 			w.release()
 		}
@@ -629,6 +630,8 @@ type store struct {
 	// tag tells what the store's params make apart in ETags: segments cut
 	// by one segment_duration differ from those of another.
 	tag string
+	// requests and sent count what the store's handlers served (stats.go).
+	requests, sent atomic.Uint64
 }
 
 var (
@@ -700,6 +703,7 @@ func (st *store) init(r *medialib.Rendition) (*blob, error) {
 	if b, ok := st.cache.peek(k); ok {
 		return b.(*blob), nil
 	}
+	st.cache.misses.Add(1)
 	tracks, ok := tracksOf(r, fmp4C)
 	if !ok {
 		return nil, medialib.ErrNotServed

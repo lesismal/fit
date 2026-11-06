@@ -55,6 +55,11 @@ func TestTable(t *testing.T) {
 	if st := l.Tables(); st.Tables != 1 || st.Bytes != tabs[0].Bytes() || st.Max != config.DefaultMediaMaxTableBytes {
 		t.Errorf("tables: %+v", st)
 	}
+	// Counted: the first call read it, the last found it kept, those
+	// between waited for the read or found it kept.
+	if st := l.Tables(); st.Hits+st.Misses != 51 || st.Hits < 1 || st.Misses < 1 {
+		t.Errorf("lookups: %+v", st)
+	}
 
 	// Bounded: room for one table; the least recently used goes.
 	audio, err := get(t, func(fn func(*mp4.Table, error)) { l.Table(bbb, 1, fn) })
@@ -476,6 +481,7 @@ func TestRole(t *testing.T) {
 		`fit_media_library_scans_total{library="b"} 1`, `fit_media_library_probes_total{library="a",result="error"} 1`,
 		`fit_media_library_pool_jobs{library="a",state="queued"} 0`, `fit_media_library_pool_refused_total{library="a",reason="expired"} 0`,
 		`fit_media_library_catalog_bytes{library="a"}`, `fit_media_library_table_bytes{library="a"} 0`,
+		`fit_media_library_table_lookups_total{library="a",result="hit"} 0`, `fit_media_library_table_lookups_total{library="b",result="miss"} 0`,
 	} {
 		if !strings.Contains(string(w.B), want) {
 			t.Errorf("metrics lack %s:\n%s", want, w.B)
