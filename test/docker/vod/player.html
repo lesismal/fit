@@ -8,7 +8,11 @@
   audio and subtitle tracks. What it found is POSTed, as JSON, to the
   collector that served the page (collector.py), which prints it and exits.
 
-    player.html?base=<the vod prefix URL>&items=films/bbb,clips/av1&containers=fmp4,ts[&signed=1]
+    player.html?base=<the vod prefix URL>[,<another>]&items=films/bbb,clips/av1&containers=fmp4,ts[&signed=1][&encrypted=<a base>]
+
+  Each base is played in turn. A base listed in encrypted serves its
+  segments encrypted (the vod handler's encrypt): hls.js must load the
+  item's key, through the grant its playlists hand on, to play it.
 
   With signed=1 each item plays through a playback URL that expires
   (url_signing), which the collector, standing for the site's API, gets from
@@ -25,7 +29,8 @@
 <script src="hls.min.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
-const base = q.get('base');
+const bases = (q.get('base') || '').split(',').filter(Boolean);
+const encrypted = (q.get('encrypted') || '').split(',').filter(Boolean);
 const items = (q.get('items') || '').split(',').filter(Boolean);
 const containers = (q.get('containers') || 'fmp4,ts').split(',');
 const signed = q.get('signed') === '1';
@@ -56,9 +61,10 @@ async function codecsOf(url) {
   return { codecs, supported: types.every((t) => MediaSource.isTypeSupported(t)) };
 }
 
-async function play(item, container) {
+async function play(base, item, container) {
   let url = `${base}${item}/index.${container}.m3u8`;
-  const r = { item, container, url };
+  const enc = encrypted.includes(base);
+  const r = { item, container, url, encrypted: enc };
   let expires = 0;
   if (signed) {
     try {
@@ -88,6 +94,8 @@ async function play(item, container) {
   const hls = new Hls({ enableWorker: true });
   const errors = [];
   hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) errors.push(d.type + ': ' + d.details); });
+  r.keys = 0;
+  hls.on(Hls.Events.KEY_LOADED, () => { r.keys++; });
   try {
     hls.attachMedia(v);
     hls.loadSource(url);
@@ -125,17 +133,19 @@ async function play(item, container) {
   }
   r.errors = errors;
   r.ok = errors.length === 0 && Math.abs(r.seekLanded - r.seekTo) < 0.5 &&
-    (!signed || r.unsignedStatus === 401 && r.expiredStatus === 403);
+    (!signed || r.unsignedStatus === 401 && r.expiredStatus === 403) && (!enc || r.keys > 0);
   return r;
 }
 
 (async () => {
   const results = [];
-  for (const item of items) {
-    for (const c of containers) {
-      const r = await play(item, c);
-      log(JSON.stringify(r));
-      results.push(r);
+  for (const base of bases) {
+    for (const item of items) {
+      for (const c of containers) {
+        const r = await play(base, item, c);
+        log(JSON.stringify(r));
+        results.push(r);
+      }
     }
   }
   await fetch('/result', { method: 'POST', body: JSON.stringify({ hls: Hls.version, ua: navigator.userAgent, results }) });

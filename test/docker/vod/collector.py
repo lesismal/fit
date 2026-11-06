@@ -66,7 +66,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         for r in res["results"]:
             state = "skip" if r.get("skipped") else ("ok  " if r.get("ok") else "FAIL")
             failed += state == "FAIL"
-            print(state, r["item"], r["container"], r.get("codecs"), r.get("skipped") or
+            print(state, r["item"], r["container"], "aes-128 keys=%s" % r.get("keys") if r.get("encrypted") else "clear",
+                  r.get("codecs"), r.get("skipped") or
                   "levels=%s audio=%s subs=%s %sx%s seek %s->%s errors=%s%s" % (
                       r.get("levels"), r.get("audioTracks"), r.get("subtitleTracks"), r.get("width"),
                       r.get("height"), r.get("seekTo"), r.get("seekLanded"), r.get("errors"),
