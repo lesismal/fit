@@ -185,6 +185,10 @@
           "description": "A PEM file with the CAs that clients' certificates must chain to: with it, every client must present a valid certificate, besides the token, before it is heard. Needs cert_file and key_file; read again when it changes, as they are.",
           "type": "string"
         },
+        "cluster": {
+          "$ref": "#/$defs/config.Cluster",
+          "description": "Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033."
+        },
         "console": {
           "$ref": "#/$defs/config.Console",
           "description": "Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out."
@@ -691,6 +695,45 @@
       "required": [
         "ca_files"
       ],
+      "type": "object"
+    },
+    "config.Cluster": {
+      "additionalProperties": false,
+      "properties": {
+        "max_concurrency": {
+          "default": 8,
+          "description": "The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0.",
+          "maximum": 256,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_nodes": {
+          "default": 256,
+          "description": "The most members the manager keeps; one more is refused. 256 when left out or 0.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_response_bytes": {
+          "default": 4194304,
+          "description": "The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least.",
+          "maximum": 67108864,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "poll_interval": {
+          "default": "10s",
+          "description": "How often each member's GET /node, /status and /config/check are read. 10s when left out; 1s at least.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "description": "The longest one call to a member may take, from its connect to the last byte of its answer; the connect and the wait for the answer's header are bounded by it too. 10s when left out; 1s at least.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "config.Console": {

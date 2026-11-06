@@ -18,6 +18,8 @@ import (
 	"github.com/lesismal/fit/admin"
 	"github.com/lesismal/fit/admin/store"
 	"github.com/lesismal/fit/app"
+	appconsole "github.com/lesismal/fit/app/console"
+	"github.com/lesismal/fit/cluster"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/listener"
 	"github.com/lesismal/fit/logs"
@@ -314,9 +316,24 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		adminLog.Infof("admin API on %s", as.Addr())
 	}
 	var console *admin.Console
+	// The manager of other fits, admin.cluster, served in the console as
+	// the module cluster; the config checked that it has a store and a
+	// console.
+	var manager *cluster.Manager
+	if c.Admin != nil && c.Admin.Cluster != nil && c.Admin.Console != nil && boot != nil {
+		adminLog := root.Logger(config.LoggerAdmin)
+		// The settings, the store and the engine are there: New cannot fail.
+		manager, _ = cluster.New(cluster.Options{Engine: s.Engine(), Settings: c.Admin.Cluster, Store: boot.st, Logf: adminLog.Infof})
+		defer manager.Close() // closed already, unless serve fails before shutdown
+		fmt.Fprintf(stdout, "fit: managing %d members (admin.cluster)\n", len(manager.Members()))
+	}
 	if c.Admin != nil && c.Admin.Console != nil {
 		adminLog := root.Logger(config.LoggerAdmin)
-		console, err = admin.StartConsole(s.Engine(), c.Admin.Console, c.Admin, configs, apps.Modules, func(r admin.Result) {
+		modules := apps.Modules
+		if manager != nil {
+			modules = func() []*appconsole.Module { return append([]*appconsole.Module{manager.Module()}, apps.Modules()...) }
+		}
+		console, err = admin.StartConsole(s.Engine(), c.Admin.Console, c.Admin, configs, modules, func(r admin.Result) {
 			printApplied(stdout, stderr, r)
 		}, adminLog.Infof)
 		if err != nil {
@@ -441,6 +458,11 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 	}
 	if as != nil {
 		_ = as.Shutdown(sctx)
+	}
+	// The manager's calls go out on the listeners' engine: closed before
+	// it is.
+	if manager != nil {
+		manager.Close()
 	}
 	// Then the roles, whose bindings are on the listeners' engine.
 	apps.Stop(sctx)

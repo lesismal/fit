@@ -4,8 +4,10 @@
 // Beside the config, the store keeps the console users whose passwords
 // changed since fit started, so that a changed password survives a restart,
 // and named sections other parts of fit keep there, as the assistant's
-// settings and model API keys. See docs/decisions/027-console-and-store.md
-// and docs/decisions/031-assistant.md.
+// settings and model API keys, and a cluster manager's members with their
+// credentials (section "cluster", which carries a version of its own). See
+// docs/decisions/027-console-and-store.md, docs/decisions/031-assistant.md
+// and docs/decisions/033-cluster-management.md.
 //
 // Opening and writing a store read and write files, and deriving its key
 // takes 64 MiB and a fair share of a second: both are for the control plane,
