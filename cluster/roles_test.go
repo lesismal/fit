@@ -502,9 +502,26 @@ func TestRolesAlerts(t *testing.T) {
 	if err := f.m.TestWebhook("gil", "ops", func(WebhookResult) {}); err == nil {
 		t.Error("gil tested a webhook")
 	}
+	// The Manager's methods refuse as the endpoints do.
+	for what, err := range map[string]error{
+		"add a rule":       second(f.m.AddAlertRule("gil", &AlertRule{Name: "x", Kind: "member_down"})),
+		"change a rule":    second(f.m.UpdateAlertRule("gil", "down", &AlertRule{Kind: "member_down"})),
+		"remove a rule":    f.m.RemoveAlertRule("gil", "down"),
+		"add a webhook":    second(f.m.AddWebhook("gil", &WebhookInput{Name: "x"})),
+		"change a webhook": second(f.m.UpdateWebhook("gil", "ops", &WebhookInput{})),
+		"remove a webhook": f.m.RemoveWebhook("gil", "ops"),
+	} {
+		var fb *ErrForbidden
+		if !errors.As(err, &fb) {
+			t.Errorf("gil may %s: %v", what, err)
+		}
+	}
 	es := f.m.AuditWhere(AuditFilter{Action: "alert.webhook"})
 	if len(es) != 1 || es[0].User != "ada" || es[0].Outcome != AuditOK || es[0].Before != "a0" || es[0].After != "a1" ||
 		!strings.Contains(es[0].Diff, `"secret_set": true`) || strings.Contains(es[0].Diff, "sekret-token") || strings.Contains(es[0].Diff, "shh") {
 		t.Errorf("%+v", es)
 	}
 }
+
+// second returns the error of a call's two results.
+func second[T any](_ T, err error) error { return err }
