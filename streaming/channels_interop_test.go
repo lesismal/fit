@@ -124,15 +124,11 @@ func TestChannelInterop(t *testing.T) {
 		{"http-flv", f.base + "/flv/live/tv.flv", nil, 0.1},
 		{"hls-fmp4", f.base + "/hls/live/tv/index.m3u8", nil, 0.1},
 		{"hls-ts", f.base + "/hls/live/tv/index.m3u8?format=ts", nil, 0.1},
-		// live/mix sets new tracks at each item: HLS marks a discontinuity.
-		// fib's egresses take new tracks for a clock that may have started
-		// again, and move what follows past the last packet of any track:
-		// the next item's first pictures, decoded before the last item's
-		// audio ends, by up to the B-frames' delay and 20ms (fib request
-		// A68).
-		{"mix-hls-fmp4", f.base + "/hls/live/mix/index.m3u8", nil, 0.2},
-		{"mix-rtmp", "rtmp://" + rtmpAddr + "/live/mix", nil, 0.2},
-		{"mix-srt", "srt://" + srtAddr + "?streamid=live/mix", nil, 0.2},
+		// live/mix sets new tracks at each item: HLS marks a discontinuity,
+		// and the times run on all the same (fib request A68).
+		{"mix-hls-fmp4", f.base + "/hls/live/mix/index.m3u8", nil, 0.1},
+		{"mix-rtmp", "rtmp://" + rtmpAddr + "/live/mix", nil, 0.1},
+		{"mix-srt", "srt://" + srtAddr + "?streamid=live/mix", nil, 0.1},
 	}
 	var wg sync.WaitGroup
 	for _, c := range checks {

@@ -2602,6 +2602,11 @@ keeps the reads behind one interface so that it can be added).
     lists every target of its stream; actions through the Admin API are not saved in the config.
 11. **Interop** pushes to MediaMTX 1.15.3; a Linux test binary runs in a Debian trixie image with
     ffmpeg, Chromium and hls.js 1.5.20.
+12. **fib A68, compared per kind of track** rather than a `hub.TracksChanger` the hub would call: no
+    caller changes, and "the same publisher, the same clock" would be wrong for SRT encoders that start
+    again mid-connection. WHEP now moves on any step back of a kind (it let up to a second back
+    through); FLV and RTMP sequence headers carry their own track's last time; HLS decides at the new
+    writer's first packet; the kinds are video and the rest (two audio tracks share one).
 
 ### I135 Playback URLs that expire
 
