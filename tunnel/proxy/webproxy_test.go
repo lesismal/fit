@@ -59,8 +59,8 @@ func setProxies(proxies ...map[string]any) func(common.Member) error {
 // limit for the connections it accepts from then on, and closes its
 // connections when it is removed.
 func TestWebProxy(t *testing.T) {
-	listen, sock, fwd, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
-	h := start(t, hubDoc(t, listen, sock, tunneltest.Echo(t, ""), fwd, proxy, con, ""))
+	h, a := startHub(t, tunneltest.Echo(t, ""), "")
+	sock, proxy := a.sock, a.proxy
 	var body string
 	waitFor(t, "the page through the proxy", func() bool {
 		code, b, err := proxyGet(proxy)
@@ -108,7 +108,7 @@ func TestWebProxy(t *testing.T) {
 	}
 
 	// A socket nothing listens on: each connection is closed.
-	if err := h.editProxy(setProxies(map[string]any{"listen": proxy, "url": "ws://" + freeAddr(t) + "/", "password": "sock"})); err != nil {
+	if err := h.editProxy(setProxies(map[string]any{"listen": proxy, "url": "ws://" + nowhere + "/", "password": "sock"})); err != nil {
 		t.Fatal(err)
 	}
 	closedSoon(t, proxy)
@@ -118,10 +118,11 @@ func TestWebProxy(t *testing.T) {
 func TestWebProxyBadURL(t *testing.T) {
 	c := New(&app.Host{ID: ID, Engine: tunneltest.Engine(t)})
 	defer c.Stop(context.Background())
-	addr := freeAddr(t)
-	if err := c.Apply(&config.TunnelProxy{Name: "me", WebProxies: []config.TunnelWebProxy{{Listen: addr, URL: "http://127.0.0.1:1/", Password: "p"}}}); err != nil {
-		t.Fatal(err)
-	}
+	// A first Apply that does not open everything opens nothing, so one
+	// whose address was taken is tried again on another.
+	addr := tunneltest.Bind(t, "tcp", func(addr string) error {
+		return c.Apply(&config.TunnelProxy{Name: "me", WebProxies: []config.TunnelWebProxy{{Listen: addr, URL: "http://127.0.0.1:1/", Password: "p"}}})
+	})
 	closedSoon(t, addr)
 }
 

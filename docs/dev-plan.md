@@ -304,9 +304,9 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | done |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | done |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | done |
-| I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
+| I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | done |
 | I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
-| I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
+| I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | done |
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
@@ -3395,6 +3395,42 @@ also in decision 033 as its items 103–117):
   member, operation and time, each entry opening its diff.
 - **Touches**: `cluster`, `login`, `app/workbench`, `docs`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 118–133):
+
+1. **Roles live in the store's document**, changed live by a cluster-wide admin, with
+   `admin.cluster.admins` in the config as the way back in. Alternative: the config, which changes only at
+   a restart and which any console user can edit.
+2. **Before any role is set**, every console user is a cluster-wide admin, as before; the first save must
+   leave an admin. Alternative: everyone a viewer after the upgrade, which would lock people out.
+3. **What each role may do**: a viewer reads; an operator runs operations, tests saved members, and
+   plans and steers template and sync rollouts; an admin also edits members and credentials, enrolls,
+   tests drafts, writes through the switcher and plans copies; groups, templates and roles need a
+   cluster-wide admin, as they decide who has which role where.
+4. **A change to a member is checked as the member is and as it will be**, so a label change cannot move
+   it out of the editor's reach; group roles follow a rename and leave with the group.
+5. **Lists are not filtered by role**; a member's own reads need a role on it. Alternative: filter every
+   list.
+6. **The default role** is none unless set; a user listed without a role stays at none.
+7. **The router fails closed**: an endpoint added with `Handle` lets only cluster-wide admins write;
+   `Checked` endpoints decide for themselves.
+8. **The manager's own pages belong to cluster-wide admins** once roles are set, or a viewer could edit
+   the config and become admin at the next restart.
+9. **The assistant's cap**: a cluster-wide admin unbounded, an operator at most `propose`, others `read`;
+   for cluster tools the narrower of role and level wins.
+10. **Version 3** is written only when roles exist; older fits then open the document read-only.
+11. **A diff holds what the API shows**, secrets masked; a switcher write keeps only its body's digest;
+    revisions are kept, as the ETag starts over at a restart.
+12. **Tests of members are audited**, reversing I141's ninth decision; polls and reads are not.
+13. **Both bounds on every write path**, where some only counted entries.
+14. **Audit filters**: user, member, operation (whole or by prefix) and RFC 3339 times; JSON lines by
+    `?format=jsonl`.
+15. **The pages hide** controls a role may not use, not merely disable them; a template's editor is
+    read-only for non-admins.
+16. **I147's endpoints**: reading drift and alerts any role; Fix and silences an operator on the members
+    (or group, or the cluster for a rule of no group); rules, webhooks and a webhook's Test a cluster-wide
+    admin. Alternative: silences for admins only, as rules.
+
 ### I149 Members behind NAT, linking out
 
 - **Do**: `admin.cluster_member` on a member: the manager's URL, and an enrollment token made on
@@ -3454,6 +3490,34 @@ also in decision 033 as its items 28–42):
 - **Pages**: Cluster → Metrics (charts per member and group), Logs (members chosen, filters,
   follow), Certificates (the inventory, sorted by expiry); Overview's sparklines.
 - **Touches**: `cluster`, `cli`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-07; each stands until the user rules on it;
+also in decision 033 as its items 134–145):
+
+1. **The CLI reaches the manager through its Admin API** (token and `-c`, as `fit check`), served
+   under `/cluster/...` by handlers calling the Manager's methods. Alternative: the console with a
+   login, at the cost of a password in scripts.
+2. **The Admin API acts as a cluster-wide admin**, the user `Admin API`, whatever the roles say; a
+   console user of that name has no role. Alternative: a role for the token in the config.
+3. **"Bytes" in the series are bytes queued for clients** (`pending_bytes`), not throughput: a byte
+   counter would sit on the request path. Alternative: bytes counted per route, measured on the
+   benchmark host (a follow-up).
+4. **Series live in the manager's memory**, 360 polls a member (about 30 KiB), lost at a restart.
+   Alternative: kept in the store, written at every poll.
+5. **Rates are computed when read**, empty across a member's restart, a gap of more than three
+   intervals, or a member counting no requests; groups summed a poll interval at a time.
+6. **Series and inventory are any role's**, as states (item 122); logs need a role on each member.
+7. **The tail reads members' log rings** through a new member endpoint `GET /logs/recent`
+   (capability `logs.recent`, ring messages numbered), not files: 16 members, 1,000 messages a
+   member, one of the 8 member-read slots; the page keeps 2,000 lines.
+8. **The inventory is the poller's `/status` read**, 256 certificates a member, not a fresh read.
+9. **Overview sparklines are a `rowExtra`** (I142's extension point); `overview.js` untouched.
+10. **`fit cluster rollout start`** plans, prints, asks unless `-yes`, follows with `-wait`; exit 1
+    for failed, aborted, rolled back or expired; `state`, `diff`, `certs -within` exit 1 when
+    something needs attention.
+11. **`diff` tells members nothing** of what the manager owns there, as drift reads (item 105).
+12. **Charts are the workbench's own inline SVG**, colours by member name set through the CSSOM
+    (the console's CSP refuses inline styles); no chart library.
 
 ### I151 Upgrading members' binaries (a question, not a plan)
 

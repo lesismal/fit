@@ -15,6 +15,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [Templates: config shared by a group](#templates-config-shared-by-a-group)
 - [Rollouts: a change applied in stages](#rollouts-a-change-applied-in-stages)
 - [Drift and alerts](#drift-and-alerts)
+- [Metrics, logs and certificates](#metrics-logs-and-certificates)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -581,6 +582,76 @@ its rollout and, for a write through the switcher, to the member's own Versions 
 lines** saves the entries picked. Every Cluster page draws only the controls the user's roles allow,
 and a user with no role is told so.
 
+## Metrics, logs and certificates
+
+Three more pages of the Cluster menu (I150) show what the members do, from what the manager reads
+already and from each member's own log:
+
+- **Metrics** charts a series the manager keeps from each poll of each member, the last
+  360 polls (an hour at the default `poll_interval`): requests, 4xx and 5xx **a second** over the
+  time since the poll before, from the member's `/status` `requests` (counted when its config sets
+  `metrics`); the **connections** open and the **bytes queued** for clients (`pending_bytes`, what
+  `limits.max_pending_bytes` bounds) as the poll read them; and the configs applied and failed
+  since the poll before. One chart has a line per member, one a line per group (its members
+  summed a poll interval at a time), and a table each member's trend and its counters since it
+  started, which are the member's own. A point has no rate after a member restarted, across a gap
+  of more than three intervals, or when the member counts no requests. The window is 3 minutes to
+  an hour; a name or `a,b` filters the members; the page reads again as often as the manager polls.
+- **Logs** tails the members chosen (16 at most) at once, merged by time. Each member's log keeps
+  its latest 1,000 messages in memory (the ring the assistant's `log_tail` reads), which its Admin
+  API now answers at `GET /logs/recent?logger=&level=&contains=&limit=&after=` (capability
+  `logs.recent`), each message numbered from the start of fit. The manager asks each member for
+  the messages after the last it gave, and answers them merged with a cursor of each member's last
+  number; **Follow** sends the cursor back every 2 seconds. A member restarted numbers from 1 again
+  and is read from its start; a member down, refused or older than this is said apart, and the
+  others are read. Filters: the least level, a logger, a text; a group picks its members. The page
+  keeps the latest 2,000 lines.
+- **Certificates** lists every member's certificates as its latest poll read them: names, issuer,
+  serial, dates and days left, the soonest to expire first, filtered by text and by days left;
+  members serving none, or not read yet, are named below.
+- **Overview** shows a sparkline of each member's requests a second (or its connections, for a
+  member that counts no requests) beside its state.
+
+The series, the inventory and a member's last counters are kept on the manager in memory, on the
+member's node: a member removed or renamed takes them with it, and a manager restarted starts
+afresh. Nothing more is asked of a member than the poller reads, but its logs. The series and the
+inventory are any role's to read, as the members' states are; a member's logs need a role on it
+(viewer), as its own reads do.
+
+### The command line: fit cluster
+
+`fit cluster` reaches a manager through **its Admin API**, as `fit check` reaches a fit: `-c` names
+the bootstrap config whose `admin` says where the Admin API listens and its `token_file`; `-ca`,
+`-server-name`, `-cert` and `-key` are for an Admin API over TLS. The manager serves its endpoints
+there under `/cluster/`. Whoever holds the Admin API's token can change the manager's own config,
+so the Admin API acts as a cluster-wide admin whatever the roles say, and the audit log records it
+as the user `Admin API` (a console user of that name has no role).
+
+```
+fit cluster nodes                    the members: URL, access and labels
+fit cluster state                    each member's state; exits 1 when one is not up
+fit cluster groups                   the groups and their members
+fit cluster diff [-node a,b | -template T]
+                                     each member's parts that differ from its templates; exits 1 when one does
+fit cluster certs [-within 30d]      the inventory; with -within, exits 1 when one expires in it
+fit cluster metrics [-node a,b] [-group g]
+fit cluster logs -node a,b [-level warn] [-logger tls] [-contains x] [-limit N] [-f]
+fit cluster rollout list
+fit cluster rollout start -template T [-group G] [-node a,b] [strategy] [-yes] [-wait]
+fit cluster rollout start -sync [-group G | -node a,b] [strategy] [-yes] [-wait]
+fit cluster rollout start -id ID [strategy] [-yes] [-wait]
+fit cluster rollout status [-wait] ID
+fit cluster rollout pause|resume|go|abort|rollback ID
+```
+
+`rollout start` plans the rollout (or takes one planned), prints each member's plan (its changes,
+its dry run's errors), asks before it starts it unless `-yes`, and with `-wait` follows it batch by
+batch until it ends, or until a canary waits for `fit cluster rollout go`. Its strategy is `-mode
+all|rolling|canary`, `-batch-size`, `-batch-percent`, `-pause 30s`, `-canary N`, `-on-failure
+batch|all`, `-gate-wait 5s`, `-max-5xx 0.01`, `-window 30s`, `-min-requests 20` and `-exclude a,b`,
+as the Rollouts page's form. `status` exits 1 for a rollout failed, aborted, rolled back or
+expired. Every command takes `-json` for the Admin API's answer.
+
 ## How members are reached
 
 A member is a fit the manager can reach, one of three ways:
@@ -705,6 +776,9 @@ pages above use nothing else:
 | `DELETE alerts/silences/<id>` | ends it now; it is kept as past |
 | `POST text/render?format=` | a template's config, JSON, as `conf`, `yaml` or `json` text |
 | `POST text/parse?format=` | such a text as JSON, or `400` with its error |
+| `GET metrics` | the series: `?node=a,b&group=g&points=90` (1 to 360; every member and group when neither is given): `{"interval_ms", "points_max", "now", "nodes", "groups"}`, a member `{"name", "status", "groups", "counters", "series"}`, `counters` `{"at", "requests": {"total", "classes"}, "connections": {"open", "refused", "pending_bytes"}, "reloads": {"succeeded", "failed"}}` as the member last gave them, a group `{"name", "nodes", "series"}`; a series is columns, `{"t", "requests", "errors_4xx", "errors_5xx", "connections", "pending_bytes", "reloads", "reloads_failed", "members"}`, `t` in Unix milliseconds, rates a second, `null` where there is none, a group's `members` the members summed at each point; any role |
+| `GET certificates` | the inventory: `{"now", "certificates", "nodes"}`, a certificate `{"node", "listener", "names", "issuer", "serial", "not_before", "not_after", "days_left", "status", "read"}` the soonest to expire first, a member `{"name", "status", "count", "read"}`; any role |
+| `GET logs` | a tail: `?node=a,b` (1 to 16, required), `level`, `logger`, `contains`, `limit` (each member's latest, 200 by default, 1,000 at most) and `cursor` (the last answer's): `{"records", "cursor", "nodes"}`, a record `{"node", "seq", "time", "level", "logger", "message"}` merged by time, a member `{"name", "count", "last", "error"}`; a role on each member named; one of the 8 reads while it runs |
 
 Beside the module, at the console's top level, the node switcher's pass-through:
 
@@ -722,6 +796,15 @@ and templates), or for the alerts' changes the alerts' own, is refused `412`. At
 and nothing else, never a write; a member that does not list a read's capability (`status`,
 `config.versions`, `config.check`) is not asked for it. No answer, page or log line holds a
 password, a token or a member's session cookie.
+
+The manager's Admin API serves the same reads and the rollouts under `/cluster/`, behind its token,
+for `fit cluster`: `GET nodes`, `state`, `groups`, `drift`, `metrics`, `certificates`, `logs`; `POST
+sync` (as the module's, but the members are told nothing); `GET`/`POST rollouts`, `GET`/`DELETE
+rollouts/<id>`, `POST rollouts/<id>/start`, `pause`, `resume`, `go`, `abort`, `rollback`, answered
+as the module answers them. On a fit that manages no members, `/cluster/` is `404`. A member's own
+Admin API gains `GET /logs/recent?logger=&level=&contains=&limit=&after=`: `{"records", "last",
+"ring_size"}`, the messages after the sequence number `after` (from the start when `after` is past
+the last), at most `limit` (100 by default, 1,000 at most), the latest.
 
 ## Members behind NAT
 

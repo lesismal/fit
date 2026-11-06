@@ -52,9 +52,18 @@ type proc struct {
 	stopped bool
 }
 
-// startFit runs doc as fit runs a config, its roles' pages writing back
-// into it, and into st when that is not nil.
-func startFit(t *testing.T, doc string, st *store.Store) *proc {
+// startFit runs the doc build returns as fit runs a config, its roles'
+// pages writing back into it, and into st when that is not nil. build
+// picks the addresses fit listens on with freeAddr; when one was taken
+// before fit bound it, the start is undone and build asked again, for
+// other addresses.
+func startFit(t *testing.T, build func() string, st *store.Store) *proc {
+	t.Helper()
+	return tunneltest.Start(t, func() (*proc, error) { return tryFit(t, build(), st) })
+}
+
+// tryFit runs doc, and undoes what it started when it does not start.
+func tryFit(t *testing.T, doc string, st *store.Store) (*proc, error) {
 	t.Helper()
 	data := []byte(doc)
 	c, err := config.Load(data)
@@ -70,7 +79,8 @@ func startFit(t *testing.T, doc string, st *store.Store) *proc {
 	rt.Swap(g)
 	s, err := listener.Start(rt)
 	if err != nil {
-		t.Fatal(err)
+		rt.Close()
+		return nil, err
 	}
 	p := &proc{t: t, rt: rt, server: s}
 	source := admin.SourceFile
@@ -86,11 +96,11 @@ func startFit(t *testing.T, doc string, st *store.Store) *proc {
 		p.apps.Stop(context.Background())
 		_ = s.Close()
 		rt.Close()
-		t.Fatalf("apps: %v", err)
+		return nil, fmt.Errorf("apps: %w", err)
 	}
 	p.configs.UseApps(p.apps)
 	t.Cleanup(p.stop)
-	return p
+	return p, nil
 }
 
 func (p *proc) stop() {
@@ -122,16 +132,17 @@ func freeAddr(t *testing.T) string {
 	return tunneltest.FreeAddr(t)
 }
 
-// freeUDPAddr is a local UDP address nothing listens on.
+// freeUDPAddr is a local UDP address nothing listens on, and no other
+// test of the package was given.
 func freeUDPAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.LocalAddr().String()
+	return tunneltest.FreeUDPAddr(t)
 }
+
+// nowhere is an address nothing listens on: port 1, a privileged port no
+// test binds. A free port let go of could be another process's by the
+// time it is dialed.
+const nowhere = "127.0.0.1:1"
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -212,6 +223,37 @@ func (p *page) post(path string, body any) string {
 		p.t.Fatalf("POST %s: %d %s", path, code, s)
 	}
 	return s
+}
+
+// bind posts to add the body body makes for an address on network, a free
+// one, and returns the address. One that was taken is deleted with the
+// body to del, and another tried.
+func (p *page) bind(network, add, del string, body func(addr string) any) string {
+	p.t.Helper()
+	return tunneltest.Bind(p.t, network, func(addr string) error {
+		code, s := p.do("POST", add, body(addr), nil)
+		if tunneltest.IsTakenText(s) {
+			p.post(del, body(addr))
+		} else if code == 200 {
+			return nil
+		}
+		return fmt.Errorf("POST %s: %d %s", add, code, s)
+	})
+}
+
+// listener adds a hub's listener of protocol on a free address, as the
+// hub's pages do, and returns the address.
+func (p *page) listener(protocol string) string {
+	p.t.Helper()
+	network := "tcp"
+	if protocol == "quic" {
+		network = "udp"
+	}
+	// A listener that cannot listen is added with a warning, and kept
+	// with its error.
+	return p.bind(network, "/api/listeners", "/api/listeners/delete", func(addr string) any {
+		return map[string]string{"protocol": protocol, "address": addr}
+	})
 }
 
 // status gets /api/status into out.
@@ -339,23 +381,6 @@ func startHub(t *testing.T, o hubOpts) *hub {
 	h.echo = tunneltest.Echo(t, "")
 	h.banner = tunneltest.Echo(t, "hello from the service\n")
 	h.stalled, h.stall = tunneltest.Stall(t)
-	h.echoListen, h.stallListen = freeAddr(t), freeAddr(t)
-	h.hubCon, h.nodeCon, h.cliCon = freeAddr(t), freeAddr(t), freeAddr(t)
-	var listen string
-	switch o.protocol {
-	case "quic":
-		listen = freeUDPAddr(t)
-		h.url = "quic://" + listen
-	case "ws", "wss":
-		listen = freeAddr(t)
-		h.url = o.protocol + "://" + listen + "/tunnel"
-	case "tls":
-		listen = freeAddr(t)
-		h.url = "tls://" + listen
-	default:
-		listen = freeAddr(t)
-		h.url = listen
-	}
 	body := ""
 	if o.bodyPassword != "" {
 		body = fmt.Sprintf(`, "body_password": %q`, o.bodyPassword)
@@ -373,14 +398,32 @@ func startHub(t *testing.T, o hubOpts) *hub {
 		nodeCred, proxyCred = n.String(), p.String()
 		h.tokens = [2]linktoken.Secret{n, p}
 	}
-	doc := fmt.Sprintf(`{"tunnel": {
+	h.proc = startFit(t, func() string {
+		h.echoListen, h.stallListen = freeAddr(t), freeAddr(t)
+		h.hubCon, h.nodeCon, h.cliCon = freeAddr(t), freeAddr(t), freeAddr(t)
+		var listen string
+		switch o.protocol {
+		case "quic":
+			listen = freeUDPAddr(t)
+			h.url = "quic://" + listen
+		case "ws", "wss":
+			listen = freeAddr(t)
+			h.url = o.protocol + "://" + listen + "/tunnel"
+		case "tls":
+			listen = freeAddr(t)
+			h.url = "tls://" + listen
+		default:
+			listen = freeAddr(t)
+			h.url = listen
+		}
+		return fmt.Sprintf(`{"tunnel": {
  "hub": {"name": "hub", `+cred+`%s, "listeners": [{"protocol": %q, "address": %q}], "console": %s},
  "node": {"name": "lab", "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "banner", "address": %q}, {"name": "stall", "address": %q}], "console": %s},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}, {"listen": %q, "node": "lab", "service": "stall"}], "console": %s}
 }}`, body, protocolOf(o.protocol), listen, consoleJSON(h.hubCon),
-		uplinkJSON(h.url, nodeCred, o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
-		uplinkJSON(h.url, proxyCred, o.bodyPassword), h.echoListen, h.stallListen, consoleJSON(h.cliCon))
-	h.proc = startFit(t, doc, nil)
+			uplinkJSON(h.url, nodeCred, o.bodyPassword), h.echo, h.banner, h.stall, consoleJSON(h.nodeCon),
+			uplinkJSON(h.url, proxyCred, o.bodyPassword), h.echoListen, h.stallListen, consoleJSON(h.cliCon))
+	}, nil)
 	h.hub, h.node, h.proxy = login(t, h.hubCon), login(t, h.nodeCon), login(t, h.cliCon)
 	h.waitNode(t, "lab", "echo")
 	return h
@@ -632,8 +675,9 @@ func testTunnel(t *testing.T, o hubOpts) {
 	})
 
 	t.Run("the proxy's pages add a forward", func(t *testing.T) {
-		listen := freeAddr(t)
-		h.proxy.post("/api/forwards", map[string]string{"listen": listen, "node": "lab", "service": "banner", "hub": "hub"})
+		listen := h.proxy.bind("tcp", "/api/forwards", "/api/forwards/delete", func(addr string) any {
+			return map[string]string{"listen": addr, "node": "lab", "service": "banner", "hub": "hub"}
+		})
 		if m := h.proc.member("tunnel", "proxy", "forwards"); !strings.Contains(string(m), listen) {
 			t.Fatalf("the forwards in the config: %s", m)
 		}
@@ -695,8 +739,7 @@ func isReset(err error) bool {
 // there; the node's pages move it to quic, pinned.
 func TestHubPages(t *testing.T) {
 	h := startHub(t, hubOpts{protocol: "tcp"})
-	udp := freeUDPAddr(t)
-	h.hub.post("/api/listeners", map[string]string{"protocol": "quic", "address": udp})
+	udp := h.hub.listener("quic")
 	waitFor(t, "the quic certificate in the config", func() bool {
 		return strings.Contains(string(h.proc.member("tunnel", "hub", "quic")), "BEGIN CERTIFICATE")
 	})
@@ -726,8 +769,7 @@ func TestHubPages(t *testing.T) {
 	// A wss listener presents the same certificate, and the node moves to
 	// it, pinned the same; a pin that is not the hub's certificate's
 	// leaves the node unregistered, saying why.
-	wss := freeAddr(t)
-	h.hub.post("/api/listeners", map[string]string{"protocol": "wss", "address": wss})
+	wss := h.hub.listener("wss")
 	h.hub.status(&st)
 	for _, l := range st.Listeners {
 		if l.Protocol == "wss" && (l.Error != "" || !strings.HasPrefix(l.URL, "wss://")) {
@@ -811,17 +853,21 @@ func TestRestartFromStore(t *testing.T) {
 	if err != nil || data != nil {
 		t.Fatal(data, err)
 	}
-	listen, con := freeAddr(t), freeAddr(t)
+	var con string
 	echo := tunneltest.Echo(t, "")
-	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
+	p := startFit(t, func() string {
+		var listen string
+		listen, con = freeAddr(t), freeAddr(t)
+		doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
  "node": {"name": "lab", "hubs": [%s], "console": %s}}}`, listen, uplinkJSON(listen, "pw", ""), consoleJSON(con))
-	if err := st.Write([]byte(doc)); err != nil {
-		t.Fatal(err)
-	}
-	p := startFit(t, doc, st)
+		if err := st.Write([]byte(doc)); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}, st)
 	pg := login(t, con)
 	pg.post("/api/services", []map[string]string{{"name": "echo", "address": echo, "description": "kept"}})
-	pg.post("/api/hubs", map[string]any{"name": "other", "endpoints": []map[string]any{{"protocol": "tcp", "address": freeAddr(t), "enabled": true}}, "password": "x"})
+	pg.post("/api/hubs", map[string]any{"name": "other", "endpoints": []map[string]any{{"protocol": "tcp", "address": nowhere, "enabled": true}}, "password": "x"})
 	p.stop()
 
 	st2, data, err := store.Open(path, "store-password")
@@ -831,7 +877,9 @@ func TestRestartFromStore(t *testing.T) {
 	if !strings.Contains(string(data), `"kept"`) || !strings.Contains(string(data), `"other"`) {
 		t.Fatalf("the store holds %s", data)
 	}
-	startFit(t, string(data), st2)
+	// It starts again on the addresses it had: they were let go of only
+	// as it stopped.
+	startFit(t, func() string { return string(data) }, st2)
 	pg = login(t, con)
 	waitFor(t, "the node to register with its services", func() bool {
 		var ns nodeStatus
@@ -843,10 +891,12 @@ func TestRestartFromStore(t *testing.T) {
 // A proxy's web proxy serves the hub's console through its encrypted
 // console socket.
 func TestWebProxy(t *testing.T) {
-	sock, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t)
-	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "console": %s, "console_socket": {"address": %q, "password": "sock"}},
- "proxy": {"name": "me", "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}]}}}`, consoleJSON(con), sock, proxy, sock)
-	startFit(t, doc, nil)
+	var sock, proxy string
+	startFit(t, func() string {
+		sock, proxy = freeAddr(t), freeAddr(t)
+		return fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "console": %s, "console_socket": {"address": %q, "password": "sock"}},
+ "proxy": {"name": "me", "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}]}}}`, consoleJSON(freeAddr(t)), sock, proxy, sock)
+	}, nil)
 	var body string
 	waitFor(t, "the page through the proxy", func() bool {
 		resp, err := http.Get("http://" + proxy + "/")
@@ -876,9 +926,11 @@ func TestWebProxy(t *testing.T) {
 		t.Fatalf("ui.css: %d, %d bytes", resp.StatusCode, len(data))
 	}
 	// A wrong password gets nothing.
-	other := freeAddr(t)
-	doc2 := fmt.Sprintf(`{"tunnel": {"proxy": {"name": "x", "web_proxies": [{"listen": %q, "url": "ws://%s/", "password": "wrong"}]}}}`, other, sock)
-	startFit(t, doc2, nil)
+	var other string
+	startFit(t, func() string {
+		other = freeAddr(t)
+		return fmt.Sprintf(`{"tunnel": {"proxy": {"name": "x", "web_proxies": [{"listen": %q, "url": "ws://%s/", "password": "wrong"}]}}}`, other, sock)
+	}, nil)
 	c := &http.Client{Timeout: 5 * time.Second}
 	if resp, err := c.Get("http://" + other + "/"); err == nil {
 		resp.Body.Close()
@@ -889,7 +941,6 @@ func TestWebProxy(t *testing.T) {
 // A node with the wrong password, or the wrong body password, does not
 // register, and says why.
 func TestWrongPasswords(t *testing.T) {
-	listen := freeAddr(t)
 	for _, tc := range []struct {
 		name, password, body, want string
 	}{
@@ -897,13 +948,17 @@ func TestWrongPasswords(t *testing.T) {
 		{"body password", "pw", "other", "closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			con := freeAddr(t)
-			doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "body_password": "aes", "listeners": [{"protocol": "tcp", "address": %q}]},
+			var con string
+			p := startFit(t, func() string {
+				listen := freeAddr(t)
+				con = freeAddr(t)
+				doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "body_password": "aes", "listeners": [{"protocol": "tcp", "address": %q}]},
  "node": {"name": "lab", "hubs": [%s], "console": %s}}}`, listen, uplinkJSON(listen, tc.password, tc.body), consoleJSON(con))
-			if tc.body == "" {
-				doc = strings.Replace(doc, `, "body_password": "aes"`, "", 1)
-			}
-			p := startFit(t, doc, nil)
+				if tc.body == "" {
+					doc = strings.Replace(doc, `, "body_password": "aes"`, "", 1)
+				}
+				return doc
+			}, nil)
 			pg := login(t, con)
 			var ns nodeStatus
 			waitFor(t, "the node to fail", func() bool {
@@ -917,13 +972,16 @@ func TestWrongPasswords(t *testing.T) {
 
 // Limits hold: past max_tunnels, a proxy's connection is closed at once.
 func TestMaxTunnels(t *testing.T) {
-	listen, fwd, con := freeAddr(t), freeAddr(t), freeAddr(t)
+	var fwd, con string
 	echo := tunneltest.Echo(t, "")
-	doc := fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
+	startFit(t, func() string {
+		listen := freeAddr(t)
+		fwd, con = freeAddr(t), freeAddr(t)
+		return fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "listeners": [{"protocol": "tcp", "address": %q}]},
  "node": {"name": "lab", "hubs": [%s], "services": [{"name": "echo", "address": %q}]},
  "proxy": {"name": "me", "max_tunnels": 2, "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}], "console": %s}}}`,
-		listen, uplinkJSON(listen, "pw", ""), echo, uplinkJSON(listen, "pw", ""), fwd, consoleJSON(con))
-	startFit(t, doc, nil)
+			listen, uplinkJSON(listen, "pw", ""), echo, uplinkJSON(listen, "pw", ""), fwd, consoleJSON(con))
+	}, nil)
 	h := &hub{proxy: login(t, con)}
 	h.waitNode(t, "lab", "echo")
 	var conns []net.Conn

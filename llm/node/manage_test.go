@@ -97,10 +97,13 @@ func TestJobsThroughMethods(t *testing.T) {
 	// Past the bound on running jobs, a job is refused as rate limited;
 	// those left running are cancelled when the node stops.
 	// A job that ends early, as one whose fake tool the kernel will not
-	// run yet (ETXTBSY while another test forks), gives its place back,
-	// so jobs are started until one is refused, and then exactly
-	// maxRunning must be running.
-	refused := false
+	// run yet (ETXTBSY, or exit 127 while another test forks), gives its
+	// place back, so jobs are started until one is refused. What is
+	// proven is the refusal: only once maxRunning jobs had started, and
+	// never with more than maxRunning running. Jobs may end between the
+	// refusal and the list that follows, so the list is not held to
+	// exactly maxRunning.
+	refused, started := false, 0
 	for range 4 * maxRunning {
 		_, err := call(n, local, model.MethodNodeActionRun, model.ActionRunReq{ID: "ollama_ps"})
 		if code(err) == model.CodeRateLimited {
@@ -110,6 +113,7 @@ func TestJobsThroughMethods(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		started++
 	}
 	running := 0
 	res, err = call(n, local, model.MethodNodeJobList, struct{}{})
@@ -124,8 +128,9 @@ func TestJobsThroughMethods(t *testing.T) {
 			t.Logf("job %d ended early: %s %s", j.ID, j.Status, j.Error)
 		}
 	}
-	if !refused || running != maxRunning {
-		t.Fatalf("past the bound: refused %v with %d running, want %d", refused, running, maxRunning)
+	if !refused || started < maxRunning || running > maxRunning {
+		t.Fatalf("past the bound: refused %v after %d started, %d running, want a refusal after %d and at most %d running",
+			refused, started, running, maxRunning, maxRunning)
 	}
 }
 

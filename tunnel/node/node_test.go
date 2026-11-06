@@ -56,7 +56,9 @@ func open(l *link.Link, id uint64, service string) error {
 func TestHubCalls(t *testing.T) {
 	v := newEnv(t)
 	s := newHub(t, v.e)
-	echo, dead := tunneltest.Echo(t, ""), freeAddr(t)
+	// Nothing listens on port 1, a privileged port no test binds: a
+	// free port let go of could be another process's by the dial.
+	echo, dead := tunneltest.Echo(t, ""), "127.0.0.1:1"
 	if err := v.apply(fmt.Sprintf(`{"name": "lab", "max_tunnels": 2, "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}, {"name": "dead", "address": %q}]}`,
 		s.uplinkJSON(`, "call_timeout": "1s"`), echo, dead)); err != nil {
 		t.Fatal(err)

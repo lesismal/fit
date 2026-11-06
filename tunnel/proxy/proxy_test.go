@@ -19,23 +19,34 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/uplink"
 )
 
-// hubDoc is a hub with a console socket, a node reaching echo, and a
-// proxy with a console, a forward to echo and a web proxy to the socket.
-func hubDoc(t *testing.T, listen, sock, echo, fwd, proxy, con, extra string) string {
+// hubAddrs are where startHub's hub, node and proxy listen: the hub's
+// listener and console socket, and the proxy's forward to echo, web proxy
+// and console.
+type hubAddrs struct{ listen, sock, fwd, proxy, con string }
+
+// startHub runs a hub with a console socket, a node reaching echo, and a
+// proxy with a console, a forward to echo and a web proxy to the socket,
+// extra added to the proxy's member, on addresses it picks.
+func startHub(t *testing.T, echo, extra string) (*harness, hubAddrs) {
 	t.Helper()
-	return fmt.Sprintf(`{"tunnel": {
+	var a hubAddrs
+	h := start(t, func() string {
+		a = hubAddrs{freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)}
+		return fmt.Sprintf(`{"tunnel": {
  "hub": {"name": "hub", "password": "pw", "allow_proxy_services": true, "listeners": [{"protocol": "tcp", "address": %q}], "console": %s, "console_socket": {"address": %q, "password": "sock"}},
  "node": {"name": "lab", "allow_hub_services": true, "hubs": [%s], "services": [{"name": "echo", "address": %q}]},
  "proxy": {"name": "me", "hubs": [%s], "forwards": [{"listen": %q, "node": "lab", "service": "echo"}],
   "web_proxies": [{"name": "hub", "listen": %q, "url": "ws://%s/", "password": "sock"}], "console": %s%s}
-}}`, listen, consoleJSON(freeAddr(t)), sock, uplinkJSON("hub", listen), echo, uplinkJSON("hub", listen), fwd, proxy, sock, consoleJSON(con), extra)
+}}`, a.listen, consoleJSON(freeAddr(t)), a.sock, uplinkJSON("hub", a.listen), echo, uplinkJSON("hub", a.listen), a.fwd, a.proxy, a.sock, consoleJSON(a.con), extra)
+	})
+	return h, a
 }
 
 // The pages' API, and the proxy's state as the changes it makes apply.
 func TestProxyAPI(t *testing.T) {
-	listen, sock, fwd, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
 	echo := tunneltest.Echo(t, "")
-	h := start(t, hubDoc(t, listen, sock, echo, fwd, proxy, con, ""))
+	h, a := startHub(t, echo, "")
+	fwd, con := a.fwd, a.con
 	h.waitNode("hub", "lab", "echo")
 	p := login(t, con)
 
@@ -75,18 +86,18 @@ func TestProxyAPI(t *testing.T) {
 	}
 
 	// Forwards: one listened on, one refused, one taken.
-	byHub, toMissing, badService, taken := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
 	p.expect("/api/forwards", map[string]string{"listen": fwd, "node": "lab", "service": "echo"}, 400, "forwarded already")
-	p.expect("/api/forwards", map[string]string{"listen": byHub, "node": "lab", "service": "extra", "hub": " hub "}, 200, "ok")
-	p.expect("/api/forwards", map[string]string{"listen": toMissing, "node": "ghost", "service": "echo"}, 200, "ok")
-	p.expect("/api/forwards", map[string]string{"listen": badService, "node": "lab", "service": "nope", "hub": "hub"}, 200, "ok")
+	byHub := p.forward(map[string]string{"node": "lab", "service": "extra", "hub": " hub "})
+	toMissing := p.forward(map[string]string{"node": "ghost", "service": "echo"})
+	badService := p.forward(map[string]string{"node": "lab", "service": "nope", "hub": "hub"})
 	echoOnce(t, byHub, "by name")
 	refused(t, toMissing)
 	refused(t, badService)
-	l, err := net.Listen("tcp", taken)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	taken := l.Addr().String()
 	p.expect("/api/forwards", map[string]string{"listen": taken, "node": "lab", "service": "echo"}, 400, "forward "+taken)
 	var fv *ForwardView
 	for _, f := range h.c.Forwards() {
@@ -105,7 +116,7 @@ func TestProxyAPI(t *testing.T) {
 
 	// A hub that does not answer, a forward through it, and its
 	// changes.
-	far := freeAddr(t)
+	far := nowhere
 	ep := []common.EndpointReq{{Protocol: "tcp", Address: far, Enabled: true}}
 	p.expect("/api/hubs", common.HubReq{Name: "far", Endpoints: ep, Password: "pw"}, 200, "ok")
 	p.expect("/api/hubs", common.HubReq{Name: "far", Endpoints: ep, Password: "pw"}, 400, "exists")
@@ -113,8 +124,7 @@ func TestProxyAPI(t *testing.T) {
 		t.Fatal("no hub far")
 	}
 	p.expect("/api/nodes/refresh", map[string]string{"hub": "far"}, 502, "")
-	viaFar := freeAddr(t)
-	p.expect("/api/forwards", map[string]string{"listen": viaFar, "node": "lab", "service": "echo", "hub": "far"}, 200, "ok")
+	viaFar := p.forward(map[string]string{"node": "lab", "service": "echo", "hub": "far"})
 	refused(t, viaFar)
 	// A forward to any hub skips the one not registered.
 	echoOnce(t, fwd, "still")
@@ -146,8 +156,8 @@ func TestProxyAPI(t *testing.T) {
 // pick refuses what no hub can carry, and a forward past max_tunnels
 // refuses a connection.
 func TestPick(t *testing.T) {
-	listen, sock, fwd, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
-	h := start(t, hubDoc(t, listen, sock, tunneltest.Echo(t, ""), fwd, proxy, con, `, "max_tunnels": 1`))
+	h, a := startHub(t, tunneltest.Echo(t, ""), `, "max_tunnels": 1`)
+	fwd := a.fwd
 	h.waitNode("hub", "lab", "echo")
 	echoOnce(t, fwd, "held")
 	refused(t, fwd)
@@ -175,8 +185,8 @@ func TestPick(t *testing.T) {
 
 // The tunnels idle past idle_timeout are closed.
 func TestSweepIdle(t *testing.T) {
-	listen, sock, fwd, proxy, con := freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t), freeAddr(t)
-	h := start(t, hubDoc(t, listen, sock, tunneltest.Echo(t, ""), fwd, proxy, con, `, "idle_timeout": "100ms"`))
+	h, a := startHub(t, tunneltest.Echo(t, ""), `, "idle_timeout": "100ms"`)
+	fwd := a.fwd
 	h.waitNode("hub", "lab", "echo")
 	echoOnce(t, fwd, "x")
 	waitFor(t, "the idle tunnel to close", func() bool { return len(h.c.Tunnels()) == 0 })
@@ -250,16 +260,51 @@ func TestApplyAfterStart(t *testing.T) {
 
 // The role registered runs a proxy when the config has one.
 func TestRegistered(t *testing.T) {
-	m := app.NewManager(tunneltest.Engine(t), nil, nil, nil)
+	e := tunneltest.Engine(t)
+	m := app.NewManager(e, nil, nil, nil)
 	defer m.Stop(context.Background())
 	if err := m.Apply(&config.Config{}); err != nil {
 		t.Fatal(err)
 	}
-	<-hosts
+	tunneltest.Host(t, e)
 	if err := m.Apply(&config.Config{Tunnel: &config.Tunnel{Proxy: &config.TunnelProxy{Name: "me"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(m.Running(), ID) {
 		t.Fatalf("running %v", m.Running())
 	}
+}
+
+// A start that finds an address taken, as another package's tests may take
+// a free one before the harness binds it, is undone and tried again on
+// other addresses; the host its manager made goes with it, and the test
+// after it starts on its own.
+func TestStartRetriesTaken(t *testing.T) {
+	var held net.Listener
+	tries := 0
+	h := start(t, func() string {
+		sock := freeAddr(t)
+		if tries++; tries == 1 {
+			var err error
+			if held, err = net.Listen("tcp", sock); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return fmt.Sprintf(`{"tunnel": {"hub": {"name": "hub", "password": "pw", "console": %s, "console_socket": {"address": %q, "password": "s"}},
+ "proxy": {"name": "me", "console": %s}}}`, consoleJSON(freeAddr(t)), sock, consoleJSON(freeAddr(t)))
+	})
+	_ = held.Close()
+	// The held address fails the first try; another process may take
+	// one of a later try's too.
+	if tries < 2 {
+		t.Fatalf("started on try %d", tries)
+	}
+	if st := h.c.Status(); st.Name != "me" {
+		t.Fatalf("status %+v", st)
+	}
+	t.Run("next", func(t *testing.T) {
+		h, a := startHub(t, tunneltest.Echo(t, ""), "")
+		h.waitNode("hub", "lab", "echo")
+		echoOnce(t, a.fwd, "own")
+	})
 }

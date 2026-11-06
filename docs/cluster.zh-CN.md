@@ -13,6 +13,7 @@
 - [模板：分组共享的配置](#模板分组共享的配置)
 - [发布：分阶段应用的修改](#发布分阶段应用的修改)
 - [漂移与告警](#漂移与告警)
+- [指标、日志与证书](#指标日志与证书)
 - [如何访问成员](#如何访问成员)
 - [管理端读取什么，以及可能出现的问题](#管理端读取什么以及可能出现的问题)
 - [API](#api)
@@ -326,6 +327,43 @@ Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己
 成员，并排显示每个未同步部分在成员上与模板中的值）、**修复**、**修复全部未同步**、**手动规划**（预填的新建发布表单）与**重新加载**；
 **告警**，计数、正在触发的告警（带**静默**）、等待中的与过去的告警；**规则**，添加、编辑与删除；**Webhook**，其发送情况、**测试**、
 编辑与删除；**静默**，当前与过去的静默，添加与结束。有未静默的告警触发时，集群菜单上显示其数量，有严重告警时为红色。
+## 管理端上的助手
+
+在控制台运行[助手](console.zh-CN.md#助手)（`admin.assistant`）的管理端上，助手以提问用户的身份读取集群并提议跨成员的修改（I153）：
+
+| 工具 | 级别 | 作用 |
+| --- | --- | --- |
+| `cluster_members` | `read` | 每个成员最近一次轮询的状态（状态、错误、版本、配置版本、漂移、与模板的同步、最近到期的证书与剩余天数、连接、重载、不可用后端、正在触发的告警），可按分组、标签选择器或状态筛选 |
+| `cluster_templates` | `read` | 模板及其部分、变量与成员，以及同步的成员数；单个模板的完整内容及各成员的部分 |
+| `cluster_rollouts` | `read` | 最近 20 次发布（逐批及各成员结果）与最近 10 次操作；单次发布的完整内容及其修改 |
+| `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总 |
+| `cluster_certs` | `read` | 证书清单，现读每个成员，最先到期的在前，可限定天数 |
+| `member` 参数 | `read` | `config_get`、`versions_diff`、`status_get`、`metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones` 与媒体工具改为经管理端与该成员的会话读取该成员，而非管理端自身 |
+| `rollout_propose` | `propose` | 发布的规划：模板（现状或草稿）、同步、修改或复制，并建议策略 |
+| `cluster_op_propose` | `propose` | 检查一次操作（重载、回滚、检查、清除缓存、测试），但不启动 |
+| `drift_fix_propose` | `propose` | 为未同步或冲突的成员规划同步发布，为一致性检查有差异的成员检查一次重载 |
+
+**助手不应用任何内容。** 提案工具生成发布规划，显示在发布页上（各成员的差异与试运行，标为助手为该用户规划，启动表单中预填其建议的策略），
+或检查一次操作并链接到预填的操作页（`#/cluster/ops?op=&members=&purge=` 或分组页），其确认对话框随之打开：由人在该页以其自身的确认启动。
+它们都不是对话提案的步骤，面板的“应用”从不启动它们；面板在工具结果下绘制带链接的卡片。经 MCP 生成的规划会返回工作台的链接。
+
+**角色与级别。** 每次调用都以用户身份进行，并像各接口一样由管理端的角色检查：读取需要任意处的角色，读取某个成员自身需要该成员上的角色；
+模板发布或同步需要在每个成员上是操作员，修改或复制需要在每个成员上是管理员，模板草稿需要集群范围的管理员；操作需要在每个成员上是操作员。
+助手的级别（I126）同样检查，并受角色限制（集群范围管理员保持原级别，任意处的操作员最多 `propose`，其他人 `read`）：取两者中更窄的，
+因此操作员永远无法提议修改模板，级别为 `read` 的用户没有提案工具。
+
+**限制。** 跨成员的读取（`cluster_metrics`、`cluster_certs`）同时最多调用 `max_concurrency` 个成员，每个在 `timeout` 内，整体在 20 秒内返回：
+慢或离线的成员连同其问题一起报告，其余照常读取。经 `member` 读取成员最多等待 20 秒；规划等待其成员试运行的时间相同，仍在规划时会说明。
+经 `member` 只能读取：配置、版本、状态、指标、一致性检查、缓存、节点、schema 以及媒体与推流的读取（`GET`），和文本转换；从不写入，
+也不读取令牌或日志文件。运行其他 fit 版本的成员会注明。
+
+**密钥。** 成员的密码、令牌或会话都不会出现在工具结果中：管理端不返回它们，成员的错误会去掉其自身的凭据，每个结果都像其他工具一样脱敏。
+助手从不写入密钥：按 `[redacted]` 复制的值以 `[secret]` 发送，保留原处的密钥；写出的密钥会被拒绝。
+
+**技能**：`fleet-health` 汇总读取成员，指出哪些宕机、版本落后、漂移或证书即将过期；`rollout-planner` 以金丝雀、分批、健康检查与回滚
+规划对分组的修改，并解释失败的批次；`cluster-drift` 解释每个成员的漂移并规划修复。它们只在管理端上提供。**问 AI** 位于概览（集群，以及每张成员卡片）、
+发布中失败的批次，以及漂移页上漂移的成员。
+
 ## 用户、角色与审计日志
 
 管理端的控制台用户在集群上有**角色**，分为集群范围和按分组：
@@ -380,42 +418,58 @@ Webhook 的**测试**需要集群范围的管理员。
 **此成员的修改**即链接到其条目），每个条目可打开其差异、摘要、版本与各成员结果，并链接到其发布，经切换器的写入则链接到成员自己的
 “版本”页；**导出 JSON Lines** 保存所选条目。每个集群页面只绘制用户角色允许的控件，没有角色的用户会看到提示。
 
-## 管理端上的助手
+## 指标、日志与证书
 
-在控制台运行[助手](console.zh-CN.md#助手)（`admin.assistant`）的管理端上，助手以提问用户的身份读取集群并提议跨成员的修改（I153）：
+集群菜单另有三个页面（I150）展示成员在做什么，数据来自管理端本来就读取的内容以及每个成员自己的日志：
 
-| 工具 | 级别 | 作用 |
-| --- | --- | --- |
-| `cluster_members` | `read` | 每个成员最近一次轮询的状态（状态、错误、版本、配置版本、漂移、与模板的同步、最近到期的证书与剩余天数、连接、重载、不可用后端、正在触发的告警），可按分组、标签选择器或状态筛选 |
-| `cluster_templates` | `read` | 模板及其部分、变量与成员，以及同步的成员数；单个模板的完整内容及各成员的部分 |
-| `cluster_rollouts` | `read` | 最近 20 次发布（逐批及各成员结果）与最近 10 次操作；单次发布的完整内容及其修改 |
-| `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总 |
-| `cluster_certs` | `read` | 证书清单，现读每个成员，最先到期的在前，可限定天数 |
-| `member` 参数 | `read` | `config_get`、`versions_diff`、`status_get`、`metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones` 与媒体工具改为经管理端与该成员的会话读取该成员，而非管理端自身 |
-| `rollout_propose` | `propose` | 发布的规划：模板（现状或草稿）、同步、修改或复制，并建议策略 |
-| `cluster_op_propose` | `propose` | 检查一次操作（重载、回滚、检查、清除缓存、测试），但不启动 |
-| `drift_fix_propose` | `propose` | 为未同步或冲突的成员规划同步发布，为一致性检查有差异的成员检查一次重载 |
+- **指标**：管理端从对每个成员的每次轮询中保存一组序列，最近 360 次轮询（默认 `poll_interval` 下为一小时）：每秒的请求、4xx 与
+  5xx（为与上次轮询之间的平均，来自成员 `/status` 的 `requests`，成员配置设置了 `metrics` 时才统计）；轮询读到的**连接数**与
+  为客户端**排队的字节数**（`pending_bytes`，即 `limits.max_pending_bytes` 所限制的量）；以及与上次轮询之间应用成功与失败的
+  配置数。一张图每个成员一条线，一张图每个分组一条线（其成员按轮询间隔相加），表格列出每个成员的走势及其启动以来的计数，
+  这些计数就是成员自己的。成员重启之后、相隔超过三个间隔、或成员不统计请求时，该点没有速率。时间范围为 3 分钟到一小时；
+  可按名称或 `a,b` 筛选成员；页面按管理端的轮询频率重新读取。
+- **日志**：同时追踪所选成员（最多 16 个）的日志，按时间合并。每个成员的日志在内存中保留最新的 1,000 条消息（即助手的
+  `log_tail` 读取的环），其 Admin API 现在通过 `GET /logs/recent?logger=&level=&contains=&limit=&after=`（能力
+  `logs.recent`）提供，每条消息自 fit 启动起编号。管理端向每个成员请求其上次给出之后的消息，合并后连同记录每个成员最后编号的
+  游标一起应答；**跟随**每 2 秒带着游标再次读取。重启的成员重新从 1 编号，会从头读取；离线、被拒绝或早于此版本的成员单独
+  说明，其余成员照常读取。筛选：最低级别、日志器、文本；选择分组即选中其成员。页面保留最新的 2,000 行。
+- **证书**：列出各成员最近一次轮询读到的证书：名称、签发者、序列号、日期与剩余天数，最早到期的在前，可按文本与剩余天数
+  筛选；未提供证书或尚未读取的成员列在下方。
+- **概览**：在每个成员的状态旁显示每秒请求的迷你走势图（成员不统计请求时为连接数）。
 
-**助手不应用任何内容。** 提案工具生成发布规划，显示在发布页上（各成员的差异与试运行，标为助手为该用户规划，启动表单中预填其建议的策略），
-或检查一次操作并链接到预填的操作页（`#/cluster/ops?op=&members=&purge=` 或分组页），其确认对话框随之打开：由人在该页以其自身的确认启动。
-它们都不是对话提案的步骤，面板的“应用”从不启动它们；面板在工具结果下绘制带链接的卡片。经 MCP 生成的规划会返回工作台的链接。
+序列、证书清单与成员的最新计数保存在管理端内存中、成员的节点上：删除或重命名的成员会将其一并带走，管理端重启后重新开始。
+除日志外，不向成员多要任何轮询之外的内容。序列与证书清单任何角色都可读取，与成员状态相同；成员的日志与其自身的读取一样，
+需要在该成员上有角色（查看者）。
 
-**角色与级别。** 每次调用都以用户身份进行，并像各接口一样由管理端的角色检查：读取需要任意处的角色，读取某个成员自身需要该成员上的角色；
-模板发布或同步需要在每个成员上是操作员，修改或复制需要在每个成员上是管理员，模板草稿需要集群范围的管理员；操作需要在每个成员上是操作员。
-助手的级别（I126）同样检查，并受角色限制（集群范围管理员保持原级别，任意处的操作员最多 `propose`，其他人 `read`）：取两者中更窄的，
-因此操作员永远无法提议修改模板，级别为 `read` 的用户没有提案工具。
+### 命令行：fit cluster
 
-**限制。** 跨成员的读取（`cluster_metrics`、`cluster_certs`）同时最多调用 `max_concurrency` 个成员，每个在 `timeout` 内，整体在 20 秒内返回：
-慢或离线的成员连同其问题一起报告，其余照常读取。经 `member` 读取成员最多等待 20 秒；规划等待其成员试运行的时间相同，仍在规划时会说明。
-经 `member` 只能读取：配置、版本、状态、指标、一致性检查、缓存、节点、schema 以及媒体与推流的读取（`GET`），和文本转换；从不写入，
-也不读取令牌或日志文件。运行其他 fit 版本的成员会注明。
+`fit cluster` 通过管理端的 **Admin API** 访问管理端，与 `fit check` 访问 fit 的方式相同：`-c` 指定引导配置，其 `admin` 说明
+Admin API 的监听地址及其 `token_file`；`-ca`、`-server-name`、`-cert` 与 `-key` 用于基于 TLS 的 Admin API。管理端在其下的
+`/cluster/` 提供端点。持有 Admin API 令牌的人可以修改管理端自己的配置，因此 Admin API 不论角色如何都作为集群范围的管理员
+行事，审计日志将其记录为用户 `Admin API`（同名的控制台用户没有角色）。
 
-**密钥。** 成员的密码、令牌或会话都不会出现在工具结果中：管理端不返回它们，成员的错误会去掉其自身的凭据，每个结果都像其他工具一样脱敏。
-助手从不写入密钥：按 `[redacted]` 复制的值以 `[secret]` 发送，保留原处的密钥；写出的密钥会被拒绝。
+```
+fit cluster nodes                    成员：URL、访问方式与标签
+fit cluster state                    各成员的状态；有成员不在线时退出码为 1
+fit cluster groups                   分组及其成员
+fit cluster diff [-node a,b | -template T]
+                                     各成员与其模板不同的部分；有不同时退出码为 1
+fit cluster certs [-within 30d]      证书清单；带 -within 时，有证书在此期间内到期则退出码为 1
+fit cluster metrics [-node a,b] [-group g]
+fit cluster logs -node a,b [-level warn] [-logger tls] [-contains x] [-limit N] [-f]
+fit cluster rollout list
+fit cluster rollout start -template T [-group G] [-node a,b] [策略] [-yes] [-wait]
+fit cluster rollout start -sync [-group G | -node a,b] [策略] [-yes] [-wait]
+fit cluster rollout start -id ID [策略] [-yes] [-wait]
+fit cluster rollout status [-wait] ID
+fit cluster rollout pause|resume|go|abort|rollback ID
+```
 
-**技能**：`fleet-health` 汇总读取成员，指出哪些宕机、版本落后、漂移或证书即将过期；`rollout-planner` 以金丝雀、分批、健康检查与回滚
-规划对分组的修改，并解释失败的批次；`cluster-drift` 解释每个成员的漂移并规划修复。它们只在管理端上提供。**问 AI** 位于概览（集群，以及每张成员卡片）、
-发布中失败的批次，以及漂移页上漂移的成员。
+`rollout start` 规划发布（或取用已规划的发布），打印每个成员的规划（其修改与试运行的错误），除非给出 `-yes`，启动前先询问；
+带 `-wait` 时逐批跟随直到结束，或直到金丝雀等待 `fit cluster rollout go`。策略为 `-mode all|rolling|canary`、`-batch-size`、
+`-batch-percent`、`-pause 30s`、`-canary N`、`-on-failure batch|all`、`-gate-wait 5s`、`-max-5xx 0.01`、`-window 30s`、
+`-min-requests 20` 与 `-exclude a,b`，与发布页面的表单相同。发布失败、中止、回滚或过期时 `status` 的退出码为 1。每个命令都
+接受 `-json`，输出 Admin API 的应答。
 
 ## 如何访问成员
 
@@ -524,6 +578,9 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `DELETE alerts/silences/<id>` | 立即结束它；作为过去的静默保留 |
 | `POST text/render?format=` | 把模板配置（JSON）写成 `conf`、`yaml` 或 `json` 文本 |
 | `POST text/parse?format=` | 把这种文本读成 JSON，出错时 `400` 附错误 |
+| `GET metrics` | 序列：`?node=a,b&group=g&points=90`（1 到 360；两者都未给出时为全部成员与分组）：`{"interval_ms", "points_max", "now", "nodes", "groups"}`，成员为 `{"name", "status", "groups", "counters", "series"}`，`counters` 为成员最近给出的 `{"at", "requests": {"total", "classes"}, "connections": {"open", "refused", "pending_bytes"}, "reloads": {"succeeded", "failed"}}`，分组为 `{"name", "nodes", "series"}`；序列按列给出 `{"t", "requests", "errors_4xx", "errors_5xx", "connections", "pending_bytes", "reloads", "reloads_failed", "members"}`，`t` 为 Unix 毫秒，速率为每秒，无值处为 `null`，分组的 `members` 为每点相加的成员数；任何角色 |
+| `GET certificates` | 证书清单：`{"now", "certificates", "nodes"}`，证书为 `{"node", "listener", "names", "issuer", "serial", "not_before", "not_after", "days_left", "status", "read"}`，最早到期的在前，成员为 `{"name", "status", "count", "read"}`；任何角色 |
+| `GET logs` | 追踪日志：`?node=a,b`（1 到 16 个，必填）、`level`、`logger`、`contains`、`limit`（每个成员最新的条数，默认 200，最多 1,000）与 `cursor`（上次应答的游标）：`{"records", "cursor", "nodes"}`，记录为 `{"node", "seq", "time", "level", "logger", "message"}`，按时间合并，成员为 `{"name", "count", "last", "error"}`；需要在所列每个成员上有角色；运行期间占用 8 个读取名额之一 |
 
 在模块之外、控制台的顶层，是节点切换器的转发：
 
@@ -537,6 +594,13 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 成员或分组。带 `If-Match` 且其 ETag 已不是文档（成员、分组与模板）当前 ETag 的修改，以及告警的修改中已不是告警自身当前 ETag 的，返回 `412`。同时最多进行 4 个测试和 8 个读取，再多返回 `429`。读取只转发
 成员的这四个 GET，不转发其他接口，从不写入；成员的能力列表中没有某个读取所需的能力（`status`、`config.versions`、
 `config.check`）时不会向它请求。任何应答、页面或日志都不含密码、令牌或成员的会话 cookie。
+
+管理端的 Admin API 在 `/cluster/` 下以其令牌提供相同的读取与发布操作，供 `fit cluster` 使用：`GET nodes`、`state`、`groups`、
+`drift`、`metrics`、`certificates`、`logs`；`POST sync`（与模块的相同，但不通知成员）；`GET`/`POST rollouts`、
+`GET`/`DELETE rollouts/<id>`、`POST rollouts/<id>/start`、`pause`、`resume`、`go`、`abort`、`rollback`，应答与模块相同。
+不管理成员的 fit 上 `/cluster/` 返回 `404`。成员自己的 Admin API 新增 `GET /logs/recent?logger=&level=&contains=&limit=&after=`：
+`{"records", "last", "ring_size"}`，即序号 `after` 之后的消息（`after` 超过最后一条时从头开始），最多 `limit` 条（默认 100，
+最多 1,000），取最新的。
 
 ## NAT 后面的成员
 

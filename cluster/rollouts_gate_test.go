@@ -145,7 +145,7 @@ func TestRolloutApplies(t *testing.T) {
 	})
 	t.Run("unsure, applied", func(t *testing.T) {
 		k := newRoFixtureWith(t, 1, slowPolls)
-		k.ms["m1"].set(func(f *roMember) { f.badPut, f.nodeFailOnce = true, true })
+		k.ms["m1"].set(func(f *roMember) { f.badPut, f.nodeFailAfterPut = true, true })
 		r := k.waitRollout(k.oneMember(fast(Strategy{Mode: StrategyAll})).ID, "failed", ended)
 		if x := memberOf(t, r, "m1"); x.Status != MemberRolledBack || !strings.Contains(x.Error.Message, "is not known") || k.ms["m1"].version() != 3 {
 			t.Fatalf("%s %+v", r.Reason, x)
@@ -153,7 +153,7 @@ func TestRolloutApplies(t *testing.T) {
 	})
 	t.Run("unsure, never applied", func(t *testing.T) {
 		k := newRoFixtureWith(t, 1, slowPolls)
-		k.ms["m1"].set(func(f *roMember) { f.dropPut, f.nodeFailOnce = true, true })
+		k.ms["m1"].set(func(f *roMember) { f.dropPut, f.nodeFailAfterPut = true, true })
 		r := k.waitRollout(k.oneMember(fast(Strategy{Mode: StrategyAll})).ID, "failed", ended)
 		if x := memberOf(t, r, "m1"); x.Status != MemberFailed || x.Unsure || k.ms["m1"].version() != 1 || !strings.Contains(r.Reason, "rolled back") {
 			t.Fatalf("%s %+v", r.Reason, x)

@@ -183,6 +183,11 @@ type roleSet struct {
 
 // rolesIn returns user's roles under d's Access and admins, the config's.
 func rolesIn(d *document, admins []string, user string) roleSet {
+	if user == AdminAPIUser {
+		// The Admin API's token holder (adminapi.go); a console user of
+		// the name is refused before its roles are read (gate).
+		return roleSet{cluster: RoleAdmin, fixed: true}
+	}
 	if d.Access == nil && len(admins) == 0 {
 		return roleSet{cluster: RoleAdmin, open: true}
 	}
@@ -380,6 +385,10 @@ func (rt *router) CheckedPrefix(method, prefix string, h console.Handler) {
 // checked, cluster-wide admin for anything but a read.
 func (m *Manager) gate(h console.Handler, checked bool) console.Handler {
 	return func(r *console.Request) {
+		if r.User == AdminAPIUser {
+			_ = console.Error(r.Context, 403, strconv.Quote(AdminAPIUser)+" is the name the manager's Admin API acts under: a console user of that name has no role")
+			return
+		}
 		need := Need{Role: RoleViewer}
 		if !checked && !reading(r.Request.Method) {
 			need = Need{Role: RoleAdmin, Cluster: true}
@@ -407,6 +416,9 @@ func (m *Manager) RolesActive() bool {
 // own password, the text conversions and dry runs are let through. It
 // returns "" for a request let through, or why it is refused.
 func (m *Manager) ConsoleGate(user, method, path, query string) string {
+	if user == AdminAPIUser && !reading(method) {
+		return strconv.Quote(AdminAPIUser) + " is the name the manager's Admin API acts under: a console user of that name changes nothing"
+	}
 	if reading(method) || strings.HasPrefix(path, "/api/m/"+ModuleID+"/") || strings.HasPrefix(path, PassPrefix) ||
 		strings.HasPrefix(path, "/api/m/ai/") {
 		return ""
@@ -441,6 +453,9 @@ func dryRun(query string) bool {
 // proposes, which a cluster-wide admin applies; anyone else reads. Before
 // roles are set, it is apply: no bound.
 func (m *Manager) AssistantCap(user string) string {
+	if user == AdminAPIUser {
+		return capFor(roleSet{})
+	}
 	m.mu.Lock()
 	rs := rolesIn(&m.doc, m.admins, user)
 	m.mu.Unlock()

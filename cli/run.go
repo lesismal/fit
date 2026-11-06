@@ -338,6 +338,10 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			return 1
 		}
 		defer manager.Close() // closed already, unless serve fails before shutdown
+		if as != nil {
+			// fit cluster reaches the manager through its Admin API (I150).
+			as.SetCluster(manager.AdminAPI())
+		}
 		fmt.Fprintf(stdout, "fit: managing %d members (admin.cluster)\n", len(manager.Members()))
 		if info := manager.LinkInfo(""); info.Enabled {
 			fmt.Fprintf(stdout, "fit: members link to %s (certificate %s)\n", info.Address, info.Fingerprint)

@@ -69,7 +69,7 @@ func TestApplyFails(t *testing.T) {
 
 // Applies after the first keep what did not change, and move what did.
 func TestApplyMoves(t *testing.T) {
-	sock := freeAddr(t)
+	sock := "127.0.0.1:0"
 	con := consoleJSON("127.0.0.1:0")
 	v := newHub(t, fmt.Sprintf(`{"password": "pw", "console": %s, "console_socket": {"address": %q, "password": "s"},
  "listeners": [{"protocol": "tcp", "address": "127.0.0.1:0"}, {"protocol": "quic", "address": "127.0.0.1:0"}]}`, con, sock))
