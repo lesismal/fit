@@ -207,7 +207,7 @@ func TestChannelInterop(t *testing.T) {
 // to /result after 30s.
 const hlsjsPage = `<!doctype html><meta charset=utf-8><video id=v muted autoplay playsinline></video>
 <script src="/hls.js"></script><script>
-const v = document.getElementById('v'), out = {errors: [], cc: 0, loadedCC: 0, keys: 0, parts: 0, times: [], src: SRC, log: [], pl: ''};
+const v = document.getElementById('v'), out = {errors: [], cc: 0, loadedCC: 0, keys: 0, parts: 0, times: [], src: SRC, log: [], pl: '', gap: 0, gapAt: 0};
 const h = new Hls();
 // What was loaded and appended, and the last media playlist, reported on a
 // fatal error.
@@ -225,6 +225,15 @@ h.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) out.errors.push(d.type + ': ' + 
 h.on(Hls.Events.KEY_LOADED, () => { out.keys++ });
 h.on(Hls.Events.FRAG_LOADED, (e, d) => { if (d.part) out.parts++ });
 h.on(Hls.Events.FRAG_CHANGED, (e, d) => { out.cc = Math.max(out.cc, d.frag.cc) });
+// The longest the picture stood still while it played: the largest step
+// between the media times of frames presented one after the other.
+let shown = -1;
+const frame = (now, md) => {
+  if (shown >= 0 && md.mediaTime - shown > out.gap) { out.gap = md.mediaTime - shown; out.gapAt = shown }
+  shown = md.mediaTime;
+  v.requestVideoFrameCallback(frame);
+};
+if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame);
 h.loadSource(SRC); h.attachMedia(v); v.play().catch(e => out.errors.push('play: ' + e));
 const t0 = Date.now();
 const timer = setInterval(() => {
@@ -248,6 +257,10 @@ type hlsResult struct {
 	// playlist, on a fatal error.
 	Log      []string `json:"log"`
 	Playlist string   `json:"pl"`
+	// Gap is the largest step in media time between two frames presented
+	// one after the other, at GapAt: how long the picture stood still.
+	Gap   float64 `json:"gap"`
+	GapAt float64 `json:"gapAt"`
 }
 
 // hlsjs plays live/tv, live/mix and live/sec, encrypted, by whole
@@ -317,12 +330,18 @@ func hlsjs(t *testing.T, f *fit) {
 
 // checkHLSJS checks that hls.js played on, through a discontinuity for
 // live/mix, live/sec and the Low-Latency channels, without a fatal error or
-// a stall of 2s.
+// a stall of 2s, and that the picture played on with it: every frame of
+// the 25 fps items decoded, none of them standing still for more than five
+// frames. hls.js reading whole segments once placed the segment after
+// items' new tracks a frame of audio early, and Chrome dropped its video
+// up to the next keyframe while the audio and the clock played on: a
+// frozen picture of ~0.8s at every item, which fib's Muxer no longer makes
+// (fib request A72).
 func checkHLSJS(t *testing.T, res hlsResult) {
 	if len(res.Errors) > 0 {
 		t.Logf("hls.js %s:\n%s\nlast playlist:\n%s", res.Src, strings.Join(res.Log, "\n"), res.Playlist)
 	}
-	t.Logf("hls.js %s: cc %d, loaded cc %d, keys %d, parts %d, errors %v, times %v", res.Src, res.CC, res.LoadedCC, res.Keys, res.Parts, res.Errors, res.Times)
+	t.Logf("hls.js %s: cc %d, loaded cc %d, keys %d, parts %d, errors %v, still %.2fs at %.2fs, times %v", res.Src, res.CC, res.LoadedCC, res.Keys, res.Parts, res.Errors, res.Gap, res.GapAt, res.Times)
 	if len(res.Errors) > 0 || len(res.Times) < 20 {
 		t.Errorf("hls.js %s: %v", res.Src, res.Errors)
 		return
@@ -330,6 +349,14 @@ func checkHLSJS(t *testing.T, res hlsResult) {
 	first, last := res.Times[0], res.Times[len(res.Times)-1]
 	if played := last[1] - first[1]; played < 20 {
 		t.Errorf("hls.js %s: %.1fs played in 30s", res.Src, played)
+	}
+	// Decoded frames (total less dropped) against the time played.
+	decoded := (last[2] - last[3]) - (first[2] - first[3])
+	if want := 0.95 * 25 * (last[1] - first[1]); decoded < want {
+		t.Errorf("hls.js %s: %.0f frames decoded in %.1fs played, want %.0f", res.Src, decoded, last[1]-first[1], want)
+	}
+	if res.Gap > 0.2 {
+		t.Errorf("hls.js %s: the picture stood still %.2fs at %.2fs", res.Src, res.Gap, res.GapAt)
 	}
 	if (strings.Contains(res.Src, "/mix/") || strings.Contains(res.Src, "/sec/")) && res.CC < 1 {
 		t.Errorf("hls.js %s: no discontinuity played through", res.Src)

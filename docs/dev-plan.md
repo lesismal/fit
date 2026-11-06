@@ -301,7 +301,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | done |
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
-| I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
+| I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | done |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
@@ -3241,6 +3241,38 @@ also in decision 033 as its items 43–55):
   text tabs as on the config pages, its owned paths listed, its variables), its groups, and each
   member's rendered result and sync state; **Compare** for two members; **Import from a node**.
 - **Touches**: `cluster`, `admin`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 68–84):
+
+1. **What a template owns is read from its fragment**, not a list of paths: top-level members whole
+   (`media_auth` whole), elements of `listeners`, `routes`, `services` and `upstreams` by name; never
+   `admin` or `schema_version`. The plan's `tls` is no top-level member, so TLS goes with its listener.
+   Alternatives: JSON pointers; `media_auth` by policy.
+2. **Element names take no variables**, as the name is how the template finds the element.
+3. **Overlaps go by `order`** (−1,000 to 1,000), then name, the later winning; each part says which
+   template it overrides.
+4. **Variables are strings**; one a member lacks is that member's error, never an empty string; group
+   variables come only from the template's groups the member is in, a later group winning; no defaults.
+5. **The in-sync hash is kept on the member**, in its record, not in the manager's document, which would
+   grow with members times parts; a value the member had before the template owned it is a conflict
+   (`own_value`), as applying would overwrite it.
+6. **Members are told** when a page reads them and after any change to templates, groups or members;
+   to the log, not the audit log.
+7. **Values compare by the SHA-256 of their canonical JSON** (keys sorted, numbers as written), so `1.0`
+   and `1` differ.
+8. **Secrets are known by name**, the assistant's rule and push URLs (`rate_limit`'s `key` excepted),
+   and are masked in every answer.
+9. **New elements go at the end of a member's list**; a template removes nothing from members, and a
+   part no longer owned is left as it is and listed as released.
+10. **The store's document stays version 2**, as older fits keep templates as they find them.
+11. **Reading sync states answers within the request**: 4 at once, 30 seconds, then members not read
+    are answered pending; only summaries without values are kept.
+12. **Text tabs convert through the cluster module's own endpoints**, a fragment converting without the
+    config's checks; the form is the Templates page's own, as the config pages share the running
+    config's draft.
+13. **A member's pages ask but never refuse**, once a part until the config is read again.
+14. **A member of another schema** gets a note on its sync state (I143's `compatible`), not an error.
 
 ### I146 Rollouts
 
