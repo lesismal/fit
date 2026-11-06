@@ -293,7 +293,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | done |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | done |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | done |
-| I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
+| I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | done |
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
 | **Cluster management** | | | |
 | I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
@@ -2775,6 +2775,34 @@ keeps the reads behind one interface so that it can be added).
   preview's own short-lived URL; the Admin API's new read endpoints are bounded and paged under
   the race detector.
 - **Touches**: `app/workbench`, `admin`, `medialib`, `streaming`, `mediaauth`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **One module**, `gw.medialib`, of eight pages, not pages added to Streaming and Media auth, so the
+   track's pages stay together and the others unchanged.
+2. **Test URLs** are issued by the Admin API (`POST /media/auth/{policy}/urls`) within an optional
+   `media_tokens` route's bounds, as the workbench holds no credentials for that route's middleware.
+   Alternative: a proxy carrying the site API's credentials.
+3. **The preview signs** for subject `workbench:<user>`, a new session each time, 2 minutes; a route
+   without `url_signing` gets a short-lived token; a public route plays unsigned.
+4. **The preview plays from the listener itself**: the console's CSP admits the `vod` and `hls`
+   listeners, and the page warns when the route sets no `cors`; proxying the media through the console,
+   which buffers whole bodies, was rejected.
+5. **A short player buffer** (8–16s), so an ended session or a rotated key stops the preview within
+   seconds; with hls.js's defaults a short film is fetched whole and never refused.
+6. **Rotation from the workbench** only for keys kept in a secret file, written then rotated as
+   `media_tokens`' revoke does; 409 for keys written in the config.
+7. **A key's age** is its file's modification time, never the secret; keys in the config show none.
+8. **Channel edits go through the shared draft** and Save and apply, checked as any change; the
+   channels page's raw tabs hold the whole `streaming` member.
+9. **The resolution filter** is `min_height` and `max_height` in the API, grouped in the page as under
+   720p, 720p, 1080p, 4K and up.
+10. **A library's viewers** are the live sessions under its `vod` route's prefix; without `url_signing`
+    viewers are not known.
+11. **One hls.js copy**, in the workbench, which `media_pages` serves (I137's identical copy removed).
+12. **Ask AI** uses `explain` and `diagnose` until I152's media skills.
+13. **Secrets written in the config** still show in the URL signing page's raw tabs, as the config
+    editor shows them on the Media auth page; redacting `GET /config` would change the whole editor.
 
 ### I139 Media files managed from the workbench
 

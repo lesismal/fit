@@ -4500,3 +4500,20 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **测试**：列表、按权限过滤、分页与搜索、bcrypt 登录、签名与过期的 URL、频道；基准机 Docker 中的 `test/docker/videosite`：无头 Chromium
   登录示例的 API，播放一部影片与频道并跳转，URL 与授权过期后被拒绝，在站点页面以及库与播放页面上都如此：16 项检查全部通过。
 - **缺口**：未测试 Safari 自带的播放器；`/media/play` 仍只用原生方式播放 HLS。实现时所做的决策在计划的 I137 一节，待审查。
+
+
+### I138 workbench 的媒体库页面 — 已完成
+
+- **媒体库** 模块（标为 VOD 与频道）位于 Streaming 与 Media auth 旁：Libraries（搜索，按编解码器、分辨率与问题过滤，分页，带进度的重新扫描）；
+  条目页（版本与轨道、音频、字幕、海报、sidecar、带 Ask AI 的探测错误，以及用 `POST /media/preview` 为用户签发的两分钟 URL 播放的 hls.js
+  预览，第一次被拒即停止）；Channels（播放列表与时间表以时间线呈现，可拖放，loop、shuffle、时区与版本写入共享草稿；当前与下一个，启动、
+  停止、跳过、立即播放与预览；推流目标的状态、错误、字节数与码率）；Playback URLs（测试 URL，从不保存；按名字与年龄列出密钥，确认后轮换；
+  按原因列出拒绝；分页列出在线会话并可结束）；Metrics（每 2 秒 `GET /media/stats`）；以及 `media_library`、`vod` 路由、`streaming.channels`
+  与 `push`、各策略 `url_signing` 的配置页，带 UI、`.conf`、`.yaml` 与 `.json` 标签页，保存错误链接回字段。Engine 菜单在 streaming 下列出
+  每个端口的 `vod` 路由与频道，并为端口加 `VOD` 标记。
+- **Admin API**：`/media/preview`，`/media/auth` 及其 `sessions`、`sessions/end`、`rotate` 与 `urls`，`/media/stats`，库页面的 `min_height` 与
+  `max_height`；`vod`、样本表与 URL 拒绝的指标。控制台的 CSP 允许 `vod` 与 `hls` 的 listener；hls.js 1.5.20 只在 workbench 中收入一份，由
+  `media_pages` 从那里提供。
+- **测试**：在浏览器中对运行着三个库与两个频道的 fit 以中英文检查，并对模拟的端点检查；竞态检测下的 `test-changed`。
+- **缺口**：cookie 模式的 `url_signing` 无法用于预览（cookie 不会发往其他源）；每次预览都是新会话，`max_sessions` 较低且为 `refuse` 时重复预览
+  可能被拒；写在配置中的密钥仍会显示在配置编辑器的原始标签页中。实现时所做的决策在计划的 I138 一节，待审查。

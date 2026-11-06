@@ -6344,3 +6344,29 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   expire, on the site's page and on the library and player pages: 16 checks of 16.
 - **Gaps**: Safari's own player not tested; `/media/play` still plays HLS natively only. The decisions
   made are in the plan's I137 section, pending review.
+
+
+### I138 The workbench's media library pages — done
+
+- **Media library** module (tagged VOD and channels) beside Streaming and Media auth: Libraries
+  (search, codec, resolution and problem filters, paging, Rescan with progress); an item's page
+  (renditions and tracks, audio, subtitles, poster, sidecar, probe errors with Ask AI, and an hls.js
+  preview on a two-minute URL `POST /media/preview` signs for the user, stopping at the first refusal);
+  Channels (the playlist and schedule as a timeline with drag and drop, loop, shuffle, time zone and
+  rendition into the shared draft; now and next, start, stop, skip, play now and a preview; push
+  targets with state, error, bytes and bit rate); Playback URLs (a test URL, never kept; keys by name
+  and age, rotated after a confirm; refusals by reason; live sessions paged and ended); Metrics
+  (`GET /media/stats` every 2s); and config pages for `media_library`, `vod` routes,
+  `streaming.channels` and `push`, and each policy's `url_signing`, with the UI, `.conf`, `.yaml` and
+  `.json` tabs and save errors linked back. The Engine menu lists each port's `vod` routes and
+  channels under streaming and tags the port `VOD`.
+- **Admin API**: `/media/preview`, `/media/auth` with `sessions`, `sessions/end`, `rotate` and `urls`,
+  `/media/stats`, `min_height` and `max_height` on a library's page; `vod`, sample-table and URL refusal
+  metrics. The console's CSP admits the `vod` and `hls` listeners; hls.js 1.5.20 is vendored once in the
+  workbench, and `media_pages` serves it from there.
+- **Tests**: checked in a browser against a running fit with three libraries and two channels, English
+  and Chinese, and against mocked endpoints; `test-changed` under the race detector.
+- **Gaps**: cookie-mode `url_signing` does not reach the preview (the cookie is not sent to another
+  origin); each preview is a new session, so a low `max_sessions` with `refuse` may refuse repeated
+  previews; secrets written in the config still show in the config editor's raw tabs. The decisions
+  made are in the plan's I138 section, pending review.
