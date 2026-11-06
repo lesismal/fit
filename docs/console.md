@@ -506,7 +506,7 @@ most 8 MiB together; without a store they last until fit restarts. A user sees o
 
 The endpoints are `POST /api/m/ai/chat` (`{"conversation", "message" | "retry": true | "answer":
 {"id", "choice"}, "page", "lang"}`; answered as SSE: `data:` events of type `start`, `text`,
-`thinking`, `tool_call`, `tool_result`, `ask`, `usage`, `summary` and `proposal`, then `event: end` with
+`thinking`, `tool_call`, `tool_result`, `ask`, `usage`, `summary`, `proposal` and `page_call`, then `event: end` with
 `{"type": "done", "reason"}` (`answer`, `ask`, `max_tool_calls`, `max_tokens_per_day`, `stopped`)
 or `event: error` with `{"message"}`; `403` for a user whose level is `off`, `404` for a
 conversation that is not, `409` without a model, for a conversation answering already or at its
@@ -568,6 +568,49 @@ offered again; `422` when it does not check or the Admin API refused it), `POST
 /api/m/ai/proposals/{conversation}/discard` (`{"id", "user"}`) and `GET /api/m/ai/audit`
 (`?user=`, `?conversation=`, `?kind=` `chat`, `apply` or `discard`, `?before=` an entry's `seq`,
 `?limit=` up to 500; the latest first).
+
+### Drafts on the page
+
+A user whose level is `edit` or above has the change they ask for drafted where they are: on a page
+that edits the config (the gateway's and the system's pages with a form and `.conf`, `.yaml` and
+`.json` tabs, and the feature pages), the assistant writes it into the page's form or text tab as an
+unsaved draft, and the person reviews it there and clicks **Save and apply**, which goes through the
+page's ordinary apply path and is recorded as that person's change. The assistant never presses it.
+
+The page tools: `page_get` (level `read`) reads what the page holds now, unsaved edits included: the
+members it edits as its draft has them (redacted), the tab shown, a text that does not parse and the
+last save's problems. `page_edit` (level `edit`) drafts a change for the members the page edits:
+members set whole (`members`, `null` removing one), operations at JSON pointers (`ops`: `add`,
+`replace`, `remove`), or the page's part as `text` in one of its tabs (`format` `conf`, `yaml` or
+`json`), with a `summary` the page shows. `page_revert` (level `edit`) takes the assistant's drafts
+out again, back to what the page held before the first of them; it is refused once the person has
+changed the page since, when the page's own **Revert the assistant's draft** (which asks first) or
+**Discard** does it.
+
+A page declares what it edits, and the panel sends it with the page as `editable`
+(`{"members", "formats", "tab", "unsaved", "assistant_draft"}`); the page tools are offered only
+while the page shown declares an editor, and never over MCP, which has no open page. Before the page
+gets a draft, fit checks it on the console's pool: every member it sets is one the page edits, none
+is in `admin`, no secret field is written (a value the model saw as `[redacted]` may be copied back,
+and the page puts back the value it holds there), its text parses in its format, and its arguments
+are at most 256 KiB; a draft that fails is refused with why and never reaches the page. A change the
+page cannot hold (another member, a secret, `admin`, a role's own settings) is proposed instead, or,
+below `propose`, described for the person to make on the page that edits it.
+
+The page then applies the draft to its shared draft as a person's edit is applied, running its own
+check of a text (`POST /config/parse`, as for a typed one), marks the fields it changed, a note above
+the forms with **Revert the assistant's draft**, and an **Assistant draft** badge beside **Unsaved
+changes** in the top bar, and answers with what it changed. No page tool calls `PUT` or `PATCH
+/config`, `/config/text`, a reconcile, a rollback or a purge, nor saves: the version, the ETag and
+**Versions** stay as they were until the person saves, and the audit log has the page tools' calls
+as tool calls of the chat, never as a change. A save, a discard or a read of the config again ends
+the draft's marks.
+
+The page tool's call reaches the panel as the stream's event `page_call` (`{"id", "name",
+"arguments"}`, the arguments as fit checked them); the panel runs it on the page shown and answers
+`POST /api/m/ai/chat/page` (`{"conversation", "id", "result" | "error"}`; `409` when the
+conversation does not wait for that call), whose result is redacted and bounded as any tool's. The
+chat waits for the answer at most 30 seconds, and no longer than the browser stays.
 
 ### Skills
 

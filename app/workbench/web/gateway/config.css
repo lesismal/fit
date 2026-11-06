@@ -44,3 +44,10 @@
 .cf-node > summary > .cf-inc { margin: 0 1px 0 0; }
 /* A nested value left out of the config: its summary stays readable, its label a little quieter. / 未设置的嵌套值：标签稍淡。 */
 .cf-node > summary > .cf-inc:not(:checked) ~ .cf-label { color: var(--muted); }
+
+/* The assistant's draft (I154): the fields it changed, marked until the draft is saved, discarded or reverted, and the
+   note above the forms. / 助手的草稿（I154）：其修改的字段在保存、放弃或撤回之前一直标出，以及表单上方的提示。 */
+.cf-ai { box-shadow: inset 3px 0 0 var(--primary); background: var(--primary-soft); border-radius: var(--radius-sm); }
+.cf-raw.cf-ai { box-shadow: inset 3px 0 0 var(--primary); background: var(--surface); }
+.cf-ai-note { background: var(--primary-soft); }
+.cf-ai-note .row--between { gap: 8px; flex-wrap: wrap; }

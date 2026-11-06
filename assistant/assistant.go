@@ -168,7 +168,7 @@ func New(o Options) (*Assistant, error) {
 	a := &Assistant{o: o, client: model.NewClient(o.Engine, o.Limits), tests: make(chan struct{}, MaxTests),
 		raw: raw, settings: o.Settings, registry: NewRegistry(), started: time.Now(),
 		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
-	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), o.Tools) {
+	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), pageTools(), o.Tools) {
 		if err := a.registry.Add(t); err != nil {
 			return nil, err
 		}
@@ -389,6 +389,7 @@ func (a *Assistant) routes(api *console.API) {
 	api.Handle("GET", "/api/tools", a.toolsHandler)
 	api.Handle("POST", "/api/chat", a.chatHandler)
 	api.Handle("POST", "/api/chat/stop", a.stopHandler)
+	api.Handle("POST", "/api/chat/page", a.pageHandler)
 	api.Handle("GET", "/api/conversations", a.conversationsHandler)
 	api.HandlePrefix("", "/api/conversations/", a.conversationHandler)
 	api.Handle("GET", "/api/proposals", a.proposalsHandler)
