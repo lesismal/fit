@@ -109,6 +109,15 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   除非 `data.send_subjects` 允许原样发送。媒体工具与其他工具一样按令牌级别经 MCP 提供。技能 `vod-setup`、`channel-scheduler`、
   `library-health` 与 `playback-troubleshoot` 使用这些工具，媒体页面的“问 AI”按钮运行后三者。
 
+- **跨集群的助手（I153）。** 在管理端（`admin.cluster`）上，控制台把管理端的 `Assistant()` 交给助手（`Options.Cluster`，
+  一个只用基本类型的接口，两个包互不导入）。工具 `cluster_members`、`cluster_templates`、`cluster_rollouts`、`cluster_metrics`
+  与 `cluster_certs` 读取它；读取 Admin API 的读取工具接受 `member`，经管理端与该成员的会话读取该成员（固定的读取列表，从不写入）；
+  `rollout_propose`、`cluster_op_propose` 与 `drift_fix_propose` 生成发布规划（模板现状或其草稿、同步、修改、复制）或经检查的操作，
+  由人在集群页面上以该页的确认启动。它们不是对话提案的步骤，“应用”从不启动它们，经 MCP 时其回答给出工作台的链接。每次调用都以用户身份进行：
+  管理端的角色由管理端检查，助手的级别由注册表检查（已受角色限制），取更窄的。跨成员读取最多等待 20 秒并报告慢或离线的成员；
+  成员的凭据从不出现在结果中。技能 `fleet-health`、`rollout-planner` 与 `cluster-drift` 只在管理端提供，集群页面（概览、失败的批次、
+  漂移的成员）会询问它们。
+
 ## 影响
 
 - 设置了 `admin.assistant` 时，workbench 的菜单中有“助手”模块及其功能页与设置页，每个页面的顶栏都有对话面板的按钮。

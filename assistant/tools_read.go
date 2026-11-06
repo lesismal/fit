@@ -579,7 +579,7 @@ func toolStatusGet(c *Call) (string, error) {
 		st["upstreams"] = short
 	}
 	delete(st, "certificates")
-	cfg := c.a.o.Config()
+	cfg := c.localConfig()
 	var roles []string
 	if cfg != nil {
 		var top map[string]map[string]json.RawMessage
@@ -595,6 +595,17 @@ func toolStatusGet(c *Call) (string, error) {
 	}
 	st["roles"] = roles
 	st["uptime_seconds"] = int64(time.Since(c.a.started) / time.Second)
+	if c.onMember() != "" {
+		// A member's roles and uptime are its /node's.
+		var node struct {
+			Roles  []string `json:"roles"`
+			Uptime int64    `json:"uptime_seconds"`
+		}
+		if err := c.a.apiGet(c.Context, "/node", &node); err != nil {
+			return "", err
+		}
+		st["roles"], st["uptime_seconds"] = node.Roles, node.Uptime
+	}
 	data, _ := json.Marshal(st)
 	red, err := c.a.redactor(c.Settings).redactJSON(data, nil)
 	return string(red), err
@@ -710,7 +721,7 @@ func toolUpstreamHealth(c *Call) (string, error) {
 	}
 	ups, _ := st["upstreams"].([]any)
 	settings := map[string]any{}
-	if cfg := c.a.o.Config(); cfg != nil {
+	if cfg := c.localConfig(); cfg != nil {
 		for _, u := range cfg.Upstreams {
 			settings[u.Name] = u
 		}
@@ -759,7 +770,7 @@ func toolCertsList(c *Call) (string, error) {
 		}
 	}
 	out := map[string]any{"certificates": certs}
-	if cfg := c.a.o.Config(); cfg != nil {
+	if cfg := c.localConfig(); cfg != nil {
 		out["acme"], out["auto_https"] = cfg.ACME, cfg.AutoHTTPS
 	}
 	data, _ := json.Marshal(out)

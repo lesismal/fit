@@ -302,7 +302,16 @@ next goes. It is made from:
 - **a sync**: the members picked, a group's, or every member, each brought in sync with all its
   templates;
 - **a copy**: parts of one member's config (top-level members whole, `routes[api]` and the other
-  named lists' elements by name) copied to others, as it has them now, secrets and all.
+  named lists' elements by name) copied to others, as it has them now, secrets and all;
+- **a patch** (I153): parts written in the request (`config`, the same kind of parts as a template's,
+  without variables) put on the members picked or a group's as written: config no template owns,
+  so an admin's of each member, as a copy is; a secret written as `[secret]` keeps each member's
+  own, and a member that has none there is not ready;
+- **a template's draft** (I153): a template's rollout with `config`, the template's whole config as
+  it would be. Each member is rendered with the draft in the template's place, and nothing is saved:
+  **starting** it saves the draft as the template, as the person who starts it, who must be a
+  cluster-wide admin (templates are theirs), and then applies it; a template changed or removed
+  since the plan refuses the start. A secret written as `[secret]` keeps the template's.
 
 **The plan.** Planning reads each member (`GET /node` for its capabilities, `GET /config` and its
 ETag), makes its desired config and its diff, part by part (secrets masked), and has the member
@@ -354,7 +363,8 @@ it got and its gate; the configs and diffs' values are dropped once it ends. The
 plan, start, pause, resume, go, abort, rollback and end, the end with every member's outcome.
 
 **The pages**, under **Rollouts**: the history, the latest first, and **New rollout**; a new
-rollout's form (what, the template, group or members, the parts of a copy); a rollout's page:
+rollout's form (what, the template, group or members, the parts of a copy, a patch's config, a
+template's draft); a rollout's page:
 planned, each member's state, its changes side by side, its dry run's errors linked to the member's
 page, its own pages and its rendered result, a box to leave it out, the strategy form, and **Start**,
 whose dialog lists the batches and every member's diff; started, its progress batch by batch with
@@ -447,6 +457,58 @@ hand** (the new rollout's form, filled in) and **Reload**; **Alerts**, the count
 with **Silence**, those pending, and the past ones; **Rules**, added, edited and removed; **Webhooks**,
 with their sends, **Test**, edited and removed; **Silences**, active and past, added and ended. While
 alerts fire, not silenced, the Cluster menu shows their count, red when one is critical.
+## The assistant on a manager
+
+On a manager whose console runs the [assistant](console.md#the-assistant) (`admin.assistant`), the
+assistant reads the cluster and proposes changes across it (I153), as the user who asks:
+
+| Tool | Level | What it does |
+| --- | --- | --- |
+| `cluster_members` | `read` | every member's state as last polled (status, error, versions, config version, drift, sync with its templates, nearest certificate and days left, connections, reloads, backends down, alerts firing), filtered by group, label selector or status |
+| `cluster_templates` | `read` | the templates, their parts, variables and members, and how many are in sync; one whole, with each member's parts |
+| `cluster_rollouts` | `read` | the latest 20 rollouts batch by batch with each member's result, and the latest 10 operations; one whole with its changes |
+| `cluster_metrics` | `read` | each member's requests by class, connections, reloads and backends down, read now from its `GET /status`, summed by group |
+| `cluster_certs` | `read` | the certificate inventory, read now from every member, the soonest to expire first, within some days |
+| `member` argument | `read` | `config_get`, `versions_diff`, `status_get`, `metrics_query`, `upstream_health`, `consistency_check`, `certs_list`, `cache_zones` and the media tools read a member instead of the manager, through the manager's session with it |
+| `rollout_propose` | `propose` | a rollout's plan: a template (as it is, or a draft), a sync, a patch or a copy, with a strategy suggested |
+| `cluster_op_propose` | `propose` | an operation (reload, rollback, check, purge, test) checked, not started |
+| `drift_fix_propose` | `propose` | a sync rollout's plan for members out of sync or in conflict, and a reload for those whose consistency check differs |
+
+**Nothing is applied by the assistant.** A propose tool makes a rollout plan, which the Rollouts page
+shows (each member's diff and dry run, marked as planned by the assistant for the user, with the
+strategy it suggests in the start form), or checks an operation and links the operations page with
+it filled in (`#/cluster/ops?op=&members=&purge=` or a group's page), whose confirm dialog opens: the
+person starts either there, with that page's own confirm. None is a step of the conversation's
+proposal, and the panel's Apply never starts one; the panel draws a card under the tool's result
+with the link. A plan made over MCP answers with the workbench's link.
+
+**Roles and levels.** Every call acts as the user and is checked by the manager's roles, as the
+endpoints check them: reads need a role anywhere, a member's own reads a role on it; a template's
+rollout or a sync an operator of each member, a patch or a copy an admin of each, a template's
+draft a cluster-wide admin; an operation an operator of each member. The assistant's level (I126)
+is checked too, capped by the roles (a cluster-wide admin keeps it, an operator anywhere at most
+`propose`, anyone else `read`): the narrower wins, so an operator never proposes a change to a
+template, and a user at `read` gets no propose tool.
+
+**Bounds.** A read across members (`cluster_metrics`, `cluster_certs`) calls at most
+`max_concurrency` members at once, each within `timeout`, and answers within 20 seconds: a member
+slow or down is reported with its problem, and the others read. A member's read through `member`
+waits 20 seconds at most; a plan waits for its members' dry runs as long, and says when it is still
+planning. Only reads reach a member through `member`: `GET` of the config, versions, status,
+metrics, consistency check, cache, node, schema and the media and streaming reads, and the text
+conversions; never a write, the tokens or the logs' files. A member of another fit version is noted.
+
+**Secrets.** No member's password, token or session reaches a tool's result: the manager answers
+none, a member's errors are redacted of its own, and every result is redacted as any tool's. The
+assistant never writes a secret: a value copied as `[redacted]` goes as `[secret]`, which keeps the
+one there; one written is refused.
+
+**Skills**: `fleet-health` reads the members together and says who is down, behind, drifting or
+near a certificate's expiry; `rollout-planner` plans a change across a group with a canary,
+batches, gates and rollback, and explains a failed batch; `cluster-drift` explains each member's
+drift and plans its fix. They are offered on a manager only. **Ask AI** on the Overview (the fleet,
+and each member's card), on a rollout's failed batch, and on a drifting member of the Drift page.
+
 ## Users, roles and the audit log
 
 The manager's console users have **roles** on the cluster, cluster-wide and per group:
@@ -622,10 +684,10 @@ pages above use nothing else:
 | `GET desired/<member>` | a member read now: its sync state, `config` and `desired`, secrets masked |
 | `POST compare` | `{"a", "b"}`: both members' configs, `{"a", "b", "parts"}`, each side `{"node", "config_etag", "config"}`, each part `{"path", "state", "a", "b"}`, `state` `same`, `differs`, `only_a` or `only_b` |
 | `POST import` | `{"node"}`: the member's config's parts, `{"node", "config_etag", "parts"}`, each `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
-| `POST rollouts` | plans a rollout: `{"kind", "template", "group", "nodes", "from", "paths", "description"}`, `kind` `template`, `sync` or `copy`; `202` with the rollout, planning; `400` with `{"field", "error"}`, `404` for a template, group or member there is none of, `429` past 4 planned or under way |
+| `POST rollouts` | plans a rollout: `{"kind", "template", "group", "nodes", "from", "paths", "config", "description"}`, `kind` `template`, `sync`, `copy` or `patch`; `config` a patch's parts, or a template's draft (I153); `202` with the rollout, planning; `400` with `{"field", "error"}`, `404` for a template, group or member there is none of, `429` past 4 planned or under way |
 | `GET rollouts` | the rollouts kept, the latest first, without the diffs' values: `{"max_active", "plan_ttl_ms", "read_only", "rollouts"}` |
-| `GET rollouts/<id>` | a rollout: `{"id", "kind", "template", "group", "from", "paths", "description", "planned_by", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`; `state` `planning`, `planned`, `running`, `paused`, `waiting`, `rolling_back`, `done`, `failed`, `aborted`, `rolled_back` or `expired`; a member `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`, a change `{"path", "state", "sync", "reason", "template", "have", "want"}` (secrets masked), a gate `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`; never a config |
-| `POST rollouts/<id>/start` | starts a plan: `{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`; `409` for a member held by another rollout or an operation |
+| `GET rollouts/<id>` | a rollout: `{"id", "kind", "template", "group", "from", "paths", "config", "template_base", "description", "planned_by", "source", "suggested", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`; `state` `planning`, `planned`, `running`, `paused`, `waiting`, `rolling_back`, `done`, `failed`, `aborted`, `rolled_back` or `expired`; a member `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`, a change `{"path", "state", "sync", "reason", "template", "have", "want"}` (secrets masked), a gate `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`; never a member's config, and its own `config` with its secrets as `[secret]`, until it ends; `source` `assistant` for a plan the assistant made for `planned_by`, and `suggested` the strategy it suggests |
+| `POST rollouts/<id>/start` | starts a plan: `{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`; a template's draft is saved as the template first, a cluster-wide admin's; `409` for a member held by another rollout or an operation, or a template changed since the plan |
 | `POST rollouts/<id>/pause`, `resume`, `go`, `abort`, `rollback` | steers it; `409` when its state does not allow it |
 | `DELETE rollouts/<id>` | discards a plan |
 | `GET drift` | every member's drift: `{"interval_ms", "read_only", "nodes"}`, each `{"node", "status", "groups", "managed", "templates", "consistency", "drifted", "fixable"}`, `templates` its sync state without the parts' values, `consistency` its check's counts |

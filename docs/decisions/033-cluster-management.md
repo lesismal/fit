@@ -716,6 +716,46 @@ Decided while building I148 (2026-11-06):
      diff of the rules, webhooks (as the API shows them) and silences. Alternative: silences an
      admin's, as rules are.
 
+Decided while building I153 (2026-11-07):
+
+134. **The assistant reaches the manager through an interface** of plain types (`assistant.Cluster`,
+     implemented by `Manager.Assistant()`), so that `assistant` and `cluster` import neither the
+     other, and each side is tested with a fake of the other. Alternatives: the tools in `cluster`
+     (which would import `assistant`), or in `assistant` importing `cluster`.
+135. **A change asked in words needs two new rollouts**: a **patch** (`kind: patch` with `config`,
+     parts as a template's, without variables), config no template owns, an admin's of each member
+     as a copy is; and a **template's draft** (`kind: template` with `config`), each member rendered
+     with the draft and nothing saved until the start, which saves the template as the person
+     starting it (a cluster-wide admin) and refuses a template changed or removed since the plan. A
+     start that saved the draft and then went no further does not save it again. Alternatives: only
+     templates (a new template for any change), or saving the template at the plan.
+136. **A secret in a patch or a draft** is the template's or each member's own, written as `[secret]`
+     (the assistant's `[redacted]` goes as it); a member that has none there is not ready.
+137. **An operation is never started by a tool**: `cluster_op_propose` checks it as `StartOp` would
+     (now `checkOpLocked`, shared) and links `#/cluster/ops?op=&members=&purge=` (or a group's page),
+     which opens with the members picked and its confirm dialog filled in. Alternative: operations
+     kept as proposed in the manager, started from a list.
+138. **A plan carries who made it and what it suggests**: `source: assistant` and `suggested`, the
+     strategy the assistant proposes, which the start form fills itself with. Alternative: the
+     strategy in the description.
+139. **The assistant waits for its plan** up to 20 seconds, so that the model reads each member's diff
+     and dry run; a plan still planning says so and goes on.
+140. **A read across members is bounded by the call**: at most `max_concurrency` members at once,
+     the whole within 20 seconds (inside the chat's 30-second tool bound); members not answered are
+     reported `timeout` with their last poll's state where it has some (a certificate's expiry).
+141. **What `member` reaches**: GET of the config, effective config, check, versions, status, metrics,
+     cache, node, schema and the media and streaming reads, and POST of the text conversions; never
+     a write, the tokens or the logs' files. A member of another fit version is noted in the result.
+142. **Lists answer what the endpoints answer**: any role reads members, templates and rollouts;
+     `cluster_metrics`, `cluster_certs` and `member` need a role on each member read.
+143. **No `cluster_log_tail` yet**: a member serves no lines of its log ring through the Admin API,
+     which I150 adds; the tool comes with it. `cluster_metrics` reads members' counters now, until
+     I150 keeps series.
+144. **The pages**: Ask AI on the Overview's bar (the members shown) and on each member card
+     (`fleet-health`), on a rollout's failed or rolled-back batch (`rollout-planner`), and on each
+     drifting member of the Drift page (`cluster-drift`); the New rollout form gains **Parts written
+     here** (a patch) and a template's draft, an admin's.
+
 Open questions of the plan, answered as proposed until reviewed:
 
 1. Members are reached by the console's user name and password, or by the Admin API's token; both.

@@ -135,7 +135,9 @@
 
     var stats = h('div.grid.grid--4.cl-stats'), info = h('div.callout.callout--warn', { hidden: true });
     var list = h('div.cl-list'), note = h('div.small.muted');
-    UI.mount(sh.tools, h('span.btn-row', cardsBtn, tableBtn), UI.btn(t('refresh'), 'refresh', function () { read(); }, 'ghost sm'));
+    // Ask AI about the members shown (I153, askai.js). / 就所示成员“问 AI”（I153，askai.js）。
+    var askFleet = FC.askFleet ? FC.askFleet(UI, function () { return { nodes: shown((data && data.nodes) || []), group: f.group }; }) : null;
+    UI.mount(sh.tools, askFleet, h('span.btn-row', cardsBtn, tableBtn), UI.btn(t('refresh'), 'refresh', function () { read(); }, 'ghost sm'));
     UI.mount(el, h('div.stack', info, stats, h('div.cl-filter', text, label, group, state, sort), list, note));
     UI.mount(list, h('div.row', h('span.spinner'), h('span.muted', t('loading'))));
 
@@ -187,7 +189,8 @@
     function card(s) {
       var x = facts(s), link = '#/cluster/node/' + encodeURIComponent(s.name);
       return h('section.card.cl-card.cl-card--' + (FC.STATE_KIND[s.status] || 'muted'),
-        h('div.card__head', h('h2.ellipsis', { title: s.name }, h('a', { href: link }, s.name)), FC.stateBadge(UI, s.status)),
+        h('div.card__head', h('h2.ellipsis', { title: s.name }, h('a', { href: link }, s.name)),
+          h('span.btn-row', FC.askCard ? FC.askCard(UI, s) : null, FC.stateBadge(UI, s.status))),
         h('div.card__body',
           h('div.small.muted', t('f.since', { ago: UI.ago(FC.sec(s.since)) }),
             s.failures ? ' · ' + t('f.failures', { n: s.failures }) : '', FC.extras(UI, null, s)),

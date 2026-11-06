@@ -122,6 +122,11 @@ type Options struct {
 	// whatever the settings give: a manager of other fits bounds the
 	// assistant by the user's roles there (cluster's AssistantCap).
 	LevelCap func(user string) string
+	// Cluster, when not nil, is the manager of other fits this fit is
+	// (I153): the cluster tools run on it, the read tools that read the
+	// Admin API take a member argument, and the cluster's skills are
+	// offered.
+	Cluster Cluster
 }
 
 // Assistant is the assistant of a console.
@@ -179,7 +184,16 @@ func New(o Options) (*Assistant, error) {
 		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
 	a.subjectKey = make([]byte, 32)
 	_, _ = rand.Read(a.subjectKey) // crypto/rand.Read never fails
-	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools(), o.Tools) {
+	tools := slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), mediaTools(), pageTools(), o.Tools)
+	if o.Cluster != nil {
+		for i, t := range tools {
+			if slices.Contains(memberTools, t.Name) {
+				tools[i] = withMember(t)
+			}
+		}
+		tools = append(tools, clusterTools(o.Cluster)...)
+	}
+	for _, t := range tools {
 		if err := a.registry.Add(t); err != nil {
 			return nil, err
 		}

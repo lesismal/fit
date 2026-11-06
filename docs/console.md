@@ -757,6 +757,9 @@ user's message, as if typed.
 | An item's probe error on its **Media library** page | `library-health` | `library`, `item` | the library, the item, the file and its error |
 | A push target in error on the **Channels** page | `channel-scheduler` | `channel`: the target's channel, when it is a channel's | the target: name, stream, channel, protocol, server (never its stream key), state, error, connects and failures |
 | A policy's URLs refused 403, on **Playback URLs** and **Metrics** | `playback-troubleshoot` | `policy`, `status`: `403` | the policy and its refusals by reason |
+| A manager's **Cluster → Overview**: the fleet (the members shown), and each member's card | `fleet-health` | `group`, the one filtered by; or `member` | the members' states in short: status, error, versions, drift, nearest certificate, backends down |
+| A failed batch of a rollout, on its page | `rollout-planner` | `rollout`, `batch`, its `group` or `template` | the rollout's kind, state, reason and strategy, and the batch's members with their gates and errors |
+| A drifting member on **Cluster → Drift and alerts** | `cluster-drift` | `member` | its sync with its templates and its consistency check's counts |
 | The LLM roles' link map, and the tunnel's map and paths | `diagnose` | — | the box or line selected, and the map as drawn: boxes with their facts, lines with latency, calls, errors and rates (the tunnel's diagram is closed, so the panel shows) |
 
 The buttons show only where the panel does: the console serves the module `ai` and the user's level
@@ -825,6 +828,18 @@ renditions or subtitles and codecs players cannot play, and gives the ffmpeg ste
 files; `playback-troubleshoot` finds why viewers are refused or stall from the 403s by reason, the
 session caps, the grants, the caches and the file pool, and may propose ending sessions. The media
 pages' **Ask AI** buttons run them (the table above).
+
+### Across a cluster
+
+On a manager of other fits (`admin.cluster`), the assistant also reads the cluster and proposes
+changes across its members (I153): the tools `cluster_members`, `cluster_templates`,
+`cluster_rollouts`, `cluster_metrics` and `cluster_certs`, a `member` argument on the read tools
+that read the Admin API, and `rollout_propose`, `cluster_op_propose` and `drift_fix_propose`, which
+make a rollout plan or a checked operation that a person starts on the Cluster pages with its own
+confirm, never a step of the conversation's proposal. The user's roles on the manager and the
+assistant's level are both checked, the narrower winning, and no member's credential reaches a
+model. The skills `fleet-health`, `rollout-planner` and `cluster-drift` are offered there only. See
+[the assistant on a manager](cluster.md#the-assistant-on-a-manager).
 
 ### Migration and security review
 

@@ -119,6 +119,10 @@ func (a *Assistant) loadSkills() error {
 	if err != nil {
 		return err
 	}
+	if a.o.Cluster == nil {
+		// The cluster's skills are a manager's (I153).
+		builtin = slices.DeleteFunc(builtin, func(sk *Skill) bool { return slices.Contains(clusterSkills, sk.Name) })
+	}
 	snap := &skillSnap{builtin: builtin, off: map[string]bool{}}
 	if a.o.Store != nil {
 		if sec := a.o.Store.Section(skillsSection); sec != nil {

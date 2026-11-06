@@ -51,7 +51,7 @@ func TestUserSkills(t *testing.T) {
 	sc := &script{turns: []fakeapi.Turn{{Text: "All bound."}}}
 	f := startChat(t, `"default_level": "apply", "users": [{"username": "bob", "level": "propose"}]`, sc.next)
 	l := f.skills()
-	if len(l.Skills) != len(builtinOrder) || !l.CanChange || !l.Kept || l.Max != MaxUserSkills || l.Level != "apply" ||
+	if len(l.Skills) != len(builtinOrder)-len(clusterSkills) || !l.CanChange || !l.Kept || l.Max != MaxUserSkills || l.Level != "apply" ||
 		!l.Skills[0].Builtin || !l.Skills[0].Enabled || l.Skills[0].Prompt != "" || l.Skills[0].Source != "" {
 		t.Fatalf("%+v", l)
 	}
@@ -148,7 +148,7 @@ func TestUserSkills(t *testing.T) {
 			t.Errorf("%+v", cat)
 		}
 	}
-	if len(cat) != len(builtinOrder)-1 {
+	if len(cat) != len(builtinOrder)-len(clusterSkills)-1 {
 		t.Errorf("%d in the catalog", len(cat))
 	}
 	if status, _ := f.do("POST", "/api/m/ai/skills/ops-daily/enable", "{}"); status != 200 {
@@ -164,7 +164,7 @@ func TestUserSkills(t *testing.T) {
 		_ = json.Unmarshal([]byte(body), &s)
 		bob.csrf = s.CSRF
 	}
-	if l := bob.skills(); l.CanChange || len(l.Skills) != len(builtinOrder)+1 {
+	if l := bob.skills(); l.CanChange || len(l.Skills) != len(builtinOrder)-len(clusterSkills)+1 {
 		t.Errorf("%+v", l)
 	}
 	for _, c := range [][3]string{{"POST", "/api/m/ai/skills", skillJSON(opsSkill)}, {"PUT", "/api/m/ai/skills/ops-daily", skillJSON(opsSkill)},
@@ -230,7 +230,7 @@ func TestUserSkillsBounds(t *testing.T) {
 	st := &memStore{}
 	_ = st.SetSection(skillsSection, []byte("not json"))
 	g := startWith(t, f.cfg, st)
-	if !strings.Contains(g.logText(), "the skills kept in the store do not load") || len(g.a.EnabledSkills()) != len(builtinOrder) {
+	if !strings.Contains(g.logText(), "the skills kept in the store do not load") || len(g.a.EnabledSkills()) != len(builtinOrder)-len(clusterSkills) {
 		t.Error(g.logText())
 	}
 	k, _ := json.Marshal(keptSkills{User: []keptSkill{{Source: "broken"}, {Source: strings.Replace(opsSkill, "ops-check", "diagnose", 1)},

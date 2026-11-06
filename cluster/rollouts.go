@@ -39,6 +39,8 @@ const (
 	RolloutSync = "sync"
 	// RolloutCopy copies parts of one member's config to others.
 	RolloutCopy = "copy"
+	// RolloutPatch (rolldraft.go) puts parts given with the request on
+	// members.
 )
 
 // The states of a rollout, Rollout.State.
@@ -168,14 +170,25 @@ const (
 // members, Group a group's, or every member when both are empty. For
 // RolloutCopy, From names the member whose parts Paths ("log",
 // "routes[api]") are copied, to Nodes, or the members of Group but From.
+// For RolloutPatch, Config holds the parts put on Nodes, or the members of
+// Group; for RolloutTemplate, Config, when set, is a draft of the
+// template's config, saved as the template when the rollout starts
+// (rolldraft.go).
 type RolloutRequest struct {
-	Kind        string   `json:"kind"`
-	Template    string   `json:"template,omitempty"`
-	Group       string   `json:"group,omitempty"`
-	Nodes       []string `json:"nodes,omitempty"`
-	From        string   `json:"from,omitempty"`
-	Paths       []string `json:"paths,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Kind        string          `json:"kind"`
+	Template    string          `json:"template,omitempty"`
+	Group       string          `json:"group,omitempty"`
+	Nodes       []string        `json:"nodes,omitempty"`
+	From        string          `json:"from,omitempty"`
+	Paths       []string        `json:"paths,omitempty"`
+	Config      json.RawMessage `json:"config,omitempty"`
+	Description string          `json:"description,omitempty"`
+
+	// source and suggested are the assistant's (I153): who planned it,
+	// and the strategy it suggests, which the Rollouts page fills its
+	// form with.
+	source    string
+	suggested *Strategy
 }
 
 // Strategy is how a rollout applies its members: StrategyAll, one batch;
@@ -307,22 +320,32 @@ type RolloutCounts map[string]int
 
 // Rollout is a change applied to many members, and how it went.
 type Rollout struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	Template    string    `json:"template,omitempty"`
-	Group       string    `json:"group,omitempty"`
-	From        string    `json:"from,omitempty"`
-	Paths       []string  `json:"paths,omitempty"`
-	Description string    `json:"description,omitempty"`
-	PlannedBy   string    `json:"planned_by"`
-	StartedBy   string    `json:"started_by,omitempty"`
-	State       string    `json:"state"`
-	Reason      string    `json:"reason,omitempty"`
-	Strategy    *Strategy `json:"strategy,omitempty"`
-	Created     time.Time `json:"created"`
-	Planned     time.Time `json:"planned,omitzero"`
-	Started     time.Time `json:"started,omitzero"`
-	Ended       time.Time `json:"ended,omitzero"`
+	ID       string   `json:"id"`
+	Kind     string   `json:"kind"`
+	Template string   `json:"template,omitempty"`
+	Group    string   `json:"group,omitempty"`
+	From     string   `json:"from,omitempty"`
+	Paths    []string `json:"paths,omitempty"`
+	// Config is a patch's parts, or a template's draft (rolldraft.go),
+	// its secrets masked in answers, dropped once the rollout ends;
+	// TemplateBase the hash of the template's config the draft was
+	// planned on.
+	Config       json.RawMessage `json:"config,omitempty"`
+	TemplateBase string          `json:"template_base,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	PlannedBy    string          `json:"planned_by"`
+	// Source is PlanSource for a plan the assistant made for PlannedBy,
+	// and Suggested the strategy it suggests (I153).
+	Source    string    `json:"source,omitempty"`
+	Suggested *Strategy `json:"suggested,omitempty"`
+	StartedBy string    `json:"started_by,omitempty"`
+	State     string    `json:"state"`
+	Reason    string    `json:"reason,omitempty"`
+	Strategy  *Strategy `json:"strategy,omitempty"`
+	Created   time.Time `json:"created"`
+	Planned   time.Time `json:"planned,omitzero"`
+	Started   time.Time `json:"started,omitzero"`
+	Ended     time.Time `json:"ended,omitzero"`
 	// Batch is the batch under way, or next; NextAt when it starts,
 	// while the rollout pauses between batches.
 	Batch   int             `json:"batch"`
@@ -379,9 +402,14 @@ func (r *Rollout) count() {
 func (r *Rollout) copy(full, secrets bool) Rollout {
 	out := *r
 	out.Paths = slices.Clone(r.Paths)
+	out.Config = copyConfig(r.Config, secrets)
 	if r.Strategy != nil {
 		s := *r.Strategy
 		out.Strategy = &s
+	}
+	if r.Suggested != nil {
+		s := *r.Suggested
+		out.Suggested = &s
 	}
 	out.Batches = make([]Batch, len(r.Batches))
 	for i, b := range r.Batches {
@@ -422,6 +450,7 @@ func (r *Rollout) copy(full, secrets bool) Rollout {
 // shed drops what r keeps of its members' configs and diffs, once it is
 // finished: the paths changed stay.
 func (r *Rollout) shed() {
+	r.Config = nil
 	for i := range r.Members {
 		x := &r.Members[i]
 		x.Config = nil
@@ -671,8 +700,23 @@ func (m *Manager) rolloutTargetsLocked(req *RolloutRequest) ([]string, error) {
 			return nil, fieldErr("nodes", "a copy names the members it copies to, or a group")
 		}
 		names = slices.DeleteFunc(names, func(n string) bool { return n == req.From })
+	case RolloutPatch:
+		switch {
+		case len(req.Nodes) > 0:
+			if err := pick(req.Nodes); err != nil {
+				return nil, err
+			}
+		case req.Group != "":
+			g, err := group()
+			if err != nil {
+				return nil, err
+			}
+			names = g
+		default:
+			return nil, fieldErr("nodes", "a patch names the members it changes, or a group")
+		}
 	default:
-		return nil, fieldErr("kind", "%q is not a kind of rollout: %s, %s or %s", req.Kind, RolloutTemplate, RolloutSync, RolloutCopy)
+		return nil, fieldErr("kind", "%q is not a kind of rollout: %s, %s, %s or %s", req.Kind, RolloutTemplate, RolloutSync, RolloutCopy, RolloutPatch)
 	}
 	if len(names) == 0 {
 		return nil, fieldErr("nodes", "the rollout has no members to plan")
@@ -699,9 +743,13 @@ func (m *Manager) PlanRollout(user string, req *RolloutRequest) (Rollout, error)
 		m.mu.Unlock()
 		return Rollout{}, errReadOnly(m.readOnly)
 	}
+	r := &Rollout{}
 	names, err := m.rolloutTargetsLocked(req)
 	if err == nil {
 		err = m.allowRolloutLocked(user, req.Kind, req.From, names)
+	}
+	if err == nil {
+		err = m.rolloutConfigLocked(user, req, r)
 	}
 	if err != nil {
 		m.mu.Unlock()
@@ -712,8 +760,9 @@ func (m *Manager) PlanRollout(user string, req *RolloutRequest) (Rollout, error)
 		m.mu.Unlock()
 		return Rollout{}, errBusy(fmt.Sprintf("%d rollouts are planned or under way already: start, discard or end one first", n))
 	}
-	r := &Rollout{ID: newOpID(), Kind: req.Kind, Template: req.Template, Group: req.Group, From: req.From, Paths: slices.Clone(req.Paths),
-		Description: req.Description, PlannedBy: user, State: RolloutPlanning, Created: m.now().UTC()}
+	*r = Rollout{ID: newOpID(), Kind: req.Kind, Template: req.Template, Group: req.Group, From: req.From, Paths: slices.Clone(req.Paths),
+		Config: r.Config, TemplateBase: r.TemplateBase, Description: req.Description, PlannedBy: user, Source: req.source, Suggested: req.suggested,
+		State: RolloutPlanning, Created: m.now().UTC()}
 	if req.Kind == RolloutTemplate {
 		r.Group = ""
 	}
@@ -734,13 +783,13 @@ func (m *Manager) PlanRollout(user string, req *RolloutRequest) (Rollout, error)
 
 // allowRolloutLocked checks that user may roll out a change of kind to the
 // members names: a template's or a sync, an operator of each; a copy of
-// parts of the member from, which applies config of no template, an admin
-// of each, who reads from. m.mu is held.
+// parts of the member from, or a patch, which apply config of no template,
+// an admin of each, who reads from. m.mu is held.
 func (m *Manager) allowRolloutLocked(user, kind, from string, names []string) error {
-	if kind != RolloutCopy {
+	if kind != RolloutCopy && kind != RolloutPatch {
 		return m.allowLocked(user, Need{Role: RoleOperator, Nodes: names})
 	}
-	if err := m.allowLocked(user, Need{Role: RoleAdmin, Nodes: names}); err != nil {
+	if err := m.allowLocked(user, Need{Role: RoleAdmin, Nodes: names}); err != nil || kind == RolloutPatch {
 		return err
 	}
 	return m.allowLocked(user, Need{Role: RoleViewer, Nodes: []string{from}})
@@ -772,8 +821,13 @@ func describeRollout(r *Rollout, members int) string {
 	switch r.Kind {
 	case RolloutTemplate:
 		s = "the template " + r.Template
+		if len(r.Config) > 0 {
+			s = "a draft of the template " + r.Template + ", saved when it starts"
+		}
 	case RolloutSync:
 		s = "a sync with the templates"
+	case RolloutPatch:
+		s = "a patch of " + strings.Join(partNames(r.Config), ", ")
 	default:
 		s = "a copy of " + strings.Join(r.Paths, ", ") + " from " + r.From
 	}
@@ -786,6 +840,9 @@ func (m *Manager) planRollout(r *Rollout) {
 	defer m.ro.wg.Done()
 	var parts []*rendered
 	var srcProb *Problem
+	if r.Kind == RolloutPatch {
+		parts = patchParts(r.Config)
+	}
 	if r.Kind == RolloutCopy {
 		cfg, _, prob := m.fetchConfigSync(r.From)
 		if prob != nil {
@@ -918,14 +975,18 @@ func (m *Manager) planMember(r *Rollout, name string, parts []*rendered) Rollout
 	var cfg, want *jv
 	var etag string
 	var sy *MemberSync
-	if r.Kind == RolloutCopy {
+	if r.Kind == RolloutCopy || r.Kind == RolloutPatch {
 		var p *Problem
 		if cfg, etag, p = m.fetchConfigSync(name); p != nil {
 			return fail(p)
 		}
-		want = desired(cfg, parts)
+		own, err := withOwnSecrets(parts, cfg)
+		if err != nil {
+			return fail(&Problem{Kind: KindRefused, Message: clip(err.Error(), maxMessage)})
+		}
+		want = desired(cfg, own)
 	} else {
-		o := m.syncSync(name)
+		o := m.planSync(r, name)
 		if o.desired == nil {
 			return fail(o.sync.Error) // set whenever it could not be read
 		}

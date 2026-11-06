@@ -89,6 +89,9 @@ type ConsoleExtras struct {
 	// assistant's a user has, whatever admin.assistant gives
 	// (assistant's Options.LevelCap).
 	AssistantCap func(user string) string
+	// Cluster, when not nil, is the manager the assistant's cluster tools
+	// run on (assistant's Options.Cluster, I153).
+	Cluster assistant.Cluster
 }
 
 // StartConsoleWith is StartConsole with x.
@@ -112,7 +115,7 @@ func StartConsoleWith(engine *fib.Engine, c *config.Console, a *config.Admin, co
 		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf,
 			// The tools read through the Admin API's endpoints, in process,
 			// as the workbench's pages do; they change nothing.
-			API: cs.api, Schema: sch, SchemaZh: workbench.SchemaZh, Validate: validateConfig, LevelCap: x.AssistantCap}
+			API: cs.api, Schema: sch, SchemaZh: workbench.SchemaZh, Validate: validateConfig, LevelCap: x.AssistantCap, Cluster: x.Cluster}
 		if st := configs.Sealer(); st != nil {
 			o.Store = st
 		}

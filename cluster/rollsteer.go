@@ -134,10 +134,8 @@ func (s *Strategy) describe() string {
 
 // ---- Starting and steering ----
 
-// StartRollout starts the planned rollout id as user, with req's strategy,
-// its members but those req excludes, and those not ready. It writes the
-// store: off a fib worker.
-func (m *Manager) StartRollout(user, id string, req *StartRequest) (Rollout, error) {
+// startRollout is StartRollout (rolldraft.go), once a draft is saved.
+func (m *Manager) startRollout(user, id string, req *StartRequest) (Rollout, error) {
 	m.mu.Lock()
 	r, err := m.steerableLocked(id)
 	if err != nil {
