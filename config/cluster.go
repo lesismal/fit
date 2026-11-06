@@ -81,15 +81,14 @@ func (c *Cluster) ResponseBytes() int64 {
 	return orDefault(c.MaxResponseBytes, DefaultClusterMaxResponseBytes)
 }
 
-// checkCluster checks admin.cluster: it keeps its members' credentials in
-// the store, and serves them in the console.
+// checkCluster checks admin.cluster: it serves its members in the
+// console. The store it keeps them in may be admin.store or the store fit
+// run finds beside the config (with -admin, or one that is there), which a
+// config alone does not say: fit run checks that one is open.
 func checkCluster(a *Admin, add func(Value, string, ...any)) {
 	c := a.Cluster
 	if c == nil {
 		return
-	}
-	if a.Store == nil {
-		add(c.At, "a manager keeps its members' credentials in the store: set admin.store too")
 	}
 	if a.Console == nil {
 		add(c.At, "a manager's members are served in the console's workbench: set admin.console too")

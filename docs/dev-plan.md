@@ -297,8 +297,8 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | done |
 | **Cluster management** | | | |
 | I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | done |
-| I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | todo |
-| I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | todo |
+| I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | done |
+| I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | todo |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
@@ -3052,6 +3052,39 @@ binaries (I151 records the question, not a plan).
 - **Touches**: `cluster` (new), `config`, `admin`, `admin/store`, `app`, `schema`, `docs`,
   `test/docker`.
 
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 8–19):
+
+1. **A store section, not a payload field**: members live in the store's section `cluster`, a document
+   of its own version, which an older fit opens and writes back untouched and which exports leave
+   out, so no credential leaves in an export; a payload field and format 4 would have made every older
+   fit refuse the whole store. Alternative: the plan's payload field and format 4.
+2. **`admin.cluster` needs `admin.console` too**, which serves the endpoints. Alternative: also in the
+   Admin API, which I150's CLI may want.
+3. **The poller is a goroutine of its own**, only starting asynchronous calls, not tasks on the
+   console's pool, whose tasks belong to requests.
+4. **One fib client a member**, two connections at most, so each member's TLS is checked by its own
+   settings and its certificate kept.
+5. **`ca` and `fingerprint` exclude each other, and there is no `insecure`**; a pin trusts the leaf
+   alone, whatever its names and dates.
+6. **Login backoff**: a minute doubling to 15, reset by an edit or a test that works; a member's 429 is
+   waited out; a console that asks for a new password is checked again on the same backoff, its session
+   logged out each time.
+7. **Sessions are logged out** on removal or change, after each test and when the manager stops (2s at
+   most), so the manager never fills a member's `max_sessions`.
+8. **Tests have a bound of their own** (4), apart from `max_concurrency`; `POST /test` tests a member not
+   yet added, and a saved member's test may take a draft.
+9. **The audit log** records adds, updates and removals: who, when, which member and the names of the
+   fields changed, never their values, 1,000 entries; tests and polls are not recorded.
+10. **Credentials are never shown**, not even their last characters: `password_set` and `token_set`.
+11. **Defaults**: `poll_interval` 10s, `timeout` 10s, `max_nodes` 256, `max_concurrency` 8,
+    `max_response_bytes` 4 MiB.
+12. **`http` member URLs only to loopback**, so credentials never cross a network in the clear.
+13. **Labels** as Kubernetes' (32 at most, keys and values of 63 characters).
+14. **A member whose entry in the store is invalid** is shown with its error and not polled, not dropped.
+15. **A member's state keeps what was last read** while it is down.
+16. **A rename is a `PUT` with a new `name`**; the renamed member gets a new poller node and session.
+
 ### I142 The Cluster menu: overview, nodes and a node's page
 
 - **Do**: the first-level **Cluster** entry in the workbench's left menu, shown when `admin.cluster`
@@ -3070,6 +3103,30 @@ binaries (I151 records the question, not a plan).
   languages.
 - **Pages**: Cluster → Overview, Nodes, a node's page.
 - **Touches**: `app/workbench`, `cluster`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 20–27):
+
+1. **A member's page reads the member** through a narrow pass-through of four GETs (`node`, `status`,
+   `versions`, `check`) on the poller's session, 8 at once at most, rather than I143's general one now
+   or the poller's last answers kept (memory a member, and stale).
+2. **`fit run`, not the config, checks a manager's store**, so the plan's `fit run -admin` with
+   `admin.cluster` alone runs: a store kept beside the config cannot be seen by validation; `fit
+   validate` no longer reports a manager without a store. Alternative: `-admin` writing `admin.store`
+   into the config it validates.
+3. **The menu's place**: after the global pages (after Logs), before Account.
+4. **No group filter yet**: a label selector (`k=v`, `k!=v`, `k`) until I144; up green, error amber,
+   down red, unknown grey.
+5. **The overview reads `/state`** every poll interval, between 2s and 10s, without a push from the
+   server. Alternative: a stream of changes.
+6. **Trusting a certificate**: confirming its whole fingerprint pins it in the form and tests again; a
+   saved member is saved at once; a certificate replaced is trusted behind a red warning.
+7. **Extension points** (`FitCluster.addAction`, `rowExtra`) so I149 adds to the pages without editing
+   them.
+8. **Nodes shows the last 20 audit entries**; the whole log is I148's.
+9. **Members behind NAT until I149**: the tunnel's hub and proxy in the manager, the member added at a
+   loopback `http` URL, the hop to the member being the tunnel's pinned TLS. Alternative: a hub host
+   of its own.
 
 ### I143 A member's own pages, opened from the manager
 

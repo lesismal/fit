@@ -6519,3 +6519,48 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: a dry run cannot see a role failing at its apply (the agent's, the tunnel's), nor an address
   taken between the check and the apply. The decisions made are in the plan's I140 section, pending
   review.
+
+
+### I141 The manager: members, their credentials and their state — done
+
+- **`admin.cluster`** (`poll_interval`, `timeout`, `max_nodes`, `max_concurrency`, `max_response_bytes`;
+  needs `admin.store` and `admin.console`) makes a fit a manager. Package `cluster` keeps the members in
+  the store's section `cluster`, a versioned document beside the groups, templates, rollouts and audit
+  log that later iterations fill.
+- **Members** are reached through their console (user and password, logged in again on 401, refused
+  logins backed off, a password change reported and never made) or their Admin API (a bearer token);
+  certificates are checked by the system's CAs, a `ca` PEM or a pinned `fingerprint`, and one refused is
+  still shown.
+- **The poller** reads `/node`, `/status` and `/config/check` on fib's asynchronous client, at most
+  `max_concurrency` members at once, every call bounded by `timeout` and `max_response_bytes`, each
+  failure given its own kind.
+- **The console module `cluster`**: `/api/m/cluster/nodes[/<name>]`, `.../nodes/<name>/test`, `/test`,
+  `/state` and `/audit`; no credential or session cookie in an answer or a log.
+- **Tests**: `cluster` at 99.8% under the race detector; a real manager and member in `cli`; on the
+  benchmark host's Docker (`test/docker/cluster`), a manager and three members: password, token, a wrong
+  password, a certificate not trusted, a wrong pin, a member down, a member's restart and the manager's.
+- **Gaps**: no pages yet (I142); entries the manager keeps for one member share that member's address
+  lockout; any console user can make the manager test a URL. The decisions made are in the plan's I141
+  section and decision 033, pending review.
+
+
+### I142 The Cluster menu: overview, nodes and a node's page — done
+
+- **Cluster** in the workbench's left menu, shown with `admin.cluster`: **Overview** (members as cards
+  or a table, colored by state, with health, fit and config versions, drift, nearest certificate
+  expiry, connections and latency; filtered by text, label selector and state in the URL, sorted,
+  refreshed as the manager polls; Ask AI on a member in trouble), **Nodes** (add, test, trust a
+  certificate by its fingerprint, edit, remove with a confirm; credentials written once and never
+  shown; recent audit) and a member's page (its state, and its `/node`, `/status`, `/versions` and
+  `/config/check` read through the manager by `GET /api/m/cluster/nodes/<name>/read/<what>`, a bounded
+  read-only pass-through that I143 makes general); English and Chinese.
+- **`docs/cluster.md`** in both languages (a manager-only `fit run -admin` config, the pages, failure
+  kinds, the API, and members behind NAT through the tunnel until I149), moved from the console's docs.
+  `fit run`, not the config, now checks a manager's store, so `fit run -admin` with `admin.cluster`
+  alone runs one.
+- **Tests**: `cluster` at 99.7% under the race detector; I141's Docker harness with the new reads; in a
+  browser against local fits: each failure kind shown and recovered from, add, test, trust, edit and
+  remove, both languages, no credential in the page, an answer or the log.
+- **Gaps**: Ask AI was not clicked (no assistant on the test manager); a read and a poll that both find
+  no session may both log in. The decisions made are in the plan's I142 section and decision 033,
+  pending review.

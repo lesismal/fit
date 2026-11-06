@@ -24,11 +24,15 @@ func TestClusterErrors(t *testing.T) {
 	if _, err := Load([]byte(ok)); err != nil {
 		t.Fatal(err)
 	}
+	// The store may be one fit run finds beside the config, which fit run
+	// checks: the config alone does not need admin.store.
+	if _, err := Load([]byte(`{"admin": {` + assistantConsole + `, "cluster": {}}}`)); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, doc string
 		want      []string
 	}{
-		{"no store", `{"admin": {` + assistantConsole + `, "cluster": {}}}`, []string{"admin.cluster: a manager keeps its members' credentials in the store"}},
 		{"no console", `{"admin": {` + store + `, "cluster": {}}}`, []string{"admin.cluster: a manager's members are served in the console's workbench"}},
 		{"bounds", `{"admin": {` + store + `, ` + assistantConsole + `, "cluster": {"poll_interval": "10ms", "timeout": "1ms", "max_response_bytes": 10}}}`,
 			[]string{"poll_interval: 10ms is below 1s", "timeout: 1ms is below 1s", "max_response_bytes: 10 is below 16384"}},

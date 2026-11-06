@@ -334,6 +334,17 @@ func TestCluster(t *testing.T) {
 	k.wait("m1-wrong-password", "still refused", kind("auth_failed"))
 	k.wait("m2-wrong-pin", "still refused", kind("tls_pin_mismatch"))
 
+	// A member's page reads the member through the manager (I142): by
+	// password and by token; a member refused answers its problem.
+	for _, n := range []string{"m1", "m2", "m3"} {
+		for _, what := range []string{"node", "status", "versions", "check"} {
+			k.mustDo("GET", "/api/m/cluster/nodes/"+n+"/read/"+what, "", 200)
+		}
+	}
+	if got := k.mustDo("GET", "/api/m/cluster/nodes/m2-wrong-pin/read/status", "", 502); !strings.Contains(got, `"kind":"tls_pin_mismatch"`) {
+		t.Errorf("m2-wrong-pin's read: %s", got)
+	}
+
 	// The list masks the credentials; no answer and no log holds one, nor a
 	// member's session cookie.
 	list := k.mustDo("GET", "/api/m/cluster/nodes", "", 200)
