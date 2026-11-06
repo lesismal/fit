@@ -95,6 +95,7 @@ These were renamed for 1.0, so that every size in bytes ends in `_bytes` and eve
 | `GET /metrics` | Metrics in Prometheus's text format |
 | `GET /cache`, `POST /cache/purge` | The cache's zones, and purges by URL, tag or zone |
 | `GET /tokens`, `GET`, `POST /tokens/{role}`, `PATCH`, `DELETE /tokens/{role}/{id}` | The link tokens the tunnel hub's and the LLM roles' listeners issue: list, issue, change the expiry of, revoke |
+| `GET /media/library`, `GET /media/library/{name}`, `GET /media/library/{name}/items/{id}`, `POST /media/library/{name}/rescan` | The media libraries: their scans, a page of a library's items, an item, and a rescan |
 | `GET /dashboard/` | The dashboard, for people (not covered) |
 
 A path in the config is a JSON pointer's tokens. A change answers with the version applied, in the
