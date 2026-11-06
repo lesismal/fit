@@ -78,7 +78,7 @@
   // modules. The modules it does not name sort after those by group and order, so a role keeps its place without
   // renumbering. / RANK 即菜单顺序：先全局/常用页，再账户页面，再各协议与功能模块。未列出的模块按组与 order 排在后面，
   // 角色因此无需改 order。
-  var RANK = ['gw.overview', 'gw.listeners', 'engine', 'sys.config', 'sys.json', 'sys.versions', 'sys.check', 'sys.logs', 'account',
+  var RANK = ['gw.overview', 'gw.listeners', 'engine', 'sys.config', 'sys.json', 'sys.versions', 'sys.check', 'sys.logs', 'account', 'ai',
     'gw.reverse', 'gw.forward', 'gw.l4', 'gw.tls', 'gw.cache', 'gw.streaming', 'gw.mediaauth', 'gw.webrtc', 'gw.tunnel', 'gw.llm'];
   // TAGS are the small muted protocol or feature tags under a module's label. / 模块标签下方的小号协议或功能标记。
   var TAGS = { 'gw.reverse': 'tag.http', 'gw.forward': 'tag.connect', 'gw.l4': 'tag.tcpudp', 'gw.tls': 'tag.tls', 'gw.cache': 'tag.http',

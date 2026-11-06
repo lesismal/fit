@@ -353,6 +353,10 @@ func TestProviderTest(t *testing.T) {
 	if r := test(`{"provider": ` + prov + `}`); !r.OK || r.Model != "gpt-test" {
 		t.Errorf("the kept key: %+v", r)
 	}
+	// The list alone.
+	if r := test(`{"provider": ` + prov + `, "models_only": true}`); !r.OK || r.Model != "" || len(r.Models) != 2 {
+		t.Errorf("the list alone: %+v", r)
+	}
 	// No model known: the list's first.
 	if r := test(`{"provider": {"name": "o", "kind": "openai", "base_url": "` + fake.BaseURL("openai") + `"}}`); !r.OK || r.Model != "gpt-test" {
 		t.Errorf("the list's model: %+v", r)

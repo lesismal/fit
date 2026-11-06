@@ -416,11 +416,13 @@ func (a *Assistant) save(user string, body putBody, s *config.Assistant) (status
 
 // testBody is a provider's test: its settings as the page has them, maybe
 // not saved yet, a key typed and not saved (or the kept one when ""), and
-// the model to call (the provider's first, or the list's, when "").
+// the model to call (the provider's first, or the list's, when ""), or
+// none, with ModelsOnly, for the list alone.
 type testBody struct {
-	Provider json.RawMessage `json:"provider"`
-	Key      string          `json:"key"`
-	Model    string          `json:"model"`
+	Provider   json.RawMessage `json:"provider"`
+	Key        string          `json:"key"`
+	Model      string          `json:"model"`
+	ModelsOnly bool            `json:"models_only"`
 }
 
 // testResult is a test's answer: the model list and how long it took, and
@@ -481,7 +483,7 @@ func (a *Assistant) test(r *console.Request) {
 		}
 		started = true
 		r.Context.Retain()
-		t := &providerTest{a: a, r: r, p: mp, model: body.Model, res: testResult{Models: []model.ModelInfo{}}}
+		t := &providerTest{a: a, r: r, p: mp, model: body.Model, modelsOnly: body.ModelsOnly, res: testResult{Models: []model.ModelInfo{}}}
 		if t.model == "" && len(p.Models) > 0 {
 			t.model = p.Models[0].Name
 		}
@@ -496,10 +498,11 @@ func (a *Assistant) test(r *console.Request) {
 
 // providerTest is a test under way.
 type providerTest struct {
-	a     *Assistant
-	r     *console.Request
-	p     *model.Provider
-	model string
+	a          *Assistant
+	r          *console.Request
+	p          *model.Provider
+	model      string
+	modelsOnly bool
 
 	mu    sync.Mutex
 	call  *model.Call
@@ -540,7 +543,7 @@ func (t *providerTest) models() {
 				t.model = list[0].ID
 			}
 		}
-		if t.model == "" {
+		if t.model == "" || t.modelsOnly {
 			t.end()
 			return
 		}
