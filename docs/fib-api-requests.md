@@ -76,7 +76,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A61 | An RTSP server's UDP bindings removed | requested | 4, 11 | I116 (030) |
 | A62 | A proxied HTTP/1.1 upload moved by splice(2) | done, fib `main` at `60d67aa` | 12 | — |
 | A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
-| A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` (branch `i131`) | 1, 11 | I131–I134 (032) |
+| A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 
 ## Evidence
 
@@ -2020,7 +2020,7 @@ that has it.
 
 **Status.** Requested on 2026-11-06, for the media library (I131–I136, [decision 032](decisions/032-media-library.md)).
 Done in fib at `8998d58` (with `ba47477`), made by fit's session per [rule 15](rules.md#7-when-fib-falls-short),
-on fib's branch `i131` until it is pushed to `main`; fit then moves to that commit ([rule 19](rules.md#9-the-fib-version)).
+on fib's `main`; fit is on that commit ([rule 19](rules.md#9-the-fib-version)).
 
 **Problem.** The media library serves files as HLS without transcoding (I133) and plays them into the hub as
 channels (I134). For both, fit must know each track's codec and every sample's place and time in a file: the
