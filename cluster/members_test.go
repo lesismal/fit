@@ -115,9 +115,10 @@ func TestDocument(t *testing.T) {
 	if d, newer, err := readDocument([]byte(`{"version":1,"members":[]}`)); newer || err != nil || !strings.Contains(string(d.marshal()), `"version":2`) {
 		t.Error("version 1", newer, err)
 	}
-	// What a later iteration keeps is kept as it is; groups are I144's.
-	d, _, _ = readDocument([]byte(`{"version":1,"groups":[{"name":"g","selector":"a"}],"templates":[1],"rollouts":[true]}`))
-	if got := string(d.marshal()); !strings.Contains(got, `"groups":[{"name":"g","selector":"a",`) || !strings.Contains(got, `"templates":[1]`) || !strings.Contains(got, `"rollouts":[true]`) || !strings.Contains(got, `"members":[]`) {
+	// What a later iteration keeps is kept as it is; groups are I144's,
+	// templates I145's.
+	d, _, _ = readDocument([]byte(`{"version":1,"groups":[{"name":"g","selector":"a"}],"templates":[{"name":"t","config":{}}],"rollouts":[true]}`))
+	if got := string(d.marshal()); !strings.Contains(got, `"groups":[{"name":"g","selector":"a",`) || !strings.Contains(got, `"templates":[{"name":"t","groups":null,"order":0,"config":{}`) || !strings.Contains(got, `"rollouts":[true]`) || !strings.Contains(got, `"members":[]`) {
 		t.Errorf("%s", got)
 	}
 }

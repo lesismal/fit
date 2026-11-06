@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="ai/ai.css">
   <link rel="stylesheet" href="cluster/cluster.css">
   <link rel="stylesheet" href="cluster/switcher.css">
+  <link rel="stylesheet" href="cluster/templates.css">
   <script src="core/ui.js"></script>
 </head>
 <body>
@@ -40,6 +41,9 @@
   <script src="gateway/check.js"></script>
   <!-- The logs: the files fit's log and the access log write, and their rotation and retention. / 日志：fit 日志与访问日志的文件及其切割与保留。 -->
   <script src="gateway/logs.js"></script>
+  <!-- What a cluster manager owns in this fit's config, marked on its config pages, asked about before a change (I145). /
+       集群管理端在本 fit 配置中拥有的部分：在配置页面上标出，修改前先询问（I145）。 -->
+  <script src="gateway/managed.js"></script>
   <!-- The account pages: the console users' own and each other's passwords. / 账户页面：控制台用户自己的及彼此的密码。 -->
   <script src="account/account.js"></script>
   <!-- The Cluster menu, when admin.cluster is set: the members' overview, the nodes and a member's page (I142). /
@@ -52,6 +56,9 @@
   <script src="cluster/enroll.js"></script>
   <!-- Groups, and operations on a group's members or a selection of members (I144). / 分组，以及对分组成员或所选成员的操作（I144）。 -->
   <script src="cluster/groups.js"></script>
+  <!-- Templates: config shared by a group, each member's sync state, Compare and Import from a node (I145). /
+       模板：分组共享的配置、各成员的同步状态、对比与从节点导入（I145）。 -->
+  <script src="cluster/templates.js"></script>
   <script src="cluster/cluster.js"></script>
   <!-- The node switcher in the header: a member's own pages, opened through the manager (I143). /
        页眉中的节点切换器：通过管理端打开成员自己的页面（I143）。 -->

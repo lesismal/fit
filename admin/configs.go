@@ -109,6 +109,9 @@ type Configs struct {
 	// admin.console runs.
 	node    atomic.Pointer[Node]
 	console atomic.Bool
+
+	// managed is what a manager of many fits owns here (managed.go).
+	managed managedState
 }
 
 // Version is a config that was applied.

@@ -12,6 +12,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [The Cluster pages](#the-cluster-pages)
 - [Groups and operations](#groups-and-operations)
 - [A member's own pages: the node switcher](#a-members-own-pages-the-node-switcher)
+- [Templates: config shared by a group](#templates-config-shared-by-a-group)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -205,6 +206,89 @@ Not passed on: the member's console users and passwords (changed on the member),
 dashboard, its own cluster management and assistant, the LLM roles' pages, and streams (`501`);
 the tunnel roles' pages need the member's console.
 
+## Templates: config shared by a group
+
+A **template** is config the manager owns on the members of the groups it is attached to. It is
+written as a part of fit's config, as in a config file, and owns what it writes: a top-level member
+whole (`log`, `media_auth`, `access_log`, ...), and the elements of `listeners`, `routes`,
+`services` and `upstreams` one by one, by their names; a template's element of those lists must be
+named, and its name takes no variables, since it is how the template finds it on every member.
+`admin` and `schema_version` are the member's own. A member's **desired config** is its own config
+with the parts its templates own taken from them: a top-level member set whole, an element
+replaced where the member has it or added at the end of its list; every other part is left as the
+member has it.
+
+```json
+{"upstreams": [{"name": "api", "addresses": ["${backend}"]}],
+ "routes": [{"name": "api", "match": {"path": ["/api/*"]},
+             "handler": {"module": "proxy", "params": {"upstream": "api"}},
+             "middleware": [{"module": "headers", "params": {"response": {"set": {"X-Served-By": "${node.name} in ${node.labels.region}"}}}}]}]}
+```
+
+**Variables** in strings are rendered per member: `${node.name}` (the member's name on the
+manager), `${node.id}` and `${node.hostname}` (as its `GET /node` says), `${node.labels.<key>}`, and
+`${<name>}`, a variable of the groups the template is attached to that the member is in, a later
+group in the template's list winning; `$${` writes `${`. A variable a member lacks makes that
+member's sync state an error, naming it, rather than rendering an empty string. Variables are
+strings: a number or a boolean is written as such in the template.
+
+**Order.** A template is attached to any number of groups, and has an `order`, from -1000 to 1000.
+A member's templates are applied by order, then by name; when two own the same part of a member,
+the later one wins, and the part says which it overrides.
+
+**Secrets** (members named as passwords, secrets, tokens and keys are, and push URLs) are kept in
+the manager's store with the template and answered as `[secret]`; sent back as `[secret]`, the
+secret kept at that place (by member, by an element's name, or by index) stays, and anything else
+replaces it. A template made from a member's config keeps its secrets without them reaching a
+browser. **Paths to files** (`cert_file`, `token_file`, `..._dir`) are warned about: each member
+reads them from its own disk.
+
+**Sync state.** Reading a member compares its config (`GET /config`) with what its templates
+render, part by part, using what the member keeps of the manager (below) to tell who changed what:
+
+| State | Reason | What it means |
+| --- | --- | --- |
+| `in_sync` | | the member holds the part as rendered |
+| `out_of_sync` | `missing` | the member has no such part yet |
+| `out_of_sync` | `template_changed` | the member holds what the manager last saw there in sync, and the template now renders something else |
+| `conflict` | `changed_here` | the member's value is neither what the manager last saw in sync nor what is rendered: someone changed it on the member |
+| `conflict` | `removed_here` | the member no longer has a part the manager saw in sync |
+| `conflict` | `own_value` | the member has its own value, from before the template owned the part |
+
+A member's state is the worst of its parts', `error` when it cannot be read or a template does not
+render for it, and `unmanaged` when no template is attached to it. Nothing is applied to a member
+here: a rollout (I146) applies the desired config, and drift (I147) watches it.
+
+**What a member is told.** When the manager reads a member, and a little after a template, a group
+or a member changes, it tells each member what it owns there, through the member's own
+`PUT /node/managed` (with `If-Match`): its node ID and host, and each part with its template and the
+hash of the value it last saw there in sync. The member keeps it in its store (in memory without
+one, until the manager tells it again) and answers it at `GET /node/managed`, each part with whether
+it changed there since (capability `node.managed`). Its own config pages mark those parts (a bar
+and a badge, amber once changed there) and ask before a change to one: a field focused, a button
+clicked, a raw tab edited, or **Save and apply** sending a change not asked about. Nothing is
+refused: the member stays its own, and the manager reports the conflict. `DELETE /node/managed`
+forgets the manager.
+
+**The pages**, under **Templates**:
+
+- **The list**: each template's groups (those that are no group's in amber), order, parts and
+  members, counted by sync state; **Read now** reads every member; **Add a template**, **Import
+  from a node** and **Compare two nodes**.
+- **A template's page**: its name, description, order and groups (each with its member count); its
+  config as a form drawn from the schema (a card per top-level member, a box per element, fields
+  added from a list and left out by a cross; what has no plain control, as a handler, as JSON),
+  and as `.conf`, `.yaml` and `.json` text, converted as typed; the parts it owns, its variables
+  with where each comes from, its warnings; and its members, each one's sync state with every part's
+  value on the member beside the rendered one.
+- **Rendered result** (`#/cluster/rendered/<member>`): a member's sync state, and its config beside
+  its desired config, line by line.
+- **Compare** (`#/cluster/compare`): two members' configs part by part, the same, different or in
+  one only, each side by side, and the whole configs.
+- **Import from a node**: a member's config read part by part (unnamed list elements, `admin` and
+  `schema_version` cannot be picked), the parts picked made into a template, attached to the
+  groups picked. Attached to its own member, it is in sync there.
+
 ## How members are reached
 
 A member is a fit the manager can reach, one of three ways:
@@ -295,6 +379,18 @@ pages above use nothing else:
 | `POST ops` | starts an operation: `{"op", "group", "members", "purge"}`, `op` one of `reload`, `rollback`, `check`, `purge`, `test`; on the group's members, on `members`, or on `members` of the group; `purge` is `{"zone", "keys", "prefixes", "tags", "all"}`; `202` with the operation; `409` when a member is in another operation, `429` when 4 run |
 | `GET ops` | the operations kept, the latest first |
 | `GET ops/<id>` | an operation: `{"id", "op", "group", "user", "purge", "started", "ended", "finished", "counts", "outcomes"}`, each outcome `{"node", "status", "detail", "error", "result", "started", "ended", "took_ms"}`, `status` `pending`, `running`, `done` or `failed`, `error` a problem as a state's |
+| `GET templates` | the templates, `{"version", "max_templates", "read_only", "templates"}`, with the document's `ETag`; each `{"name", "description", "groups", "order", "config", "created", "updated", "parts", "variables", "warnings", "nodes", "missing_groups"}`, secrets in `config` as `[secret]`, `parts` each `{"path", "member", "name"}`, `nodes` the members of its groups now |
+| `POST templates` | adds a template: `{"name", "description", "groups", "order", "config"}`, or `"from": {"node", "paths"}` in place of `config`, the parts of a member's config (`"log"`, `"routes[api]"`) as it has them now; `201`; `400` with `{"field", "error"}`; `409` for a name taken or 128 templates; `502` when the member cannot be read |
+| `GET templates/<name>` | the template |
+| `PUT templates/<name>` | replaces it, a new `name` renaming it; `[secret]` keeps the secret kept at its place |
+| `DELETE templates/<name>` | removes it; its members keep what it gave them, and are told the manager no longer owns it |
+| `POST sync` | reads members now, `{"nodes"}`, `{"template"}` (its members) or `{}` (every member), and tells each what the manager owns there: `{"nodes", "pending"}`, each `{"node", "state", "error", "errors", "checked", "config_etag", "templates", "parts", "counts", "released", "managed", "managed_error", "note"}`, a part `{"path", "member", "name", "template", "overrides", "state", "reason", "have", "want"}`, secrets masked; members not read within 30s are `pending`; 4 at once, `429` past |
+| `GET sync` | every member's latest sync state, without the parts' values |
+| `GET desired/<member>` | a member read now: its sync state, `config` and `desired`, secrets masked |
+| `POST compare` | `{"a", "b"}`: both members' configs, `{"a", "b", "parts"}`, each side `{"node", "config_etag", "config"}`, each part `{"path", "state", "a", "b"}`, `state` `same`, `differs`, `only_a` or `only_b` |
+| `POST import` | `{"node"}`: the member's config's parts, `{"node", "config_etag", "parts"}`, each `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
+| `POST text/render?format=` | a template's config, JSON, as `conf`, `yaml` or `json` text |
+| `POST text/parse?format=` | such a text as JSON, or `400` with its error |
 
 Beside the module, at the console's top level, the node switcher's pass-through:
 
@@ -304,8 +400,8 @@ Beside the module, at the console's top level, the node switcher's pass-through:
 | `GET /api/n/<member>/node` | the member's `GET /node` |
 | `<method> /api/n/<member>/m/<module>/<path>` | the member's `/api/m/<module>/<path>`, its Admin API's `/<path>` for the module `admin`, with the query; answered as the member answers, but for the headers above; `502` with `{"error", "problem"}` when the member cannot be reached, `403` for what is not passed on, `409` for a change to a read-only member |
 
-A change sent with `If-Match` and an ETag that is no longer the document's (its members and groups)
-is refused `412`. At most
+A change sent with `If-Match` and an ETag that is no longer the document's (its members, groups
+and templates) is refused `412`. At most
 4 tests and 8 reads run at once; one more is `429`. The reads pass on those four GETs of a member
 and nothing else, never a write; a member that does not list a read's capability (`status`,
 `config.versions`, `config.check`) is not asked for it. No answer, page or log line holds a

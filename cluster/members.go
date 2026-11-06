@@ -435,8 +435,10 @@ type AuditEntry struct {
 	Action string    `json:"action"`
 	Node   string    `json:"node,omitempty"`
 	// Group is the group changed, or the group an operation ran on.
-	Group  string `json:"group,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Group string `json:"group,omitempty"`
+	// Template is the template changed (I145).
+	Template string `json:"template,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 	// Op is an operation's ID, and Outcomes how it went on each member.
 	Op       string         `json:"op,omitempty"`
 	Outcomes []AuditOutcome `json:"outcomes,omitempty"`
@@ -462,14 +464,15 @@ const (
 	ActionEnrolled    = "node.enrolled"
 )
 
-// document is the store's section: the members, the groups (I144), and
-// what I145 to I148 keep beside them, which this version keeps as it finds
-// it.
+// document is the store's section: the members, the groups (I144), the
+// templates (I145), and what I146 to I148 keep beside them, which this
+// version keeps as it finds it. Templates came in version 2, which an
+// earlier fit of that version keeps as it finds them.
 type document struct {
 	Version   int               `json:"version"`
 	Members   []Member          `json:"members"`
 	Groups    []Group           `json:"groups"`
-	Templates []json.RawMessage `json:"templates"`
+	Templates []Template        `json:"templates"`
 	Rollouts  []json.RawMessage `json:"rollouts"`
 	Audit     []AuditEntry      `json:"audit"`
 	// LinkCert is the link listener's certificate and key, PEM, made once
@@ -504,10 +507,11 @@ func (d *document) marshal() []byte {
 	if out.Groups == nil {
 		out.Groups = []Group{}
 	}
-	for _, p := range []*[]json.RawMessage{&out.Templates, &out.Rollouts} {
-		if *p == nil {
-			*p = []json.RawMessage{}
-		}
+	if out.Templates == nil {
+		out.Templates = []Template{}
+	}
+	if out.Rollouts == nil {
+		out.Rollouts = []json.RawMessage{}
 	}
 	if out.Members == nil {
 		out.Members = []Member{}

@@ -1,0 +1,42 @@
+/* Cluster → Templates (I145, templates.js), and the marks a member's own config pages put on what a manager owns
+   (gateway/managed.js). The rest is core/ui.css and cluster/cluster.css.
+
+   集群 → 模板（I145，templates.js），以及成员自己的配置页面对管理端所拥有部分的标记（gateway/managed.js）。
+   其余样式在 core/ui.css 与 cluster/cluster.css 中。 */
+
+/* A side-by-side diff: lines removed, added and changed tinted. / 并排差异：删除、新增与修改的行着色。 */
+.tp-diff { overflow: auto; max-height: 520px; border: 1px solid var(--border); border-radius: 8px; }
+.tp-diff table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.tp-diff th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-size: 12px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.tp-diff td { vertical-align: top; padding: 0 8px; border-left: 1px solid var(--border); }
+.tp-diff td:first-child { border-left: 0; }
+.tp-diff pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; }
+.tp-diff .tp-del td:first-child, .tp-diff .tp-chg td:first-child { background: var(--danger-soft, rgba(220, 60, 60, .12)); }
+.tp-diff .tp-add td:last-child, .tp-diff .tp-chg td:last-child { background: var(--ok-soft, rgba(40, 170, 90, .14)); }
+
+/* A part, an element or a member's result, folded. / 部分、元素或成员结果，可折叠。 */
+.tp-el { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.tp-el > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tp-el[open] > summary { margin-bottom: 8px; }
+.tp-pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+
+/* The template's form: a field a row, its name, control and doc. / 模板表单：每个字段一行，名称、控件与说明。 */
+.tp-obj { display: flex; flex-direction: column; gap: 8px; }
+.tp-field { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 12px; align-items: start; }
+.tp-fname { display: flex; align-items: center; gap: 4px; padding-top: 4px; }
+.tp-fctl { min-width: 0; }
+.tp-fctl > .tp-obj { border-left: 2px solid var(--border); padding-left: 10px; }
+.tp-fdoc { grid-column: 2; }
+.tp-add { max-width: 260px; }
+.tp-raw { min-height: 320px; }
+.tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.tp-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.tp-list { margin: 0; padding-left: 18px; }
+.tp-pick { cursor: pointer; }
+.tp-parts { max-height: 420px; overflow: auto; }
+@media (max-width: 640px) { .tp-field { grid-template-columns: 1fr; } .tp-fdoc { grid-column: 1; } }
+
+/* What a manager owns, on a member's own config pages. / 成员自己配置页面上管理端拥有的部分。 */
+.mg-owned { box-shadow: inset 3px 0 0 var(--primary); }
+.mg-owned.mg-changed { box-shadow: inset 3px 0 0 var(--warn); }
+.mg-badge { margin-left: 6px; }
