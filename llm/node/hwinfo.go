@@ -41,13 +41,19 @@ func CollectHW() model.HWInfo {
 	return h
 }
 
+// cmdTimeoutScale multiplies runCmd's timeouts: 1, but larger in tests,
+// whose tools are scripts just written, which a loaded macOS may take
+// seconds to start the first time.
+// cmdTimeoutScale 放大 runCmd 的超时：通常为 1，测试中更大，因为测试用的工具是刚写出的脚本，负载高的 macOS 第一次启动它们可能要几秒。
+var cmdTimeoutScale time.Duration = 1
+
 // runCmd runs a short command and returns its trimmed stdout ("" on any error).
 // runCmd 执行短命令并返回去除首尾空白的 stdout（出错时返回 ""）。
 func runCmd(timeout time.Duration, name string, args ...string) string {
 	if _, err := exec.LookPath(name); err != nil {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout*cmdTimeoutScale)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
