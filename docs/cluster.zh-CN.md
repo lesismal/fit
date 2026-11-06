@@ -12,6 +12,7 @@
 - [成员自己的页面：节点切换器](#成员自己的页面节点切换器)
 - [模板：分组共享的配置](#模板分组共享的配置)
 - [发布：分阶段应用的修改](#发布分阶段应用的修改)
+- [漂移与告警](#漂移与告警)
 - [如何访问成员](#如何访问成员)
 - [管理端读取什么，以及可能出现的问题](#管理端读取什么以及可能出现的问题)
 - [API](#api)
@@ -257,6 +258,69 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 列出各批次与每个成员的差异）；启动后逐批显示进度，每个成员的状态、版本与检查结果（发现的 5xx 比例与不一致，以及失败原因），并提供
 **暂停**、**继续**、**继续发布**、**中止**与**回滚**。模板页有**发布**按钮，成员的渲染结果页有**同步此节点**。
 
+## 漂移与告警
+
+**漂移**指成员与管理端的预期不符，分两种：
+
+- **相对于其模板**：某个部分未同步或冲突，或模板无法为其渲染，如[同步状态](#模板分组共享的配置)所述；
+- **相对于其自身配置**：其一致性检查发现的、所依据的配置与实际运行之间的不一致（`GET /config/check`）。
+
+一致性检查随每次轮询获得。关联了模板的成员在可能发生变化时于轮询之后与模板比对读取：还没有同步状态、其配置的 ETag（其
+`GET /node` 给出的）不是同步状态所基于的那个，或同步状态已超过 10 分钟；模板、分组或成员的变化无论如何都会立即读取。这些读取
+不通知成员任何内容，同时至多 `max_concurrency` 个、每个成员一次一个，且从不等待：没有空位的成员在之后的轮询中读取。
+
+管理端从不自行应用任何内容。与模板未同步的成员上的**修复**为其规划一次同步发布（[发布](#发布分阶段应用的修改)）并打开其规划，
+其中有每个部分的差异与成员的试运行；有人在该页启动后才会应用。一致性不一致通过对该成员的**重新加载**修复，这是一次需先确认的
+操作，成员自己的一致性页面对此有说明。
+
+**告警**依据**规则**。一条规则监视一件事，作用于全部成员或某个分组的成员，条件持续达到规则的时长（`for_ms`）后触发：
+
+| 类型 | 触发条件 | 设置 |
+| --- | --- | --- |
+| `member_down` | 成员为 `down` 或 `error`（凭据被拒、证书不受信任），从其状态变化时起算 | |
+| `drift` | 成员存在上述漂移 | `source`：`templates`、`consistency`，留空为两者 |
+| `rollout_failed` | 发布以 `failed` 结束，每个发布一个告警，直到被回滚或结束后经过 `resolve_after_ms` | `resolve_after_ms`，0 为永不 |
+| `cert_expiry` | 成员最早到期的证书在 `days` 天内到期 | `days`，默认 14 |
+| `backends_down` | 成员的上游后端至少有 `threshold` 个不可用 | `threshold`，默认 1 |
+| `reload_failed` | 成员最近一次重新加载失败（依据管理端首次读到之后的重新加载计数），直到一次成功、成员重启或经过 `resolve_after_ms` | `resolve_after_ms` |
+
+管理端起初每种类型各有一条规则：成员离线 1 分钟后、漂移 5 分钟后、后端不可用 2 分钟后、证书 14 天内到期、发布失败与重新加载失败
+立即触发；触发期间每 4 小时再次发送（`repeat_ms`，0 为不重复）。管理端启动后尚未读到的成员保持其告警不变。条件消失、成员被删除，
+或规则被删除、关闭或修改时，告警**恢复**；保留最近 500 个。
+
+**Webhook** 是告警的去处：规则发送到其列出的 Webhook，未列出时发送到全部 Webhook。每次评估中，每个 Webhook 收到一条新触发（或
+再次发送）告警的通知与一条已恢复告警的通知；已发送过触发通知的告警恢复时会发送恢复通知。Webhook 有**格式**：
+
+| 格式 | 消息体 |
+| --- | --- |
+| `json` | fit 自己的格式：`{"version", "source", "manager", "manager_host", "status", "test", "sent", "text", "alerts", "more"}`，每个告警与 API 应答的相同，至多 50 个，其余计入 `more` |
+| `slack` | `{"text"}`：Slack 的 incoming webhook、Mattermost 与 Rocket.Chat |
+| `discord` | `{"content"}` |
+| `feishu` | 飞书机器人：文本消息，按飞书的方式以 Webhook 的密钥签名 |
+| `dingtalk` | 钉钉机器人：文本消息，按钉钉的方式以密钥签名，签名在 URL 的查询参数中 |
+| `wecom` | 企业微信群机器人：文本消息 |
+| `custom` | Webhook 的模板，即 JSON：字符串中的 `${text}`、`${status}` 与 `${manager}`，以及作为值的 `${count}` 与 `${alerts}` |
+
+聊天服务的消息为一行说明加上每个告警一行；Webhook 有模板时，模板即这一行，其中 `${severity}`、`${rule}`、`${kind}`、`${node}`、
+`${subject}`、`${on}`、`${status}`、`${summary}`、`${since}` 与 `${id}` 会被替换。有密钥时，`json`、`slack`、`discord`、`wecom` 与
+`custom` 带有 `X-Fit-Timestamp` 与 `X-Fit-Signature: sha256=<hex>`，即以密钥为键、对时间戳、点号与消息体计算的 HMAC-SHA256；
+接收方重新计算并比较。Webhook 的 URL 与其密钥一样是机密，因为聊天服务的令牌就在 URL 中：两者都只写入一次，加密保存在管理端的 store
+中，应答中只给出 URL 的协议与主机，从不记入日志；URL 须为 `https`，或仅限回环地址的 `http`。
+
+Webhook 一次发送一条通知，每条在其超时内完成（默认 10 秒，1 至 60 秒），队列容纳 64 条，超出时丢弃最旧的；失败的通知不重发，
+Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己的队列：轮询器与评估器照常运行。聊天服务应答 200 但带错误码（飞书的
+`code`、钉钉与企业微信的 `errcode`）视为失败。
+
+**静默**使某条规则、某个成员或某个成员上的某条规则的告警在静默结束前（至多 30 天后）不被发送；告警仍会显示并标为已静默，不计入
+菜单的徽标。从未发送过的告警在其静默结束后发送。
+
+所有内容保存在 store 的 `cluster.alerts` 分区中，与成员的文档分开：规则、Webhook 及其 URL 与密钥、静默、正在触发与过去的告警。
+审计日志记录规则、Webhook 与静默的每次修改，以及每次 Webhook 测试。
+
+**页面**位于**漂移与告警**下（`#/cluster/alerts/<tab>`）：**漂移**，各成员的模板与一致性检查，可只显示有漂移的成员，**差异**（现读
+成员，并排显示每个未同步部分在成员上与模板中的值）、**修复**、**修复全部未同步**、**手动规划**（预填的新建发布表单）与**重新加载**；
+**告警**，计数、正在触发的告警（带**静默**）、等待中的与过去的告警；**规则**，添加、编辑与删除；**Webhook**，其发送情况、**测试**、
+编辑与删除；**静默**，当前与过去的静默，添加与结束。有未静默的告警触发时，集群菜单上显示其数量，有严重告警时为红色。
 ## 用户、角色与审计日志
 
 管理端的控制台用户在集群上有**角色**，分为集群范围和按分组：
@@ -271,6 +335,10 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 **每个**成员上都具备所需角色时才被允许，按成员当前的样子，以及修改标签或名称时修改后的样子判断。分组、模板与角色决定谁在何处有何角色，
 因此只有集群范围的管理员才能修改它们。列表（概览、节点、分组、模板、发布、审计日志）对在任意处有角色的用户可读；成员自己的页面、
 对其的读取、渲染后的配置、对比与导入需要在该成员上有角色。
+
+**漂移与告警**遵循同样的角色：漂移、告警、规则、Webhook（不含其密钥）与静默对任何角色可读；漂移的**修复**规划同步发布，需要在
+每个成员上是操作员；静默需要在其成员上是操作员，规则作用于分组时为该分组上的操作员，否则为集群范围的操作员；规则、Webhook 及
+Webhook 的**测试**需要集群范围的管理员。
 
 **角色保存在哪里。** 角色与成员一起保存在管理端的 store 中，由集群范围的管理员在**用户与审计**页修改，立即对每个页面与请求生效。
 `admin.cluster.admins` 列出无论角色如何都是集群范围管理员的控制台用户：在没有管理员时用来恢复访问，只能通过修改配置并重启来修改，
@@ -287,7 +355,7 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 是操作员的用户最多为 `propose`，由集群范围的管理员应用；其他人最多为 `read`。MCP 令牌也受同样的限制。用户页显示每个用户的级别以及受
 角色限制后的级别。
 
-**审计日志**记录每个集群操作：成员的添加、修改、删除、注册与测试；分组、模板与角色的修改；操作；发布的每一步；以及经节点切换器的每次
+**审计日志**记录每个集群操作：成员的添加、修改、删除、注册与测试；分组、模板与角色的修改；操作；发布的每一步；告警规则、Webhook 与静默的修改及 Webhook 的测试；以及经节点切换器的每次
 写入。每个条目含用户、时间、成员、操作、结果（`ok`、`failed`、`partial`、已发送但未应答的 `unknown`、`not_sent`，或发布结束时的状态）、
 前后版本以及修改内容：
 
@@ -295,6 +363,7 @@ schema 绘制其配置：经控制台为 `/api/m/admin/schema`，经令牌或连
 | --- | --- | --- | --- |
 | 成员、分组、模板或角色 | 管理端文档的版本，`r12` → `r13` | API 所显示内容的差异：成员的凭据只显示是否设置（修改了密码会在详情中注明），模板的密钥被遮盖 | 完整差异的 SHA-256 |
 | 操作 | 每个成员前后的配置版本，在其结果中 | 无 | 无 |
+| 告警规则、Webhook 与静默 | 告警自己的版本，`a3` → `a4` | 规则、Webhook（按 API 所显示）与静默的差异 | 完整差异的 SHA-256 |
 | 发布启动 | 每个成员的版本，以及其所得配置的哈希 | 每个成员的各部分，现有的与将得到的，密钥被遮盖 | 完整差异的 SHA-256 |
 | 发布结束 | 每个成员之前的版本，以及应用或回滚后的版本 | 无 | 每个成员的配置哈希 |
 | 经切换器的写入 | 最近一次读到的成员配置版本，以及其应答的版本 | 无：所发送的内容包含成员的配置与密钥 | 所发送请求体的 SHA-256 |
@@ -398,6 +467,19 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `POST rollouts/<id>/start` | 启动规划：`{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`；成员被其他发布或操作占用时 `409` |
 | `POST rollouts/<id>/pause`、`resume`、`go`、`abort`、`rollback` | 操控发布；状态不允许时 `409` |
 | `DELETE rollouts/<id>` | 放弃规划 |
+| `GET drift` | 各成员的漂移：`{"interval_ms", "read_only", "nodes"}`，每个为 `{"node", "status", "groups", "managed", "templates", "consistency", "drifted", "fixable"}`，`templates` 为其不含部分值的同步状态，`consistency` 为其检查的计数 |
+| `POST drift/fix` | `{"nodes"}`：为它们规划一次同步发布，与 `kind` 为 `sync` 的 `POST rollouts` 相同；`202` 附发布 |
+| `GET alerts` | `{"read_only", "counts", "active", "pending", "history"}`，`counts` 为 `{"firing", "silenced", "pending", "critical", "warning", "info"}`（未静默的触发告警，按严重程度），告警为 `{"id", "rule", "kind", "severity", "node", "subject", "state", "summary", "since", "fired", "resolved", "resolved_why", "last_sent", "sends", "silenced_by"}`，`history` 最新在前 |
+| `GET alerts/summary` | 只有计数，供菜单徽标使用 |
+| `GET alerts/config` | `{"version", "read_only", "rules", "webhooks", "silences", "kinds", "formats", "severities", "bounds"}`，附告警的 `ETag`；Webhook 为 `{"name", "url_host", "secret_set", "format", "template", "timeout_ms", "disabled", "send_resolved", "status"}`，`status` 为 `{"sent", "failed", "dropped", "queued", "last_at", "last_ok", "last_status", "last_error", "last_took_ms"}` |
+| `POST alerts/rules` | 添加规则：`{"name", "kind", "disabled", "group", "severity", "for_ms", "repeat_ms", "resolve_after_ms", "days", "threshold", "source", "webhooks"}`；`201`；`400` 附 `{"field", "error"}`，名称已占用或已有 64 条规则时 `409` |
+| `PUT alerts/rules/<name>`、`DELETE alerts/rules/<name>` | 替换（新的 `name` 即改名）或删除规则；其告警恢复 |
+| `POST alerts/webhooks` | 添加 Webhook：`{"name", "url", "secret", "format", "template", "timeout_ms", "send_resolved", "disabled"}`；`201`；名称已占用或已有 16 个时 `409` |
+| `PUT alerts/webhooks/<name>` | 替换它；留空的 `url` 或 `secret` 保留已保存的，`clear_secret` 删除密钥；改名时其规则随之改名 |
+| `DELETE alerts/webhooks/<name>` | 删除它；仍有规则引用时 `409` |
+| `POST alerts/webhooks/<name>/test` | 向其发送测试，完成后应答：`{"ok", "status", "error", "took_ms"}` |
+| `POST alerts/silences` | 添加静默：`{"rule", "node", "comment", "starts", "ends", "duration_ms"}`，规则、成员或两者；`201` |
+| `DELETE alerts/silences/<id>` | 立即结束它；作为过去的静默保留 |
 | `POST text/render?format=` | 把模板配置（JSON）写成 `conf`、`yaml` 或 `json` 文本 |
 | `POST text/parse?format=` | 把这种文本读成 JSON，出错时 `400` 附错误 |
 
@@ -410,7 +492,7 @@ ETag、应用时间、来源）、重载次数、连接、上游及其下线的�
 | `<方法> /api/n/<成员>/m/<模块>/<路径>` | 成员的 `/api/m/<模块>/<路径>`（模块 `admin` 为其 Admin API 的 `/<路径>`），带查询参数；按成员的应答返回，应答头如上所述；无法访问成员时返回 `502` 与 `{"error", "problem"}`，不转发的接口返回 `403`，对只读成员的修改返回 `409` |
 
 用户角色不允许的请求返回 `403` 与 `{"error", "kind": "forbidden", "user", "role", "nodes", "groups", "cluster"}`：所需的角色，以及缺少该角色的
-成员或分组。带 `If-Match` 且其 ETag 已不是文档（成员、分组与模板）当前 ETag 的修改返回 `412`。同时最多进行 4 个测试和 8 个读取，再多返回 `429`。读取只转发
+成员或分组。带 `If-Match` 且其 ETag 已不是文档（成员、分组与模板）当前 ETag 的修改，以及告警的修改中已不是告警自身当前 ETag 的，返回 `412`。同时最多进行 4 个测试和 8 个读取，再多返回 `429`。读取只转发
 成员的这四个 GET，不转发其他接口，从不写入；成员的能力列表中没有某个读取所需的能力（`status`、`config.versions`、
 `config.check`）时不会向它请求。任何应答、页面或日志都不含密码、令牌或成员的会话 cookie。
 

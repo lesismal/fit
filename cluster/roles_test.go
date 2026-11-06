@@ -448,3 +448,63 @@ func TestAccessCheck(t *testing.T) {
 		t.Error(n)
 	}
 }
+
+// TestRolesAlerts: I147's drift and alerts under the roles. Reading them is
+// any role's; a drift's fix and a silence an operator's of what they touch;
+// rules, webhooks and a webhook's test a cluster-wide admin's. Their audit
+// entries carry the alerts' versions and a diff without secrets.
+func TestRolesAlerts(t *testing.T) {
+	f, us := rolesFixture(t, config.Cluster{})
+	sink := newHookSink(t)
+	hook := js(map[string]any{"name": "ops", "url": sink.srv.URL + "/hook?token=sekret-token", "secret": "shh"})
+	type tc struct {
+		user, method, path, body string
+		want                     int
+	}
+	for _, c := range []tc{
+		{"nemo", "GET", "/alerts/config", "", 403},
+		{"nemo", "GET", "/drift", "", 403},
+		{"pat", "GET", "/alerts", "", 200},
+		{"pat", "GET", "/alerts/summary", "", 200},
+		{"vic", "GET", "/alerts/config", "", 200},
+		{"vic", "GET", "/drift", "", 200},
+		{"opal", "POST", "/alerts/rules", `{"name":"down","kind":"member_down"}`, 403},
+		{"gil", "POST", "/alerts/webhooks", hook, 403},
+		{"ada", "POST", "/alerts/webhooks", hook, 201},
+		{"ada", "POST", "/alerts/rules", `{"name":"down","kind":"member_down","webhooks":["ops"]}`, 201},
+		{"ada", "POST", "/alerts/rules", `{"name":"prod-down","kind":"member_down","group":"prod"}`, 201},
+		{"gil", "POST", "/alerts/webhooks/ops/test", "", 403},
+		{"gil", "PUT", "/alerts/rules/down", `{"kind":"member_down"}`, 403},
+		{"gil", "DELETE", "/alerts/webhooks/ops", "", 403},
+		{"vic", "POST", "/alerts/silences", `{"node":"a","duration_ms":60000}`, 403},
+		{"opal", "POST", "/alerts/silences", `{"node":"b","duration_ms":60000}`, 403},
+		{"opal", "POST", "/alerts/silences", `{"rule":"down","duration_ms":60000}`, 403},
+		{"opal", "POST", "/alerts/silences", `{"rule":"prod-down","duration_ms":60000}`, 201},
+		{"opal", "POST", "/drift/fix", `{"nodes":["b"]}`, 403},
+		{"opal", "POST", "/drift/fix", `{"nodes":["a"]}`, 202},
+	} {
+		if code, got, _ := us[c.user].do(c.method, "/api/m/cluster"+c.path, c.body); code != c.want {
+			t.Errorf("%s %s %s: %d, not %d: %s", c.user, c.method, c.path, code, c.want, got)
+		}
+	}
+	// A silence of a member is ended by an operator of it, not a viewer.
+	code, got, _ := us["opal"].do("POST", "/api/m/cluster/alerts/silences", `{"node":"a","duration_ms":60000}`)
+	var s Silence
+	if code != 201 || json.Unmarshal([]byte(got), &s) != nil {
+		t.Fatalf("%d %s", code, got)
+	}
+	if code, _, _ := us["vic"].do("DELETE", "/api/m/cluster/alerts/silences/"+s.ID, ""); code != 403 {
+		t.Errorf("vic ended a silence: %d", code)
+	}
+	if code, got, _ := us["opal"].do("DELETE", "/api/m/cluster/alerts/silences/"+s.ID, ""); code != 200 {
+		t.Errorf("%d %s", code, got)
+	}
+	if err := f.m.TestWebhook("gil", "ops", func(WebhookResult) {}); err == nil {
+		t.Error("gil tested a webhook")
+	}
+	es := f.m.AuditWhere(AuditFilter{Action: "alert.webhook"})
+	if len(es) != 1 || es[0].User != "ada" || es[0].Outcome != AuditOK || es[0].Before != "a0" || es[0].After != "a1" ||
+		!strings.Contains(es[0].Diff, `"secret_set": true`) || strings.Contains(es[0].Diff, "sekret-token") || strings.Contains(es[0].Diff, "shh") {
+		t.Errorf("%+v", es)
+	}
+}

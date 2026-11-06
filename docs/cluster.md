@@ -14,6 +14,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [A member's own pages: the node switcher](#a-members-own-pages-the-node-switcher)
 - [Templates: config shared by a group](#templates-config-shared-by-a-group)
 - [Rollouts: a change applied in stages](#rollouts-a-change-applied-in-stages)
+- [Drift and alerts](#drift-and-alerts)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -361,6 +362,91 @@ each member's status, versions and gate (the share of 5xx and the drift it found
 failed), with **Pause**, **Resume**, **Go on**, **Abort** and **Roll back**. A template's page has
 **Roll out**, and a member's rendered result **Sync this node**.
 
+## Drift and alerts
+
+**Drift** is a member that is not what the manager expects of it, in two ways:
+
+- **against its templates**: a part out of sync or in conflict, or templates that do not render for
+  it, as [the sync state](#templates-config-shared-by-a-group) says;
+- **against its own config**: the differences its consistency check finds between the config it
+  runs from and what it runs (`GET /config/check`).
+
+The consistency check comes with every poll. A member a template is attached to is read against its
+templates after a poll when that can have changed: it has no sync state yet, its config's ETag (as
+its `GET /node` says) is not the one its sync state was taken of, or its sync state is older than
+10 minutes; a change of the templates, the groups or the members is read at once anyway. These reads
+tell the member nothing, run at most `max_concurrency` at once and one at a time a member, and are
+never waited for: a member there is no room for is read after a later poll.
+
+Nothing is applied by the manager unasked. **Fix** on a member out of sync with its templates plans
+a sync rollout of it ([rollouts](#rollouts-a-change-applied-in-stages)) and opens its plan, with each
+part's diff and the member's dry run; it is applied once a person starts it there. A consistency
+drift is fixed by a **Reload** of the member, an operation confirmed first, as the member's own
+Consistency page explains.
+
+**Alerts** follow **rules**. A rule watches one thing, on every member or a group's, and fires once
+its condition has lasted the rule's time (`for_ms`):
+
+| Kind | Fires when | Settings |
+| --- | --- | --- |
+| `member_down` | the member is `down`, or `error` (refused credentials, a certificate not trusted), from when its state changed | |
+| `drift` | the member drifts, as above | `source`: `templates`, `consistency`, or both when empty |
+| `rollout_failed` | a rollout ended `failed`, an alert per rollout, until it is rolled back or `resolve_after_ms` after it ended | `resolve_after_ms`, 0 for never |
+| `cert_expiry` | the member's certificate that expires first does within `days` | `days`, 14 by default |
+| `backends_down` | at least `threshold` of the member's upstream backends are down | `threshold`, 1 by default |
+| `reload_failed` | the member's latest reload failed, as its reload counts tell from the manager's first read of them, until one succeeds, the member restarts, or `resolve_after_ms` passes | `resolve_after_ms` |
+
+A manager starts with a rule of each kind: member-down after a minute, drift after 5 minutes,
+backends-down after 2 minutes, certificate-expiry within 14 days, rollout-failed and reloads-failing
+at once; each sent again every 4 hours (`repeat_ms`, 0 for never) while it fires. A member not read
+since the manager started keeps its alerts as they are. An alert **resolves** once its condition is
+gone, its member is removed or its rule removed, turned off or changed; the last 500 are kept.
+
+**Webhooks** are where alerts go: a rule sends to those it names, or to every webhook when it names
+none. Each evaluation sends a webhook one notification of the alerts that fired (or are sent again)
+and one of those that resolved; an alert resolved is sent when it was sent firing. A webhook has a
+**format**:
+
+| Format | Body |
+| --- | --- |
+| `json` | fit's own: `{"version", "source", "manager", "manager_host", "status", "test", "sent", "text", "alerts", "more"}`, each alert as the API answers it, 50 at most and the rest counted in `more` |
+| `slack` | `{"text"}`: Slack's incoming webhooks, Mattermost and Rocket.Chat |
+| `discord` | `{"content"}` |
+| `feishu` | Feishu's (Lark's) bot: a text message, signed by the webhook's secret as Feishu signs |
+| `dingtalk` | DingTalk's robot: a text message, signed by the secret as DingTalk signs, in the URL's query |
+| `wecom` | WeCom's group robot: a text message |
+| `custom` | the webhook's template, JSON with `${text}`, `${status}` and `${manager}` in strings, and `${count}` and `${alerts}` as values |
+
+A chat service's message is a line saying what it is and a line each alert; the webhook's template,
+when it has one, is that line, with `${severity}`, `${rule}`, `${kind}`, `${node}`, `${subject}`,
+`${on}`, `${status}`, `${summary}`, `${since}` and `${id}` replaced. With a secret, `json`, `slack`,
+`discord`, `wecom` and `custom` carry `X-Fit-Timestamp` and `X-Fit-Signature: sha256=<hex>`, the
+HMAC-SHA256 keyed by the secret of the timestamp, a dot and the body; a receiver computes it again
+and compares. A webhook's URL is a secret as its secret is, since a chat service's token is in it:
+both are written once, kept encrypted in the manager's store, and answered as the URL's scheme and
+host only, never logged; the URL is `https`, or `http` to a loopback address.
+
+A webhook sends one notification at a time, each within its timeout (10 s by default, 1 to 60 s),
+from a queue of 64, the oldest dropped past it; one that fails is not sent again, and the webhook's
+status says how its sends went. A webhook that does not answer holds up nothing but its own queue: the
+poller and the evaluator go on. A chat service that answers 200 with an error code (Feishu's `code`,
+DingTalk's and WeCom's `errcode`) has failed.
+
+**Silences** keep the alerts of a rule, of a member, or of a rule on a member, from being sent until
+they end (30 days ahead at most); the alerts still show, marked silenced, and are not counted in the
+menu's badge. An alert that was never sent is sent once its silence ends.
+
+Everything is kept in the store's section `cluster.alerts`, apart from the members' document: the
+rules, the webhooks with their URLs and secrets, the silences, the alerts firing and the past ones.
+The audit log has every change of rules, webhooks and silences, and every webhook test.
+
+**The pages**, under **Drift and alerts** (`#/cluster/alerts/<tab>`): **Drift**, each member's
+templates and consistency check, the members with drift only or every one, **Diff** (each part out
+of sync, the member's beside its templates', read now), **Fix**, **Fix all out of sync**, **Plan by
+hand** (the new rollout's form, filled in) and **Reload**; **Alerts**, the counts, the alerts firing
+with **Silence**, those pending, and the past ones; **Rules**, added, edited and removed; **Webhooks**,
+with their sends, **Test**, edited and removed; **Silences**, active and past, added and ended. While
+alerts fire, not silenced, the Cluster menu shows their count, red when one is critical.
 ## Users, roles and the audit log
 
 The manager's console users have **roles** on the cluster, cluster-wide and per group:
@@ -378,6 +464,11 @@ labels or name, as it will be. Groups, templates and roles decide who has which 
 a cluster-wide admin changes them. The lists (Overview, Nodes, Groups, Templates, Rollouts, the
 audit log) are read by anyone with a role anywhere; a member's own pages, its reads, its rendered
 config, a compare or an import need a role on that member.
+
+**Drift and alerts** follow the same roles: drift, alerts, rules, webhooks (without their secrets)
+and silences are read by any role; a drift's **Fix**, which plans a sync rollout, needs an operator
+of each member; a silence needs an operator of its member, of its rule's group for a rule on a
+group, or cluster-wide otherwise; rules, webhooks and a webhook's **Test** need a cluster-wide admin.
 
 **Where roles are kept.** The roles live in the manager's store, beside the members, and are changed
 on **Users and audit** by a cluster-wide admin; they take effect at once, for every page and request.
@@ -402,8 +493,8 @@ most `propose`, which a cluster-wide admin applies; anyone else at most `read`. 
 the same way. The Users page shows each user's level and the level the roles bound it to.
 
 **The audit log** records every cluster action: members added, changed, removed, enrolled and tested;
-groups, templates and roles changed; operations; each step of a rollout; and every write through the
-node switcher. Each entry has its user, time, members, operation, outcome (`ok`, `failed`,
+groups, templates and roles changed; operations; each step of a rollout; alert rules, webhooks and
+silences changed and webhooks tested; and every write through the node switcher. Each entry has its user, time, members, operation, outcome (`ok`, `failed`,
 `partial`, `unknown` for a write sent and not answered, `not_sent`, or the state a rollout ended in),
 the versions before and after, and the change:
 
@@ -411,6 +502,7 @@ the versions before and after, and the change:
 | --- | --- | --- | --- |
 | a member, group, template or the roles | the manager's document, `r12` → `r13` | of what the API shows of it: a member's credentials only as set or not (a password changed is named in the detail), a template's secrets masked | the SHA-256 of the whole diff |
 | an operation | each member's config version before and after, in its outcome | none | none |
+| alert rules, webhooks and silences | the alerts' own version, `a3` → `a4` | of the rules, webhooks (as the API shows them) and silences | the SHA-256 of the whole diff |
 | a rollout's start | each member's version, and the hash of the config it gets | each member's parts, what it has and what it gets, secrets masked | the SHA-256 of the whole diff |
 | a rollout's end | each member's version before, and after it was applied or rolled back | none | each member's config hash |
 | a write through the switcher | the member's config version as last read, and the one it answered | none: what was sent holds the member's config and secrets | the SHA-256 of the body sent |
@@ -536,6 +628,19 @@ pages above use nothing else:
 | `POST rollouts/<id>/start` | starts a plan: `{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`; `409` for a member held by another rollout or an operation |
 | `POST rollouts/<id>/pause`, `resume`, `go`, `abort`, `rollback` | steers it; `409` when its state does not allow it |
 | `DELETE rollouts/<id>` | discards a plan |
+| `GET drift` | every member's drift: `{"interval_ms", "read_only", "nodes"}`, each `{"node", "status", "groups", "managed", "templates", "consistency", "drifted", "fixable"}`, `templates` its sync state without the parts' values, `consistency` its check's counts |
+| `POST drift/fix` | `{"nodes"}`: plans a sync rollout of them, as `POST rollouts` with `kind` `sync`; `202` with the rollout |
+| `GET alerts` | `{"read_only", "counts", "active", "pending", "history"}`, `counts` `{"firing", "silenced", "pending", "critical", "warning", "info"}` (firing not silenced, by severity), an alert `{"id", "rule", "kind", "severity", "node", "subject", "state", "summary", "since", "fired", "resolved", "resolved_why", "last_sent", "sends", "silenced_by"}`, `history` the latest first |
+| `GET alerts/summary` | the counts alone, for the menu's badge |
+| `GET alerts/config` | `{"version", "read_only", "rules", "webhooks", "silences", "kinds", "formats", "severities", "bounds"}`, with the alerts' `ETag`; a webhook `{"name", "url_host", "secret_set", "format", "template", "timeout_ms", "disabled", "send_resolved", "status"}`, `status` `{"sent", "failed", "dropped", "queued", "last_at", "last_ok", "last_status", "last_error", "last_took_ms"}` |
+| `POST alerts/rules` | adds a rule: `{"name", "kind", "disabled", "group", "severity", "for_ms", "repeat_ms", "resolve_after_ms", "days", "threshold", "source", "webhooks"}`; `201`; `400` with `{"field", "error"}`, `409` for a name taken or 64 rules |
+| `PUT alerts/rules/<name>`, `DELETE alerts/rules/<name>` | replaces (a new `name` renames it) or removes a rule; its alerts resolve |
+| `POST alerts/webhooks` | adds a webhook: `{"name", "url", "secret", "format", "template", "timeout_ms", "send_resolved", "disabled"}`; `201`; `409` for a name taken or 16 webhooks |
+| `PUT alerts/webhooks/<name>` | replaces it; a `url` or `secret` left empty keeps the one kept, `clear_secret` drops the secret; its rules follow a rename |
+| `DELETE alerts/webhooks/<name>` | removes it; `409` while a rule names it |
+| `POST alerts/webhooks/<name>/test` | sends it a test, answered once it is over: `{"ok", "status", "error", "took_ms"}` |
+| `POST alerts/silences` | adds a silence: `{"rule", "node", "comment", "starts", "ends", "duration_ms"}`, a rule, a member or both; `201` |
+| `DELETE alerts/silences/<id>` | ends it now; it is kept as past |
 | `POST text/render?format=` | a template's config, JSON, as `conf`, `yaml` or `json` text |
 | `POST text/parse?format=` | such a text as JSON, or `400` with its error |
 
@@ -550,7 +655,7 @@ Beside the module, at the console's top level, the node switcher's pass-through:
 A request the user's roles do not allow is refused `403` with `{"error", "kind": "forbidden", "user",
 "role", "nodes", "groups", "cluster"}`: the role it needed, and the members or groups it lacks it on.
 A change sent with `If-Match` and an ETag that is no longer the document's (its members, groups
-and templates) is refused `412`. At most
+and templates), or for the alerts' changes the alerts' own, is refused `412`. At most
 4 tests and 8 reads run at once; one more is `429`. The reads pass on those four GETs of a member
 and nothing else, never a write; a member that does not list a read's capability (`status`,
 `config.versions`, `config.check`) is not asked for it. No answer, page or log line holds a
