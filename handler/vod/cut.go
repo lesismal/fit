@@ -116,6 +116,12 @@ func (p *plan) cutVideo(vt, at *mp4.Table, d time.Duration, maxBytes int64) erro
 		return errNoKeyframe
 	}
 	p.end = max(vt.Time(vt.End()), p.segs[len(p.segs)-1].start+time.Millisecond)
+	// The end is weighed as a keyframe would be: the last segment ends at
+	// the keyframe before it when that is nearer its target.
+	start := p.segs[len(p.segs)-1].start
+	if target := start + d; p.end > target && prev.i >= 0 && target-prev.t < p.end-target && prev.t-start >= d/2 {
+		cut(prev, true)
+	}
 	return nil
 }
 

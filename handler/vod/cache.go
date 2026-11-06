@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lesismal/fit/medialib"
@@ -71,8 +72,9 @@ type cache struct {
 	used int64
 	m    map[ckey]*entry
 	lru  list.List
-	// cat is the catalog last seen; a new one drops what it lacks.
-	cat *medialib.Catalog
+	// cat is the catalog last seen; a new one drops what it lacks. It is
+	// read on every request, without the lock.
+	cat atomic.Pointer[medialib.Catalog]
 }
 
 func newCache(max int64) *cache { return &cache{max: max, m: map[ckey]*entry{}} }
@@ -212,13 +214,8 @@ func (c *cache) drop(f fileID) {
 // changed reports whether cat is not the catalog c last saw, and makes it
 // the one it has seen.
 func (c *cache) changed(cat *medialib.Catalog) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.cat == cat {
-		return false
-	}
-	c.cat = cat
-	return true
+	old := c.cat.Load()
+	return old != cat && c.cat.CompareAndSwap(old, cat)
 }
 
 // keep drops what the cache keeps of the files cat does not have as they

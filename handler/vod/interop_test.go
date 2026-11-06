@@ -21,13 +21,13 @@ import (
 // ffprobe finds every segment valid, starting on a keyframe with its audio
 // within a frame of its video; and the files themselves play through Range.
 // They run only with FIT_MEDIA_INTEROP set, with ffmpeg and ffprobe on the
-// PATH, as test/docker/vod/README's steps run them; there a missing ffmpeg
-// fails them. Nothing is measured.
+// PATH, as test/docker/vod/e2e.sh runs them in a Linux container; there a
+// missing ffmpeg fails them. Nothing is measured.
 
 func requireFFmpeg(t *testing.T) {
 	t.Helper()
 	if os.Getenv("FIT_MEDIA_INTEROP") == "" {
-		t.Skip("FIT_MEDIA_INTEROP is not set; see test/docker/vod/README.md")
+		t.Skip("FIT_MEDIA_INTEROP is not set; test/docker/vod/e2e.sh runs these checks in a container with ffmpeg")
 	}
 	for _, name := range []string{"ffmpeg", "ffprobe", "sh"} {
 		if _, err := exec.LookPath(name); err != nil {
@@ -81,10 +81,10 @@ func probeStreams(t *testing.T, in string) (start map[string]float64, frame floa
 }
 
 // countFrames returns the video frames ffmpeg decodes of in, and the first
-// one's time.
-func countFrames(t *testing.T, args ...string) (int, float64) {
+// one's time; strict fails the test on anything ffmpeg says.
+func countFrames(t *testing.T, strict bool, args ...string) (int, float64) {
 	t.Helper()
-	out := run(t, true, "ffmpeg", append(append([]string{"-hide_banner", "-v", "error"}, args...), "-map", "0:v:0", "-f", "framecrc", "-")...)
+	out := run(t, strict, "ffmpeg", append(append([]string{"-hide_banner", "-v", "error"}, args...), "-map", "0:v:0", "-f", "framecrc", "-")...)
 	frames, first := 0, math.NaN()
 	tb := 0.0
 	for line := range strings.Lines(out) {
@@ -157,17 +157,21 @@ func TestInterop(t *testing.T) {
 								t.Errorf("%s: audio starts %.3fs after video, the file %.3fs", ref.ref, got, want)
 							}
 						}
-						// Every frame plays, and a seek lands within a
-						// segment of where it was asked.
-						want, _ := countFrames(t, "-i", src)
-						got, _ := countFrames(t, "-i", media)
+						// Every frame plays, and a seek plays on from
+						// there, wherever this ffmpeg seeks in HLS at all:
+						// some (7.1) play nothing after -ss in fMP4 HLS, or
+						// in H.265 over MPEG-TS, their own hls muxer's
+						// included, which is checked first.
+						want, _ := countFrames(t, true, "-i", src)
+						got, _ := countFrames(t, true, "-i", media)
 						if got != want {
 							t.Errorf("%s: %d frames played, the file has %d", ref.ref, got, want)
 						}
-						seekTo := math.Floor(it.Duration.Seconds() * 0.55)
-						n, first := countFrames(t, "-ss", fmt.Sprint(seekTo), "-i", media, "-t", "1")
-						if n == 0 || math.IsNaN(first) {
-							t.Errorf("%s: nothing played after a seek to %vs", ref.ref, seekTo)
+						seekTo := fmt.Sprint(math.Floor(it.Duration.Seconds() * 0.55))
+						if !ffmpegSeeks(t, work, src, c, seekTo) {
+							t.Logf("%s: this ffmpeg plays nothing after a seek in its own %s HLS of the file: not checked", ref.ref, c)
+						} else if n, first := countFrames(t, true, "-ss", seekTo, "-i", media, "-t", "1"); n == 0 || math.IsNaN(first) {
+							t.Errorf("%s: nothing played after a seek to %ss", ref.ref, seekTo)
 						}
 					}
 					checkSegments(t, f, work, it.ID, ref.ref, c, frame)
@@ -180,6 +184,31 @@ func TestInterop(t *testing.T) {
 			run(t, true, "ffprobe", "-v", "error", "-show_entries", "format=duration", base+ref.ref+"."+ext)
 		}
 	}
+}
+
+// ffmpegSeeks reports whether ffmpeg plays on after a seek to seekTo in its
+// own HLS of src, cut with its hls muxer into segments of container c.
+func ffmpegSeeks(t *testing.T, work, src, c, seekTo string) bool {
+	t.Helper()
+	dir, err := os.MkdirTemp(work, "ref")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-hide_banner", "-v", "error", "-i", src, "-c", "copy", "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod"}
+	if c == "fmp4" {
+		args = append(args, "-hls_segment_type", "fmp4")
+	}
+	list := filepath.Join(dir, "index.m3u8")
+	run(t, true, "ffmpeg", append(args, list)...)
+	// At two places, one past a segment's start: an ffmpeg that plays on
+	// after one only, by chance, does not seek in HLS.
+	at, _ := strconv.ParseFloat(seekTo, 64)
+	for _, ss := range []string{seekTo, fmt.Sprint(at + 1.5)} {
+		if n, _ := countFrames(t, false, "-ss", ss, "-i", list, "-t", "1"); n == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // fileRefT is a rendition or audio file of an item: its name in URLs, as
