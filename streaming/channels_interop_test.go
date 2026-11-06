@@ -105,7 +105,8 @@ func TestChannelInterop(t *testing.T) {
     "channels": [{"name": "live/tv", "library": "lib", "items": ["a", "b"]`+push+`},
                  {"name": "live/mix", "library": "lib", "items": ["a", "c"]},
                  {"name": "live/sec", "library": "lib", "items": ["a", "c"], "encrypt": true, "key_rotation": 3},
-                 {"name": "live/secll", "library": "lib", "items": ["a", "b"], "encrypt": true, "key_rotation": 3}]
+                 {"name": "live/secll", "library": "lib", "items": ["a", "c"], "encrypt": true, "key_rotation": 3},
+                 {"name": "live/mixll", "library": "lib", "items": ["a", "c"]}]
   },
   "routes": [
     {"match": {"path": ["/flv/*"]}, "handler": {"module": "httpflv", "params": {"prefix": "/flv/", "cors": "*"}}},
@@ -118,6 +119,7 @@ func TestChannelInterop(t *testing.T) {
 	f.waitLive(t, "live/mix")
 	f.waitLive(t, "live/sec")
 	f.waitLive(t, "live/secll")
+	f.waitLive(t, "live/mixll")
 	ctx := context.Background()
 	rtmpAddr, rtspAddr, srtAddr := f.addr(t, "rtmp"), f.addr(t, "rtsp"), f.addr(t, "srt")
 
@@ -145,6 +147,10 @@ func TestChannelInterop(t *testing.T) {
 		// playlists hand on.
 		{"enc-hls-fmp4", f.base + "/shls/live/sec/index.m3u8?token=" + viewToken, nil, 0.1},
 		{"enc-hls-ts", f.base + "/shls/live/sec/index.m3u8?format=ts&token=" + viewToken, nil, 0.1},
+		// Low-Latency HLS's playlists across new tracks, whose preload
+		// hint follows the next segment's discontinuity and EXT-X-MAP,
+		// by ffmpeg, which reads whole segments.
+		{"mix-llhls-fmp4", f.base + "/sll/live/mixll/index.m3u8?token=" + viewToken, nil, 0.1},
 	}
 	var wg sync.WaitGroup
 	for _, c := range checks {
@@ -201,8 +207,19 @@ func TestChannelInterop(t *testing.T) {
 // to /result after 30s.
 const hlsjsPage = `<!doctype html><meta charset=utf-8><video id=v muted autoplay playsinline></video>
 <script src="/hls.js"></script><script>
-const v = document.getElementById('v'), out = {errors: [], cc: 0, keys: 0, parts: 0, times: [], src: SRC};
+const v = document.getElementById('v'), out = {errors: [], cc: 0, loadedCC: 0, keys: 0, parts: 0, times: [], src: SRC, log: [], pl: ''};
 const h = new Hls();
+// What was loaded and appended, and the last media playlist, reported on a
+// fatal error.
+let pl = '';
+const log = s => { out.log.push(s); if (out.log.length > 400) out.log.shift() };
+h.on(Hls.Events.LEVEL_LOADED, (e, d) => { pl = d.networkDetails && d.networkDetails.responseText || pl });
+h.on(Hls.Events.FRAG_LOADED, (e, d) => { out.loadedCC = Math.max(out.loadedCC, d.frag.cc);
+  log('load ' + d.frag.sn + '/' + (d.part ? d.part.index : '-') + ' cc ' + d.frag.cc + ' init ' + (d.frag.initSegment ? d.frag.initSegment.relurl : '')) });
+h.on(Hls.Events.BUFFER_CODECS, (e, d) => { log('codecs ' + Object.values(d).map(t => t.codec).join(' ')) });
+h.on(Hls.Events.BUFFER_APPENDED, (e, d) => { log('appended ' + d.frag.sn + '/' + (d.part ? d.part.index : '-')) });
+h.on(Hls.Events.ERROR, (e, d) => { log('error ' + d.details + (d.error ? ' (' + d.error.message + ')' : '') + (d.fatal ? ' fatal' : ''));
+  if (d.fatal) out.pl = pl });
 h.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) out.errors.push(d.type + ': ' + d.details + (d.error ? ' (' + d.error.message + ')' : '') +
   (d.frag ? ' sn ' + d.frag.sn + ' cc ' + d.frag.cc : '') + (d.part ? ' part ' + d.part.index : '')) });
 h.on(Hls.Events.KEY_LOADED, () => { out.keys++ });
@@ -225,13 +242,20 @@ type hlsResult struct {
 	Parts  int          `json:"parts"`
 	Times  [][4]float64 `json:"times"`
 	Src    string       `json:"src"`
+	// LoadedCC is the last discontinuity loaded, CC the last played.
+	LoadedCC int `json:"loadedCC"`
+	// Log is what was loaded and appended, Playlist the last media
+	// playlist, on a fatal error.
+	Log      []string `json:"log"`
+	Playlist string   `json:"pl"`
 }
 
 // hlsjs plays live/tv, live/mix and live/sec, encrypted, by whole
-// segments, and live/secll, encrypted, by Low-Latency HLS's parts, with
-// hls.js in a headless Chromium.
+// segments, and live/secll, encrypted, and live/mixll by Low-Latency HLS's
+// parts, across items whose tracks differ, with hls.js in a headless
+// Chromium.
 func hlsjs(t *testing.T, f *fit) {
-	names := []string{"tv", "mix", "sec", "secll"}
+	names := []string{"tv", "mix", "sec", "secll", "mixll"}
 	results := make(chan hlsResult, len(names))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hls.js", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, os.Getenv("FIT_HLSJS")) })
@@ -240,11 +264,12 @@ func hlsjs(t *testing.T, f *fit) {
 		switch r.PathValue("name") {
 		case "sec":
 			src = f.base + "/shls/live/sec/index.m3u8?token=" + viewToken
-		case "secll":
-			// Low-Latency HLS, over items of the same tracks: hls.js
-			// fails to append the parts after a discontinuity, clear
-			// or encrypted alike (live/mix and live/sec over /sll/).
-			src = f.base + "/sll/live/secll/index.m3u8?token=" + viewToken
+		case "secll", "mixll":
+			// Low-Latency HLS across new tracks: fib names the segment's
+			// discontinuity and EXT-X-MAP before the preload hint of its
+			// first part, without which hls.js appended the parts after
+			// the old init section.
+			src = f.base + "/sll/live/" + r.PathValue("name") + "/index.m3u8?token=" + viewToken
 		}
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, strings.Replace(hlsjsPage, "SRC", strconv.Quote(src), 2))
@@ -291,9 +316,13 @@ func hlsjs(t *testing.T, f *fit) {
 }
 
 // checkHLSJS checks that hls.js played on, through a discontinuity for
-// live/mix, without a fatal error or a stall of 2s.
+// live/mix, live/sec and the Low-Latency channels, without a fatal error or
+// a stall of 2s.
 func checkHLSJS(t *testing.T, res hlsResult) {
-	t.Logf("hls.js %s: cc %d, keys %d, parts %d, errors %v, times %v", res.Src, res.CC, res.Keys, res.Parts, res.Errors, res.Times)
+	if len(res.Errors) > 0 {
+		t.Logf("hls.js %s:\n%s\nlast playlist:\n%s", res.Src, strings.Join(res.Log, "\n"), res.Playlist)
+	}
+	t.Logf("hls.js %s: cc %d, loaded cc %d, keys %d, parts %d, errors %v, times %v", res.Src, res.CC, res.LoadedCC, res.Keys, res.Parts, res.Errors, res.Times)
 	if len(res.Errors) > 0 || len(res.Times) < 20 {
 		t.Errorf("hls.js %s: %v", res.Src, res.Errors)
 		return
@@ -308,8 +337,11 @@ func checkHLSJS(t *testing.T, res hlsResult) {
 	if strings.Contains(res.Src, "/sec/") && res.Keys < 2 {
 		t.Errorf("hls.js %s: %d keys loaded, a new one every 3 segments", res.Src, res.Keys)
 	}
-	if strings.Contains(res.Src, "/sll/") && (res.Parts == 0 || res.Keys < 2) {
-		t.Errorf("hls.js %s: %d parts and %d keys loaded", res.Src, res.Parts, res.Keys)
+	if strings.Contains(res.Src, "/sll/") && (res.Parts == 0 || res.LoadedCC < 1) {
+		t.Errorf("hls.js %s: %d parts loaded, the last discontinuity %d", res.Src, res.Parts, res.LoadedCC)
+	}
+	if strings.Contains(res.Src, "/secll/") && res.Keys < 2 {
+		t.Errorf("hls.js %s: %d keys loaded", res.Src, res.Keys)
 	}
 	stalled := 0
 	for i := 1; i < len(res.Times); i++ {
