@@ -274,7 +274,9 @@ func TestLinkTokenExpiredOrReplaced(t *testing.T) {
 	if !strings.Contains(lm.log.String(), "("+ReasonExpired+")") || st.Linked {
 		t.Fatalf("%+v\n%s", st, lm.log)
 	}
-	f.waitState("late", "to show the refusal", func(s State) bool { return s.Link != nil && s.Link.Refused != nil && s.Link.Refused.Reason == ReasonExpired })
+	f.waitState("late", "to show the refusal", func(s State) bool {
+		return s.Link != nil && s.Link.Refused != nil && s.Link.Refused.Reason == ReasonExpired
+	})
 
 	// A new token for it, and the old one is no member's.
 	e2, err := f.m.EnrollAgain("tester", "late", &EnrollInput{TTL: "1h", URL: "wss://example.com:9/cluster/link"}, "")

@@ -376,7 +376,7 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 		host, _ := os.Hostname()
 		fitVersion, _ := versions()
 		link, err := cluster.StartMember(cluster.MemberOptions{Engine: s.Engine(), Settings: c.Admin.ClusterMember,
-			API: admin.LinkAPI(c.Admin, configs, func(r admin.Result) { printApplied(stdout, stderr, r) }, adminLog.Infof),
+			API:             admin.LinkAPI(c.Admin, configs, func(r admin.Result) { printApplied(stdout, stderr, r) }, adminLog.Infof),
 			MaxRequestBytes: c.Admin.ConfigBytes() + 64<<10, Keeper: keep,
 			Node: cluster.MemberNode{ID: nodeID, Hostname: host, FitVersion: fitVersion}, Logf: adminLog.Infof})
 		if err != nil {

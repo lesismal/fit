@@ -434,7 +434,9 @@ func TestMemberSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the member to stop", func() bool { return strings.Contains(l.Status().Stopped, "no credential for the manager and no enrollment token") })
+	waitFor(t, "the member to stop", func() bool {
+		return strings.Contains(l.Status().Stopped, "no credential for the manager and no enrollment token")
+	})
 	l.Close()
 	l.Close()
 
