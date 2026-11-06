@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles and for I140; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140 and I141; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -97,6 +97,23 @@ What I140 adds to every fit, so that a manager can manage it:
   capabilities. The config pages have **Check** beside **Save and apply**: the same request with
   `?dry_run=1`, its errors shown where a save's are.
 
+What I141 adds, the manager (`admin.cluster`, package `cluster`, the console module `cluster`; see
+[managing other fits](../console.md#managing-other-fits)):
+
+- **Members in the store's section `cluster`**, a document of its own version (1) holding the
+  members with their credentials, and the groups, templates, rollouts and audit log the later
+  iterations fill, kept as found until then. A document of a later version is shown and never
+  written over.
+- **Access** by the console's user name and password (logged in again on 401; a refused login
+  backed off from a minute to 15; a console asking for a password change reported, its session
+  logged out) or by the Admin API's token. **TLS** by the system's CAs, a `ca` PEM, or a pinned
+  `fingerprint`, checked in the handshake's `VerifyConnection` so that a certificate refused is
+  still shown with its fingerprint; `http` only to loopback.
+- **The poller**, a goroutine of its own, starts at most `max_concurrency` polls; each is a chain
+  of calls on fib's asynchronous client, one client per member, each call bounded by `timeout` and
+  its answer by `max_response_bytes`. A member's state keeps how its last poll went, with each
+  failure a kind of its own, and what the last poll that read it found.
+
 ## Pending review
 
 Decided while building I140 (2026-11-06); each stands until the user rules on it.
@@ -118,6 +135,40 @@ Decided while building I140 (2026-11-06); each stands until the user rules on it
 6. **Address lockouts double.** The first stays 15 minutes, so a typo or two costs no more than
    before; a guesser that comes back is slowed to 5 guesses an hour.
 7. **`/api/node` at the console's top level**, beside `/api/m/admin/node`, as the plan names it.
+
+Decided while building I141 (2026-11-06):
+
+8. **The members are a section of the store, not a new field of its payload.** The plan asked for
+   a payload field and a new payload version; the store already keeps named sections (format 3),
+   which an older fit opens and writes back untouched, and which its exports leave out, so that
+   members' credentials never leave in an export. A new format would have made every older fit
+   refuse the whole store, its config too. The section carries a version of its own for its own
+   changes. Alternative: the payload field and format 4, as planned.
+9. **`admin.cluster` needs `admin.console` too**, which serves its endpoints. Alternative: the
+   endpoints in the Admin API as well (I150's CLI may want them).
+10. **The poller is a goroutine of its own**, not tasks of the console's pool: it only starts
+    asynchronous calls and parses bounded answers, and the pool's tasks are bound to requests.
+11. **One fib client per member**, two connections at most, so that each member's TLS is checked
+    as its own settings say and its certificate kept. Alternative: one client and a dialer per
+    member.
+12. **`ca` and `fingerprint` exclusive; no `insecure`.** A pin trusts the leaf alone, whatever its
+    names and dates.
+13. **A refused login waits a minute, doubling to 15 minutes**, unless the member is changed or a
+    test of it works; a member's 429 waits its `Retry-After`. A console asking for its temporary
+    password to be changed is checked again on the same backoff, its session logged out each time.
+14. **Sessions are logged out** when a member is removed or changed, after each test, and when the
+    manager stops (waiting 2 seconds at most), so that the manager never fills a member's
+    `max_sessions`.
+15. **Tests have a bound of their own, 4**, beside `max_concurrency`, so that a busy poller never
+    refuses a person's test; `POST /test` tests a member not added yet, and a saved member's test
+    may take a draft of its changes.
+16. **The audit log records changes** (add, change, remove: who, when, which member, the fields
+    changed, never their values), 1000 entries; tests and polls are reads and are not recorded.
+17. **Credentials are never answered, not even their last characters**: `password_set` and
+    `token_set` only.
+18. **The defaults**: `poll_interval` 10s (1s at least), `timeout` 10s (1s at least), `max_nodes`
+    256, `max_concurrency` 8, `max_response_bytes` 4 MiB (16 KiB at least).
+19. **The API is documented in the console's docs** until I142 writes `docs/cluster.md`.
 
 Open questions of the plan, answered as proposed until reviewed:
 

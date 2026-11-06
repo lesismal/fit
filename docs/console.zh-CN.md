@@ -20,6 +20,7 @@ fit 可以把配置加密保存在它自己格式的文件里，即 **store**，
 - [页面](#页面)
 - [检查运行中的配置](#检查运行中的配置)
 - [上限与超时](#上限与超时)
+- [管理其他 fit](#管理其他-fit)
 - [角色的页面](#角色的页面)
 - [workbench 的模块](#workbench-的模块)
 
@@ -712,6 +713,59 @@ MCP 页以控制台自己的地址显示这两者。fit 的助手不调用任何
 该页的端点为 `GET /api/m/ai/mcp`（服务器是否开启、带默认值的设置、端点与令牌，从不含哈希）、`POST /api/m/ai/mcp/tokens`
 （`{"name", "level", "days", "allow"}`：返回 `{"token", "view"}`，令牌只显示这一次；名称已被占用或超过
 `max_tokens_per_user` 时 `409`）与 `DELETE /api/m/ai/mcp/tokens/{id}`。设置经 `PUT /api/m/ai/settings` 与助手设置一起保存。
+
+## 管理其他 fit
+
+设置了 `admin.cluster` 的 fit 是**管理端**：它保存其他 fit（**成员**）的地址和管理员凭据，读取每个成员的状态，并以控制台模块
+`cluster` 提供给工作台。管理端不在数据路径上：无论它是否运行，成员都按各自的配置提供服务。设计见
+[决定 033](decisions/033-cluster-management.zh-CN.md)；工作台的“集群”页面在后续迭代中基于下列端点加入。
+
+```json
+{"admin": {
+  "store": {"path": "/var/lib/fit/manager.store", "password_env": "FIT_STORE_PASSWORD"},
+  "console": {"address": "127.0.0.1:2020", "users": [{"username": "admin", "password_hash": "$2a$10$..."}]},
+  "cluster": {"poll_interval": "10s", "timeout": "10s", "max_nodes": 256, "max_concurrency": 8, "max_response_bytes": 4194304}
+}}
+```
+
+`admin.cluster` 需要 `admin.store`，成员连同其密码和令牌保存在 store 的 `cluster` 节中，与 store 的其余内容一起加密，且不进入
+store 的导出；还需要提供这些端点的 `admin.console`。成员有两种访问方式：
+
+- **`console`**：成员控制台的用户名和密码。管理端以 `POST /api/login` 登录，保存会话的 cookie 和 CSRF 令牌，经控制台读取 Admin
+  API（`/api/node`、`/api/m/admin/status`、`/api/m/admin/config/check`），调用返回 401 时（例如成员重启或会话到期）重新登录。
+  登录被拒后，除非修改或测试该成员，一分钟内不再发送，之后每次加倍，最长 15 分钟，因此错误的密码不会把成员的用户锁在外面；
+  被成员限速的登录按其 `Retry-After` 等待。要求修改临时密码的控制台会被报告，其会话随即登出：管理端从不修改成员的密码。
+- **`admin_api`**：成员 Admin API 的 bearer 令牌，直接访问 Admin API 的地址（`/node`、`/status`、`/config/check`）。
+
+成员的 URL 必须是 `https`，或只指向回环地址的 `http`，凭据不会以明文跨越网络；URL 可以带路径，用于代理后面的成员。成员证书由系统
+CA、`tls.ca`（要信任的 CA 的 PEM）或 `tls.fingerprint`（叶证书的 SHA-256，经人确认后固定）验证；没有信任任意证书的设置。
+
+轮询器每隔 `poll_interval`、同时最多 `max_concurrency` 个成员，读取每个成员的 `GET /node`，其能力列表包含时再读 `/status` 和
+`/config/check`。每次调用都经 fib 的异步 HTTP 客户端发出，从不阻塞 worker；`timeout` 限制连接、等待应答头和整个调用，
+`max_response_bytes` 限制每个应答。成员状态记录最近一次轮询的结果（`status`：`up`、`down`、`error`，首次轮询前为
+`unknown`；`error` 带 `kind` 和消息；`reachable`、连续失败次数 `failures`、`polled`、`seen`、`since`），以及最近一次成功读取
+到的内容，成员下线时仍保留：节点信息（ID、主机、fit/fib/Go 版本、运行时长、角色、schema 摘要、能力）、运行中的配置（版本、
+ETag、应用时间、来源）、重载次数、连接、上游及其下线的后端、证书及最近的到期时间、漂移数、`/node` 的延迟，以及它出示的证书。
+每种失败有各自的类型：`unreachable`、`timeout`、`tls_untrusted`（附证书，其指纹可以固定）、`tls_pin_mismatch`、`tls`、
+`auth_failed`、`rate_limited`、`password_change_required`、`forbidden`、`unsupported`（早于 `GET /node` 的 fit）、
+`http_status`、`bad_answer` 和 `too_large`。
+
+模块的端点位于 `/api/m/cluster/` 下，需要控制台登录和 CSRF 令牌：
+
+| 端点 | 作用 |
+| --- | --- |
+| `GET nodes` | 成员列表 `{"version", "max_nodes", "read_only", "nodes"}`，带 `ETag`；成员的凭据只显示为 `password_set` 和 `token_set` |
+| `POST nodes` | 添加成员：`{"name", "labels", "url", "access", "username", "password", "token", "tls": {"ca", "fingerprint"}}`；返回 `201`；字段错误返回 `400` 和 `{"field", "error"}`，名称已占用或达到 `max_nodes` 返回 `409` |
+| `GET nodes/<name>` | 成员及其 `state` |
+| `PUT nodes/<name>` | 替换成员，新的 `name` 即改名；留空的密码或令牌保留原值 |
+| `DELETE nodes/<name>` | 删除成员，并登出其会话 |
+| `POST nodes/<name>/test` | 测试已保存的成员，或按请求体修改后的成员（不保存）：`{"ok", "error", "latency_ms", "certificate", "node", "must_change_password"}`；`certificate` 含有供人确认后固定的指纹 |
+| `POST test` | 按请求体测试尚未添加的成员 |
+| `GET state` | 所有成员的状态：`{"interval_ms", "timeout_ms", "read_only", "nodes"}` |
+| `GET audit` | 管理端的修改记录：谁、何时、哪个成员、改了什么（凭据只记字段名） |
+
+带 `If-Match` 且其 ETag 已不是成员列表当前 ETag 的修改返回 `412`。同时最多进行 4 个测试，再多返回 `429`。任何应答、页面或日志
+都不含密码、令牌或成员的会话 cookie。`cluster` 节由更新版本的 fit 写入时，管理端只显示、从不覆盖：此时管理端为只读。
 
 ## 角色的页面
 
