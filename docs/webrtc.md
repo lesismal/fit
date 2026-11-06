@@ -609,6 +609,10 @@ Browsers open the camera and the microphone only on a secure page: over HTTPS, o
   and the endpoints' origins alone. With `pages` false, no page is served at all: every path under
   the prefix that is not the API, the redirect from `<prefix>` included, answers 404, for a
   deployment whose page is its own; the login and the room API stay, for that page.
+- **Library and player.** With `libraries`, media libraries, or `channels`, the streaming role's
+  channels, `/media/library` lists what the logged-in user may play, and `/media/watch` plays it
+  with hls.js, vendored in the binary, through a playback URL the pages sign for that user; see
+  [the media library](media-library.md#a-video-site).
 - **Login.** With `auth` and `login`, the pages log the policy's users in: `POST
   /media/api/login` checks the password (a `password_hash` on mediaauth's bcrypt pool) and answers
   with a token the policy signs for its `token_ttl`, set as the cookie `fit_media_token`

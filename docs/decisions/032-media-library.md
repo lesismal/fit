@@ -87,6 +87,14 @@ What each iteration decides:
 - **I137–I139**: an example video site, the workbench's pages for all of it, and files managed from
   the workbench (resumable uploads written to a temporary file on the file pool and renamed into
   place).
+- **I137, a video site**: the example (fit-examples' `video-site`) is a library, `vod` and a
+  channel, `media_tokens` on the loopback behind `basic_auth`, and an API of some 300 lines of Go
+  that logs the site's own viewers in and asks for a URL signed for each. `media_pages` gains a
+  library and a player page behind the policy's login, which sign their URLs for the logged-in user
+  (`api/play`). hls.js 1.5.20 (Apache-2.0) is vendored with its license in `media_pages`'
+  `web/vendor`, taken from its npm package and checked against its shasum, served at
+  `<prefix>/vendor/hls.min.js` for the site's page as well; it is no Go dependency, and is recorded
+  here by rule 14.
 
 ## Rejected
 

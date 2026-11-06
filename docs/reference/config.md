@@ -3807,7 +3807,7 @@ In JSON:
 
 ### `media_pages`
 
-Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera.
+Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera; with libraries or channels, a library page and a player page that plays with hls.js through playback URLs signed for the viewer.
 
 Serves fit's own media pages under `prefix` (`/media`), embedded in the binary, with no script or
 style from elsewhere: an index, a room call (`call`) with a chat of text messages and small files,
@@ -3838,6 +3838,21 @@ watchers a room, `max_message_bytes`, `member_ttl` and `stall_timeout`. The page
 sit behind the route's middleware as well, as `basic_auth` or `forward_auth`. The route must match
 the prefix and what is below it. See [WebRTC](../webrtc.md#the-media-pages).
 
+With `libraries`, the [media libraries](#media-library) named, or `channels`, the streaming role's
+[channels](../channels.md), the pages gain a library page (`library`) and a player page (`watch`),
+behind the policy's login: the library page lists, through `api/library` and
+`api/library/<name>` (`offset`, `limit`, `q`), the items and channels the viewer may play (`play` on
+`vod/<library>/<id>`, or on the channel's name), with their posters, and the player page plays one
+with hls.js, vendored in the binary with its license (Apache-2.0) under `vendor/`, or with the
+browser's own HLS where there are no Media Source Extensions. It asks `api/play` for the URL: with
+the policy's [`url_signing`](../media-library.md#playback-urls-that-expire), and playing not public,
+a playback URL signed for the viewer, its address and a session of its own, good for `url_signing`'s
+`ttl`, whose playlists hand the player the grant it plays on; otherwise the plain URL, which the
+login's cookie lets in. A refused URL stops the player, which offers to play again. An item plays
+from `vod`, `/vod/{library}/{id}/index.m3u8` unless set, the [`vod`](#http-handlers-vod) handler's
+own prefix; a channel from `hls`, which `channels` needs. See
+[the media library](../media-library.md#a-video-site).
+
 In a .conf file:
 
 ```fit
@@ -3853,6 +3868,9 @@ route {
 		chat true
 		max_file_bytes 5MiB
 		hls /hls/{stream}/index.m3u8
+		libraries films
+		vod /vod/{library}/{id}/index.m3u8
+		channels true
 		links RTMP { url rtmp://{host}/live/{stream}?token={token} }
 	}
 }
@@ -3877,6 +3895,10 @@ handler:
     chat: true
     max_file_bytes: 5242880
     hls: /hls/{stream}/index.m3u8
+    libraries:
+      - films
+    vod: /vod/{library}/{id}/index.m3u8
+    channels: true
     links:
       - name: RTMP
         url: rtmp://{host}/live/{stream}?token={token}
@@ -3892,6 +3914,7 @@ In JSON:
     "pages": true, "mic_default": false, "cam_default": false,
     "chat": true, "max_file_bytes": 5242880,
     "hls": "/hls/{stream}/index.m3u8",
+    "libraries": ["films"], "vod": "/vod/{library}/{id}/index.m3u8", "channels": true,
     "links": [{"name": "RTMP", "url": "rtmp://{host}/live/{stream}?token={token}"}]
   }}
 }
@@ -3918,6 +3941,9 @@ In JSON:
 | `max_file_bytes` | integer, 1024 to 33554432 | `5242880` | The largest file a member may send in a room's chat, in bytes; a larger one is answered 413, and the page refuses it before sending. 5 MiB (5242880) when left out. |
 | `member_ttl` | duration | `"30s"` | How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out. |
 | `stall_timeout` | duration | `"30s"` | How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out. |
+| `libraries` | list of string |  | The media_library names whose items the library page lists, at most 16: those the viewer may play, play on vod/<library>/<id> under auth, that can be served, with their posters, searched and paged; the player page plays one with hls.js, vendored in the binary. With the auth policy's url_signing, and playing not public, the player plays through a playback URL the pages sign for the viewer, its address and a session of its own, good for url_signing's ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the login's cookie lets in. None when left out: no library page. |
+| `vod` | string | `"/vod/{library}/{id}/index.m3u8"` | The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing for its library's name and {id} for its ID: a path on this server or an http or https URL, ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix. |
+| `channels` | boolean |  | List the streaming role's channels on the library page too, those the viewer may play, with what each plays now and next, played from hls, which must be set, through a playback URL signed for the viewer as an item's is. Off when left out. |
 
 <a id="mediapages-link"></a>
 

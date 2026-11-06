@@ -20,6 +20,10 @@
  * config's chat is on, the call page carries the room chat: text messages and
  * small files carried by the room API, its history on joining, and a file
  * downloaded with the page's credentials.
+ *
+ * With the config's library, the library page lists the media libraries'
+ * items and the channels the viewer may play, and the player page plays one
+ * with hls.js (vendor/hls.min.js) through the URL api/play gives it.
  */
 'use strict';
 
@@ -73,6 +77,16 @@
       'chat.toobig': 'The file is {size}, larger than the room chat\'s limit of {max}.',
       'chat.nojoin': 'Join a room to chat.', 'chat.sendfail': 'The message could not be sent: {e}',
       'chat.filefail': 'The file could not be sent: {e}', 'chat.downloadfail': 'The file could not be downloaded: {e}',
+      'nav.library': 'Library', 'home.library': 'Films and episodes on demand, and channels that play them as live streams.',
+      'lib.search': 'Search', 'lib.go': 'Search', 'lib.channels': 'Channels', 'lib.more': 'More',
+      'lib.loading': 'Loading…', 'lib.empty': 'Nothing here you may play.', 'lib.nochannels': 'No channel you may play.',
+      'lib.notready': 'The library is being scanned; trying again.', 'lib.now': 'Now: {t}', 'lib.next': 'Next: {t}',
+      'lib.live': 'LIVE', 'lib.count': '{n} titles',
+      'watch.back': 'Back to the library', 'watch.again': 'Play again', 'watch.loading': 'Getting a playback URL…',
+      'watch.playing': 'playing', 'watch.paused': 'paused', 'watch.ended': 'ended', 'watch.refused': 'refused',
+      'watch.expired': 'The server refused the playback URL: it has expired, or was ended. Play again for a new one.',
+      'watch.nohls': 'This browser plays neither HLS nor Media Source Extensions.', 'watch.error': 'Playback failed: {e}',
+      'watch.until': 'The playback URL is good until {t}; the player plays on after it.',
     },
     zh: {
       'nav.home': '首页', 'nav.call': '通话', 'nav.publish': '推流', 'nav.play': '播放',
@@ -109,6 +123,16 @@
       'chat.toobig': '这个文件有 {size}，超过了房间聊天的 {max} 上限。',
       'chat.nojoin': '加入房间后才能聊天。', 'chat.sendfail': '消息发送失败：{e}',
       'chat.filefail': '文件发送失败：{e}', 'chat.downloadfail': '文件下载失败：{e}',
+      'nav.library': '片库', 'home.library': '点播的电影和剧集，以及把它们当作直播播放的频道。',
+      'lib.search': '搜索', 'lib.go': '搜索', 'lib.channels': '频道', 'lib.more': '更多',
+      'lib.loading': '加载中…', 'lib.empty': '这里没有你可以播放的内容。', 'lib.nochannels': '没有你可以播放的频道。',
+      'lib.notready': '片库正在扫描，稍后重试。', 'lib.now': '正在播放：{t}', 'lib.next': '下一个：{t}',
+      'lib.live': '直播', 'lib.count': '{n} 部',
+      'watch.back': '返回片库', 'watch.again': '重新播放', 'watch.loading': '正在获取播放地址…',
+      'watch.playing': '播放中', 'watch.paused': '已暂停', 'watch.ended': '已结束', 'watch.refused': '被拒绝',
+      'watch.expired': '服务器拒绝了这个播放地址：它已过期或已被结束。请重新播放以获取新的地址。',
+      'watch.nohls': '这个浏览器既不能播放 HLS，也不支持 Media Source Extensions。', 'watch.error': '播放失败：{e}',
+      'watch.until': '播放地址在 {t} 前有效；过期后已开始的播放会继续。',
     },
   };
   var lang = 'en';
@@ -303,6 +327,8 @@
     }
     $('login').close();
     renderHome();
+    if (view === 'library') renderLibrary();
+    if (view === 'watch') startWatch();
   }
 
   async function logout() {
@@ -1711,6 +1737,269 @@
     });
   }
 
+  /* ---------- the library and the player ---------- */
+
+  // The library page lists what the viewer may play, a page of each
+  // library's items at a time and the channels; the player page asks
+  // api/play for the URL of one, a playback URL signed for the viewer when
+  // the policy signs them, and plays it with hls.js (vendor/hls.min.js,
+  // loaded once it is needed), or with the browser's own HLS where there
+  // are no Media Source Extensions. A URL the server refuses, as once it and
+  // the grant its playlists handed on have expired, stops the player, which
+  // offers to play again with a new one.
+
+  var PAGE_ITEMS = 60;
+  var libPage = { q: '', shelves: {}, gen: 0 };
+  var watchPage = { hls: null, gen: 0, state: '', url: '', signed: false, expires: 0, kind: '', title: '', refused: false, error: '' };
+
+  function libraryOn() { return !!(S.conf && S.conf.library); }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function formatDuration(s) {
+    s = Math.max(0, Math.round(s || 0));
+    var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return h ? h + ':' + pad2(m) + ':' + pad2(x) : m + ':' + pad2(x);
+  }
+
+  // go shows a view at a URL of the pages with a query of its own.
+  function go(v, search) { show(v, true, search); }
+
+  function libraryHint(r) {
+    if (r.status === 401) { showLogin(t('auth.needed')); return t('auth.needed'); }
+    if (r.status === 403) return t('auth.denied');
+    return r.text ? r.text.trim() : 'HTTP ' + r.status;
+  }
+
+  async function renderLibrary() {
+    if (!libraryOn()) return;
+    var gen = ++libPage.gen;
+    $('lib-q').value = libPage.q;
+    if (needsCredentials('play')) {
+      hint('lib-hint', t('auth.needed'), 'error');
+      showLogin(t('auth.needed'));
+      return;
+    }
+    hint('lib-hint', t('lib.loading'));
+    var r = await api('library');
+    if (gen !== libPage.gen) return;
+    if (r.status !== 200 || !r.data) { hint('lib-hint', libraryHint(r), 'error'); return; }
+    hint('lib-hint', '');
+    var chans = $('lib-channels');
+    chans.textContent = '';
+    $('lib-channels-card').hidden = !S.conf.library.channels;
+    var q = libPage.q.toLowerCase();
+    r.data.channels.filter(function (ch) { return !q || ch.name.toLowerCase().indexOf(q) >= 0 || (ch.now || '').toLowerCase().indexOf(q) >= 0; })
+      .forEach(function (ch) { chans.appendChild(channelCard(ch)); });
+    if (!chans.firstChild) chans.appendChild(el('p', 'muted', t('lib.nochannels')));
+    var box = $('lib-shelves');
+    box.textContent = '';
+    libPage.shelves = {};
+    r.data.libraries.forEach(function (l) {
+      var card = el('div', 'card');
+      var head = el('div', 'card__head card__head--row');
+      var count = el('span', 'badge');
+      head.appendChild(el('h3', '', l.name));
+      head.appendChild(count);
+      var body = el('div', 'card__body');
+      var grid = el('div', 'shelf');
+      var note = el('p', 'muted');
+      var more = el('button', 'btn btn--sm shelf__more', t('lib.more'));
+      more.type = 'button';
+      more.hidden = true;
+      body.appendChild(grid);
+      body.appendChild(note);
+      body.appendChild(more);
+      card.appendChild(head);
+      card.appendChild(body);
+      card.setAttribute('data-library', l.name);
+      box.appendChild(card);
+      var sh = { name: l.name, grid: grid, note: note, more: more, count: count, offset: 0, total: 0, tries: 0 };
+      libPage.shelves[l.name] = sh;
+      more.addEventListener('click', function () { loadShelf(sh, gen); });
+      loadShelf(sh, gen);
+    });
+  }
+
+  async function loadShelf(sh, gen) {
+    var path = 'library/' + encodeURIComponent(sh.name) + '?offset=' + sh.offset + '&limit=' + PAGE_ITEMS +
+      (libPage.q ? '&q=' + encodeURIComponent(libPage.q) : '');
+    var r = await api(path);
+    if (gen !== libPage.gen) return;
+    // A library not scanned yet is asked again, a bounded number of times.
+    if (r.status === 503 && sh.tries < 30) {
+      sh.tries++;
+      sh.note.textContent = t('lib.notready');
+      setTimeout(function () { if (gen === libPage.gen) loadShelf(sh, gen); }, Math.max(1, r.retryAfter) * 1000);
+      return;
+    }
+    if (r.status !== 200 || !r.data) { sh.note.textContent = libraryHint(r); return; }
+    sh.note.textContent = '';
+    r.data.items.forEach(function (it) { sh.grid.appendChild(itemCard(sh.name, it)); });
+    sh.offset += r.data.items.length;
+    sh.total = r.data.total;
+    sh.count.textContent = t('lib.count', { n: sh.total });
+    sh.more.hidden = sh.offset >= sh.total;
+    if (!sh.total) sh.note.textContent = t('lib.empty');
+  }
+
+  function posterCard(href, art, title, meta, onclick) {
+    var a = el('a', 'poster');
+    a.href = href;
+    a.title = title;
+    a.appendChild(art);
+    a.appendChild(el('span', 'poster__title', title));
+    a.appendChild(el('span', 'poster__meta', meta));
+    a.addEventListener('click', function (ev) {
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+      ev.preventDefault();
+      onclick();
+    });
+    return a;
+  }
+
+  function itemCard(lib, it) {
+    var art = el('span', 'poster__art', (it.title || it.id).charAt(0).toUpperCase());
+    if (it.poster) {
+      // The poster is the vod handler's, let in by the login's cookie; one
+      // that does not load leaves the title's initial.
+      var img = el('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.addEventListener('error', function () { img.remove(); });
+      img.src = it.poster;
+      art.appendChild(img);
+    }
+    var meta = [formatDuration(it.duration)];
+    if (it.height) meta.push(it.height + 'p');
+    if (it.renditions.length > 1) meta.push(it.renditions.length + '×');
+    var search = '?library=' + encodeURIComponent(lib) + '&id=' + encodeURIComponent(it.id);
+    var card = posterCard('watch' + search, art, it.title || it.id, meta.join(' · '), function () { go('watch', search); });
+    card.setAttribute('data-item', it.id);
+    return card;
+  }
+
+  function channelCard(ch) {
+    var art = el('span', 'poster__art poster__art--live', t('lib.live'));
+    var meta = ch.now ? t('lib.now', { t: ch.now }) : ch.state;
+    if (ch.next) meta += ' · ' + t('lib.next', { t: ch.next });
+    var search = '?channel=' + encodeURIComponent(ch.name);
+    var card = posterCard('watch' + search, art, ch.name, meta, function () { go('watch', search); });
+    card.setAttribute('data-channel', ch.name);
+    return card;
+  }
+
+  // loadHls loads hls.js once, from the pages' own copy.
+  var hlsScript = null;
+  function loadHls() {
+    if (window.Hls) return Promise.resolve(true);
+    if (!hlsScript) {
+      hlsScript = new Promise(function (resolve) {
+        var s = document.createElement('script');
+        s.src = 'vendor/hls.min.js';
+        s.onload = function () { resolve(!!window.Hls); };
+        s.onerror = function () { hlsScript = null; resolve(false); };
+        document.head.appendChild(s);
+      });
+    }
+    return hlsScript;
+  }
+
+  function renderWatch() {
+    var w = watchPage;
+    $('watch-title').textContent = w.title;
+    var v = $('watch-video');
+    var state = '';
+    if (w.refused) state = 'refused';
+    else if (!w.error && w.state === 'started') state = v.ended ? 'ended' : v.paused ? 'paused' : 'playing';
+    var badge = $('watch-state');
+    badge.textContent = state ? t('watch.' + state) : '';
+    badge.className = 'badge' + (state === 'refused' ? ' err' : state === 'playing' ? ' ok' : '');
+    $('watch-again').hidden = !(w.refused || w.error);
+    if (w.refused) hint('watch-hint', t('watch.expired'), 'error');
+    else if (w.error) hint('watch-hint', w.error, 'error');
+    else if (w.state === 'loading') hint('watch-hint', t('watch.loading'));
+    else if (w.signed && w.expires) hint('watch-hint', t('watch.until', { t: new Date(w.expires * 1000).toLocaleTimeString() }));
+    else hint('watch-hint', '');
+  }
+
+  function stopWatch() {
+    watchPage.gen++;
+    if (watchPage.hls) { try { watchPage.hls.destroy(); } catch (e) { /* gone already */ } }
+    watchPage.hls = null;
+    var v = $('watch-video');
+    if (v.getAttribute('src') || v.currentSrc) {
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) { /* nothing loaded */ }
+    }
+  }
+
+  // refuse stops a player the server refused: its URL, and the grant its
+  // playlists handed on, expired or were ended.
+  function refuse(status) {
+    if (watchPage.refused) return;
+    stopWatch();
+    watchPage.refused = true;
+    problem('playback refused: HTTP ' + status);
+    renderWatch();
+  }
+
+  async function startWatch() {
+    stopWatch();
+    var gen = watchPage.gen;
+    var p = new URLSearchParams(location.search);
+    var body = p.get('channel') ? { channel: p.get('channel') } : { library: p.get('library') || '', id: p.get('id') || '' };
+    Object.assign(watchPage, { state: 'loading', url: '', signed: false, expires: 0, refused: false, error: '',
+      kind: body.channel ? 'channel' : 'vod', title: body.channel || body.id });
+    renderWatch();
+    if (needsCredentials('play')) {
+      watchPage.error = t('auth.needed');
+      renderWatch();
+      showLogin(t('auth.needed'));
+      return;
+    }
+    var r = await api('play', body);
+    if (gen !== watchPage.gen) return;
+    if (r.status !== 200 || !r.data) { watchPage.state = ''; watchPage.error = libraryHint(r); renderWatch(); return; }
+    Object.assign(watchPage, { url: r.data.url, signed: r.data.signed, expires: r.data.expires || 0, title: r.data.title, kind: r.data.kind });
+    var hasHls = await loadHls();
+    if (gen !== watchPage.gen) return;
+    var v = $('watch-video');
+    var url = r.data.url;
+    watchPage.state = 'started';
+    if (hasHls && window.Hls.isSupported()) {
+      var sameOrigin = new URL(url, location.href).origin === location.origin;
+      var tok = !r.data.signed && sameOrigin && token() ? token() : '';
+      var h = new window.Hls({
+        // A token pasted in, rather than the login's cookie, goes along as
+        // a header; a signed URL carries its own grant.
+        xhrSetup: function (xhr) { if (tok) xhr.setRequestHeader('Authorization', 'Bearer ' + tok); },
+      });
+      watchPage.hls = h;
+      var recoveries = 0;
+      h.on(window.Hls.Events.ERROR, function (_, d) {
+        if (gen !== watchPage.gen) return;
+        var code = d && d.response && d.response.code;
+        if (code === 401 || code === 403) { refuse(code); return; }
+        if (d && d.fatal) {
+          if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR && recoveries++ < 2) { h.recoverMediaError(); return; }
+          problem('hls: ' + d.details);
+          stopWatch();
+          watchPage.error = t('watch.error', { e: d.details });
+          renderWatch();
+        }
+      });
+      h.on(window.Hls.Events.MANIFEST_PARSED, function () { if (gen === watchPage.gen) playWhenReady(v); });
+      h.attachMedia(v);
+      h.loadSource(url);
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = url;
+      playWhenReady(v);
+    } else {
+      watchPage.error = t('watch.nohls');
+    }
+    renderWatch();
+  }
+
   /* ---------- views ---------- */
 
   var view = 'home';
@@ -1718,21 +2007,25 @@
   function viewOf(path) {
     var base = new URL(document.baseURI).pathname;
     var rest = path.indexOf(base) === 0 ? path.slice(base.length) : '';
+    if (rest === 'library' || rest === 'watch') return libraryOn() ? rest : 'home';
     return rest === 'call' || rest === 'publish' || rest === 'play' ? rest : 'home';
   }
 
-  function show(v, push) {
+  function show(v, push, search) {
+    if (view === 'watch' && v !== 'watch') stopWatch();
     view = v;
-    ['home', 'call', 'publish', 'play'].forEach(function (n) { $('view-' + n).hidden = n !== v; });
+    ['home', 'call', 'publish', 'play', 'library', 'watch'].forEach(function (n) { $('view-' + n).hidden = n !== v; });
     document.querySelectorAll('.tab').forEach(function (a) { a.classList.toggle('is-active', a.getAttribute('data-nav') === v); });
     if (push) {
       var u = new URL(v === 'home' ? './' : v, document.baseURI);
-      u.search = location.search;
+      u.search = search !== undefined ? search : location.search;
       try { history.pushState(null, '', u.toString()); } catch (e) { /* nothing */ }
     }
     if (v === 'home') renderHome();
     if (v === 'publish') renderPub();
     if (v === 'play') renderPlay();
+    if (v === 'library') renderLibrary();
+    if (v === 'watch') startWatch();
   }
 
   function renderHome() {
@@ -1772,6 +2065,8 @@
     S.conf = r.data;
     document.title = S.conf.title;
     $('play-mode-field').hidden = !S.conf.hls;
+    $('nav-library').hidden = !libraryOn();
+    $('home-library').hidden = !libraryOn();
     renderAuth();
     $('login-token-field').hidden = false;
 
@@ -1844,6 +2139,15 @@
     $('pub-cam').addEventListener('click', function () { if (pubPage.local) toggle(pubPage.local, 'video', pubChanged); else flip('pub-cam'); });
     $('pub-screen').addEventListener('click', function () { if (pubPage.local) toggle(pubPage.local, 'screen', pubChanged); });
 
+    $('lib-form').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      libPage.q = $('lib-q').value.trim();
+      renderLibrary();
+    });
+    $('watch-again').addEventListener('click', function () { startWatch(); });
+    $('watch-video').addEventListener('play', renderWatch);
+    $('watch-video').addEventListener('pause', renderWatch);
+    $('watch-video').addEventListener('ended', renderWatch);
     $('play-form').addEventListener('submit', startPlay);
     $('play-stop').addEventListener('click', stopPlay);
     $('play-stream').addEventListener('input', function () { renderLinks('play-links', $('play-stream').value.trim()); });
@@ -1870,7 +2174,7 @@
     clearChat();
     renderChatPanel();
     show(viewOf(location.pathname), false);
-    if (needsCredentials('play') && needsCredentials('publish')) showLogin('');
+    if (needsCredentials('play') && (needsCredentials('publish') || view === 'library' || view === 'watch')) showLogin('');
     if (params.get('auto') === '1' && view === 'call') joinCall();
   }
 
@@ -1924,6 +2228,18 @@
     file: function (name, bytes) { return sendChatFile(name, bytes); },
     messages: function () { return chatMessages(); },
     chatEnabled: function () { return chatEnabled(); },
+    // The player page: what it plays, and how far.
+    watch: function () {
+      var v = $('watch-video');
+      var w = watchPage;
+      return {
+        state: w.state, kind: w.kind, title: w.title, url: w.url, signed: w.signed, expires: w.expires,
+        refused: w.refused, error: w.error, hls: !!w.hls,
+        currentTime: v.currentTime, duration: v.duration, paused: v.paused, seeking: v.seeking,
+        width: v.videoWidth, height: v.videoHeight,
+      };
+    },
+    seek: function (to) { $('watch-video').currentTime = to; },
     status: function () {
       var l = call.local;
       var spot = call.spot ? (call.spot === call.me ? call.name : call.spot.name) : '';

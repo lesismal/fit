@@ -4,8 +4,11 @@
 // page; a login against a media_auth policy's users, which issues a token
 // signed by the policy; and a room API, through which the members of a call
 // announce whether they publish and their microphone and camera are on, and
-// learn the others' with Server-Sent Events. See
-// docs/decisions/030-media-auth-and-pages.md.
+// learn the others' with Server-Sent Events; and, with libraries or
+// channels, a library page of the media libraries' items and the streaming
+// role's channels the viewer may play, and a player page that plays one
+// with hls.js through a playback URL signed for the viewer. See
+// docs/decisions/030-media-auth-and-pages.md and 032-media-library.md.
 //
 // Nothing blocks a worker: the room API's state is in memory under short
 // locks, its events are written with WriteNoWait, a slow browser is sent only
@@ -42,7 +45,7 @@ import (
 
 func init() {
 	module.Register(module.Info{ID: module.Handlers + ".media_pages", New: func() any { return new(Pages) },
-		Doc: "Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera."})
+		Doc: "Serves fit's media pages under a prefix: an index with a login, a room call, publish and play pages over WHIP and WHEP, and the room API through which the members of a call announce their microphone and camera; with libraries or channels, a library page and a player page that plays with hls.js through playback URLs signed for the viewer."})
 }
 
 // The defaults of the params.
@@ -81,6 +84,9 @@ type Pages struct {
 	MaxFileBytes    int64              `json:"max_file_bytes,omitempty" min:"1024" max:"33554432" default:"5242880" doc:"The largest file a member may send in a room's chat, in bytes; a larger one is answered 413, and the page refuses it before sending. 5 MiB (5242880) when left out."`
 	MemberTTL       config.Duration    `json:"member_ttl,omitempty" default:"\"30s\"" doc:"How long a member stays in its room without a heartbeat: the pages send one every third of it. 30s when left out."`
 	StallTimeout    config.Duration    `json:"stall_timeout,omitempty" default:"\"30s\"" doc:"How long a room's event stream may wait for its browser to take what it was sent before it is cut off. 30s when left out."`
+	Libraries       []string           `json:"libraries,omitempty" doc:"The media_library names whose items the library page lists, at most 16: those the viewer may play, play on vod/<library>/<id> under auth, that can be served, with their posters, searched and paged; the player page plays one with hls.js, vendored in the binary. With the auth policy's url_signing, and playing not public, the player plays through a playback URL the pages sign for the viewer, its address and a session of its own, good for url_signing's ttl, whose playlists hand the player its grant; otherwise through the plain URL, which the login's cookie lets in. None when left out: no library page."`
+	VOD             string             `json:"vod,omitempty" default:"\"/vod/{library}/{id}/index.m3u8\"" doc:"The URL of an item's multivariant playlist, as a vod handler serves it, {library} standing for its library's name and {id} for its ID: a path on this server or an http or https URL, ending in {id}/ and the playlist's name. The item's poster is beside it, poster and its extension. /vod/{library}/{id}/index.m3u8 when left out, the vod handler's own prefix."`
+	Channels        bool               `json:"channels,omitempty" doc:"List the streaming role's channels on the library page too, those the viewer may play, with what each plays now and next, played from hls, which must be set, through a playback URL signed for the viewer as an item's is. Off when left out."`
 
 	prefix   string
 	auth     *mediaauth.Policy
@@ -88,7 +94,8 @@ type Pages struct {
 	hub      *hub
 	settings *settings
 	assets   map[string]*asset
-	pages    bool   // serve the pages
+	pages    bool // serve the pages
+	lib      *library
 	conf     []byte // GET api/config's answer
 }
 
@@ -208,6 +215,9 @@ func (p *Pages) Provision(ctx *module.Context) error {
 			"maxMessage":  st.maxMessage,
 		},
 	}
+	if conf["library"], err = p.provisionLibrary(ctx, origins); err != nil {
+		return err
+	}
 	if p.conf, err = json.Marshal(conf); err != nil {
 		return err
 	}
@@ -298,8 +308,8 @@ func (p *Pages) buildAssets(origins []string) error {
 	if len(origins) > 0 {
 		extra = " " + strings.Join(origins, " ")
 	}
-	csp := "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:" + extra +
-		"; connect-src 'self'" + extra + "; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+	csp := "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:" + extra + "; media-src 'self' blob:" + extra +
+		"; connect-src 'self'" + extra + "; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 	p.assets = map[string]*asset{}
 	add := func(name, ctype string, body []byte) {
 		sum := sha256.Sum256(body)
@@ -329,7 +339,10 @@ func (p *Pages) buildAssets(origins []string) error {
 	index = bytes.ReplaceAll(index, []byte("{{base}}"), []byte(p.prefix+"/"))
 	index = bytes.ReplaceAll(index, []byte("{{title}}"), []byte(orDefault(p.Title, "fit media")))
 	add("index.html", "text/html; charset=utf-8", index)
-	for _, f := range []struct{ name, ctype string }{{"app.js", "text/javascript; charset=utf-8"}, {"app.css", "text/css; charset=utf-8"}} {
+	// hls.js, which the player page plays HLS with, is vendored in
+	// web/vendor with its license (Apache-2.0), served beside it.
+	for _, f := range []struct{ name, ctype string }{{"app.js", "text/javascript; charset=utf-8"}, {"app.css", "text/css; charset=utf-8"},
+		{"vendor/hls.min.js", "text/javascript; charset=utf-8"}, {"vendor/hls.js-LICENSE.txt", "text/plain; charset=utf-8"}} {
 		b, err := fs.ReadFile(files, f.name)
 		if err != nil {
 			return err
@@ -366,7 +379,7 @@ func (p *Pages) ServeHTTP(c *fibhttp.Context) {
 	}
 	name := rest
 	switch rest {
-	case "", "call", "publish", "play":
+	case "", "call", "publish", "play", "library", "watch":
 		name = "index.html"
 	}
 	a := p.assets[name]
@@ -408,6 +421,10 @@ func (p *Pages) api(c *fibhttp.Context, rest string) {
 			return
 		}
 		writeJSON(c, stdhttp.StatusOK, map[string]any{}, stdhttp.Header{"Set-Cookie": {p.cookie(c, "", -1)}})
+	case rest == "library" || strings.HasPrefix(rest, "library/"):
+		p.libraryAPI(c, strings.TrimPrefix(rest, "library"))
+	case rest == "play":
+		p.play(c)
 	case strings.HasPrefix(rest, "rooms/"):
 		p.rooms(c, strings.TrimPrefix(rest, "rooms/"))
 	default:

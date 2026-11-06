@@ -289,6 +289,71 @@ cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; Sam
 多花 3.2 ms；测试媒体库的小分片多花 24 µs（fMP4）和 48 µs（MPEG-TS），由 153 µs 到 177 µs、由 174 µs 到 222 µs，
 包括其密钥的派生。
 
+## 一个视频网站
+
+把以上全部合在一起：一个网站，它的影片是一个媒体库，以点播和频道两种方式播放，只给网站自己的 API 放行的观众看，经由会
+过期的 URL。fit-examples 的 [video-site](https://github.com/lesismal/fit-examples/tree/main/video-site) 就是这样一个完整的网站，
+附带用 ffmpeg 为它生成影片的脚本；下面说明它的各部分如何配合。
+
+```fit
+media_library films { roots /srv/media/films }
+
+media_auth site {
+	secret_file /etc/fit/site-secret
+	users staff { password_hash $2a$10$...; play * }
+	url_signing { ttl 2m; play_grace 30m; max_sessions 2; on_limit end_oldest }
+}
+
+streaming {
+	channels { name tv/films; library films; items films/testcard films/bars }
+}
+
+upstream site-api { addresses 127.0.0.1:8090 }
+
+route vod { match { path /vod/* }; handler vod { library films; auth site } }
+route channels { match { path /hls/* }; handler hls { prefix /hls/; auth site } }
+route tokens {
+	match { path /media-tokens /media-tokens/*; remote_ip 127.0.0.1/32 ::1/128 }
+	middleware basic_auth { users { username site-api; password_hash $2a$10$... } }
+	handler media_tokens { auth site; url_prefixes /vod/films/ /hls/tv/; max_ttl 1h }
+}
+route api { match { path /api/* }; handler proxy { upstream site-api } }
+route staff {
+	match { path /media /media/* }
+	handler media_pages { auth site; login true; libraries films; channels true; hls /hls/{stream}/index.m3u8 }
+}
+route site { priority -1; handler static { root /srv/site } }
+```
+
+**由网站的 API 决定谁能观看。** 观众属于网站，存在它自己的数据库里；fit 一个也不保存。API 用自己的会话让观众登录；观众
+要播放某个节目时，API 向 `media_tokens` 申请它的 URL：`POST /media-tokens/urls`，以观众的不透明 ID 为主体，带上观众的来源
+地址（fit 的 proxy 追加的最后一个 `X-Forwarded-For`）和一个较短的 `ttl`，再把得到的 URL 交给页面。`media_tokens` 是唯一能
+签名的路由：它只接受来自本机（`remote_ip`）且通过 `basic_auth`（或 `jwt`、`forward_auth`）的请求，因此只有 API 能访问它。
+示例的 API 约 300 行 Go，只用标准库和 bcrypt；关键的调用是这一个：
+
+```go
+body, _ := json.Marshal(map[string]any{"subject": viewer.ID, "address": addr, "ttl": "2m",
+	"paths": []string{"/vod/films/" + id + "/index.m3u8"}})
+req, _ := http.NewRequest("POST", "http://127.0.0.1:8080/media-tokens/urls", bytes.NewReader(body))
+req.SetBasicAuth("site-api", password)
+// 200: {"subject": ..., "session": ..., "expires": ..., "urls": ["/vod/films/films/testcard/index.m3u8?exp=...&sig=..."]}
+```
+
+**页面播放它。** 网站的页面把 URL 交给 hls.js；hls.js 1.5.20（Apache-2.0）随 fit 提供，内置在 `media_pages` 中，位于
+`<prefix>/vendor/hls.min.js`，许可证在其旁边，同一网站的任何页面都可以加载。Safari 自己就能播放这个 URL。URL 在其 `ttl`
+后失效；播放器凭播放列表交给它的授权继续播放，直到影片结束，暂停和拖动也不受影响；频道的授权在 URL 过期后存活
+`play_grace`。两者都被拒绝（403）后，页面向 API 申请新的 URL，只有观众仍在登录且仍被允许时 API 才会给出。一个观众的播放器
+超过 `max_sessions` 时，最早的那个被结束。
+
+**fit 给工作人员的页面。** 设置了 `libraries` 和 `channels` 的 `media_pages` 多出一个片库页面 `<prefix>/library` 和一个播放
+页面 `<prefix>/watch`，都在策略的登录之后：片库列出登录用户可以播放的条目和频道（对 `vod/<library>/<id>` 或频道名有
+`play` 权限），带海报，可搜索、分页；播放页面通过 `api/play` 取得为该用户、其地址和一个独立会话签名的 URL，用 hls.js 播放。
+策略的 `users` 是 fit 自己的用户，供工作人员使用，与网站的观众无关。[配置参考](reference/config.md#http-handlers-media_pages)
+列出了各字段。
+
+**端到端测试。** `test/docker/videosite/e2e.sh` 在 Linux 容器中运行这个示例，影片由它的脚本生成：无头 Chromium 登录示例的
+API，经由 API 发放的 URL 播放一部影片和频道，拖动进度，并在 URL 及其授权过期后被拒绝；在片库和播放页面上也做同样的事。
+
 ## 指标
 
 `fit_media_library_items`（按 `state`，ok 或 error）、`fit_media_library_catalog_bytes`、`fit_media_library_scans_total`、
