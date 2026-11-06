@@ -13,6 +13,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [Groups and operations](#groups-and-operations)
 - [A member's own pages: the node switcher](#a-members-own-pages-the-node-switcher)
 - [Templates: config shared by a group](#templates-config-shared-by-a-group)
+- [Rollouts: a change applied in stages](#rollouts-a-change-applied-in-stages)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -289,6 +290,76 @@ forgets the manager.
   `schema_version` cannot be picked), the parts picked made into a template, attached to the
   groups picked. Attached to its own member, it is in sync there.
 
+## Rollouts: a change applied in stages
+
+A **rollout** applies one change to many members, a batch at a time, each batch checked before the
+next goes. It is made from:
+
+- **a template's change**: every member of the template's groups (or those picked) gets its desired
+  config, its own with the parts its templates own taken from them;
+- **a sync**: the members picked, a group's, or every member, each brought in sync with all its
+  templates;
+- **a copy**: parts of one member's config (top-level members whole, `routes[api]` and the other
+  named lists' elements by name) copied to others, as it has them now, secrets and all.
+
+**The plan.** Planning reads each member (`GET /node` for its capabilities, `GET /config` and its
+ETag), makes its desired config and its diff, part by part (secrets masked), and has the member
+check it by its own dry run (`PUT /config?dry_run=1` with `If-Match`): the whole apply path,
+compiled and loaded, without applying it. A member is **ready**, has **nothing to change**, or is
+**not ready**, with why: the member's dry run refused the config (each error with its JSON pointer),
+it could not be read, its templates do not render for it, it is a fit older than rollouts (it must
+list `config.if_match`, `config.dry_run` and `config.versions`), it is held by another rollout or
+an operation, or the plan would keep more than 8 MiB of configs and diffs. The plan keeps each ready
+member's desired config byte for byte in the manager's store (encrypted), the ETag it was made from,
+the version it ran, and the ETag the member's dry run said the new config gets. A plan not started
+within an hour expires; at most 4 rollouts are planned or under way at once.
+
+**The strategy**, chosen when it starts:
+
+| Strategy | What it does |
+| --- | --- |
+| `all` | one batch of every member |
+| `rolling` | batches of `batch_size` members, or of `batch_percent` of them, with `pause_ms` between batches |
+| `canary` | a first batch of `canary` members (the first by name); once its gate passes the rollout **waits** for a person to go on; then the rest, in batches as rolling has them, or at once |
+
+Members may be left out when it starts. Each member gets its desired config by its own `PUT /config`
+with `If-Match` on the ETag the plan read: a member changed since the plan answers `412` and is
+**skipped**, never overwritten. An apply whose answer is lost is told by the member's `GET /node`:
+running the ETag the dry run gave means it was applied.
+
+**The health gate** after each batch, `wait_ms` after it is applied (5 s by default), checks each
+member applied: it is reachable; it runs the config the rollout applied (its config's ETag), so its
+reload succeeded and held; its consistency check (`GET /config/check`) finds no more differences
+than before the rollout; and, when `max_5xx_ratio` is set, its share of 5xx answers over
+`window_ms` after the batch is at most that, judged once it answered `min_requests` (counted from
+the member's `GET /status` `requests`, which a member counts when its config sets `metrics`; a batch
+with a member that counts none fails before anything of it is applied). An apply refused fails the
+gate too. A failed gate **stops the rollout** and rolls back its batch, or every member applied
+(`on_failure: all`), each to the version it ran before by its own `POST /rollback/{n}` with
+`If-Match` on the rollout's config: a member changed since is left as it is, said so.
+
+**Steering.** **Pause** takes effect after the batch under way; **Resume** goes on from there;
+**Go on** follows a canary; **Abort** stops after the members being applied (a gate's wait is cut
+short), leaving what was applied; **Roll back** rolls back every member the rollout applied, once it
+is paused, waiting or ended. One rollout or operation runs on a member at a time: a rollout holds
+its members from its start to its end, and operations and other rollouts are refused on them. A
+manager restarted while a rollout runs shows it **paused where it stopped**; resumed, a member whose
+apply was under way is found applied or not by its ETag, and gated.
+
+**Kept.** Rollouts are kept in the manager's store, the last 50, each with its plan, its strategy,
+its batches and each member's outcome, versions (from, applied, rolled back), the hash of the config
+it got and its gate; the configs and diffs' values are dropped once it ends. The audit log has each
+plan, start, pause, resume, go, abort, rollback and end, the end with every member's outcome.
+
+**The pages**, under **Rollouts**: the history, the latest first, and **New rollout**; a new
+rollout's form (what, the template, group or members, the parts of a copy); a rollout's page:
+planned, each member's state, its changes side by side, its dry run's errors linked to the member's
+page, its own pages and its rendered result, a box to leave it out, the strategy form, and **Start**,
+whose dialog lists the batches and every member's diff; started, its progress batch by batch with
+each member's status, versions and gate (the share of 5xx and the drift it found, and why it
+failed), with **Pause**, **Resume**, **Go on**, **Abort** and **Roll back**. A template's page has
+**Roll out**, and a member's rendered result **Sync this node**.
+
 ## How members are reached
 
 A member is a fit the manager can reach, one of three ways:
@@ -389,6 +460,12 @@ pages above use nothing else:
 | `GET desired/<member>` | a member read now: its sync state, `config` and `desired`, secrets masked |
 | `POST compare` | `{"a", "b"}`: both members' configs, `{"a", "b", "parts"}`, each side `{"node", "config_etag", "config"}`, each part `{"path", "state", "a", "b"}`, `state` `same`, `differs`, `only_a` or `only_b` |
 | `POST import` | `{"node"}`: the member's config's parts, `{"node", "config_etag", "parts"}`, each `{"path", "member", "name", "ownable", "why", "secret", "value"}` |
+| `POST rollouts` | plans a rollout: `{"kind", "template", "group", "nodes", "from", "paths", "description"}`, `kind` `template`, `sync` or `copy`; `202` with the rollout, planning; `400` with `{"field", "error"}`, `404` for a template, group or member there is none of, `429` past 4 planned or under way |
+| `GET rollouts` | the rollouts kept, the latest first, without the diffs' values: `{"max_active", "plan_ttl_ms", "read_only", "rollouts"}` |
+| `GET rollouts/<id>` | a rollout: `{"id", "kind", "template", "group", "from", "paths", "description", "planned_by", "started_by", "state", "reason", "strategy", "created", "planned", "started", "ended", "batch", "next_at", "batches", "members", "counts"}`; `state` `planning`, `planned`, `running`, `paused`, `waiting`, `rolling_back`, `done`, `failed`, `aborted`, `rolled_back` or `expired`; a member `{"node", "status", "config_etag", "version", "new_etag", "digest", "applied", "rolled_back", "unsure", "changes", "changed", "errors", "warnings", "note", "error", "gate"}`, a change `{"path", "state", "sync", "reason", "template", "have", "want"}` (secrets masked), a gate `{"passed", "checked", "reasons", "notes", "version", "drift_before", "drift_after", "requests", "errors_5xx", "ratio"}`; never a config |
+| `POST rollouts/<id>/start` | starts a plan: `{"strategy": {"mode", "batch_size", "batch_percent", "pause_ms", "canary", "on_failure", "gate": {"wait_ms", "max_5xx_ratio", "window_ms", "min_requests"}}, "exclude"}`; `409` for a member held by another rollout or an operation |
+| `POST rollouts/<id>/pause`, `resume`, `go`, `abort`, `rollback` | steers it; `409` when its state does not allow it |
+| `DELETE rollouts/<id>` | discards a plan |
 | `POST text/render?format=` | a template's config, JSON, as `conf`, `yaml` or `json` text |
 | `POST text/parse?format=` | such a text as JSON, or `400` with its error |
 

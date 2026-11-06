@@ -301,3 +301,36 @@ func TestAccountPasswordUserSlowed(t *testing.T) {
 		t.Errorf("a change while the user is slowed: %d %s %v", code, body, h)
 	}
 }
+
+// TestPutWholeConfigWithAdmin: a manager's rollout (I146) puts a member's
+// whole config back with its changes, as GET /config answered it: on a fit
+// without a store that includes admin, which is taken, by a dry run and an
+// apply alike, with no warning when it is unchanged; a changed admin is
+// applied with the warning that it takes effect at a restart.
+func TestPutWholeConfigWithAdmin(t *testing.T) {
+	f := start(t, `{"admin": {"address": "127.0.0.1:0", "history": 4}, "listeners": [{"name": "web", "address": "127.0.0.1:0"}],
+  "routes": [{"handler": {"module": "respond", "params": {"body": "one"}}}]}`, &config.Admin{})
+	resp, body := f.get(t, "/config")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"admin"`) {
+		t.Fatalf("GET /config: %d %s", resp.StatusCode, body)
+	}
+	next := strings.Replace(body, `"one"`, `"two"`, 1)
+	v := f.configs.Current()
+	resp, out := f.send(t, "PUT", "/config?dry_run=1", "application/json", next, v.ETag)
+	var a dryAnswer
+	if resp.StatusCode != 200 || json.Unmarshal([]byte(out), &a) != nil || !a.DryRun || len(a.Warnings) != 0 {
+		t.Fatalf("a dry run of the config with its admin: %d %s", resp.StatusCode, out)
+	}
+	resp, out = f.send(t, "PUT", "/config", "application/json", next, v.ETag)
+	if resp.StatusCode != 200 || strings.Contains(out, "warnings") || f.served(t) != "two" {
+		t.Fatalf("the config with its admin: %d %s", resp.StatusCode, out)
+	}
+	if got := f.configs.Current().ETag; got != a.NewETag {
+		t.Errorf("applied as %s, the dry run said %s", got, a.NewETag)
+	}
+	changed := strings.Replace(next, `"history": 4`, `"history": 5`, 1)
+	resp, out = f.send(t, "PUT", "/config", "application/json", changed, f.configs.Current().ETag)
+	if resp.StatusCode != 200 || !strings.Contains(out, "admin changed") {
+		t.Fatalf("a changed admin: %d %s", resp.StatusCode, out)
+	}
+}

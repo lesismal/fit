@@ -71,6 +71,11 @@ func TestMetricsRegistry(t *testing.T) {
 	if n := m.Requests("web", "api").Codes()[1]; n != 0 {
 		t.Errorf("a route taken again kept %d requests", n)
 	}
+	// The totals keep what released routes counted.
+	c.Observe(0, 503, time.Millisecond)
+	if got := m.Totals(); got != [5]uint64{0, 1, 0, 0, 1} {
+		t.Errorf("totals %v", got)
+	}
 }
 
 func TestTextWriter(t *testing.T) {

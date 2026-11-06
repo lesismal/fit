@@ -158,6 +158,10 @@ func (m *RequestMetrics) Duration() HistogramSnapshot {
 type Metrics struct {
 	mu       sync.Mutex
 	requests map[[2]string]*RequestMetrics
+	// retired are the requests counted by the RequestMetrics no graph has
+	// any more, by the class of their status, so that Totals never goes
+	// back.
+	retired [len(StatusClasses)]uint64
 }
 
 // NewMetrics returns an empty Metrics.
@@ -184,7 +188,30 @@ func (m *Metrics) Release(r *RequestMetrics) {
 	defer m.mu.Unlock()
 	if r.refs--; r.refs == 0 {
 		delete(m.requests, [2]string{r.Listener, r.Route})
+		for i, n := range r.Codes() {
+			m.retired[i] += n
+		}
 	}
+}
+
+// Totals returns every request counted since m was made, by the class of
+// its status, routes no graph has any more included: counters that never
+// go back, whose difference over a while is what was answered in it, as a
+// manager's health gate reads them (GET /status's requests).
+func (m *Metrics) Totals() [len(StatusClasses)]uint64 {
+	m.mu.Lock()
+	out := m.retired
+	live := make([]*RequestMetrics, 0, len(m.requests))
+	for _, r := range m.requests {
+		live = append(live, r)
+	}
+	m.mu.Unlock()
+	for _, r := range live {
+		for i, n := range r.Codes() {
+			out[i] += n
+		}
+	}
+	return out
 }
 
 // AllRequests returns the RequestMetrics kept, by listener and route.

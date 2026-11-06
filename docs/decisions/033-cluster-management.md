@@ -183,6 +183,18 @@ What I145 adds, templates ([templates](../cluster.md#templates-config-shared-by-
   whether it changed there since the manager saw it in sync; the config pages mark those parts and
   ask before a change to one.
 
+What I146 adds, rollouts ([rollouts](../cluster.md#rollouts-a-change-applied-in-stages)):
+
+- **Rollouts** in the document's `rollouts`: planned from a template's change, a sync, or parts
+  copied from a member (`POST /api/m/cluster/rollouts`), each member's desired config, diff and dry
+  run taken; started with a strategy (all, rolling, canary), applied batch by batch by each member's
+  `PUT /config` with `If-Match`, gated, stopped and rolled back by `POST /rollback/{n}` on a failed
+  gate; paused, resumed, gone on with, aborted, rolled back and discarded; kept with each member's
+  outcome and versions, paused by a restart.
+- **On every fit, for it**: `GET /status` answers `requests`, the requests answered since fit
+  started by the class of their status, never going back (`status.requests`), when the config sets
+  `metrics`.
+
 ## Pending review
 
 Decided while building I140 (2026-11-06); each stands until the user rules on it.
@@ -458,6 +470,69 @@ Decided while building I145 (2026-11-06):
 83. **A member of another schema** is read with a note (I143's `compatible`), not refused.
 84. **The pages**: Templates after Groups; `#/cluster/newtemplate`, `template/<name>`,
     `rendered/<member>` and `compare`.
+
+Decided while building I146 (2026-11-06):
+
+85. **Rollouts are typed in the document's `rollouts`**, version 2 kept (an I145 fit keeps them as
+    it finds them). A ready member's desired config is kept in the store byte for byte (base64), so
+    that what is applied gets the ETag its dry run said, until the rollout ends; then the configs and
+    the diffs' values are dropped, the paths changed and a hash of each config kept; the last 50
+    rollouts are kept. Alternatives: a section of their own; the desired configs made again at apply.
+86. **A plan is frozen**: what its members get is what was planned, whatever changes after; it
+    expires an hour after it is planned; at most 4 rollouts are planned or under way at once.
+    Alternative: render the templates again at each batch.
+87. **Members not ready are left out, with why**, and the rollout starts with those ready; a person
+    leaves more out with `exclude`. Alternative: refuse to start a plan with any member not ready.
+88. **A conflict is applied over** when its member is in the plan: the diff shows each part's sync
+    state and reason (`changed_here`, `own_value`), and a person leaves the member out to keep its
+    value. Alternative: leave conflicting parts or members out by themselves.
+89. **Batches follow the members' names**; the canary is the first ones; the rest go in batches of a
+    size, of a percentage (rounded up), or at once. Alternatives: a canary picked by hand, or by label.
+90. **The gate**: reachable; its config's ETag the one the rollout applied (its reload succeeded and
+    held); its consistency check's differences not more than before the rollout; and, when set, its
+    share of 5xx over the window after the batch, judged from `min_requests` (by default a 5 s wait,
+    a 30 s window, 20 requests). Fewer requests pass with a note; a member that counts none fails its
+    batch before anything of it is applied. Alternatives: pass such members; read `/metrics`.
+91. **The share of 5xx needs one change on members**: `GET /status` answers `requests`, totals by
+    class that never go back (the routes a reload removed included, `observe.Metrics.Totals`),
+    listed as `status.requests`, counted when the config sets `metrics`. The manager reads them
+    twice, so no window lives on the member. Alternatives: a windowed endpoint on members; parsing
+    Prometheus text.
+92. **An apply refused fails its batch's gate**, and its batch is rolled back; a member skipped
+    (`412`, changed since the plan) does not.
+93. **A rollback goes to the version the member ran when planned**, `POST /rollback/{n}` with
+    `If-Match` on the rollout's config; a member changed since, or that no longer keeps the version,
+    is `rollback_failed`, never forced. A failed gate rolls back its batch, or with `on_failure: all`
+    every member applied. Alternative: put back the old config, which the plan would have to keep.
+94. **An apply whose answer is lost is told by the member's ETag** (`GET /node`'s `config_etag`
+    against the dry run's `new_etag`), which also tells, after a restart, whether an apply under way
+    landed; a member not readable either is failed and `unsure`, and its rollback's `412` with its
+    old ETag says it never ran the new config.
+95. **Pause takes effect between batches; abort at once**: after the members being applied, cutting
+    a gate's wait short, leaving what was applied; a resume asked before a pause is taken takes it
+    back. A rollback is asked for, never made by an abort.
+96. **A manager restarted** shows a running rollout paused where it stopped, a plan under way
+    expired, a rollback under way failed (to be asked again); its members are held again. Only a
+    person resumes it.
+97. **One rollout or operation per member**: a started rollout holds its members until it ends,
+    paused and waiting included; plans hold nothing, and a member held is not ready at plan and
+    refused at start.
+98. **The store is written at checkpoints** (planned, each batch's start, gate and end, each step
+    of a person, the end) without changing the members' ETag, so a page's edit of members is not
+    refused for a rollout's progress; a write that fails is logged and the rollout goes on.
+99. **The audit log** has each plan, start, pause, resume, go, abort, rollback, discard and end, the
+    end with each member's outcome and versions (from, applied, rolled back, the config's hash), as
+    I148 will read them.
+100. **A rollout runs on a goroutine of its own**, waiting on its members' calls, at most
+     `max_concurrency` of a batch at once, with timers for gates and pauses; tests use milliseconds,
+     not an injected clock.
+101. **`admin` in a desired config**: a member without a store answers `admin` in `GET /config`, and
+     takes it back unchanged in `PUT /config` without a warning (tested in package `admin`); a
+     template or a copy cannot own `admin`, so a rollout never changes it.
+102. **The pages**: Rollouts after Templates; `#/cluster/rollouts` (the history), `newrollout` (filled
+     from its query), `rollout/<id>`; **Roll out** on a template's page and **Sync this node** on a
+     rendered result; a dry run's errors linked to the member's page, its own pages and its rendered
+     result. The API's times are milliseconds (`pause_ms`, `wait_ms`, `window_ms`).
 
 Open questions of the plan, answered as proposed until reviewed:
 

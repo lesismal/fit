@@ -75,6 +75,10 @@ const (
 	// CapStatus: GET /status, and CapMetrics GET /metrics.
 	CapStatus  = "status"
 	CapMetrics = "metrics"
+	// CapStatusRequests: GET /status answers requests, the requests answered
+	// since fit started by the class of their status, counters that never
+	// go back, when the running config counts requests (metrics set).
+	CapStatusRequests = "status.requests"
 	// CapReload: POST /reload.
 	CapReload = "config.reload"
 	// CapCache: GET /cache and POST /cache/purge.
@@ -311,6 +315,10 @@ func (cs *Configs) capabilities() []string {
 		CapReload, CapStatus, CapMetrics, CapCache, CapCachePrefix, CapLogs, CapTokens, CapMedia, CapSchema, CapManaged}
 	if cs.Sealer() != nil {
 		caps = append(caps, CapStore)
+	}
+	if cs.env.Metrics != nil {
+		// Requests are counted once a config sets metrics.
+		caps = append(caps, CapStatusRequests)
 	}
 	if cs.console.Load() {
 		caps = append(caps, CapConsole)

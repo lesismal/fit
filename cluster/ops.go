@@ -495,7 +495,7 @@ func clip(s string, n int) string {
 
 // auditSize is about what e takes in the store.
 func auditSize(e *AuditEntry) int {
-	n := 96 + len(e.User) + len(e.Action) + len(e.Node) + len(e.Group) + len(e.Detail) + len(e.Op)
+	n := 96 + len(e.User) + len(e.Action) + len(e.Node) + len(e.Group) + len(e.Detail) + len(e.Op) + len(e.Rollout) + len(e.Template)
 	for _, o := range e.Outcomes {
 		n += 48 + len(o.Node) + len(o.Status) + len(o.Detail) + len(o.Error)
 	}

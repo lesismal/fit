@@ -1,7 +1,10 @@
 #!/bin/sh
-# The docker test of cluster management (I141): a manager and three members,
+# The docker tests of cluster management: TestCluster (I141), a manager and
+# three members; TestRollouts (I146), a manager and five members, rolled out
+# to in batches, gated, rolled back, paused by a restart and resumed;
 # each a fit in a container of its own, driven through the manager's console
-# by e2e/cluster_test.go, which starts and stops the containers itself.
+# by e2e/cluster_test.go and e2e/rollouts_test.go, which start and stop the
+# containers themselves.
 #
 #   test/docker/cluster/e2e.sh            build fit for Linux and run the test here
 #   test/docker/cluster/e2e.sh build DIR  only build fit and the test binary into DIR,
@@ -9,8 +12,9 @@
 #
 # On such a host: FIT_BIN=DIR/fit DIR/cluster-e2e.test -test.v. Environment:
 # FIT_IMAGE (the containers' image, default debian:trixie), FIT_PORT (the host
-# port of the manager's console, default 29441), GOARCH (the containers'
-# architecture, default this machine's). This is an interop test, not a load
+# port of the manager's console, default 29441; TestRollouts publishes its
+# members' web ports at the next ten), GOARCH (the containers' architecture,
+# default this machine's). This is an interop test, not a load
 # test: it makes a few calls a second.
 set -eu
 
@@ -35,7 +39,7 @@ run)
 	FIT_BIN="$work/fit" "$work/cluster-e2e.test" -test.v -test.timeout 15m
 	;;
 *)
-	sed -n '2,14p' "$0"
+	sed -n '2,20p' "$0"
 	exit 2
 	;;
 esac

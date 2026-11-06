@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lesismal/fit/observe"
 )
 
 // Status is GET /status's answer: what fit is doing now, which the config
@@ -19,6 +21,21 @@ type Status struct {
 	Connections connectionsStatus  `json:"connections"`
 	Upstreams   []upstreamStatus   `json:"upstreams"`
 	Certs       []certificateState `json:"certificates"`
+	// Requests are the requests answered since fit started, when the
+	// running config counts them (metrics or telemetry.metrics set;
+	// CapStatusRequests).
+	Requests *requestsStatus `json:"requests,omitempty"`
+}
+
+// requestsStatus counts the requests fit answered since it started, on
+// every listener and route, those of routes a reload removed included:
+// counters that never go back, so that a manager reading them twice has
+// what was answered in between, as a rollout's health gate does with the
+// share of 5xx.
+type requestsStatus struct {
+	Total uint64 `json:"total"`
+	// Classes counts them by the class of their status: "1xx" to "5xx".
+	Classes map[string]uint64 `json:"classes"`
 }
 
 type reloadsStatus struct {
@@ -72,6 +89,16 @@ func (cs *Configs) Status() Status {
 	st.Upstreams, st.Certs = []upstreamStatus{}, []certificateState{}
 	if g := cs.rt.Current(); g != nil {
 		defer g.Release()
+		if m := g.Metrics; m != nil {
+			// The running config counts requests (metrics or
+			// telemetry.metrics).
+			rs := &requestsStatus{Classes: make(map[string]uint64, len(observe.StatusClasses))}
+			for i, n := range m.Totals() {
+				rs.Classes[observe.StatusClasses[i]] = n
+				rs.Total += n
+			}
+			st.Requests = rs
+		}
 		for _, p := range g.Upstreams() {
 			u := upstreamStatus{Name: p.Name(), InFlight: p.InFlight(), Backends: []backendStatus{}}
 			for _, b := range p.Backends() {

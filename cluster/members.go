@@ -439,6 +439,8 @@ type AuditEntry struct {
 	// Template is the template changed (I145).
 	Template string `json:"template,omitempty"`
 	Detail   string `json:"detail,omitempty"`
+	// Rollout is a rollout's ID (I146).
+	Rollout string `json:"rollout,omitempty"`
 	// Op is an operation's ID, and Outcomes how it went on each member.
 	Op       string         `json:"op,omitempty"`
 	Outcomes []AuditOutcome `json:"outcomes,omitempty"`
@@ -465,16 +467,16 @@ const (
 )
 
 // document is the store's section: the members, the groups (I144), the
-// templates (I145), and what I146 to I148 keep beside them, which this
-// version keeps as it finds it. Templates came in version 2, which an
-// earlier fit of that version keeps as it finds them.
+// templates (I145), the rollouts (I146), and what I147 and I148 keep beside
+// them. Templates and rollouts came in version 2, which an earlier fit of
+// that version keeps as it finds them.
 type document struct {
-	Version   int               `json:"version"`
-	Members   []Member          `json:"members"`
-	Groups    []Group           `json:"groups"`
-	Templates []Template        `json:"templates"`
-	Rollouts  []json.RawMessage `json:"rollouts"`
-	Audit     []AuditEntry      `json:"audit"`
+	Version   int          `json:"version"`
+	Members   []Member     `json:"members"`
+	Groups    []Group      `json:"groups"`
+	Templates []Template   `json:"templates"`
+	Rollouts  []Rollout    `json:"rollouts"`
+	Audit     []AuditEntry `json:"audit"`
 	// LinkCert is the link listener's certificate and key, PEM, made once
 	// and kept, so that the members' pins of it stay good.
 	LinkCert *linkCert `json:"link_cert,omitempty"`
@@ -511,7 +513,7 @@ func (d *document) marshal() []byte {
 		out.Templates = []Template{}
 	}
 	if out.Rollouts == nil {
-		out.Rollouts = []json.RawMessage{}
+		out.Rollouts = []Rollout{}
 	}
 	if out.Members == nil {
 		out.Members = []Member{}

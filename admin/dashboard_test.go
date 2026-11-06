@@ -51,7 +51,8 @@ func TestStatus(t *testing.T) {
     {"name": "secure", "address": "127.0.0.1:0", "tls": {"certificates": [{"cert_file": %q, "key_file": %q}]}}
   ],
   "upstreams": [{"name": "back", "addresses": [%q, %q], "max_fails": 1, "fail_timeout": "1m"}],
-  "routes": [{"listeners": ["web"], "handler": {"module": "proxy", "params": {"upstream": "back"}}}]
+  "routes": [{"listeners": ["web"], "handler": {"module": "proxy", "params": {"upstream": "back"}}}],
+  "metrics": {}, "admin": {"address": "127.0.0.1:0"}
 }`, cert.CertFile, cert.KeyFile, ln.Addr().String(), dead), &config.Admin{}, runtime.Env{Engine: engine, Metrics: observe.NewMetrics()})
 	web := "http://" + f.server.Addrs()[0].Addr.String()
 	// Enough requests that the dead backend is tried, fails and is taken
@@ -87,6 +88,15 @@ func TestStatus(t *testing.T) {
 	if len(st.Certs) != 1 || st.Certs[0].Listener != "secure" || strings.Join(st.Certs[0].Names, ",") != "a.example" ||
 		st.Certs[0].Serial == "" || !st.Certs[0].NotAfter.After(st.Certs[0].NotBefore) {
 		t.Errorf("certificates: %+v", st.Certs)
+	}
+	// The six requests are counted, with the 502s of the dead backend's
+	// tries, if any, as 5xx; the totals add up.
+	if rq := st.Requests; rq == nil || rq.Total != 6 || rq.Classes["2xx"]+rq.Classes["5xx"] != 6 || len(rq.Classes) != 5 {
+		t.Errorf("requests: %+v", st.Requests)
+	}
+	_, body = f.get(t, "/node")
+	if !strings.Contains(body, `"`+CapStatusRequests+`"`) {
+		t.Errorf("/node lists no %s: %s", CapStatusRequests, body)
 	}
 }
 
