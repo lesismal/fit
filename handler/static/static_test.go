@@ -245,8 +245,7 @@ func TestConditional(t *testing.T) {
 
 func TestChangedFile(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "one"})
-	s := mustLoad(t, root, "")
-	s.cache.check = 0 // every request looks at the disk
+	s := mustLoad(t, root, `, "check_interval": "0s"`) // every request looks at the disk
 	first := get(s, "GET", "/a.txt", nil).Response
 	if string(first.Body) != "one" {
 		t.Fatalf("got %q", first.Body)

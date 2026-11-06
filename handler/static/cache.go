@@ -39,11 +39,13 @@ const lookupOverhead = 256
 // bytes, which a client asking for paths that do not exist cannot grow
 // past, and contents by bytes.
 //
-// A lookup is trusted for the check interval, or until a watch reports a
-// change to what it depends on, whichever comes first: the path it was
-// resolved for, its compressed twins, the entries of the directory it named
-// when it named one, and every directory on its way from the root. index
-// finds the lookups a change names without going through them all.
+// A lookup a watch vouches for is trusted until the watch reports a change
+// to what it depends on: the path it was resolved for, its compressed twins,
+// the entries of the directory it named when it named one, and every
+// directory on its way from the root. index finds the lookups a change names
+// without going through them all. A lookup no watch vouches for, where the
+// system has none or for a file that is a symbolic link, is trusted for the
+// check interval.
 type cache struct {
 	maxFile        int64
 	maxBytes       int64
@@ -55,6 +57,8 @@ type cache struct {
 	// gen moves on with every change a watch reports, so that a lookup
 	// resolved while one arrived is not kept as if it were current.
 	gen atomic.Uint64
+	// watching says the watch that vouches for watched lookups runs.
+	watching atomic.Bool
 
 	mu          sync.RWMutex
 	lookups     map[string]*lookup
@@ -74,6 +78,9 @@ type lookup struct {
 	// gen is the cache's gen when the lookup began, before the disk was
 	// looked at.
 	gen uint64
+	// watched says a watch reports every change that makes the lookup
+	// stale, so that it stands until one does, past the check interval.
+	watched bool
 	// rel is the request path cleaned, slash-separated under the root, ""
 	// for the root; deps are what a watch reports a change to that makes
 	// the lookup stale: rel itself, and rel's entries ("rel/", "/" for the
@@ -120,7 +127,13 @@ func (c *cache) lookup(name string) *lookup {
 	c.mu.RLock()
 	l := c.lookups[name]
 	c.mu.RUnlock()
-	if l == nil || time.Since(l.checked) >= c.check {
+	if l == nil {
+		return nil
+	}
+	if l.watched && c.watching.Load() {
+		return l
+	}
+	if time.Since(l.checked) >= c.check {
 		return nil
 	}
 	return l
@@ -326,7 +339,7 @@ func (s *Static) resolve(name string) *lookup {
 	l.rel, l.deps = name, []string{name}
 	// Watched before the disk is looked at, so that no change after the
 	// look goes unreported.
-	s.watch.Watch(path.Dir(name))
+	l.watched = s.watch.Watch(path.Dir(name))
 	full := filepath.Join(s.root, filepath.FromSlash(name))
 	info, err := os.Stat(full)
 	if err != nil {
@@ -345,7 +358,7 @@ func (s *Static) resolve(name string) *lookup {
 			l.redirect = true
 			return l
 		}
-		s.watch.Watch(name)
+		l.watched = s.watch.Watch(name) && l.watched
 		l.deps = append(l.deps, entriesOf(name))
 		for _, index := range s.index {
 			indexFull := filepath.Join(full, index)
@@ -381,10 +394,26 @@ var onDisk = dotfile.OnDisk
 // twins.
 func (s *Static) file(l *lookup) *lookup {
 	if s.foldCase && dotfile.Script(l.name) {
-		return &lookup{checked: l.checked, gen: l.gen, rel: l.rel, deps: l.deps, status: stdhttp.StatusNotFound}
+		return &lookup{checked: l.checked, gen: l.gen, watched: l.watched, rel: l.rel, deps: l.deps, status: stdhttp.StatusNotFound}
 	}
 	s.twins(l)
+	if l.watched && isLink(l.full) {
+		// The watch sees the link replaced, not the file it leads to
+		// changed.
+		l.watched = false
+	}
+	for _, t := range l.twins {
+		if l.watched && t.info != nil && isLink(t.full) {
+			l.watched = false
+		}
+	}
 	return l
+}
+
+// isLink reports whether full is a symbolic link.
+func isLink(full string) bool {
+	info, err := os.Lstat(full)
+	return err == nil && info.Mode()&fs.ModeSymlink != 0
 }
 
 // twins looks for the compressed twins of l's file.

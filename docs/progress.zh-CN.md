@@ -4481,8 +4481,9 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **待审查的决策**：
   1. ETag 仍和 nginx 一样由 mtime 和大小生成：大小、时间都相同的替换后 ETag 不变，客户端带条件请求验证旧副本时会得到
      304。加入 inode 或 change time 会让提供同一批文件的多台机器 ETag 不同。
-  2. 被监听的 lookup 仍在 `check_interval` 到期，作为 inotify 看不到的变化的上限（另一台机器在网络文件系统上的写入、
-     根目录下指向别处文件的软链接）。
+  2. ~~被监听的 lookup 仍在 `check_interval` 到期。~~ 用户当天裁定：有监听担保的内容在监听报告变更前不再查看磁盘
+     （fib `08e6f0a` 及此处）。间隔只用于其他平台和本身是软链接的文件；网络文件系统上其他机器的写入需要
+     `check_interval: 0`。
   3. 不提供 `watch: false` 参数：`check_interval: 0` 关闭监听，其余由间隔限定。
   4. fib 的 `FileCache` 在非 Linux 平台上改为信任文件 5s，不再每个请求 stat；`CheckInterval` 设为负数保持旧行为。
   5. Windows 没有 inode 和 change time；stamp 取创建时间，而 NTFS tunneling 可能把它带给改名到别的文件位置上的文件，

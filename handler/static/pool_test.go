@@ -10,7 +10,8 @@ import (
 
 // TestNoDiskOnHit checks that a path the cache knows, within check_interval,
 // is answered without the file pool, which every look at the disk goes
-// through, and that it is looked at again once the interval has passed.
+// through, and that it is looked at again once the interval has passed,
+// unless a watch vouches for it.
 func TestNoDiskOnHit(t *testing.T) {
 	root := tree(t, map[string]string{"a.txt": "aaa", "dir/index.html": "<p>i</p>", "big.bin": "0123456789abcdefghij"})
 	s := mustLoad(t, root, `, "max_file_bytes": 16, "check_interval": "200ms"`)
@@ -45,6 +46,14 @@ func TestNoDiskOnHit(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 	before = jobs.Load()
 	get(s, "GET", "/a.txt", nil)
+	if s.watch != nil {
+		if jobs.Load() != before {
+			t.Fatal("a.txt, under a watch, was looked at again past check_interval")
+		}
+		// Without the watch, the interval tells.
+		s.Cleanup()
+		get(s, "GET", "/a.txt", nil)
+	}
 	if jobs.Load() != before+1 {
 		t.Fatal("a.txt was not looked at again past check_interval")
 	}

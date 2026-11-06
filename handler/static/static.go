@@ -4,11 +4,13 @@
 // No file operation runs on a fib worker. What the handler learns of a
 // request path, the file it names, its index file or its compressed twins,
 // and the contents of small files, is kept in memory and trusted for
-// check_interval, 5s by default, or until a watch of the directories under
-// the root, on Linux, reports a change to it, within moments of the change:
-// a file written, replaced or removed, a directory on its way renamed, or a
-// symbolic link on the way to the root pointed elsewhere. A request it
-// answers from what it knows costs no system call. A file's contents are
+// as long as a watch of the directories under the root, on Linux, reports
+// no change to it, which it does within moments of the change: a file
+// written, replaced or removed, a directory on its way renamed, or a
+// symbolic link on the way to the root pointed elsewhere. What no watch
+// vouches for, elsewhere than Linux or for a file that is a symbolic link,
+// is trusted for check_interval, 5s by default. A request it answers from
+// what it knows costs no system call. A file's contents are
 // served from memory while the file's stamp, its size, modification and
 // status change times and inode, is what it was when they were read, which
 // tells apart a file replaced by one of the same size and modification time.
@@ -100,7 +102,7 @@ type Static struct {
 	BrowseMax     int      `json:"browse_max_entries,omitempty" min:"0" default:"10000" doc:"The most entries a listing reads and shows; a directory with more is listed in part, and says so. 10000 when left out or 0."`
 	Dotfiles      string   `json:"dotfiles,omitempty" enum:"deny,allow" default:"\"deny\"" doc:"Whether files and directories whose names start with a dot, as .git, .env and .htpasswd do, are served: deny answers a request for one, or for anything under a dot directory, 404, as for a file not there, but /.well-known/ under the root, for ACME's HTTP-01 challenge and security.txt; allow serves them as other files. Listings leave them out either way. On Windows deny also hides a path with a segment shaped as an 8.3 short name, as GIT~1 for .git, which NTFS may give a dotfile. deny when left out."`
 
-	CheckInterval *config.Duration `json:"check_interval,omitempty" default:"\"5s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what it cannot see, as a write another machine makes on a network file system; elsewhere a change shows within it. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then. 5s when left out."`
+	CheckInterval *config.Duration `json:"check_interval,omitempty" default:"\"5s\"" doc:"How long what the handler learned of a request path, the file it names and its validators, is trusted before the disk is looked at again, where no watch reports its changes. On Linux a watch of the directories under the root reports a change within moments, a file written, replaced or removed, a directory renamed, or a symbolic link on the way to the root pointed elsewhere, and what it watches is trusted until it does; this interval is for other systems, and for a file that is a symbolic link, whose target's changes the watch does not see. A file is told by its size, modification and status change times and inode, so one replaced by another of the same size and modification time is seen too. 0 looks at the disk for every request, with no watch, so that a response always carries the file as it is on disk then, also on a network file system, whose changes from other machines no watch sees. 5s when left out."`
 
 	root         string
 	index        []string
@@ -204,13 +206,16 @@ func (s *Static) Provision(ctx *module.Context) error {
 		// bounds how long a change goes unseen.
 		if w, err := filewatch.New(root, s.cache.event); err == nil {
 			s.watch = w
+			s.cache.watching.Store(true)
 		}
 	}
 	return nil
 }
 
-// Cleanup stops the watch of the root.
+// Cleanup stops the watch of the root; what it vouched for is trusted for
+// check_interval from then on.
 func (s *Static) Cleanup() {
+	s.cache.watching.Store(false)
 	_ = s.watch.Close()
 }
 
