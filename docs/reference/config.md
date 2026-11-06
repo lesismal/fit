@@ -35,6 +35,7 @@ a config against it and more.
 - [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
+- [Profiling](#pprof): [`pprof`](#config-pprof)
 - [ACME](#acme): [`acme`](#config-acme), [`acme.shared_storage`](#config-sharedstorage), [`acme.shared_storage.redis`](#config-redisstorage), [`acme.shared_storage.etcd`](#config-etcdstorage), [`acme.shared_storage.consul`](#config-consulstorage), [`acme.on_demand`](#config-ondemand)
 - [LLM](#llm): [`llm`](#config-llm), [`llm.hub`](#config-llmhub), [`llm.hub.console`](#config-roleconsole), [`llm.hub.listen`](#config-llmlisten), [`llm.hub.tokens[]`](#config-linktoken), [`llm.hub.peers[]`](#config-llmpeer), [`llm.hub.limits`](#config-llmlimits), [`llm.node`](#config-llmnode), [`llm.node.models[]`](#config-llmmodel), [`llm.node.settings`](#config-llmnodesettings), [`llm.node.proxy`](#config-llmnodeproxy), [`llm.proxy`](#config-llmproxy), [`llm.proxy.api`](#config-llmproxyapi), [`llm.proxy.api_keys[]`](#config-llmproxykey)
 - [Tunnel](#tunnel): [`tunnel`](#config-tunnel), [`tunnel.hub`](#config-tunnelhub), [`tunnel.hub.listeners[]`](#config-tunnellistener), [`tunnel.hub.console_socket`](#config-tunnelconsolesocket), [`tunnel.hub.quic`](#config-tunnelhubquic), [`tunnel.node`](#config-tunnelnode), [`tunnel.node.hubs[]`](#config-tunneluplink), [`tunnel.node.hubs[].endpoints[]`](#config-tunnelendpoint), [`tunnel.node.services[]`](#config-tunnelservice), [`tunnel.proxy`](#config-tunnelproxy), [`tunnel.proxy.forwards[]`](#config-tunnelforward), [`tunnel.proxy.web_proxies[]`](#config-tunnelwebproxy)
@@ -63,6 +64,7 @@ A config is one object. Its parts, each with a chapter below:
 | [`admin`](#admin-api) | The Admin API, which reads and replaces the running config. |
 | [`auto_https`](#https-by-default) | HTTPS by default, and its ports. |
 | [`metrics`](#metrics) | Requests counted and timed by listener and route. |
+| [`pprof`](#pprof) | Go's runtime profiles at the Admin API's `/debug/pprof/`. |
 | [`acme`](#acme) | How certificates are obtained: the CA, its account, storage, on-demand TLS. |
 | [`providers`](#providers) | Routes, upstreams, services and listeners from Docker, Consul, etcd and Kubernetes. |
 
@@ -114,6 +116,7 @@ In JSON:
 | `admin` | [object](#config-admin) |  | The Admin API, through which the running config is read and replaced, and which serves metrics in Prometheus's text format at /metrics; off when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. |
 | `auto_https` | [object](#config-autohttps) |  | HTTPS by default: a config that writes no listeners is served over HTTPS on port 443, with certificates obtained with acme for the host names its routes match, and over HTTP on port 80 only to be redirected; a listener whose tls is empty gets certificates for the host names of the routes it serves. On when left out. |
 | `metrics` | [object](#config-metrics) |  | Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin. |
+| `pprof` | [object](#config-pprof) |  | Serve Go's runtime profiles, as net/http/pprof does, at the Admin API's /debug/pprof/: CPU, heap, allocations, goroutines, blocking, mutexes and execution traces, for go tool pprof and go tool trace. Off when left out: the endpoints answer 404, and blocking and mutexes are not sampled. Follows every config applied, with no restart. Needs admin; served on the Admin API's own address, behind its token, and not through the console. |
 | `acme` | [object](#config-acme) |  | How certificates for the names listeners list in tls.acme are obtained and renewed; the defaults when left out. Its settings are read when fit starts: a change to them takes effect when fit restarts. The names follow every reload. |
 | `llm` | [object](#config-llm) |  | The LLM feature's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which share AI models among machines and serve them to agents. None when left out. What their web pages change is written back here. |
 | `tunnel` | [object](#config-tunnel) |  | The tunnel's roles to run beside the gateway, on its engine: a hub, a node and a proxy, which reach services behind NAT through the hub. None when left out. What their web pages change is written back here. |
@@ -1596,6 +1599,78 @@ In JSON:
 ### `metrics`
 
 It has no fields: `{}` turns it on.
+
+<a id="pprof"></a>
+
+## Profiling
+
+Go's runtime profiles, as `net/http/pprof` serves them, at the Admin API's `/debug/pprof/`: the
+CPU profile (`profile?seconds=N`), the heap, allocations, goroutines, threads, blocking, mutexes
+and execution traces (`trace?seconds=N`). `seconds` may ask for at most `max_duration`, a minute
+by default, since a profile holds its connection to the Admin API while it samples.
+Off when left out, and then those paths answer 404. The setting follows every config applied, so
+the workbench's Global → Profiling page, or a `PUT /config/pprof`, turns it on and off without a
+restart.
+
+The profiles are served on the Admin API's own address, behind its token and, off loopback, its
+TLS, as every other endpoint of it is; the console does not serve them. Blocking and mutex
+contention are sampled only when `block_profile_rate` and `mutex_profile_fraction` are set,
+since sampling them costs every such event a little; leave them out once done looking.
+
+
+With it, `go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30` takes a CPU
+profile, and `go tool pprof http://127.0.0.1:2019/debug/pprof/heap` reads the heap. With
+`admin.token_file`, fetch the profile with the token first,
+`curl -H "Authorization: Bearer $TOKEN" -o cpu.pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30`,
+and open the file with `go tool pprof cpu.pprof`.
+
+In a .conf file:
+
+```fit
+admin {}
+
+pprof { block_profile_rate 10000; mutex_profile_fraction 100 }
+
+listener web :8080
+
+route { handler respond }
+```
+
+In YAML:
+
+```yaml
+admin: {}
+pprof:
+  block_profile_rate: 10000
+  mutex_profile_fraction: 100
+listeners:
+  - name: web
+    address: :8080
+routes:
+  - handler:
+      module: respond
+```
+
+In JSON:
+
+```json
+{
+  "admin": {},
+  "pprof": {"block_profile_rate": 10000, "mutex_profile_fraction": 100},
+  "listeners": [{"name": "web", "address": ":8080"}],
+  "routes": [{"handler": {"module": "respond"}}]
+}
+```
+
+<a id="config-pprof"></a>
+
+### `pprof`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `block_profile_rate` | integer, 0 or more |  | Sample goroutines blocking on channels, selects and locks for the block profile: one event per this many nanoseconds spent blocked, on average, 1 for every one. 0, none, when left out; set it only while looking, since it costs every blocking event. |
+| `mutex_profile_fraction` | integer, 0 or more |  | Sample one in this many contended mutexes for the mutex profile, 1 for every one. 0, none, when left out. |
+| `max_duration` | duration | `"1m"` | The longest a profile's seconds may ask for: a CPU profile or a trace samples for that long, and a delta profile waits that long, holding its connection to the Admin API all the while; a request for longer is refused with 400. 1m when left out. |
 
 <a id="acme"></a>
 

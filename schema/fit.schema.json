@@ -2462,6 +2462,28 @@
       ],
       "type": "object"
     },
+    "config.Pprof": {
+      "additionalProperties": false,
+      "properties": {
+        "block_profile_rate": {
+          "description": "Sample goroutines blocking on channels, selects and locks for the block profile: one event per this many nanoseconds spent blocked, on average, 1 for every one. 0, none, when left out; set it only while looking, since it costs every blocking event.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_duration": {
+          "default": "1m",
+          "description": "The longest a profile's seconds may ask for: a CPU profile or a trace samples for that long, and a delta profile waits that long, holding its connection to the Admin API all the while; a request for longer is refused with 400. 1m when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "mutex_profile_fraction": {
+          "description": "Sample one in this many contended mutexes for the mutex profile, 1 for every one. 0, none, when left out.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "config.Provider": {
       "additionalProperties": false,
       "properties": {
@@ -6454,6 +6476,10 @@
     "metrics": {
       "$ref": "#/$defs/config.Metrics",
       "description": "Count and time requests by listener and route, for the Admin API's /metrics, which serves the rest of fit's metrics without it; off when left out, since it costs every request a little. Needs admin."
+    },
+    "pprof": {
+      "$ref": "#/$defs/config.Pprof",
+      "description": "Serve Go's runtime profiles, as net/http/pprof does, at the Admin API's /debug/pprof/: CPU, heap, allocations, goroutines, blocking, mutexes and execution traces, for go tool pprof and go tool trace. Off when left out: the endpoints answer 404, and blocking and mutexes are not sampled. Follows every config applied, with no restart. Needs admin; served on the Admin API's own address, behind its token, and not through the console."
     },
     "providers": {
       "description": "Sources of routes, upstreams, services and listeners other than this file and the Admin API, merged into the config: what this config writes wins over every provider, and a provider over those listed after it; a provider's element named as one before it is left out. The Admin API's /config/effective shows the result and where each part came from. Read when fit starts: a change takes effect when fit restarts.",

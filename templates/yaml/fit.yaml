@@ -2468,6 +2468,30 @@ upstreams:
 # object.
 # metrics:
 
+# Serve Go's runtime profiles, as net/http/pprof does, at the Admin API's /debug/pprof/: CPU,
+# heap, allocations, goroutines, blocking, mutexes and execution traces, for go tool pprof and
+# go tool trace. Off when left out: the endpoints answer 404, and blocking and mutexes are not
+# sampled. Follows every config applied, with no restart. Needs admin; served on the Admin
+# API's own address, behind its token, and not through the console.
+# object.
+# pprof:
+  # # Sample goroutines blocking on channels, selects and locks for the block profile: one event
+  # # per this many nanoseconds spent blocked, on average, 1 for every one. 0, none, when left
+  # # out; set it only while looking, since it costs every blocking event.
+  # # integer, 0 or more.
+  # block_profile_rate: 0
+
+  # # Sample one in this many contended mutexes for the mutex profile, 1 for every one. 0, none,
+  # # when left out.
+  # # integer, 0 or more.
+  # mutex_profile_fraction: 0
+
+  # # The longest a profile's seconds may ask for: a CPU profile or a trace samples for that long,
+  # # and a delta profile waits that long, holding its connection to the Admin API all the while;
+  # # a request for longer is refused with 400. 1m when left out.
+  # # duration, as "1.5s" or "2m"; default "1m".
+  # max_duration: "1m"
+
 # How certificates for the names listeners list in tls.acme are obtained and renewed; the
 # defaults when left out. Its settings are read when fit starts: a change to them takes effect
 # when fit restarts. The names follow every reload.

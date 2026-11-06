@@ -293,7 +293,9 @@ and the language (English or Chinese) are picked at the top right. Each page has
 
 - **Global**: an overview of the running config (status, routes, services, upstreams and their
   health, certificates, the version); the listeners; the rest of the config, part by part (log,
-  access log, telemetry, metrics, limits, engine, providers, and whatever else the schema holds); the
+  access log, telemetry, metrics, profiling, limits, engine, providers, and whatever else the schema
+  holds; Profiling turns `pprof` on and off at once, and the Admin API, not the console, then serves
+  the profiles at `/debug/pprof/`); the
   whole config as JSON; and the versions applied (`admin.history` of them), where each came from, each
   one's text, and a button to roll back to it.
 - **Logs**: the files fit's own log and the access log write, what each rotates and keeps, the files

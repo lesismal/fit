@@ -102,6 +102,10 @@ const VersionHeader = "Fit-Config-Version"
 //	                            restarts one (channels.go)
 //	GET    /dashboard/          read-only web pages of the GET endpoints,
 //	                            unless admin.disable_dashboard
+//	GET    /debug/pprof/        Go's runtime profiles, as net/http/pprof
+//	                            serves them, while the config has pprof;
+//	                            on this server only, not the console's
+//	                            (pprof.go)
 //
 // Every config carries an ETag, a hash of it as written; a change sent with
 // If-Match is applied only if the running config is still that one, and is
@@ -185,6 +189,7 @@ func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(fo
 	}
 
 	mux := s.routes()
+	mux.Handle("/debug/pprof/", s.pprofHandler())
 	if !a.DisableDashboard {
 		mux.Handle("GET /dashboard/", dashboardHandler())
 		mux.Handle("GET /dashboard", http.RedirectHandler("/dashboard/", http.StatusMovedPermanently))

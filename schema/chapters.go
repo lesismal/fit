@@ -33,6 +33,7 @@ var chapters = []struct{ field, title, anchor, file string }{
 	{"admin", "Admin API", "admin-api", "admin.md"},
 	{"auto_https", "HTTPS by default", "https-by-default", "auto_https.md"},
 	{"metrics", "Metrics", "metrics", "metrics.md"},
+	{"pprof", "Profiling", "pprof", "pprof.md"},
 	{"acme", "ACME", "acme", "acme.md"},
 	{"llm", "LLM", "llm", "llm.md"},
 	{"tunnel", "Tunnel", "tunnel", "tunnel.md"},

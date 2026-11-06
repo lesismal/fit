@@ -496,6 +496,16 @@ func TestValidate(t *testing.T) {
 			want: []string{`1:63: metrics: the Admin API serves metrics: set admin too`},
 		},
 		{
+			name: "pprof without admin",
+			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "pprof": {"block_profile_rate": 1}}`,
+			want: []string{`1:61: pprof: the Admin API serves the profiles: set admin too`},
+		},
+		{
+			name: "a negative pprof rate",
+			doc:  `{"admin": {}, "listeners": [{"name": "web", "address": ":80"}], "pprof": {"mutex_profile_fraction": -1}}`,
+			want: []string{`1:101: pprof.mutex_profile_fraction: -1 is less than the minimum 0`},
+		},
+		{
 			name: "a provider of no kind",
 			doc:  `{"listeners": [{"name": "web", "address": ":80"}], "providers": [{}]}`,
 			want: []string{"1:66: providers[0]: set exactly one kind of provider: docker, consul, consul_kv, etcd or kubernetes"},

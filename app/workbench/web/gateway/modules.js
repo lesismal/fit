@@ -19,7 +19,7 @@
     ['s.services', 'Layer 4 services', '四层服务'], ['s.auto_https', 'Automatic HTTPS', '自动 HTTPS'], ['s.acme', 'ACME', 'ACME'],
     ['s.certs', 'Certificates', '证书'], ['s.zones', 'Cache zones', '缓存区'],
     ['s.log', 'Log', '日志'], ['s.access_log', 'Access log', '访问日志'], ['s.telemetry', 'Telemetry', '遥测'],
-    ['s.metrics', 'Metrics', '指标'], ['s.limits', 'Limits', '限制'], ['s.engine', 'Engine', '引擎'],
+    ['s.metrics', 'Metrics', '指标'], ['s.pprof', 'Profiling', '性能剖析'], ['s.limits', 'Limits', '限制'], ['s.engine', 'Engine', '引擎'],
     ['s.providers', 'Providers', '配置来源'], ['s.tunnel', 'Tunnel roles', '隧道角色'], ['s.llm', 'LLM roles', 'LLM 角色'],
     ['s.webrtc', 'WebRTC', 'WebRTC'], ['s.other', 'Other', '其他'], ['s.json', 'Config as JSON', 'JSON 配置'],
     ['s.versions', 'Config versions', '配置版本'],
@@ -55,6 +55,8 @@
     // system / 系统
     ['role.note', 'A role set here starts when the config is applied, and stops when it is left out. Its own pages show in this menu once it runs.',
       '在这里设置的角色在配置应用后启动，移除后停止。角色运行后，其页面会出现在菜单中。'],
+    ['pprof.note', 'While pprof is set, the Admin API serves Go\'s runtime profiles at /debug/pprof/ on its own address (admin.address, 127.0.0.1:2019 by default), behind its token; the console does not serve them. Save and apply turns them on or off at once, with no restart; leave pprof out when done. Then, for example: go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30',
+      '设置 pprof 后，Admin API 在其自己的地址（admin.address，默认 127.0.0.1:2019）的 /debug/pprof/ 上提供 Go 运行时的性能剖析数据，需其令牌访问；控制台不提供。“保存并应用”后立即开启或关闭，无需重启；用完后移除 pprof。例如：go tool pprof http://127.0.0.1:2019/debug/pprof/profile?seconds=30'],
     ['other.none', 'Every member of the config has its own page.', '配置的每个成员都有自己的页面。'],
     ['j.draft', 'Draft', '草稿'], ['j.effective', 'Effective', '生效配置'],
     ['j.note', 'The whole config as JSON, admin aside when fit keeps its config in admin.store. Edits here are the same draft the forms edit; Save and apply checks it and applies it as one.',
@@ -75,10 +77,10 @@
   // The config's members the Global menu edits, and those edited on a page of their own: the feature pages in
   // features.js, and the protocol pages above. A member in ELSEWHERE is not listed by the "other" page either.
   // Global 菜单编辑的成员，以及在各自独立页面编辑的成员（features.js 中的功能页面与上面的协议页面）。“其他”页面也不再列出它们。
-  var SYS = ['log', 'access_log', 'telemetry', 'metrics', 'limits', 'engine', 'providers'];
+  var SYS = ['log', 'access_log', 'telemetry', 'metrics', 'pprof', 'limits', 'engine', 'providers'];
   var ELSEWHERE = { listeners: 1, routes: 1, upstreams: 1, services: 1, auto_https: 1, acme: 1, admin: 1,
     tunnel: 1, llm: 1, webrtc: 1, streaming: 1, media_auth: 1 };
-  var SYS_ICONS = { log: 'log', access_log: 'book', telemetry: 'activity', metrics: 'activity', limits: 'shield', engine: 'cpu',
+  var SYS_ICONS = { log: 'log', access_log: 'book', telemetry: 'activity', metrics: 'activity', pprof: 'zap', limits: 'shield', engine: 'cpu',
     providers: 'plug', other: 'cube' };
 
   // restMembers is the config's members that no other page edits: what the "other" page owns. / 其余无页面编辑的成员。
@@ -443,6 +445,7 @@
             if (ROLES[name]) {
               body.appendChild(h('div.callout.callout--warn', UI.icon('info'), ' ', t('role.note')));
             }
+            if (name === 'pprof') body.appendChild(h('div.callout', UI.icon('info'), ' ', t('pprof.note')));
             body.appendChild(FitConfig.with(UI).section(name));
           }, members([name]));
         };

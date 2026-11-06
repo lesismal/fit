@@ -159,6 +159,9 @@ type Result struct {
 // be read back.
 func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, first *config.Config, data []byte, source string, keep int) *Configs {
 	cs := &Configs{rt: rt, server: server, env: env, first: first, currentCfg: first, keep: max(keep, 1), parts: map[string]*provider.Part{}}
+	if first != nil {
+		applyProfiling(first.Pprof)
+	}
 	var version uint64
 	if g := rt.Current(); g != nil {
 		version = g.Version
@@ -450,6 +453,9 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	if ws := c.Warnings(); len(ws) > 0 {
 		deprecated = config.AsErrors(m.Errors(ws))
 	}
+	// The runtime's sampling for the block and mutex profiles follows the
+	// config.
+	applyProfiling(c.Pprof)
 	// What the check compares the runtime with is this config, not the one
 	// it replaced.
 	cs.currentCfg = c
