@@ -13,6 +13,9 @@ func TestContextWithoutEnv(t *testing.T) {
 	if c.Engine() != nil {
 		t.Error("an engine without an Env")
 	}
+	if c.MediaLibrary("a") != nil {
+		t.Error("a media library without an Env")
+	}
 	if _, ok := c.Upstream("a"); ok {
 		t.Error("an upstream without an Env")
 	}

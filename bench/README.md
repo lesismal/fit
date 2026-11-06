@@ -58,6 +58,12 @@ master.
 - `bench/microbench.sh [-C repo] -pkg PKG -bench REGEX A B` runs a package's micro-benchmarks
   for two refs, alternating, 10 times each, on the host, and compares them with benchstat here;
   `-C ../fib` does it for fib. About a minute.
+- `bench/vod.sh [out-dir]` measures the `vod` handler against nginx serving the same files cut
+  beforehand into HLS with ffmpeg: segments a second, MB/s, p99 and the servers' resident memory,
+  with fit's cache holding every segment (`fit-hot`) and holding few (`fit-cold`, each segment
+  read and muxed again). It builds fit here and runs `bench/vod/host.sh` on the host under
+  `flock /root/bench.lock`; the library is made there with ffmpeg the first time. About five
+  minutes.
 
 ## What runs where
 
