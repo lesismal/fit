@@ -202,7 +202,8 @@ is full. A segment asked for by many players at once is read once.
 
 **What is kept.** The cuts of the files, their playlists, segments and subtitles are kept for the
 next request, up to `max_cache_bytes` (256 MiB), the least recently used dropped first; what is
-being built holds its bytes from when it starts, so the bound holds while it is. Handlers of the
+being built holds its bytes from when its work starts on the file pool, so the bound holds while it
+is, and requests queued for the pool hold none. Handlers of the
 same params share what they keep, and keep it across reloads that keep the params.
 
 **Files that change.** A file changed or removed since the library's last scan is answered 404

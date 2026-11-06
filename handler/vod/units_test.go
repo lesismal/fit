@@ -132,12 +132,16 @@ func TestCache(t *testing.T) {
 	f := fileID{root: "r", path: "p"}
 	k := func(n int32) ckey { return ckey{file: f, what: whatSegment, n: n} }
 	// A build that ends later, and waiters for it.
-	var finish func(any, int64, error)
+	var later job
+	keep := func(j job) { later = j }
 	var got []any
 	for range 3 {
-		c.get(k(0), 100, func(done func(any, int64, error)) { finish = done }, func(v any, err error) { got = append(got, v) })
+		c.get(k(0), keep, func(v any, err error) { got = append(got, v) })
 	}
-	finish("zero", 100, nil)
+	if !later.hold(100) {
+		t.Fatal("no room")
+	}
+	later.done("zero", 100, nil)
 	if len(got) != 3 || got[2] != "zero" {
 		t.Fatalf("waiters got %v", got)
 	}
@@ -145,51 +149,77 @@ func TestCache(t *testing.T) {
 		t.Fatal("not kept")
 	}
 	// Too many waiters.
-	c.get(k(1), 100, func(done func(any, int64, error)) { finish = done }, func(any, error) {})
+	c.get(k(1), keep, func(any, error) {})
 	for range maxWaiters - 1 {
-		c.get(k(1), 100, nil, func(any, error) {})
+		c.get(k(1), nil, func(any, error) {})
 	}
 	var werr error
-	c.get(k(1), 100, nil, func(_ any, err error) { werr = err })
+	c.get(k(1), nil, func(_ any, err error) { werr = err })
 	if !errors.Is(werr, errWaiters) {
 		t.Fatalf("%v", werr)
 	}
-	// Dropped while it is built: given to those waiting, not kept.
+	// Dropped while it is built: it holds nothing more, those waiting get
+	// it, and it is not kept.
 	c.drop(f)
-	finish("one", 100, nil)
-	if _, ok := c.peek(k(1)); ok {
-		t.Fatal("kept what was dropped while built")
+	if !later.hold(1 << 20) {
+		t.Fatal("a job dropped refused")
+	}
+	later.done("one", 100, nil)
+	if _, ok := c.peek(k(1)); ok || c.stats().Bytes != 0 {
+		t.Fatalf("kept what was dropped while built: %+v", c.stats())
 	}
 	// An error is not kept.
-	c.get(k(2), 100, func(done func(any, int64, error)) { done(nil, 0, io.EOF) }, func(_ any, err error) { werr = err })
-	if werr != io.EOF {
-		t.Fatal(werr)
+	c.get(k(2), func(j job) { j.done(nil, 0, io.EOF) }, func(_ any, err error) { werr = err })
+	if werr != io.EOF || c.stats().Bytes != 0 {
+		t.Fatal(werr, c.stats())
 	}
-	// Past the bound: refused while what is built holds it all; once
-	// built, the least recently used go.
-	c.get(k(3), 3000, func(done func(any, int64, error)) { finish = done }, func(any, error) {})
-	c.get(k(4), 1000, func(func(any, int64, error)) {}, func(_ any, err error) { werr = err })
+	// Past the bound: what is built holds it, until it is done; a job
+	// that cannot hold what it needs is refused, and the least recently
+	// used go for one that can.
+	c.put(k(7), "seven", 500)
+	c.get(k(3), keep, func(any, error) {})
+	if !later.hold(3000) {
+		t.Fatal("no room for 3000")
+	}
+	held := later
+	c.get(k(4), func(j job) {
+		if j.hold(1000) {
+			t.Error("held past the bound")
+		}
+		j.done(nil, 0, errFull)
+	}, func(_ any, err error) { werr = err })
 	if !errors.Is(werr, errFull) {
 		t.Fatal(werr)
 	}
+	if _, ok := c.peek(k(7)); ok {
+		t.Error("the least recently used was kept while a job wanted its room")
+	}
 	// Built larger than it can hold: given, not kept.
-	finish("big", 8000, nil)
-	if _, ok := c.peek(k(3)); ok || c.stats().Bytes != 0 {
+	held.done("big", 8000, nil)
+	if _, ok := c.peek(k(3)); ok {
 		t.Fatalf("%+v", c.stats())
 	}
-	c.put(k(5), "five", 1000)
-	c.put(k(5), "again", 1000)
-	c.put(k(6), "huge", 5000)
-	if v, _ := c.peek(k(5)); v != "five" {
+	c2 := newCache(4096)
+	c2.put(k(5), "five", 1000)
+	c2.put(k(5), "again", 1000)
+	c2.put(k(6), "huge", 5000)
+	if v, _ := c2.peek(k(5)); v != "five" {
 		t.Fatal(v)
 	}
-	if _, ok := c.peek(k(6)); ok {
+	if _, ok := c2.peek(k(6)); ok {
 		t.Fatal("kept past the bound")
 	}
-	// A catalog without the file drops it; one with it keeps it.
-	c.keep(&medialib.Catalog{})
-	if c.stats().Entries != 0 {
-		t.Fatalf("%+v", c.stats())
+	// A cache full of jobs refuses another at once.
+	c3 := newCache(entryBytes)
+	c3.get(k(0), keep, func(any, error) {})
+	c3.get(k(1), nil, func(_ any, err error) { werr = err })
+	if !errors.Is(werr, errFull) {
+		t.Fatal(werr)
+	}
+	// A catalog without the file drops it.
+	c2.keep(&medialib.Catalog{})
+	if c2.stats().Entries != 0 {
+		t.Fatalf("%+v", c2.stats())
 	}
 }
 

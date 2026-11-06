@@ -526,14 +526,19 @@ func (v *VOD) serveVTT(c *fibhttp.Context, l *medialib.Library, s *medialib.Subt
 	}
 	w := v.wait(c)
 	f := s.File
-	v.st.cache.get(k, 2*f.Size+1024, func(done func(any, int64, error)) {
+	v.st.cache.get(k, func(j job) {
+		// The file read, and its WebVTT: within max_subtitle_bytes.
+		if !j.hold(2*f.Size + 1024) {
+			j.done(nil, 0, errFull)
+			return
+		}
 		l.Subtitle(s, func(data []byte, err error) {
 			if err != nil {
-				done(nil, 0, err)
+				j.done(nil, 0, err)
 				return
 			}
 			b := &blob{data: withTimestampMap(data), header: v.st.header("text/vtt; charset=utf-8", etag(&f, "vtt"), f.ModTime), modTime: f.ModTime}
-			done(b, int64(cap(b.data)), nil)
+			j.done(b, int64(cap(b.data)), nil)
 		})
 	}, func(b any, err error) {
 		bl, _ := b.(*blob)
@@ -704,23 +709,27 @@ func (st *store) plan(l *medialib.Library, r *medialib.Rendition, fn func(*plan,
 	k := ckey{file: idOf(&r.File), what: whatPlan}
 	vi, ai := pickTracks(r.MP4())
 	reserve := int64(planBytes + segBytes*(int(r.Duration/st.key.segDur)+16))
-	st.cache.get(k, reserve, func(done func(any, int64, error)) {
+	st.cache.get(k, func(j job) {
 		tables(l, r, vi, ai, func(vt, at *mp4.Table, err error) {
 			if err != nil {
-				done(nil, 0, err)
+				j.done(nil, 0, err)
 				return
 			}
 			ok := l.Submit(func() {
+				if !j.hold(reserve) {
+					j.done(nil, 0, errFull)
+					return
+				}
 				p, err := buildPlan(vt, at, st.key.segDur, st.key.segBytes)
 				if err != nil {
-					done(nil, 0, err)
+					j.done(nil, 0, err)
 					return
 				}
 				p.video, p.audio = vi, ai
-				done(p, p.memory(), nil)
-			}, func() { done(nil, 0, medialib.ErrBusy) })
+				j.done(p, p.memory(), nil)
+			}, func() { j.done(nil, 0, medialib.ErrBusy) })
 			if !ok {
-				done(nil, 0, medialib.ErrBusy)
+				j.done(nil, 0, medialib.ErrBusy)
 			}
 		})
 	}, func(p any, err error) {
@@ -774,10 +783,10 @@ func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n 
 	// The samples are read into one buffer and muxed into another.
 	reserve := 2*int64(p.segs[n].bytes) + 64<<10
 	file := r.File
-	st.cache.get(k, reserve, func(done func(any, int64, error)) {
+	st.cache.get(k, func(j job) {
 		tables(l, r, p.video, p.audio, func(vt, at *mp4.Table, err error) {
 			if err != nil {
-				done(nil, 0, err)
+				j.done(nil, 0, err)
 				return
 			}
 			src := &source{vt: vt, at: at}
@@ -789,9 +798,13 @@ func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n 
 				src.atrack = m.Tracks[p.audio].Track
 			}
 			ok := l.Submit(func() {
+				if !j.hold(reserve) {
+					j.done(nil, 0, errFull)
+					return
+				}
 				data, err := st.build(l, &file, r, p, n, c, src)
 				if err != nil {
-					done(nil, 0, err)
+					j.done(nil, 0, err)
 					return
 				}
 				ct := hls.MPEGTS.ContentType
@@ -799,10 +812,10 @@ func (st *store) segment(l *medialib.Library, r *medialib.Rendition, p *plan, n 
 					ct = contentTypeOf(src.tracks())
 				}
 				b := &blob{data: data, header: st.header(ct, etag(&file, c.String()+strconv.Itoa(n)+"-"+st.tag), file.ModTime), modTime: file.ModTime}
-				done(b, int64(cap(data)), nil)
-			}, func() { done(nil, 0, medialib.ErrBusy) })
+				j.done(b, int64(cap(data)), nil)
+			}, func() { j.done(nil, 0, medialib.ErrBusy) })
 			if !ok {
-				done(nil, 0, medialib.ErrBusy)
+				j.done(nil, 0, medialib.ErrBusy)
 			}
 		})
 	}, func(b any, err error) {

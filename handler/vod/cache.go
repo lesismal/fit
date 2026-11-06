@@ -93,11 +93,12 @@ func (c *cache) peek(k ckey) (any, bool) {
 // get calls fn with what the cache keeps of k, or with what build makes of
 // it, or with the error: at once, on the caller's goroutine, when it keeps
 // k or cannot build it (errFull, errWaiters), and otherwise once it is
-// built, wherever done is called. build is called for a k neither kept nor
-// being built, without the cache's lock, with reserve bytes held for it,
-// and calls done once: with what it made and the bytes it takes, or with
-// an error, which is given to those waiting and not kept.
-func (c *cache) get(k ckey, reserve int64, build func(done func(val any, bytes int64, err error)), fn func(any, error)) {
+// built, wherever the job is done. build is called for a k neither kept nor
+// being built, without the cache's lock; its job holds the memory the work
+// takes once it starts (job.hold), and is done once: with what it made and
+// the bytes it takes, or with an error, which is given to those waiting and
+// not kept.
+func (c *cache) get(k ckey, build func(j job), fn func(any, error)) {
 	c.mu.Lock()
 	if e := c.m[k]; e != nil {
 		if e.elem != nil {
@@ -115,18 +116,47 @@ func (c *cache) get(k ckey, reserve int64, build func(done func(val any, bytes i
 		c.mu.Unlock()
 		return
 	}
-	reserve += entryBytes
-	if !c.room(reserve) {
+	if !c.room(entryBytes) {
 		c.mu.Unlock()
 		fn(nil, errFull)
 		return
 	}
-	e := &entry{key: k, bytes: reserve, waiters: []func(any, error){fn}}
+	e := &entry{key: k, bytes: entryBytes, waiters: []func(any, error){fn}}
 	c.m[k] = e
-	c.used += reserve
+	c.used += entryBytes
 	c.mu.Unlock()
-	build(func(val any, bytes int64, err error) { c.done(e, val, bytes, err) })
+	build(job{c: c, e: e})
 }
+
+// job is an entry being built, as get hands it to build.
+type job struct {
+	c *cache
+	e *entry
+}
+
+// hold takes n bytes more for the entry while it is built, the least
+// recently used dropped for them, and reports whether there was room: the
+// work holds the memory it takes from when it starts, on the file pool, so
+// that requests queued for the pool hold none, and the bound holds for
+// what is being built as for what is kept. An entry dropped meanwhile
+// holds nothing, its work about to find its file changed.
+func (j job) hold(n int64) bool {
+	c := j.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m[j.e.key] != j.e {
+		return true
+	}
+	if !c.room(n) {
+		return false
+	}
+	c.used += n
+	j.e.bytes += n
+	return true
+}
+
+// done ends the job with val, which takes bytes, or with err.
+func (j job) done(val any, bytes int64, err error) { j.c.done(j.e, val, bytes, err) }
 
 // room drops the least recently used until need fits, and reports whether
 // it does; it drops nothing for what could never fit. c.mu is held.
