@@ -13,6 +13,7 @@ A config is one object. Its parts, each with a chapter below:
 | [`admin`](#admin-api) | The Admin API, which reads and replaces the running config. |
 | [`auto_https`](#https-by-default) | HTTPS by default, and its ports. |
 | [`metrics`](#metrics) | Requests counted and timed by listener and route. |
+| [`pprof`](#pprof) | Go's runtime profiles at the Admin API's `/debug/pprof/`. |
 | [`acme`](#acme) | How certificates are obtained: the CA, its account, storage, on-demand TLS. |
 | [`providers`](#providers) | Routes, upstreams, services and listeners from Docker, Consul, etcd and Kubernetes. |
 

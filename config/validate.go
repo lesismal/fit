@@ -296,6 +296,9 @@ func (c *Config) Validate() Errors {
 	if m := c.Metrics; m != nil && c.Admin == nil {
 		add(m.At, "the Admin API serves metrics: set admin too")
 	}
+	if p := c.Pprof; p != nil && c.Admin == nil {
+		add(p.At, "the Admin API serves the profiles: set admin too")
+	}
 	if t := c.Telemetry; t != nil {
 		checkTelemetry(t, add)
 	}

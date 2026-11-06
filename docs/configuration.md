@@ -101,7 +101,7 @@ More: the [JSON reference](reference/json.md).
 | `services` | TCP and UDP proxying | [Services](reference/config.md#services) |
 | handlers | `proxy`, `static`, `respond`, `fastcgi`, `forward_proxy`; `whip`, `whep` and `webrtc_proxy` for WebRTC; `httpflv`, `hls`, `stream_whip` and `stream_whep` for streaming; `vod` for a media library | [Handlers](reference/config.md#handlers) |
 | middleware | authentication, rate limits, caching, compression, headers, rewrites and more | [Middleware](reference/config.md#middleware) |
-| `log`, `access_log`, `telemetry`, `metrics` | Logs, traces and metrics | [Log](reference/config.md#log), [Access log](reference/config.md#access-log), [Telemetry](reference/config.md#telemetry), [Metrics](reference/config.md#metrics) |
+| `log`, `access_log`, `telemetry`, `metrics`, `pprof` | Logs, traces, metrics and runtime profiles | [Log](reference/config.md#log), [Access log](reference/config.md#access-log), [Telemetry](reference/config.md#telemetry), [Metrics](reference/config.md#metrics), [Profiling](reference/config.md#pprof) |
 | `limits` | Bounds on connections, headers, bodies and memory | [Limits](reference/config.md#limits) |
 | `auto_https`, `acme` | HTTPS by default and certificates | [HTTPS by default](reference/config.md#https-by-default), [ACME](reference/config.md#acme) |
 | `engine` | fib's event loops, workers and buffers | [Engine](reference/config.md#engine) |
