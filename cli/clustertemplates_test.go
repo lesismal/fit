@@ -120,7 +120,14 @@ func TestServeClusterTemplates(t *testing.T) {
 	// Both are out of sync, the route and the upstream missing, until
 	// their desired configs are applied, as a rollout (I146) will.
 	for _, n := range []string{"m1", "m2"} {
+		// A member's console checks one login from an address at a time:
+		// the poller's and the sync's may meet, and the second is told to
+		// wait (rate_limited); the sync is asked again until it is read.
 		ms, raw := syncOf(n)
+		for deadline := time.Now().Add(15 * time.Second); ms.State == "error" && time.Now().Before(deadline); {
+			time.Sleep(100 * time.Millisecond)
+			ms, raw = syncOf(n)
+		}
 		if ms.State != "out_of_sync" || stateOf(ms, "routes[api]").Reason != "missing" || stateOf(ms, "upstreams[api]").State != "out_of_sync" || ms.Managed == "failed" {
 			t.Fatalf("%s: %s", n, raw)
 		}
