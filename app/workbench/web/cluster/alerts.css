@@ -1,0 +1,5 @@
+/* Cluster → Drift and alerts (I147, alerts.js). The rest is core/ui.css, cluster/cluster.css and cluster/templates.css.
+   集群 → 漂移与告警（I147，alerts.js）。其余样式在 core/ui.css、cluster/cluster.css 与 cluster/templates.css 中。 */
+
+/* A tile of alerts firing, red with a critical one. / 告警计数块，有严重告警时为红色。 */
+.stat__icon--danger { background: var(--danger-soft); color: var(--danger); }
