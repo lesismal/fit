@@ -261,6 +261,24 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 				tempUser, admin.DefaultConsolePassword, until.Format(time.RFC3339))
 		}
 	}
+	if c.Admin != nil {
+		// Who this fit is, for the Admin API's /node: its ID is the
+		// config's, or made once and kept in the store, or beside the
+		// config without one.
+		var st *store.Store
+		if boot != nil {
+			st = boot.st
+		}
+		id, kept, err := c.Admin.NodeID, admin.IDInConfig, error(nil)
+		if id == "" {
+			id, kept, err = admin.NodeID(st, app.BesidePrefix(paths[0]))
+		}
+		if err != nil {
+			fmt.Fprintf(warnWriter(stderr), "fit: the node ID could not be kept (%v): %s lasts until fit stops\n", err, id)
+		}
+		fitVersion, fibVersion := versions()
+		configs.UseNode(admin.Node{ID: id, IDKept: kept, FitVersion: fitVersion, FibVersion: fibVersion, Started: started})
+	}
 	// The llm and tunnel roles run on the listeners' engine, and
 	// write what their pages change back into the config through configs.
 	apps := app.NewManager(s.Engine(), env.Engine, root, configs.EditMember)

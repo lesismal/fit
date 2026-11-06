@@ -1,6 +1,7 @@
 // Package login keeps the logins of fit's web pages: users with bcrypt
 // hashes, sessions with idle and absolute ends, a CSRF token for each, and
-// addresses refused for a while after failing too often. The Admin API's
+// addresses and users refused for a while after failing too often, for
+// longer each time they go on failing, up to a cap. The Admin API's
 // console and the consoles of the agent and tunnel roles share it; it knows
 // nothing of the server that carries the requests.
 //
@@ -29,15 +30,37 @@ import (
 )
 
 // Failed logins: how many from one address before it is refused, within what
-// window, for how long, and how many addresses are remembered; how many
-// passwords are checked at once.
+// window, for how long the first time, and at most when its lockouts double
+// as it goes on failing; how many addresses are remembered; how many
+// passwords are checked at once. An address that has failed nothing for a
+// Window since its last failure and its lockout is forgotten.
 const (
 	MaxFailures  = 5
 	Window       = 15 * time.Minute
 	Lockout      = 15 * time.Minute
+	MaxLockout   = time.Hour
 	MaxAddresses = 4096
 	Checks       = 2
 )
+
+// Failed checks of one user's password, from any address: how many in a
+// row, with no right one between, before the user's checks are slowed, and
+// for how long after that one, doubling with each failure after it, up to
+// MaxUserBackoff. A right password ends the count, and so does a Window
+// with no failure once the wait is over. The names of no user share one
+// count. A user is never refused for longer than MaxUserBackoff after a
+// failure, so that guessing from many addresses cannot keep the user out
+// for long, and slows to one guess every MaxUserBackoff.
+const (
+	UserFailures   = 10
+	UserBackoff    = 2 * time.Second
+	MaxUserBackoff = 5 * time.Minute
+)
+
+// unknownUser is the key the failures of names that are no user's are
+// counted under: one count for them all, so that their table stays as small
+// as the users.
+const unknownUser = "\x00"
 
 // Options are the users and the limits of a set of logins.
 type Options struct {
@@ -81,17 +104,29 @@ type Logins struct {
 	mu       sync.Mutex
 	sessions map[[sha256.Size]byte]*Session // by the hash of their token
 	fails    map[string]*failures           // by Key of the client address, at most MaxAddresses
+	// userFails are the failures of each user's password, by its name, or
+	// unknownUser: no more than the users and one.
+	userFails map[string]*userFailures
 	// noRoomUntil is when fails, full of addresses locked out, may have
 	// room again; zero once a check ends.
 	noRoomUntil time.Time
 }
 
-// failures are an address's failed checks: how many since first, until
-// when it is refused, and whether a check of it is under way.
+// failures are an address's failed checks: how many since first, the last
+// one, until when it is refused, how many lockouts it has earned since it
+// was last quiet for a Window, and whether a check of it is under way.
 type failures struct {
-	n            int
-	first, until time.Time
-	busy         bool
+	n                  int
+	first, last, until time.Time
+	lockouts           int
+	busy               bool
+}
+
+// userFailures are a user's failed checks in a row: how many, the last one,
+// and until when its checks are refused.
+type userFailures struct {
+	n           int
+	last, until time.Time
 }
 
 // New returns the logins o describes, with no session yet.
@@ -99,7 +134,7 @@ func New(o Options) *Logins {
 	l := &Logins{
 		users: map[string][]byte{}, temp: map[string]time.Time{}, idle: o.Idle, lifetime: o.Lifetime, max: max(o.MaxSessions, 1),
 		now: time.Now, checks: make(chan struct{}, Checks),
-		sessions: map[[sha256.Size]byte]*Session{}, fails: map[string]*failures{},
+		sessions: map[[sha256.Size]byte]*Session{}, fails: map[string]*failures{}, userFails: map[string]*userFailures{},
 	}
 	cost := bcrypt.DefaultCost
 	for _, u := range o.Users {
@@ -316,12 +351,15 @@ func Key(addr string) string {
 }
 
 // Ticket is a password check admitted from an address, as Admit gives it:
-// no other check from the address is admitted until Done.
+// no other check from the address is admitted until Done. One AdmitUser
+// gives is of a user's password too, whose failures it counts.
 type Ticket struct {
-	l    *Logins
-	key  string
-	f    *failures
-	done bool // under l.mu
+	l       *Logins
+	key     string
+	f       *failures
+	user    string // the key of the user's failures, when hasUser
+	hasUser bool
+	done    bool // under l.mu
 }
 
 // Admit admits a password check from addr, before it is queued, and returns
@@ -352,18 +390,63 @@ func (l *Logins) Admit(addr string) (t *Ticket, wait time.Duration, busy bool) {
 	return &Ticket{l: l, key: key, f: f}, 0, false
 }
 
-// LockedOut returns how long the ticket's address is refused logins: a
-// check that waited in a queue asks again before it runs.
-func (t *Ticket) LockedOut() time.Duration {
+// AdmitUser is Admit for a check of user's password: it is refused, too,
+// while the user's checks are slowed (UserFailures), when slowed is set and
+// wait is how long they still are; and the ticket counts the check's
+// failure against the user as well as the address, and its success, Passed,
+// ends the user's count.
+func (l *Logins) AdmitUser(addr, user string) (t *Ticket, wait time.Duration, busy, slowed bool) {
+	key := unknownUser
+	if l.HasUser(user) {
+		key = user
+	}
+	if t, wait, busy = l.Admit(addr); t == nil {
+		return nil, wait, busy, false
+	}
+	t.user, t.hasUser = key, true
+	if wait := t.userWait(); wait > 0 {
+		t.Done(false)
+		return nil, wait, false, true
+	}
+	return t, 0, false, false
+}
+
+// userWait returns how long the ticket's user is still refused checks, or
+// 0.
+func (t *Ticket) userWait() time.Duration {
+	if !t.hasUser {
+		return 0
+	}
 	now := t.l.now()
 	t.l.mu.Lock()
 	defer t.l.mu.Unlock()
-	return t.f.until.Sub(now)
+	if u := t.l.userFails[t.user]; u != nil {
+		return max(u.until.Sub(now), 0)
+	}
+	return 0
+}
+
+// LockedOut returns how long the ticket's address, or its user, is refused
+// logins: a check that waited in a queue asks again before it runs.
+func (t *Ticket) LockedOut() time.Duration {
+	now := t.l.now()
+	t.l.mu.Lock()
+	wait := t.f.until.Sub(now)
+	t.l.mu.Unlock()
+	return max(wait, t.userWait())
 }
 
 // Done ends the ticket's check, counting a failure when failed, and lets
-// the address be checked again. Only the first call counts.
-func (t *Ticket) Done(failed bool) {
+// the address be checked again; a check that did not run, or a right
+// password, is done with false. Only the first call of Done or Passed
+// counts.
+func (t *Ticket) Done(failed bool) { t.end(failed, false) }
+
+// Passed ends the ticket's check as one whose password was right: done as
+// Done(false) is, and the user's count of failures ends.
+func (t *Ticket) Passed() { t.end(false, true) }
+
+func (t *Ticket) end(failed, passed bool) {
 	l := t.l
 	now := l.now()
 	l.mu.Lock()
@@ -377,8 +460,37 @@ func (t *Ticket) Done(failed bool) {
 	l.noRoomUntil = time.Time{}
 	if failed {
 		l.count(f, now)
-	} else if f.n == 0 && l.fails[t.key] == f {
+		if t.hasUser {
+			l.countUser(t.user, now)
+		}
+		return
+	}
+	// An address with lockouts to its name is kept, so that a check
+	// left before it ran does not forget them.
+	if f.n == 0 && f.lockouts == 0 && l.fails[t.key] == f {
 		delete(l.fails, t.key)
+	}
+	if passed && t.hasUser {
+		delete(l.userFails, t.user)
+	}
+}
+
+// countUser counts a failure of the user keyed key, starting its count anew
+// once it has been quiet for a Window past its wait, and slows its checks
+// once it has failed UserFailures times in a row.
+func (l *Logins) countUser(key string, now time.Time) {
+	u := l.userFails[key]
+	if u == nil {
+		u = &userFailures{}
+		l.userFails[key] = u
+	}
+	if !now.Before(u.until) && now.Sub(u.last) > Window {
+		u.n = 0
+	}
+	u.n++
+	u.last = now
+	if u.n >= UserFailures {
+		u.until = now.Add(min(UserBackoff<<min(u.n-UserFailures, 16), MaxUserBackoff))
 	}
 }
 
@@ -403,19 +515,28 @@ func (l *Logins) Failed(addr string) {
 }
 
 // count counts a failure in f, starting its window anew once the last one
-// is over, and locks its address out once it has failed too often.
+// is over, and locks its address out once it has failed MaxFailures times in
+// a window: for Lockout the first time, and twice as long each time after,
+// up to MaxLockout, until it has been quiet for a Window.
 func (l *Logins) count(f *failures, now time.Time) {
-	if f.n == 0 || f.over(now) {
+	switch {
+	case f.over(now):
+		f.n, f.lockouts, f.first = 0, 0, now
+	case f.n == 0 || now.Sub(f.first) > Window && !now.Before(f.until):
 		f.n, f.first = 0, now
 	}
+	f.last = now
 	if f.n++; f.n >= MaxFailures {
-		f.until = now.Add(Lockout)
+		f.until = now.Add(min(Lockout<<min(f.lockouts, 16), MaxLockout))
+		f.lockouts++
+		f.n = 0
 	}
 }
 
-// over reports whether f's window and lockout are both past.
+// over reports whether f is quiet: its lockout past, and a Window past its
+// last failure and its lockout.
 func (f *failures) over(now time.Time) bool {
-	return now.Sub(f.first) > Window && now.After(f.until)
+	return !now.Before(f.until) && now.Sub(f.last) > Window && now.Sub(f.until) > Window
 }
 
 // Addresses returns how many addresses' failures are remembered.

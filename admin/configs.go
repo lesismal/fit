@@ -104,6 +104,11 @@ type Configs struct {
 	tempMu    sync.Mutex
 	tempUser  string
 	tempUntil time.Time
+
+	// node is who this fit is, for GET /node; console is set once
+	// admin.console runs.
+	node    atomic.Pointer[Node]
+	console atomic.Bool
 }
 
 // Version is a config that was applied.
@@ -151,6 +156,14 @@ type Result struct {
 	// Deprecated are the names the config uses that were renamed, each
 	// with its path and its position in the config applied.
 	Deprecated config.Errors
+	// DryRun says that the config was only checked, as Configs.DryRun does: Version
+	// and ETag are then the running config's, still running, NewETag the
+	// ETag the config checked would have once applied, and Unchanged says
+	// it is the running config itself. Added and Removed are the listeners
+	// an apply would bind and take away.
+	DryRun    bool
+	NewETag   string
+	Unchanged bool
 }
 
 // NewConfigs returns the Configs of server, whose runtime rt is running
@@ -159,6 +172,7 @@ type Result struct {
 // be read back.
 func NewConfigs(rt *runtime.Runtime, server *listener.Server, env runtime.Env, first *config.Config, data []byte, source string, keep int) *Configs {
 	cs := &Configs{rt: rt, server: server, env: env, first: first, currentCfg: first, keep: max(keep, 1), parts: map[string]*provider.Part{}}
+	cs.node.Store(newNode())
 	if first != nil {
 		applyProfiling(first.Pprof)
 	}
@@ -291,10 +305,16 @@ func (cs *Configs) SetConsolePassword(username, hash string) error {
 	return nil
 }
 
-func (cs *Configs) record(version uint64, data []byte, source, baseSource string, m *provider.Merged) {
+// etagOf is the ETag of data, a base config as written: a strong entity
+// tag of its hash.
+func etagOf(data []byte) string {
 	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:12]) + `"`
+}
+
+func (cs *Configs) record(version uint64, data []byte, source, baseSource string, m *provider.Merged) {
 	cs.history = append(cs.history, &Version{Number: version, Applied: time.Now(), Source: source, Bytes: len(data),
-		ETag: `"` + hex.EncodeToString(sum[:12]) + `"`, data: data, baseSource: baseSource,
+		ETag: etagOf(data), data: data, baseSource: baseSource,
 		effective: m.Data, sources: m.Sources, shadowed: m.Shadowed})
 	if n := len(cs.history) - cs.keep; n > 0 {
 		clear(cs.history[:n])
@@ -318,15 +338,30 @@ func (cs *Configs) Apply(data []byte, source string) (Result, error) {
 // calling nothing, unless it names the running config's ETag or is "*". An
 // error from edit is returned as it is.
 func (cs *Configs) Update(source, ifMatch string, edit func(cur *Version) ([]byte, error)) (Result, error) {
-	return cs.update(source, ifMatch, func(cur *Version) ([]byte, string, error) {
+	return cs.update(source, ifMatch, false, func(cur *Version) ([]byte, string, error) {
 		data, err := edit(cur)
 		return data, source, err
 	})
 }
 
-// update is Update with edit saying where the base config it gives came
-// from.
-func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data []byte, baseSource string, err error)) (Result, error) {
+// DryRun is Update without applying: the config edit makes from the running
+// one takes the whole path an apply takes, If-Match, merged with what
+// providers provide, loaded and compiled, every module provisioned and the
+// listeners' new addresses tried, and gives the errors an apply would give,
+// or a Result with DryRun set and the warnings an apply would give. Nothing
+// changes: not the running config, its version, the history, the store,
+// nor the counts of reloads. Compiling takes no engine, as fit validate's
+// does, so that the upstreams' pools dial nothing and probe nothing.
+func (cs *Configs) DryRun(source, ifMatch string, edit func(cur *Version) ([]byte, error)) (Result, error) {
+	return cs.update(source, ifMatch, true, func(cur *Version) ([]byte, string, error) {
+		data, err := edit(cur)
+		return data, source, err
+	})
+}
+
+// update is Update, or DryRun when dry, with edit saying where the base
+// config it gives came from.
+func (cs *Configs) update(source, ifMatch string, dry bool, edit func(cur *Version) (data []byte, baseSource string, err error)) (Result, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cur := cs.history[len(cs.history)-1]
@@ -337,15 +372,31 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 	if err != nil {
 		return Result{}, err
 	}
+	// A dry run counts nothing: it is not a reload.
+	failed := func() {
+		if !dry {
+			cs.failures.Add(1)
+		}
+	}
 	// Comments and trailing commas are blanked out, so that what is kept,
 	// merged with providers and edited by JSON pointer is standard JSON.
 	if data, err = config.Standardize(data); err != nil {
-		cs.failures.Add(1)
+		failed()
 		return Result{}, config.Errors{err.(*config.Error)}
 	}
 	if cs.admin != nil && hasAdmin(data) {
-		cs.failures.Add(1)
+		failed()
 		return Result{}, errAdminInStore
+	}
+	if dry {
+		r, c, err := cs.check(data, baseSource, cs.parts, source)
+		if err != nil {
+			return Result{}, err
+		}
+		r.Version, r.ETag, r.NewETag = cur.Number, cur.ETag, etagOf(data)
+		r.Unchanged = r.NewETag == cur.ETag
+		r.Warnings = append(r.Warnings, cs.restartWarnings(c)...)
+		return r, nil
 	}
 	cs.reloads.Add(1)
 	r, c, m, err := cs.apply(data, baseSource, cs.parts, source)
@@ -362,28 +413,36 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 			cs.saved = sum
 		}
 	}
+	r.Warnings = append(r.Warnings, cs.restartWarnings(c)...)
+	return r, nil
+}
+
+// restartWarnings are the changes c makes that take effect only when fit
+// restarts.
+func (cs *Configs) restartWarnings(c *config.Config) []string {
+	var warnings []string
 	if !sameAccessLog(cs.first.AccessLog, c.AccessLog) {
-		r.Warnings = append(r.Warnings, "access_log changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "access_log changed; the change takes effect when fit restarts")
 	}
 	if !sameLog(cs.first.Log, c.Log) {
-		r.Warnings = append(r.Warnings, "log's output or format changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "log's output or format changed; the change takes effect when fit restarts")
 	}
 	if !sameAdmin(cs.first.Admin, c.Admin) {
-		r.Warnings = append(r.Warnings, "admin changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "admin changed; the change takes effect when fit restarts")
 	}
 	if !sameACME(cs.first.ACME, c.ACME) {
-		r.Warnings = append(r.Warnings, "acme changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "acme changed; the change takes effect when fit restarts")
 	}
 	if !sameJSON(cs.first.Telemetry, c.Telemetry) {
-		r.Warnings = append(r.Warnings, "telemetry changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "telemetry changed; the change takes effect when fit restarts")
 	}
 	if !sameJSON(cs.first.Engine, c.Engine) {
-		r.Warnings = append(r.Warnings, "engine changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "engine changed; the change takes effect when fit restarts")
 	}
 	if !sameProviders(cs.first.Providers, c.Providers) {
-		r.Warnings = append(r.Warnings, "providers changed; the change takes effect when fit restarts")
+		warnings = append(warnings, "providers changed; the change takes effect when fit restarts")
 	}
-	return r, nil
+	return warnings
 }
 
 // apply merges parts into data, the base config, whose source is
@@ -391,31 +450,9 @@ func (cs *Configs) update(source, ifMatch string, edit func(cur *Version) (data 
 // reported where they were written: in the base config, or in what a
 // provider provided. cs.mu must be held.
 func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provider.Part, source string) (Result, *config.Config, *provider.Merged, error) {
-	var ordered []*provider.Part
-	for _, name := range cs.providers {
-		if p := parts[name]; p != nil {
-			ordered = append(ordered, p)
-		}
-	}
-	m := &provider.Merged{Data: data}
-	if json.Valid(data) {
-		merged, err := provider.Merge(data, baseSource, ordered)
-		switch {
-		case err == nil:
-			m = merged
-		case len(ordered) > 0:
-			return Result{}, nil, nil, err
-		}
-		// With nothing to merge, a base config that cannot take parts
-		// is loaded as it is, for its own errors.
-	}
-	loaded := m.Data
-	if cs.admin != nil {
-		loaded = WithAdmin(m.Data, cs.admin)
-	}
-	c, err := config.Load(loaded)
+	c, m, err := cs.load(data, baseSource, parts)
 	if err != nil {
-		return Result{}, nil, nil, m.Errors(err)
+		return Result{}, nil, nil, err
 	}
 	env := cs.env
 	env.Previous = cs.rt.Current()
@@ -462,6 +499,66 @@ func (cs *Configs) apply(data []byte, baseSource string, parts map[string]*provi
 	return Result{Version: g.Version, Source: source, Added: added, Removed: removed, Warnings: warnings, Deprecated: deprecated}, c, m, nil
 }
 
+// load merges parts into data, the base config, whose source is
+// baseSource, and loads the result, with the bootstrap file's admin when
+// there is a store. Errors are reported where they were written. cs.mu must
+// be held.
+func (cs *Configs) load(data []byte, baseSource string, parts map[string]*provider.Part) (*config.Config, *provider.Merged, error) {
+	var ordered []*provider.Part
+	for _, name := range cs.providers {
+		if p := parts[name]; p != nil {
+			ordered = append(ordered, p)
+		}
+	}
+	m := &provider.Merged{Data: data}
+	if json.Valid(data) {
+		merged, err := provider.Merge(data, baseSource, ordered)
+		switch {
+		case err == nil:
+			m = merged
+		case len(ordered) > 0:
+			return nil, nil, err
+		}
+		// With nothing to merge, a base config that cannot take parts
+		// is loaded as it is, for its own errors.
+	}
+	loaded := m.Data
+	if cs.admin != nil {
+		loaded = WithAdmin(m.Data, cs.admin)
+	}
+	c, err := config.Load(loaded)
+	if err != nil {
+		return nil, nil, m.Errors(err)
+	}
+	return c, m, nil
+}
+
+// check is apply without applying: data is merged, loaded and compiled, as
+// fit validate compiles, with no engine, and the listeners the graph would
+// bind are tried by the server, which binds none of them; the graph is
+// released at once. cs.mu must be held.
+func (cs *Configs) check(data []byte, baseSource string, parts map[string]*provider.Part, source string) (Result, *config.Config, error) {
+	c, m, err := cs.load(data, baseSource, parts)
+	if err != nil {
+		return Result{}, nil, err
+	}
+	g, err := runtime.Compile(c, runtime.Env{})
+	if err != nil {
+		return Result{}, nil, m.Errors(err)
+	}
+	defer g.Release()
+	r := Result{Source: source, DryRun: true}
+	if cs.server != nil {
+		if r.Added, r.Removed, err = cs.server.Plan(g); err != nil {
+			return Result{}, nil, err
+		}
+	}
+	if ws := c.Warnings(); len(ws) > 0 {
+		r.Deprecated = config.AsErrors(m.Errors(ws))
+	}
+	return r, c, nil
+}
+
 // Reloads returns how many configs were tried, from loading on, since fit
 // started, and how many of them failed; the config fit started with is not
 // counted.
@@ -470,13 +567,13 @@ func (cs *Configs) Reloads() (tried, failed uint64) { return cs.reloads.Load(), 
 // Reapply applies the running config again, as a new version, so that what
 // it loads from files, its certificates, is loaded again.
 func (cs *Configs) Reapply(source string) (Result, error) {
-	return cs.update(source, "", func(cur *Version) ([]byte, string, error) { return cur.data, cur.baseSource, nil })
+	return cs.update(source, "", false, func(cur *Version) ([]byte, string, error) { return cur.data, cur.baseSource, nil })
 }
 
 // Rollback applies again the config applied as version n, as a new version.
 // It gives a *RequestError with status 404 when n is no longer kept.
 func (cs *Configs) Rollback(n uint64, ifMatch string) (Result, error) {
-	return cs.update(SourceRollback, ifMatch, func(*Version) ([]byte, string, error) {
+	return cs.update(SourceRollback, ifMatch, false, func(*Version) ([]byte, string, error) {
 		// update holds the lock.
 		if v := cs.find(n); v != nil {
 			return v.data, v.baseSource, nil
@@ -675,7 +772,7 @@ func sameAdmin(a, b *config.Admin) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Addr() == b.Addr() && a.TokenFile == b.TokenFile && a.HistoryLen() == b.HistoryLen() &&
+	return a.Addr() == b.Addr() && a.TokenFile == b.TokenFile && a.HistoryLen() == b.HistoryLen() && a.NodeID == b.NodeID &&
 		a.ConfigBytes() == b.ConfigBytes() && a.Conns() == b.Conns() &&
 		a.CertFile == b.CertFile && a.KeyFile == b.KeyFile && a.ClientCAFile == b.ClientCAFile
 }

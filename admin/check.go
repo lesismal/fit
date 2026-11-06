@@ -126,6 +126,11 @@ func (s *Server) putText(w http.ResponseWriter, r *http.Request) {
 		writeUpdateError(w, err)
 		return
 	}
+	dry, err := isDryRun(r)
+	if err != nil {
+		writeUpdateError(w, err)
+		return
+	}
 	data, ok := s.readBody(w, r, f.types...)
 	if !ok {
 		return
@@ -153,7 +158,7 @@ func (s *Server) putText(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res, err := s.configs.Update(s.source, r.Header.Get("If-Match"), func(cur *Version) ([]byte, error) {
+	res, err := s.update(r, dry, func(cur *Version) ([]byte, error) {
 		if len(members) == 0 {
 			return adapted.JSON, nil
 		}

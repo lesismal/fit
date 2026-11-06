@@ -1229,8 +1229,13 @@ In JSON:
 
 The Admin API reads and replaces the running config: `GET`, `PUT`, `PATCH` and `DELETE` on
 `/config/` and a JSON pointer into it, `POST /load` for a whole config, ETags against lost updates,
-the configs applied (`/versions`) and rollback to one. It also serves metrics at `/metrics`, the
-effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
+the configs applied (`/versions`) and rollback to one. A change sent with `?dry_run=1` is checked
+through the whole path an apply takes, loaded, compiled and its new listeners' addresses tried, and
+answered as an apply would answer it, with nothing applied. `GET /node` says who this fit is: its
+node ID (`node_id`, or one made once and kept in the store or beside the config), host name, fit's
+and fib's versions, start time, running config version and ETag, roles, the schema's digest and the
+capabilities a manager of many fits checks before it calls an endpoint. It also serves metrics at
+`/metrics`, the effective config with providers merged, and a read-only dashboard. It listens on 127.0.0.1:2019
 unless told otherwise. To listen anywhere but a loopback address or a Unix socket it needs
 `token_file`, and `cert_file` and `key_file` to be served over TLS (1.2 or later), so that the
 token never crosses a network in the clear; TLS may be set on loopback too. The certificate files
@@ -1340,6 +1345,7 @@ In JSON:
 | `history` | integer, 0 or more | `10` | How many of the configs applied, the running one included, are kept to be read back. 10 when left out or 0. |
 | `max_config_bytes` | integer, 0 or more | `4194304` | The largest config the Admin API takes; a larger one gets 413. 4 MiB when left out or 0. |
 | `max_conns` | integer, 0 or more | `16` | The most connections the Admin API keeps open at once, a quarter of them kept for those that have made a request with the token (any request, without token_file). When they are taken, a new connection closes the oldest of those that have not, of the client holding the most, and is closed as it is accepted only when every one has; one past a client's share, a quarter of them, is closed too, but for loopback clients. A connection that has not is closed 5s after it is accepted, whatever it is doing. 16 when left out or 0. |
+| `node_id` | string |  | This fit's node ID, which the Admin API's GET /node answers and a manager of many fits knows it by: 1 to 64 letters, digits, '.', '_' and '-', starting with a letter or digit. Left out, fit makes one, a random UUID, once, and keeps it in the store, or without one in a file beside the config, as fit.node-id beside fit.json; set it where neither lasts, as in a container whose config is read-only. |
 | `disable_dashboard` | boolean |  | Do not serve the dashboard, the read-only web pages at /dashboard/ that show the routes, services, upstreams and their health, certificates and config versions from the Admin API's GET endpoints; served when left out or false. |
 | `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |

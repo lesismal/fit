@@ -258,10 +258,17 @@ endpoints answer `409`. The users and their first hashes stay in the bootstrap f
   checked on a pool of their own (1 running, 16 waiting, then `503`), so logins cannot hold up
   logged-in users' requests.
 - **Lockouts.** A client address that fails 5 times in 15 minutes is refused for 15 minutes, with
-  `429` and `Retry-After`. An IPv6 address counts by its /64. One check from an address runs at a
-  time, so guesses sent at once cannot slip past the count; another sent meanwhile gets `429`. The
-  table of addresses holds 4,096 at most; filling it never ends a lockout early, and while it is
-  full of addresses locked out, new ones are refused until the first lockout ends.
+  `429` and `Retry-After`; each further lockout it earns before it has been quiet for 15 minutes
+  lasts twice as long, up to an hour. An IPv6 address counts by its /64. One check from an address
+  runs at a time, so guesses sent at once cannot slip past the count; another sent meanwhile gets
+  `429`. The table of addresses holds 4,096 at most; filling it never ends a lockout early, and while
+  it is full of addresses locked out, new ones are refused until the first lockout ends.
+- **Slowed users.** A user whose password fails 10 times in a row, from any addresses, has its
+  checks refused for 2 seconds, then twice as long after each further failure, up to 5 minutes
+  (`429`, `Retry-After`). The right password, once the wait is over, works and ends the count, and so
+  do 15 minutes without a failure; names that are no user's share one count. Guessing from many
+  addresses is so held to one guess every 5 minutes, and keeps the user out for 5 minutes at most
+  after a guess. A refused login's `429` carries `{"error", "retry_after"}`, the seconds to wait.
 - **Sessions.** A login gives a session: 32 random bytes in the cookie `fit_console_<port>` (the console's port, so that consoles
   of several fits on one host keep their logins apart), `HttpOnly`,
   `SameSite=Strict`, and `Secure` over TLS. The console keeps only its SHA-256, and ends it after
@@ -342,7 +349,10 @@ and the language (English or Chinese) are picked at the top right. Each page has
   console's Content-Security-Policy lets its pages reach the listeners that serve `vod` and `hls`
   routes, and nothing else. hls.js (1.5.20, Apache-2.0) is vendored in the workbench and loaded only
   when a player first needs it.
-- **Account**: the signed-in user's password, and the console users' (below).
+- **Account**: the signed-in user's password, and the console users' (below); **This node**, who
+  this fit is, as `GET /api/node` says: its node ID (copied with a click), where the ID is kept, the
+  host, fit's, fib's and Go's versions, the start and uptime, the running config's version, ETag and
+  source, the roles running, the schema's digest and the capabilities a manager checks.
 - **Tunnel** and **LLM**: a module for each role running, as `tunnel.hub` or `llm.node`, with the
   role's pages; a hub's Tokens page, and the LLM roles' links page, issue and revoke the link tokens
   their peers link with ([the tunnel](tunnel.md#tokens), [the LLM feature](llm.md#tokens)), which
@@ -375,12 +385,17 @@ and a text that fails is answered with its path, line and column and applies not
 Every page edits the same draft of the config: **Save and apply** sends it whole, with `If-Match`,
 or, from a raw tab, sends that page's text, which is merged into the config first. The result says
 which version it was applied as, with any warnings. A config with errors is refused and its errors
-are shown at their paths. When the config was changed elsewhere since the page read it (`412`), the
+are shown at their paths. **Check**, beside it, sends the same request with `?dry_run=1`: the server
+loads and compiles the draft, tries its new listeners' addresses, and answers as the save would,
+without applying anything; its errors are shown where a save's are, and a draft that passes is
+shown with the listeners it would add or remove and its warnings, still unsaved. When the config was changed elsewhere since the page read it (`412`), the
 page says so: discard the changes to read it again, or copy them from the JSON page first.
 
 For scripts, the console's own endpoints are `POST /api/login` (a JSON body
-`{"username", "password"}`, answered with the user and the CSRF token), `POST /api/logout`,
-`GET /api/session` and `GET /api/workbench` (the user and the IDs of the modules served). Each
+`{"username", "password"}`, answered with `{"user", "csrf"}` and the session's cookie; a program
+keeps the cookie and sends `csrf` in `X-Fit-Csrf` on every request but a GET or a HEAD), `POST /api/logout`,
+`GET /api/session` (the same `{"user", "csrf"}`), `GET /api/workbench` (the user and the IDs of the
+modules served) and `GET /api/node` (the Admin API's `GET /node`, also at `/api/m/admin/node`). Each
 module's endpoints are under `/api/m/<module>/`: the config's module, `admin`, serves
 `GET /api/m/admin/schema`, the Admin API's endpoints under `/api/m/admin/`, behind a session instead
 of the token, as `GET /api/m/admin/config`, and the pages' own: `GET /api/m/admin/users` (the
