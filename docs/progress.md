@@ -5966,3 +5966,35 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: `llm_nodes` and `tunnel_nodes` are not built, as those roles have no Go API for their
   node lists; `metrics_query` reads current counters only, as fit keeps no metric history. The
   decisions made are in the plan's I125 section, pending review.
+
+
+### I126 Proposals, levels and the audit log — done
+
+- **Propose tools** (level `propose`): `config_propose` (whole top-level members, or add, replace and
+  remove at JSON pointers), `reconcile_propose`, `rollback_propose` and `cache_purge_propose`; each
+  call adds a step to the conversation's one pending proposal, kept with the conversation: the
+  steps, the base ETag and version, a revision, and the whole checked again on the running config,
+  with a redacted diff of the changed members in `.conf`, `.yaml` and `.json`. A step wrong in itself
+  is refused; one that leaves the whole invalid is kept, and the proposal cannot be applied until
+  another mends it.
+- **Apply** (level `apply` only; the panel's Apply, then a dialog with the whole diff): as the user,
+  through the Admin API in process, with `If-Match` and the revision the person saw: patches as one
+  `PUT /config/text?members=`, fixes as one `POST /config/reconcile`, or `POST /rollback/{n}`; saved,
+  listed in `/versions` as `console`; purges after. All or nothing for the config; a stale proposal
+  is refused (412) and offered again on the new version; a refused change leaves the proposal with
+  its reason, which the model is told.
+- **Levels** are checked on every tool call against the settings in use, and on every apply; `read`
+  and `edit` users get no propose tools.
+- **Audit log** (store section `assistant.audit`, bounded by `limits.max_audit_entries`): answers'
+  tool calls (redacted, cut), applies, refusals, offers again and discards, with user, time, source,
+  conversation, skill, owner, steps, outcome and version; `GET /api/m/ai/audit`; `GET
+  /api/m/ai/proposals`, `POST .../{conv}/apply` and `.../{conv}/discard`.
+- **Workbench**: the panel's proposal card and confirm dialog, the Proposals and Audit log pages,
+  English and Chinese.
+- **Tests**: `make test-changed` under the race detector; `assistant` at 98.6%, the new files 100%;
+  an admin test applies a two-step proposal as one version that `/versions` lists, saved; in a
+  browser against a scripted model, English and Chinese: cancel leaves the config, confirm applies,
+  a stale proposal is offered again, a `propose` user cannot apply.
+- **Gaps**: no purge by prefix (the Admin API has none); config steps of different kinds are refused
+  in one proposal; server-side error details are English only. The decisions made are in the plan's
+  I126 section, pending review.

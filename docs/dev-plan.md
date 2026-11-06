@@ -280,7 +280,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | **AI assistant** | | | |
 | I124 | Decision 031; `admin.assistant` and its settings page; the model client for each API, streamed, with tool calls, on fib's asynchronous HTTP client; keys in the store | I120 | done |
 | I125 | The workbench's chat panel and the read tools: tool registry, SSE chat, page context, redaction, fit's log ring | I124 | done |
-| I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | todo |
+| I126 | Proposals: the change tools, the diff and apply flow, per-user levels and the audit log | I125 | done |
 | I127 | Skills: the format, the built-in set, the Skills page, import and export, `/name` | I126 | todo |
 | I128 | Ask AI where the work is: entry points on save errors, Consistency, the Engine menu, form fields, metrics and role pages | I127 | todo |
 | I129 | Migration and review: `migrate` and `security-review` end to end, evaluated on fixed sets of configs | I127 | todo |
@@ -2063,6 +2063,37 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   forbidden members cannot be proposed; the audit log holds across a restart within its bound; under
   the race detector.
 - **Touches**: `assistant`, `admin`, `admin/store`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Who applies.** Only level `apply`; an `apply` user lists and applies or discards any user's
+   pending proposals, the proposer recorded as `owner` in the audit log, since a `propose` user's
+   could otherwise never be applied. Alternative: each user's proposals private.
+2. **One kind of config step a proposal**: patches, fixes or one rollback, each through its own
+   endpoint as exactly one version, since mixing them takes two calls and cannot be all or nothing;
+   purges mix with any. Alternative: fold fixes and rollbacks into one merged `PUT /config/text`.
+3. **No proposal touches `admin`**: it holds the forbidden members, `PUT /config/text?members`
+   refuses it, and it takes effect only at a restart; a rollback to a version whose `admin` differs
+   is refused too.
+4. **The assistant never writes a secret**: a value under a secret-named member must equal the
+   config's at that path (a `[redacted]` copied back is restored) or be empty; the person sets new
+   secrets on the page. Alternative: allow it, flagged in the diff.
+5. **Patches go by top-level member** (`PUT /config/text?members=` with only the changed ones), the
+   rest of the config kept as written, member order kept with an order-preserving JSON tree.
+6. **A step that leaves the whole invalid is kept** for the next to mend; one wrong in itself is
+   refused.
+7. **A proposal of purges only is never stale**; its zones are checked again at the apply.
+8. **Diffs are made again at each view**, 256 KiB a format; a proposal holds at most 32 steps and
+   256 KiB of arguments.
+9. **Diffs are redacted everywhere**, in the panel and the dialog as for the model.
+10. **No apply while the conversation answers** (409); apply and discard commit only if the revision
+    is unchanged.
+11. **The audit log** records answers that called tools, not plain questions, so the bound is not
+    spent on chat; every console user may read it, as the console's log; a cancelled dialog sends
+    nothing and is not logged.
+12. **Discard** needs any level but `off`; deleting a conversation with a pending proposal is logged
+    as a discard.
+13. **An apply runs on a context of its own**, so a browser that leaves cannot half apply it.
 
 ### I127 Skills
 

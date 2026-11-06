@@ -4238,3 +4238,25 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   在浏览器中：中英文问题由工具回答，`ask_user` 的选择到达模型，停止、重试、重启后对话仍在，store 文件中没有明文对话。
 - **缺口**：`llm_nodes` 与 `tunnel_nodes` 未实现，这些角色没有节点列表的 Go API；`metrics_query` 只读当前计数，fit 不保存指标历史。
   实现时所做的决策在计划的 I125 一节，待审查。
+
+
+### I126 提案、级别与审计日志 — 已完成
+
+- **提议工具**（级别 `propose`）：`config_propose`（整个顶层成员，或在 JSON pointer 处的添加、替换与删除）、`reconcile_propose`、
+  `rollback_propose` 与 `cache_purge_propose`；每次调用向对话唯一的待处理提案添加一步，提案随对话保存：各步骤、基准 ETag 与
+  版本、revision，以及在运行中配置上对整体的再次检查，附改动成员在 `.conf`、`.yaml` 与 `.json` 中脱敏的 diff。本身错误的步骤
+  被拒绝；使整体无效的步骤被保留，在其他步骤修好之前提案不能应用。
+- **应用**（仅级别 `apply`；面板的 Apply，然后是展示完整 diff 的对话框）：以该用户身份经进程内 Admin API，带 `If-Match` 与用户
+  看到的 revision：补丁作为一次 `PUT /config/text?members=`，修复作为一次 `POST /config/reconcile`，或 `POST /rollback/{n}`；保存，
+  在 `/versions` 中列为 `console`；之后执行缓存清除。配置全有或全无；过期的提案被拒绝（412）并在新版本上重新提供；被拒绝的
+  修改带着原因留在提案中，并告知模型。
+- **级别** 在每次工具调用时按当时的设置检查，每次应用时也检查；`read` 与 `edit` 用户得不到提议工具。
+- **审计日志**（store 小节 `assistant.audit`，受 `limits.max_audit_entries` 限制）：回答中的工具调用（脱敏、截断）、应用、拒绝、
+  重新提供与丢弃，带用户、时间、来源、对话、技能、owner、步骤、结果与版本；`GET /api/m/ai/audit`；`GET /api/m/ai/proposals`、
+  `POST .../{conv}/apply` 与 `.../{conv}/discard`。
+- **Workbench**：面板中的提案卡片与确认对话框，Proposals 与 Audit log 页面，中英文。
+- **测试**：竞态检测下的 `make test-changed`；`assistant` 覆盖率 98.6%，新文件 100%；一个 admin 测试把两步提案作为一个版本应用，
+  `/versions` 列出且已保存；在浏览器中对脚本化模型以中英文验证：取消不改配置，确认后应用，过期提案被重新提供，`propose` 用户
+  不能应用。
+- **缺口**：不能按前缀清除缓存（Admin API 没有）；同一提案中不同类的配置步骤被拒绝；服务端的错误详情只有英文。实现时所做的
+  决策在计划的 I126 一节，待审查。
