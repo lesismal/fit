@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="cluster/cluster.css">
   <link rel="stylesheet" href="cluster/switcher.css">
   <link rel="stylesheet" href="cluster/templates.css">
+  <link rel="stylesheet" href="cluster/alerts.css">
   <script src="core/ui.js"></script>
 </head>
 <body>
@@ -62,6 +63,9 @@
   <!-- Rollouts: a change applied to many members in stages, planned, gated and rolled back (I146). /
        发布：分阶段应用到多个成员的修改，含规划、健康检查与回滚（I146）。 -->
   <script src="cluster/rollouts.js"></script>
+  <!-- Drift and alerts: members out of sync and their fixes as rollouts, alert rules, webhooks and silences (I147). /
+       漂移与告警：未同步的成员及以发布进行的修复、告警规则、Webhook 与静默（I147）。 -->
+  <script src="cluster/alerts.js"></script>
   <script src="cluster/cluster.js"></script>
   <!-- The node switcher in the header: a member's own pages, opened through the manager (I143). /
        页眉中的节点切换器：通过管理端打开成员自己的页面（I143）。 -->

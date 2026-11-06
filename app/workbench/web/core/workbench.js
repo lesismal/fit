@@ -27,6 +27,8 @@
 //   topbar(UI, shell) optional: called each time the shell is built; what it returns goes in the top bar beside the
 //           preferences, on every page, and shell is the shell's root, for a panel beside the pages (the assistant's).
 //   managerOnly  optional: a module of the manager's own (the account pages), never drawn against a member.
+//   badge()   optional: {text, kind ('danger', 'warn' or ''), title} or null, drawn on the module's menu row; called
+//           again on every rebuild (WB.refreshMenu), as the Cluster menu's count of alerts firing (I147).
 //
 // The node switcher (I143): a page whose URL has ?node=<member> is drawn against that member of the manager, its
 // modules' requests passed on by the manager (UI.target()). The menu is then the member's modules the manager opens
@@ -49,7 +51,8 @@
 // shell 为外框根元素，供页面旁的面板（助手）使用。WB.page() 返回当前页面（面板作为上下文发送），WB.select(value) 记录页面的
 // 选中项，切换页面时清除。编辑配置的页面用 WB.editor({describe, call}) 登记其编辑器（切换页面时清除），WB.page() 的 editable
 // 即其声明；WB.pageTool(name, args) 把助手页面工具的调用（page_get、page_edit、page_revert）交给它：只在页面上起草，从不提交或保存。
-// managerOnly：管理端自己的模块（账户页面），从不针对成员绘制。节点切换器（I143）：URL 带 ?node=<成员> 的页面针对管理端的该
+// managerOnly：管理端自己的模块（账户页面），从不针对成员绘制。badge()：可选，返回 {text, kind, title} 或 null，绘制在模块的
+// 菜单行上，每次重建时再次调用（如集群菜单上正在触发的告警数，I147）。节点切换器（I143）：URL 带 ?node=<成员> 的页面针对管理端的该
 // 成员绘制，模块的请求由管理端转发（UI.target()）；菜单为管理端可打开的成员模块（GET /api/n/<成员>/workbench），不含管理端
 // 自己的模块；WB.frame(fn) 不论提供哪些模块都向外框添加内容：fn({wb, target}) → {title, top, band, cls, color} 或 null。
 (function () {
@@ -205,6 +208,13 @@
   function text(m, label, tag) {
     return h('div.tree__text', h('span.ellipsis', label), tag ? h('span.tree__tag', tag) : null);
   }
+  // badgeOf is the badge a module's badge() asks for on its menu row, or null. / 模块 badge() 要求在其菜单行上显示的徽标。
+  function badgeOf(m) {
+    var b = null;
+    try { b = typeof m.def.badge === 'function' ? m.def.badge() : null; } catch (e) { b = null; }
+    if (!b || b.text == null || b.text === '') return null;
+    return h('span.tree__badge' + (b.kind ? '.tree__badge--' + b.kind : ''), { title: b.title || '', 'aria-label': b.title || '' }, String(b.text));
+  }
 
   function setOpen(key, on, el) {
     open[key] = on;
@@ -229,12 +239,12 @@
       // 属于其他模块，由那个模块的条目标记。
       if (one && one.href && !one.kids) {
         return h('a.nav__item.tree__leaf.tree__mod', { href: one.href, title: navLabel(m, one.title || one.label) },
-          UI.icon(m.icon || one.icon), text(m, label, tag));
+          UI.icon(m.icon || one.icon), text(m, label, tag), badgeOf(m));
       }
       // A module of one page is a page of its own. / 只有一页的模块直接链接到该页。
       if (one && one.id && !one.kids && !one.href) {
         var a = h('a.nav__item.tree__leaf.tree__mod', { href: '#/' + m.id + '/' + one.id, title: label },
-          UI.icon(m.icon || one.icon), text(m, label, tag));
+          UI.icon(m.icon || one.icon), text(m, label, tag), badgeOf(m));
         items[m.id + '/' + one.id] = a;
         return a;
       }
@@ -245,7 +255,7 @@
         h('a.nav__item.tree__head', {
           href: '#/' + m.id, title: label, 'aria-expanded': isOpen ? 'true' : 'false',
           onclick: function (e) { e.preventDefault(); toggle(node, mkey); }
-        }, UI.icon(m.icon), text(m, label, tag), h('span.tree__chev', UI.icon('chev'))), kids);
+        }, UI.icon(m.icon), text(m, label, tag), badgeOf(m), h('span.tree__chev', UI.icon('chev'))), kids);
       nodes[m.id] = node;
       return node;
     });

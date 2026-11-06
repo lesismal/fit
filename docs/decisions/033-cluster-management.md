@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144, I145 and I149 built; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; I143, I144, I145, I146, I147 and I149 built; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -194,6 +194,22 @@ What I146 adds, rollouts ([rollouts](../cluster.md#rollouts-a-change-applied-in-
 - **On every fit, for it**: `GET /status` answers `requests`, the requests answered since fit
   started by the class of their status, never going back (`status.requests`), when the config sets
   `metrics`.
+
+What I147 adds, drift and alerts ([drift and alerts](../cluster.md#drift-and-alerts)):
+
+- **Drift checked on every poll**: a member's consistency check comes with its poll; a member a
+  template is attached to is read against its templates after a poll when its config changed (its
+  ETag) or its sync state is missing or old; `GET /api/m/cluster/drift` lists every member's drift,
+  and `POST drift/fix` plans a sync rollout of the members named (`Manager.FixDrift`), applied only
+  once a person starts it.
+- **Alerts**: rules (member down, drift, a rollout failed, a certificate expiring, upstream backends
+  down, reloads failing), each with its time, repeat interval, group and webhooks; an evaluator of
+  its own fires an alert once its condition has lasted its time, sends it, again at its repeat
+  interval, and resolves it after; silences; webhooks in fit's JSON or a chat service's format,
+  signed by their secret, sent on fib's asynchronous client, one at a time each, bounded queues. The
+  rules, webhooks (their URLs and secrets), silences and the alerts firing and past are kept in the
+  store's section `cluster.alerts`. `GET/POST/PUT/DELETE /api/m/cluster/alerts/...`.
+- **On members**: nothing; a member is read as before.
 
 ## Pending review
 
@@ -533,6 +549,85 @@ Decided while building I146 (2026-11-06):
      from its query), `rollout/<id>`; **Roll out** on a template's page and **Sync this node** on a
      rendered result; a dry run's errors linked to the member's page, its own pages and its rendered
      result. The API's times are milliseconds (`pause_ms`, `wait_ms`, `window_ms`).
+
+Decided while building I147 (2026-11-06):
+
+103. **The alerts are a store section of their own, `cluster.alerts`** (its own version, 1), not a
+     member of the document: they change as members' states do, written by the evaluator without
+     touching the document or its ETag; a fit that predates them keeps the section as it finds it,
+     and sections are never in an export, so webhooks' URLs and secrets stay in the store.
+     Alternatives: an `alerts` member of the version 2 document, which an I146 fit would drop when it
+     writes; a document of version 3, which would leave an older fit read-only.
+104. **Drift is read after a poll when it can have changed**: a member a template is attached to,
+     up, is read against its templates (I145's sync read, `runSync`'s read of one member) after a
+     poll when it has no sync state, its config's ETag as `GET /node` says differs from the one its
+     sync state was taken of, or its sync state is older than 10 minutes; a change of templates,
+     groups or members is read by I145's refresh already. At most `max_concurrency` at once, one at a
+     time a member, never waited for: a member there is no room for is read after a later poll.
+     Alternative: every managed member's `GET /config` on every poll, up to `max_response_bytes` each.
+105. **A drift read tells the member nothing**: a poll only reads; rollouts and the pages' reads tell
+     members what they own. Alternative: telling, as a page's read does.
+106. **Drift has two sources**: the templates (out of sync, in conflict, or not rendering) and the
+     member's own consistency check; a rule may watch one (`source`). **Fix** of a template drift
+     plans a sync rollout of the member (`POST drift/fix`, `FixDrift(user, nodes)` calling
+     `PlanRollout(user, {kind: sync, nodes})`) and opens its plan, which a person starts; a consistency
+     drift is fixed by a reload of the member (I144's operation), confirmed, as no rollout brings what
+     runs in line with the config it runs from. Alternatives: a Fix that starts the rollout; a link to
+     `#/cluster/newrollout?kind=sync&nodes=…` alone (kept as **Plan by hand**).
+107. **The conditions**: `member_down` a member `down` or `error` (it cannot be managed either way),
+     from its state's since; `drift` as above; `rollout_failed` a rollout in state `failed`, an alert
+     per rollout, until rolled back or `resolve_after_ms` (24 hours) after it ended; `cert_expiry` the
+     nearest expiry within `days` (14); `backends_down` at least `threshold` (1) backends down;
+     `reload_failed` the latest change of the member's reload counts a failure, counted from when the
+     manager first read them (a failure before is not its to tell), until a reload succeeds, the
+     member restarts (its counts go back) or `resolve_after_ms` (an hour) passes. Alternatives:
+     `member_down` on `down` only; `rollout_failed` from the `rollout.end` audit entries.
+108. **Default rules** while the section does not exist: member-down 1 minute, drift 5 minutes,
+     rollout-failed, certificate-expiry 14 days, backends-down 2 minutes, reloads-failing, each
+     repeated every 4 hours; with no webhook nothing is sent, and the alerts show on the pages and the
+     badge. Alternative: no rule until a person adds one.
+109. **A rule's members are a group's, or every member's; its webhooks named, or every one when
+     none is**: a webhook a rule names cannot be removed (409), as the rule would then send to every
+     one; a webhook renamed is renamed in its rules.
+110. **The evaluator** is a goroutine of its own, every second and whenever a drift read ends or the
+     rules change; a condition's time runs from when it began (a state's since, a failure's time) or
+     from when it was first seen; a member not read since the manager started keeps its alerts as they
+     are; what no longer holds resolves before new alerts take its room. At most 2,048 alerts firing
+     or pending (past it new ones are not followed, logged once an hour) and 500 resolved are kept;
+     pending ones are not kept across a restart, firing ones are, and are not sent again for it.
+     Tests drive it with an injected clock.
+111. **Sending**: in each evaluation a webhook gets one notification of the alerts that fired or are
+     repeated and one of those that resolved (50 alerts in the JSON, 20 lines of text, the rest
+     counted). A resolved alert is sent when it was sent firing, also when its rule is gone (to every
+     webhook that takes resolved alerts) and while silenced, so that receivers close what they
+     opened. Repeat every 4 hours by default, 0 never. A failed notification is not sent again (the
+     repeat does); a webhook's queue holds 64, the oldest dropped; one at a time a webhook, its timeout
+     1 to 60 s (10 s), its answer at most 64 KiB; Feishu's, DingTalk's and WeCom's 200 with an
+     `errcode` or `code` not 0 is a failure. Alternative: retries with backoff.
+112. **Formats**: `json` (fit's), `slack` (Mattermost and Rocket.Chat take the same), `discord`,
+     `feishu`, `dingtalk`, `wecom`, `custom`. A chat format's template is each alert's line with
+     `${...}` replaced, and `custom`'s the whole body, JSON checked when saved with sample values:
+     plain replacement, nothing executed. Signatures: `X-Fit-Signature: sha256=<HMAC of the timestamp,
+     a dot and the body>` with `X-Fit-Timestamp`; Feishu's and DingTalk's own schemes for theirs.
+     Alternatives: Go's `text/template`; more services (Teams, Telegram) as formats.
+113. **A webhook's URL is a secret as its secret is**, as a chat service's token is in it: both written
+     once, kept in the store, answered as scheme and host only (`url_host`), taken out of every error,
+     never logged or audited; `https`, or `http` to a loopback address.
+114. **Silences** match a rule, a member or both, from now or a start to an end at most 30 days
+     ahead; ended early by `DELETE`, kept as past for 7 days, 256 at most. A silenced alert fires and
+     shows (`silenced_by`) but is not sent, nor counted in the badge; one never sent is sent once the
+     silence ends.
+115. **The audit log** has every change of rules, webhooks and silences and every webhook test (by
+     `appendAudit`, the URL by its host); alerts firing and resolving are logged, not audited, as no
+     person acted. Every method takes the user, for I148's roles: `AddAlertRule`, `UpdateAlertRule`,
+     `RemoveAlertRule`, `AddWebhook`, `UpdateWebhook`, `RemoveWebhook`, `TestWebhook`, `AddSilence`,
+     `ExpireSilence`, `FixDrift`.
+116. **The alerts have an ETag of their own** (`"a<n>"`), taken as `If-Match` by their changes, apart
+     from the members'.
+117. **The pages**: Drift and alerts after Rollouts, `#/cluster/alerts/<tab>` (`drift`, `alerts`,
+     `rules`, `webhooks`, `silences`); a badge on the Cluster menu while alerts fire, their count, red
+     with a critical one, read from `GET alerts/summary` every 15 s. The workbench's core gained a
+     module's optional `badge()`, drawn on its menu row, as no extension point drew one.
 
 Open questions of the plan, answered as proposed until reviewed:
 

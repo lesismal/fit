@@ -150,6 +150,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .tree__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tree__tag { flex: none; align-self: flex-start; padding: 1px 6px; border-radius: 999px; background: var(--sidebar-active); color: var(--sidebar-text); font-size: 10px; font-weight: 600; letter-spacing: .02em; line-height: 1.35; white-space: nowrap; }
 .nav__item.is-active .tree__tag { color: var(--sidebar-strong); }
+/* A module's badge on its menu row (badge()), as the Cluster menu's alerts firing. / 模块菜单行上的徽标（badge()），如集群菜单上的告警数。 */
+.tree__badge { flex: none; min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--sidebar-active); color: var(--sidebar-strong); font-size: 11px; font-weight: 700; line-height: 1.4; text-align: center; }
+.tree__badge--danger { background: var(--danger); color: #fff; }
+.tree__badge--warn { background: var(--warn, #f5a524); color: #1b1b1b; }
 .tree__chev { margin-left: auto; display: inline-flex; opacity: .6; }
 .tree__chev svg { width: 14px !important; height: 14px !important; transition: transform .15s; }
 .tree__node.is-open > .tree__head .tree__chev svg, .tree__node.is-filtered > .tree__head .tree__chev svg { transform: rotate(90deg); }
