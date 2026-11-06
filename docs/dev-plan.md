@@ -287,7 +287,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I130 | An MCP server on the tool registry: tools, skills as prompts, config and schema as resources; per-user tokens capped at `propose`; proposals applied only in the workbench | I126, I127 | done |
 | **Media library** | | | |
 | I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | done |
-| I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | todo |
+| I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | done |
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | todo |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
@@ -2463,6 +2463,38 @@ keeps the reads behind one interface so that it can be added).
   a rescan; a broken file is listed with its error; a path or symlink out of the roots is refused;
   the bounds and a reload hold under the race detector.
 - **Touches**: `medialib` (new), `config`, `app`, `admin`, `schema`, `docs`, `test/workers`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The patterns' names** are `files` and `exclude`, not the plan's "include and exclude", as
+   `include` is a directive of the `.conf` format. Alternatives: `match` and `ignore`; a block.
+2. **Pattern syntax**: one without `/` matches the name, one with `/` the path under the root, `**`
+   spans directories; `exclude` prunes directories; dot-names are always skipped. Alternatives:
+   gitignore's rules; regular expressions.
+3. **IDs** are the path under the root without the rendition label and extension when that is safe
+   in a URL; otherwise unsafe runs become `-` and 8 hex digits of the path's hash follow, so IDs stay
+   stable and unique. Alternatives: reversible escaping (unreadable for CJK names); a hash only on a
+   collision (an ID would change when a colliding file appears).
+4. **An ID taken twice** (across roots or sidecars): the first in root and path order wins, the
+   other is reported. Alternative: the root in the ID.
+5. **Naming**: rendition labels `NNNp[fps]`, `Nk`, `Nkbps` and `audio[-lang…]`; subtitles and posters
+   go to the item with the longest matching base; a sidecar's lists merge with the files named after
+   it, and may name subdirectories but not above its own.
+6. **A pool a library**, made at once, with the static handler's defaults (4 a CPU, at least 16; queue
+   4096; 10s); `max_probes` keeps scans from crowding out serving. Alternative: one pool an engine.
+7. **The sample-table cache lives in `medialib`**, shared by I133 and I134 under one bound
+   (`max_table_bytes`), with `Table` and `Subtitle`; this adds `max_table_bytes`,
+   `max_subtitle_bytes`, `file_workers`, `file_queue` and `file_timeout`.
+8. **Sidecars** are read again at each scan, their bytes in a scan bounded by `max_catalog_bytes`.
+9. **Defaults**: `scan_interval` 10m (at least 10s; it cannot be turned off), `max_items` 20,000,
+   `max_files` 200,000, `max_catalog_bytes` 64 MiB, `max_probes` 4, sidecars 64 KiB (at most 1 MiB),
+   subtitles 2 MiB, tables 128 MiB.
+10. **The Admin API finds a library** with `medialib.Lookup` on the upstream engine, not through
+    `app.Manager`, whose lock is held for a whole apply.
+11. **`HasApps` does not count `media_library`**, as for `media_auth`: a config still needs a listener
+    or routes.
+12. **Fixtures' line endings**: `medialib/testdata/.gitattributes` sets `* -text`, so that Windows CI
+    does not change the subtitles compared byte for byte.
 
 ### I133 Video on demand
 

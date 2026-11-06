@@ -4365,3 +4365,22 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   （216,000 个样本）在上限内读取；`FuzzOpen` 加入 fib CI 的 fuzz 任务；`media/interop` 的 `TestMP4` 检查较长的文件；`media/mp4` 覆盖率 95.5%。
 - **缺口**：只使用第一个样本描述；不读取 `cmov` 与加密文件；第一个播放编辑之后的编辑保留但不应用。实现时所做的决策在计划的 I131 一节，
   待审查。
+
+
+### I132 媒体库 — 已完成
+
+- **配置**：`media_library`（`config/medialibrary.go`）：具名的库，含 `roots`、`files` 与 `exclude` 模式、`follow_symlinks`、`scan_interval`
+  以及各带默认值的上限；由角色 `media_library`（包 `medialib`）按引擎运行，重载时原地修改。
+- **扫描** 在库自己的 goroutine 上进行（启动时、按间隔、重载有变化时以及 `POST /media/library/<name>/rescan`），每次读取目录 256 项，
+  受 `max_files` 与 32 层限制；用 fib 的 `media/mp4` 在库自己受限的文件池（`file_workers`、`file_queue`、`file_timeout`）上探测媒体文件，
+  同时最多 `max_probes` 个，未改变的文件复用结果；新目录完整后才替换旧目录。
+- **条目** 按名字或严格的 sidecar `<name>.json` 把版本、音频、字幕（`.vtt`，以及作为 WebVTT 提供的 `.srt`）与海报归在一起；探测失败的文件
+  带错误列出且不提供；除非 `follow_symlinks`，拒绝指向根目录之外的 sidecar 路径与符号链接；目录受 `max_items` 与 `max_catalog_bytes` 限制。
+- **供 I133 与 I134 使用**：池上的 `Open`、`OpenFile` 与 `Submit`（`ErrChanged`、`ErrOutside`），受 `max_table_bytes` 限制的样本表缓存
+  `Table`，以及 `Subtitle`。
+- **Admin API**：`GET /media/library`、`/media/library/{name}`（分页与过滤）、`/media/library/{name}/items/{id}` 与 `POST .../rescan`；七组
+  `fit_media_library_*` 指标；中英文的 `docs/media-library.md`。
+- **测试**：竞态检测下的 `make test-changed`；`medialib` 覆盖率 99.2%；一个 ffmpeg 生成的小库（80 KB）与 ffprobe 对照；文件新增、修改与
+  删除后重新扫描；损坏的文件；根目录内、指向外部、循环与悬空的符号链接；每个上限；重载与读取、扫描并发。
+- **缺口**：`test/workers` 的用例随 I133 的 `vod` 加入；扫描之后被换成 FIFO 的文件可能占住一个池 goroutine（从不是 fib worker）。实现时所做的
+  决策在计划的 I132 一节，待审查。

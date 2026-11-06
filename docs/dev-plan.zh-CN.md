@@ -277,7 +277,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I130 | 基于工具注册表的 MCP 服务器：工具、作为 prompts 的 skill、作为 resources 的配置与 schema；按用户签发、最高 `propose` 的 token；提议只在 workbench 中应用 | I126, I127 | done |
 | **媒体库** | | | |
 | I131 | 决定 032；fib A64，非分片 MP4 文件的读取器：经 `io.ReaderAt` 读取样本表，按时间和关键帧查找样本，内存有上限 | I116 | done |
-| I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | todo |
+| I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | done |
 | I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | todo |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | todo |
 | I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | todo |
@@ -2004,6 +2004,28 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
 - **完成标准**：一个由 ffmpeg 生成文件组成的媒体库列出每个条目，时长和编码与 ffprobe 一致，多码率和字幕正确分组；新增、修改或删除的文件在
   重新扫描后体现；损坏的文件连同错误列出；根目录之外的路径或符号链接被拒绝；上限和重载在 race 检测下成立。
 - **涉及**：`medialib`（新）、`config`、`app`、`admin`、`schema`、`docs`、`test/workers`。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **模式字段的名字** 是 `files` 与 `exclude`，而不是计划中的“include 与 exclude”，因为 `include` 是 `.conf` 格式的指令。备选：`match` 与
+   `ignore`；一个块。
+2. **模式语法**：不含 `/` 的匹配文件名，含 `/` 的匹配根目录下的路径，`**` 跨目录；`exclude` 也剪掉目录；点开头的名字总是跳过。备选：
+   gitignore 的规则；正则表达式。
+3. **ID** 在 URL 中安全时为根目录下去掉版本标签与扩展名的路径；否则不安全的部分变为 `-`，后接路径哈希的 8 位十六进制，使 ID 稳定且唯一。
+   备选：可逆转义（中日韩文件名不可读）；只在冲突时加哈希（出现冲突文件时已有 ID 会改变）。
+4. **重复的 ID**（跨根目录或 sidecar）：按根目录与路径顺序第一个胜出，其余的报告出来。备选：ID 中带根目录。
+5. **命名**：版本标签为 `NNNp[fps]`、`Nk`、`Nkbps` 与 `audio[-lang…]`；字幕与海报归到基名匹配最长的条目；sidecar 的列表与以它命名的文件
+   合并，可引用子目录但不能高于自身所在目录。
+6. **每个库一个池**，立即创建，默认值与 static 处理器相同（每 CPU 4 个，至少 16；队列 4096；10 秒）；`max_probes` 防止扫描挤占服务。
+   备选：每个引擎一个池。
+7. **样本表缓存放在 `medialib`**，由 I133 与 I134 在同一上限（`max_table_bytes`）下共用，连同 `Table` 与 `Subtitle`；为此新增
+   `max_table_bytes`、`max_subtitle_bytes`、`file_workers`、`file_queue` 与 `file_timeout`。
+8. **sidecar** 每次扫描重新读取，一次扫描中的字节数受 `max_catalog_bytes` 限制。
+9. **默认值**：`scan_interval` 10 分钟（至少 10 秒，不能关闭），`max_items` 20,000，`max_files` 200,000，`max_catalog_bytes` 64 MiB，
+   `max_probes` 4，sidecar 64 KiB（最多 1 MiB），字幕 2 MiB，样本表 128 MiB。
+10. **Admin API 查找库** 用上游引擎上的 `medialib.Lookup`，而不是经过 `app.Manager`，后者的锁在整个应用过程中都被持有。
+11. **`HasApps` 不计 `media_library`**，与 `media_auth` 一样：配置仍需要 listener 或路由。
+12. **测试文件的换行**：`medialib/testdata/.gitattributes` 设为 `* -text`，使 Windows CI 不改动逐字节比较的字幕。
 
 ### I133 点播
 

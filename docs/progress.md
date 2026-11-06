@@ -6153,3 +6153,30 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: only the first sample description is used; `cmov` and encrypted files are not read;
   edits past the first playing one are kept, not applied. The decisions made are in the plan's I131
   section, pending review.
+
+
+### I132 Media libraries — done
+
+- **Config**: `media_library` (`config/medialibrary.go`): named libraries of `roots`, with `files` and
+  `exclude` patterns, `follow_symlinks`, `scan_interval` and every bound with a default; run by the
+  role `media_library` (package `medialib`), per engine, changed in place on a reload.
+- **Scans** run on the library's own goroutine (at start, on the interval, on a reload's change and on
+  `POST /media/library/<name>/rescan`), read directories 256 entries at a time within `max_files` and
+  32 levels, and probe media files with fib's `media/mp4` on the library's bounded file pool
+  (`file_workers`, `file_queue`, `file_timeout`), `max_probes` at once, reusing unchanged files; the
+  new catalog replaces the old one only when whole.
+- **Items** group renditions, audio, subtitles (`.vtt`, and `.srt` served as WebVTT) and posters by name
+  or by a strict sidecar `<name>.json`; a file that fails to probe is listed with its error and not
+  served; sidecar paths and symbolic links out of the roots are refused unless `follow_symlinks`; the
+  catalog is bounded by `max_items` and `max_catalog_bytes`.
+- **For I133 and I134**: `Open`, `OpenFile` and `Submit` on the pool (`ErrChanged`, `ErrOutside`),
+  `Table` with a sample-table cache bounded by `max_table_bytes`, and `Subtitle`.
+- **Admin API**: `GET /media/library`, `/media/library/{name}` (paged and filtered),
+  `/media/library/{name}/items/{id}` and `POST .../rescan`; seven `fit_media_library_*` metrics;
+  `docs/media-library.md` in English and Chinese.
+- **Tests**: `make test-changed` under the race detector; `medialib` at 99.2%; a small ffmpeg-made
+  library (80 KB) checked against ffprobe; rescans after files are added, changed and removed; broken
+  files; symbolic links in, out of, looping and dangling; every bound; reloads racing reads and scans.
+- **Gaps**: `test/workers` gets its case with I133's `vod`; a file swapped for a FIFO after a scan could
+  hold a pool goroutine (never a fib worker). The decisions made are in the plan's I132 section,
+  pending review.
