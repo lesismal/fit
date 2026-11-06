@@ -117,6 +117,9 @@ func serve(ctx context.Context, stopSignals func(), reload <-chan struct{}, args
 			err = mapErrors(err)
 		}
 	}
+	if err == nil && boot == nil && c.Admin != nil && c.Admin.Cluster != nil {
+		err = errors.New("admin.cluster: a manager keeps its members' credentials in a store: set admin.store, or run with -admin, which keeps one beside the config")
+	}
 	if err == nil && boot != nil && *watch {
 		err = fmt.Errorf("-watch watches config files, but the config is kept in the store %s; send SIGHUP to read the store again", boot.st.Path())
 	}

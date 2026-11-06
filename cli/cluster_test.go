@@ -106,3 +106,26 @@ func TestServeCluster(t *testing.T) {
 		t.Fatalf("stop: %d %q", code, ms.err.String())
 	}
 }
+
+// TestServeClusterAdminFlag runs a manager from a config of admin.cluster
+// alone: without a store fit run refuses it, and with -admin, which keeps
+// one beside the config, it manages.
+func TestServeClusterAdminFlag(t *testing.T) {
+	t.Setenv(StorePasswordEnv, "")
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "manager.json")
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	users := `"users": [{"username": "admin", "password_hash": ` + js(string(hash)) + `}]`
+	writeFile(t, cfg, `{"admin": {"address": "127.0.0.1:0", "console": {"address": "127.0.0.1:0", `+users+`}, "cluster": {}}}`)
+	if s := startServe(t, "-c", cfg, "-watch-certs=false"); s.stop(t) != 1 || !strings.Contains(s.err.String(), "run with -admin") {
+		t.Errorf("without a store: %q", s.err.String())
+	}
+	writeFile(t, cfg, `{"admin": {"address": "127.0.0.1:0", "console": {"address": "127.0.0.1:0"}, "cluster": {}}}`)
+	s := startServe(t, "-admin", "-c", cfg, "-watch-certs=false")
+	if out := s.out.waitFor(t, "console on ", 1); !strings.Contains(out, "fit: managing 0 members (admin.cluster)") {
+		t.Errorf("%s", out)
+	}
+	if code := s.stop(t); code != 0 {
+		t.Fatalf("stop: %d %q", code, s.err.String())
+	}
+}
