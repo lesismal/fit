@@ -6180,3 +6180,29 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: `test/workers` gets its case with I133's `vod`; a file swapped for a FIFO after a scan could
   hold a pool goroutine (never a fib worker). The decisions made are in the plan's I132 section,
   pending review.
+
+
+### I133 Video on demand — done
+
+- **`vod`** (`handler/vod`): a library's items over HLS, cut from the files as they are stored: a
+  multivariant playlist (renditions as variants with BANDWIDTH, CODECS and RESOLUTION; audio files and
+  subtitles as groups), media playlists of fMP4 or MPEG-TS segments (`container`, or
+  `index.ts.m3u8`), cut at the keyframe nearest `segment_duration` and bounded by
+  `max_segment_bytes`; WebVTT subtitles with `X-TIMESTAMP-MAP`; the files with `Range` through
+  SendFile, and posters. Plans, playlists and segments are built on the library's file pool, a
+  request waiting retained within `timeout`, and kept in a cache bounded by `max_cache_bytes`, shared
+  across reloads; a file changed or removed answers 404 and is dropped. ETag and Last-Modified from
+  the file, `cache_control`, and `media_auth`'s `play` on `vod/<library>/<id>`.
+- **Tests**: every frame of every fixture in both containers matches the file's tables, segments start
+  on keyframes, audio within a frame of video; a held pool, timeouts, a busy pool, cut and slow
+  clients, the cache bound, reloads and changed files under the race detector; `vod` at 98.0%.
+  `TestInterop` (ffmpeg 6.1, 7.1 and 9.0) and hls.js 1.5.20 in Chromium 156 play and seek every item,
+  in a Linux container on the benchmark host (`test/docker/vod/e2e.sh`).
+- **Benchmark** (`bench/vod.sh`, benchmark host, 4 server CPUs, segments of 1.26 MB, medians of 3):
+  nginx serving ffmpeg's segments cut beforehand 24,960 segments a second, p99 3.6 ms, RSS 135 MiB;
+  fit with every segment cached 19,210 (77%), p99 8.4 ms, 615 MiB (holding 435 MB of segments); fit
+  with a 64 MiB cache, every segment read and muxed, 5,496, p99 44 ms, 206 MiB.
+- **Gaps**: Safari's own player not checked (steps in `test/docker/vod/e2e.sh`), nor H.265 in a
+  browser; cached segments are written from memory, not by sendfile (the 23% behind nginx); `v<i>`
+  follows the catalog's order; a file's first video and audio tracks only, no MP3; BANDWIDTH is the
+  average; no metrics of the cache. The decisions made are in the plan's I133 section, pending review.

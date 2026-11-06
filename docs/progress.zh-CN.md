@@ -4384,3 +4384,22 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   删除后重新扫描；损坏的文件；根目录内、指向外部、循环与悬空的符号链接；每个上限；重载与读取、扫描并发。
 - **缺口**：`test/workers` 的用例随 I133 的 `vod` 加入；扫描之后被换成 FIFO 的文件可能占住一个池 goroutine（从不是 fib worker）。实现时所做的
   决策在计划的 I132 一节，待审查。
+
+
+### I133 点播 — 已完成
+
+- **`vod`**（`handler/vod`）：以 HLS 提供库中的条目，直接从存储的文件切分：多版本播放列表（各版本作为 variant，带 BANDWIDTH、CODECS 与
+  RESOLUTION；音频文件与字幕作为组），fMP4 或 MPEG-TS 分段的媒体播放列表（`container`，或 `index.ts.m3u8`），在离 `segment_duration`
+  最近的关键帧处切分并受 `max_segment_bytes` 限制；带 `X-TIMESTAMP-MAP` 的 WebVTT 字幕；经 SendFile 并支持 `Range` 的原文件，以及海报。
+  切分计划、播放列表与分段都在库的文件池上构建，请求在 `timeout` 内保留等待，并保存在受 `max_cache_bytes` 限制、重载之间共用的缓存中；
+  被修改或删除的文件回答 404 并从缓存中去掉。ETag 与 Last-Modified 来自文件，`cache_control`，以及对 `vod/<library>/<id>` 的
+  `media_auth` `play` 检查。
+- **测试**：两种容器下每个测试文件的每一帧都与文件的样本表一致，分段从关键帧开始，音频与视频相差不超过一帧；竞态检测下覆盖池被占住、
+  超时、池满、断开与慢的客户端、缓存上限、重载与文件变化；`vod` 覆盖率 98.0%。`TestInterop`（ffmpeg 6.1、7.1 与 9.0）以及 Chromium 156
+  中的 hls.js 1.5.20 在基准机的 Linux 容器中播放并跳转了每个条目（`test/docker/vod/e2e.sh`）。
+- **基准**（`bench/vod.sh`，基准机，服务端 4 个 CPU，分段 1.26 MB，3 轮中位数）：nginx 提供 ffmpeg 预先切好的分段，每秒 24,960 个，p99
+  3.6 ms，RSS 135 MiB；fit 所有分段都在缓存中时 19,210（77%），p99 8.4 ms，615 MiB（缓存了 435 MB 分段）；fit 用 64 MiB 缓存、每个分段
+  都读取并封装时 5,496，p99 44 ms，206 MiB。
+- **缺口**：未检查 Safari 自带播放器（步骤见 `test/docker/vod/e2e.sh`），也未在浏览器中检查 H.265；缓存的分段从内存写出而非 sendfile
+  （与 nginx 差 23% 的原因）；`v<i>` 的编号随目录顺序；只用文件的第一条视频与音频轨道，不提供 MP3；BANDWIDTH 是平均值；缓存没有指标。
+  实现时所做的决策在计划的 I133 一节，待审查。
