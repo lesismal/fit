@@ -2235,3 +2235,60 @@ items whose tracks are the same (no `SetTracks`) show none.
 tracks differ from the last one's, its timestamps already continuous per track, and the egresses then
 pass them on as they are. The tolerance of 0.2s for such items in `TestChannelInterop` and
 `TestChannelEgresses` comes down to a frame.
+
+## A69: Encrypted HLS segments
+
+**Status.** Requested on 2026-11-06, from I136 (encrypted segments). Not made yet: I136's session
+could not change fib. Meanwhile fit encrypts a channel's segments itself, in its `hls` handler
+(`streaming/hlsenc.go`), within every rule: it copies each segment the Muxer cut, encrypts it on the
+channel's library's file pool once for every viewer, keeps it within the handler's `max_bytes`, and
+rewrites the media playlists with the keys' tags. That stopgap goes once fib does it.
+
+**Problem.** `media/hls` encrypts nothing (its doc says so: "Left out: ... and encryption"). A live
+stream served encrypted, AES-128 of RFC 8216 section 4.3.2.4 (`METHOD=AES-128`), needs the media
+playlist to carry `#EXT-X-KEY` tags, at the start and wherever the key changes, kept out of the way
+of `#EXT-X-MAP` (a key before it encrypts the initialization section too), and every segment
+encrypted with the key in force and the IV its media sequence number. Neither can be done by a
+`SegmentWriter`: it knows neither the stream nor the segment's msn, and the Muxer writes the
+playlist. So fit copies and encrypts each segment outside the Muxer, a second copy of every segment
+kept, and parses and rewrites every playlist the Muxer renders, on the worker, for every request.
+Parts (Low-Latency HLS) it cannot encrypt at all, since a part's bytes are a slice of its segment's.
+
+**Evidence.** `streaming/hlsenc.go` in fit: `withKeys` rewrites each media playlist line by line;
+`serveEncrypted` answers `seg-*` names itself, from `Muxer.File`, a copy encrypted on a pool and
+cached; `keyServed` renders a whole playlist to learn the session and the last msn before it serves a
+key; LL-HLS tags are stripped and parts refused.
+
+**Suggested API.**
+
+```go
+// Encryption encrypts a Muxer's segments with AES-128 (RFC 8216 section 4.3.2.4).
+type Encryption struct {
+	// Rotation is how many segments one key encrypts; 0 for one key.
+	Rotation int
+	// Key returns the key of epoch (msn / Rotation) of the Muxer whose
+	// session is session, and the URI the playlist names it by, relative
+	// to the playlist. Called on the publisher's goroutine, once an epoch.
+	Key func(session string, epoch uint64) (key [16]byte, uri string)
+}
+
+// in Config:
+	// Encryption, when not nil, encrypts every segment as it completes, each
+	// part too, with an IV of its msn (a part's, its own explicit IV), and
+	// writes #EXT-X-KEY, after any #EXT-X-MAP, wherever the key changes.
+	Encryption *Encryption
+
+// in HandlerConfig:
+	// Encrypt returns the Encryption of the stream at path, nil for none:
+	// asked once a Muxer starts.
+	Encrypt func(path string) *Encryption
+```
+
+and `Muxer.Session()`, `Muxer.Next()` (the msn of the segment being cut), so that a key server can
+check a key's session and epoch without rendering a playlist.
+
+**How fit uses it.** The `hls` handler's `HandlerConfig.Encrypt` returns, for a channel with
+`encrypt`, an `Encryption` of its `key_rotation` whose `Key` derives the key from the library's
+secret (`medialib.Keys`) and names it `key-<session>-<epoch>.key`; its key URIs are answered as now,
+checked with `Session` and `Next`. `withKeys`, the encrypted segments' cache and the copy go; parts of
+encrypted channels are served.

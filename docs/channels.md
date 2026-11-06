@@ -119,6 +119,34 @@ one plays. When the pool or the disk is too slow, the channel pauses rather than
 read late in a burst, and counts an underrun. A file changed or removed while it plays ends its item
 where it was read to; the next scan lists it as it is.
 
+## Encrypted HLS
+
+With `encrypt`, a channel's HLS is encrypted as `vod`'s segments are
+([encrypted segments](media-library.md#encrypted-segments)): AES-128, under keys derived from the
+library's `secret` or `secret_file`, a new one every `key_rotation` segments (10), so that a key
+handed out opens a few segments only.
+
+```json
+{"name": "tv/films", "library": "films", "items": ["films/bbb", "films/sintel"], "encrypt": true, "key_rotation": 10}
+```
+
+The `hls` handler does it, for any stream that is a channel with `encrypt`:
+
+- a media playlist gains an `#EXT-X-KEY` wherever the key changes, its URI `key-<session>-<n>.key`
+  beside the segments, and none of Low-Latency HLS's parts: an encrypted channel is played by whole
+  segments. An `#EXT-X-MAP` after a key, at a discontinuity, is preceded by `METHOD=NONE`, so that
+  initialization sections stay clear.
+- a key is served only to a request the handler's `auth` lets play the channel, with
+  `Cache-Control: private, no-store`, and only for the segments cut so far and the next, so that a
+  viewer cannot take the keys of what is to come; an `hls` handler without `auth` serves none (403).
+- a segment is encrypted once, on the library's file pool, for every viewer that asks for it, and
+  kept, within the handler's `max_bytes`.
+
+`<session>` changes whenever the stream's segmenting starts again, as after `idle_timeout`, and with
+it every key, so that no key and IV are used twice. RTMP, RTSP, SRT, HTTP-FLV, WHEP and push targets
+carry the channel as before, under their own `auth`. fib's HLS encrypts nothing yet: fit encrypts
+the segments fib's muxer cuts ([fib request A69](fib-api-requests.md#a69-encrypted-hls-segments)).
+
 ## Push targets
 
 | Field | Default | |
