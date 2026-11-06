@@ -207,10 +207,10 @@ func TestHLSAuth(t *testing.T) {
 	}
 }
 
-func TestWithToken(t *testing.T) {
+func TestWithQuery(t *testing.T) {
 	in := "#EXTM3U\n#EXT-X-MAP:URI=\"init-1.mp4\"\n#EXTINF:2.0,\nseg-1.m4s\r\n#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"part-2.0.m4s\"\nmedia.m3u8?format=ts\nseg-2.m4s?token=x\n"
 	want := "#EXTM3U\n#EXT-X-MAP:URI=\"init-1.mp4?token=a%2Bb\"\n#EXTINF:2.0,\nseg-1.m4s?token=a%2Bb\r\n#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"part-2.0.m4s?token=a%2Bb\"\nmedia.m3u8?format=ts&token=a%2Bb\nseg-2.m4s?token=x\n"
-	if got := string(withToken([]byte(in), "a+b")); got != want {
+	if got := string(withQuery([]byte(in), "token=a%2Bb")); got != want {
 		t.Fatalf("got\n%q\nwant\n%q", got, want)
 	}
 }

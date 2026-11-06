@@ -75,6 +75,10 @@ GOP（从最后一个关键帧开始），最多 `gop_cache_bytes`，使新的�
 用 `?token=` 获取的 HLS 播放列表，其中的媒体播放列表、分片和 part 也都带上该 token，使不发送请求头的播放器（如 Safari
 和 ffmpeg）能继续播放；HLS 的每个请求都会检查。查询参数中的 token 不会被记录：访问日志把它写成 `REDACTED`。
 
+策略设置了 `url_signing` 时，`hls` 和 `httpflv` 处理器也接受[会过期的播放地址](media-library.zh-CN.md#会过期的播放地址)：
+为一个观众和一路流（`/hls/live/cam/`；`/live/cam.flv` 为 `/live/cam/`）签名，频道的流与其他流一样；用它取得的 HLS 播放列表
+给列出的内容一个授权，在 URL 过期后再存活 `play_grace`。
+
 ### 用 bcrypt 检查的密码
 
 RTMP、RTSP 和 SRT 在必须于返回前作答的钩子中做决定，钩子运行在收到请求的 worker 上，而 fit 运行的任何东西都不会占住

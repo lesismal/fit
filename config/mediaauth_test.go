@@ -56,11 +56,41 @@ func TestMediaAuth(t *testing.T) {
 		{doc(`{"name": "a", "users": [{"name": "u", "password": "p"}, {"name": "u", "password": "q"}]}`), "already named"},
 		{doc(`{"name": "a", "users": [{"name": "u"}]}`), "set password or password_hash"},
 		{doc(`{"name": "a", "users": [{"name": "u", "password_hash": "plain"}]}`), "not a bcrypt hash"},
+		{doc(`{"name": "a", "public": ["publish"], "url_signing": {}}`), "url_signing needs a key"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"bind_address": "host"}}`), `"host" is not one of`},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"on_limit": "wait"}}`), `"wait" is not one of`},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"max_sessions": -1}}`), "less than the minimum"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"max_tracked_sessions": -1}}`), "less than the minimum"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"play_grace": "-1s"}}`), "is negative"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"referers": ["example.com"]}}`), "not an origin"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"origins": ["https://a b"]}}`), "not an origin"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"trusted_proxies": ["x"]}}`), "not an IP address"},
+		{doc(`{"name": "a", "secret": "0123456789abcdef", "url_signing": {"referers": [` + strings.Repeat(`"https://a",`, 256) + `"https://a"]}}`), "at most 256"},
 	} {
 		_, err := Load([]byte(bad.doc))
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
 			t.Errorf("%s: %v, want %q", bad.doc, err, bad.want)
 		}
+	}
+}
+
+// TestURLSigning reads url_signing and its defaults.
+func TestURLSigning(t *testing.T) {
+	c, err := Load([]byte(`{"listeners": [{"name": "w", "address": ":8080"}], "media_auth": [
+		{"name": "a", "secret": "0123456789abcdef", "url_signing": {"ttl": "1m", "play_grace": "5m", "session_idle": "30s",
+		 "max_tracked_sessions": 10, "max_sessions": 2, "on_limit": "end_oldest", "bind_address": "subnet", "cookie": true,
+		 "referers": ["https://*.example.com"], "origins": ["http://localhost:8080"], "trusted_proxies": ["10.0.0.0/8", "::1"]}},
+		{"name": "b", "secret": "0123456789abcdef", "url_signing": {}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := c.MediaAuthPolicy("a").URLSigning
+	if u.URLTTL() != time.Minute || u.Grace() != 5*time.Minute || u.Idle() != 30*time.Second || u.Tracked() != 10 || !u.Cookie {
+		t.Fatalf("%+v", u)
+	}
+	d := c.MediaAuthPolicy("b").URLSigning
+	if d.URLTTL() != DefaultURLTTL || d.Grace() != DefaultPlayGrace || d.Idle() != DefaultSessionIdle || d.Tracked() != DefaultTrackedSessions {
+		t.Fatalf("defaults: %+v", d)
 	}
 }
 

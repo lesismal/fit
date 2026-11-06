@@ -180,8 +180,73 @@ Opus；MPEG-TS 承载除 AV1 外的同样编码，因此 AV1 的版本不出现�
 
 **谁可以播放。** `auth` 指定一个 [`media_auth`](reference/config.md#media-auth) 策略，每个请求都必须满足它对流
 `vod/<library>/<id>`（如 `vod/films/films/*`）的 `play`：bearer token、Basic、`token` 查询参数或 `fit_media_token`
-cookie。以 `?token=` 取得的播放列表，其列出的内容也带上该 token，使不发送请求头的 Safari 和 ffmpeg 能继续播放。会过期的
-播放地址和加密分片在[开发计划](dev-plan.zh-CN.md)的后续迭代中加入。
+cookie。以 `?token=` 取得的播放列表，其列出的内容也带上该 token，使不发送请求头的 Safari 和 ffmpeg 能继续播放。策略设置了
+`url_signing` 时，该条目的[签名 URL](#会过期的播放地址) 也可播放。加密分片在[开发计划](dev-plan.zh-CN.md)的后续迭代中加入。
+
+## 会过期的播放地址
+
+由网站的 API 决定谁能观看，fit 负责校验。策略的 `url_signing` 开启为一个观众、一个资源、一段时间签名的 URL；`auth`
+指向该策略的 `vod` 处理器，以及流媒体角色的 `hls` 和 `httpflv` 处理器（频道的流与其他流一样），在每个请求上校验它：
+当场、在 worker 上、不回调任何人。泄露的 URL 很快失效，也打不开别的东西。
+
+```json
+{
+  "media_auth": [{
+    "name": "site",
+    "keys": [{"key": "k1", "secret_file": "/etc/fit/site-k1"}, {"key": "k2", "secret_file": "/etc/fit/site-k2"}],
+    "url_signing": {"ttl": "10m", "play_grace": "30m", "max_sessions": 2, "on_limit": "end_oldest",
+                    "referers": ["https://www.example.com"]}
+  }],
+  "routes": [
+    {"match": {"path": ["/vod/films/*"]}, "handler": {"module": "vod", "params": {"library": "films", "auth": "site"}}},
+    {"match": {"path": ["/media-tokens", "/media-tokens/*"]},
+     "middleware": [{"module": "jwt", "params": {"jwks_url": "https://auth.example.com/.well-known/jwks.json"}}],
+     "handler": {"module": "media_tokens", "params": {"auth": "site", "url_base": "https://media.example.com",
+                                                      "url_prefixes": ["/vod/films/"], "max_ttl": "1h"}}}
+  ]
+}
+```
+
+**URL 里有什么。** 网站的 API 向 `media_tokens` 请求 URL：`POST /media-tokens/urls`，请求体为
+`{"subject": "user-42", "address": "203.0.113.7", "ttl": "10m", "paths": ["/vod/films/films/bbb/index.m3u8"]}`，
+得到完整的 URL，交给页面上的 hls.js 或播放器：
+
+```
+https://media.example.com/vod/films/films/bbb/index.m3u8?exp=1767225600&kid=k1&ip=203.0.113.7&sid=Qk9Hq3n2c8lYv1aF&sub=user-42&sig=0Wm2Yt7pV4lH8oXcQ1sZ9g
+```
+
+`exp` 是过期时间（Unix 秒）；`kid` 是签名所用的密钥环中的密钥（单一 secret 时没有）；`ip` 是请求中给出的观众地址，
+`bind_address: subnet` 时为其网段（IPv4 `/24`，IPv6 `/64`）；`sid` 是播放会话，请求未给出时为新的随机值；`sub` 是主体，
+访问日志会把它记为用户，所以应使用不透明的 ID，而不是姓名或邮箱；`sig` 是对资源、过期时间和这些字段计算的 HMAC-SHA256
+的前 16 字节（base64url），密钥由密钥环中的密钥或策略的 secret 派生。资源是名称之前的路径：条目为
+`/vod/films/films/bbb/`，流的播放列表为 `/hls/live/cam/`，`/live/cam.flv` 为 `/live/cam/`。网站也可以自己签名，使用相同的
+密钥和与 `mediaauth.SignURL` 相同的消息；经由 `media_tokens` 则密钥只留在 fit 中。
+
+**校验什么。** 条目的每个播放列表、分片、初始化分片、字幕和文件：密钥和签名，对照请求所针对的资源，因此一个条目的 URL
+用于另一个条目、或其路径改动任意一个字节都会被拒绝；过期时间；地址，取自连接对端，位于 `trusted_proxies` 之后时取自
+`X-Forwarded-For`；发送了的 `Referer` 和 `Origin` 分别对照 `referers` 和 `origins`；以及会话。被拒绝的 URL 返回 403 并说明
+原因：`expired`、`signature`、`address`、`referer`、`origin`、`session_limit` 或 `session_ended`。不带签名的请求照旧
+校验（token、Basic 或 cookie）；带签名的请求只凭签名放行。校验不分配内存；唯一的开销是访问日志的脱敏。
+
+**播放列表交出什么。** URL 几分钟就失效，影片却要放几个小时：用 URL 取得的播放列表，给其列出的播放列表、分片、初始化
+分片、密钥和字幕一个自己的授权，字段相同并加上 `g=1`，在 URL 过期时间与条目结束时间（从取得播放列表时起播放到结尾）
+二者中较晚者之后再存活 `play_grace`（30m）。所以已经开始的播放器能播到结尾，暂停或拖动也不受影响，而 URL 本身一过期就被
+拒绝。用授权取得的播放列表交出同一个授权，因此授权永远不会被续期；直播流的授权在 URL 过期后存活 `play_grace`，之后播放器
+需要从网站取新的 URL。带授权的播放列表属于该观众自己：不管路由的 `cache_control` 如何，都以
+`Cache-Control: private, no-store` 发出。设置 `cookie` 时（供丢弃播放列表查询参数的播放器使用），授权改为设置在资源路径上的
+cookie `fit_media_grant`，`HttpOnly`、`SameSite=Lax`，TLS 下为 `Secure; SameSite=None`，播放列表中的 URI 不带查询，可被缓存
+保留。
+
+**会话。** `max_sessions` 限制一个主体的播放会话数：在 `session_idle`（2m）内仍有请求的会话。超过时，
+`on_limit: refuse` 对新会话返回 403；`on_limit: end_oldest` 结束该主体最早开始的会话，此后它的请求以及它得到的每个授权的
+请求都被拒绝，直到这些授权本应过期。会话按策略保存在内存中，重载后保留，总数以 `max_tracked_sessions`（100,000）为上限，
+超过时新会话返回 503；有多个 fit 时，各自统计自己看到的会话。
+
+**吊销。** 轮换密钥环中的一个密钥（`POST /media-tokens/revoke`，请求体 `{"key": "k1"}`），会立即拒绝该密钥签发的 URL
+和授权，且只拒绝这些；轮换单一 secret 则全部拒绝。
+
+**绝不进入日志。** 无论请求如何应答，访问日志写出的 URI 中请求的 `token` 和 `sig` 都被替换为 `REDACTED`；cookie 中的授权
+从不记录。
 
 ## 指标
 

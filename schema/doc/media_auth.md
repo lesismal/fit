@@ -43,6 +43,19 @@ restart forgets, as `fit media-token` does. Revoking is per key, or all keys, bu
 the tokens a key signed cannot be listed or counted, and one subject's tokens cannot be revoked
 alone.
 
+`url_signing` turns on playback URLs that expire, for the `vod`, `hls` and `httpflv` handlers whose
+`auth` names the policy: the site's API, or `media_tokens`' `POST <prefix>/urls` for it, signs a URL
+for one viewer (`sub`), one resource (an item's path prefix, `/vod/<library>/<id>/`, or a stream's,
+`/hls/live/cam/`), an expiry (`exp`) and, if asked, the viewer's address (`ip`, or its network with
+`bind_address: subnet`) and a playback session (`sid`), with the secret or a key of the ring (`kid`).
+The handlers check it on every request, at once and without a callback; a playlist fetched with one
+hands what it names a grant of its own that lives `play_grace` (30m) past the later of the URL's
+expiry and the item's end, in their query or, with `cookie`, as the cookie `fit_media_grant` on the
+resource's path. `max_sessions` caps a subject's sessions, `on_limit` refusing a new one or ending
+the oldest; `referers` and `origins` list the pages and scripts that may play; rotating a key
+refuses the URLs it signed. Refusals are 403, and the access log shows the signature as `REDACTED`.
+See [playback URLs that expire](../media-library.md#playback-urls-that-expire).
+
 ```json
 {
   "listeners": [{"name": "web", "address": ":8080"}],

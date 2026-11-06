@@ -82,6 +82,11 @@ An HLS playlist fetched with `?token=` names its media playlist, segments and pa
 too, so that a player that sends no header, as Safari and ffmpeg, plays on; every request of HLS is
 checked. A token in a query is never logged: the access log writes it as `REDACTED`.
 
+With the policy's `url_signing`, the `hls` and `httpflv` handlers also play
+[playback URLs that expire](media-library.md#playback-urls-that-expire), signed for one viewer and
+one stream (`/hls/live/cam/`, `/live/cam/` for `/live/cam.flv`), a channel's as any other: an HLS
+playlist fetched with one hands what it names a grant that lives `play_grace` past the URL's expiry.
+
 ### Passwords checked with bcrypt
 
 RTMP, RTSP and SRT decide in a hook that must answer before it returns, on the worker the request

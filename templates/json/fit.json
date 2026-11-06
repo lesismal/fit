@@ -911,8 +911,9 @@
           // // The media_auth policy every request, playlist and segment, must satisfy, play on the
           // // stream's path: a bearer token, Basic, the token query parameter or the fit_media_token
           // // cookie. A playlist fetched with a token in its query names its playlists, segments and parts
-          // // with the token too, so that a player that sends no header (Safari, ffmpeg) plays on.
-          // // Everyone may play when left out.
+          // // with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With
+          // // the policy's url_signing, a signed URL of the stream plays too, and its playlists hand what
+          // // they name a grant of their own. Everyone may play when left out.
           // // string.
           // "auth": "",
 
@@ -972,8 +973,9 @@
 
           // // The media_auth policy a player must satisfy, play on the stream's path: a bearer token,
           // // Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401
-          // // with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may
-          // // play when left out, as the route's middleware allow.
+          // // with a Bearer challenge without credentials, 403 when they do not allow it. With the
+          // // policy's url_signing, a signed URL of the stream plays too. Everyone may play when left out,
+          // // as the route's middleware allow.
           // // string.
           // "auth": "",
 
@@ -1179,6 +1181,18 @@
           // // one at a time on a pool of its own, never blocks a worker. 10s when left out.
           // // duration, as "1.5s" or "2m"; default "10s".
           // "revoke_timeout": "10s",
+
+          // // What the URLs <prefix>/urls answers start with, before their paths: the scheme and host
+          // // viewers reach fit's vod, hls and httpflv routes at, as https://media.example.com. The paths
+          // // and their queries alone when left out.
+          // // string.
+          // "url_base": "",
+
+          // // The path prefixes <prefix>/urls may sign URLs for: every path of a request must start with
+          // // one of them, as /vod/films/, so that a URL cannot be signed for a resource outside them. Any
+          // // path when left out.
+          // // list of string.
+          // "url_prefixes": [],
         // },
       // },
     // },
@@ -1436,7 +1450,9 @@
           // // play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or
           // // the fit_media_token cookie. A playlist fetched with a token in its query names its
           // // playlists, segments and subtitles with the token too, so that a player that sends no header
-          // // (Safari, ffmpeg) plays on. Everyone may play when left out.
+          // // (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the item plays
+          // // too, and its playlists hand what they name a grant of their own. Everyone may play when left
+          // // out.
           // // string.
           // "auth": "",
 
@@ -4899,6 +4915,79 @@
       // // when left out.
       // // duration, as "1.5s" or "2m"; default "12h".
       // "token_ttl": "12h",
+
+      // // Turns on playback URLs that expire: URLs signed for one viewer and one resource (an item of
+      // // vod, a stream of hls or httpflv) with the policy's secret or a key of its keys, as
+      // // media_tokens' /urls issues them, and checked by those handlers on every playlist, segment
+      // // and subtitle, at once and without a callback. Needs secret, secret_file or keys. Off when
+      // // left out.
+      // // object.
+      // "url_signing": {
+        // // How long a URL media_tokens' /urls issues is good for when the request names no ttl, and at
+        // // most the route's max_ttl. 10m when left out.
+        // // duration, as "1.5s" or "2m"; default "10m".
+        // "ttl": "10m",
+
+        // // How a URL issued for a viewer's address is bound to it: ip, to that address alone, or
+        // // subnet, to its /24 for IPv4 and its /64 for IPv6, for viewers whose address changes within
+        // // their network. A URL issued without an address is good from anywhere. ip when left out.
+        // // one of: ip, subnet; default "ip".
+        // "bind_address": "ip",
+
+        // // How long the grant a playlist hands its segments, init segments, keys and subtitles lives
+        // // past the later of the URL's expiry and the item's end, played from when the playlist is
+        // // fetched: so that a film does not stop halfway, nor after a pause, while the URL itself dies
+        // // soon. A live stream's grant lives this long past the URL's expiry. 30m when left out.
+        // // duration, as "1.5s" or "2m"; default "30m".
+        // "play_grace": "30m",
+
+        // // Hands the grant on as the cookie fit_media_grant, on the resource's path and HttpOnly,
+        // // rather than in the query of every URI a playlist names, for players that drop a playlist's
+        // // query parameters. The URL the player starts from keeps its query. Off when left out.
+        // // boolean.
+        // "cookie": true,
+
+        // // The most playback sessions one subject may have at once, a session being a URL's sid,
+        // // playing while it fetches within session_idle; past it, on_limit says what happens. No cap
+        // // when left out or 0.
+        // // integer, 0 or more.
+        // "max_sessions": 0,
+
+        // // What a new session past max_sessions does: refuse, answered 403, or end_oldest, which ends
+        // // the subject's session that started first, whose next request is answered 403. refuse when
+        // // left out.
+        // // one of: refuse, end_oldest; default "refuse".
+        // "on_limit": "refuse",
+
+        // // How long a session may go without a request and still count as playing. 2m when left out.
+        // // duration, as "1.5s" or "2m"; default "2m".
+        // "session_idle": "2m",
+
+        // // The most sessions the policy keeps track of, of all its subjects; a new session past it is
+        // // answered 503. 100000 when left out or 0.
+        // // integer, 0 or more; default 100000.
+        // "max_tracked_sessions": 100000,
+
+        // // The origins of the pages that may play the URLs, as https://www.example.com or
+        // // https://*.example.com, * matching any run of characters, matched against the origin of a
+        // // request's Referer: a request with another Referer is answered 403, one without any let
+        // // through. Any when left out.
+        // // list of string.
+        // "referers": [],
+
+        // // The origins whose scripts may fetch the URLs, as referers lists them, matched against a
+        // // request's Origin: a request with another Origin is answered 403, one without any let
+        // // through. Any when left out.
+        // // list of string.
+        // "origins": [],
+
+        // // The addresses ("10.0.0.1") and networks ("10.0.0.0/8") of proxies in front of fit, whose
+        // // X-Forwarded-For is believed when a URL bound to an address is checked: the viewer is the
+        // // last address in it that is not one of them. None when left out: the viewer is the
+        // // connection's peer.
+        // // list of string.
+        // "trusted_proxies": ["10.0.0.0/8"],
+      // },
     // },
   // ],
 

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -68,7 +69,10 @@ type Tokens struct {
 	MaxTokens     int             `json:"max_tokens,omitempty" min:"1" max:"1000" default:"100" doc:"The most tokens one request may ask for; more is answered 400. 100 when left out."`
 	MaxBodyBytes  int             `json:"max_body_bytes,omitempty" min:"256" max:"1048576" default:"65536" doc:"The largest request body the route takes; a larger one is answered 413. 64 KiB when left out."`
 	RevokeTimeout config.Duration `json:"revoke_timeout,omitempty" default:"\"10s\"" doc:"How long a revoke may wait for the secret file's write before it is answered 504; the write, one at a time on a pool of its own, never blocks a worker. 10s when left out."`
+	URLBase       string          `json:"url_base,omitempty" doc:"What the URLs <prefix>/urls answers start with, before their paths: the scheme and host viewers reach fit's vod, hls and httpflv routes at, as https://media.example.com. The paths and their queries alone when left out."`
+	URLPrefixes   []string        `json:"url_prefixes,omitempty" doc:"The path prefixes <prefix>/urls may sign URLs for: every path of a request must start with one of them, as /vod/films/, so that a URL cannot be signed for a resource outside them. Any path when left out."`
 
+	urlBase       string
 	prefix        string
 	auth          *mediaauth.Policy
 	ring          bool   // the policy has a keyring
@@ -85,6 +89,9 @@ type Tokens struct {
 
 // pathPrefix is what prefix may be: a path of plain segments.
 var pathPrefix = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+// pathChars is what url_prefixes may hold.
+var pathChars = regexp.MustCompile(`^[A-Za-z0-9._~/-]+$`)
 
 // Provision checks the params, finds the policy and starts the revoke pool.
 func (t *Tokens) Provision(ctx *module.Context) error {
@@ -121,6 +128,19 @@ func (t *Tokens) Provision(ctx *module.Context) error {
 	revokeTimeout := t.RevokeTimeout.Std()
 	if revokeTimeout <= 0 {
 		revokeTimeout = DefaultRevokeTimeout
+	}
+	if t.URLBase != "" {
+		u, err := url.Parse(t.URLBase)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+			u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(t.URLBase, "?#") {
+			return ctx.Errorf("url_base", "%q is not http:// or https://, a host and maybe a path, as https://media.example.com", t.URLBase)
+		}
+		t.urlBase = strings.TrimRight(t.URLBase, "/")
+	}
+	for i, p := range t.URLPrefixes {
+		if !strings.HasPrefix(p, "/") || len(p) > 256 || strings.Contains(p, "..") || !pathChars.MatchString(p) {
+			return ctx.Params.Field("url_prefixes").Index(i).Errorf("%q is not a path prefix, as /vod/films/", p)
+		}
 	}
 	p, err := mediaauth.Provision(ctx, "auth", t.Auth)
 	if err != nil {
@@ -178,6 +198,12 @@ func (t *Tokens) ServeHTTP(c *fibhttp.Context) {
 			return
 		}
 		t.revoke(c)
+	case t.prefix + "/urls":
+		if c.Request.Method != stdhttp.MethodPost {
+			plain(c, stdhttp.StatusMethodNotAllowed, "the urls endpoint takes POST", stdhttp.Header{"Allow": {"POST"}})
+			return
+		}
+		t.urls(c)
 	default:
 		plain(c, stdhttp.StatusNotFound, "not found", nil)
 	}

@@ -185,6 +185,12 @@ type Policy struct {
 	// applied says the role has set st from a config applied, after which
 	// Provision leaves it to the role.
 	applied bool
+
+	// sess is the playback sessions of the policy's signed URLs, kept
+	// across reloads.
+	sess sessionTable
+	// refused counts the signed URLs refused, by reason.
+	refused refusals
 }
 
 // state is a policy as compiled from one config, swapped whole.
@@ -199,12 +205,17 @@ type state struct {
 	// checked against each until one matches. Its first is the default.
 	keys []mediaKey
 	ttl  time.Duration
+	// url is url_signing, nil without; urlKey signs URLs with the single
+	// secret, as each key's url does with the keyring's.
+	url    *urlConfig
+	urlKey *urlKey
 }
 
 // mediaKey is one key of a policy's keyring.
 type mediaKey struct {
 	name    string
 	signKey []byte
+	url     *urlKey
 	file    string // the secret_file it comes from, or empty for inline
 }
 
@@ -324,7 +335,7 @@ func (p *Policy) compile(cfg *config.MediaAuth, old *state) (*state, error) {
 					return nil, fmt.Errorf("keys: %q and %q share a secret", o.name, k.Key)
 				}
 			}
-			st.keys = append(st.keys, mediaKey{name: k.Key, signKey: signKey, file: k.SecretFile})
+			st.keys = append(st.keys, mediaKey{name: k.Key, signKey: signKey, url: newURLKey(signKey), file: k.SecretFile})
 		}
 	default:
 		secret := cfg.Secret
@@ -342,8 +353,19 @@ func (p *Policy) compile(cfg *config.MediaAuth, old *state) (*state, error) {
 		if secret != "" {
 			st.signKey = signKeyFor(cfg.Name, secret)
 		} else {
+			if cfg.URLSigning != nil {
+				return nil, errors.New("url_signing needs a key to sign with: set secret, secret_file or keys")
+			}
 			st.signKey = p.key[:]
 		}
+		st.urlKey = newURLKey(st.signKey)
+	}
+	if cfg.URLSigning != nil {
+		u, err := compileURL(cfg.URLSigning)
+		if err != nil {
+			return nil, err
+		}
+		st.url = u
 	}
 	return st, nil
 }
@@ -426,6 +448,7 @@ func (p *Policy) Rotate(secret string) error {
 	}
 	next := *st
 	next.signKey = signKeyFor(p.name, secret)
+	next.urlKey = newURLKey(next.signKey)
 	p.st.Store(&next)
 	return nil
 }
@@ -464,6 +487,7 @@ func (p *Policy) RotateKey(key, secret string) error {
 			}
 		}
 		keys[i].signKey = signKey
+		keys[i].url = newURLKey(signKey)
 	}
 	if !found {
 		return fmt.Errorf("mediaauth: no key named %q", key)

@@ -3,7 +3,6 @@ package streaming
 import (
 	"fmt"
 	stdhttp "net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -101,7 +100,7 @@ func respond(c *fibhttp.Context, status int, msg string, hdr stdhttp.Header) {
 // HTTPFLV is the httpflv handler.
 type HTTPFLV struct {
 	Prefix string          `json:"prefix,omitempty" doc:"The part of the path before the stream's: with /flv/, /flv/live/cam.flv plays live/cam. / when left out: /live/cam.flv plays live/cam, the stream rtmp://host/live/cam publishes."`
-	Auth   string          `json:"auth,omitempty" doc:"The media_auth policy a player must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. Everyone may play when left out, as the route's middleware allow."`
+	Auth   string          `json:"auth,omitempty" doc:"The media_auth policy a player must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter (/live/cam.flv?token=T) or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. With the policy's url_signing, a signed URL of the stream plays too. Everyone may play when left out, as the route's middleware allow."`
 	Wait   config.Duration `json:"wait,omitempty" doc:"How long a player may wait for a stream with no publisher yet, or for the next one after its publisher leaves. 404 at once for a stream without a publisher when left out."`
 	CORS   string          `json:"cors,omitempty" doc:"Sent as Access-Control-Allow-Origin, which a web player on another origin (flv.js, mpegts.js) needs, as \"*\". None when left out."`
 
@@ -122,6 +121,8 @@ func (f *HTTPFLV) Provision(ctx *module.Context) error {
 
 // ServeHTTP plays the stream the path names.
 func (f *HTTPFLV) ServeHTTP(c *fibhttp.Context) {
+	// Whatever the answer, the access log holds no token or signature.
+	mediaauth.Redact(c.Request)
 	stream, ok := f.stream(c.Request.URL.Path)
 	if !ok {
 		respond(c, stdhttp.StatusNotFound, "no stream in the path: /<stream>.flv", nil)
@@ -132,7 +133,10 @@ func (f *HTTPFLV) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	hb := s.Hub()
-	f.b.auth.Guard(c, mediaauth.Play, stream, func(string) { f.handler(hb).ServeHTTP(c) })
+	// The stream's resource, as a signed URL is signed for: /live/cam/ for
+	// /live/cam.flv, as mediaauth.ResourceOf has it.
+	resource := strings.TrimSuffix(c.Request.URL.Path, ".flv") + "/"
+	f.b.auth.GuardResource(c, stream, resource, func(mediaauth.Access) { f.handler(hb).ServeHTTP(c) })
 }
 
 func (f *HTTPFLV) stream(p string) (string, bool) {
@@ -168,7 +172,7 @@ func (f *HTTPFLV) path(r *stdhttp.Request) (string, string, bool) {
 // HLS is the hls handler.
 type HLS struct {
 	Prefix         string          `json:"prefix,omitempty" doc:"The part of the path before the stream's: with /hls/, /hls/live/cam/index.m3u8 is the playlist of live/cam. / when left out."`
-	Auth           string          `json:"auth,omitempty" doc:"The media_auth policy every request, playlist and segment, must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and parts with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out."`
+	Auth           string          `json:"auth,omitempty" doc:"The media_auth policy every request, playlist and segment, must satisfy, play on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and parts with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. With the policy's url_signing, a signed URL of the stream plays too, and its playlists hand what they name a grant of their own. Everyone may play when left out."`
 	Format         string          `json:"format,omitempty" enum:"fmp4,ts" doc:"The segment format of a playlist's URL without a format query parameter: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus. The other is played with ?format=ts or ?format=fmp4. fmp4 when left out."`
 	TargetDuration config.Duration `json:"target_duration,omitempty" default:"\"2s\"" doc:"How long segments are: a stream with video is cut at the first key frame after it. Set it to the key frame interval. 2s when left out."`
 	PartDuration   config.Duration `json:"part_duration,omitempty" doc:"Turns on Low-Latency HLS with parts this long, 200ms to 1s being usual: blocking playlist reloads, EXT-X-PART and preload hints. Off when left out."`
@@ -307,6 +311,8 @@ func (sh *hlsShared) handler(hb *hub.Hub) *hls.Handler {
 
 // ServeHTTP serves a playlist or a segment of the stream the path names.
 func (h *HLS) ServeHTTP(c *fibhttp.Context) {
+	// Whatever the answer, the access log holds no token or signature.
+	mediaauth.Redact(c.Request)
 	rest, ok := strings.CutPrefix(c.Request.URL.Path, h.b.prefix)
 	i := strings.LastIndexByte(rest, '/')
 	if !ok || i <= 0 || !validStream(rest[:i]) {
@@ -319,17 +325,28 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 		return
 	}
 	hb := s.Hub()
-	token := ""
-	if strings.HasSuffix(name, ".m3u8") && strings.Contains(c.Request.URL.RawQuery, "token=") {
-		token = c.Request.URL.Query().Get("token")
-	}
-	h.b.auth.Guard(c, mediaauth.Play, stream, func(string) {
-		if token != "" {
-			c.OnResponse(func(r *fibhttp.Response) {
-				if r.StatusCode == stdhttp.StatusOK {
-					r.Body = withToken(r.Body, token)
-				}
-			})
+	// The stream's resource, as a signed URL is signed for: the path up to
+	// the playlist's or segment's name.
+	resource := c.Request.URL.Path[:len(h.b.prefix)+i+1]
+	h.b.auth.GuardResource(c, stream, resource, func(a mediaauth.Access) {
+		if strings.HasSuffix(name, ".m3u8") {
+			// A live stream's grant lives play_grace past its URL.
+			if query, cookie := a.PassOn(0); query != "" || cookie != "" {
+				c.OnResponse(func(r *fibhttp.Response) {
+					if r.StatusCode != stdhttp.StatusOK {
+						return
+					}
+					if query != "" {
+						r.Body = withQuery(r.Body, query)
+					}
+					if cookie != "" {
+						if r.Header == nil {
+							r.Header = stdhttp.Header{}
+						}
+						r.Header.Add("Set-Cookie", cookie)
+					}
+				})
+			}
 		}
 		h.shared.handler(hb).ServeHTTP(c)
 	})
@@ -338,18 +355,21 @@ func (h *HLS) ServeHTTP(c *fibhttp.Context) {
 // uriAttr is a URI attribute of a playlist's tag.
 var uriAttr = regexp.MustCompile(`URI="([^"]*)"`)
 
-// withToken returns playlist with token added to the query of every URI it
-// names: its lines that are not tags, and the URI attributes of its tags.
-func withToken(playlist []byte, token string) []byte {
+// withQuery returns playlist with query, a token or a grant, added to the
+// query of every URI it names: its lines that are not tags, and the URI
+// attributes of its tags. A URI that has the query's first parameter is
+// left as it is.
+func withQuery(playlist []byte, query string) []byte {
+	first, _, _ := strings.Cut(query, "=")
 	add := func(uri string) string {
-		if uri == "" || strings.Contains(uri, "token=") {
+		if uri == "" || strings.Contains(uri, first+"=") {
 			return uri
 		}
 		sep := "?"
 		if strings.Contains(uri, "?") {
 			sep = "&"
 		}
-		return uri + sep + "token=" + url.QueryEscape(token)
+		return uri + sep + query
 	}
 	lines := strings.Split(string(playlist), "\n")
 	for i, line := range lines {
