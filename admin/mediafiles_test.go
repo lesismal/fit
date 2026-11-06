@@ -444,13 +444,26 @@ func TestConsoleUploads(t *testing.T) {
 
 	// The audit log: the upload begun and finished, the one refused, and
 	// the rename, each as ada's, from the workbench.
-	code, body, _ = b.do("GET", "/api/m/ai/audit?kind=media&limit=100", "")
-	if code != 200 {
-		t.Fatalf("audit: %d %s", code, body)
-	}
-	for _, want := range []string{`"tool":"media.upload.begin"`, `"tool":"media.upload"`, `"tool":"media.rename"`, `"source":"workbench"`, `"user":"ada"`, `"outcome":"failed"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the audit log lacks %s: %s", want, body)
+	// An entry may be written once its answer has gone out: the log is
+	// read until it holds them all, or the time is up.
+	wants := []string{`"tool":"media.upload.begin"`, `"tool":"media.upload"`, `"tool":"media.rename"`, `"source":"workbench"`, `"user":"ada"`, `"outcome":"failed"`}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		code, body, _ = b.do("GET", "/api/m/ai/audit?kind=media&limit=100", "")
+		if code != 200 {
+			t.Fatalf("audit: %d %s", code, body)
+		}
+		missing := ""
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				missing = want
+				break
+			}
+		}
+		if missing == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the audit log lacks %s: %s", missing, body)
 		}
 	}
 	for _, p := range []string{"/media/library/x", "/media/library//uploads/x", "/media/library/a/uploads/", "/media/library/a/uploads/b/c", "/other"} {

@@ -4617,3 +4617,18 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
 - **测试**：有无 store 时重启后 ID 相同，以及迁入 store；试运行拒绝应用会拒绝的内容且不改变任何东西；程序的登录、读取与应用；用注入的时钟
   测试退避；竞态检测下。
 - **缺口**：试运行看不到角色在应用时的失败（agent、隧道），也看不到检查与应用之间被占用的地址。实现时所做的决策在计划的 I140 一节，待审查。
+
+
+### I141 管理节点：成员、凭据与状态 — 已完成
+
+- **`admin.cluster`**（`poll_interval`、`timeout`、`max_nodes`、`max_concurrency`、`max_response_bytes`；需要 `admin.store` 与 `admin.console`）使 fit
+  成为管理节点。包 `cluster` 把成员保存在 store 的 `cluster` 小节中，这是一个带版本的文档，与之后的迭代填充的组、模板、发布与审计日志并列。
+- **成员** 经其控制台（用户名与密码，401 时重新登录，登录被拒时退避，要求改密码时报告而从不代改）或其 Admin API（bearer token）访问；证书按
+  系统 CA、`ca` PEM 或固定的 `fingerprint` 检查，被拒绝的证书仍会显示。
+- **轮询器** 在 fib 的异步客户端上读取 `/node`、`/status` 与 `/config/check`，同时最多 `max_concurrency` 个成员，每次调用受 `timeout` 与
+  `max_response_bytes` 限制，每种失败有自己的类型。
+- **控制台模块 `cluster`**：`/api/m/cluster/nodes[/<name>]`、`.../nodes/<name>/test`、`/test`、`/state` 与 `/audit`；应答与日志中没有凭据或会话 cookie。
+- **测试**：竞态检测下 `cluster` 覆盖率 99.8%；`cli` 中真实的管理节点与成员；基准机的 Docker 中（`test/docker/cluster`）一个管理节点与三个成员：
+  密码、token、错误的密码、不受信任的证书、错误的 pin、成员宕机、成员重启与管理节点重启。
+- **缺口**：还没有页面（I142）；管理节点为同一成员保存的多个条目共享该成员的地址锁定；任何控制台用户都能让管理节点测试某个 URL。实现时所做的
+  决策在计划的 I141 一节与决定 033 中，待审查。
