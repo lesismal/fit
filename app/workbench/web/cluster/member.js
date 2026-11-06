@@ -66,7 +66,7 @@
           FC.trustSaved(UI, mem, e.certificate, e.kind === 'tls_pin_mismatch', list.etag).then(function (ok) { if (ok) read(true); });
         }, 'primary sm') : null,
         UI.btn(t('edit'), 'edit', function () {
-          FC.memberForm(UI, { member: mem, etag: list.etag, reload: function () { read(true); }, then: function (saved) {
+          (mem.access === 'link' && FC.linkForm ? FC.linkForm : FC.memberForm)(UI, { member: mem, etag: list.etag, reload: function () { read(true); }, then: function (saved) {
             if (saved && saved.name && saved.name !== name) location.hash = '#/cluster/node/' + encodeURIComponent(saved.name);
             else read(true);
           } });
@@ -76,7 +76,7 @@
         }, 'ghost sm'));
       if (readOnly) tools.querySelectorAll('button').forEach(function (b, i) { if (i > 0) b.disabled = true; });
       var s = st || {};
-      var access = mem.access === 'admin_api' ? t('nd.token') : t('nd.as', { user: mem.username || '?' });
+      var access = mem.access === 'link' && FC.linkAccess ? FC.linkAccess(UI) : mem.access === 'admin_api' ? t('nd.token') : t('nd.as', { user: mem.username || '?' });
       UI.mount(top,
         readOnly ? h('div.callout.callout--warn', t('readonly', { why: readOnly })) : null,
         UI.card(t('mb.member'), h('div.stack',
@@ -85,10 +85,10 @@
             s.failures ? h('span.small.muted', ' · ' + t('f.failures', { n: s.failures })) : null, FC.extras(UI, mem, s)), tools),
           s.error ? FC.problemBox(UI, s.error, FC.askMember(UI, s)) : null,
           UI.kv([
-            [t('fm.url'), h('code', mem.url)],
+            [t('fm.url'), mem.access === 'link' ? '—' : h('code', mem.url)],
             [t('fm.labels'), FC.labelChips(UI, mem.labels) || '—'],
             [t('fm.access'), access],
-            [t('fm.tls'), mem.tls && mem.tls.fingerprint ? h('code.cl-fp', mem.tls.fingerprint) : /^https:/i.test(mem.url) ? t(mem.tls && mem.tls.ca ? 'fm.tls.ca' : 'fm.tls.system') : t('nd.http')],
+            [t('fm.tls'), mem.access === 'link' ? '—' : mem.tls && mem.tls.fingerprint ? h('code.cl-fp', mem.tls.fingerprint) : /^https:/i.test(mem.url) ? t(mem.tls && mem.tls.ca ? 'fm.tls.ca' : 'fm.tls.system') : t('nd.http')],
             [t('f.latency'), s.node ? t('f.ms', { n: s.latency_ms }) : '—'],
             [t('f.polled'), s.polled ? UI.ago(FC.sec(s.polled)) : t('st.unknown')]
           ]),

@@ -1278,8 +1278,11 @@ outside agents over MCP at `/mcp` on the console's address, with tokens users ma
 credentials are kept in the store, each one's `GET /node`, `/status` and `/config/check` read every
 `poll_interval` through its console or its Admin API, and their states served in the console as the
 module `cluster`, whose Cluster pages add, test and trust them; it needs `console`, and a store:
-`store`, or the one `fit run -admin` keeps beside the config. See
-[cluster management](../cluster.md) and [decision 033](../decisions/033-cluster-management.md).
+`store`, or the one `fit run -admin` keeps beside the config. Its `link_address` takes the links of
+members behind NAT, which `admin.cluster_member` links out with: the line Add by enrollment gives,
+the manager's URL, its certificate's fingerprint and an enrollment token used once. See
+[cluster management](../cluster.md), [members behind NAT](../cluster.md#members-behind-nat) and
+[decision 033](../decisions/033-cluster-management.md).
 
 In a .conf file:
 

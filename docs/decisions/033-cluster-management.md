@@ -126,6 +126,22 @@ What I142 adds, the workbench's **Cluster** menu ([its pages](../cluster.md#the-
 - `fit run` checks that a manager has a store, which may be the one `-admin` keeps beside the
   config; the config alone no longer asks for `admin.store`.
 
+What I149 adds, members behind NAT linking out ([members behind NAT](../cluster.md#members-behind-nat)):
+
+- **`admin.cluster.link_address`**: a WebSocket listener over TLS on the listeners' engine, with a
+  self-signed certificate made once and kept in the document, bounded to `max_nodes` + 16
+  connections, 32 of them before their hello.
+- **Add by enrollment**: a member of the access `link` and an enrollment token (`fite1.`), kept as
+  a hash, with a lifetime; the config line holds the manager's URL, its certificate's fingerprint and
+  the token. **`admin.cluster_member`** on the member dials out on fib's WebSocket client, pins the
+  certificate, proves the token once for a credential of its own (`fitc1.`, kept as a hash on the
+  manager), keeps it in its store or beside its config, and links with it from then on, again with
+  backoff whenever the link ends. Both sides prove the token with decision 035's handshake.
+- **Over the link** the manager sends the member's Admin API its requests, served in process
+  (`admin.LinkAPI`); the poller, tests, the member's page and `Manager.Call` reach a linked member
+  as the others, through one transport abstraction. A member removed, or enrolled again, has its
+  link revoked and forgets its credential. The document's version is 2.
+
 ## Pending review
 
 Decided while building I140 (2026-11-06); each stands until the user rules on it.
@@ -211,6 +227,48 @@ Decided while building I142 (2026-11-06):
     `FitCluster.rowExtra` (a member's linked or waiting state).
 27. **The Nodes page shows the last 20 audit entries**; the full log, filtered, is I148's.
 
+Decided while building I149 (2026-11-06):
+
+28. **A link listener of its own** (`link_address`), not an endpoint of the console: the console's
+    32 connections, a quarter per client, would cap the members behind one NAT. Alternative: the
+    console's `/cluster/link`, with its connection bounds raised.
+29. **Its certificate is self-signed, kept in the store, and pinned through the config line**, so
+    that a member trusts it from its first contact and no CA is needed; renewing it would break
+    every pin, so it is never renewed. Alternative: the console's certificate files, or a CA.
+30. **The token and the credential are linktoken secrets** of prefixes of their own (`fite1.`,
+    `fitc1.`), kept as hashes, proved with decision 035's handshake (the label
+    `fit cluster link v1`, the mode bound); the welcome proves the token back.
+31. **A member is added when its token is made** (the access `link`, waiting), and the token is
+    used up on the manager before the credential reaches the member: a member that cannot keep it
+    needs a new token. Alternative: a two-step enrollment the member acknowledges.
+32. **The link carries the Admin API, served in process** (`admin.LinkAPI`: every endpoint but the
+    dashboard and pprof, refused while a console password is temporary), with the authority of the
+    Admin API's token; the member needs no console. Alternative: the member passing requests on to
+    its own console or Admin API over loopback, with a credential of those.
+33. **The member keeps its credential** in its store's section `cluster_member`, or a file beside
+    its config (`.cluster-member`, 0600), for the manager of the fingerprint it was given for; a
+    token in the config other than the one it came from enrolls again.
+34. **Refusals for good stop the member** (`used`, `expired`, `unknown`, `proof`, `revoked`), the
+    last three forgetting its credential, until a new token and a restart; `busy` and `replaced`
+    are tried again. Alternative: trying again every few minutes.
+35. **`admin.cluster_member` is read at start**, as the rest of `admin`.
+36. **The bounds**: pings every 15s, a link closed after 45s silent, backoff 1s to a minute with
+    jitter, a handshake of 10s; 16 calls per link; 2 workers and 16 waiting on the member; request
+    bodies on the link bounded by `max_response_bytes` too.
+37. **The document's version is 2**, so that an I141 fit, which would drop the links and the
+    certificate, shows it read-only rather than writing it over.
+38. **An enrollment token lasts 24h** unless told otherwise, from a minute to 30 days.
+39. **One link per credential**: a newer one replaces the older (`replaced`); two fits sharing one
+    credential take turns, with backoff.
+40. **`Manager.Call(name, method, path, header, body, done)`** is the one way to a member's Admin
+    API with its access, session or link, for I143's pass-through.
+41. **The Nodes and member pages learned of the access `link`** (its access, credential and
+    certificate columns, and an edit of its name and labels alone) in a few lines of their own,
+    beside the extension points.
+42. **fib's WebSocket connection gives neither its connection nor backpressure** (fib requests A52,
+    A53): the listener keeps its connections by remote address, as the LLM mesh does, and the
+    link's queues are bounded by its calls in flight and their sizes.
+
 Open questions of the plan, answered as proposed until reviewed:
 
 1. Members are reached by the console's user name and password, or by the Admin API's token; both.
@@ -219,7 +277,7 @@ Open questions of the plan, answered as proposed until reviewed:
 4. Templates own whole members and named elements; an unnamed route cannot be shared.
 5. No unattended sync; drift is fixed by a person's rollout.
 6. Members linking out (I149) after templates and rollouts (I145–I146); the tunnel reaches members
-   behind NAT until then.
+   behind NAT until then. (I149 was built first, 2026-11-06; the tunnel stays a way to them.)
 7. **Upgrading members' binaries (I151) is not taken up** in this track: it needs a graceful
    restart that hands listening sockets on, which fit does not have; packages, containers and
    orchestrators upgrade fits, and the overview's version column shows where each stands.

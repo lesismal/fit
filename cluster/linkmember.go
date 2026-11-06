@@ -393,7 +393,10 @@ const (
 // attempt dials the manager, says hello in mode with secret, and serves
 // the manager's requests until the link closes or the member stops.
 func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
-	events := make(chan memberEvent, 8)
+	// Room for the handshake's messages, and for the calls that follow
+	// the welcome before the link is taken as open, which the manager
+	// bounds by maxLinkCalls.
+	events := make(chan memberEvent, maxLinkCalls+8)
 	var raw atomic.Pointer[fib.Connection]
 	var active atomic.Int64
 	active.Store(time.Now().UnixNano())
@@ -545,6 +548,18 @@ func (l *MemberLink) attempt(mode string, secret linktoken.Secret) outcome {
 				l.status = MemberStatus{Linked: true, Name: w.Name, Since: time.Now().UTC()}
 				l.mu.Unlock()
 				l.logf("cluster: linked to the manager at %s as the member %q", l.url, w.Name)
+			case msgRequest, msgCancel:
+				// Sent right after the welcome, before the link was
+				// taken as open.
+				if !open.Load() {
+					closeRaw()
+					return outcome{kind: outRetry, err: "the manager sent a call before its welcome"}
+				}
+				if ev.kind == msgRequest {
+					l.serve(ev.ws, ev.data)
+				} else {
+					l.cancel(ev.data)
+				}
 			case msgRefuse, msgRevoked:
 				var r refuseMsg
 				_ = json.Unmarshal(ev.data, &r)

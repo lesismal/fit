@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -172,3 +173,36 @@ func credOf(data []byte) string {
 	}
 	return k.Credential[len(k.Credential)-20:]
 }
+
+// fit run stops on a link setting it cannot use: a member's token file that
+// is not there, a manager's link address that is taken.
+func TestServeClusterLinkErrors(t *testing.T) {
+	dir := t.TempDir()
+	const rest = `"listeners": [{"name": "web", "address": "127.0.0.1:0"}], "routes": [{"handler": {"module": "respond"}}]}`
+	member := filepath.Join(dir, "member.json")
+	writeFile(t, member, `{"admin": {"address": "127.0.0.1:0", "cluster_member": {"manager": "wss://127.0.0.1:1/cluster/link",
+"fingerprint": "`+strings.Repeat("ab", 32)+`", "token_file": `+js(filepath.Join(dir, "none"))+`}}, `+rest)
+	ms := startServe(t, "-c", member, "-watch-certs=false")
+	if code := <-ms.done; code != 1 || !strings.Contains(ms.err.String(), "token_file") {
+		t.Fatalf("%d %s", code, ms.err.String())
+	}
+	ms.done <- 1
+
+	taken := filepath.Join(dir, "taken.json")
+	occupied, err := netListen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	mhash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	writeFile(t, taken, `{"admin": {"address": "127.0.0.1:0", "store": {"path": `+js(filepath.Join(dir, "m.store"))+`, "password": "s"},
+"console": {"address": "127.0.0.1:0", "users": [{"username": "admin", "password_hash": `+js(string(mhash))+`}]},
+"cluster": {"link_address": `+js(occupied.Addr().String())+`}}, `+rest)
+	s := startServe(t, "-c", taken, "-watch-certs=false")
+	if code := <-s.done; code != 1 || !strings.Contains(s.err.String(), "link_address") {
+		t.Fatalf("%d %s", code, s.err.String())
+	}
+	s.done <- 1
+}
+
+func netListen() (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") }

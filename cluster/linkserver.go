@@ -118,7 +118,6 @@ func (m *Manager) startLinks() error {
 		return err
 	}
 	h.ln = ln
-	m.logf("cluster: members link to %s (certificate %s)", ln.addr, h.fingerprint)
 	return nil
 }
 

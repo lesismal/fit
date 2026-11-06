@@ -42,13 +42,19 @@
     // 修改后轮询器会立即读取该成员：稍后再次读取其状态。
     function saved() { read(); setTimeout(function () { if (document.body.contains(el)) read(); }, 1500); }
     function add() { FC.memberForm(UI, { etag: list && list.etag, reload: read, then: saved }); }
-    function edit(mem) { FC.memberForm(UI, { member: mem, etag: list && list.etag, reload: read, then: saved }); }
+    function edit(mem) {
+      // A linked member (I149, enroll.js) changes only its name and labels. / 连接型成员（I149）只改名称与标签。
+      var f = mem.access === 'link' && FC.linkForm ? FC.linkForm : FC.memberForm;
+      f(UI, { member: mem, etag: list && list.etag, reload: read, then: saved });
+    }
 
     function creds(m) {
+      if (m.access === 'link' && FC.linkCreds) return FC.linkCreds(UI, m);
       if (m.access === 'admin_api') return UI.badge(t('fm.token') + ' · ' + t(m.token_set ? 'nd.set' : 'nd.unset'), m.token_set ? 'ok' : 'danger');
       return h('span', h('span.small', m.username || '—'), ' ', UI.badge(t('fm.password') + ' · ' + t(m.password_set ? 'nd.set' : 'nd.unset'), m.password_set ? 'ok' : 'danger'));
     }
     function tlsOf(m) {
+      if (m.access === 'link') return h('span.muted.small', '—');
       if (!/^https:/i.test(m.url)) return h('span.muted.small', t('nd.http'));
       var tls = m.tls || {};
       if (tls.fingerprint) return h('div', UI.badge(t('nd.tls.pin'), 'primary'), h('div', h('code.small.cl-fp', { title: tls.fingerprint }, tls.fingerprint.slice(0, 23) + '…')));
@@ -100,7 +106,10 @@
           return h('div', h('a', { href: '#/cluster/node/' + encodeURIComponent(m.name) }, h('b', m.name)), FC.labelChips(UI, m.labels));
         } },
         { label: t('nd.url'), render: function (m) { return h('code.small.cl-url', { title: m.url }, m.url); } },
-        { label: t('nd.access'), render: function (m) { return m.access === 'admin_api' ? t('nd.token') : t('nd.as', { user: m.username || '?' }); } },
+        { label: t('nd.access'), render: function (m) {
+          if (m.access === 'link' && FC.linkAccess) return FC.linkAccess(UI);
+          return m.access === 'admin_api' ? t('nd.token') : t('nd.as', { user: m.username || '?' });
+        } },
         { label: t('nd.creds'), render: creds },
         { label: t('nd.tls'), render: tlsOf },
         { label: t('nd.state'), render: stateOf },

@@ -58,3 +58,6 @@
 .cl-flush > :not(.table-wrap) { margin: 14px 18px; }
 .cl-top { align-items: start; }
 .cl-card .card__head h2 { min-width: 0; }
+/* A linked member's link on its row (I149, enroll.js). / 行上连接型成员的连接状态（I149，enroll.js）。 */
+.cl-link-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.cl-link .small { overflow-wrap: anywhere; }

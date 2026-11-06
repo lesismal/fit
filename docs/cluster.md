@@ -106,7 +106,7 @@ config pages from the manager is the node switcher's, planned next (I143).
 
 ## How members are reached
 
-A member is a fit the manager can reach, one of two ways:
+A member is a fit the manager can reach, one of three ways:
 
 - **`console`**: its console's user name and password. The manager logs in with
   `POST /api/login`, keeps the session's cookie and CSRF token, reads the Admin API through the
@@ -119,6 +119,8 @@ A member is a fit the manager can reach, one of two ways:
   member's password.
 - **`admin_api`**: its Admin API's bearer token, at the Admin API's own address (`/node`,
   `/status`, `/config/check`).
+- **`link`**: a member that links out to the manager (see [members behind NAT](#members-behind-nat)),
+  added by enrollment rather than by its URL, whose Admin API the manager reaches over its link.
 
 The console is the one to choose where both are served: a console user is what a person has, and
 the console's slowed logins guard it on a network. A member's URL is `https`, or `http` to a
@@ -158,6 +160,7 @@ Each failure has a kind of its own, which the pages word and say what to do abou
 | `http_status` | error | another status the manager did not expect |
 | `bad_answer` | error | an answer that is not the JSON a fit answers |
 | `too_large` | error | an answer larger than `max_response_bytes` |
+| `not_linked` | down | a member that links out has no link now: not enrolled yet, or linking again |
 
 A member recovers by itself at the next poll once what was wrong is fixed: a member restarted, a
 certificate trusted, credentials edited.
@@ -177,6 +180,9 @@ pages above use nothing else:
 | `POST nodes/<name>/test` | tests the member as kept, or as the body would change it, without saving it: `{"ok", "error", "latency_ms", "certificate", "node", "must_change_password"}`; `certificate` holds the fingerprint a person confirms before pinning it |
 | `POST test` | tests a member not added yet, as the body has it |
 | `GET nodes/<name>/read/<what>` | the member's own answer to the Admin API's `GET /node`, `/status`, `/versions` or `/config/check` (`what` is `node`, `status`, `versions` or `check`), read through the manager with the session the poller keeps; `502` with `{"error", "problem"}` when the member cannot be read, `problem` as a state's `error` |
+| `GET link` | where members link to: `{"enabled", "address", "url", "fingerprint", "links", "default_ttl", "max_ttl"}` |
+| `POST enroll` | adds a member that links out: `{"name", "labels", "ttl", "url"}`; `201` with `{"node", "token", "expires", "config", "config_line"}`, the token shown this once; `409` without `link_address` |
+| `POST nodes/<name>/enroll` | a new enrollment token for a linked member: `{"ttl", "url"}`, the same answer |
 | `GET state` | every member's state: `{"interval_ms", "timeout_ms", "read_only", "nodes"}` |
 | `GET audit` | the manager's changes: who, when, which member, what changed (credentials by name only) |
 
@@ -188,9 +194,79 @@ password, a token or a member's session cookie.
 
 ## Members behind NAT
 
-A member the manager cannot reach, behind NAT or a firewall with no port open, is reached through
-[the tunnel](tunnel.md) until members link out to the manager themselves (planned, I149). The
-member runs a `tunnel.node` that
+A member the manager cannot reach, behind NAT or a firewall with no port open, **links out to the
+manager** itself (I149) and is managed through its link as the others are over HTTP: polled, tested,
+and read on its page, the same state, the same kinds of failure, the same API.
+
+On the manager, `admin.cluster.link_address` turns on the link listener, a WebSocket over TLS that
+members dial out to. Its certificate is self-signed, made once and kept in the store's `cluster`
+section, so that it outlives restarts and no CA is needed: each member pins it when it enrolls.
+
+```json
+{"admin": {"cluster": {"link_address": ":7444", "link_url": "wss://manager.example.com:7444/cluster/link"}}}
+```
+
+| Setting | Default | What it is |
+| --- | --- | --- |
+| `link_address` | off | where members link to, as `:7444`; without it no member can enroll |
+| `link_url` | the host the page was opened at, and `link_address`'s port | the URL the config line names the manager by: `wss://host:port/cluster/link` |
+
+On the Nodes page, **Add by enrollment** names the member, gives its labels, the token's lifetime
+(24h when empty, 30 days at most) and the manager's URL as the member reaches it, and shows, once,
+the line to paste into the member's `admin`:
+
+```json
+{"admin": {"cluster_member": {"manager": "wss://manager.example.com:7444/cluster/link",
+  "fingerprint": "3b:1e:…:73:76", "token": "fite1.<id>.<secret>"}}}
+```
+
+The member needs no console and no open port; its Admin API may stay on loopback. When it starts
+it dials the manager, checks the manager's certificate against `fingerprint` (no other certificate
+is trusted, and the token is never sent to another), and proves the token. The token is used
+**once**: the manager answers with a credential of the member's own, keeps only its hash (and only
+the token's hash before it), and the member keeps the credential in its store's section
+`cluster_member`, or without a store in a file beside its config (`fit.cluster-member` beside
+`fit.json`, mode 0600). From then on it links with the credential, and `token` may be left out; a
+new token in its config enrolls it again. Both sides prove the token or credential with the
+handshake of [issued link tokens](decisions/035-link-tokens.md), each proof bound to both sides'
+nonces and to its direction.
+
+The link is kept alive by pings both ways, and closed by either side after 45 seconds without a
+word; the member links again whenever it ends, after a wait that doubles from a second to a minute.
+It survives the manager's restart and a network cut. Over the link the manager sends the member's
+Admin API its requests, which the member serves in process, on two workers of the link's own with
+16 waiting at most (one more is answered busy at once); a request is bounded by `timeout`, and its
+body and its answer by `max_response_bytes`; one the manager gives up on is canceled on the member.
+At most 16 calls go over one link at once. The member logs each change made through the link as
+the manager's, and a config so applied has the source `cluster`.
+
+Each linked member's row says whether it is **Linked** (and from where) or **Waiting**: for its
+enrollment, until its token expires; or for it to link again. Its state's `link` holds the same
+(`linked`, `since`, `remote`, `host`, `enrolled`, `enroll_by`, and the last hello `refused` with its
+reason), and a member with no link is `down` with the kind `not_linked`. **New token** makes a
+linked member a new enrollment token, for one that lost its credential or moved: it keeps linking
+with its credential until it enrolls with the new one, which then replaces it. Its name and labels
+are edited as any member's.
+
+What the manager refuses, and what the member does then:
+
+| Refused | Why | The member |
+| --- | --- | --- |
+| `used` | the enrollment token was used already | stops linking until it is given a new token and restarted |
+| `expired` | the token's lifetime ended | the same |
+| `unknown` | no member has the token or credential: replaced, or the member removed | forgets its credential, and stops |
+| `proof` | the proof does not check | the same |
+| `revoked` | the member was removed on the manager, or enrolled again | forgets its credential, and stops |
+| `busy` | the manager could not keep the credential now | tries again |
+| `replaced` | another link with the same credential took this one's place | tries again |
+
+A member removed on the manager loses its credential: its link is closed with `revoked`, it
+forgets the credential, and the manager no longer knows it.
+
+### Through the tunnel
+
+Before I149, or where a member already runs a tunnel node, a member is reached through
+[the tunnel](tunnel.md) instead. The member runs a `tunnel.node` that
 links out to a hub and offers its console as a service; the manager runs a `tunnel.proxy` that
 forwards a local port to it, and adds the member at that local address. The hub may be the manager
 itself.

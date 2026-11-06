@@ -493,7 +493,9 @@ func TestMemberSettings(t *testing.T) {
 	if err := FileKeeper(filepath.Join(path, "no", "dir")).Save([]byte("{}")); err == nil {
 		t.Error("saved into no directory")
 	}
-	if err := FileKeeper(t.TempDir()).Save(nil); err == nil {
+	full := t.TempDir()
+	_ = os.WriteFile(filepath.Join(full, "f"), nil, 0o600)
+	if err := FileKeeper(full).Save(nil); err == nil {
 		t.Error("removed a directory with files")
 	}
 	ms := newMemStore()
@@ -536,14 +538,18 @@ func fakeManager(t *testing.T, onOpen func(c *websocket.Connection), onMessage f
 func TestMemberHandshake(t *testing.T) {
 	secret := linktoken.New()
 	var mode atomic.Int32
+	var last atomic.Pointer[[]byte]
+	var answered atomic.Bool
 	url, fp, e := fakeManager(t, func(c *websocket.Connection) {
 		switch mode.Load() {
 		case 0: // a challenge that is not one
 			_ = c.WriteBinary([]byte("c{"))
 		case 1: // a message that is not one
 			_ = c.WriteBinary([]byte("?"))
-		case 2, 3, 4: // a proper challenge
-			_ = c.WriteBinary(encodeJSON(msgChallenge, challengeMsg{Nonce: linktoken.Nonce()}))
+		default: // a proper challenge
+			n := linktoken.Nonce()
+			last.Store(&n)
+			_ = c.WriteBinary(encodeJSON(msgChallenge, challengeMsg{Nonce: n}))
 		}
 	}, func(c *websocket.Connection, data []byte) {
 		switch mode.Load() {
@@ -551,6 +557,25 @@ func TestMemberHandshake(t *testing.T) {
 			_ = c.WriteBinary(encodeJSON(msgWelcome, welcomeMsg{Name: "x", Proof: []byte("no")}))
 		case 3: // busy
 			_ = c.WriteBinary(encodeJSON(msgRefuse, refuseMsg{Reason: ReasonBusy, Message: "later"}))
+		case 5: // a welcome that proves the token, with a credential that is not one
+			var h helloMsg
+			_ = json.Unmarshal(data[1:], &h)
+			proof := linktoken.ListenerProof(secret.Stored(), transcript(h.ID, h.Nonce, *last.Load(), h.Mode), "x", "bad")
+			_ = c.WriteBinary(encodeJSON(msgWelcome, welcomeMsg{Name: "x", Credential: "bad", Proof: proof}))
+		case 6: // gone during the handshake
+			_ = c.Close(websocket.CloseGoingAway, "")
+		case 7: // a welcome, and a call at once after it
+			if data[0] == msgResponse {
+				answered.Store(true)
+				return
+			}
+			var h helloMsg
+			_ = json.Unmarshal(data[1:], &h)
+			cred := linktoken.New().StringAs(credentialPrefix)
+			proof := linktoken.ListenerProof(secret.Stored(), transcript(h.ID, h.Nonce, *last.Load(), h.Mode), "x", cred)
+			_ = c.WriteBinary(encodeJSON(msgWelcome, welcomeMsg{Name: "x", Credential: cred, Proof: proof}))
+			_ = c.WriteBinary(encodeCall(msgRequest, 1, requestHead{Method: "GET", Path: "/node", Timeout: 5000}, nil))
+			_ = c.WriteBinary(encodeCancel(2))
 		}
 	})
 	logs := &logBuf{}
@@ -560,11 +585,21 @@ func TestMemberHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	for i, want := range []string{"challenge is not one", "not one", "did not prove the token", "(busy)"} {
+	for i, want := range []string{"challenge is not one", "not one", "did not prove the token", "(busy)", "", "credential is not one", "closed by the manager"} {
+		if want == "" {
+			continue
+		}
 		mode.Store(int32(i))
 		waitFor(t, want, func() bool { return strings.Contains(logs.String(), want) })
 	}
+	// A call right after the welcome is served.
+	mode.Store(7)
+	waitFor(t, "a call after the welcome answered", answered.Load)
+	l.Close()
 	// No answer at all: the handshake times out.
+	l, _ = StartMember(MemberOptions{Engine: e, Settings: &config.ClusterMember{Manager: url, Fingerprint: fp, Token: linktoken.New().StringAs(config.ClusterEnrollPrefix)},
+		API: http.NotFoundHandler(), Logf: logs.logf})
+	defer l.Close()
 	mode.Store(4)
 	waitFor(t, "a handshake that took too long", func() bool { return strings.Contains(logs.String(), "took too long") })
 	if l.Status().Linked {
@@ -657,3 +692,161 @@ func newWSEcho(t *testing.T, f *fixture, got chan []byte) *websocket.Connection 
 	}
 	return conn
 }
+
+// What is left of the link's edges: the errors' words, the calls of a
+// manager closed or of a console member, broken messages, enrollments
+// refused at the last moment, a member removed while calls are under way.
+func TestLinkEdges(t *testing.T) {
+	if (&Problem{Kind: "k", Message: "m"}).Error() != "k: m" || (refusal{msg: "x"}).Error() != "x" || boundString("abc", 2) != "ab" {
+		t.Error("words")
+	}
+	for _, d := range [][]byte{{1}, append(make([]byte, 8), 0xff, 0xff, 0xff, 0xff), append(make([]byte, 11), 1, '{')} {
+		if _, _, err := decodeCall(d, &responseHead{}); err == nil {
+			t.Errorf("%q decoded", d)
+		}
+	}
+	if err := (&Member{Name: "x", Access: AccessLink, Link: &Link{}}).check(); err == nil {
+		t.Error("a link with nothing")
+	}
+	if err := (&Member{Name: "x", Access: AccessLink, URL: "https://x", Link: &Link{TokenHash: "h"}}).check(); err == nil {
+		t.Error("a link with a URL")
+	}
+
+	f, ck := linkFixture(t, "127.0.0.1:0", func(c *config.Cluster) { c.Timeout = config.Duration(20 * time.Second) })
+	// A member at its URL, through its console: Call puts the console's
+	// prefix before the path.
+	cm := newFakeMember(t, false)
+	f.add(consoleInput("by-console", cm.srv.URL))
+	f.waitUp("by-console")
+	got := make(chan *Reply, 1)
+	if err := f.m.Call("by-console", "GET", "status", nil, nil, func(r *Reply, _ *Problem) { got <- r }); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-got; r == nil || r.Status != 200 {
+		t.Fatal(r)
+	}
+	s := f.serve()
+	if code, body, _ := s.do("POST", "/api/m/cluster/nodes/by-console/enroll", "{"); code != 400 {
+		t.Errorf("%d %s", code, body)
+	}
+
+	// Enrollments refused at the last moment, as by another enrollment.
+	e := enrollIn(t, f, "edge")
+	tok, _ := linktoken.ParseAs(e.Token, config.ClusterEnrollPrefix)
+	if _, _, err := f.m.enroll(linktoken.New().ID, "r", &helloNode{}); err == nil || err.(refusal).reason != ReasonUnknown {
+		t.Error(err)
+	}
+	ck.add(48 * time.Hour)
+	if _, _, err := f.m.enroll(tok.ID, "r", &helloNode{}); err == nil || err.(refusal).reason != ReasonExpired {
+		t.Error(err)
+	}
+	ck.add(-48 * time.Hour)
+	if _, _, err := f.m.enroll(tok.ID, "r", &helloNode{Hostname: strings.Repeat("h", 300)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.m.enroll(tok.ID, "r", &helloNode{}); err == nil || err.(refusal).reason != ReasonUsed {
+		t.Error(err)
+	}
+	f.m.noteRefusal("nobody", &Refusal{})
+	if f.m.link.ln.lookup(nil) != nil || f.m.link.ln.conns.lookup("nowhere") != nil {
+		t.Error("lookup")
+	}
+
+	// A store that fails as a member enrolls: the member is told to try
+	// again, and enrolls once the store works.
+	e2 := enrollIn(t, f, "stored")
+	f.store.mu.Lock()
+	f.store.fail = errors.New("disk full")
+	f.store.mu.Unlock()
+	keep := &brokenKeeper{}
+	lm := startLinked(t, f, e2.Config, keep, nil)
+	waitFor(t, "a busy refusal", func() bool { return strings.Contains(lm.log.String(), "("+ReasonBusy+")") })
+	f.store.mu.Lock()
+	f.store.fail = nil
+	f.store.mu.Unlock()
+	lm.waitLinked(t, true)
+	if !strings.Contains(lm.log.String(), "cannot be kept") {
+		t.Error(lm.log)
+	}
+
+	// Calls to a slow member: one past what a link carries is refused;
+	// those under way end when the member is removed.
+	release := make(chan struct{})
+	defer close(release)
+	slowAPI := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		w.WriteHeader(204)
+	})
+	e3 := enrollIn(t, f, "slow")
+	sl := startLinked(t, f, e3.Config, nil, slowAPI)
+	sl.waitLinked(t, true)
+	probs := make(chan *Problem, maxLinkCalls+1)
+	for range maxLinkCalls + 1 {
+		if err := f.m.Call("slow", "GET", "/slow", nil, nil, func(_ *Reply, p *Problem) { probs <- p }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := <-probs; p == nil || !strings.Contains(p.Message, "as many calls") {
+		t.Fatal(p)
+	}
+	if err := f.m.Remove("tester", "slow"); err != nil {
+		t.Fatal(err)
+	}
+	for range maxLinkCalls {
+		if p := <-probs; p == nil {
+			t.Fatal("a call answered")
+		}
+	}
+	sl.waitStopped(t)
+
+	// A transport closed calls nothing; a welcome of a member gone is a
+	// revocation; the forgetting of a credential that cannot be forgotten
+	// is said.
+	tr := newLinkTransport(f.m, "x")
+	tr.close()
+	errs := make(chan error, 1)
+	tr.do("GET", "/", nil, nil, func(_ *reply, err error) { errs <- err })
+	if err := <-errs; !errors.Is(err, errClosed) {
+		t.Error(err)
+	}
+	if tr.track(&linkCall{}) {
+		t.Error("tracked")
+	}
+	if err := f.m.Remove("tester", "stored"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a credential that cannot be forgotten", func() bool { return strings.Contains(lm.log.String(), "could not be forgotten") })
+	r := dialRaw(t, f, e.Config.Manager)
+	r.next(t)
+	var l *mlink
+	f.m.link.ln.open.Range(func(_, v any) bool {
+		if v.(*mlink).ws != nil {
+			l = v.(*mlink)
+		}
+		return true
+	})
+	waitFor(t, "the raw link", func() bool {
+		f.m.link.ln.open.Range(func(_, v any) bool {
+			if m := v.(*mlink); m.credID == "" {
+				l = m
+			}
+			return true
+		})
+		return l != nil
+	})
+	f.m.welcome(l, "nobody", "x", welcomeMsg{})
+	if m := r.next(t); m[0] != msgRevoked {
+		t.Errorf("%q", m)
+	}
+}
+
+// brokenKeeper keeps nothing: every save fails.
+type brokenKeeper struct{}
+
+func (*brokenKeeper) Load() ([]byte, error) { return nil, nil }
+func (*brokenKeeper) Save([]byte) error     { return errors.New("read-only disk") }
