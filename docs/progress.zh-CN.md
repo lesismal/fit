@@ -4522,3 +4522,22 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   （`bench/microbench.sh` 现在让每个构建在其包的 `testdata` 旁运行）。
 - **缺口**：cookie 模式的 `url_signing` 无法用于预览（cookie 不会发往其他源）；每次预览都是新会话，`max_sessions` 较低且为 `refuse` 时重复预览
   可能被拒；写在配置中的密钥仍会显示在配置编辑器的原始标签页中。实现时所做的决策在计划的 I138 一节，待审查。
+
+
+### I139 在 workbench 中管理媒体文件 — 已完成
+
+- **上传**：`media_library` 新增 `upload_dir`、`max_upload_bytes`（32 GiB）、`max_uploads`（4）、`min_free_bytes`（1 GiB）与 `upload_expiry`
+  （24 小时）。按 tus 的方式可续传：`POST /media/library/<name>/uploads`，在 `Upload-Offset` 处 `PATCH`，`HEAD` 续传，`DELETE` 放弃。控制台把
+  PATCH 的正文边到边以每次 512 KiB 流式写到库的文件池（`app/console` 的 `StreamBody`，基于 fib 的 `StreamRequestBodyAtHeader`、`OnBody`、
+  `HoldBody` 与 `LimitBody`），写入 `.fit-upload-<id>.part`，靠其 `.json` 跨重启保留，完整后同步并改名就位，再由扫描探测；写入任何内容之前
+  回答 413，以及 429、507；正文超过上传大小时放弃上传并删除其文件。
+- **改名、移动、删除与 sidecar**：作用于条目及其所有文件，在池上一次一个修改，从不写到根目录之外；改名保留 sidecar 指定的 ID 并改写 sidecar
+  的引用；条目立即离开目录、样本表与 `vod` 缓存。`GET .../usage` 说明谁在播放条目（列出或正在播放它的频道、播放会话）；正在使用的条目的
+  修改被拒绝（409），除非 `force`。每次修改都记入助手的审计日志（类型 `media`，来源 `workbench`）。
+- **Workbench**：库页面上的上传卡片（8 MiB 分块、重试、暂停与继续，再次选择同一文件即可续传）；条目页面上的文件管理（改名、带目录列表的
+  移动、删除，每项都在确认时显示谁在使用该条目）与 sidecar 表单；中英文；在浏览器中检查过。
+- **测试**：经 `medialib`、Admin API 与控制台在断开后续传；413 不留下文件；根目录之外的路径；改名保留 sidecar 的 ID；删除使条目离开目录、
+  样本表与 `vod` 缓存；有在线频道与会话时的使用情况；重启与过期；竞态检测下。在基准机上，4 GiB 的上传在 2 GiB 处断开，续传、校验并探测
+  （`TestUploadGB`，以 `FIT_UPLOAD_GB` 运行）。
+- **缺口**：中途失败的删除无法回滚；直接发到 Admin API 的 PATCH 受其一分钟读超时限制；只有 `url_signing` 下才知道会话；只用 token 经
+  Admin API 的修改不进审计日志。实现时所做的决策在计划的 I139 一节，待审查。

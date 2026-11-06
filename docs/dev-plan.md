@@ -294,7 +294,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | done |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | done |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | done |
-| I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | todo |
+| I139 | Media files managed from the workbench: resumable uploads, rename, move, delete and sidecars, bounded and confirmed | I138 | done |
 | **Cluster management** | | | |
 | I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | todo |
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | todo |
@@ -2818,6 +2818,51 @@ keeps the reads behind one interface so that it can be added).
   a rename keeps the item's `id` when its sidecar names one; a deleted item leaves the catalog and
   its caches; under the race detector.
 - **Touches**: `medialib`, `admin`, `app/workbench`, `schema`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **One `upload_dir` a library**, inside one of its roots (or a root), as roots are plain strings in
+   the config and one target keeps the bounds simple. Alternatives: a field a root; a path relative to
+   the first root.
+2. **The protocol is shaped as tus's** (`Upload-Offset`, `Upload-Length`, POST, PATCH, HEAD, DELETE),
+   without a whole tus server (`Tus-Resumable`, `Upload-Metadata`, extensions).
+3. **A body past the upload, or a full disk, gives the whole upload up** and removes its file, so no
+   partial file is left. Alternative: trim back to the last good offset.
+4. **A rename** renames only the files in the item's directory named after it (`base.*`,
+   `base-poster.*`) and rewrites a sidecar that names one; a new name that would read as a rendition
+   label or a poster is refused. Alternative: every file renamed and the sidecar rewritten whole.
+5. **A move** takes every file, keeping its path under the item's directory, so the sidecar's
+   references hold; missing folders are made.
+6. **An item in use** (named or played by a channel, or played in a session) is refused 409 for a
+   rename, move, delete or a sidecar edit that changes its ID, unless `force`; the page shows the usage
+   in its confirm dialog. Alternative: a warning in the page only.
+7. **"Still playing"** is a live session whose resource is the item's `vod` prefix, under a policy with
+   `url_signing`; the answer says when sessions cannot be counted.
+8. **The catalog after a change**: the item leaves it at once and stays out of a scan begun before the
+   change; a rescan lists it as it now is.
+9. **Uploads outlive a restart** by a `.json` beside each `.part`; expiry and orphans are cleaned at the
+   start of each scan, so their timing follows `scan_interval`; uploads past `max_uploads` at a restart
+   are removed. Alternatives: memory only; a timer of their own.
+10. **Writes never follow links out**: every file written lies inside its root after resolving, whatever
+    `follow_symlinks` (which is for reading) says.
+11. **Names valid on every OS**: no `\`, `:`, `*?"<>|`, controls, leading `.`, trailing `.` or space, or
+    Windows device names; 255 bytes a name, 1,024 a path, 32 levels; uploads only of kinds the library
+    reads.
+12. **Audit**: kind `media`, source `workbench`, one entry a change (`media.upload.begin`,
+    `media.upload`, `media.upload.cancel`, `media.rename`, `media.move`, `media.delete`,
+    `media.sidecar`), written when the console runs the assistant; changes made with the Admin API's
+    token are logged, not audited.
+13. **A streamed PATCH through the console** has 10 minutes for its body (in place of the console's 30s
+    read timeout), a ceiling of 1 TiB on any streamed body, and `LimitBody` set to what the upload still
+    takes; the workbench sends 8 MiB pieces.
+14. **The Admin API's own server takes PATCH too**, read 64 KiB at a time, so scripts upload with the
+    token, within its one-minute read timeout.
+15. **The page uploads one file at a time**, retrying a piece up to 30 times, up to 15s apart;
+    `max_uploads` bounds other clients.
+16. **A sidecar edit** carries the sidecar's time and is refused 409 if the file changed; references must
+    exist, lie in the root and be of the right kind; another item's ID is refused; a new sidecar is not
+    written over a file already there.
+17. **Defaults**: 32 GiB, 4 uploads, 1 GiB free, 24h; at most 1,024 uploads and 2,000 folders listed.
 
 ## Cluster management
 

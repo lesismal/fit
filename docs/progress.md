@@ -6380,3 +6380,34 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   origin); each preview is a new session, so a low `max_sessions` with `refuse` may refuse repeated
   previews; secrets written in the config still show in the config editor's raw tabs. The decisions
   made are in the plan's I138 section, pending review.
+
+
+### I139 Media files managed from the workbench — done
+
+- **Uploads**: `media_library` gains `upload_dir`, `max_upload_bytes` (32 GiB), `max_uploads` (4),
+  `min_free_bytes` (1 GiB) and `upload_expiry` (24h). Resumable as tus makes them:
+  `POST /media/library/<name>/uploads`, `PATCH` at `Upload-Offset`, `HEAD` to resume, `DELETE` to give
+  up. The console streams a PATCH's body to the library's file pool as it arrives (`StreamBody` in
+  `app/console`, on fib's `StreamRequestBodyAtHeader`, `OnBody`, `HoldBody` and `LimitBody`), 512 KiB at a
+  time, into `.fit-upload-<id>.part`, kept across restarts by its `.json`, synced and renamed into place
+  once whole, then probed by the scan; 413 before anything is written, 429, 507; a body past the upload
+  gives it up and removes its file.
+- **Rename, move, delete and sidecars**: on an item and all its files, on the pool, one change at a
+  time, never writing out of a root; a rename keeps an ID its sidecar names and rewrites the sidecar's
+  references; the item leaves the catalog, its sample tables and the `vod` cache at once.
+  `GET .../usage` says what plays an item (channels naming or playing it, playback sessions); a change
+  to one in use is refused 409 unless `force`. Every change is in the assistant's audit log (kind
+  `media`, source `workbench`).
+- **Workbench**: an Upload card on the library page (8 MiB pieces, retries, pause and resume, an upload
+  under way resumed by picking its file again); Manage files (rename, move with a folder list, delete,
+  each confirmed with what uses the item) and a sidecar form on the item page; English and Chinese;
+  checked in a browser.
+- **Tests**: resuming after a cut through `medialib`, the Admin API and the console; 413 leaving no file;
+  paths out of the roots; a rename keeping a sidecar's ID; a delete dropping the catalog's item, its
+  tables and the `vod` cache; usage with a live channel and session; restarts and expiry; under the race
+  detector. On the benchmark host, a 4 GiB upload cut at 2 GiB, resumed, checksummed and probed
+  (`TestUploadGB`, run with `FIT_UPLOAD_GB`).
+- **Gaps**: a delete that fails part way cannot roll back; a PATCH straight to the Admin API is bounded
+  by its one-minute read timeout; sessions are known only under `url_signing`; changes through the
+  token-only Admin API are not in the audit log. The decisions made are in the plan's I139 section,
+  pending review.
