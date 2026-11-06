@@ -317,9 +317,11 @@ func TestAssistantNoCredentials(t *testing.T) {
 	in := consoleInput("good", good.srv.URL)
 	in.TLS.CA = good.caPEM()
 	f.add(in)
+	// Its login fails from the first poll: a session won before would be
+	// kept, and the member never fail.
+	bad.set(func(f *fakeMember) { f.loginStatus = 500 })
 	f.add(consoleInput("bad", bad.srv.URL))
 	f.add(tokenInput("tok", downURL(t)))
-	bad.set(func(f *fakeMember) { f.loginStatus = 500 })
 	f.waitUp("good")
 	f.waitState("bad", "to fail", func(s State) bool { return s.Error != nil })
 	a := f.m.Assistant()
