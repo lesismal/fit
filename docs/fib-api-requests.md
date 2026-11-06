@@ -78,6 +78,7 @@ The fit iterations that depend on these are R03–R06 and R07c in the [developme
 | A63 | Multipath TCP as a listener's option | done, fib `5c0e5b9` | — | — |
 | A64 | A reader of MP4 files that are not fragmented | done, fib `8998d58` | 1, 11 | I131–I134 (032) |
 | A70 | TURN relays that never share a port of the range | done, fib `856ad5b` | 11 | I162 |
+| A72 | A segment's tracks begin at its keyframe | done, fib `e4e10c0` | 11 | I134, I136 |
 
 ## Evidence
 
@@ -2382,3 +2383,37 @@ lasts until the earliest of the tracks in its last part ends. No API changes.
 **How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` plays `live/secll`
 and `live/mixll` by their parts across items whose tracks differ.
 
+## A72: A segment's tracks begin at its keyframe
+
+**Status.** Found on 2026-11-06, from I134 (channels) and I136 (encrypted segments), after A71. Done
+in fib at `e4e10c0`, made by fit's session per [rule 15](rules.md#7-when-fib-falls-short); fit is on
+`e4e10c0`.
+
+**Problem.** A channel moving to an item whose tracks differ, played by whole fMP4 segments (not
+Low-Latency HLS's parts), froze its picture for about 0.8s at every item in hls.js with Chrome: the
+audio and `currentTime` played on, but 4 of the 25 frames of that second decoded. fMP4's writer holds
+each track's last packet until the next one tells its duration, so the AAC frame decoding just before
+a keyframe went in the segment the keyframe began: every segment's audio began up to a frame (here
+13ms) before its keyframe. hls.js takes a whole segment to start at its earliest decode time and to
+last as long as its video, and places the first segment after a discontinuity where the one before
+ends, so it placed the new item 13ms early, and its first audio decoded before the last audio of the
+item before. Chrome then starts every track over at a keyframe, and dropped the new item's video up to
+its next keyframe, a second on. Items with the same tracks (`live/tv`) and Low-Latency HLS's parts,
+which hls.js places by `EXTINF`, played on.
+
+**Evidence.** In `TestChannelInterop` with hls.js 1.5.20: the init PTS hls.js found grew by 13ms at
+every discontinuity (0, 0.0133, 0.0267, …); the muxed buffer grew to 12.213s, not 13.05s, when the
+first segment of an item was appended; `requestVideoFrameCallback` showed the frames presented going
+from 12.173s to 13.053s. In the segments, audio began at 10.987s where the video's keyframe was at
+11.000s.
+
+**As built.** The Muxer's cut at a keyframe waits for the other tracks to reach it: their packets
+decoding before the keyframe go in the segment it ends, the fMP4 writer's held one completed by the
+first packet after the keyframe, written before the cut; the packets after the keyframe wait in order,
+by up to 250ms or 256 packets; a stream that ends, or changes its tracks, while a cut waits keeps the
+keyframe in its last segment. No API changes; the publisher's time per second of media and its
+allocations are unchanged (`BenchmarkMuxerEncryption`).
+
+**How fit uses it.** Nothing changes in fit but the version; `TestChannelInterop` now checks every
+channel hls.js plays for its decoded frames (95% of 25 a second played) and for the largest step
+between frames presented one after the other (at most 0.2s).

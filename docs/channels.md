@@ -216,5 +216,5 @@ The role logs each item a channel plays, each item skipped and why, and each pus
 `test/docker/channels/e2e.sh` runs `streaming`'s `TestChannelInterop` in a Linux container: ffmpeg
 makes the items, ffprobe reads a channel over RTMP, RTSP, SRT, HTTP-FLV and HLS (fMP4 and MPEG-TS)
 and finds its decode times continuous across items, a headless Chromium plays channels with hls.js,
-through discontinuities, and a channel is pushed over RTMP and SRT to MediaMTX in a container, which
+through discontinuities, every frame decoded and none standing still, and a channel is pushed over RTMP and SRT to MediaMTX in a container, which
 is restarted and gets the stream back.

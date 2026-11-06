@@ -183,4 +183,4 @@ route hls { match { path /hls/* }; handler hls { prefix /hls/ } }
 
 `test/docker/channels/e2e.sh` 在 Linux 容器中运行 `streaming` 的 `TestChannelInterop`：ffmpeg 生成条目，ffprobe 经 RTMP、
 RTSP、SRT、HTTP-FLV 与 HLS（fMP4 和 MPEG-TS）读取频道，确认解码时间跨条目连续；无头 Chromium 用 hls.js 播放频道，穿过
-不连续点；一个频道经 RTMP 和 SRT 推到容器中的 MediaMTX，MediaMTX 重启后又重新收到流。
+不连续点，每一帧都解码、画面不停顿；一个频道经 RTMP 和 SRT 推到容器中的 MediaMTX，MediaMTX 重启后又重新收到流。
