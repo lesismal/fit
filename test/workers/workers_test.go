@@ -211,6 +211,11 @@ var notCovered = map[string]string{
 	"hls":         "streaming's TestHLSAuth",
 	"stream_whip": "streaming's TestStreamWHIPWHEP",
 	"stream_whep": "streaming's TestStreamWHIPWHEP",
+	// It needs the role media_library and its scan: what it reads and
+	// builds runs on the library's file pool, a request waiting retained.
+	// handler/vod's TestNoWorkerBlocks holds the pool up and checks that
+	// ServeHTTP returns at once and the answer comes once the pool goes on.
+	"vod": "handler/vod's TestNoWorkerBlocks",
 }
 
 // handlerOf compiles a config of c's route and returns its handler.

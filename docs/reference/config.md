@@ -43,7 +43,7 @@ a config against it and more.
 - [Streaming](#streaming): [`streaming`](#config-streaming), [`streaming.rtmp`](#config-streamrtmp), [`streaming.rtsp`](#config-streamrtsp), [`streaming.srt`](#config-streamsrt), [`streaming.webrtc`](#config-streamwebrtc)
 - [Media library](#media-library): [`media_library[]`](#config-medialibrary)
 - [Providers](#providers): [`providers[]`](#config-provider), [`providers[].docker`](#config-dockerprovider), [`providers[].consul`](#config-consulprovider), [`providers[].consul_kv`](#config-consulkvprovider), [`providers[].etcd`](#config-etcdprovider), [`providers[].kubernetes`](#config-kubernetesprovider), [`providers[].kubernetes.ingress`](#config-kubernetesingress)
-- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
+- [Handlers](#handlers): [`fastcgi`](#http-handlers-fastcgi), [`forward_proxy`](#http-handlers-forward_proxy), [`hls`](#http-handlers-hls), [`httpflv`](#http-handlers-httpflv), [`media_pages`](#http-handlers-media_pages), [`media_tokens`](#http-handlers-media_tokens), [`proxy`](#http-handlers-proxy), [`respond`](#http-handlers-respond), [`static`](#http-handlers-static), [`stream_whep`](#http-handlers-stream_whep), [`stream_whip`](#http-handlers-stream_whip), [`vod`](#http-handlers-vod), [`webrtc_proxy`](#http-handlers-webrtc_proxy), [`whep`](#http-handlers-whep), [`whip`](#http-handlers-whip)
 - [Middleware](#middleware): [`basic_auth`](#http-middleware-basic_auth), [`body_limit`](#http-middleware-body_limit), [`cache`](#http-middleware-cache), [`circuit_breaker`](#http-middleware-circuit_breaker), [`client_cert`](#http-middleware-client_cert), [`compress`](#http-middleware-compress), [`concurrency_limit`](#http-middleware-concurrency_limit), [`forward_auth`](#http-middleware-forward_auth), [`headers`](#http-middleware-headers), [`jwt`](#http-middleware-jwt), [`rate_limit`](#http-middleware-rate_limit), [`redirect`](#http-middleware-redirect), [`rewrite`](#http-middleware-rewrite), [`wasm`](#http-middleware-wasm)
 
 ## The config
@@ -4247,6 +4247,75 @@ In JSON:
 | `stream` | string |  | The stream's path. When left out, it is the path after prefix a POST is sent to, as live/cam in /whip/live/cam. A session's URL is the path of its POST followed by its ID, which the route must match too. |
 | `prefix` | string |  | The part of the path before the stream's. /whip/ when left out. |
 | `auth` | string |  | The media_auth policy a POST must satisfy, publish on the stream's path: a bearer token, Basic, the token query parameter or the fit_media_token cookie. 401 with a Bearer challenge without credentials, 403 when they do not allow it. A session's URL takes PATCH and DELETE without credentials, its random ID being the capability (RFC 9725). Everyone may publish when left out, as the route's middleware allow. |
+
+<a id="http-handlers-vod"></a>
+
+### `vod`
+
+Serves a media library's items as video on demand over HLS, fMP4 or MPEG-TS segments cut from the files as they are stored, and the files themselves with Range.
+
+Serves the items of a [`media_library`](#media-library) as video on demand over HLS (RFC 8216),
+cut from the files as they are stored, without transcoding: `/vod/films/films/bbb/index.m3u8`
+is the multivariant playlist of the item `films/bbb` of the library `films`, after `prefix`
+(`/vod/<library>/` when left out). Its renditions are variants, its audio files an audio group
+and its subtitles, as WebVTT, a subtitle group; each media playlist is of fragmented MP4
+segments, or MPEG-TS ones with `container` `ts`, and `index.fmp4.m3u8` and `index.ts.m3u8` name
+either. Segments are cut at the keyframe nearest `segment_duration`, from the files' sample
+tables, on the library's file pool, and kept, up to `max_cache_bytes`; the files themselves are
+served too, as `v0.mp4`, with `Range`. A file changed or removed since the library's last scan
+is answered `404`. `auth` names a [`media_auth`](#media-auth) policy every request must satisfy
+with `play` on `vod/<library>/<id>`; a playlist fetched with a `token` query parameter names
+what it lists with the token too. `cache_control` lets a CDN keep what is served, whose `ETag`
+and `Last-Modified` come from the file. See [Media library](../media-library.md#video-on-demand).
+
+In a .conf file:
+
+```fit
+route {
+	match { path /vod/films/* }
+	handler vod {
+		library films
+		segment_duration 4s
+		cache_control "public, max-age=86400"
+	}
+}
+```
+
+In YAML, a route:
+
+```yaml
+match:
+  path:
+    - /vod/films/*
+handler:
+  module: vod
+  params:
+    library: films
+    segment_duration: 4s
+    cache_control: public, max-age=86400
+```
+
+In JSON:
+
+```json
+{
+  "match": {"path": ["/vod/films/*"]},
+  "handler": {"module": "vod", "params": {"library": "films", "segment_duration": "4s", "cache_control": "public, max-age=86400"}}
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `library` | string |  | Required. The media_library whose items are served. |
+| `prefix` | string |  | The part of the path before an item's ID: with /vod/films/, /vod/films/films/bbb/index.m3u8 is the playlist of the item films/bbb. /vod/<library>/ when left out. |
+| `auth` | string |  | The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out. |
+| `container` | string: `fmp4`, `ts` | `"fmp4"` | The segments of index.m3u8: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus, for older players. Either is played by its own name too, index.fmp4.m3u8 and index.ts.m3u8. fmp4 when left out. |
+| `segment_duration` | duration | `"4s"` | About how long segments are: a file with video is cut at the keyframe nearest this after a segment's start, so set it to the keyframe interval the files were made with, or a multiple of it. 1s to 60s. 4s when left out. |
+| `max_cache_bytes` | integer, 0 or more | `268435456` | The most memory the handler keeps of what it builds from the files, for the next request: how each is cut into segments, its playlists, its segments and subtitles, the least recently used dropped; and of what it is building. 256 MiB when left out or 0. |
+| `max_segment_bytes` | integer, 0 or more | `33554432` | The largest segment: one that would be larger is cut at an earlier keyframe, or without one when there is none. 64 KiB to 1 GiB, and at most a quarter of max_cache_bytes. 32 MiB when left out or 0. |
+| `cache_control` | string |  | Sent as Cache-Control with every playlist, segment, subtitle and file, so that a CDN keeps them, as "public, max-age=86400": they change only when their file does, which their ETag and Last-Modified say. None when left out. |
+| `cors` | string |  | Sent as Access-Control-Allow-Origin, as "*", for players on other origins. None when left out. |
+| `timeout` | duration | `"30s"` | How long a request may wait for what it needs to be read and built on the library's file pool; past it the answer is 503. 30s when left out. |
 
 <a id="http-handlers-webrtc_proxy"></a>
 

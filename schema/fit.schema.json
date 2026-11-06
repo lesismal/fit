@@ -4386,6 +4386,22 @@
           "if": {
             "properties": {
               "module": {
+                "const": "vod"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/http.handlers.vod"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "module": {
                 "const": "webrtc_proxy"
               }
             }
@@ -4446,6 +4462,7 @@
             "static",
             "stream_whep",
             "stream_whip",
+            "vod",
             "webrtc_proxy",
             "whep",
             "whip"
@@ -5057,6 +5074,68 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "http.handlers.vod": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "The media_auth policy every request, playlist, segment, subtitle and file, must satisfy, play on the stream vod/<library>/<id>: a bearer token, Basic, the token query parameter or the fit_media_token cookie. A playlist fetched with a token in its query names its playlists, segments and subtitles with the token too, so that a player that sends no header (Safari, ffmpeg) plays on. Everyone may play when left out.",
+          "type": "string"
+        },
+        "cache_control": {
+          "description": "Sent as Cache-Control with every playlist, segment, subtitle and file, so that a CDN keeps them, as \"public, max-age=86400\": they change only when their file does, which their ETag and Last-Modified say. None when left out.",
+          "type": "string"
+        },
+        "container": {
+          "default": "fmp4",
+          "description": "The segments of index.m3u8: fmp4, fragmented MP4 for H.264, H.265, AV1, AAC and Opus, or ts, MPEG-TS for H.264, H.265, AAC and Opus, for older players. Either is played by its own name too, index.fmp4.m3u8 and index.ts.m3u8. fmp4 when left out.",
+          "enum": [
+            "fmp4",
+            "ts"
+          ],
+          "type": "string"
+        },
+        "cors": {
+          "description": "Sent as Access-Control-Allow-Origin, as \"*\", for players on other origins. None when left out.",
+          "type": "string"
+        },
+        "library": {
+          "description": "The media_library whose items are served.",
+          "type": "string"
+        },
+        "max_cache_bytes": {
+          "default": 268435456,
+          "description": "The most memory the handler keeps of what it builds from the files, for the next request: how each is cut into segments, its playlists, its segments and subtitles, the least recently used dropped; and of what it is building. 256 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_segment_bytes": {
+          "default": 33554432,
+          "description": "The largest segment: one that would be larger is cut at an earlier keyframe, or without one when there is none. 64 KiB to 1 GiB, and at most a quarter of max_cache_bytes. 32 MiB when left out or 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "description": "The part of the path before an item's ID: with /vod/films/, /vod/films/films/bbb/index.m3u8 is the playlist of the item films/bbb. /vod/<library>/ when left out.",
+          "type": "string"
+        },
+        "segment_duration": {
+          "default": "4s",
+          "description": "About how long segments are: a file with video is cut at the keyframe nearest this after a segment's start, so set it to the keyframe interval the files were made with, or a multiple of it. 1s to 60s. 4s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "30s",
+          "description": "How long a request may wait for what it needs to be read and built on the library's file pool; past it the answer is 503. 30s when left out.",
+          "pattern": "^\\+?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "library"
+      ],
       "type": "object"
     },
     "http.handlers.webrtc_proxy": {
