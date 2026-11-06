@@ -154,7 +154,9 @@ fit validate -c fit.yaml -c conf.d
 
 无论哪种格式，`fit run` 在收到 SIGHUP 时，或使用 `-watch` 时每当某个文件变化、目录中加入或移除文件，都会重新应用配置。
 加载或编译失败的配置会被拒绝，运行中的配置保持不变。[Admin API](reference/config.md#admin-api) 以 JSON 读取和替换运行中的
-配置，可以整体替换，也可以按 JSON pointer 修改，并保留版本以便回滚。
+配置，可以整体替换，也可以按 JSON pointer 修改，并保留版本以便回滚。任何带 `?dry_run=1` 的修改都会走完整个应用流程
+（加载、编译、试绑新监听的地址）接受检查，应答与应用时相同，但什么都不应用；`GET /node` 说明本 fit 是谁（节点 ID、版本、
+运行中的配置与 API 的能力），供管理其他 fit 的 fit 使用（[决定 033](decisions/033-cluster-management.zh-CN.md)）。
 
 设置 `admin.store` 后，配置加密保存在单独的文件 store 中，fit 从它运行：启动 fit 的文件给出 `admin`，其中其余的内容只是
 store 的初始内容，仅在 store 还不存在时使用。每个被应用的配置，无论来自 Admin API、控制台还是某个角色的页面，都会写入
