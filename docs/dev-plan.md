@@ -300,7 +300,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | done |
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
-| I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | todo |
+| I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
@@ -3157,6 +3157,36 @@ also in decision 033 as its items 20–27):
   variables), a group's page with its members' states and an operations bar; Overview's filter by
   group; each operation confirmed in a dialog naming the members, and its results per member.
 - **Touches**: `cluster`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 43–55):
+
+1. **Membership is computed, never stored**: a selector's matches and the members named, from the
+   labels as they are.
+2. **Selectors** are Kubernetes' equality terms and `!k`, without `in` or `notin`; an empty selector
+   selects no one.
+3. **A name without a member is kept and shown missing**, not refused; renames follow, a removal takes
+   the name out, operations skip it.
+4. **Variables are plain strings**: 64 at most, names of letters, digits and `_`, values of 4 KiB, not
+   secret; typed or secret values are I145's templates'.
+5. **No new document version**: groups stay in version 2, whose `groups` an I149 fit keeps; members
+   and groups share one ETag.
+6. **"Reload" applies the running config again** (a new `POST /reload`, `config.reload`), not SIGHUP's
+   reading of files or the store, which would drop what the manager changed by the API; no fallback
+   for older members.
+7. **Rollback goes to the latest kept version whose ETag differs** from the running one's, with
+   `If-Match`, so a reload between does not count as a step back; no choice of version.
+8. **Purge by prefix is new on the member** (`prefixes` in `POST /cache/purge`, `cache.prefix`):
+   absolute URLs, the host in lower case, keys scanned under the shard and disk-index locks as a full
+   clear scans them; operations also purge by tag and all.
+9. **Operations are asynchronous** (202, followed by the page), with bounds of their own: 4 at once,
+   one a member, 32 kept.
+10. **Audit entries** hold each member's outcome (errors cut to 256 bytes) within a log of about 2 MiB;
+    a read-only manager refuses operations (409), as it could not audit them.
+11. **The test operation goes through `Manager.Call`**, on the node's session.
+12. **New problem kinds** `refused` and `no_earlier_config`, so pages show no misleading hint.
+13. **The pages**: Groups in the menu, a group's page that is its operations page, `#/cluster/ops` for
+    any selection, every member selected at first, no cancel.
 
 ### I145 Templates: config shared by a group
 
