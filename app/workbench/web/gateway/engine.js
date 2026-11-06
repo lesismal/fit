@@ -1,7 +1,8 @@
 // The Engine menu: one first-level entry whose submenus are the listener ports, each listing the features that port
 // serves and the page that edits each one, in a fixed order: the handlers of its routes, the reverse and forward proxy
-// routes, the cache and other middleware, the streaming and WebRTC handlers, and its layer-4, SOCKS, TLS, ACME and
-// automatic-HTTPS settings; its protocol, PROXY protocol, HTTP/3, on-demand and client-certificate badges are small
+// routes, the cache and other middleware, the streaming handlers (with the port's vod routes and the channels its
+// egress plays, I138) and WebRTC handlers, and its layer-4, SOCKS, TLS, ACME and automatic-HTTPS settings; its
+// protocol, PROXY protocol, HTTP/3, on-demand, client-certificate and VOD badges are small
 // tags rather than entries, and its last entry opens the listener form. The module has no page of its own: every entry
 // is a link into a page of another module. Its data comes from config.js's shared draft, plus GET /api/status for the
 // addresses the kernel bound and the listeners HTTPS by default makes; a config change (the fit:config event) or a
@@ -38,6 +39,8 @@
     ['e.r.stream_whip', 'WHIP publish routes', 'WHIP 推流路由'], ['e.r.stream_whep', 'WHEP play routes', 'WHEP 播放路由'],
     ['e.r.whip', 'WHIP routes', 'WHIP 路由'], ['e.r.whep', 'WHEP routes', 'WHEP 路由'],
     ['e.r.webrtc_proxy', 'WebRTC proxy routes', 'WebRTC 代理路由'],
+    // video on demand and channels (I138) / 点播与频道
+    ['e.r.vod', 'VOD routes', '点播路由'], ['e.channels', 'Channels', '频道'], ['e.tag.vod', 'VOD', '点播'],
     // layer 4, SOCKS and TLS / 四层、SOCKS 与 TLS
     ['e.l4', 'Layer 4 services', '四层服务'], ['e.socks', 'SOCKS forward proxy', 'SOCKS 正向代理'],
     ['e.socks.title', 'The SOCKS rules are edited on the Listeners page.', 'SOCKS 规则在监听页面编辑。'],
@@ -157,6 +160,7 @@
         l = l || {};
         var name = l.name || '#' + (i + 1), protocols = protocolsOf(l);
         out.push(navPort(draft, {
+          vod: servesHTTP(protocols) && (draft.routes || []).some(function (r) { return servesPort(r, name) && r && r.handler && r.handler.module === 'vod'; }),
           name: name, address: l.address || '', protocols: protocols, http: servesHTTP(protocols),
           tls: l.tls, socks: l.socks || protocols.indexOf('socks') >= 0, proxyProtocol: l.proxy_protocol,
           mptcp: l.mptcp, generated: false, bound: bound[name]
@@ -255,6 +259,7 @@
     if (port.tls && port.tls.on_demand) parts.push(t('e.tag.ondemand'));
     if (port.tls && port.tls.client_auth) parts.push(t('e.tag.mtls'));
     if (port.mptcp) parts.push(t('e.tag.mptcp'));
+    if (port.vod) parts.push(t('e.tag.vod'));
     return parts.join(' · ');
   }
 
@@ -276,7 +281,7 @@
   function routeHref(module) { return '#/gw.reverse/routes?handler=' + encodeURIComponent(module); }
   function otherHandlers(by) {
     return Object.keys(by).filter(function (m) {
-      return HANDLERS.indexOf(m) < 0 && m !== 'proxy' && m !== 'forward_proxy' &&
+      return HANDLERS.indexOf(m) < 0 && m !== 'proxy' && m !== 'forward_proxy' && m !== 'vod' &&
         STREAM_HANDLERS.indexOf(m) < 0 && WEBRTC_HANDLERS.indexOf(m) < 0;
     }).sort();
   }
@@ -320,11 +325,18 @@
       add(t('e.middleware'), '#/gw.reverse/routes', 'layers', mwRoutes.length,
         t('e.mw.title', { list: Object.keys(mwMods).sort().join(', ') }), mwRoutes);
     }
-    // 5. Streaming: its page, then each handler's filtered routes. / 5. 流媒体：其页面与各处理器的过滤路由。
+    // 5. Streaming: its page, then each handler's filtered routes, then its vod routes and the channels its egress
+    // plays (I138). / 5. 流媒体：其页面与各处理器的过滤路由，然后是点播路由与其输出所播放的频道（I138）。
     var stream = STREAM_HANDLERS.filter(function (m) { return by[m]; });
-    if (stream.length) {
+    var channels = (draft.streaming && draft.streaming.channels) || [];
+    if (stream.length || by.vod) {
       add(t('e.streaming'), '#/gw.streaming/streaming', 'play');
       stream.forEach(function (m) { add(t(STREAM_WORDS[m]), routeHref(m), STREAM_ICONS[m], by[m].length, null, by[m]); });
+      if (by.vod) add(t('e.r.vod'), '#/gw.medialib/vod', 'disk', by.vod.length, null, by.vod);
+      if (channels.length && (by.hls || by.httpflv || by.stream_whep)) {
+        add(t('e.channels'), '#/gw.medialib/channels', 'radio', channels.length,
+          channels.map(function (c) { return c && c.name; }).filter(Boolean).join(', '));
+      }
     }
     // 6. WebRTC: its page, then each handler's filtered routes. / 6. WebRTC：其页面与各处理器的过滤路由。
     var webrtc = WEBRTC_HANDLERS.filter(function (m) { return by[m]; });

@@ -41,6 +41,15 @@ var zh = sync.OnceValue(func() map[string]string {
 	return m
 })
 
+// HLSJS returns hls.js (1.5.20, Apache-2.0), which the workbench's media
+// pages play HLS with, and its license: one copy in fit, for any other page
+// that plays HLS to serve too.
+func HLSJS() (script, license []byte) {
+	script, _ = files.ReadFile("web/vendor/hls.min.js")
+	license, _ = files.ReadFile("web/vendor/hls.LICENSE.txt")
+	return script, license
+}
+
 // SchemaZh returns the Chinese of the config schema's descriptions, by
 // their English text, as the pages show them: gateway/schema-zh.js's. The
 // assistant's schema_describe answers in Chinese with it.

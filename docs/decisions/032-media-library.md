@@ -87,6 +87,12 @@ What each iteration decides:
 - **I137–I139**: an example video site, the workbench's pages for all of it, and files managed from
   the workbench (resumable uploads written to a temporary file on the file pool and renamed into
   place).
+- **I138, hls.js in the workbench**: hls.js 1.5.20 (Apache-2.0, its license beside it) is vendored in
+  the workbench's `vendor/` for the preview player, and loaded only when a player first needs it;
+  `workbench.HLSJS()` hands the same file to any other page that plays HLS, so fit keeps one copy.
+  The console's Content-Security-Policy opens `connect-src`, `img-src` and `media-src` (with `blob:`)
+  to the listeners serving `vod` and `hls` routes alone, and no `worker-src`, so the player runs
+  without a worker.
 
 ## Rejected
 

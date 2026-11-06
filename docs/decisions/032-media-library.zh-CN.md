@@ -63,6 +63,10 @@
   服务器的 DRM 不做。
 - **I137–I139**：一个视频网站示例、工作台中覆盖以上全部的页面，以及在工作台中管理文件（可续传的上传在文件池上写入
   临时文件，完整后改名就位）。
+- **I138，hls.js 随工作台提供**：hls.js 1.5.20（Apache-2.0，许可证文件随附）放在工作台的 `vendor/` 中，供预览播放器使用，
+  仅在首次需要时加载；`workbench.HLSJS()` 把同一份文件提供给其他播放 HLS 的页面，fit 中只保留一份。控制台的
+  Content-Security-Policy 只为提供 `vod` 与 `hls` 路由的监听放开 `connect-src`、`img-src` 与 `media-src`（含 `blob:`），
+  不开放 `worker-src`，播放器因此不使用 worker。
 
 ## 否决的方案
 

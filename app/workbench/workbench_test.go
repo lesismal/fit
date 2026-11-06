@@ -28,9 +28,34 @@ func TestPages(t *testing.T) {
 		}
 		loaded[ref] = true
 	}
+	// The vendored files are loaded by a page when it needs them, as
+	// gateway/media.js loads vendor/hls.min.js for a player: each script
+	// is named by a script of the bundle, and comes with its license.
+	var scripts strings.Builder
+	if err := fs.WalkDir(p, ".", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".js") && !strings.HasPrefix(path, "vendor/") {
+			b, err := fs.ReadFile(p, path)
+			scripts.Write(b)
+			return err
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := fs.WalkDir(p, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || path == "index.html" {
 			return err
+		}
+		if strings.HasPrefix(path, "vendor/") {
+			if js, ok := strings.CutSuffix(path, ".min.js"); ok {
+				if !strings.Contains(scripts.String(), "'"+path+"'") {
+					t.Errorf("%s is loaded by no script of the bundle", path)
+				}
+				if _, err := fs.Stat(p, js+".LICENSE.txt"); err != nil {
+					t.Errorf("%s comes without its license: %v", path, err)
+				}
+			}
+			return nil
 		}
 		if !loaded[path] {
 			t.Errorf("%s is not loaded by index.html", path)
@@ -50,6 +75,14 @@ func TestPages(t *testing.T) {
 		if strings.HasSuffix(ref, ".js") && !strings.HasPrefix(ref, "core/") && strings.Index(s, `src="`+ref+`"`) < wb {
 			t.Errorf("%s is loaded before core/workbench.js", ref)
 		}
+	}
+}
+
+// HLSJS is hls.js, vendored once for every page that plays HLS.
+func TestHLSJS(t *testing.T) {
+	js, license := HLSJS()
+	if len(js) < 100<<10 || !strings.Contains(string(license), "Apache License") {
+		t.Fatalf("hls.js: %d bytes, license %q", len(js), license)
 	}
 }
 

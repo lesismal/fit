@@ -1,0 +1,72 @@
+/* The media library's pages (gateway/media.js, I138): the library browser, the item's preview player, the channels'
+   timeline, the playback URLs and the metrics. The rest is core/ui.css and the config form's config.css.
+
+   媒体库页面（gateway/media.js，I138）：媒体库浏览、条目预览播放器、频道时间线、播放 URL 与指标。其余样式见 core/ui.css
+   与配置表单的 config.css。 */
+
+.md-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.md-scan .meter { max-width: 520px; }
+.md-filters { gap: 12px; align-items: flex-end; }
+.md-search { min-width: 220px; flex: 1 1 220px; }
+.md-filter { display: inline-flex; flex-direction: column; gap: 3px; }
+.md-pager { margin-top: 8px; }
+.md-problems summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.md-problems ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* An item / 条目 */
+.md-rendition { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.md-player { display: flex; flex-direction: column; gap: 8px; }
+.md-video { width: 100%; max-width: 720px; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius-sm); }
+.md-player.is-stopped .md-video { opacity: .45; }
+.md-player__note:empty { display: none; }
+
+/* Channels: the settings, the playlist and schedule beside the library picker. / 频道：设置、播放列表与日程，旁边为条目选择器。 */
+.md-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; align-items: end; }
+.md-check { align-self: center; gap: 6px; }
+.md-timeline { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+@media (max-width: 960px) { .md-timeline { grid-template-columns: minmax(0, 1fr); } }
+
+.md-bar { display: flex; height: 22px; border-radius: var(--radius-xs); overflow: hidden; border: 1px solid var(--border); }
+.md-bar__seg { flex: 1 1 0; min-width: 14px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-2);
+  background: var(--primary-soft); border-right: 1px solid var(--surface); }
+.md-bar__seg:nth-child(even) { background: color-mix(in srgb, var(--primary-soft) 60%, var(--surface-3)); }
+.md-bar__seg.is-now { background: var(--primary); color: var(--on-primary); }
+.md-bar__seg.is-unknown { background: var(--warn-soft); }
+
+.md-rows { display: flex; flex-direction: column; gap: 4px; }
+.md-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs);
+  background: var(--surface); cursor: grab; }
+.md-row.is-now { border-color: var(--primary); }
+.md-row.is-over, .md-drop.is-over { outline: 2px dashed var(--primary); outline-offset: 1px; }
+.md-row__n { min-width: 20px; color: var(--muted); font-size: 12px; text-align: right; }
+.md-row__title { flex: 1 1 auto; min-width: 0; }
+.md-grip { color: var(--muted); font-size: 11px; letter-spacing: -2px; cursor: grab; user-select: none; }
+.md-drop { padding: 12px; border: 1px dashed var(--border-2); border-radius: var(--radius-xs); color: var(--muted); font-size: 12.5px; text-align: center; }
+
+.md-day { position: relative; height: 54px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--surface-2); overflow: hidden; }
+.md-day__tick { position: absolute; bottom: 2px; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); pointer-events: none; }
+.md-day__tick:first-child { transform: none; }
+.md-day__tick:last-child { transform: translateX(-100%); }
+.md-day__slot { position: absolute; top: 5px; height: 26px; padding: 0 4px; border-radius: var(--radius-xs); background: var(--primary);
+  color: var(--on-primary); font-size: 11px; line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-day__now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); pointer-events: none; }
+.md-slots { display: flex; flex-direction: column; gap: 4px; }
+.md-slot { display: flex; gap: 8px; align-items: center; }
+.md-slot .md-at { width: 190px; flex: none; }
+.md-slot select { flex: 1 1 auto; min-width: 0; }
+
+.md-picker { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; background: var(--surface-2); }
+.md-picker__list { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow: auto; }
+.md-pick { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--radius-xs); background: var(--surface); cursor: grab; }
+.md-pick__text { flex: 1 1 auto; min-width: 0; }
+
+.md-now { display: flex; flex-direction: column; gap: 4px; min-width: 260px; }
+
+/* Playback URLs and metrics / 播放 URL 与指标 */
+.md-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
+.md-url { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
+.md-reasons { display: flex; gap: 8px; flex-wrap: wrap; }
+.md-reason { display: flex; flex-direction: column; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); min-width: 96px; }
+.md-reason.is-hot { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: var(--danger-soft); }
+.md-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.md-metric { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
