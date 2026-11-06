@@ -4440,3 +4440,35 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   不变（6.13 到 6.03 µs，6.77 到 6.92 µs，不显著），签名请求 7.63 µs。
 - **缺口**：会话按每个 fit 各自计数；RTMP、RTSP、SRT 与 WHEP 不接受签名 URL；没有再次手工试用 Safari 的播放器。实现时所做的决策在计划的
   I135 一节，待审查。
+
+
+## 静态文件跟随磁盘
+
+### fib filewatch；check_interval 默认 5s，0 表示每个请求 — 完成
+
+- **问题**（2026-11-06 发现）：`handler/static` 只凭大小和修改时间识别文件，所以被大小、时间都相同的文件替换后
+  （`rsync -t`、`cp -p`、`tar x`、可复现构建）会一直从内存返回旧内容；变化要等 `check_interval`（1s）后才体现，
+  而且无法设为 0。
+- **fib**（`3ac534d`）：公开的 `filewatch` 包。`filewatch.Watcher` 就是原先 `http.FileCache` 自用的 inotify 监听，
+  现在监听从根目录到文件的每一级目录（目录改名是 `Dir` 事件，旧的监听随之去掉）、根目录路径上软链接所在的目录
+  （部署时 `current` 改指向是 `All`），以及根目录下指向目录的软链接被替换。`filewatch.Stamp` 在大小、mtime、inode
+  之外加上状态变更时间和设备号。`FileCacheConfig.CheckInterval`（默认 5s，负数表示每个请求）限定监听看不到的变化，
+  并取代了非 Linux 平台上每个请求一次的 stat。
+- **fit**：fib 升级到该提交。`check_interval` 不设置时为 5s，设为 `0` 时每个请求都查看磁盘、不做监听，替换后的下一个
+  响应就是新文件。Linux 上处理器用 `filewatch` 监听根目录；事件通过索引只丢弃依赖它所指路径的 lookup（路径本身、
+  预压缩版本、找到了 index 文件或列表的目录的条目、消失的目录下的一切），解析期间来了事件的 lookup 不保留。文件内容
+  只在文件的 stamp 与读入时相同时从内存返回。`Cleanup` 关闭监听。
+- **测试**：Linux `-race` 下，`check_interval` 为 1h 时，同 stamp 替换、文件创建与删除、优先级更高的 index 文件出现、
+  目录被替换、根目录软链接被替换都立即可见；无监听时，同 stamp 替换在间隔后可见，设为 0 时立即可见；各类事件丢弃
+  的内容。
+- **待审查的决策**：
+  1. ETag 仍和 nginx 一样由 mtime 和大小生成：大小、时间都相同的替换后 ETag 不变，客户端带条件请求验证旧副本时会得到
+     304。加入 inode 或 change time 会让提供同一批文件的多台机器 ETag 不同。
+  2. 被监听的 lookup 仍在 `check_interval` 到期，作为 inotify 看不到的变化的上限（另一台机器在网络文件系统上的写入、
+     根目录下指向别处文件的软链接）。
+  3. 不提供 `watch: false` 参数：`check_interval: 0` 关闭监听，其余由间隔限定。
+  4. fib 的 `FileCache` 在非 Linux 平台上改为信任文件 5s，不再每个请求 stat；`CheckInterval` 设为负数保持旧行为。
+  5. Windows 没有 inode 和 change time；stamp 取创建时间，而 NTFS tunneling 可能把它带给改名到别的文件位置上的文件，
+     所以那里大小、时间都相同的替换无法识别：它只有大小和时间可比。
+  6. 根目录所在文件系统大小写不敏感时，事件按磁盘上的写法给出文件名，用别的大小写请求的 lookup 要等间隔到期。
+     大小写不敏感的 inotify 根目录很少见。

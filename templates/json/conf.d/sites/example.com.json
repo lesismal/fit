@@ -1233,10 +1233,16 @@
           // "dotfiles": "deny",
 
           // // How long what the handler learned of a request path, the file it names and its validators,
-          // // is trusted before the disk is looked at again; a change on disk shows within it. 1s when
-          // // left out.
-          // // duration, as "1.5s" or "2m"; default "1s".
-          // "check_interval": "1s",
+          // // is trusted before the disk is looked at again. On Linux a watch of the directories under the
+          // // root reports a change within moments, a file written, replaced or removed, a directory
+          // // renamed, or a symbolic link on the way to the root pointed elsewhere, and this bounds what
+          // // it cannot see, as a write another machine makes on a network file system; elsewhere a change
+          // // shows within it. A file is told by its size, modification and status change times and inode,
+          // // so one replaced by another of the same size and modification time is seen too. 0 looks at
+          // // the disk for every request, with no watch, so that a response always carries the file as it
+          // // is on disk then. 5s when left out.
+          // // duration, as "1.5s" or "2m"; default "5s".
+          // "check_interval": "5s",
         // },
       // },
     // },
