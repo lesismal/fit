@@ -117,10 +117,16 @@ func (b *Backend) storeDown() {
 // rotation.
 func (b *Backend) ProbedDown() bool { return b.probedDown.Load() }
 
+// setProbedDown stores what picks read, downUntil, before probedDown, so
+// that whoever sees ProbedDown change sees Down and the picks agree.
 func (b *Backend) setProbedDown(down bool) {
 	b.mu.Lock()
+	if down {
+		b.downUntil.Store(math.MaxInt64)
+	} else {
+		b.downUntil.Store(b.passiveUntil)
+	}
 	b.probedDown.Store(down)
-	b.storeDown()
 	b.mu.Unlock()
 }
 
