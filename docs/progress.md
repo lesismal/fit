@@ -6722,3 +6722,27 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: lists are not filtered by group; with roles set the manager's own LLM pages, which read by
   POST, need a cluster-wide admin; a rollout's plan entry has no diff. The decisions made are in the
   plan's I148 section and decision 033, pending review.
+
+
+### I150 Metrics, logs and certificates across the cluster — done
+
+- **Metrics**: series kept by the manager from each poll, 360 a member, per member and summed per
+  group (requests, 4xx and 5xx a second, connections, bytes queued for clients, reloads),
+  `GET /api/m/cluster/metrics`.
+- **Certificates**: the inventory from each member's `/status`, now with issuer, serial and dates,
+  soonest expiry first, `GET certificates`.
+- **Logs**: tailed from up to 16 members at once through a new member endpoint `GET /logs/recent`
+  (capability `logs.recent`, the log ring numbered), merged by time and followed with a cursor;
+  a member down is reported on its own while the others are read. `GET logs`.
+- **CLI**: the manager serves `/cluster/...` on its own Admin API, acting as the cluster-wide admin
+  `Admin API`; `fit cluster nodes | state | groups | diff | certs | metrics | logs | rollout
+  list/start/status/pause/resume/go/abort/rollback`.
+- **Pages**: Cluster → Metrics (a line per member and per group, a table), Logs (members, filters,
+  follow), Certificates; sparklines on the Overview; English and Chinese.
+- **Tests**: series against a member's own counters, a merged tail of three real members, the
+  expiring certificate first, the CLI driving a rollout end to end and aborting a canary; race tests
+  on the changed packages and their dependents; the pages checked in a browser against a manager and
+  three members.
+- **Gaps**: "bytes" are bytes queued, not throughput; series start afresh at a manager's restart; logs
+  through a member reached over its console were not run end to end. The decisions made are in the
+  plan's I150 section and decision 033 (items 134–145), pending review.

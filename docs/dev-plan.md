@@ -306,7 +306,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | done |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | done |
 | I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
-| I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
+| I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | done |
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
 | I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
@@ -3490,6 +3490,34 @@ also in decision 033 as its items 28–42):
 - **Pages**: Cluster → Metrics (charts per member and group), Logs (members chosen, filters,
   follow), Certificates (the inventory, sorted by expiry); Overview's sparklines.
 - **Touches**: `cluster`, `cli`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-07; each stands until the user rules on it;
+also in decision 033 as its items 134–145):
+
+1. **The CLI reaches the manager through its Admin API** (token and `-c`, as `fit check`), served
+   under `/cluster/...` by handlers calling the Manager's methods. Alternative: the console with a
+   login, at the cost of a password in scripts.
+2. **The Admin API acts as a cluster-wide admin**, the user `Admin API`, whatever the roles say; a
+   console user of that name has no role. Alternative: a role for the token in the config.
+3. **"Bytes" in the series are bytes queued for clients** (`pending_bytes`), not throughput: a byte
+   counter would sit on the request path. Alternative: bytes counted per route, measured on the
+   benchmark host (a follow-up).
+4. **Series live in the manager's memory**, 360 polls a member (about 30 KiB), lost at a restart.
+   Alternative: kept in the store, written at every poll.
+5. **Rates are computed when read**, empty across a member's restart, a gap of more than three
+   intervals, or a member counting no requests; groups summed a poll interval at a time.
+6. **Series and inventory are any role's**, as states (item 122); logs need a role on each member.
+7. **The tail reads members' log rings** through a new member endpoint `GET /logs/recent`
+   (capability `logs.recent`, ring messages numbered), not files: 16 members, 1,000 messages a
+   member, one of the 8 member-read slots; the page keeps 2,000 lines.
+8. **The inventory is the poller's `/status` read**, 256 certificates a member, not a fresh read.
+9. **Overview sparklines are a `rowExtra`** (I142's extension point); `overview.js` untouched.
+10. **`fit cluster rollout start`** plans, prints, asks unless `-yes`, follows with `-wait`; exit 1
+    for failed, aborted, rolled back or expired; `state`, `diff`, `certs -within` exit 1 when
+    something needs attention.
+11. **`diff` tells members nothing** of what the manager owns there, as drift reads (item 105).
+12. **Charts are the workbench's own inline SVG**, colours by member name set through the CSSOM
+    (the console's CSP refuses inline styles); no chart library.
 
 ### I151 Upgrading members' binaries (a question, not a plan)
 
