@@ -336,8 +336,9 @@ Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己
 | `cluster_members` | `read` | 每个成员最近一次轮询的状态（状态、错误、版本、配置版本、漂移、与模板的同步、最近到期的证书与剩余天数、连接、重载、不可用后端、正在触发的告警），可按分组、标签选择器或状态筛选 |
 | `cluster_templates` | `read` | 模板及其部分、变量与成员，以及同步的成员数；单个模板的完整内容及各成员的部分 |
 | `cluster_rollouts` | `read` | 最近 20 次发布（逐批及各成员结果）与最近 10 次操作；单次发布的完整内容及其修改 |
-| `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总 |
-| `cluster_certs` | `read` | 证书清单，现读每个成员，最先到期的在前，可限定天数 |
+| `cluster_metrics` | `read` | 各成员按类别的请求、连接、重载与不可用后端（现读其 `GET /status`），并按分组汇总，附最近 12 次轮询的[序列](#指标日志与证书) |
+| `cluster_certs` | `read` | 各成员轮询读到的证书清单，最先到期的在前，可限定天数 |
+| `cluster_log_tail` | `read` | 最多 16 个成员自身日志的最新行，按时间合并，可按日志器、级别与文本筛选，默认每个成员 50 行；与 `log_tail` 一样在 `data.send_logs` 打开时提供 |
 | `member` 参数 | `read` | `config_get`、`versions_diff`、`status_get`、`metrics_query`、`upstream_health`、`consistency_check`、`certs_list`、`cache_zones` 与媒体工具改为经管理端与该成员的会话读取该成员，而非管理端自身 |
 | `rollout_propose` | `propose` | 发布的规划：模板（现状或草稿）、同步、修改或复制，并建议策略 |
 | `cluster_op_propose` | `propose` | 检查一次操作（重载、回滚、检查、清除缓存、测试），但不启动 |
@@ -352,7 +353,7 @@ Webhook 的状态说明其发送情况。不应答的 Webhook 只阻塞它自己
 助手的级别（I126）同样检查，并受角色限制（集群范围管理员保持原级别，任意处的操作员最多 `propose`，其他人 `read`）：取两者中更窄的，
 因此操作员永远无法提议修改模板，级别为 `read` 的用户没有提案工具。
 
-**限制。** 跨成员的读取（`cluster_metrics`、`cluster_certs`）同时最多调用 `max_concurrency` 个成员，每个在 `timeout` 内，整体在 20 秒内返回：
+**限制。** 跨成员的读取（`cluster_metrics`、`cluster_log_tail`）同时最多调用 `max_concurrency` 个成员，每个在 `timeout` 内，整体在 20 秒内返回：
 慢或离线的成员连同其问题一起报告，其余照常读取。经 `member` 读取成员最多等待 20 秒；规划等待其成员试运行的时间相同，仍在规划时会说明。
 经 `member` 只能读取：配置、版本、状态、指标、一致性检查、缓存、节点、schema 以及媒体与推流的读取（`GET`），和文本转换；从不写入，
 也不读取令牌或日志文件。运行其他 fit 版本的成员会注明。

@@ -798,15 +798,16 @@ Decided while building I153 (2026-11-07):
      and dry run; a plan still planning says so and goes on.
 152. **A read across members is bounded by the call**: at most `max_concurrency` members at once,
      the whole within 20 seconds (inside the chat's 30-second tool bound); members not answered are
-     reported `timeout` with their last poll's state where it has some (a certificate's expiry).
+     reported `timeout`, the others read; their last poll's state is `cluster_members`'s.
 153. **What `member` reaches**: GET of the config, effective config, check, versions, status, metrics,
      cache, node, schema and the media and streaming reads, and POST of the text conversions; never
      a write, the tokens or the logs' files. A member of another fit version is noted in the result.
 154. **Lists answer what the endpoints answer**: any role reads members, templates and rollouts;
      `cluster_metrics`, `cluster_certs` and `member` need a role on each member read.
-155. **No `cluster_log_tail` yet**: a member serves no lines of its log ring through the Admin API,
-     which I150 adds; the tool comes with it. `cluster_metrics` reads members' counters now, until
-     I150 keeps series.
+155. **I150's insight serves the tools**: `cluster_log_tail` is I150's merged tail (16 members, 50
+     lines a member by default, gated by `data.send_logs` as `log_tail` is), waited for 20 seconds at
+     most; `cluster_certs` is I150's inventory as polled, reading no member; `cluster_metrics` reads
+     the members' counters now and adds I150's series of the last 12 polls.
 156. **The pages**: Ask AI on the Overview's bar (the members shown) and on each member card
      (`fleet-health`), on a rollout's failed or rolled-back batch (`rollout-planner`), and on each
      drifting member of the Drift page (`cluster-drift`); the New rollout form gains **Parts written

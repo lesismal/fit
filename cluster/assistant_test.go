@@ -268,9 +268,6 @@ func TestAssistantReadsBounded(t *testing.T) {
 	a := k.m.Assistant()
 	for _, read := range []func(ctx context.Context) ([]byte, error){
 		func(ctx context.Context) ([]byte, error) { return a.Metrics(ctx, "ann", "edge", nil) },
-		func(ctx context.Context) ([]byte, error) {
-			return a.Certs(ctx, "ann", "", []string{"m1", "m2", "m3", "m1"}, 0)
-		},
 	} {
 		ctx, cancel := context.WithTimeout(t.Context(), 600*time.Millisecond)
 		start := time.Now()
@@ -306,9 +303,6 @@ func TestAssistantReadsBounded(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	if _, err := a.Certs(t.Context(), "ann", "", nil, -1); err == nil {
-		t.Error("negative days")
-	}
 	if _, err := a.Certs(t.Context(), "ann", "nope", nil, 0); err == nil {
 		t.Error("no group")
 	}
@@ -339,6 +333,7 @@ func TestAssistantNoCredentials(t *testing.T) {
 	keep(a.Members("admin", "", "", ""))
 	keep(a.Metrics(t.Context(), "admin", "", nil))
 	keep(a.Certs(t.Context(), "admin", "", nil, 0))
+	keep(a.Logs(t.Context(), "admin", "", []string{"good", "bad", "tok"}, "", "", "", 0))
 	keep(a.Rollouts("admin", ""))
 	keep(a.Templates("admin", ""))
 	keep(a.CheckOp("admin", []byte(`{"op":"test","members":["good","bad","tok"]}`)))

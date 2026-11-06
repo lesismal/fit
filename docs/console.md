@@ -833,7 +833,7 @@ pages' **Ask AI** buttons run them (the table above).
 
 On a manager of other fits (`admin.cluster`), the assistant also reads the cluster and proposes
 changes across its members (I153): the tools `cluster_members`, `cluster_templates`,
-`cluster_rollouts`, `cluster_metrics` and `cluster_certs`, a `member` argument on the read tools
+`cluster_rollouts`, `cluster_metrics`, `cluster_certs` and `cluster_log_tail`, a `member` argument on the read tools
 that read the Admin API, and `rollout_propose`, `cluster_op_propose` and `drift_fix_propose`, which
 make a rollout plan or a checked operation that a person starts on the Cluster pages with its own
 confirm, never a step of the conversation's proposal. The user's roles on the manager and the

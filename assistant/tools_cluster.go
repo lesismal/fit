@@ -38,6 +38,7 @@ type Cluster interface {
 	Rollouts(user, id string) ([]byte, error)
 	Metrics(ctx context.Context, user, group string, nodes []string) ([]byte, error)
 	Certs(ctx context.Context, user, group string, nodes []string, within int) ([]byte, error)
+	Logs(ctx context.Context, user, group string, nodes []string, logger, level, contains string, limit int) ([]byte, error)
 	PlanRollout(ctx context.Context, user string, req []byte) ([]byte, error)
 	CheckOp(user string, req []byte) ([]byte, error)
 	FixDrift(ctx context.Context, user string, nodes []string) ([]byte, error)
@@ -127,7 +128,7 @@ func clusterTools(cl Cluster) []*Tool {
 				return c.clusterJSON(cl.Rollouts(c.User, a.Rollout))
 			})},
 		{Name: "cluster_metrics", Group: GroupCluster, Level: config.AssistantRead,
-			Description: "Each member's requests by status class, connections open and refused, reloads and upstream backends down, read now from the members, and their sums by group: counters since each member started. A member slow or down is reported, not waited for.",
+			Description: "Each member's requests by status class, connections open and refused, reloads and upstream backends down, read now from the members, and their sums by group (counters since each member started); and the manager's series of the last polls, per member and group: requests, 4xx and 5xx a second, connections, reloads. A member slow or down is reported, not waited for.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{` + groupSchema + `,` + nodesSchema + `}}`),
 			Run: need(func(c *Call, cl Cluster) (string, error) {
 				var a struct {
@@ -142,7 +143,7 @@ func clusterTools(cl Cluster) []*Tool {
 				return c.clusterJSON(cl.Metrics(ctx, c.User, a.Group, a.Nodes))
 			})},
 		{Name: "cluster_certs", Group: GroupCluster, Level: config.AssistantRead,
-			Description: "The certificate inventory: every certificate the members serve, with its member, listener, names, issuer, expiry and days left, the one that expires first first; within_days keeps those expiring within that many days. Read now from the members; one not read gives its nearest expiry as last polled.",
+			Description: "The certificate inventory: every certificate the members serve, with its member, listener, names, issuer, serial, expiry, days left and the member's status, the one that expires first first, as each member's latest poll read them; within_days keeps those expiring within that many days.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{` + groupSchema + `,` + nodesSchema + `,"within_days":{"type":"integer","description":"only certificates expiring within these days"}}}`),
 			Run: need(func(c *Call, cl Cluster) (string, error) {
 				var a struct {
@@ -156,6 +157,26 @@ func clusterTools(cl Cluster) []*Tool {
 				ctx, cancel := context.WithTimeout(c.Context, clusterReadWait)
 				defer cancel()
 				return c.clusterJSON(cl.Certs(ctx, c.User, a.Group, a.Nodes, a.WithinDays))
+			})},
+		{Name: "cluster_log_tail", Group: GroupCluster, Level: config.AssistantRead,
+			Description: "The latest lines of members' own logs, merged by time, oldest first: of nodes or a group's members (16 at most), by logger, least level and text, limit lines a member (50 when left out). Each member's outcome is said; one slow or down does not hold the others. Secrets are redacted.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{` + groupSchema + `,"nodes":{"type":"array","items":{"type":"string"},"description":"members by name; the group's when left out"},` +
+				`"logger":{"type":"string"},"level":{"type":"string","enum":["debug","info","warn","error"]},"contains":{"type":"string"},"limit":{"type":"integer","description":"lines a member, 50 when left out"}}}`),
+			Enabled: func(s *config.Assistant) (bool, string) {
+				return s.Data != nil && s.Data.SendLogs, "data.send_logs is off"
+			},
+			Run: need(func(c *Call, cl Cluster) (string, error) {
+				var a struct {
+					Group, Logger, Level, Contains string
+					Nodes                          []string
+					Limit                          int
+				}
+				if err := c.Decode(&a); err != nil {
+					return "", err
+				}
+				ctx, cancel := context.WithTimeout(c.Context, clusterReadWait)
+				defer cancel()
+				return c.clusterJSON(cl.Logs(ctx, c.User, a.Group, a.Nodes, a.Logger, a.Level, a.Contains, a.Limit))
 			})},
 		{Name: ToolRolloutPropose, Group: GroupChange, Level: config.AssistantPropose,
 			Description: "Plan a change across members as a rollout: each member's diff, checked by the member's own dry run, nothing applied. kind template rolls out a template as it is, or, with config, a draft of its new config, saved as the template when a person starts the rollout (a cluster-wide admin's); sync brings members in sync with their templates; patch puts config (top-level members whole, named routes, upstreams, listeners and services by name) on nodes or a group's members as they are, for config no template owns (an admin's of each member); copy copies paths from the member from. Secrets stay [redacted], which keeps each one's own. strategy suggests how a person runs it. The answer is the plan with its link: a person starts it on the Rollouts page, with its confirm.",

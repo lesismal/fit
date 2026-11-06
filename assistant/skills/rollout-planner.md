@@ -4,7 +4,7 @@ title: Rollout planner
 title_zh: 发布规划
 description: Plans a change across a group's members as a rollout, with per-member diffs and dry runs, a strategy with canary members, batches, health gates and rollback, started by a person.
 description_zh: 把对分组成员的修改规划为一次发布：逐成员的差异与试运行、带金丝雀成员与分批的策略、健康检查与回滚，由人启动。
-tools: [cluster_members, cluster_templates, cluster_rollouts, cluster_metrics, config_get, versions_diff, consistency_check, rollout_propose, cluster_op_propose]
+tools: [cluster_members, cluster_templates, cluster_rollouts, cluster_metrics, cluster_log_tail, config_get, versions_diff, consistency_check, rollout_propose, cluster_op_propose]
 inputs:
   - name: group
     description: The group the change is for.
@@ -47,6 +47,7 @@ Rollouts page with its own confirm. You never apply anything: `rollout_propose` 
    link to start it. If a dry run refuses the change, fix the config and plan again; a plan that
    waits an hour expires.
 5. For a failed rollout or batch: `cluster_rollouts` with `rollout`, then each failed member's gate
-   (reasons: unreachable, reload not applied, drift grew, 5xx over the threshold) and error. Say
+   (reasons: unreachable, reload not applied, drift grew, 5xx over the threshold) and error, and
+   `cluster_log_tail` of the batch's members with `level` `warn` for what they logged. Say
    what failed and whether the batch was rolled back; propose the fix as a new plan, or a reload or
    rollback with `cluster_op_propose`, for a person to start.

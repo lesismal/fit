@@ -85,6 +85,11 @@ func (fc *fakeCluster) Certs(ctx context.Context, user, group string, nodes []st
 	return []byte(`{"certificates":[{"node":"m1","names":["a.example"],"days_left":3}]}`), nil
 }
 
+func (fc *fakeCluster) Logs(ctx context.Context, user, group string, nodes []string, logger, level, contains string, limit int) ([]byte, error) {
+	fc.record("logs %s %s %v %s %s %s %d", user, group, nodes, logger, level, contains, limit)
+	return []byte(`{"records":[{"node":"m1","seq":3,"level":"error","logger":"server","message":"dial: refused, Authorization: Bearer abcdefghijklmnop1234"}],"nodes":[{"name":"m1","count":1}]}`), nil
+}
+
 func (fc *fakeCluster) PlanRollout(ctx context.Context, user string, req []byte) ([]byte, error) {
 	fc.record("plan %s", user)
 	fc.mu.Lock()
@@ -175,6 +180,7 @@ func TestClusterToolsRead(t *testing.T) {
 			call("m7", "cache_zones", `{"member": "down"}`),
 			call("m8", "consistency_check", `{}`),
 			call("m9", "status_get", `{"member": "bare"}`),
+			call("ma", "cluster_log_tail", `{"nodes": ["m1"], "level": "warn", "contains": "dial", "limit": 5}`),
 		}},
 		{Text: "m2 is down."},
 	}
@@ -184,7 +190,7 @@ func TestClusterToolsRead(t *testing.T) {
 		t.Fatalf("%+v %s", s.end, s.err)
 	}
 	res := s.of(EventToolResult)
-	if len(res) != 14 {
+	if len(res) != 15 {
 		t.Fatalf("%+v", res)
 	}
 	want := [][]string{
@@ -202,6 +208,7 @@ func TestClusterToolsRead(t *testing.T) {
 		{`the member "down": unreachable`},
 		{`"differences"`},
 		{`the answer is not what it should be`},
+		{`"message":"dial: refused, Authorization: [redacted]`},
 	}
 	for i, w := range want {
 		for _, x := range w {
@@ -218,7 +225,7 @@ func TestClusterToolsRead(t *testing.T) {
 	got := fc.called()
 	for _, w := range []string{"members ada edge role=edge up", "templates ada api", "rollouts ada r1", "metrics ada edge []", "certs ada  [m1] 30",
 		"member ada m1 GET /config", "member ada m1 POST /config/render?format=conf", "member ada m1 GET /status", "member ada m1 GET /node",
-		"member ada old GET /status", "member ada down GET /cache"} {
+		"member ada old GET /status", "member ada down GET /cache", "logs ada  [m1]  warn dial 5"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("the manager was not asked %q:\n%s", w, got)
 		}
@@ -480,6 +487,7 @@ func TestClusterToolArgs(t *testing.T) {
 		{"cluster_rollouts", `{"rollout": "bad"}`, "the manager's answer is not JSON"},
 		{"cluster_metrics", `{"nodes": "m1"}`, "not what the tool takes"},
 		{"cluster_certs", `{"within_days": "x"}`, "not what the tool takes"},
+		{"cluster_log_tail", `{"limit": "x"}`, "not what the tool takes"},
 		{ToolRolloutPropose, `{"kind": 1}`, "not what the tool takes"},
 		{ToolRolloutPropose, `{"summary": "x", "kind": "patch", "config": {"log": {"x_token": 7}}}`, "never writes"},
 		{ToolClusterOpPropose, `{"op": 1}`, "not what the tool takes"},

@@ -179,7 +179,7 @@ workers.
 - **The assistant across a cluster (I153).** On a manager (`admin.cluster`), the console hands the
   assistant the manager's `Assistant()` (`Options.Cluster`, an interface of plain types, so that
   neither package imports the other). The tools `cluster_members`, `cluster_templates`,
-  `cluster_rollouts`, `cluster_metrics` and `cluster_certs` read it; the read tools that read the
+  `cluster_rollouts`, `cluster_metrics`, `cluster_certs` and `cluster_log_tail` read it; the read tools that read the
   Admin API take `member`, which reads that member through the manager's session (a fixed list of
   reads, never a write); `rollout_propose`, `cluster_op_propose` and `drift_fix_propose` make a
   rollout plan (a template as it is or a draft of it, a sync, a patch, a copy) or a checked

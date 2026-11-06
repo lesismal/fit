@@ -22,6 +22,9 @@ func (cluster) Metrics(ctx context.Context, user, group string, nodes []string) 
 func (cluster) Certs(ctx context.Context, user, group string, nodes []string, within int) ([]byte, error) {
 	return []byte(`{"certificates":[]}`), nil
 }
+func (cluster) Logs(ctx context.Context, user, group string, nodes []string, logger, level, contains string, limit int) ([]byte, error) {
+	return []byte(`{"records":[]}`), nil
+}
 func (cluster) PlanRollout(ctx context.Context, user string, req []byte) ([]byte, error) {
 	return []byte(`{"link":"#/cluster/rollout/r1","id":"r1","state":"planned","planned_by":"` + user + `"}`), nil
 }

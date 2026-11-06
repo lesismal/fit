@@ -14,8 +14,9 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// certMember is a fit as a manager polls it, serving certs certificates,
-// its /status held hold milliseconds once holding is set.
+// certMember is a fit as a manager polls it, serving certs certificates and
+// a line of its log ring, its /status and /logs/recent held hold
+// milliseconds.
 type certMember struct {
 	srv   *httptest.Server
 	certs int
@@ -31,21 +32,33 @@ func newCertMember(t *testing.T, certs int) *certMember {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/node":
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "c", "capabilities": []string{"node", "status"}})
-		case "/status":
+		hold := func() bool {
 			select {
 			case <-time.After(time.Duration(c.hold.Load()) * time.Millisecond):
+				return true
 			case <-r.Context().Done():
+				return false
+			}
+		}
+		switch r.URL.Path {
+		case "/node":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "c", "capabilities": []string{"node", "status", "logs.recent"}})
+		case "/status":
+			if !hold() {
 				return
 			}
 			var list []map[string]any
 			for i := range c.certs {
 				list = append(list, map[string]any{"listener": "web", "names": []string{fmt.Sprintf("h%d.example", i)}, "issuer": "R3",
-					"not_after": time.Now().Add(time.Duration(i+1) * 24 * time.Hour).UTC()})
+					"not_after": time.Now().Add(time.Duration(i+1)*24*time.Hour + time.Hour).UTC()})
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"certificates": list, "reloads": map[string]int{"failed": 1}})
+		case "/logs/recent":
+			if !hold() {
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"records": []map[string]any{{"seq": 7, "time": time.Now().UTC(), "level": "warn",
+				"logger": "server", "message": "upstream down " + r.URL.Query().Get("limit")}}, "last": 7})
 		default:
 			w.WriteHeader(404)
 		}
@@ -54,46 +67,75 @@ func newCertMember(t *testing.T, certs int) *certMember {
 	return c
 }
 
-// TestAssistantCerts: the inventory is read from every member, the
-// soonest first, bounded; a member not read in time gives its nearest
-// expiry as its last poll read it; members wait their turn within
-// max_concurrency, and those not reached when the read ends are said so.
-func TestAssistantCerts(t *testing.T) {
+// TestAssistantInsight: the inventory is the members' certificates as
+// polled, the soonest first, bounded; the series come with the metrics;
+// a log tail merges the members' lines and ends with the read when a
+// member is slow; members wait their turn within max_concurrency, and
+// those not reached when a read ends are said so.
+func TestAssistantInsight(t *testing.T) {
 	f := newFixture(t, config.Cluster{MaxNodes: 8, MaxConcurrency: 1})
-	many, slow := newCertMember(t, assistantCerts+1), newCertMember(t, 1)
+	many, more, slow := newCertMember(t, MaxMemberCerts), newCertMember(t, MaxMemberCerts), newCertMember(t, 1)
 	f.add(tokenInput("b-many", many.srv.URL))
+	f.add(tokenInput("b-more", more.srv.URL))
 	f.add(tokenInput("a-slow", slow.srv.URL))
-	f.waitState("a-slow", "to show its certificate", func(s State) bool { return s.Certificates != nil && !s.Certificates.NearestExpiry.IsZero() })
+	waitFor(t, "the inventory", func() bool { return len(f.m.Certificates().Certificates) == 2*MaxMemberCerts+1 })
 	a := f.m.Assistant()
 	data, err := a.Certs(t.Context(), "admin", "", nil, 0)
-	if err != nil || !strings.Contains(string(data), fmt.Sprintf("%d certificates; the %d that expire first", assistantCerts+2, assistantCerts)) {
+	if err != nil || !strings.Contains(string(data), fmt.Sprintf("%d certificates; the %d that expire first", 2*MaxMemberCerts+1, assistantCerts)) {
 		t.Fatalf("%v %.300s", err, data)
 	}
 	var c struct {
 		Certificates []struct {
 			Node     string
-			DaysLeft int  `json:"days_left"`
-			Stale    bool `json:"from_last_poll"`
+			DaysLeft int `json:"days_left"`
 		}
-		NotRead []struct{ Node string } `json:"not_read"`
 	}
 	if data, _ = a.Certs(t.Context(), "admin", "", []string{"b-many"}, 2); json.Unmarshal(data, &c) != nil || len(c.Certificates) != 2 || c.Certificates[0].DaysLeft > c.Certificates[1].DaysLeft {
 		t.Fatalf("%s", data)
 	}
-	// slow holds its answer: with one call at once, many waits behind it
-	// and is not reached either; slow gives its last poll's.
+	gone := newCertMember(t, 0)
+	f.add(tokenInput("c-gone", gone.srv.URL))
+	gone.srv.Close()
+	if data, _ = a.Certs(t.Context(), "admin", "", []string{"c-gone"}, 0); !strings.Contains(string(data), `"not_read":[{"name":"c-gone"`) {
+		t.Fatalf("%s", data)
+	}
+	if _, err := a.Certs(t.Context(), "admin", "", nil, -1); err == nil {
+		t.Error("negative days")
+	}
+	// The metrics carry the series, and count the reloads that failed.
+	if data, err = a.Metrics(t.Context(), "admin", "", []string{"a-slow"}); err != nil || !strings.Contains(string(data), `"reloads_failed":1`) ||
+		!strings.Contains(string(data), `"series":{"interval_ms"`) {
+		t.Fatalf("%v %s", err, data)
+	}
+	// A tail merges the members' lines.
+	if data, err = a.Logs(t.Context(), "admin", "", []string{"a-slow", "b-many"}, "", "warn", "", 0); err != nil ||
+		strings.Count(string(data), "upstream down 50") != 2 || strings.Contains(string(data), `"cursor":"e`) {
+		t.Fatalf("%v %s", err, data)
+	}
+	for _, c := range []struct {
+		group string
+		nodes []string
+	}{{"", nil}, {"", make([]string, MaxTailNodes+1)}, {"nope", nil}} {
+		if _, err := a.Logs(t.Context(), "admin", c.group, c.nodes, "", "", "", 0); err == nil {
+			t.Errorf("%v", c)
+		}
+	}
+	if _, err := a.Logs(t.Context(), "admin", "", []string{"a-slow"}, "", "loud", "", 0); err == nil {
+		t.Error("a level")
+	}
+	// a-slow holds its answers: with one call at once, b-many waits behind
+	// it and is not reached either; the tail ends with its wait.
 	slow.hold.Store(1500)
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
-	data, err = a.Certs(ctx, "admin", "", []string{"b-many", "a-slow"}, 0)
-	c.Certificates, c.NotRead = nil, nil
-	if err != nil || json.Unmarshal(data, &c) != nil || len(c.NotRead) != 2 || len(c.Certificates) != 2 || !c.Certificates[0].Stale {
+	data, err = a.Metrics(ctx, "admin", "", []string{"b-many", "a-slow"})
+	if err != nil || strings.Count(string(data), `"kind":"timeout"`) != 2 {
 		t.Fatalf("%v %.500s", err, data)
 	}
-	// The metrics count the reloads that failed by group.
-	slow.hold.Store(0)
-	if data, err = a.Metrics(t.Context(), "admin", "", []string{"a-slow"}); err != nil || !strings.Contains(string(data), `"reloads_failed":1`) {
-		t.Fatalf("%v %s", err, data)
+	ctx, cancel = context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := a.Logs(ctx, "admin", "", []string{"a-slow"}, "", "", "", 0); err == nil || !strings.Contains(err.Error(), "did not come in time") {
+		t.Fatal(err)
 	}
 }
 

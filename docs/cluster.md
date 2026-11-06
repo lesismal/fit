@@ -468,8 +468,9 @@ assistant reads the cluster and proposes changes across it (I153), as the user w
 | `cluster_members` | `read` | every member's state as last polled (status, error, versions, config version, drift, sync with its templates, nearest certificate and days left, connections, reloads, backends down, alerts firing), filtered by group, label selector or status |
 | `cluster_templates` | `read` | the templates, their parts, variables and members, and how many are in sync; one whole, with each member's parts |
 | `cluster_rollouts` | `read` | the latest 20 rollouts batch by batch with each member's result, and the latest 10 operations; one whole with its changes |
-| `cluster_metrics` | `read` | each member's requests by class, connections, reloads and backends down, read now from its `GET /status`, summed by group |
-| `cluster_certs` | `read` | the certificate inventory, read now from every member, the soonest to expire first, within some days |
+| `cluster_metrics` | `read` | each member's requests by class, connections, reloads and backends down, read now from its `GET /status`, summed by group, with the [series](#metrics-logs-and-certificates) of the last 12 polls |
+| `cluster_certs` | `read` | the certificate inventory as the members' polls read it, the soonest to expire first, within some days |
+| `cluster_log_tail` | `read` | the latest lines of up to 16 members' own logs, merged by time, by logger, level and text, 50 a member by default; offered when `data.send_logs` is on, as `log_tail` is |
 | `member` argument | `read` | `config_get`, `versions_diff`, `status_get`, `metrics_query`, `upstream_health`, `consistency_check`, `certs_list`, `cache_zones` and the media tools read a member instead of the manager, through the manager's session with it |
 | `rollout_propose` | `propose` | a rollout's plan: a template (as it is, or a draft), a sync, a patch or a copy, with a strategy suggested |
 | `cluster_op_propose` | `propose` | an operation (reload, rollback, check, purge, test) checked, not started |
@@ -491,7 +492,7 @@ is checked too, capped by the roles (a cluster-wide admin keeps it, an operator 
 `propose`, anyone else `read`): the narrower wins, so an operator never proposes a change to a
 template, and a user at `read` gets no propose tool.
 
-**Bounds.** A read across members (`cluster_metrics`, `cluster_certs`) calls at most
+**Bounds.** A read across members (`cluster_metrics`, `cluster_log_tail`) calls at most
 `max_concurrency` members at once, each within `timeout`, and answers within 20 seconds: a member
 slow or down is reported with its problem, and the others read. A member's read through `member`
 waits 20 seconds at most; a plan waits for its members' dry runs as long, and says when it is still

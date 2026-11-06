@@ -42,8 +42,10 @@ const (
 	// changes it lists.
 	assistantChangeBytes = 2048
 	assistantPlanMembers = 64
-	// assistantCerts bounds the certificates of the inventory.
-	assistantCerts = 500
+	// assistantCerts bounds the certificates of the inventory, and
+	// assistantSeries the points of each series cluster_metrics gives.
+	assistantCerts  = 500
+	assistantSeries = 12
 )
 
 // PlanSource marks a rollout planned by the assistant, Rollout.Source.
@@ -525,12 +527,6 @@ type statusRead struct {
 			Up      bool   `json:"up"`
 		} `json:"backends"`
 	} `json:"upstreams"`
-	Certificates []struct {
-		Listener string    `json:"listener"`
-		Names    []string  `json:"names"`
-		Issuer   string    `json:"issuer"`
-		NotAfter time.Time `json:"not_after"`
-	} `json:"certificates"`
 }
 
 // memberRead is a member's answer of a read across members, or why there
@@ -703,14 +699,20 @@ func (a *AssistantAPI) Metrics(ctx context.Context, user, group string, nodes []
 			add(g, &r)
 		}
 	}
-	return json.Marshal(map[string]any{"members": rows, "by_group": sums, "read_at": a.m.now().UTC(),
-		"note": "counters since each member started, read now; requests are counted only where the member's config sets metrics"})
+	q := MetricsQuery{Nodes: names, Points: assistantSeries}
+	if group != "" {
+		q.Groups = []string{group}
+	}
+	series, _ := a.m.Metrics(q) // names and group checked above
+	return json.Marshal(map[string]any{"members": rows, "by_group": sums, "read_at": a.m.now().UTC(), "series": series,
+		"note": "members and by_group are counters since each member started, read now; series are the manager's per poll (I150), rates a second, oldest first; requests are counted only where the member's config sets metrics"})
 }
 
-// Certs answers cluster_certs: every certificate the members serve, read
-// now from each one's GET /status, the one that expires first first; with
-// within, only those that expire within that many days. A member not read
-// gives its nearest expiry as its last poll read it.
+// Certs answers cluster_certs: the certificate inventory (I150), every
+// certificate the members serve as their latest polls read them, the one
+// that expires first first, of the members nodes names, the group's, or
+// every member; with within, only those that expire within that many days;
+// at most assistantCerts. It reads no member: the poller did.
 func (a *AssistantAPI) Certs(ctx context.Context, user, group string, nodes []string, within int) ([]byte, error) {
 	if within < 0 {
 		return nil, fieldErr("within_days", "the days are 0 (every certificate) or more")
@@ -719,53 +721,65 @@ func (a *AssistantAPI) Certs(ctx context.Context, user, group string, nodes []st
 	if err != nil {
 		return nil, err
 	}
-	type cert struct {
-		Node     string    `json:"node"`
-		Listener string    `json:"listener,omitempty"`
-		Names    []string  `json:"names"`
-		Issuer   string    `json:"issuer,omitempty"`
-		NotAfter time.Time `json:"not_after"`
-		DaysLeft int       `json:"days_left"`
-		Stale    bool      `json:"from_last_poll,omitempty"`
-	}
-	type unread struct {
-		Node  string      `json:"node"`
-		Error *problemOut `json:"error"`
-	}
-	states := map[string]State{}
-	for _, st := range a.m.States() {
-		states[st.Name] = st
-	}
-	now := a.m.now()
-	list := []cert{}
-	failed := []unread{}
-	keep := func(c cert) {
-		c.DaysLeft = *daysLeft(now, c.NotAfter)
-		if within == 0 || c.DaysLeft <= within {
+	inv := a.m.Certificates()
+	list := []CertEntry{}
+	for _, c := range inv.Certificates {
+		if slices.Contains(names, c.Node) && (within == 0 || c.DaysLeft <= within) {
 			list = append(list, c)
 		}
 	}
-	for _, mr := range a.readStatus(ctx, names) {
-		if mr.status == nil {
-			failed = append(failed, unread{Node: mr.name, Error: problemOf(mr.prob)})
-			if c := states[mr.name].Certificates; c != nil && !c.NearestExpiry.IsZero() {
-				keep(cert{Node: mr.name, Listener: c.NearestListener, Names: c.NearestNames, NotAfter: c.NearestExpiry, Stale: true})
-			}
-			continue
-		}
-		for _, c := range mr.status.Certificates {
-			keep(cert{Node: mr.name, Listener: c.Listener, Names: c.Names, Issuer: c.Issuer, NotAfter: c.NotAfter})
+	unread := []CertNode{}
+	for _, n := range inv.Nodes {
+		if slices.Contains(names, n.Name) && n.Read.IsZero() {
+			unread = append(unread, n)
 		}
 	}
-	sort.SliceStable(list, func(i, j int) bool { return list[i].NotAfter.Before(list[j].NotAfter) })
-	out := map[string]any{"certificates": list, "read_at": now.UTC()}
+	out := map[string]any{"certificates": list, "read_at": inv.Now, "note": "as each member's latest poll read them"}
 	if len(list) > assistantCerts {
 		out["certificates"], out["note"] = list[:assistantCerts], fmt.Sprintf("%d certificates; the %d that expire first are listed", len(list), assistantCerts)
 	}
-	if len(failed) > 0 {
-		out["not_read"] = failed
+	if len(unread) > 0 {
+		out["not_read"] = unread
 	}
 	return json.Marshal(out)
+}
+
+// assistantTail bounds the messages a member gives a tail the assistant
+// reads, when not told.
+const assistantTail = 50
+
+// Logs answers cluster_log_tail: the latest messages of the members' own
+// logs (I150's merged tail of their rings), of nodes or the group's, at
+// most MaxTailNodes, merged by time, filtered by logger, least level and
+// text, limit a member; waited for until ctx ends. Each member's outcome
+// is said, one slow or down as its problem.
+func (a *AssistantAPI) Logs(ctx context.Context, user, group string, nodes []string, logger, level, contains string, limit int) ([]byte, error) {
+	if len(nodes) == 0 && group == "" {
+		return nil, fieldErr("nodes", "name the members whose logs to read, or a group, of %d members at most", MaxTailNodes)
+	}
+	names, err := a.targets(user, group, nodes)
+	if err != nil {
+		return nil, err
+	}
+	if limit == 0 {
+		limit = assistantTail
+	}
+	type res struct {
+		b   TailBody
+		err error
+	}
+	ch := make(chan res, 1)
+	a.m.TailLogs(TailQuery{Nodes: names, Logger: logger, Level: level, Contains: contains, Limit: limit}, func(b TailBody, err error) { ch <- res{b, err} })
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return nil, r.err
+		}
+		r.b.Cursor = ""
+		return json.Marshal(r.b)
+	case <-ctx.Done():
+		return nil, fmt.Errorf("the members' logs did not come in time: %w", ctx.Err())
+	}
 }
 
 // memberPaths are the Admin API's paths a read tool's member argument

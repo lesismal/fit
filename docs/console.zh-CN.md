@@ -626,7 +626,7 @@ fit 内置 18 个技能，嵌入在二进制中：`explain`、`route-builder`、
 ### 跨集群
 
 在管理其他 fit 的管理端（`admin.cluster`）上，助手还会读取集群并提议跨成员的修改（I153）：工具 `cluster_members`、`cluster_templates`、
-`cluster_rollouts`、`cluster_metrics` 与 `cluster_certs`，读取 Admin API 的读取工具上的 `member` 参数，以及 `rollout_propose`、
+`cluster_rollouts`、`cluster_metrics`、`cluster_certs` 与 `cluster_log_tail`，读取 Admin API 的读取工具上的 `member` 参数，以及 `rollout_propose`、
 `cluster_op_propose` 与 `drift_fix_propose`：它们生成发布规划或经检查的操作，由人在集群页面上以其自身的确认启动，从不是对话提案的步骤。
 用户在管理端上的角色与助手的级别都会检查，取更窄的；成员的凭据不会到达模型。技能 `fleet-health`、`rollout-planner` 与 `cluster-drift`
 只在管理端上提供。见[管理端上的助手](cluster.zh-CN.md#管理端上的助手)。
