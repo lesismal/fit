@@ -2,7 +2,7 @@
 
 [English](033-cluster-management.md) | [简体中文](033-cluster-management.zh-CN.md)
 
-Status: accepted (2026-11-06) for its principles, I140 and I141; the choices marked *pending review*
+Status: accepted (2026-11-06) for its principles, I140, I141 and I142; the choices marked *pending review*
 stand until the user rules on them. The track is I140–I151 of the
 [development plan](../dev-plan.md#cluster-management).
 
@@ -98,7 +98,7 @@ What I140 adds to every fit, so that a manager can manage it:
   `?dry_run=1`, its errors shown where a save's are.
 
 What I141 adds, the manager (`admin.cluster`, package `cluster`, the console module `cluster`; see
-[managing other fits](../console.md#managing-other-fits)):
+[cluster management](../cluster.md)):
 
 - **Members in the store's section `cluster`**, a document of its own version (1) holding the
   members with their credentials, and the groups, templates, rollouts and audit log the later
@@ -113,6 +113,18 @@ What I141 adds, the manager (`admin.cluster`, package `cluster`, the console mod
   of calls on fib's asynchronous client, one client per member, each call bounded by `timeout` and
   its answer by `max_response_bytes`. A member's state keeps how its last poll went, with each
   failure a kind of its own, and what the last poll that read it found.
+
+What I142 adds, the workbench's **Cluster** menu ([its pages](../cluster.md#the-cluster-pages)):
+
+- **Overview**: every member's state, as cards or a table, coloured by state, filtered by a text, a
+  label selector and a state, kept in the URL, sorted, and read as often as the manager polls.
+- **Nodes**: members added, tested, trusted by their certificate's fingerprint, edited and removed,
+  every change with the members' ETag; credentials written once and never filled in again.
+- **A member's page**: its state, then its `/node`, `/status`, `/versions` and `/config/check` read
+  through the manager by `GET /api/m/cluster/nodes/<name>/read/<what>`, a bounded pass-through of
+  those four GETs alone, with the poller's session.
+- `fit run` checks that a manager has a store, which may be the one `-admin` keeps beside the
+  config; the config alone no longer asks for `admin.store`.
 
 ## Pending review
 
@@ -168,7 +180,36 @@ Decided while building I141 (2026-11-06):
     `token_set` only.
 18. **The defaults**: `poll_interval` 10s (1s at least), `timeout` 10s (1s at least), `max_nodes`
     256, `max_concurrency` 8, `max_response_bytes` 4 MiB (16 KiB at least).
-19. **The API is documented in the console's docs** until I142 writes `docs/cluster.md`.
+19. **The API is documented in the console's docs** until I142 writes `docs/cluster.md`; it now
+    lives there, and the console's docs link to it.
+
+Decided while building I142 (2026-11-06):
+
+20. **A member's page reads through a narrow pass-through**, `GET nodes/<name>/read/<what>` for
+    `node`, `status`, `versions` and `check` alone, answered as the member answers, on the node's
+    own transport and session, with a bound of its own (8 at once) and no read of a capability the
+    member does not list. I143 generalises it to `/api/n/<member>/...` for every method, with the
+    audit of writes. Alternatives: the poller's last answers kept whole (memory per member, and
+    stale), or I143's general pass-through now.
+21. **`admin.store` is no longer required by the config**: `fit run` refuses `admin.cluster`
+    without a store, which may be the one beside the config, so that `fit run -admin` with
+    `admin.cluster` alone runs a manager, as the plan's recipe asks. `fit validate` no longer
+    reports a manager without a store. Alternative: `-admin` writing an `admin.store` into the
+    config it validates.
+22. **The Cluster entry sits after the global pages and before Account** in the menu.
+    Alternatives: first, for a fit that is mostly a manager; last, with the roles.
+23. **Groups have no filter yet**: the overview filters by a label selector (`k=v`, `k!=v`, `k`),
+    which a group by labels is; I144 adds groups to the filter. **The colours**: up green, error
+    amber, down red, not read yet grey.
+24. **The overview reads `state` every poll interval, clamped to 2–10 seconds**, while it is shown;
+    no push from the server. Alternative: a stream of state changes.
+25. **Trusting a certificate pins it in the form and tests again**, and on a saved member saves the
+    pin at once after a confirm that shows the whole fingerprint; a certificate that replaced a
+    pinned one is trusted the same way, behind a warning. Alternative: trust only from the form.
+26. **Extension points for the next iterations**, so that they add to the pages without editing
+    them: `FitCluster.addAction` (I149's Add by enrollment beside Add a node) and
+    `FitCluster.rowExtra` (a member's linked or waiting state).
+27. **The Nodes page shows the last 20 audit entries**; the full log, filtered, is I148's.
 
 Open questions of the plan, answered as proposed until reviewed:
 

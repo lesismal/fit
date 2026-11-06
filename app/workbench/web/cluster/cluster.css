@@ -1,0 +1,60 @@
+/* The Cluster menu's pages (cluster/*.js): the overview's cards and filter, the members' labels, problems and
+   certificates, the member's form. The rest is core/ui.css, which index.html loads before this file.
+
+   集群菜单的页面（cluster/*.js）：概览的卡片与筛选、成员的标签、问题与证书、成员表单。其余样式在 core/ui.css 中；
+   index.html 在本文件之前加载它。 */
+
+/* The state tiles, which filter by their state when clicked. / 状态磁贴，点击即按其状态筛选。 */
+.cl-stat { cursor: pointer; transition: border-color .15s; }
+.cl-stat:hover, .cl-stat:focus-visible { border-color: var(--border-2); outline: none; }
+.cl-stat.is-active { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* The filter's controls on one wrapping row. / 筛选控件排成可换行的一行。 */
+.cl-filter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cl-filter .input { width: auto; flex: 1 1 180px; min-width: 0; }
+.cl-filter .cl-sel { flex: 2 1 260px; font-family: var(--mono); }
+.cl-filter .select { width: auto; }
+.btn.is-active { background: var(--primary-soft); color: var(--primary); }
+
+/* A card per member, its state the colour of its left edge. / 每个成员一张卡片，左边线为其状态的颜色。 */
+.cl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.cl-card { border-left: 4px solid var(--border-2); min-width: 0; }
+.cl-card--ok { border-left-color: var(--ok); }
+.cl-card--warn { border-left-color: var(--warn); }
+.cl-card--danger { border-left-color: var(--danger); }
+.cl-card .card__head { gap: 8px; flex-wrap: wrap; }
+.cl-card .card__head h2 a { color: inherit; text-decoration: none; }
+.cl-card .card__head h2 a:hover { text-decoration: underline; }
+.cl-card .card__body { display: flex; flex-direction: column; gap: 8px; }
+.cl-card .kv { margin: 0; }
+
+.cl-health { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.cl-health__why { font-size: 12px; font-weight: 600; color: var(--text-2); margin-left: 4px; }
+.cl-msg { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Labels, each a link that filters the overview. / 标签，每个都是筛选概览的链接。 */
+.cl-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.cl-label { font: 11.5px/1.6 var(--mono); padding: 0 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); text-decoration: none; white-space: nowrap; }
+.cl-label:hover { background: var(--primary-soft); color: var(--primary); }
+
+/* A problem: its kind, message and hint. / 问题：类型、消息与提示。 */
+.cl-problem { display: flex; flex-direction: column; gap: 4px; }
+.cl-problem__msg { overflow-wrap: anywhere; font-size: 13px; }
+
+/* A certificate, its fingerprint in full. / 证书，指纹完整显示。 */
+.cl-cert { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.cl-fp { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; word-break: break-all; }
+.cl-url { white-space: nowrap; }
+.cl-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+
+/* The member's form: its errors under their fields, the test's result below. / 成员表单：错误显示在对应字段下，测试结果在下方。 */
+.cl-form [hidden] { display: none !important; }
+.cl-err { color: var(--danger); }
+.cl-result:empty { display: none; }
+
+.cl-bar { flex-wrap: wrap; gap: 8px; }
+.cl-up { display: flex; flex-direction: column; gap: 6px; }
+/* What a flush card says when it has no table to show: padded as a card's body. / 无表格可显示时，贴边卡片中的文字按卡片主体留白。 */
+.cl-flush > :not(.table-wrap) { margin: 14px 18px; }
+.cl-top { align-items: start; }
+.cl-card .card__head h2 { min-width: 0; }
