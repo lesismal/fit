@@ -143,7 +143,9 @@ func TestSlotsPeerShare(t *testing.T) {
 	if NewSlots(0).Open(netip.Addr{}, func() {}) != nil || NewSlots(-1).Open(netip.Addr{}, func() {}) != nil {
 		t.Fatal("a connection taken with max_conns 0")
 	}
-	if one := NewSlots(1); openSlot(one, "") == nil || openSlot(one, "") == nil {
+	one := NewSlots(1)
+	first := openSlot(one, "")
+	if second := openSlot(one, ""); first == nil || second == nil {
 		t.Fatal("max_conns 1 takes no unauthenticated connection")
 	}
 }
