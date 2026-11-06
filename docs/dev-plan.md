@@ -303,7 +303,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | done |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | done |
-| I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | todo |
+| I147 | Drift and alerts: drift fixed by a rollout, alert rules sent to webhooks; the Drift and alerts pages | I146 | done |
 | I148 | The manager's users and roles per group, and the audit log; the Users and audit pages | I146 | todo |
 | I149 | Members behind NAT linking out to the manager, enrolled by a one-time token; Add by enrollment | I141 | done |
 | I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | todo |
@@ -3348,6 +3348,38 @@ also in decision 033 as its items 85–102):
   opens a rollout's plan; the alert rules' form, webhooks, active and past alerts, silences; a
   badge on the Cluster menu while alerts are active.
 - **Touches**: `cluster`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 103–117):
+
+1. **Alerts live in a store section of their own**, `cluster.alerts`, not in the document, which an
+   older fit would write without them; version 3 would make older fits read-only.
+2. **Drift is read again only when it can have changed**: the config's ETag differs, no state yet, or
+   the state is older than 10 minutes.
+3. **Drift reads tell members nothing** of what they own; rollouts and page reads do.
+4. **Consistency drift is fixed by a confirmed Reload** of the member, not a rollout; Fix plans a
+   rollout and never starts it.
+5. **`member_down` covers down and error**; `rollout_failed` is one alert a failed rollout, until rolled
+   back or 24 hours; `reload_failed` counts from the manager's first read, until a success, a restart or
+   an hour.
+6. **Default rules exist** while none is saved; without webhooks they show only on the pages and the
+   badge.
+7. **A rule's webhooks**: an empty list is every webhook; a webhook a rule names cannot be deleted
+   (409); a rename follows into rules.
+8. **Resolved notifications are sent** whenever the firing one was, while silenced too, and to every
+   webhook when the rule was deleted, so receivers close what they opened.
+9. **Failed sends are not retried**: a queue of 64 dropping the oldest, a timeout of 10s (1s to 60s), a
+   chat service's 200 with an error code counted as failed.
+10. **Templates are plain `${...}` replacement**, not Go templates, so nothing user-written runs;
+    custom bodies are checked as JSON when saved.
+11. **Webhook URLs are secrets** (chat tokens live in them), https or loopback http only.
+12. **Bounds**: silences up to 30 days ahead, kept 7 days after they end, 256 at most; 2,048 alerts
+    firing or pending and 500 resolved; pending alerts are not kept across a restart.
+13. **Firing and resolving go to the log, not the audit log**, as no person acted; every method takes
+    the user, for I148's roles.
+14. **Alerts have an ETag of their own**, apart from the members'.
+15. **The badge** is a small addition to the core (`badge()` on a module), as no extension point drew
+    one.
 
 ### I148 Users, roles and the audit log
 

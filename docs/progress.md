@@ -6678,3 +6678,25 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: with no traffic the 5xx gate passes with a note; server reasons are English on the Chinese
   pages; a rollout's history keeps the paths changed, not the values. The decisions made are in the
   plan's I146 section and decision 033, pending review.
+
+
+### I147 Drift and alerts — done
+
+- **Drift on every poll**: the consistency check with each poll, and a member a template is attached to
+  read against its templates once its config's ETag changed, without telling it anything and never
+  blocking the poller; `GET /api/m/cluster/drift` lists each member's drift with its diff, and Fix plans
+  a sync rollout of it (`POST drift/fix`, `FixDrift(user, nodes)`), started by a person.
+- **Alert rules** (member down, drift, rollout failed, certificate expiring, upstream backends down,
+  reloads failing) fire once their condition has lasted their time, are sent to webhooks (fit's signed
+  JSON, Slack, Discord, Feishu, DingTalk, WeCom, custom) one at a time each on fib's asynchronous client
+  from a bounded queue, repeat unless silenced, and resolve after; rules, webhooks (URLs and secrets),
+  silences and alerts are kept in the store's section `cluster.alerts`.
+- **Pages**: Cluster, Drift and alerts (drift, alerts, rules, webhooks, silences) and a badge on the
+  Cluster menu while alerts fire; English and Chinese; checked in a browser against two members, one
+  down and a webhook sink.
+- **Tests**: each rule firing once its time has passed and resolving after, with an injected clock; a
+  silence holding through repeats; a webhook that never answers not delaying the poller; every format's
+  body and signature; secrets redacted; alerts across a restart; `cluster` at 99.2% under the race
+  detector.
+- **Gaps**: a failed send is not retried; no Teams or Telegram format; alert summaries are written in
+  English. The decisions made are in the plan's I147 section and decision 033, pending review.
