@@ -7,7 +7,11 @@
 // conversations (GET /api/conversations, GET and DELETE /api/conversations/{id}) are picked, started anew or deleted in
 // the panel's head. Markdown is built as DOM nodes, never as HTML, so nothing a model writes runs on the page. A
 // conversation's pending proposal (the propose tools' steps, I126) is shown above the composer, with Apply, which asks
-// again in a dialog with the whole diff, and Discard (ai/proposals.js).
+// again in a dialog with the whole diff, and Discard (ai/proposals.js). A skill (I127) is picked with the Skills button or
+// by typing /name at the start of the message, which shows the enabled skills that match: the chip above the composer
+// says which the conversation runs, its × stops it, and the message goes with "skill" when the chip changed it. A skill
+// the assistant loads itself (skill_load) comes as the event skill and sets the chip. FitAI.useSkill(name, {message,
+// inputs}) opens the panel on a new conversation with a skill picked, for the pages' Ask AI buttons (I128).
 //
 // 助手的对话面板：控制台提供 ai 模块且用户级别不是 off 时，每个页面的顶栏都有一个按钮，点开后面板显示在页面旁。消息连同当前
 // 页面（WB.page）与页面上选中的文字作为上下文发往 POST /api/chat，回答以 SSE 事件流回（text、thinking、tool_call、
@@ -15,7 +19,10 @@
 // 结果），ask_user 的问题显示为一排按钮，所选即该调用的结果。停止会结束回答（POST /api/chat/stop），重试会重新回答最后一条
 // 消息；用户的对话（GET /api/conversations、GET 与 DELETE /api/conversations/{id}）在面板头部选择、新建或删除。Markdown
 // 以 DOM 节点构建，从不作为 HTML 插入，模型写的任何内容都不会在页面上执行。对话的待处理提案（提案工具的各步骤，I126）显示在
-// 输入框上方，带“应用”（会再弹出含完整差异的对话框确认）与“丢弃”（ai/proposals.js）。
+// 输入框上方，带“应用”（会再弹出含完整差异的对话框确认）与“丢弃”（ai/proposals.js）。技能（I127）可用“技能”按钮选择，或在
+// 消息开头输入 /name，面板会列出匹配的已启用技能：输入框上方的标签显示对话运行的技能，点 × 停止使用；标签有变化时消息带上 "skill"。
+// 助手自行加载的技能（skill_load）以 skill 事件到达并更新标签。FitAI.useSkill(name, {message, inputs}) 以选好的技能打开面板并新建
+// 对话，供各页面的“问 AI”按钮使用（I128）。
 (function () {
   'use strict';
 
@@ -34,7 +41,9 @@
       'p.summarized': 'The turns above are summarized for the model.', 'p.chose': 'Chose: {choice}', 'p.limit.max_tool_calls': 'The answer reached its limit of tool calls.',
       'p.limit.max_tokens_per_day': 'Today\'s tokens are spent.', 'p.kept': 'Conversations are kept in the store, encrypted.',
       'p.notKept': 'Without admin.store, conversations last until fit restarts.', 'p.copy': 'Copy', 'p.you': 'You',
-      'p.step': 'Added to the proposal — {tool}: {summary}'
+      'p.step': 'Added to the proposal — {tool}: {summary}',
+      'p.skills': 'Skills', 'p.skillsHint': 'Pick a skill, or type /name at the start of a message', 'p.noSkill': 'No skill: the assistant picks one when it fits',
+      'p.clearSkill': 'Stop using this skill', 'p.skillLoaded': 'The assistant loaded the skill {skill}.', 'p.noMatch': 'No enabled skill matches.'
     },
     'zh-CN': {
       'p.open': '助手', 'p.close': '关闭助手', 'p.new': '新对话', 'p.delete': '删除此对话',
@@ -50,7 +59,9 @@
       'p.summarized': '以上轮次以摘要提供给模型。', 'p.chose': '已选择：{choice}', 'p.limit.max_tool_calls': '本次回答已达到工具调用次数上限。',
       'p.limit.max_tokens_per_day': '今日的 token 已用完。', 'p.kept': '对话加密保存在 store 中。',
       'p.notKept': '未配置 admin.store：对话只保留到 fit 重启。', 'p.copy': '复制', 'p.you': '你',
-      'p.step': '已加入提案 — {tool}：{summary}'
+      'p.step': '已加入提案 — {tool}：{summary}',
+      'p.skills': '技能', 'p.skillsHint': '选择一个技能，或在消息开头输入 /name', 'p.noSkill': '未选技能：合适时助手会自行选择',
+      'p.clearSkill': '停止使用此技能', 'p.skillLoaded': '助手加载了技能 {skill}。', 'p.noMatch': '没有匹配的已启用技能。'
     }
   }, 'ai');
 
@@ -110,7 +121,21 @@
       } else if (LIST.test(l)) {
         flush();
         var list = h(/^\s*\d/.test(l) ? 'ol' : 'ul');
-        for (; i < lines.length && LIST.test(lines[i]); i++) list.appendChild(h('li', inline(lines[i].replace(LIST, ''))));
+        // An item's indented lines that are not items themselves continue it; items indented more than the first are a
+        // list inside the item before them. / 条目后缩进且本身不是条目的行是它的延续；比第一项缩进更多的条目构成前一项内的子列表。
+        var base = l.match(/^\s*/)[0].length, last = null, sub = null;
+        while (i < lines.length && LIST.test(lines[i])) {
+          var line = lines[i], ind = line.match(/^\s*/)[0].length, item = line.replace(LIST, '');
+          for (i++; i < lines.length && /^\s+\S/.test(lines[i]) && !LIST.test(lines[i]); i++) item += ' ' + lines[i].trim();
+          if (ind > base && last) {
+            if (!sub) { sub = h(/^\s*\d/.test(line) ? 'ol' : 'ul'); last.appendChild(sub); }
+            sub.appendChild(h('li', inline(item)));
+          } else {
+            last = h('li', inline(item));
+            sub = null;
+            list.appendChild(last);
+          }
+        }
         root.appendChild(list);
       } else if (/^\s*>/.test(l)) {
         flush();
@@ -152,11 +177,15 @@
   // panel builds the panel inside shell and returns its button for the top bar. / 在 shell 中构建面板，返回顶栏按钮。
   function panel(UI, shell) {
     var t = UI.t;
-    var st = { open: false, loaded: false, conv: load(CONV_KEY), convs: [], streaming: false, ctrl: null, info: null, sendPage: true, last: null };
-    var pick = h('select.select.select--sm.ai-pick', { 'aria-label': t('p.pick'), onchange: function () { open(pick.value); } });
+    // skill: the chip's skill; convSkill: the one the conversation runs, as the server says; inputs: a skill's inputs,
+    // sent once with it; skills: the enabled skills, read when the panel opens.
+    // skill：标签上的技能；convSkill：服务端所说对话运行的技能；inputs：技能的输入，随其发送一次；skills：已启用的技能，打开面板时读取。
+    var st = { open: false, loaded: false, conv: load(CONV_KEY), convs: [], streaming: false, ctrl: null, info: null, sendPage: true, last: null,
+      skill: '', convSkill: '', inputs: null, skills: null, pickAt: 0, matches: [] };
+    var pick = h('select.select.select--sm.ai-pick', { 'aria-label': t('p.pick'), onchange: function () { open(pick.value); if (!pick.value) setSkill(''); } });
     var del = h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', title: t('p.delete'), 'aria-label': t('p.delete'), onclick: remove }, UI.icon('trash'));
     var head = h('div.ai-head', UI.icon('chat'), h('b', t('p.open')), pick,
-      h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', title: t('p.new'), 'aria-label': t('p.new'), onclick: function () { open(''); } }, UI.icon('plus')),
+      h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', title: t('p.new'), 'aria-label': t('p.new'), onclick: function () { open(''); setSkill(''); } }, UI.icon('plus')),
       del, h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', title: t('p.close'), 'aria-label': t('p.close'), onclick: toggle }, UI.icon('x')));
     var note = h('div.callout.callout--warn.ai-note', { hidden: true });
     var log = h('div.ai-log', { role: 'log', 'aria-live': 'polite' });
@@ -166,12 +195,27 @@
     var pageLabel = h('span.ellipsis');
     var input = h('textarea.textarea.ai-input', {
       rows: 3, placeholder: t('p.placeholder'), 'aria-label': t('p.placeholder'),
-      onkeydown: function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } }
+      onkeydown: function (e) {
+        if (pickKey(e)) return;
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+      },
+      oninput: function () { typed(); }
     });
     var sendBtn = h('button.btn.btn--primary.ai-send', { type: 'button', onclick: function () { if (st.streaming) stop(); else submit(); } });
     var foot = h('div.ai-foot.small.muted');
-    var box = h('aside.ai-panel', { hidden: true, 'aria-label': t('p.open'), onkeydown: function (e) { if (e.key === 'Escape') toggle(); } },
-      head, note, log, propBox, h('label.check.ai-ctx.small', pageBox, pageLabel), h('div.ai-compose', input, sendBtn), foot);
+    // The skill: a button that opens the picker, and the chip of the skill the next message runs.
+    // 技能：打开选择器的按钮，以及下一条消息所运行技能的标签。
+    var picker = h('div.ai-skillpick', { hidden: true, role: 'listbox', 'aria-label': t('p.skills') });
+    var chip = h('span.ai-skillchip');
+    var skillBtn = h('button.btn.btn--ghost.btn--sm', { type: 'button', title: t('p.skillsHint'), 'aria-label': t('p.skills'),
+      onclick: function () { if (picker.hidden) { st.pickAt = -1; showPicker(''); } else hidePicker(); } }, UI.icon('book'), t('p.skills'));
+    var skillBar = h('div.ai-skillbar.small', skillBtn, chip);
+    var box = h('aside.ai-panel', { hidden: true, 'aria-label': t('p.open'), onkeydown: function (e) {
+      if (e.key !== 'Escape') return;
+      if (!picker.hidden) { hidePicker(); return; }
+      toggle();
+    } },
+      head, note, log, propBox, h('label.check.ai-ctx.small', pageBox, pageLabel), skillBar, h('div.ai-composewrap', picker, h('div.ai-compose', input, sendBtn)), foot);
     shell.appendChild(box);
     var button = h('button.btn.btn--ghost.btn--icon.ai-toggle', { type: 'button', title: t('p.open'), 'aria-label': t('p.open'), onclick: toggle }, UI.icon('chat'));
     setBusy(false);
@@ -201,9 +245,90 @@
       button.classList.toggle('is-active', st.open);
       if (!st.open) return;
       context();
+      loadSkills();
       if (!st.loaded) { st.loaded = true; list().then(function () { open(st.conv); }); }
       setTimeout(function () { input.focus(); }, 30);
     }
+
+    // ---- Skills / 技能 ----
+    // loadSkills reads the enabled skills, each time the panel opens, as the Skills page may have changed them.
+    // loadSkills 每次打开面板时读取已启用的技能（技能页可能已修改它们）。
+    function loadSkills() {
+      return UI.api('GET', '/api/skills').then(function (b) {
+        st.skills = (b.skills || []).filter(function (s) { return s.enabled; });
+        drawChip();
+      }, function () { st.skills = st.skills || []; });
+    }
+    function skillOf(name) { return (st.skills || []).filter(function (s) { return s.name === name; })[0]; }
+    function skillTitle(name) { var s = skillOf(name); return s && FitAI.skillWords ? FitAI.skillWords(UI, s).title : name; }
+    function drawChip() {
+      if (!st.skill) { UI.mount(chip, h('span.muted', t('p.noSkill'))); return; }
+      UI.mount(chip, h('span.badge.ai-skillchip__on', { title: '/' + st.skill }, UI.icon('book'), ' ', skillTitle(st.skill),
+        h('button.ai-skillchip__x', { type: 'button', title: t('p.clearSkill'), 'aria-label': t('p.clearSkill'), onclick: function () { setSkill(''); input.focus(); } }, UI.icon('x'))));
+    }
+    function setSkill(name, inputs) { st.skill = name || ''; st.inputs = inputs || null; drawChip(); }
+    // showPicker lists the enabled skills whose name or title holds filter. / 列出名称或标题包含 filter 的已启用技能。
+    function showPicker(filter) {
+      var f = String(filter || '').toLowerCase();
+      st.matches = (st.skills || []).filter(function (s) {
+        var w = FitAI.skillWords ? FitAI.skillWords(UI, s) : s;
+        return !f || s.name.indexOf(f) >= 0 || String(w.title).toLowerCase().indexOf(f) >= 0;
+      });
+      if (st.pickAt >= st.matches.length) st.pickAt = st.matches.length - 1;
+      UI.mount(picker, st.matches.length ? st.matches.map(function (s, i) {
+        var w = FitAI.skillWords ? FitAI.skillWords(UI, s) : s;
+        return h('button.ai-skillpick__item' + (i === st.pickAt ? '.is-active' : ''), { type: 'button', role: 'option', 'aria-selected': i === st.pickAt ? 'true' : 'false',
+          onmousedown: function (e) { e.preventDefault(); }, onclick: function () { choose(s); } },
+          h('div', h('b', w.title), ' ', h('code.small', '/' + s.name)), h('div.small.muted', w.description));
+      }) : h('div.small.muted.ai-skillpick__none', t('p.noMatch')));
+      picker.hidden = false;
+      var a = picker.querySelector('.is-active');
+      if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest' });
+    }
+    function hidePicker() { picker.hidden = true; st.matches = []; }
+    // choose picks s: the chip shows it, and a /name typed is taken out of the message. / 选择 s：标签显示它，并去掉已输入的 /name。
+    function choose(s) {
+      setSkill(s.name);
+      input.value = input.value.replace(/^\/[a-z0-9-]*\s*/, '');
+      hidePicker();
+      input.focus();
+    }
+    // typed shows the picker while the message is /name and nothing after it. / 消息为 /name 且其后无内容时显示选择器。
+    function typed() {
+      var m = input.value.match(/^\/([a-z0-9-]*)$/);
+      if (!m) { if (!picker.hidden) hidePicker(); return; }
+      st.pickAt = 0;
+      showPicker(m[1]);
+    }
+    // pickKey moves through the picker with the arrows, and picks with Enter or Tab. / 方向键在选择器中移动，Enter 或 Tab 选择。
+    function pickKey(e) {
+      if (picker.hidden || !st.matches.length) return false;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        st.pickAt = (Math.max(st.pickAt, -1) + (e.key === 'ArrowDown' ? 1 : st.matches.length - 1) + st.matches.length) % st.matches.length;
+        showPicker(input.value.match(/^\/([a-z0-9-]*)$/) ? input.value.slice(1) : '');
+        return true;
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.isComposing && st.pickAt >= 0) {
+        e.preventDefault();
+        choose(st.matches[st.pickAt]);
+        return true;
+      }
+      return false;
+    }
+    // useSkill opens the panel on a new conversation with skill name picked, its inputs and a message filled in.
+    // useSkill 以选好的技能 name 打开面板并新建对话，预填其输入与消息。
+    function useSkill(name, o) {
+      o = o || {};
+      if (st.streaming) return false;
+      if (!st.open) toggle();
+      open('');
+      setSkill(name, o.inputs);
+      if (o.message != null) input.value = o.message;
+      setTimeout(function () { input.focus(); }, 30);
+      return true;
+    }
+    window.FitAI.useSkill = useSkill;
     // context shows which page goes as context. / 显示作为上下文发送的页面。
     function context() {
       var p = window.WB && WB.page ? WB.page() : {};
@@ -226,10 +351,11 @@
       pick.value = st.conv || '';
       del.disabled = !st.conv;
     }
-    // open shows conversation id, or a new one for ''. / 显示对话 id，'' 表示新对话。
+    // open shows conversation id, or a new one for '', whose skill is the chip's. / 显示对话 id，'' 表示新对话（技能为标签上的）。
     function open(id) {
       if (st.streaming) return;
       st.conv = id || '';
+      st.convSkill = '';
       save(CONV_KEY, st.conv);
       drawPick();
       UI.clear(log);
@@ -245,7 +371,7 @@
       if (!c || st.streaming) return;
       UI.confirm(t('p.deleteQ', { title: c.title }), t('p.delete'), true).then(function (ok) {
         if (!ok) return;
-        UI.api('DELETE', '/api/conversations/' + encodeURIComponent(c.id)).then(function () { open(''); return list(); }, UI.fail);
+        UI.api('DELETE', '/api/conversations/' + encodeURIComponent(c.id)).then(function () { open(''); setSkill(''); return list(); }, UI.fail);
       });
     }
 
@@ -349,6 +475,8 @@
     }
     function drawConversation(c) {
       UI.clear(log);
+      st.convSkill = c.skill || '';
+      setSkill(st.convSkill);
       var T = null, msgs = c.messages || [];
       msgs.forEach(function (m, i) {
         if (c.folded && i === c.folded) log.appendChild(h('div.ai-divider.small.muted', t('p.summarized')));
@@ -396,12 +524,26 @@
     function submit() {
       var msg = input.value.trim();
       if (!msg || st.streaming) return;
+      // /name, an enabled skill's, picks it; the rest is the message, and nothing is sent without one.
+      // /name（某个已启用技能）选择该技能；其余部分为消息，没有消息则不发送。
+      var m = msg.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/);
+      if (m && skillOf(m[1])) {
+        setSkill(m[1]);
+        msg = (m[2] || '').trim();
+        hidePicker();
+        if (!msg) { input.value = ''; return; }
+      }
       if (!st.conv) UI.clear(log);
       input.value = '';
       log.querySelectorAll('.ai-retry').forEach(function (r) { r.remove(); });
       userMsg(msg);
       scrollDown(true);
-      run({ conversation: st.conv || undefined, message: msg });
+      var body = { conversation: st.conv || undefined, message: msg };
+      if (st.skill !== st.convSkill || st.inputs) {
+        body.skill = st.skill;
+        if (st.skill && st.inputs) body.inputs = st.inputs;
+      }
+      run(body);
     }
     function answer(id, choice) {
       if (st.streaming) return;
@@ -428,6 +570,8 @@
         switch (ev.type) {
           case 'start':
             st.conv = ev.conversation; save(CONV_KEY, st.conv);
+            st.convSkill = ev.skill || '';
+            setSkill(st.convSkill);
             if (fresh) { st.convs.unshift({ id: ev.conversation, title: ev.title }); drawPick(); }
             break;
           case 'text': T.text(ev.text); break;
@@ -438,6 +582,7 @@
           case 'usage': footer(ev.today); break;
           case 'summary': T.note(t('p.summary')); break;
           case 'proposal': T.note(t('p.step', { tool: t('tool.' + ev.name), summary: ev.text || '' })); break;
+          case 'skill': st.convSkill = ev.skill; setSkill(ev.skill); T.note(t('p.skillLoaded', { skill: skillTitle(ev.skill) })); break;
         }
       }, { signal: st.ctrl ? st.ctrl.signal : undefined }).then(function (end) {
         T.flush();

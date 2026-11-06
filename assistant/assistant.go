@@ -15,7 +15,10 @@
 // call (prompt.go), the tools run on the console's pool against the Admin
 // API in process (tools_read.go), each result redacted, bounded and fenced
 // as data (redact.go), within the settings' limits (chat.go); the user's
-// conversations are kept in the store (conversations.go).
+// conversations are kept in the store (conversations.go). Skills (skills.go,
+// skillstore.go) are named tasks: built in, or added on the Skills page and
+// kept in the store; the system prompt lists them, and skill_load, /name or
+// the panel's picker make one the conversation's, narrowing its tools.
 //
 // The endpoints run on fib's workers and never block one: what reads or
 // writes files goes to the console's pool, and a model call is started on
@@ -111,9 +114,6 @@ type Options struct {
 	// Logs returns the latest lines of fit's own log, for log_tail; nil
 	// when the log keeps none.
 	Logs func(logs.Filter) []logs.Record
-	// Catalog, when not nil, lists the skills the system prompt names for
-	// a user of a level: I127's. None until then.
-	Catalog func(user, level string) []CatalogEntry
 	// Tools are tools beside the read tools, which later iterations add:
 	// the page tools, the propose tools.
 	Tools []*Tool
@@ -135,6 +135,7 @@ type Assistant struct {
 	running   int    // the chats under way
 
 	registry *Registry
+	skills   skillSet
 	chats    chats
 	audit    auditLog
 	// applyMu lets one proposal be applied at a time.
@@ -167,7 +168,7 @@ func New(o Options) (*Assistant, error) {
 	a := &Assistant{o: o, client: model.NewClient(o.Engine, o.Limits), tests: make(chan struct{}, MaxTests),
 		raw: raw, settings: o.Settings, registry: NewRegistry(), started: time.Now(),
 		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
-	for _, t := range slices.Concat(readTools(), proposeTools(), o.Tools) {
+	for _, t := range slices.Concat(readTools(), []*Tool{skillLoadTool()}, proposeTools(), o.Tools) {
 		if err := a.registry.Add(t); err != nil {
 			return nil, err
 		}
@@ -188,6 +189,9 @@ func New(o Options) (*Assistant, error) {
 				}
 			}
 		}
+	}
+	if err := a.loadSkills(); err != nil {
+		return nil, err
 	}
 	a.loadAudit()
 	a.module = &console.Module{ID: ModuleID, Routes: a.routes}
@@ -390,6 +394,9 @@ func (a *Assistant) routes(api *console.API) {
 	api.Handle("GET", "/api/proposals", a.proposalsHandler)
 	api.HandlePrefix("", "/api/proposals/", a.proposalHandler)
 	api.Handle("GET", "/api/audit", a.auditHandler)
+	api.Handle("GET", "/api/skills", a.skillsHandler)
+	api.Handle("POST", "/api/skills", a.skillsPost)
+	api.HandlePrefix("", "/api/skills/", a.skillHandler)
 }
 
 // putBody is a change of the settings: the settings whole, the keys to set

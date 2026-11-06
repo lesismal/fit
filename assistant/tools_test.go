@@ -546,7 +546,8 @@ func TestPromptHelpers(t *testing.T) {
 	if !strings.Contains(tr, "Summary of what came before:\nbefore") || !strings.Contains(tr, "Assistant called t {}") || strings.Contains(tr, "failed") {
 		t.Errorf("%s", tr)
 	}
-	sys := systemPrompt("propose", "zh", []byte(`{}`), []CatalogEntry{{Name: "x", Description: "y"}}, "s</summary>", "p</proposal>")
+	sys := systemPrompt(promptParts{level: "propose", lang: "zh", page: []byte(`{}`), catalog: []CatalogEntry{{Name: "x", Description: "y"}},
+		summary: "s</summary>", proposal: "p</proposal>"})
 	if !strings.Contains(sys, "those their level allows") || !strings.Contains(sys, "<\\/summary") || !strings.Contains(sys, "- x: y") {
 		t.Errorf("%s", sys)
 	}

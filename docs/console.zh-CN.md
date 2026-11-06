@@ -440,6 +440,58 @@ schema 及本用户能否调用）。
 `GET /api/m/ai/audit`（`?user=`、`?conversation=`、`?kind=` 为 `chat`、`apply` 或 `discard`、`?before=` 某条记录的 `seq`、
 `?limit=` 最多 500；最新的在前）。
 
+### 技能
+
+技能是一个命名的任务：何时使用、说明做法的提示词、可调用的工具、所需的输入，以及（如需要）它自己的模型。它以 Markdown 书写：
+两行 `---` 之间为 YAML front matter，其后为提示词：
+
+```markdown
+---
+name: ops-check
+title: Ops check
+title_zh: 运维检查
+description: Checks what the ops team checks every morning.
+description_zh: 检查运维团队每天早上检查的内容。
+tools: [status_get, upstream_health, config_propose]
+inputs:
+  - name: upstream
+    description: The pool to look at.
+    required: false
+model: anthropic/claude-sonnet-4-5
+examples:
+  - Is everything up this morning?
+---
+Read the status and each upstream's health, and say what is down and why.
+```
+
+`name`（小写字母、数字与 `-`，最多 40 个字符）、`title` 与 `description` 为必填；`title_zh` 与 `description_zh` 是工作台
+中文界面显示的内容；`tools` 列出可调用的工具，还会再按用户级别与设置收窄（`ask_user` 始终可用）；`model` 为设置中某个提供方
+的 `provider/model`，或默认提供方的某个模型；`inputs`（最多 8 个）与 `examples`（最多 8 个）显示在技能页与面板中。一个技能
+最多 32 KiB。不符合上述格式的 front matter（未列出的键、类型不对的值、已被占用的名称、无法解析的 YAML）会被拒绝，并给出出错
+的行号。
+
+fit 内置 14 个技能，嵌入在二进制中：`explain`、`route-builder`、`reverse-proxy`、`tls-acme`、`rate-limit-auth`、
+`cache-tuning`、`diagnose`、`drift-explain`、`log-analysis`、`security-review`、`migrate`、`media-setup`、
+`llm-mesh-setup` 与 `tunnel-setup`。**技能** 页把它们与用户添加的技能一起列出：每个技能的标题与用途、所列的工具（本用户不可
+调用的以删除线显示）以及是否启用；可查看全文、导出为 `.md`，并用 **试用** 以其示例运行。级别为 `apply` 的用户可以添加技能
+（从模板或导入 `.md` 文件）、编辑与删除已添加的技能，并启用或停用任意技能；内置技能不能修改或删除，但可以导出、改名后作为自己的
+技能添加，再停用内置的那个。添加的技能由所有控制台用户共享，最多 64 个，与停用了哪些内置技能一起保存在 store 的
+`assistant.skills` 段中；没有 store 时只保留到 fit 重启。
+
+在面板中，**技能** 按钮用于选择技能，在消息开头输入 `/` 会列出匹配的已启用技能；`/name 其余内容` 以其余内容运行该技能。输入框
+上方的标签显示对话运行的技能，点 × 停止使用。没有技能时，每次调用的系统提示会列出已启用的技能（每个只有名称与一句英文描述），
+当用户的请求符合某个技能时，模型用 `skill_load` 加载它：该工具的结果是技能的完整提示词，此后对话运行该技能。技能运行期间，
+系统提示带上它的提示词而不带目录，提供给模型的工具是技能所列、且用户级别与设置允许的那些，外加 `ask_user`；技能所列但超出
+级别的工具不会提供，提示中会说明。目录最多占模型窗口的十分之一：超出时只列名称。审计日志记录每次回答运行的技能。
+
+端点为 `GET /api/m/ai/skills`（所有技能，不含提示词，各带 `builtin`、`enabled` 与 `tool_state`，以及本用户能否修改）、
+`POST /api/m/ai/skills`（`{"source"}`：添加；`400` 带 `{"error", "line"}`，名称已被占用或超过 64 个时 `409`）、
+`GET /api/m/ai/skills/{name}`（全文，含 `prompt` 与 `source`）、`PUT`（替换已添加的技能，名称可变）、`DELETE`，以及
+`POST /api/m/ai/skills/{name}/enable` 与 `.../disable`；修改需要 `apply` 级别（低于它时 `403`）。`POST /api/m/ai/chat`
+可随消息带 `"skill"`（技能名，或 `""` 停止对话的技能）与 `"inputs"`（技能的输入，每个最多 2 KiB，作为数据发给模型）；以某个
+已启用技能的 `/name ...` 开头的消息等同于 `"skill": "name"`。其 `start` 事件带上对话运行的 `skill`，`skill` 事件表示
+`skill_load` 设定了技能。
+
 ## 角色的页面
 
 [llm](llm.zh-CN.md) 和 [tunnel](tunnel.zh-CN.md) 的角色也可以有自己的页面，各由角色的 `console` 设置：字段与

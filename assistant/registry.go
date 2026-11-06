@@ -90,6 +90,10 @@ type Call struct {
 	// proposed hears of the proposal a propose tool changed, and the
 	// members it changes, for the chat's audit entry.
 	proposed func(p *Proposal, changed []string)
+	// loadSkill makes sk the chat's current skill, as skill_load asks,
+	// and says the tools the chat offers from then on, and those sk names
+	// that it does not, with why.
+	loadSkill func(sk *Skill) (ok, not []string)
 }
 
 // Decode decodes the call's arguments into v, a struct, and says what is
