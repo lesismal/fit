@@ -50,13 +50,16 @@ type roMember struct {
 	noNewETag      bool
 	badPut         bool
 	// dropPut answers an apply with what is not JSON, without applying
-	// it; nodeFailOnce has the GET /node after a PUT fail once;
+	// it; nodeFailAfterPut has every GET /node fail from an apply until
+	// a rollback is asked for: whoever reads it in between (the apply's
+	// own check, or a poll the manager started before), it fails, so that
+	// the apply's fate is not known whatever the order of the reads;
 	// configStatus answers GET /config with it; dryStatus a dry run.
-	dropPut      bool
-	nodeFailOnce bool
-	nodeFailing  bool
-	configStatus int
-	dryStatus    int
+	dropPut          bool
+	nodeFailAfterPut bool
+	nodeFailing      bool
+	configStatus     int
+	dryStatus        int
 	// dryClose and putClose cut the connection of a dry run and of an
 	// apply (not applied); dryUnchanged says a dry run changes nothing;
 	// statusBad answers GET /status with what is not JSON; statusDelay
@@ -145,7 +148,7 @@ func (f *roMember) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 	}
 	if isPut && (dry && f.dryClose || !dry && f.putClose) {
-		if !dry && f.nodeFailOnce {
+		if !dry && f.nodeFailAfterPut {
 			f.nodeFailing = true
 		}
 		f.mu.Unlock()
@@ -163,7 +166,6 @@ func (f *roMember) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == "GET" && r.URL.Path == "/node":
 		if f.nodeFailing {
-			f.nodeFailing = false
 			answer(500, map[string]string{"error": "no node now"})
 			return
 		}
@@ -204,7 +206,7 @@ func (f *roMember) serve(w http.ResponseWriter, r *http.Request) {
 			answer(f.dryStatus, map[string]string{"error": "dry run refused"})
 			return
 		}
-		if !dry && f.nodeFailOnce {
+		if !dry && f.nodeFailAfterPut {
 			f.nodeFailing = true
 		}
 		if !dry && f.dropPut {
@@ -240,6 +242,7 @@ func (f *roMember) serve(w http.ResponseWriter, r *http.Request) {
 		answer(200, map[string]any{"current": cur.n, "versions": vs})
 	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/rollback/"):
 		f.rollbacks++
+		f.nodeFailing = false
 		n, _ := strconv.ParseUint(strings.TrimPrefix(r.URL.Path, "/rollback/"), 10, 64)
 		switch {
 		case f.rollbackStatus != 0:
