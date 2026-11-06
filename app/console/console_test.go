@@ -17,9 +17,11 @@ import (
 	"github.com/lesismal/fit/config"
 )
 
-// testModule is a module with an endpoint, a prefix and a longer prefix.
-var testModule = &Module{ID: "test.mod", Routes: func(api *API) {
+// testModule is a module with an endpoint, a prefix and a longer prefix, and
+// paths outside /api/m/test.mod/ it serves as well.
+var testModule = &Module{ID: "test.mod", Prefixes: []string{"/api/x/", "/api/now"}, Routes: func(api *API) {
 	api.Handle("GET", "/api/who", func(r *Request) { _ = r.JSON(200, map[string]string{"user": r.User, "path": r.Path}) })
+	api.HandlePrefix("", "/api/x/", func(r *Request) { _ = r.JSON(200, map[string]string{"x": r.Path, "user": r.User}) })
 	api.HandlePrefix("", "/api/any/", func(r *Request) { _ = r.JSON(200, map[string]string{"short": r.Path}) })
 	api.HandlePrefix("GET", "/api/any/long/", func(r *Request) { _ = r.JSON(200, map[string]string{"long": r.Path}) })
 }}

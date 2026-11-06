@@ -98,6 +98,8 @@ type Manager struct {
 	// link is the members that link out to the manager: the listener
 	// they link to, and their links.
 	link linkHub
+	// pass is the calls the node switcher passes on to members.
+	pass passHub
 }
 
 // New returns the manager o.Settings turns on, with the members the store
@@ -141,7 +143,7 @@ func New(o Options) (*Manager, error) {
 		}
 		m.nodes[mem.Name] = newNode(m, mem.clone())
 	}
-	m.module = &console.Module{ID: ModuleID, Routes: m.routes}
+	m.module = &console.Module{ID: ModuleID, Routes: m.routes, Prefixes: []string{PassPrefix}}
 	if err := m.startLinks(); err != nil {
 		for _, n := range m.nodes {
 			n.t.close()
@@ -529,6 +531,7 @@ func (m *Manager) routes(api *console.API) {
 	api.Handle("GET", "/api/state", m.state)
 	api.Handle("GET", "/api/audit", func(r *console.Request) { _ = r.JSON(200, map[string]any{"entries": m.Audit()}) })
 	m.linkRoutes(api)
+	m.passRoutes(api)
 }
 
 func (m *Manager) list(r *console.Request) {

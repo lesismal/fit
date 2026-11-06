@@ -584,7 +584,9 @@ func (n *node) loginResult(r *reply) (*Problem, *session) {
 	refuse := func(p *Problem, wait time.Duration) (*Problem, *session) {
 		p.At = now
 		n.loginAfter, n.loginProblem = now.Add(wait), p
-		return p, nil
+		// The caller's own copy, which it may change without n.mu.
+		cp := *p
+		return &cp, nil
 	}
 	switch r.status {
 	case stdhttp.StatusOK:

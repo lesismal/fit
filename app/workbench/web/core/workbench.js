@@ -26,6 +26,13 @@
 //   boot(UI)  optional: called once after the shell is built; its promise may do async work and then WB.refreshMenu.
 //   topbar(UI, shell) optional: called each time the shell is built; what it returns goes in the top bar beside the
 //           preferences, on every page, and shell is the shell's root, for a panel beside the pages (the assistant's).
+//   managerOnly  optional: a module of the manager's own (the account pages), never drawn against a member.
+//
+// The node switcher (I143): a page whose URL has ?node=<member> is drawn against that member of the manager, its
+// modules' requests passed on by the manager (UI.target()). The menu is then the member's modules the manager opens
+// (GET /api/n/<member>/workbench), without the manager's own, and WB.frame(fn) adds to the shell, whatever modules
+// are served: fn({wb, target}) → {title, top, band, cls, color} or null, title before the page's title, top in the top
+// bar, band between the top bar and the page, cls a class of the shell and color its --member colour.
 //
 // WB.page() is the page shown, as a panel sends it for context: {module, page, title, crumb, hash, selection, editable},
 // where selection is what the page last gave WB.select(value) (a port, a route, a difference), cleared when the page
@@ -42,6 +49,9 @@
 // shell 为外框根元素，供页面旁的面板（助手）使用。WB.page() 返回当前页面（面板作为上下文发送），WB.select(value) 记录页面的
 // 选中项，切换页面时清除。编辑配置的页面用 WB.editor({describe, call}) 登记其编辑器（切换页面时清除），WB.page() 的 editable
 // 即其声明；WB.pageTool(name, args) 把助手页面工具的调用（page_get、page_edit、page_revert）交给它：只在页面上起草，从不提交或保存。
+// managerOnly：管理端自己的模块（账户页面），从不针对成员绘制。节点切换器（I143）：URL 带 ?node=<成员> 的页面针对管理端的该
+// 成员绘制，模块的请求由管理端转发（UI.target()）；菜单为管理端可打开的成员模块（GET /api/n/<成员>/workbench），不含管理端
+// 自己的模块；WB.frame(fn) 不论提供哪些模块都向外框添加内容：fn({wb, target}) → {title, top, band, cls, color} 或 null。
 (function () {
   'use strict';
   var h = UI.h, t = UI.t;
@@ -98,7 +108,10 @@
     'gw.streaming': 'tag.streaming', 'gw.mediaauth': 'tag.mediaauth', 'gw.webrtc': 'tag.webrtc', 'gw.tunnel': 'tag.tunnel', 'gw.llm': 'tag.llm' };
   // LABELS are the names the menu words itself (sys.config's own word still names its pages). / 菜单自己取词的名称。
   var LABELS = { 'sys.config': 'wb.global' };
-  var defs = [];
+  // MANAGER_ONLY are the modules of the manager's own, beside those with managerOnly, never drawn against a member.
+  // MANAGER_ONLY 为管理端自己的模块（另有带 managerOnly 的模块），从不针对成员绘制。
+  var MANAGER_ONLY = ['account'];
+  var defs = [], frames = [];
   var OPEN_KEY = 'fit_wb_open', MINI_KEY = 'fit_wb_mini';
 
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -141,6 +154,8 @@
         rebuildTree();
       } catch (e) { UI.fail(e); }
     },
+    // frame adds fn to what every shell is built with (the node switcher's). / 为每次构建的外框添加内容（节点切换器的）。
+    frame: function (fn) { if (typeof fn === 'function') frames.push(fn); },
     module: function (def) {
       def.server = def.server || def.id;
       def.order = def.order || 0;
@@ -375,7 +390,7 @@
         if (m.nav.length > 1 && nav) where.push(navLabel(m, nav.label));
         titleEl.textContent = title || '';
         crumbEl.textContent = crumb || where.join(' / ');
-        document.title = (title ? title + ' · ' : '') + 'fit';
+        document.title = (UI.target() ? '[' + UI.target() + '] ' : '') + (title ? title + ' · ' : '') + 'fit';
         UI.clear(toolsEl);
         return UI.clear(content);
       }
@@ -471,7 +486,8 @@
   function build(wb, logout) {
     var served = {};
     (wb.modules || []).forEach(function (id) { served[id] = true; });
-    mods = defs.filter(function (d) { return served[d.server]; }).map(function (d) {
+    var member = !!UI.target();
+    mods = defs.filter(function (d) { return served[d.server] && !(member && (d.managerOnly || MANAGER_ONLY.indexOf(d.id) >= 0)); }).map(function (d) {
       var m = Object.create(d);
       m.ui = UI.scope(d.server, d.id);
       m.def = d;
@@ -497,14 +513,22 @@
       filterEl, navEl, foot);
     var menu = h('button.btn.btn--ghost.btn--icon.menu-btn', { type: 'button', 'aria-label': t('menu'), onclick: function () { root.classList.toggle('nav-open'); } }, UI.icon('menu'));
     var extra = h('div.row.topbar__extra');
-    var top = h('header.topbar', menu, h('div', titleEl, crumbEl), h('div.topbar__spacer'), toolsEl, extra, UI.prefs());
-    root = h('div.shell' + (load(MINI_KEY) === '1' ? '.is-mini' : ''), side, h('div.main', top, content));
+    // What the frames add: before the title, in the top bar, and a band above the page. / 外框附加内容。
+    var fr = [];
+    frames.forEach(function (fn) { try { var x = fn({ wb: wb, target: UI.target() }); if (x) fr.push(x); } catch (e) { UI.fail(e); } });
+    var top = h('header.topbar', menu, fr.map(function (x) { return x.title || null; }), h('div', titleEl, crumbEl), h('div.topbar__spacer'), toolsEl,
+      fr.map(function (x) { return x.top || null; }), extra, UI.prefs());
+    root = h('div.shell' + (load(MINI_KEY) === '1' ? '.is-mini' : ''), side, h('div.main', top, fr.map(function (x) { return x.band || null; }), content));
+    fr.forEach(function (x) {
+      if (x.cls) x.cls.split(' ').forEach(function (c) { if (c) root.classList.add(c); });
+      if (x.color) root.style.setProperty('--member', x.color);
+    });
     // The modules' own tools in the top bar, on every page. / 模块自己放在顶栏的工具，每个页面都有。
     mods.forEach(function (m) {
       if (typeof m.def.topbar !== 'function') return;
       try { var x = m.def.topbar(m.ui, root); if (x) extra.appendChild(x); } catch (e) { UI.fail(e); }
     });
-    if (!mods.length) UI.mount(content, UI.empty(t('wb.empty')));
+    if (!mods.length) UI.mount(content, UI.empty(wb.member && wb.member.error ? wb.member.error : t('wb.empty')));
     return root;
   }
 
@@ -627,7 +651,11 @@
     });
     var served = '';
     function run() {
-      return UI.workbench().then(function (wb) {
+      // A member that cannot be read is drawn with its error and the way back. / 无法读取的成员：显示其错误与返回方式。
+      return UI.workbench().catch(function (e) {
+        if (!UI.target() || (e && e.status === 401)) throw e;
+        return { user: '', modules: [], member: { name: UI.target(), error: (e && e.message) || String(e) } };
+      }).then(function (wb) {
         served = (wb.modules || []).join(',');
         UI.mount(app, build(wb, logout));
         if (!started) { window.addEventListener('hashchange', route); started = true; }
