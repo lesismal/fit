@@ -21,6 +21,10 @@ const (
 
 // Record is a message the log wrote, as its ring keeps it.
 type Record struct {
+	// Seq numbers the messages the ring was given since fit started, from
+	// 1: a reader that keeps the last one it saw asks for those after it
+	// (Filter.After), as a manager tailing several members does.
+	Seq     uint64    `json:"seq"`
 	Time    time.Time `json:"time"`
 	Level   string    `json:"level"`
 	Logger  string    `json:"logger"`
@@ -33,12 +37,15 @@ type Record struct {
 type ring struct {
 	mu   sync.Mutex
 	recs [RingSize]Record
-	next int // where the next record goes
-	n    int // how many are kept
+	next int    // where the next record goes
+	n    int    // how many are kept
+	seq  uint64 // the last record's Seq
 }
 
 func (r *ring) add(rec Record) {
 	r.mu.Lock()
+	r.seq++
+	rec.Seq = r.seq
 	r.recs[r.next] = rec
 	r.next = (r.next + 1) % RingSize
 	if r.n < RingSize {
@@ -59,6 +66,18 @@ type Filter struct {
 	// Limit is the most returned, the latest; 100 when zero, and never
 	// more than RingSize.
 	Limit int
+	// After, when not zero, returns only the messages whose Seq is
+	// greater; an After past the last message's, as a reader's of a fit
+	// since restarted, is taken as zero.
+	After uint64
+}
+
+// Last returns the Seq of the latest message the ring was given, 0 when
+// none.
+func (r *Root) Last() uint64 {
+	r.ring.mu.Lock()
+	defer r.ring.mu.Unlock()
+	return r.ring.seq
 }
 
 // Recent returns the latest messages of the log's ring that f lets
@@ -74,9 +93,16 @@ func (r *Root) Recent(f Filter) []Record {
 	g := &r.ring
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	after := f.After
+	if after > g.seq {
+		after = 0
+	}
 	var out []Record
 	for i := 0; i < g.n && len(out) < limit; i++ {
 		rec := g.recs[(g.next-1-i+2*RingSize)%RingSize]
+		if rec.Seq <= after {
+			break
+		}
 		if f.Logger != "" && rec.Logger != f.Logger || levelRank(rec.Level) < least {
 			continue
 		}

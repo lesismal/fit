@@ -171,6 +171,9 @@ type Server struct {
 	// audit, when not nil, writes the changes of media files to the
 	// assistant's audit log: the console's server sets it.
 	audit auditFunc
+	// cluster serves /cluster/ on the Admin API of a manager of other
+	// fits (SetCluster).
+	cluster clusterSlot
 
 	ln   net.Listener
 	srv  *http.Server
@@ -229,6 +232,8 @@ func Start(a *config.Admin, configs *Configs, report func(Result), warnf func(fo
 	}
 
 	mux := s.routes()
+	mux.HandleFunc("/cluster", s.clusterAPI)
+	mux.HandleFunc("/cluster/", s.clusterAPI)
 	mux.Handle("/debug/pprof/", s.pprofHandler())
 	if !a.DisableDashboard {
 		mux.Handle("GET /dashboard/", dashboardHandler())
@@ -291,6 +296,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /cache", s.cacheZones)
 	mux.HandleFunc("POST /cache/purge", s.purge)
 	mux.HandleFunc("GET /logs", s.logs)
+	mux.HandleFunc("GET /logs/recent", s.recentLogs)
 	mux.HandleFunc("POST /logs/rotate", s.logsRotate)
 	mux.HandleFunc("POST /logs/cleanup", s.logsCleanup)
 	mux.HandleFunc("GET /tokens", s.listAllTokens)

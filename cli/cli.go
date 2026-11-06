@@ -36,6 +36,9 @@ Commands:
 	token      issue, list, change and revoke the link tokens a running fit's
 	           tunnel hub and LLM listeners take, through its Admin API
 	store     export or import the config kept encrypted in admin.store
+	cluster    a manager's members, groups, diffs, metrics, certificates and
+	           logs, and its rollouts started, followed and aborted, through
+	           its Admin API
 	help       print this help
 `
 
@@ -74,6 +77,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runToken(args[1:], stdout, stderr)
 	case "store":
 		return runStore(args[1:], stdout, stderr)
+	case "cluster":
+		return runCluster(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

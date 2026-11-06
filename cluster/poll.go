@@ -95,6 +95,9 @@ type Reloads struct {
 type Connections struct {
 	Open    int64  `json:"open"`
 	Refused uint64 `json:"refused"`
+	// PendingBytes are the bytes queued for clients that their
+	// connections have not taken (I150).
+	PendingBytes int64 `json:"pending_bytes"`
 }
 
 // Upstreams counts the member's upstreams and their backends, those down
@@ -132,10 +135,16 @@ type statusAnswer struct {
 		} `json:"backends"`
 	} `json:"upstreams"`
 	Certificates []struct {
-		Listener string    `json:"listener"`
-		Names    []string  `json:"names"`
-		NotAfter time.Time `json:"not_after"`
+		Listener  string    `json:"listener"`
+		Names     []string  `json:"names"`
+		Issuer    string    `json:"issuer"`
+		Serial    string    `json:"serial"`
+		NotBefore time.Time `json:"not_before"`
+		NotAfter  time.Time `json:"not_after"`
 	} `json:"certificates"`
+	// Requests are the requests the member answered since it started, by
+	// the class of their status, when it counts them (I146, I150).
+	Requests *requestCounts `json:"requests"`
 }
 
 // checkAnswer is the part of GET /config/check the poller keeps.
@@ -212,6 +221,10 @@ type node struct {
 	loginProblem *Problem
 	backoff      time.Duration
 	state        State
+
+	// ins is what the polls read for the series and the certificates'
+	// inventory (I150, insight.go), under a lock of its own.
+	ins insight
 }
 
 // session is a console's login: its cookies and CSRF token.
@@ -486,6 +499,10 @@ func (p *poller) finish(prob *Problem) {
 	}
 	status, name := st.Status, n.spec.Name
 	n.mu.Unlock()
+	if prob == nil {
+		// The series and the certificates' inventory (I150).
+		n.observe(now, p)
+	}
 	if changed {
 		if prob != nil {
 			n.m.logf("cluster: member %q is %s (%s): %s", name, status, prob.Kind, prob.Message)
