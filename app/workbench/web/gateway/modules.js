@@ -1,10 +1,12 @@
 // The gateway's and the system's modules that edit the config (the admin server module): listeners, the reverse
 // proxy (routes and upstreams), the forward proxy, layer 4 services, TLS, the cache zones, then the rest of the
 // config's members, the config as JSON and its versions. They share config.js's draft and its save bar.
-// Needs ui.js, workbench.js and config.js.
+// Needs ui.js, workbench.js and config.js. A route of the Routes page, and an upstream with backends down on the
+// Upstreams page, have an Ask AI button (I128) that asks the skill diagnose about it.
 //
 // 编辑配置的网关与系统模块（admin 服务端模块）：监听、反向代理（路由与上游）、正向代理、四层代理、TLS、缓存，以及
 // 配置的其余成员、JSON 形式的配置与配置版本。它们共用 config.js 的草稿与保存栏。依赖 ui.js、workbench.js 与 config.js。
+// “路由”页的每条路由，以及“上游”页中有后端不可用的上游，都有“问 AI”按钮（I128），以技能 diagnose 诊断它。
 (function () {
   'use strict';
 
@@ -34,6 +36,10 @@
     ['l.add', 'Add listener', '添加监听'], ['l.engine.note', 'Each port\'s features are grouped under the Engine menu in the sidebar; this page edits the listeners themselves.',
       '各端口的功能都在侧边栏的“引擎”菜单中分组列出；本页编辑监听本身。'], ['u.add', 'Add upstream', '添加上游'], ['sv.add', 'Add service', '添加服务'],
     ['u.up', '{up} / {all} up', '{up} / {all} 可用'], ['u.addrs', '{n} addresses', '{n} 个地址'],
+    // Ask AI (I128): what is asked of the assistant / “问 AI”：向助手提的问题
+    ['r.ask', 'Diagnose the route {name}: does it answer, and does it fail or run slow?', '诊断路由 {name}：它是否正常应答？是否失败或变慢？'],
+    ['u.ask', 'The upstream {name} has {down} of {all} backends down. Why, and what should I fix?',
+      '上游 {name} 的 {all} 个后端中有 {down} 个不可用。原因是什么？应该修复什么？'],
     // TLS / 证书
     ['c.note', 'The certificates the listeners serve now, files and ACME alike. Set a listener\'s tls on the Listeners page; ACME and automatic HTTPS have their own pages.',
       '各监听当前提供的证书（文件证书与 ACME 证书）。监听的 tls 在“监听”页设置；ACME 与自动 HTTPS 各有单独页面。'],
@@ -123,6 +129,35 @@
 
   function chips(UI, list) { return list.filter(Boolean).map(function (x) { return typeof x === 'string' ? UI.h('span.muted.small', x) : x; }); }
 
+  // askOf is an Ask AI button (ai/ask.js), or null without the assistant. / “问 AI”按钮，没有助手时为 null。
+  function askOf(spec, o) { return window.FitAI && FitAI.askButton ? FitAI.askButton(spec, o) : null; }
+  // routeAsk asks diagnose about a route: its name as the input route, its match, handler and upstream as the
+  // selection. / routeAsk 让 diagnose 诊断一条路由：名称为输入 route，匹配、处理器与上游为选中项。
+  function routeAsk(UI, r) {
+    return function () {
+      var m = (r && r.match) || {}, p = (r && r.handler && r.handler.params) || {};
+      var name = (r && r.name) || [].concat(m.host || [], m.path || []).join(' ') || '?';
+      return { skill: 'diagnose', message: UI.t('r.ask', { name: name }), inputs: { route: (r && r.name) || '' },
+        selection: { route: { name: r && r.name, match: r && r.match, handler: r && r.handler && r.handler.module,
+          upstream: typeof p.upstream === 'string' ? p.upstream : undefined, listeners: r && r.listeners,
+          middleware: ((r && r.middleware) || []).map(function (mw) { return mw && mw.module; }) } } };
+    };
+  }
+  // upstreamAsk asks diagnose about an upstream with backends down: the routes that proxy to it as the input route.
+  // upstreamAsk 让 diagnose 诊断有后端不可用的上游：代理到它的路由作为输入 route。
+  function upstreamAsk(UI, u, hl, routes) {
+    return function () {
+      var names = (routes || []).filter(function (r) {
+        var p = r && r.handler && r.handler.params;
+        return p && p.upstream === u.name;
+      }).map(function (r) { return r.name; }).filter(Boolean);
+      return { skill: 'diagnose', message: UI.t('u.ask', { name: u.name, down: hl.all - hl.up, all: hl.all }),
+        inputs: { route: names.join(', ') },
+        selection: { upstream: { name: u.name, addresses: u.addresses, load_balancing: u.load_balancing, up: hl.up, all: hl.all,
+          backends: hl.backends }, routes: names } };
+    };
+  }
+
   function routeChips(UI, r) {
     var h = UI.h, m = (r && r.match) || {}, out = [];
     if (r && r.handler && r.handler.module) out.push(UI.badge(r.handler.module, 'primary'));
@@ -132,6 +167,7 @@
     var p = r && r.handler && r.handler.params;
     if (p && p.upstream) out.push(h('span.muted.small', '→ ' + p.upstream));
     if (r && r.listeners && r.listeners.length) out.push(h('span.muted.small', '@' + r.listeners.join(',')));
+    out.push(askOf(routeAsk(UI, r), { label: false }));
     return chips(UI, out);
   }
 
@@ -214,7 +250,8 @@
         var health = {};
         UI.api('GET', '/api/status').then(function (st) {
           (st.upstreams || []).forEach(function (u) {
-            health[u.name] = { up: u.backends.filter(function (b) { return b.up; }).length, all: u.backends.length };
+            health[u.name] = { up: u.backends.filter(function (b) { return b.up; }).length, all: u.backends.length,
+              backends: u.backends.map(function (b) { return { address: b.address, up: b.up, probed_down: b.probed_down, in_flight: b.in_flight, succeeded: b.succeeded, failed: b.failed }; }) };
           });
         }).catch(function () { /* health is extra / 健康状态只是附加信息 */ }).then(function () {
           var C = FitConfig.with(UI);
@@ -228,7 +265,8 @@
                 return chips(UI, [
                   t('u.addrs', { n: ((u && u.addresses) || []).length }),
                   u && u.load_balancing ? UI.badge(u.load_balancing) : null,
-                  hl ? UI.badge(t('u.up', hl), hl.up === hl.all ? 'ok' : hl.up ? 'warn' : 'danger', true) : null
+                  hl ? UI.badge(t('u.up', hl), hl.up === hl.all ? 'ok' : hl.up ? 'warn' : 'danger', true) : null,
+                  hl && hl.up < hl.all ? askOf(upstreamAsk(UI, u, hl, C.draft.routes), { label: false }) : null
                 ]);
               }
             }));

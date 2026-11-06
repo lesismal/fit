@@ -22,6 +22,11 @@
 // apply stays the person's click. Secrets are not drafted: a [redacted] value the assistant copies back is put back as
 // the draft holds it, and any other change of a secret field is refused.
 //
+// Ask AI (I128): a save's problems, a failed save and a raw text that does not parse have an Ask AI button that asks
+// the skill explain about the error (its input error) with the text it is about (the lines around each problem's line,
+// or the draft's values at the problems' paths, secrets left out) as the page's selection; and every field of a form
+// has one that asks explain about its schema path (its input path), the field's path and value as the selection.
+//
 // 配置的共享草稿及由 schema 生成的表单编辑器，供网关与系统各模块（admin 服务端模块）使用。所有编辑配置的页面都编辑同一份
 // 草稿（连同 ETag 只读取一次），顶栏中的同一个保存栏整体保存（带 If-Match 的 PUT /config）或放弃修改；保存失败的问题
 // 链接到其所在的页面与字段。表单不含 admin：它在 fit 启动时所用的配置文件中设置。带 opts.members 的页面另外还有 UI、
@@ -31,6 +36,9 @@
 // 检查），page_revert 撤回助手的草稿。助手的草稿与人工修改一样只改共享草稿：未保存、标记为助手所写（所改字段、表单上方带
 // “撤回”的提示、保存栏中的徽标），从不提交。页面工具从不调用 PUT /config、/config/text、回滚或 reconcile，也不改变 ETag 或
 // 版本：“保存并应用”始终由人点击。不起草密钥：助手抄回的 [redacted] 值按草稿中的原值放回，其他对密钥字段的修改一律拒绝。
+// “问 AI”（I128）：保存的问题、保存失败与无法解析的原始文本都有“问 AI”按钮，以技能 explain 解释该错误（输入 error），
+// 并把它所针对的文本（各问题所在行附近的行，或草稿在各问题路径上的值，不含密钥）作为页面的选中项；表单的每个字段也有一个，
+// 以 explain 讲解其 schema 路径（输入 path），字段的路径与值作为选中项。
 (function () {
   'use strict';
   var h = UI.h;
@@ -76,6 +84,10 @@
     ['cf.ai.revert.q', 'You changed the page after the assistant\'s draft. Reverting returns it to what it held before the draft, and drops those changes too. Revert?',
       '助手起草之后你又修改了页面。撤回会让页面回到起草之前的内容，你之后的修改也会一并丢弃。确定撤回？'],
     ['cf.ai.reverted', 'The assistant\'s draft was reverted.', '已撤回助手的草稿。'],
+    // Ask AI (I128): what is asked of the assistant / “问 AI”：向助手提的问题
+    ['cf.ask.save', 'Explain why my save was refused, and how to fix it.', '解释我的保存为什么被拒绝，以及如何修正。'],
+    ['cf.ask.parse', 'Explain why this {fmt} text does not parse, and how to fix it.', '解释这段 {fmt} 文本为什么无法解析，以及如何修正。'],
+    ['cf.ask.field', 'Explain the field {field}: what it does, and what this config sets it to.', '讲解字段 {field}：它的作用，以及本配置把它设为什么。'],
     ['cf.c.listener', 'Listener', '监听'], ['cf.c.names', 'Names', '域名'], ['cf.c.issuer', 'Issuer', '签发者'], ['cf.c.from', 'Valid from', '生效时间'],
     ['cf.c.until', 'Expires', '过期时间'], ['cf.c.serial', 'Serial', '序列号'], ['cf.c.left', '{n} days left', '剩余 {n} 天'], ['cf.c.expired', 'expired', '已过期'],
     ['cf.c.none', 'No listener serves a certificate.', '没有监听在提供证书。'],
@@ -328,6 +340,7 @@
     v.ta.classList.toggle('is-invalid', !!r.error);
     v.load.hidden = !r.loading;
     var parts = rawErrorParts(r);
+    if (parts.length) parts.unshift(h('div.ai-askrow', h('span'), askBtn(saveAsk(r.error, r.details, r, 'cf.ask.parse'))));
     v.err.hidden = !parts.length;
     UI.mount(v.err, parts);
   }
@@ -641,7 +654,8 @@
         S.message = { kind: 'danger', text: t('cf.changed'), action: [t('cf.reread'), reload] };
       } else {
         S.errors = res.errors || [];
-        S.message = S.errors.length ? null : { kind: 'danger', text: t('cf.failed', { e: res.error || r.status + ' ' + r.statusText }) };
+        S.message = S.errors.length ? null : { kind: 'danger', text: t('cf.failed', { e: res.error || r.status + ' ' + r.statusText }),
+          ask: res.error || r.status + ' ' + r.statusText };
       }
       paintNotice(); redraw();
       var n = notice && notice.firstChild;
@@ -664,6 +678,101 @@
         });
       });
     });
+  }
+
+  // ---- Ask AI (I128) / 问 AI ----
+  // askBtn is an Ask AI button (ai/ask.js), or null without the assistant. / “问 AI”按钮（ai/ask.js），没有助手时为 null。
+  function askBtn(spec, o) { return window.FitAI && FitAI.askButton ? FitAI.askButton(spec, o) : null; }
+  // pathTokens splits an error path, a.b[0]["key"], into its members and indexes. / 把错误路径拆分为成员与下标。
+  function pathTokens(path) {
+    var out = [], re = /\.?([A-Za-z_][\w-]*)|\[(\d+)\]|\["((?:[^"\\]|\\.)*)"\]/g, m;
+    while ((m = re.exec(path || '')) && m[0]) {
+      if (m[1] != null) out.push(m[1]);
+      else if (m[2] != null) out.push(+m[2]);
+      else { try { out.push(JSON.parse('"' + m[3] + '"')); } catch (e) { out.push(m[3]); } }
+    }
+    return out;
+  }
+  // schemaPath is a path as the schema names it, its members only: routes[0].handler → routes.handler; a map's key is
+  // left out with what follows it. / schemaPath 为 schema 所用的路径，只含成员：routes[0].handler → routes.handler；
+  // 映射的键及其后的部分不计入。
+  function schemaPath(path) {
+    var out = [], re = /\.?([A-Za-z_][\w-]*)|\[(\d+)\]|\["((?:[^"\\]|\\.)*)"\]/g, m;
+    while ((m = re.exec(path || '')) && m[0]) {
+      if (m[3] != null) break;
+      if (m[1] != null) out.push(m[1]);
+    }
+    return out.join('.');
+  }
+  function secretPath(path) { return pathTokens(path).some(function (x) { return typeof x === 'string' && secretName(x); }); }
+  // valueAt is the draft's value at an error path, or undefined for a secret's or a missing one.
+  // valueAt 返回草稿在错误路径上的值；密钥或不存在时为 undefined。
+  function valueAt(path) {
+    if (!path || secretPath(path)) return undefined;
+    var v = S.draft;
+    pathTokens(path).forEach(function (k) { v = v != null && typeof v === 'object' ? v[k] : undefined; });
+    return clone(v);
+  }
+  // redactLine hides the value of a line that sets a secret, as `password: x` or `"token": "x",`.
+  // redactLine 隐藏设置密钥的行中的值，如 `password: x` 或 `"token": "x",`。
+  function redactLine(l) {
+    var m = /^(\s*["']?([A-Za-z0-9_-]+)["']?\s*[:=]?\s*)(\S.*)$/.exec(l || '');
+    if (!m || !secretName(m[2]) || /^[[{]/.test(m[3])) return l || '';
+    return m[1] + '"[redacted]"' + (/[,;]\s*$/.test(m[3]) ? m[3].trim().slice(-1) : '');
+  }
+  // excerpt is the text around the lines the problems name, numbered, or its first lines when they name none.
+  // excerpt 为各问题所在行附近的文本（带行号）；问题未指出行时为文本的开头若干行。
+  function excerpt(text, details) {
+    var lines = String(text || '').split('\n'), want = {}, out = [], last = 0;
+    (details || []).forEach(function (e) {
+      if (!e.line) return;
+      for (var i = Math.max(1, e.line - 4); i <= Math.min(lines.length, e.line + 4); i++) want[i] = true;
+    });
+    var nums = Object.keys(want).map(Number).sort(function (a, b) { return a - b; });
+    if (!nums.length) for (var i = 1; i <= Math.min(lines.length, 60); i++) nums.push(i);
+    nums.forEach(function (n) {
+      if (last && n > last + 1) out.push('…');
+      out.push(n + ': ' + redactLine(lines[n - 1]));
+      last = n;
+    });
+    var text2 = out.join('\n');
+    return text2.length > 6000 ? text2.slice(0, 6000) + '\n…' : text2;
+  }
+  function problemText(e) {
+    return (e.path || t('cf.whole')) + (e.line ? ' (line ' + e.line + ', column ' + (e.column || 0) + ')' : '') + ': ' + e.message;
+  }
+  // lastRaw is the raw text the last save sent, when it was a tab's text. / 上次保存发送的原始文本（若为标签页文本）。
+  function lastRaw() { return S.lastRaw && S.tabs[S.lastRaw.key] ? rawOf(S.lastRaw.key, S.lastRaw.fmt) : null; }
+  // saveAsk asks explain about an error and its problems, with the text they are about: raw's (a tab's text) with
+  // lines, or the draft's values at their paths. / saveAsk 让 explain 解释错误及其问题，连同所针对的文本：原始文本
+  // （带行号），或草稿在各问题路径上的值。
+  function saveAsk(error, details, raw, what) {
+    return function () {
+      var ds = (details || []).slice(0, 20), paths = {};
+      ds.forEach(function (e) { if (e.path) paths[schemaPath(e.path)] = true; });
+      var one = Object.keys(paths).length === 1 ? Object.keys(paths)[0] : '';
+      var sel = { save_error: error || undefined, problems: ds.map(function (e) { return { path: e.path, line: e.line, column: e.column, message: e.message }; }) };
+      if (raw) {
+        sel.format = raw.fmt; sel.members = raw.members;
+        sel.text = excerpt(raw.text, ds);
+      } else {
+        var vals = {};
+        ds.forEach(function (e) { var v = valueAt(e.path); if (v !== undefined) vals[e.path] = v; });
+        sel.format = 'json'; sel.values = vals;
+      }
+      return { skill: 'explain', message: t(what, { fmt: raw ? '.' + raw.fmt : '' }),
+        inputs: { error: [error].concat(ds.map(problemText)).filter(Boolean).join('\n'), path: one },
+        selection: sel };
+    };
+  }
+  // fieldAsk asks explain about a form field: its schema path as the input, its path and value as the selection.
+  // fieldAsk 让 explain 讲解表单字段：schema 路径为输入，字段路径与值为选中项。
+  function fieldAsk(s, slot) {
+    return function () {
+      var sp = schemaPath(slot.path), v = slot.get(), sel = { field: slot.path, schema_path: sp, type: kind(s), set: v !== undefined };
+      if (v !== undefined && !secretPath(slot.path)) sel.value = clone(v);
+      return { skill: 'explain', message: t('cf.ask.field', { field: slot.path }), inputs: { path: sp }, selection: sel };
+    };
   }
 
   // ---- the bar and the notices / 保存栏与提示 ----
@@ -708,12 +817,13 @@
       var m = S.message;
       parts.push(h('div.callout' + (m.kind ? '.callout--' + m.kind : ''),
         h('div.row.row--between', h('span', m.text),
-          h('span.btn-row', m.action ? UI.btn(m.action[0], 'refresh', function (ev) { UI.busy(ev.currentTarget, m.action[1]()).catch(UI.fail); }, 'sm') : null,
+          h('span.btn-row', m.ask ? askBtn(saveAsk(m.ask, [], lastRaw(), 'cf.ask.save')) : null,
+            m.action ? UI.btn(m.action[0], 'refresh', function (ev) { UI.busy(ev.currentTarget, m.action[1]()).catch(UI.fail); }, 'sm') : null,
             h('button.btn.btn--ghost.btn--icon.btn--sm', { type: 'button', 'aria-label': t('close'), onclick: function () { S.message = null; paintNotice(); } }, UI.icon('x')))),
         m.list ? h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, m.list.map(function (x) { return h('li', x); })) : null));
     }
     if (S.errors.length) {
-      parts.push(h('div.callout.callout--danger', h('b', t('cf.problems')),
+      parts.push(h('div.callout.callout--danger', h('div.ai-askrow', h('b', t('cf.problems')), askBtn(saveAsk('', S.errors, lastRaw(), 'cf.ask.save'))),
         h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, S.errors.map(problemLink))));
     }
     UI.mount(notice, parts);
@@ -1288,7 +1398,8 @@
     var k = kind(s);
     var err = hasError(slot.path);
     var optional = !required && k !== 'boolean';
-    var nameEl = h('span.cf-label', name, required ? h('span.cf-req', '*') : null, s.deprecated ? h('span.badge.badge--warn', { style: { marginLeft: '6px' } }, t('cf.deprecated')) : null);
+    var nameEl = h('span.cf-label', name, required ? h('span.cf-req', '*') : null, s.deprecated ? h('span.badge.badge--warn', { style: { marginLeft: '6px' } }, t('cf.deprecated')) : null,
+      askBtn(fieldAsk(s, slot), { label: false, cls: 'cf-askfield' }));
     if (nestedKind(k)) {
       var v = slot.get();
       return node(slot.path, [nameEl, h('span.muted.small', summary(v))],

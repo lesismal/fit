@@ -5,13 +5,15 @@
 // tags rather than entries, and its last entry opens the listener form. The module has no page of its own: every entry
 // is a link into a page of another module. Its data comes from config.js's shared draft, plus GET /api/status for the
 // addresses the kernel bound and the listeners HTTPS by default makes; a config change (the fit:config event) or a
-// refresh rebuilds the menu without losing the page shown.
+// refresh rebuilds the menu without losing the page shown. Each port, and each entry that lists routes, has an Ask AI
+// button (I128) that asks the skill diagnose about it, its routes' names as the skill's input route.
 //
 // 引擎菜单：一级条目，其子菜单为各监听端口，每个端口按固定顺序列出它所提供的功能及编辑各项功能的页面：路由的处理器、反向与
 // 正向代理路由、缓存与其他中间件、流媒体与 WebRTC 处理器，以及四层服务、SOCKS、TLS、ACME 与自动 HTTPS 的设置；其协议、
 // PROXY 协议、HTTP/3、按需证书与客户端证书以小标记显示而非条目，最后一项打开监听表单。本模块没有自己的页面：每个条目都
 // 链接到其他模块的页面。数据取自 config.js 的共享草稿，另用 GET /api/status 补充内核实际绑定的地址与自动 HTTPS 生成的监听；
-// 配置变化（fit:config 事件）或刷新时重建菜单，且不丢失当前页面。依赖 ui.js、workbench.js 与 config.js。
+// 配置变化（fit:config 事件）或刷新时重建菜单，且不丢失当前页面。每个端口及每个列出路由的条目都有“问 AI”按钮（I128），
+// 以技能 diagnose 诊断它，其路由名称作为技能输入 route。依赖 ui.js、workbench.js 与 config.js。
 (function () {
   'use strict';
 
@@ -47,7 +49,12 @@
     ['e.tag.auto', 'Auto HTTPS', '自动 HTTPS'], ['e.tag.mptcp', 'MPTCP', 'MPTCP'],
     // protocols / 协议
     ['e.p.http11', 'HTTP/1.1', 'HTTP/1.1'], ['e.p.h2c', 'h2c', 'h2c'], ['e.p.h2', 'HTTP/2', 'HTTP/2'],
-    ['e.p.tcp', 'TCP', 'TCP'], ['e.p.udp', 'UDP', 'UDP'], ['e.p.socks', 'SOCKS', 'SOCKS']
+    ['e.p.tcp', 'TCP', 'TCP'], ['e.p.udp', 'UDP', 'UDP'], ['e.p.socks', 'SOCKS', 'SOCKS'],
+    // Ask AI (I128): what is asked of the assistant / “问 AI”：向助手提的问题
+    ['e.ask.port', 'Diagnose the port {name} ({address}): is it bound and serving, and do any of its routes fail or run slow?',
+      '诊断端口 {name}（{address}）：它是否已绑定并在提供服务？它的路由是否有失败或变慢的？'],
+    ['e.ask.routes', 'Diagnose the routes under “{what}” on the port {name}: do they answer, and does any of them fail or run slow?',
+      '诊断端口 {name} 上“{what}”下的路由：它们是否正常应答？是否有失败或变慢的？']
   ];
 
   var ui = UI.scope('admin', 'engine');
@@ -192,8 +199,46 @@
     var title = [full, '[' + portTag(port) + ']'];
     if (port.bound && port.bound.address && port.bound.address !== port.address) title.push(port.bound.address);
     if (S.statusFailed) title.push(t('e.status.failed'));
-    return { id: port.name, label: label, tag: portTag(port), icon: 'listen', kids: portKids(draft, port),
-      title: title.join(' — ') };
+    var kids = portKids(draft, port);
+    return { id: port.name, label: label, tag: portTag(port), icon: 'listen', kids: kids,
+      title: title.join(' — '), ask: portAsk(draft, port, kids) };
+  }
+
+  // ---- Ask AI (I128) / 问 AI ----
+  // routeFacts is what the assistant is told of a route: its name, match, handler and upstream, never its params' other
+  // values. / routeFacts 是告诉助手的路由信息：名称、匹配、处理器与上游，不含其参数的其他值。
+  function routeFacts(r) {
+    var p = (r && r.handler && r.handler.params) || {};
+    return { name: r.name || undefined, match: r.match || undefined, handler: r.handler && r.handler.module,
+      upstream: typeof p.upstream === 'string' ? p.upstream : undefined, listeners: r.listeners || undefined,
+      middleware: (r.middleware || []).map(function (mw) { return mw && mw.module; }) };
+  }
+  function routeNames(routes) {
+    return routes.map(function (r) { return r && r.name; }).filter(Boolean).join(', ');
+  }
+  function portFacts(port) {
+    return { name: port.name, address: port.address, bound: port.bound && port.bound.address, protocols: port.protocols,
+      tls: !!(port.tls && Object.keys(port.tls).length), generated: port.generated || undefined, tags: portTag(port) };
+  }
+  // portAsk asks diagnose about a port: its facts, its entries, and its routes' names as the skill's input route.
+  // portAsk 让 diagnose 诊断一个端口：端口信息、其条目，以及作为技能输入 route 的各路由名称。
+  function portAsk(draft, port, kids) {
+    return function () {
+      var routes = routesOf(draft, port);
+      return { skill: 'diagnose',
+        message: t('e.ask.port', { name: port.name, address: (port.bound && port.bound.address) || port.address || '—' }),
+        inputs: { route: routeNames(routes) },
+        selection: { port: portFacts(port), entries: kids.map(function (k) { return k.count != null ? k.label + ' (' + k.count + ')' : k.label; }),
+          routes: routes.map(routeFacts) } };
+    };
+  }
+  // routesAsk asks diagnose about an entry of a port's routes. / routesAsk 让 diagnose 诊断端口的某组路由。
+  function routesAsk(port, what, routes) {
+    return function () {
+      return { skill: 'diagnose', message: t('e.ask.routes', { what: what, name: port.name }),
+        inputs: { route: routeNames(routes) },
+        selection: { port: portFacts(port), entry: what, routes: routes.map(routeFacts) } };
+    };
   }
 
   // portTag is the small line under a port's name: its protocols and the features with no page of their own
@@ -240,19 +285,20 @@
   // the listener form comes last. / portKids 按用户的顺序列出端口的条目；只显示端口真正具有的功能，监听表单在最后。
   function portKids(draft, port) {
     var out = [], routes = routesOf(draft, port), by = byModule(routes);
-    function add(label, href, icon, count, title) {
-      out.push({ label: label, href: href, icon: icon, count: count, title: title });
+    // rs, the routes an entry lists, give it an Ask AI button (I128). / rs 为条目所列的路由，使其带“问 AI”按钮（I128）。
+    function add(label, href, icon, count, title, rs) {
+      out.push({ label: label, href: href, icon: icon, count: count, title: title, ask: rs && rs.length ? routesAsk(port, label, rs) : undefined });
     }
     // 1. The handlers serving the port, in the fixed order, then any other handler by its module id.
     // 1. 服务该端口的处理器（按固定顺序），其后为其他以模块 ID 为名的处理器。
     HANDLERS.forEach(function (m) {
-      if (by[m]) add(t(HANDLER_WORDS[m]), routeHref(m), HANDLER_ICONS[m], by[m].length);
+      if (by[m]) add(t(HANDLER_WORDS[m]), routeHref(m), HANDLER_ICONS[m], by[m].length, null, by[m]);
     });
-    otherHandlers(by).forEach(function (m) { add(m, routeHref(m), 'code', by[m].length); });
+    otherHandlers(by).forEach(function (m) { add(m, routeHref(m), 'code', by[m].length, null, by[m]); });
     // 2. The port's protocol and feature tags are in portTag, not entries. / 2. 协议与功能小标记在 portTag 中，不是条目。
     // 3. The reverse and forward proxy routes. / 3. 反向与正向代理路由。
-    if (by.proxy) add(t('e.reverse'), routeHref('proxy'), 'route', by.proxy.length);
-    if (by.forward_proxy) add(t('e.forward'), '#/gw.forward/routes', 'forward', by.forward_proxy.length);
+    if (by.proxy) add(t('e.reverse'), routeHref('proxy'), 'route', by.proxy.length, null, by.proxy);
+    if (by.forward_proxy) add(t('e.forward'), '#/gw.forward/routes', 'forward', by.forward_proxy.length, null, by.forward_proxy);
     // 4. Cache middleware (its zones and the routes that use it), then the other middleware grouped.
     // 4. 缓存中间件（其缓存区与使用它的路由），其余中间件归为一组。
     var cache = routes.filter(function (r) {
@@ -260,31 +306,31 @@
     });
     if (cache.length) {
       add(t('e.zones'), '#/gw.cache/zones', 'disk');
-      add(t('e.cached'), '#/gw.reverse/routes', 'route', cache.length);
+      add(t('e.cached'), '#/gw.reverse/routes', 'route', cache.length, null, cache);
     }
-    var mwRoutes = 0, mwMods = {};
+    var mwRoutes = [], mwMods = {};
     routes.forEach(function (r) {
       var got = false;
       (r.middleware || []).forEach(function (mw) {
         if (mw && mw.module && mw.module !== 'cache') { got = true; mwMods[mw.module] = 1; }
       });
-      if (got) mwRoutes++;
+      if (got) mwRoutes.push(r);
     });
-    if (mwRoutes) {
-      add(t('e.middleware'), '#/gw.reverse/routes', 'layers', mwRoutes,
-        t('e.mw.title', { list: Object.keys(mwMods).sort().join(', ') }));
+    if (mwRoutes.length) {
+      add(t('e.middleware'), '#/gw.reverse/routes', 'layers', mwRoutes.length,
+        t('e.mw.title', { list: Object.keys(mwMods).sort().join(', ') }), mwRoutes);
     }
     // 5. Streaming: its page, then each handler's filtered routes. / 5. 流媒体：其页面与各处理器的过滤路由。
     var stream = STREAM_HANDLERS.filter(function (m) { return by[m]; });
     if (stream.length) {
       add(t('e.streaming'), '#/gw.streaming/streaming', 'play');
-      stream.forEach(function (m) { add(t(STREAM_WORDS[m]), routeHref(m), STREAM_ICONS[m], by[m].length); });
+      stream.forEach(function (m) { add(t(STREAM_WORDS[m]), routeHref(m), STREAM_ICONS[m], by[m].length, null, by[m]); });
     }
     // 6. WebRTC: its page, then each handler's filtered routes. / 6. WebRTC：其页面与各处理器的过滤路由。
     var webrtc = WEBRTC_HANDLERS.filter(function (m) { return by[m]; });
     if (webrtc.length) {
       add(t('e.webrtc'), '#/gw.webrtc/webrtc', 'radio');
-      webrtc.forEach(function (m) { add(t(WEBRTC_WORDS[m]), routeHref(m), 'radio', by[m].length); });
+      webrtc.forEach(function (m) { add(t(WEBRTC_WORDS[m]), routeHref(m), 'radio', by[m].length, null, by[m]); });
     }
     // 7. Layer 4, SOCKS, TLS, ACME and automatic HTTPS. / 7. 四层、SOCKS、TLS、ACME 与自动 HTTPS。
     var services = (draft.services || []).filter(function (s) {
