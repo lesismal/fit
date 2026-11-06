@@ -6519,3 +6519,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: a dry run cannot see a role failing at its apply (the agent's, the tunnel's), nor an address
   taken between the check and the apply. The decisions made are in the plan's I140 section, pending
   review.
+
+
+### I141 The manager: members, their credentials and their state — done
+
+- **`admin.cluster`** (`poll_interval`, `timeout`, `max_nodes`, `max_concurrency`, `max_response_bytes`;
+  needs `admin.store` and `admin.console`) makes a fit a manager. Package `cluster` keeps the members in
+  the store's section `cluster`, a versioned document beside the groups, templates, rollouts and audit
+  log that later iterations fill.
+- **Members** are reached through their console (user and password, logged in again on 401, refused
+  logins backed off, a password change reported and never made) or their Admin API (a bearer token);
+  certificates are checked by the system's CAs, a `ca` PEM or a pinned `fingerprint`, and one refused is
+  still shown.
+- **The poller** reads `/node`, `/status` and `/config/check` on fib's asynchronous client, at most
+  `max_concurrency` members at once, every call bounded by `timeout` and `max_response_bytes`, each
+  failure given its own kind.
+- **The console module `cluster`**: `/api/m/cluster/nodes[/<name>]`, `.../nodes/<name>/test`, `/test`,
+  `/state` and `/audit`; no credential or session cookie in an answer or a log.
+- **Tests**: `cluster` at 99.8% under the race detector; a real manager and member in `cli`; on the
+  benchmark host's Docker (`test/docker/cluster`), a manager and three members: password, token, a wrong
+  password, a certificate not trusted, a wrong pin, a member down, a member's restart and the manager's.
+- **Gaps**: no pages yet (I142); entries the manager keeps for one member share that member's address
+  lockout; any console user can make the manager test a URL. The decisions made are in the plan's I141
+  section and decision 033, pending review.
