@@ -31,6 +31,7 @@
       'sw.ro.not_read': 'The manager has not read it yet, so its version is not known: its pages are read-only until it has (open it again in a moment).',
       'sw.ro.version': 'It runs another version of fit (config schema {member}; this manager\'s {manager}), whose pages this manager\'s do not know: they are read-only.',
       'sw.ro.manager': 'This manager\'s members cannot be written, so a change through it could not be recorded in its audit log: the pages are read-only.',
+      'nd.a.node.api': 'changed through the node switcher',
       'sw.st.up': 'up', 'sw.st.down': 'down', 'sw.st.error': 'error', 'sw.st.unknown': 'not read yet',
       'member.readonly': 'This member is open read-only (the band above the page says why): nothing is changed on it from here.'
     },
@@ -46,6 +47,7 @@
       'sw.ro.not_read': '管理端尚未读取该成员，其版本未知：读取之前其页面只读（稍后再次打开即可）。',
       'sw.ro.version': '它运行的是另一版本的 fit（配置 schema {member}；本管理端为 {manager}），本管理端的页面不认识其页面：只读。',
       'sw.ro.manager': '本管理端的成员数据不能写入，通过它所做的修改无法记入其审计日志：页面只读。',
+      'nd.a.node.api': '经节点切换器修改',
       'sw.st.up': '正常', 'sw.st.down': '离线', 'sw.st.error': '错误', 'sw.st.unknown': '尚未读取',
       'member.readonly': '此成员以只读方式打开（原因见页面上方的横条）：不能从这里修改它。'
     }
