@@ -11,6 +11,7 @@ nothing else. The design and the choices made are [decision 033](decisions/033-c
 - [Running a manager](#running-a-manager)
 - [The Cluster pages](#the-cluster-pages)
 - [Groups and operations](#groups-and-operations)
+- [A member's own pages: the node switcher](#a-members-own-pages-the-node-switcher)
 - [How members are reached](#how-members-are-reached)
 - [What the manager reads, and what can go wrong](#what-the-manager-reads-and-what-can-go-wrong)
 - [The API](#the-api)
@@ -104,8 +105,8 @@ manager: who it is (node ID, host, the versions of fit, fib and Go, platform, st
 schema and capabilities), its running config with its reloads and connections, its listeners, its
 upstreams and each backend's state and counts, the certificates it serves with their expiry, the
 configs it keeps (versions) and its consistency check. Each part says its own problem when the
-member cannot be read, and none is asked of a member that is not up. Opening the member's own
-config pages from the manager is the node switcher's, planned next (I143).
+member cannot be read, and none is asked of a member that is not up. **Open** opens the member's
+own pages through the manager ([the node switcher](#a-members-own-pages-the-node-switcher)).
 
 ## Groups and operations
 
@@ -151,6 +152,58 @@ An operation and each member's outcome (its status, what it did, its error) go t
 audit log once it ends. The manager keeps the last 32 operations in memory, with their outcomes;
 at most 4 run at once, and a member already in one is not given another until it ends. Only a
 manager that can write its document runs operations, since it could not audit them otherwise.
+
+## A member's own pages: the node switcher
+
+On a manager, the workbench's header has a **Node** select: *This manager*, then every member with
+its state. Choosing a member opens the workbench's own pages against that member, through the
+manager: the overview, listeners, the Engine menu, every config page with its `.conf`, `.yaml` and
+`.json` tabs, Check and Save, the versions with their rollback, the consistency check, logs,
+cache zones, the media pages, and the tunnel roles' pages of a member reached by its console.
+**Open** on every member's card, row and page does the same. The page's URL then carries
+`?node=<member>`, so that a member's page can be bookmarked or opened in a tab of its own, and
+choosing **This manager**, or **Back to the manager**, loads the manager's own pages again, with
+nothing of the member's left on them.
+
+A member's pages are marked so that no one edits the wrong fit: the member's name in a pill before
+the page's title and in the tab's title (`[edge-7] Routes · fit`), a band above the page saying
+who it is, its host, its fit version and how the manager reaches it, and the top bar's line, all
+in a colour of the member's own. The menu is the member's: its listeners and roles, without the
+manager's Cluster menu, account pages and assistant.
+
+The pages are the manager's own: no markup or script is ever loaded from a member. What they ask
+for goes to `/api/n/<member>/m/<module>/<path>` on the manager in place of
+`/api/m/<module>/<path>`, behind the manager's login and CSRF token, and the manager passes it on
+to the member as it reaches it: through its console with the session it keeps, its Admin API with
+its token, or its link. The browser never holds a member's credentials, and the browser's own
+cookie and CSRF token stop at the manager. Only what the pages send goes on (`Content-Type`,
+`If-Match`, `If-None-Match`, `Upload-Offset`, `Upload-Length`, `Fit-Store-Password`), and only
+what they read comes back (`ETag`, `Fit-Config-Version`, `Fit-Dry-Run`, `Retry-After`, `Allow`,
+the upload's offsets, an attachment's `Content-Disposition`, and a `Content-Type` of JSON, text,
+YAML or bytes; anything else is answered as bytes): a member sets no cookie and no header on the
+manager's origin. A member that refuses the manager's credentials, or asks for its console user's
+temporary password to be changed, is answered `502` with the problem, as its state would say it.
+
+Saving works as it does on the member itself: the config is sent with the ETag the page read, a
+config changed on the member since is refused `412`, and a save's errors link to their fields.
+**Every change** (a request that is not a GET or a HEAD, but for the text conversions and Check,
+which change nothing) is recorded in the manager's audit log with its user, the member, the
+method and path and how the member answered (`PUT /config: 200, config version 8`), and in its
+log. A member whose config schema is not the manager's (`schema_digest` in its `GET /node`: it
+runs another version of fit) opens **read-only**: the band says why, Save is dimmed, and the
+manager refuses its changes (`409`) as the pages do; it reads, checks and converts as any. So is
+a member not read yet, and every member of a manager whose document a newer fit wrote, which could
+not record the change. A member's pages draw its config with its own schema: `/api/m/admin/schema`
+through its console, its Admin API's `GET /schema` (the capability `schema`) by token or link; a
+member older than the switcher, which serves none, is drawn with the manager's, answered with
+`Fit-Schema-From: manager`, its pages being read-only anyway.
+
+The bounds: 3 calls to a member at once and 16 more waiting, each waiting at most `timeout`
+(`503` after); 64 calls to members at once in all (`429`); a request's body and an answer at most
+`max_response_bytes` (`413`, and `502` with `too_large`); 64 changes waiting for their audit entries.
+Not passed on: the member's console users and passwords (changed on the member), its pprof and
+dashboard, its own cluster management and assistant, the LLM roles' pages, and streams (`501`);
+the tunnel roles' pages need the member's console.
 
 ## How members are reached
 
@@ -242,6 +295,14 @@ pages above use nothing else:
 | `POST ops` | starts an operation: `{"op", "group", "members", "purge"}`, `op` one of `reload`, `rollback`, `check`, `purge`, `test`; on the group's members, on `members`, or on `members` of the group; `purge` is `{"zone", "keys", "prefixes", "tags", "all"}`; `202` with the operation; `409` when a member is in another operation, `429` when 4 run |
 | `GET ops` | the operations kept, the latest first |
 | `GET ops/<id>` | an operation: `{"id", "op", "group", "user", "purge", "started", "ended", "finished", "counts", "outcomes"}`, each outcome `{"node", "status", "detail", "error", "result", "started", "ended", "took_ms"}`, `status` `pending`, `running`, `done` or `failed`, `error` a problem as a state's |
+
+Beside the module, at the console's top level, the node switcher's pass-through:
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /api/n/<member>/workbench` | the modules of the member its pages open, `{"user", "modules", "member"}`, `member` being `{"name", "access", "url", "id", "hostname", "fit_version", "schema_digest", "manager_schema_digest", "roles", "read_only", "reason_kind", "reason"}`, `reason_kind` `version`, `not_read` or `manager`; its `GET /node` is read now |
+| `GET /api/n/<member>/node` | the member's `GET /node` |
+| `<method> /api/n/<member>/m/<module>/<path>` | the member's `/api/m/<module>/<path>`, its Admin API's `/<path>` for the module `admin`, with the query; answered as the member answers, but for the headers above; `502` with `{"error", "problem"}` when the member cannot be reached, `403` for what is not passed on, `409` for a change to a read-only member |
 
 A change sent with `If-Match` and an ETag that is no longer the document's (its members and groups)
 is refused `412`. At most
