@@ -5766,3 +5766,41 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Docs**: the schema, the reference and the templates are regenerated; the Log and Access log
   chapters describe `time_zone` and `rotate`, with their examples; the Chinese reference's Log and
   Access log rows, the console docs' workbench menu and pages, and decision 034 in both languages.
+
+## Review follow-ups after v1.0.0
+
+### I161 Unauthenticated connections and file names, after review — done
+
+- **Admin API** (`admin/server.go`): a connection that has not sent the token is closed by a timer
+  at accept + 5s, whatever it is doing; its write deadline is capped there too, not only its read
+  deadline; dashboard files answered on it carry `Connection: close`. The review's client, 70
+  pipelined dashboard requests read slowly, gets one answer and is closed.
+- **Slots** (`login/slots.go`, used by the Admin API, the consoles and the pages): a quarter of
+  `max_conns` is kept for authenticated connections; when the slots are full, a new connection
+  closes the oldest unauthenticated connection of the client holding the most of them (loopback and
+  Unix-socket clients count as one), and is refused only when every connection has authenticated.
+  An authenticated connection is never closed for another.
+- **fastcgi**: scripts are checked with `dotfile.Scan`; a backslash, NUL or `..` answers 400 on
+  every OS, in the plain path and in `try_files`, and a `try_files` entry with one is refused when
+  the config loads.
+- **static**: whether a root folds case is decided once, when the handler is set up
+  (`dotfile.FoldsCase`); on such a root a path not spelled as on disk (`dotfile.OnDisk`, which also
+  catches Windows' 8.3 short names) or with a fastcgi `split_path` extension in any case
+  (`dotfile.AddScripts`, `dotfile.Script`) answers 404. Both checks run on cache misses only, on the
+  file pool, so the per-request path is unchanged.
+- **Docs and converter**: the nginx migration docs (English and Chinese) map `location ~ \.php$`
+  to `(?i)\.php$`, and the nginx converter writes such regexps with `(?i)` and a warning; the
+  schema, reference, templates and `schema-zh.js` are regenerated.
+- **Breaking**: a full Admin API or console closes an unauthenticated connection rather than refuse
+  the new one; an unauthenticated dashboard connection is closed after each answer; fastcgi answers
+  400 to a backslash on Linux too; on Windows and macOS `static` refuses case variants and script
+  extensions.
+- **Tests**: `make test-changed` under the race detector (77 packages); vet for linux, darwin and
+  windows. Windows' name lookup is compiled and vetted, not run: CI has no Windows test of it.
+- **Benchmark**: `BenchmarkServeCached` on the benchmark host, 10 alternating runs: 687.5 ns to
+  692.2 ns (p=0.53), allocations unchanged. The `bench/ab.sh` static run did not start: the user's
+  `qwen27b.service` holds :8081, the harness's h2c port.
+- **Gaps**: a loopback client reconnecting at full speed can still race a brand-new loopback admin
+  connection before it authenticates (an already authenticated one is never affected); a per-client
+  accept rate would close it. The decisions made while building it are in the plan's I161 section,
+  pending review.

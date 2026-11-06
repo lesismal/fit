@@ -320,7 +320,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | **Agent and tunnel, continued** | | | |
 | I159 | Issued tokens for the tunnel and the LLM feature's mesh: a listener issues, lists, expires and revokes tokens that any role may present in place of the shared password, each token its own credential, with an optional lifetime; a peer that knows no long-lived password, no table of guesses that works everywhere, and no role's password that lets one member pose as another | I106, I113 | todo |
 | I160 | The tunnel's and the LLM mesh's TLS, from the review of 2026-11-06: a link's certificate options passed apart from its address, so nothing in the address can override the pin; `quic_insecure` refused off loopback; a self-signed certificate kept across restarts without the store; an LLM listener's certificate reloaded when its file changes | I159 | todo |
-| I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | todo |
+| I161 | The Admin API's and consoles' unauthenticated connections, and Windows and case-insensitive file names, from the review of 2026-11-06: writes bounded as reads are, slots kept for authenticated clients; fastcgi refusing a backslash as static does; an extension in another case not served as source | — | done |
 
 ## M0, foundations
 
@@ -2828,6 +2828,28 @@ Principles, in the order they bind:
   keep an authenticated admin out; the backslash paths are refused by fastcgi on every OS; `/x.PHP` on
   a shared root does not serve source on Windows or macOS; under the race detector.
 - **Touches**: `admin`, `app/console`, `handler/fastcgi`, `handler/static`, `internal/dotfile`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **Which unauthenticated connection a new one closes.** The oldest of the client that holds the
+   most unauthenticated connections, loopback and Unix-socket clients counting as one client; the
+   plan said the oldest. So an attacker reconnecting from other addresses closes its own
+   connections, not a new admin's. Alternatives: plain oldest first; a minimum age before one may be
+   closed.
+2. **The authenticated share.** A quarter of `max_conns` (16 → 12 for unauthenticated, 32 → 24),
+   with at least one slot always open to unauthenticated connections, as the existing per-client
+   quarter. Alternative: a config field of its own.
+3. **How `static` learns fastcgi's `split_path`.** A process-wide list fastcgi adds its extensions
+   to when set up (`dotfile.AddScripts`), never shrunk, so a reload can only widen the refusal.
+   Alternative: a `script_extensions` param on `static`.
+4. **How `static` reads a name as it is on disk.** `FindFirstFile` on Windows, a directory read
+   elsewhere: O(entries) a path segment, on cache misses on case-insensitive roots only. A name in
+   another Unicode normalization than the disk's (NFC against NFD on macOS) is refused.
+5. **The answer to a case variant.** 404, as for a hidden dotfile. Alternative: 400.
+6. **fastcgi's `try_files`.** Only a backslash, NUL or `..` answers 400; Windows aliases and
+   dotfiles are still skipped over as before.
+7. **The nginx converter.** It writes a `~` regexp containing `\.php` as `(?i)` and warns, beside
+   the migration docs. Alternative: the docs only.
 
 ## Performance
 

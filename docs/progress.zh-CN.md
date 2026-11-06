@@ -4101,3 +4101,29 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   `node --check`。仓库中没有浏览器测试框架，因此页面没有自动的中英文浏览器运行：这是一个待补的缺口。
 - **文档**：schema、参考与模板重新生成；Log 与 Access log 章节说明 `time_zone` 与 `rotate` 并更新示例；中文参考的 Log 与
   Access log 行、控制台文档的 workbench 菜单与页面，以及两种语言的决定 034。
+
+## v1.0.0 之后的审查跟进
+
+### I161 审查后的未认证连接与文件名 — 已完成
+
+- **Admin API**（`admin/server.go`）：尚未发送 token 的连接在 accept + 5s 时由定时器关闭，无论在做什么；写截止时间也限制在
+  那里，而不只是读截止时间；对它应答的 dashboard 文件带 `Connection: close`。审查中流水线发出 70 个 dashboard 请求并慢读的
+  客户端，只拿到一个应答就被关闭。
+- **连接位**（`login/slots.go`，Admin API、控制台与页面共用）：为已认证连接保留 `max_conns` 的四分之一；连接位满时，新连接
+  关闭持有未认证连接最多的那个客户端最早的未认证连接（loopback 与 Unix socket 客户端算一个），只有所有连接都已认证时才拒绝。
+  已认证连接绝不会因别的连接被关闭。
+- **fastcgi**：用 `dotfile.Scan` 检查脚本；反斜杠、NUL 或 `..` 在所有系统上答 400，普通路径与 `try_files` 都如此，含这些字符的
+  `try_files` 项在加载配置时被拒绝。
+- **static**：根目录是否大小写不敏感在处理器建立时判定一次（`dotfile.FoldsCase`）；在这样的根目录上，拼写与磁盘不一致的路径
+  （`dotfile.OnDisk`，也能捕获 Windows 的 8.3 短名）或任意大小写的 fastcgi `split_path` 扩展名（`dotfile.AddScripts`、
+  `dotfile.Script`）答 404。两项检查只在缓存未命中时、在文件池上运行，每个请求的路径不变。
+- **文档与转换器**：nginx 迁移文档（中英文）把 `location ~ \.php$` 映射为 `(?i)\.php$`，nginx 转换器为这类正则加 `(?i)` 并
+  警告；schema、参考、模板与 `schema-zh.js` 重新生成。
+- **不兼容变更**：Admin API 或控制台满时关闭一个未认证连接而不是拒绝新连接；未认证的 dashboard 连接在每个应答后关闭；
+  fastcgi 在 Linux 上也对反斜杠答 400；在 Windows 与 macOS 上 `static` 拒绝大小写变体与脚本扩展名。
+- **测试**：竞态检测下的 `make test-changed`（77 个包）；linux、darwin 与 windows 的 vet。Windows 的名字查找只编译与 vet，
+  未运行：CI 没有它的 Windows 测试。
+- **基准**：基准机上 `BenchmarkServeCached` 交替 10 轮：687.5 ns 到 692.2 ns（p=0.53），分配不变。`bench/ab.sh` 的 static
+  运行没能开始：用户的 `qwen27b.service` 占着基准框架的 h2c 端口 :8081。
+- **缺口**：全速重连的 loopback 客户端仍可能在新的 loopback 管理员连接认证前抢走它的位（已认证的不受影响）；按客户端限制
+  accept 速率可以补上。实现时所做的决策在计划的 I161 一节，待审查。
