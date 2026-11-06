@@ -61,3 +61,16 @@
 /* A linked member's link on its row (I149, enroll.js). / 行上连接型成员的连接状态（I149，enroll.js）。 */
 .cl-link-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .cl-link .small { overflow-wrap: anywhere; }
+/* Groups and operations (I144, groups.js): chips of members and groups, a group's variables, the box column, the
+   operations bar. / 分组与操作（I144，groups.js）：成员与分组的标签块、分组变量、复选框列、操作栏。 */
+.cl-mono { font-family: var(--mono); }
+.cl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cl-chip { font: 12px/1.7 var(--mono); padding: 0 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); text-decoration: none; white-space: nowrap; }
+a.cl-chip:hover { background: var(--primary-soft); color: var(--primary); }
+.cl-warn { color: var(--warn); }
+.cl-preview { min-height: 24px; }
+.cl-var { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; align-items: center; }
+.cl-vars-view { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.cl-pick { width: 32px; }
+.cl-ops { flex-wrap: wrap; }
+.cl-check { gap: 8px; cursor: pointer; }

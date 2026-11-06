@@ -567,7 +567,14 @@ func (cs *Configs) Reloads() (tried, failed uint64) { return cs.reloads.Load(), 
 // Reapply applies the running config again, as a new version, so that what
 // it loads from files, its certificates, is loaded again.
 func (cs *Configs) Reapply(source string) (Result, error) {
-	return cs.update(source, "", false, func(cur *Version) ([]byte, string, error) { return cur.data, cur.baseSource, nil })
+	return cs.Reload(source, "", false)
+}
+
+// Reload is Reapply with an If-Match field's value, as Update takes it, and,
+// when dry, checked as DryRun checks a config, not applied: what POST
+// /reload does.
+func (cs *Configs) Reload(source, ifMatch string, dry bool) (Result, error) {
+	return cs.update(source, ifMatch, dry, func(cur *Version) ([]byte, string, error) { return cur.data, cur.baseSource, nil })
 }
 
 // Rollback applies again the config applied as version n, as a new version.
