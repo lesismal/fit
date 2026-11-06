@@ -204,6 +204,7 @@ type note struct {
 // answers the hub's calls with what its funcs return.
 type peer struct {
 	t     *testing.T
+	hub   *Hub
 	l     *link.Link
 	notes chan note
 	rsp   proto.RegisterRsp
@@ -218,7 +219,7 @@ type peer struct {
 // dial links a peer to addr, not registered yet.
 func (v *env) dial(addr string) *peer {
 	v.t.Helper()
-	p := &peer{t: v.t, notes: make(chan note, 256)}
+	p := &peer{t: v.t, hub: v.s, notes: make(chan note, 256)}
 	r := link.NewRouter()
 	r.HandleCall(proto.MethodNodeInfo, func(*link.Link, []byte) (any, error) {
 		p.mu.Lock()
@@ -299,7 +300,27 @@ func (p *peer) mustRegister(typ, name string, services ...proto.Service) *peer {
 	if err := p.register(typ, name, "pw", services...); err != nil {
 		p.t.Fatalf("register %s %s: %v", typ, name, err)
 	}
+	p.waitReady(typ, name)
 	return p
+}
+
+// waitReady waits until the hub sends on p's link: it marks a link so once
+// its answer to the registration has gone out, which may be after p has read
+// the answer, and until then a tunnel to p finds it disconnected.
+func (p *peer) waitReady(typ, name string) {
+	p.t.Helper()
+	waitFor(p.t, "the hub to send on "+typ+" "+name+"'s link", func() bool {
+		hp := p.hub.peerByName(typ, name)
+		if hp == nil {
+			return false
+		}
+		for _, l := range p.hub.peerLinks(hp) {
+			if c := connOf(l); c != nil && c.ID == p.rsp.Conn {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func (p *peer) call(m proto.Method, req, rsp any) error {
