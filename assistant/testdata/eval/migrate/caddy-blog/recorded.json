@@ -1,0 +1,471 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "text": "",
+      "calls": [
+        {
+          "name": "adapt_convert",
+          "args": {
+            "from": "caddyfile",
+            "text": "{{source}}"
+          }
+        },
+        {
+          "name": "config_get",
+          "args": {
+            "members": [
+              "listeners",
+              "routes",
+              "upstreams"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "https",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1",
+                    "h2"
+                  ],
+                  "tls": {}
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "proxy_10_0_2_5_4000",
+                  "addresses": [
+                    "10.0.2.5:4000",
+                    "10.0.2.6:4000"
+                  ],
+                  "load_balancing": "least_conn",
+                  "health_check": {
+                    "path": "/healthz",
+                    "interval": "10s"
+                  }
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "blog.example.net-feed.xml",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ],
+                    "path": [
+                      "/feed.xml"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/var/www/blog"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog.example.net-api",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ],
+                    "path": [
+                      "/api/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    },
+                    {
+                      "module": "rewrite",
+                      "params": {
+                        "strip_prefix": [
+                          "/api"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_2_5_4000"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog.example.net",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/var/www/blog"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "www.blog.example.net-default",
+                  "match": {
+                    "host": [
+                      "www.blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 301,
+                        "to": "https://blog.example.net{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog-to-https",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "blog.example.net",
+                      "www.blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 308,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  }
+                }
+              ],
+              "acme": {
+                "email": "ops@example.net"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Move the caddyfile config over",
+            "members": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "https",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1",
+                    "h2"
+                  ],
+                  "tls": {}
+                }
+              ],
+              "upstreams": [
+                {
+                  "name": "proxy_10_0_2_5_4000",
+                  "addresses": [
+                    "10.0.2.5:4000",
+                    "10.0.2.6:4000"
+                  ],
+                  "load_balancing": "least_conn",
+                  "health_check": {
+                    "path": "/healthz",
+                    "interval": "10s"
+                  }
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "blog.example.net-feed.xml",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ],
+                    "path": [
+                      "/feed.xml"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/var/www/blog"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog.example.net-api",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ],
+                    "path": [
+                      "/api/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    },
+                    {
+                      "module": "rewrite",
+                      "params": {
+                        "strip_prefix": [
+                          "/api"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "proxy_10_0_2_5_4000"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog.example.net",
+                  "match": {
+                    "host": [
+                      "blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "compress",
+                      "params": {
+                        "encodings": [
+                          "zstd",
+                          "gzip"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "static",
+                    "params": {
+                      "root": "/var/www/blog"
+                    }
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "www.blog.example.net-default",
+                  "match": {
+                    "host": [
+                      "www.blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 301,
+                        "to": "https://blog.example.net{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  },
+                  "listeners": [
+                    "https"
+                  ]
+                },
+                {
+                  "name": "blog-to-https",
+                  "listeners": [
+                    "http"
+                  ],
+                  "match": {
+                    "host": [
+                      "blog.example.net",
+                      "www.blog.example.net"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 308,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  }
+                }
+              ],
+              "acme": {
+                "email": "ops@example.net"
+              }
+            },
+            "unconverted": [
+              "line 20: templates: fit does not render templates; /feed.xml is served as the file it is",
+              "line 24: @bots header_regexp User-Agent (gptbot|ccbot) and its respond 403: fit matches headers by value, not by a regular expression"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "Caddy serves its sites over HTTPS by default; since this fit writes its listeners, I added https on :443 (its certificates from ACME, with the email from the global options) and http on :80, redirecting to HTTPS. The converter took the rest. Not converted: templates (line 20) and the @bots matcher (line 24)."
+    }
+  ]
+}

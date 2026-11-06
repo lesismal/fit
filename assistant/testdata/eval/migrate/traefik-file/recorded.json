@@ -1,0 +1,439 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "text": "",
+      "calls": [
+        {
+          "name": "config_get",
+          "args": {
+            "members": [
+              "listeners",
+              "routes",
+              "upstreams"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "schema_describe",
+          "args": {
+            "path": "routes.match"
+          }
+        },
+        {
+          "name": "schema_describe",
+          "args": {
+            "path": "upstreams.health_check"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "websecure",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1",
+                    "h2"
+                  ],
+                  "tls": {
+                    "acme": [
+                      "app.example.com",
+                      "grafana.example.com"
+                    ]
+                  }
+                }
+              ],
+              "acme": {
+                "email": "ops@example.com"
+              },
+              "upstreams": [
+                {
+                  "name": "app",
+                  "addresses": [
+                    "10.0.3.10:8080",
+                    "10.0.3.11:8080"
+                  ],
+                  "health_check": {
+                    "path": "/health",
+                    "interval": "10s"
+                  }
+                },
+                {
+                  "name": "api",
+                  "addresses": [
+                    "10.0.3.20:9000"
+                  ]
+                },
+                {
+                  "name": "grafana",
+                  "addresses": [
+                    "10.0.3.30:3000"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "http-to-https",
+                  "listeners": [
+                    "http"
+                  ],
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 308,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  }
+                },
+                {
+                  "name": "app",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "app.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "app"
+                    }
+                  }
+                },
+                {
+                  "name": "app-api",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "app.example.com"
+                    ],
+                    "path": [
+                      "/api*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "rewrite",
+                      "params": {
+                        "strip_prefix": [
+                          "/api"
+                        ]
+                      }
+                    },
+                    {
+                      "module": "rate_limit",
+                      "params": {
+                        "rate": 50,
+                        "burst": 100
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "api"
+                    }
+                  }
+                },
+                {
+                  "name": "grafana",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "grafana.example.com"
+                    ],
+                    "remote_ip": [
+                      "10.8.0.0/16"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "grafana"
+                    }
+                  }
+                },
+                {
+                  "name": "grafana-others",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "grafana.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 403
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Move the traefik config over",
+            "members": {
+              "listeners": [
+                {
+                  "name": "web",
+                  "address": ":8080",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "http",
+                  "address": ":80",
+                  "protocols": [
+                    "http/1.1"
+                  ]
+                },
+                {
+                  "name": "websecure",
+                  "address": ":443",
+                  "protocols": [
+                    "http/1.1",
+                    "h2"
+                  ],
+                  "tls": {
+                    "acme": [
+                      "app.example.com",
+                      "grafana.example.com"
+                    ]
+                  }
+                }
+              ],
+              "acme": {
+                "email": "ops@example.com"
+              },
+              "upstreams": [
+                {
+                  "name": "app",
+                  "addresses": [
+                    "10.0.3.10:8080",
+                    "10.0.3.11:8080"
+                  ],
+                  "health_check": {
+                    "path": "/health",
+                    "interval": "10s"
+                  }
+                },
+                {
+                  "name": "api",
+                  "addresses": [
+                    "10.0.3.20:9000"
+                  ]
+                },
+                {
+                  "name": "grafana",
+                  "addresses": [
+                    "10.0.3.30:3000"
+                  ]
+                }
+              ],
+              "routes": [
+                {
+                  "name": "health",
+                  "listeners": [
+                    "web"
+                  ],
+                  "match": {
+                    "path": [
+                      "/healthz"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 200,
+                      "body": "ok"
+                    }
+                  }
+                },
+                {
+                  "name": "http-to-https",
+                  "listeners": [
+                    "http"
+                  ],
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 308,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  }
+                },
+                {
+                  "name": "app",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "app.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "app"
+                    }
+                  }
+                },
+                {
+                  "name": "app-api",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "app.example.com"
+                    ],
+                    "path": [
+                      "/api*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "rewrite",
+                      "params": {
+                        "strip_prefix": [
+                          "/api"
+                        ]
+                      }
+                    },
+                    {
+                      "module": "rate_limit",
+                      "params": {
+                        "rate": 50,
+                        "burst": 100
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "api"
+                    }
+                  }
+                },
+                {
+                  "name": "grafana",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "grafana.example.com"
+                    ],
+                    "remote_ip": [
+                      "10.8.0.0/16"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "grafana"
+                    }
+                  }
+                },
+                {
+                  "name": "grafana-others",
+                  "listeners": [
+                    "websecure"
+                  ],
+                  "match": {
+                    "host": [
+                      "grafana.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "respond",
+                    "params": {
+                      "status": 403
+                    }
+                  }
+                }
+              ]
+            },
+            "unconverted": [
+              "lines 57-60: the middleware geoblock, a Traefik plugin: fit runs no Traefik plugins; the closest is a wasm middleware of your own"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "There is no converter for Traefik, so I converted it by hand: the entry point web is the listener http on :80 (your listener web keeps its name), redirecting to HTTPS; websecure is :443 with certificates from ACME for both hosts. The routers are routes, the services upstreams with their health check; stripPrefix is rewrite, rateLimit rate_limit, and ipAllowList a remote_ip match with a route beside it answering 403. Not converted: the geoblock plugin (line 57)."
+    }
+  ]
+}

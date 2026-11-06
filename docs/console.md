@@ -538,7 +538,9 @@ together as one `POST /config/reconcile`; or one rollback, `POST /rollback/{n}`.
 of them and run after the config. No step may touch `admin` (its members are out of every tool's
 reach, and it changes only when fit restarts), nor write a secret: a value the model saw as
 `[redacted]` may be written back only where the config has it, and is then the config's own again.
-At most 32 steps and 256 KiB of arguments.
+At most 32 steps and 256 KiB of arguments. A `config_propose` step may list what it did not carry over
+from a config moved from another server (`unconverted`, at most 100 items of 500 bytes), shown with
+the proposal.
 
 The panel shows the pending proposal above the composer: its steps, the members it changes, whether
 it checks, its diff in `.conf`, `.yaml` and `.json` (redacted), **Review and apply…** and
@@ -560,7 +562,7 @@ across restarts, and is read on the **Audit log** page.
 The endpoints are `GET /api/m/ai/proposals` (the pending proposals: the user's, and every user's for
 one whose level is `apply`), `GET /api/m/ai/proposals/{conversation}` (`?user=` for another's: the
 proposal checked on the running config, with `revision`, `etag`, `stale`, `steps` and each step's
-error, `changed`, `diff` by format, `valid`, `errors`, `can_apply`), `POST
+error, `changed`, `diff` by format, `valid`, `errors`, `unconverted`, `can_apply`), `POST
 /api/m/ai/proposals/{conversation}/apply` (`{"id", "revision", "etag", "user"}`; `200` with
 `outcome` `applied` or `partial`, the `version` and the purges; `403` below `apply`; `409` for a
 revision not the proposal's or a conversation answering; `412` when stale, with the proposal
@@ -635,6 +637,54 @@ message (a name, or `""` to stop the conversation's) and `"inputs"` (the skill's
 2 KiB each, sent to the model as data); a message `/name ...` of an enabled skill is the same as
 `"skill": "name"`. Its `start` event carries the `skill` the chat runs, and an event `skill` says
 that `skill_load` set one.
+
+### Migration and security review
+
+Two of the built-in skills do whole tasks, and fit checks them on fixed sets of configs.
+
+**`migrate`** moves a config from nginx, Caddy or Traefik to fit: pasted after `/migrate`, with
+the input `from` (`nginx`, `caddyfile` or `traefik`) when it is not plain. nginx and Caddyfile text
+go through `adapt_convert`, the converter of `fit adapt`, first; its warnings, each with its source
+line, are what the model converts by hand (nginx's `allow` and `deny` as a `remote_ip` match beside
+a route answering 403, `expires` as a `Cache-Control` header) or names as not converted. Traefik's
+YAML (entry points, routers, services, middlewares) and its Docker labels have no converter: the
+model converts them by the mapping of [Migrating from Traefik](migrating-from-traefik.md). The
+result is merged into the running config: fit's listeners, routes and upstreams are kept, a listener
+on an address fit listens on already is reused, names that clash are renamed, and neither `admin`
+nor a secret is written, so a route guarded by passwords the config cannot carry answers 401 until
+they are added on the page. It is checked with `config_validate`, and becomes one proposal, whose
+`unconverted` lists each item not carried over, with its source line, why, and the closest fit has.
+The panel and the Proposals page show the list with the diff; the proposal is applied as any other.
+
+**`security-review`** reads the config, the status and the certificates, and writes its findings
+one a line, as ``- **high** `routes[2]` (admin-panel): what is wrong. Fix: the change.``, the most
+severe first, then what it checked and found fine. It looks at least for the console reachable from
+everywhere, plain HTTP beside HTTPS without a redirect, certificates near expiry, client
+certificates asked for but not required, routes to internal or metadata addresses for anyone, admin
+or internal routes without auth, uploads and logins without limits, `trusted_proxies` trusting every
+address, directory listings and dotfiles served, very long timeouts, and secrets written in the
+config. Asked to, it proposes each fix it can, one step per finding; a change to `admin` or to a
+secret it describes for the file instead.
+
+**The evaluation.** `assistant/testdata/eval` holds the two sets: five configs to migrate (two of
+nginx, a Caddyfile, a Traefik YAML and Docker labels), each with requests and where they must go
+once its proposal is applied on a small running config, and the items it must name as not
+converted; and two fit configs with planted problems, each with the findings the review must make,
+by member. `make assistant-eval` runs them against a model:
+
+```bash
+FIT_EVAL_KIND=anthropic FIT_EVAL_MODEL=claude-sonnet-4-5 FIT_EVAL_API_KEY=... make assistant-eval
+```
+
+It reports, case by case, whether the proposal checks (as `fit validate` checks a config: loaded
+and compiled), is applied and keeps the routes, how many of the items not converted it names, and
+how many planted problems the review finds, with the calls and tokens each took; and then how many
+cases of each set pass. `FIT_EVAL_BASE_URL`, `FIT_EVAL_API_VERSION` and `FIT_EVAL_CONTEXT` set the
+provider as `admin.assistant` would, `FIT_EVAL_CASES` picks cases by a regular expression,
+`FIT_EVAL_REPORT` writes the report as JSON, and `FIT_EVAL_RECORD=1` writes the model's answers
+back as each case's `recorded.json`. Files a config names that are not on this machine
+(certificates, a static root) stand for those on the machine it came from. CI calls no model:
+`go test ./assistant` runs the same sets against the recorded answers, and every case must pass.
 
 ## Roles' pages
 

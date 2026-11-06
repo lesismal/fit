@@ -41,7 +41,7 @@ const (
 func readTools() []*Tool {
 	return []*Tool{
 		{Name: "config_get", Group: GroupConfig, Level: config.AssistantRead,
-			Description: "Read fit's config: the base config (as written and kept) or the effective one (with what providers added), whole or only some top-level members, as JSON, fit's .conf or YAML. Secrets are redacted and the assistant's, the console's users and the Admin API's own settings are left out.",
+			Description: "Read fit's config: the base config (as written and kept) or the effective one (with what providers added), whole or only some top-level members (one it does not set is null), as JSON, fit's .conf or YAML. Secrets are redacted and the assistant's, the console's users and the Admin API's own settings are left out.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["base","effective"],"description":"base (default) or effective"},"members":{"type":"array","items":{"type":"string"},"description":"top-level members to read, as routes or upstreams; all when left out"},"format":{"type":"string","enum":["json","conf","yaml"],"description":"json (default), conf or yaml"}}}`),
 			Run:         toolConfigGet},
 		{Name: "schema_describe", Group: GroupConfig, Level: config.AssistantRead,
@@ -130,11 +130,12 @@ func (c *Call) configJSON(source string) ([]byte, error) {
 }
 
 // members returns the top-level members names lists of obj, a JSON object,
-// in obj's order; all of them when names is empty.
-func members(obj []byte, names []string) ([]byte, error) {
+// in obj's order, all of them when names is empty; and the names obj does
+// not set, absent.
+func members(obj []byte, names []string) (_ []byte, absent []string, _ error) {
 	dec := json.NewDecoder(bytes.NewReader(obj))
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
-		return nil, errNotJSON
+		return nil, nil, errNotJSON
 	}
 	var b bytes.Buffer
 	b.WriteByte('{')
@@ -144,7 +145,7 @@ func members(obj []byte, names []string) ([]byte, error) {
 		key, _ := k.(string)
 		var v json.RawMessage
 		if err := dec.Decode(&v); err != nil {
-			return nil, errNotJSON
+			return nil, nil, errNotJSON
 		}
 		if len(names) > 0 && !slices.Contains(names, key) {
 			continue
@@ -160,11 +161,11 @@ func members(obj []byte, names []string) ([]byte, error) {
 	}
 	b.WriteByte('}')
 	for _, n := range names {
-		if !found[n] {
-			return nil, fmt.Errorf("the config sets no member %q", n)
+		if !found[n] && !slices.Contains(absent, n) {
+			absent = append(absent, n)
 		}
 	}
-	return b.Bytes(), nil
+	return b.Bytes(), absent, nil
 }
 
 func toolConfigGet(c *Call) (string, error) {
@@ -189,16 +190,30 @@ func toolConfigGet(c *Call) (string, error) {
 	if err != nil {
 		return "", errors.New("the config is not JSON")
 	}
-	if red, err = members(red, args.Members); err != nil {
+	red, absent, err := members(red, args.Members)
+	if err != nil {
 		return "", err
 	}
+	// A member asked for that the config does not set is null in JSON,
+	// and said in a comment in the other formats: not an error, since the
+	// next step is often to add it.
 	switch args.Format {
 	case "", "json":
+		for _, n := range absent {
+			kb, _ := json.Marshal(n)
+			if len(red) > 2 {
+				kb = append([]byte{','}, kb...)
+			}
+			red = append(append(red[:len(red)-1], kb...), []byte(":null}")...)
+		}
 		return string(red), nil
 	case "conf", "yaml":
 		text, err := c.a.apiJSON(c.Context, "POST", "/config/render?format="+args.Format, "application/json", red)
 		if err != nil {
 			return "", err
+		}
+		if len(absent) > 0 {
+			text = append(text, []byte("\n# The config sets no "+strings.Join(absent, ", ")+".\n")...)
 		}
 		return string(text), nil
 	}

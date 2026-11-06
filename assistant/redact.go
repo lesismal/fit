@@ -102,6 +102,21 @@ func secretName(name string) bool {
 	return false
 }
 
+// selectorValue reports whether s, under a member named name that
+// secretName takes for a secret's, is a selector rather than one:
+// rate_limit's key, which is ip, route or header:Name. A rate limit moved
+// from nginx has one, which the model must see and may write.
+func selectorValue(name, s string) bool {
+	if name != "key" {
+		return false
+	}
+	h, ok := strings.CutPrefix(s, "header:")
+	return s == "ip" || s == "route" || ok && headerName.MatchString(h)
+}
+
+// headerName is a header field's name.
+var headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]{1,64}$`)
+
 // errNotJSON is a tool's output that should have been JSON.
 var errNotJSON = errors.New("not JSON")
 
@@ -186,7 +201,7 @@ func (w *jsonRewriter) value(path string, secret bool) error {
 		_, err := w.dec.Token() // the closing delimiter
 		return err
 	case string:
-		if secret && t != "" {
+		if secret && t != "" && !selectorValue(path[strings.LastIndexByte(path, '.')+1:], t) {
 			t = Redacted
 		}
 		sb, _ := json.Marshal(t)

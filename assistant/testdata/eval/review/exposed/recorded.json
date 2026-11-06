@@ -1,0 +1,275 @@
+{
+  "model": "hand-written for the eval, in the shape a model answers",
+  "turns": [
+    {
+      "calls": [
+        {
+          "name": "config_get",
+          "args": {}
+        },
+        {
+          "name": "status_get",
+          "args": {}
+        },
+        {
+          "name": "certs_list",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_validate",
+          "args": {
+            "patch": {
+              "routes": [
+                {
+                  "name": "shop",
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "shop"
+                    }
+                  }
+                },
+                {
+                  "name": "login",
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/api/login"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "shop"
+                    }
+                  },
+                  "middleware": [
+                    {
+                      "module": "rate_limit",
+                      "params": {
+                        "rate": 5,
+                        "burst": 10
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "admin-panel",
+                  "listeners": [
+                    "https"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/admin/*"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "backoffice"
+                    }
+                  }
+                },
+                {
+                  "name": "uploads",
+                  "listeners": [
+                    "https"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/upload/*"
+                    ],
+                    "method": [
+                      "POST",
+                      "PUT"
+                    ]
+                  },
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "shop"
+                    }
+                  }
+                },
+                {
+                  "name": "cloud-info",
+                  "listeners": [
+                    "https"
+                  ],
+                  "match": {
+                    "host": [
+                      "shop.example.com"
+                    ],
+                    "path": [
+                      "/cloud/*"
+                    ]
+                  },
+                  "middleware": [
+                    {
+                      "module": "rewrite",
+                      "params": {
+                        "strip_prefix": [
+                          "/cloud"
+                        ]
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "proxy",
+                    "params": {
+                      "upstream": "metadata"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Rate limit logins",
+            "ops": [
+              {
+                "op": "add",
+                "path": "/routes/1/middleware",
+                "value": [
+                  {
+                    "module": "rate_limit",
+                    "params": {
+                      "rate": 5,
+                      "burst": 10
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Bound upload bodies",
+            "ops": [
+              {
+                "op": "remove",
+                "path": "/limits/max_body_bytes"
+              },
+              {
+                "op": "add",
+                "path": "/routes/3/middleware",
+                "value": [
+                  {
+                    "module": "body_limit",
+                    "params": {
+                      "max_bytes": 16777216
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "Admin panel from the office only",
+            "ops": [
+              {
+                "op": "add",
+                "path": "/routes/2/match/remote_ip",
+                "value": [
+                  "10.0.0.0/8"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "HTTPS only, plain HTTP redirected",
+            "ops": [
+              {
+                "op": "add",
+                "path": "/routes/0/listeners",
+                "value": [
+                  "https"
+                ]
+              },
+              {
+                "op": "add",
+                "path": "/routes/1/listeners",
+                "value": [
+                  "https"
+                ]
+              },
+              {
+                "op": "add",
+                "path": "/routes/-",
+                "value": {
+                  "name": "to-https",
+                  "listeners": [
+                    "http"
+                  ],
+                  "middleware": [
+                    {
+                      "module": "redirect",
+                      "params": {
+                        "status": 308,
+                        "to": "https://{host}{uri}"
+                      }
+                    }
+                  ],
+                  "handler": {
+                    "module": "respond"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "config_propose",
+          "args": {
+            "summary": "No proxy to the metadata service",
+            "ops": [
+              {
+                "op": "remove",
+                "path": "/routes/4"
+              },
+              {
+                "op": "remove",
+                "path": "/upstreams/2"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "Findings, the most severe first:\n\n- **high** `routes[2]` (admin-panel): /admin/ reaches the back office for anyone, with no auth and no remote_ip match. Fix: add a remote_ip match for your office or VPN, or basic_auth.\n- **high** `routes[4]` (cloud-info): /cloud/ proxies to 169.254.169.254, the cloud's metadata service, for anyone: its credentials are one request away. Fix: remove the route and the upstream metadata.\n- **medium** `admin.console.address` (0.0.0.0:2020): the console listens on every address; TLS protects the passwords, but anyone can try them. Fix: listen on 127.0.0.1 or a VPN address, in the file; admin changes at a restart.\n- **medium** `listeners[0]` (http): shop.example.com is served in plain HTTP on :80 as well as HTTPS, with no redirect. Fix: serve the routes on https only, and redirect http to HTTPS.\n- **medium** `routes[3]` (uploads): no body_limit, and `limits.max_body_bytes` is raised to 4 GiB. Fix: put limits back to the default and give uploads a body_limit.\n- **medium** `routes[1]` (login): logins have no rate_limit, so passwords can be guessed fast. Fix: a rate_limit of a few requests a second by address.\n- **low** `media_auth[0].tokens[0].token` (tv): a token is written in the config. Fix: write its token_sha256 instead, in the file.\n\nChecked and fine: the upstreams' timeouts are the defaults, no static files are served, and no TLS setting is weakened.\n\nI proposed the fixes I can make, one step each; the console's address and the token are yours to change in the file."
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+# traefik.yml: the static config.
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+certificatesResolvers:
+  le:
+    acme:
+      email: ops@example.com
+      storage: /data/acme.json
+      httpChallenge:
+        entryPoint: web
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+---
+# dynamic.yml: routers, middlewares and services.
+http:
+  routers:
+    app:
+      rule: Host(`app.example.com`)
+      entryPoints: [websecure]
+      service: app
+      tls:
+        certResolver: le
+    app-api:
+      rule: Host(`app.example.com`) && PathPrefix(`/api`)
+      entryPoints: [websecure]
+      service: api
+      middlewares: [api-strip, api-ratelimit]
+      tls:
+        certResolver: le
+    grafana:
+      rule: Host(`grafana.example.com`)
+      entryPoints: [websecure]
+      service: grafana
+      middlewares: [office-only, geoblock]
+      tls:
+        certResolver: le
+  middlewares:
+    api-strip:
+      stripPrefix:
+        prefixes: [/api]
+    api-ratelimit:
+      rateLimit:
+        average: 50
+        burst: 100
+    office-only:
+      ipAllowList:
+        sourceRange: [10.8.0.0/16]
+    geoblock:
+      plugin:
+        geoblock:
+          allowedCountries: [DE, FR]
+  services:
+    app:
+      loadBalancer:
+        servers:
+          - url: http://10.0.3.10:8080
+          - url: http://10.0.3.11:8080
+        healthCheck:
+          path: /health
+          interval: 10s
+    api:
+      loadBalancer:
+        servers:
+          - url: http://10.0.3.20:9000
+    grafana:
+      loadBalancer:
+        servers:
+          - url: http://10.0.3.30:3000

@@ -1,0 +1,26 @@
+# docker-compose.yml: two services Traefik routes by their labels, on its
+# entry point web, which listens on :80.
+services:
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.rule=Host(`whoami.example.com`) && PathPrefix(`/v2`)
+      - traefik.http.routers.whoami.entrypoints=web
+      - traefik.http.routers.whoami.middlewares=whoami-headers,whoami-auth
+      - traefik.http.services.whoami.loadbalancer.server.port=8080
+      - traefik.http.middlewares.whoami-headers.headers.customresponseheaders.X-Served-By=edge
+      - traefik.http.middlewares.whoami-auth.forwardauth.address=http://auth:4181/verify
+  status:
+    image: nginx
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.status.rule=Host(`status.example.com`)
+      - traefik.http.routers.status.entrypoints=web
+      - traefik.http.routers.status.middlewares=status-errors
+      - traefik.http.services.status.loadbalancer.server.port=80
+      - traefik.http.middlewares.status-errors.errors.status=500-599
+      - traefik.http.middlewares.status-errors.errors.service=status
+      - traefik.http.middlewares.status-errors.errors.query=/{status}.html
+  auth:
+    image: thomseddon/traefik-forward-auth

@@ -1,0 +1,77 @@
+{
+  "config": "fit.json",
+  "certificates": [
+    {
+      "listener": "https",
+      "names": [
+        "api.example.com"
+      ],
+      "days": 5
+    },
+    {
+      "listener": "partners",
+      "names": [
+        "partners.example.com"
+      ],
+      "days": 200
+    }
+  ],
+  "findings": [
+    {
+      "id": "certificate-expiring",
+      "severity": "high",
+      "members": [
+        "listeners[1]"
+      ],
+      "mentions": [
+        "api.example.com",
+        "expir"
+      ]
+    },
+    {
+      "id": "client-auth-optional",
+      "severity": "high",
+      "members": [
+        "listeners[2]",
+        "routes[4]"
+      ],
+      "mentions": [
+        "verify_if_given",
+        "partners"
+      ]
+    },
+    {
+      "id": "trusted-proxies-everyone",
+      "severity": "medium",
+      "members": [
+        "routes[1]"
+      ],
+      "mentions": [
+        "trusted_proxies"
+      ]
+    },
+    {
+      "id": "browse-and-dotfiles",
+      "severity": "medium",
+      "members": [
+        "routes[3]"
+      ],
+      "mentions": [
+        "dotfiles",
+        "browse"
+      ]
+    },
+    {
+      "id": "long-timeouts",
+      "severity": "low",
+      "members": [
+        "upstreams[1]",
+        "routes[2]"
+      ],
+      "mentions": [
+        "reports",
+        "response_timeout"
+      ]
+    }
+  ]
+}

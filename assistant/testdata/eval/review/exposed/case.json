@@ -1,0 +1,90 @@
+{
+  "config": "fit.json",
+  "certificates": [
+    {
+      "listener": "https",
+      "names": [
+        "shop.example.com"
+      ],
+      "days": 70
+    }
+  ],
+  "findings": [
+    {
+      "id": "console-everywhere",
+      "severity": "medium",
+      "members": [
+        "admin.console"
+      ],
+      "mentions": [
+        "0.0.0.0"
+      ]
+    },
+    {
+      "id": "plain-http-without-redirect",
+      "severity": "medium",
+      "members": [
+        "listeners[0]",
+        "routes[0]"
+      ],
+      "mentions": [
+        "redirect",
+        "plain"
+      ]
+    },
+    {
+      "id": "admin-route-without-auth",
+      "severity": "high",
+      "members": [
+        "routes[2]"
+      ],
+      "mentions": [
+        "admin-panel"
+      ]
+    },
+    {
+      "id": "uploads-unbounded",
+      "severity": "medium",
+      "members": [
+        "routes[3]",
+        "limits"
+      ],
+      "mentions": [
+        "uploads"
+      ]
+    },
+    {
+      "id": "login-without-rate-limit",
+      "severity": "medium",
+      "members": [
+        "routes[1]"
+      ],
+      "mentions": [
+        "login"
+      ]
+    },
+    {
+      "id": "metadata-for-anyone",
+      "severity": "high",
+      "members": [
+        "routes[4]",
+        "upstreams[2]"
+      ],
+      "mentions": [
+        "169.254.169.254",
+        "cloud-info",
+        "metadata"
+      ]
+    },
+    {
+      "id": "token-in-config",
+      "severity": "low",
+      "members": [
+        "media_auth[0]"
+      ],
+      "mentions": [
+        "token"
+      ]
+    }
+  ]
+}

@@ -4,7 +4,8 @@
 
 fit 借鉴了 Traefik 的 provider（把 Docker 标签、Consul 服务目录、KV 存储和 Kubernetes 资源变成路由）和中间件，并增加了
 静态文件服务、缓存，以及更小的每连接开销。没有转换器；本指南给出 Traefik 各部分与 fit 的对应，每个字段见
-[配置参考](reference/config.zh-CN.md)。
+[配置参考](reference/config.zh-CN.md)。工作台助手的技能 `migrate` 会按这一对应自行转换 Traefik 的 YAML 或 Docker
+标签，生成一个提案，并列出无法迁移的项（见[控制台](console.zh-CN.md#迁移与安全审查)）。
 
 ## 各部分的对应
 

@@ -1,0 +1,73 @@
+{
+  "from": "traefik",
+  "source": "source.yaml",
+  "routes": [
+    {
+      "port": 443,
+      "host": "app.example.com",
+      "path": "/dashboard",
+      "want": {
+        "upstream": [
+          "10.0.3.10:8080",
+          "10.0.3.11:8080"
+        ],
+        "contains": [
+          "/health"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "app.example.com",
+      "path": "/api/v1/users",
+      "want": {
+        "upstream": [
+          "10.0.3.20:9000"
+        ],
+        "contains": [
+          "strip_prefix",
+          "rate_limit"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "grafana.example.com",
+      "path": "/",
+      "remote": "10.8.4.2",
+      "want": {
+        "upstream": [
+          "10.0.3.30:3000"
+        ]
+      }
+    },
+    {
+      "port": 443,
+      "host": "grafana.example.com",
+      "path": "/",
+      "remote": "203.0.113.9",
+      "want": {
+        "denied": true
+      }
+    },
+    {
+      "port": 80,
+      "host": "app.example.com",
+      "path": "/dashboard",
+      "want": {
+        "redirect": "https://"
+      }
+    },
+    {
+      "port": 8080,
+      "host": "localhost",
+      "path": "/healthz",
+      "want": {
+        "module": "respond"
+      }
+    }
+  ],
+  "unconverted": [
+    "geoblock|plugin"
+  ]
+}

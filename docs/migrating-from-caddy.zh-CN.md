@@ -5,7 +5,8 @@
 fit 与 Caddy 理念相同：默认 HTTPS、严格的结构化配置，以及原子替换配置的 Admin API。不同在于内置了什么（缓存、限流、
 四层代理，Caddy 把它们留给插件），以及每个连接的开销更小。fit 自己的配置格式 [.conf 文件](reference/fit.zh-CN.md) 像
 Caddyfile 一样由指令块组成，每组域名一个 `site`，但指令就是 fit 自己的字段。`fit adapt` 可以把 Caddyfile 的常用子集转换成
-.conf 文件作为起点；没有从 Caddy JSON 的转换器。本指南给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。
+.conf 文件作为起点；没有从 Caddy JSON 的转换器。本指南给出两者的对应，每个字段见 [配置参考](reference/config.zh-CN.md)。工作台助手的技能 `migrate` 也能转换
+Caddyfile：先用转换器，再处理它剩下的内容，生成一个提案，并列出无法迁移的项（见[控制台](console.zh-CN.md#迁移与安全审查)）。
 
 ## 一个站点
 

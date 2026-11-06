@@ -145,7 +145,10 @@ type ProposalView struct {
 	Fixes        []FixRef          `json:"fixes,omitempty"`
 	Rollback     uint64            `json:"rollback,omitempty"`
 	Purges       []PurgeStep       `json:"purges,omitempty"`
-	Error        string            `json:"error,omitempty"`
+	// Unconverted is what the steps say they did not carry over from a
+	// config moved from another server.
+	Unconverted []string `json:"unconverted,omitempty"`
+	Error       string   `json:"error,omitempty"`
 	// Level is the viewer's, and CanApply whether that level applies.
 	Level    string `json:"level"`
 	CanApply bool   `json:"can_apply"`
@@ -175,6 +178,9 @@ func (a *Assistant) viewFrom(ctx context.Context, user, conv string, p *Proposal
 		st.Args = json.RawMessage(red.text(string(st.Args)))
 		st.Summary = red.text(st.Summary)
 		v.Steps = append(v.Steps, stepView{ProposalStep: st, Error: b.stepErrs[i]})
+	}
+	for _, it := range unconverted(p.Steps) {
+		v.Unconverted = append(v.Unconverted, red.text(it))
 	}
 	for _, f := range diffFormats {
 		d, err := a.diff(ctx, b, f)

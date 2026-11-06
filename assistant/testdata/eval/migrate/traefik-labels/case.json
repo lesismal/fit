@@ -1,0 +1,50 @@
+{
+  "from": "traefik",
+  "source": "source.yaml",
+  "routes": [
+    {
+      "port": 80,
+      "host": "whoami.example.com",
+      "path": "/v2/api",
+      "want": {
+        "upstream": [
+          "whoami:8080"
+        ],
+        "contains": [
+          "forward_auth",
+          "auth:4181",
+          "X-Served-By"
+        ]
+      }
+    },
+    {
+      "port": 80,
+      "host": "whoami.example.com",
+      "path": "/v1/api",
+      "want": {
+        "denied": true
+      }
+    },
+    {
+      "port": 80,
+      "host": "status.example.com",
+      "path": "/",
+      "want": {
+        "upstream": [
+          "status:80"
+        ]
+      }
+    },
+    {
+      "port": 8080,
+      "host": "localhost",
+      "path": "/healthz",
+      "want": {
+        "module": "respond"
+      }
+    }
+  ],
+  "unconverted": [
+    "errors"
+  ]
+}
