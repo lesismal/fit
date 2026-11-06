@@ -229,6 +229,7 @@ type Admin struct {
 	Store            *Store     `json:"store,omitempty" doc:"Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file."`
 	Console          *Console   `json:"console,omitempty" doc:"Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out."`
 	Assistant        *Assistant `json:"assistant,omitempty" doc:"The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included."`
+	Cluster          *Cluster   `json:"cluster,omitempty" doc:"Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033."`
 
 	At Value `json:"-" fit:"self"`
 }

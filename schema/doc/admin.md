@@ -40,6 +40,12 @@ any Chat Completions server, or this fit's `llm.proxy`), its limits and each con
 the Settings page keeps them, with the keys, in the store; its `mcp` serves the assistant to
 outside agents over MCP at `/mcp` on the console's address, with tokens users make on the MCP page. See
 [the assistant](../console.md#the-assistant) and [decision 031](../decisions/031-assistant.md).
+`admin.cluster`, off when left out, makes this fit a manager of others: their addresses and
+credentials are kept in the store, each one's `GET /node`, `/status` and `/config/check` read every
+`poll_interval` through its console or its Admin API, and their states served in the console as the
+module `cluster`; it needs `store` and `console`. See
+[managing other fits](../console.md#managing-other-fits) and
+[decision 033](../decisions/033-cluster-management.md).
 
 ```json
 {

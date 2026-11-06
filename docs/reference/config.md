@@ -32,7 +32,7 @@ a config against it and more.
 - [Telemetry](#telemetry): [`telemetry`](#config-telemetry), [`telemetry.traces`](#config-tracesexport), [`telemetry.metrics`](#config-metricsexport)
 - [Limits](#limits): [`limits`](#config-limits)
 - [Engine](#engine): [`engine`](#config-engine)
-- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp)
+- [Admin API](#admin-api): [`admin`](#config-admin), [`admin.store`](#config-store), [`admin.console`](#config-console), [`admin.console.users[]`](#config-consoleuser), [`admin.assistant`](#config-assistant), [`admin.assistant.providers[]`](#config-assistantprovider), [`admin.assistant.providers[].models[]`](#config-assistantmodel), [`admin.assistant.default_model`](#config-assistantmodelref), [`admin.assistant.params`](#config-assistantparams), [`admin.assistant.limits`](#config-assistantlimits), [`admin.assistant.data`](#config-assistantdata), [`admin.assistant.users[]`](#config-assistantuser), [`admin.assistant.mcp`](#config-assistantmcp), [`admin.cluster`](#config-cluster)
 - [HTTPS by default](#https-by-default): [`auto_https`](#config-autohttps)
 - [Metrics](#metrics): [`metrics`](#config-metrics)
 - [Profiling](#pprof): [`pprof`](#config-pprof)
@@ -1269,6 +1269,12 @@ any Chat Completions server, or this fit's `llm.proxy`), its limits and each con
 the Settings page keeps them, with the keys, in the store; its `mcp` serves the assistant to
 outside agents over MCP at `/mcp` on the console's address, with tokens users make on the MCP page. See
 [the assistant](../console.md#the-assistant) and [decision 031](../decisions/031-assistant.md).
+`admin.cluster`, off when left out, makes this fit a manager of others: their addresses and
+credentials are kept in the store, each one's `GET /node`, `/status` and `/config/check` read every
+`poll_interval` through its console or its Admin API, and their states served in the console as the
+module `cluster`; it needs `store` and `console`. See
+[managing other fits](../console.md#managing-other-fits) and
+[decision 033](../decisions/033-cluster-management.md).
 
 In a .conf file:
 
@@ -1350,6 +1356,7 @@ In JSON:
 | `store` | [object](#config-store) |  | Keep the config encrypted in a file of its own, the store, which is the base config fit runs from then on: every config applied is written to it, and what this file sets beside admin is only the store's first content, used when the store does not exist yet. Left out, the config lives in this file. |
 | `console` | [object](#config-console) |  | Serve the console, web pages behind a user name and password from which the whole config, admin aside, is read and changed; off when left out. |
 | `assistant` | [object](#config-assistant) |  | The workbench's assistant, a chat beside the console's pages that reads what fit does and drafts changes for a person to submit, calling the model APIs set here; off when left out, and then nothing is sent anywhere. Needs console. With a store, these settings are the first ones only: once the Settings page saves, the store's are used, keys included. |
+| `cluster` | [object](#config-cluster) |  | Manage other fits from this one, the manager: their addresses and credentials, added on the workbench's Cluster pages, are kept in the store, and each one's state is read every poll_interval. Off when left out, and then nothing is called. Needs store and console. See decision 033. |
 
 <a id="config-store"></a>
 
@@ -1501,6 +1508,18 @@ Also at `llm.hub.console.users[]`.
 | `max_request_bytes` | integer, 0 to 8388608 | `1048576` | The most bytes of a request's body, beside the console's own bound. 1 MiB when left out or 0. |
 | `max_concurrent_calls` | integer, 0 to 64 | `4` | The most requests of one token served at once; one more is answered 429. 4 when left out or 0. |
 | `max_calls_per_minute` | integer, 0 to 6000 | `120` | The most requests of one token in a minute; past it they are answered 429 until the minute's share comes back. 120 when left out or 0. |
+
+<a id="config-cluster"></a>
+
+### `admin.cluster`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `poll_interval` | duration | `"10s"` | How often each member's GET /node, /status and /config/check are read. 10s when left out; 1s at least. |
+| `timeout` | duration | `"10s"` | The longest one call to a member may take, from its connect to the last byte of its answer; the connect and the wait for the answer's header are bounded by it too. 10s when left out; 1s at least. |
+| `max_nodes` | integer, 0 to 10000 | `256` | The most members the manager keeps; one more is refused. 256 when left out or 0. |
+| `max_concurrency` | integer, 0 to 256 | `8` | The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0. |
+| `max_response_bytes` | integer, 0 to 67108864 | `4194304` | The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least. |
 
 <a id="https-by-default"></a>
 

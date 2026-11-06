@@ -643,6 +643,38 @@
         // "max_calls_per_minute": 120,
       // },
     // },
+
+    // // Manage other fits from this one, the manager: their addresses and credentials, added on the
+    // // workbench's Cluster pages, are kept in the store, and each one's state is read every
+    // // poll_interval. Off when left out, and then nothing is called. Needs store and console. See
+    // // decision 033.
+    // // object.
+    // "cluster": {
+      // // How often each member's GET /node, /status and /config/check are read. 10s when left out; 1s
+      // // at least.
+      // // duration, as "1.5s" or "2m"; default "10s".
+      // "poll_interval": "10s",
+
+      // // The longest one call to a member may take, from its connect to the last byte of its answer;
+      // // the connect and the wait for the answer's header are bounded by it too. 10s when left out;
+      // // 1s at least.
+      // // duration, as "1.5s" or "2m"; default "10s".
+      // "timeout": "10s",
+
+      // // The most members the manager keeps; one more is refused. 256 when left out or 0.
+      // // integer, 0 to 10000; default 256.
+      // "max_nodes": 256,
+
+      // // The most members polled at once; the others wait for their turn. Tests from the pages run
+      // // beside them, 4 at most. 8 when left out or 0.
+      // // integer, 0 to 256; default 8.
+      // "max_concurrency": 8,
+
+      // // The largest answer read from a member; a larger one fails its call, and is reported as too
+      // // large. 4 MiB when left out or 0; 16 KiB at least.
+      // // integer, 0 to 67108864; default 4194304.
+      // "max_response_bytes": 4194304,
+    // },
   // },
 
   // Count and time requests by listener and route, for the Admin API's /metrics, which serves
