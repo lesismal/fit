@@ -46,7 +46,10 @@
       '把一个成员当前的顶层成员（整体）以及按名称的路由、上游、监听与服务（含密钥）复制到其他成员。'],
     ['ro.template', 'Template', '模板'], ['ro.group', 'Group', '分组'], ['ro.nodes', 'Members', '成员'], ['ro.from', 'Copied from', '复制来源'],
     ['ro.paths', 'Parts', '部分'], ['ro.paths.hint', 'One a line, as log or routes[api].', '每行一个，如 log 或 routes[api]。'],
-    ['ro.anygroup', 'Every member', '全部成员'], ['ro.allof', 'All of its members', '其全部成员'], ['ro.desc', 'Description', '说明'],
+    ['ro.anygroup', 'Every member', '全部成员'], ['ro.desc', 'Description', '说明'],
+    ['ro.nodes.template', 'None picked: every member of the template\'s groups.', '未选择时：模板所在分组的全部成员。'],
+    ['ro.nodes.sync', 'None picked: the group\'s members, or every member.', '未选择时：分组的成员，或全部成员。'],
+    ['ro.nodes.copy', 'The members it is copied to; none picked: the group\'s.', '复制到的成员；未选择时：分组的成员。'],
     ['ro.plan', 'Plan', '规划'], ['ro.planning', 'Planning: each member is read, its desired config made, and checked by its own dry run…',
       '规划中：读取每个成员、生成期望配置，并由其自己的试运行检查……'],
     // States / 状态
@@ -197,17 +200,19 @@
       var picked = {};
       (q.nodes ? q.nodes.split(',') : []).forEach(function (n) { picked[n] = true; });
       var nodes = h('div.cl-chips', names.map(function (n) {
-        var c = h('input', { type: 'checkbox', checked: !!picked[n] });
+        var c = h('input', { type: 'checkbox', checked: !!picked[n], 'aria-label': n });
         c.addEventListener('change', function () { picked[n] = c.checked; });
         return h('label.cl-chip.tp-pick', c, ' ', n);
       }));
       var desc = h('input.input', { name: 'rollout-description', autocomplete: 'off', maxlength: 512 });
       var err = h('div.callout.callout--danger', { hidden: true });
       var fTpl = UI.field(t('ro.template'), tpl), fGroup = UI.field(t('ro.group'), group), fFrom = UI.field(t('ro.from'), from);
-      var fPaths = UI.field(t('ro.paths'), paths, t('ro.paths.hint')), fNodes = UI.field(t('ro.nodes'), nodes, t('ro.allof'));
+      var nodesHint = h('span.field__hint');
+      var fPaths = UI.field(t('ro.paths'), paths, t('ro.paths.hint')), fNodes = h('label.field', h('span.field__label', t('ro.nodes')), nodes, nodesHint);
       function sync() {
         var k = kind.value;
         kindHint.textContent = t('ro.k.' + k + '.hint');
+        nodesHint.textContent = t('ro.nodes.' + k);
         fTpl.hidden = k !== 'template'; fFrom.hidden = fPaths.hidden = k !== 'copy'; fGroup.hidden = k === 'template';
       }
       kind.addEventListener('change', sync);
