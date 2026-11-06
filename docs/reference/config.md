@@ -1277,9 +1277,9 @@ outside agents over MCP at `/mcp` on the console's address, with tokens users ma
 `admin.cluster`, off when left out, makes this fit a manager of others: their addresses and
 credentials are kept in the store, each one's `GET /node`, `/status` and `/config/check` read every
 `poll_interval` through its console or its Admin API, and their states served in the console as the
-module `cluster`; it needs `store` and `console`. See
-[managing other fits](../console.md#managing-other-fits) and
-[decision 033](../decisions/033-cluster-management.md).
+module `cluster`, whose Cluster pages add, test and trust them; it needs `console`, and a store:
+`store`, or the one `fit run -admin` keeps beside the config. See
+[cluster management](../cluster.md) and [decision 033](../decisions/033-cluster-management.md).
 
 In a .conf file:
 

@@ -952,77 +952,13 @@ saved with the assistant's through `PUT /api/m/ai/settings`.
 
 ## Managing other fits
 
-A fit with `admin.cluster` is a **manager**: it keeps the address and an administrator's
-credentials of other fits, its **members**, reads each one's state, and serves them to the
-workbench as the console module `cluster`. The manager is not in the data path: members serve from
-their own configs whether it runs or not. The design is
-[decision 033](decisions/033-cluster-management.md); the workbench's Cluster pages come with the
-next iterations, on the endpoints below.
-
-```json
-{"admin": {
-  "store": {"path": "/var/lib/fit/manager.store", "password_env": "FIT_STORE_PASSWORD"},
-  "console": {"address": "127.0.0.1:2020", "users": [{"username": "admin", "password_hash": "$2a$10$..."}]},
-  "cluster": {"poll_interval": "10s", "timeout": "10s", "max_nodes": 256, "max_concurrency": 8, "max_response_bytes": 4194304}
-}}
-```
-
-`admin.cluster` needs `admin.store`, which keeps the members with their passwords and tokens in its
-section `cluster`, encrypted with the rest of the store and left out of its exports, and
-`admin.console`, which serves them. A member is reached one of two ways:
-
-- **`console`**: its console's user name and password. The manager logs in with
-  `POST /api/login`, keeps the session's cookie and CSRF token, reads the Admin API through the
-  console (`/api/node`, `/api/m/admin/status`, `/api/m/admin/config/check`), and logs in again
-  when a call answers 401, as after the member restarted or the session's lifetime ended. A
-  refused login is not sent again for a minute, doubling to 15 minutes, unless the member is
-  changed or tested, so that a wrong password never locks the member's users out; a login the
-  member rate-limits waits what its `Retry-After` asks. A console that asks for its temporary
-  password to be changed is reported, and its session logged out: the manager never changes a
-  member's password.
-- **`admin_api`**: its Admin API's bearer token, at the Admin API's own address (`/node`,
-  `/status`, `/config/check`).
-
-A member's URL is `https`, or `http` to a loopback address only, so that no credential crosses a
-network in the clear; it may carry a path, for a member behind a proxy. Its certificate is
-verified by the system's CAs, by `tls.ca` (a PEM of the CAs to trust), or by `tls.fingerprint`
-(the SHA-256 of its leaf certificate, pinned once a person confirmed it); there is no setting that
-trusts any certificate.
-
-Every `poll_interval`, at most `max_concurrency` members at once, the poller reads each member's
-`GET /node`, then `/status` and `/config/check` when its capabilities list them. Every call goes
-out on fib's asynchronous HTTP client, never blocking a worker, with `timeout` bounding the
-connect, the wait for the answer's header and the whole call, and `max_response_bytes` bounding
-each answer. A member's state keeps how its last poll went (`status`: `up`, `down`, `error` or
-`unknown` before the first; `error` with its `kind` and message; `reachable`, `failures` in a row,
-`polled`, `seen`, `since`) and what the last poll that read it found, kept while it is down: its
-node (ID, host, fit, fib and Go versions, uptime, roles, schema digest, capabilities), its
-running config (version, ETag, applied, source), reloads, connections, upstreams with their
-backends down, its certificates with the nearest expiry, its drift count, the latency of its
-`/node`, and the certificate it presented. Each failure has a kind of its own: `unreachable`,
-`timeout`, `tls_untrusted` (with the certificate, whose fingerprint may be pinned),
-`tls_pin_mismatch`, `tls`, `auth_failed`, `rate_limited`, `password_change_required`,
-`forbidden`, `unsupported` (a fit before `GET /node`), `http_status`, `bad_answer` and
-`too_large`.
-
-The module's endpoints, under `/api/m/cluster/`, behind the console's login and CSRF token:
-
-| Endpoint | What it does |
-| --- | --- |
-| `GET nodes` | the members, `{"version", "max_nodes", "read_only", "nodes"}`, with an `ETag`; a member's credentials only as `password_set` and `token_set` |
-| `POST nodes` | adds a member: `{"name", "labels", "url", "access", "username", "password", "token", "tls": {"ca", "fingerprint"}}`; `201`; `400` with `{"field", "error"}`, `409` for a name taken or `max_nodes` reached |
-| `GET nodes/<name>` | the member and its `state` |
-| `PUT nodes/<name>` | replaces it, a new `name` renaming it; a password or token left empty keeps the one kept |
-| `DELETE nodes/<name>` | removes it, logging its session out |
-| `POST nodes/<name>/test` | tests the member as kept, or as the body would change it, without saving it: `{"ok", "error", "latency_ms", "certificate", "node", "must_change_password"}`; `certificate` holds the fingerprint a person confirms before pinning it |
-| `POST test` | tests a member not added yet, as the body has it |
-| `GET state` | every member's state: `{"interval_ms", "timeout_ms", "read_only", "nodes"}` |
-| `GET audit` | the manager's changes: who, when, which member, what changed (credentials by name only) |
-
-A change sent with `If-Match` and an ETag that is no longer the members' is refused `412`. At most
-4 tests run at once; one more is `429`. No answer, page or log line holds a password, a token or a
-member's session cookie. A store whose `cluster` section a newer fit wrote is shown and never
-written over: the manager is then read-only.
+A fit with `admin.cluster` is a **manager** of other fits, its members: it keeps their addresses and
+an administrator's credentials in its store, reads each one's state, and shows them in the
+workbench's **Cluster** menu (Overview, Nodes and a page per member), served as the console module
+`cluster`. `fit run -admin` with a config of `admin.cluster` alone runs one.
+[Cluster management](cluster.md) describes the pages, how members are reached and trusted, what can
+go wrong with each, the module's API, and how to reach members behind NAT; the design is
+[decision 033](decisions/033-cluster-management.md).
 
 ## Roles' pages
 
