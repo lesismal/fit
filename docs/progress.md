@@ -6234,3 +6234,29 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   hold such items to a frame's gap.
 - **Gaps**: a codec change between items makes RTSP players drop and is not renegotiated over WHEP. The
   decisions made are in the plan's I134 section, pending review.
+
+
+### I135 Playback URLs that expire — done
+
+- **`media_auth.url_signing`**: URLs signed for one viewer and one resource (`/vod/<library>/<id>/`, a
+  stream's `/hls/…/`, `/live/cam/` for `.flv`), carrying `exp`, `kid`, `ip` (the address, or its /24 or
+  /64), `sid`, `sub` and `sig`, a truncated HMAC-SHA256; `vod`, `hls` and `httpflv` (channels included)
+  check them on the worker without a callback and without allocating.
+- **Grants**: a playlist hands what it lists a grant of its own, living `play_grace` past the later of
+  the URL's expiry and the item's end, in the query or as the cookie `fit_media_grant`, never renewed.
+  `max_sessions` a subject with `on_limit` (`refuse` or `end_oldest`), bounded by
+  `max_tracked_sessions`; `referers`, `origins` and `trusted_proxies`; rotating a key refuses what it
+  signed.
+- **`media_tokens`**: `POST <prefix>/urls` names a viewer (subject, address, session), the paths and a
+  ttl, and answers the URLs whole (`url_base`, `url_prefixes`). Tokens and signatures are `REDACTED` in
+  the access log however a request is answered; refusals carry the route's CORS.
+- **Tests**: expiry with an injected clock, a resource changed in any byte, another item, address and
+  subnet, `max_sessions: 2` refusing or ending the oldest, key rotation, cookies, referers and origins;
+  `TestSignedURLAccessLog`; `make test-changed` under the race detector; `mediaauth` 98.9%. hls.js
+  1.5.20 in Chromium on the benchmark host plays every item through URLs from `/urls`: 401 without one,
+  403 for one expired, and playing on through the grant after a seek. A cached segment on the
+  benchmark host: open and token requests unchanged (6.13 to 6.03 µs, 6.77 to 6.92 µs, not
+  significant), signed 7.63 µs.
+- **Gaps**: sessions are counted by each fit alone; RTMP, RTSP, SRT and WHEP take no signed URLs;
+  Safari's player was not tried again by hand. The decisions made are in the plan's I135 section,
+  pending review.

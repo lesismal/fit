@@ -280,7 +280,7 @@ I01 建立、后续迭代逐步填充的结构。名字可以调整，但每个�
 | I132 | 媒体库：扫描 `media_library` 的根目录生成条目目录（轨道、编码、多码率、字幕、海报），在有上限的文件池上探测，Admin API | I131 | done |
 | I133 | 点播：处理器 `vod`，从样本表按关键帧切分的 HLS（fMP4 或 MPEG-TS）、多码率、音轨与字幕组、Range、`auth` | I132 | done |
 | I134 | 频道：媒体库条目作为直播流推入 hub，按顺序、循环或排期；`push` 到外部 RTMP 和 SRT 服务器 | I132 | done |
-| I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | todo |
+| I135 | 会过期的播放 URL：绑定资源、地址或会话的 `url_signing`，授权传递到分片，`media_tokens` 的 `POST <prefix>/urls`，`max_sessions` | I119, I133 | done |
 | I136 | 加密分片：AES-128 HLS，密钥只提供给持有该资源授权的请求 | I135 | todo |
 | I137 | 影视站端到端：示例、`media_pages` 的媒体库与播放页面、文档 | I134, I135 | todo |
 | I138 | workbench 的媒体库页面：菜单条目、配置页面、带预览的媒体库浏览、时间线上的频道、推流目标、测试 URL、密钥与当前会话、指标 | I135, I123 | todo |
@@ -2111,6 +2111,27 @@ URL：由影视站的 API 为某个观众、某个片子签发，fit 在每个�
   另一个条目，或路径改动任何一个字节，都被拒绝；绑定地址的 URL 从其他地址访问被拒绝；`max_sessions: 2` 时第三个会话被拒绝，或结束最早的；
   轮换密钥只拒绝它签发的 URL；访问日志显示 `REDACTED`；在 race 检测下通过。
 - **涉及**：`mediaauth`、`handler/vod`、`handler/mediatokens`、`streaming`、`config`、`schema`、`docs`、`test/workers`。
+
+**待审查的决策**（实现时所做，2026-11-06；在用户裁定前按此执行）：
+
+1. **资源** 是路径到最后一个 `/` 为止（`/x/cam.flv` 即 `/x/cam/`），各处理器按自己算出的资源检查。备选：签名流名，但那样 URL 不绑定路由。
+2. **每个 URL 都带 `sub`**，用于按主体统计会话并在访问日志中给出用户；文档建议用不透明的 ID。备选：哈希后的主体，I138 的会话列表就
+   无法显示。
+3. **子授权的有效期** 为 URL 过期时间与“现在加条目时长”中较晚者，再加 `play_grace`，并由用它获取的播放列表原样传递，泄露的授权无法
+   续期；直播流为过期时间加 `play_grace`。
+4. **签名** 为 16 字节的 HMAC-SHA256（约 160 字节查询参数），所用密钥与 token 密钥分开派生，token 的 MAC 永远不会被当作 URL 的签名
+   通过；只有一个 secret 时省略 `kid`。
+5. **默认值**：`ttl` 10 分钟、`play_grace` 30 分钟、`session_idle` 2 分钟、`max_tracked_sessions` 100,000，每秒最多清扫一次；超出上限时
+   新会话回答 503。
+6. **每次 `/urls` 请求一个观众**，最多 `max_tokens` 个路径，未给出时随机生成 `sid`，路径前加 `url_base`。备选：批量观众。
+7. **Cookie**：cookie 模式只把授权放在 cookie 中，使播放列表仍可缓存；cookie 在 TLS 下为 `Secure; SameSite=None`，否则为 `SameSite=Lax`；
+   应答 URL 授权的播放列表带 `private, no-store`。
+8. **`referers` 与 `origins`** 是来源模式；没有该请求头的请求放行。
+9. **URL 被拒** 时回答 403 并在正文中给出原因，按原因计数；请求同时带有 token 或 Basic 时，错误的 cookie 退回到那些检查。
+10. **脱敏** 放在 `vod`、`hls` 与 `httpflv` 的最前面，顺带修复了提前应答时把 `?token=` 记入日志的问题；拒绝时现在带上处理器的 `cors`。
+11. **I133 的 `TestPoolGivesUp`** 在负载下约十次失败一次，现在先等池排空。
+12. **互通测试框架**（`test/docker/vod`）经 `url_signing` 提供服务，`max_sessions` 为 1 且 `end_oldest`；`LOCK` 是 `e2e.sh` 的新选项，
+    `collector.py` 代表网站的 API。
 
 ### I136 加密分片
 

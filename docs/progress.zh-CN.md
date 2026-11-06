@@ -4422,3 +4422,21 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   一个包比较，HLS 在不连续点前后保持解码时间。fit 已移到该提交，频道测试把这类条目的间隙限制在一帧以内。
 - **缺口**：条目之间换编解码器时 RTSP 播放器会断开，WHEP 不会重新
   协商。实现时所做的决策在计划的 I134 一节，待审查。
+
+
+### I135 会过期的播放 URL — 已完成
+
+- **`media_auth.url_signing`**：为一个观众与一个资源（`/vod/<library>/<id>/`、流的 `/hls/…/`、`.flv` 的 `/live/cam/`）签名的 URL，带 `exp`、
+  `kid`、`ip`（地址，或其 /24、/64）、`sid`、`sub` 与截断的 HMAC-SHA256 `sig`；`vod`、`hls` 与 `httpflv`（含频道）在 worker 上检查，不回调，
+  不分配内存。
+- **授权**：播放列表为其中列出的内容发放自己的授权，有效期为 URL 过期与条目结束中较晚者再加 `play_grace`，放在查询参数或 cookie
+  `fit_media_grant` 中，从不续期。按主体的 `max_sessions` 与 `on_limit`（`refuse` 或 `end_oldest`），受 `max_tracked_sessions` 限制；
+  `referers`、`origins` 与 `trusted_proxies`；轮换密钥会拒绝它签过的 URL。
+- **`media_tokens`**：`POST <prefix>/urls` 指定观众（主体、地址、会话）、路径与 ttl，返回完整的 URL（`url_base`、`url_prefixes`）。无论请求如何
+  应答，token 与签名在访问日志中都是 `REDACTED`；拒绝时带路由的 CORS。
+- **测试**：用注入的时钟测试过期，资源任一字节被改、另一个条目、地址与子网、`max_sessions: 2` 拒绝或结束最早的会话、轮换密钥、cookie、
+  referers 与 origins；`TestSignedURLAccessLog`；竞态检测下的 `make test-changed`；`mediaauth` 覆盖率 98.9%。基准机上 Chromium 中的 hls.js
+  1.5.20 用 `/urls` 给出的 URL 播放每个条目：没有 URL 时 401，过期时 403，跳转后靠授权继续播放。基准机上的缓存分段：开放与 token 请求
+  不变（6.13 到 6.03 µs，6.77 到 6.92 µs，不显著），签名请求 7.63 µs。
+- **缺口**：会话按每个 fit 各自计数；RTMP、RTSP、SRT 与 WHEP 不接受签名 URL；没有再次手工试用 Safari 的播放器。实现时所做的决策在计划的
+  I135 一节，待审查。

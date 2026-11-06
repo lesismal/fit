@@ -290,7 +290,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | done |
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | done |
 | I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | done |
-| I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
+| I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | done |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
 | I138 | The workbench's media library pages: menu entries, config pages, a library browser with previews, channels on a timeline, push targets, test URLs, keys and live sessions, metrics | I135, I123 | todo |
@@ -2630,6 +2630,36 @@ keeps the reads behind one interface so that it can be added).
   the URLs it signed and only those; the access log shows `REDACTED`; under the race detector.
 - **Touches**: `mediaauth`, `handler/vod`, `handler/mediatokens`, `streaming`, `config`, `schema`,
   `docs`, `test/workers`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **The resource** is a path up to its last `/` (`/x/cam.flv` is `/x/cam/`), each handler checking
+   against the resource it computes. Alternative: the stream's name signed, which would not bind a URL
+   to a route.
+2. **`sub` in every URL**, to count sessions by subject and give the access log its user; the docs
+   advise an opaque ID. Alternative: a hashed subject, which I138's session list could not show.
+3. **A child grant lives** the later of the URL's expiry and now plus the item's length, plus
+   `play_grace`, and is passed on unchanged by the playlists fetched with it, so a leaked grant cannot
+   be renewed; a live stream's lives the expiry plus `play_grace`.
+4. **The signature** is 16 bytes of HMAC-SHA256 (about 160 bytes of query), under a key derived apart
+   from the token key, so that a token's MAC never checks as a URL's; `kid` is left out for a single
+   secret.
+5. **Defaults**: `ttl` 10m, `play_grace` 30m, `session_idle` 2m, `max_tracked_sessions` 100,000 swept at
+   most once a second; past the cap a new session answers 503.
+6. **One viewer a `/urls` request**, up to `max_tokens` paths, a random `sid` when none is given,
+   `url_base` before the paths. Alternative: viewers in a batch.
+7. **Cookies**: cookie mode puts the grant only in the cookie, so playlists stay cacheable; the cookie
+   is `Secure; SameSite=None` over TLS and `SameSite=Lax` otherwise; a playlist answering a URL grant is
+   sent `private, no-store`.
+8. **`referers` and `origins`** are origin patterns; a request without the header passes.
+9. **A URL's refusal** is 403 with its reason in the body, counted by reason; a bad cookie falls back
+   to the token or Basic check when the request carries those too.
+10. **Redaction** at the top of `vod`, `hls` and `httpflv`, which also stops the logging of `?token=`
+    on early answers found on the way; refusals now carry the handler's `cors`.
+11. **I133's `TestPoolGivesUp`**, failing about once in ten under load, waits for the pool to drain
+    first.
+12. **The interop harness** (`test/docker/vod`) serves through `url_signing` with `max_sessions` 1 and
+    `end_oldest`; `LOCK` is a new option of `e2e.sh`, and `collector.py` stands for the site's API.
 
 ### I136 Encrypted segments
 
