@@ -298,7 +298,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | **Cluster management** | | | |
 | I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | done |
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | done |
-| I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | todo |
+| I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
 | I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | todo |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
@@ -3103,6 +3103,30 @@ also in decision 033 as its items 8–19):
   languages.
 - **Pages**: Cluster → Overview, Nodes, a node's page.
 - **Touches**: `app/workbench`, `cluster`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 20–27):
+
+1. **A member's page reads the member** through a narrow pass-through of four GETs (`node`, `status`,
+   `versions`, `check`) on the poller's session, 8 at once at most, rather than I143's general one now
+   or the poller's last answers kept (memory a member, and stale).
+2. **`fit run`, not the config, checks a manager's store**, so the plan's `fit run -admin` with
+   `admin.cluster` alone runs: a store kept beside the config cannot be seen by validation; `fit
+   validate` no longer reports a manager without a store. Alternative: `-admin` writing `admin.store`
+   into the config it validates.
+3. **The menu's place**: after the global pages (after Logs), before Account.
+4. **No group filter yet**: a label selector (`k=v`, `k!=v`, `k`) until I144; up green, error amber,
+   down red, unknown grey.
+5. **The overview reads `/state`** every poll interval, between 2s and 10s, without a push from the
+   server. Alternative: a stream of changes.
+6. **Trusting a certificate**: confirming its whole fingerprint pins it in the form and tests again; a
+   saved member is saved at once; a certificate replaced is trusted behind a red warning.
+7. **Extension points** (`FitCluster.addAction`, `rowExtra`) so I149 adds to the pages without editing
+   them.
+8. **Nodes shows the last 20 audit entries**; the whole log is I148's.
+9. **Members behind NAT until I149**: the tunnel's hub and proxy in the manager, the member added at a
+   loopback `http` URL, the hop to the member being the tunnel's pinned TLS. Alternative: a hub host
+   of its own.
 
 ### I143 A member's own pages, opened from the manager
 
