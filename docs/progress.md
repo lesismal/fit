@@ -6609,3 +6609,26 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: an operation cannot be cancelled; no rollback to a chosen version; no `in` or `notin`; older
   members fail reload and prefix purge as `unsupported`. The decisions made are in the plan's I144
   section and decision 033, pending review.
+
+
+### I143 A member's own pages, opened from the manager — done
+
+- **The node switcher** in the workbench's header opens the manager's own pages (config with its text
+  tabs, Engine, versions, Consistency, logs, media, the tunnel's roles) against a member, the URL
+  carrying `?node=<member>`, the member's name marked in its own color before the title, in the tab's
+  title and in a band above the page; **Open** on every member's card, row and page.
+- **The pass-through** `/api/n/<member>/...` goes on with the session, token or link the manager keeps;
+  headers by fixed lists both ways, so no cookie or header of the member reaches the manager's page and
+  no credential reaches the browser; 3 calls a member and 16 waiting, 64 in all, bodies within
+  `max_response_bytes`; every write in the manager's audit log (`node.api`) with its user; a member of
+  another config schema opens read-only, refused by the page and the manager.
+- **Also**: `console.Module.Prefixes`; the Admin API's `GET /schema` (`schema`); queries on calls to `http`
+  members; a data race on a refused login's problem fixed.
+- **Tests**: console, token and linked members; headers both ways; `If-Match` and 412; dry runs;
+  read-only; refusals; bounds; a real manager and member in `cli`; under the race detector. In a browser
+  in both languages against a manager, a console member running a tunnel hub, a token member, a linked
+  member and an older one: saves applied as a new version, a stale ETag refused, the older member
+  read-only, the way back.
+- **Gaps**: the LLM roles' pages are not opened through the switcher; a member added a moment ago may
+  open read-only until its first poll. The decisions made are in the plan's I143 section and decision
+  033, pending review.

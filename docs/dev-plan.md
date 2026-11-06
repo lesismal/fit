@@ -299,7 +299,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I140 | Decision 033; what a member needs: `GET /node`, a dry run of `PUT`/`PATCH /config`, logins a program can use, failed logins slowed; a Check button on the config pages | I121 | done |
 | I141 | The manager: `admin.cluster`, members and their credentials in the store (console password or Admin API token, TLS pinned), a bounded poller of their state | I140 | done |
 | I142 | The workbench's Cluster menu: Overview, Nodes and a node's page; `docs/cluster.md` | I141 | done |
-| I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | todo |
+| I143 | A member's own pages opened from the manager: the node switcher, its API passed on with the stored session | I142 | done |
 | I144 | Resource groups by label or name, and operations on many members (reload, rollback, check, purge) with per-member results; the Groups pages | I142 | done |
 | I145 | Templates: config paths a group's members share, with variables, sync state, conflicts marked on members; the Templates pages | I144 | todo |
 | I146 | Rollouts: per-member diffs and dry runs, all at once, rolling or canary, health gates, rollback on failure; the Rollouts pages | I145 | todo |
@@ -3142,6 +3142,38 @@ also in decision 033 as its items 20–27):
   the page; the body caps hold; browser checks in both languages.
 - **Pages**: the node switcher; every existing page, against a member.
 - **Touches**: `cluster`, `app/console`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it;
+also in decision 033 as its items 56–67):
+
+1. **The path is the plan's `/api/n/<member>/...`** at the console's top level, by a small generic
+   `console.Module.Prefixes`; `/api/m/cluster/n/...` is refused, so there is one way.
+2. **The pass-through calls the member on its own connection**, not through `Manager.Call`, so it sees
+   the console session (a 403 asking for a new password ends it) and reaches role modules at their
+   console paths. Alternative: a wider `Manager.Call`.
+3. **The member shown lives in the URL's `?node=`**, and switching loads the page again, so nothing of
+   one fit stays on another's, each member's page has its own link and tab, and the browser's own
+   prompt guards unsaved changes.
+4. **"A version the bundle knows"** is the same config schema digest as the manager's; writes are also
+   refused on the manager by the last poll's digest. Alternatives: the same fit version, or minor
+   version; read-only in the page alone.
+5. **A write** is anything but GET and HEAD, render and parse, and dry runs; every write is audited,
+   whatever the member answered ("may or may not have been applied" when unanswered, "not sent" when its
+   login failed).
+6. **Audit entries are written to the store asynchronously**, without changing the members' ETag; 64
+   writes may wait for theirs, one more is refused (429) before it is sent; a manager whose member list
+   a newer fit wrote refuses switcher writes, as it could not record them.
+7. **Bounds**: 3 calls a member and 16 waiting, 503 after waiting past `timeout`, 64 in all.
+8. **Headers and statuses**: fixed lists both ways; content types a browser renders become
+   `application/octet-stream`; the member's 401 and its 403 for a new password become 502; streams 501.
+9. **Not passed on**: the member's console users and passwords, pprof, the dashboard, `cluster`, `ai`,
+   and the LLM roles, whose pages read by POST and streams, so that every poll would be an audited write.
+10. **`GET /schema`** on every fit's Admin API (`schema`); an older member is drawn with the manager's
+    schema, read-only in any case. Alternative: no pages for such members.
+11. **The marks**: a pill before the title, the tab's title, a band, and the top bar's line in a color
+    made from the member's name; read-only dims Save and refuses writes with a toast.
+12. **Two fixes on the way**: queries pass on calls to `http` members, and a data race on a refused
+    login's problem.
 
 ### I144 Resource groups and operations on many
 
