@@ -194,6 +194,19 @@ func TestPurge(t *testing.T) {
 	if n, _ := d.stats(); n != 2 {
 		t.Errorf("%d responses on disk after the purges, want 2", n)
 	}
+	// /expires and /s-maxage are left; a prefix of /s- and of nothing
+	// else takes one, from memory and disk.
+	if n, err := PurgeBy("disk", Selection{Prefixes: []string{"http://" + strings.ToUpper(host) + "/s-", "https://" + host + "/"}}); n != 1 || err != nil {
+		t.Errorf("purge by prefix: %d %v", n, err)
+	}
+	if kept("/s-maxage") || !kept("/expires") {
+		t.Error("purge by prefix")
+	}
+	if n, _ := d.stats(); n != 1 {
+		t.Errorf("%d responses on disk after the prefix, want 1", n)
+	}
+	get(t, c, "GET", base+"/s-maxage")
+	waitFor(t, "files written", func() bool { n, _ := d.stats(); return n == 2 })
 	if n, err := Purge("disk", nil, nil, true); n != 2 || err != nil {
 		t.Errorf("purge all: %d %v", n, err)
 	}
@@ -210,6 +223,11 @@ func TestPurge(t *testing.T) {
 	}
 	if _, err := Purge("", []string{"/relative"}, nil, false); err == nil {
 		t.Error("a relative URL")
+	}
+	for _, p := range []string{"/relative", "ftp://h/", "http://u@h/", "http://h/#f", "http://%zz"} {
+		if _, err := PurgeBy("", Selection{Prefixes: []string{p}}); err == nil {
+			t.Errorf("the prefix %q", p)
+		}
 	}
 	z := Zones()
 	if len(z) != 1 || z[0].Zone != "disk" || z[0].DiskPath == "" {

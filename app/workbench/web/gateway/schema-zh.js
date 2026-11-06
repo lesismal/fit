@@ -885,7 +885,7 @@ window.FitSchemaZh = {
 "How often each member's GET /node, /status and /config/check are read. 10s when left out; 1s at least.": "多久读取一次每个成员的 GET /node、/status 和 /config/check。不设置时为 10s；至少 1s。",
 "The longest one call to a member may take, from its connect to the last byte of its answer; the connect and the wait for the answer's header are bounded by it too. 10s when left out; 1s at least.": "对一个成员的一次调用最长可用的时间，从建立连接到收到应答的最后一个字节；连接和等待应答头也受它限制。不设置时为 10s；至少 1s。",
 "The most members the manager keeps; one more is refused. 256 when left out or 0.": "管理端最多保存的成员数；再多一个即被拒绝。不设置或为 0 时为 256。",
-"The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. 8 when left out or 0.": "同时轮询的最多成员数；其余的排队等候。页面发起的测试在此之外进行，最多 4 个。不设置或为 0 时为 8。",
+"The most members polled at once; the others wait for their turn. Tests from the pages run beside them, 4 at most. Each operation on many members (reload, rollback, check, purge, test) calls at most this many of them at once too. 8 when left out or 0.": "同时轮询的最多成员数；其余的排队等候。页面发起的测试在此之外进行，最多 4 个。对多个成员的每次操作（重新加载、回滚、检查、清除缓存、测试）同时调用的成员也最多为此数。不设置或为 0 时为 8。",
 "The largest answer read from a member; a larger one fails its call, and is reported as too large. 4 MiB when left out or 0; 16 KiB at least.": "从成员读取的最大应答；更大的应答使该次调用失败，并报告为过大。不设置或为 0 时为 4 MiB；至少 16 KiB。",
 "The manager's link URL, as its Add by enrollment page gives it: wss://host:port/cluster/link.": "管理者的连接 URL，即其“通过注册添加”页面给出的：wss://host:port/cluster/link。",
 "The SHA-256 of the manager's link certificate, 64 hex digits, with or without colons, as the page gives it: the only certificate this fit links to.": "管理者连接证书的 SHA-256，64 位十六进制数字，可带或不带冒号，即页面给出的：本 fit 只连接到出示该证书的管理者。",

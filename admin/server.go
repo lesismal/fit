@@ -61,6 +61,9 @@ const DryRunHeader = "Fit-Dry-Run"
 //	DELETE /config/<pointer>    remove it
 //	POST   /load                replace the running config with the body
 //	POST   /rollback/{n}        apply version n again, as a new version
+//	POST   /reload              apply the running config again, as a new
+//	                            version, loading again what it loads from
+//	                            files: certificates, keys, token files
 //	GET    /versions            the configs kept, oldest first
 //	GET    /versions/{n}        the config applied as version n
 //	GET    /config/effective    the config as it runs, with what providers
@@ -86,8 +89,9 @@ const DryRunHeader = "Fit-Dry-Run"
 //	                            health, certificates
 //	GET    /cache               what each cache zone keeps
 //	POST   /cache/purge         remove responses a cache zone keeps, by
-//	                            URL, by tag (Cache-Tag, Surrogate-Key) or
-//	                            all: {"zone", "urls", "tags", "all"}
+//	                            URL, by URL prefix, by tag (Cache-Tag,
+//	                            Surrogate-Key) or all: {"zone", "urls",
+//	                            "prefixes", "tags", "all"}
 //	GET    /logs                the file outputs of fit's own log and the
 //	                            access log, with their loggers, formats,
 //	                            time zones, rotation and files on disk
@@ -270,6 +274,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /config/import", s.importConfig)
 	mux.HandleFunc("POST /load", s.load)
 	mux.HandleFunc("POST /rollback/{n}", s.rollback)
+	mux.HandleFunc("POST /reload", s.reload)
 	mux.HandleFunc("GET /versions", s.versions)
 	mux.HandleFunc("GET /versions/{n}", s.version)
 	mux.HandleFunc("GET /metrics", s.metrics)
@@ -609,6 +614,19 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.configs.Rollback(n, r.Header.Get("If-Match"))
+	s.applied(w, res, err)
+}
+
+// reload answers POST /reload: the running config applied again, as a new
+// version, with If-Match when sent and ?dry_run=1 as the other writes take
+// it; no body.
+func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
+	dry, err := isDryRun(r)
+	if err != nil {
+		writeUpdateError(w, err)
+		return
+	}
+	res, err := s.configs.Reload(s.source, r.Header.Get("If-Match"), dry)
 	s.applied(w, res, err)
 }
 

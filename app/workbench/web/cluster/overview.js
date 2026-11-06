@@ -4,13 +4,14 @@
 // backends down and the latency of its GET /node. Filtered by a text, a label selector (env=prod, region, tier!=db)
 // and a state, sorted, and read again as often as the poller reads, while the page is shown. A member in trouble has
 // Ask AI (diagnose). The filter lives in the URL (#/cluster/overview?label=...&state=...), so that a label clicked
-// anywhere opens the overview filtered by it. Groups (I144) add their filter here.
+// anywhere opens the overview filtered by it. A group (I144) filters too (#/cluster/overview?group=...): its members as
+// the manager has them now, by its selector and its names.
 //
 // 集群 → 概览（I142）：管理端轮询器最后一次读到的各成员状态（GET /api/m/cluster/state），以卡片或表格显示：着色的状态、
 // 持续时长与原因、fit 版本、运行配置的版本、一致性检查统计的不一致数、最早到期的证书、连接数、不可用的上游后端以及其
 // GET /node 的延迟。可按文本、标签选择器（env=prod, region, tier!=db）与状态筛选、排序；页面显示期间按轮询的频率重新读取。
 // 出问题的成员带“问 AI”（diagnose）。筛选条件保存在 URL 中（#/cluster/overview?label=...&state=...），在任何地方点击标签
-// 即打开按其筛选的概览。分组（I144）在此加入其筛选。
+// 即打开按其筛选的概览。分组（I144）也可筛选（#/cluster/overview?group=...）：管理端当前按其选择器与名称确定的成员。
 (function () {
   'use strict';
   var FC = window.FitCluster;
@@ -42,18 +43,22 @@
     });
     return q;
   }
-  // selector reads a label selector: terms key=value, key!=value or key, separated by commas; every term must hold.
-  // selector 读取标签选择器：以逗号分隔的 key=value、key!=value 或 key，每一项都须满足。
+  // selector reads a label selector, as a group's (I144): terms key=value (or key==value), key!=value, key or !key,
+  // separated by commas; every term must hold.
+  // selector 读取标签选择器（与分组 I144 的相同）：以逗号分隔的 key=value（或 key==value）、key!=value、key 或 !key，
+  // 每一项都须满足。
   function selector(s) {
     var terms = String(s || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean).map(function (x) {
-      var m = x.match(/^([^!=]+?)\s*(!=|=)\s*(.*)$/);
-      return m ? { key: m[1].trim(), op: m[2], value: m[3].trim() } : { key: x, op: 'has' };
+      var m = x.match(/^([^!=]+?)\s*(!=|==|=)\s*(.*)$/);
+      if (m) return { key: m[1].trim(), op: m[2] === '==' ? '=' : m[2], value: m[3].trim() };
+      return x[0] === '!' ? { key: x.slice(1).trim(), op: 'absent' } : { key: x, op: 'has' };
     });
     return function (labels) {
       labels = labels || {};
       return terms.every(function (tm) {
         var has = Object.prototype.hasOwnProperty.call(labels, tm.key);
         if (tm.op === 'has') return has;
+        if (tm.op === 'absent') return !has;
         if (tm.op === '=') return has && labels[tm.key] === tm.value;
         return !has || labels[tm.key] !== tm.value;
       });
@@ -84,7 +89,7 @@
     var h = UI.h, t = UI.t;
     var el = sh.page('overview', t('n.overview'));
     var q = query();
-    var f = { text: q.q || '', label: q.label || '', state: q.state || '', sort: q.sort && SORTS[q.sort] ? q.sort : 'state' };
+    var f = { text: q.q || '', label: q.label || '', group: q.group || '', state: q.state || '', sort: q.sort && SORTS[q.sort] ? q.sort : 'state' };
     var view = load(VIEW_KEY) === 'table' ? 'table' : 'cards';
     var data = null, busy = false, timer = 0, every = 0;
 
@@ -92,6 +97,17 @@
     // 筛选控件：每次修改都重绘并写入 URL，不重新加载页面。
     var text = h('input.input.input--sm', { type: 'search', placeholder: t('ov.search'), 'aria-label': t('ov.search'), value: f.text });
     var label = h('input.input.input--sm.cl-sel', { type: 'search', placeholder: t('ov.label'), 'aria-label': t('ov.label'), value: f.label, spellcheck: 'false' });
+    // The groups (I144), read once; a group named in the URL is offered before they are read.
+    // 分组（I144）只读取一次；URL 中的分组在读取之前也提供。
+    var group = h('select.select.select--sm', { 'aria-label': t('ov.group') },
+      h('option', { value: '' }, t('ov.group.all')), f.group ? h('option', { value: f.group, selected: true }, f.group) : null);
+    if (FC.groups) {
+      FC.groups(UI).then(function (d) {
+        UI.mount(group, h('option', { value: '' }, t('ov.group.all')), d.groups.map(function (g) {
+          return h('option', { value: g.name, selected: g.name === f.group }, g.name);
+        }), f.group && !d.groups.some(function (g) { return g.name === f.group; }) ? h('option', { value: f.group, selected: true }, f.group) : null);
+      }, function () { /* ignore / 忽略 */ });
+    }
     var state = h('select.select.select--sm', { 'aria-label': t('ov.state') },
       [['', t('st.all')], ['up', t('st.up')], ['down', t('st.down')], ['error', t('st.error')], ['unknown', t('st.unknown')]].map(function (o) {
         return h('option', { value: o[0], selected: o[0] === f.state }, o[1]);
@@ -101,17 +117,18 @@
         return h('option', { value: k, selected: k === f.sort }, t('ov.sort.' + k));
       }));
     function changed() {
-      f = { text: text.value.trim(), label: label.value.trim(), state: state.value, sort: sort.value };
+      f = { text: text.value.trim(), label: label.value.trim(), group: group.value, state: state.value, sort: sort.value };
       var parts = [];
       if (f.text) parts.push('q=' + encodeURIComponent(f.text));
       if (f.label) parts.push('label=' + encodeURIComponent(f.label));
+      if (f.group) parts.push('group=' + encodeURIComponent(f.group));
       if (f.state) parts.push('state=' + f.state);
       if (f.sort !== 'state') parts.push('sort=' + f.sort);
       try { history.replaceState(null, '', '#/cluster/overview' + (parts.length ? '?' + parts.join('&') : '')); } catch (e) { /* ignore / 忽略 */ }
       draw();
     }
     [text, label].forEach(function (x) { x.addEventListener('input', changed); });
-    [state, sort].forEach(function (x) { x.addEventListener('change', changed); });
+    [group, state, sort].forEach(function (x) { x.addEventListener('change', changed); });
     var cardsBtn = UI.btn(t('ov.cards'), 'dashboard', function () { setView('cards'); }, 'ghost sm');
     var tableBtn = UI.btn(t('ov.table'), 'layers', function () { setView('table'); }, 'ghost sm');
     function setView(v) { view = v; save(VIEW_KEY, v); draw(); }
@@ -119,7 +136,7 @@
     var stats = h('div.grid.grid--4.cl-stats'), info = h('div.callout.callout--warn', { hidden: true });
     var list = h('div.cl-list'), note = h('div.small.muted');
     UI.mount(sh.tools, h('span.btn-row', cardsBtn, tableBtn), UI.btn(t('refresh'), 'refresh', function () { read(); }, 'ghost sm'));
-    UI.mount(el, h('div.stack', info, stats, h('div.cl-filter', text, label, state, sort), list, note));
+    UI.mount(el, h('div.stack', info, stats, h('div.cl-filter', text, label, group, state, sort), list, note));
     UI.mount(list, h('div.row', h('span.spinner'), h('span.muted', t('loading'))));
 
     // shown are the members the filter keeps, sorted. / 筛选后保留的成员，已排序。
@@ -128,6 +145,7 @@
       var out = nodes.filter(function (s) {
         if (f.state && s.status !== f.state) return false;
         if (txt && (s.name + ' ' + s.url).toLowerCase().indexOf(txt) < 0) return false;
+        if (f.group && (s.groups || []).indexOf(f.group) < 0) return false;
         return sel(s.labels);
       });
       var by = SORTS[f.sort] || SORTS.state;
@@ -218,7 +236,7 @@
       var rows = shown(nodes);
       if (!rows.length) {
         UI.mount(list, h('div.stack', UI.empty(t('ov.nomatch')), h('div.row', UI.btn(t('ov.clear'), 'x', function () {
-          text.value = ''; label.value = ''; state.value = ''; changed();
+          text.value = ''; label.value = ''; group.value = ''; state.value = ''; changed();
         }, 'ghost sm'))));
       } else {
         UI.mount(list, view === 'table' ? UI.card(null, table(rows), null, true) : h('div.cl-cards', rows.map(card)));
