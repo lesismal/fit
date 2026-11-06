@@ -294,6 +294,23 @@ jobs:
           go run ./cmd/fit build -fit . -with "github.com/lesismal/fit-examples/module/hello=.fit-examples/module/hello" -o "$RUNNER_TEMP/fit-hello"
           "$RUNNER_TEMP/fit-hello" version
 
+  # The assistant's MCP server (I130) with the official Go MCP SDK's client,
+  # in a module of its own (test/mcpsdk) so that the SDK stays out of fit's
+  # dependencies: it builds this checkout's fit and runs it.
+  mcp-sdk:
+    name: MCP (official Go SDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go vet and go test -race
+        working-directory: test/mcpsdk
+        run: |
+          go vet ./...
+          go test -race -count=1 ./...
+
   # The container image with the Docker Compose example, and the systemd
   # units, each run as deploy/README.md and the examples' READMEs say (I66).
   packaging:

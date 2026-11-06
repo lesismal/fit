@@ -41,7 +41,7 @@ var ErrNoResource = errors.New("no such resource")
 
 // Served reports whether t is served to outside agents: a tool that runs in
 // fit, on the pool. ask_user waits for the person in the panel, and the
-// page tools act on a page that is open, neither of which an outside agent
+// page tools (KindPage) act on a page that is open, neither of which an outside agent
 // has.
 func Served(t *Tool) bool { return t.Kind == KindPool && t.Group != GroupPage }
 

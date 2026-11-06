@@ -95,8 +95,19 @@ func TestPropose(t *testing.T) {
 			t.Errorf("a propose token lacks %s: %v", n, names)
 		}
 	}
-	if has(names, "ask_user") {
-		t.Errorf("ask_user is served: %v", names)
+	// Neither ask_user nor the page tools (I154), which need the person
+	// and the open page, are served, though the token's level, propose,
+	// is above edit's.
+	for _, n := range []string{"ask_user", assistant.ToolPageGet, assistant.ToolPageEdit, assistant.ToolPageRevert} {
+		if has(names, n) {
+			t.Errorf("%s is served: %v", n, names)
+		}
+		if a := f.modern(tok, "tools/call", map[string]any{"name": n, "arguments": map[string]any{}}); a.errCode() != codeInvalidParams {
+			t.Errorf("calling %s: %s", n, a.body)
+		}
+	}
+	if f.a.Registry().Tool(assistant.ToolPageEdit) == nil {
+		t.Fatal("the registry has no page tools to leave out")
 	}
 	step := func(body string) *answer {
 		return f.modern(tok, "tools/call", map[string]any{"name": "config_propose", "arguments": map[string]any{"summary": "answer " + body,
@@ -332,7 +343,7 @@ func TestDocs(t *testing.T) {
 	if a := g.modern(tok, "resources/read", map[string]any{"uri": "fit://status"}); a.errCode() != 0 {
 		t.Errorf("status beside failed docs: %s", a.body)
 	}
-	big := strings.Repeat("é", assistant.MaxResourceBytes)
+	big := "x" + strings.Repeat("é", assistant.MaxResourceBytes)
 	if c := clipText(big); len(c) > assistant.MaxResourceBytes+100 || !strings.HasSuffix(c, "chapter instead]") {
 		t.Errorf("clipText: %d", len(c))
 	}

@@ -138,12 +138,14 @@ func New(o Options) *Server {
 func (s *Server) now() time.Time { return time.Now().Add(time.Duration(s.skew.Load())) }
 
 // version is fit's, as the server names itself.
-var version = func() string {
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+var version = versionOf(debug.ReadBuildInfo())
+
+func versionOf(bi *debug.BuildInfo, ok bool) string {
+	if ok && bi.Main.Version != "" {
 		return bi.Main.Version
 	}
 	return "devel"
-}()
+}
 
 func serverInfo() map[string]string {
 	return map[string]string{"name": "fit", "title": "fit", "version": version}
@@ -175,8 +177,12 @@ func effective(token, user string) string {
 }
 
 // clientAddr returns the request's peer address.
-func clientAddr(r *console.Request) netip.Addr {
-	ap, err := netip.ParseAddrPort(r.Request.RemoteAddr)
+func clientAddr(r *console.Request) netip.Addr { return addrOf(r.Request.RemoteAddr) }
+
+// addrOf returns the address of a request's RemoteAddr, the zero one, which
+// no prefix holds, when it is not an address and a port.
+func addrOf(remote string) netip.Addr {
+	ap, err := netip.ParseAddrPort(remote)
 	if err != nil {
 		return netip.Addr{}
 	}
@@ -286,8 +292,10 @@ func (s *Server) admit(id string, m *config.AssistantMCP, now time.Time) (status
 		lv = &live{allowance: per, at: now, sessions: map[string]*session{}}
 		s.live[id] = lv
 	}
-	lv.allowance = min(per, lv.allowance+now.Sub(lv.at).Minutes()*per)
-	lv.at = now
+	if now.After(lv.at) {
+		lv.allowance = min(per, lv.allowance+now.Sub(lv.at).Minutes()*per)
+		lv.at = now
+	}
 	switch {
 	case lv.allowance < 1:
 		return 429, fmt.Sprintf("the token made its %d requests of the minute: wait", m.CallsPerMinute()), int((1-lv.allowance)/per*60) + 1

@@ -520,6 +520,66 @@ fit 内置 14 个技能，嵌入在二进制中：`explain`、`route-builder`、
 已启用技能的 `/name ...` 开头的消息等同于 `"skill": "name"`。其 `start` 事件带上对话运行的 `skill`，`skill` 事件表示
 `skill_load` 设定了技能。
 
+### MCP 服务器
+
+`admin.assistant.mcp`（不设置时关闭）在控制台地址的 `/mcp` 上以 [Model Context Protocol](https://modelcontextprotocol.io)
+提供助手，让外部代理（Claude Code、Cursor、MCP SDK 的客户端）使用面板所用的能力：
+
+| MCP | fit 提供的内容 |
+| --- | --- |
+| tools | 当前设置下令牌级别允许的注册表工具及其 schema，结果像发给模型时一样脱敏并截断；不提供 `ask_user` 与页面工具，它们需要用户本人与打开的页面 |
+| prompts | 已启用的技能，技能的输入即其参数；提示词为技能的提示词及其使用的工具 |
+| resources | `fit://config/base`、`fit://config/effective`、`fit://status`、`fit://versions`、`fit://schema`、`fit://docs/reference` 及其各章；模板 `fit://schema/{path}`、`fit://versions/{n}` 与 `fit://docs/reference/{chapter}`；像发给模型时一样脱敏，每个最多 1 MiB |
+
+```json
+{
+  "admin": {
+    "console": {"users": [{"username": "ada", "password_hash": "$2a$10$..."}]},
+    "assistant": {
+      "users": [{"username": "ada", "level": "apply"}],
+      "mcp": {"allow": ["127.0.0.1", "::1"], "max_calls_per_minute": 120}
+    }
+  }
+}
+```
+
+代理以 **MCP 令牌** 认证，令牌在工作台的 **助手 → MCP** 页上创建：名称、级别（`read`，或级别为 `propose`、`apply` 的用户可选
+`propose`）、天数（最多 `max_token_days`，默认 90），以及可选的使用来源地址。令牌只显示一次：fit 只保存其密钥的 SHA-256，存于
+store 的 `assistant.mcp` 段中，没有 store 时只保存在内存中直到 fit 重启；令牌在同一页上吊销。令牌的调用具有其级别，并受每次请求时
+所用设置中其用户级别的限制，因此用户被降为 `read` 或 `off` 时其令牌随之降级；令牌的用户不再是控制台用户时被拒绝。用户看到自己的
+令牌；级别为 `apply` 的用户可查看并吊销所有人的令牌。
+
+级别为 `propose` 的令牌可使用提案工具：每次调用向该令牌唯一的待定提案加入一步，提案保存在其用户名为 `MCP: <令牌名>` 的对话中，
+并返回提案 ID 与 **提案** 页的链接。没有应用工具：提案只在那里应用，由级别为 `apply` 的用户点击应用并在对话框中再次确认，与所有
+提案相同。同一令牌的提案调用依次执行，使提案一次只加入一步。
+
+传输方式为 Streamable HTTP，支持协议的两个时代：修订版 `2026-07-28` 为无状态，每个请求在 `_meta` 中带协议版本，并带
+`Mcp-Protocol-Version`、`Mcp-Method` 与 `Mcp-Name` 请求头，fit 会将其与请求体核对（`server/discover` 返回 fit 提供的内容）；
+`2025-11-25`、`2025-06-18` 与 `2025-03-26` 以 `initialize` 打开会话（`Mcp-Session-Id`，以 `DELETE` 结束）。每个请求是一条
+JSON-RPC 消息的 `POST`；客户端接受 SSE 时 `tools/call` 以 SSE 流应答（工具运行期间发送 ping，然后是结果），其余以 JSON 应答；
+客户端切断流即取消调用；`GET` 返回 `405`，因为 fit 不主动发送任何内容。
+
+每个请求依次检查：调用方地址是否在 `allow` 中（不设置时仅限回环地址；`403`）、`Authorization: Bearer` 中的令牌（缺失、错误、
+已吊销或已过期时 `401`）、令牌自身的来源地址（`403`）、用户级别（`off` 时 `403`），以及令牌的上限：`max_calls_per_minute`
+（120）与 `max_concurrent_calls`（4）超出时回答 `429` 并带 `Retry-After`，`max_request_bytes`（1 MiB）超出时 `413`，
+`max_sessions`（4）超出时结束最久未用的会话，`session_idle_timeout`（1h）结束空闲会话。工具调用在控制台的线程池上运行，
+最长 30 秒；不读取其流的客户端在队列超过水位一分钟后被切断。每次工具调用、资源读取与提示词获取都记入审计日志，来源为 `mcp`
+并带令牌名称。与所有请求一样，控制台的 `Origin` 检查会拒绝其他网站的浏览器。
+
+把 fit 加入 Claude Code（用你的令牌替换 `<token>`）：
+
+```sh
+claude mcp add --transport http fit http://127.0.0.1:2020/mcp --header "Authorization: Bearer <token>"
+```
+
+以 JSON 配置的客户端（Cursor、项目的 `.mcp.json`）使用
+`{"mcpServers": {"fit": {"type": "http", "url": "http://127.0.0.1:2020/mcp", "headers": {"Authorization": "Bearer <token>"}}}}`。
+MCP 页以控制台自己的地址显示这两者。fit 的助手不调用任何外部 MCP 服务器。
+
+该页的端点为 `GET /api/m/ai/mcp`（服务器是否开启、带默认值的设置、端点与令牌，从不含哈希）、`POST /api/m/ai/mcp/tokens`
+（`{"name", "level", "days", "allow"}`：返回 `{"token", "view"}`，令牌只显示这一次；名称已被占用或超过
+`max_tokens_per_user` 时 `409`）与 `DELETE /api/m/ai/mcp/tokens/{id}`。设置经 `PUT /api/m/ai/settings` 与助手设置一起保存。
+
 ## 角色的页面
 
 [llm](llm.zh-CN.md) 和 [tunnel](tunnel.zh-CN.md) 的角色也可以有自己的页面，各由角色的 `console` 设置：字段与

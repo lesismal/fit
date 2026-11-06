@@ -84,6 +84,16 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   名称与英文描述（不超过窗口的十分之一），`skill_load` 把某个技能的完整提示词交给模型；`/name`、面板的选择器或 `skill_load`
   使它成为对话的技能，此后系统提示带上其提示词（标明为 fit 自己的指令，不能推翻规则）而不再带目录。技能可用的工具为它所列、
   且用户级别与设置允许的那些，外加 `ask_user`；技能的 `model` 从启动它的那条消息起使用。
+- **MCP 服务器（I130）** 即 `admin.assistant.mcp`，默认关闭，位于控制台地址的 `/mcp`（包 `assistant/mcp`）：提供注册表中在 fit
+  内运行的工具（不含 `ask_user` 与页面工具）、作为提示词的已启用技能，以及作为资源的配置、状态、版本、schema 与配置参考文档，
+  均像发给模型时一样脱敏并受限。同一端点支持协议修订版 2026-07-28（无状态，请求头与请求体核对，`server/discover`）与
+  2025-03-26 至 2025-11-25（以 `initialize` 打开会话）；`tools/call` 以 SSE 流应答，流被切断即取消调用。调用方持有 MCP 令牌，
+  由控制台用户在 MCP 页创建，只显示一次，以其 256 位密钥的 SHA-256 保存在 store 的 `assistant.mcp` 段中；其级别为自身级别
+  （`read` 或 `propose`）并受其用户级别限制，每次请求都检查，因此永远不会是 `apply`。提案调用向令牌唯一的待定提案加入一步，
+  提案保存在其用户的一个对话中，只在工作台中应用，与所有提案相同。每个令牌的会话数、请求字节数、并发请求数与每分钟请求数
+  都有上限，且只能从 `allow`（默认仅回环地址）及令牌自身的地址访问；每次调用、读取与提示词都记入审计日志，来源为 `mcp` 并带
+  令牌名称。fit 的助手不调用任何外部 MCP 服务器。官方 Go MCP SDK 只用于一个测试，位于独立的模块（`test/mcpsdk`）中，
+  不增加 fit 自身的依赖。
 
 ## 影响
 
@@ -93,7 +103,9 @@ workbench 编辑的配置中，各种概念（监听、路由、上游、角色�
   属于控制台，与其他模块的 API 一样需要登录与 CSRF 令牌；I126 加入 `GET /api/m/ai/proposals`、
   `GET /api/m/ai/proposals/{conversation}`、其 `POST .../apply` 与 `POST .../discard`，以及 `GET /api/m/ai/audit`，菜单中加入
   提案页与审计日志页；I127 加入 `GET`/`POST /api/m/ai/skills`、`GET`/`PUT`/`DELETE /api/m/ai/skills/{name}` 及其
-  `POST .../enable` 与 `.../disable`，菜单中加入技能页。
+  `POST .../enable` 与 `.../disable`，菜单中加入技能页；I130 加入 `GET /api/m/ai/mcp`、`POST /api/m/ai/mcp/tokens` 与
+  `DELETE /api/m/ai/mcp/tokens/{id}`，菜单中加入 MCP 页。`/mcp` 也属于控制台，但以 MCP 令牌代替登录，令牌有效时其连接如登录后
+  一样保持。
 - 一次对话在流式输出期间占用控制台的一个连接，工具在运行期间占用控制台线程池的工作线程；`max_concurrent_chats`（4）使两者
   都保持很少。
 - 保存了助手设置的 fit 写出的 store 为版本 3，旧版 fit 无法打开。这是把密钥与配置一同加密保存的代价。

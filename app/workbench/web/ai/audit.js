@@ -20,7 +20,8 @@
     ['au.all', 'All', '全部'], ['au.more', 'Older entries', '更早的记录'], ['au.none', 'No entries.', '没有记录。'],
     ['au.for', 'for {user}', '代 {user}'], ['au.moreCalls', 'and {n} more', '另有 {n} 个'], ['au.skill', 'skill {skill}', '技能 {skill}'],
     ['au.convFilter', 'Conversation ID', '对话 ID'],
-    ['k.chat', 'answer', '回答'], ['k.apply', 'apply', '应用'], ['k.discard', 'discard', '丢弃'],
+    ['k.chat', 'answer', '回答'], ['k.apply', 'apply', '应用'], ['k.discard', 'discard', '丢弃'], ['k.tool', 'MCP call', 'MCP 调用'],
+    ['au.mcp', 'over MCP, token {token}', '经 MCP，令牌 {token}'], ['o.ok', 'ok', '成功'],
     ['o.answer', 'answered', '已回答'], ['o.ask', 'asked', '已提问'], ['o.stopped', 'stopped', '已停止'], ['o.error', 'error', '出错'],
     ['o.max_tool_calls', 'tool call limit', '达到工具调用上限'], ['o.max_tokens_per_day', 'day\'s tokens spent', '当日 token 用尽'],
     ['o.applied', 'applied', '已应用'], ['o.partial', 'applied, a purge failed', '已应用，清除失败'], ['o.failed', 'failed', '失败'],
@@ -30,7 +31,7 @@
   WORDS.forEach(function (w) { en[w[0]] = w[1]; zh[w[0]] = w[2]; });
   UI.addI18n({ 'en': en, 'zh-CN': zh }, 'ai');
 
-  var KIND = { applied: 'ok', answer: 'ok', partial: 'warn', stale: 'warn', ask: '', stopped: '', discarded: '', failed: 'danger', refused: 'danger', error: 'danger' };
+  var KIND = { ok: 'ok', applied: 'ok', answer: 'ok', partial: 'warn', stale: 'warn', ask: '', stopped: '', discarded: '', failed: 'danger', refused: 'danger', error: 'danger' };
 
   function word(UI, k) { var w = UI.t(k); return w === k ? k.replace(/^\w+\./, '') : w; }
 
@@ -41,7 +42,7 @@
     var f = { user: '', kind: '', conversation: '' }, rows = [], last = 0;
     var userSel = h('select.select.select--sm', { onchange: function () { f.user = userSel.value; load(true); } });
     var kindSel = h('select.select.select--sm', { onchange: function () { f.kind = kindSel.value; load(true); } },
-      [['', t('au.all')], ['chat', t('k.chat')], ['apply', t('k.apply')], ['discard', t('k.discard')]].map(function (o) { return h('option', { value: o[0] }, o[1]); }));
+      [['', t('au.all')], ['chat', t('k.chat')], ['apply', t('k.apply')], ['discard', t('k.discard')], ['tool', t('k.tool')]].map(function (o) { return h('option', { value: o[0] }, o[1]); }));
     var convIn = h('input.input.input--sm', { placeholder: t('au.convFilter'), onchange: function () { f.conversation = convIn.value.trim(); load(true); } });
     var note = h('div.small.muted'), table = h('div'), more = h('div.btn-row');
     sh.tools.appendChild(UI.btn('', 'refresh', function () { load(true); }, 'ghost icon'));
@@ -65,7 +66,10 @@
     function draw() {
       UI.mount(table, UI.table([
         { label: t('au.time'), render: function (e) { return h('span.small', UI.fmtTime(Math.floor(e.at / 1000))); } },
-        { label: t('au.user'), render: function (e) { return h('span', h('b', e.user), e.owner ? h('div.small.muted', t('au.for', { user: e.owner })) : null); } },
+        { label: t('au.user'), render: function (e) {
+          return h('span', h('b', e.user), e.owner ? h('div.small.muted', t('au.for', { user: e.owner })) : null,
+            e.source === 'mcp' ? h('div.small.muted', t('au.mcp', { token: e.token || '' })) : null);
+        } },
         { label: t('au.kind'), render: function (e) { return h('span', UI.badge(word(UI, 'k.' + e.kind)), e.skill ? h('div.small.muted', t('au.skill', { skill: e.skill })) : null); } },
         { label: t('au.conv'), render: function (e) { return e.conversation ? h('code.small', e.conversation.slice(0, 8)) : '—'; } },
         { label: t('au.calls'), render: calls },

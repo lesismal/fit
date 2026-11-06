@@ -109,14 +109,14 @@ func TestTokensPage(t *testing.T) {
 	st := &memStore{}
 	f := start(t, settings(`{"max_tokens_per_user":2,"max_token_days":30}`, ""), st)
 	for body, want := range map[string]int{
-		`{"name":"","days":1}`:                          400,
-		`{"name":"x\u0001","days":1}`:                   400,
-		`{"name":"x","level":"apply","days":1}`:         400,
-		`{"name":"x","days":0}`:                         400,
-		`{"name":"x","days":31}`:                        400,
-		`{"name":"x","days":1,"allow":["nowhere"]}`:     400,
+		`{"name":"","days":1}`:                      400,
+		`{"name":"x\u0001","days":1}`:               400,
+		`{"name":"x","level":"apply","days":1}`:     400,
+		`{"name":"x","days":0}`:                     400,
+		`{"name":"x","days":31}`:                    400,
+		`{"name":"x","days":1,"allow":["nowhere"]}`: 400,
 		`{"name":"x","days":1,"allow":[` + strings.Repeat(`"::1",`, 16) + `"::1"]}`: 400,
-		`{"name":` + `"` + strings.Repeat("n", 65) + `","days":1}`:                 400,
+		`{"name":` + `"` + strings.Repeat("n", 65) + `","days":1}`:                  400,
 	} {
 		if status, out := f.do("POST", "/api/m/ai/mcp/tokens", body); status != want {
 			t.Errorf("%s: %d %s", body, status, out)

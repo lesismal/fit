@@ -103,10 +103,8 @@ type response struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
+// resultOf is the response to the request id, which has one.
 func resultOf(id json.RawMessage, v any) []byte {
-	if len(id) == 0 {
-		id = json.RawMessage("null")
-	}
 	data, _ := json.Marshal(response{JSONRPC: "2.0", ID: id, Result: v})
 	return data
 }
