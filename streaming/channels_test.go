@@ -208,13 +208,9 @@ func TestChannelEgresses(t *testing.T) {
 	}
 	// RTSP's timestamps are RTP's, from the first packet: continuous too.
 	checkContinuous(t, "rtsp", rtspTL.video(), 1500*time.Millisecond, gap)
-	// live/mix: the tracks set again at each item. fib's RTMP egress takes
-	// new tracks for a new clock when a packet comes at or before the last
-	// of any track, as the next item's first pictures, decoded before the
-	// last item's audio ends, do: it moves them on by 20ms past that
-	// audio, a jump of up to the B-frames' delay and 20ms (fib request
-	// A68).
-	checkContinuous(t, "rtmp live/mix", mixTL.video(), span, 150*time.Millisecond)
+	// live/mix: the tracks set again at each item, the times running on
+	// across them all the same (fib request A68).
+	checkContinuous(t, "rtmp live/mix", mixTL.video(), span, gap)
 	if mixTL.tracks < 2 {
 		t.Errorf("live/mix: the tracks were set %d times", mixTL.tracks)
 	}

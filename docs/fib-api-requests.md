@@ -2199,8 +2199,11 @@ with `SetIdleTimeout`; a logout gives it the 5s back.
 
 ## A68: New tracks on the same clock
 
-**Status.** Requested on 2026-11-06, from I134 (channels). Not yet in fib; fit's channels go on
-without it, as below.
+**Status.** Requested on 2026-11-06, from I134 (channels). Done in fib at `826c2c3` (with `40b3e2c`,
+`7fd6218` and `a8a475f`), made by fit's session per [rule 15](rules.md#7-when-fib-falls-short), the
+first way below: each egress compares a packet after `OnTracks` with the last of its own kind (video,
+or the rest), and HLS keeps the decode times across the discontinuity (`fmp4.Writer.Offset` and
+`Follow`); fit is on that commit.
 
 **Problem.** A publisher that changes its tracks mid-stream, its clock running on
 (`hub.Publisher.SetTracks`, as a channel moving to an item encoded otherwise does, or a codec change),

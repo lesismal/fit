@@ -104,10 +104,10 @@ An item whose tracks are the last one's (the same codecs, with the same configur
 encoded the same way) carries on with no change a player can see. An item whose tracks differ sets
 them anew: HLS marks a discontinuity (`#EXT-X-DISCONTINUITY`) and, with fMP4, a new initialization
 section, RTMP and HTTP-FLV players get new sequence headers, and RTSP players end when the codecs
-change, as for any stream. For now fib's egresses take new tracks for a clock that may have started
-again, and move the packets after them on past the last packet of any track, by the B-frames' delay
-and 20ms at most ([fib request A68](fib-api-requests.md#a68-new-tracks-on-the-same-clock)); encode
-a channel's items alike, as a site's films usually are, for no jump at all.
+change, as for any stream. The timestamps run on across the change: fib's egresses take new tracks
+for a clock that started again only when a packet comes at or before the last of its own kind
+([fib request A68](fib-api-requests.md#a68-new-tracks-on-the-same-clock)), which a channel's next
+item never does.
 
 ## Reading files
 

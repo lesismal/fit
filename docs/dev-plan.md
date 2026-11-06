@@ -289,7 +289,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I162.
 | I131 | Decision 032; fib A64, a reader of MP4 files that are not fragmented: sample tables through an `io.ReaderAt`, samples by time and keyframe, bounded memory | I116 | done |
 | I132 | Media libraries: `media_library` roots scanned into a catalog of items (tracks, codecs, renditions, subtitles, posters), probed on a bounded file pool, the Admin API | I131 | done |
 | I133 | Video on demand: the handler `vod`, HLS (fMP4 or MPEG-TS) cut at keyframes from the sample tables, renditions, audio and subtitle groups, ranges, `auth` | I132 | done |
-| I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | todo |
+| I134 | Channels: library items played into the hub as live streams, in order, looped or on a schedule; `push` to outside RTMP and SRT servers | I132 | done |
 | I135 | Playback URLs that expire: `url_signing` bound to a resource, address or session, grants carried to segments, `POST <prefix>/urls` in `media_tokens`, `max_sessions` | I119, I133 | todo |
 | I136 | Encrypted segments: AES-128 HLS, keys served only to a grant for the resource | I135 | todo |
 | I137 | A video site end to end: the example, `media_pages`' library and player pages, docs | I134, I135 | todo |
@@ -2573,6 +2573,40 @@ keeps the reads behind one interface so that it can be added).
   target (fit itself and an outside server in a container) receives the stream and gets it back
   after the target restarts; under the race detector.
 - **Touches**: `streaming`, `medialib`, `config`, `schema`, `docs`, `test/workers`.
+
+**Decisions pending review** (made while building it, 2026-11-06; each stands until the user rules on it):
+
+1. **A package of its own**, `streaming/channels`, which the Admin API imports, since `streaming`'s
+   tests import `admin` and the code in `streaming` would make a cycle. Alternative:
+   `app.Manager.Role(id)` behind an interface.
+2. **`SetTracks` only when the tracks differ**, so films encoded alike play on seamlessly; fib's
+   egresses shift timestamps at every `SetTracks` (A68). Alternative: at every item, a discontinuity
+   an item.
+3. **Items join by presentation time**; audio wholly before the start (AAC priming) is dropped; an
+   item ends at its latest track's start plus duration. Alternative: by decode time, leaving gaps of
+   about 120 ms.
+4. **"Starts at its time"** means the slot's first picture is shown at the slot's time on the
+   channel's timeline, the video sent up to the B-frame delay earlier.
+5. **A slot under way** is joined at a start, or when a reload wakes an idle channel, from the
+   keyframe before its position; slots a reload has passed are skipped.
+6. **Nothing to play**: the channel stays published and silent; stop then start plays a finished list
+   that does not loop from its first item again.
+7. **Defaults**: the rendition with the most pixels, then the highest bitrate; audio falls back to the
+   item's default audio file; `time_zone` UTC; `loop` on.
+8. **Bounds**: `read_ahead` 3s (0.5s to 1 minute), `max_buffer_bytes` 16 MiB, reads of a second; a
+   packet more than a second late pauses the channel, counted as an underrun.
+9. **Push**: a target polls every `retry_min` while its stream is not published; its subscription waits
+   5s; the backoff starts over after `retry_max` up; a reload keeps the connection when the stream,
+   URL and `connect_timeout` are unchanged.
+10. **Names**: push targets without a name are `stream#n`, the top-level ones first; a channel's status
+    lists every target of its stream; actions through the Admin API are not saved in the config.
+11. **Interop** pushes to MediaMTX 1.15.3; a Linux test binary runs in a Debian trixie image with
+    ffmpeg, Chromium and hls.js 1.5.20.
+12. **fib A68, compared per kind of track** rather than a `hub.TracksChanger` the hub would call: no
+    caller changes, and "the same publisher, the same clock" would be wrong for SRT encoders that start
+    again mid-connection. WHEP now moves on any step back of a kind (it let up to a second back
+    through); FLV and RTMP sequence headers carry their own track's last time; HLS decides at the new
+    writer's first packet; the kinds are video and the rest (two audio tracks share one).
 
 ### I135 Playback URLs that expire
 
