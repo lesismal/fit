@@ -342,7 +342,12 @@ func TestLinkCertificateKept(t *testing.T) {
 	}
 	f.m.Close()
 
-	// link_url names the certificate's host.
+	// link_url names the certificate's host, with a port or without.
+	np, _ := linkFixture(t, "127.0.0.1:0", func(c *config.Cluster) { c.LinkURL = "wss://noport.example/cluster/link" })
+	ncert, _ := tls.X509KeyPair([]byte(np.m.doc.LinkCert.Cert), []byte(np.m.doc.LinkCert.Key))
+	if leaf, _ := certLeaf(ncert); leaf == nil || leaf.Subject.CommonName != "noport.example" {
+		t.Error(leaf)
+	}
 	g, _ := linkFixture(t, "127.0.0.1:0", func(c *config.Cluster) { c.LinkURL = "wss://manager.example:9/cluster/link" })
 	if info := g.m.LinkInfo("x"); info.URL != "wss://manager.example:9/cluster/link" {
 		t.Error(info)
@@ -844,6 +849,13 @@ func TestLinkEdges(t *testing.T) {
 	f.m.welcome(l, "nobody", "x", welcomeMsg{})
 	if m := r.next(t); m[0] != msgRevoked {
 		t.Errorf("%q", m)
+	}
+	// A call on a link that closed fails at once.
+	r.waitClosed(t)
+	waitFor(t, "the link's close", func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.state == linkClosed })
+	l.call(newLinkTransport(f.m, ""), "GET", "/", nil, nil, func(_ *reply, err error) { errs <- err })
+	if err := <-errs; !errors.Is(err, errLinkClosed) {
+		t.Error(err)
 	}
 }
 

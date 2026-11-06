@@ -407,3 +407,16 @@ func TestBind(t *testing.T) {
 		t.Fatal("bound past the bound")
 	}
 }
+
+func TestStringAs(t *testing.T) {
+	s := New()
+	got, err := ParseAs(s.StringAs("fite1."), "fite1.")
+	if err != nil || got.ID != s.ID || got.Hash() != s.Hash() {
+		t.Fatal(got, err)
+	}
+	for _, bad := range []string{s.String(), "fite1." + s.ID, "fite1.XYZ.abc", "fite1." + s.ID + ".!!", "fite1." + s.ID + ".AAAA"} {
+		if _, err := ParseAs(bad, "fite1."); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
