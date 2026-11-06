@@ -94,11 +94,21 @@ func loadConfig(t *testing.T, assistant string) *config.Config {
 
 func start(t *testing.T, cfg *config.Config, st Store) *fixture {
 	t.Helper()
+	return startWith(t, cfg, st)
+}
+
+// startWith starts an assistant as start does, with what opts set in its
+// options.
+func startWith(t *testing.T, cfg *config.Config, st Store, opts ...func(*Options)) *fixture {
+	t.Helper()
 	f := &fixture{t: t, cfg: cfg}
 	e := engine(t)
 	o := Options{Engine: e, Settings: cfg.Admin.Assistant, Console: cfg.Admin.Console, Config: func() *config.Config { return f.cfg }, Logf: f.logf}
 	if st != nil {
 		o.Store = st
+	}
+	for _, fn := range opts {
+		fn(&o)
 	}
 	var err error
 	if f.a, err = New(o); err != nil {

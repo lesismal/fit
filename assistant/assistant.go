@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
@@ -34,6 +35,13 @@ import (
 	"github.com/lesismal/fit/app/console"
 	"github.com/lesismal/fit/assistant/model"
 	"github.com/lesismal/fit/config"
+	"github.com/lesismal/fit/logs"
+
+	// The converters adapt_convert and config_validate use.
+	_ "github.com/lesismal/fit/adapter/caddyfile"
+	_ "github.com/lesismal/fit/adapter/fitconf"
+	_ "github.com/lesismal/fit/adapter/nginx"
+	_ "github.com/lesismal/fit/adapter/yaml"
 )
 
 // ModuleID is the console module the assistant is served as.
@@ -82,6 +90,26 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// Limits bound the model client; the defaults when zero.
 	Limits model.Limits
+
+	// API is the Admin API's endpoints, which the tools call in process,
+	// on the console's pool, as the workbench's pages call them.
+	API http.Handler
+	// Schema is the config's JSON Schema, and SchemaZh, when not nil,
+	// returns its descriptions' Chinese by their English: schema_describe's.
+	Schema   []byte
+	SchemaZh func() map[string]string
+	// Validate checks a config's JSON as fit validate does, for
+	// config_validate; config.Load alone when nil.
+	Validate func(data []byte) error
+	// Logs returns the latest lines of fit's own log, for log_tail; nil
+	// when the log keeps none.
+	Logs func(logs.Filter) []logs.Record
+	// Catalog, when not nil, lists the skills the system prompt names for
+	// a user of a level: I127's. None until then.
+	Catalog func(user, level string) []CatalogEntry
+	// Tools are tools beside the read tools, which later iterations add:
+	// the page tools, the propose tools.
+	Tools []*Tool
 }
 
 // Assistant is the assistant of a console.
@@ -97,6 +125,12 @@ type Assistant struct {
 	keys      map[string]string // by provider, from the store
 	fromStore bool
 	rev       uint64 // counts the saves, for the pages' version
+	running   int    // the chats under way
+
+	registry *Registry
+	chats    chats
+	started  time.Time
+	close    sync.Once
 }
 
 // kept is the store's section.
@@ -121,7 +155,13 @@ func New(o Options) (*Assistant, error) {
 		raw = json.RawMessage("{}") // made in code, not loaded
 	}
 	a := &Assistant{o: o, client: model.NewClient(o.Engine, o.Limits), tests: make(chan struct{}, MaxTests),
-		raw: raw, settings: o.Settings}
+		raw: raw, settings: o.Settings, registry: NewRegistry(), started: time.Now(),
+		chats: chats{users: map[string]*userChats{}, dirty: map[string]bool{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}}
+	for _, t := range append(readTools(), o.Tools...) {
+		if err := a.registry.Add(t); err != nil {
+			return nil, err
+		}
+	}
 	if o.Store != nil {
 		if sec := o.Store.Section(Section); sec != nil {
 			var k kept
@@ -140,6 +180,7 @@ func New(o Options) (*Assistant, error) {
 		}
 	}
 	a.module = &console.Module{ID: ModuleID, Routes: a.routes}
+	go a.saver()
 	return a, nil
 }
 
@@ -149,8 +190,18 @@ func (a *Assistant) Module() *console.Module { return a.module }
 // Client returns the model client the assistant calls with.
 func (a *Assistant) Client() *model.Client { return a.client }
 
-// Close closes the model client: calls in flight fail.
-func (a *Assistant) Close() { a.client.Close() }
+// Registry returns the tools the assistant offers.
+func (a *Assistant) Registry() *Registry { return a.registry }
+
+// Close closes the model client, so that calls in flight fail, and writes
+// the conversations that changed to the store.
+func (a *Assistant) Close() {
+	a.close.Do(func() {
+		a.client.Close()
+		close(a.chats.stop)
+		<-a.chats.done
+	})
+}
 
 // Settings returns the settings in use, which the caller must not change.
 func (a *Assistant) Settings() *config.Assistant {
@@ -320,6 +371,11 @@ func (a *Assistant) routes(api *console.API) {
 	api.Handle("GET", "/api/settings", func(r *console.Request) { _ = r.JSON(200, a.view()) })
 	api.Handle("PUT", "/api/settings", a.put)
 	api.Handle("POST", "/api/providers/test", a.test)
+	api.Handle("GET", "/api/tools", a.toolsHandler)
+	api.Handle("POST", "/api/chat", a.chatHandler)
+	api.Handle("POST", "/api/chat/stop", a.stopHandler)
+	api.Handle("GET", "/api/conversations", a.conversationsHandler)
+	api.HandlePrefix("", "/api/conversations/", a.conversationHandler)
 }
 
 // putBody is a change of the settings: the settings whole, the keys to set

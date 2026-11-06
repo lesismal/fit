@@ -80,6 +80,8 @@ type Root struct {
 	loggers  []Logger
 	zone     atomic.Pointer[zone]
 	closed   atomic.Bool
+	// ring keeps the latest messages written, for Recent.
+	ring ring
 }
 
 // zone is the time zone the log writes its lines and turns its files in.
@@ -172,7 +174,7 @@ func New(c *config.Log, stdout, stderr io.Writer) (*Root, error) {
 			_ = r.Close()
 			return nil, err
 		}
-		r.handlers[i] = h.WithAttrs([]slog.Attr{slog.String("logger", name)})
+		r.handlers[i] = ringHandler{inner: h.WithAttrs([]slog.Attr{slog.String("logger", name)}), ring: &r.ring, logger: name}
 	}
 	return r, nil
 }

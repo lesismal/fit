@@ -106,4 +106,7 @@ func TestSchemaZh(t *testing.T) {
 			t.Errorf("gateway/schema-zh.js holds %q, which the schema no longer has", d)
 		}
 	}
+	if got := SchemaZh(); len(got) != len(zh) || got["A console user's name."] != zh["A console user's name."] {
+		t.Errorf("SchemaZh has %d descriptions, the file %d", len(got), len(zh))
+	}
 }

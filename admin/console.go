@@ -19,6 +19,7 @@ import (
 	"github.com/lesismal/fit/assistant"
 	"github.com/lesismal/fit/config"
 	"github.com/lesismal/fit/login"
+	"github.com/lesismal/fit/runtime"
 	"github.com/lesismal/fit/schema"
 )
 
@@ -72,16 +73,23 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		return nil, fmt.Errorf("console: %w", err)
 	}
 	cs := &Console{schema: sch, logf: logf, configs: configs}
+	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
+	cs.api = inner.routes()
 	if a.Assistant != nil {
-		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf}
+		o := assistant.Options{Engine: engine, Settings: a.Assistant, Console: c, Config: configs.CurrentConfig, Logf: logf,
+			// The tools read through the Admin API's endpoints, in process,
+			// as the workbench's pages do; they change nothing.
+			API: cs.api, Schema: sch, SchemaZh: workbench.SchemaZh, Validate: validateConfig}
 		if st := configs.Sealer(); st != nil {
 			o.Store = st
 		}
-		// Settings is set: New cannot fail.
+		if l := configs.env.Log; l != nil {
+			o.Logs = l.Recent
+		}
+		// Settings is set, and the tools are the assistant's own: New
+		// cannot fail.
 		cs.ai, _ = assistant.New(o)
 	}
-	inner := &Server{configs: configs, report: report, maxBody: a.ConfigBytes(), source: SourceConsole}
-	cs.api = inner.routes()
 	cs.module = &console.Module{ID: AdminModule, Routes: cs.routes}
 	rc := &config.RoleConsole{Address: c.Addr(), MPTCP: c.MPTCP, CertFile: c.CertFile, KeyFile: c.KeyFile, Users: c.Users,
 		SessionTimeout: c.SessionTimeout, SessionLifetime: c.SessionLifetime, MaxSessions: c.MaxSessions, MaxConns: c.MaxConns, At: c.At}
@@ -114,6 +122,22 @@ func StartConsole(engine *fib.Engine, c *config.Console, a *config.Admin, config
 		cs.logins.SetTemporary(user, until)
 	}
 	return cs, nil
+}
+
+// validateConfig checks a config's JSON as fit validate does: loaded, and
+// compiled, which provisions every module and checks their params, without
+// binding anything.
+func validateConfig(data []byte) error {
+	c, err := config.Load(data)
+	if err != nil {
+		return err
+	}
+	g, err := runtime.Compile(c, runtime.Env{})
+	if err != nil {
+		return err
+	}
+	g.Release()
+	return nil
 }
 
 // routes adds the config's module: the schema, the console's own accounts,
