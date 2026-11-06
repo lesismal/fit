@@ -42,7 +42,7 @@ func TestPages(t *testing.T) {
 	v.setMember(cur)
 
 	// Settings: passwords set, then cleared; the console socket moved.
-	sock := freeAddr(t)
+	sock := "127.0.0.1:0"
 	pg.expect(200, "/api/settings", map[string]any{"password": "pw2", "body_password": "b", "socket_address": sock, "socket_password": "sp"})
 	if cs := v.s.settings().cfg; cs.Password != "pw2" || cs.BodyPassword != "b" || cs.ConsoleSocket == nil || cs.ConsoleSocket.Password != "sp" {
 		t.Fatalf("settings %+v", cs)

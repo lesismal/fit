@@ -6700,3 +6700,25 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
   detector.
 - **Gaps**: a failed send is not retried; no Teams or Telegram format; alert summaries are written in
   English. The decisions made are in the plan's I147 section and decision 033, pending review.
+
+
+### I148 Users, roles and the audit log — done
+
+- **Roles**: the manager's console users are `viewer`, `operator` or `admin`, cluster-wide and per group,
+  kept in the store's cluster document (version 3 once set) and changed on Cluster, Users and audit, by a
+  cluster-wide admin; `admin.cluster.admins` names admins whatever the roles say; until roles are set
+  every console user is a cluster-wide admin.
+- **One check**, `Manager.Allow`, guards every module endpoint (through a router that fails closed), the
+  node switcher, I147's drift and alerts, the console's new gate on the manager's own pages, and the
+  assistant's levels.
+- **The audit log**: entries gain members, outcome, a diff (16 KiB) with its digest, and versions before
+  and after (the document's `rN`, alerts' `aN`, members' config versions); filtered by user, member,
+  operation and time, exported as JSON lines, bounded by entries and bytes on every write, kept across
+  restarts; tests of members are audited.
+- **Pages** show only what each role allows; checked in a browser as a viewer, an operator of one group,
+  that group's admin and a cluster-wide admin, in both languages.
+- **Tests**: each role refused across the endpoints, the switcher, the gate and I147's endpoints; the open
+  state before roles; roles and the log across a restart; `cluster` at 99.1% under the race detector.
+- **Gaps**: lists are not filtered by group; with roles set the manager's own LLM pages, which read by
+  POST, need a cluster-wide admin; a rollout's plan entry has no diff. The decisions made are in the
+  plan's I148 section and decision 033, pending review.

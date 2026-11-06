@@ -26,20 +26,10 @@ import (
 	"github.com/lesismal/fit/tunnel/internal/tunneltest"
 )
 
-// hosts hands the tests the app.Host a Manager makes for the role
-// test.host, which runs nothing: a Hub made on it changes its member
-// through the env's editor, as fit's admin.Configs would.
-var hosts = make(chan *app.Host, 1)
-
-type hostRole struct{}
-
-func (hostRole) Apply(any) error      { return nil }
-func (hostRole) Stop(context.Context) {}
-
-func init() {
-	app.Register(app.Info{ID: "test.host", Member: func(*config.Config) any { return struct{}{} },
-		New: func(h *app.Host) (app.Role, error) { hosts <- h; return hostRole{}, nil }})
-}
+// A Hub is made on the host of tunneltest's role, which runs nothing: it
+// changes its member through the env's editor, as fit's admin.Configs
+// would.
+func init() { tunneltest.RegisterHostRole() }
 
 // env is a Hub on an engine of its own, with the member its pages edit.
 type env struct {
@@ -63,7 +53,7 @@ func newEnv(t *testing.T) *env {
 	if err := m.Apply(&config.Config{}); err != nil {
 		t.Fatal(err)
 	}
-	v.s, v.m = New(<-hosts), m
+	v.s, v.m = New(tunneltest.Host(t, v.e)), m
 	t.Cleanup(func() {
 		v.s.Stop(context.Background())
 		m.Stop(context.Background())
@@ -181,13 +171,6 @@ func busyAddr(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	return l.Addr().String()
-}
-
-// freeAddr is a local address nothing listens on, and no other test of
-// the package was given.
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	return tunneltest.FreeAddr(t)
 }
 
 // note is a notify a peer received.
