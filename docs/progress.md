@@ -6632,3 +6632,25 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: the LLM roles' pages are not opened through the switcher; a member added a moment ago may
   open read-only until its first poll. The decisions made are in the plan's I143 section and decision
   033, pending review.
+
+
+### I145 Templates: config shared by a group — done
+
+- **Templates**: fragments of fit's config the manager owns on the members of its groups: top-level
+  members whole, and listeners, routes, services and upstreams by element name; variables per member
+  (`${node.name}`, `${node.id}`, `${node.hostname}`, `${node.labels.<key>}`, group variables); an `order`
+  for overlaps; secrets kept in the store and masked; warnings for file paths;
+  `/api/m/cluster/templates[/<name>]`.
+- **Sync state**: each member's desired config (its own, the owned parts taken from its templates) and
+  each part in sync, out of sync or a conflict with its reason, by comparing the member's value, the
+  rendered one and the hash last seen in sync, which the member keeps through its new
+  `PUT /node/managed` (`node.managed`); the member's config pages mark owned parts and ask before a local
+  change. `Manager.Desired` is ready for I146's rollouts; nothing but that record is written to members.
+- **Pages**: Cluster, Templates (the list; an editor with a form and `.conf`, `.yaml` and `.json` tabs;
+  the members' sync with diffs), a member's rendered result, Compare, Import from a node; English and
+  Chinese; checked in a browser, a route changed on a member showing as a conflict on the manager.
+- **Tests**: I145's done-when end to end against two real fits (one with a store, one without) under the
+  race detector; the API's edges with fake members.
+- **Gaps**: the template form edits handlers and maps as JSON; a member down when told hears at its next
+  read; a member without a store has `admin` in its desired config, for I146 to check. The decisions
+  made are in the plan's I145 section and decision 033, pending review.
