@@ -4558,3 +4558,19 @@ SOCKS、TLS 证书、ACME、默认 HTTPS 与 HTTP 重定向；并把端口功能
   端到端应用并以该用户写入 `media.delete`；竞态检测下；在浏览器中检查过。
 - **缺口**：主体只在工具数据中哈希，日志行或页面选中的内容中不会；助手应用时的 `media.*` 审计条目来源为 `workbench`。实现时所做的决策在
   计划的 I152 一节，待审查。
+
+
+## 集群管理
+
+### I140 决定 033；成员被管理所需的能力 — 已完成
+
+- **决定 033**（中英文）：集群这条线的选择，以及按提议写下的待定问题，待审查。
+- **`GET /node`**（Admin API；经控制台为 `/api/node` 与 `/api/m/admin/node`）：节点 ID（`admin.node_id`，或生成一次后保存在 store 的 `node` 小节
+  或配置旁的 `fit.node-id` 中）、主机、fit、fib 与 Go 的版本、启动时间、运行中配置的版本、ETag 与来源、角色、schema 摘要与能力（`admin.Cap*`）。
+- **试运行**：在 `PUT`、`PATCH` 与 `DELETE /config`、`POST /load` 与 `PUT /config/text` 上加 `?dry_run=1`，走完整的应用路径（`If-Match`、合并、
+  加载、编译、用 `listener.Server.Plan` 试绑新的 listener 地址），像应用一样应答，带 `dry_run`、`new_etag` 与 `unchanged`，不改变任何东西。
+- **登录**：为程序返回 `{"user","csrf"}`；429 带 `retry_after`；用户连续失败 10 次后被减速（2 秒起翻倍到 5 分钟）；地址锁定翻倍到 1 小时。
+- **Workbench**：账户菜单的 This node；配置页 Save 旁的 **Check**，错误显示在 Save 显示的位置。在浏览器中以中英文检查过。
+- **测试**：有无 store 时重启后 ID 相同，以及迁入 store；试运行拒绝应用会拒绝的内容且不改变任何东西；程序的登录、读取与应用；用注入的时钟
+  测试退避；竞态检测下。
+- **缺口**：试运行看不到角色在应用时的失败（agent、隧道），也看不到检查与应用之间被占用的地址。实现时所做的决策在计划的 I140 一节，待审查。

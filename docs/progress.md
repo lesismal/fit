@@ -6435,3 +6435,29 @@ TURN's TCP and TLS listeners; a peer without Multipath TCP falls back to plain T
 - **Gaps**: subjects are hashed in tool data only, not in log lines or a page's selection; the
   `media.*` audit entries of an assistant's apply say source `workbench`. The decisions made are in the
   plan's I152 section, pending review.
+
+
+## Cluster management
+
+### I140 Decision 033; what a member needs to be managed — done
+
+- **Decision 033** (English and Chinese): the cluster track's choices, and its open questions as
+  proposed, pending review.
+- **`GET /node`** (the Admin API; `/api/node` and `/api/m/admin/node` through the console): the node ID
+  (`admin.node_id`, or made once and kept in the store's section `node`, or in `fit.node-id` beside the
+  config), the host, fit's, fib's and Go's versions, the start time, the running config's version,
+  ETag and source, the roles, a digest of the schema and the capabilities (`admin.Cap*`).
+- **Dry runs**: `?dry_run=1` on `PUT`, `PATCH` and `DELETE /config`, `POST /load` and
+  `PUT /config/text` runs the whole apply path (`If-Match`, merge, load, compile, new listener
+  addresses tried with `listener.Server.Plan`) and answers as an apply does, with `dry_run`, `new_etag`
+  and `unchanged`, changing nothing.
+- **Logins**: `{"user","csrf"}` for programs; 429 with `retry_after`; a user slowed after 10 failures in
+  a row (2s doubling to 5 minutes); address lockouts doubling to an hour.
+- **Workbench**: Account, This node; **Check** beside Save on the config pages, its errors where Save's
+  go. Checked in a browser in English and Chinese.
+- **Tests**: the same ID across restarts with and without a store, and its move into a store; dry runs
+  refusing what an apply refuses and changing nothing; a program's login, read and apply; the backoff
+  with an injected clock; under the race detector.
+- **Gaps**: a dry run cannot see a role failing at its apply (the agent's, the tunnel's), nor an address
+  taken between the check and the apply. The decisions made are in the plan's I140 section, pending
+  review.
