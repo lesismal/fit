@@ -117,7 +117,9 @@
 
       # # A PEM file with the certificate the listener presents, followed by any intermediates; with
       # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
-      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed. Read when
+      # # the listener starts, and again when it changes on disk (fit run -watch-certs): links from
+      # # then on are taken with the new certificate, and those open stay.
       # # string.
       # cert_file: "/etc/fit/example.com.pem"
 
@@ -125,9 +127,10 @@
       # # string.
       # key_file: "/etc/fit/example.com.key"
 
-      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
-      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
-      # # which peers set as their pin. For a listener without cert_file.
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps, so
+      # # that it outlives a restart: in cert and key with admin.store, or else in a file beside the
+      # # config, 0600, as fit.llm.hub.pem beside fit.json; its pages and its log show its SHA-256
+      # # fingerprint, which peers set as their pin. For a listener without cert_file.
       # # boolean.
       # self_signed: true
 
@@ -366,7 +369,9 @@
 
       # # A PEM file with the certificate the listener presents, followed by any intermediates; with
       # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
-      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed. Read when
+      # # the listener starts, and again when it changes on disk (fit run -watch-certs): links from
+      # # then on are taken with the new certificate, and those open stay.
       # # string.
       # cert_file: "/etc/fit/example.com.pem"
 
@@ -374,9 +379,10 @@
       # # string.
       # key_file: "/etc/fit/example.com.key"
 
-      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
-      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
-      # # which peers set as their pin. For a listener without cert_file.
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps, so
+      # # that it outlives a restart: in cert and key with admin.store, or else in a file beside the
+      # # config, 0600, as fit.llm.hub.pem beside fit.json; its pages and its log show its SHA-256
+      # # fingerprint, which peers set as their pin. For a listener without cert_file.
       # # boolean.
       # self_signed: true
 
@@ -720,7 +726,9 @@
 
       # # A PEM file with the certificate the listener presents, followed by any intermediates; with
       # # key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A
-      # # listener on an address other than a loopback one needs TLS: this, or self_signed.
+      # # listener on an address other than a loopback one needs TLS: this, or self_signed. Read when
+      # # the listener starts, and again when it changes on disk (fit run -watch-certs): links from
+      # # then on are taken with the new certificate, and those open stay.
       # # string.
       # cert_file: "/etc/fit/example.com.pem"
 
@@ -728,9 +736,10 @@
       # # string.
       # key_file: "/etc/fit/example.com.key"
 
-      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert
-      # # and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint,
-      # # which peers set as their pin. For a listener without cert_file.
+      # # Take links over TLS (wss://) with a self-signed certificate the role makes and keeps, so
+      # # that it outlives a restart: in cert and key with admin.store, or else in a file beside the
+      # # config, 0600, as fit.llm.hub.pem beside fit.json; its pages and its log show its SHA-256
+      # # fingerprint, which peers set as their pin. For a listener without cert_file.
       # # boolean.
       # self_signed: true
 
@@ -1016,8 +1025,8 @@
 
         # # A tls, wss or quic listener's certificate: a PEM file with it, followed by any
         # # intermediates, for nodes and proxies that check it with ca_file or the system's roots; with
-        # # key_file. Read when the hub's member is applied. The hub's own certificate, in quic, when
-        # # left out.
+        # # key_file. Read when the hub's member is applied, and again when it changes on disk (fit run
+        # # -watch-certs). The hub's own certificate, in quic, when left out.
         # # string.
         # cert_file: "/etc/fit/example.com.pem"
 
@@ -1050,8 +1059,10 @@
     # # object.
     # quic:
       # # The PEM certificate the tls, wss and quic listeners without cert_file present, which nodes
-      # # and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and
-      # # writes it here when a listener needs one and none is set.
+      # # and proxies pin by its SHA-256 fingerprint; with key. When a listener needs one and none is
+      # # set, the hub makes a self-signed one and keeps it: here, with admin.store, or else in a file
+      # # beside the config, 0600, as fit.tunnel.hub.pem beside fit.json; so that it outlives a
+      # # restart, and the pins of it stay good.
       # # string.
       # cert: ""
 
@@ -1209,6 +1220,8 @@
             # # The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket
             # # over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password,
             # # host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear.
+            # # An address has no query, fragment or user ('?', '#', '@'): pin and ca_file say how the hub's
+            # # certificate is checked.
             # # string; required.
             # address: "127.0.0.1:9000"
 
@@ -1249,7 +1262,8 @@
         # ca_file: "/etc/fit/ca.pem"
 
         # # Take any QUIC certificate, which lets anyone on the path read and change what the quic links
-        # # carry: for tests only.
+        # # carry: for tests only. Refused for a quic:// endpoint whose host is not a loopback one,
+        # # unless body_password is set; pin and ca_file override it.
         # # boolean.
         # quic_insecure: true
 
@@ -1398,6 +1412,8 @@
             # # The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket
             # # over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password,
             # # host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear.
+            # # An address has no query, fragment or user ('?', '#', '@'): pin and ca_file say how the hub's
+            # # certificate is checked.
             # # string; required.
             # address: "127.0.0.1:9000"
 
@@ -1438,7 +1454,8 @@
         # ca_file: "/etc/fit/ca.pem"
 
         # # Take any QUIC certificate, which lets anyone on the path read and change what the quic links
-        # # carry: for tests only.
+        # # carry: for tests only. Refused for a quic:// endpoint whose host is not a loopback one,
+        # # unless body_password is set; pin and ca_file override it.
         # # boolean.
         # quic_insecure: true
 

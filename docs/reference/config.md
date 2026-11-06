@@ -1805,9 +1805,9 @@ Also at `llm.node.listen`, `llm.proxy.listen`.
 | `node_password` | string |  | The password nodes prove to link as a node, on a hub's or a proxy's listener; password when left out. |
 | `proxy_password` | string |  | The password proxies prove to link as a proxy, on a hub's or a node's listener; password when left out. |
 | `hub_password` | string |  | The password hubs prove to link as a hub, on a node's or a proxy's listener; password when left out. |
-| `cert_file` | string |  | A PEM file with the certificate the listener presents, followed by any intermediates; with key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A listener on an address other than a loopback one needs TLS: this, or self_signed. |
+| `cert_file` | string |  | A PEM file with the certificate the listener presents, followed by any intermediates; with key_file, links are taken over TLS (wss://), and peers check it with their ca_file or pin. A listener on an address other than a loopback one needs TLS: this, or self_signed. Read when the listener starts, and again when it changes on disk (fit run -watch-certs): links from then on are taken with the new certificate, and those open stay. |
 | `key_file` | string |  | A PEM file with the private key of cert_file. |
-| `self_signed` | boolean |  | Take links over TLS (wss://) with a self-signed certificate the role makes and keeps in cert and key, so that it outlives a restart; its pages and its log show its SHA-256 fingerprint, which peers set as their pin. For a listener without cert_file. |
+| `self_signed` | boolean |  | Take links over TLS (wss://) with a self-signed certificate the role makes and keeps, so that it outlives a restart: in cert and key with admin.store, or else in a file beside the config, 0600, as fit.llm.hub.pem beside fit.json; its pages and its log show its SHA-256 fingerprint, which peers set as their pin. For a listener without cert_file. |
 | `cert` | string |  | The PEM certificate self_signed made; with key. Written by the role; delete both for a new one, which every peer must pin again. |
 | `key` | string |  | The PEM private key of cert. |
 
@@ -2131,7 +2131,7 @@ In JSON:
 | `protocol` | string: `tcp`, `tls`, `ws`, `wss`, `quic` |  | Required. The protocol: tls, TCP over TLS; wss, a WebSocket over TLS, for networks that let only HTTPS through; quic, over UDP; or tcp and ws, the same in the clear, which only a loopback address, or a hub with body_password, may take. |
 | `address` | string |  | Required. The host and port it listens on, as in ":7000"; an empty host is every address. |
 | `path` | string | `"/tunnel"` | A ws or wss listener's path. /tunnel when left out. |
-| `cert_file` | string |  | A tls, wss or quic listener's certificate: a PEM file with it, followed by any intermediates, for nodes and proxies that check it with ca_file or the system's roots; with key_file. Read when the hub's member is applied. The hub's own certificate, in quic, when left out. |
+| `cert_file` | string |  | A tls, wss or quic listener's certificate: a PEM file with it, followed by any intermediates, for nodes and proxies that check it with ca_file or the system's roots; with key_file. Read when the hub's member is applied, and again when it changes on disk (fit run -watch-certs). The hub's own certificate, in quic, when left out. |
 | `key_file` | string |  | The PEM private key of cert_file. |
 
 <a id="config-tunnelconsolesocket"></a>
@@ -2150,7 +2150,7 @@ In JSON:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cert` | string |  | The PEM certificate the tls, wss and quic listeners without cert_file present, which nodes and proxies pin by its SHA-256 fingerprint; with key. The hub makes a self-signed one and writes it here when a listener needs one and none is set. |
+| `cert` | string |  | The PEM certificate the tls, wss and quic listeners without cert_file present, which nodes and proxies pin by its SHA-256 fingerprint; with key. When a listener needs one and none is set, the hub makes a self-signed one and keeps it: here, with admin.store, or else in a file beside the config, 0600, as fit.tunnel.hub.pem beside fit.json; so that it outlives a restart, and the pins of it stay good. |
 | `key` | string |  | The PEM private key of cert. |
 | `idle_timeout` | duration | `"30s"` | How long a QUIC connection may hear nothing from its peer before it is closed. 30s when left out. |
 | `keep_alive` | duration | `"10s"` | How often a quiet QUIC connection is pinged, so that it neither idles out nor loses its NAT mapping. 10s when left out. |
@@ -2189,7 +2189,7 @@ Also at `tunnel.proxy.hubs[]`.
 | `pin` | string |  | The SHA-256 fingerprint of the hub's certificate, as its pages show it, which tls://, wss:// and quic:// endpoints check the certificate against, in place of the chain and name checks: for a hub with a self-signed certificate. Without it or ca_file, the certificate is checked against the system's roots. |
 | `quic_pin` |  |  | Deprecated: renamed `pin`; the old name goes in config version 2. |
 | `ca_file` | string |  | A PEM file of the CAs that sign the hub's certificate, which tls://, wss:// and quic:// endpoints check it against, its name too, in place of the system's roots. Read at each dial. Not with pin. |
-| `quic_insecure` | boolean |  | Take any QUIC certificate, which lets anyone on the path read and change what the quic links carry: for tests only. |
+| `quic_insecure` | boolean |  | Take any QUIC certificate, which lets anyone on the path read and change what the quic links carry: for tests only. Refused for a quic:// endpoint whose host is not a loopback one, unless body_password is set; pin and ca_file override it. |
 | `pool_size` | integer, 0 to 100 | `10` | How many links to the hub carry tunnels; each tunnel goes over one throughout. 10 when left out or 0. |
 | `dial_timeout` | duration | `"5s"` | How long a link's dial may take. 5s when left out. |
 | `call_timeout` | duration | `"10s"` | How long the hub may take to answer a registration or a call. 10s when left out. |
@@ -2203,7 +2203,7 @@ Also at `tunnel.proxy.hubs[]`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `address` | string |  | Required. The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password, host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear. |
+| `address` | string |  | Required. The hub's address: tls://host:port for TCP over TLS, wss://host:port/path for a WebSocket over TLS, quic://host:port for QUIC; or, only to a loopback host or with body_password, host:port or tcp://host:port for TCP and ws://host:port/path for a WebSocket in the clear. An address has no query, fragment or user ('?', '#', '@'): pin and ca_file say how the hub's certificate is checked. |
 | `disabled` | boolean |  | Leave the endpoint out of the dials, keeping it for later. |
 
 <a id="config-tunnelservice"></a>
