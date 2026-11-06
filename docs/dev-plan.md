@@ -309,7 +309,7 @@ Status: `todo`, `doing` or `done`. The next free iteration number is I163.
 | I150 | Metrics, logs and certificates across members, `fit cluster` in the CLI, the assistant's cluster tools; their pages | I147, I125 | done |
 | **AI assistant, continued** | | | |
 | I152 | The assistant's media library tools and skills: the catalog, channels, sessions, rescans, key rotation and file changes proposed; `vod-setup`, `channel-scheduler`, `library-health`, `playback-troubleshoot` | I127, I138 | done |
-| I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | todo |
+| I153 | The assistant across a cluster: members' state, templates and rollouts read, changes proposed as rollout plans, the manager's roles checked; `fleet-health`, `rollout-planner`, `cluster-drift` | I127, I146, I148 | done |
 | I154 | The assistant's page edits: the `edit` level, and the page tools that draft a change into the open page's editor and forms as an unsaved draft, reverted on request, never submitted — **Save and apply** stays the person's | I125, I126, I120 | done |
 | **Logging** | | | |
 | I155 | Decision 034; the file sink: a bounded queue and a writer of its own, the log's `time_zone` (local by default, UTC or an IANA zone), rotation by size and by time, retention by age, number and total size, compression, and `log`'s file outputs and their `rotate` | I21, I82, I83 | done |
@@ -2336,6 +2336,39 @@ The iterations, I124–I130 and I152–I154, are in the [index](#index).
   template it may not edit; no member credential reaches a recorded request; a read across
   members stays within its bounds when a member is slow or down; under the race detector.
 - **Touches**: `assistant`, `cluster`, `app/workbench`, `docs`.
+
+**Decisions pending review** (made while building it, 2026-11-07; each stands until the user rules on it;
+also in decision 031 and decision 033 as its items 146–156):
+
+1. **`assistant` and `cluster` meet through an interface of plain types** (`assistant.Cluster`,
+   implemented by `cluster.Manager.Assistant()`), so neither imports the other. Alternative: the tools
+   in `cluster`, or `assistant` importing `cluster`.
+2. **A change asked in words becomes one of two new rollout kinds**: a patch (parts written in the
+   request, for config no template owns; admin on each member), or a template draft (members planned
+   against it, saved only when a cluster-wide admin starts the rollout; refused if the template changed
+   since). Alternative: templates only, or saving the template when the plan is made.
+3. **Secrets**: the assistant's `[redacted]` goes out as `[secret]`, which keeps the existing secret; a
+   member with none there is not ready; a secret the model writes out is refused.
+4. **No tool starts anything**: `rollout_propose` returns the plan and a link to its page, whose own
+   confirm starts it; `cluster_op_propose` checks the operation as `StartOp` would and links to the ops
+   page with the confirm filled in; none is a step of the conversation's proposal, so Apply never runs
+   them. Alternative: proposed operations stored in the manager.
+5. **The proposal card** is drawn from the tool result's `link`, no new stream event; over MCP the answer
+   carries the workbench's absolute URL.
+6. **Plans record `source` and `suggested`** (the strategy), and the start form prefills from it.
+7. **Waits**: 20s for a plan, a read across members, a member read and the log tail, inside the chat's
+   30s tool limit; a plan not ready by then says so and keeps going.
+8. **`member` reaches reads only**: config, effective config, check, versions, status, metrics, cache,
+   node, schema, the media and streaming reads, and the text conversions; never writes, tokens or log
+   files. A member of another fit version adds a note.
+9. **I150 reused**: certificates from its inventory (no member calls), metrics a live read plus 12
+   points of its series, `cluster_log_tail` its `TailLogs`, behind `data.send_logs`.
+10. **Cluster skills are hidden on a fit that is not a manager.**
+11. **Role needs match the endpoints'**: any role reads the lists; metrics, logs and `member` reads need
+    a role on each member read; the narrower of role and assistant level wins.
+12. **Ask AI**: the Overview's toolbar and each member card (`fleet-health`), a failed or rolled-back
+    batch (`rollout-planner`), each drifting member (`cluster-drift`); the `diagnose` button stays.
+13. **The New rollout form** gains "Parts written here" (a patch) and a template draft, for admins only.
 
 ### I154 Edits on the page, submitted by a person
 
